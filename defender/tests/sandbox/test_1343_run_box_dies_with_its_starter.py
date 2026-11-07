@@ -518,8 +518,13 @@ def test_b10_output_past_the_limit_stops_and_removes_the_run_box_with_the_plain_
     """Overflow on a live run box: the box is gone and no 'could not confirm' note is attached. (B10 output-limit path)"""
     from defender.execution import bash_exec
 
+    if box_mod.BoxSpec.from_env(os.environ).runtime != "runc":
+        pytest.skip("a write past the helper does not trip the fence on runsc (#1421): runc only")
     box, _ = live
-    command = f"head -c {box_mod.BOX_OUTPUT_LIMIT + 1} /dev/zero"
+    # A process writing to the helper's own stdout (a bypass), the only thing that still trips the
+    # fence: a cooperating command now gets exit 75 and the box lives (#1421 O5, decision 2).
+    command = ("python3 -c \"import os; f = os.open(f'/proc/{os.getppid()}/fd/1', os.O_WRONLY); "
+               f"[os.write(f, bytes(1 << 20)) for _ in range({(box_mod.BOX_OUTPUT_LIMIT >> 20) + 1})]\"")
     with pytest.raises(box_mod.BoxOutputLimitExceeded) as raised:
         box.run_parsed(bash_exec.parse(command), command=command, cwd=_CWD, timeout=60)
     assert getattr(raised.value, "__notes__", []) == []

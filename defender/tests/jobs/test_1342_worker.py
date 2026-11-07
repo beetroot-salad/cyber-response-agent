@@ -25,6 +25,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from defender.records import job_lane, run_end
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     ALERT_DIGEST,
@@ -410,6 +411,7 @@ JSON_NULL = object()  # `_job_end_with(key=JSON_NULL)` writes an explicit JSON n
 def _job_end_with(**changes) -> str:
     """A job-end record of the ratified keys with `changes` applied (a `None` value drops the key)."""
     body = json.loads(job_end())
+    body["cut_short"] = JSON_NULL  # the fifth fact reads null on a run nothing cut short (#1421)
     body.update(changes)
     return json.dumps({k: (None if v is JSON_NULL else v) for k, v in body.items() if v is not None})
 
@@ -483,6 +485,18 @@ CASES = {
         expect=("failed", "no_report", None), code=EXIT),
     "1-job-end-a-missing-key": _spec(
         files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=None)}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-without-the-cut-short-fact": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=None)}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-cut-short-as-a-number": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=5)}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-cut-short-as-a-list": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=["box-lost"])}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-cut-short-the-empty-word": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short="")}), exit=EXIT,
         expect=("failed", "no_report", None), code=EXIT),
     "1-job-end-setup-as-a-list": _spec(
         files=_committed(**{"{id}.job-end.json": _job_end_with(setup=["done"])}), exit=EXIT,
@@ -564,7 +578,8 @@ _SPELLINGS = {"trailing space": lambda w: w + " ", "trailing newline": lambda w:
               "leading space": lambda w: " " + w, "leading zero-width space": lambda w: "\u200b" + w,
               "leading byte-order mark": lambda w: "\ufeff" + w,
               "zero-width space inside": lambda w: w[:2] + "\u200b" + w[2:]}
-for _key, _words in (("setup", ("refused", "crashed", "done")), ("box", ("not_started", "start_failed", "started"))):
+for _key, _words in (("setup", ("refused", "crashed", "done")), ("box", ("not_started", "start_failed", "started")),
+                     ("cut_short", ("box-lost", "box-output-limit", "provider-down", "budget"))):
     for _word in _words:
         for _how, _spell in _SPELLINGS.items():
             CASES[f"1-job-end-{_key}-word-{_word}-{_how.replace(' ', '-')}"] = _spec(
@@ -600,6 +615,53 @@ async def test_o8_the_stage_comes_from_the_job_end_record_and_the_report(world, 
     assert stored["started_at"] == NOW
     _no_run_text(stored)
     assert inv
+
+
+def _job_end_cut_short(cut_short: str, *, report_committed: bool, scrub_verified: bool) -> str:
+    """The real record's own text with the fifth fact set (#1421)."""
+    return job_lane.JobEnd(setup="done", box="started", report_committed=report_committed,
+                           scrub_verified=scrub_verified, cut_short=cut_short).text()
+
+
+_CUT_SHORT_WORDS = sorted({*run_end.TRUNCATED_BY_VALUES, "box-lost", "box-output-limit"})
+
+
+@pytest.mark.parametrize(("cut_short", "verified"), [(word, True) for word in _CUT_SHORT_WORDS] + [
+    ("box-lost", False),  # the scrub also did not verify
+])
+async def test_o8_o9_a_failed_jobs_message_names_its_class_beside_the_existing_words(world, cut_short, verified):
+    """Fixed words, `no_report`, not decided by the run, so a worker stop re-queues. (O8, O9)"""
+    record = _job_end_cut_short(cut_short, report_committed=False, scrub_verified=verified)
+    _inv, stored = await _run_one(world, _child(world, exit=5, printed=MARKER, files={"{id}.job-end.json": record}))
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
+    assert cut_short in stored["failure_message"], stored["failure_message"]
+    assert "the host committed no report" in stored["failure_message"], stored["failure_message"]
+    _no_run_text(stored)
+
+
+@pytest.mark.parametrize("text", [f"box-lost {MARKER}", MARKER, "box-lost\n" + MARKER], ids=["suffixed", "bare", "multiline"])
+async def test_o8_child_text_in_the_cut_short_fact_never_reaches_the_job_message(world, text):
+    """The record is refused outside the vocabulary, so the fixed message cannot carry a child's words. (O8)"""
+    record = _job_end_with(cut_short=text)
+    _inv, stored = await _run_one(world, _child(world, exit=5, files=_committed(**{"{id}.job-end.json": record})))
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
+    _no_run_text(stored)
+    assert "box-lost" not in stored["failure_message"], "a refused record was still read for its word"
+
+
+async def test_o8_a_committed_and_verified_report_still_completes_when_the_box_was_lost_after(world):
+    """The model had closed: the job reads as completed whatever the run's exit was. (O8)"""
+    record = _job_end_cut_short("box-lost", report_committed=True, scrub_verified=True)
+    _inv, stored = await _run_one(world, _child(world, exit=5, files=_committed(**{"{id}.job-end.json": record})))
+    assert (stored["stage"], stored["failure_reason"]) == ("completed", None)
+
+
+async def test_o8_a_model_closed_run_whose_teardown_faulted_reads_as_failed_and_names_the_class(world):
+    """The accepted cost: closed, then no proof the box died, so a failed job naming the class. (O8)"""
+    record = _job_end_cut_short("box-lost", report_committed=True, scrub_verified=False)
+    _inv, stored = await _run_one(world, _child(world, exit=5, files=_committed(**{"{id}.job-end.json": record})))
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
+    assert "box-lost" in stored["failure_message"]
 
 
 def _job_end_junk_characters() -> list[str]:
@@ -3752,7 +3814,11 @@ async def test_b3_a_fence_landing_while_the_spawn_is_prepared_ends_the_child_as_
 _FAILING_RECORD = job_end(setup="crashed", box="not_started", report_committed=False, scrub_verified=False)
 
 
-@pytest.mark.parametrize("record", [_FAILING_RECORD, "{not json"], ids=["failing-record", "unparseable-record"])
+_CUT_SHORT_RECORD = job_end(report_committed=False, cut_short="box-lost")
+
+
+@pytest.mark.parametrize("record", [_FAILING_RECORD, "{not json", _CUT_SHORT_RECORD],
+                         ids=["failing-record", "unparseable-record", "box-lost-record"])
 async def test_b11_a_child_that_writes_a_failing_ending_as_the_stop_lands_is_handed_back_with_its_cost_not_failed(world, record):
     """The signal makes the child leave a failing or unparseable job-end and exit: the row is handed back (still `running`, lapsed, cost, marked) and its retry is a new row. (B11, r5 R1)"""
     child, marks = _spending(world, _SPEND, files={"{id}.job-end.json": record}, term="finish", term_mark=_term_mark(world))

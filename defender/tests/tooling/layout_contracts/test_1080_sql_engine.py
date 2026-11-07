@@ -487,8 +487,19 @@ def test_1080_the_defender_sql_engine_imports_nothing_outside_the_box_image_clos
     _assert_caught(_closure(tmp_path, root=root), "pydantic_ai", "an engine importing pydantic_ai")
 
 
+#: An empty query dies on a missing cursor whichever statement the tool reaches first, so the
+#: attribute named in the traceback is not part of the contract (#1421); the failure itself is.
+_NO_CURSOR = ("arg_shapes.empty", "arg_shapes.whitespace")
+
+
 def test_sql_argument_shapes_the_shim_must_forward(tmp_path):
-    _check_all(_p_arg_shapes(tmp_path))
+    shapes = _p_arg_shapes(tmp_path)
+    for key in _NO_CURSOR:
+        golden = dict(S.golden(GOLDEN)[key]["dict"])
+        got = dict(S.canon(shapes.pop(key))["dict"])
+        assert (got["rc"], got["stdout"]) == (golden["rc"], ""), got
+        assert "AttributeError" in got["stderr"], got["stderr"]
+    _check_all(shapes)
     rec, ran = _run_shim(tmp_path, SQL, ["SELECT 'é' AS e, '日本' AS j, \"user\" FROM data "
                                          "ORDER BY 3 LIMIT 1"], stdin=_PAYLOAD)
     _check("arg_shapes.non-ascii", rec)

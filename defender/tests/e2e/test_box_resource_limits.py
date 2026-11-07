@@ -4,7 +4,10 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import re
+import shlex
 import shutil
+import signal
 import time
 import uuid
 from collections.abc import Iterator
@@ -14,8 +17,10 @@ import pytest
 
 from defender import box as box_mod
 from defender.execution import bash_exec
+from defender.systems.circuit_breaker import error_class_for_exit
 from defender.tests.e2e._spec771 import AliasProbeDocker
-from defender.tests.support.integrations._defender_sql import EXIT_OK, run_sql_py
+from defender.investigation import tools
+from defender.tests.support.integrations._defender_sql import EXIT_INPUT_ERROR, EXIT_OK, run_sql_py
 from defender.tests.support.runtime.state._1255_view import MODEL_RUN
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 from defender.tests.support.storage._alert_plant import plant_alert
@@ -118,6 +123,38 @@ def test_every_launch_path_caps_memory_cpu_and_processes(argv_of, tmp_path):
     assert "--init" not in argv, "docker's init has the attached stream as its output"
 
 
+@pytest.mark.parametrize("memory", ["512m", "2g", "1073741824"])
+@pytest.mark.parametrize("builder", ["create", "render", "host-run", "host-fallback"])
+def test_both_builders_hand_the_box_its_cap_in_the_environment(builder, memory, tmp_path, monkeypatch):
+    """`DEFENDER_BOX_MEMORY` is `BoxSpec.memory` as written, once, from both box builders whatever the request names; the host builders carry it and `DEFENDER_BOX` never. (P5)"""
+    from defender.box import _host_env
+    from defender.box._lifecycle import _create_argv, _host_fallback_env, _render_argv, _run_lane_mounts
+
+    spec = box_mod.BoxSpec(memory=memory, rootfs="defender-box:cap")
+    named = {"DEFENDER_BOX": "1", box_mod.BoxSpec.MEMORY_ENV: "1k"}
+    for var, value in named.items():
+        monkeypatch.setenv(var, value)
+    if builder in ("host-run", "host-fallback"):
+        request = box_mod.BoxRequest(name="defender-lane-cap", workdir=tmp_path, defender_dir=DEFENDER, spec=spec,
+                                     tenant_id=TEST_TENANT, env=named)
+        env = (_host_env.run_env(DEFENDER, _run_dir(tmp_path)) if builder == "host-run"
+               else _host_fallback_env(request))
+        assert "DEFENDER_DIR" in env, "control: the builder ran"
+        assert not set(named) & set(env)
+        return
+    if builder == "create":
+        run_dir = _run_dir(tmp_path)
+        argv = _create_argv("defender-run-cap", run_dir, DEFENDER, spec,
+                            lane=_run_lane_mounts(run_dir, DEFENDER, None)).argv
+    else:
+        request = box_mod.BoxRequest(name="defender-lane-cap", workdir=tmp_path, defender_dir=DEFENDER,
+                                     spec=spec, tenant_id=TEST_TENANT, env=named)
+        argv = _render_argv(request).argv
+    assert _flag(argv, "--memory") == memory, "control: the cap itself reaches docker"
+    given = [argv[i + 1] for i, word in enumerate(argv) if word == "--env" and argv[i + 1].startswith("DEFENDER_BOX_MEMORY=")]
+    assert given == [f"DEFENDER_BOX_MEMORY={memory}"]
+
+
 @pytest.mark.parametrize("payload", [
     json.dumps({"a": "x" * (20 << 20)}),
     "\n".join(json.dumps({"a": "x" * 100}) for _ in range(250_000)),
@@ -127,6 +164,149 @@ def test_a_payload_past_the_engines_default_object_size_still_loads(payload):
     are over its 16 MiB default."""
     res = run_sql_py("SELECT count(*) AS n FROM data", stdin=payload)
     assert res.returncode == EXIT_OK, res.stderr
+
+
+# ---- the SQL tool's and the helper's own limits, on the unsandboxed fallback ----------------
+
+PAYLOAD_MAX = 64 << 20
+#: Far over the result budget, on rows small enough that base code still prints them all.
+OVERSIZED_RESULT_SQL = "SELECT repeat('x', 1024) AS s FROM range(64 * 1024)"
+DECLARED = ("--rows", "values", "--names", "columns")
+
+
+def _reason_lines(err: bytes | str) -> list[str]:
+    text = err.decode("utf-8", "replace") if isinstance(err, bytes) else err
+    return [line for line in text.splitlines() if line.strip()]
+
+
+def _refusal_without_a_traceback(res) -> None:
+    assert res.stdout == "", "a size failure is never an observation"
+    assert "Traceback" not in res.stderr, res.stderr[-400:]
+    assert res.returncode == EXIT_INPUT_ERROR, "O1-O4 all exit 2"
+    assert error_class_for_exit(tools._shim_exit_code(res.returncode)) == "agent-fixable", res.returncode
+
+
+def test_o1_a_payload_over_the_maximum_is_refused_before_parsing_on_both_load_paths():
+    """Bytes no parser accepts, so only a check before parsing can give the size message; one message. (O1)"""
+    junk = "x" * (PAYLOAD_MAX + 1)
+    undeclared = run_sql_py("SELECT 1 AS x", stdin=junk)
+    declared = run_sql_py(*DECLARED, "SELECT 1 AS x", stdin=junk)
+    for res in (undeclared, declared):
+        _refusal_without_a_traceback(res)
+        assert "not valid JSON" not in res.stderr, "the payload was parsed before its size was checked"
+        assert "narrow" in res.stderr.lower(), res.stderr
+        assert len(_reason_lines(res.stderr)) == 1
+        assert len(res.stderr.strip()) <= 160, "P1: the digest keeps 160 characters"
+    assert undeclared.stderr == declared.stderr, "one message, whichever load path"
+
+
+def test_o4_a_result_over_the_budget_prints_nothing_and_the_tool_refuses():
+    """Nothing partial on stdout; the refusal is the model's to fix. A small result still prints. (O4, O7)"""
+    control = run_sql_py("SELECT repeat('x', 1024) AS s", stdin='{"a":1}')
+    assert control.returncode == EXIT_OK, control.stderr
+    assert "xxx" in control.stdout
+
+    _refusal_without_a_traceback(run_sql_py(OVERSIZED_RESULT_SQL, stdin='{"a":1}'))
+
+
+def _unboxed(tmp_path: Path, command: str) -> box_mod.BoxResult:
+    return box_mod.unboxed_executor(env=dict(os.environ)).run_parsed(
+        bash_exec.parse(command), command=command, cwd=tmp_path, timeout=EXEC_TIMEOUT)
+
+
+def _writes(fd: int, mib: int, byte: str = "x") -> str:
+    source = f"import os; [os.write({fd}, b'{byte}' * (1 << 20)) for _ in range({mib})]"
+    return f"python3 -c {shlex.quote(source)}"
+
+
+@pytest.mark.parametrize("printing", [
+    _writes(1, (box_mod.BOX_OUTPUT_LIMIT >> 20) + 1),
+    f"{_writes(2, 40)} ; {_writes(2, 30)}",  # C13: neither pipeline is over alone
+    f"{_writes(1, 40)} ; {_writes(2, 30)}",
+], ids=["stdout", "stderr-across-pipelines", "both-streams"])
+def test_o5_the_budget_spans_the_whole_command_and_stops_it_with_exit_75(tmp_path, printing):
+    """No partial stdout, one reason line, no later pipeline; a smaller command is untouched. (O5)"""
+    control = _unboxed(tmp_path, f"{_writes(1, 1)} ; touch ran-control")
+    assert (control.rc, len(control.out)) == (0, 1 << 20), control.err
+    assert (tmp_path / "ran-control").exists()
+
+    res = _unboxed(tmp_path, f"{printing} ; touch later")
+    assert res.rc == 75, res.err[-400:]
+    assert res.out == b""
+    assert not (tmp_path / "later").exists(), "a pipeline ran after the budget stopped the command"
+    assert len(_reason_lines(res.err)) == 1, res.err[:400]
+    assert len(res.err.strip()) <= 160, "P1: the digest keeps 160 characters"
+    assert "exit=" not in res.err.decode(), "the digest already carries the code"
+
+
+def test_o5_output_that_is_not_utf8_crosses_as_its_own_bytes(tmp_path):
+    """Raw bytes: no decode and re-encode, which expanded invalid UTF-8 threefold (C13). (O5)"""
+    res = _unboxed(tmp_path, f"{_writes(1, 1, byte=chr(92) + 'xff')}")
+    assert res.rc == 0, res.err
+    assert res.out == b"\xff" * (1 << 20)
+
+
+KILL_OR_CRASH = (signal.SIGKILL, signal.SIGSEGV, signal.SIGABRT, signal.SIGBUS)
+
+
+@pytest.mark.parametrize("sig", KILL_OR_CRASH, ids=[s.name for s in KILL_OR_CRASH])
+@pytest.mark.parametrize("last", ["cat", "head -c 3"], ids=["last-stage-cat", "last-stage-head"])
+def test_o6_a_stage_dying_on_a_signal_gives_its_signal_a_reason_and_no_partial_output(tmp_path, sig, last):
+    """Upstream of `head`, whose exit is 0, included; no later pipeline runs. (O6)"""
+    stage = f"sh -c {shlex.quote(f'echo partial; kill -{int(sig)} $$')}"
+    res = _unboxed(tmp_path, f"{stage} | {last} ; touch later")
+    assert res.rc == -int(sig), res
+    assert res.out == b""
+    assert len(_reason_lines(res.err)) == 1, res.err
+    assert len(res.err.strip()) <= 160, "P1: the digest keeps 160 characters"
+    assert "memory" in res.err.decode().lower(), res.err
+    assert not (tmp_path / "later").exists()
+
+
+def test_o6_control_sigpipe_is_the_normal_head_case_and_keeps_its_output(tmp_path):
+    """`-13` upstream of `head` is not a kill: output kept, exit 0, the next pipeline runs. (O6)"""
+    res = _unboxed(tmp_path, "yes | head -n 1 ; touch later")
+    assert (res.rc, res.out) == (0, b"y\n"), res
+    assert (tmp_path / "later").exists()
+
+
+def test_o6_control_sigterm_is_not_a_kill_and_keeps_its_output(tmp_path):
+    """`-15` upstream of `cat` is outside the kill set: output kept, exit 0, the next pipeline runs. (O6)"""
+    res = _unboxed(tmp_path, f"sh -c {shlex.quote('echo kept; kill -15 $$')} | cat ; touch later")
+    assert (res.rc, res.out) == (0, b"kept\n"), res
+    assert (tmp_path / "later").exists()
+
+
+def test_o10_the_sql_skill_states_the_ceilings_the_exit_codes_and_the_dense_payload_caveat():
+    """Each ceiling bullet of the model's instructions names its own subject with its constant's figure and exit code. (O10)"""
+    from defender.execution import box_codec
+    from defender.investigation.sql_engine import sql as defender_sql
+
+    text = (DEFENDER / "skills" / "gather" / "defender-sql.md").read_text(encoding="utf-8")
+    section = text.split("\n## Ceilings\n", 1)[1].split("\n## ", 1)[0]
+    bullets = {}
+    for bullet in re.split(r"\n(?=- \*\*)", section):
+        found = re.match(r"- \*\*(?P<subject>.+?)\*\*(?P<body>.*)", bullet.strip(), re.S)
+        if found:
+            bullets[found["subject"]] = found["body"]
+
+    def pick(keyword: str) -> tuple[str, str]:
+        hits = [(k, v) for k, v in bullets.items() if keyword in k.lower()]
+        assert len(hits) == 1, (keyword, list(bullets))
+        return hits[0]
+
+    def exit_of(body: str) -> int:
+        return int(re.search(r"exit `(-?\d+)`", body)[1])
+
+    for keyword, constant, code in (("payload is at most", defender_sql._MAX_PAYLOAD, defender_sql.EXIT_INPUT_ERROR),
+                                    ("result is at most", defender_sql._RESULT_BUDGET, defender_sql.EXIT_INPUT_ERROR),
+                                    ("prints more than", box_codec.BOX_OUTPUT_LIMIT, box_codec.OVER_BUDGET_RC)):
+        subject, body = pick(keyword)
+        assert int(re.search(r"(\d+) MiB", subject)[1]) << 20 == constant, subject
+        assert exit_of(body) == code, (subject, body)
+    assert "dense" in pick("memory")[1]
+    assert {int(c) for c in re.findall(r"`(-\d+)`", pick("memory")[1])} == {-9, -11}
+    assert all(bash_exec.is_kill_or_crash(rc) for rc in (-9, -11))
 
 
 # ---- live boxes ----------------------------------------------------------------------------
@@ -216,7 +396,150 @@ def test_a_process_past_the_memory_cap_is_stopped_at_the_cap(boxed, base, runtim
     if runtime == "runc":
         assert res is not None
         assert res.rc == -9, f"expected the kernel's kill: {res}"
+        assert "memory" in res.err.decode().lower(), f"no reason line naming the cap (O6): {res}"
         assert _sh(box, "echo alive").rc == 0
+
+
+KILL_LINE_PROGRAM = "sh -c 'kill -9 $$'"
+
+
+def _kill_line(box: box_mod.BoxExecutor) -> bytes:
+    """The O6 line as this box gives it, for a size failure that arrives as a crash to match."""
+    res = _sh(box, KILL_LINE_PROGRAM)
+    assert (res.rc, res.out) == (-9, b""), res
+    return res.err
+
+
+def _size_failure_at_the_box_boundary(res: box_mod.BoxResult, kill_line: bytes) -> None:
+    """P5: no stdout, no traceback, one line naming memory or room; exit 2 with the size text,
+    or a crash signal with exactly the O6 line (the occasional crash under the limit, C16)."""
+    assert res.out == b"", "a size failure is never an observation (P2)"
+    assert b"Traceback" not in res.err, res.err[-400:]
+    assert b"not valid JSON" not in res.err, res.err[-400:]
+    lines = _reason_lines(res.err)
+    assert len(lines) == 1, res.err[-400:]
+    assert len(res.err.strip()) <= 160, "P1: the digest keeps 160 characters"
+    assert any(word in lines[0].lower() for word in ("memory", "room")), lines[0]
+    if res.rc == EXIT_INPUT_ERROR:
+        return
+    assert res.rc in (-int(sig) for sig in KILL_OR_CRASH), res
+    assert res.err == kill_line, "a crash must read as every other kill"
+
+
+#: C19: shapes far past the edge, where both sides of the near-edge flip are behind them (O2).
+LOADS_OUT_OF_ROOM = {
+    "memory": ("512m", lambda: "[{}" + ",{}" * ((21 << 20) - 1) + "]", ""),
+    "scratch": (box_mod.BoxSpec().memory,
+                lambda: '{"columns":["a","b","c","d"],"values":[[1,2,3,4]' + ",[1,2,3,4]" * (2 << 20) + "]}",
+                " ".join(DECLARED)),
+}
+
+
+@requires_box_daemon
+@RUNTIMES
+@pytest.mark.parametrize("room", list(LOADS_OUT_OF_ROOM))
+def test_o2_a_load_that_runs_out_of_room_below_the_maximum_is_a_size_refusal(boxed, base, room):
+    """Under the maximum, over what the box can hold: a size failure, memory's sometimes the tool's refusal, and the box carries on. (O2)"""
+    memory, shape, args = LOADS_OUT_OF_ROOM[room]
+    payload = shape()
+    assert len(payload) < PAYLOAD_MAX, "this shape is for O1 past the maximum"
+    box = boxed(memory=memory)
+    (next(base.glob("run-limits-*")) / "payload.json").write_text(payload, encoding="utf-8")
+    kill_line = _kill_line(box)
+    tries = O3_TRIES if room == "memory" else 1  # near the edge a try flips between answer and refusal
+    results = []
+    for _ in range(tries):
+        # A try killed mid-load leaves its scratch behind; clear it so the next cannot meet a full disk.
+        assert _sh(box, "find /tmp -maxdepth 1 -name 'defender-sql-*' -exec rm -rf {} +").rc == 0
+        results.append(_sh(box, f"cat {MODEL_RUN}/payload.json | defender-sql {args} 'SELECT 1 AS x'"))
+    for res in results:
+        _size_failure_at_the_box_boundary(res, kill_line)
+    if room == "memory":  # else the O6 line alone would pass with no load protection at all
+        refusals = [res for res in results if res.rc == EXIT_INPUT_ERROR]
+        assert refusals, f"every try crashed: {[r.rc for r in results]}"
+        for res in refusals:  # a no-space exit 2 would also be a refusal, but of the wrong thing
+            assert "memory" in res.err.decode().lower(), res.err[-400:]
+    assert _sh(box, "echo alive").rc == 0
+
+
+O3_QUERY = "SELECT * FROM range(1000000000) t ORDER BY random()"
+O3_TRIES = 4
+
+
+@requires_box_daemon
+@RUNTIMES
+def test_o3_a_query_needing_too_much_memory_is_a_size_failure_and_is_sometimes_the_refusal(boxed):
+    """Over N real tries every one is a size failure at the box boundary, no engine advice, the
+    box carries on, and at least one is the tool's own refusal naming memory. (O3, P5)"""
+    box = boxed(memory="512m")
+    kill_line = _kill_line(box)
+    results = [_sh(box, f"""echo '{{"a":1}}' | defender-sql '{O3_QUERY}'""") for _ in range(O3_TRIES)]
+    for res in results:
+        _size_failure_at_the_box_boundary(res, kill_line)
+        for engine_advice in (b"SET ", b"PRAGMA", b"duckdb.org", b"threads"):
+            assert engine_advice not in res.err, res.err[-400:]
+    refusals = [res for res in results if res.rc == EXIT_INPUT_ERROR]
+    assert refusals, f"every try crashed: {[res.rc for res in results]}"
+    assert len({res.err for res in refusals}) == 1, "P1: one text for every refusal"
+    assert "memory" in refusals[0].err.decode().lower()
+    assert _sh(box, "echo alive").rc == 0
+
+
+@requires_box_daemon
+@RUNTIMES
+def test_o3_a_query_that_fits_still_answers_after_a_refusal_in_the_same_box(boxed):
+    """The control on the same channel: the refusal leaves the box and the tool usable. (O3)"""
+    box = boxed(memory="512m")
+    _sh(box, f"""echo '{{"a":1}}' | defender-sql '{O3_QUERY}'""")
+    res = _sh(box, """echo '{"a":1}' | defender-sql 'SELECT 41 + 1 AS x'""")
+    assert (res.rc, b'"x": 42' in res.out) == (0, True), res
+
+
+@requires_box_daemon
+@RUNTIMES
+@pytest.mark.parametrize("sig", KILL_OR_CRASH, ids=[s.name for s in KILL_OR_CRASH])
+def test_o6_a_stage_dying_on_a_signal_in_a_live_box_is_a_result_with_the_one_line(boxed, sig):
+    """The same frame as the unsandboxed transport, through the real `docker exec`. (O6)"""
+    box = boxed()
+    res = _sh(box, f"sh -c 'echo partial; kill -{int(sig)} $$' | cat")
+    assert res.rc == -int(sig), res
+    assert res.out == b""
+    assert res.err == _kill_line(box), res
+    assert "memory" in res.err.decode().lower()
+    assert _sh(box, "echo alive").rc == 0
+
+
+@requires_box_daemon
+@RUNTIMES
+def test_o6_control_sigpipe_in_a_live_box_keeps_the_output(boxed):
+    """`yes | head` ends -13 upstream and is no kill. (O6)"""
+    res = _sh(boxed(), "yes | head -n 1")
+    assert (res.rc, res.out) == (0, b"y\n"), res
+
+
+@requires_box_daemon
+@RUNTIMES
+def test_o5_a_command_printing_too_much_in_a_live_box_is_a_result_with_exit_75_and_the_box_carries_on(boxed):
+    """Stopped by the helper, below the host fence: the run would continue. (O5)"""
+    box = boxed()
+    res = _sh(box, f"{_writes(1, 40)} ; {_writes(2, 30)}")
+    assert res.rc == 75, res.err[-300:]
+    assert res.out == b""
+    assert len(_reason_lines(res.err)) == 1
+    assert _sh(box, "echo alive").rc == 0
+
+
+@requires_box_daemon
+@RUNTIMES
+def test_o6_the_helper_killed_with_the_box_running_is_a_result_with_minus_9_and_the_box_carries_on(boxed):
+    """A real exec 137 with no frame: the stage kills its parent, the helper. Rule 2, not a fault. (O6)"""
+    box = boxed()
+    source = "import os, signal; os.kill(os.getppid(), signal.SIGKILL)"
+    res = _sh(box, f"python3 -c {shlex.quote(source)}")
+    assert res.rc == -9, res
+    assert res.out == b""
+    assert res.err == _kill_line(box)
+    assert _sh(box, "echo alive").rc == 0
 
 
 @requires_box_daemon

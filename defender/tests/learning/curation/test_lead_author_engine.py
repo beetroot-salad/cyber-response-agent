@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,7 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 
 from pydantic_ai.messages import (  # noqa: E402
     ModelResponse,
+    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -35,6 +38,8 @@ from defender.learning._pydantic_stage import run_stage  # noqa: E402
 from defender.investigation import permission  # noqa: E402
 from defender.investigation.agent_definition import RunScope, bind  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
+from defender._exception_groups import carried  # noqa: E402
+from defender.execution import bash_exec  # noqa: E402
 from defender.investigation.permission import AgentPolicy  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
@@ -462,3 +467,133 @@ def test_box_output_overflow_is_not_an_unprocessable_learning_stage(tmp_path, gr
             deps=deps, make_model=_fake_model(fail),
         )
     assert carried(caught.value, BoxOutputLimitExceeded) is overflow
+
+
+class _LaneDaemon:
+    """A lane box's daemon, as words: `exited` until started, and whatever a fault leaves it after.
+    `blind` makes it stop answering status: `gone` (no such container) or `mute` (no answer)."""
+
+    def __init__(self) -> None:
+        self.status = "exited"
+        self.blind: str | None = None
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
+        argv = list(argv)
+        self.calls.append(argv)
+        if argv[1] == "inspect" and self.blind == "gone":
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="Error: No such object: lane\n")
+        if argv[1] == "inspect" and self.blind == "mute":
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="Cannot connect to the Docker daemon\n")
+        if argv[1] == "start":
+            self.status = "running"
+        elif argv[1] == "stop":
+            self.status = "exited"
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{self.status}\n", stderr="")
+
+
+# A command the lane's bash policy allows (a scoped `rm` of a draft), so the transport is reached.
+LANE_COMMAND = "rm skills/elastic/_draft/x.md"
+
+
+class _Lane:
+    """Two items on one lane box whose first command finds the box dead (C5); the next is answered."""
+
+    def __init__(self, tmp_path: Path, *, blinds: str | None = None) -> None:
+        from defender import box as box_mod
+
+        self.tmp_path = tmp_path
+        self.daemon = _LaneDaemon()
+        self.exchanges: list[str] = []
+        wire = box_mod.encode_response(box_mod.BoxResult(rc=0, out=b"answer\n", err=b""))
+
+        def exec_in_box(_argv, **kw):
+            self.exchanges.append(self.daemon.status)
+            if len(self.exchanges) == 1:
+                self.daemon.status = "exited"
+                self.daemon.blind = blinds
+                return subprocess.Popen(["sh", "-c", "exit 137"], **kw)
+            return subprocess.Popen([sys.executable, "-c", f"import os; os.write(1, {wire!r})"], **kw)
+
+        name = "defender-lane-1421"
+        self.box = box_mod.BoxExecutor(
+            name=name, docker=self.daemon,
+            transport=box_mod._DockerTransport(name, box_mod.BoxSpec(), popen=exec_in_box))
+        self.runs = box_mod.BoxRuns(self.box)
+        self.wt = _worktree(tmp_path)
+        self.run_dir = _run_dir(tmp_path)
+
+    def item(self, trace: str, box, command: str = LANE_COMMAND) -> str:
+        def calls_bash(messages, _info):
+            """One command; any answer to it, a retry prompt included, ends the item."""
+            answered = any(isinstance(part, (ToolReturnPart, RetryPromptPart))
+                           for message in messages for part in getattr(message, "parts", []))
+            return ModelResponse(parts=[TextPart(content="done")] if answered else
+                                 [ToolCallPart(tool_name="bash", args={"command": command})])
+
+        deps = bind(LEAD_AUTHOR_DEF, self.run_dir, defender_dir=self.wt / "defender",
+                    scope=RunScope(tenant_agent=_agent(self.wt)), box=box)
+        return run_stage(
+            stage="lead_author",
+            wiring=StageWiring(prompt_path=_prompt(self.tmp_path), model="m", effort=None, trace_name=trace,
+                               label="la"),
+            ctx=StageContext(learning_run_dir=self.run_dir, user="u", request_limit=4,
+                             wall_clock_timeout=config.subagent_timeout()),
+            deps=deps, make_model=_fake_model(calls_bash),
+        )
+
+
+def test_o8_a_lost_lane_box_fails_the_item_and_the_next_items_window_runs(tmp_path):
+    """Decision 4: the item is an ordinary failure, not a halt, and a proven start clears the loss for the next. (O8)"""
+    lane = _Lane(tmp_path)
+    with pytest.raises(RunUnprocessable), lane.runs.run() as box:
+        lane.item("first-item.jsonl", box)
+    with lane.runs.run() as box:
+        assert lane.item("next-item.jsonl", box) == "done"
+    assert lane.exchanges == ["running", "running"], "an item's command did not reach its box"
+    assert lane.daemon.status == "exited", "the lane left its box running"
+
+
+def test_o8_a_lost_box_stays_refused_for_the_rest_of_its_window(tmp_path):
+    """Sticky: a second command in the same window gets the refusal without another exchange. (O8)"""
+    from defender import box as box_mod
+
+    lane = _Lane(tmp_path)
+    with lane.runs.run() as box:
+        with pytest.raises(box_mod.BoxLost):
+            box.run_parsed(bash_exec.parse(LANE_COMMAND), command=LANE_COMMAND, cwd=Path("/"), timeout=5)
+        with pytest.raises(box_mod.BoxLost):
+            box.run_parsed(bash_exec.parse(LANE_COMMAND), command=LANE_COMMAND, cwd=Path("/"), timeout=5)
+    assert lane.exchanges == ["running"], "a refused box was asked to run another command"
+
+
+@pytest.mark.parametrize("blind", ["gone", "mute"])
+def test_o8_a_vanished_lane_box_or_unanswering_daemon_halts_the_tick_with_no_attempt_charged(tmp_path, blind):
+    """The stop after the loss cannot be proven: that fault, not the item's failure, leaves the window. (O8, decision 4)"""
+    from defender import box as box_mod
+
+    lane = _Lane(tmp_path, blinds=blind)
+    with pytest.raises(box_mod.BoxFault) as halted, lane.runs.run() as box:
+        lane.item("first-item.jsonl", box)
+    assert not isinstance(halted.value, RunUnprocessable)
+    assert lane.exchanges == ["running"]
+    # Control for the same arm: with the daemon answering, the same loss is the item's failure (above).
+
+
+def test_o9_a_fence_trip_in_a_lane_still_propagates_and_stays_refused_in_the_next_window(tmp_path):
+    """The fence is never cleared by a window start; the stage handler does not turn it into a failed item. (O9)"""
+    from defender import box as box_mod
+
+    lane = _Lane(tmp_path)
+    def past_the_fence(_argv, **kw):
+        lane.exchanges.append(lane.daemon.status)
+        return subprocess.Popen(["head", "-c", str(box_mod.BOX_OUTPUT_LIMIT + 1), "/dev/zero"], **kw)
+
+    lane.box.transport = box_mod._DockerTransport(lane.box.name, box_mod.BoxSpec(), popen=past_the_fence)
+    with pytest.raises(BaseException) as first, lane.runs.run() as box:  # noqa: PT011
+        lane.item("first-item.jsonl", box)
+    assert carried(first.value, box_mod.BoxOutputLimitExceeded) is not None, first.value
+    assert not isinstance(first.value, RunUnprocessable)
+    with pytest.raises(box_mod.BoxOutputLimitExceeded), lane.runs.run() as box:
+        box.run_parsed(bash_exec.parse(LANE_COMMAND), command=LANE_COMMAND, cwd=Path("/"), timeout=5)
+    assert len(lane.exchanges) == 1, "the next window asked a fenced box to run a command"

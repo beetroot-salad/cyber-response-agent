@@ -32,7 +32,6 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
-from defender.box import BoxOutputLimitExceeded
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.usage import RunUsage, UsageLimits
 
@@ -58,6 +57,7 @@ from .. import toon_gate as toon_gate_mod
 from ..agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from defender._agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from .. import challenge_gate
+from ..box_endings import box_ending_in
 from defender._exception_groups import carried, carried_unless_overridden
 from .. import review_roles
 from ..close_tool import register_close_tool
@@ -312,14 +312,21 @@ async def _drive_agent(  # noqa: PLR0913, PLR0912, C901 — the loop's own input
         _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
-    except (run_end.CallRecordWriteFailed, providers.ProviderDown, BaseExceptionGroup) as e:
-        # Two failures end the run by name. Concurrent leads may deliver either inside an
-        # exception group; a group that carries neither propagates as itself.
-        if carried(e, BoxOutputLimitExceeded) is not None:
-            raise
+    except (run_end.CallRecordWriteFailed, providers.ProviderDown, box_mod.BoxEnding,
+            BaseExceptionGroup) as e:
+        # These failures end the run by name. Concurrent leads may deliver any of them inside an
+        # exception group; a group that carries none propagates as itself.
+        ending = box_ending_in(e)
         failed = carried(e, run_end.CallRecordWriteFailed)
         down = _provider_down_in(e)
-        if failed is not None:
+        if ending is not None:
+            # The box is unusable, or a process wrote past its helper (#1421 O8, O9): ahead of a
+            # call-record or provider fault beside it. Its own words are logged here, once; the
+            # records carry only its class.
+            _logger.error(f"{ending}")
+            truncated_by = ending.exit_class
+            exit_reason = type(ending).__name__
+        elif failed is not None:
             # A call record the run could not write (A12, #1234), stamped with the record that
             # failed.
             _logger.error(f"{failed}")
@@ -364,7 +371,7 @@ def _provider_down_in(exc: BaseException) -> providers.ProviderDown | None:
     """The `ProviderDown` that should end the run on `exc` (bare, or carried by a group that
     holds no interrupt, kill or abort), else `None`."""
     return carried_unless_overridden(
-        exc, providers.ProviderDown, (BudgetKill, RunAborted, BoxOutputLimitExceeded))
+        exc, providers.ProviderDown, (BudgetKill, RunAborted, box_mod.BoxEnding))
 
 
 def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
@@ -557,7 +564,12 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
         _logger.error(f"store fault during the correlation lead ({e!r}); ending the run")
         return None, stop(session_store.TRUNCATED_BY_STORE, "StoreAppendError")
     except BaseException as e:
-        # A provider that stayed down (#1243) may arrive inside an exception group.
+        # A box ending (#1421) or a provider that stayed down (#1243) may arrive inside an
+        # exception group; the box ending first.
+        ending = box_ending_in(e)
+        if ending is not None:
+            _logger.error(f"{ending}")
+            return None, stop(ending.exit_class, type(ending).__name__)
         down = _provider_down_in(e)
         if down is not None:
             _logger.error(f"{down}; stopping before the agent starts")

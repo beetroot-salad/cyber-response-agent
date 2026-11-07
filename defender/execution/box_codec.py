@@ -26,6 +26,9 @@ BOX_ENV_ALLOWLIST: tuple[str, ...] = (
     "LANG",
     "TZ",
     "DEFENDER_BOX",
+    # The box's memory cap as `BoxSpec.memory` spells it (`512m`, `2g`, plain bytes), set by both
+    # launch builders: the in-box SQL tool limits its own address space to a share of it (#1421).
+    "DEFENDER_BOX_MEMORY",
     # The run clock's preload (#1255 "Into the box", `box/_clock.CLOCK_ENV`): set on the create
     # command and carried to every in-box child, so `defender-sql` and python read the run clock.
     "LD_PRELOAD",
@@ -42,6 +45,12 @@ BOX_MARK_ENV: dict[str, str] = {"DEFENDER_BOX": "1"}
 
 class BoxFault(Exception):
     pass
+
+
+#: What one `docker exec` may return to the host: the fence in `box/_output.py` ends the run when
+#: a response outgrows it. Lives here, beside the codec, so the in-box helper's own budget below
+#: is derived from the same figure; `box` re-exports it.
+BOX_OUTPUT_LIMIT = 64 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -64,6 +73,32 @@ REQUEST_MAGIC = b"DFB1"
 RESPONSE_MAGIC = b"DFR1"
 
 _RESPONSE_HEADER = struct.Struct("!4siQQ")
+
+#: What the in-box helper lets one command print in all (stdout and stderr, every pipeline): the
+#: fence's limit less the frame's own header, so a command at the budget cannot trip the fence.
+HELPER_OUTPUT_BUDGET = BOX_OUTPUT_LIMIT - _RESPONSE_HEADER.size
+
+#: The code of a command the helper stopped for printing past its budget (sysexits'
+#: `EX_TEMPFAIL`): a result, not a lost box.
+OVER_BUDGET_RC = 75
+
+#: The one line the model reads in place of everything else, each at most 160 characters with no
+#: variable part: the queries table keeps `exit=<code>; ` and 160 characters of stderr as the
+#: pitfall's merge key, so equal causes must read byte-identical (P1). The host builds the
+#: kill line itself when the helper was the thing killed (exec 137 with the box running).
+OVER_BUDGET_LINE = (
+    b"defender-bash: output past the 64 MiB limit, so nothing is shown. "
+    b"Print less: filter with grep, or take a head.\n"
+)
+KILLED_LINE = (
+    b"defender-bash: a process was killed, most likely at the box's memory cap. "
+    b"Nothing is shown; run something smaller.\n"
+)
+PROCESS_CAP_LINE = (
+    b"defender-bash: could not start a process: the box's process limit is reached. "
+    b"Run fewer processes at once.\n"
+)
+FAILED_LINE = b"defender-bash: the box helper failed on this command; try a simpler one.\n"
 _U32 = struct.Struct("!I")
 _U8 = struct.Struct("!B")
 

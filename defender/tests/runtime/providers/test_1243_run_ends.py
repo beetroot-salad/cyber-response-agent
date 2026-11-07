@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
-
 import asyncio
 import time
 from pathlib import Path
@@ -322,53 +320,6 @@ def test_d4_exit_4_is_provider_downs_alone(tmp_path: Path, kill: Any, member: st
     assert d.rc == 0, f"a run ended {member} exited {d.rc}; only provider-down exits 4"
 
 
-SIBLING_TENANT = fixture_uuid("tenant:acme")
-SIBLING_WORLD = "b"
-
-
-def _sibling_episode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A launched episode a sibling process can run as: a finished, recorded source run on
-    tenant `acme`, the episode primed from it by the real launcher door (`cli.prepare_episode`),
-    and the family manifest (worlds a, b, c) written. The episodes root is its parent."""
-    from defender.records import RunId
-
-    planted = S.plant_tenant(SIBLING_TENANT)
-    _base, src = T.runs_base(tmp_path, tenant_id=SIBLING_TENANT, recorded=True)
-    runs = planted.accept().runs_repository()
-    source = runs.open(RunId.parse(src.name))
-    with cli.prepare_episode(runs, source) as view:
-        ep = Path(view.episode.dir)
-        T.write_family(ep, T.family_doc(episode_id=ep.name, source_run_dir=str(src)))
-        view.start_runs([T.world_id(ep, label) for label in T.WORLDS])
-    return ep
-
-
-def _run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
-    """World `b`'s sibling through the REAL `run.main --episode/--world` door; its lifecycle
-    seam drives the REAL investigation (`_spec1222.drive_run`, the replay harness) over the run
-    folder the door materialized, with `main` as MAIN's model."""
-    d = S.new_drive(tmp_path, main=main)
-
-    def lifecycle(**kw: Any) -> dict:
-        return S.drive_run(d, Path(kw["run"].run_dir), tenant=kw["tenant"].tenant)
-
-    argv = ["--episode", ep.name, "--world", SIBLING_WORLD, "--tenant", SIBLING_TENANT,
-            "--no-learn"]
-    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
-
-    try:
-        # The launch-time publish, in-process.
-        d.rc = run_mod.main(argv, directory=directory_for_argv(argv), lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
-                                    preflight=lambda *_a, **_k: 0, ticket_writer=S.NoTicket(),
-                                    publish=in_process_publish())
-    except SystemExit as exit_:
-        d.refusal = exit_.code if isinstance(exit_.code, str) else None
-        d.rc = exit_.code if isinstance(exit_.code, int) else 1
-    except Exception as e:  # noqa: BLE001 — kept for the test to assert on
-        d.raised = e
-    return d
-
-
 @pytest.mark.parametrize(("fault", "ends", "rc"), [
     (P.provider_down_fault("sibling"), P.PROVIDER_DOWN, P.PROVIDER_DOWN_EXIT),
     (lambda: BudgetKill("world budget spent"), "budget", 0),
@@ -376,9 +327,9 @@ def _run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
 def test_o6_d4_a_sibling_world_ending_provider_down_exits_4(tmp_path: Path,
                                                            monkeypatch: pytest.MonkeyPatch,
                                                            fault: Any, ends: str, rc: int) -> None:
-    ep = _sibling_episode(tmp_path, monkeypatch)
+    ep = P.sibling_episode(tmp_path, monkeypatch)
     main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=fault))
-    d = _run_sibling(tmp_path / "sibling", ep, main)
+    d = P.run_sibling(tmp_path / "sibling", ep, main)
     assert d.run_dir is not None, (
         f"the sibling never reached its run (rc={d.rc!r}, refusal={d.refusal!r}, raised={d.raised!r})")
     assert main.requests == 1, f"the sibling's MAIN made {main.requests} requests"
