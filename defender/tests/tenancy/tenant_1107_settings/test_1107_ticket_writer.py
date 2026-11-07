@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 
-from defender import box as box_mod
 from defender.records import RunPaths
 from defender.records import run_end
 from defender.investigation import ticket_writer
@@ -38,12 +37,11 @@ def _world(tmp_path: Path, *, marker: str = MARKER, name: str = "tenants",
     return root, folder, alert
 
 
-def _shim(tmp_path: Path, monkeypatch, *answers: dict[str, Any], name: str = "docker"
-          ) -> S.DockerShim:
-    """The docker shim, first on this process's PATH — which run.py's run env is built from."""
-    shim = S.DockerShim(tmp_path / name, list(answers) or None)
-    monkeypatch.setenv("PATH", shim.path_value())
-    return shim
+def _shim(tmp_path: Path, monkeypatch, *answers: dict[str, Any], name: str = "proxy"
+          ) -> S.ProxyStandIn:
+    """The credential proxy's stand-in, installed as the address every run here reaches (the case
+    store is behind it, #1391 O1)."""
+    return S.ProxyStandIn(tmp_path / name, list(answers) or None).install(monkeypatch)
 
 
 def _run(tmp_path: Path, root: Path, alert: Path, *, run_id: str = "r1107",
@@ -52,8 +50,12 @@ def _run(tmp_path: Path, root: Path, alert: Path, *, run_id: str = "r1107",
     """`run.main` over one alert with the real ticket writer. `page=True` leaves the real renderer
     in place; otherwise the recorder's `visualize` stands in. Returns (rc, refusal, run dir,
     recorder)."""
+    from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
+
     rec = S.RunRecorder(tmp_path / "runs" / run_id, summary=summary, before_lifecycle=before)
-    seams = {} if page else {"visualize": rec.visualize}
+    seams: dict[str, Any] = {"signer": FakeSigner()}
+    if not page:
+        seams["visualize"] = rec.visualize
     rc, refused = S.drive_run(
         S.run_argv(alert, root, update_ticket=update_ticket), rec, **seams)
     return rc, refused, rec.run_dir_at, rec
@@ -88,36 +90,12 @@ def _ticket_line_near(page: str, reason: str, *others: str, window: int = 1500) 
     return False
 
 
-def _post_calls(shim: S.DockerShim) -> list[list[str]]:
-    return [c["argv"] for c in shim.calls() if "POST" in c["argv"]]
+def _post_calls(proxy: S.ProxyStandIn) -> list[dict[str, Any]]:
+    return [r for r in proxy.requests() if r["method"] == "POST"]
 
 
-def test_d_writer_context_from_run(tmp_path, monkeypatch):
-    root, folder, alert = _world(tmp_path)
-    run_id = "r-ctx"
-    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok())
-    other_tree = tmp_path / "another-defender-tree"
-    other_tree.mkdir()
-    elsewhere = tmp_path / "some-other-cwd"
-    elsewhere.mkdir()
-    monkeypatch.setenv("DEFENDER_DIR", str(other_tree))
-    monkeypatch.chdir(elsewhere)
-
-    rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=run_id)
-    assert refused is None, f"the run did not complete: rc={rc} refused={refused}"
-    assert rc == 0, f"the run did not complete: rc={rc} refused={refused}"
-    calls = shim.calls()
-    assert calls, "the record step reached no docker child at all"
-    for call in calls:
-        env = call["env"]
-        # box_mod.run_env(defender_dir, run_dir) exports both — run.py's values, whatever the
-        # process's own DEFENDER_DIR and cwd say.
-        assert env.get("DEFENDER_DIR") == str(S.DEFENDER), (
-            f"the writer's child names DEFENDER_DIR={env.get('DEFENDER_DIR')!r}, not run.py's "
-            f"{S.DEFENDER}")
-        assert env.get("DEFENDER_RUN_DIR") == str(run_dir), (
-            f"the writer's child names DEFENDER_RUN_DIR={env.get('DEFENDER_RUN_DIR')!r}, not "
-            f"the run dir run.py passed ({run_dir}) — the process cwd leaked in")
+# Retired by #1391 O1: `test_d_writer_context_from_run` checked the environment of the docker child
+# the record step forked. The step forks nothing now; it sends to the credential proxy.
 
 
 def test_o6_missing_config_receipt(tmp_path, monkeypatch, caplog):
@@ -157,8 +135,8 @@ def test_o6_bad_config_receipt(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     _shim(tmp_path, monkeypatch)
     arms = {
-        "missing-key": ("TICKET_BASTION_HOST", lambda f: S.drop_key(
-            f, CASE, "TICKET_BASTION_HOST")),
+        "missing-key": ("TICKET_KEY_PATTERN", lambda f: S.drop_key(
+            f, CASE, "TICKET_KEY_PATTERN")),
         "non-digit-timeout": ("TICKET_TIMEOUT_SEC", lambda f: S.set_key(
             f, CASE, "TICKET_TIMEOUT_SEC", "ten")),
     }
@@ -187,13 +165,13 @@ def test_o6_case_record_fault_receipt(tmp_path, monkeypatch, caplog):
     (no link), the exit code unchanged. O5, run-start flow."""
     caplog.set_level(logging.INFO)
     root_ok, _f, alert_ok = _world(tmp_path, name="tenants-ok")
-    shim_ok = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-ok")
+    shim_ok = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-ok")
     rc_ok, _refused, ok_dir, _rec = _run(tmp_path, root_ok, alert_ok, run_id="r-ok")
-    assert [c["argv"] for c in shim_ok.calls() if "POST" in c["argv"]], "the control posted nothing"
+    assert _post_calls(shim_ok), "the control posted nothing"
     assert (S.receipt(ok_dir) or {}).get("ok") is True, "the control failed"
 
     for arm, text in CASE_RECORD_FAULTS.items():
-        shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name=f"docker-{arm}")
+        shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name=f"proxy-{arm}")
         root, folder, alert = _world(tmp_path, name=f"tenants-{arm}")
         S.case_record_path(folder).write_bytes(text)
         caplog.clear()
@@ -253,13 +231,13 @@ def test_o5_no_case_record_file_leaves_a_receipt_naming_it(tmp_path, monkeypatch
     assert not S.receipt_path(run_dir).exists(), "a run without --update-ticket wrote a receipt"
 
 
-def _comment_argv(shim: S.DockerShim) -> list[str]:
-    (argv,) = _post_calls(shim)
-    return argv
+def _comment_argv(proxy: S.ProxyStandIn) -> dict[str, Any]:
+    (request,) = _post_calls(proxy)
+    return request
 
 
-def _sent_body(argv: list[str]) -> str:
-    return argv[argv.index("-d") + 1]
+def _sent_body(request: dict[str, Any]) -> str:
+    return json.dumps(request["body"])
 
 
 def _with_report(run_dir: Path) -> None:
@@ -275,27 +253,28 @@ def test_o8_edits_to_the_case_settings_after_run_start_change_nothing_the_commen
     """Editing the tenant's case-record.yaml or the system's config.env under the data root during
     a run changes nothing the comment carries; control: the body planted before start is sent. D-18."""
     edited_body = "EDITED-BODY {disposition}"
-    control_shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-control")
+    control_shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-control")
     root, _folder, alert = _world(tmp_path, name="control", case_body=edited_body)
     _run(tmp_path, root, alert, run_id="r-control", before=_with_report)
     assert "EDITED-BODY" in _sent_body(_comment_argv(control_shim)), "control: the body is read"
 
-    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-edited")
+    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-edited")
     root, folder, alert = _world(tmp_path, name="edited")
 
     def edit_during_the_run(run_dir: Path) -> None:
         _with_report(run_dir)
         S.case_record_path(folder).write_text(
             f'system: "cmdb"\ncomment:\n  body: "{edited_body}"\n', encoding="utf-8")
-        S.set_key(folder, CASE, "TICKET_URL_BASE", "http://edited-host.invalid:9")
+        (S.settings_of(folder) / "systems" / CASE / "access.yaml").write_text(
+            S.T1106.access_text(MARKER, CASE, base="http://edited-host.invalid:9"),
+            encoding="utf-8")
 
     rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-edited",
                                       before=edit_during_the_run)
     assert refused is None, f"rc={rc} refused={refused}"
     assert rc == 0, f"rc={rc} refused={refused}"
     argv = _comment_argv(shim)
-    assert S.curl_url(argv) == f"http://ticket-{MARKER}:8080/tickets/{KEY}/comments", argv
-    assert S.context_of(argv) == S.context_name(MARKER, CASE), argv
+    assert argv["url"] == f"http://ticket-{MARKER}:8080/tickets/{KEY}/comments", argv
     assert "EDITED-BODY" not in _sent_body(argv), "an edit made during the run reached the comment"
     got = S.receipt(run_dir)
     assert got is not None
@@ -304,9 +283,8 @@ def test_o8_edits_to_the_case_settings_after_run_start_change_nothing_the_commen
 
 def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
-    # Docker answers an unknown context with rc 1 and 'context not found' on stderr, before any
-    # request — the request returns no status.
-    _shim(tmp_path, monkeypatch, S.context_not_found(S.context_name(MARKER, CASE)))
+    # The proxy reports the store took the request and never answered: no status.
+    _shim(tmp_path, monkeypatch, S.timed_out("ticket store did not answer in time"))
     root, _folder, alert = _world(tmp_path)
     rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-transport")
     assert refused is None, f"rc={rc} refused={refused}"
@@ -314,14 +292,14 @@ def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     got = S.receipt(run_dir)
     assert got is not None, "no ticket_write.json for a transport fault"
     assert got.get("ok") is False, got
-    # #1374 r4: docker's exit 1 does not prove curl never ran, so this settles nothing. The failing
-    # check's own detail (docker's 'context not found', the context's name) stays in the reason.
+    # #1374: a request that may have reached the store settles nothing. The proxy's own detail stays
+    # in the reason.
     assert got.get("status") == "unknown", got
     assert got.get("url") is None, got
     reason = got.get("reason") or ""
     assert reason.strip(), f"no reason on the transport-fault receipt: {got}"
     assert "may have reached the store" in reason, reason
-    assert "docker exec failed" in reason, reason
+    assert "did not answer in time" in reason, reason
     assert _warnings(caplog), "a transport fault logged no warning"
 
 
@@ -368,9 +346,8 @@ def test_o5_run_start_makes_no_call_and_writes_no_receipt_on_any_path(tmp_path, 
     """Whatever run start finds wrong with the case settings it neither calls the store nor leaves
     a receipt: the record leg is the only source of one. O1, O5, run-start flow."""
     for arm in ("ok", "missing-config", "bad-config", "bad-case-record", "no-key", "transport"):
-        answers = ([S.context_not_found(S.context_name(MARKER, CASE))] if arm == "transport"
-                   else S.store_answers_ok())
-        shim = _shim(tmp_path, monkeypatch, *answers, name=f"docker-{arm}")
+        answers = [S.timed_out()] if arm == "transport" else S.store_answers_ok()
+        shim = _shim(tmp_path, monkeypatch, *answers, name=f"proxy-{arm}")
         root, folder, alert = _world(tmp_path, name=f"tenants-{arm}")
         if arm == "missing-config":
             S.config_path(folder, CASE).unlink()
@@ -383,7 +360,7 @@ def test_o5_run_start_makes_no_call_and_writes_no_receipt_on_any_path(tmp_path, 
         seen: list[tuple[int, bool]] = []
 
         def at_start(run_dir: Path, shim=shim, seen=seen) -> None:
-            seen.append((len(shim.calls()), S.receipt_path(run_dir).exists()))
+            seen.append((len(shim.requests()), S.receipt_path(run_dir).exists()))
 
         rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=f"r-start-{arm}",
                                           before=at_start)
@@ -410,7 +387,7 @@ def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch,
     read back once (#1374) and, the read meeting the same 5xx, the receipt is `unknown`."""
     caplog.set_level(logging.INFO)
     root, _folder, alert = _world(tmp_path)
-    _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-ok")
+    _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-ok")
     rc_ok, refused_ok, ok_dir, _rec = _run(tmp_path, root, alert, run_id="r-ok", page=True)
     assert refused_ok is None, refused_ok
     control = S.receipt(ok_dir)
@@ -424,11 +401,11 @@ def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch,
         run_id = f"r-http-{status}"
         shim = _shim(tmp_path, monkeypatch,
                      S.answer(json.dumps({"detail": f"store said {status}"}), status),
-                     name=f"docker-{status}")
+                     name=f"proxy-{status}")
         caplog.clear()
         rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=run_id, page=True)
         assert refused is None, f"HTTP {status}: refused {refused}"
-        assert len([c for c in shim.calls() if "POST" in c["argv"]]) == 1, (
+        assert len(_post_calls(shim)) == 1, (
             f"HTTP {status}: positive control, the comment was sent once")
         page = S.page_html(run_dir)
         assert page, f"HTTP {status}: the run page did not render"
@@ -449,7 +426,7 @@ def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog
     caplog.set_level(logging.INFO)
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path, name="tenants-bad")
-    S.drop_key(folder, CASE, "TICKET_BASTION_HOST")
+    S.drop_key(folder, CASE, "TICKET_KEY_PATTERN")
     caplog.clear()
     _rc, _ref, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-bad")
     got = S.receipt(run_dir)
@@ -468,17 +445,16 @@ def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog
     # gives says so. The writer never asks, so the record lands as on any case (#1221).
     root2, _folder2, alert2 = _world(tmp_path, name="tenants-closed")
     run_id = "r-closed"
-    shim2 = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-closed")
+    shim2 = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-closed")
     _rc2, _ref2, run_dir2, _rec2 = _run(tmp_path, root2, alert2, run_id=run_id)
     recorded = S.receipt(run_dir2)
     assert recorded is not None, "a closed case's record wrote no receipt"
     assert (recorded.get("status"), recorded.get("ok"), recorded.get("reason")) == (
         ticket_writer.RECEIPT_COMMENTED, True, None), (
         f"a case the store holds closed was not recorded like any other: {recorded}")
-    methods = [c["argv"][c["argv"].index("-X") + 1] for c in shim2.calls() if "-X" in c["argv"]]
+    methods = [r["method"] for r in shim2.requests()]
     assert "GET" not in methods, f"the writer read the case back: {methods}"
-    comments = [c["argv"] for c in shim2.calls()
-                if "POST" in c["argv"] and any(a.endswith("/comments") for a in c["argv"])]
+    comments = [r for r in _post_calls(shim2) if r["path"].endswith("/comments")]
     assert len(comments) == 1, f"expected one comment POST, saw {len(comments)}: {methods}"
 
 
@@ -488,7 +464,7 @@ def test_s7_nf24_receipt_write_failure_is_harmless(tmp_path, monkeypatch, caplog
 
     # A directory squatting the receipt's name: a real input the guarded replace cannot write
     # over. The record step itself succeeds against the store.
-    _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-squat")
+    _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-squat")
 
     def squat(run_dir: Path) -> None:
         S.receipt_path(run_dir).mkdir()
@@ -542,7 +518,7 @@ def test_s7_mf12_no_receipt_branch_clears_stale_receipt(tmp_path, monkeypatch):
 
 def test_o1_ticket_writer_ignores_env(tmp_path, monkeypatch):
     """With TICKET_URL_BASE exported, the record step's request URL and the receipt's url are
-    the tenant file's."""
+    the tenant's declared base."""
     exported = "http://exported-ticket-1107:1"
     monkeypatch.setenv("TICKET_URL_BASE", exported)
     run_id = "r-o1"
@@ -551,17 +527,13 @@ def test_o1_ticket_writer_ignores_env(tmp_path, monkeypatch):
     rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=run_id)
     assert refused is None, f"rc={rc} refused={refused}"
     assert rc == 0, f"rc={rc} refused={refused}"
-    calls = shim.calls()
-    assert calls, "the record step reached the store through no docker child"
-    # The variable was exported and reached the run env (it is passed through untouched).
-    assert calls[0]["env"].get("TICKET_URL_BASE") == exported, (
-        "the exported variable never reached the run env — the fixture does not discriminate")
+    calls = shim.requests()
+    assert calls, "the record step reached the store through no request"
     file_base = f"http://ticket-{MARKER}:8080"
     for call in calls:
-        url = S.curl_url(call["argv"]) or ""
-        assert url.startswith(file_base), (
-            f"the record step addressed {url!r}, not the tenant file's {file_base}")
-        assert exported not in " ".join(call["argv"]), call["argv"]
+        assert call["url"].startswith(file_base), (
+            f"the record step addressed {call['url']!r}, not the tenant file's {file_base}")
+        assert exported not in json.dumps(call), call
     got = S.receipt(run_dir)
     assert got is not None, f"the receipt's url is not the tenant file's: {got}"
     assert str(got.get("url") or "").startswith(file_base), f"the receipt's url is not the tenant file's: {got}"
@@ -614,23 +586,5 @@ def test_s7_f6_run_env_handed_to_the_correlation_lead(tmp_path, monkeypatch):
         "the correlation lead's backend call was not handed the run env's marker")
 
 
-def test_s7_f6_run_env_handed_to_the_ticket_writer(tmp_path, monkeypatch):
-    marker_var, marker_value = "SPEC1107_RUN_ENV_MARKER", "run-env-marker-7c1"
-    monkeypatch.setenv(marker_var, marker_value)
-    root, _folder, alert = _world(tmp_path)
-    run_id = "r-f6"
-    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok())
-    rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=run_id)
-    assert refused is None, f"rc={rc} refused={refused}"
-    assert rc == 0, f"rc={rc} refused={refused}"
-    calls = shim.calls()
-    assert calls, "the writer reached no docker child"
-    # box_mod.run_env's copy, as run.py builds it for this run: the marker and the two
-    # run-scoped variables are what the writer's child must be handed.
-    run_envs = box_mod.run_env(S.DEFENDER, run_dir)
-    wanted = {k: run_envs.get(k) for k in (marker_var, "DEFENDER_DIR", "DEFENDER_RUN_DIR")}
-    assert wanted[marker_var] == marker_value, f"the run env lost the marker: {wanted}"
-    for call in calls:
-        got = {k: call["env"].get(k) for k in wanted}
-        assert got == wanted, (
-            f"the writer's docker child was not handed run.py's run env: {got} vs {wanted}")
+# Retired by #1391 O1: `test_s7_f6_run_env_handed_to_the_ticket_writer` checked the environment of
+# the docker child the writer forked. The writer forks nothing now; it sends to the credential proxy.

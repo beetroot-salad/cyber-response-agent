@@ -433,34 +433,16 @@ def test_1391_o3_health_check_faults_by_the_reply_and_a_403_names_the_monitor_pr
     assert [s.path for s in up.seen] == ["/_cluster/health"], "the request was never sent"
 
 
-@pytest.mark.parametrize("transport", [
-    pytest.param(None, id="missing"),
-    pytest.param("docker-exec", id="docker-exec"),
-    pytest.param("", id="blank"),
-    pytest.param("http-proxy", id="control"),
-])
-def test_1391_o3_elastic_without_the_http_proxy_method_is_a_settings_fault_naming_the_key(
-        tmp_path, data_root, transport):
-    """Until #1391 O1/O2 retire this: `ELASTIC_TRANSPORT` missing or not `http-proxy` is a
-    ConfigFault naming it at the settings check and at a verb, nothing sent; `http-proxy` passes.
-    #1391 O3, D12 (retired by #1391 O1/O2)."""
-    with H.upstream() as up, _elastic(tmp_path, data_root, up.url,
-                                      transport=transport) as (ctx, tap):
-        if transport == "http-proxy":
-            assert elastic_adapter.check_settings(ctx.tenant) is None
-            return
-        with pytest.raises(ConfigFault, match="ELASTIC_TRANSPORT"):
-            elastic_adapter.check_settings(ctx.tenant)
-        with pytest.raises(ConfigFault, match="ELASTIC_TRANSPORT"):
-            elastic_adapter.VERBS["query"](ctx, native_query="*")
-
-    assert (tap.tokens, up.seen) == ([], [])
+# Retired by #1391 O1/O2, as its docstring said: `test_1391_o3_elastic_without_the_http_proxy_method_
+# is_a_settings_fault_naming_the_key` (D12's interim `ELASTIC_TRANSPORT` refusal). There is no
+# access-method key now; a leftover `ELASTIC_TRANSPORT` is refused as a key Elastic does not read
+# (`test_1391_o2_a_key_the_adapter_does_not_read_is_refused_by_name[elastic-transport]`).
 
 
 def test_1391_o3_elastic_on_the_http_proxy_method_with_no_access_yaml_is_a_settings_fault(
         tmp_path, data_root):
-    """`ELASTIC_TRANSPORT=http-proxy` beside no `access.yaml` is a ConfigFault naming it at the
-    settings check and at a verb, nothing sent. #1391 O3, P1, D12."""
+    """Elastic's settings with no `access.yaml` beside them are a ConfigFault naming it at the
+    settings check and at a verb, nothing sent. #1391 O3, P1."""
     with H.upstream() as up, _elastic(tmp_path, data_root, up.url,
                                       declared=False) as (ctx, tap):
         with pytest.raises(ConfigFault, match="access.yaml"):
@@ -645,48 +627,81 @@ def _params(fn):
             if p.kind is inspect.Parameter.KEYWORD_ONLY and p.default is inspect.Parameter.empty}
 
 
+#: Audit events of a process being started, by any route (`subprocess`, `os.system`, spawn, exec).
+_PROCESS_EVENTS = ("subprocess.Popen", "os.system", "os.posix_spawn", "os.exec", "os.spawn",
+                   "os.fork", "os.forkpty")
+#: What the audit hook records while `_watching` is non-empty. The hook cannot be removed once
+#: added, so it is added once per process and records only inside `_processes_started`.
+_started: list[tuple[str, object]] = []
+_watching: list[bool] = []
+_hooked: list[bool] = []
+
+
+def _audit(event, args):
+    if _watching and event.startswith(_PROCESS_EVENTS):
+        _started.append((event, args[:2] if isinstance(args, tuple) else args))
+
+
+@contextlib.contextmanager
+def _processes_started():
+    """Every process start inside the block, from Python's audit events."""
+    import sys
+
+    if not _hooked:
+        sys.addaudithook(_audit)
+        _hooked.append(True)
+    _started.clear()
+    _watching.append(True)
+    try:
+        yield _started
+    finally:
+        _watching.clear()
+
+
 @pytest.mark.parametrize("system", sorted(_NETWORK_ENVS))
 def test_1391_o1_a_declaration_alone_puts_a_system_on_the_proxy_and_no_verb_forks_a_process(
-        tmp_path, data_root, monkeypatch, system):
+        tmp_path, data_root, system):
     """A system folder holding an access declaration and only its own keys passes the settings
-    check, and every verb reaches the system through the proxy without running a subprocess
-    (no `docker`). #1391 O1, O2, P1."""
-    import subprocess
-
-    forked: list[object] = []
-
-    def _refuse(*args, **_kw):
-        forked.append(args[0] if args else None)
-        raise AssertionError(f"a verb ran a subprocess: {args!r}")
-
+    check, and every verb reaches the system through the proxy without starting a process (no
+    `docker`). #1391 O1, O2, P1."""
     with H.upstream() as up, _proxied(tmp_path, data_root, up, system) as (ctx, tap):
         assert _adapter_of(system).check_settings(ctx.tenant) is None
-        monkeypatch.setattr(subprocess, "run", _refuse)
-        monkeypatch.setattr(subprocess, "Popen", _refuse)
         outcomes = {}
-        for name, fn in _adapter_of(system).VERBS.items():
-            try:
-                fn(ctx, **_params(fn))
-            except Exception as exc:  # noqa: BLE001 — the test reads whatever the verb raised
-                outcomes[name] = exc
-            else:
-                outcomes[name] = None
+        with _processes_started() as started:
+            for name, fn in _adapter_of(system).VERBS.items():
+                try:
+                    fn(ctx, **_params(fn))
+                except Exception as exc:  # noqa: BLE001 — the test reads whatever the verb raised
+                    outcomes[name] = exc
+                else:
+                    outcomes[name] = None
+            forked = list(started)
 
-    assert forked == [], f"{system}'s verbs ran subprocesses: {forked}"
+    assert forked == [], f"{system}'s verbs started processes: {forked}"
     config_faults = {v: str(e) for v, e in outcomes.items() if isinstance(e, ConfigFault)}
     assert config_faults == {}, f"{system} refused complete settings: {config_faults}"
     assert up.seen, f"positive control: {system}'s verbs reached the upstream: {outcomes}"
     assert len(tap.tokens) == len(up.seen), "every upstream request went through the proxy"
 
 
+def test_1391_o1_the_process_watch_sees_a_process_start():
+    """Positive control for the watch the no-process test relies on."""
+    import subprocess
+    import sys
+
+    with _processes_started() as started:
+        subprocess.run([sys.executable, "-c", "pass"], check=True)
+    assert any(event == "subprocess.Popen" for event, _ in started), started
+
+
 @pytest.mark.parametrize("system", sorted(_NETWORK_ENVS))
 def test_1391_o1_a_network_system_with_no_declaration_is_a_settings_fault_naming_it(
         tmp_path, data_root, system):
     """No `access.yaml` is a settings fault, never a fallback to another access method. P1."""
-    with H.upstream() as up, _proxied(tmp_path, data_root, up, system,
-                                      declared=False) as (ctx, tap):
-        with pytest.raises(ConfigFault, match="access"):
-            _adapter_of(system).check_settings(ctx.tenant)
+    with (H.upstream() as up,
+          _proxied(tmp_path, data_root, up, system, declared=False) as (ctx, tap),
+          pytest.raises(ConfigFault, match="access")):
+        _adapter_of(system).check_settings(ctx.tenant)
     assert (tap.tokens, up.seen) == ([], [])
 
 

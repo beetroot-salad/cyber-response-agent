@@ -48,8 +48,7 @@ def _ctx(settings: Path, run_dir: Path, env: dict | None = None):
 def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path):
     transport = T.mod("integrations._stub_transport")
     cfg = transport.load_config(_ctx(injected, tmp_path), "cmdb", "CMDB")
-    assert cfg["URL_BASE"] == f"http://cmdb-{MARK}:8080"
-    assert cfg["BASTION_HOST"] == f"bastion-{MARK}"
+    assert cfg["URL_BASE"] == f"http://cmdb-{MARK}:8080"  # the injected tenant's declaration
     checkout = transport.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path), "cmdb", "CMDB")
     assert checkout["URL_BASE"] != cfg["URL_BASE"], "the fixture no longer discriminates"
 
@@ -84,15 +83,15 @@ def test_the_record_leg_comments_to_the_injected_tenants_store_with_its_case_rec
     run_dir.mkdir()
     C.plant_record(run_dir)
     write_report(run_dir)  # a readable report: the injected body renders over it
-    shim = S.DockerShim(tmp_path / "shim", S.store_answers_ok())
-    S.record_step(run_dir, _record(injected), env=shim.env({}))
+    proxy = S.ProxyStandIn(tmp_path / "proxy", S.store_answers_ok())
+    S.record_step(run_dir, _record(injected), env={}, proxy_url=proxy.url,
+                  request_token="write-token-1106")
 
-    posts = [c["argv"] for c in shim.calls() if "POST" in c["argv"]]
-    assert len(posts) == 1, shim.calls()
-    argv = posts[0]
-    assert S.curl_url(argv) == f"http://ticket-{MARK}:8080/tickets/{C.TICKET_KEY}/comments", argv
-    assert S.context_of(argv) == T.context_name(MARK, "ticket"), argv
-    assert any("injected-tenant-body" in a for a in argv), "the injected case-record body was not sent"
+    posts = [r for r in proxy.requests() if r["method"] == "POST"]
+    assert len(posts) == 1, proxy.requests()
+    (post,) = posts
+    assert post["url"] == f"http://ticket-{MARK}:8080/tickets/{C.TICKET_KEY}/comments", post
+    assert "injected-tenant-body" in post["body"]["body"], "the injected case-record body was not sent"
     checkout_text = (T.FIXTURE_SETTINGS / "case-record.yaml").read_text(encoding="utf-8")
     assert "injected-tenant-body" not in checkout_text, "the fixture no longer discriminates"
 

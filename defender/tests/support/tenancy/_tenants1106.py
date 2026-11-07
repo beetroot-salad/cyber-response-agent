@@ -226,6 +226,11 @@ PREFIX: dict[str, str] = {
 }
 
 
+def default_base(marker: str, system: str) -> str:
+    """The made-up base a fixture tenant declares for `system`: carries `marker` and `system`."""
+    return f"http://{system}-{marker}:8080"
+
+
 def access_text(marker: str, system: str, *, base: str | None = None) -> str:
     """The access declaration a fixture tenant carries for `system` (#1391 P1: every system with
     network access has one): at `base` (default: a made-up one carrying `marker` and `system`, so
@@ -241,7 +246,7 @@ def access_text(marker: str, system: str, *, base: str | None = None) -> str:
     writes = ([{"method": "POST", "path": "/tickets/*/comments"}] if system == "ticket" else [])
     return json.dumps({
         "access": "http-proxy",
-        "base": base or f"http://{system}-{marker}:8080",
+        "base": base or default_base(marker, system),
         "auth": auth,
         "reads": reads,
         "writes": writes,
@@ -553,6 +558,7 @@ __all__ = [
     "TEMPLATE_SETTINGS",
     "config_texts",
     "access_text",
+    "default_base",
     "elastic_access_text",
     "lead_zero_text",
     "case_record_text",
