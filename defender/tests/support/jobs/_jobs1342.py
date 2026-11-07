@@ -610,10 +610,10 @@ def is_box_token(value: object) -> bool:
 
 
 def job_end(*, setup: str = "done", box: str = "started", report_committed: bool = True,
-            scrub_verified: bool = True) -> str:
-    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its four facts."""
+            scrub_verified: bool = True, cut_short: str | None = None) -> str:
+    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its five facts (#1421)."""
     return json.dumps({"setup": setup, "box": box, "report_committed": report_committed,
-                       "scrub_verified": scrub_verified})
+                       "scrub_verified": scrub_verified, "cut_short": cut_short})
 
 
 def scrub_verdict(*, ran: bool) -> str:

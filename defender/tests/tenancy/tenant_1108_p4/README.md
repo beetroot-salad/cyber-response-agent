@@ -44,7 +44,7 @@ logs in to OpenBao itself with AppRole). Human decisions U1–U8 are in r3; U9�
 
 - **U13 (`validate_scaffold` spelling):** one spelling, `validate_scaffold.py <system> --tenant <T>
   --staged <dir>` (the staged directory agent-root-shaped), as `test_connect_propose.py` has it.
-  `e2e/test_ee_consumers.py` is re-spelled onto it with every case's assertions kept. No second
+  `e2e/test_consumers_e2e.py` is re-spelled onto it with every case's assertions kept. No second
   flag (`--agent-dir`). Scope: the scaffold validator's command line only.
 - **U14 (OD21 consequence):** the saved `runtime.html` (an operator page that may show the raw
   knowledge reason) must never become box-visible when a resume or branch re-binds a source run
@@ -176,7 +176,7 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 ### Open items in the seams
 
 - **`validate_scaffold` spelling conflict: resolved by owner ruling U13.** The S-D spelling
-  `<system> --tenant <T> --staged <dir>` stands; the 10 `e2e/test_ee_consumers.py` cases (formerly
+  `<system> --tenant <T> --staged <dir>` stands; the 10 `e2e/test_consumers_e2e.py` cases (formerly
   `--agent-dir`) are re-spelled onto it, naming a set-up tenant under a data root of the
   scaffold's own and keeping `DEFENDER_DIR` for the code tree. Their assertions are unchanged.
 - `launch_publish(spawn=)` is used by `test_publish_child.py` but absent from `_s_b_support.py`'s docstring; the test is authoritative.
@@ -218,7 +218,7 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - Flow 3 run start → `test_run_start.py`, `test_run_copy.py`, `tests/tenancy/test_tenant_settings_location.py`, `e2e/test_tenant_run_start_e2e.py`
 - Flow 4 drain → `test_drains.py`, `test_refused_claims.py`
 - Flow 5 revert → `test_revert_cli.py`
-- Flow 6 connect → `test_connect_propose.py`, `e2e/test_ee_consumers.py`
+- Flow 6 connect → `test_connect_propose.py`, `e2e/test_consumers_e2e.py`
 - Flow 7 branch replay → `test_branch_replay.py`
 - A-ID drain AppRole login → `test_drain_credentials.py`, `test_live_dev_issuer.py`
 - U9 stage layout → `test_run_copy.py`, `test_drains.py`, `test_run_isolation_e2e.py`, `tenant_1108_delivery/test_batches.py`, `tenant_1108_delivery/test_box.py`, `e2e/test_tenant_box_mount.py`
@@ -336,7 +336,7 @@ Repair round r5:
   `e2e/test_exec_seam.py::test_relative_operand_names_the_same_file_at_all_three_sites` (a repo-root-relative operand now names the product
   `skills/gather/SKILL.md`, with the control that its full path IS readable); `learning/curation/test_authoring_contract.py` (the
   placeholder<->param sweep covers the pre-P4 shipped catalog fixture, ≥20 templates, plus every committed `knowledge/*/agent` catalog);
-  `e2e/test_ee_box_boundary.py::test_write_under_defender_dir_fails_erofs_by_errno` (the poisoned write goes under `skills/gather/`, a folder
+  `e2e/test_box_boundary_e2e.py::test_write_under_defender_dir_fails_erofs_by_errno` (the poisoned write goes under `skills/gather/`, a folder
   the product still ships, so the probe meets the ro bind rather than ENOENT; box-only, not run locally).
 - `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_working`
   (class ii): the expected CI `tacit_cli check` step carries `--defender-dir knowledge/tenant-fixture/agent`, the spelling the r4 respell of

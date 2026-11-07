@@ -20,8 +20,25 @@ the tool prints the columns plus the idiom for that shape.
 
 **Its exit codes are its own, not the `query` tool's:** `1` = query error, fix the
 SQL — or a wrong `--rows`/`--names` declaration, fix that; `2` = the payload never
-arrived or is not JSON. A `2` here is *not* the data-source outage
+arrived, is not JSON, or is too big (below). A `2` here is *not* the data-source outage
 `failure-modes.md` sends you to escalate.
+
+## Ceilings
+
+Each of these is yours to fix by asking for less, prints one line, and never leaves a partial
+answer.
+
+- **The payload is at most 64 MiB.** Over it, exit `2` before anything is read: narrow the
+  source query (fewer rows or fields).
+- **The result is at most 32 MiB.** Over it, exit `2` and nothing is printed: aggregate,
+  `LIMIT`, or select fewer columns.
+- **Memory is capped with the box.** A payload that cannot be loaded, or a query that needs
+  too much (a wide `ORDER BY`, a cross join), exits `2` naming memory. If the tool is killed
+  outright (code `-9` or `-11`), the advice is the same. Loading takes several times the
+  payload's size, so a **dense payload** (many short rows of small values) can be refused
+  well below 64 MiB: narrow the source query rather than retrying at that size.
+- **Any command that prints more than 64 MiB in all is stopped** with exit `75` and no
+  output: pipe it through `head`, `grep` or `wc`.
 
 ## The binding each shape needs
 

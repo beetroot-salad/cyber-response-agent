@@ -1357,6 +1357,37 @@ def test_box_output_overflow_ends_the_world_without_retrying_or_replacing_the_bo
     assert ["docker", "stop", "-t", "0", "overflow-oracle"] in calls
 
 
+def test_a_lost_oracle_box_is_replaced_for_the_next_python_call_and_the_world_goes_on(tmp_path):
+    """#1421 O8: the first box's command finds it dead (C5), `BoxLost` takes the existing replacement flow: stopped, a fresh box, no fault."""
+    import sys
+
+    from defender import box as box_mod
+
+    starts: list[str] = []
+    calls: list[list[str]] = []
+    wire = box_mod.encode_response(box_mod.BoxResult(rc=0, out=b"2\n", err=b""))
+
+    def docker(argv, **_kwargs):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, "exited" if argv[1] == "inspect" else "", "")
+
+    def factory():
+        name = f"lost-oracle-{len(starts) + 1}"
+        starts.append(name)
+        first = len(starts) == 1
+        script = ["sh", "-c", "exit 137"] if first else [sys.executable, "-c", f"import os; os.write(1, {wire!r})"]
+        return box_mod.BoxExecutor(
+            name=name, docker=docker,
+            transport=box_mod._DockerTransport(name, box_mod.BoxSpec(), popen=lambda _argv, **kw: subprocess.Popen(script, **kw)))
+
+    est = _estate(tmp_path)
+    model = S.oracle(S.python("print(1)"), S.python("print(2)"), *_forge_submit())
+    registry = S.sandboxed_registry(_episode(tmp_path), "b", est, model, S.passing_verifier(), box=factory)
+    _ask(registry, est, tmp_path)  # the world answers: no OracleUnservable
+    assert starts == ["lost-oracle-1", "lost-oracle-2"], "the lost box was not replaced for the next python call"
+    assert ["docker", "stop", "-t", "0", "lost-oracle-1"] in calls, "the lost box was left running"
+
+
 def test_overflow_cleanup_crossing_deadline_is_settled_before_attempt_can_retry(tmp_path):
     import threading
 

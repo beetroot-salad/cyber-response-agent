@@ -21,8 +21,10 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 from defender.systems import circuit_breaker
 from defender.systems import system_status
 from defender._exception_groups import carried_unless_overridden
+from .box_endings import box_ending_in
 from .run_state import run_state_of
 from . import permission
+from defender import box as box_mod
 from defender import providers
 from defender.records import run_end
 from defender.records import session_store
@@ -616,12 +618,16 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
         # Run-level abort: passes through; the driver stamps the main session likewise.
         stamp(session_store.TRUNCATED_BY_ABORTED)
         raise
-    except (providers.ProviderDown, BaseExceptionGroup) as ended:
-        # The provider stayed down (#1243), bare or inside an exception group: ends the run,
-        # this lead stamped so its session doesn't read as finished. Any other group
-        # propagates as it did.
-        if carried_unless_overridden(
-                ended, providers.ProviderDown, (BudgetKill, circuit_breaker.RunAborted)):
+    except (providers.ProviderDown, box_mod.BoxEnding, BaseExceptionGroup) as ended:
+        # The run's box became unusable or its fence tripped (#1421), or the provider stayed
+        # down (#1243), bare or inside an exception group: ends the run, this lead stamped with
+        # the class so its session doesn't read as finished; the box ending first. Any other
+        # group propagates as it did.
+        ending = box_ending_in(ended)
+        if ending is not None:
+            stamp(ending.exit_class)
+        elif carried_unless_overridden(ended, providers.ProviderDown,
+                                       (BudgetKill, circuit_breaker.RunAborted, box_mod.BoxEnding)):
             stamp(session_store.TRUNCATED_BY_PROVIDER_DOWN)
         raise
     except run_end.CallRecordWriteFailed as failed:

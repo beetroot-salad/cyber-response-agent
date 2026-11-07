@@ -10,6 +10,8 @@ from pathlib import Path
 from defender import providers
 from defender.records import RunPaths
 
+from ._spec import BoxSpec
+
 #: Variables that may carry knowledge-delivery login material (an OpenBao/Vault token, an
 #: AppRole `role_id`/`secret_id`, a forge token): no host child is ever handed one (#1108 P4 O8,
 #: P-4: login material is file-only and reaches a delivery process only by its config file). A
@@ -56,8 +58,10 @@ def run_env(
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
     # Prepended: host subprocesses also need the operator's own PYTHONPATH entries.
     env["PYTHONPATH"] = _prepend(str(defender_dir.parent), env.get("PYTHONPATH"))
-    # A host lane never carries the in-box mark, even if the operator's shell set it.
+    # A host lane never carries the in-box mark, even if the operator's shell set it, nor a box's
+    # memory cap: it has none (#1421).
     env.pop("DEFENDER_BOX", None)
+    env.pop(BoxSpec.MEMORY_ENV, None)
     return env
 
 

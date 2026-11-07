@@ -160,7 +160,7 @@ jobs:
           uv run pytest tests/ -v -m "not live and not gate"
           -n auto --dist loadfile --durations=25
           --shard ${{ matrix.shard }}/3
-          --ignore tests/e2e/test_ee_box_boundary.py
+          --ignore tests/e2e/test_box_boundary_e2e.py
 
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
   # carry inline. It moved out here for wall clock alone: 27 tests that each start a real
@@ -207,7 +207,7 @@ jobs:
           DEFENDER_BUDGET_ENFORCE: "1"
         # No -n: 27 container starts contend on one docker daemon, and xdist would buy
         # nothing but flakier teardown.
-        run: uv run pytest tests/e2e/test_ee_box_boundary.py -v -rs
+        run: uv run pytest tests/e2e/test_box_boundary_e2e.py -v -rs
 
       - name: Verify the model view and run clock under gVisor
         working-directory: defender
@@ -278,7 +278,7 @@ jobs:
           pip install --quiet uv
           cd /repo/defender
           uv sync --extra dev --extra runtime --locked
-          uv run pytest tests/e2e/test_ee_box_boundary.py -v -rs
+          uv run pytest tests/e2e/test_box_boundary_e2e.py -v -rs
           INNER
           # -v "$PWD:/repo": the mount destination MUST differ from the source, or the bind is
           # a pass-through, the translation is the identity again, and this job would assert

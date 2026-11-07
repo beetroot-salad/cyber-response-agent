@@ -148,7 +148,7 @@ claims:
   - id: C4
     kind: behavior
     claim: An oversized response under runc is refused and the container is stopped.
-    probe: tests/e2e/test_box_output.py::test_live_box_printing_past_limit_is_refused_and_stopped[runc], executed in the focused locked pytest run.
+    probe: tests/e2e/test_box_output.py::test_live_box_output_past_the_budget_is_a_result_and_past_the_helper_is_a_fence_trip[runc], executed in the focused locked pytest run.
     probe_kind: executed
     observed: Passed, including an under-limit command and stopped-container inspection.
     verdict: holds

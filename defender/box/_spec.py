@@ -6,17 +6,19 @@ discriminates on the docker one, and the protocol they implement is declared her
 """
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Literal, Protocol, runtime_checkable
+from typing import ClassVar, Literal, NoReturn, Protocol, runtime_checkable
 
 from defender._model import model
 from defender.execution import bash_exec
 from defender.execution.box_codec import (
+    KILLED_LINE,
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_exec_seam.py imports it as `box.REQUEST_MAGIC`
     RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_exec_seam.py imports it as `box.RESPONSE_MAGIC`
     BoxFault,
@@ -27,7 +29,10 @@ from defender.execution.box_codec import (
     encode_request,
     encode_response,
 )
+from defender.records.run_end import TRUNCATED_BY_BOX_LOST, TRUNCATED_BY_BOX_OUTPUT_LIMIT
 from ._clock import write_clock
+from ._docker import _inspect_field
+from ._ending import BoxEnding, BoxLost
 from ._output import BoxOutputLimitExceeded, capture_bounded
 from defender._model_view import ModelView
 from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.py/tests import `box.scrub`, `box.RunTainted`
@@ -37,6 +42,17 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
     verdict_path,
     write_did_not_run,
 )
+
+
+_logger = logging.getLogger(__name__)
+
+#: `docker exec`'s own code when the process it ran (the in-box helper) was killed (C4, C5).
+_EXEC_KILLED = 137
+#: The in-box helper's own code for a command that passed its deadline.
+_HELPER_DEADLINE = 3
+#: The code a command's result carries when the helper itself was killed (rule 2): a kill, as a
+#: stage's own kill reads.
+_KILLED_RC = -9
 
 
 # This module is host-only (it pulls in pydantic); nothing inside a box imports it. An unset
@@ -56,6 +72,10 @@ class BoxSpec:
     pids_limit: int = 256
 
     ENV_VAR: ClassVar[str] = "DEFENDER_BOX_RUNTIME"
+    #: The box environment's copy of `memory` (#1421 P5), as written: the in-box SQL tool limits
+    #: its own address space to a share of it. Set by both `docker run` builders; never on a host
+    #: lane, which has no cap.
+    MEMORY_ENV: ClassVar[str] = "DEFENDER_BOX_MEMORY"
     RUNTIMES: ClassVar[tuple[str, ...]] = ("runsc", "runc")
 
     @classmethod
@@ -174,7 +194,10 @@ class BoxExecutor:
         default=None, compare=False, repr=False,
     )
 
-    _output_refused: bool = field(default=False, compare=False, repr=False)
+    #: The exit class of the ending that refuses every later command in this box (#1421), or
+    #: `None`. The fence's refusal is permanent; a lost box's is lifted only by `readmit`, when a
+    #: lane's next window has proven its box started.
+    _refusing: str | None = field(default=None, compare=False, repr=False)
 
     #: The run box's attached `docker start -a -i` (#1343 B10), held here for the run's life: its
     #: input pipe is the box's main process's input, so the box ends when the process holding the
@@ -195,6 +218,12 @@ class BoxExecutor:
         preload to feed."""
         self._clock_reading = reading
 
+    def readmit(self) -> None:
+        """A lane window started this box again and proved it running: a loss found in an
+        earlier window no longer refuses its commands. The fence's refusal stays."""
+        if self._refusing == TRUNCATED_BY_BOX_LOST:
+            self._refusing = None
+
     def _sync_clock(self) -> None:
         if self.clock_file is None or self._clock_reading is None:
             return
@@ -212,26 +241,30 @@ class BoxExecutor:
         self, pipelines: Sequence[bash_exec.Pipeline], *,
         command: str, cwd: Path, timeout: float,
     ) -> BoxResult:
-        if self._output_refused:
-            raise BoxOutputLimitExceeded()
+        self._refuse()
         self._sync_clock()
         frame = encode_request(pipelines)
+        if self.sandboxed:
+            return self._exchange_boxed(frame, command=command, cwd=cwd, timeout=timeout)
+        return self._exchange_unboxed(frame, command=command, cwd=cwd, timeout=timeout)
+
+    run = run_parsed
+
+    def _refuse(self) -> None:
+        """Every command after an ending gets that ending again, with no new exchange."""
+        if self._refusing == TRUNCATED_BY_BOX_OUTPUT_LIMIT:
+            raise BoxOutputLimitExceeded()
+        if self._refusing == TRUNCATED_BY_BOX_LOST:
+            raise BoxLost(f"the box {self.name} was found unusable; it runs no further command")
+
+    def _exchange_unboxed(self, frame: bytes, *, command: str, cwd: Path, timeout: float) -> BoxResult:
+        """An unsandboxed transport (the host fallback, a test's): outside #1421's rules, its
+        faults stay plain `BoxFault`s and no daemon is asked anything."""
         try:
             raw = self.transport(frame, cwd=cwd, timeout=timeout)
         except BoxOutputLimitExceeded as overflow:
-            self._output_refused = True
-            # The lifecycle owns the daemon and proof that every box process has stopped.
-            from ._lifecycle import BoxRuns
-
-            try:
-                BoxRuns(self).stop()
-            except Exception as cleanup:
-                overflow.add_note(f"could not confirm the box stopped: {cleanup}")
-                raise overflow from cleanup
-            raise
-        except BoxFault:
-            raise
-        except subprocess.TimeoutExpired:
+            self._end(overflow, command)
+        except (BoxFault, subprocess.TimeoutExpired):
             raise
         except Exception as e:
             raise BoxFault(f"the box was unreachable while running {command!r}: {e}") from e
@@ -240,7 +273,78 @@ class BoxExecutor:
         except BoxFault as e:
             raise BoxFault(f"{e}: {_text(raw.stderr).strip()}") from None
 
-    run = run_parsed
+    def _exchange_boxed(self, frame: bytes, *, command: str, cwd: Path, timeout: float) -> BoxResult:
+        """One exchange with a sandboxed box. A clean frame is the command's result, whatever
+        its code; anything else asks the box's status once and is classified by `_unframed`."""
+        raw: RawExec | None = None
+        failure: Exception | None = None
+        try:
+            raw = self.transport(frame, cwd=cwd, timeout=timeout)
+        except BoxOutputLimitExceeded as overflow:
+            self._end(overflow, command)
+        except Exception as e:  # noqa: BLE001 — every exchange without a frame is classified below
+            failure = e
+        if raw is not None:
+            try:
+                return decode_response(raw.stdout)
+            except BoxFault as e:
+                failure = e
+        return self._unframed(raw, failure, command=command, timeout=timeout)
+
+    def _unframed(
+        self, raw: RawExec | None, failure: Exception | None, *, command: str, timeout: float,
+    ) -> BoxResult:
+        """#1421's executor rule for an exchange with no clean frame, on the box's one answer:
+        1. not `running`, no answer, or a fault asking: the box is lost;
+        2. `running` and exec 137: the helper was killed, the box lives: a result with the kill
+           line (a result, so the row is recorded);
+        3. `running` and a host timeout or the helper's own deadline (exec 3): a timeout;
+        4. `running` and anything else: the box is lost, worded as unusable."""
+        status = self._status()
+        if status != "running":
+            self._end(BoxLost(
+                f"the box {self.name} is not running (its status: {status or 'no answer'}); "
+                "it can run no command"), command, cause=failure)
+        if raw is not None and raw.rc == _EXEC_KILLED:
+            return BoxResult(rc=_KILLED_RC, out=b"", err=KILLED_LINE)
+        if isinstance(failure, subprocess.TimeoutExpired):
+            raise failure
+        if raw is not None and raw.rc == _HELPER_DEADLINE:
+            raise subprocess.TimeoutExpired(command, timeout)
+        said = f"exec rc {raw.rc}, no frame" if raw is not None else f"{type(failure).__name__}"
+        self._end(BoxLost(
+            f"the box {self.name} is running but did not answer a command as its helper does "
+            f"({said}); it is unusable"), command, cause=failure)
+        raise AssertionError("unreachable")  # pragma: no cover — `_end` always raises
+
+    def _status(self) -> str | None:
+        """The box's status, asked once; `None` for no answer or a fault asking."""
+        if self.docker is None:
+            return None
+        try:
+            return _inspect_field(self.docker, self.name, "{{.State.Status}}")
+        except BoxFault:
+            return None
+
+    def _end(self, ending: BoxEnding, command: str, *, cause: BaseException | None = None) -> NoReturn:
+        """Refuse every later command with `ending`'s class, stop the box, and raise `ending`.
+        The ending keeps its identity when the stop cannot be proven, with a note saying so. The
+        log names the command; the records carry only the class."""
+        self._refusing = ending.exit_class
+        _logger.error(f"the box {self.name} ended the run ({ending.exit_class}) while running "
+                      f"{command!r}")
+        # The lifecycle owns the daemon and proof that every box process has stopped.
+        from ._lifecycle import BoxRuns
+
+        try:
+            BoxRuns(self).stop()
+        except Exception as cleanup:
+            ending.add_note(f"could not confirm the box stopped: {cleanup}")
+            raise ending from cleanup
+        if cause is not None:
+            raise ending from cause
+        raise ending
+
 
 
 # `@runtime_checkable` because pydantic validates the strict `AgentDeps.box` field with
@@ -331,8 +435,4 @@ class _HostTransport:
         rc, out, err = bash_exec.run_parsed(
             pipelines, command="", env=self.env, cwd=cwd, timeout=timeout,
         )
-        return RawExec(rc=rc, stdout=encode_response(BoxResult(
-            rc=rc,
-            out=out.encode("utf-8", "replace"),
-            err=err.encode("utf-8", "replace"),
-        )), stderr=b"")
+        return RawExec(rc=rc, stdout=encode_response(BoxResult(rc=rc, out=out, err=err)), stderr=b"")

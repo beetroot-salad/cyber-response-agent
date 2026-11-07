@@ -283,6 +283,7 @@ RESIDUE = {
     ("investigation.sql_engine.sql", "_inferred_load", "builtins.open"): (1, "model_tools"),
     ("investigation.sql_engine.sql", "_load_rows", "builtins.open"): (1, "model_tools"),
     ("investigation.sql_engine.sql", "_run", "shutil.rmtree"): (1, "nonrecord", ('scratch',)),
+    ("investigation.sql_engine.sql", "_answer_query", "shutil.rmtree"): (1, "nonrecord", ('scratch',)),
     ("tenancy.tenant_settings", "read_regular_bytes", "getattr(os)"): (1, "nonrecord", ('os',)),
     ("tenancy.tenant_settings", "read_regular_bytes", "os.open"): (1, "nonrecord", ('path',)),
     ("investigation.tools._files", "_write_operand", "hold"): (1, "model_tools", ('root',)),

@@ -219,6 +219,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
                  **CLOCK_ENV, **BOX_MARK_ENV}
     if any(m.target == MODEL_AGENT for m in lane):
         env_pairs["DEFENDER_AGENT_DIR"] = str(MODEL_AGENT)
+    env_pairs.update(_cap_env(spec))
     _input_dir_source(run_dir)
     argv = [
         "docker", "create", "-i", "--rm", "--name", name,
@@ -678,6 +679,13 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
                           spec, docker, staged_token, running_wait)
 
 
+def _cap_env(spec: BoxSpec) -> dict[str, str]:
+    """The box's memory cap, handed to the box as `BoxSpec.memory` spells it (#1421 P5): the
+    in-box SQL tool limits its own address space to a share of it. One owner of the figure, so
+    no per-runtime detection; both `docker run` builders take it through the allowlist."""
+    return {BoxSpec.MEMORY_ENV: spec.memory}
+
+
 def _render_argv(
     request: BoxRequest, mounts: Sequence[tuple[Path, Path]] = (),
     start_token: str = "",
@@ -701,7 +709,9 @@ def _render_argv(
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={request.spec.tmpfs_size}",
         "--workdir", str(request.model_workdir),
     ]
-    env = _render_env(request.env, request.model_workdir, defender_dir=request.model_code_dir)
+    # The cap is the spec's, never the request's: a request env naming one is overridden.
+    env = _render_env({**request.env, **_cap_env(request.spec)}, request.model_workdir,
+                      defender_dir=request.model_code_dir)
     for key in sorted(env):
         argv += ["--env", f"{key}={env[key]}"]
     # Resolved here, never at BoxRequest construction.
@@ -825,8 +835,10 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
     env["PYTHONPATH"] = (
         f"{defender_dir.parent}{os.pathsep}{inherited}" if inherited else str(defender_dir.parent)
     )
-    # A host lane never carries the in-box mark.
+    # A host lane never carries the in-box mark, nor a box's cap: it has none (#1421), so the SQL
+    # tool there sets its limit at the engine's own figure.
     env.pop("DEFENDER_BOX", None)
+    env.pop(BoxSpec.MEMORY_ENV, None)
     return env
 
 
@@ -1034,6 +1046,11 @@ class BoxRuns:
                     f"could not start the box {name} (start rc={proc.returncode}: "
                     f"{(proc.stderr or '').strip()}; status {status!r})"
                 )
+            # A proven start: a loss found in an earlier window no longer refuses this one's
+            # commands (#1421 decision 4). The fence's refusal is never lifted.
+            readmit = getattr(self._box, "readmit", None)
+            if callable(readmit):
+                readmit()
         except BaseException:
             # Best-effort, before the refusal unwinds through host steps.
             with contextlib.suppress(BoxFault):
@@ -1072,11 +1089,13 @@ def stop_and_scrub(
     in_flight: bool,
     read_verdict: Callable[[], str | None] | None = None,
     write_verdict: Callable[[dict], None] | None = None,
-) -> None:
-    """Reap a boxed run: tear the box down, then walk the tree it could write.
+) -> bool:
+    """Reap a boxed run: tear the box down, then walk the tree it could write. Returns whether
+    the box is down, so a caller ending its run by name (#1421) learns of a teardown fault it
+    asked to have logged rather than raised.
 
-    Call it from a `finally`, with `in_flight` saying whether an exception is already
-    propagating.
+    Call it from a `finally`, with `in_flight` saying whether an exception (or a run ending
+    that a teardown fault must not replace) is already propagating.
 
     - The scrub runs only once the box is provably dead; after a teardown fault it is skipped
       rather than raced against a live writer.
@@ -1111,6 +1130,7 @@ def stop_and_scrub(
             _logger.info(
                 f"swept {len(swept)} orphaned staged file(s) under {tree}",
             )
+    return box_down
 
 
 def unboxed_executor(

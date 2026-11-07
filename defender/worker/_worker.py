@@ -111,6 +111,10 @@ def _ending_from(end: job_lane.JobEnd | None, returncode: int,
         why = "the host committed no report"
     else:
         why = "the scrub did not verify the run folder after the box stopped"
+    if end.cut_short is not None:
+        # A vocabulary word, never a child's text (`JobEnd.parse` refuses anything else): the
+        # class the run ended by, beside the existing words (#1421). The run log names the rest.
+        why = f"{why}; the run was cut short ({end.cut_short})"
     return Ending(_FAILED, failure_reason=_NO_REPORT, failure_message=why)
 
 

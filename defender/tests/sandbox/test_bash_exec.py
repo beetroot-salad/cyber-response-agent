@@ -15,10 +15,16 @@ def _env(**extra: str) -> dict[str, str]:
     return env
 
 
-def _run(cmd: str, *, env=None, cwd="/", timeout: float = 10.0):
+def _run_raw(cmd: str, *, env=None, cwd="/", timeout: float = 10.0) -> tuple[int, bytes, bytes]:
+    """The helper's own bytes (#1421: it works in raw bytes, nothing decoded or re-encoded)."""
     return bash_exec.run_parsed(
         bash_exec.parse(cmd), command=cmd, env=env or _env(), cwd=cwd, timeout=timeout,
     )
+
+
+def _run(cmd: str, *, env=None, cwd="/", timeout: float = 10.0):
+    rc, out, err = _run_raw(cmd, env=env, cwd=cwd, timeout=timeout)
+    return rc, out.decode("utf-8"), err.decode("utf-8")
 
 
 def test_single_command():
@@ -153,9 +159,7 @@ def test_non_utf8_output_does_not_crash():
     emit = f"{sys.executable} -c " + shlex.quote(
         "import sys; sys.stdout.buffer.write(b'\\xff\\xfe')"
     )
-    rc, out, err = _run(emit)
-    assert rc == 0
-    assert "�" in out
+    assert _run_raw(emit) == (0, b"\xff\xfe", b"")
 
 
 @pytest.mark.parametrize("cmd", [
@@ -202,4 +206,328 @@ def test_unexpected_redirect_fails_closed(tmp_path):
 
 
 def test_run_parsed_empty_is_noop():
-    assert bash_exec.run_parsed([], command="", env=_env(), cwd="/", timeout=10.0) == (0, "", "")
+    assert bash_exec.run_parsed([], command="", env=_env(), cwd="/", timeout=10.0) == (0, b"", b"")
+
+
+# ---- #1421: one output budget, kills named, start failures framed, raw bytes ----------------
+
+import errno  # noqa: E402
+import random  # noqa: E402
+import resource  # noqa: E402
+import shlex  # noqa: E402
+import signal  # noqa: E402
+import sys  # noqa: E402
+import time  # noqa: E402
+
+from defender import box as box_mod  # noqa: E402
+from defender.execution import box_codec  # noqa: E402
+from defender.tests.support.shared.contracts._by_path import DEFENDER  # noqa: E402
+
+OVER_BUDGET_RC = 75
+HEADER = len(box_codec.encode_response(box_codec.BoxResult(rc=0, out=b"", err=b"")))
+#: What one command may print in all: the host fence's limit less the frame's own header.
+BUDGET = box_mod.BOX_OUTPUT_LIMIT - HEADER
+
+
+def _py(source: str) -> str:
+    return f"{shlex.quote(sys.executable)} -c {shlex.quote(source)}"
+
+
+def _write(fd: int, size: int, byte: str = "x") -> str:
+    whole, rest = divmod(size, 1 << 20)
+    return _py(f"import os; [os.write({fd}, b'{byte}' * (1 << 20)) for _ in range({whole})]; "
+               f"os.write({fd}, b'{byte}' * {rest})" if rest else
+               f"import os; [os.write({fd}, b'{byte}' * (1 << 20)) for _ in range({whole})]")
+
+
+def _entrypoint(cmd: str, *, cwd=None, preexec=None, timeout: int = 60) -> tuple[int, box_codec.BoxResult | None, bytes]:
+    """The in-box process as `docker exec` runs it: a request frame in, a response frame out.
+    Returns the process's own exit status, the decoded frame (None if it is no frame), stderr."""
+    env = _env(DEFENDER_BOX_TIMEOUT=str(timeout), PYTHONPATH=str(DEFENDER.parent))
+    proc = subprocess.run(
+        [sys.executable, "-P", "-m", "defender.execution.bash_exec"],
+        input=box_codec.encode_request(bash_exec.parse(cmd)), capture_output=True, env=env,
+        cwd=cwd, preexec_fn=preexec, timeout=timeout + 30)
+    try:
+        frame = box_codec.decode_response(proc.stdout)
+    except box_codec.BoxFault:
+        frame = None
+    return proc.returncode, frame, proc.stderr
+
+
+def _one_line(err: bytes) -> bytes:
+    lines = [ln for ln in err.splitlines() if ln.strip()]
+    assert len(lines) == 1, err[:400]
+    assert len(err.strip()) <= 160, f"P1: the digest keeps 160 characters: {err!r}"
+    return err
+
+
+def test_the_budget_is_the_fences_limit_less_the_frames_header_and_lives_beside_the_codec():
+    """One figure for both trust levels; the codec owns it and `box` re-exports it. (O5, P4)"""
+    assert box_codec.BOX_OUTPUT_LIMIT == box_mod.BOX_OUTPUT_LIMIT == 64 << 20
+
+
+@pytest.mark.parametrize("over", [0, 1], ids=["exactly-at-budget", "one-byte-over"])
+@pytest.mark.parametrize("shape", ["stdout", "both-streams", "cd-error"])
+def test_o5_a_command_at_the_budget_passes_and_one_byte_more_is_stopped_with_exit_75(shape, over, tmp_path):
+    """Everything entering the frame is charged, `cd` errors included; the frame at the budget
+    cannot trip the host fence, which is the same figure. (O5, P4)"""
+    target = "d" * 200
+    cd_error = len(_run_raw(f"cd {target}", cwd=tmp_path)[2])
+    total = BUDGET + over
+    cmd, expected_rc = {
+        "stdout": (_write(1, total), 0),
+        "both-streams": (f"{_write(1, total // 2)} ; {_write(2, total - total // 2)}", 0),
+        "cd-error": (f"{_write(1, total - cd_error)} ; cd {target}", 1),
+    }[shape]
+    status, frame, _ = _entrypoint(cmd, cwd=tmp_path)
+    assert status == 0
+    assert frame is not None
+    if over == 0:
+        assert frame.rc == expected_rc
+        assert len(frame.out) + len(frame.err) == BUDGET
+        assert len(box_codec.encode_response(frame)) == box_mod.BOX_OUTPUT_LIMIT
+    else:
+        assert frame.rc == OVER_BUDGET_RC
+        assert frame.out == b""
+        _one_line(frame.err)
+
+
+def test_o5_stderr_counts_against_the_budget_and_never_fills_the_scratch_disk(tmp_path):
+    """Stderr rides a pipe read in the same loop, so a file limit that would have stopped a temp
+    file (the box's /tmp is 64 MiB) does not stop it. (O5)"""
+    def small_files():
+        resource.setrlimit(resource.RLIMIT_FSIZE, (1 << 20, 1 << 20))
+        signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+
+    status, frame, _ = _entrypoint(_write(2, 4 << 20), cwd=tmp_path, preexec=small_files)
+    assert frame is not None
+    assert (frame.rc, len(frame.err)) == (0, 4 << 20)
+
+
+def test_o5_the_first_pipeline_that_breaks_the_budget_stops_the_command_and_drops_what_it_held(tmp_path):
+    """Earlier output goes too; the later pipeline never runs; the reason is not the kill line. (O5, O6)"""
+    cmd = f"echo earlier ; {_write(2, BUDGET // 2 + 1)} | cat ; {_write(2, BUDGET // 2 + 1)} ; touch later"
+    status, frame, _ = _entrypoint(cmd, cwd=tmp_path)
+    assert frame is not None
+    assert (frame.rc, frame.out) == (OVER_BUDGET_RC, b"")
+    assert b"earlier" not in frame.err
+    assert not (tmp_path / "later").exists()
+    kill = _entrypoint(f"{_py('import os; os.kill(os.getpid(), 9)')} ; touch later2", cwd=tmp_path)[1]
+    assert kill is not None
+    assert _one_line(kill.err) != _one_line(frame.err), "the helper's own stop read as a kill"
+
+
+KILLS = (signal.SIGKILL, signal.SIGSEGV, signal.SIGABRT, signal.SIGBUS)
+
+
+def _dies(sig: int) -> str:
+    return f"sh -c {shlex.quote(f'echo partial-out; echo errmarker >&2; kill -{int(sig)} $$')}"
+
+
+@pytest.mark.parametrize("last", ["cat", "head -c 3", "wc -c"], ids=["cat", "head", "wc"])
+@pytest.mark.parametrize("sig", KILLS, ids=[s.name for s in KILLS])
+def test_o6_a_stage_dying_on_a_kill_or_crash_gives_its_signal_one_fixed_line_and_nothing_else(sig, last, tmp_path):
+    """Upstream of a last stage that exits 0 included; stdout, stderr and the pipelines before
+    it are dropped; no pipeline after it runs. (O6)"""
+    cmd = f"echo earlier ; {_dies(sig)} | {last} ; touch later"
+    status, frame, _ = _entrypoint(cmd, cwd=tmp_path)
+    assert frame is not None
+    assert frame.rc == -int(sig)
+    assert frame.out == b""
+    line = _one_line(frame.err).decode()
+    assert "memory" in line.lower(), line
+    assert "errmarker" not in line
+    assert "earlier" not in line
+    assert not (tmp_path / "later").exists()
+
+
+def test_o6_every_kill_gets_the_same_line_whatever_the_signal_or_the_command(tmp_path):
+    """The digest is the pitfall's merge key and already carries the exit code: no variable parts. (O6, P1)"""
+    frames = [_entrypoint(f"{_dies(sig)} | cat", cwd=tmp_path)[1] for sig in KILLS]
+    frames.append(_entrypoint(f"echo other ; {_dies(signal.SIGKILL)}", cwd=tmp_path)[1])
+    assert all(f is not None and f.out == b"" for f in frames), frames
+    lines = {f.err for f in frames}
+    assert len(lines) == 1, lines
+    line = next(iter(lines)).decode()
+    assert "memory" in line.lower(), line
+    assert "exit=" not in line
+
+
+def test_o6_control_sigpipe_upstream_of_head_is_the_normal_case_and_keeps_everything(tmp_path):
+    """-13 is not a kill: the output stays, the exit is the last stage's, the next pipeline runs. (O6)"""
+    status, frame, _ = _entrypoint("yes | head -n 1 ; touch later", cwd=tmp_path)
+    assert frame is not None
+    assert (frame.rc, frame.out) == (0, b"y\n")
+    assert (tmp_path / "later").exists()
+
+
+def test_o6_control_a_stage_dying_on_sigterm_is_not_a_kill(tmp_path):
+    """-15 is outside the kill set: output and code stay as the command made them, upstream or last. (O6)"""
+    stage = f"sh -c {shlex.quote('echo kept; echo e >&2; kill -15 $$')}"
+    upstream = _entrypoint(f"{stage} | cat ; touch later", cwd=tmp_path)[1]
+    assert upstream is not None
+    assert (upstream.rc, upstream.out, upstream.err) == (0, b"kept\n", b"e\n")
+    assert (tmp_path / "later").exists()
+    last = _entrypoint(stage, cwd=tmp_path)[1]
+    assert last is not None
+    assert (last.rc, last.out, last.err) == (-int(signal.SIGTERM), b"kept\n", b"e\n")
+
+
+def test_o6_control_a_stage_exiting_137_on_its_own_is_not_a_kill(tmp_path):
+    """Only a signal death is a kill; an exit code of 137 keeps its output and code. (O6)"""
+    status, frame, _ = _entrypoint("sh -c 'echo kept; echo e >&2; exit 137'", cwd=tmp_path)
+    assert frame is not None
+    assert (frame.rc, frame.out, frame.err) == (137, b"kept\n", b"e\n")
+
+
+def test_o5_the_frame_carries_every_byte_value_on_both_streams_unchanged(tmp_path):
+    """All 256 byte values in a shuffled order come back byte for byte on stdout and stderr; the frame never re-encodes text. (O5)"""
+    order = list(range(256))
+    random.Random(1421).shuffle(order)
+    shuffled = bytes(order)
+    cmd = _py(f"import os; b = bytes.fromhex({shuffled.hex()!r}); os.write(1, b); os.write(2, b[::-1])")
+    status, frame, _ = _entrypoint(cmd, cwd=tmp_path)
+    assert status == 0
+    assert frame is not None
+    assert (frame.rc, frame.out, frame.err) == (0, shuffled, shuffled[::-1])
+
+
+def test_o5_the_stderr_of_every_stage_shares_one_pipe_in_the_order_it_was_written(tmp_path):
+    """Interleaving across stages is kept when stderr leaves the temp file: one stage writes before and
+    after the other, so a buffer per stage, joined in stage order, would read 132. (O5)"""
+    def stage(*steps: str) -> str:
+        """Each step is ("say", text), ("mark", name) or ("wait", name), run in order by one process."""
+        where = str(tmp_path)
+        code = {"say": "sys.stderr.write({a!r}); sys.stderr.flush()",
+                "mark": "open(os.path.join({w!r}, {a!r}), 'w').close()",
+                "wait": "any(os.path.exists(os.path.join({w!r}, {a!r})) or time.sleep(0.01) for _ in range(2000))"}
+        body = "; ".join(code[kind].format(a=arg, w=where) for kind, arg in (step.split(":") for step in steps))
+        return _py(f"import os, sys, time; {body}")
+
+    first = stage("say:1", "mark:one", "wait:two", "say:3")
+    second = stage("wait:one", "say:2", "mark:two")
+    rc, out, err = _run_raw(f"{first} | {second}")
+    assert err == b"123", err
+
+
+#: What the producer test below may hold in memory: the helper's own buffering past this is the fault it
+#: exposes, as a MemoryError here instead of gigabytes on a shared machine.
+PRODUCER_TEST_ADDRESS_SPACE = 1 << 30
+
+
+def test_o5_a_producer_that_never_stops_is_stopped_at_the_budget_not_the_deadline(tmp_path):
+    """`yes` has no end: the helper's own budget ends it, well inside its deadline, and nothing after it runs.
+    The helper runs under an address-space limit, so a helper that buffers without a cap fails fast here. (O5)"""
+    def limited():
+        resource.setrlimit(resource.RLIMIT_AS, (PRODUCER_TEST_ADDRESS_SPACE, PRODUCER_TEST_ADDRESS_SPACE))
+
+    started = time.monotonic()
+    status, frame, err = _entrypoint("yes ; touch later", cwd=tmp_path, preexec=limited, timeout=30)
+    elapsed = time.monotonic() - started
+    assert frame is not None, f"no frame (the helper died or ran to its deadline): {err[-300:]!r}"
+    assert (frame.rc, frame.out) == (OVER_BUDGET_RC, b"")
+    assert elapsed < 20, elapsed
+    assert not (tmp_path / "later").exists()
+
+
+def test_a_forked_daemon_holding_stderr_does_not_hold_the_command(tmp_path):
+    """The shared pipe stays open in the daemon; the command ends when stdout is done and every stage exited. (O5)"""
+    daemon = _py("import subprocess, sys; subprocess.Popen(['sleep', '12'], stdout=subprocess.DEVNULL, "
+                 "stderr=sys.stderr); print('ok')")
+    started = time.monotonic()
+    rc, out, err = _run_raw(daemon, timeout=40)
+    assert (rc, out) == (0, b"ok\n")
+    assert time.monotonic() - started < 8, "the helper waited for the daemon's copy of the pipe"
+
+
+@pytest.mark.parametrize(("kind", "code"), [
+    ("E2BIG", errno.E2BIG), ("ENOTDIR", errno.ENOTDIR), ("ENOEXEC", errno.ENOEXEC),
+])
+def test_a_stage_that_cannot_start_for_any_other_reason_is_rc_126_with_the_systems_text(kind, code, tmp_path):
+    """Keyed on errno; the text is the system's, like the permission branch. (O6)"""
+    garbage = tmp_path / "garbage"
+    garbage.write_bytes(b"\x01\x02not a program\x00")
+    garbage.chmod(0o755)
+    program = {"E2BIG": f"cat {'a' * 200_000}", "ENOTDIR": "/etc/hostname/not-a-dir",
+               "ENOEXEC": str(garbage)}[kind]
+    rc, out, err = _run_raw(program, cwd=tmp_path)
+    assert (rc, out) == (126, b""), (rc, err[:200])
+    assert os.strerror(code).encode() in err
+
+
+def test_a_stage_that_cannot_start_for_want_of_a_process_names_the_process_cap(tmp_path):
+    """EAGAIN from a real per-user process limit: rc 126 and one fixed line naming the cap. (O6)"""
+    def capped():
+        if os.geteuid() == 0:
+            os.setgid(65534)
+            os.setuid(65534)
+        resource.setrlimit(resource.RLIMIT_NPROC, (1, 1))
+
+    probe = subprocess.run(["true"], preexec_fn=capped, capture_output=True)
+    if probe.returncode != 0 and os.geteuid() == 0:
+        pytest.skip("cannot run as the unprivileged user here")
+    status, frame, err = _entrypoint("echo hi", cwd=tmp_path, preexec=capped)
+    assert frame is not None, err[-400:]
+    assert (frame.rc, frame.out) == (126, b"")
+    line = _one_line(frame.err).decode().lower()
+    assert "process" in line, line
+
+
+_REFUSES_ONE_START = """\
+import os, subprocess, sys
+
+real, seen = subprocess.Popen, []
+
+def refuse(*args, **kwargs):
+    seen.append(args)
+    if len(seen) - 1 == int(os.environ["REFUSE_AT"]):
+        raise OSError(int(os.environ["REFUSE_ERRNO"]), "refused")
+    return real(*args, **kwargs)
+
+subprocess.Popen = refuse
+from defender.execution import bash_exec
+sys.exit(bash_exec._run_box_entrypoint())
+"""
+
+#: Two pipelines of three and four stages: seven starts, each a place the system can refuse one.
+_SEVEN_STAGES = "echo a | cat | cat ; echo b | cat | cat | cat"
+
+
+@pytest.mark.parametrize("code", [errno.EAGAIN, errno.ENOMEM], ids=["EAGAIN", "ENOMEM"])
+@pytest.mark.parametrize("at", range(7))
+def test_a_stage_that_cannot_start_for_want_of_a_process_or_memory_names_the_process_cap_at_any_stage(tmp_path, at, code):
+    """Whichever of the seven starts is refused (injected in a wrapper process, as no real fault reaches it): rc 126,
+    nothing on stdout, one line naming the cap. (O6)"""
+    proc = subprocess.run(
+        [sys.executable, "-P", "-c", _REFUSES_ONE_START], input=box_codec.encode_request(bash_exec.parse(_SEVEN_STAGES)),
+        capture_output=True, cwd=tmp_path, timeout=60,
+        env=_env(DEFENDER_BOX_TIMEOUT="30", PYTHONPATH=str(DEFENDER.parent), REFUSE_AT=str(at), REFUSE_ERRNO=str(code)))
+    try:
+        frame = box_codec.decode_response(proc.stdout)
+    except box_codec.BoxFault:
+        frame = None
+    assert frame is not None, (proc.returncode, proc.stdout[:100], proc.stderr[-300:])
+    assert frame.rc == 126, (frame.rc, frame.err)
+    assert frame.out == b""
+    assert frame.err == box_codec.PROCESS_CAP_LINE
+
+
+def test_an_unplanned_failure_in_the_helper_still_returns_a_frame(tmp_path):
+    """A working directory that vanished under the command: a frame, not a traceback and no frame at all. (O6)"""
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    status, frame, err = _entrypoint("echo hi", cwd=gone, preexec=lambda: os.rmdir(gone))
+    assert frame is not None, err[-400:]
+    assert frame.rc != 0
+    assert frame.out == b""
+    _one_line(frame.err)
+    assert b"Traceback" not in frame.err
+
+
+def test_cd_errors_are_returned_as_bytes_and_charged_like_everything_else(tmp_path):
+    """`run_parsed` returns bytes for every part, the `cd` error included. (O5)"""
+    rc, out, err = _run_raw("cd nowhere-at-all", cwd=tmp_path)
+    assert (rc, out) == (1, b"")
+    assert isinstance(err, bytes)
+    assert b"nowhere-at-all" in err

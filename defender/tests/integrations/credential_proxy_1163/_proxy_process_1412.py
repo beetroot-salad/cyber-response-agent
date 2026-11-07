@@ -11,6 +11,7 @@ from typing import Any
 import uvicorn
 
 from defender.credential_proxy import CredentialSet, ProxyDeps, create_app
+from defender.credential_proxy._connections import DeliveryLimited
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 
 GAUGE_PATH = H.GAUGE_PATH
@@ -63,7 +64,8 @@ def main(data_root: str, tenant: str, port: str, trace: str) -> None:
                                audit=audit))
     if trace == "trace":
         tracemalloc.start()
-    uvicorn.run(_Gauged(app, audit), host="127.0.0.1", port=int(port), log_level="warning")
+    uvicorn.run(_Gauged(app, audit), host="127.0.0.1", port=int(port), log_level="warning",
+                http=DeliveryLimited)
 
 
 if __name__ == "__main__":

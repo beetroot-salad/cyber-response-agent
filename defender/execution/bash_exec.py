@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
+import selectors
 import subprocess
 import sys
 import time
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -354,15 +357,75 @@ def parse(cmd: str) -> list[Pipeline]:
     return builder.pipelines
 
 
-def _do_cd(cwd: Path, argv: list[str]) -> tuple[Path, int, str]:
+def _do_cd(cwd: Path, argv: list[str]) -> tuple[Path, int, bytes]:
     if len(argv) == 1:
-        return cwd, 0, ""
+        return cwd, 0, b""
     raw = argv[1]
     target = Path(raw) if os.path.isabs(raw) else cwd / raw
     target = target.resolve()
     if target.is_dir():
-        return target, 0, ""
-    return cwd, 1, f"cd: {raw}: No such file or directory\n"
+        return target, 0, b""
+    return cwd, 1, f"cd: {raw}: No such file or directory\n".encode()
+
+
+#: The signals that end a stage as a kill or a crash, as a return code: the memory cap's kill
+#: and the crashes of a process that ran out of room. Not -13: `head` ends its producer that way
+#: as a matter of course.
+KILL_OR_CRASH = (-9, -11, -6, -7)
+
+
+def is_kill_or_crash(rc: int | None) -> bool:
+    """Whether a stage's return code says a kill or crash signal ended it. The one owner of the
+    set; the blame mapping reuses it. A kill the helper sends itself never reaches this: it
+    stops the command and returns before the codes are read."""
+    return rc in KILL_OR_CRASH
+
+
+#: A stage's wait, once its stdout is done: how often to look for the stages' exit.
+_POLL_SECONDS = 0.05
+_CHUNK = 256 * 1024
+
+
+def _codec():
+    """`box_codec` (function-local: it imports this module)."""
+    from defender.execution import box_codec
+
+    return box_codec
+
+
+class _Stopped(Exception):
+    """The command ends here with this code and this one line, and nothing else is returned."""
+
+    def __init__(self, rc: int, line: bytes) -> None:
+        super().__init__(line)
+        self.rc = rc
+        self.line = line
+
+
+class _Budget:
+    """What the whole command may still print: charged by everything entering the frame."""
+
+    def __init__(self, limit: int) -> None:
+        self.left = limit
+
+    def charge(self, size: int) -> None:
+        self.left -= size
+        if self.left < 0:
+            codec = _codec()
+            raise _Stopped(codec.OVER_BUDGET_RC, codec.OVER_BUDGET_LINE)
+
+
+@dataclass
+class _Deadline:
+    at: float
+    command: str
+    timeout: float
+
+    def left(self) -> float:
+        left = self.at - time.monotonic()
+        if left <= 0:
+            raise subprocess.TimeoutExpired(self.command, self.timeout)
+        return left
 
 
 def _kill_all(procs: list[subprocess.Popen]) -> None:
@@ -372,75 +435,133 @@ def _kill_all(procs: list[subprocess.Popen]) -> None:
         p.wait()
 
 
-def _stage_stderr(stage: Stage, errfile):
+def _stage_stderr(stage: Stage, shared: int):
     if stage.stderr == "devnull":
         return subprocess.DEVNULL
     if stage.stderr == "stdout":
         return subprocess.STDOUT
-    return errfile
+    return shared
 
 
-def _reap_upstream(
-    procs: list[subprocess.Popen], deadline: float, command: str, timeout: float
+def _spawn(
+    stages: list[Stage], procs: list[subprocess.Popen], stderr_fd: int, *,
+    env: dict[str, str], cwd: Path,
 ) -> None:
-    for p in procs[:-1]:
+    prev_stdout = None
+    for stage in stages:
+        proc = subprocess.Popen(
+            stage.argv,
+            stdin=prev_stdout if prev_stdout is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=_stage_stderr(stage, stderr_fd),
+            cwd=str(cwd),
+            env=env,
+        )
+        if prev_stdout is not None:
+            prev_stdout.close()
+        prev_stdout = proc.stdout
+        procs.append(proc)
+
+
+def _start_failure(argv0: str, exc: OSError) -> tuple[int, bytes, bytes]:
+    """What a stage that could not start leaves: keyed on `errno`. Out of processes or memory
+    ends the command naming the process cap; anything else is the system's own text."""
+    if isinstance(exc, FileNotFoundError):
+        return 127, b"", f"{argv0}: command not found\n".encode()
+    if isinstance(exc, PermissionError):
+        return 126, b"", f"{argv0}: Permission denied\n".encode()
+    if exc.errno in (errno.EAGAIN, errno.ENOMEM):
+        raise _Stopped(126, _codec().PROCESS_CAP_LINE)
+    why = os.strerror(exc.errno) if exc.errno else str(exc)
+    return 126, b"", f"{argv0}: {why}\n".encode()
+
+
+def _reap_upstream(procs: list[subprocess.Popen]) -> bool:
+    """Collect every stage that has exited (the upstream ones end when the last stage stops
+    reading, or on their own); whether all of them have."""
+    return all(p.poll() is not None for p in procs)
+
+
+class _Pump:
+    """Reads the last stage's stdout and the one stderr pipe the stages share, in one loop, so
+    both count against the budget as they arrive."""
+
+    def __init__(self, procs: list[subprocess.Popen], err_fd: int, budget: _Budget) -> None:
+        assert procs[-1].stdout is not None
+        self.procs = procs
+        self.budget = budget
+        self.out_fd = procs[-1].stdout.fileno()
+        self.err_fd = err_fd
+        self.sinks = {self.out_fd: bytearray(), err_fd: bytearray()}
+        self.open = {self.out_fd, err_fd}
+        self.sel = selectors.DefaultSelector()
+        for fd in self.open:
+            self.sel.register(fd, selectors.EVENT_READ)
+
+    def _read(self, fd: int) -> bool:
+        """One chunk of `fd`; whether it held data."""
         try:
-            p.wait(timeout=max(0.0, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            _kill_all(procs)
-            raise subprocess.TimeoutExpired(command, timeout) from None
+            chunk = os.read(fd, _CHUNK)
+        except BlockingIOError:
+            return False
+        if not chunk:
+            self.open.discard(fd)
+            self.sel.unregister(fd)
+            return False
+        self.budget.charge(len(chunk))
+        self.sinks[fd] += chunk
+        return True
+
+
+    def run(self, deadline: _Deadline) -> tuple[bytes, bytes]:
+        # A forked daemon can hold the stderr pipe open for good, so the loop ends at the last
+        # stdout's EOF with every stage exited, then drains what is there without blocking.
+        while self.out_fd in self.open or not _reap_upstream(self.procs):
+            left = deadline.left()
+            if not self.open:
+                time.sleep(min(left, 0.01))
+                continue
+            wait = left if self.out_fd in self.open else min(left, _POLL_SECONDS)
+            for key, _ in self.sel.select(wait):
+                self._read(key.fd)
+        while self.err_fd in self.open and self._read(self.err_fd):
+            pass
+        return bytes(self.sinks[self.out_fd]), bytes(self.sinks[self.err_fd])
 
 
 def _run_one_pipeline(
-    stages: list[Stage], *, env: dict[str, str], cwd: Path, timeout: float, command: str
-) -> tuple[int, str, str]:
-    import tempfile
-
+    stages: list[Stage], *, env: dict[str, str], cwd: Path, deadline: _Deadline, budget: _Budget,
+) -> tuple[int, bytes, bytes]:
     procs: list[subprocess.Popen] = []
-    with tempfile.TemporaryFile(mode="w+b") as errfile:
-        prev_stdout = None
+    err_r, err_w = os.pipe()
+    os.set_blocking(err_r, False)
+    try:
         try:
-            for stage in stages:
-                stderr = _stage_stderr(stage, errfile)
-                try:
-                    proc = subprocess.Popen(
-                        stage.argv,
-                        stdin=prev_stdout if prev_stdout is not None else subprocess.DEVNULL,
-                        stdout=subprocess.PIPE,
-                        stderr=stderr,
-                        cwd=str(cwd),
-                        env=env,
-                    )
-                except FileNotFoundError:
-                    _kill_all(procs)
-                    return 127, "", f"{stage.argv[0]}: command not found\n"
-                except PermissionError:
-                    _kill_all(procs)
-                    return 126, "", f"{stage.argv[0]}: Permission denied\n"
-                if prev_stdout is not None:
-                    prev_stdout.close()
-                prev_stdout = proc.stdout
-                procs.append(proc)
-
-            last = procs[-1]
-            deadline = time.monotonic() + timeout
-            try:
-                out, _ = last.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                _kill_all(procs)
-                raise subprocess.TimeoutExpired(command, timeout) from None
-            _reap_upstream(procs, deadline, command, timeout)
-            rc = last.returncode
+            _spawn(stages, procs, err_w, env=env, cwd=cwd)
+        except OSError as exc:
+            _kill_all(procs)
+            return _start_failure(stages[len(procs)].argv[0], exc)
         finally:
-            for p in procs:
-                if p.stdout is not None:
-                    with contextlib.suppress(OSError):
-                        p.stdout.close()
-        errfile.seek(0)
-        err = errfile.read().decode("utf-8", "replace")
-    # Decoded here rather than by a text-mode pipe, whose universal newlines would turn a
-    # program's `\r\n` into `\n`: the output reaches the caller as the program wrote it.
-    return rc, (out or b"").decode("utf-8", "replace"), err
+            os.close(err_w)
+        try:
+            pump = _Pump(procs, err_r, budget)
+            try:
+                out, err = pump.run(deadline)
+            finally:
+                pump.sel.close()
+        except BaseException:
+            _kill_all(procs)
+            raise
+        for p in procs:
+            if is_kill_or_crash(p.returncode):
+                raise _Stopped(p.returncode, _codec().KILLED_LINE)
+        return procs[-1].returncode, out, err
+    finally:
+        os.close(err_r)
+        for p in procs:
+            if p.stdout is not None:
+                with contextlib.suppress(OSError):
+                    p.stdout.close()
 
 
 def _short_circuit(pl, rc: int) -> bool:
@@ -451,16 +572,13 @@ def _is_cd_pipeline(pl) -> bool:
     return len(pl.stages) == 1 and bool(pl.stages[0].argv) and pl.stages[0].argv[0] == "cd"
 
 
-def run_parsed(
-    pipelines: list[Pipeline], *, command: str, env: dict[str, str], cwd: str | Path,
-    timeout: float,
-) -> tuple[int, str, str]:
-    cwd = Path(cwd)
-    out_parts: list[str] = []
-    err_parts: list[str] = []
+def _run_all(
+    pipelines: list[Pipeline], cwd: Path, env: dict[str, str], deadline: _Deadline,
+    budget: _Budget,
+) -> tuple[int, bytes, bytes]:
+    out_parts: list[bytes] = []
+    err_parts: list[bytes] = []
     rc = 0
-    deadline = time.monotonic() + timeout
-
     ran_any = False
     for pl in pipelines:
         if ran_any and _short_circuit(pl, rc):
@@ -469,23 +587,37 @@ def run_parsed(
 
         if _is_cd_pipeline(pl):
             cwd, rc, cd_err = _do_cd(cwd, pl.stages[0].argv)
+            budget.charge(len(cd_err))
             if cd_err:
                 err_parts.append(cd_err)
             continue
 
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise subprocess.TimeoutExpired(command, timeout)
-        prc, pout, perr = _run_one_pipeline(
-            pl.stages, env=env, cwd=cwd, timeout=remaining, command=command
+        deadline.left()
+        rc, pout, perr = _run_one_pipeline(
+            pl.stages, env=env, cwd=cwd, deadline=deadline, budget=budget
         )
-        rc = prc
         if pout:
             out_parts.append(pout)
         if perr:
             err_parts.append(perr)
+    return rc, b"".join(out_parts), b"".join(err_parts)
 
-    return rc, "".join(out_parts), "".join(err_parts)
+
+def run_parsed(
+    pipelines: list[Pipeline], *, command: str, env: dict[str, str], cwd: str | Path,
+    timeout: float,
+) -> tuple[int, bytes, bytes]:
+    """Run the pipelines; the code, stdout and stderr as the programs wrote them (bytes).
+
+    One output budget spans the whole command, and a stage ending on a kill or crash signal
+    that this helper did not send ends it too: either returns the code, empty stdout and one
+    fixed line, with everything captured dropped and no later pipeline run."""
+    budget = _Budget(_codec().HELPER_OUTPUT_BUDGET)
+    deadline = _Deadline(time.monotonic() + timeout, command, timeout)
+    try:
+        return _run_all(pipelines, Path(cwd), env, deadline, budget)
+    except _Stopped as stop:
+        return stop.rc, b"", stop.line
 
 
 def _run_box_entrypoint() -> int:
@@ -514,9 +646,12 @@ def _run_box_entrypoint() -> int:
     except subprocess.TimeoutExpired:
         print("box entrypoint: the pipeline exceeded its wall-clock deadline", file=sys.stderr)
         return 3
+    except Exception:  # noqa: BLE001 — a helper fault on a model's command still answers with a frame
+        traceback.print_exc()
+        rc, out, err = 70, b"", box_codec.FAILED_LINE
 
     sys.stdout.buffer.write(box_codec.encode_response(box_codec.BoxResult(
-        rc=rc, out=out.encode("utf-8"), err=err.encode("utf-8"),
+        rc=rc, out=out, err=err,
     )))
     sys.stdout.buffer.flush()
     return 0

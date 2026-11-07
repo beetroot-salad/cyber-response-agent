@@ -1,6 +1,6 @@
 """The sandbox the agent's commands run in.
 
-Split into four modules:
+Split into these modules:
 
   * `_spec`      — what a box IS: the request, the mounts, the executor, and the two
                        transports that carry a command to one.
@@ -8,6 +8,7 @@ Split into four modules:
                        a banned program back into reach.
   * `_docker`    — talking to the daemon: naming, env, status, reaping, mount shapes.
   * `_lifecycle` — start, stop, scrub, and the faults each step can raise.
+  * `_ending`    — the box failures that end a run by name (#1421).
 
 Every name below is a re-export; the runtime imports the box through this module.
 """
@@ -32,6 +33,7 @@ from defender.records.formats import RUN_ID_ALLOWED, is_valid_run_id
 from defender.execution import bash_exec
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,  # noqa: F401 — re-exported: tests read it as `box.BOX_ENV_ALLOWLIST`
+    BOX_OUTPUT_LIMIT,  # the fence's limit, kept beside the codec (#1421); re-exported as `box.BOX_OUTPUT_LIMIT`
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_exec_seam.py imports it as `box.REQUEST_MAGIC`
     RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_exec_seam.py imports it as `box.RESPONSE_MAGIC`
     BOX_MARK_ENV,  # noqa: F401 — re-exported: tests read it as `box.BOX_MARK_ENV`
@@ -52,7 +54,8 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
     verdict_path,
     write_did_not_run,
 )
-from ._output import BOX_OUTPUT_LIMIT, BoxOutputLimitExceeded
+from ._ending import BoxEnding, BoxLost
+from ._output import BoxOutputLimitExceeded
 from ._spec import (
     ALIAS_PROFILE_PATH,
     BANNED_SHAPES,
@@ -161,7 +164,9 @@ __all__ = [
     "BANNED_SHAPES",
     "BOX_ENV_ALLOWLIST",
     "BoxExecutor",
+    "BoxEnding",
     "BoxFault",
+    "BoxLost",
     "BOX_OUTPUT_LIMIT",
     "BoxOutputLimitExceeded",
     "BoxLike",

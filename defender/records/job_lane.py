@@ -31,6 +31,7 @@ from defender.records._layout import RUN_LAYOUT, RunPaths, SessionPaths
 from defender.records._locations import DataRoot, RunsBase, unwrap_data_root
 from defender.records._store_errors import StoreError
 from defender.records._tenant_id import TenantId, TenantRefused
+from defender.records.run_end import normalized_truncated_by
 
 #: The tenant's runs container below its folder: the tenant layout's name for it
 #: (`tenancy._TenantLayout.runs`), which this door may not import (records sits below tenancy).
@@ -86,34 +87,45 @@ class Launched:
         return RunId.parse(self.record.investigation_id)
 
 
+_JOB_END_KEYS = frozenset({"setup", "box", "report_committed", "scrub_verified", "cut_short"})
+
+
 @dataclass(frozen=True)
 class JobEnd:
-    """The job-end record (`<runs>/<id>.job-end.json`): four facts, each set by the job entry at
-    the point it became true."""
+    """The job-end record (`<runs>/<id>.job-end.json`): five facts, each set by the job entry at
+    the point it became true. `cut_short` is the run's exit class (`run_end.TRUNCATED_BY_VALUES`,
+    the whole vocabulary) as the driver returned it, or `None`: a run nothing cut short, or one
+    that never returned from its driver (setup refused or crashed, a group that propagated)
+    (#1421)."""
 
     setup: str
     box: str
     report_committed: bool
     scrub_verified: bool
+    cut_short: str | None
 
     def text(self) -> str:
         return json.dumps({"setup": self.setup, "box": self.box,
                            "report_committed": self.report_committed,
-                           "scrub_verified": self.scrub_verified})
+                           "scrub_verified": self.scrub_verified,
+                           "cut_short": self.cut_short})
 
     @classmethod
     def parse(cls, text: str) -> JobEnd | None:
-        """The record `text` holds, or `None` when it is not one the job entry could have written."""
+        """The record `text` holds, or `None` when it is not one the job entry could have written.
+        `cut_short` must be JSON null or a vocabulary word exactly, so no child's text can reach
+        the fixed job message that names it."""
         obj, unreadable = _io.load_json_artifact(text)
-        if unreadable is not None or not isinstance(obj, dict) or set(obj) != {
-                "setup", "box", "report_committed", "scrub_verified"}:
+        if unreadable is not None or not isinstance(obj, dict) or set(obj) != _JOB_END_KEYS:
             return None
         setup, box = obj["setup"], obj["box"]
-        committed, verified = obj["report_committed"], obj["scrub_verified"]
+        committed, verified, cut_short = obj["report_committed"], obj["scrub_verified"], obj["cut_short"]
         if not (isinstance(setup, str) and setup in _SETUPS and isinstance(box, str) and box in _BOXES
-                and isinstance(committed, bool) and isinstance(verified, bool)):
+                and isinstance(committed, bool) and isinstance(verified, bool)
+                and (cut_short is None or normalized_truncated_by(cut_short) is not None)):
             return None
-        return cls(setup=setup, box=box, report_committed=committed, scrub_verified=verified)
+        return cls(setup=setup, box=box, report_committed=committed, scrub_verified=verified,
+                   cut_short=cut_short)
 
 
 def _run_id(raw: object) -> RunId:

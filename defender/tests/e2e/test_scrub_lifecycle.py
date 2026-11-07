@@ -23,6 +23,7 @@ from defender.tests.e2e._spec771 import snapshot_outside as _snapshot
 pytest.importorskip("pydantic_ai")
 
 from defender import run_common  # noqa: E402
+from defender.records import run_end  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead  # noqa: E402
 from defender.investigation import permission  # noqa: E402
@@ -499,6 +500,65 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
         "the tree walked is not the run dir the box was given"
 
 
+@pytest.mark.parametrize("stop_faults", [False, True], ids=["control-clean-teardown", "teardown-fault"])
+def test_o8_the_summary_gains_a_key_only_when_the_teardown_of_a_box_ending_faulted(tmp_path, stop_faults):
+    """A box ending returns normally; the summary carries one extra key exactly when the stop could not be proven, and the fault does not replace it. (O8)"""
+    log: list[str] = []
+    rec = BoxLifecycleRecorder(events=log)
+    ended = {"output": "done", "requests": 1, "truncated_by": "box-lost"}
+
+    def stop(*_a, **_k):
+        if stop_faults:
+            raise BoxFault("could not stop the box")
+
+    from defender.run import _run_investigation_lifecycle
+
+    try:
+        summary = _run_investigation_lifecycle(
+            run=fixture_run(_clean_run_dir(tmp_path / "lifecycle")), model="m-741", model_override=None,
+            defender_dir=DEFENDER, tenant=_tenants1106.fixture_run_tenant(),
+            investigate=lambda **_kw: ended, start_box=rec.start_box, stop_box=stop, scrub=rec.scrub)
+    except BoxFault as fault:
+        pytest.fail(f"the teardown fault replaced the ending: {fault}")
+    assert {k: v for k, v in summary.items() if k in ended} == ended
+    assert bool(set(summary) - set(ended)) is stop_faults, summary
+    assert bool(rec.scrubbed) is not stop_faults, "the scrub walked a tree whose box was not provably dead"
+
+
+@pytest.mark.parametrize("word", [*run_end.TRUNCATED_BY_VALUES, None])
+def test_o8_every_run_end_word_reaches_the_job_fact_and_only_the_two_box_words_swallow_a_teardown_fault(tmp_path, word):
+    """The job fact is the driver's word whole; a faulting teardown is swallowed and flagged for 'box-lost' and 'box-output-limit' alone, and the worker names the word. (O8, O9)"""
+    from defender import run as run_py
+    from defender.records import job_facts, job_lane
+    from defender.worker._worker import _ending_from
+
+    box_words = {"box-lost", "box-output-limit"}
+    rec = BoxLifecycleRecorder()
+    held = run_py._JobEndFacts()
+
+    def stop(*_a, **_k):
+        raise BoxFault("could not stop the box")
+
+    def drive():
+        return run_py._run_investigation_lifecycle(
+            run=fixture_run(_clean_run_dir(tmp_path / "lifecycle")), model="m-741", model_override=None,
+            defender_dir=DEFENDER, tenant=_tenants1106.fixture_run_tenant(), job_facts=held,
+            investigate=lambda **_kw: {"output": "done", "requests": 1, "truncated_by": word},
+            start_box=rec.start_box, stop_box=stop, scrub=rec.scrub)
+
+    if word in box_words:
+        assert drive().get(run_py.TEARDOWN_FAULTED) is True
+    else:
+        with pytest.raises(BoxFault):
+            drive()
+    assert held.cut_short == word
+    end = job_lane.JobEnd(setup=job_facts.SETUP_DONE, box=job_facts.BOX_STARTED, report_committed=False,
+                          scrub_verified=False, cut_short=word)
+    ending = _ending_from(end, 5, lambda: None)
+    assert word is None or word in ending.failure_message
+    assert ending.decided_by_run is False
+
+
 def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
     run = _clean_run_dir(tmp_path)
     os.symlink("/etc/passwd", run / "sneaky.json")
@@ -558,7 +618,7 @@ def _reap_probe(*, stop_fault=None, scrub_fault=None):
 def test_the_reap_scrubs_once_the_box_is_down(tmp_path):
     log, stop, scrub_tree = _reap_probe()
     assert stop_and_scrub(object(), tmp_path, stop_box=stop, scrub_tree=scrub_tree,
-                          in_flight=False) is None
+                          in_flight=False) is True  # #1421: it returns whether the box is down
     assert log == ["stop", "scrub"]
 
 
@@ -576,7 +636,7 @@ def test_a_failed_teardown_skips_the_scrub_rather_than_racing_it(tmp_path, capsy
     capsys.readouterr()
     log2, stop2, scrub_tree2 = _reap_probe(stop_fault=fault)
     assert stop_and_scrub(object(), tmp_path, stop_box=stop2, scrub_tree=scrub_tree2,
-                          in_flight=True) is None
+                          in_flight=True) is False  # #1421: not proven down, and the caller is told
     assert log2 == ["stop"], "the scrub walked a tree whose box was not provably dead"
     err = capsys.readouterr().err
     assert "teardown refused" in err, (

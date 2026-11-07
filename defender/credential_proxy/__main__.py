@@ -30,6 +30,7 @@ import uvicorn
 from defender import _io
 from defender._log import configure_from_env
 from defender.credential_proxy._app import create_app_from_config
+from defender.credential_proxy._connections import DeliveryLimited, check_delivery_limit_supported
 from defender.kit.faults import ConfigFault
 
 CONFIG_ENV = "DEFENDER_CREDENTIAL_PROXY_CONFIG"
@@ -70,10 +71,16 @@ def main() -> int:
     except OSError as e:  # the audit file cannot be opened for append
         _logger.error("the credential proxy cannot start: %s", e)
         return 2
+    try:
+        check_delivery_limit_supported()
+    except (AttributeError, OSError) as e:
+        _logger.error("the credential proxy cannot start: this platform cannot limit undelivered "
+                      "replies (%s)", e)
+        return 2
     host = os.environ.get(HOST_ENV, DEFAULT_HOST)
     _logger.info("credential proxy on http://%s:%d", host, port)
     # `log_config=None` keeps uvicorn on the handlers `configure_from_env` installed.
-    uvicorn.run(app, host=host, port=port, log_config=None)
+    uvicorn.run(app, host=host, port=port, log_config=None, http=DeliveryLimited)
     return 0
 
 
