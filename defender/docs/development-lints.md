@@ -25,6 +25,7 @@ Most gates take a line suppression of the form `# lint-<tag>: ok — <reason>`. 
 | Whole-file reads through `defender._io`: `read_text_utf8` for `read_text(encoding="utf-8")`, `read_bytes_capped` for `read_bytes()` (same semantics), capped at `READ_LIMIT`, which a caller can only lower | a bare `read_text()` / `read_bytes()` (or a reference to one), which sizes its buffer from the file | `# lint-whole-read: ok` |
 | Lesson text through `_corpus.Lesson.line` / `.lines` / `.match_text`, and inside a `_untrusted` frame when it reaches a model (#1206). The gate matches names (`.fm`, a `lesson…`'s `.raw` / `.body`, a `hit…`'s `.frontmatter`), so a lesson file parsed directly is not seen | reading the raw text and printing it — a line break or terminal control in a value forges rows | `# lint-lesson-text: ok` |
 | An optional input resolved once at the boundary (see below) | re-coalescing the default in the body | `# lint-default: ok` |
+| Every Forgejo API call named in `defender/_forgejo_api.py`, and every OpenBao call the lifecycle makes in `defender/_openbao_api.py` (#1440); send the `ApiCall` it answers | an `/api/v1/...` path (or, in `lifecycle/`, a `/v1/...` path) written where it is called: a second, unnamed call shape nobody finds without grep | `# lint-api-path: ok` |
 
 ### Test discipline
 

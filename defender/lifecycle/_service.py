@@ -19,12 +19,13 @@ from typing import Any
 
 import httpx
 
+from defender import _forgejo_api as forgejo
 from defender import _io
-from defender.configuration.issuer import TRANSIT_MOUNT
+from defender import _openbao_api as openbao
 from defender.credential_proxy import transit_key_for
 from defender.identity import audit
 from defender.lifecycle._bot import Minted, log_in, mint
-from defender.lifecycle._job import SERVICE, Actor, Step, StepFailed, answered, field_of, next_step, only
+from defender.lifecycle._job import SERVICE, Actor, Step, StepFailed, answered, field_of, next_step, only, send
 from defender.lifecycle.config import LifecycleConfig
 from defender.tenancy import ALL, ForgeWiring, Generation, HeldTenant, TenantId, TenantRepository, tenant_id_file_text
 
@@ -138,7 +139,7 @@ class ManagementService(Actor):
         return sign_role_id
 
     async def _approle_accessor(self) -> str:
-        mounts = field_of(answered(await self._bao.get("/v1/sys/auth")), "data")
+        mounts = field_of(answered(await send(self._bao, openbao.auth_mounts())), "data")
         accessor = (mounts.get("approle/") or {}).get("accessor") if isinstance(mounts, dict) else None
         if not accessor:
             raise StepFailed("OpenBao has no approle/ auth mount")
@@ -146,16 +147,14 @@ class ManagementService(Actor):
 
     async def _approle(self, name: str, policy: str) -> str:
         """The AppRole `name` on the one templated `policy` (written again if it exists); its role id."""
-        answered(await self._bao.post(f"/v1/auth/approle/role/{name}", json={
-            "token_policies": [policy], "token_ttl": TOKEN_TTL, "token_max_ttl": TOKEN_TTL,
-            "secret_id_ttl": 0, "secret_id_num_uses": 0}))
-        return str(field_of(answered(await self._bao.get(f"/v1/auth/approle/role/{name}/role-id")), "data", "role_id"))
+        answered(await send(self._bao, openbao.write_approle(name, policy=policy, ttl=TOKEN_TTL)))
+        return str(field_of(answered(await send(self._bao, openbao.approle_role_id(name))), "data", "role_id"))
 
     async def _entity(self, name: str, metadata: Mapping[str, str], role_id: str, accessor: str) -> None:
         """The entity `name` with `metadata`, aliased on the AppRole mount by `role_id`. An entity that
         exists is updated, and its alias on the mount kept: OpenBao allows one alias per entity and mount."""
-        answered(await self._bao.post(f"/v1/identity/entity/name/{name}", json={"metadata": dict(metadata)}))
-        entity = field_of(answered(await self._bao.get(f"/v1/identity/entity/name/{name}")), "data")
+        answered(await send(self._bao, openbao.write_entity(name, metadata)))
+        entity = field_of(answered(await send(self._bao, openbao.entity(name))), "data")
         entity_id = entity.get("id") if isinstance(entity, dict) else None
         if not entity_id:
             raise StepFailed(f"OpenBao answered no id for the entity {name}")
@@ -164,41 +163,38 @@ class ManagementService(Actor):
             return
         if aliases:
             raise StepFailed(f"the entity {name} is aliased on the AppRole mount by another role id")
-        answered(await self._bao.post("/v1/identity/entity-alias", json={
-            "name": role_id, "canonical_id": entity_id, "mount_accessor": accessor}))
+        answered(await send(self._bao, openbao.create_entity_alias(name=role_id, entity_id=entity_id,
+                                                                    mount_accessor=accessor)))
 
     async def _ensure_key(self, tenant: str) -> None:
         """The tenant's request-token signing key, made (ed25519) only when absent: one key per tenant,
         kept across rotations (A25)."""
-        path = f"/v1/{TRANSIT_MOUNT}/keys/{transit_key_for(tenant)}"
-        if answered(await self._bao.get(path), 404).status_code == 404:
-            answered(await self._bao.post(path, json={"type": "ed25519"}))
+        key = transit_key_for(tenant)
+        if answered(await send(self._bao, openbao.transit_key(key)), 404).status_code == 404:
+            answered(await send(self._bao, openbao.create_transit_key(key)))
 
     async def _destroy_key(self, tenant: str) -> None:
         """The tenant's signing key, at offboarding only: read (absent is done), made deletable, deleted
         (A25, RC-4)."""
-        path = f"/v1/{TRANSIT_MOUNT}/keys/{transit_key_for(tenant)}"
-        if answered(await self._bao.get(path), 404).status_code == 404:
+        key = transit_key_for(tenant)
+        if answered(await send(self._bao, openbao.transit_key(key)), 404).status_code == 404:
             return
-        answered(await self._bao.post(f"{path}/config", json={"deletion_allowed": True}))
-        answered(await self._bao.delete(path), 404)
+        answered(await send(self._bao, openbao.allow_transit_key_deletion(key)))
+        answered(await send(self._bao, openbao.delete_transit_key(key)), 404)
 
     async def _write_role(self, gen: Generation, *, client_id: str | None) -> None:
         """The generation's OIDC role; its claim comes from the minting entity's metadata, and its
         client id (once the integration exists) is the integration's audience."""
-        body: dict[str, Any] = {"key": self._config.oidc_key, "ttl": TOKEN_TTL, "template": CLAIMS}
-        if client_id is not None:
-            body["client_id"] = client_id
-        answered(await self._bao.post(f"/v1/identity/oidc/role/{gen.oidc_role}", json=body))
+        answered(await send(self._bao, openbao.write_oidc_role(gen.oidc_role, key=self._config.oidc_key, ttl=TOKEN_TTL,
+                                                                template=CLAIMS, client_id=client_id)))
 
     async def _repo(self, held: HeldTenant) -> None:
         """The tenant's private repository, made empty if absent (Flow 1.4)."""
         wiring = await self._wiring(held)
-        found = answered(await self._forge.get(f"/api/v1/repos/{wiring.repo}"), 404)
+        found = answered(await send(self._forge, forgejo.repository(wiring.repo)), 404)
         if found.status_code == 404:
             org, name = wiring.repo.split("/", 1)
-            answered(await self._forge.post(f"/api/v1/orgs/{org}/repos", json={
-                "name": name, "private": True, "auto_init": False, "default_branch": "main"}))
+            answered(await send(self._forge, forgejo.create_empty_private_repository(org, name)))
         elif found.json().get("private") is not True:
             raise StepFailed(f"the repository {wiring.repo} exists and is not private")
         await self._commit_next(held)
@@ -210,24 +206,21 @@ class ManagementService(Actor):
         gens = await held.generations()
         gen = only(gens, "pending")
         wiring = await self._wiring(held)
-        if answered(await self._forge.get(f"/api/v1/users/{gen.bot_login}"), 404).status_code == 404:
-            answered(await self._forge.post("/api/v1/admin/users", json={
-                "username": gen.bot_login, "email": f"{gen.bot_login}@bots.invalid", "visibility": "private",
-                "password": self.secret(secrets.token_urlsafe(32)), "must_change_password": False}))
-        answered(await self._forge.put(f"/api/v1/repos/{wiring.repo}/collaborators/{gen.bot_login}",
-                                       json={"permission": "write"}))
+        if answered(await send(self._forge, forgejo.user(gen.bot_login)), 404).status_code == 404:
+            answered(await send(self._forge, forgejo.create_bot_user(
+                gen.bot_login, password=self.secret(secrets.token_urlsafe(32)))))
+        answered(await send(self._forge, forgejo.add_collaborator(wiring.repo, gen.bot_login, permission="write")))
         keep = {gen.bot_login, *(g.bot_login for g in gens if g.status == "live")}
         for login_name in await self._collaborators(wiring.repo):
             if login_name not in keep:
-                answered(await self._forge.delete(f"/api/v1/repos/{wiring.repo}/collaborators/{login_name}"), 404)
+                answered(await send(self._forge, forgejo.remove_collaborator(wiring.repo, login_name)), 404)
         await self._commit_next(held)
 
     async def _collaborators(self, repo: str) -> list[str]:
         found: list[str] = []
         page = 1
         while True:
-            listed = answered(await self._forge.get(f"/api/v1/repos/{repo}/collaborators",
-                                                    params={"page": page, "limit": _COLLABORATOR_PAGE})).json()
+            listed = answered(await send(self._forge, forgejo.collaborators(repo, page=page, limit=_COLLABORATOR_PAGE))).json()
             if not isinstance(listed, list):
                 raise StepFailed(f"the collaborators of {repo} are not a list")
             # The forge may page by fewer than asked (its own maximum), so only an empty page, or one
@@ -261,7 +254,7 @@ class ManagementService(Actor):
         made before it would refuse)."""
         gen = await self._building(held)
         wiring = await self._wiring(held)
-        repo = answered(await self._forge.get(f"/api/v1/repos/{wiring.repo}"))
+        repo = answered(await send(self._forge, forgejo.repository(wiring.repo)))
         if repo.json().get("empty") is True:
             credential = Minted(held.tenant_id, await self._bot_jwt(gen))
             await asyncio.to_thread(self._push_template, held.tenant_id, wiring.origin, credential)
@@ -283,22 +276,22 @@ class ManagementService(Actor):
         change omits). The rule is then read back as stored: the forge drops a user without access to
         the repository and every team of a user-owned one, so only the stored rule shows the invariant."""
         bots = {g.bot_login for g in await held.generations()}
-        rules = f"/api/v1/repos/{wiring.repo}/branch_protections"
-        found = answered(await self._forge.get(f"{rules}/main"), 404)
+        found = answered(await send(self._forge, forgejo.branch_protection(wiring.repo, "main")), 404)
         if found.status_code == 404:
-            answered(await self._forge.post(rules, json={
+            answered(await send(self._forge, forgejo.create_branch_protection(wiring.repo, {
                 "rule_name": "main", "branch_name": "main", "enable_push": False, "enable_push_whitelist": False,
                 "enable_force_push": False, "enable_merge_whitelist": True, "merge_whitelist_usernames": [],
-                "merge_whitelist_teams": [OWNERS]}))
+                "merge_whitelist_teams": [OWNERS]})))
         else:
             rule = _rule(found, wiring.repo)
             if _breaks_invariant(rule, bots) is not None:
                 users = [u for u in _names_in(rule, "merge_whitelist_usernames") if u not in bots]
                 teams = _names_in(rule, "merge_whitelist_teams")
-                answered(await self._forge.patch(f"{rules}/main", json={
+                answered(await send(self._forge, forgejo.edit_branch_protection(wiring.repo, "main", {
                     "enable_push": False, "enable_merge_whitelist": True, "merge_whitelist_usernames": users,
-                    "merge_whitelist_teams": teams if OWNERS in teams else [*teams, OWNERS]}))
-        broken = _breaks_invariant(_rule(answered(await self._forge.get(f"{rules}/main")), wiring.repo), bots)
+                    "merge_whitelist_teams": teams if OWNERS in teams else [*teams, OWNERS]})))
+        stored = answered(await send(self._forge, forgejo.branch_protection(wiring.repo, "main")))
+        broken = _breaks_invariant(_rule(stored, wiring.repo), bots)
         if broken is not None:
             raise StepFailed(f"the protection of main on {wiring.repo} reads back with {broken}")
 
@@ -306,14 +299,14 @@ class ManagementService(Actor):
         """The forge accepts a push before it registers the branch (it does that after the push returns),
         so `main` is waited for, bounded, before anything reads or protects it."""
         for _ in range(MAIN_WAIT_TRIES):
-            if answered(await self._forge.get(f"/api/v1/repos/{repo}")).json().get("empty") is not True:
+            if answered(await send(self._forge, forgejo.repository(repo))).json().get("empty") is not True:
                 return
             await asyncio.sleep(MAIN_WAIT_SECONDS)
         raise StepFailed(f"{repo} is still empty after the template push")
 
     async def _bot_jwt(self, gen: Generation) -> str:
         """The bot's JWT, through a short-lived secret id of the recorded AppRole (swept at `sweep`, P1)."""
-        made = answered(await self._bao.post(f"/v1/auth/approle/role/{gen.approle}/secret-id"))
+        made = answered(await send(self._bao, openbao.new_secret_id(gen.approle)))
         secret = self.secret(str(field_of(made, "data", "secret_id")))
         token = self.secret(await log_in(self._bao, str(gen.role_id), secret))
         return self.secret(await mint(self._bao, gen.oidc_role, token))
@@ -353,8 +346,8 @@ class ManagementService(Actor):
             await held.commit(step=held.record.step, actor=SERVICE,
                               update_generations={gen.salt: {"sign_role_id": sign_role_id}})
             gen = await self._building(held)
-        wrapped = [self.secret(str(field_of(answered(await self._bao.post(
-            f"/v1/auth/approle/role/{approle}/secret-id", headers={"X-Vault-Wrap-TTL": WRAP_TTL})), "wrap_info", "token")))
+        wrapped = [self.secret(str(field_of(answered(await send(
+            self._bao, openbao.new_secret_id(str(approle), wrap_ttl=WRAP_TTL))), "wrap_info", "token")))
             for approle in (gen.approle, gen.sign_approle)]
         await self._commit_next(held, update_generations={
             gen.salt: {"wrapped_secret": wrapped[0], "sign_wrapped_secret": wrapped[1]}})
@@ -375,12 +368,11 @@ class ManagementService(Actor):
         await self._commit_next(held, go_live=gen.salt)
 
     async def _sweep_secret_ids(self, approle: str, *, keep: str) -> None:
-        listed = answered(await self._bao.get(f"/v1/auth/approle/role/{approle}/secret-id", params={"list": "true"}), 404)
+        listed = answered(await send(self._bao, openbao.secret_id_accessors(approle)), 404)
         keys = field_of(listed, "data", "keys") if listed.status_code != 404 else []
         for accessor in keys:
             if accessor != keep:
-                answered(await self._bao.post(f"/v1/auth/approle/role/{approle}/secret-id-accessor/destroy",
-                                              json={"secret_id_accessor": accessor}), 404)
+                answered(await send(self._bao, openbao.destroy_secret_id(approle, accessor)), 404)
 
     async def _activate(self, held: HeldTenant) -> None:
         """The tenant is `active`, nothing pending (Flow 1.10, RC-9)."""
@@ -410,18 +402,18 @@ class ManagementService(Actor):
         delete (#1433): a refusal must find nothing left that grants access."""
         bots: list[str] = []
         for gen in gens:
-            if answered(await self._forge.get(f"/api/v1/users/{gen.bot_login}"), 404).status_code != 404:
+            if answered(await send(self._forge, forgejo.user(gen.bot_login)), 404).status_code != 404:
                 bots.append(gen.bot_login)
                 if repo is not None:
-                    answered(await self._forge.delete(f"/api/v1/repos/{repo}/collaborators/{gen.bot_login}"), 404)
-            paths = [f"identity/oidc/role/{gen.oidc_role}", f"auth/approle/role/{gen.approle}",
-                     f"identity/entity/name/{gen.entity}"]
+                    answered(await send(self._forge, forgejo.remove_collaborator(repo, gen.bot_login)), 404)
+            deletes = [openbao.delete_oidc_role(gen.oidc_role), openbao.delete_approle(gen.approle),
+                       openbao.delete_entity(gen.entity)]
             if gen.sign_approle is not None:
-                paths.append(f"auth/approle/role/{gen.sign_approle}")
+                deletes.append(openbao.delete_approle(gen.sign_approle))
             if gen.sign_entity is not None:
-                paths.append(f"identity/entity/name/{gen.sign_entity}")
-            for path in paths:
-                answered(await self._bao.delete(f"/v1/{path}"), 404)
+                deletes.append(openbao.delete_entity(gen.sign_entity))
+            for call in deletes:
+                answered(await send(self._bao, call), 404)
         return bots
 
     async def _delete_bots(self, bots: list[str]) -> None:
@@ -430,7 +422,7 @@ class ManagementService(Actor):
         (the bot owns a repository, a fork of the tenant repo included, or belongs to an
         organisation) fails the step with the forge's reason; the bot is revoked by then."""
         for bot in bots:
-            answered(await self._forge.delete(f"/api/v1/admin/users/{bot}"), 404)
+            answered(await send(self._forge, forgejo.delete_user(bot)), 404)
 
     # --- offboard -------------------------------------------------------------------------------
 
@@ -443,7 +435,7 @@ class ManagementService(Actor):
         bots = await self._revoke([g for g in await held.generations() if g.status != "destroyed"], repo=repo)
         await self._destroy_key(held.tenant_id)
         if repo is not None:
-            answered(await self._forge.patch(f"/api/v1/repos/{repo}", json={"archived": True}), 404)
+            answered(await send(self._forge, forgejo.archive_repository(repo)), 404)
         await self._delete_bots(bots)
         await self._commit_next(held, destroy=ALL)
 
@@ -463,8 +455,8 @@ class ManagementService(Actor):
         (RC-8), the repo deleted, `repo_url` and the wiring cleared; audited after the commit."""
         repo = await self._repo_of(held)
         await self._destroy(await held.generations(), repo=repo)
-        if repo is not None and answered(await self._forge.get(f"/api/v1/repos/{repo}"), 404).status_code != 404:
-            answered(await self._forge.delete(f"/api/v1/repos/{repo}"), 404)
+        if repo is not None and answered(await send(self._forge, forgejo.repository(repo)), 404).status_code != 404:
+            answered(await send(self._forge, forgejo.delete_repository(repo)), 404)
         await held.commit(step=None, actor=None, pending_action=None, repo_url=None, drop_wiring=True)
         audit.emit("tenant.repo.delete", actor=audit.SYSTEM, tenant_id=held.tenant_id, target=held.tenant_id)
 

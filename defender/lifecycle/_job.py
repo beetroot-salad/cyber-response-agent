@@ -20,6 +20,7 @@ from typing import Any
 
 import httpx
 
+from defender._api_call import ApiCall
 from defender.tenancy import FenceMissed, Generation, HeldTenant, TenantRepository, claimable_now
 
 _logger = logging.getLogger(__name__)
@@ -64,6 +65,11 @@ class StepFailed(Exception):
     def __init__(self, message: str, *, restart: tuple[str, str] | None = None) -> None:
         super().__init__(message)
         self.restart = restart
+
+
+async def send(client: httpx.AsyncClient, call: ApiCall, *, headers: Mapping[str, str] | None = None) -> httpx.Response:
+    """`call` sent with `client`; `headers` (a credential the client does not carry) on top of its own."""
+    return await client.request(call.method, call.path, **call.options(headers=headers))
 
 
 def answered(response: httpx.Response, *ok: int) -> httpx.Response:

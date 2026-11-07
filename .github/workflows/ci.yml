@@ -749,6 +749,13 @@ jobs:
       - name: Raw-YAML gate (one YAML reader and writer, #1127 — baseline-ratcheted)
         run: defender/.venv/bin/python tooling/lint/lint_raw_yaml.py
 
+      # Every Forgejo API call is named in defender/_forgejo_api.py, and every OpenBao call the
+      # lifecycle makes in defender/_openbao_api.py (#1440): a path written where it is called is
+      # a second call shape that only a grep finds ("who deletes a forge user?"). The baseline
+      # ships EMPTY.
+      - name: Inline-API-path gate (one Forgejo adapter, #1440 — baseline-ratcheted)
+        run: defender/.venv/bin/python tooling/lint/lint_inline_api_paths.py
+
       # A module importing another module's closed vocabulary and re-deriving the membership
       # test itself instead of calling the normalizer that ships beside it (#785). The six
       # interpreters of report.md's disposition each looked fine alone; they disagreed only

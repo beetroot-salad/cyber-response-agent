@@ -23,9 +23,10 @@ from typing import Any
 
 import httpx
 
+from defender import _forgejo_api as forgejo
 from defender import _io
+from defender import _openbao_api as openbao
 from defender.configuration import publish_root
-from defender.configuration.issuer import TRANSIT_MOUNT
 from defender.credential_proxy import transit_key_for
 from defender.lifecycle._bot import Minted, log_in, mint
 from defender.lifecycle._job import (
@@ -38,6 +39,7 @@ from defender.lifecycle._job import (
     field_of,
     next_step,
     only,
+    send,
 )
 from defender.lifecycle._teardown import Containers, stop_containers, take_exclusive
 from defender.lifecycle.config import LifecycleConfig
@@ -134,8 +136,8 @@ class HostActor(Actor):
                                                  prefix=_SIGN_FILE))
             jwt = await self._bot_jwt(gen, secret_id)
             bearer = {"Authorization": f"Bearer {jwt}"}
-            answered(await self._forge.get(f"/api/v1/repos/{wiring.repo}", headers=bearer))
-            branch = answered(await self._forge.get(f"/api/v1/repos/{wiring.repo}/branches/main", headers=bearer)).json()
+            answered(await send(self._forge, forgejo.repository(wiring.repo), headers=bearer))
+            branch = answered(await send(self._forge, forgejo.branch(wiring.repo, "main"), headers=bearer)).json()
             if not (isinstance(branch, dict) and branch.get("protected") is True and branch.get("user_can_push") is False
                     and branch.get("user_can_merge") is False):
                 seen = branch if isinstance(branch, dict) else {}
@@ -155,7 +157,7 @@ class HostActor(Actor):
 
     async def _unwrap(self, wrapped: str, which: str) -> tuple[str, str]:
         """The secret id and its accessor that `wrapped` wraps (spent by this call)."""
-        unwrapped = await self._bao.post("/v1/sys/wrapping/unwrap", headers={"X-Vault-Token": self.secret(wrapped)})
+        unwrapped = await send(self._bao, openbao.unwrap(self.secret(wrapped)))
         if unwrapped.status_code != 200:
             raise StepFailed(f"the wrapped {which} secret could not be unwrapped (HTTP {unwrapped.status_code}): it was "
                              "spent or has expired")
@@ -166,8 +168,7 @@ class HostActor(Actor):
         """The installed sign pair works (A24', r8.4): logged in as the generation's sign login, one fixed
         probe is signed with the tenant's key, and the answer carries a signature."""
         token = self.secret(await log_in(self._bao, str(gen.sign_role_id), sign_secret_id))
-        signed = answered(await self._bao.post(f"/v1/{TRANSIT_MOUNT}/sign/{transit_key_for(tenant)}",
-                                               json={"input": _PROBE}, headers={"X-Vault-Token": token}))
+        signed = answered(await send(self._bao, openbao.transit_sign(transit_key_for(tenant), input_b64=_PROBE, token=token)))
         signature = field_of(signed, "data", "signature")
         if not isinstance(signature, str) or not signature:
             raise StepFailed("the sign proof answered no signature")

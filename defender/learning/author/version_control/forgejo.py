@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
+
+from defender import _forgejo_api as forgejo
+from defender._api_call import ApiCall
 
 if TYPE_CHECKING:
     import httpx
@@ -103,9 +106,9 @@ class ForgeAddress:
         return f"{self.scheme}://{self.netloc}"
 
     @property
-    def api(self) -> str:
-        """The repository's Forgejo API root."""
-        return f"{self.origin}/api/v1/repos/{self.owner}/{self.repo}"
+    def full_name(self) -> str:
+        """`owner/repo`, as the forge's API names the repository."""
+        return f"{self.owner}/{self.repo}"
 
 
 #: The page size a listing asks for. Forgejo clamps it to its `max_response_items`, so a page
@@ -183,19 +186,19 @@ class ForgejoForge:
         self._client = client
         self._repository_id: int | None = None
 
-    def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+    def _request(self, call: ApiCall) -> httpx.Response:
         import httpx
 
+        method = call.method
         try:
             response = self._client.request(
                 method,
-                url,
-                headers={
-                    "Authorization": f"Bearer {self._identity.token(min_validity=60)}"
-                },
+                f"{self.address.origin}{call.path}",
                 follow_redirects=False,
                 timeout=30.0,
-                **kwargs,
+                **call.options(headers={
+                    "Authorization": f"Bearer {self._identity.token(min_validity=60)}"
+                }),
             )
             response.raise_for_status()
             return response
@@ -213,14 +216,14 @@ class ForgejoForge:
         """This repository's id, read once (`GET /repos/{o}/{r}`) and kept: what a PR's head
         repository is compared with."""
         if self._repository_id is None:
-            value = self._json(self._request("GET", self.address.api))
+            value = self._json(self._request(forgejo.repository(self.address.full_name)))
             if not isinstance(value, dict) or type(value.get("id")) is not int:
                 raise ForgeError("Forgejo's repository read names no repository id")
             self._repository_id = value["id"]
         return self._repository_id
 
     def verify_main_protection(self) -> None:
-        response = self._request("GET", f"{self.address.api}/branches/main")
+        response = self._request(forgejo.branch(self.address.full_name, "main"))
         value = self._json(response)
         if (
             not isinstance(value, dict)
@@ -239,17 +242,13 @@ class ForgejoForge:
         """Every PR row of `state` whose head is this repository, page by page on our own
         address. A row of another shape is a `ForgeError`; a fork's row, or one with no head
         repository, is skipped after it is counted."""
-        import httpx
-
         ours = self.repository_id()
         rows: list[dict] = []
         seen, page = 0, 1
         while True:
-            url = httpx.URL(
-                f"{self.address.api}/pulls",
-                params={"state": state, "page": str(page), "limit": str(_PAGE_LIMIT)},
+            response = self._request(
+                forgejo.pulls(self.address.full_name, state=state, page=page, limit=_PAGE_LIMIT)
             )
-            response = self._request("GET", str(url))
             value = self._json(response)
             if not isinstance(value, list):
                 raise ForgeError("Forgejo pulls JSON must be an array")
@@ -294,14 +293,7 @@ class ForgejoForge:
 
     def open_pr(self, *, base: str, head: str, title: str, body: str) -> str:
         response = self._request(
-            "POST",
-            f"{self.address.api}/pulls",
-            json={
-                "base": base,
-                "head": head,
-                "title": title,
-                "body": body,
-            },
+            forgejo.open_pull(self.address.full_name, base=base, head=head, title=title, body=body)
         )
         value = self._json(response)
         if not isinstance(value, dict) or not isinstance(value.get("html_url"), str):

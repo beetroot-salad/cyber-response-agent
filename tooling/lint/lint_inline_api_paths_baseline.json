@@ -1,0 +1,4 @@
+{
+  "//": "lint_inline_api_paths baseline — Forgejo API paths written outside defender/_forgejo_api.py, and OpenBao paths written in defender/lifecycle/ rather than defender/_openbao_api.py (#1440). Fingerprint is file:function:kind (forgejo|openbao), file relative to the scan scope. This baseline ships EMPTY — every site was moved onto the adapters when the gate landed, so an entry in it is a regression someone chose. Regenerate: python tooling/lint/lint_inline_api_paths.py --update-baseline.",
+  "entries": {}
+}
