@@ -298,21 +298,16 @@ def test_a_contract_deferred_with_a_rationale_closes_clean() -> None:
     assert _errors(doc) == []
 
 
-def test_a_contract_deferred_with_an_empty_rationale_is_refused() -> None:
-    """"appear in `conclude.deferred_authorizations[]` with a NON-EMPTY rationale". Listing the
-    id and saying nothing is the orphan-contract loophole with a row in front of it."""
-    doc = _authz_closure_doc(_ONE_CONTRACT, "", _deferred_authz("h-001.ac1|"))
-    _one_error(doc, "ac1")
-
-
-def test_a_contract_neither_resolved_nor_deferred_is_refused() -> None:
-    doc = _authz_closure_doc(_ONE_CONTRACT, "", _deferred_authz())
-    _one_error(doc, "ac1")
-
-
-def test_one_contract_resolved_and_the_other_abandoned_is_refused_for_the_orphan_only() -> None:
-    doc = _authz_closure_doc(_TWO_CONTRACTS, _authz_row("ac1"), _deferred_authz())
-    _one_error(doc, "ac2")
+@pytest.mark.parametrize(("doc", "orphan"), [
+    # "appear in `conclude.deferred_authorizations[]` with a NON-EMPTY rationale". Listing the id
+    # and saying nothing is the orphan-contract loophole with a row in front of it.
+    pytest.param(_authz_closure_doc(_ONE_CONTRACT, "", _deferred_authz("h-001.ac1|")), "ac1", id="deferred_with_an_empty_rationale"),
+    pytest.param(_authz_closure_doc(_ONE_CONTRACT, "", _deferred_authz()), "ac1", id="neither_resolved_nor_deferred"),
+    pytest.param(_authz_closure_doc(_TWO_CONTRACTS, _authz_row("ac1"), _deferred_authz()), "ac2",
+                 id="one_resolved_the_other_abandoned_refused_for_the_orphan_only"),
+])
+def test_an_authorization_contract_without_a_resolution_or_a_reasoned_deferral_is_refused(doc, orphan) -> None:
+    _one_error(doc, orphan)
 
 
 def test_a_contract_on_a_lead_born_hypothesis_is_in_scope() -> None:
@@ -563,27 +558,19 @@ def test_an_impact_prediction_deferred_with_a_rationale_closes_clean() -> None:
     assert _errors(doc) == []
 
 
-def test_an_impact_prediction_deferred_with_an_empty_rationale_is_refused() -> None:
-    doc = _impact_closure_doc(
-        preds=_ONE_IMPACT_PRED,
-        deferred=_deferred_impact("l-001.ip1|"),
-        impact_verdict="indeterminate",
-        impact_severity="low",
-    )
-    _one_error(doc, "ip1")
-
-
-def test_an_impact_prediction_neither_resolved_nor_deferred_is_refused() -> None:
-    doc = _impact_closure_doc(
-        preds=_ONE_IMPACT_PRED, impact_verdict="indeterminate", impact_severity="low"
-    )
-    _one_error(doc, "ip1")
-
-
-def test_one_impact_prediction_resolved_and_the_other_abandoned_is_refused() -> None:
-    """Per prediction, not per lead: grading `ip1` must not discharge `ip2` beside it."""
-    doc = _impact_closure_doc(preds=_TWO_IMPACT_PREDS, resolutions=_r_impact())
-    _one_error(doc, "ip2")
+@pytest.mark.parametrize(("doc", "orphan"), [
+    pytest.param(_impact_closure_doc(
+        preds=_ONE_IMPACT_PRED, deferred=_deferred_impact("l-001.ip1|"),
+        impact_verdict="indeterminate", impact_severity="low"), "ip1", id="deferred_with_an_empty_rationale"),
+    pytest.param(_impact_closure_doc(
+        preds=_ONE_IMPACT_PRED, impact_verdict="indeterminate", impact_severity="low"), "ip1",
+        id="neither_resolved_nor_deferred"),
+    # Per prediction, not per lead: grading `ip1` must not discharge `ip2` beside it.
+    pytest.param(_impact_closure_doc(preds=_TWO_IMPACT_PREDS, resolutions=_r_impact()), "ip2",
+                 id="one_resolved_the_other_abandoned"),
+])
+def test_an_impact_prediction_without_a_resolution_or_a_reasoned_deferral_is_refused(doc, orphan) -> None:
+    _one_error(doc, orphan)
 
 
 def test_deferred_impact_predictions_project_onto_the_conclude_block() -> None:

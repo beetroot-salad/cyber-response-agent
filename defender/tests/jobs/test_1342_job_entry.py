@@ -941,7 +941,7 @@ def test_o8_scrub_verified_comes_from_the_host_scrub_verdict_not_from_the_lifecy
 
 
 def test_o8_a_tree_the_scrub_found_tainted_is_not_verified(scene, monkeypatch):
-    """The verdict says `ran: true` and the scrub raises `RunTainted`: `scrub_verified` is false. (O8)"""
+    """The report closed, then the scrub wrote `ran: true` and raised `RunTainted`: `report_committed: true`, `scrub_verified: false`, the box started, and no reader touched the tree. (C2, O8)"""
     from defender.box import RunTainted
 
     run_id = str(uuid.uuid4())
@@ -956,16 +956,14 @@ def test_o8_a_tree_the_scrub_found_tainted_is_not_verified(scene, monkeypatch):
     got = run_job(scene, run_id, ran=ran, visualize=spies.seam,
                   lifecycle=_lifecycle(scene, investigate=_investigate(ran), scrub=taint))
 
-    record = scene.job_end(run_id)
-    assert record["box"] == "started"
-    assert record["scrub_verified"] is False
+    assert scene.job_end(run_id) == {**SETTLED, "scrub_verified": False}, "the report closed; only the scrub verdict is lost"
     assert isinstance(got.raised, RunTainted), got
     assert spies.seam_calls == 0, "the page was rendered from a tainted tree"
     assert spies.events == [], f"a reader of the tainted tree ran: {spies.events}"
 
 
 def test_c2_a_committed_report_survives_a_teardown_fault(scene):
-    """The report closed, then `stop_box` raised `BoxFault`: the record says `report_committed: true`, `scrub_verified: false`, the box started. (C2, O8)"""
+    """The report closed, then `stop_box` raised `BoxFault` after a successful start: the record says `report_committed: true`, `scrub_verified: false`, the box `started` (not `start_failed`). (C2, O8, M3, D-ad)"""
     from defender.box import BoxFault
 
     run_id = str(uuid.uuid4())
@@ -978,24 +976,6 @@ def test_c2_a_committed_report_survives_a_teardown_fault(scene):
     got = run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), stop_box=stop))
 
     assert isinstance(got.raised, BoxFault), got
-    assert scene.job_end(run_id) == {**SETTLED, "scrub_verified": False}
-
-
-def test_c2_a_committed_report_survives_a_tainted_tree(scene):
-    """The report closed, then the scrub wrote `ran: true` and raised `RunTainted`: `report_committed: true`, `scrub_verified: false`. (C2, O8)"""
-    from defender.box import RunTainted
-
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
-    ran = Ran()
-
-    def taint(tree: Path, *, write_verdict: Any) -> None:
-        write_verdict({"ran": True, "reason": "walk completed"})
-        raise RunTainted("a planted link")
-
-    got = run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), scrub=taint))
-
-    assert isinstance(got.raised, RunTainted), got
     assert scene.job_end(run_id) == {**SETTLED, "scrub_verified": False}
 
 
@@ -1112,24 +1092,6 @@ def test_c1_the_job_lanes_box_start_is_handed_the_launch_records_token_and_the_o
     assert not operator[0].get("start_token"), operator
 
 
-def test_m3_a_teardown_fault_is_told_from_a_start_fault(scene):
-    """The box started and its stop faulted: `box: started`, `scrub_verified` false. (M3)"""
-    from defender.box import BoxFault
-
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
-    ran = Ran()
-
-    def stop(*_a: Any, **_k: Any) -> None:
-        raise BoxFault("could not tear down the box")
-
-    got = run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), stop_box=stop))
-
-    assert isinstance(got.raised, BoxFault), got
-    record = scene.job_end(run_id)
-    assert (record["setup"], record["box"], record["scrub_verified"]) == ("done", "started", False)
-
-
 def test_m3_a_box_start_fault_is_start_failed_and_nothing_ran(scene):
     """The box could not start (no daemon): `box: start_failed`, the investigation never ran. (M3)"""
     from defender import box as box_mod
@@ -1165,22 +1127,6 @@ def test_d_ad_a_fault_other_than_a_box_start_fault_while_the_box_is_starting_is_
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "done", "box": "start_failed",
                                      "report_committed": False, "scrub_verified": False}
-
-
-def test_d_ad_control_a_fault_after_the_box_started_stays_started(scene):
-    """Control: a stop-box fault after a successful start leaves `box: started`. (D-ad)"""
-    from defender.box import BoxFault
-
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
-    ran = Ran()
-
-    def stop(*_a: Any, **_k: Any) -> None:
-        raise BoxFault("could not tear down the box")
-
-    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), stop_box=stop))
-
-    assert scene.job_end(run_id)["box"] == "started"
 
 
 def test_o8_a_crash_in_the_lifecycle_records_no_report_and_reaches_the_caller(scene):
