@@ -459,8 +459,7 @@ def held_findings_count(episode: formats.Episode) -> int:
     return len(sink.rows(FINDINGS)) + len(sink.rows(QUESTIONER_FINDINGS))
 
 
-def publish_episode_findings(episode_dir: Path | formats.Episode, *,
-                             state: LearningState) -> PublishReport:
+def publish_episode_findings(episode: formats.Episode, *, state: LearningState) -> PublishReport:
     """Publish a job episode's held findings to the tenant's queues through `state` (#1344,
     "Publishing"). Every row is screened by its channel's own rule first, so a held row that
     fails it is `FindingsRefused` with nothing appended; then each channel is appended with
@@ -469,19 +468,9 @@ def publish_episode_findings(episode_dir: Path | formats.Episode, *,
     episode with no findings held publishes nothing. Anything else that fails (the episode or the
     queue cannot be read or written) is raised as it is: the job stays pending.
 
-    `episode_dir` is the episode's handle, or its folder `<data root>/<tenant>/episodes/<id>`,
-    which is opened through that tenant's runs repository walk (never by path)."""
-    if isinstance(episode_dir, formats.Episode):
-        return _publish_held(episode_dir, state=state)
-    folder = Path(episode_dir)
-    if folder.parent.name != "episodes":
-        raise JudgeRefused(f"{folder} is not an episode folder (<data root>/<tenant>/episodes/<id>)")
-    from defender import tenancy
-
-    tenant = tenancy.requested_tenant(tenancy.data_root_from_path(folder.parent.parent.parent),
-                                      folder.parent.parent.name)
-    with tenant.runs_repository().episode_files(folder.name) as episode:
-        return _publish_held(episode, state=state)
+    `episode` is the handle from the tenant's runs repository (`episode_files`): a library
+    function never makes a tenant out of a path."""
+    return _publish_held(episode, state=state)
 
 
 def _publish_held(episode: formats.Episode, *, state: LearningState) -> PublishReport:

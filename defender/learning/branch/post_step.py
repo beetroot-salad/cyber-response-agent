@@ -69,33 +69,39 @@ def _default_tick(paths: Any) -> int:
     return author_drain(paths)
 
 
-def main(argv: list[str], *, author_tick: Callable[..., int] | None = None) -> int:
+def main(argv: list[str], *, author_tick: Callable[..., int] | None = None,
+         directory: Any = None) -> int:
     """Publish the pending jobs' findings, record the outcome, then run the drain's gate;
-    returns the gate's exit."""
+    returns the gate's exit. The tenant is accepted here, by the host acceptance (the command
+    function of an entry module owns the scope), and held for the whole step."""
+    from defender.systems import run_tenant
+
     ns = parse_post_step_args(argv)
     tie_to_parent()
     require_parent(ns.parent_pid, who="learning post-step")
+    which = f"job {ns.job}" if ns.job is not None else f"tenant {ns.tenant} (no family)"
     previous = signal.signal(signal.SIGTERM, _interrupt)
     try:
-        return _post_step(ns, author_tick=author_tick if author_tick is not None else _default_tick)
+        try:
+            data_root = tenancy.resolve_data_root()
+            admitted = run_tenant.host_tenant(data_root, ns.tenant, directory=directory)
+            lane = JobLane.open(data_root, ns.tenant, make=True)
+        except (TenantRefused, JobLaneRefused) as unusable:
+            sys.exit(f"[post-step] {which}: the tenant cannot be used: {unusable}")
+        with admitted, lane:
+            return _post_step(ns, which, admitted.tenant, lane,
+                              author_tick=author_tick if author_tick is not None else _default_tick)
     finally:
         signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
 
 
-def _post_step(ns: argparse.Namespace, *, author_tick: Callable[..., int]) -> int:
+def _post_step(ns: argparse.Namespace, which: str, tenant: Any, lane: JobLane, *,
+               author_tick: Callable[..., int]) -> int:
     from defender.learning.core.config import LoopPaths
 
-    which = f"job {ns.job}" if ns.job is not None else f"tenant {ns.tenant} (no family)"
-    try:
-        data_root = tenancy.resolve_data_root()
-        tenant = tenancy.requested_tenant(data_root, ns.tenant)
-        lane = JobLane.open(data_root, ns.tenant, make=True)
-    except (TenantRefused, JobLaneRefused) as unusable:
-        sys.exit(f"[post-step] {which}: the tenant cannot be used: {unusable}")
     paths = LoopPaths.for_tenant(tenant)
-    with lane:
-        published, refused = _publish_pending(tenant, paths, list(dict.fromkeys(ns.pending)))
-        lane.write_post_step(ns.job, PostStepRecord.of(published, refused))
+    published, refused = _publish_pending(tenant, paths, list(dict.fromkeys(ns.pending)))
+    lane.write_post_step(ns.job, PostStepRecord.of(published, refused))
     _logger.info(f"post-step of {which}: published {len(published)} job(s), refused {len(refused)}")
     return author_tick(paths)
 

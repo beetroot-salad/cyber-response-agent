@@ -1063,7 +1063,12 @@ class BoxRuns:
                     f"{status!r}, not 'exited'"
                 )
             self._window = _attach(self._docker, name)
-            _await_running(self._docker, name, self._window, _WINDOW_RUNNING_WAIT)
+            try:
+                _await_running(self._docker, name, self._window, _WINDOW_RUNNING_WAIT)
+            except _StarterExited as exited:
+                # The private class must not reach a durable record other packages read; a lane
+                # box is never `--rm`, so the run box's name-reuse reasoning does not apply.
+                raise BoxFault(str(exited)) from exited
         except BaseException:
             # Best-effort, before the refusal unwinds through host steps.
             with contextlib.suppress(BoxFault):
