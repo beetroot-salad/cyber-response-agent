@@ -526,7 +526,6 @@ class _Pump:
                 self._read(key.fd)
         while self.err_fd in self.open and self._read(self.err_fd):
             pass
-        self.sel.close()
         return bytes(self.sinks[self.out_fd]), bytes(self.sinks[self.err_fd])
 
 
@@ -545,7 +544,11 @@ def _run_one_pipeline(
         finally:
             os.close(err_w)
         try:
-            out, err = _Pump(procs, err_r, budget).run(deadline)
+            pump = _Pump(procs, err_r, budget)
+            try:
+                out, err = pump.run(deadline)
+            finally:
+                pump.sel.close()
         except BaseException:
             _kill_all(procs)
             raise

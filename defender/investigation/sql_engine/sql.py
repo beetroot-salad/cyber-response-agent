@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import re
@@ -61,7 +62,9 @@ _RESULT_TOO_BIG = (
 #: reaches the cap; a limit below it turns the same overrun into an allocation error the tool
 #: can catch and refuse.
 _ADDRESS_SPACE_SHARE = 0.8
-_BOX_MEMORY = re.compile(r"(\d+)([bkmg]?)b?", re.IGNORECASE)
+#: The errors that mean the box has no room for the payload (disk, quota, file-size limit, memory).
+_NO_ROOM_ERRNOS = (errno.ENOSPC, errno.EDQUOT, errno.EFBIG, errno.ENOMEM)
+_BOX_MEMORY = re.compile(r"(\d+(?:\.\d+)?)([bkmg]?)b?", re.IGNORECASE)
 _UNITS = {"": 1, "b": 1, "k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
 _ENGINE_FIGURE = re.compile(r"([\d.]+)\s*(\w+)")
 _ENGINE_UNITS = {"bytes": 1, "KiB": 1 << 10, "MiB": 1 << 20, "GiB": 1 << 30, "TiB": 1 << 40,
@@ -99,7 +102,7 @@ def _box_memory_bytes(text: str) -> int | None:
     match = _BOX_MEMORY.fullmatch(text.strip())
     if match is None:
         return None
-    size = int(match.group(1)) * _UNITS[match.group(2).lower()]
+    size = int(float(match.group(1)) * _UNITS[match.group(2).lower()])
     return size or None
 
 
@@ -763,7 +766,8 @@ def _run(sql: str, rows_path: str | None = None, names_path: str | None = None) 
         if _is_memory_error(exc):
             raise _SizeRefusal(_LOAD_OUT_OF_MEMORY if phase.loading
                                else _QUERY_OUT_OF_MEMORY) from None
-        if isinstance(exc, OSError) and phase.loading:
+        if (isinstance(exc, OSError) and phase.loading
+                and exc.errno in _NO_ROOM_ERRNOS):
             raise _SizeRefusal(_NO_ROOM) from None
         raise
     finally:
