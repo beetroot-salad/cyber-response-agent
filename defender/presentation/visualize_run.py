@@ -233,6 +233,10 @@ def render_runtime_headline(
 """
 
 
+#: The cost bar's segment for the part of the run's total no request-log bar explains (#1377 S5).
+UNATTRIBUTED = "unattributed"
+
+
 def render_runtime_metrics(
     attribution: dict[str, dict],
     phase_order: list[str],
@@ -242,10 +246,10 @@ def render_runtime_metrics(
     health: dict,
 ) -> str:
     # The dict collapses repeated phase names into one bucket, in first-appearance order.
-    cost_bar = _phase_bar(
-        {ph: (attribution.get(ph) or {}).get("cost", 0.0) for ph in phase_order},
-        lambda v: f"${v:.3f}",
-    )
+    bars = {ph: (attribution.get(ph) or {}).get("cost", 0.0) for ph in phase_order}
+    if totals.get("unattributed", 0.0) > 5e-7:
+        bars[UNATTRIBUTED] = totals["unattributed"]
+    cost_bar = _phase_bar(bars, lambda v: f"${v:.3f}")
     wall_bar = _phase_bar(
         {ph: (wall_times.get(ph) or {}).get("duration_sec", 0.0) for ph in phase_order},
         lambda v: fmt_duration(v * 1000),
@@ -449,6 +453,8 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     events = read_jsonl_rows(RunPaths(run_dir).tool_trace)
     messages = load_messages(run_dir)
     _, n_tool_calls, result_total = _stats(events)
+    result_is_lower_limit = any(e.get("total_cost_is_lower_limit") is True
+                                for e in events if e.get("type") == "result")
     report = parse_report(run_dir)
     leads = sorted(lead_repository.joined(run_dir), key=_lead_sort_key)
 
@@ -462,9 +468,7 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
 
     attribution = phase_attribution(events, phase_order, tags)
     main_total = sum(b["cost"] for b in attribution.values())
-    gather_by_phase, gather_total = gather_cost_by_phase(
-        run_dir, events, tags, phase_order, main_total, result_total, messages
-    )
+    gather_by_phase, gather_total = gather_cost_by_phase(run_dir, events, tags, phase_order, messages)
     # `phase_keys`: iterating `phase_order` would add a repeated bucket's gather cost twice.
     for ph in phase_keys:
         attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
@@ -500,10 +504,13 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     ):
         for model, cost in by_model_costs.items():
             by_model[model] = by_model.get(model, 0.0) + cost
-    # `result_total` (main session only) is the fallback when there are no phases; subagent
-    # and review costs are added either way.
+    # The headline is the run file's total alone (#1377 S5): it is the whole run's spend, review
+    # included, from the spend ledger. The bars come from the request log; what they do not explain
+    # is shown as its own "unattributed" segment (never below 0), so the parts add up to the headline.
     totals = {
-        "cost": (main_total + gather_total if phase_order else result_total) + review_total,
+        "cost": result_total,
+        "lower_limit": result_is_lower_limit,
+        "unattributed": max(0.0, result_total - (main_total + gather_total) - review_total),
         "review_cost": review_total,
         "wall_ms": wall_ms,
         "by_model": by_model,
@@ -526,7 +533,7 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
         if totals["review_cost"] else ""
     )
     stats_html = (
-        f'<span class="ts-cost">${totals.get("cost", 0.0):.4f}</span>'
+        f'<span class="ts-cost">{"at least " if totals.get("lower_limit") else ""}${totals.get("cost", 0.0):.4f}</span>'
         f"{review_note}"
         f'<span class="ts-sep">·</span>'
         f'<span class="ts-wall">{fmt_duration(wall_ms)}</span>'

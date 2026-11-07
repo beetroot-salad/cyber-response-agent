@@ -80,6 +80,33 @@ _ACTIVE_PATHS: set[str] = set()
 _EVER_LOGGER_PATHS: set[str] = set()
 
 
+class _NoLedger:
+    """The explicit "this logger keeps no spend ledger" (a learning stage, the policy-denial
+    stream): its responses are not a failed spend write. A logger that is neither bound nor given
+    this is a wiring fault, and each run-side response it records is a failed write (#1377)."""
+
+    def __repr__(self) -> str:
+        return "NO_LEDGER"
+
+
+NO_LEDGER = _NoLedger()
+
+
+class SpendLedger:
+    """A run's spend ledger: the run's session store and the run id its rows are written under."""
+
+    def __init__(self, store: Any, run_id: str) -> None:
+        self.store, self.run_id = store, run_id
+
+    def record(self, response: Any) -> None:
+        """Append `response`'s row. Raises whatever the store raises; `RequestLogger.record_spend`
+        is the caller that never lets it reach an agent."""
+        from defender.records import session_store as ss
+
+        ss.record_spend(self.store, self.run_id, getattr(response, "model_name", None) or "",
+                        _usage_dict(getattr(response, "usage", None)))
+
+
 class RequestLogger:
 
     def __init__(self, path: Path):
@@ -103,9 +130,42 @@ class RequestLogger:
         self._seq: dict[str, int] = {}
         self.n_requests = 0
         self._denial_seq = 0
+        self._init_spend()
+
+    def _init_spend(self) -> None:
+        #: `None`: unbound. A `SpendLedger` once the run's store is open, or `NO_LEDGER`.
+        self.ledger: SpendLedger | _NoLedger | None = None
+        #: Set when a spend write failed (or none was bound): the run's cost is then a lower limit.
+        self.spend_write_failed = False
+        self._on_spend_failure: Any = None
+
+    def bind_ledger(self, ledger: SpendLedger | _NoLedger, *, on_failure: Any = None) -> None:
+        """Bind the run's ledger (or `NO_LEDGER`); `on_failure()` is called once per failed write."""
+        self.ledger, self._on_spend_failure = ledger, on_failure
+
+    def record_spend(self, response: Any) -> None:
+        """The ledger write for one response, the first step after it returns. It never raises: a
+        failure (or a missing binding) logs at ERROR, sets `spend_write_failed` and tells the
+        failure sink, and the agent runs on. A raise here would change a verdict (the review
+        gate forces `inconclusive` on any exception from a stage)."""
+        ledger = self.ledger
+        if ledger is NO_LEDGER:
+            return
+        try:
+            if not isinstance(ledger, SpendLedger):
+                raise RuntimeError("no spend ledger is bound to this run's request logger")
+            ledger.record(response)
+        except Exception as fault:  # noqa: BLE001 — bookkeeping never stops the run (#1377 S3)
+            self.spend_write_failed = True
+            _logger.error(f"spend write failed ({fault!r}); this run's cost is a lower limit")
+            try:
+                if self._on_spend_failure is not None:
+                    self._on_spend_failure()
+            except Exception:  # noqa: BLE001 — the sink is best effort too
+                _logger.exception("the spend-failure sink raised")
 
     @classmethod
-    def from_record(cls, record: Any, *, continuing: bool = False) -> RequestLogger:
+    def from_record(cls, record: Any, *, continuing: bool = False, no_ledger: bool = False) -> RequestLogger:
         """A logger writing to `record`. A stream is started empty the first time this process
         opens its path, unless `continuing`: then it is appended to, and its policy-denial
         numbering goes on from the denials it already holds (a branch arm's log, restored to
@@ -125,6 +185,8 @@ class RequestLogger:
         logger.messages = []
         logger._seq = {}
         logger.n_requests = logger._denial_seq = 0
+        logger._init_spend()
+        logger.ledger = NO_LEDGER if no_ledger else None
         if continuing:
             rows, _malformed, _read = record.read_rows()
             logger._denial_seq = sum(
@@ -257,7 +319,7 @@ def _denial_logger_or_null(record: Any) -> RequestLogger:
     try:
         # Continued, never started over: a branch arm's log already holds its source's denials
         # through the branch point; a fresh run's does not exist yet.
-        return RequestLogger.from_record(record, continuing=True)
+        return RequestLogger.from_record(record, continuing=True, no_ledger=True)
     except OSError as e:
         _logger.error(
             f"the policy-denial log at {record.path} could not be opened ({e!r}); denials "
@@ -361,11 +423,16 @@ def _user_event(message: Any) -> dict | None:
     return ev
 
 
-def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -> None:
+def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, run_id: str,
+                spend_write_failed: bool = False) -> None:
     """`{run_dir}/tool_trace.jsonl`: the events this run produced, and its own cost.
 
-    Sliced at the branch point: a resumed run hydrates the source run's prefix too, which
-    would otherwise be reported (and billed, e.g. in `run_stats.py`) once per sibling.
+    The events are sliced at the branch point: a resumed run hydrates the source run's prefix too,
+    which would otherwise be reported once per sibling. The result line's cost and usage are the
+    spend ledger's rows for `run_id` (#1377 S5): every response the run received (main, every
+    lead's last one, the review), never the saved conversation. `num_turns` stays MAIN's turns,
+    which run health reads. The total is marked a lower limit when a spend write failed. A ledger
+    that cannot be read raises, and the caller writes no trace (the job's cost is unknown then too).
     """
     from defender.records import session_store as ss  # local import — avoids a cycle at module load
 
@@ -389,20 +456,19 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -
                 events.append(user)
 
     responses = [m for m in messages if isinstance(m, ModelResponse)]
-    keys = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
-    totals = {k: 0 for k in keys}
+    totals = dict.fromkeys(ss.SPEND_COUNTS, 0)
     total_cost = 0.0
-    for m in responses:
-        d = _usage_dict(m.usage)
-        for k in keys:
-            totals[k] += d.get(k, 0)
-        total_cost += usage_cost(m.model_name or "", d)
+    for spent in ss.run_spend(store, run_id):  # an unreadable ledger raises: no total, as the job's cost is unknown
+        for k in ss.SPEND_COUNTS:
+            totals[k] += spent.usage.get(k, 0)
+        total_cost += usage_cost(spent.model, spent.usage)
 
     events.append({
         "type": "result",
         "duration_ms": round(wall_ms),
         "duration_api_ms": round(wall_ms),
         "total_cost_usd": round(total_cost, 6),
+        "total_cost_is_lower_limit": spend_write_failed,
         "num_turns": len(responses),
         "usage": totals,
     })
@@ -412,5 +478,5 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -
 # Public path-mode helpers remain available to learning and tooling callers.
 __all__ = [
     "RequestLogger", "encode_wire_record", "denial_logger", "wire_log_path",
-    "stage_trace_path", "writer_id", "write_trace",
+    "stage_trace_path", "writer_id", "write_trace", "NO_LEDGER", "SpendLedger",
 ]

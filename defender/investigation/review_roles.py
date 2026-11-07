@@ -120,11 +120,13 @@ class UnboundReviewStage(RuntimeError):
 def _make_live_stage(  # noqa: PLR0913 — one stage's full wiring, named once
     defn: AgentDefinition, run_dir: Path, defender_dir: Path,
     logger: observe.RequestLogger, *, agent_id: str, instructions: str, build: Any,
+    make_model: Any = None,
 ):
     """One live review stage: one Agent built per call.
 
-    Uses the run's logger so review calls land in the run's accounted cost; it must not be
-    closed here, since the main agent is still writing to it. `agent_id` is per lens
+    Uses the run's logger so review calls land in the run's spend ledger (bound to it once the
+    run's store opens); it must not be closed here, since the main agent is still writing to it.
+    `make_model` is the run's model factory, so a run's model seam reaches the review stages too. `agent_id` is per lens
     (`review:{lens}`) because one role runs twice and `observe` keys records on `agent_id`.
 
     `build` is the agent-builder seam (default `driver.build_agent_core`), so this can be
@@ -132,9 +134,10 @@ def _make_live_stage(  # noqa: PLR0913 — one stage's full wiring, named once
 
     async def call(request):
         assert defn.deps_cls is not None, f"{defn.role.name}_DEF declares no deps_cls"
+        seam = {} if make_model is None else {"make_model": make_model}
         agent = build(
             defn, deps_type=defn.deps_cls, instructions=instructions,
-            logger=logger, agent_id=agent_id,
+            logger=logger, agent_id=agent_id, **seam,
         )
         deps = bind_review_role(defn, run_dir, defender_dir=defender_dir)
         result = await agent.run(request.prompt, deps=deps)
@@ -174,7 +177,7 @@ class ReviewStages:
 
 def live_review_stages(
     run_dir: Path, defender_dir: Path, *, logger: observe.RequestLogger,
-    model_override: str | None = None, build: Any = None,
+    model_override: str | None = None, build: Any = None, make_model: Any = None,
 ) -> ReviewStages:
     """The production bundle, built where the run dir and the run's logger both exist.
 
@@ -195,7 +198,7 @@ def live_review_stages(
         return _make_live_stage(
             replace(defn, model=lambda: name), run_dir, defender_dir, logger,
             agent_id=f"{REVIEW_AGENT_ID_PREFIX}{lens}",
-            instructions=prompts[defn.role.value], build=build,
+            instructions=prompts[defn.role.value], build=build, make_model=make_model,
         )
 
     return ReviewStages(

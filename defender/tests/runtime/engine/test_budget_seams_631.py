@@ -252,6 +252,20 @@ def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_pa
     assert "limits" in core_sig.parameters
 
 
+def test_s3_a_run_side_hook_with_no_ledger_bound_counts_each_response_as_a_failed_spend_write(tmp_path, caplog):
+    """A response recorded while no ledger is bound is logged at ERROR naming spend, never dropped silently; the agent runs on. (S3, r4 carrier)"""
+    import logging
+
+    run_dir = _run_dir(tmp_path, "unbound")
+    result, model = drive_agent(MAIN_DEF, run_dir, [[("bash", {"command": "echo hi"})]], limits=DEFAULT_LIMITS,
+                                state=_state(run_dir), enforce=False)
+
+    assert model.calls == 2, "the agent should have run to its end"
+    assert "stopping" in str(result.output)
+    failures = [r for r in caplog.records if r.levelno >= logging.ERROR and "spend" in r.getMessage().lower()]
+    assert len(failures) == 2, f"one failed write per response, got {[r.getMessage() for r in failures]}"
+
+
 def test_limits_threaded_from_boundary(tmp_path):
     """Limits are threaded inward from the boundary: an injected cap of 3, not `DEFAULT_LIMITS`, is
     what refuses."""

@@ -48,7 +48,7 @@ from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
 ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
 OTHER_TENANT = str(uuid.UUID(int=0x1342))
-SETTLED = {"setup": "done", "box": "started", "report_committed": True, "scrub_verified": True, "cut_short": None}
+SETTLED = {"setup": "done", "box": "started", "report_committed": True, "scrub_verified": True, "cut_short": None, "spend_write_failed": False}
 
 
 pytestmark = [pytest.mark.postgres, pytest.mark.skipif(
@@ -479,7 +479,7 @@ def test_o6_an_alert_that_admission_refuses_is_refused_and_recorded_even_with_a_
 
 
 REFUSED = {"setup": "refused", "box": "not_started", "report_committed": False, "scrub_verified": False,
-           "cut_short": None}
+           "cut_short": None, "spend_write_failed": False}
 
 
 @pytest.mark.parametrize("record", ["creating", "offboarding", "offboarded", "no wiring", "no record", "records unreachable"])
@@ -642,7 +642,7 @@ def test_o8_a_setup_that_raises_otherwise_is_crashed_and_the_exception_reaches_t
     assert ran.raised is boom, ran
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "crashed", "box": "not_started",
-                                     "report_committed": False, "scrub_verified": False, "cut_short": None}
+                                     "report_committed": False, "scrub_verified": False, "cut_short": None, "spend_write_failed": False}
 
 
 def test_o6_the_run_folder_is_still_made_exclusively(scene):
@@ -659,7 +659,7 @@ def test_o6_the_run_folder_is_still_made_exclusively(scene):
     assert first.calls["lifecycle"] == second.calls["lifecycle"] == 0
     assert first.raised is None, first.raised
     assert scene.job_end(taken) == {"setup": "refused", "box": "not_started",
-                                    "report_committed": False, "scrub_verified": False, "cut_short": None}
+                                    "report_committed": False, "scrub_verified": False, "cut_short": None, "spend_write_failed": False}
     assert (scene.runs / taken / "mark").read_text(encoding="utf-8") == "theirs"
     assert sorted(p.name for p in (scene.runs / taken).iterdir()) == ["mark"]
     assert not (scene.runs / used).exists()
@@ -1151,6 +1151,36 @@ def test_o8_a_tainted_tree_still_raises_with_the_cut_short_fact_already_set(scen
     assert scene.job_end(run_id)["cut_short"] == "box-lost", scene.job_end(run_id)
 
 
+@pytest.mark.parametrize(("mode", "failed"), [("replay-priced-raises", False), ("replay-priced-ledger-fault-raises", True),
+                                              ("replay-priced-dies", False), ("replay-priced-ledger-fault-dies", True)],
+                         ids=["no write failed", "a write failed", "no write failed, dies inside the run",
+                              "a write failed, dies inside the run"])
+def test_s2_a_run_that_raises_after_a_failed_spend_write_still_says_so_in_its_job_end_record(scene, tmp_path, mode, failed):
+    """The fact is set when the write fails, not copied from a summary the raising run never returns, nor at the run's end:
+    a raise after the run returned, or one inside the run after the failed write, still leaves it set. (S2, O8, r4 failure sink)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    marks = tmp_path / "marks"
+    env = {**_env(scene), "DEFENDER_MODEL": "claude-sonnet-4-6", "DEFENDER_GATHER_MODEL": "claude-haiku-4-5",
+           "DEFENDER_REVIEW_MODEL": "kimi-k2.6"}
+
+    # A real fault: the child makes a SQLite trigger on its own spend_ledger refuse inserts from the first review call (ENTRY).
+    proc = subprocess.run(_child_cmd(scene, marks, run_id, os.getpid(), mode), env=env,  # noqa: S603
+                          cwd=str(WORKTREE), capture_output=True, text=True, timeout=240, check=False)
+
+    assert proc.returncode != 0, proc.stderr[-2000:]
+    if mode.endswith("-dies"):
+        assert (marks / "fault-raised").is_file(), ("premise: MAIN's request after the close raised inside the run", proc.stderr[-2000:])
+    else:
+        assert "the run died after its last response" in proc.stderr, proc.stderr[-2000:]
+    reviewed = (marks / "calls-review").read_text(encoding="utf-8").count("\n") if (marks / "calls-review").is_file() else 0
+    assert reviewed == 3, "premise: the run's live review stages are built on its model factory and made their three calls (#1377 r4)"
+    record = scene.job_end(run_id)
+    assert record is not None, proc.stderr[-2000:]
+    assert record["setup"] == "done", record
+    assert record["spend_write_failed"] is failed, record
+
+
 @pytest.mark.parametrize("scrub_ends", ["returns", "raises"])
 def test_c2_the_lifecycle_sets_scrub_verified_only_when_stop_and_scrub_returns(scene, scrub_ends):
     """On the holder the job entry handed it, `scrub_verified` is still false while the scrub runs, true after a clean return, and false after a raise even though the verdict says `ran: true`. (C2, O8)"""
@@ -1280,7 +1310,7 @@ def test_m3_a_box_start_fault_is_start_failed_and_nothing_ran(scene):
 
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "done", "box": "start_failed",
-                                     "report_committed": False, "scrub_verified": False, "cut_short": None}
+                                     "report_committed": False, "scrub_verified": False, "cut_short": None, "spend_write_failed": False}
 
 
 @pytest.mark.parametrize("fault", [OSError("could not write the did-not-run verdict"), RuntimeError("the start blew up"),
@@ -1300,7 +1330,7 @@ def test_d_ad_a_fault_other_than_a_box_start_fault_while_the_box_is_starting_is_
     assert got.raised is fault, got
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "done", "box": "start_failed",
-                                     "report_committed": False, "scrub_verified": False, "cut_short": None}
+                                     "report_committed": False, "scrub_verified": False, "cut_short": None, "spend_write_failed": False}
 
 
 def test_d_ad_control_a_fault_after_the_box_started_stays_started(scene):
@@ -1694,7 +1724,7 @@ def test_o7_a_sigterm_is_one_keyboard_interrupt_and_later_ones_do_not_interrupt_
     assert (marks / "stop-box-done").exists(), "a second SIGTERM interrupted the teardown"
     assert (marks / "start-token").read_text(encoding="utf-8") == scene.token, "the box start was not handed the launch token"
     assert scene.job_end(run_id) == {"setup": "done", "box": "started", "report_committed": committed,
-                                     "scrub_verified": False, "cut_short": None}, "an interrupted run still leaves its job-end record"
+                                     "scrub_verified": False, "cut_short": None, "spend_write_failed": False}, "an interrupted run still leaves its job-end record"
 
 
 _INTERMEDIATE = """
@@ -1807,7 +1837,7 @@ def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path, spe
         assert not (runs / run_id).exists()
         record = json.loads((runs / f"{run_id}.job-end.json").read_text(encoding="utf-8"))
         assert record == {"setup": "refused", "box": "not_started", "report_committed": False,
-                          "scrub_verified": False, "cut_short": None}
+                          "scrub_verified": False, "cut_short": None, "spend_write_failed": False}
 
 
 

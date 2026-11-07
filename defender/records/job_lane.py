@@ -87,28 +87,31 @@ class Launched:
         return RunId.parse(self.record.investigation_id)
 
 
-_JOB_END_KEYS = frozenset({"setup", "box", "report_committed", "scrub_verified", "cut_short"})
+_JOB_END_KEYS = frozenset({"setup", "box", "report_committed", "scrub_verified", "cut_short", "spend_write_failed"})
 
 
 @dataclass(frozen=True)
 class JobEnd:
-    """The job-end record (`<runs>/<id>.job-end.json`): five facts, each set by the job entry at
+    """The job-end record (`<runs>/<id>.job-end.json`): six facts, each set by the job entry at
     the point it became true. `cut_short` is the run's exit class (`run_end.TRUNCATED_BY_VALUES`,
     the whole vocabulary) as the driver returned it, or `None`: a run nothing cut short, or one
     that never returned from its driver (setup refused or crashed, a group that propagated)
-    (#1421)."""
+    (#1421). `spend_write_failed` is true when a spend write failed in the run, so its cost may be
+    missing recorded spend (#1377)."""
 
     setup: str
     box: str
     report_committed: bool
     scrub_verified: bool
     cut_short: str | None
+    spend_write_failed: bool
 
     def text(self) -> str:
         return json.dumps({"setup": self.setup, "box": self.box,
                            "report_committed": self.report_committed,
                            "scrub_verified": self.scrub_verified,
-                           "cut_short": self.cut_short})
+                           "cut_short": self.cut_short,
+                           "spend_write_failed": self.spend_write_failed})
 
     @classmethod
     def parse(cls, text: str) -> JobEnd | None:
@@ -120,12 +123,23 @@ class JobEnd:
             return None
         setup, box = obj["setup"], obj["box"]
         committed, verified, cut_short = obj["report_committed"], obj["scrub_verified"], obj["cut_short"]
+        spend_failed = obj["spend_write_failed"]
         if not (isinstance(setup, str) and setup in _SETUPS and isinstance(box, str) and box in _BOXES
                 and isinstance(committed, bool) and isinstance(verified, bool)
+                and isinstance(spend_failed, bool)
                 and (cut_short is None or normalized_truncated_by(cut_short) is not None)):
             return None
         return cls(setup=setup, box=box, report_committed=committed, scrub_verified=verified,
-                   cut_short=cut_short)
+                   cut_short=cut_short, spend_write_failed=spend_failed)
+
+
+@dataclass(frozen=True)
+class RunCost:
+    """A run's spend read from its ledger, and whether the run ever opened its store (a pointer
+    exists): the worker applies the lower-limit rule from this one read (#1377)."""
+
+    usd: float
+    store_opened: bool
 
 
 def _run_id(raw: object) -> RunId:
@@ -314,31 +328,28 @@ class JobLane:
             raise CostUnreadable(f"run {run_id}: its session pointer's case id is refused: {bad}") from None
         return database, session_id or None
 
-    def cost(self, run_id: object) -> float:
-        """What the run spent: the sum, over every session in the database its pointer names, of
-        that session's own model responses priced from the pricing table (a fork's inherited
-        prefix is its parent's, so counted once). No pointer: 0 — the store was never opened, so
-        no model request was made. `CostUnreadable` for a pointer or database that cannot be
-        read, or a lineage whose main session has a parent: the sum is the run's spend only for a
-        fresh lineage, never a resume."""
+    def cost(self, run_id: object) -> RunCost:
+        """What the run spent: the sum of the spend ledger's rows for this run id in the database
+        its pointer names (#1377), each priced from the pricing table. Rows of another run in the
+        same database (a branch arm's source, a sibling) are not counted; no conversation is read.
+        No pointer: 0, `store_opened` false (the store was never opened, so no model request was
+        made). `CostUnreadable` for a pointer or database that cannot be read, a database without
+        the ledger, or a pointer naming a session the database lacks."""
+        run_id = _run_id(run_id)
         located = self.session_database(run_id)
         if located is None:
-            return 0.0
+            return RunCost(0.0, store_opened=False)
         database, session_id = located
-        from defender.configuration import billed_usage, usage_cost
+        from defender.configuration import usage_cost
         from defender.records import session_store
 
         try:
             with session_store.open_store_for_read(database) as store:
-                sessions = {s.session_id: s for s in session_store.list_sessions(store)}
                 main = session_id if session_id is not None else session_store.main_session_id(store)
-                if main not in sessions:
+                if store.connection.execute("SELECT 1 FROM session WHERE session_id = ?", (main,)).fetchone() is None:
                     raise CostUnreadable(f"run {run_id}: its main session {main} is not in {database}")
-                if sessions[main].parent_session_id is not None:
-                    raise CostUnreadable(f"run {run_id}: its main session {main} has a parent; the "
-                                         "cost of a resumed lineage is not this run's spend")
-                return sum(usage_cost(m.model_name or "", billed_usage(m.usage))
-                           for s in sessions for m in session_store.own_responses(store, s))
+                return RunCost(sum(usage_cost(r.model, r.usage) for r in session_store.run_spend(store, str(run_id))),
+                               store_opened=True)
         except CostUnreadable:
             raise
         except (OSError, sqlite3.Error, StoreError, ValueError) as fault:

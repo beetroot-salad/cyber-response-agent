@@ -149,7 +149,8 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
 
 
 def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second_write(tmp_path):
-    """A second `write_trace` under one `run_id` fails loud or keeps every event of the first."""
+    """A second `write_trace` under one `run_id` fails loud or keeps every event of the first. (#1377 S5: the run file's
+    total reads the ledger for the run's own id, which a run's directory names, so the call names it.)"""
     observe_mod = __import__("defender.investigation.observe", fromlist=["write_trace"])
     run_dir, store, _replay = _driven_run(tmp_path, run_id="trace-once")
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
@@ -160,7 +161,7 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
         return len([line for line in text.splitlines() if line.strip()])
 
     try:
-        observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=1.0)
+        observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=1.0, run_id=run_dir.name)
     except FileExistsError:
         return  # failing loud on a second write discharges the demand
     second = (run_dir / "tool_trace.jsonl").read_text()

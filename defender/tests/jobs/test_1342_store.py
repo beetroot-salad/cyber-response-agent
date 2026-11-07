@@ -33,6 +33,7 @@ from defender.tests.support.jobs._jobs1342 import (
     job_store,
     lapse_lease,
     lease_left,
+    lower_limit,
     register_tenant,
     row,
 )
@@ -78,8 +79,8 @@ def _plant_investigation(dsn: str, *, tenant: str, alert_id: str, key: str, atte
                          created_at: dt.datetime = NOW) -> str:
     investigation_id = str(uuid.uuid4())
     lease = "now() + interval '30 seconds'" if stage == "running" else "NULL"  # #1343: a running row has a lease
-    execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
-                 f"stage, created_at, cost_usd, lease_expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, {lease})",  # noqa: S608
+    execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
+                 f"cost_usd, cost_is_lower_limit, lease_expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, false, {lease})",  # noqa: S608
             (investigation_id, tenant, alert_id, key, attempt, stage, created_at))
     return investigation_id
 
@@ -624,7 +625,7 @@ async def test_o4_rows_created_together_are_claimed_lowest_id_first(dsn):
     alerts = [_plant_alert(dsn, ticket=f"P-{n}") for n in range(2)]
     for investigation_id, alert_id in ((high, alerts[0]), (low, alerts[1])):  # the higher id goes in first
         execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
-                     "stage, created_at, cost_usd) VALUES (%s, %s, %s, 'k', 1, 'queued', %s, 0)",
+                     "stage, created_at, cost_usd, cost_is_lower_limit) VALUES (%s, %s, %s, 'k', 1, 'queued', %s, 0, false)",
                 (investigation_id, T1, alert_id, NOW))
     async with job_store(dsn) as store:
         got = [await store.claim() for _ in range(3)]
@@ -1890,8 +1891,8 @@ def _plant_running(dsn: str, *, alert_id: str, key: str, attempt: int, lapsed: b
     when = "now() - interval '1 minute'" if lapsed else "now() + interval '30 seconds'"
     mark = "now()" if marked else "NULL"
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, "
-                 "created_at, started_at, cost_usd, lease_expires_at, accounting_written_at) VALUES "
-                 f"(%s, %s, %s, %s, %s, 'running', %s, %s, 1.25, {when}, {mark})",  # noqa: S608
+                 "created_at, started_at, cost_usd, cost_is_lower_limit, lease_expires_at, accounting_written_at) VALUES "
+                 f"(%s, %s, %s, %s, %s, 'running', %s, %s, 1.25, false, {when}, {mark})",  # noqa: S608
             (investigation_id, tenant, alert_id, key, attempt, NOW, NOW))
     return investigation_id
 
@@ -1903,6 +1904,13 @@ def _snap(dsn: str, investigation_id: str) -> dict[str, Any]:
 
 def _changed(before: dict[str, Any], after: dict[str, Any]) -> set[str]:
     return {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
+
+
+async def _queued_row(dsn: str) -> str:
+    """One queued row (cost 0, no mark) for T1."""
+    async with job_store(dsn) as store:
+        queued, _ = await store.create_investigation(T1, _plant_alert(dsn, ticket="QR"), "kqr", actor="u-1")
+    return queued.investigation_id
 
 
 def _retries_of(dsn: str, investigation_id: str) -> list[str]:
@@ -2193,6 +2201,174 @@ async def test_b11_take_over_tells_a_handed_back_row_from_a_lost_workers_in_its_
     assert "handed it back" in got_handed["failure_message"], got_handed["failure_message"]
     assert "stopped renewing" not in got_handed["failure_message"]
     assert "stopped renewing its lease" in got_lost["failure_message"], got_lost["failure_message"]
+
+
+# --- #1377: the cost's lower-limit mark (`cost_is_lower_limit`) ---------------------------------------------------
+
+def _mark(dsn: str, inv: str, value: bool) -> None:
+    """Plant the row's mark (a cost from before the write under test)."""
+    execute(dsn, "UPDATE jobs.investigations SET cost_is_lower_limit = %s WHERE id = %s", (value, inv))
+
+
+@pytest.mark.parametrize("value", [True, False])
+@pytest.mark.parametrize("path", ["finish", "hand_back", "write_accounting"])
+async def test_s2_every_final_cost_write_sets_the_mark_to_the_value_it_is_given(dsn, path, value):
+    """The worker's final figure lands with the mark it passes, over whatever the row held, on each path that writes one; the record answers it too. (S2)"""
+    if path == "write_accounting":
+        inv = _ended_with_cost(dsn, "aborted", "A")
+    else:
+        inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    _mark(dsn, inv, not value)
+    async with job_store(dsn) as store:
+        if path == "finish":
+            got = await store.finish(T1, inv, stage="completed", disposition="benign", cost_usd=4.5,
+                                     cost_is_lower_limit=value)
+        else:
+            got = await getattr(store, path)(T1, inv, cost_usd=4.5, knowledge=KNOWLEDGE, cost_is_lower_limit=value)
+    assert (got.cost_usd, got.cost_is_lower_limit) == (4.5, value)
+    assert (row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (4.5, value)
+
+
+@pytest.mark.parametrize("path", ["finish", "hand_back", "write_accounting"])
+async def test_s4_the_job_row_refuses_a_lower_limit_mark_beside_an_unknown_cost(dsn, path):
+    """The database refuses true beside a null cost, so no write path stores it; the refused write changes nothing and a null cost with no mark still lands. (S4)"""
+    from defender.jobs.store import is_refusal
+
+    if path == "write_accounting":
+        inv = _ended_with_cost(dsn, "failed", "A")
+    else:
+        inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    before = _snap(dsn, inv)
+
+    async def write(*, cost, mark):
+        async with job_store(dsn) as store:
+            if path == "finish":
+                return await store.finish(T1, inv, stage="completed", disposition="benign", cost_usd=cost,
+                                          cost_is_lower_limit=mark)
+            return await getattr(store, path)(T1, inv, cost_usd=cost, knowledge=None, cost_is_lower_limit=mark)
+
+    with pytest.raises(Exception) as refused:  # noqa: PT011 — the class is the database's, tested through is_refusal
+        await write(cost=None, mark=True)
+    assert is_refusal(refused.value), refused.value
+    assert _snap(dsn, inv) == before, "a refused write changed the row"
+    assert (await write(cost=None, mark=False)).cost_usd is None
+
+
+async def test_s4_the_check_is_the_databases_own_not_only_the_stores(dsn):
+    """Raw SQL cannot store a lower limit beside a null cost either; the control, a number marked, can be stored. (S4)"""
+    inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    execute(dsn, "UPDATE jobs.investigations SET cost_usd = 2.0, cost_is_lower_limit = true WHERE id = %s", (inv,))
+    assert (row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (2.0, True)
+    with pytest.raises(Exception, match="cost_is_lower_limit|check"):  # noqa: PT011
+        execute(dsn, "UPDATE jobs.investigations SET cost_usd = NULL WHERE id = %s", (inv,))
+    assert row(dsn, inv)["cost_usd"] == 2.0
+
+
+async def test_s2_a_live_rows_cost_so_far_and_a_cancelled_queued_row_are_not_marked(dsn):
+    """A renewal never marks, with or without a copied figure ("so far" already says it); a queued row cancelled before any run is exactly 0. (S2, S4)"""
+    running = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="R"), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        await store.renew({running})
+        assert lower_limit(dsn, running) is False
+        await store.renew({running}, costs={running: 3.5})
+        queued, _ = await store.create_investigation(T1, _plant_alert(dsn, ticket="Q"), "kq", actor="u-1")
+        cancelled = await store.cancel_investigation(T1, queued.investigation_id, actor="u-1")
+        claimed = await store.get_investigation(T1, running)
+    assert (row(dsn, running)["cost_usd"], lower_limit(dsn, running), claimed.cost_is_lower_limit) == (3.5, False, False)
+    assert (queued.cost_is_lower_limit, cancelled.cost_usd, cancelled.cost_is_lower_limit) == (False, 0, False)
+    assert lower_limit(dsn, queued.investigation_id) is False
+
+
+async def test_s2_cancelling_a_running_row_marks_its_copied_cost_and_the_holders_final_write_then_sets_its_own(dsn):
+    """Cancel ends the row without its holder's figure, so the copy it keeps is at least; the holder's later accounting writes its own value, either way. (S2, B-P2)"""
+    async with job_store(dsn) as store:
+        marked = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="A"), key="ka", attempt=1, lapsed=False)
+        cleared = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="B"), key="kb", attempt=1, lapsed=False)
+        for inv in (marked, cleared):
+            got = await store.cancel_investigation(T1, inv, actor="u-1")
+            assert (got.stage, got.cost_usd, got.cost_is_lower_limit) == ("aborted", 1.25, True)
+            assert (row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (1.25, True)
+        await store.write_accounting(T1, marked, cost_usd=2.0, knowledge=None, cost_is_lower_limit=True)
+        await store.write_accounting(T1, cleared, cost_usd=2.0, knowledge=None, cost_is_lower_limit=False)
+    assert [(row(dsn, i)["cost_usd"], lower_limit(dsn, i)) for i in (marked, cleared)] == [(2.0, True), (2.0, False)]
+
+
+@pytest.mark.parametrize(("cost", "mark"), [(2.0, False), (2.0, True), (None, False)])
+async def test_s2_cancelling_a_handed_back_row_keeps_the_figure_and_mark_its_holder_wrote(dsn, cost, mark):
+    """A handed-back row still `running` already has its holder's final figure: a cancel before the take-over leaves cost and mark as written, and an unknown cost stays unmarked. (S2, S4)"""
+    inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        await store.hand_back(T1, inv, cost_usd=cost, knowledge=None, cost_is_lower_limit=mark)
+        got = await store.cancel_investigation(T1, inv, actor="u-1")
+    assert (got.stage, got.cost_usd, got.cost_is_lower_limit) == ("aborted", cost, mark)
+    assert (row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (cost, mark)
+
+
+@pytest.mark.parametrize("attempt", [1, 3], ids=["lease_lapsed", "retry_cap"])
+async def test_s2_a_lost_workers_row_is_taken_over_as_at_least_its_last_copy_and_a_handed_back_row_keeps_its_mark(dsn, attempt):
+    """Take-over makes no host read: a lost worker's row keeps its stale copy, marked, at either ending; a handed-back row keeps the mark its holder wrote; the retry starts unmarked at 0. (S2; base-drift unsettled 1)"""
+    lost = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="L"), key="kl", attempt=attempt, lapsed=True)
+    handed = {mark: _plant_running(dsn, alert_id=_plant_alert(dsn, ticket=f"H{mark}"), key=f"kh{mark}", attempt=1,
+                                   lapsed=False) for mark in (True, False)}
+    async with job_store(dsn) as store:
+        for mark, inv in handed.items():
+            await store.hand_back(T1, inv, cost_usd=2.0, knowledge=None, cost_is_lower_limit=mark)
+        await store.take_over(held=frozenset())
+    assert (row(dsn, lost)["failure_reason"], row(dsn, lost)["cost_usd"], lower_limit(dsn, lost)) == (
+        "lease_lapsed" if attempt == 1 else "retry_cap", 1.25, True)
+    assert [(row(dsn, handed[m])["cost_usd"], lower_limit(dsn, handed[m])) for m in (True, False)] == [(2.0, True), (2.0, False)]
+    retries = _retries_of(dsn, lost)
+    if attempt == 1:
+        [retry] = retries
+        assert (row(dsn, retry)["cost_usd"], lower_limit(dsn, retry)) == (0, False)
+    else:
+        assert retries == []
+
+
+#: The class of a write that ends a running row (r4 S2, store side): the ending write; the cost the row holds (a renewal's copy,
+#: or its holder's figure); its lease (a take-over takes only a lapsed one); and whether its holder already wrote its final figure,
+#: with which mark (a hand-back does, and lapses the lease at once; the live-lease case is planted all the same).
+_ENDED_WITHOUT_FIGURE = [
+    (write, cost, lease, figure)
+    for write in ("cancel", "take_over")
+    for cost in (0.0, 1.25)
+    for lease in (("live", "lapsed") if write == "cancel" else ("lapsed",))
+    for figure in ("not written", "written marked", "written unmarked")
+]
+
+
+@pytest.mark.parametrize(("write", "cost", "lease", "figure"), _ENDED_WITHOUT_FIGURE,
+                         ids=["-".join(map(str, case)) for case in _ENDED_WITHOUT_FIGURE])
+async def test_s2_a_write_that_ends_a_running_row_marks_it_exactly_when_its_holder_never_wrote_its_figure(
+        dsn, write, cost, lease, figure):
+    """Cancel or take-over of a running row: "at least" when its holder has not written its final figure, whatever the cost
+    (0 included) or the lease; otherwise the mark its holder wrote. The cost is kept either way. (r4 S2 store side, S4)"""
+    written = figure != "not written"
+    inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=lease == "lapsed", marked=written)
+    execute(dsn, "UPDATE jobs.investigations SET cost_usd = %s, cost_is_lower_limit = %s WHERE id = %s",
+            (cost, figure == "written marked", inv))
+    async with job_store(dsn) as store:
+        if write == "cancel":
+            got = await store.cancel_investigation(T1, inv, actor="u-1")
+            assert got.stage == "aborted", got
+        else:
+            assert inv in await store.take_over(held=frozenset())
+    ended = row(dsn, inv)
+    assert ended["stage"] == ("aborted" if write == "cancel" else "failed"), ended
+    assert (ended["cost_usd"], lower_limit(dsn, inv)) == (cost, figure != "written unmarked"), (
+        "the mark is not (no holder's figure) or the holder's own")
+
+
+async def test_s2_a_claimed_row_and_a_stored_marked_row_carry_the_mark_in_their_records(dsn):
+    """The record the store answers (claim, read) has the row's mark, so the API can serve it. (S2, G10)"""
+    queued = await _queued_row(dsn)
+    async with job_store(dsn) as store:
+        claim = await store.claim()
+        execute(dsn, "UPDATE jobs.investigations SET cost_usd = 3.0, cost_is_lower_limit = true WHERE id = %s",
+                (claim.record.investigation_id,))
+        read = await store.get_investigation(T1, claim.record.investigation_id)
+    assert (claim.record.cost_is_lower_limit, read.cost_is_lower_limit) == (False, True)
+    assert claim.record.investigation_id == queued
 
 
 async def test_o6_the_store_tells_a_value_it_refuses_from_a_read_only_database_on_real_faults(dsn):

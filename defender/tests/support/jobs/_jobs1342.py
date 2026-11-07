@@ -306,7 +306,7 @@ CHILD_SCRIPT = textwrap.dedent("""
     if spend:  # #1343 B2/B6: the live child writes its session database while the worker reads it
         sys.path.insert(0, spend["path"])
         from defender.records.session_store._write import open_store
-        from defender.tests.support.jobs._jobs1342 import _paths, _response, session_pointer
+        from defender.tests.support.jobs._jobs1342 import _paths, _response, insert_spend, session_db, session_pointer
         import hashlib
         case = hashlib.md5(run_id.encode()).hexdigest() if spend.get("per_run") else spend["case"]  # per run: a retry never shares its parent's database
         (runs / f"{run_id}.session-pointer.json").write_text(session_pointer(case), encoding="utf-8")
@@ -317,7 +317,15 @@ CHILD_SCRIPT = textwrap.dedent("""
             for n, (model, usage) in enumerate(spend["steps"]):
                 began = time.monotonic()
                 handle.append(session, _response(model, usage), agent_id="main")
-                (marks / f"wrote-{n}").write_text(str(time.monotonic() - began), encoding="utf-8")
+                appended = time.monotonic() - began
+                began = time.monotonic()
+                try:
+                    insert_spend(session_db(runs, case), run_id, [(model, usage)])  # #1377: the ledger row cost is read from
+                except Exception as fault:  # noqa: BLE001 - a missing ledger is the code stage's red, named by its own mark
+                    (marks / f"insert-failed-{n}").write_text(repr(fault), encoding="utf-8")
+                else:
+                    (marks / f"ledger-{n}").write_text(str(time.monotonic() - began), encoding="utf-8")
+                (marks / f"wrote-{n}").write_text(str(appended), encoding="utf-8")  # after the insert: a test that waits on this mark then signals the child must find the ledger row (or insert-failed-n)
                 until = time.monotonic() + 60
                 while not (marks / f"go-{n}").exists() and time.monotonic() < until:
                     time.sleep(0.02)
@@ -583,7 +591,7 @@ def plant_queued_investigation(dsn: str, *, tenant: str, alert_id: str, investig
     """A `queued` row with a chosen id, as SQL (the store mints ids; a case that must plant a file
     named for the id before the claim needs to know it)."""
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
-                 "stage, created_at, cost_usd) VALUES (%s, %s, %s, %s, 1, 'queued', %s, 0)",
+                 "stage, created_at, cost_usd, cost_is_lower_limit) VALUES (%s, %s, %s, %s, 1, 'queued', %s, 0, false)",
             (investigation_id, tenant, alert_id, key, NOW))
 
 
@@ -610,10 +618,11 @@ def is_box_token(value: object) -> bool:
 
 
 def job_end(*, setup: str = "done", box: str = "started", report_committed: bool = True,
-            scrub_verified: bool = True, cut_short: str | None = None) -> str:
-    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its five facts (#1421)."""
+            scrub_verified: bool = True, cut_short: str | None = None, spend_write_failed: bool = False) -> str:
+    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its six facts (#1421, #1377)."""
     return json.dumps({"setup": setup, "box": box, "report_committed": report_committed,
-                       "scrub_verified": scrub_verified, "cut_short": cut_short})
+                       "scrub_verified": scrub_verified, "cut_short": cut_short,
+                       "spend_write_failed": spend_write_failed})
 
 
 def scrub_verdict(*, ran: bool) -> str:
@@ -689,6 +698,46 @@ def plant_fork(runs: Path, case_id: str, parent: tuple[str, list[int]], *, agent
         fork = handle.fork(parent[0], parent[1][-1])
         handle.append(fork, _response(model, usage), agent_id=agent_id)
     return fork
+
+
+#: The spend ledger's table and columns as #1377's sketch names them (the design leaves them open).
+SPEND_LEDGER = "spend_ledger"
+SPEND_COLUMNS = ("run_id", "model", "input_tokens", "output_tokens", "cache_read_input_tokens",
+                 "cache_creation_input_tokens")
+
+
+def insert_spend(database: Path, run_id: str, spend: list[tuple[str, dict[str, int]]]) -> None:
+    """#1377: one ledger row per `(model, billed usage)` for `run_id` in an existing session database."""
+    import sqlite3
+
+    conn = sqlite3.connect(database, timeout=30)
+    try:
+        for model, usage in spend:
+            values = (run_id, model, *(usage.get(k, 0) for k in SPEND_COLUMNS[2:]))
+            conn.execute(f"INSERT INTO {SPEND_LEDGER} ({', '.join(SPEND_COLUMNS)}) "  # noqa: S608
+                         f"VALUES ({', '.join('?' * len(SPEND_COLUMNS))})", values)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, dict[str, int]]]) -> None:
+    """#1377: `case_id`'s session database (made by the real store, so its own schema, and with a
+    `main` session when this call makes the file) holding one ledger row per `(model, billed usage)`
+    for `run_id`."""
+    from defender.records.session_store._write import open_store
+
+    fresh = not session_db(runs, case_id).exists()
+    with open_store(case_id=case_id, sessions=_paths(runs)) as handle:
+        if fresh:
+            handle.new_session("main")
+    insert_spend(session_db(runs, case_id), run_id, spend)
+
+
+def lower_limit(dsn: str, investigation_id: str) -> bool | None:
+    """#1377: the row's `cost_is_lower_limit` (kept apart from `row`, whose columns every #1342 case reads)."""
+    found = execute(dsn, "SELECT cost_is_lower_limit FROM jobs.investigations WHERE id = %s", (investigation_id,))
+    return found[0][0] if found else None
 
 
 @contextmanager

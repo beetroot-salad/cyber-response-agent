@@ -143,16 +143,6 @@ def gather_dispatch_phase(events: list[dict], tags: list[str | None]) -> dict[st
     return out
 
 
-def gather_calls_by_phase(
-    events: list[dict], tags: list[str | None], phase_order: list[str]
-) -> dict[str, int]:
-    out = {ph: 0 for ph in phase_order}
-    for ph, _inp in _iter_gather_tool_uses(events, tags):
-        if ph in out:
-            out[ph] += 1
-    return out
-
-
 def _iter_agent_responses(run_dir: Path, messages: list[dict] | None, prefix: str):
     """Every wire response a subagent namespace wrote, as `(suffix, record)`.
 
@@ -195,10 +185,11 @@ def gather_cost_by_phase(
     events: list[dict],
     tags: list[str | None],
     phase_order: list[str],
-    main_total: float,
-    result_total: float,
     messages: list[dict] | None = None,
 ) -> tuple[dict[str, float], float]:
+    """The leads' spend by phase, from the request log's lead responses alone. The run file's total
+    is the whole run's (#1377), so "the total minus MAIN's" is no longer taken for gather spend: a
+    log with no lead response has no gather cost on any phase."""
     out = {ph: 0.0 for ph in phase_order}
     per_lead = _cost_by(_iter_gather_responses(run_dir, messages), lambda lead, _raw: lead)
     if per_lead:
@@ -208,15 +199,6 @@ def gather_cost_by_phase(
             ph = _gather_phase_for(gphase.get(lead), phase_order) or fallback
             if ph in out:
                 out[ph] += c
-        return out, sum(out.values())
-    residual = max(0.0, (result_total or 0.0) - (main_total or 0.0))
-    counts = gather_calls_by_phase(events, tags, phase_order)
-    tot = sum(counts.values())
-    if residual > 0 and tot > 0:
-        for ph, n in counts.items():
-            tph = _gather_phase_for(ph, phase_order)
-            if tph in out:
-                out[tph] += residual * n / tot
     return out, sum(out.values())
 
 

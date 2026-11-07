@@ -23,29 +23,32 @@ def _inv(name: str) -> str:
 
 
 def test_b_the_history_stays_one_line_with_the_new_revision_on_the_uuid_ids_revision():
-    """One head (#1345's `0007_alert_mapping` since), with `0006_job_leases` directly on `0005_uuid_ids`, which sits on `0004_jobs`; both keep their id and place. (B Data model: one migration on A's; renumbered after #1382)"""
+    """One head (#1345's `0007_alert_mapping`, then #1377's `0008_cost_lower_limit`, since), with `0006_job_leases` directly on `0005_uuid_ids`, which sits on `0004_jobs`; both keep their id and place. (B Data model: one migration on A's; renumbered after #1382)"""
     from defender.migrations import _scripts, head, heads
 
     scripts = _scripts()
     assert heads() == (head(),)
-    assert scripts.get_revision(head()).down_revision == "0006_job_leases"
+    assert scripts.get_revision("0007_alert_mapping").down_revision == "0006_job_leases"
     assert scripts.get_revision("0006_job_leases").down_revision == "0005_uuid_ids"
     assert scripts.get_revision("0005_uuid_ids").down_revision == "0004_jobs"
     assert scripts.get_revision("0004_jobs").down_revision == "0003_sign_login"
-    assert [r.revision for r in scripts.walk_revisions()][2:] == [
+    assert [r.revision for r in scripts.walk_revisions()][3:] == [
         "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy", "0001_baseline"]
 
 
-def _plant(dsn: str, inv: str, stage: str, ticket: str, *, cost: float = 0) -> None:
+def _plant(dsn: str, inv: str, stage: str, ticket: str, *, cost: float = 0, at_head: bool = False) -> None:
+    """A row at the database's revision: `at_head` adds #1377's required `cost_is_lower_limit` (false), which a database
+    at an older revision does not have."""
     alert = _id("alert", ticket)
     execute(dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, "
                  "title, description, raw) VALUES (%s, %s, 'elastic', %s, now(), now(), now(), 't', 'd', '\\x7b7d')",
             (alert, TENANT, ticket))
     started = "now() - interval '2 hours'" if stage != "queued" else "NULL"
     finished = "now() - interval '1 hour'" if stage in TERMINAL else "NULL"
+    mark_column, mark = (", cost_is_lower_limit", ", false") if at_head else ("", "")
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
-                 f"started_at, finished_at, cost_usd) VALUES (%s, %s, %s, 'k', 1, %s, now(), {started}, {finished}, %s)",  # noqa: S608
-            (inv, TENANT, alert, stage, cost))
+                 f"started_at, finished_at, cost_usd{mark_column}) VALUES (%s, %s, %s, 'k', 1, %s, now(), {started}, {finished}, "  # noqa: S608
+                 f"%s{mark})", (inv, TENANT, alert, stage, cost))
 
 
 def _a_era_database(dsn: str) -> None:
@@ -114,10 +117,11 @@ def test_b_a_running_row_must_have_a_lease_and_other_stages_need_none(migrated_d
     dsn = migrated_database
     execute(dsn, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, now(), 'active')", (TENANT,))
     for ticket in ("1", "2", "3"):
-        _plant(dsn, _inv(ticket), "queued", ticket)
+        _plant(dsn, _inv(ticket), "queued", ticket, at_head=True)
     i_1 = _inv("1")
     insert = ("INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, started_at, "
-              f"cost_usd, lease_expires_at) VALUES ('{_inv('new')}', '{TENANT}', '{_id('alert', 'new')}', 'k', 1, %s, now(), now(), 0, " + "{lease})")
+              f"cost_usd, cost_is_lower_limit, lease_expires_at) VALUES ('{_inv('new')}', '{TENANT}', '{_id('alert', 'new')}', 'k', 1, %s, "
+              "now(), now(), 0, false, {lease})")  # cost_is_lower_limit: #1377's required column, at head
     execute(dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, title, "
                  "description, raw) VALUES (%s, %s, 'elastic', 'new', now(), now(), now(), 't', 'd', '\\x7b7d')",
             (_id("alert", "new"), TENANT))

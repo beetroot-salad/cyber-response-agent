@@ -23,6 +23,7 @@ JOBS_TABLES = {"alerts", "investigations"}  # #1342 (#1345 r5: the mapping table
 UNKNOWN_REVISION = "f00dfeedbeef"
 #: #1345 r5 Upgrade: the migration after `0006_job_leases`. r5 names no id: this one is DESIGN-IMPLIED for the code stage.
 ALERT_MAPPING_REVISION = "0007_alert_mapping"
+COST_LOWER_LIMIT_REVISION = "0008_cost_lower_limit"  # #1377
 ROOT = Path(__file__).resolve().parents[3]  # the checkout under test, put first on the child's path
 
 
@@ -329,11 +330,13 @@ def test_the_dev_command_without_a_database_refuses_loudly():
 def test_the_jobs_revision_sits_directly_on_the_sign_login_revision():
     """The history is the baseline, `0002_tenancy`, `0003_sign_login`, then `0004_jobs` (#1342 O1; r6: tenants are
     #1214's records; jobs follows #1163's revision, so the history stays one line), then #1382's `0005_uuid_ids`,
-    #1343's `0006_job_leases` and #1345's `0007_alert_mapping` as head. (The name predates them; the node id is kept.)"""
+    #1343's `0006_job_leases`, #1345's `0007_alert_mapping` and #1377's `0008_cost_lower_limit` as head. (The name predates
+    them; the node id is kept. #1377 Design "Data and API": a migration after the latest.)"""
     from defender.migrations import _scripts, head
 
     scripts = _scripts()
-    assert head() == ALERT_MAPPING_REVISION
+    assert head() == COST_LOWER_LIMIT_REVISION
+    assert scripts.get_revision(COST_LOWER_LIMIT_REVISION).down_revision == ALERT_MAPPING_REVISION
     assert scripts.get_revision(ALERT_MAPPING_REVISION).down_revision == "0006_job_leases"
     assert scripts.get_revision("0006_job_leases").down_revision == "0005_uuid_ids"
     assert scripts.get_revision("0005_uuid_ids").down_revision == "0004_jobs"
@@ -341,7 +344,7 @@ def test_the_jobs_revision_sits_directly_on_the_sign_login_revision():
     assert scripts.get_revision("0003_sign_login").down_revision == "0002_tenancy"
     assert scripts.get_revision("0002_tenancy").down_revision == "0001_baseline"
     assert [r.revision for r in scripts.walk_revisions()] == [
-        ALERT_MAPPING_REVISION, "0006_job_leases", "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy",
+        COST_LOWER_LIMIT_REVISION, ALERT_MAPPING_REVISION, "0006_job_leases", "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy",
         "0001_baseline"]
 
 
@@ -389,14 +392,15 @@ def _jobs_indexes(dsn: str, table: str) -> list[str]:
 
 @pytest.mark.postgres
 def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated_database):
-    """Both tables hold exactly the designed columns; required ones are NOT NULL (an alert's title and description, derived by the store, are nullable, #1345); `cost_usd` is a nullable float; `raw` is bytea; no defaults (#1342 M10, R3)."""
+    """Both tables hold exactly the designed columns; required ones are NOT NULL (an alert's title and description, derived by the store, are nullable, #1345); `cost_usd` is a nullable float and #1377's `cost_is_lower_limit` a required boolean; `raw` is bytea; no defaults (#1342 M10, R3; #1377 r4 API field)."""
     alerts = _jobs_columns(migrated_database, "alerts")
     investigations = _jobs_columns(migrated_database, "investigations")
     assert set(alerts) == {"id", "tenant_id", "vendor", "vendor_ticket_id", "fired_at", "changed_at",
                            "received_at", "title", "description", "raw"}
     assert set(investigations) == {"id", "tenant_id", "alert_id", "request_key", "attempt", "stage", "created_at",
                                    "started_at", "finished_at", "disposition", "cost_usd", "knowledge",
-                                   "failure_reason", "failure_message", "lease_expires_at", "accounting_written_at"}
+                                   "failure_reason", "failure_message", "lease_expires_at", "accounting_written_at",
+                                   "cost_is_lower_limit"}
     # #1345 (data model): the store derives an alert's title and description from the tenant's mapping, so both are nullable.
     assert {n for n, (_, nullable, _) in alerts.items() if nullable} == {"title", "description"}
     nullable = {n for n, (_, can_be_null, _) in investigations.items() if can_be_null}
@@ -404,12 +408,14 @@ def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated
                         "failure_message", "lease_expires_at", "accounting_written_at"}
     assert alerts["raw"][0] == "bytea"
     assert investigations["cost_usd"][0] == "double precision"
+    assert investigations["cost_is_lower_limit"][0] == "boolean"
     assert [c for cols in (alerts, investigations) for c, (_, _, default) in cols.items() if default is not None] == []
 
 
 @pytest.mark.postgres
 def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
-    """PKs, the tenant FK, the alert uniques, the composite FK, the attempt unique and a stage CHECK; no other constraint (#1342 M10)."""
+    """PKs, the tenant FK, the alert uniques, the composite FK, the attempt unique, a stage CHECK, #1343's lease CHECK and #1377's
+    lower-limit-needs-a-cost CHECK; no other constraint (#1342 M10; #1377 S4: the job row enforces it)."""
     alerts = _jobs_constraints(migrated_database, "alerts")
     assert [(kind, cols) for kind, cols, _ in alerts] == sorted([
         ("f", ("tenant_id",)), ("p", ("id",)), ("u", ("id", "tenant_id")),
@@ -425,11 +431,13 @@ def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
     assert foreign == "FOREIGN KEY (tenant_id, alert_id) REFERENCES jobs.alerts(tenant_id, id)", \
         "no ON DELETE / ON UPDATE action: delete and cascade are the store's, under the alert lock (M10, O10)"
     checks = [d for k, _, d in investigations if k == "c"]
-    assert len(checks) == 2, "the stage CHECK and #1343's running-has-a-lease CHECK, no other"
+    assert len(checks) == 3, "the stage CHECK, #1343's running-has-a-lease CHECK and #1377's mark-needs-a-cost CHECK, no other"
     [check] = [d for d in checks if "completed" in d]
     for stage in ("queued", "running", "completed", "unparseable", "failed", "aborted"):
         assert f"'{stage}'" in check
-    [lease] = [d for d in checks if "completed" not in d]
+    [mark] = [d for d in checks if "cost_is_lower_limit" in d]
+    assert "cost_usd" in mark
+    [lease] = [d for d in checks if "completed" not in d and d != mark]
     assert "lease_expires_at" in lease
     assert "'running'" in lease  # (#1343: second CHECK; conflict updated)
 
