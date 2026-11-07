@@ -82,13 +82,14 @@ def _ticket_key(run: Run) -> str | None:
 
 def comments_on(truncated_by: str | None, closed_before_cut: bool) -> bool:
     """Does a run that ended this way comment on its case? Not a run cut short by its budget,
-    its store, its model provider or its box (unusable, or its fence tripped: #1421) before it
-    reached a verdict: it leaves the case open and writes no receipt. The one rule, read by the
-    record step and by `run.py`, which signs no write-back token for a run that will not
-    comment."""
+    its store, its model provider (down, or refusing MAIN's requests) or its box (unusable, or
+    its fence tripped: #1421) before it reached a verdict: it leaves the case open and writes no
+    receipt. The one rule, read by the record step and by `run.py`, which signs no write-back
+    token for a run that will not comment."""
     return closed_before_cut or run_end.normalized_truncated_by(truncated_by) not in (
         run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE,
-        run_end.TRUNCATED_BY_PROVIDER_DOWN, *run_end.BOX_ENDINGS)
+        run_end.TRUNCATED_BY_PROVIDER_DOWN, run_end.TRUNCATED_BY_PROVIDER_REJECTED,
+        *run_end.BOX_ENDINGS)
 
 
 def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exit record (#1047)

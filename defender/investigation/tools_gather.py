@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic_ai import RunContext
-from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
+from pydantic_ai.exceptions import ModelHTTPError, ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
 from defender._model import model
@@ -598,6 +598,19 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
             session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
             f"gather for {lead_id} ended abnormally ({e}); any queries it ran are in "
             f"the queries table. {INCOMPLETE_IDIOM}",
+        )
+    except ModelHTTPError as e:
+        # The provider refused one of this lead's requests for good (#1243): resending gets the
+        # same answer, so the lead ends by name and MAIN decides what to do next. Only the
+        # status reaches MAIN, never the provider's text. Anything else HTTP passes through.
+        status = providers.refusal_status(e)
+        if status is None:
+            raise
+        _logger.warning(f"gather for {lead_id}: the model provider refused a request (HTTP {status})")
+        fault = _Ending(
+            run_end.TRUNCATED_BY_PROVIDER_REJECTED,
+            f"gather for {lead_id} ended: the model provider refused one of its requests "
+            f"(HTTP {status}); any queries it ran are in the queries table. {INCOMPLETE_IDIOM}",
         )
     except session_store.StoreError as e:
         # The gather recorder is observational (gather never sends a store-sourced history),

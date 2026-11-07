@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
-from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.usage import RunUsage, UsageLimits
 
@@ -256,7 +256,7 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
             _logger.warning(f"truncated_by write skipped: {e!r}")
 
 
-async def _drive_agent(  # noqa: PLR0913, PLR0912, C901 — the loop's own inputs: agent, prompt, deps, store, bounds
+async def _drive_agent(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the loop's own inputs; one except arm per ending
     agent: Agent[AgentDeps, str], prompt: str | None, deps: AgentDeps, store: Any,
     session_id: str, bounds: challenge_gate.Bounds, message_history: list | None = None,
     *, usage: RunUsage | None = None, snapshots: branch.SnapshotWriter | None = None,
@@ -307,6 +307,12 @@ async def _drive_agent(  # noqa: PLR0913, PLR0912, C901 — the loop's own input
         _logger.warning(f"{e}; writing partial trace")
         truncated_by = session_store.TRUNCATED_BY_BUDGET
         exit_reason = "BudgetKill"
+    except ModelHTTPError as e:
+        # The provider refused one of MAIN's own requests for good (#1243). Anything else HTTP
+        # passes through as before.
+        if not _main_request_refused(e):
+            raise
+        truncated_by, exit_reason = run_end.TRUNCATED_BY_PROVIDER_REJECTED, "ProviderRejected"
     except (sqlite3.Error, session_store.StoreError) as e:
         # The `StoreError` base: every store fault can surface from the ProcessHistory hook.
         _logger.error(f"store append failed ({e!r}); stopping the run")
@@ -365,6 +371,16 @@ def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
 
     run = getattr(verbs, "call_run", None)
     bind_call_ids(state, run if isinstance(run, str) and run else run_id)
+
+
+def _main_request_refused(exc: BaseException) -> bool:
+    """Whether `exc` is the provider refusing MAIN's own request for good (#1243), logged if so.
+    Resending gets the same answer and there is no lead to end, so the run ends by name: like
+    provider-down an infrastructure end with no report."""
+    status = providers.refusal_status(exc)
+    if status is not None:
+        _logger.error(f"the model provider refused MAIN's request (HTTP {status}); ending the run")
+    return status is not None
 
 
 def _provider_down_in(exc: BaseException) -> providers.ProviderDown | None:

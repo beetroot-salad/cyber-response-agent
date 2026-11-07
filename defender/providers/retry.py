@@ -75,6 +75,17 @@ def _temporary(exc: BaseException) -> tuple[bool, int | None]:
     return isinstance(exc, ModelAPIError), None
 
 
+def refusal_status(exc: BaseException) -> int | None:
+    """The HTTP status of `exc` if it is the provider refusing a request for good (an HTTP
+    error the retrier does not resend), else `None`. What a refusal means is the caller's: a
+    gather lead's ends that lead, MAIN's own ends the run `provider-rejected` (#1243)."""
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    if isinstance(exc, ModelHTTPError) and not _temporary(exc)[0]:
+        return exc.status_code
+    return None
+
+
 def _backoff(attempt: int, policy: RetryPolicy) -> float:
     """The wait before the retry that follows failed attempt `attempt` (1-based)."""
     return BACKOFF_BASE_S * BACKOFF_FACTOR ** (attempt - 1) * (0.5 + 0.5 * policy.jitter())
