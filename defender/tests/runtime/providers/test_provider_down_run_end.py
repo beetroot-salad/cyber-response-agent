@@ -3,6 +3,7 @@ from __future__ import annotations
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import asyncio
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -10,21 +11,27 @@ from typing import Any
 import pytest
 
 from defender import run as run_mod
+from defender.providers import ProviderDown
 from defender.hooks.budget_enforcer import BudgetKill
 from defender.investigation.challenge_gate import REVIEW_ROLES
 from defender.investigation.review_roles import ReviewStages
 from defender.learning.branch import cli
 from defender.learning.branch.outcome import DID_NOT_FINISH
 from defender.records import run_end
+from defender.records import run_end as rb
+from defender.run_common import learning_refusal_gate
 from defender.systems.circuit_breaker import RunAborted
 from defender.tests.support.runtime.permissions import _review_bundle as RB
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.shared.filesystem import _spec1047 as T47
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.runtime.providers import _spec1243 as P
 
 L3 = P.L3
 LEAD = "l-001"
 CORR = "CORR-1243: correlation summary delivered."
+SHAPES = ["bare", *sorted(P.GROUPED_PROVIDER_DOWN)]  # a bare ProviderDown, and one inside each group shape
+CONTROL_SHAPES = sorted(P.GROUPED_WITHOUT_PROVIDER_DOWN)
 
 
 def _down_at(n: int = 1, model: str = "fake") -> S.LeadFault:
@@ -35,15 +42,114 @@ def _down_at(n: int = 1, model: str = "fake") -> S.LeadFault:
 def _store(stores: list) -> Path:
     assert stores, "the run opened no session store"
     return stores[-1].path
+def _grouped_down(shape: str) -> P.Recorded:
+    """The `shape` group around a `ProviderDown` as the retrier raises it, recorded."""
+    return P.Recorded(P.GROUPED_PROVIDER_DOWN[shape](P.provider_down_fault()))
+
+def _assert_fired_a_group(fault: P.Recorded, *, holding_provider_down: bool) -> BaseException:
+    """The fault fired exactly once, as an exception group that does (or does not) hold a
+    `ProviderDown`. This is the guard that the scenario put a group, not a bare failure, on its
+    path."""
+    assert len(fault.raised) == 1, (
+        f"the grouped fault fired {len(fault.raised)} times; the scenario raises it once")
+    group = fault.raised[0]
+    assert isinstance(group, BaseExceptionGroup), f"the fault raised {group!r}, not a group"
+    if holding_provider_down:
+        assert P.carries(group, ProviderDown), group
+    else:
+        # Read without `ProviderDown`, so the control does not lean on the class it controls for.
+        assert all(isinstance(leaf, (RuntimeError, ValueError)) for leaf in _leaves(group)), group
+    return group
+
+def _leaves(exc: BaseException) -> list[BaseException]:
+    if isinstance(exc, BaseExceptionGroup):
+        return [leaf for inner in exc.exceptions for leaf in _leaves(inner)]
+    return [exc]
+
+def _assert_not_provider_down(d: S.Drive, stores: list) -> None:
+    """The run did not end provider-down on any channel: summary, run-end record, exit code, or
+    MAIN's session stamp."""
+    assert (d.summary or {}).get("truncated_by") != P.PROVIDER_DOWN, d.summary
+    rec = P.sidecar(d.folder)
+    assert rec is None or rec["truncated_by"] != P.PROVIDER_DOWN, rec
+    assert d.rc != P.PROVIDER_DOWN_EXIT, f"a run with no ProviderDown exited {d.rc}"
+    assert P.sessions(_store(stores)).get("main") != P.PROVIDER_DOWN, (
+        "MAIN's session is stamped provider-down by a group that holds no ProviderDown")
+
+def _assert_escaped_as_itself(d: S.Drive, group: BaseException) -> None:
+    """MAIN's loop on a group with no `ProviderDown` (and no `CallRecordWriteFailed`):
+    `_drive_agent` re-raises it and the run crashes on it, every failure it carries escaping,
+    none dropped or relabelled. The members' identity is pinned, not the group's."""
+    assert d.raised is not None, (
+        "a group holding no ProviderDown was swallowed: the run did not crash on it "
+        f"(summary {d.summary!r})")
+    assert {id(e) for e in _leaves(d.raised)} == {id(e) for e in _leaves(group)}, (
+        f"what escaped ({d.raised!r}) is not the group's own failures ({group!r})")
+
+def _correlation_ending(d: S.Drive) -> str:
+    """The correlation section of MAIN's opening message, with the run folder and id
+    normalised away. It holds the lead's framed summary or its one named ending."""
+    assert d.run_dir is not None
+    _heading, body = S.correlation_section(d.main.opening_message)
+    return S.normalize(body, run_dir=d.run_dir, run_id=d.run_dir.name)
+
+def _provider_down(shape: str, at: int) -> tuple[S.LeadFault, Any]:
+    """A fault that raises `ProviderDown` on request `at`, bare or inside the `shape` group, and the
+    check that it fired in that shape."""
+    if shape == "bare":
+        return S.LeadFault(raise_on=at, exc=P.provider_down_fault()), lambda: None
+    fault = _grouped_down(shape)
+    return (S.LeadFault(raise_on=at, exc=fault),
+            lambda: _assert_fired_a_group(fault, holding_provider_down=True))
 
 
-def test_o3_main_down_ends_the_run_provider_down_with_no_report_and_exit_4(tmp_path: Path) -> None:
+@pytest.mark.parametrize("shape", SHAPES)
+def test_o3_d6_main_request_down_ends_the_run_provider_down_with_no_report_and_exit_4(
+        tmp_path: Path, shape: str) -> None:
     stores: list = []
-    main = S.MainScript([S.call("read_file", path="alert.json"), S.text(S.DONE)],
-                        fault=_down_at(2))
+    fault, fired = _provider_down(shape, at=2)
+    main = S.MainScript([S.call("read_file", path="alert.json"), S.text(S.DONE)], fault=fault)
     d = S.run_alert(tmp_path, main=main, leads={L3: [S.text(CORR)]},
                     store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
     assert main.requests == 2, f"MAIN made {main.requests} requests; the fault is on its 2nd"
+    fired()
+    P.assert_ended_provider_down(d)
+    assert P.sessions(_store(stores)).get("main") == P.PROVIDER_DOWN, (
+        "MAIN's session is not stamped provider-down")
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_o3_d6_a_main_lead_down_stamps_its_session_and_ends_the_run(tmp_path: Path, shape: str) -> None:
+    stores: list = []
+    fault, fired = _provider_down(shape, at=2)
+    d = S.run_alert(
+        tmp_path, main=[S.gather(LEAD, "cmdb"), S.text(S.DONE)],
+        leads={L3: [S.text(CORR)], LEAD: [S.list_verbs("cmdb"), S.text("unreached")]},
+        lead_faults={LEAD: fault},
+        store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
+    assert d.router.requests(LEAD) == 2, "MAIN's lead never reached its failing request"
+    fired()
+    P.assert_ended_provider_down(d)
+    ended = P.sessions(_store(stores))
+    assert ended.get(P.gather_agent(LEAD)) == P.PROVIDER_DOWN, (
+        f"the lead's session reads {ended.get(P.gather_agent(LEAD))!r}, not provider-down")
+    assert ended.get("main") == P.PROVIDER_DOWN, "MAIN's session is not stamped provider-down"
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_o3_d6_correlation_lead_provider_down_is_not_a_lead_ending_and_stops_before_main(
+        tmp_path: Path, shape: str) -> None:
+    """A `ProviderDown` raised in l-00c, bare or inside a group, passes the lead's catch-all like
+    `BudgetKill`: the run stops before MAIN."""
+    stores: list = []
+    fault, fired = _provider_down(shape, at=1)
+    d = S.run_alert(tmp_path, leads={L3: [S.text(CORR)]}, lead_faults={L3: fault},
+                    store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
+    assert d.router.dispatched(L3), "l-00c never ran"
+    fired()
+    assert d.main.requests == 0, (
+        f"MAIN was asked for {d.main.requests} turn(s) after the correlation lead's provider "
+        "went down: the lead ended dispatch_raised and the run went on")
     P.assert_ended_provider_down(d)
     assert P.sessions(_store(stores)).get("main") == P.PROVIDER_DOWN, (
         "MAIN's session is not stamped provider-down")
@@ -57,21 +163,6 @@ def test_o3_scenario2_main_behind_the_real_retrier_ends_provider_down(tmp_path: 
         f"MAIN's request reached its model {main.attempts} times; the retrier makes 4 attempts")
     assert all(a == main.inbound[0] for a in main.inbound), "a retry changed MAIN's request"
     P.assert_ended_provider_down(d)
-
-
-def test_o3_a_main_lead_down_stamps_its_session_and_ends_the_run(tmp_path: Path) -> None:
-    stores: list = []
-    d = S.run_alert(
-        tmp_path, main=[S.gather(LEAD, "cmdb"), S.text(S.DONE)],
-        leads={L3: [S.text(CORR)], LEAD: [S.list_verbs("cmdb"), S.text("unreached")]},
-        lead_faults={LEAD: _down_at(2)},
-        store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
-    assert d.router.requests(LEAD) == 2, "MAIN's lead never reached its failing request"
-    P.assert_ended_provider_down(d)
-    ended = P.sessions(_store(stores))
-    assert ended.get(P.gather_agent(LEAD)) == P.PROVIDER_DOWN, (
-        f"the lead's session reads {ended.get(P.gather_agent(LEAD))!r}, not provider-down")
-    assert ended.get("main") == P.PROVIDER_DOWN
 
 
 def test_o3_concurrent_leads_down_end_the_run_once(tmp_path: Path) -> None:
@@ -110,15 +201,6 @@ def test_o3_scenario5_correlation_lead_down_stops_before_main(tmp_path: Path) ->
     assert P.sessions(_store(stores)).get("main") == P.PROVIDER_DOWN
 
 
-def test_o3_correlation_lead_provider_down_is_not_a_lead_ending(tmp_path: Path) -> None:
-    """A `ProviderDown` raised in l-00c passes the lead's catch-all like `BudgetKill`: the
-    real-retrier scenario's stop, from the typed failure alone."""
-    d = S.run_alert(tmp_path, leads={L3: [S.text(CORR)]}, lead_faults={L3: _down_at(1)})
-    assert d.router.dispatched(L3), "l-00c never ran"
-    assert d.main.requests == 0, "MAIN ran after the correlation lead's provider went down"
-    P.assert_ended_provider_down(d)
-
-
 def test_o3_a_deadline_cutting_a_backoff_keeps_its_own_ending(tmp_path: Path) -> None:
     stall_s = 12.0
 
@@ -143,8 +225,6 @@ def test_o3_a_deadline_cutting_a_backoff_keeps_its_own_ending(tmp_path: Path) ->
         "the correlation lead cut mid-backoff is not stamped timed out")
 
 
-#: How long a lens waits for the event it is gated on before giving up (a gate that never ran
-#: the other lens) — a bound on a broken scenario, never reached on a conforming one.
 _GATE_BOUND_S = 30.0
 
 
@@ -323,6 +403,8 @@ def test_d4_exit_4_is_provider_downs_alone(tmp_path: Path, kill: Any, member: st
 
 
 SIBLING_TENANT = fixture_uuid("tenant:acme")
+
+
 SIBLING_WORLD = "b"
 
 
@@ -385,3 +467,143 @@ def test_o6_d4_a_sibling_world_ending_provider_down_exits_4(tmp_path: Path,
     assert d.raised is None, f"the sibling crashed instead of ending {ends}: {d.raised!r}"
     assert (d.summary or {}).get("truncated_by") == ends, d.summary
     assert d.rc == rc, f"a sibling world that ended {ends} exited {d.rc!r}, not {rc}"
+
+
+@pytest.mark.parametrize("shape", CONTROL_SHAPES)
+def test_d6_control_a_group_without_provider_down_still_escapes_mains_loop(tmp_path: Path,
+                                                                          shape: str) -> None:
+    fault = P.Recorded(P.GROUPED_WITHOUT_PROVIDER_DOWN[shape])
+    stores: list = []
+    main = S.MainScript([S.call("read_file", path="alert.json"), S.text(S.DONE)],
+                        fault=S.LeadFault(raise_on=2, exc=fault))
+    d = S.run_alert(tmp_path, main=main, leads={L3: [S.text(CORR)]},
+                    store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
+    assert main.requests == 2, f"MAIN made {main.requests} requests; the group is on its 2nd"
+    group = _assert_fired_a_group(fault, holding_provider_down=False)
+    _assert_escaped_as_itself(d, group)
+    _assert_not_provider_down(d, stores)
+
+
+def test_d6_control_a_group_without_provider_down_from_a_main_lead_still_escapes(
+        tmp_path: Path) -> None:
+    fault = P.Recorded(P.GROUPED_WITHOUT_PROVIDER_DOWN["flat"])
+    stores: list = []
+    d = S.run_alert(
+        tmp_path, main=[S.gather(LEAD, "cmdb"), S.text(S.DONE)],
+        leads={L3: [S.text(CORR)], LEAD: [S.list_verbs("cmdb"), S.text("unreached")]},
+        lead_faults={LEAD: S.LeadFault(raise_on=2, exc=fault)},
+        store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
+    assert d.router.requests(LEAD) == 2, "MAIN's lead never reached its failing request"
+    group = _assert_fired_a_group(fault, holding_provider_down=False)
+    _assert_escaped_as_itself(d, group)
+    _assert_not_provider_down(d, stores)
+    assert P.sessions(_store(stores)).get(P.gather_agent(LEAD)) != P.PROVIDER_DOWN
+
+
+@pytest.mark.parametrize("shape", CONTROL_SHAPES)
+def test_d6_control_a_group_without_provider_down_at_the_correlation_lead_is_dispatch_raised(
+        tmp_path: Path, shape: str) -> None:
+    tenant = S.plant_tenant()
+
+    def drive(label: str, exc: P.Fault | None, stores: list) -> S.Drive:
+        sub = tmp_path / label
+        sub.mkdir()
+        faults = {L3: S.LeadFault(raise_on=1, exc=exc)} if exc is not None else None
+        return S.run_alert(sub, tenant=tenant, main=S.MainScript([S.text(S.DONE)]),
+                           leads={L3: [S.text(CORR)]}, lead_faults=faults,
+                           store_factory=S.store_factory(sub, sink=stores), stores=stores)
+
+    summary = drive("summary", None, [])
+    bare = drive("bare", P.ordinary_error(), [])
+    fault = P.Recorded(P.GROUPED_WITHOUT_PROVIDER_DOWN[shape])
+    stores: list = []
+    d = drive("grouped", fault, stores)
+    assert d.router.dispatched(L3), "l-00c never ran"
+    _assert_fired_a_group(fault, holding_provider_down=False)
+    assert d.raised is None, f"the run crashed on the lead's group: {d.raised!r}"
+    assert d.main.requests == 1, (
+        f"MAIN was asked {d.main.requests} time(s): the run stopped before MAIN on a group "
+        "holding no ProviderDown")
+    assert not (d.summary or {}).get("truncated_by"), f"the run was cut: {d.summary!r}"
+    assert d.rc == 0, f"rc={d.rc!r}"
+    _assert_not_provider_down(d, stores)
+    named = _correlation_ending(d)
+    assert named != _correlation_ending(summary), (
+        "the grouped run's correlation section is the summary run's: the lead's failure was "
+        "not named at all")
+    assert named == _correlation_ending(bare), (
+        "a correlation-lead group holding no ProviderDown is named differently from the same "
+        f"bare error (dispatch_raised):\n  grouped: {named!r}\n  bare:    "
+        f"{_correlation_ending(bare)!r}")
+
+
+def test_o5_provider_down_is_a_member_of_the_run_end_vocabulary() -> None:
+    """`provider-down` is a `truncated_by` member and normalizes to itself, not to `None`, which
+    every reader takes as "not cut short"."""
+    assert P.PROVIDER_DOWN in rb.TRUNCATED_BY_VALUES
+    assert rb.normalized_truncated_by(P.PROVIDER_DOWN) == P.PROVIDER_DOWN
+    # Control on the same normalizer: an unlisted spelling still reads as None.
+    assert rb.normalized_truncated_by("provider_down") is None
+
+
+def test_o5_a_provider_down_run_end_record_parses(tmp_path: Path) -> None:
+    """The production reader reads a provider-down run-end record back as provider-down; a
+    record it refused would read as "the host said nothing"."""
+    rec = rb.parse_record({"truncated_by": P.PROVIDER_DOWN, "closed_before_cut": False})
+    assert rec is not None, "parse_record refuses a provider-down run-end record"
+    assert rec.truncated_by == P.PROVIDER_DOWN
+    # Control: the same reader refuses an out-of-vocabulary value.
+    assert rb.parse_record({"truncated_by": "provider_down", "closed_before_cut": False}) is None
+
+
+def test_o4_provider_down_is_not_a_forced_close_exit() -> None:
+    """Provider-down is an infrastructure end like budget and store, not in the forced
+    unresolved-close set, so no report.md is written for it."""
+    assert P.PROVIDER_DOWN not in rb.FORCED_CLOSE_EXITS
+    assert rb.TRUNCATED_BY_BUDGET not in rb.FORCED_CLOSE_EXITS
+    assert rb.TRUNCATED_BY_REQUEST_LIMIT in rb.FORCED_CLOSE_EXITS  # control: the set is not empty
+
+
+def test_o5_the_ticket_lane_leaves_a_provider_down_ticket_open_with_no_call(tmp_path: Path) -> None:
+    for report in (False, True):
+        run_dir = T47.closed_run_dir(tmp_path / f"report-{report}", report=report)
+        fake = T47.record_ticket(run_dir, truncated_by=P.PROVIDER_DOWN, closed_before_cut=False)
+        assert fake.calls == [], (
+            f"report={report}: the lane made {fake.calls} for a provider-down run — it must "
+            "make no call at all")
+        assert T47.receipt(run_dir) is None
+
+
+def test_o5_the_ticket_lane_records_a_provider_down_run_whose_model_had_closed(tmp_path: Path) -> None:
+    run_dir = T47.closed_run_dir(tmp_path, disposition="malicious")
+    fake = T47.record_ticket(run_dir, truncated_by=P.PROVIDER_DOWN, closed_before_cut=True)
+    assert len(fake.records) == 1, f"a closed-before-cut provider-down run recorded {fake.calls}"
+    assert "malicious" in fake.records[0].text()
+    assert fake.transitions == []
+
+
+def test_o5_ticket_lane_control_an_uncut_run_still_records(tmp_path: Path) -> None:
+    """Positive control on the same channel: an uncut run with a report records its comment,
+    so "no call" above is the provider-down arm, not a lane that never calls."""
+    run_dir = T47.closed_run_dir(tmp_path, disposition="malicious")
+    fake = T47.record_ticket(run_dir, truncated_by=None)
+    assert len(fake.records) == 1, f"an uncut run recorded {fake.records}"
+
+
+def test_o5_curation_refuses_a_provider_down_run(tmp_path: Path) -> None:
+    """The learning refusal gate refuses a provider-down run because it was cut short: a
+    truncated investigation never trains the corpus."""
+    run_dir = T47.closed_run_dir(tmp_path, report=False)
+    reason = learning_refusal_gate(run_dir, truncated_by=P.PROVIDER_DOWN)
+    assert reason is not None, "curation was not refused for a provider-down run"
+    assert P.PROVIDER_DOWN in reason, f"the refusal does not name the cut: {reason!r}"
+    # Control: the same gate with no cut does not refuse for truncation.
+    other = learning_refusal_gate(run_dir, truncated_by=None)
+    assert other is None or "truncated" not in other
+
+
+def test_o5_the_run_end_record_written_for_provider_down_round_trips(tmp_path: Path) -> None:
+    """The production writer and reader agree on a provider-down record: written in
+    `write_sidecar`'s document shape, read back by `parse_record` as the same value."""
+    doc = rb.RunEnd(P.PROVIDER_DOWN, False).doc()
+    assert rb.parse_record(json.loads(json.dumps(doc))) == rb.RunEnd(P.PROVIDER_DOWN, False)
