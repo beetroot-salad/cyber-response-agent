@@ -241,11 +241,29 @@ def _start_form(child: dict) -> tuple[str, list[str]]:
 
 
 def _runs_from(child: dict, copy: Path, source: Path) -> bool:
-    """Judged by what the process is: its script, its working directory (a `-m` start) and its `PYTHONPATH`."""
-    here = [a for a in child["argv"][1:] if a.startswith("/")] + [child["cwd"]]
-    return (any(_under(p, copy) or os.path.realpath(p) == os.path.realpath(copy) for p in here)
+    """Judged by what the process is: a `-m` start by its working directory (modules are found from it), a script start by the script's path; never by a working directory the worker did not set."""
+    argv = child["argv"]
+    if "-m" in argv[1:3]:
+        here = [child["cwd"]]
+    else:
+        script, _ = _start_form(child)
+        here = [script if os.path.isabs(script) else os.path.join(child["cwd"], script)]
+    return (all(_under(p, copy) or os.path.realpath(p) == os.path.realpath(copy) for p in here)
             and not any(_under(p, source) or os.path.realpath(p) == os.path.realpath(source) for p in here)
             and str(source) not in child["env"].get("PYTHONPATH", ""))
+
+
+def _values_of(argv: list[str], flag: str) -> list[str]:
+    """What follows `flag` up to the next flag."""
+    if flag not in argv:
+        return []
+    rest = argv[argv.index(flag) + 1:]
+    return rest[:next((i for i, a in enumerate(rest) if a.startswith("--")), len(rest))]
+
+
+def _child_of(children: list[dict], kind: str, job: str) -> dict | None:
+    """The child that runs the job entry (`job_entry`) or the post-step (`post_step`) for `job`."""
+    return next((c for c in children if kind in _start_form(c)[0] and job in _values_of(c["argv"], "--job")), None)
 
 
 @pytest.mark.postgres
@@ -311,10 +329,21 @@ def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_sou
         register_tenant(db, t.tenant_id, data_root=data_root)
         runs = data_root / t.tenant_id / "runs"
         runs.mkdir(exist_ok=True)
-        job = _job_of(db, _queue_investigation(db, "J-1", complete=True, tenant=t.tenant_id))
+        investigation = _queue_investigation(db, "J-1", complete=True, tenant=t.tenant_id)
+        job = _job_of(db, investigation)
         assert not list(runs.glob("*.session-pointer.json")), "premise: the source investigation has no run folder or session store"
         with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: _job_status_by_id(db, job) not in ("queued", "running")) as proc:
+            children = W.watch_children(
+                proc, lambda seen: _child_of(seen, "job_entry", job) and _child_of(seen, "post_step", job), timeout=120)
             W.wait_until(lambda: (runs / f"{job}.post-step.json").is_file(), timeout=120, what="the post-step's record", proc=proc)
+
+        entry = _child_of(children, "job_entry", job)
+        assert entry is not None, f"no job-entry child was observed; saw {[c['argv'] for c in children]}"
+        assert _values_of(entry["argv"], "--source") == [investigation], entry["argv"]
+        assert _values_of(entry["argv"], "--job") == [job]
+        post = _child_of(children, "post_step", job)
+        assert post is not None, "no post-step child was observed"
+        assert _values_of(post["argv"], "--pending") == [], "control: nothing was pending before this job"
 
         end = json.loads((runs / f"{job}.learning-end.json").read_text(encoding="utf-8"))
         assert (end["status"], end["reason"]) == ("failed", "source_unavailable"), end
@@ -322,6 +351,28 @@ def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_sou
         assert (status, reason) == ("failed", "source_unavailable"), "the child command crashed or was never wired"
         assert message
         assert json.loads((runs / f"{job}.post-step.json").read_text(encoding="utf-8")) == {"published": [], "refused": []}
+
+
+@pytest.mark.postgres
+def test_o15_the_default_post_step_command_lists_the_tenants_earlier_pending_job(source, data_root, db, tmp_path):
+    """An earlier job `completed`/`pending` and a new one: the real post-step child is started with the earlier job's id after `--pending`. (O15, O14, Worker start)"""
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    with B.run_tenant(tmp_path, data_root) as t:
+        register_tenant(db, t.tenant_id, data_root=data_root)
+        runs = data_root / t.tenant_id / "runs"
+        runs.mkdir(exist_ok=True)
+        earlier = _job_of(db, _queue_investigation(db, "J-1", complete=True, tenant=t.tenant_id))
+        execute(db, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'pending', "
+                    "started_at = now(), finished_at = now(), lease_expires_at = NULL WHERE id = %s", (earlier,))
+        assert execute(db, "SELECT status, publish_state FROM jobs.learning_jobs WHERE id = %s", (earlier,)) == [("completed", "pending")]
+        new = _job_of(db, _queue_investigation(db, "J-2", complete=True, tenant=t.tenant_id))
+        with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: _job_status_by_id(db, new) not in ("queued", "running")) as proc:
+            children = W.watch_children(proc, lambda seen: _child_of(seen, "post_step", new), timeout=120)
+            W.wait_until(lambda: (runs / f"{new}.post-step.json").is_file(), timeout=120, what="the post-step's record", proc=proc)
+        post = _child_of(children, "post_step", new)
+        assert post is not None, f"no post-step child was observed; saw {[c['argv'] for c in children]}"
+        assert earlier in _values_of(post["argv"], "--pending"), post["argv"]
 
 
 # --- image entry: the real entries from a copy, no PYTHONPATH --------------------------------------------------------

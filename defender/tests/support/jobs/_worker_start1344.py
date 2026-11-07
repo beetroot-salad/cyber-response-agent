@@ -37,8 +37,9 @@ def build_source(root: Path) -> Path:
 def worker_env(data_root: Path, *, dsn: str = CLOSED_DSN, stamp: str | None = STAMP, slots: str | None = None,
                learning: str | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
     """The environment of an image: no PYTHONPATH, no inherited `DEFENDER_*`, the settings as named (`None` leaves one
-    unset). `PYTHONDONTWRITEBYTECODE` is whatever the host has: the worker owes the children that setting itself."""
-    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH" and not k.startswith("DEFENDER_")}
+    unset). `PYTHONDONTWRITEBYTECODE` is removed, whatever the host has: the worker owes the children that setting itself."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PYTHONPATH", "PYTHONDONTWRITEBYTECODE") and not k.startswith("DEFENDER_")}
     env.update({"DEFENDER_DATABASE_DSN": dsn, "DEFENDER_DATA_ROOT": str(data_root)})
     for name, value in (("DEFENDER_BUILD_COMMIT", stamp), ("DEFENDER_WORKER_SLOTS", slots),
                         ("DEFENDER_WORKER_LEARNING_SLOTS", learning)):

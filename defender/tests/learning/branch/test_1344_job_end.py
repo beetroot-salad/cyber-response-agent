@@ -7,6 +7,9 @@ import os
 import shutil
 import signal
 import sqlite3
+import subprocess
+import sys
+import textwrap
 import threading
 import time
 from pathlib import Path
@@ -224,8 +227,9 @@ def test_a_verification_that_refuses_ends_failed_verify_refused_but_a_withheld_s
     lost = run_entry(tmp_path / "lost", spawn=RosterLostAfterTheLast())
     _failed_with(lost, "failed", "verify_refused")
 
-    split = run_entry(tmp_path / "split", spawn=PerWorld(J.FakeSibling(commit="deadbee"),
-                                                         b=J.FakeSibling(commit="cafe2")))
+    other_job = fixture_uuid("1344-job-split")
+    split = run_entry(tmp_path / "split", job=other_job,
+                      spawn=PerWorld(J.FakeSibling(commit="deadbee"), b=J.FakeSibling(commit="cafe2")))
     _ended(split, "completed", None)
 
 
@@ -402,18 +406,39 @@ def test_a_sigterm_while_no_fork_point_is_being_decided_ends_skipped_or_stopped_
     assert (ran.end["status"], ran.end["reason"]) in {("skipped", "no_fork_point"), ("stopped", None)}, ran.end
 
 
-def test_a_sigterm_after_the_judge_returned_is_still_completed(tmp_path):
-    """The ending is decided at the judge's return: a signal landing after it is not a stop. (End record, r5)"""
+_LATE_STOP = textwrap.dedent("""
+    import json, signal, sys, threading
+    from pathlib import Path
     from defender.learning.judge import grade_episode
+    from defender.tests.learning.branch.test_1344_job_lane import run_entry
 
-    def graded_then_stopped(runs, episode_id, **kw):
+    def graded_then_a_late_stop(runs, episode_id, **kw):
         graded = grade_episode(runs, episode_id, **kw)
-        _term()
+        timer = threading.Timer(0.05, signal.raise_signal, [signal.SIGTERM])
+        timer.start()
         return graded
 
-    ran = run_entry(tmp_path, grade=graded_then_stopped)
-    assert ran.judge.calls, "premise: the judge was asked"
-    _ended(ran, "completed", None)
+    ended = None
+    try:
+        ended = run_entry(Path(sys.argv[1]), grade=graded_then_a_late_stop).end
+        threading.Event().wait(0.5)
+    except BaseException as late:
+        print(repr(late), file=sys.stderr)
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    Path(sys.argv[2]).write_text(json.dumps(ended), encoding="utf-8")
+""")
+
+
+def test_a_sigterm_after_the_judge_returned_is_still_completed(tmp_path):
+    """A real SIGTERM landing just after the judge seam returned, in a child over the real entry, is not a stop. (End record, r5)"""
+    out = tmp_path / "end.json"
+    done = subprocess.run([sys.executable, "-c", _LATE_STOP, str(tmp_path / "entry"), str(out)],
+                          capture_output=True, text=True, timeout=300, check=False)
+    assert out.is_file(), f"premise: the wrapper wrote no end record: {done.stderr[-2000:]}"
+    ended = json.loads(out.read_text(encoding="utf-8"))
+    assert ended is not None, f"premise: the entry left no end record: {done.stderr[-2000:]}"
+    assert (ended["status"], ended["reason"]) == ("completed", None), ended
 
 
 HOLD_SECONDS = 120
