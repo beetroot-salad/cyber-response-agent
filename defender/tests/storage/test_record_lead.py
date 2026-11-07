@@ -13,6 +13,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from defender.hooks.record_lead import (
     ALREADY_CLAIMED,
     CLAIMED,
@@ -97,20 +99,21 @@ def test_an_empty_or_whitespace_goal_claims_nothing(tmp_path):
     assert claim_lead(_dispatch(run_dir, "l-001", "a real question", ["d"]), run=fixture_run(run_dir)) == CLAIMED
 
 
-def test_an_overlong_lead_id_is_refused_before_os_open(tmp_path):
-    """A well-shaped but unbounded id would fail the create with ENAMETOOLONG, the outcome a
-    caller can do least with. `LEAD_ID_RE` bounds the body, so the shape check refuses it —
-    the same bound `tools_gather`'s own seam check reads."""
-    run_dir = tmp_path / fixture_uuid("run")
+@pytest.mark.parametrize(("lead_id", "what_to_summarize"), [
+    # A well-shaped but unbounded id would fail the create with ENAMETOOLONG, the outcome a caller
+    # can do least with. `LEAD_ID_RE` bounds the body, so the shape check refuses it — the same
+    # bound `tools_gather`'s own seam check reads.
+    ("l-" + "a" * 300, ["d"]),
+    ("0", ["d"]),  # a malformed id
+    # The `isinstance(wtc, list)` guard the live caller relies on: `tools_gather` unfreezes the
+    # request's tuple back to a list at that boundary precisely because a non-list is skipped here
+    # rather than coerced.
+    ("l-001", ("d",)),
+], ids=["overlong_lead_id", "malformed_lead_id", "non_list_what_to_summarize"])
+def test_an_unclaimable_dispatch_silently_skips_and_writes_nothing(tmp_path, lead_id, what_to_summarize):
+    run_dir = tmp_path / fixture_uuid("run-skip")
     (run_dir / "gather_raw").mkdir(parents=True)
-    assert claim_lead(_dispatch(run_dir, "l-" + "a" * 300, "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
-    assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
-
-
-def test_malformed_lead_id_silently_skips(tmp_path):
-    run_dir = tmp_path / fixture_uuid("run-bad-id")
-    (run_dir / "gather_raw").mkdir(parents=True)
-    assert claim_lead(_dispatch(run_dir, "0", "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
+    assert claim_lead(_dispatch(run_dir, lead_id, "g", what_to_summarize), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
 
 
@@ -118,16 +121,6 @@ def test_missing_required_keys_silently_skips_write(tmp_path):
     run_dir = tmp_path / fixture_uuid("run-d")
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead({"run_dir": str(run_dir), "lead_id": "l-001"}, run=fixture_run(run_dir)) == NOT_CLAIMED
-    assert not (run_dir / "gather_raw" / "l-001.lead.json").exists()
-
-
-def test_non_list_what_to_summarize_silently_skips(tmp_path):
-    """The `isinstance(wtc, list)` guard the live caller relies on: `tools_gather`
-    unfreezes the request's tuple back to a list at that boundary precisely
-    because a non-list is skipped here rather than coerced."""
-    run_dir = tmp_path / fixture_uuid("run-tuple")
-    (run_dir / "gather_raw").mkdir(parents=True)
-    assert claim_lead(_dispatch(run_dir, "l-001", "g", ("d",)), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert not (run_dir / "gather_raw" / "l-001.lead.json").exists()
 
 

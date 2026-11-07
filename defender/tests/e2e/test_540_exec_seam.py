@@ -322,35 +322,23 @@ def test_hostile_argv_crosses_byte_exact(tmp_path):
             denied, policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow
 
 
-def test_non_utf8_argv_rejected_rather_than_transcoded(tmp_path):
+@pytest.mark.parametrize(("arg", "pattern"), [
+    ("\udcff", "(?i)utf-?8"),  # a non-UTF-8 argv is rejected rather than transcoded
+    ("a\x00b", "(?i)nul"),  # an embedded NUL
+], ids=["non_utf8", "embedded_nul"])
+def test_an_unencodable_argv_is_rejected_before_the_transport_is_touched(tmp_path, arg, pattern):
     """The encoder rejects it loudly, before the transport is touched."""
-    surrogate = "\udcff"
-    hostile = [bash_exec.Pipeline("first", [bash_exec.Stage(["grep", "-n", surrogate])])]
+    hostile = [bash_exec.Pipeline("first", [bash_exec.Stage(["grep", "-n", arg])])]
 
     t = RecordingTransport(framed(0, b"", b""))
     executor = box.BoxExecutor(spec=box.BoxSpec(), transport=t)
 
-    with pytest.raises(ValueError, match="(?i)utf-?8"):
+    with pytest.raises(ValueError, match=pattern):
         box.encode_request(hostile)
 
-    with pytest.raises(ValueError, match="(?i)utf-?8"):
+    with pytest.raises(ValueError, match=pattern):
         executor.run_parsed(hostile, command="grep -n <hostile>", cwd=tmp_path, timeout=5.0)
-    assert t.calls == [], "a non-UTF-8 argv was handed to the transport instead of refused"
-
-
-def test_embedded_nul_argv_rejected(tmp_path):
-    """Rejected at the encoder, before the transport is touched."""
-    hostile = [bash_exec.Pipeline("first", [bash_exec.Stage(["grep", "-n", "a\x00b"])])]
-
-    t = RecordingTransport(framed(0, b"", b""))
-    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=t)
-
-    with pytest.raises(ValueError, match="(?i)nul"):
-        box.encode_request(hostile)
-
-    with pytest.raises(ValueError, match="(?i)nul"):
-        executor.run_parsed(hostile, command="grep -n <hostile>", cwd=tmp_path, timeout=5.0)
-    assert t.calls == [], "an embedded-NUL argv reached the transport"
+    assert t.calls == [], "an unencodable argv reached the transport"
 
 
 def test_box_accepts_no_raw_command_string(tmp_path):

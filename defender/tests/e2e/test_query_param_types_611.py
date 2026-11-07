@@ -86,27 +86,21 @@ def test_mistyped_params_cannot_trip_a_healthy_system(tmp_path):
     assert r.rows[-1]["payload_status"] == "ok", "the live system did not answer after the typos"
 
 
-def test_a_truthy_string_cannot_pose_as_a_bool(tmp_path):
-    """The silent-wrong half, and the one with no crash to notice: `"false"` is TRUTHY, so an
-    unchecked bool param inverts the filter and the agent gets a confident wrong answer."""
+@pytest.mark.parametrize(("param", "run_id", "why"), [
+    # The silent-wrong half, and the one with no crash to notice: `"false"` is TRUTHY, so an
+    # unchecked bool param inverts the filter and the agent gets a confident wrong answer.
+    ({"enabled": "false"}, "q611-strbool", "a string reached a bool param — the filter would have inverted"),
+    # `bool` subclasses `int`, so an unguarded isinstance admits `limit=True` — which reaches the
+    # arithmetic clamp as a 1.
+    ({"limit": True}, "q611-boolint", "a bool was admitted as an int"),
+], ids=["truthy_string_as_bool", "bool_as_int"])
+def test_a_value_of_the_wrong_type_cannot_pose_as_the_declared_one(tmp_path, param, run_id, why):
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=typed(rec), turns=[
-        q("elastic", "probe", {"native_query": "FROM logs", "enabled": "false"}), DONE,
-    ], run_id="q611-strbool")
+        q("elastic", "probe", {"native_query": "FROM logs", **param}), DONE,
+    ], run_id=run_id)
 
-    assert rec.calls == [], "a string reached a bool param — the filter would have inverted"
-    assert r.row()["exit_code"] == 64
-
-
-def test_a_bool_is_not_an_int(tmp_path):
-    """`bool` subclasses `int`, so an unguarded isinstance admits `limit=True` — which reaches
-    the arithmetic clamp as a 1."""
-    rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=typed(rec), turns=[
-        q("elastic", "probe", {"native_query": "FROM logs", "limit": True}), DONE,
-    ], run_id="q611-boolint")
-
-    assert rec.calls == [], "a bool was admitted as an int"
+    assert rec.calls == [], why
     assert r.row()["exit_code"] == 64
 
 
