@@ -16,7 +16,7 @@ from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, Learning
 from defender.records._locations import unwrap_learning_root
 from defender.tenancy._tenant import requested_tenant
 from defender.tests.learning.branch.test_1344_job_lane import (
-    _SIBLING, _WORKER, _await_pid, _gone, _running, sink_files)
+    _SIBLING, _WORKER, _await_pid, _gone, _running, child_env, sink_files)
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -220,7 +220,8 @@ def test_o9_the_real_post_step_takes_the_tick_it_started_with_it_when_its_worker
     ep, _ = _job_episode(tmp_path, "chain", findings=False)
     _data_root, tenant_id = J.episode_location(ep)
     pid_file = tmp_path / "tick.pid"
-    worker = subprocess.Popen([sys.executable, "-c", _WORKER, _POST_STEP, tenant_id, str(pid_file), _SIBLING, ep.name])
+    worker = subprocess.Popen([sys.executable, "-c", _WORKER, _POST_STEP, tenant_id, str(pid_file), _SIBLING, ep.name],
+                              env=child_env())
     child = None
     try:
         child = _await_pid(pid_file)

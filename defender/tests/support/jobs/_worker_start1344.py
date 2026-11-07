@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -99,15 +100,56 @@ def kill_group(proc: subprocess.Popen) -> None:
             stream.close()
 
 
+class ChildWatch:
+    """Polls a worker's children from a thread started with the worker, so no child that runs and exits quickly is
+    missed by a watch that began late. Every child read after its exec is kept."""
+
+    def __init__(self) -> None:
+        self._seen: dict[int, dict] = {}
+        self._halt = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def begin(self, proc: subprocess.Popen) -> None:
+        parent = _cmdline(proc.pid)
+
+        def poll() -> None:
+            while not self._halt.is_set() and proc.poll() is None:
+                for pid in children_of(proc.pid):
+                    if pid not in self._seen and (info := snapshot_process(pid, forked_from=parent)) is not None:
+                        self._seen[pid] = info
+                time.sleep(0.002)
+
+        self._thread = threading.Thread(target=poll, daemon=True)
+        self._thread.start()
+
+    def end(self) -> None:
+        self._halt.set()
+        if self._thread is not None:
+            self._thread.join(timeout=10)
+
+    def children(self) -> list[dict]:
+        return list(self._seen.values())
+
+    def wait_for(self, done: Callable[[list[dict]], bool], *, timeout: float, what: str) -> list[dict]:
+        """Wait until `done(every child read so far)`; returns them."""
+        wait_until(lambda: bool(done(self.children())), timeout=timeout, what=what)
+        return self.children()
+
+
 @contextmanager
 def serving(source: Path, env: dict[str, str], *, ready: Callable[[], bool], what: str = "the worker to serve",
-            timeout: float = 120) -> Iterator[subprocess.Popen]:
-    """A worker process, waited on until `ready()`; killed at the end if the case left it running."""
+            timeout: float = 120, watch: ChildWatch | None = None) -> Iterator[subprocess.Popen]:
+    """A worker process, waited on until `ready()`; killed at the end if the case left it running. `watch` starts
+    polling its children as the process starts."""
     proc = start(source, env)
+    if watch is not None:
+        watch.begin(proc)
     try:
         wait_until(ready, timeout=timeout, what=what, proc=proc)
         yield proc
     finally:
+        if watch is not None:
+            watch.end()
         kill_group(proc)
 
 
@@ -149,21 +191,6 @@ def snapshot_process(pid: int, *, forked_from: list[bytes] | None = None) -> dic
         return None
     return {"pid": pid, "argv": [a.decode(errors="replace") for a in argv], "cwd": cwd,
             "env": dict(e.decode(errors="replace").split("=", 1) for e in environ if b"=" in e)}
-
-
-def watch_children(proc: subprocess.Popen, done: Callable[[list[dict]], bool], *, timeout: float) -> list[dict]:
-    """Poll the worker's children until `done(everything read so far)`; every child read after its exec is returned."""
-    seen: dict[int, dict] = {}
-    parent = _cmdline(proc.pid)
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and proc.poll() is None:
-        for pid in children_of(proc.pid):
-            if pid not in seen and (info := snapshot_process(pid, forked_from=parent)) is not None:
-                seen[pid] = info
-        if done(list(seen.values())):
-            break
-        time.sleep(0.002)
-    return list(seen.values())
 
 
 #: Runs a script the way `python script args` does, then writes {module name: file} of every module that has one.

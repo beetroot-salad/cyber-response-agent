@@ -276,11 +276,13 @@ def test_o15_children_run_from_the_copy_and_load_modules_from_nowhere_else(sourc
         (data_root / t.tenant_id / "runs").mkdir(exist_ok=True)
         job = _job_of(db, _queue_investigation(db, "J-1", complete=True, tenant=t.tenant_id))
         investigation = _queue_investigation(db, "P-1", tenant=t.tenant_id)
-        with W.serving(source, W.worker_env(data_root, dsn=db, slots="2"), ready=lambda: bool(W.code_copies(data_root))) as proc:
+        watch = W.ChildWatch()
+        with W.serving(source, W.worker_env(data_root, dsn=db, slots="2"), ready=lambda: bool(W.code_copies(data_root)),
+                       watch=watch) as proc:
             (copy,) = W.code_copies(data_root)
-            children = W.watch_children(
-                proc, lambda seen: all(any(wanted in " ".join(c["argv"]) for c in seen) for wanted in (investigation, job)),
-                timeout=120)
+            children = watch.wait_for(
+                lambda seen: all(any(wanted in " ".join(c["argv"]) for c in seen) for wanted in (investigation, job)),
+                timeout=120, what="an investigation child and a learning child")
             W.wait_until(lambda: _job_status_by_id(db, job) not in ("queued", "running")
                          and (row(db, investigation) or {}).get("stage") not in ("queued", "running"),
                          timeout=120, what="both kinds of work to end", proc=proc)
@@ -292,7 +294,10 @@ def test_o15_children_run_from_the_copy_and_load_modules_from_nowhere_else(sourc
         for kind, found in ours.items():
             for child in found:
                 assert _runs_from(child, copy, source), f"a {kind} child did not run from the copy: {child['argv']}, cwd {child['cwd']}"
-        assert not list(copy.rglob("__pycache__")), "a child wrote bytecode into the copy (O15: bytecode writes are off)"
+        for kind, found in ours.items():
+            for child in found:
+                assert child["env"].get("PYTHONDONTWRITEBYTECODE"), \
+                    f"a {kind} child runs with bytecode writes on (O15: the worker sets it for its children): {child['argv']}"
 
         entries = {_start_form(c)[0]: c for found in ours.values() for c in found}
         assert len(entries) >= 2, f"one entry for the investigation and one for the learning job: {sorted(entries)}"
@@ -332,9 +337,10 @@ def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_sou
         investigation = _queue_investigation(db, "J-1", complete=True, tenant=t.tenant_id)
         job = _job_of(db, investigation)
         assert not list(runs.glob("*.session-pointer.json")), "premise: the source investigation has no run folder or session store"
-        with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: _job_status_by_id(db, job) not in ("queued", "running")) as proc:
-            children = W.watch_children(
-                proc, lambda seen: _child_of(seen, "job_entry", job) and _child_of(seen, "post_step", job), timeout=120)
+        watch = W.ChildWatch()
+        with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: bool(W.code_copies(data_root)), watch=watch) as proc:
+            children = watch.wait_for(lambda seen: _child_of(seen, "job_entry", job) and _child_of(seen, "post_step", job),
+                                      timeout=120, what="the job entry and the post-step children")
             W.wait_until(lambda: (runs / f"{job}.post-step.json").is_file(), timeout=120, what="the post-step's record", proc=proc)
 
         entry = _child_of(children, "job_entry", job)
@@ -367,8 +373,9 @@ def test_o15_the_default_post_step_command_lists_the_tenants_earlier_pending_job
                     "started_at = now(), finished_at = now(), lease_expires_at = NULL WHERE id = %s", (earlier,))
         assert execute(db, "SELECT status, publish_state FROM jobs.learning_jobs WHERE id = %s", (earlier,)) == [("completed", "pending")]
         new = _job_of(db, _queue_investigation(db, "J-2", complete=True, tenant=t.tenant_id))
-        with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: _job_status_by_id(db, new) not in ("queued", "running")) as proc:
-            children = W.watch_children(proc, lambda seen: _child_of(seen, "post_step", new), timeout=120)
+        watch = W.ChildWatch()
+        with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: bool(W.code_copies(data_root)), watch=watch) as proc:
+            children = watch.wait_for(lambda seen: _child_of(seen, "post_step", new), timeout=120, what="the post-step child")
             W.wait_until(lambda: (runs / f"{new}.post-step.json").is_file(), timeout=120, what="the post-step's record", proc=proc)
         post = _child_of(children, "post_step", new)
         assert post is not None, f"no post-step child was observed; saw {[c['argv'] for c in children]}"

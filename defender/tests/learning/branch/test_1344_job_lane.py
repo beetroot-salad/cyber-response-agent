@@ -578,6 +578,12 @@ _WORKER = textwrap.dedent("""
 """)
 
 
+def child_env() -> dict[str, str]:
+    """The environment of a Python child that imports `defender`: pyproject's `pythonpath` reaches only pytest's own
+    `sys.path`, and CI sets none, so the checkout root is named."""
+    return dict(os.environ, PYTHONPATH=str(T.DEFENDER.parent))
+
+
 class RealChild:
     """The launcher's spawn seam over its REAL `_default_spawn`, running the test-owned sleeping child for a sibling."""
 
@@ -626,7 +632,7 @@ def _gone(pid: int) -> bool:
 def test_o9_a_sibling_dies_with_its_killed_worker(tmp_path):
     """SIGKILL the worker: the entry's real tie fires and the launcher's real spawn takes the sibling with it. (O9, L-C21)"""
     pid_file = tmp_path / "sibling.pid"
-    worker = subprocess.Popen([sys.executable, "-c", _WORKER, _ENTRY, str(pid_file), _SIBLING])
+    worker = subprocess.Popen([sys.executable, "-c", _WORKER, _ENTRY, str(pid_file), _SIBLING], env=child_env())
     sibling = None
     try:
         sibling = _await_pid(pid_file)
@@ -644,7 +650,8 @@ def test_o9_a_sibling_dies_with_its_killed_worker(tmp_path):
 def test_o9_the_real_job_entry_takes_its_launchers_sibling_with_it_when_its_worker_is_killed(tmp_path):
     """SIGKILL the worker above the REAL job entry: the entry's tie fires, its launcher unwinds, the sibling is gone. (O9, L-C21)"""
     pid_file = tmp_path / "sibling.pid"
-    worker = subprocess.Popen([sys.executable, "-c", _WORKER, _JOB_ENTRY, str(tmp_path / "entry"), str(pid_file)])
+    worker = subprocess.Popen([sys.executable, "-c", _WORKER, _JOB_ENTRY, str(tmp_path / "entry"), str(pid_file)],
+                              env=child_env())
     sibling = None
     try:
         sibling = _await_pid(pid_file)
@@ -675,7 +682,7 @@ _UNWINDING = textwrap.dedent("""
 def test_o9_the_launcher_terminates_its_child_when_it_unwinds_on_sigterm(tmp_path):
     """SIGTERM the launcher's process: it unwinds and the sibling it was waiting on is gone. (O9)"""
     pid_file = tmp_path / "sibling.pid"
-    launcher = subprocess.Popen([sys.executable, "-c", _UNWINDING, str(pid_file), _SIBLING])
+    launcher = subprocess.Popen([sys.executable, "-c", _UNWINDING, str(pid_file), _SIBLING], env=child_env())
     sibling = None
     try:
         sibling = _await_pid(pid_file)

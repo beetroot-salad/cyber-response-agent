@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests.learning.branch.test_1344_job_lane import JOB, Watch, WatchJudge, choose, run_entry
+from defender.tests.learning.branch.test_1344_job_lane import JOB, Watch, WatchJudge, child_env, choose, run_entry
 from defender.tests.learning.branch.test_947_triplet_launcher import _BASE
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -407,7 +407,7 @@ def test_a_sigterm_while_no_fork_point_is_being_decided_ends_skipped_or_stopped_
 
 
 _LATE_STOP = textwrap.dedent("""
-    import json, signal, sys, threading
+    import json, os, signal, sys, threading
     from pathlib import Path
     from defender.learning.judge import grade_episode
     from defender.tests.learning.branch.test_1344_job_lane import run_entry
@@ -418,14 +418,16 @@ _LATE_STOP = textwrap.dedent("""
         timer.start()
         return graded
 
-    ended = None
+    # A signal landing once the entry has returned must be harmless to this wrapper: ignored (so `run_entry` restores
+    # SIG_IGN, not SIG_DFL), and whatever it raises in the gap before that is swallowed. The record is read from disk.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
     try:
-        ended = run_entry(Path(sys.argv[1]), grade=graded_then_a_late_stop).end
-        threading.Event().wait(0.5)
+        run_entry(Path(sys.argv[1]), grade=graded_then_a_late_stop)
     except BaseException as late:
         print(repr(late), file=sys.stderr)
-    finally:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    threading.Event().wait(0.5)
+    records = sorted(Path(os.environ["DEFENDER_DATA_ROOT"]).glob("*/runs/*.learning-end.json"))
+    ended = json.loads(records[0].read_text(encoding="utf-8")) if len(records) == 1 else None
     Path(sys.argv[2]).write_text(json.dumps(ended), encoding="utf-8")
 """)
 
@@ -434,7 +436,8 @@ def test_a_sigterm_after_the_judge_returned_is_still_completed(tmp_path):
     """A real SIGTERM landing just after the judge seam returned, in a child over the real entry, is not a stop. (End record, r5)"""
     out = tmp_path / "end.json"
     done = subprocess.run([sys.executable, "-c", _LATE_STOP, str(tmp_path / "entry"), str(out)],
-                          capture_output=True, text=True, timeout=300, check=False)
+                          capture_output=True, text=True, timeout=300, check=False,
+                          env=child_env())
     assert out.is_file(), f"premise: the wrapper wrote no end record: {done.stderr[-2000:]}"
     ended = json.loads(out.read_text(encoding="utf-8"))
     assert ended is not None, f"premise: the entry left no end record: {done.stderr[-2000:]}"
