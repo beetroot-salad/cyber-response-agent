@@ -1181,6 +1181,25 @@ def test_s2_a_run_that_raises_after_a_failed_spend_write_still_says_so_in_its_jo
     assert record["spend_write_failed"] is failed, record
 
 
+@pytest.mark.parametrize(("reported", "want"), [(True, True), (False, False), (None, False)],
+                         ids=["a write failed", "none failed", "the summary names none"])
+def test_s4_the_page_step_is_told_the_hosts_spend_write_fact_only_when_a_write_failed(scene, reported, want):
+    """The post-step hands the run page `spend_write_failed=True` when the run's summary reports a failed spend write, and never True otherwise (a seam that predates the keyword is called without it). (S4, r6 S5)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    seen: list[dict[str, Any]] = []
+
+    def visualize(_run: Any, **kw: Any) -> None:
+        seen.append(kw)
+
+    extra = {} if reported is None else {"spend_write_failed": reported}
+    got = run_job(scene, run_id, visualize=visualize, lifecycle=_lifecycle(scene, investigate=_investigate(Ran(), **extra)))
+
+    assert got.raised is None, got
+    assert len(seen) == 1, seen
+    assert seen[0].get("spend_write_failed", False) is want, seen
+
+
 @pytest.mark.parametrize("scrub_ends", ["returns", "raises"])
 def test_c2_the_lifecycle_sets_scrub_verified_only_when_stop_and_scrub_returns(scene, scrub_ends):
     """On the holder the job entry handed it, `scrub_verified` is still false while the scrub runs, true after a clean return, and false after a raise even though the verdict says `ran: true`. (C2, O8)"""

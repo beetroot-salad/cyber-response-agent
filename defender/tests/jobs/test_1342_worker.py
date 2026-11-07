@@ -4352,6 +4352,37 @@ async def test_b5_an_outage_reading_the_alert_at_launch_hands_the_row_back_with_
     assert child.seen(inv) is None
 
 
+class _CostReads:
+    """Wraps a lane door and counts the lanes' `cost` calls: a run whose premise is "no live figure was read" proves it."""
+
+    def __init__(self, lanes) -> None:
+        self._lanes, self.reads = lanes, 0
+
+    def __call__(self, root, tenant):
+        outer, lane = self, self._lanes(root, tenant)
+
+        class _Counting:
+            def __getattr__(self, name):
+                real = getattr(lane, name)
+                if name != "cost":
+                    return real
+
+                def cost(*a, **k):
+                    outer.reads += 1
+                    return real(*a, **k)
+                return cost
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc) -> None:
+                lane.close()
+        return _Counting()
+
+
+_NO_TICK = {**_FAST, "cost_interval": 60.0}  # the cost tick never fires inside the test: no live figure is ever read
+
+
 async def test_b11_a_fault_reading_a_stopped_runs_ending_still_hands_the_row_back(world):
     """A stop signalled the child and reading its records then raises something nobody planned for: the stop cut the run short, so the row is handed back (cost unknown: no live figure was read), never failed `worker_error`. (#1343 review, B11; r6 S2/S4)"""
     release = world["tmp"] / "release"
@@ -4359,8 +4390,8 @@ async def test_b11_a_fault_reading_a_stopped_runs_ending_still_hands_the_row_bac
     dsn = world["dsn"]
     async with job_store(dsn) as store:
         inv = await _queued(store)
-        lanes = _lanes_failing(inv, "read_job_end", _NobodyPlannedThis("x"))
-        serving = asyncio.create_task(_worker(world, store, child, open_lane=lanes, **_FAST).serve())
+        lanes = _CostReads(_lanes_failing(inv, "read_job_end", _NobodyPlannedThis("x")))
+        serving = asyncio.create_task(_worker(world, store, child, open_lane=lanes, **_NO_TICK).serve())
         try:
             await _until(lambda: child.seen(inv), "the child")
             os.kill(os.getpid(), signal.SIGTERM)
@@ -4369,6 +4400,7 @@ async def test_b11_a_fault_reading_a_stopped_runs_ending_still_hands_the_row_bac
             release.touch()
             _kill_whatever_remains(child.seen(inv))
             await _stop_all(serving)
+    assert lanes.reads == 0, "premise: no live cost read happened"
     _handed_back(dsn, inv, unknown_cost=True)  # a child ran but no live figure was read: unknown, not "at least 0" (r6 S2/S4)
 
 
@@ -4397,13 +4429,14 @@ async def test_s4_an_outage_reading_a_finished_childs_records_before_any_live_fi
     dsn = world["dsn"]
     async with job_store(dsn) as store:
         inv = await _queued(store)
-        lanes = _lanes_failing(inv, "read_job_end", ConnectionError("the volume is gone"))
-        drained = asyncio.create_task(_worker(world, store, child, open_lane=lanes, **_FAST).drain())
+        lanes = _CostReads(_lanes_failing(inv, "read_job_end", ConnectionError("the volume is gone")))
+        drained = asyncio.create_task(_worker(world, store, child, open_lane=lanes, **_NO_TICK).drain())
         try:
             await _until(lambda: child.seen(inv), "the child")
         finally:
             release.touch()
             await asyncio.wait_for(drained, timeout=60)
+    assert lanes.reads == 0, "premise: no live cost read happened"
     _handed_back(dsn, inv, unknown_cost=True)
 
 

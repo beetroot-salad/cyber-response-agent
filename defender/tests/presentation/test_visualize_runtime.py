@@ -455,8 +455,9 @@ def test_s5_the_headline_says_at_least_exactly_when_the_host_knows_a_spend_write
     assert _dollars(headline) == pytest.approx(_priced(_LEDGER), abs=2e-4)
 
 
-def test_a3_an_unreadable_ledger_reads_unknown_in_the_headline_not_zero_and_not_at_least(tmp_path, monkeypatch):
-    """UPDATED (r6 S5; was: a null total on the result line): a session database without its ledger table reads "unknown", never `$0.0000` or "at least", with no unattributed segment, and the page still renders."""
+@pytest.mark.parametrize("spend_write_failed", [False, True], ids=["no write failed", "a write failed"])
+def test_a3_an_unreadable_ledger_reads_unknown_in_the_headline_not_zero_and_not_at_least(tmp_path, monkeypatch, spend_write_failed):
+    """UPDATED (r6 S5; was: a null total on the result line): a session database without its ledger table reads "unknown", never `$0.0000` or "at least" (the mark stands only beside a number, S4), with no unattributed segment, and the page still renders."""
     import sqlite3
 
     from defender.records import session_store as ss
@@ -472,7 +473,7 @@ def test_a3_an_unreadable_ledger_reads_unknown_in_the_headline_not_zero_and_not_
     finally:
         conn.close()
 
-    html = _page(run)
+    html = _page(run, spend_write_failed=spend_write_failed)
 
     assert _headline(html) == "unknown"
     assert not _unattributed(_cost_segments(html)), "an unattributed segment beside an unknown headline"
@@ -535,7 +536,8 @@ _NUMBERS = {"nan": float("nan"), "inf": float("inf"), "-inf": float("-inf"), "ne
 _FORGERIES = {f"{name}-{mark_name}": (value, mark)
               for name, value in _NUMBERS.items() for mark_name, mark in (("mark-true", True), ("mark-string", "yes"))}
 _FORGERIES |= {"no-total": ("no total", False), "no-mark": (0.37, "no mark"), "missing-line": ("no line", False),
-               "doubled-line": ("two lines", True)}
+               "doubled-line": ("two lines", True),
+               "json-null-total-and-usage": ("json null", False)}  # what the host writes when the ledger was unreadable
 
 
 @pytest.mark.parametrize(("total", "mark"), _FORGERIES.values(), ids=_FORGERIES.keys())
@@ -549,6 +551,11 @@ def test_s5_nothing_the_result_line_says_changes_the_headline_the_bars_or_whethe
     lines = path.read_text().splitlines()
     if total == "no line":
         path.write_text("".join(line + "\n" for line in lines[:-1]))
+    elif total == "json null":
+        events = [json.loads(line) for line in lines]
+        events[-1].update(total_cost_usd=None, usage=None, total_cost_is_lower_limit=mark)  # literal JSON nulls, not absent keys
+        path.write_text("".join(json.dumps(e) + "\n" for e in events))
+        assert '"total_cost_usd": null' in path.read_text().splitlines()[-1], "premise: the key is present, null"
     elif total == "two lines":
         forged = {**json.loads(lines[-1]), "total_cost_usd": 77.0, "total_cost_is_lower_limit": mark}
         path.write_text("".join(line + "\n" for line in [*lines, json.dumps(forged)]))
