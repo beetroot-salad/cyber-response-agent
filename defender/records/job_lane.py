@@ -25,6 +25,7 @@ import math
 import re
 import sqlite3
 import stat
+import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
@@ -153,6 +154,10 @@ _END_REASONS: dict[str, frozenset[str | None]] = {
     LEARNING_FAILED: frozenset(FAILED_BY_THE_ENTRY),
 }
 
+#: The largest findings count an end record may carry: what the row's `findings_count` column
+#: (a 32-bit `INTEGER`) holds. A larger one is no count, so the record is not one.
+MAX_FINDINGS_COUNT = 2**31 - 1
+
 _PROGRESS_FIELDS = frozenset({"fork_message_id", "stage", "sibling_cost_usd"})
 _END_FIELDS = frozenset({"status", "reason", "message", "fork_message_id", "stage",
                          "findings_count", "sibling_cost_usd"})
@@ -164,9 +169,13 @@ def _optional_text(value: object) -> bool:
 
 
 def _cost(value: object) -> bool:
-    """A cost in dollars: a finite, non-negative JSON number (never a bool)."""
-    return (isinstance(value, (int, float)) and not isinstance(value, bool)
-            and math.isfinite(value) and value >= 0)
+    """A cost in dollars: a finite, non-negative JSON number (never a bool). An integer beyond
+    the float range is not one (`math.isfinite` would overflow on it)."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    if isinstance(value, int) and abs(value) > sys.float_info.max:
+        return False
+    return math.isfinite(value) and value >= 0
 
 
 def _record_object(text: str, fields: frozenset[str]) -> dict | None:
@@ -206,7 +215,7 @@ class LearningProgress:
         try:
             return cls(fork_message_id=obj["fork_message_id"], stage=obj["stage"],
                        sibling_cost_usd=obj["sibling_cost_usd"])
-        except ValueError:
+        except (TypeError, ValueError, OverflowError):
             return None
 
 
@@ -233,7 +242,7 @@ class LearningEnd:
                 and _optional_text(self.stage) and _cost(self.sibling_cost_usd)):
             raise ValueError(f"not a learning end record: {self!r}")
         if not isinstance(self.findings_count, int) or isinstance(self.findings_count, bool) \
-                or self.findings_count < 0:
+                or not 0 <= self.findings_count <= MAX_FINDINGS_COUNT:
             raise ValueError(f"not a findings count: {self.findings_count!r}")
         if self.reason is not None and not (self.message or "").strip():
             raise ValueError(f"a {self.status} end names why in its message")
@@ -252,7 +261,7 @@ class LearningEnd:
             return None
         try:
             return cls(**{name: obj[name] for name in _END_FIELDS})
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
 
 

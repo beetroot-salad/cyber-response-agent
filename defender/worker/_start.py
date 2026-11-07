@@ -1,7 +1,7 @@
 """The worker's real start (#1344 O15, D8): its settings, the one-worker-per-machine lock on the
 data root, and the code copy its children and their boxes run from.
 
-Order: the settings are read and judged first (an empty build stamp, bad slots), so a refused start
+Order: the settings are read and judged first (a build stamp that is not a commit, bad slots), so a refused start
 touches nothing; then an exclusive kernel lock on the data root, so a refused second worker never
 touches the first one's live copy; then the copy is replaced. The lock lives as long as the process
 (the kernel drops it with the descriptor), across containers that share the mount.
@@ -29,11 +29,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender import _io
+from defender.records.formats import BUILD_COMMIT_ENV, is_build_commit
 
-#: The variables the deployed worker reads.
+#: The variables the deployed worker reads (`BUILD_COMMIT_ENV` is the stamp's own, from `records`).
 DSN_ENV = "DEFENDER_DATABASE_DSN"
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
-BUILD_COMMIT_ENV = "DEFENDER_BUILD_COMMIT"
 SLOTS_ENV = "DEFENDER_WORKER_SLOTS"
 LEARNING_SLOTS_ENV = "DEFENDER_WORKER_LEARNING_SLOTS"
 LEARNING_CHECK_ENV = "DEFENDER_WORKER_LEARNING_CHECK_SECONDS"
@@ -74,16 +74,30 @@ def _setting_count(environ: Mapping[str, str], name: str, default: int) -> int:
     return int(raw.strip())
 
 
-def read_settings(environ: Mapping[str, str]) -> Settings:
-    """The worker's settings, judged before any work: a non-empty build stamp, slots of at least
-    one, learning slots between 0 and slots - 1 (default min(1, slots - 1)), and the family-less
-    check's interval, whole seconds of at least 1 (default 300). Learning is on by default in
-    production (#1344 D3); 0 is the off switch."""
-    commit = (environ.get(BUILD_COMMIT_ENV) or "").strip()
-    if not commit:
+def build_commit(environ: Mapping[str, str]) -> str:
+    """The build stamp in `environ`, exactly as given, when it is a commit as a code copy's marker
+    is read (`records.formats.is_build_commit`: lowercase hex, 7 to 64 characters); anything else
+    (unset, empty, a tag or branch name, uppercase, a `-dirty` suffix, whitespace) is
+    `WorkerStartRefused`. Children stamp the copy's marker as their build commit, so a stamp the
+    marker reader would not take is refused here, before anything is touched."""
+    raw = environ.get(BUILD_COMMIT_ENV)
+    if raw is None or not raw.strip():
         raise WorkerStartRefused(
             f"{BUILD_COMMIT_ENV} is empty or unset: the worker's code copy is stamped with the build's commit, "
             "and there is no other source for it")
+    if not is_build_commit(raw):
+        raise WorkerStartRefused(
+            f"{BUILD_COMMIT_ENV}={raw!r} is not a commit: the code copy's marker names the build's commit as "
+            "7 to 64 lowercase hex characters, nothing else (no tag, branch name, suffix or whitespace)")
+    return raw
+
+
+def read_settings(environ: Mapping[str, str]) -> Settings:
+    """The worker's settings, judged before any work: a build stamp that is a commit
+    (`build_commit`), slots of at least one, learning slots between 0 and slots - 1 (default
+    min(1, slots - 1)), and the family-less check's interval, whole seconds of at least 1
+    (default 300). Learning is on by default in production (#1344 D3); 0 is the off switch."""
+    commit = build_commit(environ)
     slots = _setting_count(environ, SLOTS_ENV, DEFAULT_SLOTS)
     if slots < 1:
         raise WorkerStartRefused(f"{SLOTS_ENV}={slots} must be at least 1")
@@ -128,11 +142,9 @@ def hold_start_lock(data_root: Path) -> int:
 def refresh_code_copy(data_root: Path, *, source: Path, environ: Mapping[str, str]) -> Path:
     """Replace the code copy on the data root with a fresh read-only copy of `source` (the parent
     of the running `defender/`), marked with the build stamp from `environ`, and return its root.
-    The caller holds the start lock. An empty stamp, or a copy that cannot be made, is
-    `WorkerStartRefused`."""
-    commit = (environ.get(BUILD_COMMIT_ENV) or "").strip()
-    if not commit:
-        raise WorkerStartRefused(f"{BUILD_COMMIT_ENV} is empty or unset: the code copy cannot be stamped")
+    The caller holds the start lock. A stamp that is not a commit, or a copy that cannot be made,
+    is `WorkerStartRefused`."""
+    commit = build_commit(environ)
     package = Path(source) / "defender"
     if not (package / "run.py").is_file():
         raise WorkerStartRefused(f"{source} has no defender/run.py: it is not a code tree to copy")

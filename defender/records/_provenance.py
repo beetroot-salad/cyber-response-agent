@@ -8,6 +8,7 @@ import re
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TypeGuard
 
 from defender import _git
 from defender._io import load_json_artifact, read_guarded, write_guarded
@@ -38,8 +39,16 @@ ORIGIN_BUILD_STAMP = "build_stamp"
 ORIGIN_CODE_COPY = "code_copy"
 _ORIGINS = frozenset({ORIGIN_GIT, ORIGIN_BUILD_STAMP, ORIGIN_CODE_COPY})
 
-#: A build commit as a marker may name it: lowercase hex, abbreviated or whole.
-_MARKER_COMMIT = re.compile(r"[0-9a-f]{7,64}")
+#: A build commit, abbreviated or whole: lowercase hex, 7 to 64 characters. The one grammar a
+#: code copy's marker is read with and the worker's start accepts `BUILD_COMMIT_ENV` by
+#: (`is_build_commit`), so a stamp the worker writes is always one the marker reader takes.
+_BUILD_COMMIT = re.compile(r"[0-9a-f]{7,64}")
+
+
+def is_build_commit(value: object) -> TypeGuard[str]:
+    """Whether `value` is a build commit as a code copy's marker may name it: lowercase hex,
+    7 to 64 characters, nothing around it (no tag, branch name, `-dirty` suffix or whitespace)."""
+    return isinstance(value, str) and _BUILD_COMMIT.fullmatch(value) is not None
 
 #: Wall clock per git call. This is on the critical path of run-dir creation with no other
 #: bound, so a hung git (stalled mount, `fsmonitor`, `index.lock`) would hang startup.
@@ -358,7 +367,7 @@ def _from_copy_marker(repo_root: Path) -> RunProvenance | None:
     raw, err = read_guarded(marker)
     obj, unreadable = (None, err) if raw is None else load_json_artifact(raw)
     commit = obj.get("commit") if isinstance(obj, dict) and unreadable is None else None
-    if not (isinstance(commit, str) and _MARKER_COMMIT.fullmatch(commit)):
+    if not is_build_commit(commit):
         return RunProvenance(
             commit=None, dirty=None, scope=CODE_SCOPE,
             unavailable=f"the code copy's marker {CODE_COPY_MARKER} names no build commit")

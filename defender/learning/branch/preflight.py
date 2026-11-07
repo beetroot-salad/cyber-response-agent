@@ -69,6 +69,11 @@ from defender.records.formats import runnable_worlds
 
 #: The words pre-flight's outcome record may hold (`outcome.OUTCOMES`); there is no fourth.
 ACCEPTED, UNUSABLE, REFUSED = outcome_mod.ACCEPTED, outcome_mod.UNUSABLE, outcome_mod.REFUSED
+#: The key of `preflight_replay`'s returned record (never of the outcome record it writes) that
+#: says the refusal was the environment's, not the family's or its source's: the read token for
+#: the credential proxy could not be signed. A job ends that one `failed: launch_refused`; every
+#: other refusal before the first sibling is `skipped: family_unusable` (#1344 r5 table).
+ENVIRONMENT_REFUSED = "environment_refused"
 
 
 
@@ -370,13 +375,13 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
             not_replayable.append({**call.entry, "reason": why})
     fact_worlds = [w for w in runnable_worlds(family) if w.facts]
 
-    def record(outcome: str, reason: str, *,
-               unservable: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+    def record(outcome: str, reason: str, *, unservable: Sequence[Mapping[str, Any]] = (),
+               environment: bool = False) -> dict[str, Any]:
         outcome_mod.write_outcome(episode, outcome, reason=reason, unservable_worlds=unservable,
                                   not_replayable=not_replayable)
         return {"outcome": outcome, "reason": reason,
                 "unservable_worlds": [dict(u) for u in unservable],
-                "not_replayable": list(not_replayable)}
+                "not_replayable": list(not_replayable), ENVIRONMENT_REFUSED: environment}
 
     # M05=A: nothing to calibrate, for a reason that belongs to no world — refused before any
     # tenant read or oracle turn.
@@ -402,7 +407,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
                                    issuer_transport=issuer_transport, directory=directory)
     except AdapterFault as unsigned:
         return record(REFUSED, f"the read token for the credential proxy cannot be signed: "
-                               f"{unsigned.detail}")
+                               f"{unsigned.detail}", environment=True)
     ctx = _preflight_context(episode.dir, source, tenant, access)
     resumed = {w.label: formats.resume_world_from(family, w.label, episode.dir)
                for w in fact_worlds}

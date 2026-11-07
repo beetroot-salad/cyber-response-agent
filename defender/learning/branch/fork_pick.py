@@ -7,8 +7,9 @@ operator fork point but is none for a job: a job's family varies what a gather r
 automatic correlation lead is no MAIN response, so it is never a candidate.
 
 A candidate the admission refuses (nothing open in the frontier, no fork snapshot, a snapshot
-current code cannot read) is dropped on its own; the rest stay. The last refusal's text is kept
-for the job's `no_fork_point` message, which a person reads.
+current code cannot read) is dropped on its own; the rest stay. The refusals' kinds are kept, each
+once (`BranchError.kind`: a fixed name in our own words, never the refusal's text, which carries
+host paths), for the job's `no_fork_point` message, which a person reads.
 """
 from __future__ import annotations
 
@@ -20,15 +21,20 @@ from typing import Any
 from defender.investigation import branch
 from defender.records import Run, session_store
 
-__all__ = ["ForkCandidates", "fork_candidates", "pick_fork"]
+__all__ = ["UNNAMED_REFUSAL", "ForkCandidates", "fork_candidates", "pick_fork"]
+
+
+#: The kind of an admission refusal raised without one (`BranchError.kind` is `None`).
+UNNAMED_REFUSAL = "a refusal with no kind"
 
 
 @dataclass(frozen=True)
 class ForkCandidates:
-    """The admitted fork points, in MAIN's path order, and the last refusal of a dropped one."""
+    """The admitted fork points, in MAIN's path order, and the distinct kinds of the dropped
+    ones' refusals, in the order first met."""
 
     ids: list[int] = field(default_factory=list)
-    last_refusal: str | None = None
+    refusal_kinds: tuple[str, ...] = ()
 
 
 def _calls_gather(message: Any) -> bool:
@@ -47,7 +53,7 @@ def fork_candidates(store: Any, run: Run) -> ForkCandidates:
     ids = session_store.path_row_ids(store, session)
     messages = session_store.hydrate(store, session, role="analysis")
     admitted: list[int] = []
-    last_refusal: str | None = None
+    kinds: dict[str, None] = {}
     for row_id, message in zip(ids, messages, strict=True):
         if not _calls_gather(message):
             continue
@@ -57,10 +63,10 @@ def fork_candidates(store: Any, run: Run) -> ForkCandidates:
                 source_run_dir=run_dir, branch_message_id=row_id, as_of=as_of),
                 source_run=run, require_capture=False)
         except branch.BranchError as refused:
-            last_refusal = f"message {row_id}: {refused}"
+            kinds.setdefault(refused.kind or UNNAMED_REFUSAL)
             continue
         admitted.append(row_id)
-    return ForkCandidates(admitted, last_refusal)
+    return ForkCandidates(admitted, tuple(kinds))
 
 
 def pick_fork(ids: list[int], *, rng: random.Random | None = None) -> int:

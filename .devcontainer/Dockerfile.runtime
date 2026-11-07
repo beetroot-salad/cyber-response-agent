@@ -29,7 +29,8 @@
 # The deployed command is the worker (#1344 O15): it reads DEFENDER_DATABASE_DSN, DEFENDER_DATA_ROOT,
 # DEFENDER_BUILD_COMMIT (baked, below), DEFENDER_WORKER_SLOTS (default 3) and
 # DEFENDER_WORKER_LEARNING_SLOTS (default min(1, slots - 1)) and DEFENDER_WORKER_LEARNING_CHECK_SECONDS
-# (default 300: a tenant with no post-step that long is checked without a family); it refuses an empty build stamp, takes
+# (default 300: a tenant with no post-step that long is checked without a family); it refuses a build stamp that is not a
+# commit (7 to 64 lowercase hex characters, the copy marker's own grammar: no tag, branch name or suffix), takes
 # a lock on the data root (one worker per machine), replaces its read-only code copy under the data
 # root, and runs every investigation and learning child from that copy:
 #   docker run --rm --env-file .env -e DEFENDER_DATABASE_DSN=... -e DEFENDER_DATA_ROOT=/data \
@@ -86,7 +87,7 @@ COPY defender/ defender/
 #   docker build -f .devcontainer/Dockerfile.runtime \
 #       --build-arg DEFENDER_BUILD_COMMIT="$(git rev-parse HEAD)" -t defender-runtime .
 #
-# The worker refuses to start without it (#1344 O15). At each start it writes a fresh read-only
+# The worker refuses to start without it, or with anything but a commit (#1344 O15). At each start it writes a fresh read-only
 # copy of the baked code under the data root with this commit in the copy's marker
 # (`.defender-code-copy.json`); its children run from that copy and stamp it as a clean build of
 # this commit, read from the marker, never from git. A process started from the baked tree itself

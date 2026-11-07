@@ -120,6 +120,7 @@ from defender.learning.branch.questioner_launch import (
 from defender.learning.branch.preflight import (
     ACCEPTED as ACCEPTED,
     DIRT as DIRT,
+    ENVIRONMENT_REFUSED as ENVIRONMENT_REFUSED,
     LauncherRefused as LauncherRefused,
     MAX_BRANCH_MESSAGE_ID as MAX_BRANCH_MESSAGE_ID,
     REFUSED as REFUSED,
@@ -820,10 +821,15 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
         _logger.info(f"episode {episode_id}: {record['outcome']} before any sibling started "
                      f"({record['reason']})")
         if lane is not None:
-            raise ending(
-                f"[branch] episode {episode_id}: pre-flight recorded {record['outcome']!r} "
-                f"({record['reason']})", reason=FAMILY_UNUSABLE,
-                brief=f"pre-flight recorded the family {record['outcome']}; no sibling started")
+            detail = (f"[branch] episode {episode_id}: pre-flight recorded {record['outcome']!r} "
+                      f"({record['reason']})")
+            if record.get(ENVIRONMENT_REFUSED):
+                # The environment's refusal, not the family's: the job fails, it is not skipped.
+                raise ending(detail, reason=LAUNCH_REFUSED,
+                             brief="pre-flight refused: the read token for the credential proxy "
+                                   "cannot be signed; no sibling started")
+            raise ending(detail, reason=FAMILY_UNUSABLE,
+                         brief=f"pre-flight recorded the family {record['outcome']}; no sibling started")
         return 1
     unservable = {entry["world"] for entry in record["unservable_worlds"]}
     worlds = [w for w in runnable_worlds(family) if w.label not in unservable]

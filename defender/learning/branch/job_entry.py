@@ -156,11 +156,10 @@ class _Job:
     # -- the progress record ---------------------------------------------------------------
 
     def progress(self) -> None:
-        try:
-            self.lane.write_learning_progress(
-                self.job_id, LearningProgress(self.fork, self.stage, self.cost))
-        except (OSError, JobLaneRefused, ValueError) as unwritten:
-            _logger.warning(f"job {self.job_id}: the progress record could not be written ({unwritten!r})")
+        """Replace the progress record. A write that fails raises: the pick must be durable
+        before any spend (O3), so the entry ends `failed: entry_error` there."""
+        self.lane.write_learning_progress(
+            self.job_id, LearningProgress(self.fork, self.stage, self.cost))
 
     def at_stage(self, name: str) -> None:
         self.stage = str(name)
@@ -174,9 +173,10 @@ class _Job:
         found = _candidates_of(source, candidates)
         ids = list(found.ids)
         if not ids:
-            why = getattr(found, "last_refusal", None)
+            kinds = _refusal_kinds(found)
             brief = ("the source investigation has no fork point: no response of its main agent "
-                     "that called gather is admitted" + (f" (the last refusal: {why})" if why else ""))
+                     "that called gather is admitted"
+                     + (f" (refused: {'; '.join(kinds)})" if kinds else ""))
             self.decided = self._end(LEARNING_SKIPPED, NO_FORK_POINT, brief)
             raise ending(f"[learning job] {brief}", reason=NO_FORK_POINT, brief=brief)
         picked = pick_fork(ids)
@@ -187,9 +187,14 @@ class _Job:
     def sibling_ended(self, view: EpisodeRuns, world_ids: Sequence[str]) -> None:
         """What the siblings that have run cost so far, carried to the progress record."""
         try:
-            self.cost = _family_cost(view, world_ids)
+            cost = _family_cost(view, world_ids)
         except Exception as unreadable:  # noqa: BLE001 — a cost the entry cannot read keeps the last one
             _logger.warning(f"job {self.job_id}: the siblings' cost could not be read ({unreadable!r})")
+        else:
+            if math.isfinite(cost) and cost >= 0:
+                self.cost = cost
+            else:
+                _logger.warning(f"job {self.job_id}: the siblings' cost read as {cost!r}, which is no cost")
         self.progress()
 
     def judged(self, graded: Any, count: Callable[[], int]) -> None:
@@ -238,6 +243,13 @@ class _Job:
         return True
 
 
+def _refusal_kinds(found: Any) -> list[str]:
+    """The kinds of refusal among the dropped candidates (`ForkCandidates.refusal_kinds`), each
+    once: fixed names in our own words, never a refusal's text."""
+    kinds = getattr(found, "refusal_kinds", None) or ()
+    return list(dict.fromkeys(str(kind) for kind in kinds))
+
+
 def _judged_message(word: str | None, findings: int | None) -> str:
     """The completed job's message: the judge's verdict word when it graded nothing."""
     if word is not None:
@@ -248,32 +260,43 @@ def _judged_message(word: str | None, findings: int | None) -> str:
 
 
 def _candidates_of(source: Run, candidates: Callable[..., Any]) -> Any:
-    """`candidates(store, source)` over the source's own session store, opened here. A store
-    that is gone is `failed: source_unavailable`; one current code cannot read is
-    `skipped: history_unreadable`, its message naming the refusal's type only."""
+    """`candidates(store, source)` over the source's own session store, opened here.
+
+    A source whose session pointer is absent is a run recorded before #1235 (its link still
+    inside the folder: `LegacyRunLink`, `skipped: history_unreadable`) or one whose store is gone
+    (`failed: source_unavailable`), as is a pointer naming a database that is not there. Only a
+    typed format refusal (`session_store.StoreError`) is `history_unreadable`, its message naming
+    the refusal's type; anything else propagates, and the entry records `failed: entry_error`."""
     if source.observability.session_pointer.read_result().absent:
+        try:
+            session_store.refuse_legacy_link(source.run_dir)
+        except session_store.StoreError as unreadable:
+            raise _history_unreadable(unreadable) from unreadable
         brief = "the source run carries no session store, so it has no fork point to read"
-        raise ending(f"[learning job] {brief}", reason=HISTORY_UNREADABLE, brief=brief)
+        raise ending(f"[learning job] {brief}", reason=SOURCE_UNAVAILABLE, brief=brief)
     try:
         database = session_store.resolve_store_path(source)
-    except (OSError, ValueError, KeyError, TypeError, session_store.StoreError) as unreadable:
-        brief = f"the source run's session pointer cannot be read ({type(unreadable).__name__})"
-        raise ending(f"[learning job] {brief}", reason=HISTORY_UNREADABLE, brief=brief,
-                     cause=unreadable) from unreadable
+    except session_store.StoreError as unreadable:
+        raise _history_unreadable(unreadable) from unreadable
     if not database.is_file():
         brief = "the source run's session database is gone"
         raise ending(f"[learning job] {brief}", reason=SOURCE_UNAVAILABLE, brief=brief)
     try:
         opened = branch.source_store_if_any(source.run_dir, source_run=source)
         if opened is None:
-            raise branch.BranchError("no session pointer")
+            brief = "the source run's session pointer is gone"
+            raise ending(f"[learning job] {brief}", reason=SOURCE_UNAVAILABLE, brief=brief)
         with opened as store:
             return candidates(store, source)
-    except (session_store.StoreError, branch.BranchError) as unreadable:
-        brief = (f"the source run's session history cannot be read by current code "
-                 f"({type(unreadable).__name__})")
-        raise ending(f"[learning job] {brief}", reason=HISTORY_UNREADABLE, brief=brief,
-                     cause=unreadable) from unreadable
+    except session_store.StoreError as unreadable:
+        raise _history_unreadable(unreadable) from unreadable
+
+
+def _history_unreadable(refusal: BaseException) -> JobEnding:
+    """`skipped: history_unreadable` for a typed format refusal, its message naming the type."""
+    brief = (f"the source run's session history cannot be read by current code "
+             f"({type(refusal).__name__})")
+    return ending(f"[learning job] {brief}", reason=HISTORY_UNREADABLE, brief=brief, cause=refusal)
 
 
 def _family_cost(view: EpisodeRuns, world_ids: Sequence[str]) -> float:

@@ -26,6 +26,18 @@ from defender.knowledge import is_reserved_query_id
 from defender.records import session_store
 from ..run_state import RunState
 from ._spec import (
+    REFUSED_FOLDED_SESSION,
+    REFUSED_NO_CAPTURE,
+    REFUSED_NO_FORK_SNAPSHOT,
+    REFUSED_NO_SOURCE_RUN,
+    REFUSED_NO_TOOL_CALL,
+    REFUSED_NOT_A_MESSAGE,
+    REFUSED_NOTHING_OPEN,
+    REFUSED_OFF_MAIN_PATH,
+    REFUSED_RETRY_STREAK,
+    REFUSED_SOURCE_CHANGED,
+    REFUSED_UNOPENED,
+    REFUSED_UNREADABLE_FORK_SNAPSHOT,
     BranchError,
     BranchSpec,
     open_source_store,
@@ -81,7 +93,7 @@ def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
     if spec.branch_message_id <= 0:
         raise BranchError(
             f"branch_message_id must be a real message, got {spec.branch_message_id} — "
-            "message 0 precedes every payload, so no world can contradict the prefix")
+            "message 0 precedes every payload, so no world can contradict the prefix", kind=REFUSED_NOT_A_MESSAGE)
 
     # On MAIN's path, not merely a number: an id past the tip or from a gather session would
     # fork a sub-agent's transcript as MAIN's.
@@ -91,7 +103,7 @@ def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
         raise BranchError(
             f"message {spec.branch_message_id} is not on the source run's MAIN path "
             f"({len(path)} row(s), {path[0] if path else '-'}..{path[-1] if path else '-'}) — "
-            "a branch point has to be a message this run's own main session actually holds")
+            "a branch point has to be a message this run's own main session actually holds", kind=REFUSED_OFF_MAIN_PATH)
 
     # A folded session stays unbranchable (D4): the fold reparents the frontier onto the
     # lineage root, so the path no longer says which turns the run's requests were. Refused
@@ -101,7 +113,7 @@ def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
             f"{run_dir}'s main session has been folded (compaction displaced tip "
             f"{session_store.displaced_tip(store, session)}) — a folded session cannot be "
             "branched: the fold displaced turns the arm's history would have to hold. Branch "
-            "an uncompacted run")
+            "an uncompacted run", kind=REFUSED_FOLDED_SESSION)
 
     prefix = session_store.hydrate(store, session, role="analysis")
     upto = prefix[: path.index(spec.branch_message_id) + 1]
@@ -112,21 +124,21 @@ def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
             f"message {spec.branch_message_id} is a "
             f"{'text-only response' if isinstance(branch_response, ModelResponse) else 'request'}"
             " — a branch point is a MAIN response that called tools, so the arm resumes by "
-            "running those calls against its own world and is handed no message of its own")
+            "running those calls against its own world and is handed no message of its own", kind=REFUSED_NO_TOOL_CALL)
 
     carried = carried_retries(upto[:-1])
     if carried:
         raise BranchError(
             f"message {spec.branch_message_id} is inside a retry streak ({carried} carried) — "
             "the framework's per-tool retry counts cannot be seeded into an arm, so it would "
-            "take that step differently. Branch at a response no tool carries a retry into")
+            "take that step differently. Branch at a response no tool carries a retry into", kind=REFUSED_RETRY_STREAK)
 
     snapshot = _snapshot.load(store, session, _snapshot.request_count(upto))
     if snapshot is None:
         raise BranchError(
             f"{run_dir} recorded no fork snapshot for message {spec.branch_message_id} — a run "
             "recorded before fork snapshots existed (or one whose snapshot was not recorded) "
-            "cannot be branched: nothing says what it held when that response arrived")
+            "cannot be branched: nothing says what it held when that response arrived", kind=REFUSED_NO_FORK_SNAPSHOT)
 
     # The clock, checked here because only the store knows this branch point's moment.
     snapshot.verify(source_run)
@@ -138,7 +150,7 @@ def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
         raise BranchError(
             f"{run_dir} captured no query that reached a system by message "
             f"{spec.branch_message_id} — a sibling world would be consistent with an empty "
-            "prefix by construction, which is the generated-world design, not a branch")
+            "prefix by construction, which is the generated-world design, not a branch", kind=REFUSED_NO_CAPTURE)
 
     document = snapshot.document if snapshot.document is not None else ""
     fences = len(scan_fences(document).bodies)
@@ -147,7 +159,7 @@ def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
         raise BranchError(
             f"nothing is open in the frontier at message {spec.branch_message_id} "
             f"({fences} fence(s): 0 slots, 0 contracts, {len(open_state.held)} held) — there "
-            "is no question there for a pair of worlds to divide")
+            "is no question there for a pair of worlds to divide", kind=REFUSED_NOTHING_OPEN)
     return snapshot
 
 
@@ -211,7 +223,7 @@ def open_main_session(
         # Every refusal before the fork: `store.fork` commits, and each retried refusal after
         # it would leave another orphan session in the source database.
         if source_run is None:
-            raise BranchError("a resumed run requires its source Run")
+            raise BranchError("a resumed run requires its source Run", kind=REFUSED_NO_SOURCE_RUN)
         snapshot = admitted_snapshot(store, spec, source_run=source_run)
         refuse_seeded_run_dir(run_state.run_dir)
         session = source_session(store, spec, source_run=source_run)
@@ -234,13 +246,25 @@ def open_main_session(
     except Exception as e:
         raise BranchError(
             f"the resume of {spec.source_run_dir} at message {spec.branch_message_id} could "
-            f"not be opened: {type(e).__name__}: {e}") from e
+            f"not be opened: {type(e).__name__}: {e}", kind=REFUSED_UNOPENED) from e
     return session_id, visible
 
 
 #: Re-exports; each name's home is the module it is imported from.
 __all__ = [
     "Any",
+    "REFUSED_FOLDED_SESSION",
+    "REFUSED_NO_CAPTURE",
+    "REFUSED_NO_FORK_SNAPSHOT",
+    "REFUSED_NO_SOURCE_RUN",
+    "REFUSED_NO_TOOL_CALL",
+    "REFUSED_NOT_A_MESSAGE",
+    "REFUSED_NOTHING_OPEN",
+    "REFUSED_OFF_MAIN_PATH",
+    "REFUSED_RETRY_STREAK",
+    "REFUSED_SOURCE_CHANGED",
+    "REFUSED_UNOPENED",
+    "REFUSED_UNREADABLE_FORK_SNAPSHOT",
     "BranchError",
     "BranchSpec",
     "ForkSnapshot",

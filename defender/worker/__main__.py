@@ -3,8 +3,8 @@
 Reads `DEFENDER_DATABASE_DSN`, `DEFENDER_DATA_ROOT`, `DEFENDER_BUILD_COMMIT`, `DEFENDER_WORKER_SLOTS`
 (default 3), `DEFENDER_WORKER_LEARNING_SLOTS` (default min(1, slots - 1)) and
 `DEFENDER_WORKER_LEARNING_CHECK_SECONDS` (default 300: how long a tenant goes without a post-step
-before a family-less one checks it, #1344 amendment 1). Refuses an empty build
-stamp and bad settings before any work, refuses a second worker on the same data root without
+before a family-less one checks it, #1344 amendment 1). Refuses a build stamp that is not a
+commit (empty, a tag, a branch name: the marker reader's grammar) and bad settings before any work, refuses a second worker on the same data root without
 touching the first one's code copy, replaces the code copy, runs every child from it, and serves
 until SIGTERM or SIGINT (exit 0). A refusal is a nonzero exit naming its cause on stderr."""
 from __future__ import annotations
