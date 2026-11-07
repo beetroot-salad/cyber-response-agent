@@ -201,14 +201,14 @@ def test_advance_to_naming_a_lead_declared_elsewhere_resolves() -> None:
     assert _errors(_lp_doc({"advance_to": "dlp-scope-check"})) == []
 
 
-def test_advance_to_naming_no_lead_at_all_is_refused() -> None:
-    _one_error(_lp_doc({"advance_to": "process-lineage-walk"}), "process-lineage-walk")
-
-
-def test_advance_to_naming_a_lead_id_rather_than_its_name_is_refused() -> None:
-    """"a lead name appearing elsewhere in the companion" — the `name` column, not the `id`.
-    Accepting `l-002` here would make the route unauditable against the run's own naming."""
-    _one_error(_lp_doc({"advance_to": "l-002"}), "l-002")
+@pytest.mark.parametrize("target", [
+    "process-lineage-walk",  # no lead of that name at all
+    # "a lead name appearing elsewhere in the companion" — the `name` column, not the `id`.
+    # Accepting `l-002` here would make the route unauditable against the run's own naming.
+    "l-002",
+])
+def test_advance_to_naming_no_lead_or_a_lead_id_rather_than_its_name_is_refused(target: str) -> None:
+    _one_error(_lp_doc({"advance_to": target}), target)
 
 
 # #18's route-compliance clause is a WARNING, not an error
@@ -499,65 +499,29 @@ def test_an_impact_resolution_against_a_local_prediction_validates_clean() -> No
     assert _errors(_r_impact_doc()) == []
 
 
-def test_a_bare_prediction_ref_does_not_reach_another_leads_prediction() -> None:
-    _one_error(_r_impact_doc({"resolved_by": "l-002", "pred_ref": "ip1"}), "ip1")
-
-
-def test_a_bare_prediction_ref_naming_nothing_at_all_is_refused() -> None:
-    _one_error(_r_impact_doc({"pred_ref": "ip9"}), "ip9")
-
-
-def test_a_qualified_prediction_ref_naming_an_undeclared_lead_is_refused() -> None:
-    _one_error(_r_impact_doc({"pred_ref": "l-009.ip1"}), "l-009.ip1")
-
-
-def test_a_qualified_prediction_ref_naming_a_real_lead_without_that_id_is_refused() -> None:
-    """l-002 exists and declares `ip2`; it does not declare `ip1`. Resolution is (lead, id),
-    not lead-exists-and-id-exists-somewhere."""
-    _one_error(_r_impact_doc({"resolved_by": "l-002", "pred_ref": "l-002.ip1"}), "l-002.ip1")
-
-
-def test_a_dimension_that_disagrees_with_the_referenced_prediction_is_refused() -> None:
-    _one_error(_r_impact_doc({"dim": "availability"}), "ip1")
-
-
-@pytest.mark.parametrize(
-    "verdict",
-    ["none", "breached", "Exceeds", "authorized", "unauthorized"],
-)
-def test_an_off_enum_resolution_verdict_is_refused(verdict: str) -> None:
-    _one_error(_r_impact_doc({"verdict": verdict}), verdict)
-
-
-def test_past_case_grounding_on_an_impact_resolution_is_refused() -> None:
-    _one_error(_r_impact_doc({"grounding": "past-case"}), "past-case")
-
-
-@pytest.mark.parametrize("grounding", ["org-authority", "runtime-evidence", "Telemetry-Baseline"])
-def test_an_off_enum_impact_grounding_kind_is_refused(grounding: str) -> None:
-    """`org-authority` is the other authz-side member — legal there, not here, because an
-    authority answers permission and not consequence."""
-    _one_error(_r_impact_doc({"grounding": grounding}), grounding)
-
-
-@pytest.mark.parametrize(
-    ("cell", "token"),
-    [
-        ("verdict", "verdict"),
-        ("grounding", "grounding_kind"),
-        ("authority", "authority_for_question"),
-        ("as_of", "as_of"),
-        ("reasoning", "reasoning"),
-    ],
-)
-def test_an_impact_resolution_missing_a_required_field_is_refused(cell: str, token: str) -> None:
-    """Rule #30's other required fields; `prediction_ref` and `dimension` have their own tests,
-    since they also carry resolution and match obligations."""
-    _one_error(_r_impact_doc({cell: ""}), token)
-
-
-def test_an_impact_resolution_with_no_prediction_ref_is_refused() -> None:
-    _one_error(_r_impact_doc({"pred_ref": ""}), "prediction_ref")
+@pytest.mark.parametrize(("overrides", "token"), [
+    pytest.param({"resolved_by": "l-002", "pred_ref": "ip1"}, "ip1", id="bare_ref_does_not_reach_another_leads_prediction"),
+    pytest.param({"pred_ref": "ip9"}, "ip9", id="bare_ref_naming_nothing"),
+    pytest.param({"pred_ref": "l-009.ip1"}, "l-009.ip1", id="qualified_ref_to_an_undeclared_lead"),
+    # l-002 exists and declares `ip2`; it does not declare `ip1`. Resolution is (lead, id),
+    # not lead-exists-and-id-exists-somewhere.
+    pytest.param({"resolved_by": "l-002", "pred_ref": "l-002.ip1"}, "l-002.ip1", id="qualified_ref_to_a_real_lead_without_that_id"),
+    pytest.param({"dim": "availability"}, "ip1", id="dimension_disagrees_with_the_referenced_prediction"),
+    pytest.param({"grounding": "past-case"}, "past-case", id="past_case_grounding"),
+    pytest.param({"pred_ref": ""}, "prediction_ref", id="no_prediction_ref"),
+    # off-enum verdicts
+    *[pytest.param({"verdict": v}, v, id=f"verdict_{v}") for v in ("none", "breached", "Exceeds", "authorized", "unauthorized")],
+    # `org-authority` is the other authz-side member — legal there, not here, because an
+    # authority answers permission and not consequence.
+    *[pytest.param({"grounding": g}, g, id=f"grounding_{g}") for g in ("org-authority", "runtime-evidence", "Telemetry-Baseline")],
+    # Rule #30's other required fields; `prediction_ref` and `dimension` carry resolution and match
+    # obligations, so they are cases above.
+    *[pytest.param({cell: ""}, token, id=f"missing_{cell}") for cell, token in (
+        ("verdict", "verdict"), ("grounding", "grounding_kind"), ("authority", "authority_for_question"),
+        ("as_of", "as_of"), ("reasoning", "reasoning"))],
+])
+def test_an_impact_resolution_breaking_rule_30_is_refused(overrides: dict, token: str) -> None:
+    _one_error(_r_impact_doc(overrides), token)
 
 
 # rule #31 — impact closure at CONCLUDE, plus the verdict/severity pair

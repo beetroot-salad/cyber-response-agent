@@ -62,21 +62,13 @@ def test_compute_role_slot_off_vocab_names_the_slot_it_actually_belongs_to():
     "v-001|compute|{web-server,database-server}/internal/known-corp|db-1|",
     "v-001|compute|unclassified-compute/??/??|1df4bcd65ee4|",
     "v-001|compute|ambiguous-web-server-or-database-server/internal/known-corp|db-1|",
-], ids=["candidate-set", "unclassified-catchall", "ambiguous-catchall"])
+    # The exact discriminator: `container` belongs in `attrs.kind`, not the role slot.
+    "v-001|compute|unclassified-compute/??/??|1df4bcd65ee4|kind=container",
+    "v-001|process|some-random-binary|some-random-binary[pid=1]|",  # a process class stays freeform
+], ids=["candidate-set", "unclassified-catchall", "ambiguous-catchall", "kind-attr-container", "process-freeform"])
 def test_escape_hatch_class_passes(row):
-    """A candidate set and the two documented catch-alls pass unchecked."""
+    """A candidate set, the two documented catch-alls, a `kind` attr and a freeform process class pass unchecked."""
     assert validate_companion(_vertex_doc(row), None) == []
-
-
-def test_compute_kind_attr_container_is_the_right_home_for_it():
-    """The exact discriminator: `container` belongs in `attrs.kind`, not the role slot."""
-    doc = _vertex_doc("v-001|compute|unclassified-compute/??/??|1df4bcd65ee4|kind=container")
-    assert validate_companion(doc, None) == []
-
-
-def test_process_class_stays_freeform():
-    doc = _vertex_doc("v-001|process|some-random-binary|some-random-binary[pid=1]|")
-    assert validate_companion(doc, None) == []
 
 
 @pytest.mark.parametrize(("vertex_row", "refine_row", "slot"), [

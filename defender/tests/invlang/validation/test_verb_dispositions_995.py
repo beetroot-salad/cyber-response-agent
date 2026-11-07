@@ -456,18 +456,16 @@ def test_a_typo_on_a_granted_system_is_told_apart_from_a_typo_on_an_ungranted_on
     assert "verb-grants.yaml" not in (near_miss.refusal or "")
 
 
-def test_a_withheld_verb_on_a_granted_system_is_still_denied():
+@pytest.mark.parametrize(("system", "verb", "outcome"), [
+    ("cmdb", "list-roles", "DENIED"),  # a withheld verb on a granted system
+    # A system with no adapter at all must not be reported as 'denied', which would tell a
+    # caller it exists.
+    ("nosuchsystem", "anything", "UNDECLARED"),
+])
+def test_a_withheld_verb_is_denied_and_an_unknown_system_is_undeclared(system, verb, outcome):
     rows = load_dispositions(dispositions_path(SETTINGS))
     reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows))
-    assert reg.decide("cmdb", "list-roles").outcome == "DENIED"
-
-
-def test_an_unknown_system_entirely_is_still_undeclared():
-    """A system with no adapter at all must not be reported as 'denied', which would tell a
-    caller it exists."""
-    rows = load_dispositions(dispositions_path(SETTINGS))
-    reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows))
-    assert reg.decide("nosuchsystem", "anything").outcome == "UNDECLARED"
+    assert reg.decide(system, verb).outcome == outcome
 
 
 def test_the_table_loads_from_a_read_only_file():
