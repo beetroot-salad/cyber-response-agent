@@ -290,10 +290,11 @@ def _family_cost(view: EpisodeRuns, world_ids: Sequence[str]) -> float:
             arm = handout[arm_id]
             if isinstance(arm, RunRefused):
                 continue
-            if arm.observability.session_pointer.read_result().absent:
-                continue
-            session_id = session_store.resolve_session_id(arm)
-            database = session_store.resolve_store_path(arm)
+            try:
+                session_id = session_store.resolve_session_id(arm)
+                database = session_store.resolve_store_path(arm)
+            except (FileNotFoundError, session_store.LegacyRunLink):
+                continue  # a world that never recorded a session spent nothing
             if session_id is None or not database.is_file():
                 continue
             with session_store.open_store_for_read(database) as store:
