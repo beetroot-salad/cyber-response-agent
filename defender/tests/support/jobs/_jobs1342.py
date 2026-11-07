@@ -591,7 +591,7 @@ def plant_queued_investigation(dsn: str, *, tenant: str, alert_id: str, investig
     """A `queued` row with a chosen id, as SQL (the store mints ids; a case that must plant a file
     named for the id before the claim needs to know it)."""
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
-                 "stage, created_at, cost_usd) VALUES (%s, %s, %s, %s, 1, 'queued', %s, 0)",
+                 "stage, created_at, cost_usd, cost_is_lower_limit) VALUES (%s, %s, %s, %s, 1, 'queued', %s, 0, false)",
             (investigation_id, tenant, alert_id, key, NOW))
 
 

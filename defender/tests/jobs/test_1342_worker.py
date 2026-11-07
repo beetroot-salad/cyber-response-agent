@@ -3087,8 +3087,8 @@ def _plant_running_lapsed(dsn: str, alert_id: str, *, attempt: int = 1) -> str:
     """A `running` row nobody holds, its lease lapsed a minute ago by the database clock."""
     inv = str(uuid.uuid4())
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
-                 "started_at, cost_usd, lease_expires_at) VALUES (%s, %s, %s, 'planted', %s, 'running', %s, %s, 0, "
-                 "now() - interval '1 minute')", (inv, T1, alert_id, attempt, NOW, NOW))
+                 "started_at, cost_usd, cost_is_lower_limit, lease_expires_at) VALUES (%s, %s, %s, 'planted', %s, 'running', "
+                 "%s, %s, 0, false, now() - interval '1 minute')", (inv, T1, alert_id, attempt, NOW, NOW))
     return inv
 
 

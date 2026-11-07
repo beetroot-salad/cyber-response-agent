@@ -79,8 +79,8 @@ def _plant_investigation(dsn: str, *, tenant: str, alert_id: str, key: str, atte
                          created_at: dt.datetime = NOW) -> str:
     investigation_id = str(uuid.uuid4())
     lease = "now() + interval '30 seconds'" if stage == "running" else "NULL"  # #1343: a running row has a lease
-    execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
-                 f"stage, created_at, cost_usd, lease_expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, {lease})",  # noqa: S608
+    execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
+                 f"cost_usd, cost_is_lower_limit, lease_expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, false, {lease})",  # noqa: S608
             (investigation_id, tenant, alert_id, key, attempt, stage, created_at))
     return investigation_id
 
@@ -625,7 +625,7 @@ async def test_o4_rows_created_together_are_claimed_lowest_id_first(dsn):
     alerts = [_plant_alert(dsn, ticket=f"P-{n}") for n in range(2)]
     for investigation_id, alert_id in ((high, alerts[0]), (low, alerts[1])):  # the higher id goes in first
         execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
-                     "stage, created_at, cost_usd) VALUES (%s, %s, %s, 'k', 1, 'queued', %s, 0)",
+                     "stage, created_at, cost_usd, cost_is_lower_limit) VALUES (%s, %s, %s, 'k', 1, 'queued', %s, 0, false)",
                 (investigation_id, T1, alert_id, NOW))
     async with job_store(dsn) as store:
         got = [await store.claim() for _ in range(3)]
@@ -1891,8 +1891,8 @@ def _plant_running(dsn: str, *, alert_id: str, key: str, attempt: int, lapsed: b
     when = "now() - interval '1 minute'" if lapsed else "now() + interval '30 seconds'"
     mark = "now()" if marked else "NULL"
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, "
-                 "created_at, started_at, cost_usd, lease_expires_at, accounting_written_at) VALUES "
-                 f"(%s, %s, %s, %s, %s, 'running', %s, %s, 1.25, {when}, {mark})",  # noqa: S608
+                 "created_at, started_at, cost_usd, cost_is_lower_limit, lease_expires_at, accounting_written_at) VALUES "
+                 f"(%s, %s, %s, %s, %s, 'running', %s, %s, 1.25, false, {when}, {mark})",  # noqa: S608
             (investigation_id, tenant, alert_id, key, attempt, NOW, NOW))
     return investigation_id
 
