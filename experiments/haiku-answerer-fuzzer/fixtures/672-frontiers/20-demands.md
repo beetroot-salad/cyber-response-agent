@@ -135,7 +135,7 @@ Addresses follow references/schema.md forms. Ids are code names where code exist
   kind: negative
   form: clause        # recorded downgrade: suite/graph/prose maintenance, not e2e behavior; conservation rides censuses c11/c15
   binds: ["ticket_adapter_cli", "judge_bash_grants"]
-  outcome: {nl: "Every surface still teaching or checking the deleted bash lane is retired or updated per censuses c11/c15: the grant-regex tests (test_judge_pydantic_engine.py:215-310, test_grant_gate.py:717-748 e1-e3, test_bind_sole_seam.py:238-262) and learning/test_loop.py:1837-1857's scope.ticket_cli assertion; the spec-graph nodes across spec_graph_575/551/538/611; and the comment/docstring censuses (adapter docstring three-to-two consumers, permission/bash.py:182,331, grant.py:196-205 three-exemptions-to-two, policy_cli.py:44-49,77-83, _stub_transport.py:78, engine_pydantic.py:5-6,102, defender/CLAUDE.md)."}
+  outcome: {nl: "Every surface still teaching or checking the deleted bash lane is retired or updated per censuses c11/c15: the grant-regex tests (test_judge_pydantic_engine.py:215-310, test_grant_gate_575.py:717-748 e1-e3, test_bind_sole_seam_551.py:238-262) and learning/test_loop.py:1837-1857's scope.ticket_cli assertion; the spec-graph nodes across spec_graph_575/551/538/611; and the comment/docstring censuses (adapter docstring three-to-two consumers, permission/bash.py:182,331, grant.py:196-205 three-exemptions-to-two, policy_cli.py:44-49,77-83, _stub_transport.py:78, engine_pydantic.py:5-6,102, defender/CLAUDE.md)."}
 ```
 
 ### Rejected-branch notes to transfer onto tests (phase E)

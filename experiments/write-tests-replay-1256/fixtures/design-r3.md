@@ -97,10 +97,10 @@ A sibling resolves its own tenant at its own start and runs the same startup che
 
 ### What changes for existing contracts
 
-- `test_adapters::test_s7_mf8_config_fault_breaker_accounting_unchanged` pins "no config-fault exemption" — superseded by #1256.
-- `test_correlation_endings::test_p006…unconfigured` pins tripped/every-call-failed endings for an unconfigured correlation system — replaced by O-6.
-- `e2e/test_query_tool::test_missing_config_is_infra_not_agent_fixable` — it drives a configured tenant with a verb that raises `ConfigFault`, so it becomes an O-5b case: the system goes down uncharged and the retry is refused. (r2 said "becomes a refusal"; corrected in r3.)
-- `test_correlation_dispatch::test_p134_tenants_siem_config_faulted_at_run_start` pins "nothing at run start names a faulted SIEM config" — superseded by O-3.
+- `test_1107_adapters::test_s7_mf8_config_fault_breaker_accounting_unchanged` pins "no config-fault exemption" — superseded by #1256.
+- `test_1222_correlation_endings::test_p006…unconfigured` pins tripped/every-call-failed endings for an unconfigured correlation system — replaced by O-6.
+- `e2e/test_query_tool_611::test_missing_config_is_infra_not_agent_fixable` — it drives a configured tenant with a verb that raises `ConfigFault`, so it becomes an O-5b case: the system goes down uncharged and the retry is refused. (r2 said "becomes a refusal"; corrected in r3.)
+- `test_1222_correlation_dispatch::test_p134_tenants_siem_config_faulted_at_run_start` pins "nothing at run start names a faulted SIEM config" — superseded by O-3.
 - `#1120`'s "setup refuses what run start refuses" parity now covers structure and grants, not system usability (D4).
 - `INFRA_CAUSES` drops "not configured"; #1254's wording in `down_message`/`RunAborted` narrows back to reachability; `_tenants.py` doc line ("per-call ConfigFault, exit 2, trips the breaker") is rewritten.
 
@@ -123,7 +123,7 @@ claims:
   - id: C1
     kind: behavior
     claim: "Today a ConfigFault counts toward per-system and run-wide breaker exactly like a TransportFault; N config-down systems abort at RUN_FAIL_KILL_LIMIT."
-    probe: "cd defender && flock /tmp/defender-pytest.lock .venv/bin/python -m pytest -p no:xdist tests/tenant_1107_settings/test_adapters.py::test_s7_mf8_config_fault_breaker_accounting_unchanged ::test_o5_missing_system_config_run_completes @ d7b1886d"
+    probe: "cd defender && flock /tmp/defender-pytest.lock .venv/bin/python -m pytest -p no:xdist tests/tenant_1107_settings/test_1107_adapters.py::test_s7_mf8_config_fault_breaker_accounting_unchanged ::test_o5_missing_system_config_run_completes @ d7b1886d"
     probe_kind: executed
     observed: "2 passed"
     verdict: holds
