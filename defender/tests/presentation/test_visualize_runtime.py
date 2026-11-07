@@ -307,7 +307,8 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
     assert "dead-end lead" in html
 
     headline = float(re.search(r'ts-cost">\$([0-9.]+)', html).group(1))
-    segs = [float(x) for x in re.findall(r'cb-pct">\$([0-9.]+)', html)]
+    # Every bar (cb-seg title "<name> · $v · p%"): cb-pct prints a value only on wide bars.
+    segs = [float(v) for _name, v in re.findall(r'class="cb-seg"[^>]*title="([^"]*?) · \$([0-9.]+) · ', html)]
     assert abs(headline - 0.5) < 0.002, f"the headline {headline} is not the run file's total (#1377 S5)"
     assert abs(headline - sum(segs)) < 0.002, f"{headline} != {sum(segs)}"
     assert "unattributed" in _without_styles(html), "the part of the total no request-log bar explains is not shown (#1377 S5)"
@@ -510,14 +511,19 @@ def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
     )
 
     headline = float(re.search(r'ts-cost">\$([0-9.]+)', doubled_html).group(1))
-    segs = [float(x) for x in re.findall(r'cb-pct">\$([0-9.]+)', doubled_html)]
-    assert abs(headline - sum(segs)) < 0.002, (
-        f"the repeated name was counted twice: headline {headline} != bars {sum(segs)}"
+    bars = {n: float(v) for n, v in re.findall(
+        r'class="cb-seg"[^>]*title="([^"]*?) · \$([0-9.]+) · ', doubled_html)}
+    assert abs(headline - 0.5) < 0.002, f"the headline {headline} is not the run file's total (#1377 S5)"
+    assert any("unattributed" in n.lower() for n in bars), f"no unattributed segment in {bars}"
+    assert abs(headline - sum(bars.values())) < 0.002, (
+        f"the repeated name was counted twice: headline {headline} != bars + unattributed {sum(bars.values())}"
     )
 
+    # The headline is the run total alone; the per-phase blocks explain only the request-log bars.
+    request_log_bars = sum(v for n, v in bars.items() if "unattributed" not in n.lower())
     per_block = [float(x) for x in re.findall(r'ps-cost">\$([0-9.]+)', doubled_html)]
-    assert abs(headline - sum(per_block)) < 0.002, (
-        f"the repeated header re-printed its bucket's stats: headline {headline} != "
+    assert abs(request_log_bars - sum(per_block)) < 0.002, (
+        f"the repeated header re-printed its bucket's stats: request-log bars {request_log_bars} != "
         f"per-phase blocks {sum(per_block)}"
     )
 
