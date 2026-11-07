@@ -225,7 +225,7 @@ def test_the_fork_candidates_of_the_old_run_are_its_one_admitted_gather(tmp_path
     run, opened = _open(tenant, old)
     with opened as store:
         found = fork_candidates(store, run)
-    assert list(found.ids) == [old.gather], (found.ids, found.last_refusal)
+    assert list(found.ids) == [old.gather], found
 
 
 def _family_child(tmp_path: Path) -> tuple[Old, dict | None, subprocess.CompletedProcess]:

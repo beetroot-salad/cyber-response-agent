@@ -66,15 +66,14 @@ def _read_json(path: Path | None) -> dict | None:
 
 @dataclass
 class Candidates:
-    """What the `candidates=` seam returns, shaped as `fork_candidates` does: `.ids`, `.last_refusal`."""
+    """What the `candidates=` seam returns, shaped as `fork_candidates` does: `.ids` (and no dropped candidate)."""
 
     ids: list[int]
-    last_refusal: str | None = None
 
 
-def choose(*ids: int, last_refusal: str | None = None):
+def choose(*ids: int):
     """A `candidates=` seam answering `ids` whatever it is asked."""
-    return lambda *_a, **_k: Candidates(list(ids), last_refusal)
+    return lambda *_a, **_k: Candidates(list(ids))
 
 
 @dataclass
@@ -108,10 +107,12 @@ def _unexpected_sigterm(_signum, _frame):
 
 def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         tmp_path, *, candidates=None, spawn=None, judge=None, questioner=None, live_tree=None,
-        oracle=None, fix_source=None, job=JOB, grade=None, preflight=None, after_source=None) -> Ran:
-    """The job entry in-process over `_spec1224`'s fixture tenant; every paid seam a recording double."""
-    est = S.estate(tmp_path)
-    _base, src = S.source_run(tmp_path, est, calls=_calls(), after_source=after_source)
+        oracle=None, fix_source=None, job=JOB, grade=None, preflight=None, after_source=None,
+        estate=None, calls=None) -> Ran:
+    """The job entry in-process over `_spec1224`'s fixture tenant (or `estate`, made at `tmp_path`), the source run
+    holding `calls` (default: `_calls()`); every paid seam a recording double."""
+    est = estate(tmp_path) if estate is not None else S.estate(tmp_path)
+    _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls, after_source=after_source)
     if fix_source is not None:
         fix_source(src)
     tenant = src.parent.parent.name
@@ -212,7 +213,7 @@ def test_o3_a_gather_that_fails_admission_is_dropped_and_the_rest_stay(tmp_path)
 
     found = fork_candidates(source.store, _run_of(source))
     assert found.ids == [late]
-    assert found.last_refusal, "the dropped gather left no refusal to name"
+    names_the_refusal_not_its_text(tmp_path, source, found, [early], source.store)
 
 
 @pytest.mark.e2e
@@ -225,7 +226,73 @@ def test_o3_when_every_gather_fails_admission_there_is_no_candidate(tmp_path):
 
     found = fork_candidates(source.store, _run_of(source))
     assert found.ids == []
-    assert found.last_refusal, "every gather was refused and the last refusal is not named"
+    names_the_refusal_not_its_text(tmp_path, source, found, gathers_of(R, source), source.store)
+
+
+def gathers_of(R, source) -> list[int]:
+    """MAIN's responses that called `gather`, in path order."""
+    return [r for r in R.tool_calling_responses(source.store)
+            if [c.tool_name for c in R.calls_of(R.message_at(source.store, r))] == ["gather"]]
+
+
+def admission_refusals(source, rows: list[int], store) -> list[str]:
+    """The text of the branch admission's refusal of each of `rows`, as an operator's launch would print it: what a
+    learning job's message must never carry (it holds host paths and run text). Asserts each row is refused."""
+    from defender.investigation import branch
+
+    run, texts = _run_of(source), []
+    for row_id in rows:
+        try:
+            as_of = branch.branch_point_time(store, run.run_dir, row_id, source_run=run)
+            branch.validate(store, branch.BranchSpec(source_run_dir=run.run_dir, branch_message_id=row_id, as_of=as_of),
+                            source_run=run, require_capture=False)
+        except branch.BranchError as refused:
+            texts.append(str(refused))
+        else:
+            raise AssertionError(f"premise: message {row_id} is admitted")
+    return texts
+
+
+def no_fork_point_message(tmp_path, found) -> str:
+    """The `no_fork_point` message the job entry writes when `fork_candidates` answered `found` with no candidate left:
+    `found` with its `ids` emptied goes through the entry's `candidates=` seam, whatever else it carries."""
+    import dataclasses
+
+    n = len(list(tmp_path.glob("entry-*")))
+    ran = run_entry(tmp_path / f"entry-{n}", job=fixture_uuid(f"1344-no-fork-point-{tmp_path}-{n}"),
+                    candidates=lambda *_a, **_k: dataclasses.replace(found, ids=[]))
+    assert ran.end is not None, f"no end record (the entry exited {ran.exit!r})"
+    assert (ran.end["status"], ran.end["reason"]) == ("skipped", "no_fork_point"), ran.end
+    assert ran.end["message"], "a skip with no message for a person to read"
+    return ran.end["message"]
+
+
+def names_the_refusal_not_its_text(tmp_path, source, found, refused: list[int], store) -> str:
+    """The dropped candidates' refusals reach a `no_fork_point` message as a kind in our own words: the message differs
+    from the one with nothing dropped, and carries neither a refusal's text nor the source's run folder. (O3, O12)"""
+    from defender.learning.branch.fork_pick import ForkCandidates
+
+    texts = admission_refusals(source, refused, store)
+    message = no_fork_point_message(tmp_path, found)
+    assert message != no_fork_point_message(tmp_path, ForkCandidates()), "the dropped candidates' refusal is not named"
+    for text in texts:
+        assert text not in message, "a refusal's own text reached the job's message"
+    assert str(source.run_dir) not in message, "the source's run folder reached the job's message"
+    assert str(tmp_path) not in message, "a host path reached the job's message"
+    return message
+
+
+def drop_snapshot(source, request: int) -> None:
+    """Delete the fork snapshot MAIN recorded at its `request`-th response: the admission's refusal names the run folder."""
+    import sqlite3
+
+    connection = sqlite3.connect(str(source.store.path))
+    try:
+        changed = connection.execute("DELETE FROM fork_snapshot WHERE request = ?", (request,)).rowcount
+        connection.commit()
+    finally:
+        connection.close()
+    assert changed, f"premise: no snapshot was recorded at request {request}"
 
 
 def _break_snapshot(source, request: int) -> None:
@@ -259,8 +326,7 @@ def test_o3_a_fork_snapshot_current_code_cannot_read_drops_that_candidate_and_na
 
     found = fork_candidates(reread(source.store), _run_of(source))
     assert found.ids == [gathers[1]]
-    assert found.last_refusal, "the dropped candidate left no refusal to name"
-    assert "snapshot" in found.last_refusal
+    names_the_refusal_not_its_text(tmp_path, source, found, [gathers[0]], reread(source.store))
 
 
 def test_o3_the_pick_is_uniform_over_the_candidates():

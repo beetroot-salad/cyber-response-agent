@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import sqlite3
@@ -12,12 +13,25 @@ import sys
 import textwrap
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from defender.tests.learning.branch.test_1344_job_lane import JOB, Watch, WatchJudge, child_env, choose, run_entry
-from defender.tests.learning.branch.test_947_triplet_launcher import _BASE
+from defender.tests.learning.branch.test_1344_job_lane import (
+    JOB,
+    Watch,
+    WatchJudge,
+    _driven_source,
+    _run_of,
+    child_env,
+    choose,
+    drop_snapshot,
+    gathers_of,
+    names_the_refusal_not_its_text,
+    run_entry,
+)
+from defender.tests.learning.branch.test_947_triplet_launcher import _BASE, _calls
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -138,12 +152,38 @@ def test_no_candidate_ends_skipped_before_any_spend(tmp_path):
     assert ran.spawn.launches == []
 
 
-def test_no_fork_point_names_the_last_refusal_the_candidates_carry(tmp_path):
-    """Every candidate refused: the message carries the object's `.last_refusal` text, whatever it says. (O3)"""
-    refusal = "REFUSAL-MARKER the fork snapshot at request 7 cannot be read"
-    ran = run_entry(tmp_path, candidates=choose(last_refusal=refusal))
-    assert refusal in _failed_with(ran, "skipped", "no_fork_point")
-    assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
+@pytest.mark.e2e
+def test_no_fork_point_names_each_kind_of_refusal_the_candidates_carry_and_never_their_text(tmp_path):
+    """Every candidate refused, by real admission refusals (one of them naming the source's run folder): the message
+    names each kind of refusal met, the first as well as the last, in our own words, and carries neither a refusal's
+    text nor a host path. (O3, O12, #1344 attack round F2)"""
+    pytest.importorskip("pydantic_ai")
+    from defender.learning.branch.fork_pick import fork_candidates
+    from defender.tests.support.storage._store_owner import reread
+
+    def refused_source(name: str, turns, *, drop: tuple[int, ...] = ()) -> str:
+        R, source = _driven_source(tmp_path / name, turns)
+        gathers = gathers_of(R, source)
+        for index in drop:
+            drop_snapshot(source, R.responses(source.store).index(gathers[index]) + 1)
+        store = reread(source.store)
+        found = fork_candidates(store, _run_of(source))
+        assert found.ids == [], f"premise: every gather of source {name} is refused"
+        return names_the_refusal_not_its_text(tmp_path / name, source, found, gathers, store)
+
+    nothing_open = refused_source("first", lambda R, c: (R.dispatch("l-001"), R.done()))
+    no_snapshot = refused_source("last", lambda R, c: (R.append(c[0]), R.dispatch("l-001"), R.done()), drop=(0,))
+    both = refused_source("both", lambda R, c: (
+        R.dispatch("l-001"), R.append(c[0]), R.dispatch("l-002"), R.done()), drop=(1,))
+
+    def words(message: str) -> set[str]:
+        return set(re.findall(r"[a-z]+", message.lower()))
+
+    first_kind, last_kind = words(nothing_open) - words(no_snapshot), words(no_snapshot) - words(nothing_open)
+    assert first_kind, "the first kind of refusal reads the same as the last"
+    assert last_kind, "the last kind of refusal reads the same as the first"
+    assert first_kind <= words(both), f"the first kind met is not named: {both!r}"
+    assert last_kind <= words(both), f"the last kind met is not named: {both!r}"
 
 
 def test_a_session_store_of_another_version_ends_skipped_history_unreadable_naming_the_type(tmp_path):
@@ -189,6 +229,82 @@ def test_too_many_unservable_worlds_end_skipped_family_unusable_with_nothing_sta
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     ran = run_entry(tmp_path, oracle=S.oracle(then=S.text_only("no served answer fits this world")))
     assert _failed_with(ran, "skipped", "family_unusable")
+    assert ran.spawn.launches == []
+
+
+#: Every refusal pre-flight records before the first sibling, by cause, and the row it ends: a refusal caused by the
+#: family or its source skips the job for good; the environment's (the read token for the credential proxy cannot be
+#: signed) fails it. A new refusal in pre-flight fails the census below until it is given a row here.
+_PREFLIGHT_REFUSALS = {
+    "no fact world": ("skipped", "family_unusable"),
+    "no original call": ("skipped", "family_unusable"),
+    "no replayable call": ("skipped", "family_unusable"),
+    "read token cannot be signed": ("failed", "launch_refused"),
+    "too many unservable worlds": ("skipped", "family_unusable"),
+}
+#: The question-writer's family refused before pre-flight: the family's own refusal too.
+_QUESTIONER_UNUSABLE = "questioner family unusable"
+
+
+def _preflight_refusal_sites() -> int:
+    """How many refusals `preflight_replay` records: its `record(REFUSED | UNUSABLE, ...)` calls."""
+    import ast
+    import inspect
+
+    from defender.learning.branch import preflight
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(preflight.preflight_replay)))
+    return sum(1 for node in ast.walk(tree)
+               if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "record"
+               and node.args and isinstance(node.args[0], ast.Name) and node.args[0].id in {"REFUSED", "UNUSABLE"})
+
+
+@dataclass
+class _ProxiedEstate(S.Estate):
+    """The fixture estate plus `elastic` on the credential proxy, its declaration planted as every tenant's is."""
+
+    systems: tuple[str, ...] = (*S.SYSTEMS, "elastic")
+
+    def place(self, data_root=None, tenant_id=S.FIXTURE_TENANT, configs=None):
+        from defender.tests.support.tenancy._tenants1106 import config_texts
+
+        return super().place(data_root, tenant_id, configs={**(configs or {}), "elastic": config_texts(tenant_id)["elastic"]})
+
+
+def _refused_before_the_first_sibling(tmp_path, monkeypatch, cause: str):
+    from defender.tests.learning.oracle.live_contracts.test_1224_preflight_and_outcome import _family
+
+    if cause == _QUESTIONER_UNUSABLE:
+        return run_entry(tmp_path, questioner=Watch("worlds: [unclosed, {facts: "))
+    if cause == "no fact world":
+        return run_entry(tmp_path, questioner=Watch(*S.questioner_for(_family(facts_b=[], facts_c=[])).replies))
+    if cause == "no original call":
+        return run_entry(tmp_path, calls=[])
+    if cause == "no replayable call":
+        return run_entry(tmp_path, estate=lambda root: S.estate(root, withheld=(("idp", "query"),)),
+                         calls=[S.Call("idp", "query", S.query_params("user:alice"), _BASE)])
+    if cause == "read token cannot be signed":
+        from defender.kit.access import PROXY_URL_ENV
+
+        monkeypatch.delenv(PROXY_URL_ENV, raising=False)
+        return run_entry(tmp_path, estate=_ProxiedEstate,
+                         calls=[*_calls(), S.Call("elastic", "query", S.query_params("user.name:alice"), _BASE)])
+    assert cause == "too many unservable worlds", cause
+    monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
+    return run_entry(tmp_path, oracle=S.oracle(then=S.text_only("no served answer fits this world")))
+
+
+@pytest.mark.parametrize("cause", [*_PREFLIGHT_REFUSALS, _QUESTIONER_UNUSABLE])
+def test_a_refusal_before_the_first_sibling_skips_the_job_when_the_family_caused_it_and_fails_it_when_the_environment_did(
+        tmp_path, monkeypatch, cause):
+    """Each refusal pre-flight records, and the question-writer's unusable family: the family's or its source's own end
+    `skipped: family_unusable`; the read token for the credential proxy that cannot be signed is the environment's and
+    ends `failed: launch_refused`. Nothing is started either way. (r5 table, L3, #1344 attack round F3)"""
+    assert _preflight_refusal_sites() == len(_PREFLIGHT_REFUSALS), \
+        "pre-flight records a refusal no row of `_PREFLIGHT_REFUSALS` decides"
+    status, reason = _PREFLIGHT_REFUSALS.get(cause, ("skipped", "family_unusable"))
+    ran = _refused_before_the_first_sibling(tmp_path, monkeypatch, cause)
+    _failed_with(ran, status, reason)
     assert ran.spawn.launches == []
 
 

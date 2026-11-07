@@ -49,9 +49,21 @@ def _under(path: str, tree: Path) -> bool:
 # --- refusals: no database, nothing touched ---------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("stamp", [None, "", " ", "\t\n  "])
+def _not_commits() -> list[str]:
+    """Build stamps that are not a commit (a commit is 7 to 64 lowercase hex characters, the marker reader's grammar):
+    tags, branch names, uppercase or mixed-case hex, hex one short of 7 or one past 64, a `-dirty` suffix, a `0x`
+    prefix, a non-hex letter, and a commit with whitespace around or inside it."""
+    good = W.STAMP
+    return ["v1.2.3", "release-2026.11", "main", "feature/1344-stamp", "HEAD",
+            good.upper(), "A" + good[1:], good[:6], good + "a" * (65 - len(good)),
+            good + "-dirty", good[:7] + "-dirty", "0x" + good[:38], "g" * 40,
+            " " + good, good + "\n", "\t" + good + " ", good[:20] + " " + good[20:]]
+
+
+@pytest.mark.parametrize("stamp", [None, "", " ", "\t\n  ", *_not_commits()])
 def test_o15_an_empty_or_unset_build_stamp_refuses_before_serving_and_before_the_copy(source, data_root, stamp):
-    """Nonzero exit naming the stamp's variable; no database reached, nothing made on the data mount. (O15, Code boxes)"""
+    """Unset, empty, or anything that is not a commit: nonzero exit naming the stamp's variable; no database reached,
+    no lock taken and nothing made on the data mount. (O15, Code boxes, #1344 attack round F4)"""
     from defender.records._provenance import BUILD_COMMIT_ENV
 
     ran = W.run_to_exit(source, W.worker_env(data_root, stamp=stamp))
@@ -61,6 +73,17 @@ def test_o15_an_empty_or_unset_build_stamp_refuses_before_serving_and_before_the
     assert BUILD_COMMIT_ENV in ran.stderr, ran.stderr[-800:]
     assert not re.search(r"(?i)connect|OperationalError|refused by the database", ran.stderr), ran.stderr[-800:]
     assert list(data_root.iterdir()) == [], "the refusal touched the data root"
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("stamp", [W.STAMP[:7], (W.STAMP * 2)[:64]], ids=["7", "64"])
+def test_o15_a_build_stamp_of_7_or_64_lowercase_hex_characters_starts(source, data_root, db, stamp):
+    """The bounds of a commit start: the worker serves, its copy's marker holds the stamp as given. (O15, F4)"""
+    serve, _probe = _serve(source, data_root, db, stamp=stamp)
+    with serve as proc:
+        (copy,) = W.code_copies(data_root)
+        assert json.loads((copy / W.MARKER).read_text(encoding="utf-8")) == {"commit": stamp}
+        assert W.stop(proc) == 0, W.stderr_of(proc)
 
 
 @pytest.mark.parametrize(("slots", "learning", "named"), [
