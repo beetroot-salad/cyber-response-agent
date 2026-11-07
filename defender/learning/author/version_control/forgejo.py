@@ -110,6 +110,11 @@ class ForgeAddress:
         """`owner/repo`, as the forge's API names the repository."""
         return f"{self.owner}/{self.repo}"
 
+    @property
+    def api(self) -> str:
+        """The repository's Forgejo API root."""
+        return f"{self.origin}{forgejo.repository(self.full_name).path}"
+
 
 #: The page size a listing asks for. Forgejo clamps it to its `max_response_items`, so a page
 #: shorter than this is not the end of the listing.
