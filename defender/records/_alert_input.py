@@ -66,7 +66,7 @@ REFUSE_ENCODING = ("the alert is not admitted: it is not UTF-8 text (a byte-orde
 REFUSE_NOT_ONE_OBJECT = "the alert is not admitted: it is not exactly one JSON object"
 REFUSE_NESTING = "the alert is not admitted: it nests deeper than the parser can follow"
 REFUSE_SURROGATE = "the alert is not admitted: it holds an unpaired surrogate escape"
-REFUSE_SIZE = "the alert is not admitted: it is larger than the size the harness reads whole"
+REFUSE_SIZE = "the alert is not admitted: it is larger than the 1 MiB an alert may be"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -84,8 +84,9 @@ def digest_of(raw: bytes) -> str:
 
 
 #: The one byte cap on an alert (#1342 M5): admission refuses more (`REFUSE_SIZE`), and the
-#: operator's file read stops there. The store's insert takes it through `admit`.
-ALERT_BYTE_CAP = _io.READ_LIMIT
+#: operator's file read stops there. The store's insert takes it through `admit`. Sized for a real alert, not the
+#: harness's file read limit (#1420): an alert of ~5 KB with five raw events of up to ~32 KB each, with headroom.
+ALERT_BYTE_CAP = 1024 * 1024
 
 
 def read_operator_alert(path: Path) -> bytes:
@@ -290,17 +291,6 @@ def derive_display(document: Mapping[str, Any], mapping: AlertMapping) -> tuple[
         return kept if postgres_can_hold(kept) else None
 
     return at("title"), at("description")
-
-
-def derive_display_of_stored(raw: bytes, mapping: AlertMapping) -> tuple[str | None, str | None]:
-    """`derive_display` over an alert's stored bytes, for a recompute (#1345 M3): the bytes are parsed as JSON only
-    and admission is not re-run (its rules may have tightened since the alert was stored). Bytes that do not parse
-    as one JSON object give `(None, None)`."""
-    try:
-        document = json.loads(raw.decode("utf-8"))
-    except (ValueError, RecursionError):
-        return None, None
-    return derive_display(document, mapping) if isinstance(document, dict) else (None, None)
 
 
 # =============================================================================================

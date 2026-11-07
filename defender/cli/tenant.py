@@ -34,7 +34,7 @@ only `agent/` is touched.
 `set-alert-mapping` (#1345) replaces the tenant's alert mapping, which lives in the database: the file is
 YAML naming each of the six entries (signature, event_time, summary, case_key, title, description) with a dotted path
 into the raw alert; an entry left out, or `null`, is unmapped. It is validated by the rules the API's `PUT` applies and
-stored by the same operation, which re-derives every stored alert's title and description. It is the production writer
+stored by the same operation. It applies to alerts stored from then on; stored alerts keep their title and description. It is the production writer
 until the API is wired to the real store, and the upgrade path from `settings/alert-mapping.yaml`. The entries:
 
     signature    the rule key lessons and the corpus are matched on: ASCII letters, digits and . _ : / @ + = - (no leading
@@ -262,7 +262,7 @@ def _stored_text(tenant_id: str, mapping: Any, created: bool) -> str:
 
 def set_alert_mapping(admitted: run_tenant.Admitted, mapping: Any) -> int:
     """`set-alert-mapping <id> <file>` for the admitted tenant: the validated `mapping` replaces the tenant's
-    through the job store's replace, the one writer (same lock, recompute, outcome and job-store audit event as the
+    through the job store's replace, the one writer (same lock, outcome and job-store audit event as the
     API's `PUT`; no API audit event), over `DEFENDER_DATABASE_DSN`. Refusals print `[tenant.py] ...`, exit 1."""
     import asyncio
     import datetime as _dt
