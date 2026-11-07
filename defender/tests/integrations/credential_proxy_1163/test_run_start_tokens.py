@@ -59,12 +59,15 @@ CASE_WRITES = {"ticket": (("POST", "/tickets/*/comments"),)}
 
 
 def _plant(data_root, *, proxy: tuple[str, ...], case_system: str | None = "ticket", **kw: Any):
-    """The playground tenant with each system of `proxy` on `http-proxy` (declaration planted
-    beside its config.env) and a case-record file naming `case_system` (None: no such file)."""
+    """The playground tenant with each system of `proxy` declared (its declaration planted beside
+    its config.env), every other system without a declaration (so not reachable, #1391 O1), and
+    a case-record file naming `case_system` (None: no such file)."""
     configs = dict(S.config_texts("t1163"))
     for system in proxy:
         configs[system] = A.env_text(system, extra=EXTRA.get(system, ""))
     folder = S.plant(data_root, configs=configs, table=TABLE, case_system=case_system, **kw)
+    for undeclared in (folder / "settings" / "systems").glob("*/access.yaml"):
+        undeclared.unlink()
     for system in proxy:
         decl = H.declaration("http://x.invalid/api", writes=CASE_WRITES.get(system, ()))
         for rel, text in H.access_files(system, decl).items():
@@ -143,7 +146,7 @@ def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_for
     assert access.token() == first, "a token with life left is reused"
     assert len(signer.payloads) == 2
     read = A.claims_of_payload(signer.payloads[1])
-    assert A.grant_of(read) == [("identity", "r")], "the cmdb (docker-exec) system is not granted"
+    assert A.grant_of(read) == [("identity", "r")], "cmdb, which has no declaration, is not granted"
     for c in [*write_back, read]:
         assert (c["tenant"], c["investigation"]) == (S.PLAYGROUND_ID, run_id)
     assert TOKEN_SEC - 1 <= read["exp"] - asked <= TOKEN_SEC + CLOCK_TOLERANCE, read["exp"] - asked
@@ -184,8 +187,8 @@ def test_r1_a_run_that_will_not_comment_signs_no_write_back_token(tmp_path, data
     assert type(leg["case"]).__name__ == "CaseTarget", leg["case"]
 
 
-def test_r2_a_docker_exec_ticket_system_gets_no_write_back_token(tmp_path, data_root):
-    """Only the identity system is `http-proxy`: the record leg is handed no token, and the
+def test_r2_a_ticket_system_with_no_declaration_gets_no_write_back_token(tmp_path, data_root):
+    """Only the identity system is declared: the record leg is handed no token, and the
     one token signed is the read token, when asked. A7, r7 A20."""
     _plant(data_root, proxy=("identity",))
     signer = A.MarkedSigner()
