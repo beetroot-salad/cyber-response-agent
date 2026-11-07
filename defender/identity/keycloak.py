@@ -18,7 +18,8 @@ from typing import Any
 import httpx
 import jwt
 
-from defender.identity import SignInRefused, SignInUnavailable, VerifiedSignIn
+from defender.identity import SignInRefused, SignInUnavailable, VerifiedProgramToken, VerifiedSignIn
+from defender.records.formats import CredentialId, IdRefused
 
 _log = logging.getLogger(__name__)
 
@@ -73,7 +74,69 @@ def _server_base(server_url: str) -> str:
     return server_url.rstrip("/")
 
 
-class KeycloakSignIn:
+def _rsa_keys(published: Any) -> dict[str, Any]:
+    """The usable RS256 signing keys of a published key set, by key id; others are skipped."""
+    keys: dict[str, Any] = {}
+    for jwk in published:
+        if not isinstance(jwk, dict) or jwk.get("kty") != "RSA" or not isinstance(jwk.get("kid"), str):
+            continue
+        if jwk.get("use", "sig") != "sig" or jwk.get("alg", _ALGORITHM) != _ALGORITHM:
+            continue
+        try:
+            keys[jwk["kid"]] = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
+        except (jwt.PyJWTError, ValueError):
+            _log.warning("skipping an unreadable signing key")
+    return keys
+
+
+class _RealmAdmin:
+    """A realm's admin API as one confidential client reaches it: a client-credentials token, reused until shortly
+    before it expires, and calls that treat any failure as `SignInUnavailable`. The subclass sets `_http`, `_oidc`
+    (the realm's `protocol/openid-connect` URL), `_admin_client` and `_clock`."""
+
+    _http: httpx.AsyncClient
+    _oidc: str
+    _admin_client: tuple[str, str]
+    _clock: Callable[[], _dt.datetime]
+    _admin_token_held: tuple[str, _dt.datetime] | None
+
+    async def _admin_token(self) -> str:
+        """A client-credentials token, reused until shortly before Keycloak says it expires."""
+        held = self._admin_token_held
+        if held is not None and self._clock() < held[1]:
+            return held[0]
+        try:
+            response = await self._http.post(f"{self._oidc}/token", auth=self._admin_client,
+                                       data={"grant_type": "client_credentials"})
+            response.raise_for_status()
+            body = response.json()
+            token, lifetime = body["access_token"], body.get("expires_in")
+        except httpx.HTTPError as error:
+            _log.warning("keycloak admin token request failed: %s", type(error).__name__)
+            raise SignInUnavailable("keycloak refused the admin token request") from error
+        except (ValueError, KeyError, TypeError) as error:
+            raise SignInUnavailable("keycloak's admin token response is unreadable") from error
+        if not isinstance(token, str) or not token:
+            raise SignInUnavailable("keycloak's admin token response is unreadable")
+        if isinstance(lifetime, (int, float)) and lifetime > _ADMIN_TOKEN_MARGIN.total_seconds():
+            self._admin_token_held = (token, self._clock() + _dt.timedelta(seconds=lifetime) - _ADMIN_TOKEN_MARGIN)
+        return token
+
+    async def _admin(self, method: str, url: str, *, accept: tuple[int, ...] = (), **kwargs: Any) -> httpx.Response:
+        """One admin API call; any non-2xx (other than the `accept`ed statuses) or transport error is unavailable."""
+        try:
+            response = await self._http.request(
+                method, url, headers={"Authorization": f"Bearer {await self._admin_token()}"}, **kwargs)
+        except httpx.HTTPError as error:
+            _log.warning("keycloak admin %s failed: %s", method, type(error).__name__)
+            raise SignInUnavailable("keycloak's admin API is unreachable") from error
+        if not response.is_success and response.status_code not in accept:
+            _log.warning("keycloak admin %s answered %s", method, response.status_code)
+            raise SignInUnavailable(f"keycloak's admin API answered {response.status_code}")
+        return response
+
+
+class KeycloakSignIn(_RealmAdmin):
     """Sign-in and account administration against one Keycloak realm."""
 
     def __init__(  # noqa: PLR0913 — the pinned interface: two clients' credentials plus the seams, one keyword each
@@ -216,17 +279,7 @@ class KeycloakSignIn:
             raise SignInUnavailable("keycloak's signing keys cannot be fetched") from error
         except (ValueError, KeyError, TypeError) as error:
             raise SignInUnavailable("keycloak's signing keys are unreadable") from error
-        keys: dict[str, Any] = {}
-        for jwk in published:
-            if not isinstance(jwk, dict) or jwk.get("kty") != "RSA" or not isinstance(jwk.get("kid"), str):
-                continue
-            if jwk.get("use", "sig") != "sig" or jwk.get("alg", _ALGORITHM) != _ALGORITHM:
-                continue
-            try:
-                keys[jwk["kid"]] = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
-            except (jwt.PyJWTError, ValueError):
-                _log.warning("skipping an unreadable signing key")
-        return keys
+        return _rsa_keys(published)
 
     # --- the admin API -----------------------------------------------------------------------
 
@@ -285,37 +338,147 @@ class KeycloakSignIn:
     def _user_url(self, account_id: str) -> str:
         return f"{self._admin_users_url}/{urllib.parse.quote(account_id, safe='')}"
 
-    async def _admin_token(self) -> str:
-        """A client-credentials token, reused until shortly before Keycloak says it expires."""
-        held = self._admin_token_held
-        if held is not None and self._clock() < held[1]:
-            return held[0]
-        try:
-            response = await self._http.post(f"{self._oidc}/token", auth=self._admin_client,
-                                       data={"grant_type": "client_credentials"})
-            response.raise_for_status()
-            body = response.json()
-            token, lifetime = body["access_token"], body.get("expires_in")
-        except httpx.HTTPError as error:
-            _log.warning("keycloak admin token request failed: %s", type(error).__name__)
-            raise SignInUnavailable("keycloak refused the admin token request") from error
-        except (ValueError, KeyError, TypeError) as error:
-            raise SignInUnavailable("keycloak's admin token response is unreadable") from error
-        if not isinstance(token, str) or not token:
-            raise SignInUnavailable("keycloak's admin token response is unreadable")
-        if isinstance(lifetime, (int, float)) and lifetime > _ADMIN_TOKEN_MARGIN.total_seconds():
-            self._admin_token_held = (token, self._clock() + _dt.timedelta(seconds=lifetime) - _ADMIN_TOKEN_MARGIN)
-        return token
 
-    async def _admin(self, method: str, url: str, *, accept: tuple[int, ...] = (), **kwargs: Any) -> httpx.Response:
-        """One admin API call; any non-2xx (other than the `accept`ed statuses) or transport error is unavailable."""
+#: A key-set refetch for an unknown key id is allowed this often, so random tokens never become Keycloak traffic.
+KEY_REFETCH_WINDOW = _dt.timedelta(seconds=60)
+#: A program client's access tokens live this long (seconds).
+PROGRAM_TOKEN_LIFESPAN = 300
+_CLIENT_PAGE = 100
+
+
+class KeycloakPrograms(_RealmAdmin):
+    """The programs realm (`defender-programs`, #1307): OAuth clients for program credentials, and the check of
+    the access tokens they get. Holds the admin client of that realm alone, with client management only. Every
+    failure of an admin call or of a key-set fetch is `SignInUnavailable`; a token that does not verify is
+    `SignInRefused`. It deletes only what it is told to, never on its own."""
+
+    def __init__(  # noqa: PLR0913 — settings and seams, one keyword each
+        self,
+        *,
+        issuer: str,
+        audience: str,
+        admin_client_id: str,
+        admin_client_secret: str,
+        server_url: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+        clock: Callable[[], _dt.datetime] = _utc_now,
+    ) -> None:
+        self._issuer, base, realm = _realm_url(issuer)
+        self._audience = audience
+        self._admin_client = (admin_client_id, admin_client_secret)
+        self._clock = clock
+        self._http = httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS)
+        server = base if server_url is None else _server_base(server_url)
+        self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
+        self._clients_url = f"{server}/admin/realms/{realm}/clients"
+        self._keys: dict[str, Any] = {}
+        self._keys_fetched_at: _dt.datetime | None = None
+        self._admin_token_held = None
+
+    async def close(self) -> None:
+        await self._http.aclose()
+
+    # --- tokens ------------------------------------------------------------------------------
+
+    async def verify_token(self, token: str) -> VerifiedProgramToken:
+        """The token's client and subject once signature, RS256, issuer, audience, `typ`, expiry and the
+        presence of `azp` and `sub` hold; else `SignInRefused`. Keycloak unreachable for a key we lack: unavailable."""
         try:
-            response = await self._http.request(
-                method, url, headers={"Authorization": f"Bearer {await self._admin_token()}"}, **kwargs)
+            header = jwt.get_unverified_header(token)
+            if header.get("alg") != _ALGORITHM:
+                raise SignInRefused("the token is not signed with RS256")
+            key = await self._key_for(header.get("kid"))
+            claims = jwt.decode(
+                token, key, algorithms=[_ALGORITHM], audience=self._audience, issuer=self._issuer,
+                options={"require": ["exp", "iss", "aud", "sub"], "verify_exp": False,
+                         "verify_iat": False, "verify_nbf": False})
+        except (jwt.PyJWTError, ValueError, TypeError) as error:
+            raise SignInRefused(f"the token failed verification: {type(error).__name__}") from error
+        expires = claims.get("exp")
+        if not isinstance(expires, (int, float)) or expires <= self._clock().timestamp():
+            raise SignInRefused("the token has expired")
+        if claims.get("typ") != "Bearer":
+            raise SignInRefused("the token is not an access token")
+        client, subject = claims.get("azp"), claims["sub"]
+        if not isinstance(client, str) or not client or not isinstance(subject, str) or not subject:
+            raise SignInRefused("the token names no client or subject")
+        return VerifiedProgramToken(
+            client_id=client, subject=subject, expires_at=_dt.datetime.fromtimestamp(expires, _dt.UTC))
+
+    async def _key_for(self, kid: object) -> Any:
+        if not isinstance(kid, str) or not kid:
+            raise SignInRefused("the token names no signing key")
+        if kid not in self._keys:
+            now = self._clock()
+            if self._keys_fetched_at is not None and now - self._keys_fetched_at < KEY_REFETCH_WINDOW:
+                raise SignInRefused("the token names an unknown signing key")
+            self._keys_fetched_at = now  # spent before asking, so a failed or concurrent fetch is not repeated
+            self._keys = await self._fetch_keys()
+        if kid not in self._keys:
+            raise SignInRefused("the token names an unknown signing key")
+        return self._keys[kid]
+
+    async def _fetch_keys(self) -> dict[str, Any]:
+        try:
+            response = await self._http.get(f"{self._oidc}/certs")
+            response.raise_for_status()
+            published = response.json()["keys"]
         except httpx.HTTPError as error:
-            _log.warning("keycloak admin %s failed: %s", method, type(error).__name__)
-            raise SignInUnavailable("keycloak's admin API is unreachable") from error
-        if not response.is_success and response.status_code not in accept:
-            _log.warning("keycloak admin %s answered %s", method, response.status_code)
-            raise SignInUnavailable(f"keycloak's admin API answered {response.status_code}")
-        return response
+            _log.warning("keycloak programs key set request failed: %s", type(error).__name__)
+            raise SignInUnavailable("keycloak's signing keys cannot be fetched") from error
+        except (ValueError, KeyError, TypeError) as error:
+            raise SignInUnavailable("keycloak's signing keys are unreadable") from error
+        return _rsa_keys(published)
+
+    # --- clients -----------------------------------------------------------------------------
+
+    async def create_client(self, credential_id: str) -> tuple[str, str]:
+        """Create the confidential, service-account-only client whose client id and internal id are the
+        credential's id; then read back its service-account user id and its secret. Nothing is undone on a
+        failure: the reconciliation deletes what no credential claims."""
+        body = {
+            "id": credential_id, "clientId": credential_id, "enabled": True, "protocol": "openid-connect",
+            "publicClient": False, "clientAuthenticatorType": "client-secret", "serviceAccountsEnabled": True,
+            "standardFlowEnabled": False, "implicitFlowEnabled": False, "directAccessGrantsEnabled": False,
+            "fullScopeAllowed": False,
+            "attributes": {"access.token.lifespan": str(PROGRAM_TOKEN_LIFESPAN)},
+            "protocolMappers": [{
+                "name": "programs-audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+                "config": {"included.custom.audience": self._audience, "access.token.claim": "true",
+                           "id.token.claim": "false", "introspection.token.claim": "false"},
+            }],
+        }
+        await self._admin("POST", self._clients_url, json=body)
+        client_url = f"{self._clients_url}/{urllib.parse.quote(credential_id, safe='')}"
+        try:
+            account = (await self._admin("GET", f"{client_url}/service-account-user")).json()["id"]
+            secret = (await self._admin("GET", f"{client_url}/client-secret")).json()["value"]
+        except (ValueError, KeyError, TypeError) as error:
+            raise SignInUnavailable("keycloak's client record is unreadable") from error
+        if not isinstance(account, str) or not account or not isinstance(secret, str) or not secret:
+            raise SignInUnavailable("keycloak's client record is unreadable")
+        return account, secret
+
+    async def client_ids(self) -> set[str]:
+        """The program clients: client ids that are credential ids (UUIDs). Built-in clients and the API's own
+        have plain names and are never listed."""
+        found: set[str] = set()
+        first = 0
+        while True:
+            response = await self._admin("GET", self._clients_url, params={"first": first, "max": _CLIENT_PAGE})
+            try:
+                page = [str(c["clientId"]) for c in response.json()]
+            except (ValueError, KeyError, TypeError) as error:
+                raise SignInUnavailable("keycloak's client list is unreadable") from error
+            for client_id in page:
+                try:
+                    found.add(str(CredentialId(client_id)))
+                except IdRefused:
+                    continue
+            if len(page) < _CLIENT_PAGE:
+                return found
+            first += _CLIENT_PAGE
+
+    async def delete_client(self, client_id: str) -> None:
+        """Delete the client with this internal id (our credential id); one already gone is fine."""
+        await self._admin("DELETE", f"{self._clients_url}/{urllib.parse.quote(client_id, safe='')}", accept=(404,))

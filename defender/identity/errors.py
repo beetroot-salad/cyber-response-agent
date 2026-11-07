@@ -50,3 +50,7 @@ class CallbackRefused(IdentityError):
     def __init__(self, reason: str, detail: str) -> None:
         super().__init__(detail)
         self.reason = reason
+
+
+class Invalid(IdentityError):
+    """A request the rules refuse before anything is written: a 422."""
