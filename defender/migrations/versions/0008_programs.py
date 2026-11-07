@@ -1,0 +1,78 @@
+"""Program identities (#1307): a user has a `kind` (`person` | `program`) and, for a program, its creator; a
+program has no email, so `users.email` may be absent (exactly for programs). A membership has a `role`
+(`admin` | `automation`): every existing row is a person's, so `admin`. A new table holds the programs' credentials.
+
+Revision ID: 0008_programs
+Revises: 0007_alert_mapping
+"""
+import sqlalchemy as sa
+from alembic import op
+
+revision = "0008_programs"
+down_revision = "0007_alert_mapping"
+
+_TIME = sa.DateTime(timezone=True)
+
+
+def _uuid() -> sa.Uuid:
+    return sa.Uuid(as_uuid=False)
+
+
+def upgrade() -> None:
+    op.add_column("users", sa.Column("kind", sa.Text(), nullable=False, server_default="person"), schema="identity")
+    op.alter_column("users", "kind", server_default=None, schema="identity")
+    op.add_column("users", sa.Column("created_by", _uuid(), nullable=True), schema="identity")
+    op.create_foreign_key(
+        "fk_users_created_by_users", "users", "users", ["created_by"], ["id"],
+        source_schema="identity", referent_schema="identity")
+    op.alter_column("users", "email", existing_type=sa.Text(), nullable=True, schema="identity")
+    op.create_check_constraint("kind", "users", "kind IN ('person', 'program')", schema="identity")
+    op.create_check_constraint(
+        "email_iff_person", "users", "(kind = 'program') = (email IS NULL)", schema="identity")
+    op.create_check_constraint(
+        "program_is_plain", "users",
+        "kind = 'person' OR (signin_account_id IS NULL AND NOT is_platform_admin AND status = 'active')",
+        schema="identity")
+    op.create_check_constraint(
+        "creator_is_for_programs", "users", "kind = 'program' OR created_by IS NULL", schema="identity")
+
+    op.add_column("memberships", sa.Column("role", sa.Text(), nullable=False, server_default="admin"), schema="identity")
+    op.alter_column("memberships", "role", server_default=None, schema="identity")
+    op.create_check_constraint(
+        "role", "memberships", "role IN ('admin', 'automation')", schema="identity")
+
+    op.create_table(
+        "program_credentials",
+        sa.Column("id", _uuid(), nullable=False),
+        sa.Column("program_id", _uuid(), nullable=False),
+        sa.Column("kind", sa.Text(), nullable=False),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column("state", sa.Text(), nullable=False),
+        sa.Column("created_by", _uuid(), nullable=False),
+        sa.Column("created_at", _TIME, nullable=False),
+        sa.Column("expires_at", _TIME, nullable=False),
+        sa.Column("key_hash", sa.Text(), nullable=True),
+        sa.Column("service_account_id", sa.Text(), nullable=True),
+        sa.Column("pending_deadline", _TIME, nullable=True),
+        sa.Column("last_used_at", _TIME, nullable=True),
+        sa.Column("revoked_at", _TIME, nullable=True),
+        sa.Column("revoked_by", _uuid(), nullable=True),
+        sa.Column("warn_14d_settled_at", _TIME, nullable=True),
+        sa.Column("warn_3d_settled_at", _TIME, nullable=True),
+        sa.Column("warn_14d_next_try_at", _TIME, nullable=True),
+        sa.Column("warn_3d_next_try_at", _TIME, nullable=True),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_program_credentials")),
+        sa.ForeignKeyConstraint(["program_id"], ["identity.users.id"], name=op.f("fk_program_credentials_program_id_users")),
+        sa.ForeignKeyConstraint(["created_by"], ["identity.users.id"], name=op.f("fk_program_credentials_created_by_users")),
+        sa.ForeignKeyConstraint(["revoked_by"], ["identity.users.id"], name=op.f("fk_program_credentials_revoked_by_users")),
+        sa.CheckConstraint("kind IN ('key', 'oauth_client')", name=op.f("ck_program_credentials_kind")),
+        sa.CheckConstraint("state IN ('pending', 'live', 'revoked')", name=op.f("ck_program_credentials_state")),
+        sa.CheckConstraint("(kind = 'key') = (key_hash IS NOT NULL)", name=op.f("ck_program_credentials_key_iff_hash")),
+        sa.CheckConstraint("state <> 'pending' OR kind = 'oauth_client'",
+                           name=op.f("ck_program_credentials_only_oauth_is_pending")),
+        sa.CheckConstraint("state <> 'revoked' OR revoked_at IS NOT NULL",
+                           name=op.f("ck_program_credentials_revoked_is_revoked")),
+        schema="identity")
+    op.create_index("program_credentials_by_program", "program_credentials", ["program_id"], schema="identity")
+    op.create_index("program_credentials_one_unrevoked_key", "program_credentials", ["key_hash"], unique=True,
+                    schema="identity", postgresql_where=sa.text("state <> 'revoked'"))

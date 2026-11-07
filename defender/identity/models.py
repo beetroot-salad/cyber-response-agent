@@ -17,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from defender._text import postgres_can_hold
 from defender.database import Base, IdColumn
-from defender.records.formats import MembershipId, TenantId, UserId
+from defender.records.formats import CredentialId, MembershipId, TenantId, UserId
 # The memberships' foreign key names `tenancy.tenants`: its table must be on the metadata too.
 from defender.tenancy import models as _tenancy  # noqa: F401
 
@@ -43,6 +43,10 @@ Email = Annotated[str, AfterValidator(normalize_email)]
 
 UserStatus = Literal["invited", "active"]
 MembershipStatus = Literal["invited", "active", "ended", "revoked"]
+UserKind = Literal["person", "program"]
+Role = Literal["admin", "automation"]
+CredentialKind = Literal["key", "oauth_client"]
+CredentialState = Literal["pending", "live", "revoked"]
 
 _TIME = DateTime(timezone=True)
 
@@ -50,6 +54,10 @@ _TIME = DateTime(timezone=True)
 def _status_check(allowed: object) -> CheckConstraint:
     """The table's CHECK on `status`, spelled from the same Literal the model validates against."""
     return CheckConstraint(f"status IN ({', '.join(repr(s) for s in get_args(allowed))})", name="status")
+
+
+def _in_check(column: str, allowed: object, name: str) -> CheckConstraint:
+    return CheckConstraint(f"{column} IN ({', '.join(repr(s) for s in get_args(allowed))})", name=name)
 
 
 def _checked_status(model: str, allowed: object, value: str) -> str:
@@ -66,11 +74,18 @@ class User(Base, kw_only=True):
         CheckConstraint("email = lower(email)", name="email_lowercase"),
         _status_check(UserStatus),
         CheckConstraint("status <> 'active' OR activated_at IS NOT NULL", name="active_is_activated"),
+        _in_check("kind", UserKind, "kind"),
+        CheckConstraint("(kind = 'program') = (email IS NULL)", name="email_iff_person"),
+        CheckConstraint(
+            "kind = 'person' OR (signin_account_id IS NULL AND NOT is_platform_admin AND status = 'active')",
+            name="program_is_plain"),
+        CheckConstraint("kind = 'program' OR created_by IS NULL", name="creator_is_for_programs"),
         {"schema": SCHEMA},
     )
 
     id: Mapped[UserId] = mapped_column(IdColumn(UserId), primary_key=True, default_factory=UserId.mint)
-    email: Mapped[str] = mapped_column(Text)
+    #: Absent exactly for a program (CHECK).
+    email: Mapped[str | None] = mapped_column(Text)
     display_name: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[UserStatus] = mapped_column(Text, default="invited")
     signin_account_id: Mapped[str | None] = mapped_column(Text, default=None)
@@ -84,16 +99,34 @@ class User(Base, kw_only=True):
     created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     updated_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     activated_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    kind: Mapped[UserKind] = mapped_column(Text, default="person")
+    #: The admin who made a program; None for a person.
+    created_by: Mapped[UserId | None] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"), default=None)
 
     @classmethod
-    def new(cls, email: str, *, created_at: _dt.datetime, status: UserStatus = "invited",
+    def new(cls, email: str | None, *, created_at: _dt.datetime, status: UserStatus = "invited",
             display_name: str = "", signin_account_id: str | None = None,
             is_platform_admin: bool = False) -> User:
-        """A user as first stored: updated and, when created active, activated at `created_at`."""
+        """A person as first stored: updated and, when created active, activated at `created_at`.
+        The email is required."""
+        if email is None:
+            raise DataRuleViolation("a person needs an email address")
         return cls(email=normalize_email(email), created_at=created_at, updated_at=created_at,
                    status=status, display_name=display_name, signin_account_id=signin_account_id,
                    is_platform_admin=is_platform_admin,
                    activated_at=created_at if status == "active" else None)
+
+    @property
+    def person_email(self) -> str:
+        """The email of a user known to be a person (the CHECK gives every person one)."""
+        assert self.email is not None, "a person has an email"
+        return self.email
+
+    @classmethod
+    def new_program(cls, *, display_name: str, created_by: UserId, created_at: _dt.datetime) -> User:
+        """A program as first stored: active, with no email, account or administrator flag."""
+        return cls(email=None, kind="program", created_by=created_by, display_name=display_name,
+                   status="active", created_at=created_at, updated_at=created_at, activated_at=created_at)
 
     @validates("status")
     def _status(self, _key: str, value: str) -> str:
@@ -104,6 +137,7 @@ class Membership(Base, kw_only=True):
     __tablename__ = "memberships"
     __table_args__ = (
         _status_check(MembershipStatus),
+        _in_check("role", Role, "role"),
         CheckConstraint("status <> 'active' OR accepted_at IS NOT NULL", name="active_is_accepted"),
         CheckConstraint("status <> 'ended' OR ended_at IS NOT NULL", name="ended_is_ended"),
         Index("memberships_one_live_row", "user_id", "tenant_id", unique=True,
@@ -130,6 +164,8 @@ class Membership(Base, kw_only=True):
     ended_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: The user who ended it, or None for the system (or while not ended).
     ended_by: Mapped[UserId | None] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"), default=None)
+    #: `admin` for a person, `automation` for a program; the identity service and repositories are the only writers.
+    role: Mapped[Role] = mapped_column(Text, default="admin")
 
     @validates("status")
     def _status(self, _key: str, value: str) -> str:
@@ -146,3 +182,50 @@ class Session(Base):
     created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     last_seen_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     expires_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+
+
+class ProgramCredential(Base, kw_only=True):
+    """A program's way in: an API key (its hash) or an OAuth client (the realm holds the secret). Whether it is
+    usable is decided by this row alone: `live` and `expires_at > now`. Rows are never deleted (audit)."""
+
+    __tablename__ = "program_credentials"
+    __table_args__ = (
+        _in_check("kind", CredentialKind, "kind"),
+        _in_check("state", CredentialState, "state"),
+        CheckConstraint("(kind = 'key') = (key_hash IS NOT NULL)", name="key_iff_hash"),
+        CheckConstraint("state <> 'pending' OR kind = 'oauth_client'", name="only_oauth_is_pending"),
+        CheckConstraint("state <> 'revoked' OR revoked_at IS NOT NULL", name="revoked_is_revoked"),
+        Index("program_credentials_by_program", "program_id"),
+        Index("program_credentials_one_unrevoked_key", "key_hash", unique=True, postgresql_where=text("state <> 'revoked'")),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[CredentialId] = mapped_column(IdColumn(CredentialId), primary_key=True, default_factory=CredentialId.mint)
+    program_id: Mapped[UserId] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"))
+    kind: Mapped[CredentialKind] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    state: Mapped[CredentialState] = mapped_column(Text)
+    created_by: Mapped[UserId] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"))
+    created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+    expires_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+    key_hash: Mapped[str | None] = mapped_column(Text, default=None)
+    #: An OAuth credential's service-account user id (the token's `sub`), set when it goes live.
+    service_account_id: Mapped[str | None] = mapped_column(Text, default=None)
+    pending_deadline: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    last_used_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    revoked_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: The admin who revoked it, or None for the system (or while not revoked).
+    revoked_by: Mapped[UserId | None] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"), default=None)
+    #: Expiry warnings, one send per threshold (14 and 3 days): settled once sent (or passed over unsent), held by its next try.
+    warn_14d_settled_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    warn_3d_settled_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    warn_14d_next_try_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    warn_3d_next_try_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+
+    @validates("kind")
+    def _kind(self, _key: str, value: str) -> str:
+        return _checked_status("credential kind", CredentialKind, value)
+
+    @validates("state")
+    def _state(self, _key: str, value: str) -> str:
+        return _checked_status("credential state", CredentialState, value)
