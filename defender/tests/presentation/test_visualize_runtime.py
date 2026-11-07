@@ -516,7 +516,7 @@ def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
     assert abs(headline - 0.5) < 0.002, f"the headline {headline} is not the run file's total (#1377 S5)"
     assert any("unattributed" in n.lower() for n in bars), f"no unattributed segment in {bars}"
     assert abs(headline - sum(bars.values())) < 0.002, (
-        f"the repeated name was counted twice: headline {headline} != bars + unattributed {sum(bars.values())}"
+        f"the bars plus unattributed do not add up to the headline: {headline} != {sum(bars.values())}"
     )
 
     # The headline is the run total alone; the per-phase blocks explain only the request-log bars.
