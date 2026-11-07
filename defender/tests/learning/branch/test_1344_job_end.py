@@ -13,10 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests.learning.branch.test_1344_job_lane import JOB, Watch, run_entry
+from defender.tests.learning.branch.test_1344_job_lane import JOB, Watch, WatchJudge, choose, run_entry
+from defender.tests.learning.branch.test_947_triplet_launcher import _BASE
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 _FIELDS = {"status", "reason", "message", "fork_message_id", "stage", "findings_count", "sibling_cost_usd"}
 _GOOD_REPLY = J.as_reply_text(J.reply_doc(bucket="none", systems=[]))
@@ -102,7 +104,7 @@ def test_a_family_the_judge_graded_ends_completed(tmp_path):
     ran = run_entry(tmp_path)
     end = _ended(ran, "completed", None)
     assert ran.judge.calls, "premise: the judge was asked"
-    assert end["fork_message_id"] == T.BRANCH_MESSAGE_ID
+    assert end["fork_message_id"] == str(T.BRANCH_MESSAGE_ID), "the record holds the fork id as a string"
     assert ran.ep.name == JOB
     assert ran.ep.is_dir()
 
@@ -127,10 +129,18 @@ def test_a_judge_verdict_that_grades_nothing_is_still_completed_with_the_word_in
 
 def test_no_candidate_ends_skipped_before_any_spend(tmp_path):
     """`no_fork_point`, with a message, for nothing: no questioner, no sibling. (O3, L3)"""
-    ran = run_entry(tmp_path, candidates=lambda *_a: [])
+    ran = run_entry(tmp_path, candidates=choose())
     assert _failed_with(ran, "skipped", "no_fork_point")
     assert ran.questioner.calls == 0
     assert ran.spawn.launches == []
+
+
+def test_no_fork_point_names_the_last_refusal_the_candidates_carry(tmp_path):
+    """Every candidate refused: the message carries the object's `.last_refusal` text, whatever it says. (O3)"""
+    refusal = "REFUSAL-MARKER the fork snapshot at request 7 cannot be read"
+    ran = run_entry(tmp_path, candidates=choose(last_refusal=refusal))
+    assert refusal in _failed_with(ran, "skipped", "no_fork_point")
+    assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
 
 
 def test_a_session_store_of_another_version_ends_skipped_history_unreadable_naming_the_type(tmp_path):
@@ -146,6 +156,18 @@ def test_an_untyped_fault_before_the_first_sibling_is_not_history_unreadable(tmp
     """The same step failing with a fault no one typed ends `failed: entry_error`, never `skipped`. (r5 table)"""
     ran = run_entry(tmp_path, questioner=Watch(fail=RuntimeError("the questioner's connection reset")))
     _failed_with(ran, "failed", "entry_error")
+
+
+def test_a_source_stamp_current_code_cannot_read_ends_skipped_history_unreadable_without_its_text(tmp_path):
+    """The source's provenance stamp is unreadable: skipped for good, nothing spent, the stamp's own text absent. (r5 table, L5)"""
+    def unreadable(src: Path) -> None:
+        (src / "provenance.json").write_text('{"commit": ["SECRET-STAMP-TEXT"]}', encoding="utf-8")
+
+    ran = run_entry(tmp_path, fix_source=unreadable)
+    message = _failed_with(ran, "skipped", "history_unreadable")
+    assert "SECRET-STAMP-TEXT" not in message
+    assert str(tmp_path) not in message, "the launcher's text reached the message"
+    assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
 
 
 def test_too_many_unservable_worlds_end_skipped_family_unusable_with_nothing_started(tmp_path, monkeypatch):
@@ -176,6 +198,25 @@ def test_knowledge_the_tenant_cannot_pin_ends_failed_launch_refused(tmp_path):
     ran = run_entry(tmp_path, fix_source=unpinnable)
     assert _failed_with(ran, "failed", "launch_refused")
     assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
+
+
+@pytest.mark.parametrize("knowledge", [T.NO_KNOWLEDGE_KEY, "unversioned"], ids=["not recorded", "unversioned"])
+def test_knowledge_no_commit_proves_ends_failed_launch_refused(tmp_path, knowledge):
+    """A source whose stamp records no knowledge commit, or says unversioned: refused before any spend. (r5 table)"""
+    ran = run_entry(tmp_path, fix_source=lambda src: T.source_stamp(src, tenant_id=S.FIXTURE_TENANT,
+                                                                    knowledge=knowledge))
+    assert _failed_with(ran, "failed", "launch_refused")
+    assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
+
+
+@pytest.mark.parametrize("live", [{"dirty": True}, {"commit": None, "dirty": None, "unavailable": T.GIT_UNAVAILABLE}],
+                         ids=["dirty", "no commit"])
+def test_a_live_tree_that_fails_its_own_stamp_check_ends_failed_launch_refused(tmp_path, live):
+    """The code the family would run is not certified: refused before any spend, not skipped as old history. (r5 table)"""
+    ran = run_entry(tmp_path, live_tree=T.source_capture(**live))
+    assert _failed_with(ran, "failed", "launch_refused")
+    assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
+    _ended(run_entry(tmp_path / "control", job=fixture_uuid("1344-job-control")), "completed", None)
 
 
 def test_a_verification_that_refuses_ends_failed_verify_refused_but_a_withheld_stamp_does_not(tmp_path):
@@ -235,6 +276,13 @@ def test_a_fault_no_one_listed_ends_failed_entry_error_and_the_runs_text_never_r
 
 
 # --- stopped ------------------------------------------------------------------------------------------
+#
+# Every stop below is a real SIGTERM to this process, sent from inside a seam the entry is running, so it lands while the
+# entry holds its own handler and never after the entry has returned.
+
+
+def _term() -> None:
+    os.kill(os.getpid(), signal.SIGTERM)
 
 
 class TermAtB(J.FakeSibling):
@@ -242,51 +290,133 @@ class TermAtB(J.FakeSibling):
 
     def __call__(self, argv, **kw):
         if _world(argv) == "b":
-            os.kill(os.getpid(), signal.SIGTERM)
+            _term()
         return super().__call__(argv, **kw)
 
 
-def test_a_sigterm_before_the_judge_returns_records_stopped_so_a_stop_never_skips_or_fails(tmp_path):
-    """The entry's own handler turns the real signal into the unwind; the record says `stopped`, and b never ran. (End record, O7)"""
-    spawn = TermAtB()
-    ran = run_entry(tmp_path, spawn=spawn)
+class TermInControl(J.FakeSibling):
+    """The stop arrives while the control runs; the control then reports `exit` (0: it finished; 143: the stop killed it)."""
+
+    def __init__(self, exit_code: int = 0) -> None:
+        super().__init__()
+        self.exit_code = exit_code
+
+    def __call__(self, argv, **kw):
+        if _world(argv) == "a":
+            _term()
+            if self.exit_code:
+                self.launches.append({"argv": list(argv), "env": dict(kw.get("env") or {})})
+                return self.exit_code
+        return super().__call__(argv, **kw)
+
+
+class TermAtFirstAnswer(S.ScriptedModel):
+    """The oracle, with a SIGTERM as it is first asked (the preflight replay is running)."""
+
+    def __call__(self, messages, info):
+        if not self.seen:
+            _term()
+        return super().__call__(messages, info)
+
+
+class TermInJudge(WatchJudge):
+    """The judge, with a SIGTERM as it is first called; then it answers, or dies of the stop (`dies`)."""
+
+    dies = False
+    signalled = False
+
+    def __call__(self, *a, **kw):
+        if not self.signalled:
+            self.signalled = True
+            _term()
+            if self.dies:
+                raise Boom("the judge was cut off")
+        return super().__call__(*a, **kw)
+
+
+class TermOnce(Watch):
+    """The questioner, with a SIGTERM as it is first paid for."""
+
+    def __call__(self, prompt, **kw):
+        if not self.prompts:
+            _term()
+        return super().__call__(prompt, **kw)
+
+
+def _stop_during_candidates(*_a, **_k):
+    _term()
+    return choose(T.BRANCH_MESSAGE_ID)()
+
+
+def _stop_during_preflight(*_a, **_k):
+    _term()
+    return 0
+
+
+def _oracle_stopped() -> S.ScriptedModel:
+    return TermAtFirstAnswer(then=S.submit(_BASE, S.EMPTY_CLAIM), name="oracle")
+
+
+STOP_SEAMS = {
+    "candidates": lambda: dict(candidates=_stop_during_candidates),
+    "role preflight": lambda: dict(preflight=_stop_during_preflight),
+    "questioner": lambda: dict(questioner=TermOnce(*S.questioner_for().replies)),
+    "replay preflight": lambda: dict(oracle=_oracle_stopped()),
+    "control": lambda: dict(spawn=TermInControl()),
+    "control killed by the stop": lambda: dict(spawn=TermInControl(143)),
+    "sibling b": lambda: dict(spawn=TermAtB()),
+    "judge": lambda: dict(judge=TermInJudge(default=_GOOD_REPLY)),
+    "judge killed by the stop": lambda: dict(judge=_judge_dying()),
+}
+
+
+def _judge_dying() -> TermInJudge:
+    judge = TermInJudge(default=_GOOD_REPLY)
+    judge.dies = True
+    return judge
+
+
+@pytest.mark.parametrize("seam", list(STOP_SEAMS))
+def test_a_sigterm_before_the_judge_returns_records_stopped_so_a_stop_never_skips_or_fails(tmp_path, seam):
+    """The entry's own handler turns the real signal into `stopped`, wherever it lands; never failed or skipped. (End record, O7)"""
+    ran = run_entry(tmp_path, **STOP_SEAMS[seam]())
     _ended(ran, "stopped", None)
-    assert spawn.worlds == ["a"]
-    assert ran.judge.calls == []
+    if seam in ("control", "control killed by the stop"):
+        assert ran.spawn.worlds == ["a"], "a sibling started after the stop"
+    if seam == "sibling b":
+        assert ran.spawn.worlds == ["a"]
+    if seam in ("candidates", "role preflight", "questioner", "replay preflight"):
+        assert ran.spawn.launches == [], "a sibling started after the stop"
+    if seam != "judge" and seam != "judge killed by the stop":
+        assert ran.judge.calls == [], "the judge was bought after the stop"
 
 
-def test_a_sigterm_after_the_judge_returned_and_before_exit_is_still_completed(tmp_path):
-    """The ending is decided at the judge's return: a signal landing once the judge has written is not a stop. (End record, r11 rule)"""
-    landed = threading.Event()
-    seen: list[float] = []
+def test_a_sigterm_while_no_fork_point_is_being_decided_ends_skipped_or_stopped_never_failed(tmp_path):
+    """A stop racing the pick cannot fail the job: an ending already decided stays `skipped`, one not yet decided is a stop. (End record, r5)"""
+    def stop_then_nothing(*_a, **_k):
+        _term()
+        return choose()()
 
-    def signal_once_graded(ep_of_job: Path) -> None:
-        judged = ep_of_job / "judge.yaml"
-        for _ in range(6000):
-            if judged.is_file():
-                break
-            time.sleep(0.005)
-        else:
-            return
-        time.sleep(0.25)  # far longer than the pass's remaining work, far shorter than a deploy
-        seen.append(time.monotonic())
-        os.kill(os.getpid(), signal.SIGTERM)
-        landed.set()
+    ran = run_entry(tmp_path, candidates=stop_then_nothing)
+    assert ran.end is not None
+    assert (ran.end["status"], ran.end["reason"]) in {("skipped", "no_fork_point"), ("stopped", None)}, ran.end
 
-    holder: list[threading.Thread] = []
 
-    def start_watching(src: Path) -> None:
-        tenant = src.parent.parent.name
-        thread = threading.Thread(
-            target=signal_once_graded, args=(Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "episodes" / JOB,),
-            daemon=True)
-        thread.start()
-        holder.append(thread)
+def test_a_sigterm_after_the_judge_returned_is_still_completed(tmp_path):
+    """The ending is decided at the judge's return: a signal landing after it is not a stop. (End record, r5)"""
+    from defender.learning.judge import grade_episode
 
-    ran = run_entry(tmp_path, fix_source=start_watching, late_signal_ok=True)  # a signal after the entry is ignored
-    holder[0].join(timeout=30)
-    assert landed.is_set(), "premise: the signal was sent"
+    def graded_then_stopped(runs, episode_id, **kw):
+        graded = grade_episode(runs, episode_id, **kw)
+        _term()
+        return graded
+
+    ran = run_entry(tmp_path, grade=graded_then_stopped)
+    assert ran.judge.calls, "premise: the judge was asked"
     _ended(ran, "completed", None)
+
+
+HOLD_SECONDS = 120
 
 
 def test_a_tenant_host_lock_still_busy_after_the_entrys_wait_is_a_hand_back(tmp_path):
@@ -294,18 +424,35 @@ def test_a_tenant_host_lock_still_busy_after_the_entrys_wait_is_a_hand_back(tmp_
     from defender.tenancy import host_lock
 
     held: list = []
+    gate = threading.Lock()
+    began: list[float] = []
+
+    def release() -> None:
+        with gate:
+            while held:
+                fd = held.pop()
+                if fd is not None:
+                    host_lock.release_lock(fd)
 
     def hold(src: Path) -> None:
         held.append(host_lock.acquire(Path(os.environ["DEFENDER_DATA_ROOT"]), src.parent.parent.name,
                                       exclusive=True, timeout=0))
+        began.append(time.monotonic())
 
+    # The lock is let go after HOLD_SECONDS whatever the entry does, so an entry that waits for ever
+    # finishes (and fails the assertions below) instead of hanging the run.
+    timer = threading.Timer(HOLD_SECONDS, release)
+    timer.daemon = True
+    timer.start()
     try:
         ran = run_entry(tmp_path, fix_source=hold)
     finally:
-        for fd in held:
-            if fd is not None:
-                host_lock.release_lock(fd)
-    assert held, "premise: the test took the lock"
-    assert held[0] is not None, "premise: the lock was free to take"
+        timer.cancel()
+        waited = time.monotonic() - began[0] if began else 0.0
+        had_it = bool(held) and held[0] is not None
+        release()
+    assert began, "premise: the test took the lock"
+    assert had_it, "premise: the lock was free to take"
+    assert waited < HOLD_SECONDS - 5, f"the entry waited out the whole {HOLD_SECONDS} s the lock was held"
     _ended(ran, "stopped", None)
     assert ran.spawn.launches == []

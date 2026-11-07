@@ -99,18 +99,19 @@ class JobChild(ScriptedChild):
 class PostStepChild(ScriptedChild):
     """`post_step_argv`: records what the worker handed over and the job's row as the child starts, and answers with a
     record naming the handed jobs as published, except `refuse` (refused) and `omit` (in neither: a queue-level
-    failure). `recording=False`: it leaves no record."""
+    failure). `recording=False`: it leaves no record; `record_text`: it leaves exactly that text as its record."""
 
     def __init__(self, *a, dsn: str, refuse: tuple[str, ...] = (), omit: tuple[str, ...] = (),
-                 recording: bool = True, **kw) -> None:
+                 recording: bool = True, record_text: str | None = None, **kw) -> None:
         super().__init__(*a, **kw)
-        self.dsn, self.refuse, self.omit, self.recording = dsn, refuse, omit, recording
+        self.dsn, self.refuse, self.omit, self.recording, self.record_text = dsn, refuse, omit, recording, record_text
         self.handed: list[tuple[str, list[str], str]] = []
 
     def __call__(self, launch) -> list[str]:
         pending = sorted(launch.pending_job_ids)
         self.handed.append((launch.job_id, pending, job_row(self.dsn, launch.job_id)["status"]))
-        self.files = {} if not self.recording else {"{id}.post-step.json": json.dumps({
+        self.files = {} if not self.recording else {"{id}.post-step.json": self.record_text if self.record_text is not None
+                                                       else json.dumps({
             "published": [j for j in pending if j not in (*self.refuse, *self.omit)],
             "refused": [j for j in pending if j in self.refuse]})}
         write_whole(self.spec, json.dumps(self.spec_dict()))
@@ -150,6 +151,29 @@ async def queued_job(world: dict, store, *, ticket: str, tenant: str = T1) -> st
 def _stop_serving(serving: asyncio.Task) -> None:
     if not serving.done():
         os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _alive(child: ScriptedChild) -> int:
+    """Children of this stand-in running now, by the order of their start and end events."""
+    return sum(1 if kind == "start" else -1 for kind, _ in child.events())
+
+
+def _lapse(dsn: str, job_id: str) -> None:
+    execute(dsn, "UPDATE jobs.learning_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = %s", (job_id,))
+
+
+#: Text at an end record's path that cannot be read as the interface's shape.
+UNREADABLE_END = [
+    pytest.param("", id="empty"), pytest.param('{"status": "comp', id="truncated"), pytest.param("[]", id="not-an-object"),
+    pytest.param(json.dumps({"status": "completed"}), id="missing-fields"),
+    pytest.param(learning_end("done"), id="unknown-status"),
+]
+#: Likewise for the post-step record's.
+UNREADABLE_POST = [
+    pytest.param("", id="empty"), pytest.param('{"published": [', id="truncated"), pytest.param("[]", id="not-an-object"),
+    pytest.param(json.dumps({"published": []}), id="missing-refused"),
+    pytest.param(json.dumps({"published": "x", "refused": []}), id="wrong-type"),
+]
 
 
 def _starts(child: ScriptedChild) -> list[str]:
@@ -305,6 +329,45 @@ async def test_no_record_from_a_child_nobody_signalled_is_exited_without_result(
     assert [j["attempt"] for j in jobs_of(world["dsn"], investigation_of(world["dsn"], job))] == [1]
 
 
+@pytest.mark.parametrize("text", UNREADABLE_END)
+async def test_an_end_record_that_cannot_be_read_counts_as_none_from_a_child_nobody_signalled(world, text):
+    """An unreadable record is no record: `failed`/`exited_without_result`, one attempt, a post-step follows. (End record, O12)"""
+    job_proc = job_child(world, files={END: text})
+    post = post_child(world)
+    async with job_store(world["dsn"]) as store:
+        job = await queued_job(world, store, ticket="T-1")
+        await learning_worker(world, store, job=job_proc, post=post).drain()
+
+    stored = job_row(world["dsn"], job)
+    assert (stored["status"], stored["reason"]) == ("failed", "exited_without_result"), stored
+    assert [h[0] for h in post.handed] == [job]
+    assert len(jobs_of(world["dsn"], investigation_of(world["dsn"], job))) == 1
+
+
+@pytest.mark.parametrize("text", UNREADABLE_END)
+async def test_an_end_record_that_cannot_be_read_counts_as_none_from_a_signalled_child_and_is_a_hand_back(world, text):
+    """Signalled and unreadable: the row is handed back (lapsed, retried as attempt 2), not ended on the text; no post-step. (End record, O6)"""
+    dsn = world["dsn"]
+    job_proc = job_child(world, files={END: text}, term="finish", term_mark=str(world["tmp"] / "termed"),
+                         wait_for=world["tmp"] / "never")
+    post = post_child(world)
+    async with job_store(dsn) as store:
+        inv = await completed_investigation(store, ticket="T-1")
+        job = jobs_of(dsn, inv)[0]["id"]
+        serving = asyncio.create_task(learning_worker(world, store, job=job_proc, post=post, **_FAST).serve())
+        try:
+            await _until(lambda: job_proc.seen(job), "the job's child")
+        finally:
+            _stop_serving(serving)
+            await asyncio.wait_for(serving, timeout=60)
+        assert [j["status"] for j in jobs_of(dsn, inv)] == ["running"], "an unreadable record decided the row"
+        await store.take_over()
+
+    old, new = jobs_of(dsn, inv)
+    assert (old["status"], old["reason"], new["attempt"], new["status"]) == ("failed", "lease_lapsed", 2, "queued")
+    assert post.handed == []
+
+
 @pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
 async def test_a_job_of_a_tenant_that_is_not_active_fails_as_a_worker_error_with_no_child(world, state):
     """Tenant not active: `failed`/`worker_error`, no child, and no post-step for a job that started nothing. (End record, O8)"""
@@ -433,6 +496,37 @@ async def test_a_stop_landing_after_a_record_does_not_override_it(world, record,
     assert post.handed == [], "a stopping worker started a post-step"
 
 
+@pytest.mark.parametrize("moved", [("failed", "worker_error"), ("skipped", "expired")], ids=["failed", "skipped"])
+async def test_o2_a_job_row_moved_while_its_child_runs_is_not_written_and_nothing_is_published(world, moved):
+    """A running job's row moved under it: its child is ended, the row keeps every column, no `pending` is made, the other job is untouched. (O2, P1)"""
+    status, reason = moved
+    dsn = world["dsn"]
+    release, mark = world["tmp"] / "release", world["tmp"] / "term-{id}"
+    jobs = job_child(world, files={END: learning_end("completed", findings=2, cost=1.5)}, wait_for=release, term="finish",
+                     term_mark=str(mark))
+    post = post_child(world)
+    async with job_store(dsn) as store:
+        fenced = await queued_job(world, store, ticket="T-1")
+        other = await queued_job(world, store, ticket="T-2")
+        draining = asyncio.create_task(learning_worker(
+            world, store, job=jobs, post=post, slots=3, learning_slots=2, **_FAST).drain())
+        try:
+            await _until(lambda: len(jobs.seen_all()) == 2, "both families to start")
+            execute(dsn, "UPDATE jobs.learning_jobs SET status = %s, reason = %s, message = 'moved by test', finished_at = %s, "
+                         "lease_expires_at = NULL WHERE id = %s", (status, reason, NOW, fenced))
+            snapshot = job_row(dsn, fenced)
+            await _until(lambda: Path(str(mark).replace("{id}", fenced)).exists(), "the moved row's child to be ended", timeout=10)
+        finally:
+            release.touch()
+            await asyncio.wait_for(draining, timeout=60)
+
+    assert job_row(dsn, fenced) == snapshot, "the worker wrote on a row it no longer held"
+    assert snapshot["publish_state"] == "none"
+    assert not Path(str(mark).replace("{id}", other)).exists(), "an unmoved row's child was ended"
+    assert job_row(dsn, other)["status"] == "completed"
+    assert all(fenced not in pending for _, pending, _ in post.handed), "the moved row was handed to a post-step"
+
+
 async def test_o6_a_running_job_keeps_its_lease_renewed(world):
     """A family longer than several leases is not taken over while its worker lives: one attempt, `completed`. (O6)"""
     dsn = world["dsn"]
@@ -549,6 +643,85 @@ async def test_o5_a_freed_learning_slot_goes_to_the_next_job_before_an_older_inv
             release_job.touch()
             release_inv.touch()
         await asyncio.wait_for(draining, timeout=60)
+    assert set(jobs.seen_all()) == set(wanted)
+    assert set(invs.seen_all()) == set(queued)
+
+
+async def test_o5_investigations_take_every_slot_while_no_job_is_queued(world):
+    """slots=3, L=1, no job queued: three investigations run at once; a reserved learning slot is not left idle. (O5)"""
+    release = world["tmp"] / "release"
+    invs = _child(world, wait_for=release)
+    async with job_store(world["dsn"]) as store:
+        queued = [await _queued(store, ticket=f"I-{n}", key=f"i{n}") for n in range(4)]
+        draining = asyncio.create_task(learning_worker(
+            world, store, job=job_child(world), post=post_child(world), inv=invs, slots=3, learning_slots=1).drain())
+        try:
+            await _until(lambda: len(invs.seen_all()) == 3, "three investigations at once")
+            await asyncio.sleep(0.3)
+            assert len(invs.seen_all()) == 3, "a fourth ran past the slots"
+        finally:
+            release.touch()
+        await asyncio.wait_for(draining, timeout=60)
+    assert set(invs.seen_all()) == set(queued)
+    assert invs.max_alive() == 3
+
+
+async def test_o5_a_job_queued_while_every_slot_is_busy_takes_the_first_freed_slot_before_an_older_investigation(world):
+    """slots=2, L=1: both slots run investigations, then a job is queued; the first slot freed goes to the job, not to the older queued investigation. (O5)"""
+    dsn = world["dsn"]
+    releases = {name: world["tmp"] / f"release-{name}" for name in ("a", "b", "job")}
+    async with job_store(dsn) as store:
+        source = await _queued(store, ticket="X-1", key="kx")
+        assert (await store.claim()).record.investigation_id == source, "premise: the test holds the source running"
+        first, second, older = [await _queued(store, ticket=f"I-{n}", key=f"i{n}") for n in (1, 2, 3)]
+        for inv, hours in ((first, 4), (second, 3), (older, 2)):
+            set_created(dsn, "investigations", inv, NOW - dt.timedelta(hours=hours))
+        runs = {first: ScriptedChild(world["tmp"] / "a", world["runs"], wait_for=releases["a"]),
+                second: ScriptedChild(world["tmp"] / "b", world["runs"], wait_for=releases["b"]),
+                older: ScriptedChild(world["tmp"] / "c", world["runs"])}
+        jobs = job_child(world, files={END: learning_end("completed")}, wait_for=releases["job"])
+        draining = asyncio.create_task(learning_worker(
+            world, store, job=jobs, post=post_child(world), inv=lambda launch: runs[launch.investigation_id](launch),
+            slots=2).drain())
+        try:
+            await _until(lambda: runs[first].seen_all() and runs[second].seen_all(), "both slots busy with investigations")
+            await store.finish(T1, source, stage="completed", disposition="malicious", cost_usd=0.0)
+            releases["a"].touch()
+            await _until(lambda: jobs.seen_all(), "the job to take the freed slot")
+            assert not runs[older].seen_all(), "the freed slot went to the older investigation"
+        finally:
+            for release in releases.values():
+                release.touch()
+        await asyncio.wait_for(draining, timeout=60)
+    assert set(runs[older].seen_all()) == {older}
+
+
+async def test_o5_jobs_investigations_and_post_steps_together_never_run_in_more_than_the_slots(world):
+    """slots=2, L=1, two jobs and two investigations queued, post-steps held: the children alive at once, post-steps counted, never pass 2. (O5, O8)"""
+    release = world["tmp"] / "release"
+    jobs = ScriptedChild(world["tmp"] / "jobs", world["runs"], files={END: learning_end("completed", findings=1)})
+    post = PostStepChild(world["tmp"] / "post", world["runs"], dsn=world["dsn"], wait_for=release)
+    invs = ScriptedChild(world["tmp"] / "invs", world["runs"], wait_for=release)
+    peaks: list[int] = []
+
+    async def sample() -> None:
+        while True:
+            peaks.append(sum(_alive(c) for c in (jobs, post, invs)))
+            await asyncio.sleep(0.005)
+
+    async with job_store(world["dsn"]) as store:
+        wanted = [await queued_job(world, store, ticket=f"J-{n}") for n in (1, 2)]
+        queued = [await _queued(store, ticket=f"I-{n}", key=f"i{n}") for n in (1, 2)]
+        draining = asyncio.create_task(learning_worker(world, store, job=jobs, post=post, inv=invs, slots=2).drain())
+        sampler = asyncio.create_task(sample())
+        try:
+            await _until(lambda: _alive(post) and _alive(invs), "a post-step and an investigation at once")
+            await asyncio.sleep(0.5)
+        finally:
+            release.touch()
+        await asyncio.wait_for(draining, timeout=90)
+        sampler.cancel()
+    assert max(peaks) == 2, f"control: both slots were used, peak {max(peaks)}"
     assert set(jobs.seen_all()) == set(wanted)
     assert set(invs.seen_all()) == set(queued)
 
@@ -837,6 +1010,62 @@ async def test_o14_a_queue_level_failure_leaves_the_job_pending_to_be_handed_aga
     assert [job_row(dsn, j)["publish_state"] for j in (a, b)] == ["done", "done"]
 
 
+@pytest.mark.parametrize("text", UNREADABLE_POST)
+async def test_o14_a_post_step_record_that_cannot_be_read_counts_as_none_and_the_job_stays_pending(world, text):
+    """An unreadable post-step record leaves the job `pending` (not `done`, not `refused`) to be handed over again. (O14, O8)"""
+    dsn = world["dsn"]
+    ended = job_child(world, files={END: learning_end("completed", findings=1)})
+    async with job_store(dsn) as store:
+        a = await queued_job(world, store, ticket="J-1")
+        await learning_worker(world, store, job=ended, post=post_child(world, name="p1", record_text=text)).drain()
+        assert job_row(dsn, a)["publish_state"] == "pending"
+
+        b = await queued_job(world, store, ticket="J-2")
+        later = post_child(world, name="p2")
+        await learning_worker(world, store, job=ended, post=later).drain()
+    assert later.handed == [(b, sorted([a, b]), "completed")]
+    assert [job_row(dsn, j)["publish_state"] for j in (a, b)] == ["done", "done"]
+
+
+@pytest.mark.parametrize("text", UNREADABLE_POST)
+async def test_o14_a_post_step_record_left_as_the_worker_stops_it_counts_as_none_when_unreadable(world, text):
+    """A signalled post-step whose record is unreadable: the job stays `completed`/`pending`. (O14, O9)"""
+    jobs = job_child(world, files={END: learning_end("completed", findings=1)})
+    post = post_child(world, record_text=text, term="finish", term_mark=str(world["tmp"] / "post-termed"),
+                      wait_for=world["tmp"] / "never")
+    async with job_store(world["dsn"]) as store:
+        job = await queued_job(world, store, ticket="J-1")
+        serving = asyncio.create_task(learning_worker(world, store, job=jobs, post=post, stop_grace=30, **_FAST).serve())
+        try:
+            await _until(lambda: post.seen(job), "the post-step")
+        finally:
+            _stop_serving(serving)
+            await asyncio.wait_for(serving, timeout=15)
+    stored = job_row(world["dsn"], job)
+    assert (stored["status"], stored["publish_state"]) == ("completed", "pending")
+
+
+async def test_o8_a_post_step_that_cannot_be_spawned_leaves_its_row_alone_and_the_next_one_publishes_it(world):
+    """An unexecutable post-step command: the job keeps its ending and `pending`, the worker carries on, and the next post-step is handed it. (O8, O14)"""
+    dsn = world["dsn"]
+    ended = job_child(world, files={END: learning_end("completed", findings=1)})
+    good = post_child(world)
+    async with job_store(dsn) as store:
+        a = await queued_job(world, store, ticket="J-1")
+        b = await queued_job(world, store, ticket="J-2")
+        set_created(dsn, "learning_jobs", a, NOW - dt.timedelta(hours=1))
+
+        def post(launch):
+            return [str(world["tmp"] / "no-such-program")] if launch.job_id == a else good(launch)
+
+        await learning_worker(world, store, job=ended, post=post).drain()
+
+    stored = job_row(dsn, a)
+    assert (stored["status"], stored["reason"]) == ("completed", None), "a lost post-step changed the job's ending"
+    assert good.handed == [(b, sorted([a, b]), "completed")]
+    assert [job_row(dsn, j)["publish_state"] for j in (a, b)] == ["done", "done"]
+
+
 async def test_o14_a_post_step_is_handed_only_its_own_tenants_pending_jobs(world):
     """Another tenant's `pending` job is not handed to this tenant's post-step, and stays pending. (O14, O8)"""
     dsn = world["dsn"]
@@ -875,7 +1104,7 @@ async def test_o8_each_post_step_announces_one_audit_event_with_its_published_an
         await learning_worker(world, store, job=ended, post=post_child(world, name="p", refuse=(a,))).drain()
 
     new = [e for e in audit.events() if e.action == "learning_post_step"][seen:]
-    assert len(new) == 1, new
+    assert len(new) == 1, f"events of `defender.jobs.audit` after the second drain: {[e.action for e in audit.events()]}"
     assert (new[0].actor, new[0].tenant_id) == ("system", T1)
     assert (_count_of("published", new[0].detail or ""), _count_of("refused", new[0].detail or "")) == (2, 1)
     assert job_row(dsn, b)["publish_state"] == "done"
@@ -974,6 +1203,35 @@ async def test_o10_delete_is_a_conflict_while_any_of_its_jobs_runs_and_removes_n
     assert row(dsn, inv) is None
 
 
+async def test_o10_delete_is_a_conflict_while_a_job_of_another_request_key_runs_after_the_auto_chain_ended(world):
+    """Auto attempt 1 lapsed and attempt 2 completed, an explicit job running: the delete is a Conflict that removes nothing; once that attempt ends it removes every row. (O10, D6)"""
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        inv = await completed_investigation(store, ticket="T-1")
+        first = await store.claim_learning_job()
+        _lapse(dsn, first.record.learning_job_id)
+        await store.take_over()
+        second = await store.claim_learning_job()
+        execute(dsn, "UPDATE jobs.learning_jobs SET status = 'completed', finished_at = %s, lease_expires_at = NULL, "
+                     "publish_state = 'done' WHERE id = %s", (NOW, second.record.learning_job_id))
+        explicit, _ = await store.create_learning_job(T1, inv, "client-1", actor="u-1")
+        running = await store.claim_learning_job()
+        assert running.record.learning_job_id == explicit.learning_job_id, "premise: the explicit job runs"
+        assert sorted((j["trigger"], j["attempt"], j["status"]) for j in jobs_of(dsn, inv)) == [
+            ("auto", 1, "failed"), ("auto", 2, "completed"), ("explicit", 1, "running")]
+
+        with pytest.raises(Conflict):
+            await store.delete_investigation(T1, inv, actor="u-1")
+        assert len(jobs_of(dsn, inv)) == 3
+        assert row(dsn, inv) is not None
+
+        _lapse(dsn, explicit.learning_job_id)
+        await store.take_over()
+        await store.delete_investigation(T1, inv, actor="u-1")
+    assert jobs_of(dsn, inv) == []
+    assert row(dsn, inv) is None
+
+
 async def test_o10_a_claim_that_commits_while_the_delete_waits_makes_the_delete_a_conflict(world):
     """The delete locks the job rows before it checks: a claim that lands first wins and the delete sees `running`. (O10, D6)"""
     import psycopg
@@ -985,7 +1243,10 @@ async def test_o10_a_claim_that_commits_while_the_delete_waits_makes_the_delete_
         async with await psycopg.AsyncConnection.connect(dsn) as holder:
             await holder.execute("SELECT id FROM jobs.learning_jobs WHERE id = %s FOR UPDATE", (job,))
             deleting = asyncio.ensure_future(store.delete_investigation(T1, inv, actor="u-1"))
-            await asyncio.sleep(1.0)
+            await _until(lambda: deleting.done() or execute(dsn, "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
+                                                                 "AND datname = current_database()")[0][0] >= 1,
+                         "the delete to wait on the locked job row")
+            assert not deleting.done(), "the delete did not wait for the job row's lock"
             await holder.execute("UPDATE jobs.learning_jobs SET status = 'running', started_at = now(), "
                                  "lease_expires_at = now() + interval '30 seconds' WHERE id = %s", (job,))
             await holder.commit()
@@ -1054,6 +1315,73 @@ async def test_o11_an_investigation_this_tenant_does_not_have_is_an_unknown_refe
             with pytest.raises(UnknownReference):
                 await store.create_learning_job(T1, named, "client-2", actor="u-1")
     assert len(jobs_of(world["dsn"], theirs)) == 1, "the other tenant's own job is untouched"
+
+
+async def test_o11_a_client_request_id_equal_to_the_auto_key_neither_replays_nor_replaces_the_auto_job(world):
+    """The auto job's own key, sent as a client's request id, is refused or made a separate explicit job; it never answers with the auto job nor makes a second auto one. (O11, Request key; design gap: the reserved prefix's treatment is unstated)"""
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        inv = await completed_investigation(store, ticket="T-1")
+        (auto,) = jobs_of(dsn, inv)
+        try:
+            made, created = await store.create_learning_job(T1, inv, auto["request_key"], actor="u-1")
+        except (Conflict, ValueError):
+            made = None
+        else:
+            assert created is True
+            assert made.learning_job_id != auto["id"], "the auto job was replayed as the client's"
+
+    rows = jobs_of(dsn, inv)
+    assert [(j["trigger"], j["attempt"]) for j in rows if j["trigger"] == "auto"] == [("auto", 1)]
+    assert {j["id"] for j in rows} == {auto["id"], *([made.learning_job_id] if made is not None else [])}
+
+
+@pytest.mark.postgres
+def test_o1_the_migration_queues_no_job_for_investigations_completed_before_it(empty_database):
+    """A database holding a completed investigation, taken to head: no learning job row appears, the investigation stays. (O1, no backfill)"""
+    from alembic import command
+
+    from defender.migrations import _config, _scripts, head, upgrade
+    from defender.tests.migrations.test_1343_migrations import TENANT, _inv, _plant
+
+    config = _config()
+    config.attributes["dsn"] = empty_database
+    command.upgrade(config, _scripts().get_revision(head()).down_revision)
+    execute(empty_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, now(), 'active')", (TENANT,))
+    _plant(empty_database, _inv("done"), "completed", "t0", cost=2.5)
+    _plant(empty_database, _inv("still-queued"), "queued", "t1")
+
+    upgrade(empty_database)
+
+    assert execute(empty_database, "SELECT count(*) FROM jobs.learning_jobs") == [(0,)]
+    assert execute(empty_database, "SELECT count(*) FROM jobs.investigations WHERE stage = 'completed'") == [(1,)]
+
+
+async def test_o1_the_database_refuses_a_second_job_with_the_same_tenant_investigation_key_and_attempt(world):
+    """A real second insert of the auto job's `(tenant, investigation, request key, attempt)` is a unique violation; the next attempt and another key insert. (O1, O2, Request key)"""
+    import psycopg
+
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        inv = await completed_investigation(store, ticket="T-1")
+    (auto,) = jobs_of(dsn, inv)
+
+    # Every column, whatever the table adds beyond the named ones: the store sets values in Python, with no server defaults.
+    others = [c for (c,) in execute(dsn, "SELECT column_name FROM information_schema.columns WHERE table_schema = 'jobs' "
+                                         "AND table_name = 'learning_jobs' AND column_name NOT IN ('id', 'request_key', 'attempt')")]
+
+    def copy_of(*, key: str | None = None, attempt: int | None = None) -> None:
+        kept = ", ".join(others)
+        execute(dsn, f"INSERT INTO jobs.learning_jobs (id, request_key, attempt, {kept}) "  # noqa: S608
+                     f"SELECT gen_random_uuid(), coalesce(%s, request_key), coalesce(%s, attempt), {kept} "
+                     "FROM jobs.learning_jobs WHERE id = %s", (key, attempt, auto["id"]))
+
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        copy_of()
+    assert len(jobs_of(dsn, inv)) == 1
+    copy_of(attempt=2)
+    copy_of(key="another-key")
+    assert len(jobs_of(dsn, inv)) == 3
 
 
 async def test_o11_an_explicit_job_runs_on_the_same_slots_as_an_auto_one(world):

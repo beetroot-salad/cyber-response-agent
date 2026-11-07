@@ -14,7 +14,7 @@ import subprocess
 import sys
 import textwrap
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +65,31 @@ def _read_json(path: Path | None) -> dict | None:
 
 
 @dataclass
+class Candidates:
+    """What the `candidates=` seam returns, shaped as `fork_candidates` does: `.ids`, `.last_refusal`."""
+
+    ids: list[int]
+    last_refusal: str | None = None
+
+
+def choose(*ids: int, last_refusal: str | None = None):
+    """A `candidates=` seam answering `ids` whatever it is asked."""
+    return lambda *_a, **_k: Candidates(list(ids), last_refusal)
+
+
+@dataclass
+class WatchJudge(J.FakeJudge):
+    """The judge double, which also reads the job's progress record each time it is called."""
+
+    record: Path | None = None
+    progress_seen: list = field(default_factory=list)
+
+    def __call__(self, *a: Any, **kw: Any) -> str:
+        self.progress_seen.append(_read_json(self.record))
+        return super().__call__(*a, **kw)
+
+
+@dataclass
 class Ran:
     end: dict | None
     progress: dict | None
@@ -83,10 +108,10 @@ def _unexpected_sigterm(_signum, _frame):
 
 def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         tmp_path, *, candidates=None, spawn=None, judge=None, questioner=None, live_tree=None,
-        oracle=None, fix_source=None, job=JOB, late_signal_ok=False) -> Ran:
+        oracle=None, fix_source=None, job=JOB, grade=None, preflight=None, after_source=None) -> Ran:
     """The job entry in-process over `_spec1224`'s fixture tenant; every paid seam a recording double."""
     est = S.estate(tmp_path)
-    _base, src = S.source_run(tmp_path, est, calls=_calls())
+    _base, src = S.source_run(tmp_path, est, calls=_calls(), after_source=after_source)
     if fix_source is not None:
         fix_source(src)
     tenant = src.parent.parent.name
@@ -95,18 +120,22 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
     asking.record = runs / f"{job}.learning-progress.json"
     spawn = spawn if spawn is not None else J.FakeSibling()
-    judge = judge if judge is not None else J.FakeJudge(
+    judge = judge if judge is not None else WatchJudge(
         default=J.as_reply_text(J.reply_doc(bucket="none", systems=[])))
+    if isinstance(judge, WatchJudge):
+        judge.record = asking.record
     seams = dict(
-        questioner=asking, preflight=S.no_preflight, live_tree=live_tree or T.source_capture(),
+        questioner=asking, preflight=preflight or S.no_preflight, live_tree=live_tree or T.source_capture(),
         roster=est.roster(), judge=judge,
         oracle=(oracle or S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM))).model,
         verifier=S.passing_verifier().model, directory=T.launcher_directory(tenant), spawn=spawn,
-        candidates=candidates if candidates is not None else (lambda *_a: [T.BRANCH_MESSAGE_ID]))
+        candidates=candidates if candidates is not None else choose(T.BRANCH_MESSAGE_ID))
+    if grade is not None:
+        seams["grade"] = grade
     argv = ["--job", job, "--tenant", tenant, "--source", src.name, "--parent-pid", str(os.getppid())]
     from defender.learning.branch import job_entry
 
-    previous = signal.signal(signal.SIGTERM, signal.SIG_IGN if late_signal_ok else _unexpected_sigterm)
+    previous = signal.signal(signal.SIGTERM, _unexpected_sigterm)
     outcome: object = None
     try:
         try:
@@ -157,7 +186,7 @@ def test_o3_the_candidates_are_mains_gather_calls_and_no_other_response(tmp_path
     assert R.CORRELATION_LEAD in source.gather.asked, "premise: the harness ran its automatic lead too"
     from defender.learning.branch.fork_pick import fork_candidates
 
-    assert fork_candidates(source.store, _run_of(source)) == [first, second]
+    assert fork_candidates(source.store, _run_of(source)).ids == [first, second]
 
 
 @pytest.mark.e2e
@@ -168,7 +197,7 @@ def test_o3_a_source_with_tool_calls_but_no_gather_has_no_candidate(tmp_path):
     assert R.tool_calling_responses(source.store), "premise: MAIN called tools"
     from defender.learning.branch.fork_pick import fork_candidates
 
-    assert fork_candidates(source.store, _run_of(source)) == []
+    assert fork_candidates(source.store, _run_of(source)).ids == []
 
 
 @pytest.mark.e2e
@@ -181,7 +210,9 @@ def test_o3_a_gather_that_fails_admission_is_dropped_and_the_rest_stay(tmp_path)
     assert [c.tool_name for c in R.calls_of(R.message_at(source.store, early))] == ["gather"]
     from defender.learning.branch.fork_pick import fork_candidates
 
-    assert fork_candidates(source.store, _run_of(source)) == [late]
+    found = fork_candidates(source.store, _run_of(source))
+    assert found.ids == [late]
+    assert found.last_refusal, "the dropped gather left no refusal to name"
 
 
 @pytest.mark.e2e
@@ -192,7 +223,44 @@ def test_o3_when_every_gather_fails_admission_there_is_no_candidate(tmp_path):
     assert R.tool_calling_responses(source.store), "premise: a gather was called"
     from defender.learning.branch.fork_pick import fork_candidates
 
-    assert fork_candidates(source.store, _run_of(source)) == []
+    found = fork_candidates(source.store, _run_of(source))
+    assert found.ids == []
+    assert found.last_refusal, "every gather was refused and the last refusal is not named"
+
+
+def _break_snapshot(source, request: int) -> None:
+    """Replace the fork snapshot MAIN recorded at its `request`-th response with a body of a version current code refuses."""
+    import sqlite3
+
+    connection = sqlite3.connect(str(source.store.path))
+    try:
+        changed = connection.execute("UPDATE fork_snapshot SET body = ? WHERE request = ?",
+                                     (json.dumps({"version": 1}), request)).rowcount
+        connection.commit()
+    finally:
+        connection.close()
+    assert changed, f"premise: no snapshot was recorded at request {request}"
+
+
+@pytest.mark.e2e
+def test_o3_a_fork_snapshot_current_code_cannot_read_drops_that_candidate_and_names_why(tmp_path):
+    """Two admitted gathers, the first one's snapshot unreadable: only the other stays, and the refusal is named. (O3)"""
+    pytest.importorskip("pydantic_ai")
+    R, source = _driven_source(tmp_path, lambda R, c: (
+        R.append(c[0]), R.dispatch("l-001"), R.append(c[1]), R.dispatch("l-002"), R.done()))
+    gathers = [r for r in R.tool_calling_responses(source.store)
+               if [c.tool_name for c in R.calls_of(R.message_at(source.store, r))] == ["gather"]]
+    assert len(gathers) == 2, "premise: two gathers"
+    from defender.learning.branch.fork_pick import fork_candidates
+
+    assert fork_candidates(source.store, _run_of(source)).ids == gathers, "control: both admitted before the plant"
+    _break_snapshot(source, R.responses(source.store).index(gathers[0]) + 1)
+    from defender.tests.support.storage._store_owner import reread
+
+    found = fork_candidates(reread(source.store), _run_of(source))
+    assert found.ids == [gathers[1]]
+    assert found.last_refusal, "the dropped candidate left no refusal to name"
+    assert "snapshot" in found.last_refusal
 
 
 def test_o3_the_pick_is_uniform_over_the_candidates():
@@ -212,8 +280,23 @@ def test_o3_the_pick_is_written_to_the_progress_record_before_any_spend(tmp_path
     assert ran.questioner.progress_seen, "premise: the questioner was reached"
     first = ran.questioner.progress_seen[0]
     assert first is not None, "nothing was recorded before the first spend"
-    assert first["fork_message_id"] == T.BRANCH_MESSAGE_ID
-    assert ran.progress["fork_message_id"] == T.BRANCH_MESSAGE_ID
+    assert first["fork_message_id"] == str(T.BRANCH_MESSAGE_ID), "the record holds the fork id as a string"
+    assert ran.progress["fork_message_id"] == str(T.BRANCH_MESSAGE_ID)
+
+
+def test_o3_the_entry_picks_among_its_candidates_and_does_not_always_pick_the_same(tmp_path):
+    """Four candidates, twelve jobs: every recorded pick is one of them, and the picks are not all one. (O3, D-B)"""
+    ids = [53, 55, 57, 59]
+    picks = []
+    for n in range(12):
+        stopped_at_the_first_spend = Watch(fail=RuntimeError("stop at the first spend"))
+        ran = run_entry(tmp_path / f"job-{n}", candidates=choose(*ids), questioner=stopped_at_the_first_spend,
+                        job=fixture_uuid(f"1344-pick-{n}"))
+        recorded = ran.questioner.progress_seen[0]
+        assert recorded is not None, "nothing was recorded before the first spend"
+        picks.append(recorded["fork_message_id"])
+    assert set(picks) <= {str(i) for i in ids}, picks
+    assert len(set(picks)) > 1, f"twelve jobs, one pick every time: {picks}"
 
 
 # --- O4: one job, one slot ---------------------------------------------------------------------------
@@ -334,6 +417,65 @@ def test_o13_a_siblings_cost_is_its_own_main_session_and_descendants_in_the_shar
         assert _cost_of(store, second) == pytest.approx(3.0)
 
 
+class SpendingSibling(J.FakeSibling):
+    """A sibling that RAN and was billed: it forks the source's session in the shared database, as a real resume
+    does, appends priced responses to the fork and points its run at it (`attach_case_pointer`)."""
+
+    def __init__(self, spend: dict[str, dict], **kw: Any) -> None:
+        super().__init__(**kw)
+        self.spend = spend
+        self.src: Path | None = None
+
+    def attach(self, src: Path) -> None:
+        self.src = src
+
+    def __call__(self, argv, **kw):
+        code = super().__call__(argv, **kw)
+        usage = self.spend.get(_label_of(argv))
+        if usage is not None:
+            self._bill(_label_of(argv), usage)
+        return code
+
+    def _bill(self, label: str, usage: dict) -> None:
+        from defender.records import SessionPaths
+        from defender.records import session_store as ss
+        from defender.tests.support.shared._locations_1210 import fixture_runs_base
+        from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+        assert self.src is not None, "attach(src) first"
+        assert self.episode_dir is not None, "the sibling has not run"
+        arm = json.loads((self.episode_dir / T.ROSTER_NAME).read_text(encoding="utf-8"))[
+            T.world_id(self.episode_dir, label)]
+        case_id = T.source_case_id(self.src)
+        with ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(self.src.parent))) as store:
+            fork = store.fork(ss.main_session_id(store), T.BRANCH_MESSAGE_ID)
+            store.append(fork, _spent(usage), agent_id="main")
+            ss.write_case_pointer(fixture_run(self.episode_dir / "runs" / arm), case_id=case_id,
+                                  store_path=store.path, session_id=fork)
+
+
+def _label_of(argv: list[str]) -> str | None:
+    return argv[argv.index("--world") + 1] if "--world" in argv else None
+
+
+def test_o13_the_entry_carries_the_siblings_cost_and_its_stage_to_the_progress_and_end_records(tmp_path):
+    """Three sibling sessions billed 15, 3 and 6 dollars: both records say 24, and the stage moves on. (O13, Records)"""
+    spawn = SpendingSibling({"a": {"output_tokens": 1_000_000}, "b": {"input_tokens": 1_000_000},
+                             "c": {"input_tokens": 2_000_000}})
+    ran = run_entry(tmp_path, spawn=spawn, fix_source=spawn.attach)
+
+    assert ran.end is not None, "no end record"
+    assert ran.end["status"] == "completed", ran.end
+    assert ran.end["sibling_cost_usd"] == pytest.approx(24.0)
+    assert ran.progress["sibling_cost_usd"] == pytest.approx(24.0)
+    at_spend, at_judge = ran.questioner.progress_seen[0], ran.judge.progress_seen[-1]
+    assert at_judge["sibling_cost_usd"] == pytest.approx(24.0), "the progress record lagged the family's last sibling"
+    assert at_spend["sibling_cost_usd"] < at_judge["sibling_cost_usd"]
+    stages = [at_spend["stage"], at_judge["stage"], ran.end["stage"]]
+    assert all(isinstance(x, str) and x for x in stages), stages
+    assert stages[0] != stages[1], f"the stage did not move between the questioner and the judge: {stages}"
+
+
 # --- judge modes, publishing, dedup -------------------------------------------------------------------
 
 
@@ -352,7 +494,7 @@ def _graded_episode(tmp_path, monkeypatch, *, job_lane: bool, episode_id: str = 
 
 
 def sink_files(new) -> list[Path]:
-    """The files among `new` that hold finding rows (a `finding_id` and a topic on every line)."""
+    """The files among `new` that hold finding rows (a `finding_id` and a `subject_topic` on every line)."""
     found = []
     for path in sorted(new):
         lines = [x for x in path.read_text(encoding="utf-8", errors="replace").splitlines() if x.strip()]
@@ -360,7 +502,7 @@ def sink_files(new) -> list[Path]:
             rows = [json.loads(x) for x in lines]
         except ValueError:
             continue
-        if rows and all(isinstance(r, dict) and "finding_id" in r and "topic" in r for r in rows):
+        if rows and all(isinstance(r, dict) and "finding_id" in r and "subject_topic" in r for r in rows):
             found.append(path)
     return found
 
@@ -379,7 +521,7 @@ def test_judge_modes_the_job_lane_writes_the_episode_and_the_operator_lane_the_q
     assert _queue() == [], "a job's judge reached the queue"
     sunk = sink_files(new)
     assert sunk, f"the job's findings are in no file the judge added to the episode: {sorted(new)}"
-    assert any(json.loads(line)["topic"] == "the lead was never revisited"
+    assert any(json.loads(line)["subject_topic"] == "the lead was never revisited"
                for p in sunk for line in p.read_text(encoding="utf-8").splitlines() if line.strip())
 
 
@@ -431,8 +573,29 @@ _ENTRY = textwrap.dedent("""
 """)
 _WORKER = textwrap.dedent("""
     import subprocess, sys, time
-    subprocess.Popen([sys.executable, "-c", sys.argv[1], sys.argv[2], sys.argv[3]])
+    subprocess.Popen([sys.executable, "-c", sys.argv[1], *sys.argv[2:]])
     time.sleep(600)
+""")
+
+
+class RealChild:
+    """The launcher's spawn seam over its REAL `_default_spawn`, running the test-owned sleeping child for a sibling."""
+
+    def __init__(self, pid_file: str) -> None:
+        self.pid_file = pid_file
+
+    def __call__(self, argv, *, env=None, **kw) -> int:
+        from defender.learning.branch.cli import _default_spawn
+
+        return _default_spawn([sys.executable, "-c", _SIBLING, self.pid_file], env=env, **kw)
+
+
+_JOB_ENTRY = textwrap.dedent("""
+    import sys
+    from pathlib import Path
+    from defender.tests.learning.branch.test_1344_job_lane import RealChild, run_entry
+
+    run_entry(Path(sys.argv[1]), spawn=RealChild(sys.argv[2]))
 """)
 
 
@@ -471,6 +634,24 @@ def test_o9_a_sibling_dies_with_its_killed_worker(tmp_path):
         worker.kill()
         worker.wait()
         assert _gone(sibling), "the sibling outlived its worker"
+    finally:
+        worker.kill()
+        worker.wait()
+        if sibling is not None and _running(sibling):
+            os.kill(sibling, signal.SIGKILL)
+
+
+def test_o9_the_real_job_entry_takes_its_launchers_sibling_with_it_when_its_worker_is_killed(tmp_path):
+    """SIGKILL the worker above the REAL job entry: the entry's tie fires, its launcher unwinds, the sibling is gone. (O9, L-C21)"""
+    pid_file = tmp_path / "sibling.pid"
+    worker = subprocess.Popen([sys.executable, "-c", _WORKER, _JOB_ENTRY, str(tmp_path / "entry"), str(pid_file)])
+    sibling = None
+    try:
+        sibling = _await_pid(pid_file)
+        assert _running(sibling), "control: the sibling is up"
+        worker.kill()
+        worker.wait()
+        assert _gone(sibling), "the sibling outlived the worker above the real job entry"
     finally:
         worker.kill()
         worker.wait()

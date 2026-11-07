@@ -2,7 +2,7 @@
 runs on scripted models (siblings as real `run.main` in a child process), the judge's findings wait in the episode, the
 row ends, the post-step publishes them to the queue and the drain gate runs.
 
-Also the old-history outcome (O3, L5): a source recorded before fork snapshots existed ends `skipped`, typed, never a crash.
+Also the unreadable-history outcome (O3, L5): a source whose session store carries a format version current code refuses ends `skipped`, typed, never a crash.
 Not real here: the Docker boxes (unboxed executor), the models (scripts), the tenant's systems (a stand-in elastic)."""
 from __future__ import annotations
 
@@ -141,7 +141,7 @@ async def test_o1_o8_o14_a_completed_investigation_is_learned_from_end_to_end_an
 
 async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_and_nothing_is_published(
         migrated_database, tmp_path, monkeypatch):  # noqa: F811
-    """Same flow, MAIN never gathered: `skipped`/`no_fork_point`, no sibling, no queue row, no gate. (O3, L3)"""
+    """Same flow, MAIN never gathered: `skipped`/`no_fork_point`, no sibling, no queue row; the child started, so the post-step and its gate still run. (O3, O8, L3)"""
     from defender.learning.core.state import FINDINGS
     from defender.tests.support.learning.core._state1135 import state_over
 
@@ -153,7 +153,11 @@ async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_
     assert (job["status"], job["reason"]) == ("skipped", "no_fork_point"), job
     assert job["findings_count"] == 0
     assert state_over(flow["root"] / flow["tenant"] / "learning").rows(FINDINGS) == []
-    assert not (flow["marks"] / "post-step" / "gate").exists(), "a job that started no family step ran the gate"
+    gate = flow["marks"] / "post-step" / "gate"
+    assert gate.is_file(), "the job's child started, so the post-step runs the gate whatever the ending"
+    assert int(gate.read_text(encoding="utf-8")) == 0
+    record = json.loads((flow["root"] / flow["tenant"] / "runs" / f"{job['id']}.post-step.json").read_text(encoding="utf-8"))
+    assert record == {"published": [], "refused": []}
     assert not list((flow["marks"] / "family").glob("sibling-*")), "a sibling started with no fork point"
 
 

@@ -5,6 +5,7 @@ directory (`-m` puts it first). `build_source` makes that tree once: the checkou
 tests, plus a planted `.venv`, so a copy that carries it is visible."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -35,10 +36,10 @@ def build_source(root: Path) -> Path:
 
 def worker_env(data_root: Path, *, dsn: str = CLOSED_DSN, stamp: str | None = STAMP, slots: str | None = None,
                learning: str | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """The environment of an image: no PYTHONPATH, no inherited `DEFENDER_*`, the five settings as named
-    (`None` leaves one unset)."""
+    """The environment of an image: no PYTHONPATH, no inherited `DEFENDER_*`, the settings as named (`None` leaves one
+    unset). `PYTHONDONTWRITEBYTECODE` is whatever the host has: the worker owes the children that setting itself."""
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH" and not k.startswith("DEFENDER_")}
-    env.update({"DEFENDER_DATABASE_DSN": dsn, "DEFENDER_DATA_ROOT": str(data_root), "PYTHONDONTWRITEBYTECODE": "1"})
+    env.update({"DEFENDER_DATABASE_DSN": dsn, "DEFENDER_DATA_ROOT": str(data_root)})
     for name, value in (("DEFENDER_BUILD_COMMIT", stamp), ("DEFENDER_WORKER_SLOTS", slots),
                         ("DEFENDER_WORKER_LEARNING_SLOTS", learning)):
         if value is not None:
@@ -75,13 +76,16 @@ def wait_until(condition: Callable[[], bool], *, timeout: float, what: str, proc
 
 
 def code_copies(data_root: Path) -> list[Path]:
-    """Every folder under the data root holding the copy's marker, whatever it is named or nested."""
+    """Every copy root under the data root: the folder holding the marker (the repository root's shape, with
+    `defender/` inside it), whatever it is named or nested."""
     return sorted(p.parent for p in data_root.rglob(MARKER))
 
 
-def files_under(root: Path) -> dict[str, tuple[int, int]]:
-    """Relative path -> (inode, size) for every file, symlinks not followed: a replaced file has a new inode."""
-    return {str(p.relative_to(root)): (p.lstat().st_ino, p.lstat().st_size)
+def files_under(root: Path) -> dict[str, tuple[str, int]]:
+    """Relative path -> (content digest, mtime_ns) for every file, symlinks not followed. Not inodes: a delete and
+    copy reuses them, so they cannot tell a replace from a reuse."""
+    return {str(p.relative_to(root)): (hashlib.sha256(p.read_bytes()).hexdigest() if not p.is_symlink() else os.readlink(p),
+                                       p.lstat().st_mtime_ns)
             for p in sorted(root.rglob("*")) if not p.is_dir()}
 
 
@@ -125,28 +129,37 @@ def children_of(pid: int) -> list[int]:
     return found
 
 
-def snapshot_process(pid: int) -> dict | None:
-    """argv and environment of a live process, or None if it is gone before they are read."""
+def _cmdline(pid: int) -> list[bytes]:
+    return Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[:-1]
+
+
+def snapshot_process(pid: int, *, forked_from: list[bytes] | None = None) -> dict | None:
+    """argv, environment and working directory of a live process, or None while it is not readable as itself: gone,
+    or still the image of its parent between fork and exec (`forked_from`: the parent's argv). Read twice around
+    the environment, so a process that execs in between is retried, not mixed."""
     try:
-        argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[:-1]
+        argv = _cmdline(pid)
         environ = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+        cwd = os.readlink(f"/proc/{pid}/cwd")
+        again = _cmdline(pid)
     except OSError:
         return None
-    if not argv:
+    if not argv or argv != again or argv == forked_from:
         return None
-    return {"argv": [a.decode(errors="replace") for a in argv],
+    return {"pid": pid, "argv": [a.decode(errors="replace") for a in argv], "cwd": cwd,
             "env": dict(e.decode(errors="replace").split("=", 1) for e in environ if b"=" in e)}
 
 
-def watch_children(proc: subprocess.Popen, matches: Callable[[dict], bool], *, timeout: float) -> list[dict]:
-    """Poll the worker's children until one matching `matches` has been read; every one read is returned."""
+def watch_children(proc: subprocess.Popen, done: Callable[[list[dict]], bool], *, timeout: float) -> list[dict]:
+    """Poll the worker's children until `done(everything read so far)`; every child read after its exec is returned."""
     seen: dict[int, dict] = {}
+    parent = _cmdline(proc.pid)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline and proc.poll() is None:
         for pid in children_of(proc.pid):
-            if pid not in seen and (info := snapshot_process(pid)) is not None:
+            if pid not in seen and (info := snapshot_process(pid, forked_from=parent)) is not None:
                 seen[pid] = info
-        if any(matches(i) for i in seen.values()):
+        if done(list(seen.values())):
             break
         time.sleep(0.002)
     return list(seen.values())

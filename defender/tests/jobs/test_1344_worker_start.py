@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import os
 import re
 import shutil
 import stat
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -86,17 +88,17 @@ def _live_store(dsn: str):
     return JobStore(dsn, clock=lambda: dt.datetime.now(dt.UTC))
 
 
-def _queue_investigation(dsn: str, ticket: str, *, complete: bool = False) -> str:
+def _queue_investigation(dsn: str, ticket: str, *, complete: bool = False, tenant: str = T1) -> str:
     """One investigation through the store; `complete`: claimed and finished `completed` by the store, its auto job queued."""
     async def go() -> str:
         store = _live_store(dsn)
         try:
-            alert = await an_alert(store, T1, ticket=ticket)
-            inv, _ = await store.create_investigation(T1, alert.alert_id, f"k-{ticket}", actor="u-1")
+            alert = await an_alert(store, tenant, ticket=ticket)
+            inv, _ = await store.create_investigation(tenant, alert.alert_id, f"k-{ticket}", actor="u-1")
             if complete:
                 claim = await store.claim()
                 assert claim.record.investigation_id == inv.investigation_id, "premise: nothing else was queued"
-                await store.finish(T1, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
+                await store.finish(tenant, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
             return inv.investigation_id
         finally:
             await store.close()
@@ -129,15 +131,14 @@ def _serve(source, data_root, dsn, *, ticket="P-1", **settings):
 
 @pytest.mark.postgres
 def test_o15_a_worker_with_default_settings_serves_from_a_fresh_read_only_copy_and_stops_on_sigterm(source, data_root, db):
-    """The copy holds the build commit in its marker, no `.venv`, no write bits; SIGTERM ends the worker with exit 0. (O15, Code boxes)"""
-    import json
-
+    """The copy (the repository root's shape) holds the build commit in its marker, no `.venv`, no write bits; SIGTERM ends the worker with exit 0. (O15, Code boxes)"""
     serve, _probe = _serve(source, data_root, db)
     with serve as proc:
         (copy,) = W.code_copies(data_root)
         assert json.loads((copy / W.MARKER).read_text(encoding="utf-8")) == {"commit": W.STAMP}
-        assert (copy / "run.py").read_bytes() == (source / "defender" / "run.py").read_bytes()
-        assert not (copy / ".venv").exists()
+        assert (copy / "defender" / "run.py").read_bytes() == (source / "defender" / "run.py").read_bytes(), \
+            "`defender/run.py` is not beside the marker: the copy is not the repository root's shape"
+        assert not list(copy.rglob(".venv"))
         assert (source / "defender" / W.VENV_SENTINEL).exists(), "premise: the source tree held a .venv"
         # Mode bits, not a write attempt: this machine runs as root.
         assert all(not p.lstat().st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
@@ -147,20 +148,19 @@ def test_o15_a_worker_with_default_settings_serves_from_a_fresh_read_only_copy_a
 
 @pytest.mark.postgres
 def test_o15_each_start_replaces_the_copy_and_removes_the_files_of_the_previous_one(source, data_root, db):
-    """Two starts, one folder: a file left in the first copy is gone, `run.py` is a new file, the marker is the second stamp. (O15)"""
-    import json
-
+    """Two starts, one folder: a stale file, a stale folder and an edited `run.py` of the first copy are gone or restored, the marker is the second stamp. (O15)"""
     first, _ = _serve(source, data_root, db, ticket="P-1")
     with first as proc:
         (copy,) = W.code_copies(data_root)
         assert W.stop(proc) == 0
     before = W.files_under(copy)
     for path in (copy, *copy.rglob("*")):
-        if path.is_dir():
-            path.chmod(0o755)
+        path.chmod(0o755 if path.is_dir() else 0o644)
     (copy / "STALE.txt").write_text("left by the first start\n", encoding="utf-8")
     (copy / "stale_dir").mkdir()
     (copy / "stale_dir" / "old.py").write_text("OLD = 1\n", encoding="utf-8")
+    entry = copy / "defender" / "run.py"
+    entry.write_text("TAMPERED = 1\n", encoding="utf-8")
 
     second, _ = _serve(source, data_root, db, ticket="P-2", stamp=SECOND)
     with second as proc:
@@ -168,9 +168,10 @@ def test_o15_each_start_replaces_the_copy_and_removes_the_files_of_the_previous_
         assert not (copy / "STALE.txt").exists()
         assert not (copy / "stale_dir").exists()
         assert json.loads((copy / W.MARKER).read_text(encoding="utf-8")) == {"commit": SECOND}
+        assert entry.read_bytes() == (source / "defender" / "run.py").read_bytes(), "an edited file of the first copy was kept"
         after = W.files_under(copy)
         assert set(after) == set(before), "the file set drifted between two starts of one build"
-        assert after["run.py"][0] != before["run.py"][0], "the first start's files were reused, not replaced"
+        assert {k for k in after if after[k][0] != before[k][0]} == {W.MARKER}, "only the marker differs between two starts"
         W.stop(proc)
 
 
@@ -182,6 +183,7 @@ def test_o15_a_second_worker_on_the_same_data_root_refuses_while_the_first_runs_
     with first as proc:
         (copy,) = W.code_copies(data_root)
         held = W.files_under(copy)
+        assert json.loads((copy / W.MARKER).read_text(encoding="utf-8")) == {"commit": W.STAMP}
 
         second = W.run_to_exit(source, W.worker_env(data_root, dsn=db, stamp=SECOND))
 
@@ -189,6 +191,7 @@ def test_o15_a_second_worker_on_the_same_data_root_refuses_while_the_first_runs_
         assert re.search(r"(?i)lock|already|another|running|held", second.stderr), second.stderr[-800:]
         assert proc.poll() is None, "the second start ended the first worker"
         assert W.files_under(copy) == held, "the refused second worker replaced the first one's live copy"
+        assert json.loads((copy / W.MARKER).read_text(encoding="utf-8")) == {"commit": W.STAMP}, "the second stamp reached the first's copy"
         proc.kill()
         proc.wait(timeout=30)
 
@@ -216,38 +219,109 @@ def test_o15_learning_slots_default_to_one_below_the_slots_and_zero_for_one_slot
         assert proc.poll() is None
 
 
+#: What a child stamps for its own tree: `run_common.REPO_ROOT` is the parent of `defender`, read in the child's environment.
+STAMP_PROBE = """
+import json
+from defender import run_common
+from defender.records._provenance import capture_tree
+stamp = capture_tree(run_common.REPO_ROOT)
+print(json.dumps({"root": str(run_common.REPO_ROOT), "origin": stamp.origin, "commit": stamp.commit, "dirty": stamp.dirty}))
+"""
+
+
+def _start_form(child: dict) -> tuple[str, list[str]]:
+    """How a child was started: (`-m:<module>` or the script's path, its arguments)."""
+    argv = child["argv"]
+    if "-m" in argv[1:3]:
+        at = argv.index("-m")
+        return f"-m:{argv[at + 1]}", argv[at + 2:]
+    script = next((a for a in argv[1:] if a.endswith(".py")), None)
+    assert script is not None, f"cannot tell how this child was started: {argv}"
+    return script, argv[argv.index(script) + 1:]
+
+
+def _runs_from(child: dict, copy: Path, source: Path) -> bool:
+    """Judged by what the process is: its script, its working directory (a `-m` start) and its `PYTHONPATH`."""
+    here = [a for a in child["argv"][1:] if a.startswith("/")] + [child["cwd"]]
+    return (any(_under(p, copy) or os.path.realpath(p) == os.path.realpath(copy) for p in here)
+            and not any(_under(p, source) or os.path.realpath(p) == os.path.realpath(source) for p in here)
+            and str(source) not in child["env"].get("PYTHONPATH", ""))
+
+
 @pytest.mark.postgres
 def test_o15_children_run_from_the_copy_and_load_modules_from_nowhere_else(source, data_root, db, tmp_path):
-    """A real investigation child and a real learning child: argv and environment name the copy, not the source; re-running the child's entry in its environment loads only the copy. (O15)"""
-    (data_root / T1 / "runs").mkdir(parents=True)
-    (data_root / T1 / "sessions").mkdir()
-    queued = _queue_investigation(db, "J-1", complete=True)
-    probe = _queue_investigation(db, "P-1")
-    with W.serving(source, W.worker_env(data_root, dsn=db, slots="2"),
-                   ready=lambda: bool(W.code_copies(data_root))) as proc:
-        (copy,) = W.code_copies(data_root)
-        children = W.watch_children(proc, lambda c: len([a for a in c["argv"] if "run.py" in a]) >= 1, timeout=90)
-        W.wait_until(lambda: _job_status(db, queued) != "queued" and (row(db, probe) or {}).get("stage") != "queued",
-                     timeout=90, what="both kinds of work to be claimed", proc=proc)
-        children += W.watch_children(proc, lambda c: False, timeout=1)
+    """The worker's investigation child and learning child (found by their job ids) start from the copy, and re-running each entry in the child's environment loads only copy modules. (O15, Code boxes)"""
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
-    assert children, "no child of the worker was ever observed"
-    src_text = str(source)
-    for child in children:
-        text = " ".join(child["argv"])
-        assert src_text not in text, f"a child ran from the source tree: {child['argv']}"
-        assert str(copy) in text, f"a child ran from neither: {child['argv']}"
-        assert src_text not in child["env"].get("PYTHONPATH", ""), child["env"]
-    entry = next(c for c in children if any(a.endswith("run.py") for a in c["argv"]))
-    script = Path(next(a for a in entry["argv"] if a.endswith("run.py")))
-    assert script == copy / "run.py"
+    with B.run_tenant(tmp_path, data_root) as t:
+        register_tenant(db, t.tenant_id, data_root=data_root)
+        (data_root / t.tenant_id / "runs").mkdir(exist_ok=True)
+        job = _job_of(db, _queue_investigation(db, "J-1", complete=True, tenant=t.tenant_id))
+        investigation = _queue_investigation(db, "P-1", tenant=t.tenant_id)
+        with W.serving(source, W.worker_env(data_root, dsn=db, slots="2"), ready=lambda: bool(W.code_copies(data_root))) as proc:
+            (copy,) = W.code_copies(data_root)
+            children = W.watch_children(
+                proc, lambda seen: all(any(wanted in " ".join(c["argv"]) for c in seen) for wanted in (investigation, job)),
+                timeout=120)
+            W.wait_until(lambda: _job_status_by_id(db, job) not in ("queued", "running")
+                         and (row(db, investigation) or {}).get("stage") not in ("queued", "running"),
+                         timeout=120, what="both kinds of work to end", proc=proc)
+        ours = {name: [c for c in children if wanted in " ".join(c["argv"])] for name, wanted in
+                (("investigation", investigation), ("learning", job))}
 
-    empty = tmp_path / "empty"
-    empty.mkdir()
-    ran, modules = W.modules_of(script, ["--help"], env=entry["env"], cwd=empty, out=tmp_path / "mods.json")
-    assert sum(1 for n in modules if n.startswith("defender.")) > 20, f"control: first-party modules were loaded: {ran.stderr[-500:]}"
-    assert W.module_files_outside(modules, copy) == {}
-    assert [f for f in modules.values() if _under(f, source)] == []
+        assert ours["investigation"], f"no investigation child was observed; saw {[c['argv'] for c in children]}"
+        assert ours["learning"], f"no learning child was observed; saw {[c['argv'] for c in children]}"
+        for kind, found in ours.items():
+            for child in found:
+                assert _runs_from(child, copy, source), f"a {kind} child did not run from the copy: {child['argv']}, cwd {child['cwd']}"
+        assert not list(copy.rglob("__pycache__")), "a child wrote bytecode into the copy (O15: bytecode writes are off)"
+
+        entries = {_start_form(c)[0]: c for found in ours.values() for c in found}
+        assert len(entries) >= 2, f"one entry for the investigation and one for the learning job: {sorted(entries)}"
+        for number, (target, entry) in enumerate(entries.items()):
+            ran, modules = W.modules_of(target, ["--help"], env=entry["env"], cwd=Path(entry["cwd"]), out=tmp_path / f"mods{number}.json")
+            assert sum(1 for n in modules if n.startswith("defender.")) > 20, f"control: {target} loaded the package: {ran.stderr[-500:]}"
+            assert W.module_files_outside(modules, copy / "defender") == {}, target
+            assert [f for f in modules.values() if _under(f, source)] == [], target
+
+        env = ours["investigation"][0]["env"]
+        stamped = subprocess.run([sys.executable, "-c", STAMP_PROBE], cwd=copy, env=env, capture_output=True, text=True,  # noqa: S603
+                                 timeout=120, check=False)
+        assert stamped.returncode == 0, stamped.stderr[-800:]
+        stamp = json.loads(stamped.stdout)
+        assert os.path.realpath(stamp["root"]) == os.path.realpath(copy), "the stamped root is not the copy: the marker and `defender/` are not one level apart"
+        assert (stamp["origin"], stamp["commit"], stamp["dirty"]) == ("code_copy", W.STAMP, False), stamp
+
+
+def _job_of(dsn: str, investigation: str) -> str:
+    return execute(dsn, "SELECT id FROM jobs.learning_jobs WHERE investigation_id = %s", (investigation,))[0][0]
+
+
+def _job_status_by_id(dsn: str, job: str) -> str:
+    return execute(dsn, "SELECT status FROM jobs.learning_jobs WHERE id = %s", (job,))[0][0]
+
+
+@pytest.mark.postgres
+def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_source_unavailable_with_a_post_step(
+        source, data_root, db, tmp_path):
+    """Default settings, no seams: a real `python -m defender.worker` runs the job's real entry (end record `source_unavailable`, not a crash) and then the real post-step (its record). (O15, O8, Worker start)"""
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    with B.run_tenant(tmp_path, data_root) as t:
+        register_tenant(db, t.tenant_id, data_root=data_root)
+        runs = data_root / t.tenant_id / "runs"
+        runs.mkdir(exist_ok=True)
+        job = _job_of(db, _queue_investigation(db, "J-1", complete=True, tenant=t.tenant_id))
+        assert not list(runs.glob("*.session-pointer.json")), "premise: the source investigation has no run folder or session store"
+        with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: _job_status_by_id(db, job) not in ("queued", "running")) as proc:
+            W.wait_until(lambda: (runs / f"{job}.post-step.json").is_file(), timeout=120, what="the post-step's record", proc=proc)
+
+        end = json.loads((runs / f"{job}.learning-end.json").read_text(encoding="utf-8"))
+        assert (end["status"], end["reason"]) == ("failed", "source_unavailable"), end
+        (status, reason, message) = execute(db, "SELECT status, reason, message FROM jobs.learning_jobs WHERE id = %s", (job,))[0]
+        assert (status, reason) == ("failed", "source_unavailable"), "the child command crashed or was never wired"
+        assert message
+        assert json.loads((runs / f"{job}.post-step.json").read_text(encoding="utf-8")) == {"published": [], "refused": []}
 
 
 # --- image entry: the real entries from a copy, no PYTHONPATH --------------------------------------------------------
