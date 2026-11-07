@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 
 from _by_path import load_lint_gate
 
@@ -78,22 +79,14 @@ def test_d_lint_writer_fstrings_clean(tmp_path):
     assert all("reader.py" in f.fingerprint for f in findings)
 
 
-def test_d_lint_tests_excluded(tmp_path):
+@pytest.mark.parametrize("excluded, scanned", [("test_reader.py", "reader.py"), ("_frontmatter.py", "other.py")])
+def test_d_lint_tests_and_the_canonical_module_are_exempt(tmp_path, excluded, scanned):
     gate = _GATE
     tree = tmp_path / "scope"
-    _pyfile(tree, "test_reader.py", _FIND)
+    _pyfile(tree, excluded, _FIND)
     assert gate._scan(tree) == []
-    _pyfile(tree, "reader.py", _FIND)
-    assert any("reader.py" in f.fingerprint for f in gate._scan(tree))
-
-
-def test_d_lint_canonical_exempt(tmp_path):
-    gate = _GATE
-    tree = tmp_path / "scope"
-    _pyfile(tree, "_frontmatter.py", _FIND)
-    assert gate._scan(tree) == []
-    _pyfile(tree, "other.py", _FIND)
-    assert any("other.py" in f.fingerprint for f in gate._scan(tree))
+    _pyfile(tree, scanned, _FIND)
+    assert any(scanned in f.fingerprint for f in gate._scan(tree))
 
 
 def test_d_lint_suppression(tmp_path):
@@ -134,21 +127,14 @@ def test_d_lint_fingerprint_dedup(tmp_path):
     assert len(by_func.get("two", [])) == 2
 
 
-def test_aliased_re_import_is_flagged(tmp_path):
+@pytest.mark.parametrize("src", [
+    "import re as regex\n\n"
+    'def f(t):\n    return regex.compile(r"\\A---\\n")\n',
+    "from re import search\n\n"
+    'def f(t):\n    return search(r"^---\\n(.*?)\\n---", t)\n',
+], ids=["aliased_re_import", "from_import_re"])
+def test_a_regex_reached_through_an_alias_or_from_import_is_flagged(tmp_path, src):
     gate = _GATE
     tree = tmp_path / "scope"
-    _pyfile(tree, "prod.py", (
-        "import re as regex\n\n"
-        'def f(t):\n    return regex.compile(r"\\A---\\n")\n'
-    ))
-    assert gate._scan(tree)
-
-
-def test_from_import_re_is_flagged(tmp_path):
-    gate = _GATE
-    tree = tmp_path / "scope"
-    _pyfile(tree, "prod.py", (
-        "from re import search\n\n"
-        'def f(t):\n    return search(r"^---\\n(.*?)\\n---", t)\n'
-    ))
+    _pyfile(tree, "prod.py", src)
     assert gate._scan(tree)
