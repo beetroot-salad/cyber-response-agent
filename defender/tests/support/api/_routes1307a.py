@@ -31,6 +31,21 @@ def normal(template: str) -> str:
     return _PARAM.sub("{}", template)
 
 
+def _served(routes: Any) -> Any:
+    """Every route as served: FastAPI includes routers lazily, so an included router yields its effective routes."""
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield route
+        elif hasattr(route, "effective_candidates"):
+            yield from _served(route.effective_candidates())
+        elif hasattr(route, "dependant"):  # an effective route context: carries path and methods
+            yield route
+
+
+#: A route table smaller than this means the walk missed routes (the app serves 40+); an empty class must fail.
+ROUTE_FLOOR = 20
+
+
 @functools.lru_cache(maxsize=1)
 def app_routes() -> tuple[tuple[str, str], ...]:
     """(METHOD, path template) for every route the real app serves, sorted."""
@@ -39,8 +54,9 @@ def app_routes() -> tuple[tuple[str, str], ...]:
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store, writes=store,
         secrets=InMemorySecrets(), checker=StubSystemChecker(), artifact_links=StubArtifactLinks(),
         identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None))  # type: ignore[arg-type]
-    found = {(method, route.path) for route in app.routes if isinstance(route, APIRoute)
+    found = {(method, route.path) for route in _served(app.routes)
              for method in route.methods if method not in {"HEAD", "OPTIONS"}}
+    assert len(found) > ROUTE_FLOOR, f"the route walk found {len(found)} routes"
     return tuple(sorted(found))
 
 

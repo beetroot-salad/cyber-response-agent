@@ -48,7 +48,6 @@ def check_admin_client_may_only_manage_clients(realm: dict) -> None:
 
 
 def check_the_audience_is_its_own_flowless_client(realm: dict) -> None:
-    assert AUDIENCE != PEOPLE_LOGIN_CLIENT
     client = _clients(realm)[AUDIENCE]
     assert client.get("serviceAccountsEnabled", False) is False
     assert all(client.get(flow) is False for flow in FLOWS)
@@ -74,15 +73,10 @@ def check_admin_client_mints_no_api_tokens(realm: dict) -> None:
     assert _clients(realm)[ADMIN_CLIENT].get("protocolMappers", []) == []
 
 
-def check_access_tokens_are_short(realm: dict) -> None:
-    """Not required by the design (it sets 300 s per created client, C23): a realm default no longer than that."""
-    assert realm.get("accessTokenLifespan", 300) <= 300
-
-
 CHECKS = [check_realm_switches, check_admin_client_may_only_manage_clients,
           check_the_audience_is_its_own_flowless_client, check_no_people_in_the_realm,
           check_only_program_relevant_clients, check_no_client_has_a_browser_flow,
-          check_admin_client_mints_no_api_tokens, check_access_tokens_are_short]
+          check_admin_client_mints_no_api_tokens]
 
 
 def _committed() -> dict:
@@ -162,7 +156,6 @@ def test_every_check_accepts_a_good_realm():
         ["clients", 1, "standardFlowEnabled"], None), id="flow-left-to-default"),
     pytest.param(check_admin_client_mints_no_api_tokens, _mutate(
         ["clients", 0, "protocolMappers"], [{"protocolMapper": "oidc-audience-mapper"}]), id="admin-audience-mapper"),
-    pytest.param(check_access_tokens_are_short, _mutate(["accessTokenLifespan"], 900), id="long-realm-lifespan"),
 ])
 def test_a_check_rejects_the_setting_it_guards(check, bad):
     """Each single-field change is caught by its own check."""

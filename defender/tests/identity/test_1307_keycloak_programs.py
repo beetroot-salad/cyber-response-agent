@@ -343,9 +343,29 @@ async def test_keycloak_down_on_a_cold_cache_is_unavailable_not_refused(kc, outa
     with pytest.raises(SignInUnavailable):
         await port.verify_token(kc.signer.sign(token_claims()))
     del kc.fail["certs"]
-    clock.now += 2 * WINDOW  # whether a failed fetch spends the minute is the design's silence: wait it out
+    clock.now += 2 * WINDOW  # a failed fetch spends the window (W7, next test): wait it out
     fresh = kc.signer.sign(token_claims(exp=int(clock.now.timestamp()) + 290))
     assert (await port.verify_token(fresh)).client_id == CREDENTIAL  # control: same adapter, Keycloak back
+
+
+@pytest.mark.parametrize("outage", _OUTAGES)
+async def test_a_failed_key_set_fetch_spends_the_minute_so_an_outage_is_not_amplified(kc, outage):
+    """After a failed fetch, an unknown key id within 60 s makes no /certs request and is refused; after it, Keycloak is asked again (W7)."""
+    kc.fail["certs"] = outage
+    clock = Clock()
+    port = adapter(kc, clock)
+    with pytest.raises(SignInUnavailable):
+        await port.verify_token(kc.signer.sign(token_claims(), kid="first"))
+    assert kc.certs_fetches() == 1
+    for n in range(20):
+        clock.now += dt.timedelta(seconds=2)
+        with pytest.raises(SignInRefused):
+            await port.verify_token(kc.signer.sign(token_claims(exp=int(clock.now.timestamp()) + 290), kid=f"second-{n}"))
+    assert kc.certs_fetches() == 1  # twenty unknown key ids inside the window, no traffic
+    clock.now += dt.timedelta(seconds=30)  # 70 s after the failure
+    with pytest.raises(SignInUnavailable):  # control: the window is over, Keycloak is asked (and still down)
+        await port.verify_token(kc.signer.sign(token_claims(exp=int(clock.now.timestamp()) + 290), kid="third"))
+    assert kc.certs_fetches() == 2
 
 
 @pytest.mark.parametrize("outage", _OUTAGES)

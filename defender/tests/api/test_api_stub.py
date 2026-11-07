@@ -62,7 +62,7 @@ from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 from defender.records.formats import AlertId  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
-from defender.tests.support.api._programs1307 import RaisingProgramsRealm  # noqa: E402
+from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
@@ -327,7 +327,7 @@ async def _seed_identity() -> tuple[IdentityService, dict[str, str], InMemoryTen
     users[SESSION_AB] = cy.id
     # Conflict updated (#1307 D7): the programs port is required; these routes never reach the realm.
     service = IdentityService(repo, signin=_Unused(), mail=_Unused(), clock=lambda: NOW,
-                              bootstrap=Bootstrap(administrators=()), programs=RaisingProgramsRealm())
+                              bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
     return service, users, tenants
 
 

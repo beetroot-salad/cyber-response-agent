@@ -91,6 +91,20 @@ def test_a_key_altered_at_any_part_is_refused() -> None:
     assert s.world.bearer(s.key[:-1]).get(f"/tenants/{T1}/alerts").status_code == 401
 
 
+def test_a_token_that_cannot_be_verified_because_keycloak_is_down_is_503_not_401() -> None:
+    """Bearer verification raising SignInUnavailable -> 503 (not 401), no expiry header; keys and the same token afterwards work (W10)."""
+    s = soar()
+    credential = issue_oauth(s.ann, T1, s.program_id)
+    token = s.world.realm.issue(credential)
+    s.world.realm.fail_verifies = 1
+    down = s.world.bearer(token, raise_errors=False).get(f"/tenants/{T1}/alerts")
+    assert down.status_code == 503, down.text
+    assert EXPIRY_HEADER not in down.headers
+    assert s.program().get(f"/tenants/{T1}/alerts").status_code == 200  # a key never asks the realm
+    assert s.world.bearer(token).get(f"/tenants/{T1}/alerts").status_code == 200  # control: back up
+    assert s.world.bearer("not.a.token").get(f"/tenants/{T1}/alerts").status_code == 401  # refused is not unavailable
+
+
 def test_another_programs_key_acts_as_that_program_in_its_own_tenant_only() -> None:
     """A key names one program and one tenant: T2's program is a 404 in T1, a 200 in T2 (O1, O2)."""
     s = soar()

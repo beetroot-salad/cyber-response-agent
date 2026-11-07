@@ -37,14 +37,17 @@ def _tenant(dsn: str) -> None:
     execute(dsn, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, %s, 'active')", (TENANT, CREATED))
 
 
-def _user(dsn: str, user: str, email: str | None, *, kind: str | None = None) -> None:
-    """A user row as the database stores it; `kind` is left out for the pre-#1307 shape."""
+def _user(dsn: str, user: str, email: str | None, *, kind: str | None = None, created_by: str | None = None) -> None:
+    """A user row as the database stores it; `kind` is left out for the pre-#1307 shape; a program has a creator."""
     columns, values = ["id", "email", "display_name", "status", "is_platform_admin", "set_password_requested_seq",
                        "set_password_sent_seq", "set_password_attempts", "created_at", "updated_at", "activated_at"], \
         [user, email, "", "active", False, 0, 0, 0, CREATED, CREATED, CREATED]
     if kind is not None:
         columns.append("kind")
         values.append(kind)
+    if created_by is not None:
+        columns.append("created_by")
+        values.append(created_by)
     execute(dsn, f"INSERT INTO identity.users ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(values))})", tuple(values))  # noqa: S608
 
 
@@ -97,35 +100,46 @@ def test_at_head_email_is_absent_exactly_for_programs(migrated_database):
     """A person needs an email, a program has none (CHECK); a program row with no email is accepted (control). (Data model)"""
     import psycopg
 
-    _user(migrated_database, SOAR, None, kind="program")
     _user(migrated_database, ANN, "ann@x.org", kind="person")
+    _user(migrated_database, SOAR, None, kind="program", created_by=ANN)
     assert execute(migrated_database, "SELECT kind, email FROM identity.users ORDER BY kind") == [
         ("person", "ann@x.org"), ("program", None)]
     with pytest.raises(psycopg.errors.CheckViolation):
         _user(migrated_database, BOB, None, kind="person")
     with pytest.raises(psycopg.errors.CheckViolation):
-        _user(migrated_database, BOB, "bob@x.org", kind="program")
+        _user(migrated_database, BOB, "bob@x.org", kind="program", created_by=ANN)
     with pytest.raises(psycopg.errors.CheckViolation):
         _user(migrated_database, BOB, "bob@x.org", kind="robot")
 
 
 @pytest.mark.postgres
 def test_at_head_a_role_is_admin_or_automation_and_a_credential_state_is_one_of_three(migrated_database):
-    """Roles and credential states outside the design are refused; the accepted values go in (control). (Data model)"""
+    """Roles and credential states outside the design are refused; design-valid rows of each state go in (control). (Data model)"""
     import psycopg
 
     _tenant(migrated_database)
     _user(migrated_database, ANN, "ann@x.org", kind="person")
-    _user(migrated_database, SOAR, None, kind="program")
+    _user(migrated_database, SOAR, None, kind="program", created_by=ANN)
     _membership(migrated_database, ANN_ROW, ANN, role="admin")
     _membership(migrated_database, BOB_ROW, SOAR, role="automation")
     with pytest.raises(psycopg.errors.CheckViolation):
         execute(migrated_database, "UPDATE identity.memberships SET role = 'owner' WHERE id = %s", (ANN_ROW,))
-    insert = """INSERT INTO identity.program_credentials (id, program_id, kind, name, state, key_hash, created_by, created_at, expires_at)
-                VALUES (%s, %s, 'key', 'k', %s, 'h', %s, %s, %s)"""
-    for n, state in enumerate(("pending", "live", "revoked")):
-        execute(migrated_database, insert, (f"a7000000-0000-4000-8000-00000000e00{n}", SOAR, state, ANN, CREATED, CREATED))
+    expires = CREATED + _dt.timedelta(days=90)
+    deadline = CREATED + _dt.timedelta(minutes=10)
+    insert = """INSERT INTO identity.program_credentials
+                (id, program_id, kind, name, state, key_hash, created_by, created_at, expires_at, pending_deadline, revoked_at, revoked_by)
+                VALUES (%s, %s, %s, 'c', %s, %s, %s, %s, %s, %s, %s, %s)"""
+
+    def row(n: int, *, kind: str = "key", state: str = "live", expires_at: _dt.datetime | None = expires, **over: object) -> tuple:
+        fields = {"key_hash": "h" if kind == "key" else None, "pending_deadline": deadline if state == "pending" else None,
+                  "revoked_at": CREATED if state == "revoked" else None, "revoked_by": ANN if state == "revoked" else None}
+        fields.update(over)
+        return (f"a7000000-0000-4000-8000-00000000e0{n:02d}", SOAR, kind, state, fields["key_hash"], ANN, CREATED,
+                expires_at, fields["pending_deadline"], fields["revoked_at"], fields["revoked_by"])
+
+    for valid in (row(0, kind="oauth_client", state="pending"), row(1, state="live"), row(2, state="revoked")):
+        execute(migrated_database, insert, valid)  # control: each state, as the design describes it
     with pytest.raises(psycopg.errors.CheckViolation):
-        execute(migrated_database, insert, ("a7000000-0000-4000-8000-00000000e0ff", SOAR, "disabled", ANN, CREATED, CREATED))
+        execute(migrated_database, insert, row(3, state="disabled"))
     with pytest.raises(psycopg.errors.NotNullViolation):
-        execute(migrated_database, insert, ("a7000000-0000-4000-8000-00000000e0fe", SOAR, "live", ANN, CREATED, None))
+        execute(migrated_database, insert, row(4, expires_at=None))

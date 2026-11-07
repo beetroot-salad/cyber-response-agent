@@ -34,7 +34,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     tenants_of,
     user_id,
 )
-from defender.tests.support.api._programs1307 import RaisingProgramsRealm  # noqa: E402  #1307 D7: the programs port is required
+from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402  #1307 D7: the programs port is required
 
 X = "x@x.example"
 FILE = {"administrators": [OPS]}
@@ -141,7 +141,7 @@ def test_a_file_that_still_has_a_tenants_section_makes_no_first_member() -> None
         world.call(IdentityService(
             world.repo, signin=world.signin, mail=world.mail, clock=world.clock,
             bootstrap=Bootstrap(administrators=(OPS,), tenants={LAB: (ME,)}),  # type: ignore[call-arg]
-            programs=RaisingProgramsRealm(),
+            programs=NoProgramsRealm(),
         ).start)
     world.send_pending()
     assert ME not in {a.email for a in world.signin.accounts.values()}

@@ -39,6 +39,7 @@ from defender.tests.support.api._programs1307 import (  # noqa: E402
     Client,
     JournalRepository,
     ProgramsWorld,
+    Soar,
     RaisingProgramsRealm,
     create_program,
     issue,
@@ -145,19 +146,32 @@ def test_an_oauth_credential_shows_keycloaks_secret_once_and_stores_none_of_it()
     assert (row.state, row.kind) == ("live", "oauth_client")
 
 
+def _use(s: Soar, kind: str, credential: str, secret: str) -> Any:
+    """A request authenticated by this very credential: the key itself, or a fresh token for the OAuth client."""
+    return s.world.bearer(secret if kind == "key" else s.world.realm.issue(credential))
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_listing_shows_the_credentials_facts_and_never_a_secret(kind: str) -> None:
-    """Listing: kind, name, creator, expiry; no secret or hash, before and after revocation (O5)."""
+    """Listing: kind, name, creator, created, expiry, last used; no secret or hash, before and after revocation (O5)."""
     s = soar()
+    created_at = s.world.clock()
     created = issue(s.ann, T1, s.program_id, kind=kind, name="rotation")
     assert created.status_code == 201, created.text
     credential, secret = created.json()["id"], created.json()["secret"]
     hashes = [r.key_hash for r in s.world.credentials(s.program_id) if r.key_hash]
+    listed = {c["id"]: c for c in items(s.ann.get(_credentials_url(s.program_id)))}
+    assert listed[credential]["last_used_at"] is None  # control: not yet used
+    s.world.clock.advance(_dt.timedelta(minutes=1))
+    used_at = s.world.clock()
+    assert _alerts(_use(s, kind, credential, secret)) == 200
     for _ in range(2):
         listed = {c["id"]: c for c in items(s.ann.get(_credentials_url(s.program_id)))}
         row = listed[credential]
         assert (row["kind"], row["name"]) == (kind, "rotation")
-        assert parse_time(row["expires_at"]) == s.world.clock() + DEFAULT_LIFETIME
+        assert parse_time(row["created_at"]) == created_at
+        assert parse_time(row["expires_at"]) == created_at + DEFAULT_LIFETIME
+        assert parse_time(row["last_used_at"]) == used_at
         assert user_id(s.ann) in {str(v) for v in row.values()}  # the creator
         text = str(listed)
         assert secret not in text
@@ -167,20 +181,27 @@ def test_listing_shows_the_credentials_facts_and_never_a_secret(kind: str) -> No
         assert revoke(s.ann, T1, s.program_id, credential).status_code == 204
 
 
-def test_use_is_recorded_as_last_used_at_most_every_five_minutes() -> None:
-    """`last_used_at` is written on use, and not again within 5 minutes (Keys, O5)."""
+@pytest.mark.parametrize("kind", KINDS)
+def test_use_is_recorded_as_last_used_at_most_every_five_minutes(kind: str) -> None:
+    """`last_used_at` is written on use, and not again within 5 minutes, for a key and for an OAuth credential (Keys, O5)."""
     s = soar()
-    [before] = s.world.credentials(s.program_id)
-    assert before.last_used_at is None
-    assert _alerts(s.program()) == 200
-    [first] = s.world.credentials(s.program_id)
-    assert first.last_used_at == s.world.clock()
+    credential, secret = s.key_id, s.key
+    if kind == "oauth_client":
+        created = issue(s.ann, T1, s.program_id, kind=kind, name="oauth")
+        credential, secret = created.json()["id"], created.json()["secret"]
+
+    def row() -> Any:
+        return {r.id: r for r in s.world.credentials(s.program_id)}[credential]
+    assert row().last_used_at is None
+    assert _alerts(_use(s, kind, credential, secret)) == 200
+    first = row().last_used_at
+    assert first == s.world.clock()
     s.world.clock.advance(_dt.timedelta(minutes=4))
-    assert _alerts(s.program()) == 200
-    assert s.world.credentials(s.program_id)[0].last_used_at == first.last_used_at
+    assert _alerts(_use(s, kind, credential, secret)) == 200
+    assert row().last_used_at == first
     s.world.clock.advance(_dt.timedelta(minutes=2))
-    assert _alerts(s.program()) == 200
-    assert s.world.credentials(s.program_id)[0].last_used_at == s.world.clock()
+    assert _alerts(_use(s, kind, credential, secret)) == 200
+    assert row().last_used_at == s.world.clock()
 
 
 # --- O5: expiry (D11) -----------------------------------------------------------------------------
@@ -550,7 +571,10 @@ def test_reconciliation_lists_the_realm_before_it_reads_credentials() -> None:
     run = s.world.journal[mark:]
     listing = run.index(("realm", "client_ids"))
     first_delete = run.index(("realm", "delete_client"))
-    assert any(kind == "repo" and "credential" in name for kind, name in run[listing:first_delete])
+    reads = [i for i, (kind, name) in enumerate(run) if kind == "repo" and "credential" in name]
+    assert reads, run  # the keep-set is read through the repository
+    assert min(reads) > listing, run  # no credential read precedes the listing
+    assert any(listing < i < first_delete for i in reads), run
 
 
 def test_a_client_created_while_reconciliation_runs_is_not_deleted() -> None:
@@ -637,6 +661,20 @@ def test_a_threshold_already_passed_at_creation_never_fires(
     s.world.send_pending()
     s.world.send_pending()
     assert len(_warned(s.world, credential)) == after_second_window
+
+
+def test_a_sender_that_first_runs_after_both_thresholds_sends_exactly_one_warning_per_admin() -> None:
+    """First pass 2 days before expiry: one warning per admin (the 3-day one), none later for the 14-day threshold (W6)."""
+    s = soar()
+    s.world.member(s.ann, T1, NINA)
+    expiry = s.world.clock() + DEFAULT_LIFETIME
+    _until_remaining(s.world, expiry, 2 * DAY)
+    for _ in range(3):
+        s.world.send_pending()
+    assert _warned(s.world) == sorted([(ANN, s.key_id), (NINA, s.key_id)])
+    s.world.clock.advance(DAY)
+    s.world.send_pending()
+    assert len(s.world.mail.warnings) == 2  # still: the passed 14-day threshold does not come back
 
 
 def test_a_revoked_credential_is_not_warned_about() -> None:

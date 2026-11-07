@@ -102,6 +102,21 @@ def test_creating_and_removing_programs_and_credentials_is_audited_with_actor_ta
     ]
 
 
+@pytest.mark.parametrize("failure", ["fail_creates", "lose_create_responses"])
+def test_an_oauth_creation_that_ends_in_503_emits_no_create_event_until_it_is_usable(failure: str, caplog) -> None:
+    """program_credential.create is emitted when the credential becomes usable: a 503 leaves none; a later success emits one (W5)."""
+    audit = AuditLog(caplog)
+    s = soar()
+    setattr(s.world.realm, failure, 1)
+    mark = audit.mark()
+    assert issue(s.ann, T1, s.program_id, kind="oauth_client").status_code == 503
+    assert CREDENTIAL_CREATE not in audit.actions(mark)
+    s.world.clock.advance(_dt.timedelta(minutes=11))  # the stuck row's deadline: its slot is free again
+    oauth = issue_oauth(s.ann, T1, s.program_id)
+    created = [e for e in audit.since(mark) if e.action == CREDENTIAL_CREATE]
+    assert [(e.target, e.tenant_id) for e in created] == [(oauth, T1)]
+
+
 def test_a_refused_credential_creates_no_event_and_a_program_is_never_an_identity_actor(caplog) -> None:
     """Refusals (cap) audit nothing; a program's requests never appear as an identity actor (O8)."""
     audit = AuditLog(caplog)

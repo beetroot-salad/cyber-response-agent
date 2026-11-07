@@ -35,7 +35,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     tenants_of,
     user_id,
 )
-from defender.tests.support.api._programs1307 import RaisingProgramsRealm  # noqa: E402  #1307 D7: the programs port is required
+from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402  #1307 D7: the programs port is required
 
 
 @pytest.mark.parametrize("has_code", [True, False])
@@ -263,7 +263,7 @@ def test_an_unflagging_made_by_another_process_takes_effect_at_this_processs_nex
     ops = world.sign_in_admin()
     assert ops.get("/admin/tenants").status_code == 200  # the session has been used
     other_process = IdentityService(world.repo, signin=world.signin, mail=world.mail, clock=world.clock,
-                                    bootstrap=Bootstrap(administrators=()), programs=RaisingProgramsRealm())
+                                    bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
     world.call(other_process.start)  # another API process, started with OPS removed from the file
     assert ops.get("/admin/tenants").status_code == 403
     assert me(ops)["administrator"] is False

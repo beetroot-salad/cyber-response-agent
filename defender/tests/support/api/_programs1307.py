@@ -4,7 +4,8 @@ script answers; whether a credential is usable is never the fake's decision (P-G
 no fake deletes anything on its own (D3: reconciliation is the only deleter).
 
 Every test-facing interface the design leaves open is fixed HERE, once (forced choices, r3):
-- FC-1 the programs port is REQUIRED (D7): `IdentityService(..., programs=<port>)`. `ProgramsWorld`
+- FC-1 the programs port is REQUIRED (D7): `IdentityService(..., programs=<port>)`. People-only worlds hold
+  `NoProgramsRealm` (quiet: no clients, nothing verifies, create/delete loud). `ProgramsWorld`
   always passes a `FakeProgramsRealm`; a lifecycle-shaped service (offboarding) gets
   `RaisingProgramsRealm` via `ProgramsWorld.lifecycle_service()`. Port methods: `create_client(credential_id)
   -> (service_account_id, secret)` (one call: create + read back), `delete_client(client_id)` (absent is
@@ -120,6 +121,10 @@ class FakeProgramsRealm:
         #: The next N `create_client` calls create the client, then raise (a lost response).
         self.lose_create_responses = 0
         self.closes = 0
+        #: The next N `client_ids` calls raise `SignInUnavailable` (Keycloak down for the purge).
+        self.fail_lists = 0
+        #: The next N `verify_token` calls raise `SignInUnavailable` (the key set cannot be fetched, W10).
+        self.fail_verifies = 0
 
     # --- the port --------------------------------------------------------------------------
     async def close(self) -> None:
@@ -150,10 +155,16 @@ class FakeProgramsRealm:
         with self._lock:
             self.journal.append(("realm", "client_ids"))
             self.list_calls += 1
+            if self.fail_lists:
+                self.fail_lists -= 1
+                raise SignInUnavailable("keycloak is unavailable")
             return set(self.clients)
 
     async def verify_token(self, token: str) -> VerifiedProgramToken:
         with self._lock:
+            if self.fail_verifies:
+                self.fail_verifies -= 1
+                raise SignInUnavailable("keycloak is unavailable")
             if token not in self.tokens:
                 raise SignInRefused("the token does not verify")
             return self.tokens[token]
@@ -198,6 +209,27 @@ class RaisingProgramsRealm:
 
     async def verify_token(self, token: str) -> VerifiedProgramToken:
         raise self._refuse("verify_token(...)")
+
+
+class NoProgramsRealm:
+    """The quiet realm of a people-only API world: no program client exists, no token verifies, and creating
+    or deleting is a test failure. For worlds whose tests never mention programs (D7: the port is required);
+    the purge tick and a stray bearer reach it, and neither is an error."""
+
+    async def close(self) -> None:
+        return None
+
+    async def create_client(self, credential_id: str) -> tuple[str, str]:
+        raise AssertionError(f"a people-only world created a program client: {credential_id}")
+
+    async def delete_client(self, client_id: str) -> None:
+        raise AssertionError(f"a people-only world deleted a program client: {client_id}")
+
+    async def client_ids(self) -> set[str]:
+        return set()
+
+    async def verify_token(self, token: str) -> VerifiedProgramToken:
+        raise SignInRefused("no token verifies in a people-only world")
 
 
 class JournalRepository:
