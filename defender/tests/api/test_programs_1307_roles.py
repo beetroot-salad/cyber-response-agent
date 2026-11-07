@@ -1,4 +1,4 @@
-"""#1307: fixed roles and program creation (O3, O4, P-H) — sketch."""
+"""#1307: fixed roles and program creation (O2 order, O3, O4, P-H, D8)."""
 from __future__ import annotations
 
 import pytest
@@ -10,51 +10,235 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from typing import Any  # noqa: E402
+
+from fastapi import FastAPI  # noqa: E402
+
+from defender.api.app import undeclared_routes  # noqa: E402  (forced choice FC-A1: see the contract map)
 from defender.identity import DataRuleViolation  # noqa: E402
-from defender.tests.support.api._identity1306 import ALERT, T1, T2, AuditLog, items  # noqa: E402
-from defender.tests.support.api._programs1307 import create_program, soar, start_investigation  # noqa: E402
+from defender.tests.support.api._identity1306 import (  # noqa: E402
+    ALERT,
+    NEW,
+    T1,
+    T2,
+    UNKNOWN,
+    AuditLog,
+    items,
+    masked,
+    user_id,
+)
+from defender.tests.support.api._programs1307 import (  # noqa: E402
+    create_program,
+    issue_key,
+    soar,
+    start_investigation,
+)
+from defender.tests.support.api._routes1307a import (  # noqa: E402
+    PATH_ID,
+    PUBLIC,
+    app_routes,
+    concrete,
+    normal,
+    route_id,
+)
+from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING  # noqa: E402
 
-INV = "/investigations"
+#: The design's permission table (O3), written out: route -> permission, permission -> roles.
+TENANT = "/tenants/{}"
+PERMISSION_OF = {
+    ("GET", f"{TENANT}/alerts"): "work.read",
+    ("GET", f"{TENANT}/alerts/{{}}"): "work.read",
+    ("POST", f"{TENANT}/investigations"): "investigations.run",
+    ("GET", f"{TENANT}/investigations"): "work.read",
+    ("GET", f"{TENANT}/investigations/{{}}"): "work.read",
+    ("POST", f"{TENANT}/investigations/{{}}/cancel"): "investigations.run",
+    ("DELETE", f"{TENANT}/investigations/{{}}"): "investigations.delete",
+    ("GET", f"{TENANT}/investigations/{{}}/artifacts/{{}}"): "work.read",
+    ("POST", f"{TENANT}/learning-jobs"): "learning.run",
+    ("GET", f"{TENANT}/learning-jobs"): "work.read",
+    ("GET", f"{TENANT}/learning-jobs/{{}}"): "work.read",
+    ("GET", f"{TENANT}/lessons"): "work.read",
+    ("GET", f"{TENANT}/systems"): "config.read",
+    ("PUT", f"{TENANT}/systems/{{}}"): "config.write",
+    ("PUT", f"{TENANT}/systems/{{}}/credentials"): "config.write",
+    ("POST", f"{TENANT}/systems/{{}}/check"): "config.write",
+    ("GET", f"{TENANT}/alert-mapping"): "config.read",
+    ("PUT", f"{TENANT}/alert-mapping"): "config.write",
+    ("GET", f"{TENANT}/members"): "people.manage",
+    ("DELETE", f"{TENANT}/members/{{}}"): "people.manage",
+    ("GET", f"{TENANT}/invitations"): "people.manage",
+    ("POST", f"{TENANT}/invitations"): "people.manage",
+    ("DELETE", f"{TENANT}/invitations/{{}}"): "people.manage",
+    ("POST", f"{TENANT}/programs"): "people.manage",
+    ("GET", f"{TENANT}/programs"): "people.manage",
+    ("DELETE", f"{TENANT}/programs/{{}}"): "people.manage",
+    ("POST", f"{TENANT}/programs/{{}}/credentials"): "people.manage",
+    ("GET", f"{TENANT}/programs/{{}}/credentials"): "people.manage",
+    ("DELETE", f"{TENANT}/programs/{{}}/credentials/{{}}"): "people.manage",
+}
+AUTOMATION = {"work.read", "investigations.run"}  # admin holds every permission above
+#: Routes outside /tenants/ and how each is classified (O2): public, person only, any caller, platform.
+OUTSIDE = {
+    ("GET", "/auth/login"), ("GET", "/auth/callback"),
+    ("POST", "/auth/logout"), ("POST", "/invitations/{}/accept"),
+    ("GET", "/me"),
+    ("GET", "/admin/tenants"), ("POST", "/admin/tenants"), ("GET", "/admin/tenants/{}"),
+    ("POST", "/admin/tenants/{}/resume"), ("POST", "/admin/tenants/{}/offboard"),
+    ("POST", "/admin/tenants/{}/rotate-forge-credential"), ("POST", "/admin/tenants/{}/invitations"),
+}
+BODIES: dict[tuple[str, str], dict[str, object]] = {
+    ("POST", f"{TENANT}/investigations"): {"alert_id": ALERT.alert_id, "client_request_id": "rq"},
+    ("POST", f"{TENANT}/learning-jobs"): {"investigation_id": PATH_ID, "client_request_id": "jq"},
+    ("PUT", f"{TENANT}/systems/{{}}"): {"kind": "ticketing", "display_name": "T", "enabled": True, "settings": {}},
+    ("PUT", f"{TENANT}/systems/{{}}/credentials"): {"kind": "static", "credentials": {"api_token": "v" * 40}},
+    ("PUT", f"{TENANT}/alert-mapping"): dict(PLANTED_ALERT_MAPPING),
+    ("POST", f"{TENANT}/invitations"): {"email": NEW},
+    ("POST", f"{TENANT}/programs"): {"display_name": "child"},
+    ("POST", f"{TENANT}/programs/{{}}/credentials"): {"kind": "key", "name": "k"},
+}
+TENANT_ROUTES = sorted(PERMISSION_OF)
 
 
-def _routes(investigation_id: str) -> list[tuple[str, str, object]]:
-    return [
-        ("post", "/learning-jobs", {"investigation_id": investigation_id, "client_request_id": "j1"}),  # D8
-        ("delete", f"{INV}/{investigation_id}", None),
-        ("get", "/systems", None),
-        ("put", "/systems/s1", {"kind": "tickets", "display_name": "x", "enabled": True, "settings": {}}),
-        ("put", "/alert-mapping", None),
-        ("get", "/members", None),
-        ("get", "/invitations", None),
-        ("get", "/programs", None),
-        ("post", "/programs", {"display_name": "child"}),
-    ]
+def _call(client: Any, route: tuple[str, str]) -> Any:
+    kwargs = {"json": BODIES[route]} if route in BODIES else {}
+    return client.request(route[0], concrete(route[1]), **kwargs)
+
+
+# --- O3, P-H: the permission table over the whole class of routes ---------------------------------
+
+def test_every_tenant_route_is_in_the_permission_table_and_every_other_route_is_classified() -> None:
+    """No route of the app escapes the table or the outside-tenants categories (O3, O2, P-H)."""
+    routes = {(m, normal(p)) for m, p in app_routes()}
+    assert {r for r in routes if r[1].startswith(TENANT)} == set(PERMISSION_OF)
+    assert {r for r in routes if not r[1].startswith(TENANT)} == OUTSIDE
+    assert set(app_routes()) >= PUBLIC
+
+
+@pytest.mark.parametrize("route", TENANT_ROUTES, ids=route_id)
+def test_automation_holds_exactly_its_permissions_and_admin_holds_every_one(route: tuple[str, str]) -> None:
+    """403 for a program iff the route's permission is outside automation's row; an admin never gets 403 (O3, D4, D8)."""
+    s = soar()
+    permission = PERMISSION_OF[route]
+    granted = _call(s.program(), route)
+    if permission in AUTOMATION:
+        assert granted.status_code not in (401, 403), (permission, granted.text)
+    else:
+        assert granted.status_code == 403, (permission, granted.text)
+    assert _call(s.ann, route).status_code not in (401, 403), permission
 
 
 def test_automation_reads_work_and_runs_investigations() -> None:
-    """automation: `work.read` and `investigations.run` (O3)."""
+    """automation: `work.read` and `investigations.run` end to end (O3)."""
     s = soar()
     program = s.program()
     assert [a["alert_id"] for a in items(program.get(f"/tenants/{T1}/alerts"))] == [ALERT.alert_id]
     started = start_investigation(program, T1)
     assert started.status_code == 201, started.text
     investigation_id = started.json()["investigation_id"]
-    assert program.get(f"/tenants/{T1}{INV}/{investigation_id}").status_code == 200
-    assert program.post(f"/tenants/{T1}{INV}/{investigation_id}/cancel").status_code == 200
+    assert program.get(f"/tenants/{T1}/investigations/{investigation_id}").status_code == 200
+    assert program.post(f"/tenants/{T1}/investigations/{investigation_id}/cancel").status_code == 200
     assert program.get(f"/tenants/{T1}/learning-jobs").status_code == 200
 
 
-def test_automation_is_refused_learning_jobs_deletion_config_and_people() -> None:
-    """Every permission outside automation's row -> 403; an admin is not refused the same request (O3, D8)."""
+def test_a_program_cannot_start_a_learning_job_and_an_admin_can() -> None:
+    """D8: `automation` is refused `learning.run`, and nothing is queued by the refused call (O3)."""
     s = soar()
     investigation_id = start_investigation(s.ann, T1).json()["investigation_id"]
-    mapping = s.ann.get(f"/tenants/{T1}/alert-mapping").json()
-    for method, path, body in _routes(investigation_id):
-        body = mapping if path == "/alert-mapping" else body
-        kwargs = {} if body is None else {"json": body}
-        refused = getattr(s.program(), method)(f"/tenants/{T1}{path}", **kwargs)
-        assert refused.status_code == 403, (method, path, refused.text)
-        assert getattr(s.ann, method)(f"/tenants/{T1}{path}", **kwargs).status_code != 403, (method, path)
+    body = {"investigation_id": investigation_id, "client_request_id": "j1"}
+    before = items(s.ann.get(f"/tenants/{T1}/learning-jobs"))
+    assert s.program().post(f"/tenants/{T1}/learning-jobs", json=body).status_code == 403
+    assert items(s.ann.get(f"/tenants/{T1}/learning-jobs")) == before
+    assert s.ann.post(f"/tenants/{T1}/learning-jobs", json=body).status_code != 403
+
+
+def test_a_program_is_refused_the_system_check_as_config_write() -> None:
+    """The system check is `config.write` (O3): refused to automation with its settings read also refused."""
+    s = soar()
+    assert s.program().post(f"/tenants/{T1}/systems/tix/check").status_code == 403
+    assert s.program().get(f"/tenants/{T1}/systems").status_code == 403
+    assert s.ann.post(f"/tenants/{T1}/systems/tix/check").status_code not in (401, 403)
+
+
+# --- O2: the order under /tenants/{T}/ (D1) ---------------------------------------------------------
+
+def test_membership_is_checked_before_permission() -> None:
+    """A program outside the tenant is told what an unknown tenant is told (404), not 403, on a route it lacks (O2, D1)."""
+    s = soar()
+    program = s.program()
+    path = "/invitations"
+    unknown = program.post(f"/tenants/{UNKNOWN}{path}", json={"email": NEW})
+    foreign = program.post(f"/tenants/{T2}{path}", json={"email": NEW})
+    assert foreign.status_code == unknown.status_code == 404
+    assert masked(foreign, T2) == masked(unknown, UNKNOWN)
+    assert program.post(f"/tenants/{T1}{path}", json={"email": NEW}).status_code == 403  # control: a member
+    assert s.ann.post(f"/tenants/{T1}{path}", json={"email": NEW}).status_code == 202  # control: permitted
+
+
+def test_permission_is_checked_before_the_ids_in_the_path() -> None:
+    """A member without the permission is 403 even for an id that names nothing; an admin gets 404 for it (O2, D1)."""
+    s = soar()
+    ghost = f"/tenants/{T1}/investigations/{PATH_ID}"
+    assert s.program().delete(ghost).status_code == 403
+    assert s.ann.delete(ghost).status_code == 404
+    assert s.program().get(ghost).status_code == 404  # permitted read: then the id is looked up
+
+
+def test_a_program_or_credential_id_of_another_tenant_is_404_under_the_path_tenant() -> None:
+    """Ids below T must belong to T: another tenant's program, another program's credential -> 404 (O2, A3)."""
+    s = soar()
+    theirs = str(create_program(s.bob, T2, "B's SOAR")["id"])
+    their_key, _ = issue_key(s.bob, T2, theirs)
+    assert s.ann.post(f"/tenants/{T1}/programs/{theirs}/credentials",
+                      json={"kind": "key", "name": "x"}).status_code == 404
+    assert s.ann.get(f"/tenants/{T1}/programs/{theirs}/credentials").status_code == 404
+    assert s.ann.delete(f"/tenants/{T1}/programs/{theirs}").status_code == 404
+    second = str(create_program(s.ann, T1, "second")["id"])
+    assert s.ann.delete(f"/tenants/{T1}/programs/{second}/credentials/{s.key_id}").status_code == 404
+    assert s.ann.delete(f"/tenants/{T1}/programs/{theirs}/credentials/{their_key}").status_code == 404
+    assert s.world.bearer(s.key).get(f"/tenants/{T1}/alerts").status_code == 200
+    mine = s.ann.get(f"/tenants/{T1}/programs/{s.program_id}/credentials")
+    assert [r["id"] for r in items(mine)] == [s.key_id]  # control: its own listing works
+
+
+def test_a_persons_id_is_not_a_program_id() -> None:
+    """Program routes answer 404 for a person's user id and leave the person untouched (D8, P-F, P-I)."""
+    s = soar()
+    carl = s.world.member(s.ann, T1, "carl@a.example")
+    carl_id = user_id(carl)
+    assert s.ann.post(f"/tenants/{T1}/programs/{carl_id}/credentials", json={"kind": "key", "name": "k"}).status_code == 404
+    assert s.ann.get(f"/tenants/{T1}/programs/{carl_id}/credentials").status_code == 404
+    assert s.ann.delete(f"/tenants/{T1}/programs/{carl_id}").status_code == 404
+    assert carl.get(f"/tenants/{T1}/alerts").status_code == 200
+    assert carl_id not in [p["id"] for p in items(s.ann.get(f"/tenants/{T1}/programs"))]
+    assert s.ann.get(f"/tenants/{T1}/programs/{s.program_id}/credentials").status_code == 200  # control
+
+
+# --- P-H, D10: an undeclared route is found by the checker -----------------------------------------
+
+def _plain(path: str, *methods: str) -> FastAPI:
+    app = FastAPI()
+
+    async def handler() -> dict[str, str]:
+        return {}
+
+    app.add_api_route(path, handler, methods=list(methods))
+    return app
+
+
+def test_the_real_app_has_no_undeclared_route() -> None:
+    """Every route the app serves declares a permission or a category (P-H, D10)."""
+    s = soar()
+    assert undeclared_routes(s.world.app) == []
+
+
+def test_the_checker_reports_a_route_that_declares_nothing_inside_or_outside_tenants() -> None:
+    """A plain route is reported by method and path; built-in docs routes and the real app's are not (P-H, D10)."""
+    assert undeclared_routes(FastAPI()) == []  # control: openapi/docs routes are not routes of ours
+    assert undeclared_routes(_plain("/tenants/{tenant_id}/widgets", "GET")) == [("GET", "/tenants/{tenant_id}/widgets")]
+    assert undeclared_routes(_plain("/elsewhere", "POST", "DELETE")) == [("DELETE", "/elsewhere"), ("POST", "/elsewhere")]
+    real = soar().world.app
+    real.add_api_route("/tenants/{tenant_id}/widgets", lambda: {}, methods=["GET"])
+    assert undeclared_routes(real) == [("GET", "/tenants/{tenant_id}/widgets")]
 
 
 def test_an_admin_creates_a_program_that_is_an_active_automation_member_with_no_email(caplog) -> None:

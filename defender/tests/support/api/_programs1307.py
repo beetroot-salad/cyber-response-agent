@@ -38,9 +38,12 @@ import dataclasses
 import datetime as _dt
 import itertools
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender.api.app import create_app
+
+if TYPE_CHECKING:
+    from defender.identity import VerifiedProgramToken
 from defender.api.fakes import InMemorySecrets, InMemoryStore, StubArtifactLinks, StubSystemChecker  # noqa: F401
 from defender.api.ports import ApiDeps
 
@@ -50,7 +53,6 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
     IdentityService,
     SignInRefused,
     SignInUnavailable,
-    VerifiedProgramToken,
 )
 from defender.tests.support.api._identity1306 import (
     ALERT,
@@ -169,7 +171,7 @@ class FakeProgramsRealm:
         """A token that verifies (realm-signed) and names `client_id` / `subject` as given."""
         with self._lock:
             token = f"eyJ.program-token-{next(self._ids)}.sig"
-            self.tokens[token] = VerifiedProgramToken(
+            self.tokens[token] = _verified_token(
                 client_id=str(client_id), subject=subject, expires_at=self._clock() + TOKEN_LIFETIME)
             return token
 
@@ -240,6 +242,12 @@ class ProgramsMail(FakeMail):
 
 
 # --- the world ---------------------------------------------------------------------------------
+
+def _verified_token(**fields: Any) -> VerifiedProgramToken:
+    """Imported at use, so files that only build worlds still collect before #1307 exists."""
+    from defender.identity import VerifiedProgramToken
+    return VerifiedProgramToken(**fields)
+
 
 class ProgramsWorld(World):
     """`World` whose service also holds the fake programs realm (FC-1, required port)."""

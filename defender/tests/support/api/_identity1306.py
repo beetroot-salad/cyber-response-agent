@@ -618,9 +618,12 @@ class World:
         extra: dict[str, Any] = {} if self.send_interval is None else {"send_interval": self.send_interval}
         if self.send_deadline is not None:
             extra["send_deadline"] = self.send_deadline
+        # #1307 D7: the programs port is required; people-only worlds hold the loud null.
+        from defender.tests.support.api._programs1307 import RaisingProgramsRealm
         self.service = IdentityService(
             self.repo, signin=self.signin, mail=self.mail, clock=self.clock,
             bootstrap=Bootstrap(administrators=tuple(administrators)),
+            programs=RaisingProgramsRealm(),
             **extra,
         )
         self.app = create_app(ApiDeps(

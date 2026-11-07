@@ -62,6 +62,7 @@ from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 from defender.records.formats import AlertId  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
+from defender.tests.support.api._programs1307 import RaisingProgramsRealm  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
@@ -180,6 +181,16 @@ IDENTITY_ROUTES = {
     ("POST", "/admin/tenants/{tenant_id}/offboard"),
     ("POST", "/admin/tenants/{tenant_id}/rotate-forge-credential"),
 }
+#: What #1307 adds (design "Program and credential routes"; param names pinned by this suite). Conflict updated: r3.
+PROGRAM_ROUTES = {
+    ("POST", "/tenants/{tenant_id}/programs"),
+    ("GET", "/tenants/{tenant_id}/programs"),
+    ("DELETE", "/tenants/{tenant_id}/programs/{program_id}"),
+    ("POST", "/tenants/{tenant_id}/programs/{program_id}/credentials"),
+    ("GET", "/tenants/{tenant_id}/programs/{program_id}/credentials"),
+    ("DELETE", "/tenants/{tenant_id}/programs/{program_id}/credentials/{credential_id}"),
+}
+IDENTITY_ROUTES = IDENTITY_ROUTES | PROGRAM_ROUTES  # same refusal contract as the members/invitations routes
 PUBLIC_ROUTES = EXISTING_ROUTES | IDENTITY_ROUTES
 
 #: One successful call per route: (route, concrete path, body, the port answers it needs).
@@ -237,8 +248,9 @@ class Scripted:
         self.transactions: list[tuple[str, str]] = []
         self.audits: list[tuple[str, str, str, str, str]] = []
 
-    def transaction(self, tenant_id: str, actor: str) -> _ScriptedTransaction:
-        return _ScriptedTransaction(self, tenant_id, actor)
+    def transaction(self, tenant_id: str, principal: Any) -> _ScriptedTransaction:
+        # Conflict updated (#1307 D6): the transaction takes the principal in place of the bare actor id.
+        return _ScriptedTransaction(self, tenant_id, principal.user_id)
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         if name.startswith("_"):
@@ -313,8 +325,9 @@ async def _seed_identity() -> tuple[IdentityService, dict[str, str], InMemoryTen
                             created_at=NOW, accepted_at=NOW)
     await repo.add_session(SESSION_AB, cy.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
     users[SESSION_AB] = cy.id
+    # Conflict updated (#1307 D7): the programs port is required; these routes never reach the realm.
     service = IdentityService(repo, signin=_Unused(), mail=_Unused(), clock=lambda: NOW,
-                              bootstrap=Bootstrap(administrators=()))
+                              bootstrap=Bootstrap(administrators=()), programs=RaisingProgramsRealm())
     return service, users, tenants
 
 
