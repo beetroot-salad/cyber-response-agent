@@ -29,7 +29,15 @@ the oldest investigation. A job runs as the job entry's child, with the same dea
 fence as an investigation; the worker copies the entry's progress record onto the row on its
 renewal loop, and decides the row from the end record alone. After a job whose child started, a
 post-step child publishes the tenant's `pending` findings and runs the drain gate, in the same
-slot and the same supervision registry, with no lease of its own."""
+slot and the same supervision registry, with no lease of its own.
+
+A family-less post-step (#1344 amendment 1) wakes a tenant no family has followed for a while: a
+worker with learning slots, not stopping, checks each `active` tenant with learning jobs once its
+last post-step (or, before any, the worker's start) is `learning_check_interval` old. That check
+runs the same child without a job, and so the drain's own gate: a retained delivery, an open batch,
+findings at threshold and stranded `pending` findings are each decided there, never by a second
+gate here. An overdue check is claimed before a queued job, within the learning slots, so sustained
+load cannot starve it."""
 from __future__ import annotations
 
 import asyncio
@@ -70,6 +78,10 @@ POLL_INTERVAL = 1.0
 #: The pause between tries of an end write that failed as an outage (B5).
 END_RETRY_DELAY = 1.0
 
+#: How long a tenant goes without a post-step before the worker checks it without a family
+#: (#1344 amendment 1), in seconds.
+LEARNING_CHECK_INTERVAL = 300.0
+
 _RUN_PY = Path(__file__).resolve().parents[1] / "run.py"
 #: The learning children's modules (#1344), started with `-m` from the code tree's root.
 JOB_ENTRY_MODULE = "defender.learning.branch.job_entry"
@@ -99,18 +111,28 @@ class LearningLaunch:
     job_id: str
     tenant_id: str
     parent_pid: int
-    investigation_id: str
+    source_investigation_id: str
 
 
 @dataclass(frozen=True)
 class PostStepLaunch:
-    """What a post-step child is started for: the job it follows, its tenant, the worker's pid,
-    and the tenant's `completed` jobs whose findings wait to be published, its own included."""
+    """What a post-step child is started for: the job it follows (None: a family-less post-step,
+    #1344 amendment 1), its tenant, the worker's pid, and the tenant's `completed` jobs whose
+    findings wait to be published, its own included."""
 
-    job_id: str
+    job_id: str | None
     tenant_id: str
     parent_pid: int
     pending_job_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _PostStepOf:
+    """What a post-step's entry in the supervision registry names: its tenant and the job it
+    follows (None: family-less). It holds no row."""
+
+    tenant_id: str
+    learning_job_id: str | None
 
 
 def run_argv(launch: Launch) -> list[str]:
@@ -131,12 +153,14 @@ def run_argv_in(root: Path) -> Callable[[Launch], list[str]]:
 def job_entry_argv(launch: LearningLaunch) -> list[str]:
     """The learning job's child: the job entry as a module, found from the working directory."""
     return [sys.executable, "-m", JOB_ENTRY_MODULE, "--job", launch.job_id, "--tenant", launch.tenant_id,
-            "--source", launch.investigation_id, "--parent-pid", str(launch.parent_pid)]
+            "--source", launch.source_investigation_id, "--parent-pid", str(launch.parent_pid)]
 
 
 def post_step_argv(launch: PostStepLaunch) -> list[str]:
-    """The post-step's child, as a module; `--pending` may name no job."""
-    return [sys.executable, "-m", POST_STEP_MODULE, "--job", launch.job_id, "--tenant", launch.tenant_id,
+    """The post-step's child, as a module; `--pending` may name no job, and a family-less one has
+    no `--job`."""
+    job = [] if launch.job_id is None else ["--job", launch.job_id]
+    return [sys.executable, "-m", POST_STEP_MODULE, *job, "--tenant", launch.tenant_id,
             "--pending", *launch.pending_job_ids, "--parent-pid", str(launch.parent_pid)]
 
 
@@ -210,7 +234,9 @@ class Worker:
 
     `learning_slots` (#1344 O5) is both the guarantee and the limit of learning-class tasks; a bare
     worker has none. Above 0 it needs both `learning_argv` and `post_step_argv`. `child_cwd` is the
-    working directory of every child (the code copy, for `-m` starts)."""
+    working directory of every child (the code copy, for `-m` starts). `learning_check_interval`
+    (seconds, above 0) is how long a tenant goes without a post-step before a family-less one
+    checks it (amendment 1); each tenant's clock starts at the start of `serve` or `drain`."""
 
     def __init__(  # noqa: PLR0913 — the ratified signature
         self, store: Any, *, data_root: Path | DataRoot,
@@ -225,6 +251,7 @@ class Worker:
         learning_argv: Callable[[LearningLaunch], list[str]] | None = None,
         post_step_argv: Callable[[PostStepLaunch], list[str]] | None = None,
         child_cwd: Path | None = None,
+        learning_check_interval: float = LEARNING_CHECK_INTERVAL,
     ) -> None:
         if slots < 1:
             raise ValueError(f"a worker needs at least one slot, not {slots!r}")
@@ -232,11 +259,21 @@ class Worker:
             raise ValueError(f"learning slots must be between 0 and slots - 1 ({slots - 1}), not {learning_slots!r}")
         if learning_slots > 0 and (learning_argv is None or post_step_argv is None):
             raise ValueError("a worker with learning slots needs both the learning and the post-step child commands")
+        if not learning_check_interval > 0:
+            raise ValueError(f"the learning check interval must be above 0 seconds, not {learning_check_interval!r}")
         self._learning_slots = learning_slots
         self._learning_argv = learning_argv
         self._post_step_argv = post_step_argv
         self._child_cwd = child_cwd
         self._learning_tasks: set[asyncio.Task[None]] = set()
+        # Family-less checks (#1344 amendment 1), in monotonic seconds: each tenant's last
+        # post-step end, the tenants a post-step runs for now, when the clock of a tenant with no
+        # post-step yet started, and when the next store read of the tenants can find one due.
+        self._learning_check_interval = learning_check_interval
+        self._last_check: dict[str, float] = {}
+        self._checking: set[str] = set()
+        self._checks_from = time.monotonic()
+        self._next_check_at = self._checks_from + learning_check_interval
         self._store = store
         self._data_root = data_root if isinstance(data_root, DataRoot) else data_root_from_path(data_root)
         self._child_argv = child_argv
@@ -299,6 +336,9 @@ class Worker:
         (a store fault, a cancellation), it stops as a deliberate stop does (`_leave`). The
         renewal (and, serving, the take-over) run beside the loop until every row's last write
         has landed."""
+        # The family-less checks' clocks start with the worker (amendment 1).
+        self._checks_from = time.monotonic()
+        self._next_check_at = self._checks_from + self._learning_check_interval
         services = self._start_services(takeover=stop is not None)
         wake = asyncio.Event()
         try:
@@ -364,12 +404,18 @@ class Worker:
     # -- slots ------------------------------------------------------------------------------------
 
     async def _claim_one(self, *, on_done: Callable[[], None] | None = None) -> bool:
-        """Claim one queued row into a task; False when nothing is queued. The oldest learning job
-        while fewer learning-class tasks than `learning_slots` run, else the oldest investigation
+        """Claim one queued row into a task; False when nothing is queued. While fewer
+        learning-class tasks than `learning_slots` run: a tenant's overdue family-less check
+        (#1344 amendment 1), else the oldest learning job; otherwise the oldest investigation
         (#1344 O5)."""
         if self._stopping:
             return False
         if len(self._learning_tasks) < self._learning_slots:
+            tenant = await self._overdue_tenant()
+            if tenant is not None:
+                self._checking.add(tenant)  # before the task runs: the next claim cannot pick it again
+                self._start_task(self._check_tenant(tenant), on_done=on_done, learning=True)
+                return True
             learning = await self._store.claim_learning_job()
             if learning is not None:
                 held = Held(learning.record, kind=LEARNING)
@@ -777,7 +823,7 @@ class Worker:
                 self._end_failing.discard(job)
             if started and not self._stopping and outcome is not None and outcome.status is not None:
                 try:
-                    await self._post_step(record)
+                    await self._post_step(tenant, job)
                 except Exception:  # noqa: BLE001 — a post-step's fault leaves the job's row as it is
                     _logger.exception("learning job %s: its post-step failed", job)
 
@@ -868,18 +914,64 @@ class Worker:
         else:
             _logger.info("learning job %s: %s", job, what)
 
-    async def _post_step(self, record: Any) -> None:
-        """The post-step after `record`'s job (O8, O14): a child handed the tenant's `pending`
-        jobs, in the one supervision registry with no lease, then the publish state of each job
-        its record names. A post-step that cannot start, or leaves no readable record, changes no
-        row: its jobs stay `pending` for the next one."""
+    async def _overdue_tenant(self) -> str | None:
+        """The tenant whose family-less check is most overdue (#1344 amendment 1), or None: an
+        `active` tenant with learning jobs, no post-step of its own running, whose last post-step
+        ended (or, before any, whose clock started with the worker) `learning_check_interval` ago.
+        The store is read only once a check can be due, and a read that fails is logged and
+        waits an interval: it never stops a claim."""
+        now = time.monotonic()
+        if now < self._next_check_at:
+            return None
+        interval = self._learning_check_interval
+        try:
+            tenants = await self._store.learning_tenants()
+        except Exception as fault:  # noqa: BLE001 — a failed read delays the checks, never the claims
+            self._note_store_fault(fault)
+            _logger.warning("the worker could not list the tenants to check for learning; retrying in %gs",
+                            interval, exc_info=True)
+            self._next_check_at = now + interval
+            return None
+        due_at = {t: self._last_check.get(t, self._checks_from) + interval
+                  for t in tenants if t not in self._checking}
+        overdue = sorted((at, t) for t, at in due_at.items() if at <= now)
+        if overdue:
+            self._next_check_at = now  # another may be due too: read again at the next claim
+            return overdue[0][1]
+        # Nothing due: read again when the soonest known tenant is, and within one interval
+        # for a tenant not yet known.
+        self._next_check_at = min([now + interval, *due_at.values()])
+        return None
+
+    async def _check_tenant(self, tenant: str) -> None:
+        """One family-less post-step for `tenant` (#1344 amendment 1), as a learning-class task:
+        none once the worker is stopping, and a fault never ends the worker."""
+        with _log.log_context(tenant_id=tenant):
+            try:
+                if self._stopping:
+                    return
+                _logger.info("tenant %s: no post-step for %gs; checking its learning without a family",
+                             tenant, self._learning_check_interval)
+                await self._post_step(tenant, None)
+            except Exception:  # noqa: BLE001 — a failed check changes no row; the next one retries
+                _logger.exception("tenant %s: its family-less post-step failed", tenant)
+            finally:
+                self._checking.discard(tenant)
+                self._last_check[tenant] = time.monotonic()
+
+    async def _post_step(self, tenant: str, job: str | None) -> None:
+        """The post-step after `job` (O8, O14), or, with `job` None, a family-less one
+        (amendment 1): a child handed the tenant's `pending` jobs, in the one supervision registry
+        with no lease, then the publish state of each job its record names. A post-step that
+        cannot start, or leaves no readable record, changes no row: its jobs stay `pending` for
+        the next one. Either kind restarts the tenant's check clock when it ends."""
         post_step = self._post_step_argv
         assert post_step is not None  # a worker with learning slots has it (constructor)
-        job, tenant = record.learning_job_id, record.tenant_id
         pending = tuple(await self._store.pending_publish(tenant))
-        held = Held(record, kind=POST_STEP)
-        key = f"{POST_STEP}:{job}"
+        held = Held(_PostStepOf(tenant, job), kind=POST_STEP)
+        key = f"{POST_STEP}:{job if job is not None else 'tenant:' + tenant}"
         self._held[key] = held
+        self._checking.add(tenant)
         try:
             launch = PostStepLaunch(job, tenant, os.getpid(), pending)
             proc = await self._run_child(held, lambda: post_step(launch))
@@ -888,14 +980,17 @@ class Worker:
             answer = await asyncio.to_thread(self._read_learning, tenant, lambda lane: lane.read_post_step(job))
         finally:
             self._held.pop(key, None)
+            self._checking.discard(tenant)
+            self._last_check[tenant] = time.monotonic()
         if answer is None:
-            _logger.warning("learning job %s: its post-step left no readable record; the jobs it was handed "
-                            "stay pending", job)
+            _logger.warning("%s: it left no readable record; the jobs it was handed stay pending", _what(held))
             return
+        # A record left by an earlier check of the tenant is truthful too: a job it names is moved
+        # only while still `pending`, so it can only confirm a publish that happened.
         published = [j for j in answer.published if j in pending]
         refused = [j for j in answer.refused if j in pending and j not in published]
         await self._store.record_publish(tenant, published=published, refused=refused)
-        announce("learning_post_step", actor=SYSTEM, tenant_id=tenant, target=job,
+        announce("learning_post_step", actor=SYSTEM, tenant_id=tenant, target=job if job is not None else tenant,
                  detail=f"published {len(published)} job(s); refused {len(refused)} job(s)")
 
     # -- the last write ---------------------------------------------------------------------------
@@ -1008,6 +1103,8 @@ def _key(held: Held) -> str:
 
 def _what(held: Held) -> str:
     """How the log names a held entry."""
+    if held.kind == POST_STEP and held.record.learning_job_id is None:
+        return f"the family-less post-step of tenant {held.record.tenant_id}"
     names = {INVESTIGATION: "investigation", LEARNING: "learning job", POST_STEP: "the post-step after learning job"}
     return f"{names[held.kind]} {_key(held)}"
 

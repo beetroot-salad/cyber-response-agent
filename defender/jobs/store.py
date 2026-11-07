@@ -741,6 +741,18 @@ class JobStore:
                 .order_by(LearningJobRow.finished_at, LearningJobRow.id))).scalars().all()
         return [str(i) for i in found]
 
+    async def learning_tenants(self) -> list[str]:
+        """The `active` tenants with any learning job, whatever its status (#1344 amendment 1):
+        the tenants a worker checks without a family, since only they have learning state its jobs
+        feed. Sorted by id."""
+        async with self._tx() as s:
+            found = (await s.execute(
+                select(LearningJobRow.tenant_id).distinct()
+                .join(TenantRecord, TenantRecord.id == LearningJobRow.tenant_id)
+                .where(TenantRecord.state == "active")
+                .order_by(LearningJobRow.tenant_id))).scalars().all()
+        return [str(t) for t in found]
+
     async def record_publish(
         self, tenant_id: str, *, published: Collection[str], refused: Collection[str],
     ) -> tuple[int, int]:

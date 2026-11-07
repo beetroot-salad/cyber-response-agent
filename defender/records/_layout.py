@@ -148,7 +148,8 @@ USED_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTIN
 #: the listing, the run-name check, the retire command). The launch record and alert file are
 #: written before the run folder exists and do not mean "used": the child's setup goes on over
 #: them. `USED_SIDECAR_SUFFIXES` is a subset (#1342).
-ACCEPTED_SIDECAR_SUFFIXES = (*USED_SIDECAR_SUFFIXES, _LAUNCH_SUFFIX, _LAUNCH_ALERT_SUFFIX)
+ACCEPTED_SIDECAR_SUFFIXES = (*USED_SIDECAR_SUFFIXES, _LAUNCH_SUFFIX, _LAUNCH_ALERT_SUFFIX,
+                             _LEARNING_PROGRESS_SUFFIX, _LEARNING_END_SUFFIX, _POST_STEP_SUFFIX)
 #: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
 #: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
 _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")

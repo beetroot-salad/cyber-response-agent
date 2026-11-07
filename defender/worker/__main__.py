@@ -1,7 +1,9 @@
 """The deployed worker (#1344 O15, D8): `python -m defender.worker`.
 
 Reads `DEFENDER_DATABASE_DSN`, `DEFENDER_DATA_ROOT`, `DEFENDER_BUILD_COMMIT`, `DEFENDER_WORKER_SLOTS`
-(default 3) and `DEFENDER_WORKER_LEARNING_SLOTS` (default min(1, slots - 1)). Refuses an empty build
+(default 3), `DEFENDER_WORKER_LEARNING_SLOTS` (default min(1, slots - 1)) and
+`DEFENDER_WORKER_LEARNING_CHECK_SECONDS` (default 300: how long a tenant goes without a post-step
+before a family-less one checks it, #1344 amendment 1). Refuses an empty build
 stamp and bad settings before any work, refuses a second worker on the same data root without
 touching the first one's code copy, replaces the code copy, runs every child from it, and serves
 until SIGTERM or SIGINT (exit 0). A refusal is a nonzero exit naming its cause on stderr."""
@@ -38,7 +40,8 @@ async def _serve_until_stopped(settings, copy: Path) -> None:  # noqa: ANN001 â€
         worker = Worker(
             store, data_root=data_root_from_path(settings.root), child_argv=run_argv_in(copy),
             slots=settings.slots, clock=_CLOCK, learning_slots=settings.learning_slots,
-            learning_argv=job_entry_argv, post_step_argv=post_step_argv, child_cwd=copy)
+            learning_argv=job_entry_argv, post_step_argv=post_step_argv, child_cwd=copy,
+            learning_check_interval=float(settings.learning_check_seconds))
         _logger.info("the worker serves build %s: %d slot(s), %d for learning, children from %s",
                      settings.build_commit, settings.slots, settings.learning_slots, copy)
         await worker.serve()

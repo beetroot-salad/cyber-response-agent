@@ -161,8 +161,9 @@ def _render_env(request_env: Mapping[str, str], workdir: Path, *, defender_dir: 
 
 class _RealDocker:
     """The real docker CLI. Called: one command, run to completion. `.popen`: a docker process
-    left running, the run box's attached start (#1343 B10), which the box executor holds for the
-    run's life. The run box's start asks for it of the docker object it was handed (r5 item 15),
+    left running, a box's attached start (the run box's, #1343 B10; each of a request-lane box's
+    windows, #1344 amendment 2), whose input its holder keeps open while the box may run.
+    Every attached start asks for it of the docker object it was handed (r5 item 15),
     so a docker double carries its own and the real daemon is never reached around it."""
 
     def __call__(self, argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess:

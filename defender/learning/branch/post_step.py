@@ -1,13 +1,17 @@
-"""A learning job's post-step (#1344 O8, O14): `python -m defender.learning.branch.post_step --job <id>
+"""A learning job's post-step (#1344 O8, O14): `python -m defender.learning.branch.post_step [--job <id>]
 --tenant <T> --pending <job id>... --parent-pid <pid>`, the worker's child once a job that started a
-family step has ended, whatever its status.
+family step has ended, whatever its status. Without `--job` it is a family-less post-step (#1344
+amendment 1): the worker's periodic check of a tenant no family has followed for a while, so a
+reviewer's verdict, a retained delivery, findings at threshold or stranded `pending` findings are not
+left waiting for the tenant's next alert. It does the same work; only its record's name differs.
 
 It publishes the findings every pending job of the tenant holds in its episode (`--pending`: the
 tenant's `completed` jobs whose findings are not yet published, its own included, so a job whose own
 post-step was lost is published by the next), then runs the drain's own gate (threshold and retained
-deliveries), even with nothing to publish. Its record (`<runs>/<job id>.post-step.json`) tells the
-worker which jobs were published and which were refused, and is written before the gate runs, so a
-gate that fails cannot make it lie:
+deliveries), even with nothing to publish. Its record (`<runs>/<key>.post-step.json`, the key the job
+lane's `post_step_key` names: the job's id, or the tenant's own id without `--job`) tells the worker
+which jobs were published and which were refused, and is written before the gate runs, so a gate that
+fails cannot make it lie:
 
 - published: every held row reached the queues (or the episode held none: a verdict that graded
   nothing). A republish adds nothing (`finding_id` dedup reads the queue and the consumed ledger).
@@ -39,10 +43,12 @@ __all__ = ["main", "parse_post_step_args"]
 
 
 def parse_post_step_args(argv: list[str]) -> argparse.Namespace:
-    """`--job <id> --tenant <T> --pending <job id>... --parent-pid <pid>`."""
+    """`[--job <id>] --tenant <T> --pending <job id>... --parent-pid <pid>`; no `--job` is a
+    family-less post-step (`job` None)."""
     p = argparse.ArgumentParser(prog="python -m defender.learning.branch.post_step",
                                 description="A learning job's post-step, run by the worker.")
-    p.add_argument("--job", required=True, help="the job whose post-step this is")
+    p.add_argument("--job", default=None,
+                   help="the job whose post-step this is; left out, the worker's family-less check of the tenant")
     p.add_argument("--tenant", required=True, help="the jobs' tenant")
     p.add_argument("--pending", nargs="*", default=[],
                    help="the tenant's completed jobs whose findings are not yet published")
@@ -79,17 +85,18 @@ def main(argv: list[str], *, author_tick: Callable[..., int] | None = None) -> i
 def _post_step(ns: argparse.Namespace, *, author_tick: Callable[..., int]) -> int:
     from defender.learning.core.config import LoopPaths
 
+    which = f"job {ns.job}" if ns.job is not None else f"tenant {ns.tenant} (no family)"
     try:
         data_root = tenancy.resolve_data_root()
         tenant = tenancy.requested_tenant(data_root, ns.tenant)
         lane = JobLane.open(data_root, ns.tenant, make=True)
     except (TenantRefused, JobLaneRefused) as unusable:
-        sys.exit(f"[post-step] job {ns.job}: the tenant cannot be used: {unusable}")
+        sys.exit(f"[post-step] {which}: the tenant cannot be used: {unusable}")
     paths = LoopPaths.for_tenant(tenant)
     with lane:
         published, refused = _publish_pending(tenant, paths, list(dict.fromkeys(ns.pending)))
         lane.write_post_step(ns.job, PostStepRecord.of(published, refused))
-    _logger.info(f"post-step {ns.job}: published {len(published)} job(s), refused {len(refused)}")
+    _logger.info(f"post-step of {which}: published {len(published)} job(s), refused {len(refused)}")
     return author_tick(paths)
 
 

@@ -36,7 +36,11 @@ DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 BUILD_COMMIT_ENV = "DEFENDER_BUILD_COMMIT"
 SLOTS_ENV = "DEFENDER_WORKER_SLOTS"
 LEARNING_SLOTS_ENV = "DEFENDER_WORKER_LEARNING_SLOTS"
+LEARNING_CHECK_ENV = "DEFENDER_WORKER_LEARNING_CHECK_SECONDS"
 DEFAULT_SLOTS = 3
+#: How long a tenant goes without a post-step before the worker checks it without a family (#1344
+#: amendment 1).
+DEFAULT_LEARNING_CHECK_SECONDS = 300
 
 #: The marker at the copy's root, and the copy's and the lock's names on the data root.
 MARKER = ".defender-code-copy.json"
@@ -58,6 +62,7 @@ class Settings:
     build_commit: str
     slots: int
     learning_slots: int
+    learning_check_seconds: int = DEFAULT_LEARNING_CHECK_SECONDS
 
 
 def _setting_count(environ: Mapping[str, str], name: str, default: int) -> int:
@@ -71,8 +76,9 @@ def _setting_count(environ: Mapping[str, str], name: str, default: int) -> int:
 
 def read_settings(environ: Mapping[str, str]) -> Settings:
     """The worker's settings, judged before any work: a non-empty build stamp, slots of at least
-    one, and learning slots between 0 and slots - 1 (default min(1, slots - 1)). Learning is on by
-    default in production (#1344 D3); 0 is the off switch."""
+    one, learning slots between 0 and slots - 1 (default min(1, slots - 1)), and the family-less
+    check's interval, whole seconds of at least 1 (default 300). Learning is on by default in
+    production (#1344 D3); 0 is the off switch."""
     commit = (environ.get(BUILD_COMMIT_ENV) or "").strip()
     if not commit:
         raise WorkerStartRefused(
@@ -86,6 +92,9 @@ def read_settings(environ: Mapping[str, str]) -> Settings:
         raise WorkerStartRefused(
             f"{LEARNING_SLOTS_ENV}={learning} must be between 0 and {SLOTS_ENV} - 1 ({slots - 1}): "
             "investigations always keep a slot")
+    check = _setting_count(environ, LEARNING_CHECK_ENV, DEFAULT_LEARNING_CHECK_SECONDS)
+    if check < 1:
+        raise WorkerStartRefused(f"{LEARNING_CHECK_ENV}={check} must be at least 1 (seconds)")
     dsn = environ.get(DSN_ENV, "")
     if not dsn:
         raise WorkerStartRefused(f"{DSN_ENV} is not set: the worker claims its work from the job store")
@@ -95,7 +104,8 @@ def read_settings(environ: Mapping[str, str]) -> Settings:
     root = Path(raw_root).resolve()
     if not root.is_dir():
         raise WorkerStartRefused(f"{DATA_ROOT_ENV}={raw_root!r} is not a folder")
-    return Settings(dsn=dsn, root=root, build_commit=commit, slots=slots, learning_slots=learning)
+    return Settings(dsn=dsn, root=root, build_commit=commit, slots=slots, learning_slots=learning,
+                    learning_check_seconds=check)
 
 
 def hold_start_lock(data_root: Path) -> int:

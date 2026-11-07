@@ -5,7 +5,9 @@ Learning jobs (#1344) share three host-held records here, keyed by the learning 
 written by its children, read by the worker: the job entry's progress record
 (`LearningProgress`, replaced whole), its end record (`LearningEnd`, create-only) and the
 post-step's record (`PostStepRecord`). Each has one parser, and text that is not a record of its
-shape parses as no record (`None`), which the worker treats like an absent one.
+shape parses as no record (`None`), which the worker treats like an absent one. A family-less
+post-step (#1344 amendment 1: no job to follow) keys its record by the tenant's own id instead
+(`post_step_key`), one record per tenant replaced at each check.
 
 The worker writes a job's launch record and alert file here before it starts the child; the
 child's job entry opens the same door first thing — before tenant acceptance, so a refusal there
@@ -256,9 +258,10 @@ class LearningEnd:
 
 @dataclass(frozen=True)
 class PostStepRecord:
-    """The post-step's record (`<runs>/<job id>.post-step.json`, the job it followed): the
-    pending jobs whose findings it published and those it refused for good (their rows failed
-    validation). A job in neither stays pending (a queue-level or transient failure)."""
+    """The post-step's record (`<runs>/<key>.post-step.json`, `post_step_key`: the job it
+    followed, or the tenant's own id for a family-less one): the pending jobs whose findings it
+    published and those it refused for good (their rows failed validation). A job in neither
+    stays pending (a queue-level or transient failure)."""
 
     published: tuple[str, ...] = ()
     refused: tuple[str, ...] = ()
@@ -287,6 +290,16 @@ class PostStepRecord:
             return cls.of(obj["published"], obj["refused"])
         except ValueError:
             return None
+
+
+def post_step_key(tenant_id: object, job_id: object | None) -> RunId:
+    """The name a post-step's record is kept under (#1344): the job it followed, or, for a
+    family-less post-step (amendment 1: `job_id` None), the tenant's own id. Both are canonical
+    UUID text, so the name has the job lane's `<id><suffix>` shape; a tenant's id never names a
+    job or a run in its own runs folder, so the two never meet, and the family-less record is one
+    per tenant, replaced at each check rather than one more file per check. The one place the
+    choice is made: the post-step writes, and the worker reads, through it."""
+    return _run_id(str(tenant_id) if job_id is None else job_id)
 
 
 def _run_id(raw: object) -> RunId:
@@ -446,14 +459,16 @@ class JobLane:
         read = self._held.view().read(self._paths(_run_id(job_id)).learning_end().name)
         return None if read.text is None else LearningEnd.parse(read.text)
 
-    def write_post_step(self, job_id: object, record: PostStepRecord) -> None:
-        """The post-step's record for the job it followed, replaced whole."""
-        self._held.write(self._paths(_run_id(job_id)).post_step().name, record.text(),
-                         mode="replace")
+    def write_post_step(self, job_id: object | None, record: PostStepRecord) -> None:
+        """The post-step's record for the job it followed (`None`: a family-less post-step, kept
+        under the tenant's id, `post_step_key`), replaced whole."""
+        self._held.write(self._paths(post_step_key(self.tenant_id, job_id)).post_step().name,
+                         record.text(), mode="replace")
 
-    def read_post_step(self, job_id: object) -> PostStepRecord | None:
-        """The post-step's record, or `None` when it is absent, unreadable or not of its shape."""
-        read = self._held.view().read(self._paths(_run_id(job_id)).post_step().name)
+    def read_post_step(self, job_id: object | None) -> PostStepRecord | None:
+        """The post-step's record (`job_id` as `write_post_step` takes it), or `None` when it is
+        absent, unreadable or not of its shape."""
+        read = self._held.view().read(self._paths(post_step_key(self.tenant_id, job_id)).post_step().name)
         return None if read.text is None else PostStepRecord.parse(read.text)
 
     # -- what the run left ------------------------------------------------------------------------

@@ -28,7 +28,8 @@
 #       defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
 # The deployed command is the worker (#1344 O15): it reads DEFENDER_DATABASE_DSN, DEFENDER_DATA_ROOT,
 # DEFENDER_BUILD_COMMIT (baked, below), DEFENDER_WORKER_SLOTS (default 3) and
-# DEFENDER_WORKER_LEARNING_SLOTS (default min(1, slots - 1)); it refuses an empty build stamp, takes
+# DEFENDER_WORKER_LEARNING_SLOTS (default min(1, slots - 1)) and DEFENDER_WORKER_LEARNING_CHECK_SECONDS
+# (default 300: a tenant with no post-step that long is checked without a family); it refuses an empty build stamp, takes
 # a lock on the data root (one worker per machine), replaces its read-only code copy under the data
 # root, and runs every investigation and learning child from that copy:
 #   docker run --rm --env-file .env -e DEFENDER_DATABASE_DSN=... -e DEFENDER_DATA_ROOT=/data \
