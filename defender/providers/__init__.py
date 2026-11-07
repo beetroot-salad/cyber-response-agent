@@ -6,7 +6,10 @@ from defender._agent_role import AgentRole
 from .anthropic import AnthropicProvider
 from .base import BuiltModel, Provider
 from .openai_compat import OpenAICompatProvider
-from .retry import DEFAULT_POLICY, ProviderDown, RetryPolicy, refusal_status, with_retries
+from .retry import (
+    DEFAULT_POLICY, SETUP_STATUSES, ProviderDown, ProviderRejected, RetryPolicy, refusal_reason,
+    refusal_status, rejected, with_retries,
+)
 
 if TYPE_CHECKING:
     from pydantic_ai.settings import ModelSettings
@@ -115,6 +118,8 @@ __all__ = [
     "DEFAULT_POLICY",
     "Provider",
     "ProviderDown",
+    "ProviderRejected",
+    "SETUP_STATUSES",
     "RetryPolicy",
     "api_key_vars",
     "build_for_effort",
@@ -122,7 +127,9 @@ __all__ = [
     "effort_for_role",
     "provider_for",
     "provider_id_for",
+    "refusal_reason",
     "refusal_status",
+    "rejected",
     "selectable_aliases",
     "with_retries",
 ]

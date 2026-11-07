@@ -238,6 +238,10 @@ def _breaker_ending(end: LeadEnd) -> str | None:
 
     if end.fault_terminator == session_store.TRUNCATED_BY_STORE:
         raise session_store.StoreError("the correlation lead's session could not be recorded")
+    if end.fault_terminator == run_end.TRUNCATED_BY_PROVIDER_REJECTED:
+        # The provider refused one of its requests (#1243 r3): named as the dispatch failing,
+        # ahead of anything the lead's calls would otherwise read as.
+        return ENDING_DISPATCH_RAISED
     if end.breaker_refused is not None:
         return ENDING_TRIPPED_BREAKER
     return None
@@ -325,7 +329,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
             return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
         _stamp_timed_out(store, session_id)
         return CorrelationOutcome(ending=ENDING_TIMED_OUT, system=system)
-    except (BudgetKill, circuit_breaker.RunAborted, providers.ProviderDown,
+    except (BudgetKill, circuit_breaker.RunAborted, providers.ProviderDown, providers.ProviderRejected,
             run_end.CallRecordWriteFailed, session_store.StoreError, sqlite3.Error,
             asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, SystemExit):
         raise
@@ -334,6 +338,8 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
             raise  # the box is unusable or its fence tripped (#1421): the run ends by name
         if carried_unless_overridden(e, providers.ProviderDown, (BudgetKill, circuit_breaker.RunAborted)):
             raise  # a provider that stayed down, inside a group (#1243)
+        if carried_unless_overridden(e, providers.ProviderRejected, (BudgetKill, circuit_breaker.RunAborted)):
+            raise  # a model whose setup is broken, inside a group (#1243 r3)
         _logger.warning(f"correlation lead dispatch failed ({type(e).__name__}); naming it")
         return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
     if not ends:

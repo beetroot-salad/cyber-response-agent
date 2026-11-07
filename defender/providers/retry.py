@@ -47,6 +47,27 @@ class ProviderDown(Exception):  # noqa: N818 — named for the state it reports,
         return self.__class__, (self.model, self.status, self.attempts)
 
 
+#: Refusals that say the model's setup is broken (key, access, model name), not the request: every
+#: caller on that model gets the same answer, so even a lead's ends the run (#1243 r3).
+SETUP_STATUSES = frozenset({401, 403, 404})
+#: How much of the provider's refusal text the host log keeps. Never shown to a model.
+_REASON_CAP = 500
+
+
+class ProviderRejected(Exception):  # noqa: N818 — named for the state it reports, like `ProviderDown`
+    """The provider refused a request for good, in a way that ends the run (#1243 r3): MAIN's own
+    request, or a lead's whose status says the model's setup is broken. `reason` is the
+    provider's text, capped, for the host log only. Raised `from` the original error."""
+
+    def __init__(self, status: int, reason: str) -> None:
+        self.status = status
+        self.reason = reason
+        super().__init__(f"the model provider refused a request (HTTP {status}): {reason}")
+
+    def __reduce__(self) -> tuple[type, tuple[Any, ...]]:
+        return self.__class__, (self.status, self.reason)
+
+
 #: A monotonic-seconds reader. Aliased so the learning-state census, which reads any `Callable`
 #: field whose name contains "lock" as a lock seam, does not mistake `clock` for one.
 Seconds = Callable[[], float]
@@ -84,6 +105,19 @@ def refusal_status(exc: BaseException) -> int | None:
     if isinstance(exc, ModelHTTPError) and not _temporary(exc)[0]:
         return exc.status_code
     return None
+
+
+def refusal_reason(exc: BaseException) -> str:
+    """The provider's own text for a refusal, capped: for the host log, never for a model."""
+    body = getattr(exc, "body", None)
+    text = str(body if body is not None else exc)
+    return text if len(text) <= _REASON_CAP else text[:_REASON_CAP] + "…"
+
+
+def rejected(exc: BaseException) -> ProviderRejected | None:
+    """`exc` as a run-ending `ProviderRejected` if it is a refusal, else `None`."""
+    status = refusal_status(exc)
+    return None if status is None else ProviderRejected(status, refusal_reason(exc))
 
 
 def _backoff(attempt: int, policy: RetryPolicy) -> float:

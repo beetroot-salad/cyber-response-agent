@@ -307,24 +307,19 @@ async def _drive_agent(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the loop's 
         _logger.warning(f"{e}; writing partial trace")
         truncated_by = session_store.TRUNCATED_BY_BUDGET
         exit_reason = "BudgetKill"
-    except ModelHTTPError as e:
-        # The provider refused one of MAIN's own requests for good (#1243). Anything else HTTP
-        # passes through as before.
-        if not _main_request_refused(e):
-            raise
-        truncated_by, exit_reason = run_end.TRUNCATED_BY_PROVIDER_REJECTED, "ProviderRejected"
     except (sqlite3.Error, session_store.StoreError) as e:
         # The `StoreError` base: every store fault can surface from the ProcessHistory hook.
         _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
-    except (run_end.CallRecordWriteFailed, providers.ProviderDown, box_mod.BoxEnding,
-            BaseExceptionGroup) as e:
+    except (run_end.CallRecordWriteFailed, providers.ProviderDown, providers.ProviderRejected,
+            ModelHTTPError, box_mod.BoxEnding, BaseExceptionGroup) as e:
         # These failures end the run by name. Concurrent leads may deliver any of them inside an
         # exception group; a group that carries none propagates as itself.
         ending = box_ending_in(e)
         failed = carried(e, run_end.CallRecordWriteFailed)
         down = _provider_down_in(e)
+        refused = _refusal_in(e)
         if ending is not None:
             # The box is unusable, or a process wrote past its helper (#1421 O8, O9): ahead of a
             # call-record or provider fault beside it. Its own words are logged here, once; the
@@ -344,6 +339,13 @@ async def _drive_agent(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the loop's 
             _logger.error(f"{down}; ending the run")
             truncated_by = session_store.TRUNCATED_BY_PROVIDER_DOWN
             exit_reason = "ProviderDown"
+        elif refused is not None:
+            # The provider refused MAIN's own request, or a lead's with a broken setup, for good
+            # (#1243 r3): resending gets the same answer, so like provider-down it is an
+            # infrastructure end with no report.
+            _logger.error(f"{refused}; ending the run")
+            truncated_by = run_end.TRUNCATED_BY_PROVIDER_REJECTED
+            exit_reason = "ProviderRejected"
         else:
             raise
     finally:
@@ -373,14 +375,16 @@ def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
     bind_call_ids(state, run if isinstance(run, str) and run else run_id)
 
 
-def _main_request_refused(exc: BaseException) -> bool:
-    """Whether `exc` is the provider refusing MAIN's own request for good (#1243), logged if so.
-    Resending gets the same answer and there is no lead to end, so the run ends by name: like
-    provider-down an infrastructure end with no report."""
-    status = providers.refusal_status(exc)
-    if status is not None:
-        _logger.error(f"the model provider refused MAIN's request (HTTP {status}); ending the run")
-    return status is not None
+def _refusal_in(exc: BaseException) -> providers.ProviderRejected | None:
+    """The refusal that should end the run on `exc` (#1243 r3): a lead's `ProviderRejected`, or
+    MAIN's own refused request, bare or carried by a group that holds no interrupt, kill, abort
+    or outage; else `None`."""
+    overriding = (BudgetKill, RunAborted, box_mod.BoxEnding, providers.ProviderDown)
+    found = carried_unless_overridden(exc, providers.ProviderRejected, overriding)
+    if found is not None:
+        return found
+    http = carried_unless_overridden(exc, ModelHTTPError, overriding)
+    return None if http is None else providers.rejected(http)
 
 
 def _provider_down_in(exc: BaseException) -> providers.ProviderDown | None:
@@ -590,6 +594,12 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
         if down is not None:
             _logger.error(f"{down}; stopping before the agent starts")
             return None, stop(session_store.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")
+        refused = carried_unless_overridden(
+            e, providers.ProviderRejected, (BudgetKill, RunAborted, box_mod.BoxEnding))
+        if refused is not None:
+            # The correlation lead's model has a broken setup (#1243 r3): MAIN's leads share it.
+            _logger.error(f"{refused}; stopping before the agent starts")
+            return None, stop(run_end.TRUNCATED_BY_PROVIDER_REJECTED, "ProviderRejected")
         raise
     return lead_zero_mod.render_correlation_section(
         outcome, grant_home=tenant.table_pointer), None

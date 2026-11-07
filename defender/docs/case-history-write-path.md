@@ -48,10 +48,10 @@ case; a person closes it.
   run begins (D-18); a folder still holding `systems/case-history/` is told to move to the file.
 
 - **Cut-short runs record per exit class (#1047 O2), still as comments.** The exit class comes
-  in-process from `run.py` off the driver's own summary. `aborted` → an escalation note (no
+  in-process from `run.py` off the driver's own summary. `aborted` / `provider-rejected` → an escalation note (no
   verdict), ticket stays open. `request-limit` / `retry-exhausted` → the record, proposing the
   host's forced `unresolved`; with no usable report → the escalation note. `budget` / `store` /
-  `provider-down` / `provider-rejected` / `box-lost` / `box-output-limit` → no call at all (the case stays open). Anything else → the record off the report. A run whose model
+  `provider-down` / `box-lost` / `box-output-limit` → no call at all (the case stays open). Anything else → the record off the report. A run whose model
   had already closed when the cut landed (`closed_before_cut`) records its own verdict.
 
 - **Anti-corruption boundary.** `report.md` (+ the run's alert record) is the internal case model;

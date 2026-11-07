@@ -600,13 +600,18 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
             f"the queries table. {INCOMPLETE_IDIOM}",
         )
     except ModelHTTPError as e:
-        # The provider refused one of this lead's requests for good (#1243): resending gets the
-        # same answer, so the lead ends by name and MAIN decides what to do next. Only the
-        # status reaches MAIN, never the provider's text. Anything else HTTP passes through.
+        # The provider refused one of this lead's requests for good (#1243 r3). A broken setup
+        # (key, access, model name) fails every lead alike, so it ends the run; any other
+        # refusal ends this lead by name and MAIN decides what next. Only the status reaches
+        # MAIN; the provider's text goes to the host log. Anything else HTTP passes through.
         status = providers.refusal_status(e)
         if status is None:
             raise
-        _logger.warning(f"gather for {lead_id}: the model provider refused a request (HTTP {status})")
+        _logger.warning(f"gather for {lead_id}: the model provider refused a request "
+                        f"(HTTP {status}): {providers.refusal_reason(e)}")
+        if status in providers.SETUP_STATUSES:
+            stamp(run_end.TRUNCATED_BY_PROVIDER_REJECTED)
+            raise providers.ProviderRejected(status, providers.refusal_reason(e)) from e
         fault = _Ending(
             run_end.TRUNCATED_BY_PROVIDER_REJECTED,
             f"gather for {lead_id} ended: the model provider refused one of its requests "

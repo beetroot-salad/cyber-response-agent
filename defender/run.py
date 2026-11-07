@@ -1594,10 +1594,10 @@ UNSERVABLE_EXIT = 3
 _EXIT_WORDS = {
     run_end.TRUNCATED_BY_PROVIDER_DOWN: "the model provider stayed down; the run ended with no "
                                         "report (rerun later)",
-    run_end.TRUNCATED_BY_PROVIDER_REJECTED: "the model provider refused one of MAIN's requests "
+    run_end.TRUNCATED_BY_PROVIDER_REJECTED: "the model provider refused a request for good; the "
+                                            "run ended with no report and the case was escalated "
                                             "(rerunning will not help: the run log names the "
-                                            "HTTP status; check the model's key, access and "
-                                            "name)",
+                                            "HTTP status and the provider's reason)",
     run_end.TRUNCATED_BY_BOX_LOST: "the run's box became unusable; the run ended (the operator's "
                                    "to fix: the run log names the command that found it)",
     run_end.TRUNCATED_BY_BOX_OUTPUT_LIMIT: "a process in the run's box wrote past its helper and "
