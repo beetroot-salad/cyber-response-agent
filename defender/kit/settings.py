@@ -10,9 +10,6 @@ from types import MappingProxyType
 #: its host path. The table pointers, the fault redaction and every settings fault build on it.
 SETTINGS_POINTER = "the tenant's settings/"
 
-#: The one implemented access method (D2). A system's `<PREFIX>_TRANSPORT` names it.
-DOCKER_EXEC = "docker-exec"
-
 #: The text a missing system folder raises — one wording for "this tenant's settings do not
 #: configure this system", whether the folder is absent or its `config.env` is.
 NOT_CONFIGURED = "this tenant's settings do not configure this system"
@@ -66,7 +63,6 @@ def system_prefix(system: str) -> str:
 
 
 __all__ = [
-    "DOCKER_EXEC",
     "NOT_CONFIGURED",
     "SETTINGS_POINTER",
     "SystemConfig",

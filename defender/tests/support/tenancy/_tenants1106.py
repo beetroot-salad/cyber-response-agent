@@ -1,7 +1,6 @@
 """#1106 — the per-tenant knowledge folder: shared fixtures for the spec and the migrated suites."""
 from __future__ import annotations
 
-import re
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
@@ -215,9 +214,6 @@ def case_record_text(system: str = "ticket", *, body: str = COMMENT_BODY) -> str
     return f'system: "{system}"\ncomment:\n  body: "{body}"\n'
 
 
-#: The one implemented access method (#1107 D2).
-DOCKER_EXEC = "docker-exec"
-
 #: Each system folder's key prefix, as the adapters spell it.
 PREFIX: dict[str, str] = {
     "cmdb": "CMDB",
@@ -230,77 +226,52 @@ PREFIX: dict[str, str] = {
 }
 
 
-def context_name(marker: str, system: str) -> str:
-    """The docker context a fixture tenant names for `system`: distinct per system and per
-    tenant, and never `soc-playground` (the base's built-in default)."""
-    return f"ctx-{marker}-{system}"
-
-
-def access_lines(marker: str, system: str) -> str:
-    """`system`'s access method and docker context lines (elastic: the proxy method alone):
-    without them its settings check fails and the system starts down (#1256)."""
-    prefix = PREFIX[system]
-    if system == "elastic":  # #1391 O3 D12: proxy only; its base, `ca` and credential are the declaration's
-        return f'{prefix}_TRANSPORT="http-proxy"\n'
-    return (f'{prefix}_TRANSPORT="{DOCKER_EXEC}"\n'
-            f'{prefix}_DOCKER_CONTEXT="{context_name(marker, system)}"\n')
+def access_text(marker: str, system: str, *, base: str | None = None) -> str:
+    """The access declaration a fixture tenant carries for `system` (#1391 P1: every system with
+    network access has one): at `base` (default: a made-up one carrying `marker` and `system`, so
+    a reader handed another tenant's base is caught by the value alone). Elastic: basic auth with
+    its two POST reads; ticket: the case-comment write; the rest bearer, GETs only (JSON is YAML)."""
+    import json
+    if system == "elastic":
+        auth: dict[str, str] = {"scheme": "basic"}
+        reads = [{"method": "POST", "path": "/*/_search"}, {"method": "POST", "path": "/_query"}]
+    else:
+        auth = {"scheme": "bearer", "field": "api_key"}
+        reads = []
+    writes = ([{"method": "POST", "path": "/tickets/*/comments"}] if system == "ticket" else [])
+    return json.dumps({
+        "access": "http-proxy",
+        "base": base or f"http://{system}-{marker}:8080",
+        "auth": auth,
+        "reads": reads,
+        "writes": writes,
+    }, indent=2) + "\n"
 
 
 def elastic_access_text(marker: str, *, base: str | None = None) -> str:
-    """The elastic declaration every fixture tenant carries (#1391 O3 P1/D12): basic auth at
-    `base` (default: a made-up one carrying `marker`), with the two POST reads (JSON is YAML)."""
-    import json
-    return json.dumps({
-        "access": "http-proxy",
-        "base": base or f"http://elastic-{marker}:9200",
-        "auth": {"scheme": "basic"},
-        "reads": [{"method": "POST", "path": "/*/_search"}, {"method": "POST", "path": "/_query"}],
-        "writes": [],
-    }, indent=2) + "\n"
+    """`access_text` for elastic."""
+    return access_text(marker, "elastic", base=base)
 
 
 def config_texts(marker: str, *, events_index: str | None = None,
                  alerts_index: str | None = None) -> dict[str, str]:
     """One complete `config.env` per system, every value carrying `marker` so a reader that
     returns another tenant's (or the checkout's) value is caught by the value alone. Complete
-    means every key the adapter's settings check reads: a system failing it is down from run
-    start, and a run whose every granted system is down is refused (#1256)."""
+    means every key the adapter's settings check reads and no other (#1391 Q4): a system failing
+    it is down from run start, and a run whose every granted system is down is refused (#1256).
+    Each system's base is its access declaration's (`access_text`), which `plant_tenant` writes
+    beside it."""
     events = events_index if events_index is not None else f"{marker}-events-*"
     alerts = alerts_index if alerts_index is not None else f"{marker}-alerts-*"
-    base = {
-        "cmdb": (
-            f'CMDB_URL_BASE="http://cmdb-{marker}:8080"\n'
-            f'CMDB_BASTION_HOST="bastion-{marker}"\n'
-            'CMDB_TIMEOUT_SEC="10"\n'
-        ),
-        "identity": (
-            f'IDENTITY_URL_BASE="http://identity-{marker}:8080"\n'
-            f'IDENTITY_BASTION_HOST="bastion-{marker}"\n'
-            'IDENTITY_TIMEOUT_SEC="10"\n'
-        ),
-        "ticket": (
-            f'TICKET_URL_BASE="http://ticket-{marker}:8080"\n'
-            f'TICKET_BASTION_HOST="bastion-{marker}"\n'
-            'TICKET_TIMEOUT_SEC="10"\n'
-            f'TICKET_KEY_PATTERN="{marker.upper()}-[0-9]+"\n'
-        ),
-        "elastic": (
-            f'ELASTIC_EVENTS_INDEX="{events}"\n'
-            f'ELASTIC_ALERTS_INDEX="{alerts}"\n'
-        ),
-        "change-mgmt": (
-            f'CHANGE_MGMT_URL_BASE="http://change-mgmt-{marker}:8080"\n'
-            f'CHANGE_MGMT_BASTION_HOST="bastion-{marker}"\n'
-            'CHANGE_MGMT_TIMEOUT_SEC="10"\n'
-        ),
-        "threat-intel": (
-            f'THREAT_INTEL_URL_BASE="http://threat-intel-{marker}:8080"\n'
-            f'THREAT_INTEL_BASTION_HOST="bastion-{marker}"\n'
-            'THREAT_INTEL_TIMEOUT_SEC="10"\n'
-        ),
+    return {
+        "cmdb": 'CMDB_TIMEOUT_SEC="10"\n',
+        "identity": 'IDENTITY_TIMEOUT_SEC="10"\n',
+        "ticket": f'TICKET_TIMEOUT_SEC="10"\nTICKET_KEY_PATTERN="{marker.upper()}-[0-9]+"\n',
+        "elastic": f'ELASTIC_EVENTS_INDEX="{events}"\nELASTIC_ALERTS_INDEX="{alerts}"\n',
+        "change-mgmt": 'CHANGE_MGMT_TIMEOUT_SEC="10"\n',
+        "threat-intel": 'THREAT_INTEL_TIMEOUT_SEC="10"\n',
         "host-state": "",
     }
-    return {system: text + access_lines(marker, system) for system, text in base.items()}
 
 
 #: Made-up templates a planted tenant's lead-zero config names, written into the tenant's own
@@ -379,9 +350,8 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     system_configs = configs if configs is not None else config_texts(marker or tenant_id)
     for system, text in system_configs.items():
         files[f"systems/{system}/config.env"] = text
-    if "elastic" in system_configs and re.search(
-            r"""^ELASTIC_TRANSPORT\s*=\s*["']?http-proxy["']?\s*$""", system_configs["elastic"], re.M):
-        files["systems/elastic/access.yaml"] = elastic_access_text(marker or tenant_id)
+    files.update({f"systems/{system}/access.yaml": access_text(marker or tenant_id, system)
+                  for system in system_configs if system in PREFIX})
     for rel, text in files.items():
         if rel in omit:
             continue
@@ -582,6 +552,7 @@ __all__ = [
     "TEMPLATE_DIR",
     "TEMPLATE_SETTINGS",
     "config_texts",
+    "access_text",
     "elastic_access_text",
     "lead_zero_text",
     "case_record_text",

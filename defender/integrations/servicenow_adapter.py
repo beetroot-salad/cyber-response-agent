@@ -23,7 +23,6 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
 
 from defender.kit.verbs import CaseComments, VerbContext
 from defender.integrations import _stub_transport as transport
-from defender.kit.access import HTTP_PROXY
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -45,11 +44,6 @@ _READ_PAGE = 100
 
 def _servicenow_settings(tenant: TenantRecord) -> dict[str, str]:
     """The system's config over the run's record, or the `ConfigFault` for why it is unusable."""
-    method = transport.record_entry(tenant, SYSTEM).get(f"{PREFIX}_TRANSPORT")
-    if method != HTTP_PROXY:
-        raise ConfigFault(
-            f"{PREFIX}_TRANSPORT={method!r}: the ready-made ServiceNow adapter is reached only "
-            f"through the credential proxy — set {PREFIX}_TRANSPORT to {HTTP_PROXY!r}")
     config = transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
     if not _TABLE_NAME.fullmatch(config["TABLE"]):
         raise ConfigFault(

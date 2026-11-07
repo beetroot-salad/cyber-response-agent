@@ -1,0 +1,8 @@
+# How the credential proxy reaches the lab's identity stub (#1391 O1). The proxy adds the stub's
+# bearer key; the agent never holds it. The lab tenant (its own repository) names the lab
+# server's address here; replays that run as this fixture never reach the stub.
+access: http-proxy
+base: http://soc-playground:8005
+auth:
+  scheme: bearer
+  field: api_key

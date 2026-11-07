@@ -27,42 +27,22 @@ precedent, not the table-name column:
 | Change-mgmt | `change-mgmt` | `http://change-mgmt:8080` | `127.0.0.1:8003` | `defender/skills/change-mgmt/` |
 | Threat-intel | `threat-intel` | `http://threat-intel:8080` | `127.0.0.1:8002` | `defender/skills/threat-intel/` |
 | Ticket-server | `ticket-server` | `http://ticket-server:8080` | `127.0.0.1:8004` | `defender/skills/ticket/` |
-| Host live state | n/a | n/a | n/a (`docker exec`) | `defender/skills/host-state/` |
+| Host live state | endpoint-query service | n/a | its own port | `defender/skills/host-state/` |
 
 Endpoints + return shapes are listed per service in
 `playground-v2/CLAUDE.md` §Stub services. Copy the verbs you need into
 the per-system SKILL — don't redocument them here, they drift.
 
-## Connection model — pick `docker exec`, not SSH tunnels
+## Connection model — the credential proxy
 
-The stubs publish on VPS loopback for debugging, so SSH tunnels (5
-forwards: 8001, 8002, 8003, 8004, 8005) are *possible* but high-friction.
-The adapter pattern that matches what the defender's runtime view of the
-playground looks like:
+Every adapter reaches its system through the credential proxy, at the `base` the
+system's `access.yaml` names; there is no other access method (#1391 P1). The lab's
+cloud firewall opens each service's port only to the address that already has SSH
+access (#1391 D7), and each stub requires a bearer key the proxy injects (D9).
 
-```python
-# Wrap docker --context soc-playground exec <host> curl ... as the transport.
-# Hosts already have Docker DNS for every stub, so:
-docker --context soc-playground exec web-1 \
-  curl -fsS http://cmdb:8080/hosts/web-1
-```
-
-Three reasons this beats tunnels:
-
-1. **No port management** — one `docker exec` works for all five stubs
-   plus future ones.
-2. **Same reachability the agent investigates against** — if a stub is
-   down inside the network, the adapter sees it the same way an in-cluster
-   client would.
-3. **No new auth surface** — `docker --context soc-playground` is already
-   configured for elastic_adapter's needs.
-
-Pick any role host as the curl bastion (`web-1` is fine). The adapter
-shells out to `docker --context soc-playground exec web-1 curl ...` and
-parses the response. The Bash permission allow rule covers it once added.
-
-For the host-state adapter, the same primitive is the entire transport:
-`docker --context soc-playground exec <target_host> <command>`. No HTTP.
+host-state is HTTP too: the lab's endpoint-query service, holding the Docker socket
+on the lab server, answers a fixed set of GET routes for the hosts listed in
+`playground-v2/hosts/inventory.yaml` (#1391 O5). The adapter is a thin client of it.
 
 ## Adapter shape — mirror `elastic_adapter.py`
 
@@ -122,8 +102,9 @@ adapter. Each verb takes keyword-only params (shown in parentheses), not
   should match v2 elastic_adapter, not v1.
 - **host-state**: `proc-tree` (`host`), `passwd` (`host`), `authorized-keys`
   (`host`, optional `user`), `fim-checksum` (`host`, `path`), `package-list`
-  (`host`). Each wraps a single `docker --context soc-playground exec <host>
-  <cmd>` inside the verb; per-verb timeout budget; never `--it`.
+  (`host`), `container-inspect` (`container_id`). Each is one GET on the
+  endpoint-query service (`/hosts/{host}/…`, `/containers/{id}`); per-verb
+  timeout constant.
 
 ## Permissions
 
@@ -138,9 +119,8 @@ permission entry needed. The main loop is denied data-source access entirely
 (the gather subagent is the data-access layer); the per-agent grant model
 (`investigation/permission/`, #575) gates what remains on the read-only bash lanes.
 
-The adapter may shell out to `docker --context soc-playground exec *` internally,
-but that runs inside the in-process verb — it is never a model-authored command
-reaching the gate.
+An adapter runs no subprocess: every request goes to the credential proxy from
+inside the in-process verb, never as a model-authored command reaching the gate.
 
 ## Audit
 
@@ -195,10 +175,9 @@ pattern on small surfaces first), not a multi-PR split:
 
 1. **identity** — load-bearing for legitimacy checks; the
    `can_access` primitive is the cleanest API to start against.
-2. **cmdb** — small surface, lets you validate the `docker exec curl`
-   transport pattern.
-3. **host-state** — different shape (no HTTP) — exercises the v2
-   adapter contract on a non-REST source.
+2. **cmdb** — small surface, lets you validate the transport pattern.
+3. **host-state** — a query API over live host state rather than a
+   record store.
 4. **change-mgmt**, **threat-intel** — straightforward once 1–3 are
    stable.
 5. **ticket-server** — last; v1's `playground_ticket_cli.py` already

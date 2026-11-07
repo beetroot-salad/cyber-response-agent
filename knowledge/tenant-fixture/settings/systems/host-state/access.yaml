@@ -1,0 +1,8 @@
+# How the credential proxy reaches the lab's endpoint-query service (#1391 O5). The proxy adds
+# the service's bearer key. The lab tenant names the lab server's address here; replays that run
+# as this fixture never reach the service.
+access: http-proxy
+base: http://soc-playground:8007
+auth:
+  scheme: bearer
+  field: api_key

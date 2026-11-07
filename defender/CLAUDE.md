@@ -55,15 +55,43 @@ A reply over 8 MiB is still refused; the fault now tells the model to narrow the
 limit is no longer configurable: remove `max_response_bytes` from the proxy's config file before
 upgrading, or the proxy refuses to start.
 
+## Upgrade from before the Docker removal (#1391 O1, O2, O5)
+
+Every system with network access is reached only through the credential proxy: a system is
+proxied because its folder holds an `access.yaml`, and there is no access-method key. Each
+adapter reads only its own keys; any other key in a system's `config.env` is refused by name at
+the settings check, so a tenant on old settings has every such system down at once until this is
+done. In one tenant commit, for each of cmdb, identity, change-mgmt, threat-intel, ticket and
+host-state:
+
+1. `config.env` keeps only the keys the adapter reads — `<PREFIX>_TIMEOUT_SEC` for the stubs, plus
+   `TICKET_KEY_PATTERN` for ticket; host-state reads none, so its file may be empty. Delete
+   `<PREFIX>_TRANSPORT`, `<PREFIX>_DOCKER_CONTEXT`, `<PREFIX>_BASTION_HOST` and `<PREFIX>_URL_BASE`
+   (and, for elastic, `ELASTIC_TRANSPORT` and `ELASTIC_RETENTION_DAYS`, which nothing reads).
+2. `access.yaml` with the system's `base` and `auth` (bearer, field `api_key`); ticket also
+   declares `writes: [{method: POST, path: "/tickets/*/comments"}]` for case comments.
+   host-state's base is an endpoint-query service (an endpoint-security product's query API)
+   that answers `GET /hosts`, `/hosts/{host}/processes`, `/hosts/{host}/accounts`,
+   `/hosts/{host}/accounts/{user}/authorized-keys`, `/hosts/{host}/files/sha256?path=…`,
+   `/hosts/{host}/packages` and `/containers/{id}`.
+3. A stored `bearer` credential per system, and a published export carrying the declarations
+   (the proxy reads only `exports/current`).
+4. Remove a leftover `systems/case-history/` folder (the case system is named by
+   `settings/case-record.yaml` since #1359).
+
+host-state's `health-check` no longer reports a docker context, and a host the service does not
+enroll is now the agent's to fix (`UpstreamFault`, from the service's 404) rather than refused
+before any call.
+
 ## Upgrade from before #1391
 
 Elastic is reached only through the credential proxy; its Docker access is gone. <!-- lint-shippable: ok — the vendor-specific product integration. -->
 A tenant's `systems/elastic/` needs, in one commit: <!-- lint-shippable: ok — the vendor-specific product integration. -->
 
-1. `config.env` with `ELASTIC_TRANSPORT="http-proxy"` and the two index keys
-   (`ELASTIC_EVENTS_INDEX`, `ELASTIC_ALERTS_INDEX`); delete `ELASTICSEARCH_URL`, `KIBANA_URL` (a
-   leftover is refused by name) and, as they now do nothing, `ELASTIC_DOCKER_CONTEXT`,
-   `ELASTIC_ES_CONTAINER`, `ELASTIC_KIBANA_CONTAINER` and `ELASTIC_SSL_VERIFY`.
+1. `config.env` with the two index keys (`ELASTIC_EVENTS_INDEX`, `ELASTIC_ALERTS_INDEX`) and no
+   other key: since the Docker removal above, any other key — `ELASTIC_TRANSPORT`,
+   `ELASTICSEARCH_URL`, `KIBANA_URL`, `ELASTIC_DOCKER_CONTEXT`, `ELASTIC_ES_CONTAINER`,
+   `ELASTIC_KIBANA_CONTAINER`, `ELASTIC_SSL_VERIFY` — is refused by name.
 2. `access.yaml`: `base` (the cluster URL, a path allowed), basic `auth`, `reads` of
    `POST /*/_search` and `POST /_query`, and `ca:` (inline PEM certificates, nothing else) when the
    cluster's certificate comes from a private CA. `ca` is then the only trust for that system, the

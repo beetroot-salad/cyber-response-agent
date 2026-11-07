@@ -25,9 +25,6 @@ SYSTEM = "elastic"
 #: The keys of `systems/elastic/config.env` this adapter requires (prefix stripped).
 REQUIRED_CONFIG_KEYS = ("EVENTS_INDEX", "ALERTS_INDEX")
 
-#: Base keys that no longer exist: the base lives in the access declaration alone (#1391 F4).
-RETIRED_BASE_KEYS = ("ELASTICSEARCH_URL", "KIBANA_URL")
-
 RETURNED_DOC_CAP = 20
 DEFAULT_LIMIT = RETURNED_DOC_CAP
 #: How long the proxy gives one request (`health-check` gets its own); constants, not settings.
@@ -47,17 +44,16 @@ def load_config(ctx: VerbContext) -> dict[str, str]:
 def _record_config(tenant: TenantRecord) -> dict[str, str]:
     """This deployment's elastic config from the run's record (#1107), by the shared rules for a
     proxied system: the two index keys (prefix stripped) and `URL_BASE`, the base of the access
-    declaration (which holds the only one, #1391 F4). Elasticsearch is reached only through the
-    credential proxy (#1391 O3), so another access method, a retired base key, no declaration, or
-    a blank index key is a `ConfigFault` — Elasticsearch is not configured for this run
-    (`check_settings` raises it at run start, so elastic is down from the start, #1256)."""
-    return transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS,
-                                   retired=RETIRED_BASE_KEYS, proxy_only=True)
+    declaration (which holds the only one, #1391 F4). Any other key (a retired base, Kibana or
+    Docker key, #1391 Q4), no declaration, or a blank index key is a `ConfigFault` —
+    Elasticsearch is not configured for this run (`check_settings` raises it at run start, so
+    elastic is down from the start, #1256)."""
+    return transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
 
 
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """Elastic's settings check (#1256 O-5): every `ConfigFault` a verb here can raise, over the
-    run's record — the file, the access method, the access declaration, the two index keys. None
+    run's record — the file, its keys, the access declaration, the two index keys. None
     when the system is usable."""
     _record_config(tenant)
 

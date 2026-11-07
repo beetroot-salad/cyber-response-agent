@@ -32,9 +32,9 @@ def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module 
 
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """This system's settings check (#1256 O-5): every `ConfigFault` a verb here can raise —
-    `_config`'s keys, then the docker transport's access method — raised over the run's
-    record, or None when the system is usable."""
-    transport.check_docker_curl_settings(tenant, SYSTEM, PREFIX)
+    `_config`'s keys and the access declaration — raised over the run's record, or None when
+    the system is usable."""
+    transport.check_settings_of(tenant, SYSTEM, PREFIX)
 
 
 def _require_utc(value: str) -> str:

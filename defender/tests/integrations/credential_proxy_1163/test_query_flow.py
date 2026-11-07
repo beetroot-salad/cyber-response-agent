@@ -3,6 +3,7 @@ loopback and a recording upstream, over a non-root base (r5 A2)."""
 from __future__ import annotations
 
 import base64
+import contextlib
 import inspect
 import json
 import logging
@@ -584,3 +585,222 @@ def test_1391_o3_the_bodies_the_proxy_is_sent_are_the_queries_as_asked(tmp_path,
     assert search["query"]["bool"]["filter"] == [], search
     assert esql == {"query": q}, esql
     assert echoed["query"] == q
+
+
+# --- #1391 O1/O2, O5, Q4: one access method, host-state over an endpoint-query API -------------
+
+#: Every lab adapter with network access (O1), and the config.env each one reads in full: the
+#: keys it declares (Q4), no access method, no base, no Docker key.
+_NETWORK_ENVS = {
+    "cmdb": 'CMDB_TIMEOUT_SEC="5"\n',
+    "identity": 'IDENTITY_TIMEOUT_SEC="5"\n',
+    "change-mgmt": 'CHANGE_MGMT_TIMEOUT_SEC="5"\n',
+    "threat-intel": 'THREAT_INTEL_TIMEOUT_SEC="5"\n',
+    "ticket": 'TICKET_TIMEOUT_SEC="5"\nTICKET_KEY_PATTERN="[A-Z]+-[0-9]+"\n',
+    "elastic": f'ELASTIC_EVENTS_INDEX="{A.ELASTIC_EVENTS}"\nELASTIC_ALERTS_INDEX="{A.ELASTIC_ALERTS}"\n',
+    "host-state": "",
+}
+
+_VERB_PARAMS = {
+    "host": "web-1", "at": "2026-05-25T15:00:00Z", "path": "/etc/passwd", "user": "root",
+    "key": "T-1391", "cr_id": "CR-1391", "value": "203.0.113.7", "native_query": "*",
+    "query": f"FROM {A.ELASTIC_EVENTS} | LIMIT 1", "container_id": "c0ffee1391",
+    "actor": "svc-1391", "pattern": "nightly-backup",
+}
+
+
+def _adapter_of(system):
+    import importlib
+    return importlib.import_module(f"defender.integrations.{system.replace('-', '_')}_adapter")
+
+
+def _decl_for(system, base):
+    if system == "elastic":
+        return H.declaration(base, scheme=H.basic_scheme(), reads=A.ELASTIC_READS)
+    return H.declaration(base)
+
+
+def _set_for(system):
+    return T.basic_set() if system == "elastic" else T.static_set()
+
+
+@contextlib.contextmanager
+def _proxied(tmp_path, data_root, up, system, *, env=None, declared=True):
+    """`system` declared at the upstream's base behind the real proxy, its config.env `env`
+    (default: its complete one); yields the verb context and the proxy's `Tap`."""
+    files = H.access_files(system, _decl_for(system, up.url),
+                           env=_NETWORK_ENVS[system] if env is None else env)
+    if not declared:
+        files[f"settings/systems/{system}/access.yaml"] = None
+    with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
+        store = H.FakeStore({(t.tenant_id, system): _set_for(system)})
+        with A.proxy_for(t, store) as (url, tap):
+            yield A.ctx_for(tmp_path, T.run_record(t), url,
+                            T.token(t.tenant_id, {(system, "r")})), tap
+
+
+def _params(fn):
+    return {p.name: _VERB_PARAMS.get(p.name, "x")
+            for p in inspect.signature(fn).parameters.values()
+            if p.kind is inspect.Parameter.KEYWORD_ONLY and p.default is inspect.Parameter.empty}
+
+
+@pytest.mark.parametrize("system", sorted(_NETWORK_ENVS))
+def test_1391_o1_a_declaration_alone_puts_a_system_on_the_proxy_and_no_verb_forks_a_process(
+        tmp_path, data_root, monkeypatch, system):
+    """A system folder holding an access declaration and only its own keys passes the settings
+    check, and every verb reaches the system through the proxy without running a subprocess
+    (no `docker`). #1391 O1, O2, P1."""
+    import subprocess
+
+    forked: list[object] = []
+
+    def _refuse(*args, **_kw):
+        forked.append(args[0] if args else None)
+        raise AssertionError(f"a verb ran a subprocess: {args!r}")
+
+    with H.upstream() as up, _proxied(tmp_path, data_root, up, system) as (ctx, tap):
+        assert _adapter_of(system).check_settings(ctx.tenant) is None
+        monkeypatch.setattr(subprocess, "run", _refuse)
+        monkeypatch.setattr(subprocess, "Popen", _refuse)
+        outcomes = {}
+        for name, fn in _adapter_of(system).VERBS.items():
+            try:
+                fn(ctx, **_params(fn))
+            except Exception as exc:  # noqa: BLE001 — the test reads whatever the verb raised
+                outcomes[name] = exc
+            else:
+                outcomes[name] = None
+
+    assert forked == [], f"{system}'s verbs ran subprocesses: {forked}"
+    config_faults = {v: str(e) for v, e in outcomes.items() if isinstance(e, ConfigFault)}
+    assert config_faults == {}, f"{system} refused complete settings: {config_faults}"
+    assert up.seen, f"positive control: {system}'s verbs reached the upstream: {outcomes}"
+    assert len(tap.tokens) == len(up.seen), "every upstream request went through the proxy"
+
+
+@pytest.mark.parametrize("system", sorted(_NETWORK_ENVS))
+def test_1391_o1_a_network_system_with_no_declaration_is_a_settings_fault_naming_it(
+        tmp_path, data_root, system):
+    """No `access.yaml` is a settings fault, never a fallback to another access method. P1."""
+    with H.upstream() as up, _proxied(tmp_path, data_root, up, system,
+                                      declared=False) as (ctx, tap):
+        with pytest.raises(ConfigFault, match="access"):
+            _adapter_of(system).check_settings(ctx.tenant)
+    assert (tap.tokens, up.seen) == ([], [])
+
+
+@pytest.mark.parametrize(("system", "key"), [
+    pytest.param("cmdb", "CMDB_TRANSPORT", id="transport-http-proxy"),
+    pytest.param("cmdb", "CMDB_DOCKER_CONTEXT", id="docker-context"),
+    pytest.param("cmdb", "CMDB_BASTION_HOST", id="bastion"),
+    pytest.param("ticket", "TICKET_TIMEOUT", id="typo"),
+    pytest.param("identity", "IDENTITY_DOCKER_CONTEXT", id="identity-docker-context"),
+    pytest.param("elastic", "ELASTIC_TRANSPORT", id="elastic-transport"),
+    pytest.param("elastic", "ELASTIC_ES_CONTAINER", id="es-container"),
+    pytest.param("elastic", "ELASTIC_KIBANA_CONTAINER", id="kibana-container"),
+    pytest.param("elastic", "ELASTIC_SSL_VERIFY", id="ssl-verify"),
+    pytest.param("elastic", "ELASTIC_DOCKER_CONTEXT", id="elastic-docker-context"),
+    pytest.param("host-state", "HOST_STATE_TRANSPORT", id="host-state-transport-docker-exec"),
+    pytest.param("host-state", "HOST_STATE_DOCKER_CONTEXT", id="host-state-docker-context"),
+    pytest.param("host-state", "UNPREFIXED", id="unprefixed"),
+])
+def test_1391_o2_a_key_the_adapter_does_not_read_is_refused_by_name(
+        tmp_path, data_root, system, key):
+    """Any config.env key the system's adapter does not declare (a retired Docker key, the old
+    access method, a typo) is a settings fault naming it, at the check and at a verb, nothing
+    sent. #1391 O2, Q4/D10."""
+    # The old access method a leftover names: what each lab system's file held before.
+    value = ("http-proxy" if key in ("CMDB_TRANSPORT", "ELASTIC_TRANSPORT")
+             else "docker-exec" if key.endswith("_TRANSPORT") else "soc-playground")
+    env = _NETWORK_ENVS[system] + f'{key}="{value}"\n'
+    with H.upstream() as up, _proxied(tmp_path, data_root, up, system, env=env) as (ctx, tap):
+        with pytest.raises(ConfigFault, match=key):
+            _adapter_of(system).check_settings(ctx.tenant)
+        verb = _adapter_of(system).VERBS["health-check"]
+        with pytest.raises(ConfigFault, match=key):
+            verb(ctx)
+    assert (tap.tokens, up.seen) == ([], [])
+
+
+def _json(payload):
+    return (200, {"Content-Type": "application/json"}, json.dumps(payload).encode())
+
+
+@pytest.mark.parametrize(("verb", "params", "route", "answer", "result"), [
+    pytest.param("health-check", {}, "/hosts",
+                 {"hosts": [{"name": "web-1", "running": True},
+                            {"name": "db-1", "running": False}]},
+                 {"system": "host-state", "connected": True, "hosts_present": ["web-1"],
+                  "hosts_missing": ["db-1"]}, id="health-check"),
+    pytest.param("proc-tree", {"host": "config-mgmt-1"}, "/hosts/config-mgmt-1/processes",
+                 {"ps_output": "PID PPID\n1 0 init\n"},
+                 {"host": "config-mgmt-1", "ps_output": "PID PPID\n1 0 init\n"}, id="proc-tree"),
+    pytest.param("passwd", {"host": "web-1"}, "/hosts/web-1/accounts",
+                 {"entries": ["root:x:0:0:root:/root:/bin/bash"]},
+                 {"host": "web-1", "entries": ["root:x:0:0:root:/root:/bin/bash"]}, id="passwd"),
+    pytest.param("authorized-keys", {"host": "db-1", "user": "deploy"},
+                 "/hosts/db-1/accounts/deploy/authorized-keys",
+                 {"path": "/home/deploy/.ssh/authorized_keys", "keys": ["ssh-ed25519 AAAA k"]},
+                 {"host": "db-1", "user": "deploy", "path": "/home/deploy/.ssh/authorized_keys",
+                  "keys": ["ssh-ed25519 AAAA k"]}, id="authorized-keys"),
+    pytest.param("fim-checksum", {"host": "web-1", "path": "/etc/passwd"},
+                 "/hosts/web-1/files/sha256", {"sha256": "ab" * 32},
+                 {"host": "web-1", "path": "/etc/passwd", "sha256": "ab" * 32}, id="fim-checksum"),
+    pytest.param("package-list", {"host": "web-1"}, "/hosts/web-1/packages",
+                 {"packages": ["openssh-server 1:9.6"]},
+                 {"host": "web-1", "packages": ["openssh-server 1:9.6"]}, id="package-list"),
+    pytest.param("container-inspect", {"container_id": "c0ffee"}, "/containers/c0ffee",
+                 {"name": "web-1", "image": "lab/web:1"},
+                 {"container_id": "c0ffee", "name": "web-1", "image": "lab/web:1"},
+                 id="container-inspect"),
+])
+def test_1391_o5_host_state_verbs_are_gets_on_the_endpoint_query_api_with_unchanged_outputs(
+        tmp_path, data_root, verb, params, route, answer, result):
+    """Each host-state verb is one bearer-authenticated GET on its route under the declared base,
+    and returns today's output shape (P5); health-check carries no docker context. #1391 O5."""
+    from defender.integrations import host_state_adapter
+
+    with H.upstream() as up, _proxied(tmp_path, data_root, up, "host-state") as (ctx, _tap):
+        up.replies[route] = _json(answer)
+        got = host_state_adapter.VERBS[verb](ctx, **params)
+
+    (seen,) = up.seen
+    assert (seen.method, seen.path.split("?", 1)[0]) == ("GET", route)
+    assert seen.header("Authorization") == f"Bearer {H.CANARY_KEY}"
+    if verb == "fim-checksum":
+        assert urlsplit(seen.path).query == "path=%2Fetc%2Fpasswd"
+    assert got == result
+
+
+@pytest.mark.parametrize(("status", "fault"), [
+    pytest.param(404, UpstreamFault, id="not-enrolled-or-no-user-404"),
+    pytest.param(400, UpstreamFault, id="bad-user-or-path-400"),
+    pytest.param(503, TransportFault, id="host-stopped-503"),
+])
+def test_1391_o5_host_state_faults_follow_the_pinned_status_table(
+        tmp_path, data_root, status, fault):
+    """The endpoint-query service's status decides the fault (design r4's table): 404 and 400
+    are the agent's to fix, 503 is the host down. #1391 O5."""
+    from defender.integrations import host_state_adapter
+
+    route = "/hosts/elasticsearch/processes"
+    with H.upstream() as up, _proxied(tmp_path, data_root, up, "host-state") as (ctx, _tap):
+        up.replies[route] = (status, {"Content-Type": "application/json"},
+                             b'{"detail": "service says no"}')
+        with pytest.raises(AdapterFault) as raised:
+            host_state_adapter.VERBS["proc-tree"](ctx, host="elasticsearch")
+    assert type(raised.value) is fault, raised.value
+    assert "service says no" in str(raised.value)
+
+
+def test_1391_o5_host_state_quotes_what_the_agent_names_into_one_path_segment(tmp_path, data_root):
+    """A host or user carrying `/` stays one path segment: the agent cannot steer the request
+    to another route of the service. #1391 O5 (the service's routes are its whole confinement)."""
+    from defender.integrations import host_state_adapter
+
+    route = "/hosts/web-1%2Faccounts%2Froot/accounts/x/authorized-keys"
+    with H.upstream() as up, _proxied(tmp_path, data_root, up, "host-state") as (ctx, _tap):
+        up.replies[route] = _json({"path": "/x", "keys": []})
+        host_state_adapter.VERBS["authorized-keys"](ctx, host="web-1/accounts/root", user="x")
+    assert [s.path for s in up.seen] == [route]

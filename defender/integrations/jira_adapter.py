@@ -24,7 +24,6 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
 
 from defender.kit.verbs import CaseComments, VerbContext
 from defender.integrations import _stub_transport as transport
-from defender.kit.access import HTTP_PROXY
 from defender.kit.faults import ConfigFault, TransportFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -46,11 +45,6 @@ _ADF_LINES = ("paragraph", "heading")
 def _jira_settings(tenant: TenantRecord) -> tuple[dict[str, str], bool]:
     """The system's config over the run's record and whether it is a Service Management project,
     or the `ConfigFault` for why the system is unusable."""
-    method = transport.record_entry(tenant, SYSTEM).get(f"{PREFIX}_TRANSPORT")
-    if method != HTTP_PROXY:
-        raise ConfigFault(
-            f"{PREFIX}_TRANSPORT={method!r}: the ready-made Jira adapter is reached only "
-            f"through the credential proxy — set {PREFIX}_TRANSPORT to {HTTP_PROXY!r}")
     config = transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
     value = config["SERVICE_DESK"]
     if value not in _SERVICE_DESK_VALUES:
