@@ -235,6 +235,8 @@ def render_runtime_headline(
 
 #: The cost bar's segment for the part of the run's total no request-log bar explains (#1377 S5).
 UNATTRIBUTED = "unattributed"
+#: The cost bar's segment for the close-time review's calls (#1377 A5).
+REVIEW = "review"
 
 
 def render_runtime_metrics(
@@ -247,6 +249,8 @@ def render_runtime_metrics(
 ) -> str:
     # The dict collapses repeated phase names into one bucket, in first-appearance order.
     bars = {ph: (attribution.get(ph) or {}).get("cost", 0.0) for ph in phase_order}
+    if totals.get("review_cost", 0.0) > 5e-7:
+        bars[REVIEW] = totals["review_cost"]
     if totals.get("unattributed", 0.0) > 5e-7:
         bars[UNATTRIBUTED] = totals["unattributed"]
     cost_bar = _phase_bar(bars, lambda v: f"${v:.3f}")
@@ -339,6 +343,11 @@ def _lead_summary(leads: list) -> str:
 RUNTIME_JS = read_text_utf8(ASSETS / "runtime.js")
 
 
+
+
+def result_total_is_null(results: list[dict]) -> bool:
+    """Whether the run file's result line carries a null total (its ledger could not be read)."""
+    return all(e.get("total_cost_usd") is None for e in results)
 
 
 def _stats(events: list[dict]) -> tuple[int, int, float]:
@@ -453,8 +462,12 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     events = read_jsonl_rows(RunPaths(run_dir).tool_trace)
     messages = load_messages(run_dir)
     _, n_tool_calls, result_total = _stats(events)
-    result_is_lower_limit = any(e.get("total_cost_is_lower_limit") is True
-                                for e in events if e.get("type") == "result")
+    results = [e for e in events if e.get("type") == "result"]
+    result_is_lower_limit = any(e.get("total_cost_is_lower_limit") is True for e in results)
+    # A result line from before #1377 has no mark key and a MAIN-only total, so it is no headline; one with the key and a
+    # null total is a run whose ledger could not be read: its cost is unknown, never 0.
+    ledger_total = bool(results) and all("total_cost_is_lower_limit" in e for e in results)
+    cost_unknown = ledger_total and result_total_is_null(results)
     report = parse_report(run_dir)
     leads = sorted(lead_repository.joined(run_dir), key=_lead_sort_key)
 
@@ -504,13 +517,16 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     ):
         for model, cost in by_model_costs.items():
             by_model[model] = by_model.get(model, 0.0) + cost
-    # The headline is the run file's total alone (#1377 S5): it is the whole run's spend, review
-    # included, from the spend ledger. The bars come from the request log; what they do not explain
-    # is shown as its own "unattributed" segment (never below 0), so the parts add up to the headline.
+    # The headline is the run file's total (#1377 S5): the whole run's spend, review included, from the spend ledger.
+    # The bars come from the request log, review its own segment; what they do not explain is the "unattributed"
+    # segment (never below 0), so the parts add up to the headline. A pre-#1377 line (MAIN-only total) is no headline:
+    # the bars and the review are, with nothing unattributed.
+    bars_total = main_total + gather_total + review_total
     totals = {
-        "cost": result_total,
-        "lower_limit": result_is_lower_limit,
-        "unattributed": max(0.0, result_total - (main_total + gather_total) - review_total),
+        "cost": result_total if ledger_total else bars_total,
+        "cost_unknown": cost_unknown,
+        "lower_limit": result_is_lower_limit and not cost_unknown,
+        "unattributed": max(0.0, result_total - bars_total) if ledger_total and not cost_unknown else 0.0,
         "review_cost": review_total,
         "wall_ms": wall_ms,
         "by_model": by_model,
@@ -527,14 +543,11 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
     review_html, n_reviewed = render_review_gate(run_dir, report, review_by_lens)
 
-    # The review is a named term inside the total, so an operator can separate it.
-    review_note = (
-        f'<span class="ts-review">(incl review ${totals["review_cost"]:.4f})</span>'
-        if totals["review_cost"] else ""
-    )
+    headline_cost = ("unknown" if totals["cost_unknown"]
+                     else f'{"at least " if totals.get("lower_limit") else ""}${totals.get("cost", 0.0):.4f}')
     stats_html = (
-        f'<span class="ts-cost">{"at least " if totals.get("lower_limit") else ""}${totals.get("cost", 0.0):.4f}</span>'
-        f"{review_note}"
+        f'<span class="ts-cost">{headline_cost}</span>'
+
         f'<span class="ts-sep">·</span>'
         f'<span class="ts-wall">{fmt_duration(wall_ms)}</span>'
     )

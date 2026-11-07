@@ -145,10 +145,20 @@ def stored_alert(row: AlertRow) -> StoredAlert:
         description=row.description, raw=bytes(row.raw))
 
 
+def reads_at_least(row: InvestigationRow) -> bool:
+    """Whether a record's cost reads "at least": the holder's stored mark, or a row that ended after it started with a cost
+    and no final figure from its holder (cancelled or taken over mid-run, a copy that may be short). Derived on read, so
+    ending a row never writes the mark and rows from before the column read the same way (#1377 B1, B2, B3)."""
+    if row.cost_is_lower_limit:
+        return True
+    return (row.stage in TERMINAL and row.started_at is not None and row.accounting_written_at is None
+            and row.cost_usd is not None)
+
+
 def investigation_record(row: InvestigationRow) -> InvestigationRecord:
     return InvestigationRecord(
         investigation_id=row.id, tenant_id=row.tenant_id, alert_id=row.alert_id, request_key=row.request_key,
         attempt=row.attempt, stage=row.stage, created_at=row.created_at, started_at=row.started_at,
         finished_at=row.finished_at, disposition=row.disposition, cost_usd=row.cost_usd,
-        cost_is_lower_limit=row.cost_is_lower_limit,
+        cost_is_lower_limit=reads_at_least(row),
         knowledge=row.knowledge, failure_reason=row.failure_reason, failure_message=row.failure_message)

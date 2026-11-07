@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator, Callable, Collection, Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import and_, case, delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy import text as sql
 from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, InterfaceError, InternalError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
@@ -107,15 +107,6 @@ def _refuse_unstorable_text(**fields: str) -> None:
     for name, text in fields.items():
         if not postgres_can_hold(text):
             raise UnstorableText(f"{name} holds a NUL or a lone surrogate, which PostgreSQL text cannot hold")
-
-
-def _ended_without_its_figure() -> Any:
-    """The mark a write that ends a row gives it when the row's holder has not yet written its final
-    figure: a running row with a copied cost becomes "at least" (the copy may be short); any other
-    row keeps its mark (#1377 S2). Read against the row as it was before the update."""
-    return case((and_(InvestigationRow.stage == "running", InvestigationRow.accounting_written_at.is_(None),
-                      InvestigationRow.cost_usd.is_not(None)), True),
-                else_=InvestigationRow.cost_is_lower_limit)
 
 
 class JobStore:
@@ -336,8 +327,7 @@ class JobStore:
                 update(InvestigationRow).where(
                     InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id,
                     InvestigationRow.stage.in_(LIVE))
-                .values(stage="aborted", failure_reason="cancelled", finished_at=self._clock(),
-                        cost_is_lower_limit=_ended_without_its_figure())
+                .values(stage="aborted", failure_reason="cancelled", finished_at=self._clock())
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             if row is None:
                 current = await self._row(s, tenant_id, investigation_id)
@@ -510,8 +500,6 @@ class JobStore:
                        else "its worker stopped renewing its lease")
                 lapsed.failure_message = why + ("; the request used all its attempts" if capped else "; it is retried")
                 lapsed.finished_at = self._clock()
-                if lapsed.accounting_written_at is None and lapsed.cost_usd is not None:
-                    lapsed.cost_is_lower_limit = True  # a lost worker's last copy: at least (#1377 S2)
                 retry_id = None
                 if not capped:
                     retry_id = InvestigationId.mint()

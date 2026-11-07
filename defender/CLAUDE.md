@@ -52,7 +52,9 @@ response any agent of the run received, review calls included), so `cost_usd` an
 `total_cost_usd` count what the run really paid. Old run files keep their main-only totals: totals before
 and after this change are not comparable. Run migrations (revision `0008_cost_lower_limit`): the API's
 investigations gain `cost_is_lower_limit`, true when `cost_usd` is "at least" that much (a spend write
-failed, or the run was killed before it reported). Every existing row reads exact.
+failed, or the run was killed before it reported). The mark is worked out when a record is read: a row that
+ended after it started, with a cost and no final figure from its worker, reads "at least" (this includes such rows
+already in the database); every other existing row reads exact.
 
 ## Upgrade from before #1412
 

@@ -87,7 +87,8 @@ class Launched:
         return RunId.parse(self.record.investigation_id)
 
 
-_JOB_END_KEYS = frozenset({"setup", "box", "report_committed", "scrub_verified", "cut_short", "spend_write_failed"})
+_JOB_END_KEYS_BEFORE_1377 = frozenset({"setup", "box", "report_committed", "scrub_verified", "cut_short"})
+_JOB_END_KEYS = _JOB_END_KEYS_BEFORE_1377 | {"spend_write_failed"}
 
 
 @dataclass(frozen=True)
@@ -119,8 +120,9 @@ class JobEnd:
         `cut_short` must be JSON null or a vocabulary word exactly, so no child's text can reach
         the fixed job message that names it."""
         obj, unreadable = _io.load_json_artifact(text)
-        if unreadable is not None or not isinstance(obj, dict) or set(obj) != _JOB_END_KEYS:
+        if unreadable is not None or not isinstance(obj, dict) or set(obj) not in (_JOB_END_KEYS, _JOB_END_KEYS_BEFORE_1377):
             return None
+        obj = {"spend_write_failed": False, **obj}  # a record from before #1377 names no spend fact: none failed
         setup, box = obj["setup"], obj["box"]
         committed, verified, cut_short = obj["report_committed"], obj["scrub_verified"], obj["cut_short"]
         spend_failed = obj["spend_write_failed"]

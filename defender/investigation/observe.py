@@ -432,7 +432,7 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, r
     spend ledger's rows for `run_id` (#1377 S5): every response the run received (main, every
     lead's last one, the review), never the saved conversation. `num_turns` stays MAIN's turns,
     which run health reads. The total is marked a lower limit when a spend write failed. A ledger
-    that cannot be read raises, and the caller writes no trace (the job's cost is unknown then too).
+    that cannot be read leaves the events whole with a null total and usage (the job's cost is unknown then too).
     """
     from defender.records import session_store as ss  # local import — avoids a cycle at module load
 
@@ -456,19 +456,26 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, r
                 events.append(user)
 
     responses = [m for m in messages if isinstance(m, ModelResponse)]
-    totals = dict.fromkeys(ss.SPEND_COUNTS, 0)
-    total_cost = 0.0
-    for spent in ss.run_spend(store, run_id):  # an unreadable ledger raises: no total, as the job's cost is unknown
-        for k in ss.SPEND_COUNTS:
-            totals[k] += spent.usage.get(k, 0)
-        total_cost += usage_cost(spent.model, spent.usage)
+    total_cost: float | None
+    totals: dict[str, int] | None
+    try:
+        counts = dict.fromkeys(ss.SPEND_COUNTS, 0)
+        spend = 0.0
+        for spent in ss.run_spend(store, run_id):
+            for k in ss.SPEND_COUNTS:
+                counts[k] += spent.usage.get(k, 0)
+            spend += usage_cost(spent.model, spent.usage)
+        total_cost, totals = spend, counts
+    except Exception as e:  # noqa: BLE001 — an unreadable ledger leaves the events whole and the total unknown
+        _logger.error(f"the spend ledger could not be read for the run file ({e!r}); its total is left null")
+        total_cost = totals = None
 
     events.append({
         "type": "result",
         "duration_ms": round(wall_ms),
         "duration_api_ms": round(wall_ms),
-        "total_cost_usd": round(total_cost, 6),
-        "total_cost_is_lower_limit": spend_write_failed,
+        "total_cost_usd": None if total_cost is None else round(total_cost, 6),
+        "total_cost_is_lower_limit": spend_write_failed and total_cost is not None,
         "num_turns": len(responses),
         "usage": totals,
     })
