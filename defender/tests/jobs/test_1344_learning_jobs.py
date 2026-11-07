@@ -129,9 +129,9 @@ def post_child(world: dict, name: str = "post", **kw) -> PostStepChild:
 
 def learning_worker(world: dict, store, *, job, post, inv=None, **kw):
     """A worker with one learning slot (a bare `Worker` has none) and both commands."""
-    inv = inv if inv is not None else _child(world)
+    investigations = inv if inv is not None else _child(world)
     kw.setdefault("learning_slots", 1)
-    return _worker(world, store, inv, learning_argv=job, post_step_argv=post, **kw)
+    return _worker(world, store, investigations, learning_argv=job, post_step_argv=post, **kw)
 
 
 async def completed_investigation(store, *, ticket: str, key: str = "k1", tenant: str = T1) -> str:
@@ -699,7 +699,7 @@ async def test_o5_a_job_queued_while_every_slot_is_busy_takes_the_first_freed_sl
 async def test_o5_jobs_investigations_and_post_steps_together_never_run_in_more_than_the_slots(world):
     """slots=2, L=1, two jobs and two investigations queued, post-steps held: the children alive at once, post-steps counted, never pass 2. (O5, O8)"""
     release = world["tmp"] / "release"
-    jobs = ScriptedChild(world["tmp"] / "jobs", world["runs"], files={END: learning_end("completed", findings=1)})
+    jobs = JobChild(world["tmp"] / "jobs", world["runs"], files={END: learning_end("completed", findings=1)})
     post = PostStepChild(world["tmp"] / "post", world["runs"], dsn=world["dsn"], wait_for=release)
     invs = ScriptedChild(world["tmp"] / "invs", world["runs"], wait_for=release)
     peaks: list[int] = []

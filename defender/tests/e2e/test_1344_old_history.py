@@ -22,7 +22,6 @@ pytestmark = pytest.mark.e2e
 
 DEFENDER = Path(__file__).resolve().parents[2]
 FIXTURE = DEFENDER / "tests" / "fixtures" / "e2e" / "old-history-d59e24acb.tar.gz"
-ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_flow_entry1344.py"
 GATHER_ROW = 10
 LEAD = "l-001"
 
@@ -172,8 +171,11 @@ def _launch_over_the_old_run(tmp_path: Path, **seams):
     est = S.estate(tmp_path, systems=(*S.SYSTEMS, "elastic"))
     tenant = est.place()
     old = Old(tmp_path, S.location_path(tenant.runs))
-    for line in (old.run_dir / "executed_queries.jsonl").read_text(encoding="utf-8").splitlines():
-        row = json.loads(line)  # the live estate answers what the old run was answered
+    from defender._io import read_jsonl_rows
+
+    executed = read_jsonl_rows(old.run_dir / "executed_queries.jsonl")
+    assert executed, "premise: the old run recorded the queries it was answered"
+    for row in executed:  # the live estate answers what the old run was answered
         est.answer(row["system"], row["verb"], row["params"],
                    json.loads((old.run_dir / row["payload_path"]).read_text(encoding="utf-8")))
     old.stamp(tenant.id)
@@ -229,9 +231,11 @@ def test_the_fork_candidates_of_the_old_run_are_its_one_admitted_gather(tmp_path
 def _family_child(tmp_path: Path) -> tuple[Old, dict | None, subprocess.CompletedProcess]:
     """The real learning job entry (`_flow_entry1344.py family`: scripted questioner, oracle, verifier, judge; siblings as
     `run.main`) over the old run planted in a tenant's runs repository. Returns the end record it left, if any."""
+    from defender.tests.e2e.test_1344_learning_replay import entry_in_a_code_copy
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    entry = entry_in_a_code_copy(tmp_path / "code")
     with B.run_tenant(tmp_path, root) as tenant:
         runs = root / tenant.tenant_id / "runs"
         (root / tenant.tenant_id / "learning").mkdir(exist_ok=True)
@@ -240,9 +244,9 @@ def _family_child(tmp_path: Path) -> tuple[Old, dict | None, subprocess.Complete
         job = "9f1c2d3e-0000-4000-8000-000000001344"
         marks = tmp_path / "marks"
         done = subprocess.run(
-            [sys.executable, str(ENTRY), "family", tenant.commit, str(marks / "family"), "--job", job, "--tenant",
+            [sys.executable, str(entry), "family", tenant.commit, str(marks / "family"), "--job", job, "--tenant",
              tenant.tenant_id, "--source", old.name, "--parent-pid", str(os.getpid())],
-            env={**os.environ, "DEFENDER_DATA_ROOT": str(root)}, capture_output=True, text=True, timeout=600, check=False)
+            env={**os.environ, "DEFENDER_DATA_ROOT": str(root), "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, text=True, timeout=600, check=False)
         record = runs / f"{job}.learning-end.json"
         return old, (json.loads(record.read_text(encoding="utf-8")) if record.is_file() else None), done
 

@@ -18,6 +18,7 @@ from defender.tenancy._tenant import requested_tenant
 from defender.tests.learning.branch.test_1344_job_lane import (
     _SIBLING, _WORKER, _await_pid, _gone, _running, child_env, sink_files)
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
+from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._locations_1210 import fixture_data_root
@@ -75,11 +76,14 @@ def _record(ep: Path, job: str) -> dict:
 
 
 def _post_step(ep: Path, job: str, pending: list[str], *, tick=None) -> None:
+    """The real post-step, its tenant admitted through the host acceptance from records handed in as `directory=`,
+    as the launcher and the job entry take theirs."""
     from defender.learning.branch import post_step
 
     _data_root, tenant_id = J.episode_location(ep)
     argv = ["--job", job, "--tenant", tenant_id, "--pending", *pending, "--parent-pid", str(os.getppid())]
-    post_step.main(argv, author_tick=tick if tick is not None else (lambda *_a, **_k: 0))
+    post_step.main(argv, author_tick=tick if tick is not None else (lambda *_a, **_k: 0),
+                   directory=T.launcher_directory(tenant_id))
 
 
 def test_o8_the_post_step_publishes_then_runs_the_drain_gate_and_records_it(tmp_path):
@@ -204,6 +208,7 @@ _POST_STEP = textwrap.dedent("""
     import os, sys
     from defender.learning.branch import post_step
     from defender.learning.branch.cli import _default_spawn
+    from defender.tests.support.learning.branch import _triplet_947 as T
 
     tenant, pid_file, sibling = sys.argv[1:4]
 
@@ -211,7 +216,7 @@ _POST_STEP = textwrap.dedent("""
         return _default_spawn([sys.executable, "-c", sibling, pid_file], env=dict(os.environ))
 
     post_step.main(["--job", sys.argv[4], "--tenant", tenant, "--pending", "--parent-pid", str(os.getppid())],
-                   author_tick=tick)
+                   author_tick=tick, directory=T.launcher_directory(tenant))
 """)
 
 

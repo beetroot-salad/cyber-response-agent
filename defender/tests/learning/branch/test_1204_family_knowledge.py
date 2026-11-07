@@ -279,7 +279,9 @@ WAIVED: dict[str, tuple[dict, dict[str, dict], bool, list[str]]] = {
     "unknown-tree-sibling": (
         T.provenance_record(), {"c": {"dirty": None, "unavailable": T.GIT_STATUS_FAILED}},
         True, ["dirt"]),
-    "dirty-source": (T.provenance_record(dirty=True), {}, True, ["dirt"]),
+    # #1344 r5 (the family check): the source's cleanliness is no longer judged, so its dirt is nothing to waive.
+    "dirty-source": (T.provenance_record(dirty=True), {}, True, []),
+    "dirty-source-flag-off": (T.provenance_record(dirty=True), {}, False, []),
     "pre-1204-source": (T.provenance_record(knowledge=T.NO_KNOWLEDGE_KEY), {}, True,
                         ["knowledge"]),
     "unversioned-sibling": (T.provenance_record(), {"b": {"knowledge": "unversioned"}}, True,
@@ -305,11 +307,12 @@ def test_1204_the_family_stamp_records_which_fault_kinds_the_override_waived(tmp
 @pytest.mark.parametrize("dirty_source", [False, True], ids=["clean-code", "dirty-code"])
 def test_1204_a_launch_that_waives_a_pre_1204_sources_knowledge_records_it_as_knowledge(
         tmp_path, dirty_source):
-    """The same record end to end through the launcher."""
+    """The same record end to end through the launcher. The source's dirt is not judged (#1344 r5), so only its
+    knowledge is waived; the family stamp still keeps the source's whole record, dirt included."""
     launch = A._prepare(tmp_path)
     A._restamp(launch.src, knowledge=T.NO_KNOWLEDGE_KEY, dirty=dirty_source)
     stamp = A._accepted(launch, "--allow-dirty")
-    assert stamp["waived"] == (["dirt", "knowledge"] if dirty_source else ["knowledge"])
+    assert stamp["waived"] == ["knowledge"]
     assert stamp["source"]["dirty"] is dirty_source
     assert stamp["allow_dirty"] is True
     # The siblings name the published tenant's real commit.
@@ -354,13 +357,15 @@ def test_1204_agreed_knowledge_is_null_when_no_sibling_names_a_commit(tmp_path, 
     assert stamp["waived"] == ["knowledge"]
 
 
-#: The design's classification of every stamp field.
+#: The design's classification of every stamp field (#1204 D4, as amended by #1344 r5 "The family check": `commit` and
+#: `scope` move from matching the source to siblings matching each other, `constant`; `knowledge` stays anchored; the
+#: stamp's new `origin` is recorded, never compared).
 D4 = {
-    "commit": "anchored", "scope": "anchored", "knowledge": "anchored",
+    "commit": "constant", "scope": "constant", "knowledge": "anchored",
     "model": "constant",
     "dirty": "dedicated", "tenant_id": "dedicated",
     "dirty_paths": "informational", "dirty_path_count": "informational",
-    "unavailable": "informational", "alert_label": "informational",
+    "unavailable": "informational", "alert_label": "informational", "origin": "informational",
     # Where the run's knowledge came from is recorded, never compared; `knowledge` stays the
     # anchored commit.
     "knowledge_source": "informational",

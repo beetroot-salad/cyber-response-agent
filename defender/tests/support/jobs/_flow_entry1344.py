@@ -30,6 +30,8 @@ QUERY = RH.Turn(tool_calls=[("query", {"system": "elastic", "verb": "query",
                                        "params": {"native_query": "user.name:dev.dana"}})])
 DOCS = [hit(ts="2026-05-25T15:20:00.000Z")]
 DISPOSITION = "malicious"
+#: The credential proxy's address in these children: nothing answers there (the conftest's own).
+PROXY_URL = "http://proxy.invalid"
 
 
 def main_script(*, gathers: bool = True) -> list:
@@ -66,40 +68,73 @@ def investigate(*, gathers: bool = True) -> int:
 
 
 def family() -> int:
+    from defender import box as box_mod
     from defender.learning.branch import job_entry
     from defender.tests.e2e import _1255_twin as TWIN
-    from defender.tests.learning.branch.test_947_triplet_launcher import _BASE
+    from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
     from defender.tests.support.learning.branch import _triplet_947 as T
     from defender.tests.support.learning.judge import _judge_921 as J
 
-    tenant = argv[argv.index("--tenant") + 1]
+    tenant, source = argv[argv.index("--tenant") + 1], argv[argv.index("--source") + 1]
     runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
-    estate = S.estate(marks / "estate")
 
     def sibling(sibling_argv, *, env=None, **_kw) -> int:
         """A real sibling's `run.py --tenant T --episode E --world W`, in this process, MAIN continuing the script."""
         recording = TWIN.Recording(sibling_argv[sibling_argv.index("--world") + 1])
-        TWIN.run_main(sibling_argv[2:], recording, main_turns=after_the_gather(),
-                      clock=TWIN.SteppingClock(TWIN.ARM_CLOCK_START))
+        # No Docker daemon here: the sibling's box start fails and the operator's opt-out, set for this sibling
+        # alone, turns it into production's unboxed mode (as `_replay_harness.production_unboxed_box` does).
+        # Its tree is walked by the real reap scan, so the family's verification can archive it.
+        with RH._unsandboxed_allowed():
+            TWIN.run_main(sibling_argv[2:], recording, main_turns=after_the_gather(),
+                          clock=TWIN.SteppingClock(TWIN.ARM_CLOCK_START), scrub=box_mod.scrub)
         (marks / f"sibling-{recording.label}").write_text(str(recording.exit_code), encoding="utf-8")
         return recording.exit_code if isinstance(recording.exit_code, int) else 1
 
-    finding = J.finding_doc(bucket="lead-quality", subject="defender", topic="the lead was never revisited")
-    world = J.reply_doc(findings=[finding])
-    world.update(bucket="lead-quality", systems=["idp"])
-    judge = J.scripted_judge(default=S.as_reply_text(world), family_default=S.as_reply_text(J.family_reply()))
+    episode = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "episodes" / argv[argv.index("--job") + 1]
+
+    def judge(*a, **kw) -> str:
+        """The scripted judge. Its finding contrasts the worlds' reports by the world ids this launch minted, so the
+        reply is written when the judge is first asked (a pointer naming no archived world is dropped unresolved)."""
+        if not scripted:
+            evidence = [f"worlds/{T.world_id(episode, label)}/report.md" for label in ("a", "b", "c")]
+            finding = J.finding_doc(bucket="lead-quality", subject="defender", topic="the lead was never revisited",
+                                    evidence=evidence)
+            world = J.reply_doc(findings=[finding])
+            world.update(bucket="lead-quality", systems=["idp"])
+            scripted.append(J.scripted_judge(default=S.as_reply_text(world),
+                                             family_default=S.as_reply_text(J.family_reply())))
+        return scripted[0](*a, **kw)
+
+    scripted: list = []
+    # The run tenant's own systems: its gather grant names the product adapters' verbs, so the launcher reads its own
+    # roster (no `roster=`). Its elastic is reached through the credential proxy (#1391), so pre-flight signs a read
+    # token: the tenant's records hold a live generation with a sign login, as the siblings' and the investigation's
+    # do (`directory_for_argv`), the signature is a stand-in's, and the proxy's address is one nothing answers at
+    # (`PROXY_URL`). Every call the source made is in its capture, so pre-flight reads nothing live through it.
     seams = dict(questioner=S.questioner_for(), preflight=S.no_preflight, live_tree=T.source_capture(),
-                 roster=estate.roster(), judge=judge, oracle=S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)).model,
-                 verifier=S.passing_verifier().model, directory=T.launcher_directory(tenant), spawn=sibling)
+                 judge=judge, oracle=S.oracle(then=S.submit(_captured(runs, source), S.EMPTY_CLAIM)).model,
+                 verifier=S.passing_verifier().model, directory=directory_for_argv(argv), spawn=sibling,
+                 signer=FakeSigner("flow1344"), proxy_url=PROXY_URL)
     (marks / "runs").write_text(str(runs), encoding="utf-8")
     if os.environ.get("FLOW_DAMAGE") == "store-version":
-        _store_from_a_newer_format(runs, argv[argv.index("--source") + 1])
+        _store_from_a_newer_format(runs, source)
     try:
         job_entry.main(argv, **seams)
     except SystemExit as stop:
         return stop.code if isinstance(stop.code, int) else 1
     return 0
+
+
+def _captured(runs: Path, source: str) -> object:
+    """What the source's elastic answered its lead (every call it made answered these rows), as the oracle's base
+    submission: each world's served answer keeps the shape the source was answered in. `None` when the source has no
+    such capture (a run the family step refuses before pre-flight)."""
+    import json
+
+    raw = runs / source / "gather_raw" / LEAD / "0.json"
+    return json.loads(raw.read_text(encoding="utf-8")) if raw.is_file() else None
 
 
 def _store_from_a_newer_format(runs: Path, investigation: str) -> None:

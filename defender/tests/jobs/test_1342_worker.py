@@ -1936,6 +1936,8 @@ async def test_o7_the_same_id_claimed_twice_by_one_worker_gets_two_different_tok
             await worker.drain()
             assert row(world["dsn"], inv)["stage"] == "completed", "premise: the claim ran"
             tokens.append(_claim_token(world, inv))
+            # A completed investigation queued its learning job (#1344 O1), which refers to it: rows cleared child first.
+            execute(world["dsn"], "DELETE FROM jobs.learning_jobs WHERE investigation_id = %s", (inv,))
             execute(world["dsn"], "DELETE FROM jobs.investigations WHERE id = %s", (inv,))
             for path in world["runs"].glob(f"{inv}*"):
                 shutil.rmtree(path) if path.is_dir() else path.unlink()

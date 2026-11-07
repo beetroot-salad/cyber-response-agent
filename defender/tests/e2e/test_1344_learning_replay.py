@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -24,7 +25,21 @@ from defender.tests.support.shared._postgres1339 import execute, migrated_databa
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.e2e]
 
-ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_flow_entry1344.py"
+ENTRY = Path("defender") / "tests" / "support" / "jobs" / "_flow_entry1344.py"
+#: The build commit the children's code copy is marked with (any non-empty stamp: siblings must agree with each other).
+COPY_COMMIT = "1344" + "c" * 36
+
+
+def entry_in_a_code_copy(home: Path) -> Path:
+    """`_flow_entry1344.py` inside a code copy of this checkout made by the worker's own start step
+    (`refresh_code_copy`), as a deployed worker runs every child: a run started from it stamps the copy's marker
+    (clean, `code_copy`), never the live checkout, whose state is the developer's. The copy carries the tests, since it
+    copies the whole `defender/`."""
+    from defender.worker import refresh_code_copy
+
+    home.mkdir(parents=True, exist_ok=True)
+    copy = refresh_code_copy(home, source=DEFENDER.parent, environ={"DEFENDER_BUILD_COMMIT": COPY_COMMIT})
+    return copy / ENTRY
 JOB_COLUMNS = ("id", "status", "reason", "message", "fork_message_id", "findings_count", "publish_state")
 
 
@@ -74,6 +89,8 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, *, investigate_mod
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")  # the copy is read-only, as the worker's children see it
+    entry = entry_in_a_code_copy(tmp_path / "code")
     if damage is not None:
         monkeypatch.setenv("FLOW_DAMAGE", damage)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
@@ -81,13 +98,14 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, *, investigate_mod
     with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
+        (root / t.tenant_id / "learning").mkdir(exist_ok=True)  # the host's prepare step makes the learning root
         flow: dict = {"tenant": t.tenant_id, "root": root, "marks": marks}
 
         def tail(launch, source: str) -> list[str]:
             return ["--job", source, "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 
         def investigation(launch) -> list[str]:
-            return [sys.executable, str(ENTRY), investigate_mode, t.commit, str(marks / "investigate"),
+            return [sys.executable, str(entry), investigate_mode, t.commit, str(marks / "investigate"),
                     *tail(launch, launch.investigation_id)]
 
         async with job_store(migrated_database) as store:
@@ -96,18 +114,19 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, *, investigate_mod
             flow["investigation"] = inv.investigation_id
 
             def learning(launch) -> list[str]:
-                return [sys.executable, str(ENTRY), "family", t.commit, str(marks / "family"), "--job", launch.job_id,
+                return [sys.executable, str(entry), "family", t.commit, str(marks / "family"), "--job", launch.job_id,
                         "--tenant", launch.tenant_id, "--source", inv.investigation_id, "--parent-pid", str(launch.parent_pid)]
 
             def post_step(launch) -> list[str]:
-                return [sys.executable, str(ENTRY), "post-step", t.commit, str(marks / "post-step"), "--job", launch.job_id,
+                return [sys.executable, str(entry), "post-step", t.commit, str(marks / "post-step"), "--job", launch.job_id,
                         "--tenant", launch.tenant_id, "--pending", *launch.pending_job_ids,
                         "--parent-pid", str(launch.parent_pid)]
 
             worker = make_worker(store, root, investigation, containers=StandInContainers(tmp_path / "containers"),
                                  slots=3, learning_slots=1, learning_argv=learning, post_step_argv=post_step)
             await worker.drain()
-        flow["gathers"] = _admitted_gathers(t.tenant_id, inv.investigation_id)
+        if damage is None:  # a damaged store is one current code refuses to open, by design
+            flow["gathers"] = _admitted_gathers(t.tenant_id, inv.investigation_id)
     return flow
 
 

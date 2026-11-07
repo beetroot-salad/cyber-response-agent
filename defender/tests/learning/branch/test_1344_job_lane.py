@@ -119,16 +119,16 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     asking = questioner if questioner is not None else Watch(*authored.replies)
     runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
     asking.record = runs / f"{job}.learning-progress.json"
-    spawn = spawn if spawn is not None else J.FakeSibling()
-    judge = judge if judge is not None else WatchJudge(
+    siblings = spawn if spawn is not None else J.FakeSibling()
+    grading = judge if judge is not None else WatchJudge(
         default=J.as_reply_text(J.reply_doc(bucket="none", systems=[])))
-    if isinstance(judge, WatchJudge):
-        judge.record = asking.record
+    if isinstance(grading, WatchJudge):
+        grading.record = asking.record
     seams = dict(
         questioner=asking, preflight=preflight or S.no_preflight, live_tree=live_tree or T.source_capture(),
-        roster=est.roster(), judge=judge,
+        roster=est.roster(), judge=grading,
         oracle=(oracle or S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM))).model,
-        verifier=S.passing_verifier().model, directory=T.launcher_directory(tenant), spawn=spawn,
+        verifier=S.passing_verifier().model, directory=T.launcher_directory(tenant), spawn=siblings,
         candidates=candidates if candidates is not None else choose(T.BRANCH_MESSAGE_ID))
     if grade is not None:
         seams["grade"] = grade
@@ -145,8 +145,8 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     finally:
         signal.signal(signal.SIGTERM, previous)
     return Ran(end=_read_json(runs / f"{job}.learning-end.json"),
-               progress=_read_json(runs / f"{job}.learning-progress.json"), questioner=asking, spawn=spawn,
-               judge=judge, ep=Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "episodes" / job, src=src,
+               progress=_read_json(runs / f"{job}.learning-progress.json"), questioner=asking, spawn=siblings,
+               judge=grading, ep=Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "episodes" / job, src=src,
                tenant=tenant, exit=outcome)
 
 
@@ -372,7 +372,12 @@ def test_o4_one_failed_sibling_does_not_stop_a_jobs_family(tmp_path):
         questioner=S.questioner_for(_five_worlds()))
     assert spawn.worlds == ["a", "b", "c", "d", "e"], (rc, message, spawn.worlds)
     assert S.read_world_record(ep, "b")["reason"] == S.REASON_DID_NOT_FINISH
-    assert S.read_world_record(ep, "d") is None
+    # Started and exited 0: verification gives each finished world a record of its own (this spawn leaves no run
+    # folder, so `not archived`), and it is never the never-started record the stop above leaves.
+    for label in ("c", "d", "e"):
+        record = S.read_world_record(ep, label)
+        assert record is not None, f"world {label} finished and was left with no record"
+        assert record["reason"] != S.REASON_DID_NOT_FINISH, (label, record)
 
 
 # --- O13: what the siblings cost ---------------------------------------------------------------------
@@ -530,15 +535,20 @@ def test_d5_a_jobs_findings_publish_once_even_after_an_author_consumed_them(tmp_
     ep, _new = _graded_episode(tmp_path, monkeypatch, job_lane=True)
     from defender.learning.judge.enqueue import publish_episode_findings
 
+    def publish() -> None:
+        # The episode reached as the post-step reaches it: by id, through its tenant's runs repository.
+        with J.episode_runs_for(ep).episode_files(ep.name) as episode:
+            publish_episode_findings(episode, state=state)
+
     state = env_state()
-    publish_episode_findings(ep, state=state)
+    publish()
     rows = state.rows(FINDINGS)
     assert rows, "the episode's findings never reached the queue"
-    publish_episode_findings(ep, state=state)
+    publish()
     assert state.rows(FINDINGS) == rows, "a crash's republish doubled the queue"
 
     state.rotate(FINDINGS, [], rows, None)
-    publish_episode_findings(ep, state=state)
+    publish()
     assert state.rows(FINDINGS) == [], "a consumed finding came back"
 
 
@@ -600,7 +610,9 @@ _JOB_ENTRY = textwrap.dedent("""
     import sys
     from pathlib import Path
     from defender.tests.learning.branch.test_1344_job_lane import RealChild, run_entry
+    from defender.tests.support.learning.branch import _triplet_947
 
+    _triplet_947.PLANT_RECORDS = True  # as tests/conftest.py's autouse fixture does in-process
     run_entry(Path(sys.argv[1]), spawn=RealChild(sys.argv[2]))
 """)
 

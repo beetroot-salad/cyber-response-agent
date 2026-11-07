@@ -124,7 +124,7 @@ def test_a_judge_verdict_that_grades_nothing_is_still_completed_with_the_word_in
     end = _ended(ran, "completed", None)
     assert end["findings_count"] == 0
     assert verdict in (end["message"] or "")
-    assert ran.judge.calls == [], "a verdict that grades nothing still bought a judge call"
+    assert ran.judge.calls == 0, "a verdict that grades nothing still bought a judge call"
 
 
 # --- skipped ------------------------------------------------------------------------------------------
@@ -190,7 +190,7 @@ def test_a_failed_control_ends_failed_control_failed_and_no_other_sibling_starts
     ran = run_entry(tmp_path, spawn=spawn)
     assert _failed_with(ran, "failed", "control_failed")
     assert spawn.worlds == ["a"]
-    assert ran.judge.calls == []
+    assert ran.judge.calls == 0
 
 
 def test_knowledge_the_tenant_cannot_pin_ends_failed_launch_refused(tmp_path):
@@ -388,11 +388,12 @@ def test_a_sigterm_before_the_judge_returns_records_stopped_so_a_stop_never_skip
     if seam in ("control", "control killed by the stop"):
         assert ran.spawn.worlds == ["a"], "a sibling started after the stop"
     if seam == "sibling b":
-        assert ran.spawn.worlds == ["a"]
+        # The stop lands inside b's own launch, so b was already started; c never is.
+        assert ran.spawn.worlds == ["a", "b"], "a sibling started after the stop"
     if seam in ("candidates", "role preflight", "questioner", "replay preflight"):
         assert ran.spawn.launches == [], "a sibling started after the stop"
     if seam != "judge" and seam != "judge killed by the stop":
-        assert ran.judge.calls == [], "the judge was bought after the stop"
+        assert ran.judge.calls == 0, "the judge was bought after the stop"
 
 
 def test_a_sigterm_while_no_fork_point_is_being_decided_ends_skipped_or_stopped_never_failed(tmp_path):
@@ -411,6 +412,9 @@ _LATE_STOP = textwrap.dedent("""
     from pathlib import Path
     from defender.learning.judge import grade_episode
     from defender.tests.learning.branch.test_1344_job_lane import run_entry
+    from defender.tests.support.learning.branch import _triplet_947
+
+    _triplet_947.PLANT_RECORDS = True  # as tests/conftest.py's autouse fixture does in-process
 
     def graded_then_a_late_stop(runs, episode_id, **kw):
         graded = grade_episode(runs, episode_id, **kw)
