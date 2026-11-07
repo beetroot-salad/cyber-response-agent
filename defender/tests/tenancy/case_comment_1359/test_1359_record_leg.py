@@ -22,6 +22,13 @@ def _world(tmp_path: Path, *, key: str | None = C.TICKET_KEY, **kw: Any) -> tupl
     return root, folder, C.plant_alert(tmp_path / "in", key=key)
 
 
+def _signer() -> Any:
+    """A signer that signs anything: run start mints the run's tokens for the proxied systems."""
+    from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
+
+    return FakeSigner()
+
+
 def _shim(tmp_path: Path, monkeypatch, *answers: dict[str, Any]) -> S.ProxyStandIn:
     """The credential proxy's stand-in (the case store is behind it), installed for the run."""
     return S.ProxyStandIn(tmp_path / "proxy", list(answers) or [S.answer('{"id": 1}', "201")]
@@ -32,7 +39,7 @@ def _run(tmp_path: Path, root: Path, alert: Path, *, summary: dict[str, Any] | N
          before: Any = None, page: bool = False) -> tuple[int | None, Any, Path]:
     rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359", summary=summary, before_lifecycle=before)
     seams = {} if page else {"visualize": rec.visualize}
-    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, **seams)
+    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(), **seams)
     return rc, refused, rec.run_dir_at
 
 
@@ -221,7 +228,7 @@ def test_run_start_a_crashing_case_check_is_a_receipt_that_names_no_host_root(tm
     (tree / "integrations" / "casesys_adapter.py").write_text(CRASHING_CASE_ADAPTER, encoding="utf-8")
     shim = _shim(tmp_path, monkeypatch)
     rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
-    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec,
+    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(),
                               visualize=rec.visualize,
                               roster=read_roster(tree / "integrations"))
 
@@ -380,7 +387,7 @@ def test_1374_an_unsettled_outcome_is_unknown_and_not_recorded(tmp_path, monkeyp
     root, _folder, alert = _world(tmp_path, case_system="casesys")
     _shim(tmp_path, monkeypatch)
     rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
-    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec,
+    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(),
                               visualize=rec.visualize, roster=_case_adapter(tmp_path, read_back))
     assert (refused, rc) == (None, 0), (refused, rc)
     got = S.receipt(rec.run_dir_at)
@@ -414,7 +421,7 @@ def test_1374_the_host_decides_from_what_the_connector_read(
     tag = _tag(tmp_path)
     texts = repr((text.replace("{tag}", tag),))
     rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
-    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec,
+    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(),
                               visualize=rec.visualize,
                               roster=_case_adapter(tmp_path, _read_answering(texts)))
     assert (refused, rc) == (None, 0), (refused, rc)
@@ -435,7 +442,7 @@ def test_1374_a_write_fault_reaches_the_receipt_cut_short(tmp_path, monkeypatch,
     root, _folder, alert = _world(tmp_path, case_system="casesys")
     _shim(tmp_path, monkeypatch)
     rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
-    S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, visualize=rec.visualize,
+    S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(), visualize=rec.visualize,
                 roster=_case_adapter(tmp_path, None, write_raises=raises))
     got = S.receipt(rec.run_dir_at)
     assert got["status"] == status, got
@@ -455,7 +462,7 @@ def test_1374_a_read_fault_reaches_the_receipt_cut_short(tmp_path, monkeypatch):
     _shim(tmp_path, monkeypatch)
     long = f"def {C.READBACK_ACTION}(ctx, *, key):\n    raise TransportFault('x' * 5000)\n"
     rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
-    S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, visualize=rec.visualize,
+    S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, signer=_signer(), visualize=rec.visualize,
                 roster=_case_adapter(tmp_path, long))
     got = S.receipt(rec.run_dir_at)
     assert got["status"] == C.UNKNOWN, got

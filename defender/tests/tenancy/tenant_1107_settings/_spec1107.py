@@ -642,7 +642,7 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
 
     try:
         return run_py().main(argv, **with_publish(
-            {"signer": FakeSigner(), **rec.seams(), **seams}, argv)), None
+            {**rec.seams(), **seams}, argv)), None
     except SystemExit as refused:
         return None, refused
 
