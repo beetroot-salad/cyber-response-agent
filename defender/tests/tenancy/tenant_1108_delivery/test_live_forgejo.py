@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from defender import _git
+from defender import _forgejo_api, _git
 from defender.learning.author.version_control.auth import ForgejoIdentity
 from defender.learning.author.version_control.forgejo import ForgeAddress, ForgejoForge
 from defender.learning.author.version_control.transport import GitTransport
@@ -108,11 +108,11 @@ def test_real_forgejo_accepts_scoped_short_lived_jwt(tmp_path):
             value[:-10] + "invalidsig",
         ]:
             response = client.get(
-                address.api, headers={"Authorization": "Bearer " + rejected}
+                address.origin + _forgejo_api.repository(address.full_name).path, headers={"Authorization": "Bearer " + rejected}
             )
             assert response.status_code == 401
         other = ForgeAddress.parse(config["other_origin"])
-        response = client.get(other.api, headers={"Authorization": "Bearer " + value})
+        response = client.get(other.origin + _forgejo_api.repository(other.full_name).path, headers={"Authorization": "Bearer " + value})
         assert response.status_code in {403, 404}
         with pytest.raises(_git.GitError):
             GitTransport(tmp_path, config["other_origin"], identity, 30).fetch()

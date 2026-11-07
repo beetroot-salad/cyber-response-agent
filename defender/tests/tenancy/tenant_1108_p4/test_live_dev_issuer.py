@@ -46,7 +46,7 @@ from pathlib import Path
 
 import pytest
 
-from defender import _git
+from defender import _forgejo_api, _git
 from defender._git import REPO_ROOT
 from defender.tests.tenancy.tenant_1108_p4._support import committed_blobs
 from defender.tests.support.sandbox._docker import daemon_reachable
@@ -315,7 +315,8 @@ def _delete_branch(lab: Lab, identity, branch: str) -> None:
 
     from defender.learning.author.version_control.forgejo import ForgeAddress
 
-    api = ForgeAddress.parse(lab.forge["origin"]).api
+    address = ForgeAddress.parse(lab.forge["origin"])
+    api = address.origin + _forgejo_api.repository(address.full_name).path
     response = httpx.delete(f"{api}/branches/{branch}", headers=_bearer(identity), timeout=30)
     assert response.status_code in (204, 404), f"cleanup of {branch}: {response.status_code}"
 
@@ -344,7 +345,8 @@ def test_one_lesson_pr_is_delivered_end_to_end_through_the_dev_issuer_O12():
     batch_id = "o12-" + uuid.uuid4().hex[:12]
     name = f"live-o12-probe-{batch_id}"
     batch = delivery.start_batch(batch_id, lanes=("lessons",))
-    api = ForgeAddress.parse(lab.forge["origin"]).api
+    address = ForgeAddress.parse(lab.forge["origin"])
+    api = address.origin + _forgejo_api.repository(address.full_name).path
     number = None
     try:
         lesson = batch.draft_root / "agent" / "lessons" / f"{name}.md"
