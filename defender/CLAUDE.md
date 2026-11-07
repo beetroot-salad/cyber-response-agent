@@ -68,16 +68,16 @@ host-state:
    `TICKET_KEY_PATTERN` for ticket; host-state reads none, so its file may be empty. Delete
    `<PREFIX>_TRANSPORT`, `<PREFIX>_DOCKER_CONTEXT`, `<PREFIX>_BASTION_HOST` and `<PREFIX>_URL_BASE`
    (and, for elastic, `ELASTIC_TRANSPORT` and `ELASTIC_RETENTION_DAYS`, which nothing reads).
-2. `access.yaml` with the system's `base` and `auth` (bearer, field `api_key`); ticket also
-   declares `writes: [{method: POST, path: "/tickets/*/comments"}]` for case comments.
+2. `access.yaml` with the system's `base` and `auth` (bearer, field `api_key`); the case system
+   also declares its comment write under `writes` (copy the template's ticket `access.yaml`).
    host-state's base is an endpoint-query service (an endpoint-security product's query API)
    that answers `GET /hosts`, `/hosts/{host}/processes`, `/hosts/{host}/accounts`,
    `/hosts/{host}/accounts/{user}/authorized-keys`, `/hosts/{host}/files/sha256?path=…`,
    `/hosts/{host}/packages` and `/containers/{id}`.
 3. A stored `bearer` credential per system, and a published export carrying the declarations
    (the proxy reads only `exports/current`).
-4. Remove a leftover `systems/case-history/` folder (the case system is named by
-   `settings/case-record.yaml` since #1359).
+4. Remove a leftover folder of the case system retired by #1359 (the case system is named by
+   `settings/case-record.yaml` since then; `tenant check` names the folder).
 
 host-state's `health-check` no longer reports a docker context, and a host the service does not
 enroll is now the agent's to fix (`UpstreamFault`, from the service's 404) rather than refused

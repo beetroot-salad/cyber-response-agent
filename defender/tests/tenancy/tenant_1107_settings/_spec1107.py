@@ -635,11 +635,14 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
 
     Unless the caller passes its own, the launch-time publish is `_launch_publish_p4`'s
     in-process stand-in, which publishes the tenant's folder for real, so the run reads an
-    export."""
+    export; and the request signer signs anything (every system is reached through the proxy,
+    #1391 O1, so a run that calls one needs a token; no OpenBao here)."""
+    from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
     try:
-        return run_py().main(argv, **with_publish({**rec.seams(), **seams}, argv)), None
+        return run_py().main(argv, **with_publish(
+            {"signer": FakeSigner(), **rec.seams(), **seams}, argv)), None
     except SystemExit as refused:
         return None, refused
 

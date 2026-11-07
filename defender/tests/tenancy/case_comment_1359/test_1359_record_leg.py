@@ -1,5 +1,5 @@
 """#1359 the record leg comments on the ticket the alert names, through the case system's adapter
-(docker route), driven through `run.main` with the real writer. Here: O1, O5, O7 end to end."""
+(through the credential proxy, #1391 O1), driven through `run.main` with the real writer. Here: O1, O5, O7 end to end."""
 from __future__ import annotations
 
 import html
@@ -22,10 +22,10 @@ def _world(tmp_path: Path, *, key: str | None = C.TICKET_KEY, **kw: Any) -> tupl
     return root, folder, C.plant_alert(tmp_path / "in", key=key)
 
 
-def _shim(tmp_path: Path, monkeypatch, *answers: dict[str, Any]) -> S.DockerShim:
-    shim = S.DockerShim(tmp_path / "docker", list(answers) or [S.answer('{"id": 1}', "201")])
-    monkeypatch.setenv("PATH", shim.path_value())
-    return shim
+def _shim(tmp_path: Path, monkeypatch, *answers: dict[str, Any]) -> S.ProxyStandIn:
+    """The credential proxy's stand-in (the case store is behind it), installed for the run."""
+    return S.ProxyStandIn(tmp_path / "proxy", list(answers) or [S.answer('{"id": 1}', "201")]
+                          ).install(monkeypatch)
 
 
 def _run(tmp_path: Path, root: Path, alert: Path, *, summary: dict[str, Any] | None = None,
@@ -43,15 +43,15 @@ def test_o1_one_comment_on_the_alert_named_ticket_and_no_call_at_run_start(tmp_p
     shim = _shim(tmp_path, monkeypatch)
     at_start: list[int] = []
     rc, refused, run_dir = _run(tmp_path, root, alert,
-                                before=lambda _d: at_start.append(len(shim.calls())))
+                                before=lambda _d: at_start.append(len(shim.requests())))
 
     assert refused is None, refused
     assert rc == 0, rc
-    assert at_start == [0], f"the store was called at run start: {shim.calls()}"
-    calls = [c["argv"] for c in shim.calls()]
+    assert at_start == [0], f"the store was called at run start: {shim.requests()}"
+    calls = shim.requests()
     assert len(calls) == 1, f"expected one store call, got {calls}"
-    assert "POST" in calls[0], calls[0]
-    assert (S.curl_url(calls[0]) or "").endswith(f"/tickets/{C.TICKET_KEY}/comments"), calls[0]
+    assert calls[0]["method"] == "POST", calls[0]
+    assert calls[0]["path"].endswith(f"/tickets/{C.TICKET_KEY}/comments"), calls[0]
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
     assert set(got) == C.RECEIPT_KEYS, got
@@ -65,7 +65,7 @@ def test_o1_a_store_that_does_not_know_the_key_leaves_a_not_found_receipt(tmp_pa
     rc, refused, run_dir = _run(tmp_path, root, alert)
 
     assert refused is None, refused
-    assert len(C.comment_calls(shim)) == 1, f"positive control: the comment was sent: {shim.calls()}"
+    assert len(C.comment_calls(shim)) == 1, f"positive control: the comment was sent: {shim.requests()}"
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
     assert (got["key"], got["status"], got["ok"]) == (C.TICKET_KEY, C.ERROR, False), got
@@ -82,7 +82,7 @@ def test_o5_an_alert_naming_no_ticket_is_an_empty_key_receipt_the_page_shows(tmp
 
     assert refused is None, refused
     assert rc == 0, rc
-    assert shim.calls() == [], f"a call was made with no key: {shim.calls()}"
+    assert shim.requests() == [], f"a call was made with no key: {shim.requests()}"
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
     assert set(got) == C.RECEIPT_KEYS, got
@@ -105,7 +105,7 @@ def test_run_start_bad_case_settings_make_no_call_and_name_the_file(tmp_path, mo
 
     assert refused is None, refused
     assert rc == 0, rc
-    assert shim.calls() == [], shim.calls()
+    assert shim.requests() == [], shim.requests()
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
     assert (got["key"], got["status"], got["ok"]) == (C.TICKET_KEY, C.ERROR, False), got
@@ -124,7 +124,7 @@ def test_o7_a_forced_close_escalates_and_the_posted_comments_row_is_keyed_on_the
         "output": "spec1359", "requests": 0, "truncated_by": "aborted", "closed_before_cut": False})
 
     assert refused is None, refused
-    assert len(C.comment_calls(shim)) == 1, shim.calls()
+    assert len(C.comment_calls(shim)) == 1, shim.requests()
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
     assert (got["key"], got["status"]) == (C.TICKET_KEY, C.ESCALATED), got
@@ -160,10 +160,10 @@ def test_o7_exit_class_decides_whether_the_run_comments(tmp_path, monkeypatch, t
     assert (refused, rc) == (None, 4 if truncated_by == "provider-down" else 0)
     got = S.receipt(run_dir)
     if expected is None:
-        assert shim.calls() == [], f"a silent exit class called the store: {shim.calls()}"
+        assert shim.requests() == [], f"a silent exit class called the store: {shim.requests()}"
         assert got is None, f"a silent exit class left a receipt: {got}"
     else:
-        assert len(C.comment_calls(shim)) == 1, shim.calls()
+        assert len(C.comment_calls(shim)) == 1, shim.requests()
         assert got is not None, "no receipt"
         assert (got["key"], got["status"], got["ok"]) == (C.TICKET_KEY, expected, True), got
 
@@ -226,7 +226,7 @@ def test_run_start_a_crashing_case_check_is_a_receipt_that_names_no_host_root(tm
                               roster=read_roster(tree / "integrations"))
 
     assert (refused, rc) == (None, 0), (refused, rc)
-    assert shim.calls() == [], shim.calls()
+    assert shim.requests() == [], shim.requests()
     got = S.receipt(rec.run_dir_at)
     assert got is not None, "no receipt"
     reason = got.get("reason") or ""
@@ -240,11 +240,10 @@ def test_run_start_a_crashing_case_check_is_a_receipt_that_names_no_host_root(tm
 # #1374: a comment whose answer was lost after it may have reached the store is read back once.
 # ======================================================================================
 
-def _read_backs(shim: S.DockerShim) -> list[list[str]]:
-    """The docker argvs whose curl reads the case back: a GET of the ticket itself."""
-    return [c["argv"] for c in shim.calls()
-            if "POST" not in c["argv"]
-            and (S.curl_url(c["argv"]) or "").endswith(f"/tickets/{C.TICKET_KEY}")]
+def _read_backs(shim: S.ProxyStandIn) -> list[dict[str, Any]]:
+    """The requests that read the case back: a GET of the ticket itself."""
+    return [r for r in shim.requests()
+            if r["method"] == "GET" and r["path"].endswith(f"/tickets/{C.TICKET_KEY}")]
 
 
 def _ticket(*bodies: str) -> dict[str, Any]:
@@ -269,7 +268,7 @@ OTHER_RUN = "[defender agent comment, run 00000000-0000-4000-8000-000000000000]"
      C.COMMENTED, True, 1),
     ("absent", lambda ours: _ticket("an analyst's note", f"{OTHER_RUN}\nan earlier run's verdict"),
      C.UNKNOWN, False, 0),
-    ("read fails", lambda ours: S.curl_timed_out(), C.UNKNOWN, False, 0),
+    ("read fails", lambda ours: S.timed_out(), C.UNKNOWN, False, 0),
     ("no comment list", lambda ours: S.answer(json.dumps({"key": C.TICKET_KEY}), "200"),
      C.UNKNOWN, False, 0),
     ("an entry it cannot read", lambda ours: S.answer(json.dumps({"comments": [
@@ -281,18 +280,18 @@ OTHER_RUN = "[defender agent comment, run 00000000-0000-4000-8000-000000000000]"
 ])
 def test_1374_a_lost_answer_is_settled_by_one_read_back(
         tmp_path, monkeypatch, label, read, status, ok, rows):
-    """The comment POST times out after it may have reached the store (curl rc 28): the host
+    """The comment POST times out after it may have reached the store (the proxy says so): the host
     reads the ticket back once and decides from this run's tag line (P3) — found is the success
     receipt with the link and the comment recorded (O2); anything else, absent included (r4), is
     `unknown` naming the ticket and the tag to look for, and never claims the store could not be
     reached (O4). One write, one read (P4)."""
     root, _folder, alert = _world(tmp_path)
     ours = _tag(tmp_path)
-    shim = _shim(tmp_path, monkeypatch, S.curl_timed_out(), read(ours))
+    shim = _shim(tmp_path, monkeypatch, S.timed_out(), read(ours))
     _rc, refused, run_dir = _run(tmp_path, root, alert)
     assert refused is None, refused
     assert ours == S.mod("tenancy.case_ticket").agent_comment_tag(run_dir.name), "not this run's tag"
-    argvs = [c["argv"] for c in shim.calls()]
+    argvs = shim.requests()
     assert len(C.comment_calls(shim)) == 1, (label, argvs)
     assert len(_read_backs(shim)) == 1, (label, argvs)
     got = S.receipt(run_dir)
@@ -320,19 +319,19 @@ def test_1374_a_lost_answer_is_settled_by_one_read_back(
 
 
 @pytest.mark.parametrize(("label", "write"), [
-    ("never sent", S.answer("", None, rc=125, stderr="docker: invalid flag")),
+    ("never sent", S.never_connected()),
     ("store refused", S.answer(json.dumps({"detail": "no such ticket"}), "404")),
 ])
 def test_1374_a_write_that_did_not_reach_or_was_refused_is_not_read_back(
         tmp_path, monkeypatch, label, write):
-    """A write proven never sent (the docker exec never ran curl) or one the store answered is
+    """A write proven never sent (the proxy never connected) or one the store answered is
     decided as before: an error receipt and no read-back (O5, O6). The read the shim would
     answer next holds this run's comment, so a read-back would show as a success."""
     root, _folder, alert = _world(tmp_path)
     shim = _shim(tmp_path, monkeypatch, write, _ticket(f"{_tag(tmp_path)}\nthe verdict"))
     _rc, refused, run_dir = _run(tmp_path, root, alert)
     assert refused is None, refused
-    assert _read_backs(shim) == [], (label, [c["argv"] for c in shim.calls()])
+    assert _read_backs(shim) == [], (label, shim.requests())
     got = S.receipt(run_dir)
     assert (got["status"], got["ok"]) == (C.ERROR, False), (label, got)
 
@@ -444,16 +443,9 @@ def test_1374_a_write_fault_reaches_the_receipt_cut_short(tmp_path, monkeypatch,
     assert "y" * 1000 not in got["reason"], len(got["reason"])
 
 
-def test_1374_a_docker_exit_1_may_have_sent_so_it_is_read_back(tmp_path, monkeypatch):
-    """Exit 1 can follow a docker client that lost its daemon after curl started, so it proves
-    nothing: the case is read back, and a comment that did land is a success (r4)."""
-    root, _folder, alert = _world(tmp_path)
-    shim = _shim(tmp_path, monkeypatch, S.no_such_container("bastion"),
-                 _ticket(f"{_tag(tmp_path)}\nthe verdict"))
-    _rc, refused, run_dir = _run(tmp_path, root, alert)
-    assert refused is None, refused
-    assert len(_read_backs(shim)) == 1, [c["argv"] for c in shim.calls()]
-    assert S.receipt(run_dir)["status"] == C.COMMENTED, S.receipt(run_dir)
+# Retired by #1391 O1: `test_1374_a_docker_exit_1_may_have_sent_so_it_is_read_back` pinned how a
+# docker exit decided "may have reached the store". The proxy says so itself (`sent`); a write that
+# may have reached is read back (`test_1374_a_lost_answer_is_settled_by_one_read_back` above).
 
 
 def test_1374_a_read_fault_reaches_the_receipt_cut_short(tmp_path, monkeypatch):

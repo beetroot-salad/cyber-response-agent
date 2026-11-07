@@ -17,11 +17,11 @@ CASE_SYSTEM = "casesys"
 ADAPTER = (
     "from defender.integrations import _stub_transport as transport\n\n\n"
     "def check_settings(tenant):\n"
-    "    transport.check_docker_curl_settings(tenant, 'casesys', 'CASESYS')\n\n\n"
+    "    transport.check_settings_of(tenant, 'casesys', 'CASESYS')\n\n\n"
     "def health_check(ctx):\n    return {}\n\n\n"
     f"def {C.COMMENT_ACTION}(ctx, *, key, body):\n    return None\n\n\n"
     "VERBS = {'health-check': health_check}\n")
-PROXY_ENV = 'CASESYS_TRANSPORT="http-proxy"\nCASESYS_TIMEOUT_SEC="5"\n'
+PROXY_ENV = 'CASESYS_TIMEOUT_SEC="5"\n'
 WRITE_ROUTE = {"method": "POST", "path": "/rest/api/3/issue/*/comment"}
 
 
@@ -81,7 +81,7 @@ def test_o2_a_tenant_with_no_case_file_passes_check(tmp_path, script):
 
 
 def test_r1_a_case_record_naming_a_good_system_passes(tmp_path, script):
-    """A case-record file naming `ticket` (docker route: no write route needed) or a configured http-proxy system with a write route is clean. r4 tenant check."""
+    """A case-record file naming `ticket` (the fixture declares its comment write) or another configured system with a write route is clean. r4 tenant check."""
     H.assert_clean(_check(script, _folder(tmp_path / "a", record=C.case_record_text("ticket"))))
     folder = _folder(tmp_path / "b", record=C.case_record_text(CASE_SYSTEM), **_proxy_system())
     H.assert_clean(_check(script, folder))
@@ -96,7 +96,7 @@ def test_r1_a_case_system_off_the_roster_is_a_finding_naming_the_file(tmp_path, 
 
 def test_r1_an_ungranted_case_system_with_bad_settings_is_a_finding_naming_its_config(tmp_path, script):
     """`check_settings` is run on the case system though no role holds it; the finding names its `config.env`. r4 tenant check."""
-    broken = 'CASESYS_TRANSPORT="http-proxy"\n'
+    broken = 'CASESYS_TIMEOUT_SEC="soon"\n'
     folder = _folder(tmp_path, record=C.case_record_text(CASE_SYSTEM), **_proxy_system(env=broken))
     H.assert_refused(_check(script, folder), f"systems/{CASE_SYSTEM}/config.env")
     ticket_broken = _folder(tmp_path / "t", record=C.case_record_text("ticket"))
@@ -162,7 +162,7 @@ def _script_with(tmp_path: Path, adapter: str) -> Path:
 
 @pytest.mark.parametrize(("why", "adapter"), ids=["check-crashes", "no-check"], argvalues=[
     ("a check that crashes", ADAPTER.replace(
-        "    transport.check_docker_curl_settings(tenant, 'casesys', 'CASESYS')\n",
+        "    transport.check_settings_of(tenant, 'casesys', 'CASESYS')\n",
         "    return tenant.grants.missing\n")),
     ("no check at all", ADAPTER.replace("def check_settings(tenant):", "def _unused(tenant):")),
 ])
