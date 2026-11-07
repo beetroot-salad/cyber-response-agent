@@ -260,8 +260,9 @@ def elastic_access_text(marker: str, *, base: str | None = None) -> str:
 
 def config_texts(marker: str, *, events_index: str | None = None,
                  alerts_index: str | None = None) -> dict[str, str]:
-    """One complete `config.env` per system, every value carrying `marker` so a reader that
-    returns another tenant's (or the checkout's) value is caught by the value alone. Complete
+    """One complete `config.env` per system. The values that carry `marker` (ticket's key
+    pattern, elastic's indices; the bases carry it in `access_text`) catch a reader that returns
+    another tenant's (or the checkout's) value by the value alone; timeouts are plain. Complete
     means every key the adapter's settings check reads and no other (#1391 Q4): a system failing
     it is down from run start, and a run whose every granted system is down is refused (#1256).
     Each system's base is its access declaration's (`access_text`), which `plant_tenant` writes

@@ -1470,7 +1470,7 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     # transport every route ends in is tripped too
     from defender.integrations import _stub_transport
 
-    monkeypatch.setattr(_stub_transport, "docker_exec_curl", wire.docker_exec_curl)  # lint-monkeypatch: ok — same tripwire, the writer's transport
+    monkeypatch.setattr(_stub_transport, "_proxy_request", wire._proxy_request)  # lint-monkeypatch: ok — same tripwire, the writer's transport (every request goes through the proxy, #1391 O1)
     # a function object bound at import time escapes even that: trip the process launch beneath it, on
     # any `docker ... exec` (the one thing the transport does), whatever route reached it
     import subprocess
@@ -1506,9 +1506,9 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
         writer_module._verb_context(None, tmp_path, tmp_path, {}, None, None)
     assert wire.called == ["_verb_context"]
     wire.called.clear()
-    with pytest.raises(AssertionError):  # control: the transport every docker route ends in is tripped
-        _stub_transport.docker_exec_curl(None, "bastion.invalid", "http://store.invalid/tickets")
-    assert wire.called == ["docker_exec_curl"]
+    with pytest.raises(AssertionError):  # control: the transport every request ends in is tripped
+        _stub_transport._proxy_request(None, "http://store.invalid/tickets", system="ticket", method="POST")
+    assert wire.called == ["_proxy_request"]
     wire.called.clear()
     with pytest.raises(AssertionError):  # control: the process tripwire is live
         subprocess.run(["docker", "--context", "c", "exec", "box", "curl"], check=False)
