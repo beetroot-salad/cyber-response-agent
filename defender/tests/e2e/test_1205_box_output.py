@@ -748,6 +748,11 @@ def test_live_box_output_past_the_budget_is_a_result_and_past_the_helper_is_a_fe
         again = executor.run_parsed(bash_exec.parse("echo answer"), command="echo answer", cwd=cwd, timeout=30)
         assert again.out == b"answer\n", "the box did not survive the helper stopping a command"
 
+        if runtime != "runc":
+            # On runsc (CI, #1421) a write through `/proc/$PPID/fd/1` reaches the exec stream as bytes
+            # that are no frame and never trips the fence; no way to trip it there is known, so the
+            # fence half is verified on runc only (owner decision).
+            return
         # Written past the helper, as C13's child did: `$PPID`'s stdout is the exec stream.
         bypass = ("python3 -c "
                   f"\"import os; f = os.open(f'/proc/{{os.getppid()}}/fd/1', os.O_WRONLY); "
