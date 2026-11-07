@@ -903,7 +903,8 @@ _DONE, _NO_REPORT = ("completed", None), ("failed", "no_report")
     # A run killed with exit 0 is no more exact than one that exited 77: the mark is not read from the exit code.
     ("no job-end, exit 0", "rows", (*_NO_REPORT, 8.0, True)),
     ("job-end unreadable, exit 77", "rows", (*_NO_REPORT, 8.0, True)),
-    ("job-end lacking the spend fact, exit 77", "rows", (*_NO_REPORT, 8.0, True)),
+    # A job-end of the five pre-#1377 keys parses as "no spend write failed" (P1): the run ends as a clean one does, exact.
+    ("job-end of the five pre-1377 keys, exit 77", "rows", (*_DONE, 8.0, False)),
     ("no job-end, exit 77", "no rows", (*_NO_REPORT, 0.0, True)),
     ("clean", "no rows", (*_DONE, 0.0, False)),
     ("clean", "unreadable database", (*_DONE, None, False)),
@@ -918,7 +919,7 @@ async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_tab
     """Each row of the final-read flag table: the ledger's sum for this run, "at least" only where spend may be missing, never beside null; the ending the job-end decides stands beside it (never replaced by `worker_error`). (S2, S4, r4)"""
     job_end_text = {"clean": job_end(), "spend write failed": job_end(spend_write_failed=True),
                     "job-end unreadable, exit 77": "{not json",
-                    "job-end lacking the spend fact, exit 77": _job_end_with(spend_write_failed=None)}.get(ending)
+                    "job-end of the five pre-1377 keys, exit 77": _job_end_with(spend_write_failed=None)}.get(ending)
     files = _committed(**{"{id}.job-end.json": job_end_text}) if job_end_text is not None else {}
     if ledger != "no pointer":
         files["{id}.session-pointer.json"] = session_pointer(CASE)
