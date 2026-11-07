@@ -176,14 +176,14 @@ class FakeProgramsRealm:
 
 class RaisingProgramsRealm:
     """The loud null (D7): any use fails the test naming the call. For a service shaped like the
-    lifecycle's, whose offboarding must never touch the realm. `close` raises too: a service that
-    closes a port it never uses is a finding."""
+    lifecycle's, whose offboarding must never touch the realm. `close` is allowed, as for the
+    lifecycle's `_NoPeople`: closing a service closes its ports."""
 
     def _refuse(self, name: str) -> AssertionError:
         return AssertionError(f"the programs realm was used: {name}")
 
     async def close(self) -> None:
-        raise self._refuse("close")
+        return None
 
     async def create_client(self, credential_id: str) -> tuple[str, str]:
         raise self._refuse(f"create_client({credential_id})")
