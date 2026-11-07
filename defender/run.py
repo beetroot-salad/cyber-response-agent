@@ -25,8 +25,6 @@ takes precedence over the ambient value.
 
 from __future__ import annotations
 
-from defender.records.formats import ALERT_MAPPING_MISSING, AlertMapping, DataRoot, RunsBase, TenantId
-
 import logging
 import json
 import os
@@ -56,6 +54,7 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _log  # noqa: E402
+from defender.records.formats import ALERT_MAPPING_MISSING, AlertMapping, DataRoot, RunsBase, TenantId  # noqa: E402
 from defender.records import formats  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402

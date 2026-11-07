@@ -29,6 +29,13 @@ steps (`branch/steps.py::Step`) in order:
 Siblings are always `run.py` processes (for the box lifecycle, reap scan, role preflight and
 provenance stamp); this module never runs an investigation in-process. A launch never reuses an
 episode directory: a relaunch, or a second launch beside a running one, is a new episode (N17).
+Each sibling is tied to its launcher, and a launcher that unwinds terminates the one it runs (O9).
+
+**The job lane** (#1344; `--job-id`, or the learning job entry through `launch_job`): the episode's
+id is the job's, the fork point is the job's pick, the siblings run one at a time with the control
+first and the episode's whole rate each (a failed control ends the family), every ending the
+outcome table names is raised typed where it is decided (`endings.JobEnding`), and the judge's
+findings wait in the episode instead of reaching the queue, a failed pass failing the job.
 """
 
 from __future__ import annotations
@@ -74,6 +81,19 @@ from defender.learning.branch.steps import Step
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.ledger import Ledger, LedgerError
+from defender.learning.branch.endings import (
+    CONTROL_FAILED,
+    FAMILY_UNUSABLE,
+    HISTORY_UNREADABLE,
+    JUDGE_FAILED,
+    LAUNCH_REFUSED,
+    SOURCE_UNAVAILABLE,
+    VERIFY_REFUSED,
+    JobEnding,
+    JobLaneHooks,
+    ending,
+)
+from defender._parent_tie import tied_argv
 from defender import tenancy
 from defender._git import REPO_ROOT
 from defender.investigation import branch
@@ -125,9 +145,7 @@ from defender.learning.branch.preflight import (
     _no_stamp as _no_stamp,
     _not_admitted as _not_admitted,
     _not_certified_clean as _not_certified_clean,
-    _off_commit as _off_commit,
     _off_knowledge as _off_knowledge,
-    _off_scope as _off_scope,
     _originals as _originals,
     _preflight_context as _preflight_context,
     _source_store as _source_store,
@@ -141,10 +159,17 @@ from defender.learning.branch.preflight import (
 
 
 
-class SourceInputReplaced(LauncherRefused, Exception):
+class SourceInputReplaced(JobEnding, Exception):
     """The source run's stored alert does not match its record (#1222 A1). An operator's exit
     like every launcher refusal, and ALSO an `Exception`, so a caller that guards a launch with
-    `except Exception` sees the refusal instead of the process leaving."""
+    `except Exception` sees the refusal instead of the process leaving. For a learning job it
+    is `skipped: history_unreadable`: a source whose input current code cannot verify (one
+    recorded before its alert carried a record, or one damaged since) can never be run."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail, reason=HISTORY_UNREADABLE,
+                         brief="the source run's alert does not match its record, or one of the "
+                               "two is missing")
 
 
 # ---------------------------------------------------------------------------------------
@@ -182,18 +207,21 @@ def _copy_source_input(episode: Episode, raw: bytes, record_text: str,
 def prepare_episode(
     runs: RunsRepository[Tenant], source: Run, *,
     prime: Callable[[Path, Episode], PrimeReport] = _PRIME_ALLOWING_EMPTY,
-    knowledge_commit: str | None = None,
+    knowledge_commit: str | None = None, episode_id: str | None = None,
 ) -> EpisodeRuns:
-    """Claim a fresh episode, copy the source's input (and the family's knowledge pin,
-    `knowledge_commit`) into it, prime the family's base into it once, and hand back its view
-    held open: the launcher's door, whose caller closes it."""
+    """Claim a fresh episode (at `episode_id`, a learning job's id, when given; else a minted
+    one), copy the source's input (and the family's knowledge pin, `knowledge_commit`) into it,
+    prime the family's base into it once, and hand back its view held open: the launcher's
+    door, whose caller closes it."""
     # Judged before an episode is claimed, so a refused source leaves no debris.
     raw, record_text = source_input(source)
     try:
-        view = runs.create_episode()
+        view = runs.create_episode(episode_id)
     except (RunRefused, TenantRefused) as refused:
-        raise LauncherRefused(f"[branch] a fresh episode could not be claimed: {refused}") \
-            from refused
+        raise ending(f"[branch] a fresh episode could not be claimed: {refused}",
+                     reason=LAUNCH_REFUSED,
+                     brief=f"the job's episode could not be claimed ({type(refused).__name__})",
+                     cause=refused) from refused
     try:
         _copy_source_input(view.episode, raw, record_text, knowledge_commit)
         _prime_once(view.episode, view.episode_id, source.run_dir, prime)
@@ -248,9 +276,10 @@ def _open_launch_source(runs: RunsRepository[Tenant], source_run_id: str) -> Run
     try:
         return runs.open(RunId.parse(source_run_id))
     except RunRefused as refusal:
-        raise LauncherRefused(
+        raise ending(
             f"[branch] source run {source_run_id!r} of tenant {runs.tenant_id!r}: "
-            f"{refusal}") from refusal
+            f"{refusal}", reason=SOURCE_UNAVAILABLE,
+            brief=f"the source run cannot be opened ({type(refusal).__name__})", cause=refusal) from refusal
 
 
 def _source_stamp_agrees(source: Run, tenant_id: TenantId) -> None:
@@ -262,11 +291,12 @@ def _source_stamp_agrees(source: Run, tenant_id: TenantId) -> None:
     if stamp is None:
         raise _no_stamp(source.run_dir)
     if stamp.get("tenant_id") != tenant_id:
-        raise LauncherRefused(
+        raise ending(
             f"[branch] source run {source.run_dir}'s stamp names tenant "
             f"{stamp.get('tenant_id')!r} but the request names {tenant_id!r}, under whose "
             "folder the source was opened — the stamp is in the box's writable run dir, so a "
-            "disagreement is refused, not settled")
+            "disagreement is refused, not settled", reason=LAUNCH_REFUSED,
+            brief="the source run's stamp names another tenant than the job's")
 
 
 # ---------------------------------------------------------------------------------------
@@ -290,6 +320,10 @@ def sibling_argv(
     if model is not None:
         argv += ["--model", model]
     return argv
+
+
+#: The job's message for a source whose knowledge the family cannot be pinned to.
+_UNPINNABLE = "the source run's knowledge cannot be pinned for the family"
 
 
 def _pinned_export(tenant: RunTenant, source: Run) -> Any:
@@ -321,22 +355,22 @@ def _pinned_export(tenant: RunTenant, source: Run) -> Any:
             if revision.commit is None:
                 why = (f"unavailable knowledge ({revision.unavailable})"
                        if revision.unavailable is not None else "unversioned knowledge")
-                raise LauncherRefused(
+                raise ending(
                     f"[branch] source run {source.run_dir}'s stamp names {why}: there is no "
                     "knowledge commit to pin its siblings to, so the family cannot be launched "
-                    "(not waived by --allow-dirty)")
+                    "(not waived by --allow-dirty)", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
             commit = revision.commit
         elif commit is None:
-            raise LauncherRefused(
+            raise ending(
                 f"[branch] source run {source.run_dir}'s knowledge record is unreadable: there "
                 "is no knowledge commit to pin its siblings to, so the family cannot be "
-                "launched (not waived by --allow-dirty)")
+                "launched (not waived by --allow-dirty)", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
         return materialise_export(tenant.tenant, commit)
     except (DeliveryRefused, LockBusy) as refused:
         at = "" if commit is None else f" ran at knowledge commit {commit}, which"
-        raise LauncherRefused(
+        raise ending(
             f"[branch] source run {source.run_dir}{at} cannot be pinned to a knowledge "
-            f"export: {refused}") from refused
+            f"export: {refused}", reason=LAUNCH_REFUSED, brief=_UNPINNABLE, cause=refused) from refused
 
 
 #: The exit code recorded for an arm whose process never started (spawn raised, or the
@@ -345,13 +379,26 @@ def _pinned_export(tenant: RunTenant, source: Run) -> Any:
 SPAWN_FAILED_EXIT = 70
 
 
-def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every arm runs on, the rate they share and the failures already counted
+def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the tenant every arm runs on, the rate they share, the failures already counted and the width
     episode: Episode, world_ids: Sequence[str], *,
     spawn: Callable[..., int] | None = None, model: str | None = None,
     tenant_id: TenantId | None, rate: float | None = None, failed_before: int = 0,
-    knowledge_commit: str | None = None,
+    knowledge_commit: str | None = None, width: int | None = None, control: str | None = None,
+    on_ended: Callable[[str, int], None] | None = None,
 ) -> dict[str, int]:
-    """Start the selected world UUIDs together, returning exits keyed by those UUIDs."""
+    """Start the selected world UUIDs, returning exits keyed by those UUIDs.
+
+    One mechanism with a width (#1344 O4, D9): at most `width` siblings run at once, from one
+    pool, each holding an equal share of the episode's `rate` (`rate / width`). `width=None` is
+    every world at once, started together (the operator's lane); a learning job runs `width=1`,
+    one sibling after another with the whole rate each. `control`, when named, starts first, and
+    its failure stops the family: no world after it starts. Either way, once `UNUSABLE_AT`
+    worlds have failed the family is unusable: the siblings still running are stopped and no
+    other world starts. A world that never started is recorded `did not finish` and exits
+    `SPAWN_FAILED_EXIT`. `on_ended(world_id, code)` is called as each sibling's process exits.
+
+    A `BaseException` reaching this frame while siblings run (a stop's signal) stops the family
+    the same way, waits for the running siblings to end, and is re-raised."""
     from defender import tenancy
     from defender.learning.core.config import KNOB_RATE
 
@@ -362,12 +409,17 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
             f"episode {episode.dir} has no usable tenant ({tenant_id!r}) to run its siblings "
             "on — refused before any sibling started")
     stop = threading.Event()
-    start = functools.partial(_default_spawn, stop=stop) if spawn is None else spawn
+    # Every spawn is handed the family's stop (`spawn(argv, *, env, stop)`): set, the sibling it
+    # runs is terminated (N18, and the unwind below).
+    start = functools.partial(_default_spawn if spawn is None else spawn, stop=stop)
     family = load_family(episode.view(), expected_episode_id=episode.dir.name)
-    worlds = {world_id: family.world_by_id(world_id) for world_id in world_ids}
+    order = sorted(world_ids, key=lambda world_id: world_id != control)
+    worlds = {world_id: family.world_by_id(world_id) for world_id in order}
     if not worlds:
         return {}
-    ready = threading.Barrier(len(worlds))
+    at_once = len(worlds) if width is None else max(1, min(width, len(worlds)))
+    together = at_once == len(worlds)
+    ready = threading.Barrier(at_once) if together else None
     exits: dict[str, int] = {}
     failed = [failed_before]
     tally = threading.Lock()
@@ -382,39 +434,63 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
             _logger.warning(f"world {label}: {why}; recorded as did not finish")
         with tally:
             failed[0] += 1
+            if world_id == control and not stop.is_set():
+                _logger.warning(f"episode {episode.dir.name}: the control world failed, so no "
+                                "other world starts")
+                stop.set()
             if failed[0] >= outcome_mod.UNUSABLE_AT and not stop.is_set():
                 _logger.warning(
                     f"episode {episode.dir.name}: {failed[0]} worlds have failed, so the "
                     "family is unusable; stopping the siblings still running")
                 stop.set()
 
+    def never_started(world_id: str) -> None:
+        exits[world_id] = SPAWN_FAILED_EXIT
+        why = "it never started: the family was stopped before its turn"
+        if outcome_mod.write_world_record(episode, world_id, outcome_mod.DID_NOT_FINISH,
+                                          detail=why):
+            _logger.warning(f"world {worlds[world_id].label}: {why}; recorded as did not finish")
+
     def launch_one(world_id: str) -> None:
         label = worlds[world_id].label
         env = dict(os.environ)
         if rate is not None:
-            env[KNOB_RATE] = str(rate / len(worlds))
-        # Rendezvous first, so "started together" does not depend on the pool's scheduling.
-        ready.wait(timeout=30)
+            env[KNOB_RATE] = str(rate / at_once)
+        if ready is not None:
+            # Rendezvous first, so "started together" does not depend on the pool's scheduling.
+            ready.wait(timeout=30)
+        elif stop.is_set():
+            never_started(world_id)
+            return
         try:
             code = start(sibling_argv(episode.dir.name, label, tenant_id=tenant_id,
                                       model=model, knowledge_commit=knowledge_commit), env=env)
-        except Exception as never_started:  # noqa: BLE001 — one arm's failure, not the family's
-            ended(world_id, SPAWN_FAILED_EXIT, f"its process never started ({never_started!r})")
+        except Exception as never_ran:  # noqa: BLE001 — one arm's failure, not the family's
+            ended(world_id, SPAWN_FAILED_EXIT, f"its process never started ({never_ran!r})")
             return
         ended(world_id, code, f"its process exited {code} without a record of its own"
-              + (" (stopped: the family became unusable)" if stop.is_set() else ""))
+              + (" (the family was stopped while it ran)" if stop.is_set() else ""))
+        if on_ended is not None:
+            on_ended(world_id, code)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(worlds)) as pool:
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=at_once)
+    try:
         futures = {world_id: pool.submit(launch_one, world_id) for world_id in worlds}
+        concurrent.futures.wait(futures.values())
+    except BaseException:
+        stop.set()
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
     # A thread that died outside `start` (a broken barrier fails all N at once) is recorded as a
     # result, not re-raised: raising would skip `verify_family`, leaving completed siblings
     # unarchived.
     for world_id, future in futures.items():
         try:
             future.result()
-        except Exception as never_started:  # noqa: BLE001 — one arm's failure, not the family's
+        except Exception as never_ran:  # noqa: BLE001 — one arm's failure, not the family's
             if world_id not in exits:
-                ended(world_id, SPAWN_FAILED_EXIT, f"its process never started ({never_started!r})")
+                ended(world_id, SPAWN_FAILED_EXIT, f"its process never started ({never_ran!r})")
     return exits
 
 
@@ -425,22 +501,39 @@ _STOP_GRACE_SECONDS = 30.0
 def _default_spawn(argv: list[str], *, env: dict[str, str] | None = None,
                    stop: threading.Event | None = None) -> int:
     """Run one sibling to completion in its own process, inheriting nothing but `env`; when
-    `stop` is set first (the family became unusable, N18), terminate it and return its exit."""
+    `stop` is set first (the family became unusable, N18), terminate it and return its exit.
+
+    Nothing outlives its launcher (#1344 O9): the child is tied to this process (it dies with
+    it, `_parent_tie.tied_argv`), and when this frame unwinds on anything (a stop's signal), the
+    child is terminated, and killed after a grace, before the unwind goes on."""
     import subprocess
 
-    child = subprocess.Popen(argv, env=env)  # noqa: S603 — fixed argv
-    while True:
-        try:
-            return child.wait(timeout=1.0)
-        except subprocess.TimeoutExpired:
-            if stop is None or not stop.is_set():
-                continue
-        child.terminate()
-        try:
-            return child.wait(timeout=_STOP_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            child.kill()
-            return child.wait()
+    child = subprocess.Popen(tied_argv(argv), env=env)  # noqa: S603 — fixed argv
+    try:
+        while True:
+            try:
+                return child.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                if stop is not None and stop.is_set():
+                    break
+        return _stopped_child(child)
+    except BaseException:
+        _stopped_child(child)
+        raise
+
+
+def _stopped_child(child: Any) -> int:
+    """`child` asked to exit (SIGTERM), killed when it outlasts the grace; its exit."""
+    import subprocess
+
+    if child.poll() is not None:
+        return child.returncode
+    child.terminate()
+    try:
+        return child.wait(timeout=_STOP_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        return child.wait()
 
 from defender.learning.branch.verification import (
     _archive_worlds as _archive_worlds,
@@ -460,6 +553,14 @@ if _missing := [f for f in _ANCHORED if _HELD[f].off_anchor is None]:
 # ---------------------------------------------------------------------------------------
 
 
+def _job_id(raw: str) -> str:
+    """`--job-id`: a learning job's id, a UUID, which becomes the episode's id."""
+    try:
+        return str(RunId.parse(raw))
+    except RunRefused as bad:
+        raise argparse.ArgumentTypeError(f"not a job id: {bad}") from None
+
+
 def parse_branch_args(argv: list[str]) -> argparse.Namespace:
     """The operator's whole command line: a tenant, a source run of it, a branch point, and
     what to say."""
@@ -476,7 +577,15 @@ def parse_branch_args(argv: list[str]) -> argparse.Namespace:
              "only those — never a commit, scope or knowledge-commit mismatch, an absent stamp "
              "or a stamp with no commit — and the override is NAMED in the stamp")
     p.add_argument("--model", default=None)
-    return p.parse_args(argv)
+    p.add_argument(
+        "--job-id", type=_job_id, default=None,
+        help="run as learning job JOB_ID (#1344): the episode's id is the job's, the siblings "
+             "run one at a time, the control first, each with the episode's whole rate, and the "
+             "judge's findings wait in the episode instead of reaching the queue")
+    ns = p.parse_args(argv)
+    if ns.job_id is not None and ns.allow_dirty:
+        p.error("--allow-dirty is an operator's waiver; a learning job (--job-id) takes none")
+    return ns
 
 
 def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
@@ -485,7 +594,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     spawn: Callable[..., int] | None = None,
     questioner: Any = None,
     preflight: Callable[..., int],
-    render_page: PageRenderer,
+    render_page: PageRenderer | None = None,
     judge: Any = None,
     lessons_dir: Path | None = None,
     live_tree: Callable[[], formats.RunProvenance] | None = None,
@@ -499,9 +608,11 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
 ) -> int:
     """Launch one episode, reporting a refusal as an operator exit rather than a traceback.
     `preflight` (the role-model check) and `render_page` (the episode page) are handed in by the
-    entry, which sits above both."""
+    entry, which sits above both. `--job-id` runs the job lane (`JobLaneHooks` with no hooks)."""
+    ns = parse_branch_args(argv)
+    lane = None if ns.job_id is None else JobLaneHooks(job_id=ns.job_id)
     try:
-        return _launch(argv, spawn=spawn, questioner=questioner, preflight=preflight,
+        return _launch(ns, lane=lane, spawn=spawn, questioner=questioner, preflight=preflight,
                        render_page=render_page, judge=judge, lessons_dir=lessons_dir, live_tree=live_tree,
                        oracle=oracle, verifier=verifier, roster=roster, directory=directory,
                        signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport)
@@ -510,15 +621,29 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
         raise LauncherRefused(f"[branch] {refusal}") from refusal
 
 
-def _launch(  # noqa: PLR0913 — see `main`
-    argv: list[str], *, spawn: Any, questioner: Any,
-    preflight: Callable[..., int], render_page: PageRenderer, judge: Any = None,
+def launch_job(  # noqa: PLR0913 — the job's identity plus the launcher's seams
+    *, tenant: str, source_run_id: str, lane: JobLaneHooks, preflight: Callable[..., int],
+    **seams: Any,
+) -> int:
+    """A learning job's family step (#1344), for the job entry: the job lane's launch over
+    `source_run_id`, its fork point decided by `lane.pick`. Nothing is wrapped: every ending the
+    outcome table names is raised as a `JobEnding`, and anything else reaches the entry as it
+    was raised, for the entry to record as `entry_error`."""
+    if lane.pick is None:
+        raise ValueError("a learning job's launch needs its fork pick (`lane.pick`)")
+    ns = argparse.Namespace(tenant=tenant, source_run_id=source_run_id, branch_message_id=None,
+                            allow_dirty=False, model=None, job_id=lane.job_id)
+    return _launch(ns, lane=lane, preflight=preflight, **seams)
+
+
+def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, then the episode, in order
+    ns: argparse.Namespace, *, lane: JobLaneHooks | None, spawn: Any = None, questioner: Any = None,
+    preflight: Callable[..., int], render_page: PageRenderer | None = None, judge: Any = None,
     lessons_dir: Path | None = None,
     live_tree: Callable[[], formats.RunProvenance] | None = None,
     oracle: Any = None, verifier: Any = None, roster: Any = None, directory: Any = None,
     signer: Any = None, proxy_url: str | None = None, issuer_transport: Any = None,
 ) -> int:
-    ns = parse_branch_args(argv)
     # Injected seams are resolved once and threaded inward non-`None`, so no two frames can
     # disagree about which preflight, roster or model an episode used.
     # The episode's tenant first, from the request: pre-flight's reader, the served systems,
@@ -527,7 +652,9 @@ def _launch(  # noqa: PLR0913 — see `main`
         tenant_id = tenancy.requested_tenant_id(ns.tenant)
         data_root = tenancy.resolve_data_root()
     except TenantRefused as refusal:
-        raise LauncherRefused(f"[branch] {refusal}") from refusal
+        raise ending(f"[branch] {refusal}", reason=LAUNCH_REFUSED,
+                     brief=f"the job's tenant was refused ({type(refusal).__name__})",
+                     cause=refusal) from refusal
     # The one host acceptance (r10 A1), held for the whole launch: this process recorded under
     # the tenant's host lock (prepare and teardown wait for the launch, and a teardown finds it to
     # stop it; its siblings hold their own), the tenant `active` with its forge wiring, its folder
@@ -543,26 +670,40 @@ def _launch(  # noqa: PLR0913 — see `main`
             data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
             box_mounted=(tenancy.box_mounted_episodes(data_root, tenant_id),))
     except TenantRefused as refusal:
-        raise LauncherRefused(f"[branch] the episode's tenant: {refusal}") from refusal
+        raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
+                     brief=f"the job's tenant was refused ({type(refusal).__name__})",
+                     cause=refusal) from refusal
     with admitted:
         # The tenant's readiness over its own folder; siblings dispatch no turn-0 lead.
         try:
             tenant = run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False)
         except TenantRefused as refusal:
-            raise LauncherRefused(f"[branch] the episode's tenant: {refusal}") from refusal
+            raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
+                         brief=f"the job's tenant was refused ({type(refusal).__name__})",
+                         cause=refusal) from refusal
         runs = tenant.tenant.runs_repository()
         source = _open_launch_source(runs, ns.source_run_id)
         _source_stamp_agrees(source, tenant.tenant_id)
+        if lane is not None and lane.pick is not None:
+            # The job's fork point (O3): picked here, once the source is open and its stamp
+            # agrees, before anything is spent.
+            lane.stage("fork pick")
+            ns.branch_message_id = lane.pick(source)
+        if ns.branch_message_id is None:
+            raise ValueError("no branch point: the command line names one, or the job lane's pick")
+        if lane is not None:
+            lane.stage("launch checks")
         # N05 / O-20: a tenant whose gather grant serves no variable system has nothing a world
         # could change. Refused here, before the question-writer or anything else is spent.
         served = served_systems(tenant.grants.gather)
         if not served:
-            raise LauncherRefused(
+            raise ending(
                 f"[branch] tenant {tenant.tenant_id!r}: its gather grant serves no system a world "
                 "can vary (no read verb other than health-check on any system but the "
                 "platform-served ones, which answer the same in every world), so no world of a "
                 "branch could be served — grant gather a read verb on at least one other system "
-                "before branching this tenant")
+                "before branching this tenant", reason=LAUNCH_REFUSED,
+                brief="the tenant's gather grant serves no system a world can vary")
         # O1: any tenant branches. No system of the lab's is assumed, so a tenant with no
         # corpus-engine part (or one whose part does not resolve) launches like any other.
         # SAME RULE, #1007 M8/O7: production's questioner-lessons root is `PATHS.lessons_
@@ -581,7 +722,7 @@ def _launch(  # noqa: PLR0913 — see `main`
             formats.capture_tree(REPO_ROOT),
             knowledge=formats.KnowledgeRevision.at(pinned.commit)))
                         if live_tree is None else live_tree)
-        source_stamp = preflight_episode(
+        checked = preflight_episode(
             source=source, branch_message_id=ns.branch_message_id,
             preflight=preflight, model=ns.model,
             allow_dirty=ns.allow_dirty,
@@ -592,7 +733,8 @@ def _launch(  # noqa: PLR0913 — see `main`
 
             roster = read_roster(adapters_under(_DEFENDER_DIR))
 
-        view = prepare_episode(runs, source, knowledge_commit=pinned.commit)
+        view = prepare_episode(runs, source, knowledge_commit=pinned.commit,
+                               episode_id=None if lane is None else lane.job_id)
         episode = view.episode
         # Set once the first sibling is about to start: past it, the abort message below ("no
         # sibling started") would be false, so anything raised later is re-raised unchanged.
@@ -603,30 +745,34 @@ def _launch(  # noqa: PLR0913 — see `main`
                 # first sibling is about to start (`start_runs`).
                 author = seams.model_seam(episode.dir) if questioner is None else questioner
                 return _run_episode(
-                    ns, source=source, source_stamp=source_stamp, episode=episode, view=view,
+                    ns, source=source, source_stamp=checked.source_stamp,
+                    launch_waived=checked.waived, episode=episode, view=view,
                     questioner=author, spawn=spawn, judge=judge, lessons_dir=questioner_lessons_dir,
                     tenant=tenant, runs=runs, served=served, oracle=oracle,
                     verifier=verifier, roster=roster, started=started,
                     knowledge_commit=pinned.commit, render_page=render_page,
                     signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
-                    directory=admitted.directory)
+                    directory=admitted.directory, lane=lane)
             except SystemExit:
                 raise
             except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
-                if started.is_set():
+                # A job's launch is never re-worded: the entry records what was raised by its
+                # type (a stop's signal included), never by this text.
+                if started.is_set() or lane is not None:
                     raise
                 raise LauncherRefused(
                     f"[branch] episode {episode.dir.name} aborted: {failed!r} — no sibling "
                     "started") from failed
 
 
-def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its seams
-    ns: argparse.Namespace, *, source: Run, source_stamp: dict, episode: Episode,
+def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's whole identity plus its seams
+    ns: argparse.Namespace, *, source: Run, source_stamp: dict, launch_waived: Sequence[str] = (),
+    episode: Episode,
     view: EpisodeRuns, questioner: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
     tenant: RunTenant, runs: RunsRepository[Tenant], served: Sequence[str], oracle: Any,
-    verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer,
+    verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer | None,
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
-    issuer_transport: Any = None, directory: Any = None,
+    issuer_transport: Any = None, directory: Any = None, lane: JobLaneHooks | None = None,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
 
@@ -635,12 +781,19 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     starts through it — the arm container, then the arm roster naming every manifest world —
     just before the first sibling starts, and every finished arm is opened through it by the
     roster's id. Returns 0 when every launched sibling exited cleanly, 1 otherwise — including
-    an episode pre-flight did not accept, where no sibling ran (and so no roster exists)."""
+    an episode pre-flight did not accept, where no sibling ran (and so no roster exists).
+
+    In the job lane (`lane`), each ending the outcome table names is raised, typed, where it is
+    decided: a family pre-flight did not accept, a failed control, a refused verification and a
+    failed judge pass. The judge writes the episode's findings, not the queue, and its return
+    is reported to `lane.judged`."""
     from defender.learning.core.config import process_oracle_settings
 
     episode_id = episode.dir.name
+    stage = lane.stage if lane is not None else (lambda _name: None)
     # One clock for the episode; every step frame is drawn here, in launch order.
     clock = timing_mod.StageClock(episode)
+    stage(Step.QUESTIONER)
     with clock.step(Step.QUESTIONER):
         try:
             family = _author(ns, source=source, episode=episode, questioner=questioner,
@@ -651,9 +804,13 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
             outcome_mod.write_outcome(
                 episode, REFUSED,
                 reason=f"the question-writer's family could not be used: {unparsed}")
-            raise LauncherRefused(
+            raise ending(
                 f"[branch] episode {episode_id}: the question-writer's family could not be "
-                f"used ({unparsed}); recorded as refused in {episode.outcome.path}") from unparsed
+                f"used ({unparsed}); recorded as refused in {episode.outcome.path}",
+                reason=FAMILY_UNUSABLE,
+                brief=f"the question-writer's family could not be used ({type(unparsed).__name__}); "
+                      "the episode's outcome is refused", cause=unparsed) from unparsed
+    stage(Step.PREFLIGHT)
     with clock.step(Step.PREFLIGHT):
         record = preflight_replay(episode, source=source, roster=roster, tenant=tenant,
                                   oracle=oracle, verifier=verifier, signer=signer,
@@ -662,25 +819,49 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     if record["outcome"] != ACCEPTED:
         _logger.info(f"episode {episode_id}: {record['outcome']} before any sibling started "
                      f"({record['reason']})")
+        if lane is not None:
+            raise ending(
+                f"[branch] episode {episode_id}: pre-flight recorded {record['outcome']!r} "
+                f"({record['reason']})", reason=FAMILY_UNUSABLE,
+                brief=f"pre-flight recorded the family {record['outcome']}; no sibling started")
         return 1
     unservable = {entry["world"] for entry in record["unservable_worlds"]}
     worlds = [w for w in runnable_worlds(family) if w.label not in unservable]
     world_ids = [w.world_id for w in worlds]
+    control = next((w.world_id for w in worlds if w.role == formats.BASE_ROLE), None)
     started.set()
+    stage(Step.RUNS)
     with clock.step(Step.RUNS):
         # The arm container, then the roster — one fresh id for EVERY manifest world, the
         # unservable and the `role: null` replicate included — before the first sibling
         # starts: each sibling's run start checks the roster names its world, and takes its
         # run id from it.
         view.start_runs([world.world_id for world in family.worlds])
+        ran: list[str] = []
+
+        def sibling_ended(world_id: str, _code: int) -> None:
+            ran.append(world_id)
+            if lane is not None:
+                lane.sibling_ended(view, list(ran))
+
+        # A job's siblings run one at a time, the control first (O4); an operator's together.
         exits = start_family(episode, world_ids, spawn=spawn, model=ns.model,
                              tenant_id=tenant.tenant_id, rate=process_oracle_settings().rate,
-                             failed_before=len(unservable), knowledge_commit=knowledge_commit)
+                             failed_before=len(unservable), knowledge_commit=knowledge_commit,
+                             width=None if lane is None else 1,
+                             control=None if lane is None else control,
+                             on_ended=sibling_ended)
+    if lane is not None and control is not None and exits.get(control, 0) != 0:
+        raise ending(
+            f"[branch] episode {episode_id}: the control world exited {exits[control]}, so no "
+            "other world started", reason=CONTROL_FAILED,
+            brief="the control world's run failed, so no other world started")
     finished = [world_id for world_id in world_ids if exits.get(world_id) == 0]
+    stage(Step.VERIFY)
     with clock.step(Step.VERIFY):
         report = verify_family(
             episode, _finished_arms(view, finished), source=source_stamp,
-            allow_dirty=ns.allow_dirty)
+            allow_dirty=ns.allow_dirty, launch_waived=launch_waived)
     failed = sorted(world_id for world_id, code in exits.items() if code)
     for world_id in failed:
         _logger.warning(f"world {family.world_by_id(world_id).label} exited {exits[world_id]}")
@@ -692,11 +873,16 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
                         f"record ({report['reason']})")
     _logger.info(f"episode {episode_id}: {len(report['archived'])}/{len(world_ids)} worlds "
                  "archived")
+    stage(Step.JUDGE)
     with clock.step(Step.JUDGE):
-        _grade(runs, episode_id=episode_id, judge=judge)
+        if lane is None:
+            _grade(runs, episode_id=episode_id, judge=judge)
+        else:
+            _grade_job(runs, episode_id=episode_id, judge=judge, lane=lane)
     # Rendered after the JUDGE frame closes so the page sees the judge's timing row;
     # non-fatal.
-    _render_page(runs, render_page, episode_id=episode_id)
+    if render_page is not None:
+        _render_page(runs, render_page, episode_id=episode_id)
     return 1 if failed else 0
 
 
@@ -710,12 +896,15 @@ def _finished_arms(view: EpisodeRuns, world_ids: Sequence[str]) -> dict[str, Run
     try:
         ids = view.arm_ids()
     except RunRefused as refused:
-        raise LauncherRefused(f"[branch] episode {view.episode_id}: VERIFY refuses: "
-                              f"{refused}") from refused
+        raise ending(f"[branch] episode {view.episode_id}: VERIFY refuses: {refused}",
+                     reason=VERIFY_REFUSED,
+                     brief=f"verification refused: the arm roster cannot be read ({type(refused).__name__})",
+                     cause=refused) from refused
     if ids is None:
-        raise LauncherRefused(
+        raise ending(
             f"[branch] episode {view.episode_id}: its arm roster is gone, so no finished arm "
-            "can be named — VERIFY refuses rather than guess an arm's id")
+            "can be named — VERIFY refuses rather than guess an arm's id", reason=VERIFY_REFUSED,
+            brief="verification refused: the episode's arm roster is gone")
     with view.arms([ids[world_id] for world_id in world_ids]) as handout:
         return {world_id: handout[ids[world_id]] for world_id in world_ids}
 
@@ -756,12 +945,43 @@ def _grade(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any) -> None
                         "episode itself is otherwise unaffected", exc_info=True)
 
 
+def _grade_job(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any, lane: JobLaneHooks) -> None:
+    """A learning job's grade (#1344, "Judge modes"): the judge's job lane, whose findings wait
+    in the episode and whose pass touches no queue. A pass that fails is the job's
+    `judge_failed`, never swallowed; its message names only the failure's type. Its return is
+    the job's ending, decided: `lane.judged` is told at once."""
+    from defender.learning.core.state import StateRefused
+
+    from defender.learning.judge import grade_episode
+
+    grade = grade_episode if lane.grade is None else lane.grade
+    try:
+        graded = grade(runs, episode_id, judge=judge, job_lane=True)
+    except (Exception, StateRefused) as judge_failed:  # noqa: BLE001 — every failure of the pass is the job's judge_failed
+        raise ending(f"[branch] episode {episode_id}: the judge pass failed ({judge_failed!r})",
+                     reason=JUDGE_FAILED,
+                     brief=f"the judge's pass failed ({type(judge_failed).__name__})",
+                     cause=judge_failed) from judge_failed
+    lane.judged(graded, functools.partial(_held_findings, runs, episode_id))
+
+
+def _held_findings(runs: RunsRepository[Tenant], episode_id: str) -> int:
+    """How many findings a job's judge left in its episode, through the repository's walk."""
+    from defender.learning.judge.enqueue import held_findings_count
+
+    with runs.episode_files(episode_id) as episode:
+        return held_findings_count(episode)
+
+
 __all__ = [
     "ACCEPTED",
+    "JobEnding",
+    "JobLaneHooks",
     "Ledger",
     "LedgerError",
     "REFUSED",
     "UNUSABLE",
+    "launch_job",
     "main",
     "parse_branch_args",
     "preflight_replay",

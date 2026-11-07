@@ -1,12 +1,13 @@
 """The job store's tables and the records it hands out. Every value is set in Python (no server
 defaults). The alerts and investigations tables carry exactly the lean constraints of #1081's
-design; the migration `0004_jobs` creates them and `0005_uuid_ids` makes their ids `uuid` (#1382)."""
+design; the migration `0004_jobs` creates them and `0005_uuid_ids` makes their ids `uuid` (#1382).
+The learning jobs table (#1344) is `0008_learning_jobs`'s."""
 
 from __future__ import annotations
 
 import dataclasses
 import datetime as _dt
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from defender._model import model
 from defender.database import Base, IdColumn
-from defender.records.formats import AlertId, InvestigationId, TenantId
+from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId
 from defender.tenancy.models import SCHEMA as TENANCY_SCHEMA
 
 SCHEMA = "jobs"
@@ -88,6 +89,56 @@ class InvestigationRow(Base, kw_only=True):
     accounting_written_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
 
 
+LEARNING_STATUSES = ("queued", "running", "completed", "failed", "skipped")
+LEARNING_TRIGGERS = ("auto", "explicit")
+#: Whether a job's findings reached the queue (#1344): `none` until a `completed` end, then
+#: `pending`; `done` once published; `refused` when they fail validation for good.
+PUBLISH_STATES = ("none", "pending", "done", "refused")
+LEARNING_TERMINAL = ("completed", "failed", "skipped")
+
+
+class LearningJobRow(Base, kw_only=True):
+    """One attempt of a learning job (#1344): attempts of one request share its request key and
+    are numbered 1, 2, 3; a retry is a new row. The worker copies the job entry's progress record
+    onto a running row and its end record onto the row it ends; nothing here is resumed from."""
+
+    __tablename__ = "learning_jobs"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "alert_id"], [f"{SCHEMA}.alerts.tenant_id", f"{SCHEMA}.alerts.id"]),
+        # No ON DELETE action: the investigation delete removes its jobs itself, under their row locks (O10).
+        ForeignKeyConstraint(["investigation_id"], [f"{SCHEMA}.investigations.id"]),
+        UniqueConstraint("tenant_id", "investigation_id", "request_key", "attempt"),
+        CheckConstraint(f"status IN ({_quoted(LEARNING_STATUSES)})", name="status"),
+        CheckConstraint(f"trigger IN ({_quoted(LEARNING_TRIGGERS)})", name="trigger"),
+        CheckConstraint(f"publish_state IN ({_quoted(PUBLISH_STATES)})", name="publish_state"),
+        CheckConstraint("status <> 'running' OR lease_expires_at IS NOT NULL", name="running_has_a_lease"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[LearningJobId] = mapped_column(IdColumn(LearningJobId), primary_key=True)
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId))
+    alert_id: Mapped[AlertId] = mapped_column(IdColumn(AlertId))
+    investigation_id: Mapped[InvestigationId] = mapped_column(IdColumn(InvestigationId))
+    request_key: Mapped[str] = mapped_column(Text)
+    attempt: Mapped[int] = mapped_column(Integer)
+    trigger: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+    #: The family step's progress, read-only (never resumed from).
+    stage: Mapped[str | None] = mapped_column(Text, default=None)
+    fork_message_id: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The siblings' own cost so far, then final: partial, without the questioner, oracle and judge (O13).
+    sibling_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    findings_count: Mapped[int] = mapped_column(Integer, default=0)
+    publish_state: Mapped[str] = mapped_column(Text, default="none")
+    started_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: Set at the end; on a `running` row, the mark of a hand-back, which no renewal covers.
+    finished_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    reason: Mapped[str | None] = mapped_column(Text, default=None)
+    message: Mapped[str | None] = mapped_column(Text, default=None)
+    lease_expires_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+
+
 @model(frozen=True)
 class StoredAlert:
     """An alert as read. `raw` is the exact bytes inserted."""
@@ -131,6 +182,62 @@ class Claim:
 
     record: InvestigationRecord
     tenant_state: str
+
+
+@model(frozen=True)
+class LearningJobRecord:
+    """A learning job attempt as read."""
+
+    learning_job_id: LearningJobId
+    tenant_id: TenantId
+    alert_id: AlertId
+    investigation_id: InvestigationId
+    request_key: str
+    attempt: int
+    trigger: str
+    status: str
+    stage: str | None
+    fork_message_id: str | None
+    sibling_cost_usd: float
+    findings_count: int
+    publish_state: str
+    created_at: _dt.datetime
+    started_at: _dt.datetime | None
+    finished_at: _dt.datetime | None
+    reason: str | None
+    message: str | None
+
+
+class LearningProgress(Protocol):
+    """What the job entry's records say of a family step (its progress or end record, as
+    `records.job_lane` reads them): the fork pick, the stage and the siblings' cost. The worker
+    copies it onto the running row, and onto the row it ends."""
+
+    @property
+    def fork_message_id(self) -> str | None: ...
+
+    @property
+    def stage(self) -> str | None: ...
+
+    @property
+    def sibling_cost_usd(self) -> float: ...
+
+
+@dataclasses.dataclass(frozen=True)
+class LearningClaim:
+    """A claimed learning job and its tenant's state, read in the claim's own transaction."""
+
+    record: LearningJobRecord
+    tenant_state: str
+
+
+def learning_job_record(row: LearningJobRow) -> LearningJobRecord:
+    return LearningJobRecord(
+        learning_job_id=row.id, tenant_id=row.tenant_id, alert_id=row.alert_id, investigation_id=row.investigation_id,
+        request_key=row.request_key, attempt=row.attempt, trigger=row.trigger, status=row.status, stage=row.stage,
+        fork_message_id=row.fork_message_id, sibling_cost_usd=row.sibling_cost_usd,
+        findings_count=row.findings_count, publish_state=row.publish_state, created_at=row.created_at,
+        started_at=row.started_at, finished_at=row.finished_at, reason=row.reason, message=row.message)
 
 
 def stored_alert(row: AlertRow) -> StoredAlert:

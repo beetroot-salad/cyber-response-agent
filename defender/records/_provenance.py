@@ -25,6 +25,22 @@ CODE_SCOPE = "defender"
 #: time (`.devcontainer/Dockerfile.runtime`).
 BUILD_COMMIT_ENV = "DEFENDER_BUILD_COMMIT"
 
+#: The marker a code copy carries at its root (#1344 r5, "Stamps from the copy"): written by the
+#: step that makes the copy, `{"commit": <the build commit>}`. Read before git is asked, so a copy
+#: under an outer work tree never stamps the outer repository's HEAD.
+CODE_COPY_MARKER = ".defender-code-copy.json"
+
+#: Where a stamp's commit came from (`RunProvenance.origin`): git answered for the tree, the
+#: image's build stamp stood in for a git that could not be asked, or a code copy's marker. A stamp
+#: with no commit, or one read back from before #1344, has none.
+ORIGIN_GIT = "git"
+ORIGIN_BUILD_STAMP = "build_stamp"
+ORIGIN_CODE_COPY = "code_copy"
+_ORIGINS = frozenset({ORIGIN_GIT, ORIGIN_BUILD_STAMP, ORIGIN_CODE_COPY})
+
+#: A build commit as a marker may name it: lowercase hex, abbreviated or whole.
+_MARKER_COMMIT = re.compile(r"[0-9a-f]{7,64}")
+
 #: Wall clock per git call. This is on the critical path of run-dir creation with no other
 #: bound, so a hung git (stalled mount, `fsmonitor`, `index.lock`) would hang startup.
 #: Generous because `--untracked-files=all` over a huge tree is slow but honest.
@@ -141,6 +157,10 @@ class RunProvenance:
     #: wrong-typed on read, each folds to `None` without voiding the record.
     started_at: str | None = None
     alert_label: str | None = None
+    #: Where `commit` came from (`ORIGIN_*`, #1344 r5): `code_copy` only for a tree whose
+    #: copy marker named it, which is then clean by construction (the copy is made read-only
+    #: from its build). `None`: no commit, or a stamp written before the field existed.
+    origin: str | None = None
 
     def __post_init__(self) -> None:
         """Refuse a record no capture could have produced, so both the writer and `from_obj`
@@ -164,6 +184,13 @@ class RunProvenance:
                 f"the dirty-path sample ({len(self.dirty_paths)}) is larger than the count it "
                 f"samples ({self.dirty_path_count}) — a negative count lands here too"
             )
+        if self.origin is not None and self.origin not in _ORIGINS:
+            raise ValueError(f"not a stamp origin: {self.origin!r}")
+        if self.origin is not None and self.commit is None:
+            raise ValueError("a stamp with no commit has no origin for it")
+        # Only a copy's marker answers clean without git, and it always does.
+        if self.origin == ORIGIN_CODE_COPY and self.dirty is not False:
+            raise ValueError("a code-copy stamp is clean by construction")
 
     def as_json(self, *, knowledge_source: Mapping[str, str | None] | None = None) -> str:
         """The stamp's wire text. `knowledge_source` is how the run came by its knowledge
@@ -189,6 +216,7 @@ class RunProvenance:
             "knowledge": None if self.knowledge is None else self.knowledge.as_wire(),
             "started_at": self.started_at,
             "alert_label": self.alert_label,
+            "origin": self.origin,
         }
         if knowledge_source is not None:
             doc["knowledge_source"] = {k: knowledge_source.get(k) for k in KNOWLEDGE_SOURCE_KEYS}
@@ -224,6 +252,7 @@ class RunProvenance:
         fork_turn = obj.get("fork_turn")
         started_at = obj.get("started_at")
         alert_label = obj.get("alert_label")
+        origin = obj.get("origin")
         # Coherence is `__post_init__`'s job; this only types each field.
         try:
             return cls(
@@ -246,6 +275,8 @@ class RunProvenance:
                 knowledge=KnowledgeRevision.from_wire(obj.get("knowledge")),
                 started_at=(started_at if isinstance(started_at, str) else None),
                 alert_label=(alert_label if isinstance(alert_label, str) else None),
+                # An unknown origin folds to `None`; a known one is held to its rule above.
+                origin=(origin if isinstance(origin, str) and origin in _ORIGINS else None),
             )
         except ValueError:
             return None
@@ -262,7 +293,7 @@ def _from_build_stamp(environ: Mapping[str, str], why: str) -> RunProvenance:
     if not baked:
         return RunProvenance(commit=None, dirty=None, unavailable=why, scope=CODE_SCOPE)
     return RunProvenance(
-        commit=baked, dirty=None, scope=CODE_SCOPE,
+        commit=baked, dirty=None, scope=CODE_SCOPE, origin=ORIGIN_BUILD_STAMP,
         unavailable=(
             f"{why}; commit recovered from the {BUILD_COMMIT_ENV} build stamp, which names the "
             "tree the image was BUILT from — nothing here can confirm it describes the code on "
@@ -274,7 +305,8 @@ def _from_build_stamp(environ: Mapping[str, str], why: str) -> RunProvenance:
 def capture_tree(
     repo_root: Path, *, environ: Mapping[str, str] | None = None
 ) -> RunProvenance:
-    """Ask git what `repo_root` is sitting on, right now.
+    """Ask git what `repo_root` is sitting on, right now — unless `repo_root` is a code copy
+    (its root holds `CODE_COPY_MARKER`), whose marker answers first and git is never asked.
 
     `environ` is the injection seam for the build-stamp fallback.
 
@@ -282,6 +314,9 @@ def capture_tree(
     failure lands in `unavailable` with its reason, which tells the operator what to fix.
     """
     env = os.environ if environ is None else environ
+    copied = _from_copy_marker(Path(repo_root))
+    if copied is not None:
+        return copied
     try:
         commit = _git.git_head_sha(repo_root, timeout=GIT_TIMEOUT_S)
     except _git.GitError as e:
@@ -296,7 +331,8 @@ def capture_tree(
     except _GIT_FAILED as e:
         # Keep the live sha (better than any baked one); only the dirt is unknown.
         return RunProvenance(
-            commit=commit, dirty=None, unavailable=f"git status: {e!r}", scope=CODE_SCOPE
+            commit=commit, dirty=None, unavailable=f"git status: {e!r}", scope=CODE_SCOPE,
+            origin=ORIGIN_GIT,
         )
     # A set of paths, not the record list: one path can have two records (`git rm --cached`
     # leaves `D  foo` and `?? foo`). `no_renames=True` above keeps a rename's source path from
@@ -308,7 +344,25 @@ def capture_tree(
         dirty_paths=tuple(paths[:DIRTY_PATH_SAMPLE]),
         dirty_path_count=len(paths),
         scope=CODE_SCOPE,
+        origin=ORIGIN_GIT,
     )
+
+
+def _from_copy_marker(repo_root: Path) -> RunProvenance | None:
+    """The stamp a code copy's marker gives, or `None` when `repo_root` holds no marker. A
+    marker that is there but names no build commit is a stamp with no commit (never a fall back
+    to git: the copy may sit under another repository's work tree, L-C23)."""
+    marker = repo_root / CODE_COPY_MARKER
+    if not os.path.lexists(marker):
+        return None
+    raw, err = read_guarded(marker)
+    obj, unreadable = (None, err) if raw is None else load_json_artifact(raw)
+    commit = obj.get("commit") if isinstance(obj, dict) and unreadable is None else None
+    if not (isinstance(commit, str) and _MARKER_COMMIT.fullmatch(commit)):
+        return RunProvenance(
+            commit=None, dirty=None, scope=CODE_SCOPE,
+            unavailable=f"the code copy's marker {CODE_COPY_MARKER} names no build commit")
+    return RunProvenance(commit=commit, dirty=False, scope=CODE_SCOPE, origin=ORIGIN_CODE_COPY)
 
 
 def write(path: Path, prov: RunProvenance) -> None:

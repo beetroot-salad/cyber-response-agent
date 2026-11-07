@@ -3,6 +3,7 @@ builder of those rows."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import field
 from defender._model import model
@@ -377,3 +378,133 @@ __all__ = [
     "append_world_rows", "append_world_rows_report", "build_finding_row", "check_disposition_entry", "defender_lane_blocked",
     "disposition_entry", "draws_on_disk", "draws_on_disk_report", "enqueue_report",
 ]
+
+
+# -- the job lane (#1344): findings held in the episode, published once the job's row has ended ---
+
+
+class FindingsRefused(JudgeRefused):
+    """A job episode's held findings fail the queue's own validation for good: a line that is
+    not a row, or a row its channel's rule refuses. Its job is never published (refused)."""
+
+
+#: Each findings channel's sink record in a job's episode.
+_SINK_RECORDS: dict[str, str] = {FINDINGS.name: "job_findings",
+                                 QUESTIONER_FINDINGS.name: "job_questioner_findings"}
+
+
+class EpisodeFindings:
+    """The judge's job-lane sink (#1344, "Judge modes"): stands where the learning state stands
+    in an operator's pass, but appends each channel's rows to the episode's own findings record
+    and reaches no queue, so a job's findings wait in its episode until its row has ended. No
+    drain is called. Only the two findings channels are held; anything else is refused."""
+
+    def __init__(self, episode: formats.Episode) -> None:
+        self._episode = episode
+
+    def _record(self, channel: Any) -> str:
+        name = _SINK_RECORDS.get(getattr(channel, "name", None) or "")
+        if name is None:
+            raise JudgeRefused(f"the job lane holds only findings, not channel {channel!r}")
+        return name
+
+    def rows_report(self, channel: Any) -> tuple[list[dict[str, Any]], int]:
+        """`(rows, unreadable lines)` the episode holds for `channel`; absent: none."""
+        name = self._record(channel)
+        rows, malformed, read = self._episode.view().read_jsonl(getattr(LAYOUT, name))
+        if read.text is None and not read.absent:
+            raise OSError(f"{getattr(self._episode, name).path}: {read.reason}")
+        return rows, malformed
+
+    def rows(self, channel: Any) -> list[dict[str, Any]]:
+        return self.rows_report(channel)[0]
+
+    def append(self, channel: Any, rows: list[dict[str, Any]], *,
+               dedup_key: str | None = None) -> tuple[int, int]:
+        """Append `rows` to the episode's record for `channel`, dropping a row whose
+        `dedup_key` the record or an earlier row already holds, as the queue does:
+        `(appended, unreadable lines seen)`. An empty append makes nothing."""
+        existing, malformed = self.rows_report(channel)
+        seen = {r[dedup_key] for r in existing if dedup_key and isinstance(r.get(dedup_key), str)}
+        fresh = []
+        for row in rows:
+            identity = row.get(dedup_key) if dedup_key else None
+            if isinstance(identity, str):
+                if identity in seen:
+                    continue
+                seen.add(identity)
+            fresh.append(row)
+        if fresh:
+            getattr(self._episode, self._record(channel)).append(
+                "".join(json.dumps(row) + "\n" for row in fresh))
+        return len(fresh), malformed
+
+    def describe(self, channel: Any) -> str:
+        return str(getattr(self._episode, self._record(channel)).path)
+
+
+@model
+class PublishReport:
+    """What one `publish_episode_findings` call put on the queues: rows newly appended to the
+    defender and questioner channels (a row either already held, or already consumed, is not
+    counted)."""
+
+    appended: int = 0
+    world_appended: int = 0
+
+
+def held_findings_count(episode: formats.Episode) -> int:
+    """How many finding rows a job's episode holds, both channels."""
+    sink = EpisodeFindings(episode)
+    return len(sink.rows(FINDINGS)) + len(sink.rows(QUESTIONER_FINDINGS))
+
+
+def publish_episode_findings(episode_dir: Path | formats.Episode, *,
+                             state: LearningState) -> PublishReport:
+    """Publish a job episode's held findings to the tenant's queues through `state` (#1344,
+    "Publishing"). Every row is screened by its channel's own rule first, so a held row that
+    fails it is `FindingsRefused` with nothing appended; then each channel is appended with
+    `finding_id` dedup, which reads the queue and the consumed ledger under the append lock, so a
+    republish after a crash, a concurrent post-step or an author's rotation adds nothing. An
+    episode with no findings held publishes nothing. Anything else that fails (the episode or the
+    queue cannot be read or written) is raised as it is: the job stays pending.
+
+    `episode_dir` is the episode's handle, or its folder `<data root>/<tenant>/episodes/<id>`,
+    which is opened through that tenant's runs repository walk (never by path)."""
+    if isinstance(episode_dir, formats.Episode):
+        return _publish_held(episode_dir, state=state)
+    folder = Path(episode_dir)
+    if folder.parent.name != "episodes":
+        raise JudgeRefused(f"{folder} is not an episode folder (<data root>/<tenant>/episodes/<id>)")
+    from defender import tenancy
+
+    tenant = tenancy.requested_tenant(tenancy.data_root_from_path(folder.parent.parent.parent),
+                                      folder.parent.parent.name)
+    with tenant.runs_repository().episode_files(folder.name) as episode:
+        return _publish_held(episode, state=state)
+
+
+def _publish_held(episode: formats.Episode, *, state: LearningState) -> PublishReport:
+    sink = EpisodeFindings(episode)
+    where = _refusal_prefix(episode.dir)
+    held: dict[str, list[dict[str, Any]]] = {}
+    for channel, validate in ((FINDINGS, _validate_row), (QUESTIONER_FINDINGS, _validate_world_row)):
+        rows, malformed = sink.rows_report(channel)
+        if malformed:
+            raise FindingsRefused(f"{where}{malformed} held line(s) of {sink.describe(channel)} "
+                                  "are not finding rows, so the job's findings are not published")
+        for row in rows:
+            try:
+                validate(row, episode_dir=episode.dir)
+            except JudgeRefused as bad:
+                raise FindingsRefused(f"a held row fails the {channel.name} rule, so the job's "
+                                      f"findings are not published: {bad}") from None
+        held[channel.name] = rows
+    report = PublishReport()
+    if held[FINDINGS.name]:
+        report.appended = state.append(FINDINGS, held[FINDINGS.name], dedup_key="finding_id")[0]
+    if held[QUESTIONER_FINDINGS.name]:
+        report.world_appended = state.append(
+            QUESTIONER_FINDINGS, held[QUESTIONER_FINDINGS.name], dedup_key="finding_id")[0]
+    return report
+

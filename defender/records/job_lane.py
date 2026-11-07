@@ -1,6 +1,12 @@
 """The job lane's door to one tenant's runs container (#1342 M1): every host file the worker and
 the job entry share, keyed by `(data root, tenant id)` and opened without accepting the tenant.
 
+Learning jobs (#1344) share three host-held records here, keyed by the learning job's id and
+written by its children, read by the worker: the job entry's progress record
+(`LearningProgress`, replaced whole), its end record (`LearningEnd`, create-only) and the
+post-step's record (`PostStepRecord`). Each has one parser, and text that is not a record of its
+shape parses as no record (`None`), which the worker treats like an absent one.
+
 The worker writes a job's launch record and alert file here before it starts the child; the
 child's job entry opens the same door first thing — before tenant acceptance, so a refusal there
 still leaves its job-end record — checks the launch record, and writes the job-end record as it
@@ -13,9 +19,11 @@ no-follow, size-limited read off that held folder; every write is create-only.""
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 import stat
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 
@@ -116,6 +124,171 @@ class JobEnd:
         return cls(setup=setup, box=box, report_committed=committed, scrub_verified=verified)
 
 
+# -- learning jobs (#1344): the vocabulary and the three records -----------------------------------
+
+#: How the job entry ended, in its end record. `stopped` is a hand-back (the worker retries it,
+#: using an attempt); the other three are the row's own terminal statuses.
+LEARNING_COMPLETED, LEARNING_SKIPPED, LEARNING_FAILED, LEARNING_STOPPED = (
+    "completed", "skipped", "failed", "stopped")
+
+#: The reasons the job entry decides (r5's outcome table, plus `entry_error`), by the status each
+#: belongs to. `completed` and `stopped` carry no reason.
+NO_FORK_POINT, HISTORY_UNREADABLE, FAMILY_UNUSABLE = (
+    "no_fork_point", "history_unreadable", "family_unusable")
+CONTROL_FAILED, LAUNCH_REFUSED, VERIFY_REFUSED = "control_failed", "launch_refused", "verify_refused"
+SOURCE_UNAVAILABLE, JUDGE_FAILED, ENTRY_ERROR = "source_unavailable", "judge_failed", "entry_error"
+SKIPPED_BY_THE_ENTRY = frozenset({NO_FORK_POINT, HISTORY_UNREADABLE, FAMILY_UNUSABLE})
+FAILED_BY_THE_ENTRY = frozenset({CONTROL_FAILED, LAUNCH_REFUSED, VERIFY_REFUSED, SOURCE_UNAVAILABLE,
+                                 JUDGE_FAILED, ENTRY_ERROR})
+#: The reasons only the worker records (no end record carries them).
+EXPIRED, EXITED_WITHOUT_RESULT, WORKER_ERROR, LEASE_LAPSED, RETRY_CAP = (
+    "expired", "exited_without_result", "worker_error", "lease_lapsed", "retry_cap")
+
+_END_REASONS: dict[str, frozenset[str | None]] = {
+    LEARNING_COMPLETED: frozenset({None}),
+    LEARNING_STOPPED: frozenset({None}),
+    LEARNING_SKIPPED: frozenset(SKIPPED_BY_THE_ENTRY),
+    LEARNING_FAILED: frozenset(FAILED_BY_THE_ENTRY),
+}
+
+_PROGRESS_FIELDS = frozenset({"fork_message_id", "stage", "sibling_cost_usd"})
+_END_FIELDS = frozenset({"status", "reason", "message", "fork_message_id", "stage",
+                         "findings_count", "sibling_cost_usd"})
+_POST_STEP_FIELDS = frozenset({"published", "refused"})
+
+
+def _optional_text(value: object) -> bool:
+    return value is None or isinstance(value, str)
+
+
+def _cost(value: object) -> bool:
+    """A cost in dollars: a finite, non-negative JSON number (never a bool)."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and value >= 0)
+
+
+def _record_object(text: str, fields: frozenset[str]) -> dict | None:
+    """`text` as a JSON object of exactly `fields`, or `None`."""
+    obj, unreadable = _io.load_json_artifact(text)
+    if unreadable is not None or not isinstance(obj, dict) or set(obj) != fields:
+        return None
+    return obj
+
+
+@dataclass(frozen=True)
+class LearningProgress:
+    """The job entry's progress record (`<runs>/<job id>.learning-progress.json`): the fork it
+    picked (a message id as text, `None` until picked), its stage, and what its siblings have cost
+    so far (dollars, partial: each sibling's own main session and descendants). Replaced whole as
+    each changes; the worker copies it to the row on its loop."""
+
+    fork_message_id: str | None
+    stage: str | None
+    sibling_cost_usd: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not (_optional_text(self.fork_message_id) and _optional_text(self.stage)
+                and _cost(self.sibling_cost_usd)):
+            raise ValueError(f"not a learning progress record: {self!r}")
+
+    def text(self) -> str:
+        return json.dumps({"fork_message_id": self.fork_message_id, "stage": self.stage,
+                           "sibling_cost_usd": self.sibling_cost_usd})
+
+    @classmethod
+    def parse(cls, text: str) -> LearningProgress | None:
+        """The record `text` holds, or `None` when it is not one of this shape."""
+        obj = _record_object(text, _PROGRESS_FIELDS)
+        if obj is None:
+            return None
+        try:
+            return cls(fork_message_id=obj["fork_message_id"], stage=obj["stage"],
+                       sibling_cost_usd=obj["sibling_cost_usd"])
+        except ValueError:
+            return None
+
+
+@dataclass(frozen=True)
+class LearningEnd:
+    """The job entry's end record (`<runs>/<job id>.learning-end.json`), written create-only at
+    every exit: the status and reason it decided (a reason only for `skipped` and `failed`, one
+    of that status's own), a message from the entry's own code (required for `skipped` and
+    `failed`; never run text), and the final pick, stage, findings count and sibling cost."""
+
+    status: str
+    reason: str | None
+    message: str | None
+    fork_message_id: str | None
+    stage: str | None
+    findings_count: int = 0
+    sibling_cost_usd: float = 0.0
+
+    def __post_init__(self) -> None:
+        allowed = _END_REASONS.get(self.status) if isinstance(self.status, str) else None
+        if allowed is None or self.reason not in allowed:
+            raise ValueError(f"not an end the job entry decides: {self.status!r}/{self.reason!r}")
+        if not (_optional_text(self.message) and _optional_text(self.fork_message_id)
+                and _optional_text(self.stage) and _cost(self.sibling_cost_usd)):
+            raise ValueError(f"not a learning end record: {self!r}")
+        if not isinstance(self.findings_count, int) or isinstance(self.findings_count, bool) \
+                or self.findings_count < 0:
+            raise ValueError(f"not a findings count: {self.findings_count!r}")
+        if self.reason is not None and not (self.message or "").strip():
+            raise ValueError(f"a {self.status} end names why in its message")
+
+    def text(self) -> str:
+        return json.dumps({"status": self.status, "reason": self.reason, "message": self.message,
+                           "fork_message_id": self.fork_message_id, "stage": self.stage,
+                           "findings_count": self.findings_count,
+                           "sibling_cost_usd": self.sibling_cost_usd})
+
+    @classmethod
+    def parse(cls, text: str) -> LearningEnd | None:
+        """The record `text` holds, or `None` when it is not one the job entry could write."""
+        obj = _record_object(text, _END_FIELDS)
+        if obj is None:
+            return None
+        try:
+            return cls(**{name: obj[name] for name in _END_FIELDS})
+        except (TypeError, ValueError):
+            return None
+
+
+@dataclass(frozen=True)
+class PostStepRecord:
+    """The post-step's record (`<runs>/<job id>.post-step.json`, the job it followed): the
+    pending jobs whose findings it published and those it refused for good (their rows failed
+    validation). A job in neither stays pending (a queue-level or transient failure)."""
+
+    published: tuple[str, ...] = ()
+    refused: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        for ids in (self.published, self.refused):
+            if not isinstance(ids, tuple) or not all(isinstance(i, str) for i in ids):
+                raise ValueError(f"not a post-step record: {self!r}")
+        if set(self.published) & set(self.refused):
+            raise ValueError("a job is published or refused, never both")
+
+    def text(self) -> str:
+        return json.dumps({"published": list(self.published), "refused": list(self.refused)})
+
+    @classmethod
+    def of(cls, published: Sequence[str], refused: Sequence[str]) -> PostStepRecord:
+        return cls(published=tuple(published), refused=tuple(refused))
+
+    @classmethod
+    def parse(cls, text: str) -> PostStepRecord | None:
+        """The record `text` holds, or `None` when it is not one of this shape."""
+        obj = _record_object(text, _POST_STEP_FIELDS)
+        if obj is None or not all(isinstance(obj[k], list) for k in _POST_STEP_FIELDS):
+            return None
+        try:
+            return cls.of(obj["published"], obj["refused"])
+        except ValueError:
+            return None
+
+
 def _run_id(raw: object) -> RunId:
     if isinstance(raw, RunId):
         return raw
@@ -135,9 +308,12 @@ class JobLane:
         self.tenant_id = tenant_id
 
     @classmethod
-    def open(cls, data_root: DataRoot, tenant_id: object) -> JobLane:
-        """`<data root>/<tenant_id>/runs`, held no-follow from the tenant's folder; never made.
-        The tenant is not accepted here: only its id's grammar is judged."""
+    def open(cls, data_root: DataRoot, tenant_id: object, *, make: bool = False) -> JobLane:
+        """`<data root>/<tenant_id>/runs`, held no-follow from the tenant's folder. Never made,
+        except with `make` (a learning post-step, #1344, whose record must land for a tenant whose
+        runs folder nothing has made yet): then a missing one is made below the held tenant
+        folder, never through a link. The tenant is not accepted here: only its id's grammar is
+        judged."""
         try:
             tenant = TenantId(tenant_id)
         except TenantRefused as refused:
@@ -151,6 +327,11 @@ class JobLane:
         except OSError as exc:
             raise JobLaneRefused(f"the tenant folder {folder} {level_fault(exc)}") from None
         try:
+            if make:
+                try:
+                    top.mkdir(_RUNS)  # lint-unguarded-tree-write: ok — `Held.mkdir`, the rooted mkdir below the tenant folder held no-follow
+                except OSError as exc:
+                    raise JobLaneRefused(f"the runs folder {runs} {level_fault(exc)}") from None
             held = hold_level(top, _RUNS, runs, io=_io, what="the runs folder")
         except FileNotFoundError:
             raise JobLaneRefused(f"the runs folder {runs} is absent: tenant setup makes it, and "
@@ -242,6 +423,39 @@ class JobLane:
         read = self._held.view().read(self._paths(_run_id(run_id)).job_end().name)
         return None if read.text is None else JobEnd.parse(read.text)
 
+    # -- a learning job's three records (#1344) ------------------------------------------------------
+
+    def write_learning_progress(self, job_id: object, progress: LearningProgress) -> None:
+        """The progress record, replaced whole (a reader sees the old record or the new one)."""
+        self._held.write(self._paths(_run_id(job_id)).learning_progress().name, progress.text(),
+                         mode="replace")
+
+    def read_learning_progress(self, job_id: object) -> LearningProgress | None:
+        """The progress record, or `None` when it is absent, unreadable or not of its shape."""
+        read = self._held.view().read(self._paths(_run_id(job_id)).learning_progress().name)
+        return None if read.text is None else LearningProgress.parse(read.text)
+
+    def write_learning_end(self, job_id: object, end: LearningEnd) -> None:
+        """The end record, create-only: one already there is `FileExistsError` and is kept."""
+        self._held.write(self._paths(_run_id(job_id)).learning_end().name, end.text(),
+                         mode="create")
+
+    def read_learning_end(self, job_id: object) -> LearningEnd | None:
+        """The end record, or `None` when it is absent, unreadable or not one the job entry
+        writes (the worker treats all three alike)."""
+        read = self._held.view().read(self._paths(_run_id(job_id)).learning_end().name)
+        return None if read.text is None else LearningEnd.parse(read.text)
+
+    def write_post_step(self, job_id: object, record: PostStepRecord) -> None:
+        """The post-step's record for the job it followed, replaced whole."""
+        self._held.write(self._paths(_run_id(job_id)).post_step().name, record.text(),
+                         mode="replace")
+
+    def read_post_step(self, job_id: object) -> PostStepRecord | None:
+        """The post-step's record, or `None` when it is absent, unreadable or not of its shape."""
+        read = self._held.view().read(self._paths(_run_id(job_id)).post_step().name)
+        return None if read.text is None else PostStepRecord.parse(read.text)
+
     # -- what the run left ------------------------------------------------------------------------
 
     def run_started(self, run_id: object) -> bool:
@@ -332,3 +546,36 @@ class JobLane:
         except (OSError, sqlite3.Error, StoreError, ValueError) as fault:
             raise CostUnreadable(f"run {run_id}: its session database {database} cannot be read: "
                                  f"{fault!r}") from None
+
+
+def sibling_cost(store: object, session_id: str) -> float:
+    """What one sibling cost (#1344 O13): its own main session `session_id` and every session
+    forked from it, at any depth, priced from their own model responses — never the prefix a
+    fork inherited, never the source's sessions or any other sibling's, and never the
+    questioner, oracle or judge, which are outside it. Siblings fork the source's database, so
+    the lineage there has a parent; unlike `JobLane.cost`, a forked lineage is what this reads.
+    `store` is an open session store holding `session_id`; a session it does not hold is
+    `CostUnreadable`."""
+    from defender.configuration import billed_usage, usage_cost
+    from defender.records import session_store
+
+    try:
+        sessions = session_store.list_sessions(store)
+        children: dict[str | None, list[str]] = {}
+        for row in sessions:
+            children.setdefault(row.parent_session_id, []).append(row.session_id)
+        if session_id not in {row.session_id for row in sessions}:
+            raise CostUnreadable(f"session {session_id} is not in the store")
+        lineage, frontier = set(), [session_id]
+        while frontier:
+            current = frontier.pop()
+            if current in lineage:
+                continue
+            lineage.add(current)
+            frontier.extend(children.get(current, ()))
+        return sum(usage_cost(m.model_name or "", billed_usage(m.usage))
+                   for s in sorted(lineage) for m in session_store.own_responses(store, s))
+    except CostUnreadable:
+        raise
+    except (OSError, sqlite3.Error, StoreError, ValueError) as fault:
+        raise CostUnreadable(f"session {session_id}: its cost cannot be read: {fault!r}") from None

@@ -131,11 +131,13 @@ def _gate(bound: Bound, manifest: dict[str, Any]) -> tuple[str, str, dict[str, A
 def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their bounded re-asks
     episode: Episode, label: str, *, world_id: str | None, judge: Any, draws: int, model: str, effort: str,
     prompt: str, scope: str = "world", reachable_systems: list[str] | None = None,
-    shown_its_facts: bool | None = None,
+    shown_its_facts: bool | None = None, contain: bool = True,
 ) -> tuple[int, dict[int, dict[str, Any]], int, str | None]:
     """Call the judge `draws` times over `prompt`, writing one `worlds/<X>/judge/<n>.yaml` per
     draw. Returns `(completed_draws, draw documents by index, malformed replies, the last
-    refusal's reason)`."""
+    refusal's reason)`. A judge call that raises costs only its draw (`contain`), except in a
+    learning job's pass (#1344), where it is raised once its wire log is written: a judge that
+    crashed fails the job (`judge_failed`), never a graded nothing."""
     from defender.learning.core.config import StageWiring
     from defender._agent_role import AgentRole
 
@@ -176,6 +178,8 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
                 doc = {"failure_reason": reason}
                 _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
                                 reply=None, failure=reason)
+                if not contain:
+                    raise
                 too_large = _is_size_failure(failed)
                 break
             _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
@@ -304,14 +308,24 @@ def _default_judge_seam(episode_dir: Path) -> Any:
 
 def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration surface
     runs: RunsRepository[Tenant], episode_id: str, *, judge: Any = None,
-    state: LearningState, draws: int | None = None, git_show: Any = None,
+    state: LearningState | None = None, draws: int | None = None, git_show: Any = None,
+    job_lane: bool = False,
 ) -> EpisodeGrade:
     """Grade episode `episode_id` of `runs`'s tenant (#1105 PR 2: the judge takes the
     repository and an id). Its door is `runs.episode_files(episode_id)`, held for the whole
     pass: a bad id, an unusable episodes root, a missing episode, a file at its name, or a
     container whose record names another tenant (or none) is `JudgeRefused`, and nothing is
-    created. Every queue append goes through `state`."""
+    created. Every queue append goes through `state` — the operator lane's.
+
+    `job_lane` (#1344, "Judge modes"): a learning job's pass reaches no queue. Its findings go
+    to the episode's own findings records through the job lane's sink
+    (`enqueue.EpisodeFindings`), which the job's post-step publishes once the job's row has
+    ended; `state` is never touched, and no drain is called. The fence is here, in code."""
     import yaml
+
+    if state is None and not job_lane:
+        raise JudgeRefused("an operator's judge pass appends through the tenant's learning "
+                           "state, and none was given")
 
     configured = draws if draws is not None else _judge_draws()
     if configured < 1:
@@ -326,8 +340,10 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
     try:
         with _open_episode(runs, episode_id) as episode:
             resolved_judge = judge if judge is not None else _default_judge_seam(episode.dir)
+            sink: Any = enqueue_mod.EpisodeFindings(episode) if job_lane else state
             return _grade_episode(episode, judge=resolved_judge, draws=configured,
-                                  git_show=git_show, state=state, tenant=runs.tenant)
+                                  git_show=git_show, state=sink, tenant=runs.tenant,
+                                  job_lane=job_lane)
     except JudgeRefused:
         raise
     # Every input-driven failure arrives as `JudgeRefused`, which is what the launcher catches.
@@ -367,16 +383,16 @@ def _refuse_queueing(prior: EpisodeGrade) -> None:
             f"{STATE_KEY} to {QUEUED!r} or remove it; the re-run is refused")
 
 
-def _grade_episode(
+def _grade_episode(  # noqa: PLR0913 — the pass's whole configuration, one keyword each
     episode: Episode, *, judge: Any, draws: int, git_show: Any, state: LearningState,
-    tenant: Any = None,
+    tenant: Any = None, job_lane: bool = False,
 ) -> EpisodeGrade:
     # A not-graded stamp never short-circuits, so a repaired episode can still be graded. A
     # recorded grade — a stamp's included, which carries the committed rows it met — is carried
     # row by row: `queued` rows are final, a `queueing` row refuses the grade (after the gates,
     # so a stamp pass still writes its stamp), every other row is re-graded (A6).
     return _Pass(episode, judge=judge, draws=draws, git_show=git_show, state=state,
-                 prior=read_grade(episode), tenant=tenant).grade()
+                 prior=read_grade(episode), tenant=tenant, job_lane=job_lane).grade()
 
 
 def _label_of(finding_id: str) -> str | None:
@@ -432,9 +448,12 @@ class _Pass:
     """One grading pass's state: the rows, the ledger and the user record it writes, and the
     queue counts. Each commit (A6) writes the whole record as it stands."""
 
-    def __init__(self, episode: Episode, *, judge: Any, draws: int, git_show: Any,
-                 state: LearningState, prior: EpisodeGrade | None, tenant: Any = None) -> None:
+    def __init__(self, episode: Episode, *, judge: Any, draws: int, git_show: Any,  # noqa: PLR0913 — the pass's whole configuration
+                 state: LearningState, prior: EpisodeGrade | None, tenant: Any = None,
+                 job_lane: bool = False) -> None:
         self.episode = episode
+        #: A learning job's pass (#1344): a judge call that raises is the pass's failure.
+        self.job_lane = job_lane
         #: The runs repository's tenant: whose exports a post-move lesson body is read from (O6).
         self.tenant = tenant
         self.bound = episode.view()
@@ -600,7 +619,7 @@ class _Pass:
         completed, documents, malformed, refusal = _run_world_draws(
             self.episode, label, world_id=self.run_set.usable[label].token, judge=self.judge, draws=self.draws, model=self.model,
             effort=self.effort, prompt=prompt, reachable_systems=self.reachable_systems,
-            shown_its_facts=ctx.shown_its_facts)
+            shown_its_facts=ctx.shown_its_facts, contain=not self.job_lane)
         # g18: a `samples.yaml#<system>` pointer resolves exactly when this prompt showed that
         # system's section whole (the cap may have cut it), in the resolver and in O16 alike.
         shown_samples = {system: section for system, section in self.samples.items()
@@ -746,8 +765,10 @@ class _Pass:
             completed, documents, malformed, refusal = _run_world_draws(
                 episode, FAMILY_LABEL, world_id=None, judge=self.judge, draws=self.draws,
                 model=self.model, effort=self.effort, prompt=prompt, scope="family",
-                reachable_systems=self.reachable_systems)
+                reachable_systems=self.reachable_systems, contain=not self.job_lane)
         except Exception as family_failed:  # noqa: BLE001 — the family call's own fault costs only itself, never the already-committed worlds
+            if self.job_lane:
+                raise
             family["draws_failed_reason"] = f"{type(family_failed).__name__}: {family_failed}"
             return
         # The draws this commit records, as a world row's `draws` does: the readers show these

@@ -318,14 +318,15 @@ class RunsRepository(Generic[_T]):
                 errno.ENOENT, f"tenant {quoted(self._tenant.id)} has no episode "
                 f"{quoted(episode_id)}", str(path)) from None
 
-    def create_episode(self) -> EpisodeRuns:
-        """Claim a fresh episode: mint a UUID and make `<T>/episodes/<uuid>` with ONE exclusive
-        create off the held `<T>/episodes` (itself made first when absent), every level walked
-        from the tenant's folder no-follow (#1187 dc 3, O9). An entry already at the minted
-        name refuses (`RunRefused`): a fresh UUID is never taken, so a collision means
-        something is wrong, and nothing is retried. The view owns the episode handle; leaving
-        it closes it."""
-        episode_id = mint_uuid()
+    def create_episode(self, episode_id: str | None = None) -> EpisodeRuns:
+        """Claim a fresh episode: mint a UUID (or take `episode_id`, a learning job's id, #1344:
+        episode id = job id) and make `<T>/episodes/<uuid>` with ONE exclusive create off the
+        held `<T>/episodes` (itself made first when absent), every level walked from the
+        tenant's folder no-follow (#1187 dc 3, O9). An entry already at the name refuses
+        (`RunRefused`): an episode is never reused (a job's retry is a new job id), so a
+        collision means something is wrong, and nothing is retried. The view owns the episode
+        handle; leaving it closes it."""
+        episode_id = mint_uuid() if episode_id is None else refuse_bad_episode_id(episode_id)
         path = Path(unwrap_episodes_root(self._tenant.episodes)) / episode_id
         try:
             episode = Episode.create(path, io=_EpisodeWalk(self._tenant, self._io),

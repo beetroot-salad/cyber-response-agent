@@ -43,6 +43,12 @@ from defender.records import (
 from defender.systems.run_tenant import RunTenant
 
 from defender.learning.branch import outcome as outcome_mod
+from defender.learning.branch.endings import (
+    HISTORY_UNREADABLE,
+    LAUNCH_REFUSED,
+    LauncherRefused,
+    ending,
+)
 
 
 
@@ -67,11 +73,15 @@ ACCEPTED, UNUSABLE, REFUSED = outcome_mod.ACCEPTED, outcome_mod.UNUSABLE, outcom
 
 
 
-class LauncherRefused(SystemExit):
-    """An episode this launcher will not run, reported as an operator's exit with an
-    explanation rather than a traceback."""
 
 
+
+
+class LaunchChecked(NamedTuple):
+    """What the launch checks hand on: the source's stamp, and the live tree's waived kinds."""
+
+    source_stamp: dict
+    waived: list[str]
 
 
 def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a model call is asked in this one block
@@ -80,33 +90,36 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
     allow_dirty: bool,
     live_tree: Callable[[], formats.RunProvenance],
     oracle: Any = None, verifier: Any = None,
-) -> dict:
+) -> LaunchChecked:
     """Everything that can refuse before the questioner is paid for, in one block, so an
-    operator with several problems hears about them all before spending anything."""
+    operator with several problems hears about them all before spending anything. Returns the
+    source's stamp (the family's anchor) and the fault kinds `--allow-dirty` waived for the live
+    tree, which the family stamp records with its siblings' own."""
     source_run_dir = source.run_dir
     _check_oracle_side(oracle=oracle, verifier=verifier, tenant_id=str(source.tenant_id))
     _check_branch_point(source, branch_message_id)
     # The live tree is judged as a one-member family by `verify_family`'s own rules, before the
-    # paid role preflight.
+    # paid role preflight: on its own stamp (#1344 r5), never against the source's commit or
+    # scope, which the family stamp only records; its knowledge stays the source's.
     source_stamp = _stamp_of(source)
     if source_stamp is None:
         raise _no_stamp(source_run_dir)
-    # Capturing the live tree runs git (up to 60 s per call); skip it when the source names no
-    # commit, since the refusal is then the source's own.
-    members: dict[str, dict | None] = (
-        {"the live tree": _as_stamp(live_tree())} if _stamp_speaks(source_stamp) else {})
-    refusal = _family_refusal(
+    members: dict[str, dict | None] = {"the live tree": _as_stamp(live_tree())}
+    judged = _family_refusal(
         source_stamp, members,
-        source_who=f"source run {source_run_dir}", allow_dirty=allow_dirty).refusal
+        source_who=f"source run {source_run_dir}", allow_dirty=allow_dirty)
+    refusal = judged.refusal
     if refusal is not None:
-        raise LauncherRefused(f"[branch] {refusal}")
+        raise ending(f"[branch] {refusal}", reason=LAUNCH_REFUSED,
+                     brief="the launch checks refused the code or knowledge the family would run on")
     rc = preflight(model, branching=True)
     if rc:
-        raise LauncherRefused(
+        raise ending(
             f"[branch] the role-model preflight refused (exit {rc}) — every role a branch uses, "
             "the oracle and its verifier included, is checked at launch so a missing key or an "
-            "unroutable model surfaces before anything is spent, never as a world's failure")
-    return source_stamp
+            "unroutable model surfaces before anything is spent, never as a world's failure",
+            reason=LAUNCH_REFUSED, brief=f"the role-model preflight refused (exit {rc})")
+    return LaunchChecked(source_stamp, list(judged.waived))
 
 
 
@@ -126,18 +139,20 @@ def _check_oracle_side(*, oracle: Any, verifier: Any, tenant_id: str) -> None:
         price_row("oracle", serving.oracle)
         price_row("verifier", serving.verifier)
     except (FatalConfigError, OraclePricingError) as bad:
-        raise LauncherRefused(
+        raise ending(
             f"[branch] the oracle cannot be configured: {bad} — pre-flight would refuse it "
-            "after the question-writer was paid for") from bad
+            "after the question-writer was paid for", reason=LAUNCH_REFUSED,
+            brief=f"the oracle cannot be configured ({type(bad).__name__})", cause=bad) from bad
 
 
 
 
 def _no_stamp(source_run_dir: Path) -> LauncherRefused:
-    return LauncherRefused(
+    return ending(
         f"[branch] source run {source_run_dir} carries no usable provenance stamp — a "
         "family is anchored to the commit its source ran, and a source with no readable "
-        "stamp cannot anchor one")
+        "stamp cannot anchor one", reason=HISTORY_UNREADABLE,
+        brief="the source run carries no provenance stamp current code can read")
 
 
 
@@ -147,6 +162,9 @@ def _no_stamp(source_run_dir: Path) -> LauncherRefused:
 #: which messages may be branched from.
 MAX_BRANCH_MESSAGE_ID = 100 * 60
 
+#: The job's message for a branch point the launch checks refuse.
+_POINT_REFUSED = "the branch admission refused the fork point"
+
 
 
 
@@ -154,20 +172,23 @@ def _check_branch_point(source: Run, branch_message_id: int) -> None:
     """Refuse a branch point the source run could not have produced."""
     source_run_dir = source.run_dir
     if branch_message_id < 0:
-        raise LauncherRefused(
+        raise ending(
             f"[branch] branch message id {branch_message_id} is negative — it names a message "
-            "in the source run's own session, and there is no message before the first")
+            "in the source run's own session, and there is no message before the first",
+            reason=LAUNCH_REFUSED, brief=_POINT_REFUSED)
     if branch_message_id > MAX_BRANCH_MESSAGE_ID:
-        raise LauncherRefused(
+        raise ending(
             f"[branch] branch message id {branch_message_id} is beyond {MAX_BRANCH_MESSAGE_ID}, "
             "the most any one investigation's session could hold — no run produced a message "
-            "there, so this is a typo rather than a branch point")
+            "there, so this is a typo rather than a branch point", reason=LAUNCH_REFUSED,
+            brief=_POINT_REFUSED)
     opened = _source_store(source)
     if opened is None:
-        raise LauncherRefused(
+        raise ending(
             f"[branch] {source.id} carries no session store, so it recorded no fork snapshot "
             f"for message {branch_message_id} — nothing says what it held when that response "
-            "arrived, and no arm can be restored from it")
+            "arrived, and no arm can be restored from it", reason=LAUNCH_REFUSED,
+            brief="the source run carries no session store to fork")
     try:
         with opened as store:
             as_of = branch.branch_point_time(store, Path(source_run_dir), branch_message_id, source_run=source)
@@ -179,7 +200,8 @@ def _check_branch_point(source: Run, branch_message_id: int) -> None:
                 as_of=as_of,
             ), source_run=source, require_capture=False)
     except branch.BranchError as bad:
-        raise LauncherRefused(f"[branch] {bad}") from bad
+        raise ending(f"[branch] {bad}", reason=LAUNCH_REFUSED, brief=_POINT_REFUSED,
+                     cause=bad) from bad
 
 
 
@@ -541,17 +563,19 @@ class _Fault(NamedTuple):
 
 
 
-#: Every `RunProvenance` field, classed by how the fork check judges it (#1204 D4). The
+#: Every `RunProvenance` field, classed by how the fork check judges it (#1204 D4, as amended by
+#: #1344 r5: a family runs on current code, so only knowledge stays held to the source). The
 #: comparison below is driven by this table, and `test_1204` holds its keys to the record's
 #: fields, so a new stamp field cannot be silently left out of the check.
 #: - `anchored`: each member must match the source, when the source pins a value; siblings
 #:   must agree with each other when it does not;
-#: - `constant`: siblings must agree with each other;
+#: - `constant`: siblings must agree with each other (the source's value is recorded, never
+#:   compared);
 #: - `dedicated`: judged by its own rule (`_clean_stamp`, `_cross_tenant_fault`);
 #: - `informational`: recorded, never compared;
 #: - `expected_to_differ`: differs between siblings by design.
 STAMP_FIELD_CLASSES: dict[str, str] = {
-    "commit": "anchored", "scope": "anchored", "knowledge": "anchored",
+    "commit": "constant", "scope": "constant", "knowledge": "anchored",
     "model": "constant",
     "dirty": "dedicated", "tenant_id": "dedicated",
     "dirty_paths": "informational", "dirty_path_count": "informational",
@@ -562,6 +586,9 @@ STAMP_FIELD_CLASSES: dict[str, str] = {
     # #1108 P4 (O-STALE, OD17): fresh, stale or pinned is how a run came by its knowledge, not
     # which knowledge it read (`knowledge` holds that), so it is recorded, never compared.
     "knowledge_source": "informational",
+    # #1344 r5: where a stamp's commit came from (git, a build stamp, a code copy's marker).
+    # Clean is judged by `dirty` alone, so this is recorded, never compared.
+    "origin": "informational",
 }
 
 
@@ -587,22 +614,6 @@ def _knowledge_commit(stamp: dict) -> str | None:
 
 
 
-def _off_commit(who: str, got: object, want: object) -> str:
-    return (f"{who} is at commit {got!r} while the source run it continues ran at {want!r} — a "
-            "family is anchored to its source's commit, and a comparison against other code is "
-            "never archived as comparable")
-
-
-
-
-def _off_scope(who: str, got: object, want: object) -> str:
-    return (f"the dirt of {who} was measured over scope {got!r} and the source's over {want!r} "
-            "— the two clean bits answer different questions, so agreeing on the commit does not "
-            "make them a match")
-
-
-
-
 def _off_knowledge(who: str, got: object, want: object) -> str:
     return (f"{who} read tenant knowledge at commit {got!r} while the source run it continues "
             f"read {want!r} — a family is anchored to the knowledge its source read, and a "
@@ -615,8 +626,6 @@ def _off_knowledge(who: str, got: object, want: object) -> str:
 #: field must have one (its refusal text), which is held at import below, so no anchored field
 #: falls back to a vague message.
 _HELD_RULES: dict[str, _HeldRule] = {
-    "commit": _HeldRule(compared=lambda stamp: stamp.get("commit"), off_anchor=_off_commit),
-    "scope": _HeldRule(compared=lambda stamp: stamp.get("scope"), off_anchor=_off_scope),
     "knowledge": _HeldRule(compared=_knowledge_commit, unknown_kind=UNPROVEN_KNOWLEDGE,
                            off_anchor=_off_knowledge),
 }
@@ -651,27 +660,21 @@ def _unknown_faults(who: str, stamp: dict) -> list[_Fault]:
 def _family_faults(
     source: dict, members: dict[str, dict | None], *, source_who: str,
 ) -> list[_Fault]:
-    """Every reason `members` are not provably one family continuing `source`."""
-    faults: list[_Fault] = []
-    anchored = _stamp_speaks(source)
-    if not anchored:
-        faults.append(_Fault(None, (
-            f"{source_who} names no commit (unavailable={source.get('unavailable')!r}) — a "
-            "family is anchored to the commit its source ran, and there is none to anchor to")))
-    else:
-        if not _clean_stamp(source):
-            faults.append(_Fault(DIRT, _not_certified_clean(source_who, source)))
-        faults.extend(_unknown_faults(source_who, source))
+    """Every reason `members` are not provably one family continuing `source` (#1344 r5): the
+    members are held to each other on every constant field and to the source on knowledge
+    alone. The source's commit and cleanliness are recorded, never judged; only knowledge no
+    commit proves on the source is a (waivable) fault of its own."""
+    faults: list[_Fault] = list(_unknown_faults(source_who, source))
     for who, stamp in members.items():
-        faults.extend(_member_faults(who, stamp, anchor=source if anchored else None))
+        faults.extend(_member_faults(who, stamp, anchor=source))
     # Agreement is over every stamp that names a commit, dirty ones included: excluding dirty
     # arms would let `--allow-dirty` waive the whole agreement, since siblings share one
     # checkout and are all dirty together.
     comparable = {who: stamp for who, stamp in members.items()
                   if stamp is not None and _stamp_speaks(stamp)}
     for field, rule in _HELD.items():
-        # A field the anchor pinned was compared member by member above.
-        if anchored and field in _ANCHORED and rule.compared(source) is not None:
+        # A field the source pinned was compared member by member above.
+        if field in _ANCHORED and rule.compared(source) is not None:
             continue
         values = {who: rule.compared(stamp) for who, stamp in comparable.items()}
         if rule.unknown_kind is not None:
@@ -686,9 +689,9 @@ def _family_faults(
 
 
 
-def _member_faults(who: str, stamp: dict | None, *, anchor: dict | None) -> list[_Fault]:
-    """One tree's faults against the anchor. `anchor` is `None` when the source could not
-    anchor (already reported); the tree is then judged on its own stamp alone."""
+def _member_faults(who: str, stamp: dict | None, *, anchor: dict) -> list[_Fault]:
+    """One tree's faults: its own stamp (it names a commit, git certified it clean, its
+    knowledge is proven) and, on every anchored field the source pins, the source's value."""
     if stamp is None:
         return [_Fault(None, (
             f"{who} carries no readable provenance stamp — an absent or unreadable stamp is "
@@ -700,7 +703,7 @@ def _member_faults(who: str, stamp: dict | None, *, anchor: dict | None) -> list
     faults: list[_Fault] = []
     for field in _ANCHORED:
         rule = _HELD[field]
-        want = None if anchor is None else rule.compared(anchor)
+        want = rule.compared(anchor)
         got = rule.compared(stamp)
         # The source pins nothing here, or the member's unknown is its own fault (below).
         if want is None or (got is None and rule.unknown_kind is not None):

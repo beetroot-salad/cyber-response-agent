@@ -165,7 +165,14 @@ class LearningJob(BaseModel):
         description="`auto` when the investigation's completion queued it; `explicit` for a re-learn."
     )
     stage: str | None = None
-    status_detail: str | None = Field(default=None, description="A skip reason or error summary.")
+    reason: str | None = Field(default=None, description=(
+        "Why a `skipped` or `failed` job ended, one fixed word: `no_fork_point`, `history_unreadable`, "
+        "`expired`, `family_unusable`, `control_failed`, `launch_refused`, `verify_refused`, "
+        "`source_unavailable`, `judge_failed`, `entry_error`, `exited_without_result`, `worker_error`, "
+        "`lease_lapsed` or `retry_cap`; null otherwise."))
+    message: str | None = Field(default=None, description=(
+        "A sentence of our own code's about the ending (never run or launcher text); a `completed` job "
+        "with no findings carries the judge's verdict word here."))
     created_at: Instant
     finished_at: Instant | None = None
 

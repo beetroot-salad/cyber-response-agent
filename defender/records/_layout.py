@@ -134,6 +134,11 @@ KNOWLEDGE_SOURCE_SUFFIX = ".knowledge-source.json"
 _LAUNCH_SUFFIX = ".launch.json"
 _LAUNCH_ALERT_SUFFIX = ".alert.json"
 _JOB_END_SUFFIX = ".job-end.json"
+#: A learning job's three host-held records (#1344), beside the runs, keyed by the job id: the
+#: entry's progress (replaced whole), its end (create-only) and the post-step's.
+_LEARNING_PROGRESS_SUFFIX = ".learning-progress.json"
+_LEARNING_END_SUFFIX = ".learning-end.json"
+_POST_STEP_SUFFIX = ".post-step.json"
 #: The sidecar names that mean "this id was used" (#1279 O8): run setup refuses an id with any of
 #: them beside its folder (`sidecar_names`). The accounting-failures name reserved, see above.
 USED_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
@@ -493,6 +498,20 @@ class RunPaths:
         """The job entry's job-end record (#1342): the facts the worker classifies the run's
         ending by, written create-only as the job entry exits."""
         return self._container(runs_base) / f"{self.run_dir.name}{_JOB_END_SUFFIX}"
+
+    def learning_progress(self, runs_base: RunsBase | None = None) -> Path:
+        """A learning job's progress record (#1344), when this name is a job id: the fork it
+        picked, its stage and its siblings' cost, replaced whole by the job entry."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_LEARNING_PROGRESS_SUFFIX}"
+
+    def learning_end(self, runs_base: RunsBase | None = None) -> Path:
+        """A learning job's end record (#1344): how the job entry ended, written create-only."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_LEARNING_END_SUFFIX}"
+
+    def post_step(self, runs_base: RunsBase | None = None) -> Path:
+        """The post-step's record (#1344) for the job it followed: the pending jobs it
+        published and refused."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_POST_STEP_SUFFIX}"
 
     def session_pointer(self, runs_base: RunsBase | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the

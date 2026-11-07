@@ -6,7 +6,10 @@
 # investigation actually executes (defender/run.py) and — per the sandbox design
 # (defender/docs/runtime-sandbox-design.md) — the eventual untrusted "hands" whose
 # rootfs should be minimal. So this image carries ONLY python + the defender
-# runtime deps + the defender code. No dev tooling, no egress tooling.
+# runtime deps + the defender code. No dev tooling, no egress tooling. Two tools are carried
+# because the worker needs them (#1344 "One image"): git, for the tenant clones the runs and the
+# learning jobs read, and the docker CLI, which starts each run's box (mount the host's Docker
+# socket). The worker runs learning as its own child processes, so there is one image.
 #
 # NO TENANT DATA (#1106, #1120). Each tenant's knowledge folder
 # (`$DEFENDER_DATA_ROOT/<id>/knowledge/`, a clone of the tenant's own repo) holds its
@@ -23,7 +26,16 @@
 # fixture tenant, `knowledge/tenant-fixture`, so the repo's `knowledge/` is mounted):
 #   docker run --rm -v "<HOST_REPO_PATH>/knowledge":/workspace/knowledge:ro \
 #       defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
-# Live investigation (needs the LLM key and the data root; egress is NOT baked in):
+# The deployed command is the worker (#1344 O15): it reads DEFENDER_DATABASE_DSN, DEFENDER_DATA_ROOT,
+# DEFENDER_BUILD_COMMIT (baked, below), DEFENDER_WORKER_SLOTS (default 3) and
+# DEFENDER_WORKER_LEARNING_SLOTS (default min(1, slots - 1)); it refuses an empty build stamp, takes
+# a lock on the data root (one worker per machine), replaces its read-only code copy under the data
+# root, and runs every investigation and learning child from that copy:
+#   docker run --rm --env-file .env -e DEFENDER_DATABASE_DSN=... -e DEFENDER_DATA_ROOT=/data \
+#       -v "<HOST_DATA_ROOT>":/data -v /var/run/docker.sock:/var/run/docker.sock defender-runtime
+# The data root must be mounted at the same path the Docker daemon sees, since boxes mount the copy,
+# and the worker's uid must own it (git refuses a tenant clone it does not own).
+# One investigation by hand (needs the LLM key and the data root; egress is NOT baked in):
 #   docker run --rm --env-file .env -e DEFENDER_DATA_ROOT=/data -v "<HOST_DATA_ROOT>":/data \
 #       defender-runtime python3 defender/run.py <alert.json> --tenant <id>
 #
@@ -43,11 +55,14 @@
 
 FROM python:3.11-slim
 
-# curl + ca-certificates: uv bootstrap and TLS to the model API. Nothing else —
-# the runtime imports no libmagic, and dev/egress tooling stays out by design.
+# curl + ca-certificates: uv bootstrap and TLS to the model API; git: the tenant clones (#1344).
+# The runtime imports no libmagic, and dev/egress tooling stays out by design.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates \
+        curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
+
+# The docker CLI alone (no daemon): the worker starts each run's box through the host's socket (#1344).
+COPY --from=docker:27.3.1-cli /usr/local/bin/docker /usr/local/bin/docker
 
 RUN pip install --no-cache-dir uv
 
@@ -63,21 +78,22 @@ RUN cd defender && uv sync --frozen --extra runtime
 COPY defender/ defender/
 
 # PROVENANCE STAMP (#976). Every run records the commit it was made against, which it normally
-# asks git for — and this image has neither git nor .git, by design: it is python + the deps +
-# the package, and `.dockerignore` keeps repository metadata out. Without a baked value every
-# containerised run would file `commit: unavailable` while carrying a file that LOOKS like the
-# drift problem was solved, which is worse than not carrying one.
+# asks git for — and this image has no .git, by design: it is python + the deps + the package
+# (git itself is here only for tenant clones), and `.dockerignore` keeps repository metadata out.
 #
 # Pass it at build time; the build is where the answer is known:
 #   docker build -f .devcontainer/Dockerfile.runtime \
 #       --build-arg DEFENDER_BUILD_COMMIT="$(git rev-parse HEAD)" -t defender-runtime .
 #
-# The recovered commit NEVER ships with a clean working-tree bit, however clean the build tree
-# was — see `defender/records/_provenance.py`. This image documents mounting a workspace over its baked
-# code for live iteration, so at runtime nothing can confirm the bytes on disk are the bytes
-# that were built; the stamp says "this commit, tree state unknown", which is true either way.
-# An unset arg is not an error: the run stamps `unavailable` and says so, as it does today.
+# The worker refuses to start without it (#1344 O15). At each start it writes a fresh read-only
+# copy of the baked code under the data root with this commit in the copy's marker
+# (`.defender-code-copy.json`); its children run from that copy and stamp it as a clean build of
+# this commit, read from the marker, never from git. A process started from the baked tree itself
+# (a single `run.py` by hand) still recovers the commit with no clean working-tree bit — see
+# `defender/records/_provenance.py` — since a workspace mounted over the baked code for live
+# iteration means nothing can confirm the bytes on disk are the bytes that were built.
 ARG DEFENDER_BUILD_COMMIT=""
 ENV DEFENDER_BUILD_COMMIT=$DEFENDER_BUILD_COMMIT
 
-CMD ["bash"]
+# The deployed process: the worker (#1344 O15). Override the command for a shell or a single run.
+CMD ["defender/.venv/bin/python", "-m", "defender.worker"]
