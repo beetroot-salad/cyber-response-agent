@@ -471,7 +471,7 @@ async def test_o3_a_replay_after_the_run_ended_returns_that_investigation_not_a_
 
 
 @pytest.mark.parametrize("accounting_written", [False, True], ids=["no-figure", "figure-written"])
-@pytest.mark.parametrize(("stage", "reason", "attempt"), [("aborted", "", 1), ("failed", "retry_cap", 3)],
+@pytest.mark.parametrize(("stage", "reason", "attempt"), [("aborted", "cancelled", 1), ("failed", "retry_cap", 3)],
                          ids=["cancelled", "take-over"])
 async def test_1377_r6_a_replay_answers_the_whole_record_a_read_does_mark_included(
         dsn, stage, reason, attempt, accounting_written):
