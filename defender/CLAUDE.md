@@ -67,7 +67,7 @@ host-state:
 1. `config.env` keeps only the keys the adapter reads — `<PREFIX>_TIMEOUT_SEC` for the stubs, plus
    `TICKET_KEY_PATTERN` for ticket; host-state reads none, so its file may be empty. Delete
    `<PREFIX>_TRANSPORT`, `<PREFIX>_DOCKER_CONTEXT`, `<PREFIX>_BASTION_HOST` and `<PREFIX>_URL_BASE`
-   (and, for elastic, `ELASTIC_TRANSPORT` and `ELASTIC_RETENTION_DAYS`, which nothing reads).
+   (and, for elastic, `ELASTIC_TRANSPORT` and `ELASTIC_RETENTION_DAYS`, which nothing reads). <!-- lint-shippable: ok — the vendor-specific product integration. -->
 2. `access.yaml` with the system's `base` and `auth` (bearer, field `api_key`); the case system
    also declares its comment write under `writes` (copy the template's ticket `access.yaml`).
    host-state's base is an endpoint-query service (an endpoint-security product's query API)
