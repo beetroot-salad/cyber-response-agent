@@ -3118,14 +3118,18 @@ def _lapsed(dsn: str, inv: str) -> bool:
 
 
 def _handed_back(dsn: str, inv: str, *, cost: float | None = None, knowledge: object = "any",
-                 at_least: bool | None = None) -> None:
-    """The row a stopping worker gave up: still `running`, lease lapsed, final accounting marked; optionally its final cost, knowledge and lower-limit mark."""
+                 at_least: bool | None = None, unknown_cost: bool = False) -> None:
+    """The row a stopping worker gave up: still `running`, lease lapsed, final accounting marked; optionally its final cost, knowledge and lower-limit mark.
+    `unknown_cost`: a child launched and no live figure was read, so the cost is NULL and unmarked (r6 S2/S4: a lower limit stands only beside a number)."""
     handed = row(dsn, inv)
     assert handed["stage"] == "running", f"a stopping worker gave the row a stage: {handed['stage']}"
     left = lease_left(dsn, inv)
     assert left is not None, "the running row has no lease"
     assert left <= 0, f"the handed-back row's lease is not lapsed: {left}"
     assert accounting_written(dsn, inv) is not None, "the hand-back did not mark the final accounting written"
+    if unknown_cost:
+        assert (handed["cost_usd"], lower_limit(dsn, inv)) == (None, False), (
+            "a hand-back with no live cost read stored a number or a mark (r6 S4): it must store NULL, unmarked")
     if cost is not None:
         assert handed["cost_usd"] == pytest.approx(cost), "the hand-back lost the run's final cost"
     if knowledge != "any":
@@ -4349,7 +4353,7 @@ async def test_b5_an_outage_reading_the_alert_at_launch_hands_the_row_back_with_
 
 
 async def test_b11_a_fault_reading_a_stopped_runs_ending_still_hands_the_row_back(world):
-    """A stop signalled the child and reading its records then raises something nobody planned for: the stop cut the run short, so the row is handed back with its last cost figure, never failed `worker_error`. (#1343 review, B11)"""
+    """A stop signalled the child and reading its records then raises something nobody planned for: the stop cut the run short, so the row is handed back (cost unknown: no live figure was read), never failed `worker_error`. (#1343 review, B11; r6 S2/S4)"""
     release = world["tmp"] / "release"
     child = _child(world, files=_committed(), wait_for=release)
     dsn = world["dsn"]
@@ -4365,7 +4369,7 @@ async def test_b11_a_fault_reading_a_stopped_runs_ending_still_hands_the_row_bac
             release.touch()
             _kill_whatever_remains(child.seen(inv))
             await _stop_all(serving)
-    _handed_back(dsn, inv, at_least=True)  # a child ran: the live copy it carries may be short (S2)
+    _handed_back(dsn, inv, unknown_cost=True)  # a child ran but no live figure was read: unknown, not "at least 0" (r6 S2/S4)
 
 
 async def test_s2_an_outage_reading_a_finished_childs_records_hands_the_row_back_with_its_live_copy_marked(world):
@@ -4384,6 +4388,23 @@ async def test_s2_an_outage_reading_a_finished_childs_records_hands_the_row_back
             release.touch()
             await asyncio.wait_for(drained, timeout=60)
     _handed_back(dsn, inv, cost=SONNET_IN, at_least=True)
+
+
+async def test_s4_an_outage_reading_a_finished_childs_records_before_any_live_figure_hands_the_row_back_unknown(world):
+    """A child ran, spent nothing the worker copied, and its ending cannot be read for an outage: the row is handed back with a NULL cost and no mark. (r6 S2/S4)"""
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release)
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        inv = await _queued(store)
+        lanes = _lanes_failing(inv, "read_job_end", ConnectionError("the volume is gone"))
+        drained = asyncio.create_task(_worker(world, store, child, open_lane=lanes, **_FAST).drain())
+        try:
+            await _until(lambda: child.seen(inv), "the child")
+        finally:
+            release.touch()
+            await asyncio.wait_for(drained, timeout=60)
+    _handed_back(dsn, inv, unknown_cost=True)
 
 
 @pytest.mark.parametrize(("child_ends", "expect"), [("killed", True), ("with its records", False)])

@@ -76,12 +76,18 @@ def _plant_alert(dsn: str, *, tenant: str = T1, ticket: str = "P-1", vendor: str
 
 
 def _plant_investigation(dsn: str, *, tenant: str, alert_id: str, key: str, attempt: int, stage: str,
-                         created_at: dt.datetime = NOW) -> str:
+                         created_at: dt.datetime = NOW, worked: tuple[str, bool] | None = None) -> str:
+    """A row in `stage`. `worked` = (`failure_reason` or "", whether its holder wrote its final figure) plants a row that was
+    started, cost 1.25 and ended."""
     investigation_id = str(uuid.uuid4())
     lease = "now() + interval '30 seconds'" if stage == "running" else "NULL"  # #1343: a running row has a lease
+    reason, accounted = worked or ("", False)
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
-                 f"cost_usd, cost_is_lower_limit, lease_expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, false, {lease})",  # noqa: S608
-            (investigation_id, tenant, alert_id, key, attempt, stage, created_at))
+                 "started_at, finished_at, failure_reason, accounting_written_at, "
+                 f"cost_usd, cost_is_lower_limit, lease_expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, {lease})",  # noqa: S608
+            (investigation_id, tenant, alert_id, key, attempt, stage, created_at, NOW if worked else None,
+             NOW if worked else None, reason or None, NOW if accounted else None,
+             1.25 if worked else 0))
     return investigation_id
 
 
@@ -462,6 +468,24 @@ async def test_o3_a_replay_after_the_run_ended_returns_that_investigation_not_a_
     assert created is False
     assert (again.investigation_id, again.attempt, again.stage) == (first.investigation_id, 1, stage)
     assert _count(dsn, "investigations") == 1
+
+
+@pytest.mark.parametrize("accounting_written", [False, True], ids=["no-figure", "figure-written"])
+@pytest.mark.parametrize(("stage", "reason", "attempt"), [("aborted", "", 1), ("failed", "retry_cap", 3)],
+                         ids=["cancelled", "take-over"])
+async def test_1377_r6_a_replay_answers_the_whole_record_a_read_does_mark_included(
+        dsn, stage, reason, attempt, accounting_written):
+    """`create_investigation`'s replay of a row that ended without its holder's figure equals `get_investigation`'s record, "at least" mark too; one with its figure reads unmarked. (r6, S2)"""
+    alert = _plant_alert(dsn)
+    inv = _plant_investigation(dsn, tenant=T1, alert_id=alert, key="k1", attempt=attempt, stage=stage,
+                               worked=(reason, accounting_written))
+    async with job_store(dsn) as store:
+        replayed, created = await store.create_investigation(T1, alert, "k1", actor="u-1")
+        read = await store.get_investigation(T1, inv)
+
+    assert created is False
+    assert replayed == read
+    assert (read.cost_usd, read.cost_is_lower_limit) == (1.25, not accounting_written)
 
 
 async def test_o3_a_replayed_request_returns_its_latest_attempt(dsn):
