@@ -167,8 +167,8 @@ class PublishStatus(Base, kw_only=True):
 class AlertMappingRow(Base, kw_only=True):
     """The tenant's alert mapping (#1345): at most one row, absent until the first save, replaced whole and never
     deleted. One nullable text column per entry, named as the entry (`records.formats.MAPPING_KEYS`); null is an
-    unmapped entry. Declared with the tenant records and read through them; written only by the jobs store's replace,
-    in one transaction with the recompute of the tenant's alerts (M1)."""
+    unmapped entry. Declared with the tenant records and read through them; written only by the jobs store's replace (M1),
+    which leaves stored alerts' title and description as they were (#1420)."""
 
     __tablename__ = "alert_mappings"
     __table_args__ = {"schema": SCHEMA}

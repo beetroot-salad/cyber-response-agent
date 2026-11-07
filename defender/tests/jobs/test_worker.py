@@ -290,16 +290,16 @@ async def test_1345_o2_the_launch_label_is_the_alerts_title_or_its_vendor_ticket
     assert launch["label"] == label
 
 
-async def test_1345_o2_the_label_is_the_title_at_launch_not_at_queueing(world):
-    """A mapping saved after the investigation is queued and before it launches decides the label: the launch reads the
-    alert as it then is. (#1345 O2, M3)"""
+async def test_1420_the_label_is_the_title_stored_with_the_alert_not_one_from_a_later_mapping(world):
+    """A mapping saved after the investigation is queued and before it launches does not change the label: the launch
+    reads the title the alert was stored with, and a save leaves stored alerts as they were. (#1345 O2, #1420 I1)"""
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
         await store.put_alert_mapping(T1, mapping_value({"title": "a"}), actor="u-1")
         await _worker(world, store, _child(world)).drain()
 
     launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
-    assert launch["label"] == "\u00e9"
+    assert launch["label"] == TITLE
 
 
 @pytest.mark.parametrize("raw", [AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES, ZWNBSP_ALERT_BYTES,
