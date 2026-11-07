@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from _by_path import load_lint_gate
 
 _GATE = load_lint_gate("lint_list_as_key_set")
@@ -34,38 +36,49 @@ def test_the_shipped_defect_is_caught(tmp_path):
     assert _scan(tmp_path, _THE_BUG) == ["m.py:render:phase_order->attribution"]
 
 
-def test_the_read_modify_write_twin_is_caught(tmp_path):
-    """#956's worse half: the second visit reads the value the first one wrote, so the
-    adjustment compounds instead of merely repeating."""
-    assert _flags(tmp_path, """
+_CAUGHT = [
+    # #956's worse half: the second visit reads the value the first one wrote, so the adjustment
+    # compounds instead of merely repeating.
+    pytest.param("""
 def render(events, phase_order, tags):
     wall_times = phase_wall_times(events, tags, phase_order)
     for ph in phase_order:
         d = wall_times.get(ph) or {}
         d["duration_sec"] = d.get("duration_sec", 0.0) - moved
         wall_times[ph] = d
-""")
-
-
-def test_a_table_unpacked_from_a_call_still_counts(tmp_path):
-    """`by_phase, total = f(..., order, ...)` keys `by_phase` from `order` exactly as a
-    single-target assignment does; reading only single targets would miss it."""
-    assert _flags(tmp_path, """
+""", id="the_read_modify_write_twin_is_caught"),
+    # `by_phase, total = f(..., order, ...)` keys `by_phase` from `order` exactly as a single-target
+    # assignment does; reading only single targets would miss it.
+    pytest.param("""
 def render(events, order):
     by_phase, total = cost_by_phase(events, order)
     for ph in order:
         by_phase[ph] += 1
-""")
-
-
-def test_the_sequence_passed_by_keyword_still_counts(tmp_path):
-    """The table is keyed by the sequence whether or not the call spells the argument."""
-    assert _flags(tmp_path, """
+""", id="a_table_unpacked_from_a_call_still_counts"),
+    # The table is keyed by the sequence whether or not the call spells the argument.
+    pytest.param("""
 def render(events, order):
     table = build(events, phases=order)
     for ph in order:
         table[ph] = 0
-""")
+""", id="the_sequence_passed_by_keyword_still_counts"),
+    # The table's origin is only visible from the OUTER scope, so a function scope has to descend into
+    # its closures even though module scope must not.
+    pytest.param("""
+def render(events, order):
+    table = build(events, order)
+    def fix():
+        for ph in order:
+            table[ph] = 0
+    return fix
+""", id="a_closure_patching_its_enclosing_table_is_caught"),
+]
+
+
+@pytest.mark.parametrize("src", _CAUGHT)
+def test_a_table_keyed_by_a_walked_sequence_is_caught(tmp_path, src):
+    """Each shape of "table keyed by a sequence, then patched by walking that sequence" is flagged."""
+    assert _flags(tmp_path, src)
 
 
 def test_a_nested_write_names_the_table_not_the_slice(tmp_path):
@@ -82,68 +95,60 @@ def render(events, order):
 # what it must NOT catch (the idiom)
 
 
-def test_the_counting_idiom_is_not_flagged(tmp_path):
-    assert not _flags(tmp_path, """
+_CLEAN = [
+    pytest.param("""
 def build_idf(token_sets):
     df = Counter()
     for ts in token_sets:
         for tok in ts:
             df[tok] += 1
     return df
-""")
-
-
-def test_a_table_built_from_a_different_sequence_is_not_flagged(tmp_path):
-    """The two halves must meet. A table keyed by something else is not a fix-up pass over
-    the sequence being walked, and repeats in that sequence cost it nothing."""
-    assert not _flags(tmp_path, """
+""", id="the_counting_idiom_is_not_flagged"),
+    # The two halves must meet. A table keyed by something else is not a fix-up pass over the sequence
+    # being walked, and repeats in that sequence cost it nothing.
+    pytest.param("""
 def render(events, order, other):
     table = build(events, other)
     for ph in order:
         table[ph] = 0
-""")
-
-
-def test_a_deduped_walk_is_not_flagged(tmp_path):
-    """The cure must scan clean, or the gate argues against its own fix."""
-    assert not _flags(tmp_path, """
+""", id="a_table_built_from_a_different_sequence_is_not_flagged"),
+    # The cure must scan clean, or the gate argues against its own fix.
+    pytest.param("""
 def render(events, order):
     table = build(events, order)
     for ph in dict.fromkeys(order):
         table[ph] = 0
-""")
-
-
-def test_a_sequence_rebound_from_a_unique_source_is_not_flagged(tmp_path):
-    assert not _flags(tmp_path, """
+""", id="a_deduped_walk_is_not_flagged"),
+    pytest.param("""
 def render(events, order):
     table = build(events, order)
     keys = list(dict.fromkeys(order))
     for ph in keys:
         table[ph] = 0
-""")
-
-
-def test_reading_a_table_is_not_patching_it(tmp_path):
-    """A loop that only READS `table[ph]` visits one bucket twice harmlessly. Firing here
-    would bury the write sites this gate exists for."""
-    assert not _flags(tmp_path, """
+""", id="a_sequence_rebound_from_a_unique_source_is_not_flagged"),
+    # A loop that only READS `table[ph]` visits one bucket twice harmlessly. Firing here would bury
+    # the write sites this gate exists for.
+    pytest.param("""
 def render(events, order):
     table = build(events, order)
     out = []
     for ph in order:
         out.append(table[ph])
     return out
-""")
-
-
-def test_the_suppression_marker_is_honoured(tmp_path):
-    assert not _flags(tmp_path, """
+""", id="reading_a_table_is_not_patching_it"),
+    pytest.param("""
 def render(events, order):
     table = build(events, order)
     for ph in order:  # lint-keyset: ok — order is a set already, upstream
         table[ph] = 0
-""")
+""", id="the_suppression_marker_is_honoured"),
+]
+
+
+@pytest.mark.parametrize("src", _CLEAN)
+def test_the_idiom_and_its_cures_are_not_flagged(tmp_path, src):
+    """Each shape that is not a fix-up pass over a repeated sequence scans clean."""
+    assert not _flags(tmp_path, src)
 
 
 # scope + the ratchet
@@ -155,15 +160,3 @@ def test_a_function_is_scanned_once_not_twice(tmp_path):
     fps = _scan(tmp_path, _THE_BUG)
     assert len(fps) == len(set(fps)) == 1, fps
 
-
-def test_a_closure_patching_its_enclosing_table_is_caught(tmp_path):
-    """The table's origin is only visible from the OUTER scope, so a function scope has to
-    descend into its closures even though module scope must not."""
-    assert _flags(tmp_path, """
-def render(events, order):
-    table = build(events, order)
-    def fix():
-        for ph in order:
-            table[ph] = 0
-    return fix
-""")
