@@ -13,7 +13,9 @@ lifecycle's `start_box` seam (never `DEFENDER_ALLOW_UNSANDBOXED`). Marks go in `
   `start-token` (the token the box start was handed), `interrupted` (the exception type that reached the investigation), `stop-box-started`, then
   `stop-box-done` once `go-on` exists (a later signal during teardown would stop the wait).
 - `replay-priced` (#1377): MAIN, one gather lead and the live review stages as priced stand-ins;
-  `replay-priced-ledger-fault` also refuses ledger inserts during the review; a mode ending `-raises` then raises out of the investigation, so the driver never returns its summary. Both configure logging as run.py's `__main__` does. Marks: `calls-<model>`."""
+  `replay-priced-ledger-fault` also refuses ledger inserts during the review; a mode ending `-raises` then raises out of the investigation, so the driver never returns its summary; one ending `-dies` raises inside the driver instead, from
+  MAIN's request after the close (`KeyboardInterrupt`, after marking `fault-raised`), between the failed writes and the run's
+  return. All configure logging as run.py's `__main__` does. Marks: `calls-<model>`."""
 from __future__ import annotations
 
 import functools
@@ -138,7 +140,7 @@ def _ledger_trigger(sql: str):
     return run
 
 
-def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False):
+def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False, dies: bool = False):
     """`replay-priced`: MAIN (dispatch one elastic lead, append, close, text), the lead (one query,
     then its final summary), the correlation lead (its summary) and the live review stages, each a priced stand-in. `-ledger-fault`
     refuses every ledger insert from the first review call until MAIN's turn after the close."""
@@ -163,6 +165,9 @@ def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False):
         main_calls["n"] += 1
         if allow is not None and main_calls["n"] == 4:  # the text turn after the close
             allow()
+        if dies and main_calls["n"] == 4:  # inside the driver, after the review's writes and before the run returns
+            (marks / "fault-raised").touch()
+            raise KeyboardInterrupt
 
     main = RH.ReplayFn([
         RH.Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic", "goal": "measure this lead",
@@ -201,7 +206,8 @@ if mode.startswith("replay-priced"):
     from defender import _log
 
     _log.configure_from_env()  # the way run.py's __main__ does: the priced modes' stderr is read for the failed-write ERROR line
-    lifecycle = _priced_lifecycle(ledger_fault="ledger-fault" in mode, raises=mode.endswith("-raises"))
+    lifecycle = _priced_lifecycle(ledger_fault="ledger-fault" in mode, raises=mode.endswith("-raises"),
+                                  dies=mode.endswith("-dies"))
 elif mode.startswith("replay"):
     lifecycle = _replay_lifecycle(fault_after_close=mode == "replay-fault-after-close")
 else:

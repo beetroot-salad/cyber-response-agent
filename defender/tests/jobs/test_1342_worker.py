@@ -343,7 +343,7 @@ async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(w
 
 @pytest.mark.parametrize("present", [".launch.json"])
 async def test_o6_launch_files_are_create_only_and_a_failed_write_is_a_worker_error(world, present):
-    """A launch record that already exists is not overwritten; no child; `failed`/`worker_error`. (O6, D-af: a leftover alert file is not a launch marker)"""
+    """A launch record that already exists is not overwritten; no child; `failed`/`worker_error`, cost exactly 0 and unmarked. (O6, D-af: a leftover alert file is not a launch marker; #1377 S2)"""
     import uuid
 
     inv = str(uuid.uuid4())
@@ -358,13 +358,14 @@ async def test_o6_launch_files_are_create_only_and_a_failed_write_is_a_worker_er
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
     assert stored["failure_message"]
     assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
+    assert lower_limit(world["dsn"], inv) is False, "nothing was launched: the 0 is exact (#1377 S2)"
     assert (world["runs"] / f"{inv}{present}").read_text(encoding="utf-8") == "planted"
     assert child.seen() is None, "a child started although its launch files could not be written"
 
 
 @pytest.mark.parametrize("shape", ["tenant folder without runs", "no tenant folder on this host"])
 async def test_o6_a_tenant_with_no_runs_container_fails_as_a_worker_error_and_nothing_is_made(world, shape):
-    """No `<root>/<T>/runs` → `failed`/`worker_error`, no child, nothing created anywhere. (O6, R1)"""
+    """No `<root>/<T>/runs` → `failed`/`worker_error`, no child, nothing created anywhere; cost exactly 0, unmarked. (O6, R1, #1377 S2)"""
     import shutil
 
     if shape == "no tenant folder on this host":
@@ -379,13 +380,14 @@ async def test_o6_a_tenant_with_no_runs_container_fails_as_a_worker_error_and_no
     assert stored["failure_message"]
     assert stored["finished_at"] == NOW
     assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
+    assert lower_limit(world["dsn"], inv) is False, "nothing was launched: the 0 is exact (#1377 S2)"
     assert child.seen() is None, "a child was started without a runs container"
     assert tree(world["root"]) == before, f"the worker made something for {inv}"
     assert not world["runs"].exists()
 
 
 async def test_o6_a_child_that_cannot_be_spawned_is_a_worker_error_and_the_worker_carries_on(world):
-    """An argv that cannot be executed ends the row `failed`/`worker_error`; `drain` returns. (O6)"""
+    """An argv that cannot be executed ends the row `failed`/`worker_error` at exactly 0, unmarked; `drain` returns. (O6, #1377 S2)"""
     missing = world["tmp"] / "no-such-program"
     inv, stored = await _run_one(world, lambda launch: [str(missing), "--job", launch.investigation_id])
 
@@ -393,7 +395,7 @@ async def test_o6_a_child_that_cannot_be_spawned_is_a_worker_error_and_the_worke
     assert stored["failure_message"]
     assert stored["finished_at"] == NOW
     assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
-    assert inv
+    assert lower_limit(world["dsn"], inv) is False, "no child ran: the 0 is exact (#1377 S2)"
 
 
 # --- O8: the worker's rule, one case per branch ----------------------------------------------------
@@ -832,6 +834,8 @@ async def test_o8_a_cost_read_fault_keeps_the_stage_and_leaves_cost_unknown(worl
         pointer = session_pointer("../../../outside")
     elif fault == "database-will-not-open":
         _break_database(world["runs"], CASE)
+    elif fault == "no-database":
+        pass  # the pointer names a case with no database at all (r4 cost reader: a run that opened its store left one)
     else:  # a database with a ledger worth 8.0, so a reader that skipped its check would answer a number
         plant_sessions(world["runs"], CASE, [("l-001" if fault == "no-main-session" else "main",
                                               "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
@@ -872,39 +876,49 @@ async def test_o8_a_session_pointer_of_the_wrong_shape_keeps_the_stage_and_leave
     assert _warned(caplog, inv), "the cost fault was not logged"
 
 
+_DONE, _NO_REPORT = ("completed", None), ("failed", "no_report")
+
+
 @pytest.mark.parametrize(("ending", "ledger", "expect"), [
-    ("clean", "rows", ("completed", 8.0, False)),
-    ("spend write failed", "rows", ("completed", 8.0, True)),
-    ("no job-end, exit 1", "rows", ("failed", 8.0, True)),
-    ("job-end unreadable, exit 1", "rows", ("failed", 8.0, True)),
-    ("job-end lacking the spend fact, exit 1", "rows", ("failed", 8.0, True)),
-    ("no job-end, exit 1", "no rows", ("failed", 0.0, True)),
-    ("clean", "no rows", ("completed", 0.0, False)),
-    ("clean", "unreadable database", ("completed", None, False)),
-    ("spend write failed", "unreadable database", ("completed", None, False)),
-    ("no job-end, exit 1", "unreadable database", ("failed", None, False)),
-    ("clean", "no ledger table", ("completed", None, False)),
-    ("no job-end, exit 1", "no pointer", ("failed", 0.0, False)),
-    ("clean", "no pointer", ("completed", 0.0, False)),
-    ("spend write failed", "no pointer", ("completed", 0.0, True)),  # a run that reported a failed write is never exact
+    ("clean", "rows", (*_DONE, 8.0, False)),
+    ("spend write failed", "rows", (*_DONE, 8.0, True)),
+    ("no job-end, exit 77", "rows", (*_NO_REPORT, 8.0, True)),
+    # A run killed with exit 0 is no more exact than one that exited 77: the mark is not read from the exit code.
+    ("no job-end, exit 0", "rows", (*_NO_REPORT, 8.0, True)),
+    ("job-end unreadable, exit 77", "rows", (*_NO_REPORT, 8.0, True)),
+    ("job-end lacking the spend fact, exit 77", "rows", (*_NO_REPORT, 8.0, True)),
+    ("no job-end, exit 77", "no rows", (*_NO_REPORT, 0.0, True)),
+    ("clean", "no rows", (*_DONE, 0.0, False)),
+    ("clean", "unreadable database", (*_DONE, None, False)),
+    ("spend write failed", "unreadable database", (*_DONE, None, False)),
+    ("no job-end, exit 77", "unreadable database", (*_NO_REPORT, None, False)),
+    ("clean", "no ledger table", (*_DONE, None, False)),
+    ("no job-end, exit 77", "no pointer", (*_NO_REPORT, 0.0, False)),
+    ("clean", "no pointer", (*_DONE, 0.0, False)),
+    ("spend write failed", "no pointer", (*_DONE, 0.0, True)),  # a run that reported a failed write is never exact
 ])
 async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_table(world, ending, ledger, expect):
-    """Each row of the final-read flag table: the ledger's sum for this run, "at least" only where spend may be missing, never beside null. (S2, S4)"""
+    """Each row of the final-read flag table: the ledger's sum for this run, "at least" only where spend may be missing, never beside null; the ending the job-end decides stands beside it (never replaced by `worker_error`). (S2, S4, r4)"""
     job_end_text = {"clean": job_end(), "spend write failed": job_end(spend_write_failed=True),
-                    "job-end unreadable, exit 1": "{not json",
-                    "job-end lacking the spend fact, exit 1": _job_end_with(spend_write_failed=None)}.get(ending)
+                    "job-end unreadable, exit 77": "{not json",
+                    "job-end lacking the spend fact, exit 77": _job_end_with(spend_write_failed=None)}.get(ending)
     files = _committed(**{"{id}.job-end.json": job_end_text}) if job_end_text is not None else {}
     if ledger != "no pointer":
         files["{id}.session-pointer.json"] = session_pointer(CASE)
-    child = _child(world, files=files, exit=0 if ending in ("clean", "spend write failed") else 1)
+    code = EXIT if ending.endswith(f"exit {EXIT}") else 0
+    child = _child(world, files=files, exit=code)
     if ledger == "unreadable database":
         _break_database(world["runs"], CASE)
     spend = {"rows": _LEDGER, "no rows": [], "no ledger table": _LEDGER}.get(ledger)
     inv, _ = await _run_spent(world, child, spend, then="DROP TABLE spend_ledger" if ledger == "no ledger table" else None)
     stored = row(world["dsn"], inv)
 
-    assert (stored["stage"], stored["cost_usd"], lower_limit(world["dsn"], inv)) == (
-        expect[0], None if expect[1] is None else pytest.approx(expect[1]), expect[2])
+    assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], lower_limit(world["dsn"], inv)) == (
+        expect[0], expect[1], None if expect[2] is None else pytest.approx(expect[2]), expect[3])
+    if expect[1] is None:
+        assert stored["failure_message"] is None, stored["failure_message"]
+    else:
+        assert _names_code(stored, inv, code), ("the no-report ending names the child's exit", stored["failure_message"])
 
 
 # --- knowledge --------------------------------------------------------------------------------------
@@ -2388,11 +2402,12 @@ async def test_d3_a_child_spawned_while_the_stop_is_under_way_that_ignores_sigte
 # --- r7: the claim carries the tenant's state (R7-1; r6 R6-4's read mechanism and R6-5 are retired) ----
 
 def _nothing_left_for_a_refused_claim(world: dict, child: ScriptedChild, inv: str) -> None:
-    """The row ended `failed`/`worker_error` naming a cause; no launch file, no child, no lock folder."""
+    """The row ended `failed`/`worker_error` naming a cause, at exactly 0 and unmarked (#1377 S2); no launch file, no child, no lock folder."""
     stored = row(world["dsn"], inv)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error"), stored
     assert stored["failure_message"]
     assert stored["finished_at"] == NOW
+    assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (0, False), "nothing was launched: exactly 0 (O6, #1377 S2)"
     assert sorted(p.name for p in world["runs"].iterdir()) == [], "a launch file was written for a refused claim"
     assert child.seen() is None, "a child started for a refused claim"
     assert child.events() == []
@@ -3304,13 +3319,14 @@ async def test_b2_a_failed_cost_read_keeps_the_last_good_figure_mid_run_and_writ
 
 
 async def test_b2_a_cost_read_that_hangs_never_delays_the_lease_renewal(world):
-    """The session database is locked, so the cost read waits on SQLite for the whole window: a 1 s lease is still fresh at every sample for 3 s; once unlocked the cost shows. (B2, r5 item 4)"""
+    """The session database is locked, so the cost read waits on SQLite for the whole window: a 1 s lease is still fresh at every sample for 3 s; once unlocked the cost (the run's ledger rows, #1377 S1) shows. (B2, r5 item 4)"""
     release = world["tmp"] / "release"
     dsn, runs = world["dsn"], world["runs"]
     child = _child(world, files=_committed(), wait_for=release)
     plant_sessions(runs, CASE, [("main", SONNET, {"input_tokens": 1_000_000})])
     async with job_store(dsn, lease=1.0) as store:
         inv = await _queued(store)
+        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})])  # the cost is the run's ledger, not its conversation (S1)
         (runs / f"{inv}.session-pointer.json").write_text(session_pointer(CASE), encoding="utf-8")
         drained = asyncio.create_task(_worker(world, store, child, **_FAST).drain())
         try:

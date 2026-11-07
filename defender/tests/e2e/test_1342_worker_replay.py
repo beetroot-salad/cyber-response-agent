@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.e2e._replay_harness import priced_billed, priced_cost
 from defender.tests.support.jobs._jobs1342 import (
     DEFENDER,
     StandInContainers,
@@ -225,11 +226,15 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_runs_stamped_l
 
 # --- #1377: the spend ledger -------------------------------------------------------------------------
 
-#: `replay-priced`'s calls and their rates (configuration/_pricing.py `in`, USD a million): MAIN dispatch,
-#: append, close, text; l-001's query and final summary, and the correlation lead's summary; the review's support,
-#: ablation, composer.
-MAIN_IN, GATHER_IN, REVIEW_IN = 3.0, 1.0, 0.95
+#: `replay-priced`'s calls: MAIN dispatch, append, close, text; l-001's query and final summary, and the correlation
+#: lead's summary; the review's support, ablation, composer. Each reports the harness's `PRICED_USAGE` under its model.
 PRICED_CALLS = {"main": 4, "gather": 3, "review": 3}
+PRICED_MODELS = {"main": "claude-sonnet-4-6", "gather": "claude-haiku-4-5", "review": "kimi-k2.6"}
+
+
+def _priced_spend(**calls: int) -> float:
+    """What `calls` (by role) cost when each reports `PRICED_USAGE`: the pricing table over the billed counts."""
+    return sum(priced_cost(PRICED_MODELS[role], n) for role, n in calls.items())
 
 
 def _priced_env(monkeypatch, root: Path, dsn: str) -> None:
@@ -258,8 +263,8 @@ def _run_result(run: Path) -> dict:
 
 
 async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated_database, tmp_path, monkeypatch):  # noqa: F811
-    """`cost_usd` is every priced response: MAIN, the lead's final one included, and the review's; exact, and the run file agrees.
-    (S1, S2, S5)"""
+    """`cost_usd` is every priced response, all four billed counts priced: MAIN, the lead's final one included, and the
+    review's; exact, and the run file agrees on the total at full precision and on every usage count. (S1, S2, S5)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     root = tmp_path / "data"
@@ -283,15 +288,15 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
         stored = row(migrated_database, inv.investigation_id)
         assert _calls(tmp_path / "marks") == PRICED_CALLS, ("premise: the run made exactly the scripted calls", stored)
         assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive"), stored
-        spent = 4 * MAIN_IN + 3 * GATHER_IN + 3 * REVIEW_IN  # 17.85
-        assert stored["cost_usd"] == pytest.approx(spent)
+        spent = _priced_spend(**PRICED_CALLS)
+        assert stored["cost_usd"] == pytest.approx(spent, rel=1e-9)
         assert lower_limit(migrated_database, inv.investigation_id) is False
         end = json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8"))
         assert end["spend_write_failed"] is False, end
         result = _run_result(runs / inv.investigation_id)
-        assert result["total_cost_usd"] == pytest.approx(spent)
+        assert result["total_cost_usd"] == pytest.approx(spent, abs=1e-6), "the run file's total is not the job's cost"
         assert result["total_cost_is_lower_limit"] is False
-        assert result["usage"]["input_tokens"] == 10_000_000, "usage counts every response, as the total does"
+        assert result["usage"] == priced_billed(10), "usage counts every response's four billed counts, as the total does"
         assert result["num_turns"] == 4, "num_turns stays MAIN's turns (run health reads it)"
 
 
@@ -335,13 +340,14 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
         report = {i: (runs / i / "report.md").read_text(encoding="utf-8").replace(i, "<id>") for i in ids}
         assert report[faulted] == report[control]
         assert "outcome: stands" in report[faulted], "premise: the review's own outcome reached the report (a forced verdict reads `unresolved`)"
-        assert got[faulted]["cost_usd"] == pytest.approx(4 * MAIN_IN + 3 * GATHER_IN)  # the review's 2.85 is lost
+        lacking_review = _priced_spend(main=4, gather=3)  # the review's three responses are lost
+        assert got[faulted]["cost_usd"] == pytest.approx(lacking_review, rel=1e-9)
         assert lower_limit(migrated_database, faulted) is True
         assert lower_limit(migrated_database, control) is False
         end = json.loads((runs / f"{faulted}.job-end.json").read_text(encoding="utf-8"))
         assert (end["report_committed"], end["spend_write_failed"]) == (True, True), end
         result = _run_result(runs / faulted)
-        assert (result["total_cost_usd"], result["total_cost_is_lower_limit"]) == (pytest.approx(15.0), True)
-        assert (result["usage"]["input_tokens"], result["num_turns"]) == (7_000_000, 4)
+        assert (result["total_cost_usd"], result["total_cost_is_lower_limit"]) == (pytest.approx(lacking_review, abs=1e-6), True)
+        assert (result["usage"], result["num_turns"]) == (priced_billed(7), 4)
         assert _spend_errors(err_file), "the failed write was not logged at ERROR"
         assert _spend_errors(tmp_path / "control.stderr") == [], "the unfaulted control logged a failed spend write"

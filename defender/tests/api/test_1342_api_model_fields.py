@@ -76,7 +76,8 @@ def test_s2_cost_is_lower_limit_sits_beside_an_unchanged_cost_and_says_what_at_l
 def test_s2_cost_is_lower_limit_is_required_on_the_wire_model_and_in_its_schema():
     """No default: a repository that forgot the field cannot serve a row, and the schema lists it as required. (S2, r4 API field)"""
     field = models.Investigation.model_fields["cost_is_lower_limit"]
-    assert field.is_required() and field.annotation is bool
+    assert field.is_required()
+    assert field.annotation is bool
     assert "cost_is_lower_limit" in models.Investigation.model_json_schema()["required"]
     fields = {"cost_usd": 0.0, "request_key": "k1", "attempt": 1}
     with pytest.raises(ValidationError, match="cost_is_lower_limit"):

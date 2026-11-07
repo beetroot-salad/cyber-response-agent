@@ -1151,10 +1151,13 @@ def test_o8_a_tainted_tree_still_raises_with_the_cut_short_fact_already_set(scen
     assert scene.job_end(run_id)["cut_short"] == "box-lost", scene.job_end(run_id)
 
 
-@pytest.mark.parametrize(("mode", "failed"), [("replay-priced-raises", False), ("replay-priced-ledger-fault-raises", True)],
-                         ids=["no write failed", "a write failed"])
+@pytest.mark.parametrize(("mode", "failed"), [("replay-priced-raises", False), ("replay-priced-ledger-fault-raises", True),
+                                              ("replay-priced-dies", False), ("replay-priced-ledger-fault-dies", True)],
+                         ids=["no write failed", "a write failed", "no write failed, dies inside the run",
+                              "a write failed, dies inside the run"])
 def test_s2_a_run_that_raises_after_a_failed_spend_write_still_says_so_in_its_job_end_record(scene, tmp_path, mode, failed):
-    """The fact is set when the write fails, not copied from a summary the raising run never returns. (S2, O8)"""
+    """The fact is set when the write fails, not copied from a summary the raising run never returns, nor at the run's end:
+    a raise after the run returned, or one inside the run after the failed write, still leaves it set. (S2, O8, r4 failure sink)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     marks = tmp_path / "marks"
@@ -1165,11 +1168,16 @@ def test_s2_a_run_that_raises_after_a_failed_spend_write_still_says_so_in_its_jo
     proc = subprocess.run(_child_cmd(scene, marks, run_id, os.getpid(), mode), env=env,  # noqa: S603
                           cwd=str(WORKTREE), capture_output=True, text=True, timeout=240, check=False)
 
-    assert "the run died after its last response" in proc.stderr and proc.returncode != 0, proc.stderr[-2000:]
+    assert proc.returncode != 0, proc.stderr[-2000:]
+    if mode.endswith("-dies"):
+        assert (marks / "fault-raised").is_file(), ("premise: MAIN's request after the close raised inside the run", proc.stderr[-2000:])
+    else:
+        assert "the run died after its last response" in proc.stderr, proc.stderr[-2000:]
     reviewed = (marks / "calls-review").read_text(encoding="utf-8").count("\n") if (marks / "calls-review").is_file() else 0
     assert reviewed == 3, "premise: the run's live review stages are built on its model factory and made their three calls (#1377 r4)"
     record = scene.job_end(run_id)
-    assert record is not None and record["setup"] == "done", record
+    assert record is not None, proc.stderr[-2000:]
+    assert record["setup"] == "done", record
     assert record["spend_write_failed"] is failed, record
 
 
