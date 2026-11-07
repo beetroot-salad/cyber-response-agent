@@ -170,7 +170,7 @@ def test_budget_and_breaker_decisions_keep_the_same_live_state_across_record_mig
     """Model-written retired state files cannot reopen the budget or reset the breaker."""
     from defender.hooks import budget_enforcer as budgets
     from defender.systems import circuit_breaker as breaker
-    from defender.tests.e2e.test_1235_host_state_in_memory import PlantingReplay
+    from defender.tests.e2e.test_run_state_in_memory import PlantingReplay
 
     monkeypatch.setenv("DEFENDER_BUDGET_ENFORCE", "true")
     run = run_handle(materialize(tmp_path / "fixture", GOLDEN_AB3), RecordIO())

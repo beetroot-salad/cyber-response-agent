@@ -1,15 +1,27 @@
-"""tenant.py git reads act on the folder aimed at, never a repository the environment or an enclosing tree points to."""
+"""tenant.py git reads act on the folder aimed at, never a repository the environment or an enclosing tree points to.
+
+tenant.py imports the checkout it runs from even when another comes first on PYTHONPATH.
+
+tenant.py's venv re-exec cannot loop.
+
+A folder tenant.py cannot read is a refusal, never a traceback.
+
+An unreadable case-record file is a finding of `check`, never a traceback.
+"""
 from __future__ import annotations
 
 import os
 import shutil
 import threading
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
 from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 
 
 def test_check_folder_ignores_an_exported_git_dir_for_every_git_read(tmp_path: Path) -> None:
@@ -112,3 +124,71 @@ def test_a_repo_with_no_commits_reports_the_id_as_not_committed(tmp_path: Path) 
     H.git(folder, "init", "-q", "-b", "main")
     text = H.assert_refused(H.check(tenant_py, None, "--folder", str(folder)), "is not committed")
     assert H.CANNOT_VERIFY_TENANT_ID not in text, text
+
+
+def test_a_decoy_tree_earlier_on_pythonpath_is_not_imported(tmp_path: Path) -> None:
+    decoy = tmp_path / "decoy"
+    (decoy / "defender" / "tenancy").mkdir(parents=True)
+    (decoy / "defender" / "tenancy" / "__init__.py").write_text("", encoding="utf-8")
+    (decoy / "defender" / "tenancy/_tenant.py").write_text(
+        "raise ImportError('the decoy tree was imported')\n", encoding="utf-8")
+    pythonpath = f"{decoy}{os.pathsep}{H.REPO_ROOT}"
+    probe = decoy / "probe.py"
+    probe.write_text("import defender.tenancy._tenant\n", encoding="utf-8")
+    shadowed = H.run_script(probe, root=None, PYTHONPATH=pythonpath)
+    assert "the decoy tree was imported" in H.output(shadowed), (
+        "precondition: the decoy does not shadow the checkout")
+
+    root = tmp_path / "root"
+    H.place_knowledge(root)
+    H.assert_clean(H.check(tenant_py, None, "--folder", str(H.knowledge_dir(root)),
+                           PYTHONPATH=pythonpath))
+
+
+def test_a_venv_without_pyvenv_cfg_is_exec_d_once_not_forever(tmp_path: Path) -> None:
+    checkout = H.tmp_checkout(tmp_path / "checkout")
+    venv_bin = checkout / "defender" / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    base = Path(getattr(sys, "_base_executable", sys.executable))
+    (venv_bin / "python3").symlink_to(base)
+    prefix = subprocess.run([str(venv_bin / "python3"), "-c", "import sys; print(sys.prefix)"],
+                            capture_output=True, text=True, check=True, timeout=30).stdout
+    assert Path(prefix.strip()).resolve() != (venv_bin.parent).resolve(), (
+        "precondition: the planted interpreter reports the venv's prefix")
+    script = checkout / H.script_of(tenant_py).relative_to(H.REPO_ROOT)
+    try:
+        subprocess.run([sys.executable, str(script), "check", "--folder", str(tmp_path)],
+                       capture_output=True, text=True, timeout=30, check=False,
+                       cwd=str(checkout))
+    except subprocess.TimeoutExpired:
+        raise AssertionError("tenant.py re-exec'd itself in a loop") from None
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason='root reads a mode-000 directory')
+def test_check_over_an_unreadable_tenant_folder_refuses(tmp_path: Path) -> None:
+    """`<root>/<T>` at mode 000: `check <T>` (the tenant active in the directory) refuses naming the data root."""
+    root = tmp_path / "data"
+    H.place_knowledge(root)
+    folder = H.tenant_folder(root)
+    folder.chmod(0)
+    try:
+        H.assert_refused(H.check(tenant_py, root, H.TID, seed=[H.TID]), "[tenant.py]", str(root))
+    finally:
+        folder.chmod(0o755)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 file anyway; CI runs unprivileged")
+def test_an_unreadable_case_record_is_named_by_check(tmp_path: Path) -> None:
+    """case-record.yaml at mode 000: `check <id>` exits 1 naming it. Control: mode restored with a whole file, check is clean. r4 tenant check, D-17."""
+    root = tmp_path / "data"
+    H.place_knowledge(root)
+    record = H.settings_dir(root) / "case-record.yaml"
+    # A WHOLE file (D-17: `comment.body` is required, so a body-less file is itself a finding and
+    # the control below would not be clean).
+    record.write_text(C.case_record_text("ticket"), encoding="utf-8")
+    record.chmod(0)
+    try:
+        H.assert_refused(H.check(tenant_py, root, H.TID), "[tenant.py]", "settings/case-record.yaml")
+    finally:
+        record.chmod(0o644)
+    H.assert_clean(H.check(tenant_py, root, H.TID))

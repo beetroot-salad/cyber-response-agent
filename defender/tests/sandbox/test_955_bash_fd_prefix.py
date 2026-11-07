@@ -346,7 +346,7 @@ def test_what_we_accept_means_what_bash_means(shim_dir, cmd):
 _CR = chr(0x000D)
 
 # No wrapper shapes here: the parse folds none, so bash has nothing to answer for. That they
-# deny is pinned in `test_959_wrapper_fold.py`.
+# deny is pinned in `test_bash_decision.py`.
 
 
 def _stages(cmd: str):

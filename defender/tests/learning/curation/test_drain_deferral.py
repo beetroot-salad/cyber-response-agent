@@ -1,6 +1,10 @@
 """#773: bounded deferral, conservation of findings, and the tick's deferral/attempt counters.
 
-Every tick runs over a batch's git-free draft (`_spec773.build_draft_scene`)."""
+Every tick runs over a batch's git-free draft (`_spec773.build_draft_scene`).
+
+#773: the curator partitions a batch into committed and consumed-skip only; the questioner
+channel vouches as the lessons channel does.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,7 +14,10 @@ import pytest
 
 from defender.tests.support.learning.curation import _spec773 as S
 
+
 LESSON = "agent/lessons/l1.md"
+
+
 LESSON2 = "agent/lessons/l2.md"
 
 
@@ -286,3 +293,105 @@ def test_a_locked_rotation_that_expires_waiting_for_the_append_lock_773(tmp_path
     sc.curator.also = None
     assert _defer_again(sc, "filler1") == 0
     assert sc.pending_by_id()["orphan"]["deferrals"] == 1
+
+
+QLESSON = "agent/lessons-questioner/w1.md"
+
+
+def test_the_curator_partitions_the_batch_into_committed_and_consumed_skip_only_773(tmp_path):
+    """`FINDINGS_BUCKETS` declares exactly `committed` and `consumed_skip`, and a tick sorts
+    its rows into those two."""
+    from defender.learning.author.lessons import run as lessons_run
+
+    assert [b.name for b in lessons_run.FINDINGS_BUCKETS] == ["committed", "consumed_skip"]
+    assert all(b.reason_field != "forward_bad_reason" for b in lessons_run.FINDINGS_BUCKETS)
+
+    sc = S.build_draft_scene(
+        tmp_path,
+        rows=[S.finding_row("ok", run_id="ok"), S.finding_row("skip", run_id="skip")],
+        curator=S.FakeCurator(
+            writes={"l1.md": S.lesson("ok")},
+            committed=["ok"],
+            consumed_skip=[{"finding_id": "skip", "reason": "dup"}],
+        ),
+    )
+    assert sc.run() == 0
+    assert sc.category_of("ok") == "consumed_committed"
+    assert sc.category_of("skip") == "consumed_skip"
+
+
+def test_author_result_carries_an_unrecognized_bucket_key_773(tmp_path):
+    for stray in ("held_forward_bad", "some_key_nobody_declared"):
+        sc = S.build_draft_scene(
+            tmp_path / stray,
+            rows=[S.finding_row("f1", run_id="f1")],
+            curator=S.FakeCurator(
+                writes={"l1.md": S.lesson("f1")},
+                extra_result={stray: [{"finding_id": "f1", "reason": "r"}]},
+            ),
+        )
+        assert sc.run() == 2, stray
+        assert sc.head_files() == [], stray
+
+
+def test_author_result_consumed_skip_bucket_is_missing_773(tmp_path):
+    """A missing bucket key is an empty list, not a violation."""
+    sc = S.build_draft_scene(
+        tmp_path,
+        rows=[S.finding_row("f1", run_id="f1")],
+        curator=S.FakeCurator(
+            writes={"l1.md": S.lesson("f1")},
+            result={"committed": ["f1"], "commit_message": "one finding"},
+        ),
+    )
+    assert sc.run() == 0
+    assert sc.head_files() == [LESSON]
+    assert sc.category_of("f1") == "consumed_committed"
+
+
+def test_the_questioner_channel_still_refuses_an_unvouched_file_773(tmp_path):
+    """An unvouched file fails the questioner tick as it does the lessons tick (`AuthorError`,
+    the draft reset); the control lands."""
+    sc = S.build_questioner_draft_scene(
+        tmp_path,
+        rows=[S.world_row("w1")],
+        curator=S.FakeCurator(writes={"stray.md": S.lesson("not-this-batch")},
+                              committed=["w1"]),
+    )
+    assert sc.run() == 2
+    assert sc.head_files() == []
+    assert sc.corpus_files() == []
+
+    control = S.build_questioner_draft_scene(
+        tmp_path / "control",
+        rows=[S.world_row("w1")],
+        curator=S.FakeCurator(writes={"w1.md": S.lesson("w1")}),
+    )
+    assert control.run() == 0
+    assert control.head_files() == [QLESSON]
+
+
+def test_a_questioner_tick_whose_curator_committed_nothing_773(tmp_path):
+    sc = S.build_questioner_draft_scene(
+        tmp_path,
+        rows=[S.world_row("w1")],
+        curator=S.FakeCurator(writes={}, committed=[],
+                              consumed_skip=[{"finding_id": "w1", "reason": "nothing to say"}]),
+    )
+    assert sc.run() == 0
+    assert sc.head_files() == []
+    assert sc.category_of("w1") == "consumed_skip"
+
+
+def test_the_questioner_channel_does_not_consume_a_committed_row_no_file_cites_773(tmp_path):
+    """On the questioner channel too, a row claimed committed that no file cites is not
+    consumed, while the cited one lands."""
+    sc = S.build_questioner_draft_scene(
+        tmp_path,
+        rows=[S.world_row("w1"), S.world_row("w2")],
+        curator=S.FakeCurator(writes={"w1.md": S.lesson("w1")}, committed=["w1", "w2"]),
+    )
+    assert sc.run() == 0
+    assert sc.head_files() == [QLESSON]
+    assert sc.category_of("w1") == "consumed_committed"
+    assert sc.category_of("w2") is None

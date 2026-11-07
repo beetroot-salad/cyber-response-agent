@@ -380,7 +380,7 @@ def _answers_at_the_tool_boundary(defn: Any, agent_id: str, run_dir: Path,
     from defender.providers import BuiltModel
     from defender.investigation.run_state import RunState
     from defender.tests.e2e._replay_harness import Turn
-    from defender.tests.sandbox.test_959_downstream import Box
+    from defender.tests.sandbox.test_bash_decision import Box
 
     model = V.Recorder([Turn(tool_calls=[call]) for call in calls] + [Turn(text="done")])
     box = Box(BoxResult(0, b"box-ran\n", b""))
@@ -460,13 +460,13 @@ def _recipe_preload(instructions: list[str]) -> list[str]:
 
 
 def _box_recipe_preload() -> list[str]:
-    from defender.tests.sandbox.test_1092_dockerfile import _instructions
+    from defender.tests.sandbox.test_box_image import _instructions
 
     return _recipe_preload(_instructions(C.DEFENDER / "box.Dockerfile"))
 
 
 def test_k3_the_recipe_reader_sees_instructions_not_comments(tmp_path):
-    from defender.tests.sandbox.test_1092_dockerfile import _instructions
+    from defender.tests.sandbox.test_box_image import _instructions
 
     assert _recipe_preload(["FROM python:3.11-slim", "RUN true"]) == []
     assert _recipe_preload(["ENV LD_PRELOAD=/usr/lib/faketime/libfaketime.so.1"])

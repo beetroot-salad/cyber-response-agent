@@ -222,7 +222,7 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - Flow 7 branch replay → `test_branch_replay.py`
 - A-ID drain AppRole login → `test_drain_credentials.py`, `test_live_dev_issuer.py`
 - U9 stage layout → `test_run_copy.py`, `test_drains.py`, `test_run_isolation_e2e.py`, `tenant_1108_delivery/test_batches.py`, `tenant_1108_delivery/test_box.py`, `e2e/test_1106_box_mount.py`
-- U10 refused claims (OD18/19/23) → `test_refused_claims.py`, `learning/curation/test_1134_curator_drain.py`, `test_773_commit_list.py`, `test_lead_author.py`
+- U10 refused claims (OD18/19/23) → `test_refused_claims.py`, `learning/curation/test_1134_curator_drain.py`, `test_drain_commit.py`, `test_lead_author.py`
 - U11 broken child (OD20) → `test_publish_child.py`
 - U12 host record (OD17/21/22') → `test_stale_visibility.py`, `test_run_page.py`, `test_run_start.py`
 - U14 (OD21 consequence) resumed box never sees the source's `runtime.html` or its reason → `e2e/test_920_branch_resume.py::test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason`

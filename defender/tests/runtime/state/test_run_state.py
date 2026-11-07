@@ -44,7 +44,7 @@ from defender.investigation.query_tool import QueryCapture  # noqa: E402
 from defender.investigation.tools import _tool_bash  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
 from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
-from defender.tests.sandbox.test_959_downstream import Box, _gather_scene  # noqa: E402
+from defender.tests.sandbox.test_bash_decision import Box, _gather_scene  # noqa: E402
 from defender.tests.runtime.engine.test_budget_seams_631 import _run_dir, drive_agent  # noqa: E402
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.investigation import driver, observe  # noqa: E402
@@ -52,7 +52,7 @@ from defender.investigation.agent_definition import bind, effective_tools_for  #
 from defender.providers import BuiltModel  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
-from defender.tests.sandbox.test_959_downstream import Box  # noqa: E402
+from defender.tests.sandbox.test_bash_decision import Box  # noqa: E402
 from defender.tests.runtime.engine.test_budget_seams_631 import ScriptedModel, _run_dir, drive_agent  # noqa: E402
 
 

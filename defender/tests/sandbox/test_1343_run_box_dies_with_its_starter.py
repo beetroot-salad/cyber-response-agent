@@ -394,7 +394,7 @@ _STARTER = textwrap.dedent("""
 
 @pytest.fixture
 def base(tmp_path: Path) -> Iterator[Path]:
-    """The run lane's sources, on the daemon-visible shared mount under DooD (as test_1195_run_box_live)."""
+    """The run lane's sources, on the daemon-visible shared mount under DooD (as test_run_box)."""
     if not is_dood():
         yield tmp_path
         return
