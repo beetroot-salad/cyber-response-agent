@@ -14,7 +14,7 @@ import pytest
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.presentation import test_1025_stage_timing as ST
+from defender.tests.presentation import test_episode_stage_timing as ST
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 from defender.tests.support.tenancy._active1214 import database_env, insert_active_tenant
 

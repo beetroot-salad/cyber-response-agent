@@ -10,7 +10,7 @@ import pytest
 
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.presentation import test_1025_stage_timing as ST
+from defender.tests.presentation import test_episode_stage_timing as ST
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
