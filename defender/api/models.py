@@ -15,7 +15,8 @@ from defender.kit.access import secret_fields
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
 from defender.records.formats import (
-    AlertId, AlertMappingFault, InvestigationId, LearningJobId, MembershipId, TenantId, UserId, check_mapping,
+    AlertId, AlertMappingFault, CredentialId, InvestigationId, LearningJobId, MembershipId, TenantId, UserId,
+    check_mapping,
 )
 
 InvestigationStatus = Literal["queued", "running", "completed", "unparseable", "failed", "aborted"]
@@ -344,7 +345,75 @@ class InvitationRef(BaseModel):
 
 
 class Me(BaseModel):
+    """A person's view of themselves."""
+
+    kind: Literal["person"] = "person"
     user: MeUser
     tenants: list[TenantRef]
     administrator: bool = Field(description="Whether this session holds platform administrator powers.")
     invitations: list[InvitationRef] = Field(description="Open invitations addressed to this user.")
+
+
+class ProgramRef(BaseModel):
+    id: UserId
+    display_name: str
+
+
+class CredentialRef(BaseModel):
+    """The credential a program's request came in on: never its secret."""
+
+    id: CredentialId
+    expires_at: Instant
+
+
+class ProgramMe(BaseModel):
+    """A program's view of itself: who it is, the one tenant it belongs to, and the credential it used."""
+
+    kind: Literal["program"] = "program"
+    program: ProgramRef
+    tenant: TenantRef
+    credential: CredentialRef
+
+
+class ProgramCreate(BaseModel):
+    """Make a program: a non-human caller of the tenant (a SOAR, a script)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str = Field(min_length=1, max_length=200)
+
+
+class Program(BaseModel):
+    id: UserId
+    display_name: str
+    created_by: UserId | None = Field(description="The administrator who made it.")
+    created_at: Instant
+
+
+class CredentialCreate(BaseModel):
+    """Issue a credential for a program: an API key, or an OAuth client of the programs realm."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["key", "oauth_client"]
+    name: str = Field(min_length=1, max_length=200)
+    expires_at: Instant | None = Field(default=None, description="Between 7 and 365 days from now; 90 days when absent.")
+
+
+class Credential(BaseModel):
+    """A credential as its administrators see it: facts only, never a secret or a hash."""
+
+    id: CredentialId
+    kind: Literal["key", "oauth_client"]
+    name: str
+    state: Literal["pending", "live", "revoked"]
+    created_by: UserId | None
+    created_at: Instant
+    expires_at: Instant
+    last_used_at: Instant | None
+
+
+class CredentialIssued(Credential):
+    """The create answer: the only time the secret is shown."""
+
+    secret: str

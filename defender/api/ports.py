@@ -13,7 +13,7 @@ from defender.identity import IdentityService
 # The store's refusals are the API's: one class each, so the store's raise is the API's answer
 # with no mapping between them (#1342).
 from defender.jobs.errors import Conflict, NotFound, UnknownReference  # noqa: F401 — re-exported: the API's refusals
-from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId, UserId
+from defender.records.formats import AlertId, CredentialId, InvestigationId, LearningJobId, TenantId, UserId
 
 from .models import (
     Alert,
@@ -43,6 +43,8 @@ class Principal:
 
     tenant_id: TenantId
     user_id: UserId
+    #: The credential a program's request came in on; None for a person (#1307 D6).
+    credential_id: CredentialId | None = None
 
 
 class StoreBrokePromise(Exception):
@@ -196,9 +198,10 @@ class WriteTransaction(Protocol):
 
 class Writes(Protocol):
     def transaction(
-        self, tenant_id: TenantId, actor: str
+        self, tenant_id: TenantId, principal: Principal
     ) -> AbstractAsyncContextManager[WriteTransaction]:
-        """A transaction for `tenant_id`, acting as `actor` (the user id the audit names)."""
+        """A transaction for `tenant_id`, acting as `principal`: the audit names its user and, for a
+        program, the credential it used."""
         ...
 
 
