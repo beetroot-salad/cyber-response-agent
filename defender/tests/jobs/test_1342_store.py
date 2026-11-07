@@ -259,9 +259,10 @@ def test_o1_the_store_loads_nothing_the_api_must_not():
 # --- O12: the store is async --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", ["insert_alert", "get_alert", "get_investigation", "create_investigation",
-                                  "cancel_investigation", "delete_investigation", "claim", "close"])
+                                  "cancel_investigation", "delete_investigation", "claim", "close",
+                                  "put_alert_mapping", "get_alert_mapping"])
 def test_o12_every_store_method_is_a_coroutine_function(name):
-    """The ratified surface is awaited, never blocking. (O12)"""
+    """The ratified surface is awaited, never blocking; the mapping's replace and read included. (O12, #1345 O1, M1)"""
     from defender.jobs import JobStore
 
     assert inspect.iscoroutinefunction(getattr(JobStore, name))
@@ -1412,14 +1413,6 @@ async def _insert(store: Any, tenant: str, *, ticket: str, raw: bytes = ALERT_BY
 def _display(dsn: str, alert_id: str) -> tuple[Any, Any]:
     [(title, description)] = execute(dsn, "SELECT title, description FROM jobs.alerts WHERE id = %s", (alert_id,))
     return title, description
-
-
-@pytest.mark.parametrize("name", ["put_alert_mapping", "get_alert_mapping"])
-def test_1345_the_mapping_methods_are_coroutine_functions(name):
-    """The mapping's replace and read are store methods, awaited like the rest. (#1345 O1, M1)"""
-    from defender.jobs import JobStore
-
-    assert inspect.iscoroutinefunction(getattr(JobStore, name))
 
 
 async def test_1345_o1_a_mapping_is_absent_until_saved_then_replaced_whole_and_an_invalid_entry_writes_nothing(unmapped_dsn):
