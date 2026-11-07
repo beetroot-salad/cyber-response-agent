@@ -20,5 +20,7 @@ TABLE, SCHEMA = "investigations", "jobs"
 def upgrade() -> None:
     op.add_column(TABLE, sa.Column("cost_is_lower_limit", sa.Boolean(), nullable=False,
                                    server_default=sa.false()), schema=SCHEMA)
+    # The default only fills the rows that exist: no column of the jobs schema keeps a server default.
+    op.alter_column(TABLE, "cost_is_lower_limit", server_default=None, schema=SCHEMA)
     op.create_check_constraint(op.f("ck_investigations_lower_limit_has_a_cost"), TABLE,
                                "NOT cost_is_lower_limit OR cost_usd IS NOT NULL", schema=SCHEMA)

@@ -8,7 +8,7 @@ import dataclasses
 import datetime as _dt
 from typing import Any
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, false, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -81,7 +81,7 @@ class InvestigationRow(Base, kw_only=True):
     cost_usd: Mapped[float | None] = mapped_column(Float, default=None)
     #: True when the cost is only a lower limit ("at least": spend may be missing from it, #1377 S2);
     #: never true beside a null cost (the table's check).
-    cost_is_lower_limit: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    cost_is_lower_limit: Mapped[bool] = mapped_column(Boolean, default=False)
     #: The API's mapped shape (`status`, `commit`, `stale_kind`), or null.
     knowledge: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True), default=None)
     failure_reason: Mapped[str | None] = mapped_column(Text, default=None)
