@@ -333,14 +333,16 @@ def test_the_jobs_revision_sits_directly_on_the_sign_login_revision():
     from defender.migrations import _scripts, head
 
     scripts = _scripts()
-    assert head() == ALERT_MAPPING_REVISION
+    # `0008_programs` (#1307, design: migrations) now sits on 0007, and later revisions may follow: the line pinned
+    # here is the one from the baseline up to 0007, read from the bottom, with a single head above it.
+    assert len(scripts.get_heads()) == 1 and head() in {r.revision for r in scripts.walk_revisions()}
     assert scripts.get_revision(ALERT_MAPPING_REVISION).down_revision == "0006_job_leases"
     assert scripts.get_revision("0006_job_leases").down_revision == "0005_uuid_ids"
     assert scripts.get_revision("0005_uuid_ids").down_revision == "0004_jobs"
     assert scripts.get_revision("0004_jobs").down_revision == "0003_sign_login"
     assert scripts.get_revision("0003_sign_login").down_revision == "0002_tenancy"
     assert scripts.get_revision("0002_tenancy").down_revision == "0001_baseline"
-    assert [r.revision for r in scripts.walk_revisions()] == [
+    assert [r.revision for r in scripts.walk_revisions()][-7:] == [
         ALERT_MAPPING_REVISION, "0006_job_leases", "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy",
         "0001_baseline"]
 

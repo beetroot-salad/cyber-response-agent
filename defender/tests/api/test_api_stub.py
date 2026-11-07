@@ -1518,7 +1518,7 @@ def test_every_fake_port_method_is_a_coroutine_function_and_a_transaction_an_asy
     assert len(implemented) >= 9
     assert ("InMemoryStore", "AlertsRepository") in implemented
     assert ("_InMemoryTransaction", "WriteTransaction") in implemented
-    transaction = InMemoryStore(lambda: NOW).transaction(A, USER)
+    transaction = InMemoryStore(lambda: NOW).transaction(A, Principal(tenant_id=A, user_id=USER))  # the principal, not the bare id (#1307 D6)
     assert hasattr(transaction, "__aenter__")
     assert hasattr(transaction, "__aexit__")
 
