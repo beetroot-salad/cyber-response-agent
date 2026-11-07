@@ -547,19 +547,6 @@ def test_the_lifespan_makes_its_first_pass_at_once_not_after_one_interval() -> N
     assert time.monotonic() - leaving < 2
 
 
-def test_between_passes_the_loop_waits_its_interval() -> None:
-    """After the start-up pass, nothing is sent until send_interval has passed (F-7)."""
-    world = World(tenants={T1: [ANN]}, start=False, send_interval=HOUR)
-    with world.lifespan_client() as browser:
-        assert wait_until(lambda: world.signin.sends_to(ANN) == 1)
-        world.sign_in(ANN, browser=browser)
-        assert world.invite(browser, T1, NEW).status_code == 202
-        time.sleep(0.5)
-        assert world.signin.sends_to(NEW) == 0
-    world.send_pending()  # control: it was pending and sendable all along
-    assert world.signin.sends_to(NEW) == 1
-
-
 def test_a_periodic_pass_that_raises_does_not_stop_the_loop() -> None:
     """A pass that raises (repository failure) is survived: later passes run and a later invite is sent (F-7, flow 1)."""
     world = World(tenants={T1: [ANN]}, start=False, send_interval=INTERVAL, failing_writes=True)

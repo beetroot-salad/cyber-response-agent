@@ -20,6 +20,7 @@ from defender.execution.bash_exec import parse
 from defender.box import BoxSpec, start_box, stop_box
 from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
+from defender.tests.support.sandbox._docker import docker_runtimes as _docker_runtimes
 
 pytestmark = pytest.mark.box
 
@@ -83,14 +84,6 @@ except OSError as e:
     listing = {"exc": type(e).__name__, "errno": e.errno}
 print(json.dumps({"writes": writes, "listing": listing}))
 '''
-
-
-def _docker_runtimes() -> frozenset[str]:
-    probe = subprocess.run(
-        ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
-    )
-    return frozenset(probe.stdout.split()) if probe.returncode == 0 else frozenset()
 
 
 @functools.cache

@@ -299,12 +299,14 @@ def test_shutdown_after_a_failed_pass_is_prompt_even_with_a_long_interval() -> N
 
 
 def test_an_idle_stop_sends_nothing_that_is_still_pending() -> None:
-    """Stopping between passes claims nothing more: an email that became due during the interval waits for a later run (O8b)."""
+    """Between passes nothing is sent until `send_interval` has passed (F-7), and stopping then claims nothing more: an email that became due during the interval waits for a later run (O8b)."""
     world = World(tenants={T1: [ANN]}, start=False, send_interval=HOUR)
     with world.lifespan_client() as browser:
         assert wait_until(lambda: world.signin.sends_to(ANN) == 1)
         world.sign_in(ANN, browser=browser)
         assert world.invite(browser, T1, NEW).status_code == 202
+        time.sleep(0.5)
+        assert world.signin.sends_to(NEW) == 0, "the loop sent before its interval passed"
     assert world.signin.sends_to(NEW) == 0
     world.send_pending()  # control: it was pending and sendable all along
     assert world.signin.sends_to(NEW) == 1

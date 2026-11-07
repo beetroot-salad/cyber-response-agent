@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests.support.runtime.state._1255_view import model_path
+from defender.tests.e2e._spec771 import snapshot_outside as _snapshot
 
 pytest.importorskip("pydantic_ai")
 
@@ -74,26 +75,6 @@ def _clean_run_dir(tmp_path: Path) -> Path:
     (run / "gather_raw" / "l-001.lead.json").write_text('{"goal": "g"}\n', encoding="utf-8")
     (run / "gather_raw" / "l-001" / "0.json").write_text('[{"a": 1}]\n', encoding="utf-8")
     return run
-
-
-def _snapshot(root: Path) -> dict[str, tuple]:
-    """Every entry's identity WITHOUT dereferencing anything: relpath -> (mode-type, inode,
-    link count, bytes-or-link-target). The oracle for "removes and rewrites nothing"."""
-    out: dict[str, tuple] = {}
-    for dirpath, dirs, files in os.walk(root, followlinks=False):
-        for name in (*dirs, *files):
-            p = Path(dirpath) / name
-            st = os.lstat(p)
-            if stat.S_ISLNK(st.st_mode):
-                body: object = os.readlink(p)
-            elif stat.S_ISREG(st.st_mode):
-                body = p.read_bytes()
-            else:
-                body = None
-            out[str(p.relative_to(root))] = (
-                stat.S_IFMT(st.st_mode), st.st_ino, st.st_nlink, body,
-            )
-    return out
 
 
 @dataclasses.dataclass

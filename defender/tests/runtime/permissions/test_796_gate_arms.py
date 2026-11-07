@@ -34,6 +34,7 @@ from defender.tests.support.runtime.permissions._review_bundle import stage as _
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
 )
+from defender.tests.support.runtime.engine._spec923 import real_targets as _real_targets
 
 DEFENDER = Path(__file__).resolve().parents[3]
 GOLDEN = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3"
@@ -68,16 +69,6 @@ def _companion(deps):
     from defender.skills.invlang.parser import parse_dense_companion
 
     return parse_dense_companion(read_companion(deps).text or "")[0]
-
-
-def _real_targets(deps) -> list[str]:
-    """Ids the investigation actually recorded — an ask naming anything else is refused by the
-    invented-identifier guard, so a routing test has to use real ones."""
-    from defender.investigation.review.projector import parse_investigation
-    from defender.investigation.review.reply import citable_refs
-
-    inv = (deps.run_dir / "investigation.md").read_text(encoding="utf-8")
-    return sorted(citable_refs(parse_investigation(inv)))
 
 
 def _a_real_target(deps) -> str:
