@@ -1,17 +1,29 @@
-"""#1047 — each archived world carries a host-written record of how its run ended."""
-from __future__ import annotations
+"""#1047 — each archived world carries a host-written record of how its run ended.
 
-from defender.tests.support.shared._locations_1210 import location_path
+#1047 — the vocabulary owner: ONE answer to what a `truncated_by` value means.
+
+#1047 — the readers this piece does NOT move, observed at their own edges.
+"""
+from __future__ import annotations
 
 import json
 
 import pytest
-from defender.tests.support.storage._alert_plant import plant_alert
 
+from defender.tests.support.shared._locations_1210 import location_path
+from defender.tests.support.storage._alert_plant import plant_alert
 from defender.records._episode_handle import Episode
 from defender.tests.support.shared.filesystem import _spec1047 as S
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.sandbox._spec791 import (
+    SpecTail,
+    drive_tail,
+    loop_paths,
+    plant_alert as plant_tail_alert,
+    satisfy_entrypoint_keys,
+)
 
 
 def _archive():
@@ -348,3 +360,269 @@ def test_a_path_traversal_style_value_written_by_the_box_anywhere_in_the_run_dir
     landed = sorted(p.relative_to(ep) for p in ep.rglob(S.run_end_name()))
     assert [str(p) for p in landed] == [f"worlds/{T.fixture_world_id('b')}/{S.run_end_name()}"], (
         f"the feature's write landed at {landed}, a path derived from box-written content")
+
+
+def _owner():
+    """The owner function, looked up at call time so a missing one fails the test."""
+    return S.sym("records.session_store", "normalized_truncated_by")
+
+
+# the seam itself
+
+
+def test_session_store_owns_what_a_truncated_by_value_means():
+    normalized = _owner()
+    members = S.vocabulary()
+    assert members, "TRUNCATED_BY_VALUES is empty; the vocabulary has no members to own"
+    for member in members:
+        assert normalized(member) == member, (
+            f"{member!r} is a declared member of TRUNCATED_BY_VALUES and the owner refused it")
+    for outside in (None, "", "request_limit", "REQUEST-LIMIT", 7, ["aborted"],
+                    # Fragments a partial write leaves: near-misses, never completed.
+                    "request-", "-limit", "requestlimit", "retry-exhaust"):
+        assert normalized(outside) is None, (
+            f"{outside!r} is not a member and the owner answered something other than None")
+
+
+def test_normalized_truncated_by_is_strict_about_whitespace_case_and_confusables():
+    normalized = _owner()
+    assert normalized("aborted") == "aborted", (
+        "control: the owner refused an exactly-spelled member")
+    for spelling, why in (
+        (" request-limit ", "whitespace-padded"),
+        ("\trequest-limit\n", "whitespace-padded with tabs and newlines"),
+        ("REQUEST-LIMIT", "a case variant"),
+        ("Request-Limit", "a title-case variant"),
+        ("аborted", "a Cyrillic-а confusable"),
+        ("aborted​", "a zero-width space inside a member"),
+    ):
+        assert normalized(spelling) is None, (
+            f"{spelling!r} ({why}) was coerced into the member it resembles")
+
+
+# coherence — the three interpretation sites give one answer
+
+
+def _three_sites(tmp_path, value):
+    """Drive the exit value through the archive and both interpretation sites and return what each
+    made of it: the archive's copied record, the judge's read, and the ticket lane's calls."""
+    base, _src = location_path(S.runs_base)(tmp_path)
+    ep = S.episode(tmp_path)
+    run_dir = S.sibling_run_dir(base, "b")
+    S.plant_sidecar(run_dir, truncated_by=value)
+    with Episode.open(ep) as episode:
+        S.mod("learning.branch.archive").archive_episode(episode, {T.world_id(episode.dir, 'b'): run_dir})
+    archived = json.loads((ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()).read_text(encoding="utf-8"))
+
+    graded_ep = S.cut_short_episode(tmp_path / "graded")
+    S.plant_archived_record(graded_ep, "b", raw=json.dumps(S.record_doc(value)))
+    row = S.graded(graded_ep)["b"]
+
+    ticket_run = S.closed_run_dir(tmp_path / "ticket")
+    fake = S.record_ticket(ticket_run, truncated_by=value)
+    return archived, row, fake
+
+
+def test_every_reader_of_the_exit_class_takes_the_owners_answer(tmp_path):
+    refused_archived, refused_row, refused_ticket = _three_sites(tmp_path / "no", "REQUEST-LIMIT")
+    assert refused_archived["truncated_by"] == "REQUEST-LIMIT", (
+        "the archive rewrote the sidecar's value instead of copying it")
+    assert refused_row.get("cut_short") is None, "the judge read a value the owner refuses"
+    assert len(refused_ticket.records) == 1, (
+        "a value the owner refuses did not take the report-driven fallback at the ticket lane")
+
+    ok_archived, ok_row, ok_ticket = _three_sites(tmp_path / "yes", "request-limit")
+    assert ok_archived["truncated_by"] == "request-limit", (
+        "the control failed: the archive did not carry a real member through")
+    assert ok_row.get("cut_short") == "request-limit"
+    assert len(ok_ticket.records) == 1, "the request-limit arm made no record at all"
+
+    gate = S.mod("run_common").learning_refusal_gate
+    assert gate(tmp_path, tmp_path / "alert.json", truncated_by="REQUEST-LIMIT") is not None, (
+        "the corpus-refusal gate stopped refusing an unrecognized exit class")
+
+
+# the exit class's other reader
+
+
+def test_a_cut_short_world_files_no_finding_and_its_reason_travels_on_its_row_unchanged(
+        tmp_path):
+    ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
+    judge = S.scripted_judge()
+    record = S.graded_record(ep, judge=judge)
+    row = S.rows(record)["b"]
+    reason = row.get("ungradable_reason")
+    assert reason, "the control failed: the cut-short row carries no reason to pass through"
+    assert "request-limit" in reason, f"the cut-short reason does not name the exit: {reason!r}"
+
+    assert S.judge_calls_for(judge, "b", episode_dir=ep) == [], "a cut-short world bought a world call"
+    ledger = [e["finding_id"] for e in record.dispositions or []]
+    assert not [f for f in ledger if f.split("/")[-3] == "b"], (
+        f"the ledger names a finding of the cut-short world: {ledger}")
+    assert [f for f in ledger if f.split("/")[-3] == "c"], (
+        f"the control failed: the judged sibling's finding is not on the ledger: {ledger}")
+
+    family = [p for p, a in zip(judge.prompts, judge.agent_ids, strict=True)
+              if str(a).startswith(S.FAMILY_AGENT_PREFIX)]
+    assert family, "the pass never made its family-scope call"
+    assert reason in family[-1].split("## NOISE CONTEXT", 1)[-1], (
+        "the family call's noise context does not carry the cut-short reason verbatim")
+
+
+# the gradable set this piece can empty for the first time
+
+
+def _all_cut_short(tmp_path):
+    """An episode whose every non-control world was cut short."""
+    return S.cut_short_episode(tmp_path, cut={"b": "request-limit", "c": "aborted"})
+
+
+def test_an_episode_whose_every_world_was_cut_short_has_no_gradable_world(tmp_path):
+    family = S.mod("learning.judge.family")
+    ep = _all_cut_short(tmp_path)
+    graded = S.graded(ep)
+    assert [label for label, row in graded.items() if family.is_gradable_row(row)] == [], (
+        "an episode whose every non-control world was cut short still has a measuring world")
+
+
+def test_pass_lessons_commit_still_returns_none_when_the_gradable_set_is_empty(tmp_path):
+    judge = S.mod("learning.judge")
+    ep = _all_cut_short(tmp_path)
+    bound = S.mod("_io").bind(ep)  # the resolver takes the pass's bound, not the root
+    assert judge._pass_lessons_commit(bound, []) is None
+    assert judge._pass_lessons_commit(bound, [T.world_id(ep, label) for label in ("b", "c")]) is not None, (
+        "control: the commit resolver answered None for worlds that carry a provenance stamp")
+
+
+# the run dir itself
+
+
+def test_a_host_write_into_the_run_dir_still_goes_through_write_guarded_and_the_destination_screen(
+        tmp_path):
+    from defender.tests.support.runtime.engine import _spec923
+
+    victim = tmp_path / "victim.md"
+    victim.write_text("VICTIM\n", encoding="utf-8")
+    deps, run_dir = _spec923.main_deps(tmp_path / "planted")
+    (run_dir / "report.md").symlink_to(victim)
+    _run, truncated_by, _reason = _spec923.drive_to_retry_exhaustion(deps)
+    assert truncated_by is not None, "the run was not cut short, so no forced close was due"
+    assert victim.read_text(encoding="utf-8") == "VICTIM\n", (
+        "the host's forced close followed a link the box planted at report.md and wrote this "
+        "run's report wherever it pointed")
+
+    clean_deps, clean_run = _spec923.main_deps(tmp_path / "clean")
+    _spec923.drive_to_retry_exhaustion(clean_deps)
+    assert (clean_run / "report.md").is_file(), (
+        "control: the forced close writes no report even with nothing planted")
+
+
+# the report's other readers — deliberately unmoved
+
+
+def test_the_episode_reader_and_the_graded_record_disagree_about_a_cut_short_world(tmp_path):
+    episode_mod = S.mod("learning.branch.episode")
+    ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(S.report_text("unresolved"), encoding="utf-8")
+    row = S.graded(ep)["b"]
+    said = J.through_view(ep, episode_mod.verdicts)
+    assert row.get("ungradable") is True, "the cut-short world graded as a verdict"
+    assert row.get("cut_short") == "request-limit"
+    assert said.get("b") == "unresolved", (
+        "the episode reader stopped reading a cut-short world's archived report as its "
+        "conclusion")
+
+
+@pytest.mark.parametrize(("truncated_by", "closed_before_cut"), [
+    ("aborted", True),
+    ("request-limit", False),
+])
+def test_run_py_tail_takes_both_record_fields_off_the_summary(
+        tmp_path, monkeypatch, truncated_by, closed_before_cut):
+    """Both halves of the run-end record reach the ticket lane from ONE in-process value, the
+    driver's summary — `closed_before_cut` is not read back off the sidecar."""
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    satisfy_entrypoint_keys(monkeypatch, tmp_path)
+    paths = loop_paths(tmp_path)
+
+    from defender import run as run_py
+
+    tail = SpecTail(paths, truncated_by=truncated_by, closed_before_cut=closed_before_cut)
+    rc = drive_tail(run_py.main, plant_tail_alert(tmp_path / "both"), tail, "--update-ticket")
+
+    assert rc == 0
+    assert tail.record_calls, "record_case_ticket was never called at all"
+    assert not S.sidecar_path(tail.run_dirs[0]).exists(), (
+        "the fixture wrote a sidecar, so nothing below is about the in-process value")
+    assert tail.record_calls[0] == {"truncated_by": truncated_by,
+                                    "closed_before_cut": closed_before_cut}, (
+        "run.py's tail did not thread the summary's record into record_case_ticket, leaving the "
+        f"per-exit-class table unreachable: {tail.record_calls[0]!r}")
+
+
+def test_a_failed_record_write_names_itself_in_the_exit_reason(tmp_path):
+    from defender.investigation import challenge_gate
+    from defender.tests.support.runtime.engine import _spec923
+
+    deps, run_dir = _spec923.main_deps(tmp_path / "owed")
+    S.sidecar_path(run_dir).mkdir(parents=True, exist_ok=True)
+    _run, truncated_by, exit_reason = _spec923.drive_to_retry_exhaustion(deps)
+    assert truncated_by == "retry-exhausted"
+    assert exit_reason == "UnexpectedModelBehavior+RunEndRecordFailed", (
+        f"a skipped forced close left the exit reason at {exit_reason!r}")
+
+    closed_deps, closed_run = _spec923.main_deps(tmp_path / "closed")
+    S.sidecar_path(closed_run).mkdir(parents=True, exist_ok=True)
+    challenge_gate.ReviewState.of(closed_deps).closed = True
+    _run, _t, closed_reason = _spec923.drive_to_retry_exhaustion(closed_deps)
+    assert closed_reason == "UnexpectedModelBehavior", (
+        f"a run that already held its verdict was told a forced close was skipped: "
+        f"{closed_reason!r}")
+
+
+def test_re_archiving_a_world_whose_sidecar_is_gone_removes_the_stale_record(tmp_path):
+    base, _src = location_path(S.runs_base)(tmp_path)
+    ep = S.episode(tmp_path)
+    run_dir = S.sibling_run_dir(base, "b")
+    archive = S.mod("learning.branch.archive")
+
+    S.plant_sidecar(run_dir, truncated_by="aborted")
+    with Episode.open(ep) as episode:
+        archive.archive_episode(episode, {T.world_id(episode.dir, 'b'): run_dir})
+        assert (ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()).is_file(), "the control did not archive"
+
+        S.sidecar_path(run_dir).unlink()
+        archive.archive_episode(episode, {T.world_id(episode.dir, 'b'): run_dir})
+    assert not (ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()).exists(), (
+        "a stale run-end record survived a re-archive whose run has none")
+    assert S.graded(S.cut_short_episode(tmp_path / "control"))["b"].get("cut_short") is None
+
+
+def test_parse_record_is_strict_as_a_whole():
+    run_end = S.mod("records.run_end")
+    ok = run_end.parse_record({"truncated_by": "aborted", "closed_before_cut": False})
+    assert ok == run_end.RunEnd("aborted", False)
+    clean = run_end.parse_record({"truncated_by": None, "closed_before_cut": False})
+    assert clean == run_end.RunEnd(None, False)
+    assert run_end.parse_record(
+        {"truncated_by": "aborted", "closed_before_cut": False, "verdict": "benign"}) == ok, (
+        "an extra key changed the record")
+
+    for doc in (
+        {"truncated_by": "Aborted", "closed_before_cut": False},   # not a member
+        {"truncated_by": "aborted", "closed_before_cut": "false"},  # a truthy string
+        {"truncated_by": "aborted", "closed_before_cut": 1},        # not a bool
+        {"truncated_by": "aborted"},                                # a field missing
+        {"closed_before_cut": False},
+        {}, [], None, "aborted",
+    ):
+        assert run_end.parse_record(doc) is None, f"{doc!r} was read as a record"
+
+
+def test_cut_short_reason_names_the_actual_world_not_a_hardcoded_label(tmp_path):
+    ep = S.cut_short_episode(tmp_path, cut={"c": "aborted"})
+
+    rows = S.graded(ep)
+
+    assert rows["c"]["ungradable_reason"].startswith("world 'c'"), (
+        f"the reason names the wrong world: {rows['c']['ungradable_reason']!r}")
