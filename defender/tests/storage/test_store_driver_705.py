@@ -819,29 +819,54 @@ def test_s3_the_ledger_is_written_ahead_of_the_request_log_so_a_log_fault_does_n
     assert _spend_errors(caplog) == []
 
 
-class _LedgerUnreadable(Exception):
-    """The test's own fault: the ledger's read refused when the run file is written."""
+def _drop_the_ledger_table(store) -> None:
+    """A real session database without its `spend_ledger` table, dropped from a second connection."""
+    from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER
 
-
-def test_s5_a_ledger_the_run_cannot_read_back_leaves_its_run_file_with_no_total(tmp_path, monkeypatch):
-    """Every response's ledger write lands, but reading the ledger back for the run file raises: the run ends as the control does,
-    and its run file carries no total at all (the empty trace), as the job's cost is then unknown; never a figure, marked or not. (S5, S4, r4)"""
-    from defender.records import session_store
-
-    _, control, _ = _priced_run(tmp_path / "control", run_id="ledger-readable")
-
-    def unreadable(*_a: Any, **_k: Any) -> Any:
-        raise _LedgerUnreadable("the spend ledger cannot be read back")
-
-    monkeypatch.setattr(session_store, "run_spend", unreadable)  # lint-monkeypatch: ok — the ledger's one reader refuses; no store state makes only that read fail after the last write
-    run_dir, summary, calls = _priced_run(tmp_path / "unreadable", run_id="ledger-unreadable")
-
-    assert calls == {"main": 2, "gather": 3}, ("premise: the run made every call", calls)
-    conn = sqlite3.connect(summary["store_path"])
+    conn = sqlite3.connect(store.path, timeout=10)
     try:
-        assert conn.execute("SELECT count(*) FROM spend_ledger").fetchone() == (5,), "premise: no spend write failed"
+        conn.execute(f"DROP TABLE {SPEND_LEDGER}")
+        conn.commit()
     finally:
         conn.close()
-    assert {k: summary.get(k) for k in ("truncated_by", "exit_reason")} == {
-        k: control.get(k) for k in ("truncated_by", "exit_reason")} == {"truncated_by": None, "exit_reason": None}
-    assert RunPaths(run_dir).tool_trace.read_text(encoding="utf-8") == "", "an unreadable ledger still left a run-file total"
+
+
+def test_a1_a2_a_session_database_without_its_ledger_table_leaves_the_run_file_whole_with_no_total(tmp_path):
+    """The ledger table gone from the run's own database: the events and result line stay, `num_turns` is MAIN's, total and usage are null, the mark false. (A1, A2)"""
+    control_dir, _, _ = _priced_run(tmp_path / "control", run_id="ledger-present")
+    control = _run_result(control_dir)
+    assert isinstance(control["total_cost_usd"], float), "positive control: a readable ledger gives a number"
+    assert control["total_cost_usd"] > 0, "positive control: a readable ledger gives a number"
+
+    opened: list = []
+    run_dir = materialize(tmp_path / "dropped", GOLDEN_AB3, run_id="ledger-dropped")
+    calls = {"main": 0}
+
+    def drop_before_the_first_call():
+        calls["main"] += 1
+        if calls["main"] == 1:
+            _drop_the_ledger_table(opened[0])
+
+    main = Priced(ReplayFn([
+        Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic", "goal": "probe", "what_to_summarize": ["x"]})]),
+        Turn(text="done")]), before=drop_before_the_first_call)
+    gather = priced_gather(ReplayFn([Turn(tool_calls=[("query", {"system": "elastic", "verb": "probe", "params": {}})]),
+                                     Turn(text="lead summarised")]))
+    summary = drive(run_dir, run_id="ledger-dropped", main=main, gather=gather, wrap_model=named_models(**_PRICED_NAMES),
+                    verbs=FakeVerbs({"elastic": {"probe": _one_hit}}), store_factory=store_factory(tmp_path / "dropped", sink=opened))
+
+    conn = sqlite3.connect(summary["store_path"])
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        conn.close()
+    assert "spend_ledger" not in tables, "premise: the table is gone"
+    assert calls["main"] == 2, "premise: the run made every MAIN call"
+    events = [json.loads(line) for line in RunPaths(run_dir).tool_trace.read_text(encoding="utf-8").splitlines()]
+    assert any(e.get("type") == "assistant" for e in events), "the run file lost its events"
+    result = _run_result(run_dir)
+    assert result["num_turns"] == control["num_turns"] == 2, "`num_turns` is MAIN's turns"
+    assert result["total_cost_usd"] is None
+    assert result["usage"] is None
+    assert result["total_cost_is_lower_limit"] is False, "the mark is true only beside a number"
+    assert _wire_responses(run_dir) == 5, "the request log lost responses"
