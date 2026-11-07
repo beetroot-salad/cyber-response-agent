@@ -325,7 +325,7 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
     daemon = FakeDaemon(tmp_path)
 
     def docker(argv, **kwargs):
-        if [str(a) for a in argv[1:2]] == ["run"]:
+        if [str(a) for a in argv[1:2]] == ["create"]:  # #1344 amendment 2
             probes.setdefault(("batch", "box-create"), lock_probe(tenant))
         return daemon(argv, **kwargs)
     request = replace(batch.box_request(), spec=box.BoxSpec(runtime="runc",
