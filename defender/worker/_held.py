@@ -19,8 +19,18 @@ class Held:
     fenced: bool = False
     signalled: bool = False
     cost_so_far: float | None = None
+    #: Set only by the final read after the child ended: that read found the run's cost exact (its
+    #: job-end record says no spend write failed, or the run never opened its store). Everything
+    #: else a child leaves behind is "at least" (#1377 S2); `Held.lower_limit` is the one rule.
+    read_exact: bool = False
     #: The fence's ender tasks, held so the event loop's weak reference is not their only one.
     enders: list[asyncio.Task[None]] = field(default_factory=list)
+
+    def lower_limit(self, cost: float | None) -> bool:
+        """Whether the figure the holder writes is only a lower limit (#1377 S2): a child ran, the
+        figure is known, and the final read did not find it exact. A row nothing launched is
+        exactly 0, and an unknown cost is never marked (S4)."""
+        return self.proc is not None and cost is not None and not self.read_exact
 
 
 @dataclass(frozen=True)
@@ -45,6 +55,4 @@ class End:
     ending: Ending | None
     cost: float | None
     knowledge: dict | None
-    #: The cost is only a lower limit ("at least"): spend may be missing from it (#1377 S2). Never
-    #: true beside an unknown cost.
-    at_least: bool = False
+

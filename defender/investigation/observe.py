@@ -431,8 +431,8 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, r
     which would otherwise be reported once per sibling. The result line's cost and usage are the
     spend ledger's rows for `run_id` (#1377 S5): every response the run received (main, every
     lead's last one, the review), never the saved conversation. `num_turns` stays MAIN's turns,
-    which run health reads. The total is marked a lower limit when a spend write failed, or the
-    ledger cannot be read.
+    which run health reads. The total is marked a lower limit when a spend write failed. A ledger
+    that cannot be read raises, and the caller writes no trace (the job's cost is unknown then too).
     """
     from defender.records import session_store as ss  # local import — avoids a cycle at module load
 
@@ -458,22 +458,17 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, r
     responses = [m for m in messages if isinstance(m, ModelResponse)]
     totals = dict.fromkeys(ss.SPEND_COUNTS, 0)
     total_cost = 0.0
-    lower_limit = spend_write_failed
-    try:
-        for spent in ss.run_spend(store, run_id):
-            for k in ss.SPEND_COUNTS:
-                totals[k] += spent.usage.get(k, 0)
-            total_cost += usage_cost(spent.model, spent.usage)
-    except Exception as fault:  # noqa: BLE001 — an unreadable ledger leaves a marked figure, not no trace
-        _logger.error(f"the spend ledger could not be read ({fault!r}); the run's total is a lower limit")
-        lower_limit = True
+    for spent in ss.run_spend(store, run_id):  # an unreadable ledger raises: no total, as the job's cost is unknown
+        for k in ss.SPEND_COUNTS:
+            totals[k] += spent.usage.get(k, 0)
+        total_cost += usage_cost(spent.model, spent.usage)
 
     events.append({
         "type": "result",
         "duration_ms": round(wall_ms),
         "duration_api_ms": round(wall_ms),
         "total_cost_usd": round(total_cost, 6),
-        "total_cost_is_lower_limit": lower_limit,
+        "total_cost_is_lower_limit": spend_write_failed,
         "num_turns": len(responses),
         "usage": totals,
     })
