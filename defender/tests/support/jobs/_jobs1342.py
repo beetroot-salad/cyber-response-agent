@@ -327,6 +327,12 @@ CHILD_SCRIPT = textwrap.dedent("""
         time.sleep(0.02)
     leave_records()
     event("end")
+    die_by = spec.get("die_by")
+    if die_by:  # dies by a signal it sends itself, as a crash does: its default action, nothing handled
+        sys.stdout.flush(); sys.stderr.flush()
+        if die_by != signal.SIGKILL:
+            signal.signal(die_by, signal.SIG_DFL)
+        os.kill(os.getpid(), die_by)
     sys.exit(spec.get("exit", 0))
 """)
 
@@ -338,7 +344,8 @@ class ScriptedChild:
     `files` (text), `binary` (hex), `sparse` (`{head, size}`), `links` (symlink targets) and `dirs`
     name what the child leaves in the runs container (`padded`: `{head, size}`, the head then spaces
     up to `size` bytes, so a document that stays valid however much of it is read); `term` is how it takes SIGTERM (`default`,
-    `ignore`, `mark`: touch `term_mark` and exit with nothing written, or `finish`: touch it, write its records, exit 0); `grandchild` starts a `sleep` in its group."""
+    `ignore`, `mark`: touch `term_mark` and exit with nothing written, or `finish`: touch it, write its records, exit 0); `grandchild` starts a `sleep` in its group.
+    `die_by`: in place of exiting, it dies by that signal, sent to itself."""
 
     where: Path
     runs: Path
@@ -354,6 +361,7 @@ class ScriptedChild:
     term_mark: str | None = None
     grandchild: bool = False
     printed: str | None = None
+    die_by: int | None = None
     #: A box the child leaves behind, as a start would have made it: `box_dir` is where, `box_token`
     #: whose (`launch`: the token its launch record carries; `other`: another claim's; `none`: no
     #: token label), `box_state` the docker stand-in's state word (unset: a `StandInContainers` marker).
@@ -379,7 +387,7 @@ class ScriptedChild:
             "runs": str(self.runs), "seen_dir": str(self.seen_dir), "events": str(self.events_path),
             "files": self.files, "binary": self.binary, "sparse": self.sparse, "padded": self.padded, "links": self.links,
             "dirs": self.dirs, "exit": self.exit, "term": self.term, "term_mark": self.term_mark,
-            "grandchild": self.grandchild, "print": self.printed,
+            "grandchild": self.grandchild, "print": self.printed, "die_by": self.die_by,
             "box": None if self.box_dir is None else {"dir": str(self.box_dir), "token": self.box_token,
                                                      "state": self.box_state},
             "wait_for": None if self.wait_for is None else str(self.wait_for),

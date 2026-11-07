@@ -10,6 +10,7 @@ import json
 import os
 import re
 import signal
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,12 +18,14 @@ from types import SimpleNamespace
 import pytest
 
 from defender.jobs import Conflict, UnknownReference
+from defender.jobs.models import LEARNING_TRIGGERS
 from defender.jobs.store import is_refusal
 from defender.tests.jobs.test_1342_worker import _FAST, _child, _committed, _queued, _run_one, _until, _worker
 from defender.tests.support.jobs._jobs1342 import (
     NOW,
     T1,
     T2,
+    WORKTREE,
     JobsAudit,
     ScriptedChild,
     an_alert,
@@ -176,6 +179,85 @@ UNREADABLE_POST = [
 ]
 
 
+#: Out-of-domain JSON values, by kind. A field's own domain (below) picks which kinds fall outside it.
+_ODD_VALUES: dict[str, list] = {
+    "list": [[], ["m-1"]], "object": [{}, {"x": 1}], "text": ["seven", "1.5"], "bool": [True, False],
+    "negative": [-1, -0.5], "nan": [float("nan")], "infinite": [float("inf"), float("-inf")],
+    "huge": [10**400], "fraction": [0.5], "blank": ["", "   "], "number": [3],
+}
+_NOT_TEXT = ("list", "object", "bool", "negative", "nan", "infinite", "huge", "fraction", "number")
+_NOT_A_COST = ("list", "object", "text", "blank", "bool", "negative", "nan", "infinite", "huge")
+_NOT_A_COUNT = (*_NOT_A_COST, "fraction")
+_NOT_IDS = ("object", "text", "blank", "bool", "negative", "nan", "infinite", "huge", "fraction", "number")
+_PROGRESS_BASE = {"fork_message_id": "m-1", "stage": "judge", "sibling_cost_usd": 0.5}
+_COMPLETED_BASE = json.loads(learning_end("completed", findings=2, cost=0.5))
+_FAILED_BASE = json.loads(learning_end("failed", "judge_failed", message="the judge failed", cost=0.5))
+_POST_BASE = {"published": ["j-1"], "refused": ["j-2"]}
+#: `(record, its base, field, the kinds of value outside the field's domain, extra values outside it)`.
+_FIELD_DOMAINS = [
+    ("progress", _PROGRESS_BASE, "fork_message_id", _NOT_TEXT, []),
+    ("progress", _PROGRESS_BASE, "stage", _NOT_TEXT, []),
+    ("progress", _PROGRESS_BASE, "sibling_cost_usd", _NOT_A_COST, [None]),
+    *[(name, base, field, kinds, extra) for name, base in (("end-completed", _COMPLETED_BASE), ("end-failed", _FAILED_BASE))
+      for field, kinds, extra in (
+          ("status", (*_NOT_TEXT, "blank", "text"),
+           [None, "done", "Completed", *(("skipped", "stopped", "completed") if name == "end-failed" else ("skipped", "failed"))]),
+          ("fork_message_id", _NOT_TEXT, []), ("stage", _NOT_TEXT, []),
+          ("findings_count", _NOT_A_COUNT, [None]), ("sibling_cost_usd", _NOT_A_COST, [None]))],
+    ("end-completed", _COMPLETED_BASE, "reason", (*_NOT_TEXT, "blank", "text"), ["judge_failed", "no_fork_point"]),
+    ("end-completed", _COMPLETED_BASE, "message", _NOT_TEXT, []),
+    ("end-failed", _FAILED_BASE, "reason", (*_NOT_TEXT, "blank", "text"), [None, "no_fork_point", "history_unreadable"]),
+    ("end-failed", _FAILED_BASE, "message", (*_NOT_TEXT, "blank"), [None]),
+    *[("post-step", _POST_BASE, field, _NOT_IDS, [None, *[[v] for k in _NOT_TEXT for v in _ODD_VALUES[k]], [None]])
+      for field in ("published", "refused")],
+]
+
+
+def _out_of_domain() -> list:
+    cases = []
+    for record, base, field, kinds, extra in _FIELD_DOMAINS:
+        for n, value in enumerate([v for k in kinds for v in _ODD_VALUES[k]] + extra):
+            cases.append(pytest.param(record, {**base, field: value}, id=f"{record}-{field}-{n}"))
+    return cases
+
+
+def test_f5_premise_every_base_record_parses(tmp_path):
+    """The bases the property starts from are records the readers accept, so each case below changes one field only."""
+    from defender.records.job_lane import LearningEnd, LearningProgress, PostStepRecord
+
+    assert LearningProgress.parse(json.dumps(_PROGRESS_BASE)) is not None
+    assert LearningEnd.parse(json.dumps(_COMPLETED_BASE)) is not None
+    assert LearningEnd.parse(json.dumps(_FAILED_BASE)) is not None
+    assert PostStepRecord.parse(json.dumps(_POST_BASE)) is not None
+
+
+@pytest.mark.parametrize(("record", "fields"), _out_of_domain())
+def test_f5_a_record_with_any_field_out_of_its_domain_is_no_record_and_never_raises(tmp_path, record, fields):
+    """One field of a valid progress, end or post-step record replaced by a JSON value outside its domain (a wrong
+    type, a bool, a negative, NaN, an infinity, an integer too big for a float, blank text, a reason another status
+    owns): the parser and the lane's reader both answer no record, and neither raises. (#1344 records)"""
+    from defender.records import job_lane
+    from defender.tenancy import data_root_from_path
+
+    text = json.dumps(fields)
+    parse, read = {
+        "progress": (job_lane.LearningProgress.parse, "read_learning_progress"),
+        "end-completed": (job_lane.LearningEnd.parse, "read_learning_end"),
+        "end-failed": (job_lane.LearningEnd.parse, "read_learning_end"),
+        "post-step": (job_lane.PostStepRecord.parse, "read_post_step"),
+    }[record]
+    assert parse(text) is None, (record, fields)
+
+    job = "5e1f0b8a-4c2d-4e7f-9a31-6b8c0d2e4f13"
+    runs = tmp_path / "data" / T1 / "runs"
+    runs.mkdir(parents=True)
+    suffix = {"progress": "learning-progress", "end-completed": "learning-end", "end-failed": "learning-end",
+              "post-step": "post-step"}[record]
+    (runs / f"{job}.{suffix}.json").write_text(text, encoding="utf-8")
+    with job_lane.JobLane.open(data_root_from_path(tmp_path / "data"), T1) as lane:
+        assert getattr(lane, read)(job) is None, (record, fields)
+
+
 def _starts(child: ScriptedChild) -> list[str]:
     return [run for kind, run in child.events() if kind == "start"]
 
@@ -312,10 +394,15 @@ async def test_the_exit_code_never_decides_the_row(world, record, exit_code, sta
     assert job_row(world["dsn"], job)["status"] == status
 
 
-@pytest.mark.parametrize("exit_code", [0, 7])
-async def test_no_record_from_a_child_nobody_signalled_is_exited_without_result(world, exit_code):
-    """No end record and no signal: `failed`/`exited_without_result` with our own message, never run text. (End record, O12)"""
-    job_proc = job_child(world, exit=exit_code, printed=RUN_TEXT)
+@pytest.mark.parametrize("ends", [
+    pytest.param({"exit": 0}, id="exit-0"), pytest.param({"exit": 7}, id="exit-7"),
+    pytest.param({"die_by": int(signal.SIGKILL)}, id="dies-by-SIGKILL"),
+    pytest.param({"die_by": int(signal.SIGSEGV)}, id="dies-by-SIGSEGV"),
+])
+async def test_no_record_from_a_child_nobody_signalled_is_exited_without_result(world, ends):
+    """No end record and no signal from the worker, whether the child exited (0 or not) or died by a signal of its own:
+    `failed`/`exited_without_result` with our own message, never run text, and no retry. (End record, O12)"""
+    job_proc = job_child(world, printed=RUN_TEXT, **ends)
     post = post_child(world)
     async with job_store(world["dsn"]) as store:
         job = await queued_job(world, store, ticket="T-1")
@@ -778,11 +865,20 @@ def test_o5_learning_slots_stay_within_zero_and_slots_minus_one(tmp_path, slots,
     pytest.param(3600, 0.5, True, id="inside-a-set-hour"),
     pytest.param(3600, 2, False, id="past-a-set-hour"),
 ])
-async def test_d4_a_first_attempt_past_the_age_limit_is_skipped_when_claimed(world, max_age, hours, runs):
-    """The limit is `learning_max_age` (default 24 h): over it the claim ends the job `skipped`/`expired` with a message. (D4, L3)"""
+@pytest.mark.parametrize("trigger", LEARNING_TRIGGERS)
+async def test_d4_a_first_attempt_past_the_age_limit_is_skipped_when_claimed(world, max_age, hours, runs, trigger):
+    """The limit is `learning_max_age` (default 24 h): over it the claim ends the job `skipped`/`expired` with a message,
+    whatever started it (every `trigger`). (D4, L3)"""
     knobs = {} if max_age is None else {"learning_max_age": max_age}
     async with job_store(world["dsn"], **knobs) as store:
         job = await queued_job(world, store, ticket="J-1")
+        if trigger != "auto":
+            inv = execute(world["dsn"], "SELECT investigation_id FROM jobs.learning_jobs WHERE id = %s", (job,))[0][0]
+            execute(world["dsn"], "DELETE FROM jobs.learning_jobs WHERE id = %s", (job,))
+            record, created = await store.create_learning_job(T1, inv, "relearn-1", actor="u-1")
+            assert created, "premise: the request queued a job of its own"
+            job = record.learning_job_id
+            assert job_row(world["dsn"], job)["trigger"] == trigger, job_row(world["dsn"], job)
         set_created(world["dsn"], "learning_jobs", job, NOW - dt.timedelta(hours=hours))
         claim = await store.claim_learning_job()
 
@@ -1393,3 +1489,76 @@ async def test_o11_an_explicit_job_runs_on_the_same_slots_as_an_auto_one(world):
         await learning_worker(world, store, job=jobs, post=post_child(world)).drain()
     assert sorted((j["trigger"], j["status"]) for j in jobs_of(world["dsn"], inv)) == [
         ("auto", "completed"), ("explicit", "completed")]
+
+
+def _tree(root: Path) -> dict[str, bytes | None]:
+    """Every path under `root`, with each file's bytes (None for a folder)."""
+    return {str(p.relative_to(root)): (p.read_bytes() if p.is_file() else None) for p in sorted(root.rglob("*"))}
+
+
+@pytest.mark.parametrize("command", ["run", "job_entry", "post_step"])
+async def test_o7_every_child_the_worker_builds_exits_at_once_under_a_parent_that_is_not_its_own(world, command):
+    """Each child command the worker builds, started with a `--parent-pid` naming a live process that did not spawn
+    it, exits nonzero before anything: no record, nothing under the data root, its job's row unchanged. (O7)"""
+    from defender.worker import _worker as W
+
+    async with job_store(world["dsn"]) as store:
+        inv = await completed_investigation(store, ticket="T-1")
+    (job,) = jobs_of(world["dsn"], inv)
+    bystander = subprocess.Popen(["sleep", "300"])  # noqa: S603, S607 — a live process that is not the child's parent
+    try:
+        argv = {"run": lambda: W.run_argv_in(WORKTREE)(W.Launch(inv, T1, bystander.pid)),
+                "job_entry": lambda: W.job_entry_argv(W.LearningLaunch(job["id"], T1, bystander.pid, inv)),
+                "post_step": lambda: W.post_step_argv(W.PostStepLaunch(job["id"], T1, bystander.pid, (job["id"],))),
+                }[command]()
+        before = _tree(world["root"])
+        proc = subprocess.run(argv, env={**os.environ, "DEFENDER_DATA_ROOT": str(world["root"]),  # noqa: S603
+                                         "DEFENDER_DATABASE_DSN": world["dsn"],
+                                         "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"},
+                              cwd=str(WORKTREE), capture_output=True, text=True, timeout=120, check=False)
+    finally:
+        bystander.kill()
+        bystander.wait(timeout=30)
+
+    assert _tree(world["root"]) == before, proc.stderr[-2000:]
+    assert job_row(world["dsn"], job["id"]) == job
+    assert proc.returncode != 0, proc.stderr[-2000:]
+    assert f"--parent-pid {bystander.pid} is not this process's parent" in proc.stderr, proc.stderr[-2000:]
+
+
+async def _running_investigation(store, *, ticket: str, key: str) -> str:
+    alert = await an_alert(store, T1, ticket=ticket)
+    inv, _ = await store.create_investigation(T1, alert.alert_id, key, actor="u-1")
+    claim = await store.claim()
+    assert claim.record.investigation_id == inv.investigation_id, "premise: nothing else was queued"
+    return inv.investigation_id
+
+
+async def _running_learning_job(store, *, ticket: str, key: str) -> str:
+    await completed_investigation(store, ticket=ticket, key=key)
+    return (await store.claim_learning_job()).record.learning_job_id
+
+
+@pytest.mark.parametrize(("table", "running"), [("investigations", _running_investigation),
+                                                ("learning_jobs", _running_learning_job)], ids=["investigation", "learning job"])
+async def test_b_p3_a_take_over_leaves_a_lapsed_running_row_the_caller_holds_on_every_table_it_covers(world, table,
+                                                                                                   running):
+    """Two lapsed `running` rows of one table take-over covers: the one in the caller's held set is left exactly as it
+    was, the other is taken over. (B-P3, #1344 O6)"""
+    dsn = world["dsn"]
+
+    def snap(row_id: str) -> dict:
+        return execute(dsn, f"SELECT to_jsonb(x) FROM jobs.{table} x WHERE id = %s", (row_id,))[0][0]  # noqa: S608
+
+    async with job_store(dsn) as store:
+        held = await running(store, ticket="T-1", key="k1")
+        stranger = await running(store, ticket="T-2", key="k2")
+        for row_id in (held, stranger):
+            execute(dsn, f"UPDATE jobs.{table} SET lease_expires_at = now() - interval '1 second' "  # noqa: S608
+                         "WHERE id = %s", (row_id,))
+        held_before = snap(held)
+
+        taken = await store.take_over(held=frozenset({held}))
+
+    assert snap(held) == held_before, f"a {table} row in the caller's held set was taken over (B-P3)"
+    assert taken == [stranger], "the row nobody holds was not taken over (alone)"

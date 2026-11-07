@@ -155,10 +155,21 @@ def test_a_session_store_of_another_version_ends_skipped_history_unreadable_nami
     assert (broken.questioner.calls, broken.spawn.launches) == (0, [])
 
 
-def test_an_untyped_fault_before_the_first_sibling_is_not_history_unreadable(tmp_path):
-    """The same step failing with a fault no one typed ends `failed: entry_error`, never `skipped`. (r5 table)"""
-    ran = run_entry(tmp_path, questioner=Watch(fail=RuntimeError("the questioner's connection reset")))
-    _failed_with(ran, "failed", "entry_error")
+@pytest.mark.parametrize("where", ["questioner", "candidates"])
+def test_an_untyped_fault_before_the_first_sibling_is_not_history_unreadable(tmp_path, where):
+    """The steps before the first sibling failing with a fault no one typed (the questioner's, or one raised while the
+    fork points are read from the source's history) end `failed: entry_error` naming its type, never `skipped`.
+    (r5 table)"""
+    def unreadable(*_a, **_k):
+        raise Boom("the history reader broke in a way nobody typed")
+
+    if where == "questioner":
+        ran = run_entry(tmp_path, questioner=Watch(fail=RuntimeError("the questioner's connection reset")))
+        _failed_with(ran, "failed", "entry_error")
+        return
+    ran = run_entry(tmp_path, candidates=unreadable)
+    assert "Boom" in _failed_with(ran, "failed", "entry_error")
+    assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
 
 
 def test_a_source_stamp_current_code_cannot_read_ends_skipped_history_unreadable_without_its_text(tmp_path):
@@ -233,19 +244,45 @@ def test_a_verification_that_refuses_ends_failed_verify_refused_but_a_withheld_s
     _ended(split, "completed", None)
 
 
-@pytest.mark.parametrize("gone", ["run folder", "session store"])
+def _session_pointer(src: Path) -> Path:
+    """The run -> case link beside the source's run folder (#1235)."""
+    pointer = src.parent / f"{src.name}.session-pointer.json"
+    assert pointer.is_file(), f"premise: the source carries its session pointer at {pointer}"
+    return pointer
+
+
+@pytest.mark.parametrize("gone", ["run folder", "session store", "session pointer"])
 def test_a_source_that_is_gone_ends_failed_source_unavailable(tmp_path, gone):
-    """Its folder removed, or its session database removed: failed, without the launcher's own paths. (r5 table, O12)"""
+    """Its folder removed, its session database removed, or its session pointer removed (and no pre-#1235 link
+    inside the folder): failed, without the launcher's own paths. (r5 table, O12)"""
     def lose(src: Path) -> None:
         if gone == "run folder":
             shutil.rmtree(src)
-        else:
+        elif gone == "session store":
             _session_db(src).unlink()
+        else:
+            _session_pointer(src).unlink()
 
     ran = run_entry(tmp_path, fix_source=lose)
     message = _failed_with(ran, "failed", "source_unavailable")
     assert str(tmp_path) not in message, "the launcher's text reached the message"
     assert ran.spawn.launches == []
+
+
+def test_a_source_recorded_before_1235_ends_skipped_history_unreadable_naming_the_type(tmp_path):
+    """No session pointer beside the folder, but the pre-#1235 link inside it: current code will never read that
+    history, so it is skipped for good, the refusal's type named and nothing spent; not `source_unavailable`.
+    (r5 table, L5)"""
+    def legacy(src: Path) -> None:
+        pointer = _session_pointer(src)
+        (src / "session_store_pointer.json").write_text(pointer.read_text(encoding="utf-8"), encoding="utf-8")
+        pointer.unlink()
+
+    ran = run_entry(tmp_path, fix_source=legacy)
+    message = _failed_with(ran, "skipped", "history_unreadable")
+    assert "LegacyRunLink" in message
+    assert str(tmp_path) not in message, "the launcher's text reached the message"
+    assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
 
 
 def test_a_judge_that_crashes_ends_failed_judge_failed_where_the_operator_lane_swallows_it(tmp_path):
@@ -277,6 +314,18 @@ def test_a_fault_no_one_listed_ends_failed_entry_error_and_the_runs_text_never_r
     assert secret not in message
     if raiser == "questioner":
         assert "Boom" in message
+
+
+def test_a_progress_record_that_cannot_be_written_ends_failed_entry_error_before_the_questioner(tmp_path):
+    """The fork pick must be durable before any spend: a non-file where the progress record goes makes that write fail,
+    and the job ends `failed: entry_error` with no questioner call and no sibling. (O3)"""
+    def blocked(src: Path) -> None:
+        runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / src.parent.parent.name / "runs"
+        (runs / f"{JOB}.learning-progress.json").mkdir()
+
+    ran = run_entry(tmp_path, fix_source=blocked)
+    _failed_with(ran, "failed", "entry_error")
+    assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
 
 
 # --- stopped ------------------------------------------------------------------------------------------
@@ -416,10 +465,19 @@ _LATE_STOP = textwrap.dedent("""
 
     _triplet_947.PLANT_RECORDS = True  # as tests/conftest.py's autouse fixture does in-process
 
+    # The stop lands deterministically: at the first file the entry opens or folder it lists once the judge seam
+    # has returned (the findings count reads the episode), never on a timer.
+    _armed = []
+
+    def _stop_at_the_next_read(event, _args):
+        if _armed and event in ("open", "os.scandir", "os.listdir"):
+            _armed.clear()
+            signal.raise_signal(signal.SIGTERM)
+
     def graded_then_a_late_stop(runs, episode_id, **kw):
         graded = grade_episode(runs, episode_id, **kw)
-        timer = threading.Timer(0.05, signal.raise_signal, [signal.SIGTERM])
-        timer.start()
+        sys.addaudithook(_stop_at_the_next_read)
+        _armed.append(True)
         return graded
 
     # A signal landing once the entry has returned must be harmless to this wrapper: ignored (so `run_entry` restores
@@ -437,7 +495,8 @@ _LATE_STOP = textwrap.dedent("""
 
 
 def test_a_sigterm_after_the_judge_returned_is_still_completed(tmp_path):
-    """A real SIGTERM landing just after the judge seam returned, in a child over the real entry, is not a stop. (End record, r5)"""
+    """A real SIGTERM landing just after the judge seam returned (at the entry's first read after it, inside the
+    findings count), in a child over the real entry, is not a stop. (End record, r5)"""
     out = tmp_path / "end.json"
     done = subprocess.run([sys.executable, "-c", _LATE_STOP, str(tmp_path / "entry"), str(out)],
                           capture_output=True, text=True, timeout=300, check=False,

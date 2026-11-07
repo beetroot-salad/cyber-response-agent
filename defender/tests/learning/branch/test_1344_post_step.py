@@ -11,6 +11,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from defender.learning.core.config import LoopPaths
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, LearningState
 from defender.records._locations import unwrap_learning_root
@@ -31,7 +33,8 @@ class Boom(Exception):
 def _job_episode(tmp_path, name: str, *, topic: str = "the lead was never revisited", findings: bool = True,
                  subject: str = "defender", comparable: bool = True):
     """A graded job episode under the tenant's real episodes folder: its judge ran in the job lane.
-    `subject="world"` files a world finding; `comparable=False` leaves a family no judge call is bought for."""
+    `subject="world"` files a world finding, `subject="both"` one of each; `comparable=False` leaves a family no judge
+    call is bought for."""
     est = S.estate(tmp_path)
     est.place(tenant_id=S.FIXTURE_TENANT)
     episode_id = fixture_uuid(f"1344-post-{name}")
@@ -39,9 +42,13 @@ def _job_episode(tmp_path, name: str, *, topic: str = "the lead was never revisi
     S.outcome_record(ep, "accepted", family_stamp=False)
     if comparable:
         J.comparable_family_stamp(ep)
-    bucket = "incoherent" if subject == "world" else "lead-quality"
-    filed = [J.finding_doc(bucket=bucket, subject=subject, topic=topic, **({"systems": ["idp"]} if subject == "world" else {}))] \
-        if findings else []
+    subjects = ("defender", "world") if subject == "both" else (subject,)
+    # Beside a defender finding, the world's is `mislabelled`: an `incoherent` one leaves the draw not measured.
+    world_bucket = "mislabelled" if subject == "both" else "incoherent"
+    filed = [J.finding_doc(bucket=world_bucket if one == "world" else "lead-quality", subject=one,
+                           topic=topic if subject != "both" else f"{topic} ({one})",
+                           **({"systems": ["idp"]} if one == "world" else {}))
+             for one in subjects] if findings else []
     world = J.reply_doc(findings=filed)
     world.update(bucket="lead-quality", systems=["idp"])
     judge = J.scripted_judge(default=S.as_reply_text(world), family_default=S.as_reply_text(J.family_reply()))
@@ -152,6 +159,41 @@ def test_o8_findings_that_fail_validation_are_refused_and_do_not_hold_back_a_goo
 
     assert _record(good, good.name) == {"published": [good.name], "refused": [bad.name]}
     assert {row["subject_topic"] for row in _queue(good)} == {"a topic the good job found"}
+
+
+def _sink_channels() -> list:
+    """Every channel the episode's findings sink holds (the sink's own table, not a hand-named list)."""
+    from defender.learning.judge import enqueue
+    from defender.tests.support.learning.curation._drain719 import channel_of
+
+    return [pytest.param(channel_of(name), id=name) for name in sorted(enqueue._SINK_RECORDS)]
+
+
+def _sink_file(ep: Path, channel) -> Path:
+    from defender.learning.judge import enqueue
+    from defender.records.formats import LAYOUT
+
+    return ep / getattr(LAYOUT, enqueue._SINK_RECORDS[channel.name])
+
+
+@pytest.mark.parametrize("bad", _sink_channels())
+def test_o8_one_invalid_row_in_any_channel_refuses_the_job_and_no_channel_publishes_any_of_its_rows(tmp_path, bad):
+    """A job holding valid rows in every channel the sink holds, and one row that fails its channel's rule planted in
+    `bad`: the record refuses the job, and no channel's queue gains a row of it (screened before anything is
+    appended). (O8, O14, Publishing)"""
+    ep, _ = _job_episode(tmp_path, f"bad-in-{bad.name}", subject="both")
+    channels = [p.values[0] for p in _sink_channels()]
+    for channel in channels:
+        held = [json.loads(x) for x in _sink_file(ep, channel).read_text(encoding="utf-8").splitlines() if x.strip()]
+        assert held, f"premise: the job holds valid rows in {channel.name}"
+    with _sink_file(ep, bad).open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"finding_id": "not-a-finding"}) + "\n")
+
+    _post_step(ep, ep.name, [ep.name])
+
+    assert _record(ep, ep.name) == {"published": [], "refused": [ep.name]}
+    assert {channel.name: _queue(ep, channel) for channel in channels} == {channel.name: [] for channel in channels}, (
+        "a channel published rows of a refused job")
 
 
 def test_o8_a_queue_level_failure_is_neither_published_nor_refused_and_retries(tmp_path):

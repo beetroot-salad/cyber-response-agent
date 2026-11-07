@@ -336,3 +336,28 @@ def test_a_copy_under_an_outer_work_tree_takes_the_marker_commit_not_the_outer_h
 
     stamped = _provenance.capture_tree(copy, environ={})
     assert (stamped.commit, stamped.dirty, stamped.origin) == (BUILT, False, "code_copy")
+
+    # A marker that names no build commit, whatever it holds, is a stamp with no commit: never git's answer for
+    # the outer tree, its commit or its origin.
+    for n, content in enumerate(_markers_naming_no_commit()):
+        (copy / MARKER).write_bytes(content)
+        odd = _provenance.capture_tree(copy, environ={})
+        assert odd.commit is None, (n, content, odd)
+        assert odd.commit != head, (n, content)
+        assert odd.origin != control.origin, (n, content, odd)
+
+
+def _markers_naming_no_commit() -> list[bytes]:
+    """Marker contents that name no build commit: random bytes, JSON that is no object, an object without a
+    commit, and commits that are not 7 to 64 lowercase hex digits (non-hex, uppercase, too short or too long)."""
+    import random
+
+    rng = random.Random(1344)
+    noise = [bytes(rng.randrange(256) for _ in range(rng.randrange(1, 200))) for _ in range(12)]
+    not_objects = [json.dumps(v).encode() for v in ([], [BUILT], BUILT, 7, None, True)]
+    no_commit = [json.dumps(v).encode() for v in ({}, {"build": BUILT}, {"Commit": BUILT}, {"commit": None},
+                                                 {"commit": 7}, {"commit": [BUILT]}, {"commit": {"sha": BUILT}})]
+    bad_commits = [json.dumps({"commit": c}).encode() for c in (
+        "g" * 40, "B" * 40, "B" + "b" * 39, "b" * 6, "b" * 65, "", " " + "b" * 39, "b" * 40 + "\n",
+        "zz" + "b" * 38, "0x" + "b" * 38)]
+    return [*noise, *not_objects, *no_commit, *bad_commits, b"", b"{", "\u00e9".encode("latin-1")]
