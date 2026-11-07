@@ -387,57 +387,73 @@ class ManagementService(Actor):
         await held.commit(step=None, actor=None, state="active", pending_action=None)
 
     async def _retire(self, held: HeldTenant) -> None:
-        """Rotation's end on the forge and OpenBao: the old chain destroyed, its bot (and with it its
-        integrations, so its JWTs) first, deleted without purge so its PRs stay (FR-8, #1433)."""
+        """Rotation's end on the forge and OpenBao: the old chains revoked, then their bots deleted
+        (FR-8, #1433)."""
         old = [g for g in await held.generations() if g.status == "retiring"]
-        for gen in old:
-            await self._destroy(held, gen)
+        await self._destroy(old, repo=await self._repo_of(held))
         await self._commit_next(held, destroy=[g.salt for g in old])
 
-    async def _destroy(self, held: HeldTenant, gen: Generation) -> None:
-        """A generation's chain, each part checked first (RC-4): the bot (its integrations go with it,
-        G8), the OIDC role, the AppRole and its secret ids, the entity (its alias with it), and the sign
-        AppRole and its entity likewise when the generation records them (one recorded before the sign
-        login has none, A24'). The bot is removed from the repository first, then deleted WITHOUT purge
-        (#1433): purge erases the PRs, reviews and comments it wrote. A delete the forge refuses (the
-        bot owns a repository, a fork of the tenant repo included, or belongs to an organisation)
-        fails the step with the forge's reason; the bot has no access to the repository by then."""
-        if answered(await self._forge.get(f"/api/v1/users/{gen.bot_login}"), 404).status_code != 404:
-            wiring = await held.forge_wiring()
-            if wiring is not None:
-                answered(await self._forge.delete(f"/api/v1/repos/{wiring.repo}/collaborators/{gen.bot_login}"), 404)
-            answered(await self._forge.delete(f"/api/v1/admin/users/{gen.bot_login}"), 404)
-        paths = [f"identity/oidc/role/{gen.oidc_role}", f"auth/approle/role/{gen.approle}",
-                 f"identity/entity/name/{gen.entity}"]
-        if gen.sign_approle is not None:
-            paths.append(f"auth/approle/role/{gen.sign_approle}")
-        if gen.sign_entity is not None:
-            paths.append(f"identity/entity/name/{gen.sign_entity}")
-        for path in paths:
-            answered(await self._bao.delete(f"/v1/{path}"), 404)
+    async def _repo_of(self, held: HeldTenant) -> str | None:
+        wiring = await held.forge_wiring()
+        return None if wiring is None else wiring.repo
+
+    async def _destroy(self, gens: list[Generation], *, repo: str | None) -> None:
+        """`_revoke` then `_delete_bots`, for a step with nothing else to revoke."""
+        await self._delete_bots(await self._revoke(gens, repo=repo))
+
+    async def _revoke(self, gens: list[Generation], *, repo: str | None) -> list[str]:
+        """Everything of `gens` that grants access, each part checked first (RC-4): each existing bot
+        removed from the tenant repo, then the OIDC role, the AppRole and its secret ids, the entity
+        (its alias with it), and the sign AppRole and its entity likewise when the generation records
+        them (one recorded before the sign login has none, A24'). The bots that still exist, for
+        `_delete_bots`. Revoking comes before any account delete because the forge can refuse that
+        delete (#1433): a refusal must find nothing left that grants access."""
+        bots: list[str] = []
+        for gen in gens:
+            if answered(await self._forge.get(f"/api/v1/users/{gen.bot_login}"), 404).status_code != 404:
+                bots.append(gen.bot_login)
+                if repo is not None:
+                    answered(await self._forge.delete(f"/api/v1/repos/{repo}/collaborators/{gen.bot_login}"), 404)
+            paths = [f"identity/oidc/role/{gen.oidc_role}", f"auth/approle/role/{gen.approle}",
+                     f"identity/entity/name/{gen.entity}"]
+            if gen.sign_approle is not None:
+                paths.append(f"auth/approle/role/{gen.sign_approle}")
+            if gen.sign_entity is not None:
+                paths.append(f"identity/entity/name/{gen.sign_entity}")
+            for path in paths:
+                answered(await self._bao.delete(f"/v1/{path}"), 404)
+        return bots
+
+    async def _delete_bots(self, bots: list[str]) -> None:
+        """Each bot account deleted WITHOUT purge (its integrations go with it, G8), the step's last
+        act (#1433): purge erases the PRs, reviews and comments it wrote. A delete the forge refuses
+        (the bot owns a repository, a fork of the tenant repo included, or belongs to an
+        organisation) fails the step with the forge's reason; the bot is revoked by then."""
+        for bot in bots:
+            answered(await self._forge.delete(f"/api/v1/admin/users/{bot}"), 404)
 
     # --- offboard -------------------------------------------------------------------------------
 
     async def _offboard(self, held: HeldTenant) -> None:
-        """Memberships end and invitations are revoked, every generation is destroyed and the tenant's
-        signing key with them, the repo is archived (Flow 2.2, A25)."""
+        """Memberships end and invitations are revoked, every generation is revoked and the tenant's
+        signing key destroyed, the repo is archived, and only then are the bots deleted (Flow 2.2, A25,
+        #1433)."""
         await self._identity.end_tenant(held.tenant_id, now=self._clock())
-        for gen in await held.generations():
-            if gen.status != "destroyed":
-                await self._destroy(held, gen)
+        repo = await self._repo_of(held)
+        bots = await self._revoke([g for g in await held.generations() if g.status != "destroyed"], repo=repo)
         await self._destroy_key(held.tenant_id)
-        wiring = await held.forge_wiring()
-        if wiring is not None:
-            answered(await self._forge.patch(f"/api/v1/repos/{wiring.repo}", json={"archived": True}), 404)
+        if repo is not None:
+            answered(await self._forge.patch(f"/api/v1/repos/{repo}", json={"archived": True}), 404)
+        await self._delete_bots(bots)
         await self._commit_next(held, destroy=ALL)
 
     async def _finish(self, held: HeldTenant) -> None:
         """The by-name sweep once more (late effects of a timed-out call), the signing key included,
         then `offboarded` with the repo deletion pending once the window ends; the publish status goes
         (Flow 2.4, A25)."""
-        for gen in await held.generations():
-            await self._destroy(held, gen)
+        bots = await self._revoke(await held.generations(), repo=await self._repo_of(held))
         await self._destroy_key(held.tenant_id)
+        await self._delete_bots(bots)
         now = self._clock()
         await held.commit(step="delete_repo", actor=SERVICE, state="offboarded", pending_action="delete_repo",
                           offboarded_at=now, repo_delete_after=now + REPO_WINDOW, drop_publish_status=True)
@@ -445,11 +461,10 @@ class ManagementService(Actor):
     async def _delete_repo(self, held: HeldTenant) -> None:
         """Due once `repo_delete_after` passed (the listing waits for it): the by-name sweep again
         (RC-8), the repo deleted, `repo_url` and the wiring cleared; audited after the commit."""
-        for gen in await held.generations():
-            await self._destroy(held, gen)
-        wiring = await held.forge_wiring()
-        if wiring is not None and answered(await self._forge.get(f"/api/v1/repos/{wiring.repo}"), 404).status_code != 404:
-            answered(await self._forge.delete(f"/api/v1/repos/{wiring.repo}"), 404)
+        repo = await self._repo_of(held)
+        await self._destroy(await held.generations(), repo=repo)
+        if repo is not None and answered(await self._forge.get(f"/api/v1/repos/{repo}"), 404).status_code != 404:
+            answered(await self._forge.delete(f"/api/v1/repos/{repo}"), 404)
         await held.commit(step=None, actor=None, pending_action=None, repo_url=None, drop_wiring=True)
         audit.emit("tenant.repo.delete", actor=audit.SYSTEM, tenant_id=held.tenant_id, target=held.tenant_id)
 

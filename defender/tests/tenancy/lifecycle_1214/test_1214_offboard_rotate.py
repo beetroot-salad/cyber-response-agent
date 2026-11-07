@@ -379,17 +379,41 @@ def test_rotation_cuts_the_old_bots_repo_access_then_deletes_it_without_purge(wo
     assert as_bot(world, old_jwt, f"repos/{full}").status_code == 401
 
 
-def test_a_refused_delete_stops_rotation_with_the_forges_reason_and_never_purges(world):
+def test_a_refused_delete_stops_rotation_with_the_forges_reason_after_revoking_everything(world):
     """K5, K4: an old bot that owns a repository (its fork) makes the forge refuse the delete; the job fails loudly with
-    the forge's message, the bot has no access to the tenant repo, and nothing retries with purge."""
+    the forge's message, nothing retries with purge, and the refusal finds the bot already revoked: no access to the
+    tenant repo, no OpenBao chain left to mint a token with."""
     tenant = world.active_tenant()
     old = world.live(tenant)
+    old_jwt = jwts(world, old)[-1]
     world.forge.add_user_repo(old.bot_login, tenant)
     full = f"{ORG}/{tenant}"
     assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
     world.drive()
     record = world.record(tenant)
     assert record.failure and "ownership of repositories" in record.failure, record.failure
+    assert world.forge.made("DELETE", f"/api/v1/admin/users/{old.bot_login}"), "control: the delete was asked"
     assert not any("purge" in c.query for c in world.forge.calls if c.path.startswith("/api/v1/admin/users/"))
     assert old.bot_login in world.forge.users and f"{old.bot_login}/{tenant}" in world.forge.repos
     assert old.bot_login not in world.forge.collaborators(full)
+    assert as_bot(world, old_jwt, f"repos/{full}").status_code != 200
+    assert set(_gone_in_openbao(world, old).values()) == {True}, _gone_in_openbao(world, old)
+
+
+def test_a_refused_delete_at_offboarding_still_destroys_the_signing_key_and_archives_the_repo(world):
+    """K5, K4, A25: an offboarded tenant's bot that belongs to an organisation makes the forge refuse its delete; the
+    job fails with the forge's reason only after every generation's OpenBao chain and the tenant's signing key are
+    gone and the repo is archived."""
+    tenant = world.active_tenant()
+    gen = world.live(tenant)
+    world.forge.team_members[(ORG, "Reviewers")] = {gen.bot_login}
+    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    world.drive()
+    record = world.record(tenant)
+    assert record.failure and "membership of organizations" in record.failure, record.failure
+    assert gen.bot_login in world.forge.users, "control: the delete was refused"
+    assert not any("purge" in c.query for c in world.forge.calls if c.path.startswith("/api/v1/admin/users/"))
+    assert set(_gone_in_openbao(world, gen).values()) == {True}, _gone_in_openbao(world, gen)
+    assert world.openbao.transit_keys == {}, "the signing key outlived a refused bot delete"
+    assert world.forge.repos[f"{ORG}/{tenant}"]["archived"] is True
+    assert gen.bot_login not in world.forge.collaborators(f"{ORG}/{tenant}")

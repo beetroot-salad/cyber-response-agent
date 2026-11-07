@@ -255,13 +255,15 @@ class FakeForge(_Recorder):
         return dict(self.repos[full_name]["collaborators"])
 
     def _delete_user(self, user: str, *, purge: bool) -> httpx.Response:
-        """Forgejo 17's user delete: a user owning a repository is refused 422 unless purged (purge deletes what it
-        owns); any delete ends its integrations (G8, #1433) and its collaborations."""
+        """Forgejo 17's user delete: a user owning a repository or belonging to an organisation is refused 422
+        unless purged (purge deletes the repositories it owns); any delete ends its integrations (G8, #1433) and its collaborations."""
         if user not in self.users:
             return httpx.Response(404)
         owned = [full for full in self.repos if full.startswith(f"{user}/")]
         if owned and not purge:
             return httpx.Response(422, json={"message": f"user still has ownership of repositories [uid: {user}]"})
+        if not purge and any(user in members for members in self.team_members.values()):
+            return httpx.Response(422, json={"message": f"user still has membership of organizations [uid: {user}]"})
         for full in owned:
             self.repos.pop(full)
         self.users.discard(user)
