@@ -45,14 +45,14 @@ PACKAGES_TIMEOUT_SEC = 30
 HEALTH_TIMEOUT_SEC = 10
 
 
-def _config(tenant: TenantRecord) -> dict[str, str]:
+def _host_state_settings(tenant: TenantRecord) -> dict[str, str]:
     return transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
 
 
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """This system's settings check (#1256 O-5): every `ConfigFault` a verb here can raise — a
     key it does not read, no access declaration — over the run's record. None when usable."""
-    _config(tenant)
+    _host_state_settings(tenant)
 
 
 def _segment(value: str) -> str:
@@ -61,14 +61,14 @@ def _segment(value: str) -> str:
 
 
 def _get(ctx: VerbContext, path: str, *, timeout_sec: int = DEFAULT_TIMEOUT_SEC) -> dict[str, Any]:
-    answer = transport.http_timed(ctx, _config(ctx.tenant), "GET", path, None,
+    answer = transport.http_timed(ctx, _host_state_settings(ctx.tenant), "GET", path, None,
                                   system=SYSTEM, timeout_sec=timeout_sec)
     if not isinstance(answer, dict):
         raise TransportFault(f"expected a JSON object from {SYSTEM}, got {type(answer).__name__}")
     return answer
 
 
-def _field(answer: dict[str, Any], name: str, kind: type) -> Any:
+def _answer_field(answer: dict[str, Any], name: str, kind: type) -> Any:
     value = answer.get(name)
     if not isinstance(value, kind):
         raise TransportFault(
@@ -77,14 +77,14 @@ def _field(answer: dict[str, Any], name: str, kind: type) -> Any:
 
 
 def _lines(answer: dict[str, Any], name: str) -> list[str]:
-    value = _field(answer, name, list)
+    value = _answer_field(answer, name, list)
     if not all(isinstance(line, str) for line in value):
         raise TransportFault(f"{SYSTEM} answered a {name!r} holding something other than text")
     return value
 
 
 def health_check(ctx: VerbContext) -> dict:
-    hosts = _field(_get(ctx, "/hosts", timeout_sec=HEALTH_TIMEOUT_SEC), "hosts", list)
+    hosts = _answer_field(_get(ctx, "/hosts", timeout_sec=HEALTH_TIMEOUT_SEC), "hosts", list)
     running: dict[str, bool] = {}
     for host in hosts:
         if not (isinstance(host, dict) and isinstance(host.get("name"), str)
@@ -103,14 +103,14 @@ def container_inspect(ctx: VerbContext, *, container_id: str) -> dict:
     answer = _get(ctx, f"/containers/{_segment(container_id)}")
     return {
         "container_id": container_id,
-        "name": _field(answer, "name", str),
-        "image": _field(answer, "image", str),
+        "name": _answer_field(answer, "name", str),
+        "image": _answer_field(answer, "image", str),
     }
 
 
 def proc_tree(ctx: VerbContext, *, host: str) -> dict:
     answer = _get(ctx, f"/hosts/{_segment(host)}/processes")
-    return {"host": host, "ps_output": _field(answer, "ps_output", str)}
+    return {"host": host, "ps_output": _answer_field(answer, "ps_output", str)}
 
 
 def passwd(ctx: VerbContext, *, host: str) -> dict:
@@ -123,7 +123,7 @@ def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
     return {
         "host": host,
         "user": user,
-        "path": _field(answer, "path", str),
+        "path": _answer_field(answer, "path", str),
         "keys": _lines(answer, "keys"),
     }
 
@@ -131,7 +131,7 @@ def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
 def fim_checksum(ctx: VerbContext, *, host: str, path: str) -> dict:
     query = urllib.parse.urlencode({"path": path})
     answer = _get(ctx, f"/hosts/{_segment(host)}/files/sha256?{query}")
-    return {"host": host, "path": path, "sha256": _field(answer, "sha256", str)}
+    return {"host": host, "path": path, "sha256": _answer_field(answer, "sha256", str)}
 
 
 def package_list(ctx: VerbContext, *, host: str) -> dict:

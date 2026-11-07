@@ -294,9 +294,8 @@ sys.exit(int(a.get("rc", 0)))
 
 def answer(stdout: str = "{}", status: str | None = "200", *, rc: int = 0,
            stderr: str = "") -> dict[str, Any]:
-    """One canned `docker` reply. `status` is appended on its own trailing line, curl's
-    `-w '\\n%{http_code}'` shape that `split_status` recovers (the transport's own contract);
-    `None` emits stdout as-is (a non-curl `docker` call, or a curl that printed nothing)."""
+    """One canned reply: the system's `stdout` body and HTTP `status`, as `ProxyStandIn` hands
+    it back in the proxy's reply format (`DockerShim` still reads the same shape)."""
     return {"stdout": stdout, "status": status, "rc": rc, "stderr": stderr}
 
 
@@ -445,8 +444,8 @@ class ProxyStandIn:
 
     def respond(self, *answers: dict[str, Any]) -> ProxyStandIn:
         for a in answers:
-            assert not a.get("rc") and not a.get("stderr"), (
-                f"a docker failure is not an answer the proxy can give: {a}")
+            assert not a.get("rc"), f"a docker failure is not an answer the proxy can give: {a}"
+            assert not a.get("stderr"), f"a docker failure is not an answer the proxy can give: {a}"
         self._answers = list(answers) or [answer()]
         return self
 
@@ -635,9 +634,8 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
 
     Unless the caller passes its own, the launch-time publish is `_launch_publish_p4`'s
     in-process stand-in, which publishes the tenant's folder for real, so the run reads an
-    export; and the request signer signs anything (every system is reached through the proxy,
-    #1391 O1, so a run that calls one needs a token; no OpenBao here)."""
-    from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
+    export. No request signer is injected: a run that must reach a system passes one (or
+    `ProxyStandIn.seams()`), so the tests of the production signing path stay on it."""
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
     try:

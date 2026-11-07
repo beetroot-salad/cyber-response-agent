@@ -115,8 +115,8 @@ def get_host(ctx: VerbContext, *, host: str) -> dict:
   run's tenant record (never a `VerbContext`, never a call) that raises
   `ConfigFault` naming what is wrong, or returns None when the system is
   usable. It must raise for EVERY settings fault any verb here can raise —
-  the keys `_config` reads and, for a docker-reached system, the access
-  method (`_stub_transport.check_docker_curl_settings`). The run calls it
+  the keys `_config` reads and the system's access declaration
+  (`integrations.record_config` checks both). The run calls it
   once at start: a system whose check raises is down for the whole run, the
   agent is told why, and no verb of it is called. A system needing no
   settings declares one that never raises. An adapter that declares none, or
@@ -202,8 +202,9 @@ read source needs a credential cannot be connected until #1163 lands: say so and
 stop.
 
 `system=` is required on every transport call, and an adapter reaches its store
-through `http_get` / `http_get_obj` / `http_post`, which run `guard_outbound`
-first. **Never** accept a pasted token, password, or auth-bearing cURL — if the
+through `http_get` / `http_get_obj` / `http_post`, which send each request through
+the credential proxy (the proxy holds the credential and checks the route against the
+system's declaration). **Never** accept a pasted token, password, or auth-bearing cURL — if the
 maintainer offers one, stop and refuse it. Nothing in an adapter logs a secret or
 returns one in a captured payload; this is the single most important property of
 the layer.
@@ -212,9 +213,8 @@ the layer.
 
 `example_adapter.py`'s `_request` does HTTP via `urllib`. Swap that one layer
 for whatever your environment needs — direct HTTP, an existing CLI you wrap
-and parse, or a vendor SDK call. (The lab's own adapters reach its stand-in
-services through `docker exec` on a Docker host the lab controls; that is the
-lab's wiring, not a transport to copy for a tenant's system.) The right
+and parse, or a vendor SDK call. (The lab's own adapters reach their systems only through the credential proxy,
+#1391.) The right
 transport is a property of *your* deployment, not of this skill; the VERBS
 surface above it — verb signatures, the returned payload, the faults —
 does not change with it.
