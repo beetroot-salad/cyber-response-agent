@@ -5,7 +5,9 @@ Revises: 0007_alert_mapping
 
 A cost is exact unless the host knows spend may be missing from it (a failed spend write, a run
 killed before it reported, a row ended without its holder's final figure). Rows from before this
-revision keep their cost and read exact: nothing recorded then could say otherwise. A lower limit
+revision keep their cost and store `false`. The mark is worked out when a record is read, so a row that
+started, ended with a cost and never had its holder's final figure written reads "at least" all the same; every
+other old row reads exact. A lower limit
 only ever stands beside a number, so the row refuses `true` beside a null cost.
 """
 import sqlalchemy as sa
