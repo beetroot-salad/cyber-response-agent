@@ -34,6 +34,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     _split_at_fences,
     drive,
     named_models,
+    priced_cost,
 )
 from defender.tests.support.storage._store_owner import reread
 
@@ -165,8 +166,10 @@ def test_s5_a_branch_arm_sharing_the_database_totals_only_its_own_run(tmp_path):
                 wrap_model=named_models(main="claude-sonnet-4-6"))
 
     assert str(arm.get("store_path")) == str(source.get("store_path")), "premise: one database holds both runs"
-    assert total(source_dir) == pytest.approx(3.0 * len(source_turns) + 2 * 1.0)
-    assert total(sibling_dir) == pytest.approx(3.0 * 2), "the arm's total includes its source's responses"
+    assert total(source_dir) == pytest.approx(
+        priced_cost("claude-sonnet-4-6", len(source_turns)) + priced_cost("claude-haiku-4-5", 2), abs=1e-6)
+    assert total(sibling_dir) == pytest.approx(priced_cost("claude-sonnet-4-6", 2), abs=1e-6), \
+        "the arm's total includes its source's responses"
 
 
 def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):

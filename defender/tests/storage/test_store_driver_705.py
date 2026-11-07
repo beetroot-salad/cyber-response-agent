@@ -46,6 +46,8 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
     named_models,
+    priced_billed,
+    priced_cost,
     priced_gather,
 )
 from defender.tests.support.storage._store_owner import reread
@@ -697,9 +699,12 @@ def test_m2_a_close_before_a_cut_is_a_committed_report(tmp_path):
 
 # --- #1377: the spend ledger, driven through the real driver (hand-started: no job lane) -------------
 
-#: What a priced stand-in response bills, by model (configuration/_pricing.py `in`, USD a million, one million tokens each).
-_MAIN_IN, _GATHER_IN = 3.0, 1.0
 _PRICED_NAMES = {"main": "claude-sonnet-4-6", "gather": "claude-haiku-4-5"}
+
+
+def _priced(*, main: int, gather: int) -> float:
+    """What `main` and `gather` priced stand-in responses cost (the harness's `PRICED_USAGE`, priced by the table)."""
+    return priced_cost(_PRICED_NAMES["main"], main) + priced_cost(_PRICED_NAMES["gather"], gather)
 
 
 def _spend_errors(caplog) -> list[str]:
@@ -731,8 +736,8 @@ def _refuse_ledger_inserts(store) -> None:
 
 def _priced_run(tmp_path, *, run_id: str, refuse_main_call: int | None = None) -> tuple[Path, dict, dict]:
     """MAIN (dispatch, then text; sonnet), lead l-001 (one query, then its final summary) and the correlation lead (haiku), each
-    response billing one million tokens; `refuse_main_call` makes ledger inserts fail from that MAIN request on. Returns the run
-    folder, the driver's summary and how many calls each model made."""
+    response reporting the harness's `PRICED_USAGE`; `refuse_main_call` makes ledger inserts fail from that MAIN request on.
+    Returns the run folder, the driver's summary and how many calls each model made."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
     opened: list = []
     calls = {"main": 0, "gather": 0}
@@ -755,17 +760,17 @@ def _priced_run(tmp_path, *, run_id: str, refuse_main_call: int | None = None) -
 
 
 def test_s1_s5_a_run_files_total_prices_every_response_the_run_received_and_usage_moves_with_it(tmp_path, caplog):
-    """The total is every priced response (MAIN, each lead's final one, the correlation lead's), exact; usage agrees; `num_turns` stays MAIN's. (S1, S5)"""
+    """The total is every priced response (MAIN, each lead's final one, the correlation lead's), all four billed counts, exact; usage agrees count by count; `num_turns` stays MAIN's. (S1, S5)"""
     run_dir, summary, calls = _priced_run(tmp_path, run_id="ledger-total")
 
     assert calls == {"main": 2, "gather": 3}, ("premise: the scripted calls", calls)
     assert summary["truncated_by"] is None, summary
     assert _wire_responses(run_dir) == 5, "premise: the request log saw every response"
     result = _run_result(run_dir)
-    assert result["total_cost_usd"] == pytest.approx(2 * _MAIN_IN + 3 * _GATHER_IN), (
+    assert result["total_cost_usd"] == pytest.approx(_priced(main=2, gather=3), abs=1e-6), (
         "the lead's final response and the correlation lead are not in the total")
     assert result["total_cost_is_lower_limit"] is False
-    assert result["usage"]["input_tokens"] == 5_000_000
+    assert result["usage"] == priced_billed(5)
     assert result["num_turns"] == 2, "`num_turns` is investigator turns"
     assert _spend_errors(caplog) == [], "a healthy run logged a failed spend write"
 
@@ -780,9 +785,9 @@ def test_s3_a_ledger_write_that_fails_leaves_the_run_unchanged_logs_at_error_and
     assert {k: summary.get(k) for k in ("truncated_by", "exit_reason")} == {
         k: control.get(k) for k in ("truncated_by", "exit_reason")} == {"truncated_by": None, "exit_reason": None}
     result = _run_result(run_dir)
-    assert result["total_cost_usd"] == pytest.approx(_MAIN_IN + 3 * _GATHER_IN), "the refused response should be the only one missing"
+    assert result["total_cost_usd"] == pytest.approx(_priced(main=1, gather=3), abs=1e-6), "the refused response should be the only one missing"
     assert result["total_cost_is_lower_limit"] is True
-    assert result["usage"]["input_tokens"] == 4_000_000
+    assert result["usage"] == priced_billed(4)
     assert _spend_errors(caplog), "a failed spend write was not logged at ERROR"
 
 
@@ -808,7 +813,35 @@ def test_s3_the_ledger_is_written_ahead_of_the_request_log_so_a_log_fault_does_n
     assert wire.is_dir(), "premise: the wire log is a directory"
     assert any("request logging skipped" in r.getMessage() for r in caplog.records), "premise: the request log's write failed"
     result = _run_result(run_dir)
-    assert result["total_cost_usd"] == pytest.approx(3 * _MAIN_IN), "a response was lost behind the request-log fault"
+    assert result["total_cost_usd"] == pytest.approx(_priced(main=3, gather=0), abs=1e-6), "a response was lost behind the request-log fault"
     assert result["total_cost_is_lower_limit"] is False
     assert result["num_turns"] == 3
     assert _spend_errors(caplog) == []
+
+
+class _LedgerUnreadable(Exception):
+    """The test's own fault: the ledger's read refused when the run file is written."""
+
+
+def test_s5_a_ledger_the_run_cannot_read_back_leaves_its_run_file_with_no_total(tmp_path, monkeypatch):
+    """Every response's ledger write lands, but reading the ledger back for the run file raises: the run ends as the control does,
+    and its run file carries no total at all (the empty trace), as the job's cost is then unknown; never a figure, marked or not. (S5, S4, r4)"""
+    from defender.records import session_store
+
+    _, control, _ = _priced_run(tmp_path / "control", run_id="ledger-readable")
+
+    def unreadable(*_a: Any, **_k: Any) -> Any:
+        raise _LedgerUnreadable("the spend ledger cannot be read back")
+
+    monkeypatch.setattr(session_store, "run_spend", unreadable)  # lint-monkeypatch: ok — the ledger's one reader refuses; no store state makes only that read fail after the last write
+    run_dir, summary, calls = _priced_run(tmp_path / "unreadable", run_id="ledger-unreadable")
+
+    assert calls == {"main": 2, "gather": 3}, ("premise: the run made every call", calls)
+    conn = sqlite3.connect(summary["store_path"])
+    try:
+        assert conn.execute("SELECT count(*) FROM spend_ledger").fetchone() == (5,), "premise: no spend write failed"
+    finally:
+        conn.close()
+    assert {k: summary.get(k) for k in ("truncated_by", "exit_reason")} == {
+        k: control.get(k) for k in ("truncated_by", "exit_reason")} == {"truncated_by": None, "exit_reason": None}
+    assert RunPaths(run_dir).tool_trace.read_text(encoding="utf-8") == "", "an unreadable ledger still left a run-file total"

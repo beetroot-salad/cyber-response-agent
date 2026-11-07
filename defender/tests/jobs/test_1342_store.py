@@ -2325,6 +2325,40 @@ async def test_s2_a_lost_workers_row_is_taken_over_as_at_least_its_last_copy_and
         assert retries == []
 
 
+#: The class of a write that ends a running row (r4 S2, store side): the ending write; the cost the row holds (a renewal's copy,
+#: or its holder's figure); its lease (a take-over takes only a lapsed one); and whether its holder already wrote its final figure,
+#: with which mark (a hand-back does, and lapses the lease at once; the live-lease case is planted all the same).
+_ENDED_WITHOUT_FIGURE = [
+    (write, cost, lease, figure)
+    for write in ("cancel", "take_over")
+    for cost in (0.0, 1.25)
+    for lease in (("live", "lapsed") if write == "cancel" else ("lapsed",))
+    for figure in ("not written", "written marked", "written unmarked")
+]
+
+
+@pytest.mark.parametrize(("write", "cost", "lease", "figure"), _ENDED_WITHOUT_FIGURE,
+                         ids=["-".join(map(str, case)) for case in _ENDED_WITHOUT_FIGURE])
+async def test_s2_a_write_that_ends_a_running_row_marks_it_exactly_when_its_holder_never_wrote_its_figure(
+        dsn, write, cost, lease, figure):
+    """Cancel or take-over of a running row: "at least" when its holder has not written its final figure, whatever the cost
+    (0 included) or the lease; otherwise the mark its holder wrote. The cost is kept either way. (r4 S2 store side, S4)"""
+    written = figure != "not written"
+    inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=lease == "lapsed", marked=written)
+    execute(dsn, "UPDATE jobs.investigations SET cost_usd = %s, cost_is_lower_limit = %s WHERE id = %s",
+            (cost, figure == "written marked", inv))
+    async with job_store(dsn) as store:
+        if write == "cancel":
+            got = await store.cancel_investigation(T1, inv, actor="u-1")
+            assert got.stage == "aborted", got
+        else:
+            assert inv in await store.take_over(held=frozenset())
+    ended = row(dsn, inv)
+    assert ended["stage"] == ("aborted" if write == "cancel" else "failed"), ended
+    assert (ended["cost_usd"], lower_limit(dsn, inv)) == (cost, figure != "written unmarked"), (
+        "the mark is not (no holder's figure) or the holder's own")
+
+
 async def test_s2_a_claimed_row_and_a_stored_marked_row_carry_the_mark_in_their_records(dsn):
     """The record the store answers (claim, read) has the row's mark, so the API can serve it. (S2, G10)"""
     queued = await _queued_row(dsn)

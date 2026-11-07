@@ -381,13 +381,32 @@ def _awaiting(fn):
     return call
 
 
-#: What every priced stand-in response bills (#1377): one million uncached input tokens, so a
-#: response costs exactly its model's `in` rate.
-PRICED_USAGE = {"input_tokens": 1_000_000}
+#: What every priced stand-in response reports (#1377), in pydantic-ai's `RequestUsage` terms: all four
+#: billed counts, at values no rate or rounding makes whole. `input_tokens` includes the cache reads
+#: and writes, as a provider's does, so a ledger that billed it raw would charge them twice.
+PRICED_USAGE = {"input_tokens": 1_234_567, "output_tokens": 76_543, "cache_read_tokens": 345_678,
+                "cache_write_tokens": 123_457}
+
+
+def priced_billed(responses: int = 1) -> dict[str, int]:
+    """The four billed counts (`configuration.billed_usage`'s keys) of `responses` priced stand-in responses."""
+    from pydantic_ai.usage import RequestUsage
+
+    from defender.configuration import billed_usage
+
+    return {k: responses * v for k, v in billed_usage(RequestUsage(**PRICED_USAGE)).items()}
+
+
+def priced_cost(model: str, responses: int = 1) -> float:
+    """What `responses` priced stand-in responses reported under `model` cost, by the pricing table
+    (`usage_cost` over `billed_usage`, the one rule from a provider's usage to a bill)."""
+    from defender.configuration import usage_cost
+
+    return responses * usage_cost(model, priced_billed())
 
 
 class Priced:
-    """A replay callable as a priced stand-in (#1377): each response bills `PRICED_USAGE`, and
+    """A replay callable as a priced stand-in (#1377): each response reports `PRICED_USAGE`, and
     `before()` (when given) runs before the response is made."""
 
     def __init__(self, fn, *, before: Callable[[], None] | None = None):
