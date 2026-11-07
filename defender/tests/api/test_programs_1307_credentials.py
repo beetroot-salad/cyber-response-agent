@@ -540,9 +540,9 @@ def test_reconciliation_deletes_every_client_without_a_usable_credential_and_kee
     live, revoked = issue_oauth(ann, T1, program_id), issue_oauth(ann, T1, program_id)
     assert revoke(ann, T1, program_id, revoked).status_code == 204
     world.realm.clients[ORPHAN] = Client(ORPHAN, "00000000-5a00-4000-8000-0000000000bb", "s")
-    world.realm.lose_create_responses = 1
     assert revoke(ann, T1, program_id, live).status_code == 204
     kept = issue_oauth(ann, T1, program_id)
+    world.realm.lose_create_responses = 1  # armed after `kept` exists: the lost response belongs to the pending create
     assert issue(ann, T1, program_id, kind="oauth_client").status_code == 503  # pending, inside its deadline
     [pending] = world.realm.created[-1:]
     _reconcile(world)

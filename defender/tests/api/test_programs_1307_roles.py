@@ -99,9 +99,15 @@ BODIES: dict[tuple[str, str], dict[str, object]] = {
 TENANT_ROUTES = sorted(PERMISSION_OF)
 
 
+def _served_template(route: tuple[str, str]) -> str:
+    """The app's own template for a table row: the table's `{}` placeholders carry no names, `concrete` fills named ones."""
+    (template,) = [p for m, p in app_routes() if (m, normal(p)) == route]
+    return template
+
+
 def _call(client: Any, route: tuple[str, str]) -> Any:
     kwargs = {"json": BODIES[route]} if route in BODIES else {}
-    return client.request(route[0], concrete(route[1]), **kwargs)
+    return client.request(route[0], concrete(_served_template(route)), **kwargs)
 
 
 # --- O3, P-H: the permission table over the whole class of routes ---------------------------------
