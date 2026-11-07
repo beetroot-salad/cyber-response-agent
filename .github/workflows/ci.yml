@@ -148,7 +148,7 @@ jobs:
         #                    before, just not on this job's critical path. gVisor is still
         #                    installed above because OTHER suites in this job start real
         #                    boxes: test_store_boundary_705.py's `box`-marked tests and
-        #                    test_771_alias_ban.py's mechanism confirmations, which
+        #                    test_seccomp_alias_ban.py's mechanism confirmations, which
         #                    _spec771.py deliberately routes through THIS job.
         env:
           DEFENDER_BUDGET_ENFORCE: "1"

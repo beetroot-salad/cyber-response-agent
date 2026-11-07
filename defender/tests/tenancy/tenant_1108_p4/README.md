@@ -51,7 +51,7 @@ logs in to OpenBao itself with AppRole). Human decisions U1–U8 are in r3; U9�
   dir. Scope: what a box launched over a source run can read; the page stays an operator surface
   host-side. Test: `e2e/test_920_branch_resume.py::test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason`.
 - **U15 (tenant template catalog):** the tenant template ships an empty catalog; the implementer
-  adds it. `tests/tenancy/test_1106_layout.py::test_the_templates_lead_zero_names_an_established_template_in_the_catalog`
+  adds it. `tests/tenancy/test_tenant_settings_location.py::test_the_templates_lead_zero_names_an_established_template_in_the_catalog`
   stays as written. Scope: the tenant template's `agent/` content.
 
 ### Agent decisions (binding for this contract; for the owner to confirm or change)
@@ -148,7 +148,7 @@ Spelled as the tests call them. One line each; the test file named holds the ful
   Why this seam: after O1 the markers are the tenant's, and the resolver can no longer find the tenant's committed tree from the product
   checkout; handing it the committed tree as a value preserves the committed-vs-working-tree rule (#869 NF1) and moves "the committed
   tree is unreadable" to the one reader of it (`Batch.base()` refuses, so the lane's deps refuse; never an adapter-only answer). Pinned by
-  `test_869_resolver.py`, including `::test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`.
+  `test_declared_systems_resolution.py`, including `::test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`.
 - Gate shapes kept: `_skills_path_rule(root, xy, path, *, systems, tree_for)`, `_verify_skills_state(root, *, change_set, ...)`, `_verify_pitfalls_state(root, *, ...)`; rules see repo-relative `agent/...` (OD6).
 - Pitfalls add-on path: `agent/skills/gather/defender-sql.pitfalls.md` (product page is never a tenant write).
 - `evaluations/harness.py::run_author(tmp, *, invoke_agent=None)`: drafts plus the drain tests' fake forge, no issuer.
@@ -183,7 +183,7 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 - Two `run_pitfalls` symbols exist by design (drain step vs `pitfalls_curator.run_pitfalls`); not a conflict.
 - `run.main`'s default when `publish=` is omitted: the real publish child (OD14 clarification; agent decision for the owner to confirm).
 - **`declared_systems` marker half: resolved by the owner (repair r5 item 1).** The implementation's seam is adopted
-  (above, "Drains and lanes") and `learning/catalog/test_869_resolver.py` is re-spelled onto it.
+  (above, "Drains and lanes") and `learning/catalog/test_declared_systems_resolution.py` is re-spelled onto it.
 
 ## 3. Coverage map
 
@@ -191,8 +191,8 @@ Files are under `tenant_1108_p4/` unless a path is given.
 
 - O1 layout allowlist → `test_layout.py`, `tests/learning/retrieval/test_corpus_fold_584.py`, `test_lessons_frontend.py`, `tests/tenancy/test_1108_knowledge_owner.py`
 - O2 one tenant, one revision, every surface → `test_run_isolation_e2e.py`, `test_run_copy.py`, `tests/runtime/permissions/test_permission.py`, `runtime/engine/test_read_confine_bash.py`, `test_gather_template_discovery.py`, `e2e/test_gather_template_index.py`, `alert_front_door_1222/test_1222_lessons_and_corpus.py`, `layout_contracts/test_1080_*`, `invlang/validation/test_frontier_recall_919.py`
-- O-A box mounts stage only, token read-back, in-box `.tenant-id` retired → `test_run_copy.py`, `test_run_start.py`, `tenant_1108_p2/test_run_start.py`, `e2e/test_1106_box_mount.py`
-- O-B one export commit for settings/knowledge/stamp → `test_run_start.py`, `test_branch_replay.py`, `e2e/test_1106_run_start.py`
+- O-A box mounts stage only, token read-back, in-box `.tenant-id` retired → `test_run_copy.py`, `test_run_start.py`, `tenant_1108_p2/test_run_start.py`, `e2e/test_tenant_box_mount.py`
+- O-B one export commit for settings/knowledge/stamp → `test_run_start.py`, `test_branch_replay.py`, `e2e/test_tenant_run_start_e2e.py`
 - O-PIN `--knowledge-commit`, branch siblings → `test_run_start.py`, `test_branch_replay.py` (the held-out launcher that pinned each index is gone, #1279 A10; scoring skips its pin line: `storage/ids_1187/test_1187_held_out.py`)
 - O4 symbol census → `test_census.py`, `tests/tenancy/test_1108_knowledge_owner.py`
 - O-TEXT model-facing spellings → `test_model_text.py`, `test_connect_propose.py`
@@ -215,13 +215,13 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - O14 lab continuity → `test_cutover.py` (live; red until F-CUT is done)
 - Flow 1 publish → `test_support_selfcheck.py`, `test_publish_child.py`
 - Flow 2 materialise → `test_materialise.py`
-- Flow 3 run start → `test_run_start.py`, `test_run_copy.py`, `tests/tenancy/test_1106_layout.py`, `e2e/test_1106_run_start.py`
+- Flow 3 run start → `test_run_start.py`, `test_run_copy.py`, `tests/tenancy/test_tenant_settings_location.py`, `e2e/test_tenant_run_start_e2e.py`
 - Flow 4 drain → `test_drains.py`, `test_refused_claims.py`
 - Flow 5 revert → `test_revert_cli.py`
 - Flow 6 connect → `test_connect_propose.py`, `e2e/test_620_consumers.py`
 - Flow 7 branch replay → `test_branch_replay.py`
 - A-ID drain AppRole login → `test_drain_credentials.py`, `test_live_dev_issuer.py`
-- U9 stage layout → `test_run_copy.py`, `test_drains.py`, `test_run_isolation_e2e.py`, `tenant_1108_delivery/test_batches.py`, `tenant_1108_delivery/test_box.py`, `e2e/test_1106_box_mount.py`
+- U9 stage layout → `test_run_copy.py`, `test_drains.py`, `test_run_isolation_e2e.py`, `tenant_1108_delivery/test_batches.py`, `tenant_1108_delivery/test_box.py`, `e2e/test_tenant_box_mount.py`
 - U10 refused claims (OD18/19/23) → `test_refused_claims.py`, `learning/curation/test_1134_curator_drain.py`, `test_drain_commit.py`, `test_lead_author.py`
 - U11 broken child (OD20) → `test_publish_child.py`
 - U12 host record (OD17/21/22') → `test_stale_visibility.py`, `test_run_page.py`, `test_run_start.py`
@@ -270,7 +270,7 @@ Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as 
     → `test_branch_replay.py::test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allow_dirty`.
   - `learning/retrieval/test_1195_lessons_run_windows.py`: the `before-the-run` rows (a pre-run stray tolerated, OD15)
     → `test_changes.py::test_change_set_is_the_draft_against_the_batch_base_...`, `::test_claims_commit_and_reset_one_after_another_within_one_batch`.
-  - `e2e/test_771_write_backstop.py`: the planted-component case and the leaf-alias case of `drain._restore_corpus`
+  - `e2e/test_guarded_write_backstop.py`: the planted-component case and the leaf-alias case of `drain._restore_corpus`
     → `test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`.
   - `tooling/layout_contracts/test_1080_episode_frontend_and_pricing.py::test_1080_values_derived_from_a_moved_files_location_resolve_as_before`:
     the `lessons_fm` `REPO_ROOT` cell → `learning/retrieval/test_lessons_fm.py`.
@@ -312,7 +312,7 @@ Repair round r4 (this round), all additive or stricter:
     `test_git_commit_no_op_returns_none`, `test_git_worktree_add_remove`, `test_git_worktree_add_branch`, `test_git_push_sets_upstream`,
     `test_git_fetch_advances_tracking_ref` (callers were `AuthorBranch` and the legacy drains) → `tenant_1108_delivery/test_changes.py`,
     `test_delivery.py::test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_write`, `test_publish.py`.
-  - `e2e/test_771_lifecycle_and_scope.py::test_a_quarantined_tainted_tree_carries_its_verdict_beside_the_archive` and its driver
+  - `e2e/test_scan_verdict_lifecycle.py::test_a_quarantined_tainted_tree_carries_its_verdict_beside_the_archive` and its driver
     `_spec771.quarantine_a_tainted_tree` (`quarantine.preserve_tainted_tree`, whose only caller was `AuthorBranch`): no successor, §6 owner item.
   - Dead support `support/learning/curation/_claim1175.py` (imported the deleted `defender._claim_git`; its suites were deleted with the contract).
 - Re-spelled with the cleanup: `tenant_1120_piece1/test_1120_operator_commands.py::test_1186_learning_operator_cli_uses_the_explicit_tenants_lock`
@@ -323,7 +323,7 @@ Repair round r4 (this round), all additive or stricter:
   so a bare `lessons/` is not a stale pointer; stale-name test data reworded or suppressed with a reason (`lint_stale_refs` clean).
 
 Repair round r5:
-- `learning/catalog/test_869_resolver.py` (4 cases, class ii) re-spelled onto `declared_systems(repo_root, *, agent=)` (§2): the markers sit in a
+- `learning/catalog/test_declared_systems_resolution.py` (4 cases, class ii) re-spelled onto `declared_systems(repo_root, *, agent=)` (§2): the markers sit in a
   real batch's published agent half and the resolver is handed `lane.batch.base()`; the union, committed-not-working-tree (a draft marker and
   product-checkout markers under both spellings stay undeclared until committed on the batch branch), depth-one (`agent/...` nested markers
   committed) and adapter-unreadable cases keep their assertions. Deleted, class (i): the `no defender/skills/ at HEAD` and `repo is no git
@@ -341,7 +341,7 @@ Repair round r5:
 - `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_working`
   (class ii): the expected CI `tacit_cli check` step carries `--defender-dir knowledge/tenant-fixture/agent`, the spelling the r4 respell of
   `::test_staying_commands_import_modules_that_have_moved` runs (the golden stays the pre-move recording; the move is applied in the test).
-- `e2e/test_922_spine.py` (class ii, repair-list class D): `TriggerRecorder` takes the batch the drain hands it and runs the REAL findings curator
+- `e2e/test_training_spine.py` (class ii, repair-list class D): `TriggerRecorder` takes the batch the drain hands it and runs the REAL findings curator
   over that batch's draft lanes with `batch=` (as `_drain_support.CuratorTrigger`), not over checkout trees. It records `completed`, and every
   case asserts the curator's `run_batch` returned: the drain records a curator's `FatalConfigError` and goes on with rc 0, so four cases had
   passed with the curator knocked out of the tick (`a_caught_family_is_consumed_without_authoring`'s "never authored" was vacuous).
@@ -358,7 +358,7 @@ Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/st
   - about 10 run-page and 26 ticket cases, behind `resolve_run_tenant(agent_root=)`.
 - **Never run against a stand-in:** the run-page cases, the host-record cases, and the box-tamper cases (stamp forged during the box window). Check that they reach their own assertions.
 - Controls that pass today only because the seam fault is dead-lettered (the U10 `gate-rejection`/`unrelated` lead controls) become meaningful after P4.
-- `test_1106_layout::test_the_templates_lead_zero_names_an_established_template_in_the_catalog` is red by **owner ruling U15**: the tenant template ships an empty catalog; the implementer adds it. Not a seam; the test stays as written.
+- `test_tenant_settings_location::test_the_templates_lead_zero_names_an_established_template_in_the_catalog` is red by **owner ruling U15**: the tenant template ships an empty catalog; the implementer adds it. Not a seam; the test stays as written.
 
 ## 6. Known gaps (not covered)
 

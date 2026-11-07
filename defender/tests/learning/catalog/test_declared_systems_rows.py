@@ -1,16 +1,31 @@
-"""#869: a dropped row is reported, never silently absorbed, and leaves a durable record.
+"""#869 at the sink: what a real granted call records.
+
+#869: the queries-table row names the system the call was dispatched to.
+
+#869: a dropped row is reported, never silently absorbed, and leaves a durable record.
 
 The mixed pitfalls tick runs over a batch draft (`_curator1134.draft_lane`) with adapters in a
-product checkout; what landed is read from the batch branch (`agent/...`)."""
+product checkout; what landed is read from the batch branch (`agent/...`).
+"""
 from __future__ import annotations
-
-from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
-from defender.tests.support.shared._locations_1210 import location_path
 
 import json
 from pathlib import Path
 
+import pytest
 
+pytest.importorskip('pydantic_ai')
+
+from defender.tests.e2e.test_pitfalls_input_823 import _dispatch, _run  # noqa: E402
+from defender.tests.e2e._replay_harness import Turn, VerbRecorder  # noqa: E402
+from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
+from defender.learning.leads.draft_synthesis import (
+    _draft_basename,
+    _draft_candidate_segments,
+)
+from defender.investigation.query_tool import resolve_query_id
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads.lead_extraction import LeadAuthorError
@@ -29,6 +44,77 @@ from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, drained_for
 from defender.learning.core.state import PITFALLS
+
+
+PARAMS = {"native_query": "FROM logs"}
+
+
+@pytest.mark.e2e
+def test_granted_call_records_its_own_system(tmp_path):
+    rec = VerbRecorder()
+    res = _run(
+        tmp_path,
+        turns=[
+            q("elastic", "query", PARAMS, query_id="fakesys.hunt-creds"),
+            q("elastic", "query", PARAMS, query_id="elastic.hunt-creds"),
+            DONE,
+        ],
+        run_id="qid-869",
+        verbs=elastic_ok(rec),
+        main_turns=[
+            Turn(tool_calls=[_dispatch()]), Turn(text="Investigation complete."),
+        ],
+    )
+
+    dispatched = _dispatch()[1]["system"]
+    granted = [r for r in res.own_rows if r["exit_code"] == 0]
+    assert len(rec.calls) == 2, "the verb was not reached, so no call was granted and executed"
+    assert len(granted) == 2
+
+    refused, kept = granted
+    assert refused["system"] == dispatched
+    assert refused["query_id"] == f"{dispatched}.{refused['verb']}"
+    assert "fakesys" not in refused["query_id"]
+
+    assert kept["query_id"] == "elastic.hunt-creds"
+
+    # And nothing else this run wrote disagrees with its own dispatched system either.
+    for row in res.own_rows:
+        if row["query_id"].startswith("∅."):
+            continue          # a writer-only sentinel names no system by construction
+        assert row["query_id"].split(".", 1)[0] == row["system"]
+
+
+def test_resolve_query_id_refuses_a_foreign_prefix():
+    assert resolve_query_id("elastic", "esql", "fakesys.hunt-creds") == "elastic.esql"
+    # The screen's other refusals still hold: a reserved sentinel prefix and a traversal-bearing id.
+    assert resolve_query_id("elastic", "esql", "∅.bash-shim") == "elastic.esql"
+    assert resolve_query_id("elastic", "esql", "../x") == "elastic.esql"
+
+
+def test_resolve_query_id_keeps_a_matching_prefix():
+    assert resolve_query_id("elastic", "esql", "elastic.hunt-creds") == "elastic.hunt-creds"
+    assert resolve_query_id("cmdb", "get-host", "cmdb.crown-jewels") == "cmdb.crown-jewels"
+
+
+def test_resolve_query_id_enforces_the_whole_schema_shape():
+    assert resolve_query_id("elastic", "esql", "elastic") == "elastic.esql"
+    assert resolve_query_id("elastic", "esql", "elastic.") == "elastic.esql"
+    assert resolve_query_id("elastic", "esql", "elastic.foo.bar") == "elastic.esql"
+
+    system, basename = _draft_candidate_segments(
+        "elastic.foo.bar", "esql", set(), row_system="elastic")
+    assert system == "elastic"
+    assert basename == _draft_basename("elastic.foo.bar")
+    assert "foo" not in basename
+    assert "." not in basename
+    assert _draft_candidate_segments(
+        resolve_query_id("elastic", "esql", "elastic.foo.bar"), "esql", set(),
+        row_system="elastic",
+    ) is None
+
+    # The control on the same address: a well-formed coined id still survives.
+    assert resolve_query_id("elastic", "esql", "elastic.hunt-creds") == "elastic.hunt-creds"
 
 
 def _mixed_batch(tmp_path: Path, monkeypatch, *, name: str = "repo"):

@@ -25,7 +25,7 @@ from defender.records import Run
 from defender.records import RunPaths
 from defender.tests.support.shared.contracts._spec1077 import bound_arguments
 from defender.tests.e2e._replay_harness import GOLDEN, drive
-from defender.tests.e2e.test_922_renderer import MARKER, driven_run, golden_replay, tenant_run
+from defender.tests.e2e.test_transcript_renderer import MARKER, driven_run, golden_replay, tenant_run
 from defender.tests.e2e.test_1084_mirror_e2e import _assert_record_written, tenant_of
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 from defender.tests.support.tenancy._active1214 import insert_active_tenant

@@ -19,7 +19,7 @@ from defender.tests.support.learning.branch import _world_1007 as W
 from defender.tests.support.learning.curation._curator1134 import author_trees
 from defender.tests.e2e import _box665 as B
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
-from defender.tests.e2e.test_922_spine import (
+from defender.tests.e2e.test_training_spine import (
     draft_root,
     drive_tenant_author_drain,
     tenant_paths,
@@ -123,7 +123,7 @@ def defender_queue_row(fid: str = "ep-1/b/0/1", **extra) -> dict:
 
 
 def drive(t, paths, trigger, *, rec=None):
-    """The REAL `author_drain` over the tenant path (`test_922_spine`'s driver)."""
+    """The REAL `author_drain` over the tenant path (`test_training_spine`'s driver)."""
     return drive_tenant_author_drain(t, paths, trigger, rec=rec)
 
 

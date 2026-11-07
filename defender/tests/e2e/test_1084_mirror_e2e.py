@@ -16,7 +16,7 @@ import pytest
 
 from defender import run_common
 from defender.configuration import _env
-from defender.tests.e2e.test_922_renderer import MARKER, driven_run, tenant_run
+from defender.tests.e2e.test_transcript_renderer import MARKER, driven_run, tenant_run
 
 pytestmark = pytest.mark.e2e
 
