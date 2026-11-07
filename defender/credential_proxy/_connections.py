@@ -8,6 +8,13 @@ from typing import ClassVar, cast
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
 
+def check_delivery_limit_supported() -> None:
+    """Raises `AttributeError` or `OSError` where a connection could not be given the limit, so
+    the program refuses at start rather than fail each connection."""
+    with socket.socket() as probe:
+        probe.setsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT, 1000)
+
+
 class DeliveryLimited(H11Protocol):
     """HTTP as uvicorn serves it, on a connection the kernel drops once bytes the proxy has sent
     find no room for `limit_sec`, freeing them. Long enough that a run which recovers rarely loses

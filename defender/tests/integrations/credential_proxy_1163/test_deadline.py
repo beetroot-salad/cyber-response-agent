@@ -613,6 +613,14 @@ BODY_SEC = 1.0
 ENDED_WITHIN_SEC = BODY_SEC + 2.5
 
 
+def _trickling(conn: socket.socket) -> Callable[[], None]:
+    """Sends `conn` one more byte each call, for as long as it stays open."""
+    def trickle() -> None:
+        with contextlib.suppress(OSError):
+            conn.sendall(b"y")
+    return trickle
+
+
 def _no_reply(_conn: socket.socket) -> None:
     """An upstream nothing reaches: these cases end before any call to it."""
 
@@ -674,14 +682,14 @@ def test_o2_a_request_that_stops_arriving_is_ended_with_a_refusal_and_the_connec
         tmp_path, data_root):
     """Most of a body, then silence: within the limit the proxy answers that the request did not
     arrive in time (a transport fault, nothing sent to a system, audited once) and closes."""
-    with _proxy_of(tmp_path, data_root, request_body_sec=BODY_SEC, upstream_timeout_sec=0.5,
-                   proxy_overhead_sec=0.5) as (url, audit):
+    with _proxy_of(tmp_path, data_root, request_body_sec=BODY_SEC, upstream_timeout_sec=0.2,
+                   proxy_overhead_sec=0.2) as (url, audit):
         conn = _open_request(url, 1000, b"x" * 10)
         with conn:
             got, closed_after = _read_until_closed(conn, 8)
 
     assert closed_after is not None, "still open: the proxy did not end the request"
-    assert closed_after < ENDED_WITHIN_SEC, closed_after
+    assert BODY_SEC <= closed_after < ENDED_WITHIN_SEC, closed_after
     final = _decoded_final(got)
     assert (final.fault, final.sent, final.status) == ("TransportFault", False, None), final
     assert "in time" in final.detail, final.detail
@@ -691,17 +699,21 @@ def test_o2_a_request_that_stops_arriving_is_ended_with_a_refusal_and_the_connec
 def test_o2_a_peer_still_sending_when_the_limit_passes_is_closed_all_the_same(tmp_path, data_root):
     """A body trickling in, never complete, a byte every 0.3 s, past the limit: the connection
     still closes (the answer says close; uvicorn's idle timer never runs while bytes arrive)."""
-    with _proxy_of(tmp_path, data_root, request_body_sec=BODY_SEC, upstream_timeout_sec=0.5,
-                   proxy_overhead_sec=0.5) as (url, _audit):
+    with _proxy_of(tmp_path, data_root, request_body_sec=BODY_SEC, upstream_timeout_sec=0.2,
+                   proxy_overhead_sec=0.2) as (url, _audit):
         conn = _open_request(url, 1000, b"x")
         with conn:
-            def trickle() -> None:
-                with contextlib.suppress(OSError):
-                    conn.sendall(b"y")
-            _got, closed_after = _read_until_closed(conn, 8, between=trickle)
+            _got, closed_after = _read_until_closed(conn, 8, between=_trickling(conn))
 
     assert closed_after is not None, "still open: the proxy did not end the request"
-    assert closed_after < ENDED_WITHIN_SEC, closed_after
+    assert BODY_SEC <= closed_after < ENDED_WITHIN_SEC, closed_after
+
+
+def test_o2_the_limit_on_a_request_arriving_is_60_seconds_unless_given_another(tmp_path):
+    """The shipped limit, and a limit that could never pass refused at construction."""
+    assert T.deps(tmp_path, H.FakeStore()).request_body_sec == 60
+    with pytest.raises(ConfigFault, match="request_body_sec"):
+        T.deps(tmp_path, H.FakeStore(), request_body_sec=0)
 
 
 def test_o2_a_request_slower_than_the_limit_but_inside_the_request_deadline_is_still_read(
@@ -732,10 +744,7 @@ def test_o2_a_peer_still_sending_past_the_size_limit_is_closed_after_the_refusal
     with _proxy_of(tmp_path, data_root) as (url, _audit):
         conn = _open_request(url, 40 * 2**20, b"x" * OVER_SIZE)
         with conn:
-            def trickle() -> None:
-                with contextlib.suppress(OSError):
-                    conn.sendall(b"y")
-            got, closed_after = _read_until_closed(conn, 8, between=trickle)
+            got, closed_after = _read_until_closed(conn, 8, between=_trickling(conn))
 
     assert closed_after is not None, "still open: the refusal did not end the connection"
     assert closed_after < 3, closed_after
