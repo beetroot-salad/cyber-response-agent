@@ -91,7 +91,9 @@ def test_the_history_is_the_baseline_and_five_revisions_on_it_in_a_line():
         "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE]
     assert [down for _, down in old] == ["0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE, None]
     assert len(script.get_heads()) == 1, "the history branches"
-    assert len(chain) == len({revision for revision, _ in chain}) >= 7, "every revision is on the one line"
+    # The whole line, newest first: each revision's down revision is the next one listed, and the last has none.
+    assert all(down == chain[i + 1][0] for i, (_, down) in enumerate(chain[:-1])), "the history is not one line"
+    assert chain[-1][1] is None
 
 @pytest.mark.postgres
 def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_database):
