@@ -11,7 +11,9 @@ lifecycle's `start_box` seam (never `DEFENDER_ALLOW_UNSANDBOXED`). Marks go in `
 - `hold` (death tie): the investigation blocks in the main thread; `hold-committed` is the same after
   closing the report on the facts holder it is handed (r5 C2). Marks: `pid`, `in-lifecycle`,
   `start-token` (the token the box start was handed), `interrupted` (the exception type that reached the investigation), `stop-box-started`, then
-  `stop-box-done` once `go-on` exists (a later signal during teardown would stop the wait)."""
+  `stop-box-done` once `go-on` exists (a later signal during teardown would stop the wait).
+- `replay-priced` (#1377): MAIN, one gather lead and the live review stages as priced stand-ins;
+  `replay-priced-ledger-fault` also refuses ledger inserts during the review. Marks: `calls-<model>`."""
 from __future__ import annotations
 
 import functools
@@ -96,7 +98,107 @@ def _hold_lifecycle(*, closes: bool):
                              start_box=_unboxed, stop_box=stop_box, scrub=lambda *a, **k: None)
 
 
-lifecycle = (_replay_lifecycle(fault_after_close=mode == "replay-fault-after-close")
-             if mode.startswith("replay") else _hold_lifecycle(closes=mode == "hold-committed"))
+#: The priced modes' models (#1377): each name its own `in` rate (3.0, 1.0, 0.95 USD a million).
+PRICED_MAIN, PRICED_GATHER, PRICED_REVIEW = "claude-sonnet-4-6", "claude-haiku-4-5", "kimi-k2.6"
+
+
+def _counted(name: str, then=None):
+    """Append one line to `<marks>/calls-<name>` per call, then run `then`."""
+    def before():
+        with (marks / f"calls-{name}").open("a", encoding="utf-8") as fh:
+            fh.write("1\n")
+        if then is not None:
+            then()
+    return before
+
+
+def _session_database() -> Path:
+    import json
+
+    job, tenant = argv[argv.index("--job") + 1], argv[argv.index("--tenant") + 1]
+    pointer = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs" / f"{job}.session-pointer.json"
+    return Path(json.loads(pointer.read_text(encoding="utf-8"))["store_path"])
+
+
+def _ledger_trigger(sql: str):
+    """A real sqlite fault on the run's own ledger table, made from a second connection."""
+    import sqlite3
+    import threading
+
+    lock = threading.Lock()
+
+    def run() -> None:
+        with lock:
+            conn = sqlite3.connect(_session_database(), timeout=10)
+            try:
+                conn.execute(sql)
+                conn.commit()
+            finally:
+                conn.close()
+    return run
+
+
+def _priced_lifecycle(*, ledger_fault: bool):
+    """`replay-priced`: MAIN (dispatch one elastic lead, append, close, text), the lead (one query,
+    then its final summary), the correlation lead (its summary) and the live review stages, each a priced stand-in. `-ledger-fault`
+    refuses every ledger insert from the first review call until MAIN's turn after the close."""
+    import asyncio
+
+    from pydantic_ai.models import override_allow_model_requests
+
+    from defender.investigation import driver
+    from defender.records.formats import parse_report_text
+    from defender.tests.e2e._replay_harness import FakeVerbs
+    from defender.tests.e2e.test_query_tool_611 import DONE, q
+
+    disposition = parse_report_text((GOLDEN / "report.md").read_text(encoding="utf-8")).disposition
+    from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER
+
+    refuse = _ledger_trigger(f"CREATE TRIGGER IF NOT EXISTS refuse_spend BEFORE INSERT ON {SPEND_LEDGER} "
+                             "BEGIN SELECT RAISE(ABORT, 'the disk is full'); END") if ledger_fault else None
+    allow = _ledger_trigger("DROP TRIGGER IF EXISTS refuse_spend") if ledger_fault else None
+    main_calls = {"n": 0}
+
+    def main_before():
+        main_calls["n"] += 1
+        if allow is not None and main_calls["n"] == 4:  # the text turn after the close
+            allow()
+
+    main = RH.ReplayFn([
+        RH.Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic", "goal": "measure this lead",
+                                        "what_to_summarize": ["auth events"]})]),
+        RH.Turn(tool_calls=[("append_block", {"text": (GOLDEN / "investigation.md").read_text(encoding="utf-8")})]),
+        RH.Turn(tool_calls=[("close_investigation", {"disposition": disposition})]),
+        RH.Turn(text="Investigation complete."),
+    ])
+    # l-001 runs its query, then its final summary; the correlation lead (l-00c) answers its summary once.
+    lead = RH._with_default_correlation(RH.ReplayFn([q("elastic", "query", {"native_query": "user.name:root"}), DONE]), None)
+    review = RH.ReplayFn([RH.Turn(text=RH._review_bundle.composer_reply("holds"))] * 3)
+    make_model = RH.priced_make_model({
+        PRICED_MAIN: RH.Priced(main, before=_counted("main", main_before)),
+        PRICED_GATHER: RH.Priced(lead, before=_counted("gather")),
+        PRICED_REVIEW: RH.Priced(review, before=_counted("review", refuse)),
+    })
+    def query(ctx, *, native_query: str, limit: int = 10) -> list[dict]:
+        return [{"user": "root"}]
+
+    verbs = FakeVerbs({"elastic": {"query": query}})
+
+    def investigate(**handed):
+        # No `review_stages`: the run's own live bundle, built on the run's `make_model` (#1377).
+        with override_allow_model_requests(False):
+            return asyncio.run(driver.run_investigation(
+                **{**handed, "verbs": verbs}, make_model=make_model, orient_shim=RH.no_orient_shims))
+
+    drive = functools.partial(run_py._drive_investigation, investigate=investigate)
+    return functools.partial(run_py._run_investigation_lifecycle, investigate=drive, start_box=_unboxed)
+
+
+if mode.startswith("replay-priced"):
+    lifecycle = _priced_lifecycle(ledger_fault=mode == "replay-priced-ledger-fault")
+elif mode.startswith("replay"):
+    lifecycle = _replay_lifecycle(fault_after_close=mode == "replay-fault-after-close")
+else:
+    lifecycle = _hold_lifecycle(closes=mode == "hold-committed")
 sys.exit(run_py.job_main(argv, lifecycle=lifecycle, preflight=lambda *a, **k: 0,
                          visualize=lambda *a, **k: None, publish=lambda *a, **k: f"fresh {commit}"))

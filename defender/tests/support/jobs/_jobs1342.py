@@ -691,6 +691,38 @@ def plant_fork(runs: Path, case_id: str, parent: tuple[str, list[int]], *, agent
     return fork
 
 
+#: The spend ledger's table and columns as #1377's sketch names them (the design leaves them open).
+SPEND_LEDGER = "spend_ledger"
+SPEND_COLUMNS = ("run_id", "model", "input_tokens", "output_tokens", "cache_read_input_tokens",
+                 "cache_creation_input_tokens")
+
+
+def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, dict[str, int]]]) -> None:
+    """#1377: `case_id`'s session database (made by the real store, so its own schema) holding one
+    ledger row per `(model, billed usage)` for `run_id`."""
+    import sqlite3
+
+    from defender.records.session_store._write import open_store
+
+    with open_store(case_id=case_id, sessions=_paths(runs)):
+        pass
+    conn = sqlite3.connect(session_db(runs, case_id))
+    try:
+        for model, usage in spend:
+            values = (run_id, model, *(usage.get(k, 0) for k in SPEND_COLUMNS[2:]))
+            conn.execute(f"INSERT INTO {SPEND_LEDGER} ({', '.join(SPEND_COLUMNS)}) "  # noqa: S608
+                         f"VALUES ({', '.join('?' * len(SPEND_COLUMNS))})", values)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def lower_limit(dsn: str, investigation_id: str) -> bool | None:
+    """#1377: the row's `cost_is_lower_limit` (kept apart from `row`, whose columns every #1342 case reads)."""
+    found = execute(dsn, "SELECT cost_is_lower_limit FROM jobs.investigations WHERE id = %s", (investigation_id,))
+    return found[0][0] if found else None
+
+
 @contextmanager
 def session_database_held_locked(runs: Path, case_id: str) -> Iterator[None]:
     """#1343 B2: while the block runs, any read of `case_id`'s planted session database waits on a real

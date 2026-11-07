@@ -55,11 +55,13 @@ from defender.tests.support.jobs._jobs1342 import (
     job_store,
     knowledge_record,
     knowledge_record_of,
+    lower_limit,
     make_worker,
     move_tenant,
     plant_fork,
     plant_queued_investigation,
     plant_sessions,
+    plant_spend,
     register_tenant,
     restate_tenant,
     row,
@@ -838,6 +840,56 @@ async def test_o8_a_session_pointer_of_the_wrong_shape_keeps_the_stage_and_leave
     assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
     assert stored["cost_usd"] is None
     assert _warned(caplog, inv), "the cost fault was not logged"
+
+
+#: #1377: the run's two ledger rows, 3.0 + 5.0 USD.
+_SPEND = [("claude-sonnet-4-6", {"input_tokens": 1_000_000}), ("claude-haiku-4-5", {"output_tokens": 1_000_000})]
+
+
+@pytest.mark.parametrize(("case", "expect"), [
+    ("clean exact", ("completed", 8.0, False)),
+    ("failed ledger write", ("completed", 8.0, True)),
+    ("killed run, no job-end", ("failed", 8.0, True)),
+    ("unreadable ledger", ("completed", None, False)),
+    ("no pointer", ("failed", 0.0, False)),
+])
+async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_table(world, case, expect):
+    """One case per row of the flag table: the ledger's sum for this run, marked "at least" only where spend may be missing.
+    (S2, S4)"""
+    pointer = {"{id}.session-pointer.json": session_pointer(CASE)}
+    ending = {
+        "clean exact": (_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=False)}, **pointer), 0),
+        "failed ledger write": (_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=True)}, **pointer), 0),
+        "killed run, no job-end": (pointer, 1),
+        "unreadable ledger": (_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=True)}, **pointer), 0),
+        "no pointer": ({}, 1),
+    }
+    files, code = ending[case]
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        if case == "unreadable ledger":
+            _break_database(world["runs"], CASE)
+        elif case != "no pointer":
+            plant_spend(world["runs"], CASE, inv, _SPEND)
+        await _worker(world, store, _child(world, files=files, exit=code)).drain()
+    stored = row(world["dsn"], inv)
+
+    assert (stored["stage"], stored["cost_usd"], lower_limit(world["dsn"], inv)) == expect
+
+
+async def test_s1_a_branch_arm_sharing_the_database_counts_only_its_own_run(world):
+    """Two runs' ledger rows in the one database the pointer names: the job's cost is its own rows only. (S1, Design "Model")"""
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        plant_spend(world["runs"], CASE, inv, _SPEND)
+        plant_spend(world["runs"], CASE, "a3000000-0000-4000-8000-000000000003",
+                    [("claude-sonnet-4-6", {"output_tokens": 1_000_000})])  # a sibling arm's 15.0
+        files = _committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=False),
+                              "{id}.session-pointer.json": session_pointer(CASE)})
+        await _worker(world, store, _child(world, files=files)).drain()
+    stored = row(world["dsn"], inv)
+
+    assert (stored["stage"], stored["cost_usd"], lower_limit(world["dsn"], inv)) == ("completed", 8.0, False)
 
 
 # --- knowledge --------------------------------------------------------------------------------------

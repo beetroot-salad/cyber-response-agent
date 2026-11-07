@@ -19,6 +19,7 @@ from defender.tests.support.jobs._jobs1342 import (
     an_alert,
     is_box_token,
     job_store,
+    lower_limit,
     make_worker,
     register_tenant,
     row,
@@ -220,3 +221,119 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_runs_stamped_l
         launch = json.loads((runs / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
         stamp = json.loads((runs / inv.investigation_id / "provenance.json").read_text(encoding="utf-8"))
         assert (launch["label"], stamp["alert_label"]) == (launched_with, launched_with)
+
+
+# --- #1377: the spend ledger -------------------------------------------------------------------------
+
+#: `replay-priced`'s calls and their rates (configuration/_pricing.py `in`, USD a million): MAIN dispatch,
+#: append, close, text; l-001's query and final summary, and the correlation lead's summary; the review's support,
+#: ablation, composer.
+MAIN_IN, GATHER_IN, REVIEW_IN = 3.0, 1.0, 0.95
+PRICED_CALLS = {"main": 4, "gather": 3, "review": 3}
+
+
+def _priced_env(monkeypatch, root: Path, dsn: str) -> None:
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)
+    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    monkeypatch.setenv("DEFENDER_MODEL", "claude-sonnet-4-6")
+    monkeypatch.setenv("DEFENDER_GATHER_MODEL", "claude-haiku-4-5")
+    monkeypatch.setenv("DEFENDER_REVIEW_MODEL", "kimi-k2.6")
+
+
+def _calls(marks: Path) -> dict[str, int]:
+    return {name: len((marks / f"calls-{name}").read_text(encoding="utf-8").splitlines())
+            if (marks / f"calls-{name}").is_file() else 0 for name in PRICED_CALLS}
+
+
+def _run_result(run: Path) -> dict:
+    lines = (run / "tool_trace.jsonl").read_text(encoding="utf-8").splitlines()
+    return [e for e in map(json.loads, lines) if e.get("type") == "result"][-1]
+
+
+async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated_database, tmp_path, monkeypatch):  # noqa: F811
+    """`cost_usd` is every priced response: MAIN, the lead's final one included, and the review's; exact, and the run file agrees.
+    (S1, S2, S5)"""
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    root = tmp_path / "data"
+    root.mkdir()
+    _priced_env(monkeypatch, root, migrated_database)
+    golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
+    with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        (root / t.tenant_id / "runs").mkdir(exist_ok=True)
+
+        def child(launch) -> list[str]:
+            return [sys.executable, str(ENTRY), "replay-priced", t.commit, str(tmp_path / "marks"), "--job",
+                    launch.investigation_id, "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+
+        async with job_store(migrated_database) as store:
+            alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
+            inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
+            await make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers")).drain()
+
+        runs = root / t.tenant_id / "runs"
+        stored = row(migrated_database, inv.investigation_id)
+        assert _calls(tmp_path / "marks") == PRICED_CALLS, ("premise: the run made exactly the scripted calls", stored)
+        assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive"), stored
+        spent = 4 * MAIN_IN + 3 * GATHER_IN + 3 * REVIEW_IN  # 17.85
+        assert stored["cost_usd"] == pytest.approx(spent)
+        assert lower_limit(migrated_database, inv.investigation_id) is False
+        end = json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8"))
+        assert end["spend_write_failed"] is False, end
+        result = _run_result(runs / inv.investigation_id)
+        assert result["total_cost_usd"] == pytest.approx(spent)
+        assert result["total_cost_is_lower_limit"] is False
+        assert result["num_turns"] == 4, "num_turns stays MAIN's turns (run health reads it)"
+
+
+async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_report_and_marks_the_sum(
+        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+    """Inserts refused during the review (a real SQLite fault): same ending, disposition and report as the unfaulted control;
+    the sum lacks the review and is marked, and the child logs it at ERROR. (S3, S2, S5)"""
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    root = tmp_path / "data"
+    root.mkdir()
+    _priced_env(monkeypatch, root, migrated_database)
+    err_file = tmp_path / "child.stderr"
+    golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
+    modes: dict[str, str] = {}
+    with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        (root / t.tenant_id / "runs").mkdir(exist_ok=True)
+
+        def child(launch) -> list[str]:
+            mode = modes[launch.investigation_id]
+            return ["/bin/sh", "-c", 'exec "$@" 2>>"$0"', str(err_file if mode.endswith("fault") else tmp_path / "control.stderr"),
+                    sys.executable, str(ENTRY), mode, t.commit, str(tmp_path / mode), "--job", launch.investigation_id,
+                    "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+
+        async with job_store(migrated_database) as store:
+            ids = []
+            for ticket, mode in (("T-control", "replay-priced"), ("T-fault", "replay-priced-ledger-fault")):
+                alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes(), ticket=ticket)
+                inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
+                modes[inv.investigation_id] = mode
+                ids.append(inv.investigation_id)
+            await make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers")).drain()
+
+        control, faulted = ids
+        runs = root / t.tenant_id / "runs"
+        assert _calls(tmp_path / "replay-priced-ledger-fault") == PRICED_CALLS, "premise: the faulted run made every call"
+        got = {i: row(migrated_database, i) for i in ids}
+        assert (got[control]["stage"], got[control]["disposition"]) == ("completed", "inconclusive"), "premise: the control"
+        assert (got[faulted]["stage"], got[faulted]["disposition"], got[faulted]["failure_reason"]) == (
+            "completed", "inconclusive", None), "a forced verdict reads `unresolved`"
+        report = {i: (runs / i / "report.md").read_text(encoding="utf-8").replace(i, "<id>") for i in ids}
+        assert report[faulted] == report[control]
+        assert got[faulted]["cost_usd"] == pytest.approx(4 * MAIN_IN + 3 * GATHER_IN)  # the review's 2.85 is lost
+        assert lower_limit(migrated_database, faulted) is True
+        assert lower_limit(migrated_database, control) is False
+        end = json.loads((runs / f"{faulted}.job-end.json").read_text(encoding="utf-8"))
+        assert (end["report_committed"], end["spend_write_failed"]) == (True, True), end
+        result = _run_result(runs / faulted)
+        assert (result["total_cost_usd"], result["total_cost_is_lower_limit"]) == (pytest.approx(15.0), True)
+        assert any("ERROR" in line and "spend" in line.lower()
+                   for line in err_file.read_text(encoding="utf-8").splitlines()), "the failed write was not logged at ERROR"

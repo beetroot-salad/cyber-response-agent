@@ -8,6 +8,8 @@ from defender.tests.support.shared.contracts._spec1077 import fixture_run as _ru
 import json
 from pathlib import Path
 
+import pytest
+
 from defender._io import read_jsonl_rows
 from defender.records import RunPaths
 from defender.presentation import visualize_data as d
@@ -359,6 +361,34 @@ def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path
     assert abs(float(named.group(1)) - review_total) < 0.0001
 
     assert "kimi-k3" in html, "the page does not name the model the review billed"
+
+
+def _restate_the_run_total(run: Path, total: float, *, lower_limit: bool) -> None:
+    """The run file's result line as #1377 writes it: the whole run's total (review included) and its mark."""
+    path = run / "tool_trace.jsonl"
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    events[-1].update(total_cost_usd=total, total_cost_is_lower_limit=lower_limit)
+    path.write_text("".join(json.dumps(e) + "\n" for e in events))
+
+
+@pytest.mark.parametrize("lower_limit", [False, True], ids=["exact", "at least"])
+def test_s5_the_headline_is_the_run_files_total_review_counted_once_and_marked_when_it_is_a_lower_limit(
+        tmp_path, monkeypatch, lower_limit):
+    """The run file's total already holds the review's calls: the headline is that total alone, "at least" when marked. (S5)"""
+    import re
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    review_total = _append_review_calls(run)
+    total = 0.5 + review_total
+    _restate_the_run_total(run, total, lower_limit=lower_limit)
+
+    html = render_runtime_page(run)
+
+    headline = re.search(r'ts-cost">(at least )?\$([0-9.]+)', html)
+    assert headline is not None, "no headline cost"
+    assert float(headline.group(2)) == pytest.approx(total, abs=0.002), "the review was counted twice or dropped"
+    assert (headline.group(1) is not None) is lower_limit
 
 
 def _duplicate_the_gather_phase(run: Path) -> None:

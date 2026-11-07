@@ -381,6 +381,38 @@ def _awaiting(fn):
     return call
 
 
+#: What every priced stand-in response bills (#1377): one million uncached input tokens, so a
+#: response costs exactly its model's `in` rate.
+PRICED_USAGE = {"input_tokens": 1_000_000}
+
+
+class Priced:
+    """A replay callable as a priced stand-in (#1377): each response bills `PRICED_USAGE`, and
+    `before()` (when given) runs before the response is made."""
+
+    def __init__(self, fn, *, before: Callable[[], None] | None = None):
+        self._fn, self._before = fn, before
+        self.__name__ = getattr(fn, "__name__", type(fn).__name__)
+
+    def __call__(self, messages, info) -> ModelResponse:
+        from pydantic_ai.usage import RequestUsage
+
+        if self._before is not None:
+            self._before()
+        response = self._fn(messages, info)
+        response.usage = RequestUsage(**PRICED_USAGE)
+        return response
+
+
+def priced_make_model(by_name: Mapping[str, Any]):
+    """The driver's `make_model` seam answering each model NAME with its own stand-in, reported
+    under that name, so the pricing table prices it (FunctionModel stamps its own `model_name`)."""
+    def make_model(name, effort):
+        return BuiltModel(FunctionModel(_awaiting(by_name[name]), model_name=name), None)
+
+    return make_model
+
+
 def _with_default_correlation(gather, main):
     """`gather` (or `main`, when none is given) as the gather model, except that the
     correlation lead's conversation is answered by its own default fake. A `gather` that routes

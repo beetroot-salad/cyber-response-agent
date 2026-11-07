@@ -61,6 +61,29 @@ def test_o14_cost_is_nullable_and_described_as_so_far_while_live():
     assert "unknown" in description or "null" in description
 
 
+def test_s2_cost_is_lower_limit_sits_beside_an_unchanged_cost_and_says_what_at_least_means():
+    """`cost_is_lower_limit` round-trips beside `cost_usd`, whose type is unchanged; its text says the cost is a lower limit. (S2, S4)"""
+    inv = _investigation(cost_usd=2.5, cost_is_lower_limit=True)
+    dumped = inv.model_dump(mode="json")
+    assert (dumped["cost_usd"], dumped["cost_is_lower_limit"]) == (2.5, True)
+    assert models.Investigation.model_validate(dumped) == inv
+    assert models.Investigation.model_fields["cost_usd"].annotation == float | None
+    description = models.Investigation.model_fields["cost_is_lower_limit"].description.lower()
+    assert "lower limit" in description
+    assert "at least" in description
+
+
+def test_s2_the_fake_creates_an_investigation_whose_cost_is_not_a_lower_limit():
+    """The development fake carries the field: a new investigation's cost is 0 and exact. (S2, S4)"""
+    async def run():
+        store = InMemoryStore(lambda: NOW)
+        store.add_alert("t", models.Alert(**_alert(raw="{}")))
+        return await store.create_investigation("t", "a1000000-0000-4000-8000-000000000001", "req-9")
+
+    inv, _ = anyio.run(run)
+    assert (inv.cost_usd, inv.cost_is_lower_limit) == (0.0, False)
+
+
 def test_b12_failure_reason_names_the_two_take_over_reasons_beside_the_old_ones():
     """The `failure_reason` text lists `lease_lapsed` and `retry_cap` and still `cancelled` and `worker_error`. (B12)"""
     description = models.Investigation.model_fields["failure_reason"].description

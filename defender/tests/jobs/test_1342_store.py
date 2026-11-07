@@ -33,6 +33,7 @@ from defender.tests.support.jobs._jobs1342 import (
     job_store,
     lapse_lease,
     lease_left,
+    lower_limit,
     register_tenant,
     row,
 )
@@ -2193,6 +2194,50 @@ async def test_b11_take_over_tells_a_handed_back_row_from_a_lost_workers_in_its_
     assert "handed it back" in got_handed["failure_message"], got_handed["failure_message"]
     assert "stopped renewing" not in got_handed["failure_message"]
     assert "stopped renewing its lease" in got_lost["failure_message"], got_lost["failure_message"]
+
+
+# --- #1377: the cost's lower-limit mark (`cost_is_lower_limit`) ---------------------------------------------------
+
+@pytest.mark.parametrize("path", ["finish", "hand_back", "write_accounting"])
+async def test_s2_every_final_cost_write_carries_its_lower_limit_mark(dsn, path):
+    """The worker's final figure lands with its mark on each path that writes one; the record answers it too. (S2)"""
+    if path == "write_accounting":
+        inv = _ended_with_cost(dsn, "aborted", "A")
+    else:
+        inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        if path == "finish":
+            got = await store.finish(T1, inv, stage="completed", disposition="benign", cost_usd=4.5,
+                                     cost_is_lower_limit=True)
+        else:
+            got = await getattr(store, path)(T1, inv, cost_usd=4.5, knowledge=KNOWLEDGE, cost_is_lower_limit=True)
+    assert (got.cost_usd, got.cost_is_lower_limit) == (4.5, True)
+    assert (row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (4.5, True)
+
+
+async def test_s2_a_live_rows_cost_so_far_and_a_cancelled_queued_row_are_not_marked(dsn):
+    """A renewal's copied figure leaves the mark false ("so far" already says it); a queued row cancelled before any run is exactly 0. (S2, S4)"""
+    running = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="R"), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        await store.renew({running}, costs={running: 3.5})
+        queued, _ = await store.create_investigation(T1, _plant_alert(dsn, ticket="Q"), "kq", actor="u-1")
+        cancelled = await store.cancel_investigation(T1, queued.investigation_id, actor="u-1")
+    assert (row(dsn, running)["cost_usd"], lower_limit(dsn, running)) == (3.5, False)
+    assert (cancelled.cost_usd, cancelled.cost_is_lower_limit) == (0, False)
+    assert lower_limit(dsn, queued.investigation_id) is False
+
+
+async def test_s2_a_lost_workers_row_is_taken_over_as_at_least_its_last_copy_and_a_handed_back_row_keeps_its_mark(dsn):
+    """Take-over makes no host read: a lost worker's row keeps its stale copy, marked; a handed-back row keeps the mark its holder wrote; the retry starts unmarked at 0. (S2; base-drift unsettled 1)"""
+    lost = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="L"), key="kl", attempt=1, lapsed=True)
+    handed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="H"), key="kh", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        await store.hand_back(T1, handed, cost_usd=2.0, knowledge=None, cost_is_lower_limit=False)
+        await store.take_over(held=frozenset())
+    assert (row(dsn, lost)["cost_usd"], lower_limit(dsn, lost)) == (1.25, True)
+    assert (row(dsn, handed)["cost_usd"], lower_limit(dsn, handed)) == (2.0, False)
+    [retry] = _retries_of(dsn, lost)
+    assert (row(dsn, retry)["cost_usd"], lower_limit(dsn, retry)) == (0, False)
 
 
 async def test_o6_the_store_tells_a_value_it_refuses_from_a_read_only_database_on_real_faults(dsn):
