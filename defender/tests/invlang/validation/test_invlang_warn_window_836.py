@@ -241,24 +241,6 @@ def test_the_accept_path_derives_its_warning_after_the_gate_returned_none(tmp_pa
 
 # the gate
 
-def test_append_block_refused_while_a_row_is_flagged(tmp_path):
-    """With a row flagged, the next `append_block` is refused even if its own text is clean,
-    and the refusal names the repair verb."""
-    from pydantic_ai.exceptions import ModelRetry
-
-    from defender.investigation.tools import _tool_append_block
-
-    deps, run = main_deps(tmp_path)
-    seed_investigation(run, WARN_DOC)
-
-    with pytest.raises(ModelRetry) as exc:
-        _tool_append_block(deps, CLEAN_BLOCK)
-
-    assert WARN_ROW in str(exc.value)
-    assert "fix_row" in str(exc.value), "the refusal offers no reachable remedy"
-    assert (run / "investigation.md").read_text(encoding="utf-8") == WARN_DOC
-
-
 def test_close_gate_precedes_every_disposition_branch(tmp_path):
     """While a row is flagged the close is refused for every disposition: the gate sits at the
     TOP of the close, after the disposition-enum and terminal-closed checks."""
@@ -299,14 +281,17 @@ def test_close_gate_precedes_the_review_spend(tmp_path):
     assert stages2.calls, "the recording bundle cannot see a review at all"
 
 
-def test_gate_refusal_names_the_flagged_rows_and_their_use_alternatives(tmp_path):
-    """Both gate refusals hand the model the row AND the corrections it can paste back."""
+def test_a_flagged_row_refuses_append_and_close_naming_the_row_and_its_repairs_and_writes_nothing(tmp_path):
+    """With a row flagged, the next `append_block` is refused even if its own text is clean, and so is
+    the close. Both refusals hand the model the row AND the corrections it can paste back, and write
+    NOTHING on either artifact."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.investigation.tools import _tool_append_block
 
     deps, run = main_deps(tmp_path)
-    seed_investigation(run, WARN_DOC)
+    inv = seed_investigation(run, WARN_DOC)
+    before = inv.read_bytes()
 
     with pytest.raises(ModelRetry) as append_exc:
         _tool_append_block(deps, CLEAN_BLOCK)
@@ -316,26 +301,10 @@ def test_gate_refusal_names_the_flagged_rows_and_their_use_alternatives(tmp_path
     for exc in (append_exc, close_exc):
         text = str(exc.value)
         assert f"row: {WARN_ROW}" in text
+        assert "fix_row" in text, "the refusal offers no reachable remedy"
         assert "use: l-001|v-001|attrs.owner|svc.config-mgmt" in text
         assert "use: l-001|v-001|class|svc.config-mgmt" not in text
         assert "no `class` alternative is offered here" in text
-
-
-def test_a_gated_refusal_leaves_both_artifacts_byte_identical(tmp_path):
-    """A gated refusal writes NOTHING on either artifact, investigation.md or report.md."""
-    from pydantic_ai.exceptions import ModelRetry
-
-    from defender.investigation.tools import _tool_append_block
-
-    deps, run = main_deps(tmp_path)
-    inv = seed_investigation(run, WARN_DOC)
-    before = inv.read_bytes()
-
-    with pytest.raises(ModelRetry):
-        _tool_append_block(deps, CLEAN_BLOCK)
-    with pytest.raises(ModelRetry):
-        _close(deps, "inconclusive")
-
     assert inv.read_bytes() == before
     assert not (run / "report.md").exists()
 

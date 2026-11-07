@@ -242,9 +242,11 @@ def _esql_rows(n: int) -> list[list]:
     return [[f"host-{i:04d}", i] for i in range(n)]
 
 
-def test_an_esql_payload_at_the_row_cap_is_never_called_complete(tmp_path):
+def test_an_esql_payload_at_the_row_cap_is_never_called_complete_nor_offered_a_count(tmp_path):
     """An ES|QL payload at the row cap is never called complete (its `row_count` is computed from the
-    rows it carries), driven through the real adapter shape."""
+    rows it carries), driven through the real adapter shape; and the footer reads the same
+    `Completeness` as the prose: an `unknown` envelope is neither named a full payload nor offered
+    a `count(*)`."""
     from defender.integrations.elastic_adapter import esql_payload
 
     payload = esql_payload("FROM logs-* | STATS c = COUNT(*) BY host", {
@@ -252,25 +254,11 @@ def test_an_esql_payload_at_the_row_cap_is_never_called_complete(tmp_path):
         "values": _esql_rows(1000),
     })
     assert payload["row_count"] == 1000, "the adapter shape changed under the test"
-    assert pv.completeness(payload).state != "complete"
+    assert pv.completeness(payload).state == "unknown", "the fixture stopped exercising it"
 
     view = _view(json.dumps(payload), ceiling=8192, run_dir=tmp_path)
     assert "nothing was capped upstream" not in view
     assert "counts are exact" not in view
-
-
-def test_an_unknown_envelope_is_not_offered_as_a_full_payload_to_count(tmp_path):
-    """The footer reads the same `Completeness` as the prose: an `unknown` envelope is neither named
-    a full payload nor offered a `count(*)`."""
-    from defender.integrations.elastic_adapter import esql_payload
-
-    payload = esql_payload("FROM logs-* | STATS c = COUNT(*) BY host", {
-        "columns": [{"name": "host", "type": "keyword"}, {"name": "c", "type": "long"}],
-        "values": _esql_rows(1000),
-    })
-    assert pv.completeness(payload).state == "unknown", "the fixture stopped exercising it"
-    view = _view(json.dumps(payload), ceiling=8192, run_dir=tmp_path)
-
     assert "full payload" not in view, "an envelope declaring nothing was called complete"
     assert "count(*)" not in view, "a count over an unknown slice was offered as the answer"
     assert "payload on disk" in view, "the file the lead must read was not named at all"

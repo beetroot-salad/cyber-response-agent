@@ -55,29 +55,7 @@ def _close(deps, disposition, **kw):
 
 # #961 — the close is a gated write path
 
-def test_a_close_over_an_error_severity_document_commits_nothing(tmp_path):
-    from pydantic_ai.exceptions import ModelRetry
-
-    deps, run = main_deps(tmp_path)
-    seed_investigation(run, _ERROR_DOC)
-
-    with pytest.raises(ModelRetry) as exc:
-        _close(deps, "inconclusive")
-
-    assert "close blocked" in str(exc.value)
-    assert not (run / "report.md").exists(), "the close committed a report anyway"
-
-
-def test_the_same_document_without_the_defect_closes(tmp_path):
-    deps, run = main_deps(tmp_path)
-    seed_investigation(run, _CLEAN_DOC + CONCLUDE_BENIGN)
-
-    _close(deps, "inconclusive")
-
-    assert (run / "report.md").is_file()
-
-
-def test_the_close_refusal_names_the_rows_and_the_repair_verb(tmp_path):
+def test_a_close_over_an_error_severity_document_commits_nothing_and_names_the_repair(tmp_path):
     """The refusal is the model's only channel: it is told its own context IS the file, so a
     close it cannot act on is a close it will retry unchanged until the budget runs out."""
     from pydantic_ai.exceptions import ModelRetry
@@ -89,9 +67,20 @@ def test_the_close_refusal_names_the_rows_and_the_repair_verb(tmp_path):
         _close(deps, "inconclusive")
     message = str(exc.value)
 
+    assert "close blocked" in message
+    assert not (run / "report.md").exists(), "the close committed a report anyway"
     assert "refined twice in this write" in message
     assert "fix_row" in message
     assert "publishes" in message, "say why a close is the moment this is checked"
+
+
+def test_the_same_document_without_the_defect_closes(tmp_path):
+    deps, run = main_deps(tmp_path)
+    seed_investigation(run, _CLEAN_DOC + CONCLUDE_BENIGN)
+
+    _close(deps, "inconclusive")
+
+    assert (run / "report.md").is_file()
 
 
 def test_the_frameworks_forced_close_is_exempt(tmp_path):
