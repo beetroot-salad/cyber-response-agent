@@ -145,13 +145,18 @@ def stored_alert(row: AlertRow) -> StoredAlert:
         description=row.description, raw=bytes(row.raw))
 
 
+def is_terminal(stage: str) -> bool:
+    """Whether `stage` is one a row ends in (the one place that tests membership of `TERMINAL`)."""
+    return stage in TERMINAL
+
+
 def reads_at_least(row: InvestigationRow) -> bool:
     """Whether a record's cost reads "at least": the holder's stored mark, or a row that ended after it started with a cost
     and no final figure from its holder (cancelled or taken over mid-run, a copy that may be short). Derived on read, so
     ending a row never writes the mark and rows from before the column read the same way (#1377 B1, B2, B3)."""
     if row.cost_is_lower_limit:
         return True
-    return (row.stage in TERMINAL and row.started_at is not None and row.accounting_written_at is None
+    return (is_terminal(row.stage) and row.started_at is not None and row.accounting_written_at is None
             and row.cost_usd is not None)
 
 

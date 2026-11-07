@@ -42,6 +42,7 @@ from defender.tenancy.models import AlertMappingRow, TenantRecord
 from .models import (
     LIVE,
     TERMINAL,
+    is_terminal,
     AlertRow,
     Claim,
     InvestigationRecord,
@@ -380,7 +381,7 @@ class JobStore:
         (the fence; a row is claimed at most once, so no claim identity is needed): `None` when it
         changed nothing (the row moved, was deleted, or never ran), and the caller then writes its
         final accounting instead (`write_accounting`)."""
-        if stage not in TERMINAL:
+        if not is_terminal(stage):
             raise ValueError(f"{stage!r} is not a terminal stage")
         async with self._tx() as s:
             row = (await s.execute(
