@@ -1274,28 +1274,32 @@ async def test_o5_finish_ends_a_running_row_once_and_returns_it(dsn):
     assert accounting_written(dsn, inv.investigation_id) is not None, "A's finish carries the final accounting (B4)"
 
 
-async def test_o5_finish_of_a_queued_row_changes_nothing(dsn):
-    """A row the worker never claimed is not finished: `None`, row untouched. (O5)"""
+_FAILED = {"stage": "failed", "failure_reason": "worker_error"}
+_COMPLETED = {"stage": "completed", "disposition": "benign"}
+
+
+@pytest.mark.parametrize(("claimed", "moved_to", "tenant", "finish", "stage_before"), [
+    # A row the worker never claimed is not finished.
+    pytest.param(False, None, T1, _FAILED, "queued", id="a_queued_row_never_claimed"),
+    # Only the owning tenant's running row finishes.
+    pytest.param(True, None, T2, _FAILED, "running", id="another_tenants_row"),
+    # A row ended elsewhere (cancel, B) keeps its stage and fields against a late finish.
+    *[pytest.param(True, t, T1, _COMPLETED, t, id=f"a_row_moved_to_{t}") for t in TERMINAL],
+])
+async def test_o5_a_finish_that_does_not_apply_returns_none_and_changes_nothing(
+        dsn, claimed, moved_to, tenant, finish, stage_before):
+    """`None`, row untouched: for a row never claimed, another tenant's row, or one already terminal. (O5)"""
     async with job_store(dsn) as store:
         alert = await an_alert(store, T1)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        if claimed:
+            await store.claim()
+        if moved_to:
+            _set_stage(dsn, inv.investigation_id, moved_to)
         before = row(dsn, inv.investigation_id)
-        assert await store.finish(T1, inv.investigation_id, stage="failed", failure_reason="worker_error") is None
+        assert await store.finish(tenant, inv.investigation_id, **finish) is None
     assert row(dsn, inv.investigation_id) == before
-    assert before["stage"] == "queued"
-
-
-@pytest.mark.parametrize("moved_to", TERMINAL)
-async def test_o5_finish_of_a_row_that_moved_to_a_terminal_stage_changes_nothing(dsn, moved_to):
-    """A row ended elsewhere (cancel, B) keeps its stage and fields against a late finish. (O5)"""
-    async with job_store(dsn) as store:
-        alert = await an_alert(store, T1)
-        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
-        await store.claim()
-        _set_stage(dsn, inv.investigation_id, moved_to)
-        before = row(dsn, inv.investigation_id)
-        assert await store.finish(T1, inv.investigation_id, stage="completed", disposition="benign") is None
-    assert row(dsn, inv.investigation_id) == before
+    assert before["stage"] == stage_before
 
 
 @pytest.mark.parametrize("stage", ["running", "queued", "nonsense"])
@@ -1310,16 +1314,6 @@ async def test_o5_finish_to_a_stage_that_is_not_terminal_is_refused_and_the_row_
             await store.finish(T1, inv.investigation_id, stage=stage, failure_reason="worker_error")
     assert row(dsn, inv.investigation_id) == before
     assert before["stage"] == "running"
-
-
-async def test_o5_finish_of_another_tenants_row_changes_nothing(dsn):
-    """Only the owning tenant's running row finishes. (O5)"""
-    async with job_store(dsn) as store:
-        alert = await an_alert(store, T1)
-        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
-        await store.claim()
-        assert await store.finish(T2, inv.investigation_id, stage="failed", failure_reason="worker_error") is None
-        assert row(dsn, inv.investigation_id)["stage"] == "running"
 
 
 # --- O14 (store side): what the reads carry ----------------------------------------------------------------------------

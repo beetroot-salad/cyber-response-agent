@@ -2006,17 +2006,23 @@ async def test_o4_a_store_fault_in_drain_ends_every_running_child_reaps_every_bo
             _handed_back(world["dsn"], inv)
 
 
-async def test_o7_a_drain_cancelled_while_two_children_run_ends_both_and_reaps_both_boxes(world):
-    """`drain()` cancelled with two children running: both are dead and both boxes (each under its claim's token) removed, the rows handed back. (O7, B11 `_abandon`)"""
+@pytest.mark.parametrize(("children", "child_kw", "worker_kw"), [
+    pytest.param(2, {}, {}, id="two_children"),
+    # The child ignores SIGTERM: it is group-killed after `stop_grace`, and its box is reaped all the same.
+    pytest.param(1, {"term": "ignore"}, {"stop_grace": 0.5}, id="a_child_that_ignores_sigterm"),
+])
+async def test_o7_a_drain_cancelled_while_children_run_ends_every_child_and_reaps_every_box(
+        world, children, child_kw, worker_kw):
+    """`drain()` cancelled with children running (even one that ignores SIGTERM): all are dead and every box (each under its claim's token) removed, the rows handed back. (O7, D3, B11 `_abandon`)"""
     containers = StandInContainers(world["tmp"] / "containers")
     release = world["tmp"] / "release"
-    child = _child(world, files=_committed(), box_dir=containers.where, wait_for=release)
+    child = _child(world, files=_committed(), box_dir=containers.where, wait_for=release, **child_kw)
     async with job_store(world["dsn"]) as store:
-        ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(2)]
+        ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(children)]
         names = [f"defender-run-{i}" for i in ids]
-        draining = asyncio.create_task(_worker(world, store, child, containers=containers).drain())
+        draining = asyncio.create_task(_worker(world, store, child, containers=containers, **worker_kw).drain())
         try:
-            await _until(lambda: all(containers.held(n) for n in names), "both children's boxes")
+            await _until(lambda: all(containers.held(n) for n in names), "every child's box")
             draining.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(draining, timeout=30)
@@ -2028,30 +2034,6 @@ async def test_o7_a_drain_cancelled_while_two_children_run_ends_both_and_reaps_b
             assert not containers.held(name), f"the cancelled drain left {inv}'s box behind"
             assert set(containers.reaped(name)) == {_claim_token(world, inv)}
             _handed_back(world["dsn"], inv)
-
-
-async def test_o7_a_drain_cancelled_while_a_child_that_ignores_sigterm_runs_still_reaps_its_box(world):
-    """A cancelled drain whose child ignores SIGTERM: the child is group-killed after `stop_grace`, and its box is reaped all the same, the row handed back. (O7, D3, B11)"""
-    containers = StandInContainers(world["tmp"] / "containers")
-    release = world["tmp"] / "release"
-    child = _child(world, files=_committed(), box_dir=containers.where, wait_for=release, term="ignore")
-    async with job_store(world["dsn"]) as store:
-        inv = await _queued(store)
-        name = f"defender-run-{inv}"
-        worker = _worker(world, store, child, containers=containers, stop_grace=0.5)
-        draining = asyncio.create_task(worker.drain())
-        try:
-            await _until(lambda: containers.held(name), "the child's box")
-            draining.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await asyncio.wait_for(draining, timeout=30)
-        finally:
-            release.touch()
-
-        assert _gone(child.seen(inv)["pid"]), "the cancelled drain left the child running"
-        assert not containers.held(name), "the box of a child that had to be killed was left behind"
-        assert set(containers.reaped(name)) == {_claim_token(world, inv)}
-        _handed_back(world["dsn"], inv)
 
 
 #: Claim faults of different kinds, in a row: an OSError family one is no more fatal than any other.
