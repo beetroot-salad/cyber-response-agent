@@ -46,17 +46,14 @@ def test_d_systems_verbatim(tmp_path):
     rec = _resolve(root)
 
     assert set(rec.systems) == {*S.PREFIX, "extra-sys"}, sorted(rec.systems)
-    assert dict(rec.systems["cmdb"]) == {
-        "CMDB_URL_BASE": "http://cmdb-vb:8080",
-        "CMDB_BASTION_HOST": "bastion-vb",
-        "CMDB_TIMEOUT_SEC": "10",
-        "CMDB_TRANSPORT": S.DOCKER_EXEC,
-        "CMDB_DOCKER_CONTEXT": S.context_name("vb", "cmdb"),
-    }, dict(rec.systems["cmdb"])
-    assert "URL_BASE" not in rec.systems["cmdb"], "the prefix was stripped at resolve"
+    assert dict(rec.systems["ticket"]) == {
+        "TICKET_TIMEOUT_SEC": "10",
+        "TICKET_KEY_PATTERN": "VB-[0-9]+",
+    }, dict(rec.systems["ticket"])
+    assert "KEY_PATTERN" not in rec.systems["ticket"], "the prefix was stripped at resolve"
     assert dict(rec.systems["extra-sys"]) == {"EXTRA_SYS_URL_BASE": "http://extra-vb:1"}
     elastic = dict(rec.systems["elastic"])
-    assert elastic == {"ELASTIC_TRANSPORT": "http-proxy", "ELASTIC_EVENTS_INDEX": "vb-events-*",
+    assert elastic == {"ELASTIC_EVENTS_INDEX": "vb-events-*",
                        "ELASTIC_ALERTS_INDEX": "vb-alerts-*"}, elastic
 
 
@@ -65,8 +62,7 @@ def test_d_systems_fault_kept(tmp_path):
     folder = S.plant(root, marker="fk")
     S.config_path(folder, "cmdb").unlink()
     # Invalid UTF-8: it must become this system's fault, never an escaping UnicodeDecodeError.
-    S.write_config(folder, "identity", S.config_texts("fk")["identity"].encode("utf-8").replace(
-        b"identity-fk", b"identity-\xff\xfe"))
+    S.write_config(folder, "identity", b'IDENTITY_TIMEOUT_SEC="\xff\xfe"\n')
 
     rec = _resolve(root)  # returns normally
 
@@ -190,9 +186,6 @@ def test_s7_nf16_unreadable_config_env_kept_as_fault(tmp_path):
 
 
 def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
-    # No arm here forks a transport; the shim first on PATH makes sure a stray one cannot
-    # reach the real docker.
-    monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "shim").path_value())
     # Under this test's data root, the one `run.main` below reads its tenants from.
     root = current_data_root()
     folder = S.plant(root, marker="nf4")
@@ -200,43 +193,43 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
 
     # Resolved twice around an edit: nothing is cached.
     first = _resolve(root)
-    S.set_key(folder, "cmdb", "CMDB_URL_BASE", "http://cmdb-edited:1")
+    S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", "EDITED-[0-9]+")
     second = _resolve(root)
     direct = run_tenant.run_tenant_for(
         S.tenant_folder_of(root), defender_dir=S.DEFENDER, dispatches_lead_zero=False)
-    assert first.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-nf4:8080"
-    assert second.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
-    assert direct.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
+    assert first.systems["ticket"]["TICKET_KEY_PATTERN"] == "NF4-[0-9]+"
+    assert second.systems["ticket"]["TICKET_KEY_PATTERN"] == "EDITED-[0-9]+"
+    assert direct.systems["ticket"]["TICKET_KEY_PATTERN"] == "EDITED-[0-9]+"
     # ...and across tenants: resolving another tenant in between memoizes nothing.
-    assert _resolve(root, fixture_uuid("tenant:other")).systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-nf4o:8080"
-    assert _resolve(root).systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
+    assert _resolve(root, fixture_uuid("tenant:other")).systems["ticket"]["TICKET_KEY_PATTERN"] == "NF4O-[0-9]+"
+    assert _resolve(root).systems["ticket"]["TICKET_KEY_PATTERN"] == "EDITED-[0-9]+"
 
     # A second run.main in one process reflects an edit made between the two. (run.main takes
     # its runs base from the data root, whose `playground` tenant is created on request.)
     ensure_d9_tenant()
     alert = S.plant_alert(tmp_path / "alert")
     seen: list[str] = []
-    for run_id, url in (("r-nf4-a", "http://cmdb-run-a:1"), ("r-nf4-b", "http://cmdb-run-b:1")):
-        S.set_key(folder, "cmdb", "CMDB_URL_BASE", url)
+    for run_id, pattern in (("r-nf4-a", "RUN-A-[0-9]+"), ("r-nf4-b", "RUN-B-[0-9]+")):
+        S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", pattern)
         rec_ = S.RunRecorder(tmp_path / "runs" / run_id)
         rc, refused = S.drive_run(S.run_argv(alert, root), rec_,
                                   visualize=rec_.visualize)
         assert refused is None, (rc, refused)
         assert rc == 0, (rc, refused)
-        seen.append(rec_.lifecycle_calls[0]["tenant"].systems["cmdb"]["CMDB_URL_BASE"])
-    assert seen == ["http://cmdb-run-a:1", "http://cmdb-run-b:1"], seen
+        seen.append(rec_.lifecycle_calls[0]["tenant"].systems["ticket"]["TICKET_KEY_PATTERN"])
+    assert seen == ["RUN-A-[0-9]+", "RUN-B-[0-9]+"], seen
 
     # Each replay drive reflects an edit made between them.
     from defender.tests.e2e import _replay_harness as RH
 
-    urls: list[str] = []
+    patterns: list[str] = []
 
     def get_host(ctx, *, host: str = "web-1") -> dict:
-        urls.append(S.record_on(ctx).systems["cmdb"]["CMDB_URL_BASE"])
+        patterns.append(S.record_on(ctx).systems["ticket"]["TICKET_KEY_PATTERN"])
         return {"host": host}
 
-    for n, url in enumerate(("http://cmdb-drive-a:1", "http://cmdb-drive-b:1")):
-        S.set_key(folder, "cmdb", "CMDB_URL_BASE", url)
+    for n, pattern in enumerate(("DRIVE-A-[0-9]+", "DRIVE-B-[0-9]+")):
+        S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", pattern)
         run_dir = RH.materialize(tmp_path / f"drive-{n}", RH.GOLDEN_AB3, run_id=f"nf4-drive-{n}")
         RH.drive(
             run_dir, run_id=f"nf4-drive-{n}",
@@ -253,7 +246,7 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
             ]),
             verbs=RH.FakeVerbs({"cmdb": {"get-host": get_host}}),
             tenant=S.tenant_folder_of(root))
-    assert urls == ["http://cmdb-drive-a:1", "http://cmdb-drive-b:1"], urls
+    assert patterns == ["DRIVE-A-[0-9]+", "DRIVE-B-[0-9]+"], patterns
 
 
 def _closure(module: str) -> tuple[int, str, set[str]]:
@@ -285,7 +278,6 @@ def test_d1096_record_types_outside_closure():
 def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
     """With the same keys exported, resolve_tenant's systems carry the tenant file's values."""
     exported = {
-        "CMDB_URL_BASE": "http://from-env:1",
         "TICKET_KEY_PATTERN": "ENV-[0-9]+",
         "ELASTIC_EVENTS_INDEX": "env-events-*",
         "ELASTIC_ALERTS_INDEX": "env-alerts-*",
@@ -304,12 +296,11 @@ def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
     rec = _resolve(root)
 
     cmdb = rec.systems["cmdb"]
-    assert cmdb["CMDB_URL_BASE"] == "http://cmdb-o1r:8080", dict(cmdb)
-    assert cmdb["CMDB_DOCKER_CONTEXT"] == S.context_name("o1r", "cmdb"), dict(cmdb)
+    assert "CMDB_DOCKER_CONTEXT" not in cmdb, dict(cmdb)
     assert rec.systems["ticket"]["TICKET_KEY_PATTERN"] == "O1R-[0-9]+"
     elastic = rec.systems["elastic"]
     assert elastic["ELASTIC_EVENTS_INDEX"] == "o1r-events-*"
-    assert elastic["ELASTIC_TRANSPORT"] == "http-proxy", dict(elastic)
+    assert "ELASTIC_TRANSPORT" not in elastic, dict(elastic)
     assert "ELASTIC_DOCKER_CONTEXT" not in elastic, dict(elastic)
 
 
@@ -323,6 +314,14 @@ def _config_keys(path: Path) -> set[str]:
     return keys
 
 
+#: The keys a shipped system's config.env holds when it is not just `<PREFIX>_TIMEOUT_SEC`.
+SHIPPED_KEYS = {
+    "elastic": {"ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX"},
+    "ticket": {"TICKET_TIMEOUT_SEC", "TICKET_KEY_PATTERN"},
+    "host-state": set(),
+}
+
+
 def test_d2_shipped_tenants_complete():
     for tenant_settings in (S.FIXTURE / "settings", S.TEMPLATE_DIR / "settings"):
         systems = tenant_settings / "systems"
@@ -334,14 +333,11 @@ def test_d2_shipped_tenants_complete():
             config_env = systems / name / "config.env"
             assert config_env.is_file(), config_env
             keys = _config_keys(config_env)
-            needed = {f"{prefix}_TRANSPORT", f"{prefix}_DOCKER_CONTEXT"}
-            if name == "elastic":  # #1391 D2/D12: the proxy method, its declaration, no Docker or base keys
-                needed = {"ELASTIC_TRANSPORT", "ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX"}
-                retired = {"ELASTIC_DOCKER_CONTEXT", "ELASTIC_ES_CONTAINER", "ELASTIC_KIBANA_CONTAINER",
-                           "ELASTICSEARCH_URL", "KIBANA_URL", "ELASTIC_SSL_VERIFY"}
-                assert not retired & keys, (tenant_settings, sorted(retired & keys))
-                assert (systems / name / "access.yaml").is_file(), (tenant_settings, "no declaration")
-            assert needed <= keys, (tenant_settings, name, sorted(needed - keys))
+            # #1391 O1/O2/Q4: every system is declared, and its config.env holds exactly the keys
+            # its adapter reads (no Docker, transport or base key).
+            assert (systems / name / "access.yaml").is_file(), (tenant_settings, name, "no declaration")
+            expected = SHIPPED_KEYS.get(name, {f"{prefix}_TIMEOUT_SEC"})
+            assert keys == expected, (tenant_settings, name, sorted(keys ^ expected))
 
     # The committed fixture, set up under this test's data root as `playground`.
     T1106.fixture_tenant(S.PLAYGROUND_ID)
@@ -380,31 +376,35 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     assert rec.grants.gather == _resolve(root, fixture_uuid("tenant:healthy")).grants.gather
 
 
+#: The keys the ticket adapter reads (`ticket_adapter.REQUIRED_CONFIG_KEYS`).
+_TICKET_KEYS = ("TIMEOUT_SEC", "KEY_PATTERN")
+
+
 def test_s60_config_env_fs_confinement(tmp_path):
     root = tmp_path / "tenants"
     outside = tmp_path / "outside.env"
-    outside.write_text('CMDB_URL_BASE="http://outside:1"\nCMDB_BASTION_HOST="b"\n'
-                       'CMDB_TIMEOUT_SEC="10"\n', encoding="utf-8")
+    outside.write_text('TICKET_TIMEOUT_SEC="10"\nTICKET_KEY_PATTERN="OUTSIDE-[0-9]+"\n',
+                       encoding="utf-8")
     # A config.env reached through a symlink outside the folder: the link walk refuses it.
     linked = S.plant(root, fixture_uuid("tenant:linked"), marker="s60l")
-    S.config_path(linked, "cmdb").unlink()
-    S.config_path(linked, "cmdb").symlink_to(outside)
+    S.config_path(linked, "ticket").unlink()
+    S.config_path(linked, "ticket").symlink_to(outside)
     with pytest.raises(S.tenant_refused()):
         _resolve(root, fixture_uuid("tenant:linked"))
 
     folder = S.plant(root, marker="s60")
     rec = _resolve(root)
     ctx = _ctx(rec, tmp_path)
-    assert transport.load_config(ctx, "cmdb", "CMDB")["URL_BASE"] == "http://cmdb-s60:8080"
+    assert transport.load_config(ctx, "ticket", "TICKET", _TICKET_KEYS)["KEY_PATTERN"] == "S60-[0-9]+"
 
     # Edited after resolve: the run still addresses the value as parsed at resolve.
-    S.set_key(folder, "cmdb", "CMDB_URL_BASE", "http://edited:1")
-    assert transport.load_config(ctx, "cmdb", "CMDB")["URL_BASE"] == "http://cmdb-s60:8080"
+    S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", "EDITED-[0-9]+")
+    assert transport.load_config(ctx, "ticket", "TICKET", _TICKET_KEYS)["KEY_PATTERN"] == "S60-[0-9]+"
     # Swapped for a link after resolve: the walk ran once, at resolve; nothing reads through it.
-    S.config_path(folder, "cmdb").unlink()
-    S.config_path(folder, "cmdb").symlink_to(outside)
-    assert transport.load_config(ctx, "cmdb", "CMDB")["URL_BASE"] == "http://cmdb-s60:8080"
-    assert rec.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-s60:8080"
+    S.config_path(folder, "ticket").unlink()
+    S.config_path(folder, "ticket").symlink_to(outside)
+    assert transport.load_config(ctx, "ticket", "TICKET", _TICKET_KEYS)["KEY_PATTERN"] == "S60-[0-9]+"
+    assert rec.systems["ticket"]["TICKET_KEY_PATTERN"] == "S60-[0-9]+"
 
 
 def test_a_config_fault_observed_at_resolve_fixed_on_disk_mid_run(tmp_path):
@@ -441,14 +441,14 @@ def test_s7_mf11_record_parts_read_only(tmp_path):
 
     # One consumer edits each part in place; the edit raises or lands on its own copy.
     for attempt in (
-        lambda: rec.systems["cmdb"].__setitem__("CMDB_URL_BASE", "http://hijacked:1"),
-        lambda: rec.systems.__setitem__("cmdb", {"CMDB_URL_BASE": "http://hijacked:1"}),
+        lambda: rec.systems["ticket"].__setitem__("TICKET_KEY_PATTERN", "HIJACKED-[0-9]+"),
+        lambda: rec.systems.__setitem__("ticket", {"TICKET_KEY_PATTERN": "HIJACKED-[0-9]+"}),
     ):
         # raising is one of the two allowed outcomes
         with contextlib.suppress(Exception):
             attempt()
 
     for reader in (rec, S.record_on(carried)):
-        assert reader.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-mf11:8080", dict(
-            reader.systems["cmdb"])
+        assert reader.systems["ticket"]["TICKET_KEY_PATTERN"] == "MF11-[0-9]+", dict(
+            reader.systems["ticket"])
 
