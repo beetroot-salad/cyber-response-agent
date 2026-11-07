@@ -383,12 +383,12 @@ class Tap:
 
 
 @contextlib.contextmanager
-def proxy_for(t: PublishedTenant, store: Any, **deps_kw: Any) -> Iterator[tuple[str, Tap]]:
+def proxy_for(t: PublishedTenant, store: Any, *, http: Any = None, **deps_kw: Any) -> Iterator[tuple[str, Tap]]:
     """The real proxy over `t`'s exports, served on loopback: yields its address and a `Tap`."""
     from defender.tests.integrations.credential_proxy_1163._target import proxy
 
     tap = Tap(proxy().create_app(T.deps({t.tenant_id: T.exports_of(t)}, store, **deps_kw)))
-    with H.serve_asgi(tap) as url:
+    with H.serve_asgi(tap, http=http) as url:
         yield url, tap
 
 

@@ -144,13 +144,17 @@ async def answer_gauge(send: Any, readings: Mapping[str, int]) -> None:
 
 
 @contextlib.contextmanager
-def serve_asgi(app: Any) -> Iterator[str]:
+def serve_asgi(app: Any, *, http: Any = None) -> Iterator[str]:
     """`app` served by uvicorn on a loopback port in a thread, for a caller that must reach it
-    over real HTTP (the adapter's transport). Yields the base URL."""
+    over real HTTP (the adapter's transport). Connections are the shipped program's, with its
+    delivery limit, unless `http` names another protocol. Yields the base URL."""
     import uvicorn
 
+    from defender.credential_proxy._connections import DeliveryLimited
+
     port = free_port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning",
+                                           http=http or DeliveryLimited))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     deadline = time.monotonic() + 10

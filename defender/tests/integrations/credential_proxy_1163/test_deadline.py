@@ -14,9 +14,11 @@ from pathlib import Path
 import httpx
 import pytest
 
+from defender._proxy_client import proxy_call
+from defender.credential_proxy._connections import DeliveryLimited
 from defender.integrations import identity_adapter
 from defender.kit.access import CALLER_GRACE_SEC
-from defender.kit.faults import TransportFault
+from defender.kit.faults import ConfigFault, TransportFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
@@ -333,7 +335,6 @@ def test_o1_the_proxys_allowance_cannot_exceed_what_the_caller_waits_for(tmp_pat
     """#1364 review: the caller's wait assumes the shipped allowance, so a proxy built with more
     (or with none) is refused at construction, not discovered as a caller timing out first."""
     from defender.kit import access
-    from defender.kit.faults import ConfigFault
 
     assert access.PROXY_OVERHEAD_SEC == 20, "the cases above straddle the shipped allowance"
     with pytest.raises(ConfigFault):
@@ -718,3 +719,75 @@ def test_o2_a_request_slower_than_the_limit_but_inside_the_request_deadline_is_s
 
     final = _decoded_final(got)
     assert "in time" not in (final.detail or ""), final
+
+
+# --- #1428 O2: a request the proxy stopped reading ends with its reply ---------------------------
+
+OVER_SIZE = 16 * 2**20 + 1000
+
+
+def test_o2_a_peer_still_sending_past_the_size_limit_is_closed_after_the_refusal(tmp_path, data_root):
+    """Over the size limit, of a body declared larger still, and trickling on: the refusal is
+    delivered and the connection closes at once rather than stay for as long as bytes arrive."""
+    with _proxy_of(tmp_path, data_root) as (url, _audit):
+        conn = _open_request(url, 40 * 2**20, b"x" * OVER_SIZE)
+        with conn:
+            def trickle() -> None:
+                with contextlib.suppress(OSError):
+                    conn.sendall(b"y")
+            got, closed_after = _read_until_closed(conn, 8, between=trickle)
+
+    assert closed_after is not None, "still open: the refusal did not end the connection"
+    assert closed_after < 3, closed_after
+    assert f"over {16 * 2**20} bytes" in _decoded_final(got).detail
+
+
+def test_o2_the_real_client_reads_the_size_refusal_of_a_request_it_is_still_sending(tmp_path, data_root):
+    """The connection closes under a client that has not finished sending: the run still gets
+    the refusal, not a broken connection, and it says nothing was sent to the system."""
+    with W.scripted(_no_reply) as up, T.rig(
+            tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + API)) as r, \
+            A.proxy_for(r.t, r.store) as (url, _tap):
+        answer = proxy_call(url, r.tok(), system="identity", method="POST", url=f"{up.url}{API}/users/x",
+                            body="x" * (40 * 2**20), timeout_sec=5)
+
+    assert (answer.fault, answer.sent) == ("ConfigFault", False), answer
+    assert f"over {16 * 2**20} bytes" in answer.detail
+
+
+def test_o2_a_peer_that_leaves_partway_through_its_request_is_audited(tmp_path, data_root, caplog):
+    """Part of a body, then gone: the one record every request gets is still written, as a
+    transport fault, and it is an expected ending, not one logged as an unforeseen failure."""
+    with _proxy_of(tmp_path, data_root) as (url, audit):
+        _open_request(url, 1000, b"x" * 10).close()
+        assert W.until(lambda: audit.records, 5), "no audit record for the request"
+        time.sleep(0.2)
+
+    assert [record["fault"] for record in audit.records] == ["TransportFault"], audit.records
+    assert "could not be processed" not in caplog.text
+
+
+# --- #1428 O1, on the real reply path ------------------------------------------------------------
+
+
+def test_o1_a_reader_stalled_past_the_proxys_give_up_loses_the_connection_at_the_limit(
+        tmp_path, data_root):
+    """The proxy gives up on a reader taking nothing (`CALLER_GRACE_SEC`), which alone leaves
+    the connection and its unsent bytes held; the limit then drops it, so reading on gets a
+    reset where `test_o6_a_reader_stalled_past_the_grace...` gets a stream that ends unfinished."""
+    class PastTheGiveUp(DeliveryLimited):
+        limit_sec = int(CALLER_GRACE_SEC) + 2
+
+    audit = H.AuditRecorder()
+    with W.scripted(_endless_8_mib) as up, T.rig(
+            tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + API)) as r, \
+            A.proxy_for(r.t, r.store, audit=audit, proxy_overhead_sec=1, http=PastTheGiveUp) as (url, _tap), \
+            W.unread(url, r.tok(), W.doc(f"{up.url}{API}/users/x", timeout_sec=1)) as response:
+        assert W.until(lambda: audit.records, 3.5), "no record by the deadline"
+        assert W.until(lambda: W.borrowed(url) == 0, CALLER_GRACE_SEC), "the proxy did not give up"
+        time.sleep(PastTheGiveUp.limit_sec + 1)
+        with pytest.raises(httpx.ReadError):
+            for _chunk in response.iter_raw():
+                pass
+
+    assert [record["outcome"] for record in audit.records] == ["sent 200"]

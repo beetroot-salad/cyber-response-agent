@@ -49,6 +49,7 @@ import anyio
 import httpx
 from fastapi import FastAPI, Request
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 from starlette.responses import Response
 from starlette.types import Receive, Scope
 from starlette.types import Send as AsgiSend
@@ -415,6 +416,8 @@ def _parse_request(raw: bytes | _Unread) -> _Asked:  # noqa: C901 — one flat s
         raise Refused(CONFIG, f"the request is over {MAX_REQUEST_BYTES} bytes")
     if raw is _Unread.TOO_SLOW:
         raise Refused(TRANSPORT, "the request did not arrive in time")
+    if raw is _Unread.PEER_LEFT:
+        raise Refused(TRANSPORT, "the caller left before its request arrived")
     try:
         doc = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError):
@@ -475,11 +478,13 @@ class _Unread(enum.Enum):
 
     TOO_LARGE = enum.auto()
     TOO_SLOW = enum.auto()
+    PEER_LEFT = enum.auto()
 
 
 async def _body_of(request: Request, wait: float) -> bytes | _Unread:
-    """The request body; or why it was not read: it passed `MAX_REQUEST_BYTES`, or it had not
-    all arrived `wait` seconds after the call (whether the peer went silent or trickled)."""
+    """The request body; or why it was not read: it passed `MAX_REQUEST_BYTES`, it had not all
+    arrived `wait` seconds after the call (whether the peer went silent or trickled), or the peer
+    left first."""
     body = bytearray()
     try:
         with anyio.fail_after(wait):
@@ -489,6 +494,8 @@ async def _body_of(request: Request, wait: float) -> bytes | _Unread:
                     return _Unread.TOO_LARGE
     except TimeoutError:
         return _Unread.TOO_SLOW
+    except ClientDisconnect:
+        return _Unread.PEER_LEFT
     return bytes(body)
 
 
@@ -499,12 +506,12 @@ class _Framed(Response):
     `CALLER_GRACE_SEC` (`_ReaderLeft`); the final record goes last, under the same bound. A reader
     still stalled then sees the connection closed unfinished once it resumes (the timeout is not
     caught). Until it resumes or dies the socket and its unsent bytes stay for the delivery limit
-    (`_listen`): a server closes only after flushing, and the ASGI interface offers no abort."""
+    (`_connections`): a server closes only after flushing, and the ASGI interface offers no abort."""
 
     def __init__(self, work: Callable[[Sink], FinalRecord], *, close: bool = False) -> None:
         super().__init__(content=None, media_type=REPLY_CONTENT_TYPE)
         self._work = work
-        self._close = close  # the request is unfinished: the connection ends with this reply (#1428)
+        self._close = close  # the proxy stopped reading the request: the connection ends with this reply (#1428)
 
     async def __call__(self, scope: Scope, receive: Receive, send: AsgiSend) -> None:
         await send({"type": "http.response.start", "status": 200,
@@ -545,7 +552,7 @@ def create_app(deps: ProxyDeps) -> FastAPI:  # lint-dup: ok — the proxy's own 
         raw = await _body_of(request, wait)
         authorization = request.headers.get("authorization")
         return _Framed(lambda send: proxy.handle(authorization, raw, send, arrived),
-                       close=raw is _Unread.TOO_SLOW)
+                       close=isinstance(raw, _Unread))
 
     app.add_api_route(PROXY_PATH, proxy_request, methods=["POST"], response_model=None)
     return app

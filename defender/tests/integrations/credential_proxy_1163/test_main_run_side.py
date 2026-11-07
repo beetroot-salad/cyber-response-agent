@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -171,24 +172,25 @@ def test_m3_a_config_still_naming_a_removed_key_refuses_to_start(tmp_path, key):
 # --- #1428 O1: bytes a run never takes do not hold the connection ---------------------------
 
 DELIVERY_MS = 60_000
-#: Runs the shipped program unchanged, except that every socket it starts listening on first
-#: writes its delivery limit to the file named by OBSERVED: the option is read off the socket the
-#: program really serves with, at the moment it starts serving.
+#: Runs the shipped program unchanged, except that the HTTP protocol underneath writes the delivery
+#: limit of each connection it is handed to the file named by OBSERVED: the option is read off
+#: the connection the program really serves.
 _OBSERVING_LAUNCHER = """
 import os, runpy, socket
-_listen = socket.socket.listen
-def listen(self, *args):
+from uvicorn.protocols.http.h11_impl import H11Protocol
+_made = H11Protocol.connection_made
+def connection_made(self, transport):
+    limit = transport.get_extra_info("socket").getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT)
     with open(os.environ["OBSERVED"], "a") as out:
-        out.write(str(self.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT)) + "\\n")
-    return _listen(self, *args)
-socket.socket.listen = listen
+        out.write(str(limit) + "\\n")
+    return _made(self, transport)
+H11Protocol.connection_made = connection_made
 runpy.run_module("defender.credential_proxy", run_name="__main__", alter_sys=True)
 """
 
 
-def test_o1_the_served_proxy_listens_with_the_delivery_limit(tmp_path):
-    """Every socket the shipped program listens on carries the 60 s limit, which the connections
-    it accepts inherit. O1, O5."""
+def test_o1_the_served_proxy_gives_a_connection_the_delivery_limit(tmp_path):
+    """A connection to the shipped program carries the 60 s limit. O1, O5."""
     port = H.free_port()
     observed = tmp_path / "observed"
     launcher = tmp_path / "launch.py"
@@ -199,10 +201,14 @@ def test_o1_the_served_proxy_listens_with_the_delivery_limit(tmp_path):
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         assert _await_listening(proc, port), _stop(proc)
+        with socket.create_connection(("127.0.0.1", port)):
+            deadline = time.monotonic() + START_SEC
+            while not observed.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
     finally:
         _stop(proc)
 
-    assert observed.read_text().split() == [str(DELIVERY_MS)]
+    assert set(observed.read_text().split()) == {str(DELIVERY_MS)}
 
 
 def _read_on(conn: socket.socket, got: list[int]) -> None:
@@ -211,15 +217,14 @@ def _read_on(conn: socket.socket, got: list[int]) -> None:
         got.append(len(piece))
 
 
-def test_o1_a_reader_that_takes_nothing_past_the_limit_loses_the_connection(tmp_path):
+def test_o1_a_reader_that_takes_nothing_past_the_limit_loses_the_connection():
     """A reply far past the socket buffers to a reader that takes nothing: once the limit has
     passed the connection is dropped, so reading on gets a reset where, without the limit, the
-    whole reply is still there. Run on the function the program opens its port with."""
-    import threading
+    whole reply is still there. Run on the protocol the program serves with."""
+    from defender.credential_proxy._connections import DeliveryLimited
 
-    import uvicorn
-
-    from defender.credential_proxy._listen import listening_socket
+    class TwoSeconds(DeliveryLimited):
+        limit_sec = 2
 
     async def endless(_scope, _receive, send):
         await send({"type": "http.response.start", "status": 200, "headers": []})
@@ -227,41 +232,59 @@ def test_o1_a_reader_that_takes_nothing_past_the_limit_loses_the_connection(tmp_
             await send({"type": "http.response.body", "body": b"x" * 65536, "more_body": True})
         await send({"type": "http.response.body", "body": b"", "more_body": False})
 
-    port = H.free_port()
-    config = uvicorn.Config(endless, host="127.0.0.1", port=port, log_config=None, lifespan="off")
-    server = uvicorn.Server(config)
-    thread = threading.Thread(target=lambda: server.run(sockets=[listening_socket(config, delivery_limit_sec=2)]),
-                              daemon=True)
-    thread.start()
-    try:
-        deadline = time.monotonic() + 10
-        while not server.started and time.monotonic() < deadline:
-            time.sleep(0.02)
-        with socket.create_connection(("127.0.0.1", port)) as conn:
+    with H.serve_asgi(endless, http=TwoSeconds) as url:
+        host, port = url.removeprefix("http://").split(":")
+        with socket.create_connection((host, int(port))) as conn:
             conn.sendall(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
             time.sleep(5)
             conn.settimeout(10)
             got: list[int] = []
             with pytest.raises(ConnectionResetError):
                 _read_on(conn, got)
-    finally:
-        server.should_exit = True
-        thread.join(10)
 
     assert sum(got) < 6 * 2**20
 
 
-def test_o5_a_port_already_taken_stops_the_program_with_an_error(tmp_path):
-    """Serving on a socket of its own (for the delivery limit) leaves a taken port what it was:
-    the program exits with an error rather than running unreachable."""
-    with socket.socket() as taken:
-        taken.bind(("127.0.0.1", 0))
-        taken.listen()
-        port = taken.getsockname()[1]
-        proc = _start(_config(tmp_path, openbao_token="t-1428"), port)
-        try:
-            code = proc.wait(timeout=START_SEC)
-        finally:
-            _stop(proc)
+# --- #1428: the limit leaves the program's start and stop as uvicorn gives them ----------------
 
-    assert code != 0
+
+def test_o5_an_interrupt_ends_the_program_cleanly(tmp_path):
+    """Ctrl-C ends the served program with exit code 0 and no traceback."""
+    port = H.free_port()
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT),
+           P.PROXY_ENV_CONFIG: str(_config(tmp_path, openbao_token="t-1428")), P.PROXY_ENV_PORT: str(port)}
+    # A test runner may have SIGINT ignored, which its children inherit and which hides the interrupt.
+    proc = subprocess.Popen([sys.executable, "-m", P.PROXY_PROGRAM_MODULE], cwd=REPO_ROOT, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+    try:
+        assert _await_listening(proc, port), _stop(proc)
+        proc.send_signal(signal.SIGINT)
+        out, _ = proc.communicate(timeout=EXIT_SEC)
+    finally:
+        _stop(proc)
+
+    assert (proc.returncode, "Traceback" in out) == (0, False), out
+
+
+def test_o5_a_host_name_is_served_on_every_address_it_resolves_to(tmp_path):
+    """Set to `localhost`, the program accepts on each of the name's addresses, IPv6 included."""
+    port = H.free_port()
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT),
+           "DEFENDER_CREDENTIAL_PROXY_HOST": "localhost",
+           P.PROXY_ENV_CONFIG: str(_config(tmp_path, openbao_token="t-1428")), P.PROXY_ENV_PORT: str(port)}
+    addresses = {info[4][0]: info[0] for info in socket.getaddrinfo("localhost", port, type=socket.SOCK_STREAM)}
+    proc = subprocess.Popen([sys.executable, "-m", P.PROXY_PROGRAM_MODULE], cwd=REPO_ROOT, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        assert _await_listening(proc, port), _stop(proc)
+        refused = []
+        for address, family in addresses.items():
+            with socket.socket(family) as s:
+                s.settimeout(1)
+                if s.connect_ex((address, port)) != 0:
+                    refused.append(address)
+    finally:
+        _stop(proc)
+
+    assert refused == []
