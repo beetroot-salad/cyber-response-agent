@@ -2279,18 +2279,21 @@ async def test_s2_a_live_rows_cost_so_far_and_a_cancelled_queued_row_are_not_mar
     assert lower_limit(dsn, queued.investigation_id) is False
 
 
-async def test_s2_cancelling_a_running_row_marks_its_copied_cost_and_the_holders_final_write_then_sets_its_own(dsn):
-    """Cancel ends the row without its holder's figure, so the copy it keeps is at least; the holder's later accounting writes its own value, either way. (S2, B-P2)"""
+async def test_s2_cancelling_a_running_row_reads_at_least_without_storing_the_mark_and_the_holders_final_write_then_stores_its_own(dsn):
+    """Cancel of a running row stores no mark (B1): the record reads "at least" by derivation (B2); the holder's later accounting stores its own value, either way. (S2, B1)"""
     async with job_store(dsn) as store:
         marked = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="A"), key="ka", attempt=1, lapsed=False)
         cleared = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="B"), key="kb", attempt=1, lapsed=False)
         for inv in (marked, cleared):
             got = await store.cancel_investigation(T1, inv, actor="u-1")
             assert (got.stage, got.cost_usd, got.cost_is_lower_limit) == ("aborted", 1.25, True)
-            assert (row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (1.25, True)
+            assert (await store.get_investigation(T1, inv)).cost_is_lower_limit is True
+            assert (row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (1.25, False), "cancel wrote the stored mark"
         await store.write_accounting(T1, marked, cost_usd=2.0, knowledge=None, cost_is_lower_limit=True)
         await store.write_accounting(T1, cleared, cost_usd=2.0, knowledge=None, cost_is_lower_limit=False)
+        records = [(await store.get_investigation(T1, i)).cost_is_lower_limit for i in (marked, cleared)]
     assert [(row(dsn, i)["cost_usd"], lower_limit(dsn, i)) for i in (marked, cleared)] == [(2.0, True), (2.0, False)]
+    assert records == [True, False], "the holder's final figure no longer reads as written"
 
 
 @pytest.mark.parametrize(("cost", "mark"), [(2.0, False), (2.0, True), (None, False)])
@@ -2305,8 +2308,8 @@ async def test_s2_cancelling_a_handed_back_row_keeps_the_figure_and_mark_its_hol
 
 
 @pytest.mark.parametrize("attempt", [1, 3], ids=["lease_lapsed", "retry_cap"])
-async def test_s2_a_lost_workers_row_is_taken_over_as_at_least_its_last_copy_and_a_handed_back_row_keeps_its_mark(dsn, attempt):
-    """Take-over makes no host read: a lost worker's row keeps its stale copy, marked, at either ending; a handed-back row keeps the mark its holder wrote; the retry starts unmarked at 0. (S2; base-drift unsettled 1)"""
+async def test_s2_a_lost_workers_row_is_taken_over_reading_at_least_without_a_stored_mark_and_a_handed_back_row_keeps_its_mark(dsn, attempt):
+    """Take-over stores no mark on a lost worker's row (B1) but its record reads "at least" (B2); a handed-back row keeps the mark its holder wrote; the retry starts unmarked at 0; the holder's later accounting stores its value. (S2, B1)"""
     lost = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="L"), key="kl", attempt=attempt, lapsed=True)
     handed = {mark: _plant_running(dsn, alert_id=_plant_alert(dsn, ticket=f"H{mark}"), key=f"kh{mark}", attempt=1,
                                    lapsed=False) for mark in (True, False)}
@@ -2314,15 +2317,22 @@ async def test_s2_a_lost_workers_row_is_taken_over_as_at_least_its_last_copy_and
         for mark, inv in handed.items():
             await store.hand_back(T1, inv, cost_usd=2.0, knowledge=None, cost_is_lower_limit=mark)
         await store.take_over(held=frozenset())
+        record = await store.get_investigation(T1, lost)
+        handed_records = [(await store.get_investigation(T1, handed[m])).cost_is_lower_limit for m in (True, False)]
     assert (row(dsn, lost)["failure_reason"], row(dsn, lost)["cost_usd"], lower_limit(dsn, lost)) == (
-        "lease_lapsed" if attempt == 1 else "retry_cap", 1.25, True)
+        "lease_lapsed" if attempt == 1 else "retry_cap", 1.25, False), "take-over wrote the stored mark"
+    assert (record.cost_usd, record.cost_is_lower_limit) == (1.25, True)
     assert [(row(dsn, handed[m])["cost_usd"], lower_limit(dsn, handed[m])) for m in (True, False)] == [(2.0, True), (2.0, False)]
+    assert handed_records == [True, False]
     retries = _retries_of(dsn, lost)
     if attempt == 1:
         [retry] = retries
         assert (row(dsn, retry)["cost_usd"], lower_limit(dsn, retry)) == (0, False)
     else:
         assert retries == []
+    async with job_store(dsn) as store:
+        await store.write_accounting(T1, lost, cost_usd=2.0, knowledge=None, cost_is_lower_limit=True)
+    assert (row(dsn, lost)["cost_usd"], lower_limit(dsn, lost)) == (2.0, True), "the holder's accounting did not store its mark"
 
 
 #: The class of a write that ends a running row (r4 S2, store side): the ending write; the cost the row holds (a renewal's copy,
@@ -2341,8 +2351,8 @@ _ENDED_WITHOUT_FIGURE = [
                          ids=["-".join(map(str, case)) for case in _ENDED_WITHOUT_FIGURE])
 async def test_s2_a_write_that_ends_a_running_row_marks_it_exactly_when_its_holder_never_wrote_its_figure(
         dsn, write, cost, lease, figure):
-    """Cancel or take-over of a running row: "at least" when its holder has not written its final figure, whatever the cost
-    (0 included) or the lease; otherwise the mark its holder wrote. The cost is kept either way. (r4 S2 store side, S4)"""
+    """Cancel or take-over of a running row: the record reads "at least" when its holder has not written its final figure,
+    whatever the cost (0 included) or the lease, else the holder's mark; the STORED mark is only ever the holder's. (S2, B1)"""
     written = figure != "not written"
     inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=lease == "lapsed", marked=written)
     execute(dsn, "UPDATE jobs.investigations SET cost_usd = %s, cost_is_lower_limit = %s WHERE id = %s",
@@ -2355,8 +2365,43 @@ async def test_s2_a_write_that_ends_a_running_row_marks_it_exactly_when_its_hold
             assert inv in await store.take_over(held=frozenset())
     ended = row(dsn, inv)
     assert ended["stage"] == ("aborted" if write == "cancel" else "failed"), ended
-    assert (ended["cost_usd"], lower_limit(dsn, inv)) == (cost, figure != "written unmarked"), (
-        "the mark is not (no holder's figure) or the holder's own")
+    async with job_store(dsn) as store:
+        record = await store.get_investigation(T1, inv)
+    assert (ended["cost_usd"], lower_limit(dsn, inv)) == (cost, figure == "written marked"), (
+        "the stored mark is not the holder's own: cancel or take-over wrote it")
+    assert (record.cost_usd, record.cost_is_lower_limit) == (cost, figure != "written unmarked"), (
+        "the record's mark is not (no holder's figure) or the holder's own")
+
+
+#: B2: (stage, started, accounting written, cost, stored mark) -> what the record reads.
+_DERIVATION = [
+    ("failed", True, False, 1.25, False, True),
+    ("aborted", True, False, 1.25, False, True),
+    ("completed", True, False, 1.25, False, True),
+    ("aborted", True, False, 0.0, False, True),
+    ("aborted", False, False, 0.0, False, False),
+    ("failed", True, True, 2.0, False, False),
+    ("failed", True, True, 2.0, True, True),
+    ("failed", True, False, None, False, False),
+    ("running", True, False, 1.25, False, False),
+]
+
+
+@pytest.mark.parametrize(("stage", "started", "written", "cost", "stored", "reads"), _DERIVATION,
+                         ids=[f"{s}-{'started' if st else 'unstarted'}-{'written' if w else 'unwritten'}-{c}-stored{m}"
+                              for s, st, w, c, m, _ in _DERIVATION])
+async def test_b2_the_record_reads_at_least_for_a_terminal_started_row_with_a_cost_and_no_holders_figure(
+        dsn, stage, started, written, cost, stored, reads):
+    """The record derives the mark: stored OR (terminal AND started AND no accounting AND cost not null); a never-started row, a written row, a null cost and a live row do not. (B2)"""
+    inv = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn), key="k", attempt=1, stage=stage)
+    execute(dsn, "UPDATE jobs.investigations SET started_at = %s, finished_at = %s, cost_usd = %s, "
+                 "accounting_written_at = %s, cost_is_lower_limit = %s, disposition = %s, failure_reason = %s WHERE id = %s",
+            (NOW if started else None, None if stage == "running" else NOW, cost, NOW if written else None, stored,
+             "benign" if stage == "completed" else None, "no_report" if stage in ("failed", "aborted") else None, inv))
+    async with job_store(dsn) as store:
+        record = await store.get_investigation(T1, inv)
+    assert record.cost_is_lower_limit is reads, (stage, started, written, cost, stored)
+    assert lower_limit(dsn, inv) is stored, "the read changed the stored column"
 
 
 async def test_s2_a_claimed_row_and_a_stored_marked_row_carry_the_mark_in_their_records(dsn):

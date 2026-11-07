@@ -307,11 +307,11 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
     assert "dead-end lead" in html
 
     headline = float(re.search(r'ts-cost">\$([0-9.]+)', html).group(1))
-    # Every bar (cb-seg title "<name> · $v · p%"): cb-pct prints a value only on wide bars.
-    segs = [float(v) for _name, v in re.findall(r'class="cb-seg"[^>]*title="([^"]*?) · \$([0-9.]+) · ', html)]
+    segs = _cost_segments(html)
     assert abs(headline - 0.5) < 0.002, f"the headline {headline} is not the run file's total (#1377 S5)"
-    assert abs(headline - sum(segs)) < 0.002, f"{headline} != {sum(segs)}"
-    assert "unattributed" in _without_styles(html), "the part of the total no request-log bar explains is not shown (#1377 S5)"
+    assert abs(headline - sum(segs.values())) < 0.002, f"{headline} != {sum(segs.values())}"
+    assert any("unattributed" in n.lower() for n in segs), "the part of the total no request-log bar explains is not shown (#1377 A5)"
+    assert not any("review" in n.lower() for n in segs), f"a review segment for a gate that made no model call: {segs}"
     # Asked of the rendered SPAN, not of the class name: the stylesheet is inlined into every
     # page, so `"ts-review" in html` is true whether or not anything was rendered with it.
     assert re.search(r'ts-review">', html) is None, (
@@ -338,7 +338,7 @@ def _append_review_calls(run: Path) -> float:
 
 
 def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path, monkeypatch):
-    """The gate's calls are calls the run made: the run file's total holds them once (the headline adds nothing), and the page names them. (S5)"""
+    """The gate's calls are in the run file's total once and are their own "review" cost-bar segment; phases, review and unattributed add up to the headline. (A5)"""
     import re
 
     run = _build_run(tmp_path)
@@ -354,23 +354,35 @@ def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path
         f"headline {headline} is not the run file's total {0.5 + review_total}: the review was counted twice or dropped"
     )
 
-    # Every bar (cb-seg title "<name> · $v · p%"), whether or not it is wide enough to print its value.
-    bars = {name: float(v) for name, v in re.findall(r'class="cb-seg"[^>]*title="([^"]*?) · \$([0-9.]+) · ', html)}
-    unattributed = [v for name, v in bars.items() if "unattributed" in name.lower()]
+    bars = _cost_segments(html)
+    review = [v for n, v in bars.items() if n.lower() == "review"]
+    unattributed = [v for n, v in bars.items() if "unattributed" in n.lower()]
+    assert len(review) == 1, f"expected one review segment, bars were {bars}"
+    assert abs(review[0] - review_total) < 0.002, f"review segment {review[0]} is not the gate's spend {review_total}"
     assert len(unattributed) == 1, f"expected one unattributed segment, bars were {bars}"
-    request_log_bars = sum(bars.values()) - unattributed[0]
-    assert abs(headline - (sum(bars.values()) + review_total)) < 0.002, (
-        f"headline {headline} is not the bars {sum(bars.values())} plus the review {review_total}"
+    phases = sum(v for n, v in bars.items() if n.lower() != "review" and "unattributed" not in n.lower())
+    assert abs(unattributed[0] - (headline - phases - review[0])) < 0.002, (
+        f"unattributed {unattributed[0]} is not the headline {headline} less phases {phases} and review {review[0]}"
     )
-    assert abs(unattributed[0] - (0.5 + review_total - request_log_bars - review_total)) < 0.002, (
-        f"unattributed {unattributed[0]} is not the headline less the bars {request_log_bars} less the review {review_total}"
-    )
-
-    named = re.search(r'ts-review">\(incl review \$([0-9.]+)\)', html)
-    assert named is not None, "the review's share is folded into the total unnamed"
-    assert abs(float(named.group(1)) - review_total) < 0.0001
+    assert abs(sum(bars.values()) - headline) < 0.002, f"segments {bars} do not add up to the headline {headline}"
 
     assert "kimi-k3" in html, "the page does not name the model the review billed"
+
+
+def _cost_segments(html: str) -> dict[str, float]:
+    """Every cost-bar segment (cb-seg title "<name> · $v · p%") by name, whether or not it is wide enough to print its value."""
+    import re
+
+    return {name: float(v) for name, v in re.findall(r'class="cb-seg"[^>]*title="([^"]*?) · \$([0-9.]+) · ', html)}
+
+
+def _pre_1377_result_line(run: Path, total: float) -> None:
+    """The run file's result line as it was written before #1377: MAIN-only total, no `total_cost_is_lower_limit` key."""
+    path = run / "tool_trace.jsonl"
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    events[-1].pop("total_cost_is_lower_limit")
+    events[-1]["total_cost_usd"] = total
+    path.write_text("".join(json.dumps(e) + "\n" for e in events))
 
 
 def _restate_the_run_total(run: Path, total: float, *, lower_limit: bool) -> None:
@@ -402,6 +414,50 @@ def test_s5_the_headline_says_at_least_exactly_when_the_run_file_marks_its_total
     assert headline is not None, "no headline cost"
     assert float(headline.group(2)) == pytest.approx(0.5, abs=0.002)
     assert (headline.group(1) is not None) is lower_limit
+
+
+def test_a3_a_null_total_reads_unknown_in_the_headline_not_zero_and_not_at_least(tmp_path, monkeypatch):
+    """A result line with a null total: the headline cost says "unknown", never `$0.0000` or "at least", and no unattributed segment. (A3, A5)"""
+    import re
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    path = run / "tool_trace.jsonl"
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    events[-1].update(total_cost_usd=None, usage=None, total_cost_is_lower_limit=False)
+    path.write_text("".join(json.dumps(e) + "\n" for e in events))
+
+    html = render_runtime_page(run)
+
+    headline = re.search(r'ts-cost">(.*?)</', html, flags=re.S)
+    assert headline is not None, "no headline cost"
+    assert "unknown" in headline.group(1).lower(), f"headline reads {headline.group(1)!r}"
+    assert "$0.0000" not in headline.group(1)
+    assert "at least" not in headline.group(1).lower()
+    assert "unattributed" not in _without_styles(html), "an unattributed segment beside an unknown headline"
+
+
+def test_a4_a_pre_1377_result_line_headline_is_every_bar_plus_review_and_has_no_unattributed(tmp_path, monkeypatch):
+    """A result line with no mark key (total covers MAIN only): the headline is the sum of all cost-bar segments plus review, not the line's total. (A4)"""
+    import re
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    review_total = _append_review_calls(run)
+    _pre_1377_result_line(run, 0.5)
+
+    html = render_runtime_page(run)
+
+    headline = re.search(r'ts-cost">(at least )?\$([0-9.]+)', html)
+    assert headline is not None, "no headline cost"
+    bars = _cost_segments(html)
+    request_log = sum(v for n, v in bars.items() if n.lower() != "review" and "unattributed" not in n.lower())
+    assert abs(0.5 - (request_log + review_total)) > 0.01, "premise: MAIN's figure differs from the request-log sum, so 'headline = result total' fails"
+    assert abs(float(headline.group(2)) - (request_log + review_total)) < 0.002, (
+        f"headline {headline.group(2)} is not the bars {request_log} plus review {review_total}")
+    assert headline.group(1) is None, "a pre-#1377 total is not marked at least"
+    assert "unattributed" not in _without_styles(html), f"an unattributed segment on a pre-#1377 page: {bars}"
+    assert abs(sum(bars.values()) - float(headline.group(2))) < 0.002, f"segments {bars} do not add up to the headline"
 
 
 def test_s5_a_total_below_what_the_bars_explain_stays_the_headline_and_no_unattributed_segment_goes_negative(tmp_path, monkeypatch):
@@ -511,8 +567,7 @@ def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
     )
 
     headline = float(re.search(r'ts-cost">\$([0-9.]+)', doubled_html).group(1))
-    bars = {n: float(v) for n, v in re.findall(
-        r'class="cb-seg"[^>]*title="([^"]*?) · \$([0-9.]+) · ', doubled_html)}
+    bars = _cost_segments(doubled_html)
     assert abs(headline - 0.5) < 0.002, f"the headline {headline} is not the run file's total (#1377 S5)"
     assert any("unattributed" in n.lower() for n in bars), f"no unattributed segment in {bars}"
     assert abs(headline - sum(bars.values())) < 0.002, (

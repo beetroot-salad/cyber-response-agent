@@ -493,8 +493,8 @@ CASES = {
     "1-job-end-without-the-cut-short-fact": _spec(
         files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=None)}), exit=EXIT,
         expect=("failed", "no_report", None), code=EXIT),
-    "1-job-end-without-the-spend-fact": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=None)}), exit=EXIT,
+    "1-job-end-an-extra-key-beside-the-five-old-ones": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=None, extra="x")}), exit=EXIT,
         expect=("failed", "no_report", None), code=EXIT),
     "1-job-end-spend-fact-null": _spec(
         files=_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=JSON_NULL)}), exit=EXIT,
@@ -538,6 +538,9 @@ CASES = {
         expect=("failed", "worker_error", None)),
     # rule 4
     "4-completed-inconclusive": _spec(files=_committed(), expect=("completed", None, "inconclusive")),
+    "4-completed-from-a-job-end-record-of-the-five-pre-1377-keys": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=None)}), exit=EXIT,
+        expect=("completed", None, "inconclusive")),
     "4-completed-malicious-whatever-the-exit": _spec(
         files=_committed(**{"{id}/report.md": MALICIOUS_REPORT.read_text(encoding="utf-8") + f"\n{MARKER}\n"}),
         exit=4, expect=("completed", None, "malicious")),
@@ -637,6 +640,20 @@ def _job_end_cut_short(cut_short: str, *, report_committed: bool, scrub_verified
     """The real record's own text with the fifth fact set (#1421)."""
     return job_lane.JobEnd(setup="done", box="started", report_committed=report_committed,
                            scrub_verified=scrub_verified, cut_short=cut_short, spend_write_failed=False).text()
+
+
+def test_p1_a_job_end_record_of_exactly_the_five_pre_1377_keys_reads_as_no_spend_write_failed():
+    """The old five keys parse as `spend_write_failed=False`; an extra key, or a non-bool value, still does not parse. (P1)"""
+    old = json.loads(_job_end_with(spend_write_failed=None))
+    assert sorted(old) == ["box", "cut_short", "report_committed", "scrub_verified", "setup"], "premise: the five old keys"
+    parsed = job_lane.JobEnd.parse(json.dumps(old))
+    assert parsed is not None
+    assert parsed.spend_write_failed is False
+    assert job_lane.JobEnd.parse(_job_end_with(spend_write_failed=True)).spend_write_failed is True, "control: the six-key record"
+    for unreadable in (_job_end_with(spend_write_failed=JSON_NULL), _job_end_with(spend_write_failed="false"),
+                       _job_end_with(spend_write_failed=0), _job_end_with(spend_write_failed=None, extra="x"),
+                       _job_end_with(spend_write_failed=False, extra="x"), _job_end_with(cut_short=None)):
+        assert job_lane.JobEnd.parse(unreadable) is None, unreadable
 
 
 _CUT_SHORT_WORDS = sorted({*run_end.TRUNCATED_BY_VALUES, "box-lost", "box-output-limit"})
@@ -3412,7 +3429,7 @@ async def test_b3_a_row_fenced_before_its_child_exists_is_never_launched_and_sti
         assert final is None
         return
     assert final["stage"] == {"cancel": "aborted", "take_over": "failed"}[how]
-    assert (final["cost_usd"], final["knowledge"], lower_limit(dsn, inv)) == (0, None, False)  # nothing launched: exact 0, over the cancel's mark
+    assert (final["cost_usd"], final["knowledge"], lower_limit(dsn, inv)) == (0, None, False)  # nothing launched: exact 0, the holder's own write
     assert accounting_written(dsn, inv) is not None
 
 
@@ -4368,7 +4385,7 @@ async def test_s2_an_outage_reading_a_finished_childs_records_hands_the_row_back
 
 @pytest.mark.parametrize(("child_ends", "expect"), [("killed", True), ("with its records", False)])
 async def test_s2_a_cancelled_running_row_stays_at_least_until_its_holder_writes_its_own_figure(world, child_ends, expect):
-    """The cancel marks the row at once; the holder's final write then sets its own value: true after a killed child, false after one that wrote a clean job-end. (S2)"""
+    """The cancelled row reads "at least" at once (derived, not stored); the holder's final write then stores its own value: true after a killed child, false after a clean job-end. (S2, B1)"""
     child, marks = _spending(world, _SPEND, files=_committed(), term="mark" if child_ends == "killed" else "finish",
                              term_mark=_term_mark(world))
     dsn = world["dsn"]
@@ -4378,7 +4395,9 @@ async def test_s2_a_cancelled_running_row_stays_at_least_until_its_holder_writes
         try:
             await _until(lambda: (marks / "wrote-0").exists(), "the child's spend")
             got = await store.cancel_investigation(T1, inv, actor="u-1")
-            assert (got.cost_is_lower_limit, lower_limit(dsn, inv)) == (True, True), "cancel left a running row's cost unmarked"
+            assert (got.cost_is_lower_limit, lower_limit(dsn, inv)) == (True, False), (
+                "cancel must read at least by derivation and store no mark (B1, B2)")
+            assert (await store.get_investigation(T1, inv)).cost_is_lower_limit is True
             await _until(lambda: _termed(world, inv), "the child to get SIGTERM", timeout=3.0)
         finally:
             (marks / "go-0").touch()
