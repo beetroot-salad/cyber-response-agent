@@ -460,6 +460,7 @@ class ProxyStandIn:
         self._requests.append({
             "system": doc.get("system"), "method": doc.get("method"), "url": doc.get("url"),
             "path": urlsplit(str(doc.get("url"))).path, "body": parsed,
+            "timeout_sec": doc.get("timeout_sec"),
             "token": authorization.removeprefix("Bearer ")})
 
     def _reply(self, n: int) -> bytes:

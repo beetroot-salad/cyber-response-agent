@@ -431,6 +431,36 @@ def test_a_config_fault_observed_at_resolve_fixed_on_disk_mid_run(tmp_path):
         "URL_BASE"] == "http://cmdb-s063:8080"
 
 
+def test_o2_each_call_uses_the_record_it_was_resolved_with(tmp_path):
+    """A verb's call takes its system's base and timeout from the run's record, never from disk:
+    two records resolved around an edit each keep their own values, called in turn, with the
+    folder gone from disk."""
+    cmdb_adapter = S.mod("integrations.cmdb_adapter")
+    root = tmp_path / "tenants"
+    folder = S.plant(root, marker="ocs")
+    access = S.settings_of(folder) / "systems" / "cmdb" / "access.yaml"
+    S.set_key(folder, "cmdb", "CMDB_TIMEOUT_SEC", "7")
+    first = _resolve(root)
+    S.set_key(folder, "cmdb", "CMDB_TIMEOUT_SEC", "3")
+    access.write_text(T1106.access_text("ocs", "cmdb", base="http://edited-cmdb:9"), encoding="utf-8")
+    second = _resolve(root)
+    S.config_path(folder, "cmdb").unlink()
+    access.unlink()
+
+    stand_in = S.ProxyStandIn(tmp_path / "proxy", [S.answer('{"host": "web-1"}')])
+    seen = []
+    for n, record in enumerate((first, second, first)):
+        run_dir = tmp_path / f"call-{n}"
+        run_dir.mkdir()
+        ctx = S.verb_context(record, run_dir, {}, proxy_url=stand_in.url, request_token="token-o2")
+        cmdb_adapter.get_host(ctx, host="web-1")
+        [request] = stand_in.requests()[n:]
+        seen.append((request["url"], request["timeout_sec"]))
+    old_base = T1106.default_base("ocs", "cmdb")
+    assert seen == [(f"{old_base}/hosts/web-1", 7), ("http://edited-cmdb:9/hosts/web-1", 3),
+                    (f"{old_base}/hosts/web-1", 7)], seen
+
+
 def test_s7_mf11_record_parts_read_only(tmp_path):
     root = tmp_path / "tenants"
     S.plant(root, marker="mf11")
