@@ -194,7 +194,7 @@ error rather than letting the write through. Scope is anchored to
    whose claim sets are identical after whitespace/case normalization.
    The group key is derived from the ID SHAPE `h-{parent}-{nonce}` —
    there is no `parent_hypothesis_id` column. **Not keyed on
-   `parent_class`**, and `test_invlang_sibling_fork_934.py` is the guard
+   `parent_class`**, and `test_invlang_sibling_fork.py` is the guard
    that keeps it that way: siblings legitimately share `??/??/??` since
    #934. Detection floor is textual and stays there — paraphrase is
    authoring discipline, and a check that tried to read two sentences
@@ -268,7 +268,7 @@ error rather than letting the write through. Scope is anchored to
    **one-observable-per-entry** clause is semantic, left to the author
    exactly as on rule #29. Corpus: zero fires — no shipped document
    uses `.attr_preds` at all. It fired three times across TWO test
-   fixtures — twice on `test_invlang_sibling_fork_934.py`'s `_ATTR_FORK`
+   fixtures — twice on `test_invlang_sibling_fork.py`'s `_ATTR_FORK`
    and once on `test_invlang_prediction_refs.py`'s `_two_hypotheses` —
    each of which wrote a vertex id in the `target` cell; both shipped
    with #934 because #33 had no implementation yet, and the cells are
@@ -527,7 +527,7 @@ error rather than letting the write through. Scope is anchored to
    Fixed here; the rule found it, which is the whole point of arming a
    closure gate over prompt surface.
 
-   The five minimal fixtures in `defender/tests/invlang/validation/test_invlang_rules_933.py`
+   The five minimal fixtures in `defender/tests/invlang/validation/test_invlang_rules.py`
    and the one in `..._adversarial.py` that this rule caught — written
    for rules #23/#24, predating the deferral table — carry a
    `:T conclude.deferred_preds` block each and are green. To back the
@@ -932,11 +932,11 @@ the fact — a whole-document reading would deny every later write with no
 repair available, which is the wedge the v2.22 delta closed on rules #6
 and #17. A trailing unterminated ```invlang is exempt: that is a write
 cut off mid-block, the next append closes it, and
-`tests/invlang/validation/test_frontier_recall_919.py` fixes that shape as accepted by
+`tests/invlang/validation/test_frontier_recall.py` fixes that shape as accepted by
 design. Measured before arming: across the 27 documents in the tree
 carrying invlang, one investigation fires — `live-867-old` itself — and
 nothing else does. `defender/docs/investigation-language.md` §On-disk surface
-carries the rule; `tests/invlang/parser/test_932_unfenced_surface.py` is the guard.
+carries the rule; `tests/invlang/parser/test_unfenced_surface.py` is the guard.
 
 The gate is the second half of the fix, not the whole of it. The first
 half is that the split itself was derived in three places — the
@@ -994,7 +994,7 @@ below:
   fork axis — and implemented in #933 as rule 10 above. The constraint
   that came with the decision holds in the shipped check: it is keyed on
   the claim set, never on `parent_class`, and
-  `test_invlang_sibling_fork_934.py` fails if that changes. Semantic
+  `test_invlang_sibling_fork.py` fails if that changes. Semantic
   distinctness is not detectable and stays the author's discipline.
 
   What that drops, deliberately: #933's reproduction — two siblings both

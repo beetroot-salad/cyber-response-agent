@@ -73,7 +73,7 @@ SECOND_WARN_ROW = "l-001|v-002|dept|finance"
 #: A legal `class` repair of `WARN_ROW`, hand-written: the validator's own `class` offer keeps
 #: the author's value, which `compute.role` refuses (#986), so it withholds that route and
 #: offers only `REPAIRED_ROW_ATTRS`. Tests feeding this row exercise `fix_row`'s mechanics on a
-#: row that lands; `test_class_vocab_986` puts the offered routes back through the validator.
+#: row that lands; `test_class_vocab` puts the offered routes back through the validator.
 REPAIRED_ROW = "l-001|v-001|class|file-server/internal/known-corp"
 #: The other legal repair — the `attrs.<name>` spelling. Keeps the VALUE cell verbatim.
 REPAIRED_ROW_ATTRS = "l-001|v-001|attrs.owner|svc.config-mgmt"
@@ -131,7 +131,7 @@ def flagged_rows(text: str) -> tuple[str, ...]:
 
 def main_deps(tmp_path: Path) -> tuple[Any, Path]:
     """MAIN deps through the real `bind` seam — real compiled policy, real gate — built as
-    `test_append_only_write_lane_810.py::_main_deps` builds them."""
+    `test_append_only_write_lane.py::_main_deps` builds them."""
     # A run folder's name is its canonical UUID run id (#1187).
     run = tmp_path / fixture_uuid("run")
     run.mkdir(parents=True)

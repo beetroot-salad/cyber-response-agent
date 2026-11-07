@@ -35,13 +35,14 @@ def _stub_config(monkeypatch):
     monkeypatch.setattr(transport, "load_config", _fake)  # lint-monkeypatch: ok — the docker-exec-curl transport has no in-process DI seam (this file's established pattern)
 
 
-def test_require_closed_passes_on_closed(monkeypatch, ctx):
+@pytest.mark.parametrize(("status", "require_closed"), [("closed", True), ("open", False)])  # without the flag, open tickets still fetch
+def test_a_ticket_is_fetched_when_closed_or_when_closure_is_not_required(monkeypatch, ctx, status, require_closed):
     monkeypatch.setattr(  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
         transport, "http_get_obj",
-                        lambda c, cfg, p, system=None, params=None: {"key": "c", "status": "closed",
+                        lambda c, cfg, p, system=None, params=None: {"key": "c", "status": status,
                                                         "resolution": "benign — r"})
-    payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=True)
-    assert payload["status"] == "closed"
+    payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=require_closed)
+    assert payload["status"] == status
 
 
 def test_require_closed_rejects_open(monkeypatch, ctx):
@@ -50,14 +51,6 @@ def test_require_closed_rejects_open(monkeypatch, ctx):
                         lambda c, cfg, p, system=None, params=None: {"key": "c", "status": "open"})
     with pytest.raises(UpstreamFault):
         ticket_adapter.get_ticket(ctx, key="c", require_closed=True)
-
-
-def test_no_flag_allows_any_status(monkeypatch, ctx):
-    # Without require_closed, open tickets still fetch.
-    monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-                        lambda c, cfg, p, system=None, params=None: {"key": "c", "status": "open"})
-    payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=False)
-    assert payload["status"] == "open"
 
 
 def test_list_require_closed_pins_status_over_widening(monkeypatch, ctx):

@@ -60,7 +60,7 @@ def _stale(line: str, kind: str) -> None:
 
 def test_o7b_a_merge_on_origin_is_published_and_reported_fresh_at_the_merge(tenant):
     """The child fetches with the identity it is handed, publishes the merge as `current` and reports
-    `fresh <merge>`, a line carrying no config path (login itself: `test_1214_forge_credential`)."""
+    `fresh <merge>`, a line carrying no config path (login itself: `test_forge_credential`)."""
     merged = tenant.merge(B.MERGE_FILES)
     line = B.run_child(tenant)
     assert tenant.server.authorized("git-upload-pack"), "the fetch never carried the identity's token"

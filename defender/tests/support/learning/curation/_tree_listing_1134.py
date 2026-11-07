@@ -1,4 +1,4 @@
-"""Seams, plants and child-process runners for `test_1134_tree_listing.py`, shared by the other
+"""Seams, plants and child-process runners for `test_tree_listing.py`, shared by the other
 #1134 listing suites."""
 from __future__ import annotations
 

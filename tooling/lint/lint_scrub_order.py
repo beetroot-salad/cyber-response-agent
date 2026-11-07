@@ -33,7 +33,7 @@ subprocess); the post-steps called from a helper before the lifecycle; a swallow
 context manager of one's own; a rebinding of a composition at run time (`globals()`, `setattr`,
 `exec`).
 
-The behaviour test (`tests/jobs/test_1342_job_entry.py`,
+The behaviour test (`tests/jobs/test_job_entry.py`,
 `test_m3_beneath_the_names_...`) backs this lint but does not replace it. It observes, in the
 test process, the named readers (by spy) and, through `sys.addaudithook`, listings and read-only
 `open` calls of the run folder made before the lifecycle double returns. It does not see: `r+`
