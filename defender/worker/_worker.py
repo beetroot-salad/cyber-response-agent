@@ -439,7 +439,7 @@ class Worker:
 
     def _cost_so_far(self, record: Any) -> float:
         with self._open_lane(self._data_root, record.tenant_id) as lane:
-            return lane.cost(record.investigation_id)
+            return lane.cost(record.investigation_id).usd
 
     # -- one row ----------------------------------------------------------------------------------
 
@@ -465,7 +465,10 @@ class Worker:
             _logger.exception("investigation %s: the worker failed while running it", inv)
             if is_outage(fault) or held.signalled:
                 # Nothing about the job failed: it is handed back, with what it had spent.
-                return End(None, 0.0 if held.proc is None else held.cost_so_far, None)
+                # A child that ran with no figure read yet is handed back as "at least" what the row
+                # already held (0 from its claim): a lower limit stands only beside a number (S4).
+                ran = held.proc is not None
+                return End(None, held.cost_so_far if ran and held.cost_so_far is not None else 0.0, None, at_least=ran)
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR,
                               failure_message="the worker failed while running the job"), None, None)
 
@@ -495,10 +498,10 @@ class Worker:
         returncode = await proc.wait()
         _logger.info("investigation %s: child %d %s after %s", inv, proc.pid,
                      _exit_words(returncode), self._clock() - started)
-        ending, cost, knowledge = await asyncio.to_thread(self._read_ending, record, returncode)
+        ending, cost, at_least, knowledge = await asyncio.to_thread(self._read_ending, record, returncode)
         if held.signalled and not ending.decided_by_run:  # R1: an ending the run itself decided wins over the stop
-            return End(None, cost, knowledge)
-        return End(ending, cost, knowledge)
+            return End(None, cost, knowledge, at_least)
+        return End(ending, cost, knowledge, at_least)
 
     async def _run_child(self, held: Held, token: str, launch: Launch) -> asyncio.subprocess.Process | End:
         """Start the row's child and wait for it to end, then run its cleanup. The task owns its
@@ -607,9 +610,12 @@ class Worker:
         elif reaped != Reaped.ABSENT:
             _logger.error("investigation %s: the backstop's answer for %s was %r", inv, name, reaped)
 
-    def _read_ending(self, record: Any, returncode: int) -> tuple[Ending, float | None, dict | None]:
+    def _read_ending(self, record: Any, returncode: int) -> tuple[Ending, float | None, bool, dict | None]:
         """The stage, cost and knowledge from the host records, through the job lane (in a thread).
-        A cost that cannot be read is None, the final figure's own meaning (R2)."""
+        A cost that cannot be read is None, the final figure's own meaning (R2). The cost is "at
+        least" (#1377 S2) when the run reported a failed spend write, or opened its store and left no
+        readable job-end record (a killed run cannot report one); never beside an unknown cost.
+        A run that never opened its store costs exactly 0, unless it reported a failed write."""
         inv = record.investigation_id
         try:
             lane = self._open_lane(self._data_root, record.tenant_id)
@@ -617,13 +623,17 @@ class Worker:
             _logger.error("investigation %s: reading its records: %s", inv, refused)
             return (Ending(_FAILED, failure_reason=_WORKER_ERROR,
                            failure_message="the tenant's runs container could not be read after the run"),
-                    None, None)
+                    None, False, None)
         try:
-            ending = _ending_from(lane.read_job_end(inv), returncode, lambda: _report_disposition_or_none(lane, inv))
+            job_end = lane.read_job_end(inv)
+            ending = _ending_from(job_end, returncode, lambda: _report_disposition_or_none(lane, inv))
             # #1396: the ending is decided; from here no fault turns it into `worker_error`
             cost: float | None
+            at_least = False
             try:
-                cost = lane.cost(inv)
+                spent = lane.cost(inv)
+                cost = spent.usd
+                at_least = (job_end is not None and job_end.spend_write_failed) or (spent.store_opened and job_end is None)
             except job_lane.CostUnreadable as unreadable:
                 _logger.warning("investigation %s: its cost is unknown: %s", inv, unreadable)
                 cost = None
@@ -643,7 +653,7 @@ class Worker:
                 lane.close()
             except Exception:  # noqa: BLE001 — a fault before the ending still raises; one after keeps it (#1396)
                 _logger.error("investigation %s: closing its records failed", inv, exc_info=True)
-        return ending, cost, knowledge
+        return ending, cost, at_least, knowledge
 
     # -- the last write ---------------------------------------------------------------------------
 
@@ -696,16 +706,18 @@ class Worker:
             ending = end.ending
             written = await self._store.finish(
                 tenant, inv, stage=ending.stage, disposition=ending.disposition, cost_usd=end.cost,
-                knowledge=end.knowledge, failure_reason=ending.failure_reason,
+                cost_is_lower_limit=end.at_least, knowledge=end.knowledge, failure_reason=ending.failure_reason,
                 failure_message=ending.failure_message)
             what = ending.stage + (f" ({ending.failure_reason})" if ending.failure_reason else "")
         else:
-            written = await self._store.hand_back(tenant, inv, cost_usd=end.cost, knowledge=end.knowledge)
+            written = await self._store.hand_back(tenant, inv, cost_usd=end.cost, cost_is_lower_limit=end.at_least,
+                                                  knowledge=end.knowledge)
             what = "handed back"
         if written is not None:
             _logger.info("investigation %s: %s", inv, what)
             return
-        accounted = await self._store.write_accounting(tenant, inv, cost_usd=end.cost, knowledge=end.knowledge)
+        accounted = await self._store.write_accounting(tenant, inv, cost_usd=end.cost, cost_is_lower_limit=end.at_least,
+                                                     knowledge=end.knowledge)
         if accounted is not None:
             _logger.info("investigation %s: the row had already ended; its final cost and knowledge are recorded", inv)
         else:
@@ -720,7 +732,7 @@ def _lesser_ends(end: End) -> list[End]:
     marker = job_lane.JobLane.unreadable_knowledge()
     ends = [end]
     if end.knowledge is not None and end.knowledge != marker:
-        ends.append(End(end.ending, end.cost, marker))
+        ends.append(End(end.ending, end.cost, marker, end.at_least))
     barest = End(None if end.ending is None else Ending(
         _FAILED, failure_reason=_WORKER_ERROR, failure_message="the store refused the job's ending as decided"),
         None, None)

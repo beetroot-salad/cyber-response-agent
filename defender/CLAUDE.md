@@ -45,6 +45,15 @@ The tenant's alert mapping lives in the database; nothing reads `settings/alert-
    describes the six entries.
 3. Delete the file from the tenant's repository.
 
+## Upgrade from before #1377
+
+A run's cost is now the sum of a spend ledger (a table in the run's session database, one row per model
+response any agent of the run received, review calls included), so `cost_usd` and the run file's
+`total_cost_usd` count what the run really paid. Old run files keep their main-only totals: totals before
+and after this change are not comparable. Run migrations (revision `0008_cost_lower_limit`): the API's
+investigations gain `cost_is_lower_limit`, true when `cost_usd` is "at least" that much (a spend write
+failed, or the run was killed before it reported). Every existing row reads exact.
+
 ## Upgrade from before #1412
 
 The credential proxy streams each upstream reply to the run in its own frame format (content

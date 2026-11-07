@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator, Callable, Collection, Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import and_, case, delete, func, select, update
 from sqlalchemy import text as sql
 from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, InterfaceError, InternalError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
@@ -107,6 +107,15 @@ def _refuse_unstorable_text(**fields: str) -> None:
     for name, text in fields.items():
         if not postgres_can_hold(text):
             raise UnstorableText(f"{name} holds a NUL or a lone surrogate, which PostgreSQL text cannot hold")
+
+
+def _ended_without_its_figure() -> Any:
+    """The mark a write that ends a row gives it when the row's holder has not yet written its final
+    figure: a running row with a copied cost becomes "at least" (the copy may be short); any other
+    row keeps its mark (#1377 S2). Read against the row as it was before the update."""
+    return case((and_(InvestigationRow.stage == "running", InvestigationRow.accounting_written_at.is_(None),
+                      InvestigationRow.cost_usd.is_not(None)), True),
+                else_=InvestigationRow.cost_is_lower_limit)
 
 
 class JobStore:
@@ -327,7 +336,8 @@ class JobStore:
                 update(InvestigationRow).where(
                     InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id,
                     InvestigationRow.stage.in_(LIVE))
-                .values(stage="aborted", failure_reason="cancelled", finished_at=self._clock())
+                .values(stage="aborted", failure_reason="cancelled", finished_at=self._clock(),
+                        cost_is_lower_limit=_ended_without_its_figure())
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             if row is None:
                 current = await self._row(s, tenant_id, investigation_id)
@@ -370,9 +380,9 @@ class JobStore:
 
     # --- the worker's write -------------------------------------------------------------
 
-    async def finish(
+    async def finish(  # noqa: PLR0913 — the one terminal write: stage, figures, knowledge and failure detail
         self, tenant_id: TenantId, investigation_id: InvestigationId, *, stage: str, disposition: str | None = None,
-        cost_usd: float | None = None, knowledge: dict[str, Any] | None = None,
+        cost_usd: float | None = None, cost_is_lower_limit: bool = False, knowledge: dict[str, Any] | None = None,
         failure_reason: str | None = None, failure_message: str | None = None,
     ) -> InvestigationRecord | None:
         """Record the one terminal stage of a running investigation, with its final cost (null when
@@ -388,7 +398,7 @@ class JobStore:
                     InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id,
                     InvestigationRow.stage == "running")
                 .values(stage=stage, finished_at=self._clock(), disposition=disposition, cost_usd=cost_usd,
-                        knowledge=knowledge, failure_reason=failure_reason, failure_message=failure_message,
+                        cost_is_lower_limit=cost_is_lower_limit, knowledge=knowledge, failure_reason=failure_reason, failure_message=failure_message,
                         accounting_written_at=self._clock())
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             if row is None:
@@ -422,7 +432,8 @@ class JobStore:
         return list(covered)
 
     async def write_accounting(
-        self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, knowledge: dict[str, Any] | None,
+        self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, cost_is_lower_limit: bool = False,
+        knowledge: dict[str, Any] | None,
     ) -> InvestigationRecord | None:
         """The holder's final cost and knowledge on a row someone else already ended (cancel,
         take-over): written once, changing no stage or failure detail (B-P2, B4). `None` when the
@@ -432,12 +443,14 @@ class JobStore:
                 update(InvestigationRow).where(
                     InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id,
                     InvestigationRow.stage.in_(TERMINAL), InvestigationRow.accounting_written_at.is_(None))
-                .values(cost_usd=cost_usd, knowledge=knowledge, accounting_written_at=self._clock())
+                .values(cost_usd=cost_usd, cost_is_lower_limit=cost_is_lower_limit, knowledge=knowledge,
+                        accounting_written_at=self._clock())
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             return None if row is None else investigation_record(row)
 
     async def hand_back(
-        self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, knowledge: dict[str, Any] | None,
+        self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, cost_is_lower_limit: bool = False,
+        knowledge: dict[str, Any] | None,
     ) -> InvestigationRecord | None:
         """A stopping worker gives a running row back: its lease lapses at once, so any worker takes
         it over within seconds, and its final cost and knowledge and the mark are written (B11).
@@ -448,7 +461,7 @@ class JobStore:
                     InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id,
                     InvestigationRow.stage == "running", InvestigationRow.accounting_written_at.is_(None))
                 .values(lease_expires_at=func.now() - _dt.timedelta(seconds=1), cost_usd=cost_usd,
-                        knowledge=knowledge, accounting_written_at=self._clock())
+                        cost_is_lower_limit=cost_is_lower_limit, knowledge=knowledge, accounting_written_at=self._clock())
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             return None if row is None else investigation_record(row)
 
@@ -497,6 +510,8 @@ class JobStore:
                        else "its worker stopped renewing its lease")
                 lapsed.failure_message = why + ("; the request used all its attempts" if capped else "; it is retried")
                 lapsed.finished_at = self._clock()
+                if lapsed.accounting_written_at is None and lapsed.cost_usd is not None:
+                    lapsed.cost_is_lower_limit = True  # a lost worker's last copy: at least (#1377 S2)
                 retry_id = None
                 if not capped:
                     retry_id = InvestigationId.mint()

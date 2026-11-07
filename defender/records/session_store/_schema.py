@@ -161,6 +161,22 @@ CREATE TABLE IF NOT EXISTS session_head_log (
     reason TEXT NOT NULL
 ) STRICT;
 
+-- spend_ledger (#1377): one row per model response a run received, written when the response
+-- returns. Append-only and on no session's path, so forks, folds and resume never see it; it holds
+-- no conversation content, only what prices the response. `run_id` says whose spend a row is: a
+-- branch arm joins its source's database, and a total sums one run's rows only.
+CREATE TABLE IF NOT EXISTS spend_ledger (
+    id INTEGER PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cache_read_input_tokens INTEGER NOT NULL,
+    cache_creation_input_tokens INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS spend_ledger_run ON spend_ledger(run_id);
+
 -- gather_boundary — the danger-lens surface, scoped to each session's PATH from its
 -- recorded head (#753 / FK16). `session_id` names the session whose conversation the row
 -- is on, NOT the session that happens to own the row: a fork therefore sees the prefix it

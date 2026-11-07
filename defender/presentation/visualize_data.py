@@ -393,7 +393,6 @@ def phase_wall_times(
 from defender.presentation.visualize_messages import (  # noqa: F401
     build_transcript,
     deduped_main_records,
-    gather_calls_by_phase,
     gather_cost_by_model,
     gather_cost_by_phase,
     gather_dispatch_phase,

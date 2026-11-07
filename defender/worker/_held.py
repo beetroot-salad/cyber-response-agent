@@ -45,3 +45,6 @@ class End:
     ending: Ending | None
     cost: float | None
     knowledge: dict | None
+    #: The cost is only a lower limit ("at least"): spend may be missing from it (#1377 S2). Never
+    #: true beside an unknown cost.
+    at_least: bool = False
