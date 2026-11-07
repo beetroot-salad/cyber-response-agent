@@ -163,15 +163,15 @@ attribute-level `ticket_cli` refs under-resolve — honest tool floor, census is
   `case_history/case_ticket.py`, NOT the real CLI: the latent wrong-script bug, F7).
 - Teaching/prompt: benign.md:37 (item 7); `_JUDGE_DENY_REASON` engine_pydantic.py:60-68
   ("benign only — the pinned closed-ticket read"); suite net =
-  test_grant_gate_575.py:904-916 (`test_g1_no_deny_reason_or_hint_names_a_program_...`).
+  test_grant_gate.py:904-916 (`test_g1_no_deny_reason_or_hint_names_a_program_...`).
 - Tests (9 files): test_judge_pydantic_engine.py:215-310 (grant shape + spoof defenses),
-  test_grant_gate_575.py:134-143 fixtures + 717-748 (e1-e3; NOTE the fixture's ticket CLI
+  test_grant_gate.py:134-143 fixtures + 717-748 (e1-e3; NOTE the fixture's ticket CLI
   path is also `case_history/case_ticket.py`, mirroring the policy_cli demo path),
-  test_bind_sole_seam_551.py:238-263, learning/test_loop.py:1837-1857 (asserts
+  test_bind_sole_seam.py:238-263, learning/test_loop.py:1837-1857 (asserts
   `captured["ticket_cli"] is not None` on the benign leg), test_benign_direction.py:569-623
   (wiring flags + invocation pins; adversarial-leg negatives at :609-623),
   test_judge_sql_idioms_corpus.py:323, test_permission.py:688-751, test_ticket_adapter.py
-  (verb-level; SURVIVES — it tests the verbs M2 reuses), e2e/test_query_tool_611.py:1310-1318
+  (verb-level; SURVIVES — it tests the verbs M2 reuses), e2e/test_query_tool.py:1310-1318
   (`test_ticket_cli_dual_surface_survives` — its "three consumers incl. the judge's grant"
   claim goes false with M6).
 - Spec-graph nodes (c15 re-verified exact): spec_graph_575-grant-gate.yaml:300-319,
@@ -228,13 +228,13 @@ modules — spec-time variant of `spec-graph trace drivers`; no diff exists yet)
   param default False; model-chosen) and its payloads persist under `gather_raw/` which the
   judge reads by design. → feeds N7 (pre-existing carve-out, confirmed identical
   before/after) — NOT an O2 surface.
-- **F7** policy_cli.py:52's demo ticket scope AND test_grant_gate_575's fixture
+- **F7** policy_cli.py:52's demo ticket scope AND test_grant_gate's fixture
   (`_ticket_cli`, :142-143) both point at `case_history/case_ticket.py`, not the real
   adapter CLI. → feeds M6 (the latent wrong-script demo is removed; the same wrong path
   appears in a test fixture slated for retirement — e2 even asserts on
   `endswith("case_ticket.py")`).
 - **F8** `_JUDGE_DENY_REASON` staleness is mechanically test-visible:
-  test_grant_gate_575.py g1 scans deny_reason + overflow hint for programs the agent cannot
+  test_grant_gate.py g1 scans deny_reason + overflow hint for programs the agent cannot
   run. → feeds M6's teaching-surface obligation (the rewrite is forced, not optional).
 - **F9** `defender/CLAUDE.md` census entry in M6 no longer exists (#673). → feeds M6:
   drop that edit site; `no-consequence` beyond the doc correction (nothing replaced it that
@@ -258,9 +258,9 @@ claims:
   - {id: g12, kind: referential, re_verifies: c12, claim: "the per-leg carrier seam exists (replace at _pydantic_stage.py:66; registration follows defn.tools at driver.py:218) but no tools parameter threads through run_stage/build_stage_agent today", probe: "read _pydantic_stage.py:41-157, driver.py:175-219", observed: "signatures carry model/effort/make_model only", verdict: holds}
   - {id: g13, kind: referential, re_verifies: c7, claim: "typed tools are authorized by registration alone (ToolSet bit → register_tools); no grant path for non-bash tools; no 'closed_tickets' name exists; deferred-tool idiom is import-at-registration in the owning package", probe: "read tools.py:511-609, agent_definition.py:67-100; grep closed_tickets defender/", observed: "as stated; grep empty", verdict: holds}
   - {id: g14, kind: referential, re_verifies: [c8, c13], claim: "the query tool's error seam + salt-wrap envelope exist as the doc cites, and are entangled with capture (rows + breaker) which M4 does not mirror", probe: "read query_tool.py:49-60,314-334,388-446,471-475; tools.py:128,269; untrusted.py:20", observed: "as stated (F4)", verdict: holds}
-  - {id: g15, kind: referential, re_verifies: [c9, c14], claim: "benign-only wiring + teaching surfaces + deny-reason suite net as cited; adversarial leg carries ticket_cli=None end-to-end", probe: "read directions.py:41, config.py:389-408, judge/run.py:60-94,159-186, benign.md:37, engine_pydantic.py:57-68, test_grant_gate_575.py:904-916, test_benign_direction.py:569-623", observed: "as stated", verdict: holds}
+  - {id: g15, kind: referential, re_verifies: [c9, c14], claim: "benign-only wiring + teaching surfaces + deny-reason suite net as cited; adversarial leg carries ticket_cli=None end-to-end", probe: "read directions.py:41, config.py:389-408, judge/run.py:60-94,159-186, benign.md:37, engine_pydantic.py:57-68, test_grant_gate.py:904-916, test_benign_direction.py:569-623", observed: "as stated", verdict: holds}
   - {id: g16, kind: referential, claim: "ticket config knob: TICKET_{URL_BASE,BASTION_HOST,TIMEOUT_SEC} with defaults as listed, per-key env override, ConfigFault on missing; transport forks docker-exec-curl host-side with mandatory inner timeout TIMEOUT_SEC+10", probe: "read knowledge/environment/systems/ticket/config.env, _stub_transport.py:124-160,163-220", observed: "as stated", verdict: holds}
-  - {id: g17, kind: census, claim: "gather's route to the same verb bodies: query tool → ModuleVerbRegistry by-path load; require_closed model-chosen default False; payloads persist to gather_raw/{lead}/{seq}.json which the judge reads via its read roots", probe: "read verbs.py:294-330, query_tool.py:423-446,471-475, test_query_tool_611.py:1310-1318; grep gather_raw writers", observed: "as stated (F6/N7)", verdict: holds}
+  - {id: g17, kind: census, claim: "gather's route to the same verb bodies: query tool → ModuleVerbRegistry by-path load; require_closed model-chosen default False; payloads persist to gather_raw/{lead}/{seq}.json which the judge reads via its read roots", probe: "read verbs.py:294-330, query_tool.py:423-446,471-475, test_query_tool.py:1310-1318; grep gather_raw writers", observed: "as stated (F6/N7)", verdict: holds}
   - {id: g18, kind: referential, claim: "JudgeDeps: run_dir = learning run dir; read roots = gather_raw + comparison dirs; stage binds mint a fresh uuid4 salt; JUDGE_DEF tools = read+bash; request cap 45", probe: "read engine_pydantic.py:71-82,153-161,181-215; agent_definition.py:377-423", observed: "as stated", verdict: holds}
   - {id: g19, kind: census, claim: "the full consumer set of the M6-removed plumbing is the 'Consumers of what M6 removes' section; pyrefly resolves _ticket_grant refs to engine_pydantic.py:112,116 + test_judge_pydantic_engine.py:224; attribute-level ticket_cli refs under-resolve in pyrefly (guard tripped) so that census is grep+read, not resolver-backed", probe: "pyrefly-refs engine_pydantic.py:116 _ticket_grant; pyrefly-refs agent_definition.py:184 ticket_cli (guard tripped); grep + per-file read of all 15 files", observed: "as listed; honest tool floor recorded", verdict: holds}
   - {id: r1-extended, kind: reachability, claim: "post-M6 the benign judge's model-reachable live-store routes are the two new typed tools and nothing else: bash shrinks to cat+defender-sql (file-opening only; the store is HTTP, no file exists), read_file opens files, no query bit on JUDGE_DEF, gather_raw is the N7 cache not a store path", probe: "surface sweep over JUDGE_DEF ToolSet + _judge_bash_shapes minus the ticket branch; phase F must re-probe against the BUILT policy and registered toolset", observed: "no other live-store surface found in this tree", verdict: unrefuted}

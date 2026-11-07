@@ -43,8 +43,8 @@ from defender.investigation.query_tool import (  # noqa: E402
 )
 from defender.systems.verb_grant import VerbGrant  # noqa: E402
 from defender.systems.verbs import VerbContext  # noqa: E402
-from defender.tests.e2e.test_query_tool_611 import PAYLOAD  # noqa: E402
-from defender.tests.e2e.test_repeat_breaker_807 import GrantScopedVerbs  # noqa: E402
+from defender.tests.e2e.test_query_tool import PAYLOAD  # noqa: E402
+from defender.tests.e2e.test_repeat_breaker import GrantScopedVerbs  # noqa: E402
 from defender.investigation.request_ceiling import FINAL_REQUEST  # noqa: E402
 from defender.investigation.tools_gather import (  # noqa: E402
     NO_SUMMARY_FAILED,
@@ -57,7 +57,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     VerbRecorder,
     materialize,
 )
-from defender.tests.e2e.test_query_tool_611 import elastic_ok  # noqa: E402
+from defender.tests.e2e.test_query_tool import elastic_ok  # noqa: E402
 from defender.tests.integrations.test_query_door import (  # noqa: E402
     HEADER_DEAD_END,
     HEADER_REQUEST_LIMIT,

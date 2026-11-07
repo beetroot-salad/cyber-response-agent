@@ -145,7 +145,7 @@ def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
 
     # #1359: the host writer's system is the tenant's `ticket`, not a `case-history` system of
     # its own; its one comment write is the write-endpoint table's, reached only through the
-    # host write entry (test_target_confinement_632), never through `guard_outbound`'s read class.
+    # host write entry (test_target_confinement), never through `guard_outbound`'s read class.
 
 
 def test_767_query_tool_is_only_ticket_reader(tmp_path):

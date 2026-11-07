@@ -43,7 +43,7 @@ from defender.tests.e2e._toon872 import (  # noqa: E402
     toon_rows,
     wire_text,
 )
-from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
+from defender.tests.e2e.test_query_tool import DONE, elastic_ok, q  # noqa: E402
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
 from defender.tests.e2e._toon872 import (  # noqa: E402
     PANIC,

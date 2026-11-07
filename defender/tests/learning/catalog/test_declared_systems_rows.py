@@ -16,9 +16,9 @@ import pytest
 
 pytest.importorskip('pydantic_ai')
 
-from defender.tests.e2e.test_pitfalls_input_823 import _dispatch, _run  # noqa: E402
+from defender.tests.e2e.test_pitfalls_input import _dispatch, _run  # noqa: E402
 from defender.tests.e2e._replay_harness import Turn, VerbRecorder  # noqa: E402
-from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
+from defender.tests.e2e.test_query_tool import DONE, elastic_ok, q  # noqa: E402
 from defender.learning.leads.draft_synthesis import (
     _draft_basename,
     _draft_candidate_segments,

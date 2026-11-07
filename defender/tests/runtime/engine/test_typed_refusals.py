@@ -75,7 +75,7 @@ def test_f10_a_nul_in_an_opens_nothing_argv_is_denied_by_the_gate(command, tmp_p
 
 
 def test_f10_the_cat_lane_still_denies_a_nul_operand(tmp_path):
-    """Regression guard on the one lane that already refused (`test_grant_gate_575.py`'s a9):
+    """Regression guard on the one lane that already refused (`test_grant_gate.py`'s a9):
     the new whole-string check must not have moved that deny somewhere it can be lost."""
     from defender.investigation.permission import bash as bash_gate
 

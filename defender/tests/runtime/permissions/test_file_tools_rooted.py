@@ -60,7 +60,7 @@ def _snapshot(path: Path) -> tuple[bytes, int, int, int, tuple[str, ...]]:
 
 
 def _main(tmp_path: Path, *, run: Path | None = None):
-    """MAIN deps through the real `bind`, as `test_append_only_write_lane_810` builds them."""
+    """MAIN deps through the real `bind`, as `test_append_only_write_lane` builds them."""
     if run is None:
         run = tmp_path / "run"
         run.mkdir()

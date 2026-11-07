@@ -37,7 +37,7 @@ def _questioner_def():
 
 def _grant_gate():
     """The #575 grant gate's module — for its `_named_programs` extractor, IMPORTED not copied."""
-    return T.mod("tests.runtime.permissions.test_grant_gate_575")
+    return T.mod("tests.runtime.permissions.test_grant_gate")
 
 
 def test_1008_the_family_judge_is_registered_under_its_own_role_key():

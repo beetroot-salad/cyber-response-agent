@@ -489,7 +489,7 @@ SQL_ROWS = 3
 
 
 def test_b5_unboxed_sql_reduces_a_payload_gathered_mid_run_by_its_model_path(tmp_path, monkeypatch):
-    from defender.tests.e2e.test_query_tool_611 import _sql_shim_aggregates
+    from defender.tests.e2e.test_query_tool import _sql_shim_aggregates
 
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
     run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-sql")

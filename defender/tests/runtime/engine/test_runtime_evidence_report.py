@@ -99,7 +99,7 @@ def test_runtime_evidence_rows_project_off_the_consultation_bucket():
 
 def test_runtime_evidence_consultation_lands_in_report_body():
     """A close renders one body line per qualifying `:R consultations` row, never into the capped
-    frontmatter (the whole-close half is `e2e/test_tacit_authz_e2e_983.py`)."""
+    frontmatter (the whole-close half is `e2e/test_tacit_authz_e2e.py`)."""
     receipts = _receipts(BENIGN_DOC)
     assert len(receipts) == 1, "fixture control: the document carries one qualifying consultation"
     (receipt,) = receipts

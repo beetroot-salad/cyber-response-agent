@@ -217,7 +217,7 @@ class _GateEnv:
 @pytest.fixture
 def gate_env(tmp_path):
     """A real anchored tree plus MAIN's and gather's policies off the real compile seam (the
-    fixture shape `test_grant_gate_575.py` uses, so these checks see the gate's own surface)."""
+    fixture shape `test_grant_gate.py` uses, so these checks see the gate's own surface)."""
     run = tmp_path / "run"
     (run / "gather_raw" / "l-001").mkdir(parents=True)
     (run / "gather_summaries").mkdir()

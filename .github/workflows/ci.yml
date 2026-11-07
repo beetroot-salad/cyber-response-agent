@@ -147,7 +147,7 @@ jobs:
         #                    `box-dood` under the split-namespace topology — twice, as
         #                    before, just not on this job's critical path. gVisor is still
         #                    installed above because OTHER suites in this job start real
-        #                    boxes: test_store_boundary_705.py's `box`-marked tests and
+        #                    boxes: test_store_boundary.py's `box`-marked tests and
         #                    test_seccomp_alias_ban.py's mechanism confirmations, which
         #                    _spec771.py deliberately routes through THIS job.
         env:
@@ -202,7 +202,7 @@ jobs:
       - name: "Run the #540 boundary suite natively"
         working-directory: defender
         # Same enforcing posture as every other pytest step over tests/ (#631 D11) — and
-        # test_budget_seams_631's workflow gate reads this block to prove it.
+        # test_budget_seams's workflow gate reads this block to prove it.
         env:
           DEFENDER_BUDGET_ENFORCE: "1"
         # No -n: 27 container starts contend on one docker daemon, and xdist would buy
@@ -251,7 +251,7 @@ jobs:
       # this name to "Run the" — and the #631 workflow gate reports steps BY name.
       - name: "Run the #540 boundary suite under DooD"
         # Same enforcing posture as the `test` job (#631 D11 — every CI pytest over tests/
-        # runs with the budget flag on). The block below is what test_budget_seams_631's
+        # runs with the budget flag on). The block below is what test_budget_seams's
         # workflow gate reads; the `-e` on the docker run is what makes it TRUE, since the
         # pytest process lives in the container, not on the runner.
         env:
@@ -395,7 +395,7 @@ jobs:
       # whole root, never a file list. It lives here rather than in `code-smells` for the
       # golden-case step's reason: collecting tests/ imports the runtime tree, and only this
       # job syncs `--extra runtime`. Same enforcing posture as every CI pytest over tests/
-      # (#631 D11; test_budget_seams_631's workflow gate reads this block).
+      # (#631 D11; test_budget_seams's workflow gate reads this block).
       - name: Gate-marked tests (the `test` job's `-m "not gate"` complement)
         working-directory: defender
         env:
@@ -895,7 +895,7 @@ jobs:
       # gated artifact name with no schema call in the same frame. Baseline ships EMPTY. NOT
       # mechanized: whether the validated text IS the written text, a write split across two
       # functions, and the consumer half of #961 (publishing is not a syntactic act) — those
-      # are tests/runtime/permissions/test_ungated_artifact_write_961_964.py's, not this gate's.
+      # are tests/runtime/permissions/test_ungated_artifact_write.py's, not this gate's.
       - name: Ungated artifact write gate (every writer meets the schema, #961/#964 — baseline-ratcheted)
         run: defender/.venv/bin/python tooling/lint/lint_ungated_artifact_write.py
 

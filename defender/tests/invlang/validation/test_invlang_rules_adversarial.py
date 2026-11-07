@@ -330,7 +330,7 @@ p1|proposed_edge|"failures arrive in bursts"
 
 
 @pytest.mark.parametrize(("case", "apid"), [
-    # test_invlang_rules_933.py covers `a1`, the only shape a `\\w+` regex misses.
+    # test_invlang_rules.py covers `a1`, the only shape a `\\w+` regex misses.
     ("trailing-junk", "ap1x"),
     ("leading-junk", "xap1"),
     ("no-index", "ap"),

@@ -194,7 +194,7 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     rows = _read_rows(S.RunPaths(run_dir).wire_log)
     assert rows, "the replay produced no wire-log records"
     # Every AGENT-produced record (a message, a budget refusal). A policy denial is the host's
-    # projection of a call, keyed by `role` (`test_denial_audit_632` pins its key set): it
+    # projection of a call, keyed by `role` (`test_denial_audit` pins its key set): it
     # names its writer already and gains no second field.
     rows = [r for r in rows if r.get("event_type") != POLICY_DENIAL_EVENT_TYPE]
     missing = [i for i, r in enumerate(rows) if not r.get("writer_id")]

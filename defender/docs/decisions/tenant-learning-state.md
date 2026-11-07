@@ -56,7 +56,7 @@ The executable coverage map uses existing suites:
 | O1: tenant root, no defaults | `test_drain719_config`, `test_front_door`, `test_state_contracts_handle` | Runtime API removal, channel/delivery content isolation, no ambient fallback |
 | O2: run-derived writes | `test_curation_boundary`, `test_launcher_frame`, `test_lead_author` | Actual run/episode findings and requests reach the owning tenant queue |
 | O3: explicit command identity | `test_operator_commands`, `test_queue_view` | Missing/invalid identity refuses before mutation; selected locks and rendered records agree |
-| O4: ownership and lifetime | `test_queue_drains_852`, `test_drain719_config` | Foreign requests are dead-lettered; same-tenant requests run; state and locks survive checkout changes |
+| O4: ownership and lifetime | `test_queue_drains`, `test_drain719_config` | Foreign requests are dead-lettered; same-tenant requests run; state and locks survive checkout changes |
 | O5: provisioning/adoption | `test_tenant_piece_setup` | Named-entry preservation, held locks, no merge, tokens, interruption recovery, unrelated-file refusal |
 | O6: root/mount boundary | `test_drain719_config`, `test_tenant_piece_setup`, `test_operator_commands` | Static/stored/rebound root-link refusal; fresh/migration setup refusal; no learning mount |
 

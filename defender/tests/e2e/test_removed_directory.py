@@ -23,8 +23,8 @@ from defender.tests.e2e.test_model_named_systems import (  # noqa: E402
     _bad_args,
     _detail,
 )
-from defender.tests.e2e.test_pitfalls_input_823 import _Res, _run  # noqa: E402
-from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
+from defender.tests.e2e.test_pitfalls_input import _Res, _run  # noqa: E402
+from defender.tests.e2e.test_query_tool import DONE, q  # noqa: E402
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S  # noqa: E402
 
 pytestmark = pytest.mark.e2e

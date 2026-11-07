@@ -25,8 +25,8 @@ from defender.tests.support.learning.core._declared870 import (  # noqa: E402
     queue_ids,
 )
 from defender.tests.e2e._replay_harness import GOLDEN_AB3, materialize  # noqa: E402
-from defender.tests.e2e.test_pitfalls_input_823 import _reduce, _run  # noqa: E402
-from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
+from defender.tests.e2e.test_pitfalls_input import _reduce, _run  # noqa: E402
+from defender.tests.e2e.test_query_tool import DONE, q  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.curation import _curator1134 as C  # noqa: E402

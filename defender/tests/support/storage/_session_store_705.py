@@ -33,7 +33,7 @@ DEFENDER = Path(__file__).resolve().parents[3]
 
 #: An investigation.md whose loop 1 is CLOSED (`:T close`), so `compaction.fold_boundary`
 #: reads 1 and `driver._fold_decision` authorizes a fold, and whose loop 2 is still open, so
-#: the fold never swallows the turn in progress. Both fold suites (`test_store_driver_705`,
+#: the fold never swallows the turn in progress. Both fold suites (`test_store_driver`,
 #: `test_fold_lessons_push` via `_fold_936`) fold this ONE document. It opens no slot: the
 #: fold's mint walks `defender_dir/lessons`, the checkout's live corpus for a `drive` that
 #: plants no tree.

@@ -25,8 +25,8 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     materialize,
 )
 from defender.tests.e2e.test_model_named_systems import PARAMS, _bad_args  # noqa: E402
-from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _reduce, _run  # noqa: E402
-from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
+from defender.tests.e2e.test_pitfalls_input import LEAD, _reduce, _run  # noqa: E402
+from defender.tests.e2e.test_query_tool import DONE, elastic_ok, q  # noqa: E402
 from defender.tests.learning.core.test_row_schema import (  # noqa: E402
     KEY_MARKER,
     SHA_MARKER,

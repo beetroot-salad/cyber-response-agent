@@ -32,7 +32,7 @@ from defender.systems.verbs import VerbRegistry  # noqa: E402
 from defender.investigation.driver import MAIN_DEF  # noqa: E402
 from defender.providers import BuiltModel  # noqa: E402
 from defender.skills.invlang.validate import validate_companion  # noqa: E402
-from defender.tests.runtime.engine.test_budget_seams_631 import ScriptedModel, drive_agent  # noqa: E402
+from defender.tests.runtime.engine.test_budget_seams import ScriptedModel, drive_agent  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 REPO_ROOT = Path(__file__).resolve().parents[4]

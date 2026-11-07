@@ -30,7 +30,7 @@ from defender.tests.e2e._replay_harness import (
     materialize,
 )
 from defender.kit.faults import UpstreamFault
-from defender.tests.e2e.test_query_tool_611 import (
+from defender.tests.e2e.test_query_tool import (
     DONE,
     ROW_KEYS,
     elastic_ok,

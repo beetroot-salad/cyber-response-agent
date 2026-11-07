@@ -34,7 +34,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
-from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
+from defender.tests.e2e.test_query_tool import (  # noqa: E402
     DONE,
     elastic_ok,
     q,

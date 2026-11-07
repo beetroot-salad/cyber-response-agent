@@ -47,7 +47,7 @@ from defender.investigation.tools import _tool_bash  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
 from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
 from defender.tests.sandbox.test_bash_decision import Box, _gather_scene  # noqa: E402
-from defender.tests.runtime.engine.test_budget_seams_631 import _run_dir, drive_agent  # noqa: E402
+from defender.tests.runtime.engine.test_budget_seams import _run_dir, drive_agent  # noqa: E402
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.investigation import driver, observe  # noqa: E402
 from defender.investigation.agent_definition import bind, effective_tools_for  # noqa: E402
@@ -55,7 +55,7 @@ from defender.providers import BuiltModel  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.sandbox.test_bash_decision import Box  # noqa: E402
-from defender.tests.runtime.engine.test_budget_seams_631 import ScriptedModel, _run_dir, drive_agent  # noqa: E402
+from defender.tests.runtime.engine.test_budget_seams import ScriptedModel, _run_dir, drive_agent  # noqa: E402
 
 
 _BUDGET_KEYS = {"run_id", "tool_calls", "subagent_spawns", "created_at", "started_at"}
@@ -532,7 +532,7 @@ def test_an_enforced_gather_whose_deps_carry_no_state_raises(tmp_path):
 
 
 def _drive_with_box(defn, run_dir: Path, turns, *, limits, enforce: bool, state, box):
-    """`test_budget_seams_631.drive_agent`, with the box injected so the test sees whether the
+    """`test_budget_seams.drive_agent`, with the box injected so the test sees whether the
     call reached it."""
     model = ScriptedModel(turns)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
@@ -605,7 +605,7 @@ def test_production_path_carries_one_state_to_lead_zero_and_the_gather_lead(tmp_
     gather lead share it."""
     from defender.tests.e2e import _lead_zero_808 as LZ
     from defender.tests.e2e._replay_harness import ReplayFn, Turn, driver_summary
-    from defender.tests.e2e.test_query_tool_611 import DONE, q
+    from defender.tests.e2e.test_query_tool import DONE, q
 
     doc = LZ.alert_doc()
     run_dir = LZ.materialize_alert(tmp_path, doc)

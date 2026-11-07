@@ -158,7 +158,7 @@ def test_a_lesson_the_runtime_wrote_survives_the_walk_that_reads_it_back(tmp_pat
         "from pathlib import Path\n"
         "from defender.investigation import tools\n"
         "from defender.knowledge._corpus import iter_lessons\n"
-        "from defender.tests.shared.filesystem.test_encoding_contract_589 import _curator_deps\n"
+        "from defender.tests.shared.filesystem.test_encoding_contract import _curator_deps\n"
         "print('enc=' + locale.getencoding())\n"
         f"deps, corpus = _curator_deps(Path({str(tmp_path)!r}))\n"
         "body = '---\\nname: cafe\\ndescription: le caf\\u00e9\\n---\\nbody\\n'\n"

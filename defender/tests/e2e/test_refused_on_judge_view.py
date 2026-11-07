@@ -52,7 +52,7 @@ from defender.tests.learning.core.test_row_schema import (  # noqa: E402
     _lead_file,
     _table,
 )
-from defender.tests.runtime.engine.test_denial_gather_632 import DENIED_PAIR, _registry  # noqa: E402
+from defender.tests.runtime.engine.test_denial_gather import DENIED_PAIR, _registry  # noqa: E402
 from defender.tests.support.learning.curation._lead_author_1134 import repo_skills  # noqa: E402
 from defender.tests.support.learning.core import _state1135
 

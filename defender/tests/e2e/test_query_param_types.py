@@ -13,7 +13,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     FakeVerbs,
     VerbRecorder,
 )
-from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
+from defender.tests.e2e.test_query_tool import (  # noqa: E402
     DONE,
     PAYLOAD,
     q,

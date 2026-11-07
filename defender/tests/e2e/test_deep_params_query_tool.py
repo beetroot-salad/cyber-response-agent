@@ -41,7 +41,7 @@ from defender.tests.e2e.test_model_named_systems import (  # noqa: E402
     _above_guard,
     _bad_args,
 )
-from defender.tests.e2e.test_repeat_breaker_807 import _replay_rejections  # noqa: E402
+from defender.tests.e2e.test_repeat_breaker import _replay_rejections  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

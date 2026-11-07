@@ -15,8 +15,8 @@ from defender.investigation import record_query as rq  # noqa: E402
 from defender.tests.support.learning.curation._frames680 import FRAME_RE  # noqa: E402
 from defender.tests.support.storage._session_store_705 import sql  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
-from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _run  # noqa: E402
-from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
+from defender.tests.e2e.test_pitfalls_input import LEAD, _Res, _run  # noqa: E402
+from defender.tests.e2e.test_query_tool import DONE, elastic_ok, q  # noqa: E402
 from defender.tests.e2e.test_model_named_systems import (  # noqa: E402
     PARAMS,
     _above_guard,
@@ -24,7 +24,7 @@ from defender.tests.e2e.test_model_named_systems import (  # noqa: E402
     _dead_end,
     _summary,
 )
-from defender.tests.e2e.test_repeat_breaker_807 import (  # noqa: E402
+from defender.tests.e2e.test_repeat_breaker import (  # noqa: E402
     INCOMPLETE_IDIOM,
     _replay_rejections,
 )

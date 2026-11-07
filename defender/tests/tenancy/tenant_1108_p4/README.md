@@ -189,8 +189,8 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 
 Files are under `tenant_1108_p4/` unless a path is given.
 
-- O1 layout allowlist → `test_layout.py`, `tests/learning/retrieval/test_corpus_fold_584.py`, `test_lessons_frontend.py`, `tests/tenancy/test_knowledge_owner.py`
-- O2 one tenant, one revision, every surface → `test_run_isolation_e2e.py`, `test_run_copy.py`, `tests/runtime/permissions/test_permission.py`, `runtime/engine/test_read_confine_bash.py`, `test_gather_template_discovery.py`, `e2e/test_gather_template_index.py`, `alert_front_door_1222/test_lessons_and_corpus.py`, `layout_contracts/test_1080_*`, `invlang/validation/test_frontier_recall_919.py`
+- O1 layout allowlist → `test_layout.py`, `tests/learning/retrieval/test_corpus_fold.py`, `test_lessons_frontend.py`, `tests/tenancy/test_knowledge_owner.py`
+- O2 one tenant, one revision, every surface → `test_run_isolation_e2e.py`, `test_run_copy.py`, `tests/runtime/permissions/test_permission.py`, `runtime/engine/test_read_confine_bash.py`, `test_gather_template_discovery.py`, `e2e/test_gather_template_index.py`, `alert_front_door_1222/test_lessons_and_corpus.py`, `layout_contracts/test_1080_*`, `invlang/validation/test_frontier_recall.py`
 - O-A box mounts stage only, token read-back, in-box `.tenant-id` retired → `test_run_copy.py`, `test_run_start.py`, `tenant_1108_p2/test_run_start.py`, `e2e/test_tenant_box_mount.py`
 - O-B one export commit for settings/knowledge/stamp → `test_run_start.py`, `test_branch_replay.py`, `e2e/test_tenant_run_start_e2e.py`
 - O-PIN `--knowledge-commit`, branch siblings → `test_run_start.py`, `test_branch_replay.py` (the held-out launcher that pinned each index is gone, #1279 A10; scoring skips its pin line: `storage/ids_1187/test_held_out.py`)
@@ -250,7 +250,7 @@ Deleted in the post-implementation contract repair (r2, OD12 class i):
 Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as r1–r3); each site carries a pointer comment:
 - Deleted, class (i):
   - `learning/curation/test_drain_byte_identity.py` (whole file, above).
-  - `learning/stages/test_frames_680_lifecycle.py::test_revert_lesson_driver_holds_shared_author_lock_and_calls_through` (`revert(branch=)`)
+  - `learning/stages/test_frames_lifecycle.py::test_revert_lesson_driver_holds_shared_author_lock_and_calls_through` (`revert(branch=)`)
     → `test_revert_cli.py::test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_agent_lesson`, `::test_flow5_revert_cli_waits_out_a_running_author_drain`.
   - `tenant_1108_delivery/test_forgejo.py::test_the_writer_lease_is_not_held_by_a_fork_pr` (lease on `AuthorBranch`)
     → `test_drains.py::test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_else_does` (`_LEASE_ROWS`, both drains).
@@ -279,7 +279,7 @@ Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as 
 - Re-spelled, class (ii), assertions kept or made stricter: `test_run_gate.py` link/out-of-lane rows (`LeadAuthorError` → `DeliveryRefused`, OD18/OD23),
   exec rows (mode 100644, P3), the two "larger than any read commits" cases → `..._is_refused`; `test_lead_author_adversary.py` link rows
   (`DeliveryRefused`); `test_curator_drain.py` hard-linked base lesson → refused claim (owner ruling 2);
-  `test_frames_680_lifecycle.py::test_lead_author_bash_reads_cross_agent_artifact` onto a batch-draft scene; `test_lessons_run_windows.py`
+  `test_frames_lifecycle.py::test_lead_author_bash_reads_cross_agent_artifact` onto a batch-draft scene; `test_lessons_run_windows.py`
   out-of-lane stray rows → refused claim (`test_a_stray_the_box_writes_outside_the_lanes_once_started_is_a_refused_claim`);
   `test_curator_manifest.py::test_p4_both_callers_forward_the_abs_corpus_path` over a draft; `tenancy/test_knowledge_revision.py`'s pointer.
 
@@ -298,13 +298,13 @@ Repair round r4 (this round), all additive or stricter:
 - Support: `_tenants1106.plant_census_catalog(folder)` plants the lead-zero template into each tenant folder's `agent/skills/gather/queries/` (R-2);
   `_spec1107.plant` re-plants in place keeping `.git`, and the publish stand-in `_launch_publish_p4` fails a lost `.git` (`pytest.fail`) instead of
   starting the remote anew, and reads `LockBusy` as `stale:transient` (R-3); the fixture tenant ships
-  `agent/skills/tacit-knowledge/SKILL.md`, re-asserted by `tenancy/test_tacit_knowledge_registry_983.py` (R-5).
-- Older suites reading the product content P4 deleted (item 13), re-spelled, nothing deleted: `invlang/validation/test_lessons_frontier_scale_935.py` (4)
+  `agent/skills/tacit-knowledge/SKILL.md`, re-asserted by `tenancy/test_tacit_knowledge_registry.py` (R-5).
+- Older suites reading the product content P4 deleted (item 13), re-spelled, nothing deleted: `invlang/validation/test_lessons_frontier_scale.py` (4)
   and `learning/retrieval/test_container_lesson_recall.py` (7) rank against the pre-P4 shipped lessons, now the committed test fixture
   `tests/fixtures/pre-p4-shipped/agent/` (byte-identical to base `0f62791e`; helper `support/shared/_pre_p4_shipped.py`);
-  `invlang/validation/test_frontier_shared_walk_930.py`'s straddle case recalls from the run copy's `agent/lessons`;
-  `integrations/test_scaffold_rules_901.py`'s template sweep covers every committed `knowledge/*/agent` catalog plus that fixture's (which carries
-  the `_draft`); `learning/curation/test_tacit_registry_authoring_991.py` gates the fixture tenant's and the pre-P4 registry and reads its worked
+  `invlang/validation/test_frontier_shared_walk.py`'s straddle case recalls from the run copy's `agent/lessons`;
+  `integrations/test_scaffold_rules.py`'s template sweep covers every committed `knowledge/*/agent` catalog plus that fixture's (which carries
+  the `_draft`); `learning/curation/test_tacit_registry_authoring.py` gates the fixture tenant's and the pre-P4 registry and reads its worked
   example from the pre-P4 copy; `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_staying_commands_import_modules_that_have_moved`
   runs `tacit_cli check --defender-dir knowledge/tenant-fixture/agent` (an agent root under the existing flag; not yet named in §2).
 - Deleted with production code the cleanup removed (OD12 class i):

@@ -39,7 +39,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
-from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
+from defender.tests.e2e.test_query_tool import DONE, q  # noqa: E402
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
@@ -57,7 +57,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
-from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
+from defender.tests.e2e.test_query_tool import DONE, elastic_ok, q  # noqa: E402
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
 from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.investigation.query_tool import QueryCapture  # noqa: E402
@@ -69,7 +69,7 @@ from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.hooks import budget_enforcer as be  # noqa: E402
 from defender.systems import circuit_breaker  # noqa: E402
 from defender.investigation.driver import MAIN_DEF  # noqa: E402
-from defender.tests.runtime.engine.test_budget_seams_631 import _run_dir, drive_agent  # noqa: E402
+from defender.tests.runtime.engine.test_budget_seams import _run_dir, drive_agent  # noqa: E402
 
 
 FLAG = "DEFENDER_BUDGET_ENFORCE"
