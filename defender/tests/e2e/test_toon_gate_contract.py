@@ -29,16 +29,9 @@ from defender.tests.e2e._toon872 import (  # noqa: E402
     wire_text,
 )
 from defender.tests.e2e._toon872 import (  # noqa: E402
-    agent_run,
-    corpus,
-    delivered_percent,
-    foreign_toolset,
     frame_overhead,
-    framed_content,
     toon_bytes,
-    toon_rows,
     wire_bytes,
-    wire_text,
 )
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
@@ -51,14 +44,8 @@ from defender.tests.e2e._toon872 import (  # noqa: E402
     REPO_ROOT,
     RUN_ID,
     PartRecorder,
-    agent_run,
-    corpus,
-    foreign_toolset,
-    framed_content,
     owned_toolset,
     run_isolated,
-    toon_rows,
-    wire_text,
 )
 from defender.tests.e2e.test_query_tool import DONE, elastic_ok, q  # noqa: E402
 

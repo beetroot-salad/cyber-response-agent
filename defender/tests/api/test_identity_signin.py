@@ -44,48 +44,23 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
 )
 from defender.tests.support.api._identity1306 import OPS as OPS_EMAIL  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
-    ANN,
-    BOB,
     EMPTY,
-    FRONTEND_ORIGIN,
     HOUR,
-    NEW,
     NINA,
     SECOND,
     SEVEN_DAYS,
-    SESSION_COOKIE,
     T0,
-    T1,
-    T2,
-    World,
-    invitation_id,
     invitation_rows,
     items,
-    me,
     repo_holds,
-    tenants_of,
-    two_tenants,
-    user_id,
 )
 from defender.api.models import AlertSummary  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
-    ANN,
-    BOB,
-    NEW,
     NO_SUCH_ID,
     SUMMARY,
-    T1,
-    T2,
     UNKNOWN,
-    invitation_id,
-    items,
     masked,
-    me,
-    problem_type,
-    tenants_of,
-    two_tenants,
-    user_id,
 )
 
 

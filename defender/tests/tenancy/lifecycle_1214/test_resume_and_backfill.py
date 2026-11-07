@@ -1,3 +1,4 @@
+# ruff: noqa: PT018
 """#1214 failure, restart point and resume; names before things; the spent wrapper; first publish; sweep (O3, P1,
 DC-4, RC-4, RC-6, RC-7, RC-8, DC-14) — in-memory twin. Real crashes (lock lost mid-step) are in test_worker_lock.
 
@@ -32,10 +33,9 @@ from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
 )
 from defender.tests.tenancy.lifecycle_1214._support import REPO_WINDOW, LifecycleWorld  # noqa: E402
 from defender.tests.support.tenancy._active1214 import CREATED  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, ORG  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import as_bot  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._job_cases import as_bot, jwts, protection_reads  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._job_cases import jwts, protection_reads  # noqa: E402
 
 
 ITEM_KEYS = ("state", "pending_action", "step", "step_actor")

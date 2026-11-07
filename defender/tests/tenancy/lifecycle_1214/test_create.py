@@ -1,3 +1,4 @@
+# ruff: noqa: F811, PT018
 """#1214 create, progress, step lists, host boundary, many tenants, audit (O1, O2, O3, O6, O7, O10, DC-2/3/5/10/11/12)
 — in-memory twin.
 

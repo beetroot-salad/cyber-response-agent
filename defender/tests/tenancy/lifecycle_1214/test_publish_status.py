@@ -1,3 +1,4 @@
+# ruff: noqa: PT018, F811
 """#1214 O6: the tenant's last publish outcome lives in `tenancy.publish_status` (not `publish-status.json`): recorded by
 host processes, readable, replaced by the next outcome and deleted at `finish` (O6, P2, Flow 2.4). Successors of #1108 P4's
 file-based assertions: a misconfiguration is recorded then cleared by a success; a transient outage and an operator

@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 import asyncio
 import dataclasses
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from dataclasses import replace
 
 import pytest
@@ -48,14 +48,11 @@ from defender.tests.support.tenancy import _tenants1106
 from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
 from defender.tests.sandbox.test_bash_decision import Box, _gather_scene  # noqa: E402
 from defender.tests.runtime.engine.test_budget_seams import _run_dir, drive_agent  # noqa: E402
-from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.investigation import driver, observe  # noqa: E402
-from defender.investigation.agent_definition import bind, effective_tools_for  # noqa: E402
+from defender.investigation.agent_definition import effective_tools_for  # noqa: E402
 from defender.providers import BuiltModel  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
-from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
-from defender.tests.sandbox.test_bash_decision import Box  # noqa: E402
-from defender.tests.runtime.engine.test_budget_seams import ScriptedModel, _run_dir, drive_agent  # noqa: E402
+from defender.tests.runtime.engine.test_budget_seams import ScriptedModel  # noqa: E402
 
 
 _BUDGET_KEYS = {"run_id", "tool_calls", "subagent_spawns", "created_at", "started_at"}

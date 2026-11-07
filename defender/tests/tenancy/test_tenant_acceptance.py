@@ -32,7 +32,7 @@ from defender.records._tenant_id import TenantRefused
 from defender.cli.learning import branch as branch_entry
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.skills.connect import validate_scaffold
-from defender.records._tenant_id import TenantId, TenantRefused
+from defender.records._tenant_id import TenantId
 
 
 def test_a_knowledge_folder_linked_to_itself_is_refused_by_name(tmp_path: Path) -> None:

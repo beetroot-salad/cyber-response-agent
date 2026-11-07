@@ -28,12 +28,10 @@ from defender.investigation import branch
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.learning.branch._branch_947 import GOLDEN_INVESTIGATION, planted_source, spec_at
 from defender.tests.support.storage._session_store_705 import runs_base
-from defender.tests.e2e._replay_harness import ReplayFn, Turn
 from defender import run as launch
 from defender import box
 from defender.box import _scrub as scan
 from defender.tests.support.tenancy import _tenants1106 as tenants
-from defender.tests.support.runtime.records._1165_flows import RecordIO, run_handle
 from defender.tests.e2e._replay_harness import DEFENDER
 from defender.tests.e2e.test_scrub_lifecycle import FakeDocker
 from defender.tests.support.tenancy._host1214 import TEST_TENANT

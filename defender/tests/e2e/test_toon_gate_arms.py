@@ -49,28 +49,12 @@ from defender.tests.e2e._toon872 import (  # noqa: E402
     PANIC,
     EncoderFault,
     SpyEncoder,
-    agent_run,
-    corpus,
-    delivered_percent,
-    foreign_toolset,
-    framed_content,
-    toon_rows,
     wire_roundtrip_equal,
-    wire_text,
 )
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender.tests.support.storage._session_store_705 import sql, store_factory  # noqa: E402
 from defender.investigation.toon_gate import GATE_METADATA_KEY  # noqa: E402
-from defender.tests.e2e._toon872 import (  # noqa: E402
-    RUN_ID,
-    PartRecorder,
-    corpus,
-    foreign_toolset,
-    framed_content,
-    toon_rows,
-    wire_text,
-)
 from defender.tests.support.storage._store_owner import reread
 
 

@@ -19,7 +19,6 @@ from defender.box import BoxExecutor, BoxFault, BoxSpec, unboxed_executor
 from defender.tests.support.sandbox import _box1195 as X
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender import _git
-from defender.box import BoxFault
 from defender.tests.support.sandbox._docker import dood_anchor, is_dood
 from defender.tests.e2e._spec771 import DEFENDER, requires_real_box
 from defender.tests.tenancy.tenant_1108_delivery._support import (

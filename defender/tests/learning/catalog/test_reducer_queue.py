@@ -44,38 +44,24 @@ from defender.tests.support.learning.core._declared870 import (
     shim_lead,
     shim_row,
 )
-from defender.learning.core import drains, persist
+from defender.learning.core import drains
 from defender.learning.core.config import pitfalls_threshold
 from defender.tests.support.learning.core._declared870 import (
     REDUCER_REL,
-    Spawn,
-    by_surface,
     curate_agent_execution_md,
-    graveyard_by_id,
-    pitfall_row,
     queue_ids,
     reducer_surface_text,
     seed_agent_files,
     seed_product,
-    shim_lead,
-    shim_row,
     silent_shim_row,
 )
 from defender.tests.support.learning.curation._curator1134 import open_state
 from defender import _git
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.tests.support.learning.core._declared870 import (
-    BINDER,
-    PITFALLS_SECTION,
     PRODUCT_REDUCER_REL,
     REDUCER_FRONTMATTER_KEYS,
     REDUCER_HEADINGS,
-    REDUCER_REL,
-    by_surface,
-    pitfall_row,
-    reducer_surface_text,
-    seed_agent_files,
-    shim_row,
     write,
 )
 

@@ -43,14 +43,7 @@ from defender.tests.e2e.test_pitfalls_input import SQL, _Box  # noqa: E402
 from defender.tests.e2e.test_query_tool import DONE, q  # noqa: E402
 from defender.kit.faults import TransportFault  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
-    GOLDEN_AB3,
-    FakeVerbs,
-    ReplayFn,
-    Turn,
-    dispatching_main,
-    drive,
     driver_summary,
-    materialize,
 )
 
 

@@ -33,22 +33,8 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     user_id,
 )
 from defender.tests.support.api._identity1306 import (  # noqa: E402
-    ANN,
-    BOB,
-    DAY,
-    HOUR,
-    NEW,
-    NINA,
-    SEVEN_DAYS,
-    SECOND,
     T0,
-    T1,
-    T2,
-    invitation_rows,
     same_invite_answer,
-    tenants_of,
-    two_tenants,
-    me,
 )
 
 

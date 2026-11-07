@@ -1,3 +1,4 @@
+# ruff: noqa: PT018
 """#1214 offboard, repo deletion and rotate (O4, O5, O10, DC-2/3, RC-4) — in-memory twin.
 
 #1214 r8: `main`'s rule at tenant creation and at every rotation (A23): push off, merge whitelist on naming the
@@ -30,8 +31,6 @@ from defender.tests.tenancy.lifecycle_1214._support import (  # noqa: E402
     ROTATE,
     LifecycleWorld,
 )
-from defender.tests.tenancy.lifecycle_1214._job_cases import as_bot, jwts  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
 
 
 OFFBOARD_STEPS = [("offboard", "service"), ("teardown", "host"), ("finish", "service")]

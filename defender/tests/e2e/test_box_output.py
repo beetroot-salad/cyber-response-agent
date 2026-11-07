@@ -494,7 +494,7 @@ def _reducer_run(root: Path, executor: box.BoxExecutor | None, sql: str = "'SELE
     unboxed one), the payload made a sparse `payload_size` bytes when given; returns its queries rows."""
     from defender.records import RunPaths as Paths
     from defender.tests.e2e._replay_harness import GOLDEN_AB3, ReplayFn, Turn, VerbRecorder, drive, materialize
-    from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q
+    from defender.tests.e2e.test_query_tool import DONE, elastic_ok, q
     from defender.tests.support.runtime.state._1255_view import model_path
     from defender._io import read_jsonl_rows
 

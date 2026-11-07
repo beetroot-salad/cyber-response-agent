@@ -7,7 +7,6 @@ import functools
 import json
 import os
 import shutil
-import subprocess
 import uuid
 from collections.abc import Iterator, Mapping
 from pathlib import Path

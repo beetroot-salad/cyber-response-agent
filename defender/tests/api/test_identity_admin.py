@@ -36,22 +36,11 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     user_id,
 )
 from defender.tests.support.api._identity1306 import (  # noqa: E402
-    DAY,
     HOUR,
-    LAB,
-    ME,
-    OPS,
     SECOND,
     SEVEN_DAYS,
-    Bootstrap,
     BootstrapRefused,
-    IdentityService,
     World,
-    invitation_id,
-    lab,
-    me,
-    tenants_of,
-    user_id,
 )
 
 

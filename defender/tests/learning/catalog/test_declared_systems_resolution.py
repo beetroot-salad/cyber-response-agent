@@ -53,30 +53,21 @@ from defender.tests.support.runtime.engine._declared869 import (
     LeadAuthorSpawn,
     Spawn,
     adapter_declared_systems,
-    agent_marker_file,
     agent_skill_md,
     commit_paths,
-    declared_systems,
     head_sha,
-    loop_log,
-    pitfall_row,
     write,
-    write_adapter,
 )
 from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.learning.curation._lead_author_1134 import (
-    draft_lead_deps,
-    lead_lane,
     run_pitfalls,
 )
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, curation_tenant, run_of
 from defender.learning.core.lane_trees import DrainTrees
-from defender.learning.leads import lead_author, pitfalls_curator
+from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
-from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorError
-from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of
+from defender.learning.leads.lead_extraction import ExecutedLead
 from defender.tests.support.learning.curation._lead_author_1134 import drafts_under, skills_view
-from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn
 
 
 #: The system the platform serves on every roster, with no adapter file (#1390).

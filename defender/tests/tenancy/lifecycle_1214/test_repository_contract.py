@@ -1,3 +1,4 @@
+# ruff: noqa: F811, PT018
 """#1214 tenant repository contract (r9 RC-3, DC-4): one suite over the in-memory twin and the PostgreSQL
 repository. Requests are one conditional update each; reads are detached copies; values are Python-side.
 

@@ -45,25 +45,19 @@ from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.support.shared.contracts._import_blocker import run_blocked
 from defender.tests.support.sandbox._spec1092 import (
     BOX_IMAGE_PY,
-    DEFENDER,
-    HASH_INPUTS,
     IMAGE_PY,
     builder_log,
     fake_docker_on_path,
-    image_tag,
-    plant_tree,
     recorded_docker_calls,
 )
-from defender.tests.support.sandbox._spec1092 import DEFENDER, DOCKERFILE
+from defender.tests.support.sandbox._spec1092 import DOCKERFILE
 from defender.box import BOX_ENV_ALLOWLIST
 from defender.tests.support.sandbox._docker import dood_anchor, is_dood
 from defender.tests.support.sandbox._spec1092 import (
-    DEFENDER,
     IMAGE_WALK_PROBE,
     box_probe,
     box_run,
     image_shell,
-    make_run_dir,
     real_box,
     requires_daemon,
     requires_live_box,

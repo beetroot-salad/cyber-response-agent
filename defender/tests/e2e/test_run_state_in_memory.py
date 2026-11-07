@@ -47,17 +47,7 @@ from defender.investigation import branch  # noqa: E402
 from defender.records import session_store  # noqa: E402
 from defender.investigation.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
-from defender.tests.e2e._replay_harness import (  # noqa: E402
-    GOLDEN,
-    GOLDEN_AB3,
-    ReplayFn,
-    Turn,
-    VerbRecorder,
-    dispatching_main,
-    drive,
-    materialize,
-)
-from defender.tests.e2e.test_query_tool import DONE, elastic_ok, q  # noqa: E402
+from defender.tests.e2e.test_query_tool import elastic_ok  # noqa: E402
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
 from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.investigation.query_tool import QueryCapture  # noqa: E402
@@ -65,7 +55,6 @@ from defender.investigation.run_state import RunState  # noqa: E402
 from defender.tests.support.tenancy._tenants1106 import fixture_gather_def  # noqa: E402
 from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
-from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.hooks import budget_enforcer as be  # noqa: E402
 from defender.systems import circuit_breaker  # noqa: E402
 from defender.investigation.driver import MAIN_DEF  # noqa: E402

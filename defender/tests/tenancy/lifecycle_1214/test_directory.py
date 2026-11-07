@@ -1,3 +1,4 @@
+# ruff: noqa: PT018
 """#1214 (r9 Flow 4, P6): the synchronous `TenantDirectory` facade for host code, and the import rule
 (importing `defender.tenancy` loads no database driver until a repository is built; nothing under `box/`
 imports tenancy).

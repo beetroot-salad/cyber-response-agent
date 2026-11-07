@@ -1,3 +1,4 @@
+# ruff: noqa: F811, PT018
 """#1214 P6 on PostgreSQL: one worker per tenant through the tenant lock; every write fenced; a worker that
 lost its lock writes nothing; a crash mid-step continues from the recorded names (O3, P1, P6, DC-1, RC-1, RC-2).
 Each worker is its own thread, event loop and repository (connection); the API side is `request_*` on its own.
@@ -24,7 +25,7 @@ pytest.importorskip('httpx')
 from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: E402,F401 — fixture
 from defender.tests.tenancy.lifecycle_1214._fakes import Fakes  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._fakes import ADMIN_TOKEN, FORGE_URL, Fakes  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import ADMIN_TOKEN, FORGE_URL  # noqa: E402
 
 
 pytestmark = pytest.mark.postgres

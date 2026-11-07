@@ -47,11 +47,9 @@ from defender.tests.support.runtime.engine._spec992 import (
 )
 from defender.investigation import observe
 from defender.investigation.close_tool import (
-    CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_REVIEW_INCOMPLETE,
     CHALLENGED,
     FORCED_INCONCLUSIVE,
-    STANDS,
     UNREADABLE,
 )
 from defender.investigation.review import role_prompt
@@ -60,26 +58,16 @@ from defender.tests.support.runtime.permissions import _review_bundle
 from defender.tests.support.runtime.engine import _spec923
 from defender.tests.support.runtime.engine._spec992 import (
     CEILING_QUESTION_MARKERS,
-    CONFIDENT,
     CONFIDENT_QUESTION,
     CONFIDENT_QUESTION_PHRASES,
-    GAP,
     UNRESOLVED,
     RECORD_ID_PREFIXES,
     V2SSHD_NOTE,
     V2SSHD_RATIONALE,
-    ceiling_companion,
     citable,
-    close_with,
-    deps_over,
     framed_bodies,
-    frontmatter,
-    gap,
-    holds,
     host_text,
     normalized,
-    record,
-    recording,
     sparse_companion,
 )
 
