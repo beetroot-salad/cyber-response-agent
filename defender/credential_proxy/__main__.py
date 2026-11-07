@@ -30,6 +30,7 @@ import uvicorn
 from defender import _io
 from defender._log import configure_from_env
 from defender.credential_proxy._app import create_app_from_config
+from defender.credential_proxy._listen import listening_socket
 from defender.kit.faults import ConfigFault
 
 CONFIG_ENV = "DEFENDER_CREDENTIAL_PROXY_CONFIG"
@@ -72,8 +73,11 @@ def main() -> int:
         return 2
     host = os.environ.get(HOST_ENV, DEFAULT_HOST)
     _logger.info("credential proxy on http://%s:%d", host, port)
-    # `log_config=None` keeps uvicorn on the handlers `configure_from_env` installed.
-    uvicorn.run(app, host=host, port=port, log_config=None)
+    # `log_config=None` keeps uvicorn on the handlers `configure_from_env` installed. Served as
+    # `uvicorn.run` would, but on a socket of our own so it carries the delivery limit (#1428).
+    config = uvicorn.Config(app, host=host, port=port, log_config=None)
+    server = uvicorn.Server(config)
+    server.run(sockets=[listening_socket(config)])
     return 0
 
 

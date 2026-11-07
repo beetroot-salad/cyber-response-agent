@@ -166,3 +166,102 @@ def test_m3_a_config_still_naming_a_removed_key_refuses_to_start(tmp_path, key):
     assert proc.returncode == P.PROXY_REFUSAL_EXIT, (proc.returncode, out)
     assert P.PROXY_REFUSAL_LOG in out
     assert FILE_TOKEN not in out
+
+
+# --- #1428 O1: bytes a run never takes do not hold the connection ---------------------------
+
+DELIVERY_MS = 60_000
+#: Runs the shipped program unchanged, except that every socket it starts listening on first
+#: writes its delivery limit to the file named by OBSERVED: the option is read off the socket the
+#: program really serves with, at the moment it starts serving.
+_OBSERVING_LAUNCHER = """
+import os, runpy, socket
+_listen = socket.socket.listen
+def listen(self, *args):
+    with open(os.environ["OBSERVED"], "a") as out:
+        out.write(str(self.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT)) + "\\n")
+    return _listen(self, *args)
+socket.socket.listen = listen
+runpy.run_module("defender.credential_proxy", run_name="__main__", alter_sys=True)
+"""
+
+
+def test_o1_the_served_proxy_listens_with_the_delivery_limit(tmp_path):
+    """Every socket the shipped program listens on carries the 60 s limit, which the connections
+    it accepts inherit. O1, O5."""
+    port = H.free_port()
+    observed = tmp_path / "observed"
+    launcher = tmp_path / "launch.py"
+    launcher.write_text(_OBSERVING_LAUNCHER, encoding="utf-8")
+    env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT), "OBSERVED": str(observed),
+           P.PROXY_ENV_CONFIG: str(_config(tmp_path, openbao_token="t-1428")), P.PROXY_ENV_PORT: str(port)}
+    proc = subprocess.Popen([sys.executable, str(launcher)], cwd=REPO_ROOT, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        assert _await_listening(proc, port), _stop(proc)
+    finally:
+        _stop(proc)
+
+    assert observed.read_text().split() == [str(DELIVERY_MS)]
+
+
+def _read_on(conn: socket.socket, got: list[int]) -> None:
+    """Read `conn` to its end, noting each piece's size in `got`."""
+    while piece := conn.recv(1 << 20):
+        got.append(len(piece))
+
+
+def test_o1_a_reader_that_takes_nothing_past_the_limit_loses_the_connection(tmp_path):
+    """A reply far past the socket buffers to a reader that takes nothing: once the limit has
+    passed the connection is dropped, so reading on gets a reset where, without the limit, the
+    whole reply is still there. Run on the function the program opens its port with."""
+    import threading
+
+    import uvicorn
+
+    from defender.credential_proxy._listen import listening_socket
+
+    async def endless(_scope, _receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        for _ in range(96):
+            await send({"type": "http.response.body", "body": b"x" * 65536, "more_body": True})
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+    port = H.free_port()
+    config = uvicorn.Config(endless, host="127.0.0.1", port=port, log_config=None, lifespan="off")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=lambda: server.run(sockets=[listening_socket(config, delivery_limit_sec=2)]),
+                              daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not server.started and time.monotonic() < deadline:
+            time.sleep(0.02)
+        with socket.create_connection(("127.0.0.1", port)) as conn:
+            conn.sendall(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+            time.sleep(5)
+            conn.settimeout(10)
+            got: list[int] = []
+            with pytest.raises(ConnectionResetError):
+                _read_on(conn, got)
+    finally:
+        server.should_exit = True
+        thread.join(10)
+
+    assert sum(got) < 6 * 2**20
+
+
+def test_o5_a_port_already_taken_stops_the_program_with_an_error(tmp_path):
+    """Serving on a socket of its own (for the delivery limit) leaves a taken port what it was:
+    the program exits with an error rather than running unreachable."""
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        proc = _start(_config(tmp_path, openbao_token="t-1428"), port)
+        try:
+            code = proc.wait(timeout=START_SEC)
+        finally:
+            _stop(proc)
+
+    assert code != 0
