@@ -66,7 +66,6 @@ REFUSE_ENCODING = ("the alert is not admitted: it is not UTF-8 text (a byte-orde
 REFUSE_NOT_ONE_OBJECT = "the alert is not admitted: it is not exactly one JSON object"
 REFUSE_NESTING = "the alert is not admitted: it nests deeper than the parser can follow"
 REFUSE_SURROGATE = "the alert is not admitted: it holds an unpaired surrogate escape"
-REFUSE_SIZE = "the alert is not admitted: it is larger than the 1 MiB an alert may be"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -87,10 +86,11 @@ def digest_of(raw: bytes) -> str:
 #: operator's file read stops there. The store's insert takes it through `admit`. Sized for a real alert, not the
 #: harness's file read limit (#1420): an alert of ~5 KB with five raw events of up to ~32 KB each, with headroom.
 ALERT_BYTE_CAP = 1024 * 1024
+REFUSE_SIZE = f"the alert is not admitted: it is larger than the {ALERT_BYTE_CAP // (1024 * 1024)} MiB an alert may be"
 
 
 def read_operator_alert(path: Path) -> bytes:
-    """The operator's input file, whole, or `AlertRefused` when it is over the read limit."""
+    """The operator's input file, whole, or `AlertRefused` when it is over `ALERT_BYTE_CAP`."""
     try:
         return _io.read_bytes_capped(path, limit=ALERT_BYTE_CAP)
     except _io.TEXT_READ_ERRORS as error:

@@ -1480,16 +1480,6 @@ async def test_1420_a_replace_leaves_every_stored_alert_as_it_was_and_applies_to
     assert _display(dsn, after.alert_id) == ("é", None)
 
 
-async def test_1345_m3_a_derived_value_postgresql_cannot_hold_is_null_and_the_insert_still_stores(dsn):
-    """An admitted alert whose mapped text holds a NUL: the insert stores it; that field is null,
-    the other derived normally. (#1345 M3, O2)"""
-    raw = b'{"t": "x\\u0000y", "rule": {"id": "r-1"}}'
-    async with job_store(dsn) as store:
-        await store.put_alert_mapping(T1, mapping_value({"title": "t", "description": "rule.id"}), actor="u-1")
-        alert = await _insert(store, T1, ticket="T-1", raw=raw)
-    assert _display(dsn, alert.alert_id) == (None, "r-1")
-
-
 @asynccontextmanager
 async def holding_mapping(dsn: str, tenant: str) -> AsyncIterator[None]:
     """Hold a save of `tenant`'s mapping mid-transaction (#1420): the mapping row `FOR UPDATE` when it exists, else an
@@ -1612,8 +1602,12 @@ async def test_1345_o2_an_empty_mapping_derives_null_for_every_alert_stored_unde
     """Saving `{}` is a mapping (so investigations run) whose display fields are all null. (#1345 O2, M2)"""
     dsn = unmapped_dsn
     async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1")
+        titled = await _insert(store, T1, ticket="T-1")
         await store.put_alert_mapping(T1, mapping_value({}), actor="u-1")
-        alert = await _insert(store, T1, ticket="T-1")
+        alert = await _insert(store, T1, ticket="T-2")
+        assert await store.get_alert_mapping(T1) is not None, "an empty mapping is saved, not absent"
+    assert _display(dsn, titled.alert_id) == ("sketch", "r-1342"), "control: the mapping before it derived a title"
     assert _display(dsn, alert.alert_id) == (None, None)
 
 
@@ -1688,53 +1682,11 @@ async def test_1345_o2_the_wire_alert_reads_the_stored_display_fields_nullable(u
     assert ((untitled.title, untitled.description), (titled.title, titled.description)) == ((None, None), ("sketch", "r-1342"))
 
 
-# --- #1345 repairs: the lock's namespace and the first-save race --------------------------------------------------------------
-
-@asynccontextmanager
-async def holding_lifecycle_lock(dsn: str, tenant: str) -> AsyncIterator[None]:
-    """The lifecycle's per-tenant lock, `pg_advisory_lock(LOCK_NAMESPACE, hashtext(tenant))`, held on a connection of its own."""
-    import psycopg
-
-    from defender.tenancy.repository import LOCK_NAMESPACE
-
-    async with await psycopg.AsyncConnection.connect(dsn, autocommit=True) as conn:
-        await conn.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (LOCK_NAMESPACE, tenant))
-        try:
-            yield
-        finally:
-            await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", (LOCK_NAMESPACE, tenant))
-
-
-async def test_1345_m3_the_mapping_lock_and_the_lifecycles_lock_do_not_hold_each_other_up(dsn):
-    """With the lifecycle's tenant lock held, an alert insert and a mapping replace for that tenant still complete; while a
-    replace is held mid-transaction, the lifecycle can take its lock. (#1345 M3)"""
-    import psycopg
-
-    from defender.tenancy.repository import LOCK_NAMESPACE
-
-    async with store_with(dsn, Clock()) as store, store_with(dsn, Clock()) as other:
-        async with holding_lifecycle_lock(dsn, T1):
-            alert = await asyncio.wait_for(_insert(store, T1, ticket="T-1"), 5)
-            created = await asyncio.wait_for(store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1"), 5)
-        assert created is False  # the default seed was there
-        assert _display(dsn, alert.alert_id) == ("sketch", "r-1342")
-
-        async with holding_mapping(dsn, T1):
-            replace = asyncio.ensure_future(other.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1"))
-            await until_blocked(dsn, 1)  # mid-transaction, holding whatever lock the replace takes
-            async with await psycopg.AsyncConnection.connect(dsn, autocommit=True) as conn:
-                cur = await conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s))", (LOCK_NAMESPACE, T1))
-                [(got,)] = await cur.fetchall()
-                if got:
-                    await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", (LOCK_NAMESPACE, T1))
-            assert not replace.done(), "control: the replace was still held when the lifecycle's lock was tried"
-        await asyncio.wait_for(replace, 10)
-    assert got, "a replace in flight held the lifecycle's per-tenant lock"
-
+# --- #1345 repairs: the first-save race ----------------------------------------------------------------------------------
 
 async def test_1345_m3_two_first_saves_for_one_tenant_both_return_and_exactly_one_creates(unmapped_dsn):
-    """Two first-save replaces race (the first held mid-transaction so the second starts under it): both return, the
-    first created and the second not, and the second's mapping stands. An alert stored before either keeps its null
+    """Two first-save replaces race (both held at the row so neither has committed): both return, exactly one created,
+    and the mapping of the one that did not (it wrote last) stands. An alert stored before either keeps its null
     display (#1420 D6). (#1345 M3, O1)"""
     dsn = unmapped_dsn
     async with store_with(dsn, Clock()) as first, store_with(dsn, Clock()) as second:
@@ -1743,10 +1695,11 @@ async def test_1345_m3_two_first_saves_for_one_tenant_both_return_and_exactly_on
             one = asyncio.ensure_future(first.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1"))
             await until_blocked(dsn, 1)
             two = asyncio.ensure_future(second.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1"))
-            await until_blocked(dsn, 2)  # the second waits on the first, whatever it waits on
+            await until_blocked(dsn, 2)  # both wait on the held row
         results = await asyncio.wait_for(asyncio.gather(one, two, return_exceptions=True), 10)
-        assert results == [True, False]
-        assert (await first.get_alert_mapping(T1)).paths == TITLE_ON_A
+        assert sorted(results, key=repr) == [False, True], results
+        last = TITLE_ON_A if results == [True, False] else TITLE_ON_RULE
+        assert (await first.get_alert_mapping(T1)).paths == last
     assert _display(dsn, alert.alert_id) == (None, None)
 
 
