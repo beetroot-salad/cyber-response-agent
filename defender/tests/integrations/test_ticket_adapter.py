@@ -27,12 +27,13 @@ def ctx(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _stub_config(monkeypatch):
-    _SHAPED = {"URL_BASE": "http://x", "BASTION_HOST": "web-1", "TIMEOUT_SEC": "10"}
+    _SHAPED = {"TIMEOUT_SEC": "10"}
 
     def _fake(ctx, system, prefix, required=transport.REQUIRED_CONFIG_KEYS_TEMPLATE):
-        return {k: _SHAPED.get(k, f"stub-{k}") for k in required}
+        # The base is the access declaration's, which the real loader adds (#1391 O1).
+        return {"URL_BASE": "http://x", **{k: _SHAPED.get(k, f"stub-{k}") for k in required}}
 
-    monkeypatch.setattr(transport, "load_config", _fake)  # lint-monkeypatch: ok — the docker-exec-curl transport has no in-process DI seam (this file's established pattern)
+    monkeypatch.setattr(transport, "load_config", _fake)  # lint-monkeypatch: ok — the shared transport has no in-process DI seam (this file's established pattern)
 
 
 def test_require_closed_passes_on_closed(monkeypatch, ctx):
@@ -90,11 +91,7 @@ def test_list_no_flag_passes_status_through(monkeypatch, ctx):
 
 
 _BASE_CONFIG = {
-    "TICKET_URL_BASE": "http://x",
-    "TICKET_BASTION_HOST": "web-1",
     "TICKET_TIMEOUT_SEC": "10",
-    "TICKET_TRANSPORT": S1107.DOCKER_EXEC,
-    "TICKET_DOCKER_CONTEXT": "ctx-ticket",
 }
 
 
