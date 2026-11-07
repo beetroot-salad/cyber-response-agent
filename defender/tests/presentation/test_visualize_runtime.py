@@ -109,7 +109,7 @@ def _build_run(tmp: Path) -> Path:
                      "duration_ms": 1500.0, "message": {"kind": "response", "parts": [{"part_kind": "text", "content": "summary"}]}})
 
     trace.append({"type": "result", "duration_ms": 90000, "duration_api_ms": 80000,
-                  "total_cost_usd": 0.5, "num_turns": 4, "usage": _USAGE})
+                  "total_cost_usd": 0.5, "total_cost_is_lower_limit": False, "num_turns": 4, "usage": _USAGE})
 
     (run / "tool_trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in trace))
     wire = RunPaths(run).wire_log
@@ -351,6 +351,18 @@ def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path
     headline = float(re.search(r'ts-cost">\$([0-9.]+)', html).group(1))
     assert abs(headline - (0.5 + review_total)) < 0.002, (
         f"headline {headline} is not the run file's total {0.5 + review_total}: the review was counted twice or dropped"
+    )
+
+    # Every bar (cb-seg title "<name> · $v · p%"), whether or not it is wide enough to print its value.
+    bars = {name: float(v) for name, v in re.findall(r'class="cb-seg"[^>]*title="([^"]*?) · \$([0-9.]+) · ', html)}
+    unattributed = [v for name, v in bars.items() if "unattributed" in name.lower()]
+    assert len(unattributed) == 1, f"expected one unattributed segment, bars were {bars}"
+    request_log_bars = sum(bars.values()) - unattributed[0]
+    assert abs(headline - (sum(bars.values()) + review_total)) < 0.002, (
+        f"headline {headline} is not the bars {sum(bars.values())} plus the review {review_total}"
+    )
+    assert abs(unattributed[0] - (0.5 + review_total - request_log_bars - review_total)) < 0.002, (
+        f"unattributed {unattributed[0]} is not the headline less the bars {request_log_bars} less the review {review_total}"
     )
 
     named = re.search(r'ts-review">\(incl review \$([0-9.]+)\)', html)

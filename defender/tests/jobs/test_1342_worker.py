@@ -886,7 +886,7 @@ async def test_o8_a_session_pointer_of_the_wrong_shape_keeps_the_stage_and_leave
     ("clean", "no ledger table", ("completed", None, False)),
     ("no job-end, exit 1", "no pointer", ("failed", 0.0, False)),
     ("clean", "no pointer", ("completed", 0.0, False)),
-    ("spend write failed", "no pointer", ("completed", 0.0, False)),
+    ("spend write failed", "no pointer", ("completed", 0.0, True)),  # a run that reported a failed write is never exact
 ])
 async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_table(world, ending, ledger, expect):
     """Each row of the final-read flag table: the ledger's sum for this run, "at least" only where spend may be missing, never beside null. (S2, S4)"""
@@ -3258,7 +3258,9 @@ async def test_b2_b6_cost_so_far_is_copied_while_the_live_child_writes_its_sessi
                 (marks / f"go-{step}").touch()
             await asyncio.wait_for(drained, timeout=60)
 
-    took = [float((marks / f"wrote-{n}").read_text(encoding="utf-8")) for n in (0, 1)]
+    assert not list(marks.glob("insert-failed-*")), [f.read_text(encoding="utf-8") for f in marks.glob("insert-failed-*")]
+    took = [float((marks / f"wrote-{n}").read_text(encoding="utf-8")) + float((marks / f"ledger-{n}").read_text(encoding="utf-8"))
+            for n in (0, 1)]  # the append, then the ledger insert
     assert max(took) < 1.0, f"the worker's reads blocked the child's appends: {took}"
     final = row(dsn, inv)
     assert (final["stage"], final["cost_usd"]) == ("completed", pytest.approx(SONNET_IN + SONNET_OUT))

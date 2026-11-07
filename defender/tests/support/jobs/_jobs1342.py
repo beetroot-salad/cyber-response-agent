@@ -317,8 +317,14 @@ CHILD_SCRIPT = textwrap.dedent("""
             for n, (model, usage) in enumerate(spend["steps"]):
                 began = time.monotonic()
                 handle.append(session, _response(model, usage), agent_id="main")
-                insert_spend(session_db(runs, case), run_id, [(model, usage)])  # #1377: the ledger row cost is read from
-                (marks / f"wrote-{n}").write_text(str(time.monotonic() - began), encoding="utf-8")
+                (marks / f"wrote-{n}").write_text(str(time.monotonic() - began), encoding="utf-8")  # before the insert: a red run must not wait out its timeout for this mark
+                began = time.monotonic()
+                try:
+                    insert_spend(session_db(runs, case), run_id, [(model, usage)])  # #1377: the ledger row cost is read from
+                except Exception as fault:  # noqa: BLE001 - a missing ledger is the code stage's red, named by its own mark
+                    (marks / f"insert-failed-{n}").write_text(repr(fault), encoding="utf-8")
+                else:
+                    (marks / f"ledger-{n}").write_text(str(time.monotonic() - began), encoding="utf-8")
                 until = time.monotonic() + 60
                 while not (marks / f"go-{n}").exists() and time.monotonic() < until:
                     time.sleep(0.02)

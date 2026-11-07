@@ -13,7 +13,7 @@ lifecycle's `start_box` seam (never `DEFENDER_ALLOW_UNSANDBOXED`). Marks go in `
   `start-token` (the token the box start was handed), `interrupted` (the exception type that reached the investigation), `stop-box-started`, then
   `stop-box-done` once `go-on` exists (a later signal during teardown would stop the wait).
 - `replay-priced` (#1377): MAIN, one gather lead and the live review stages as priced stand-ins;
-  `replay-priced-ledger-fault` also refuses ledger inserts during the review. Both configure logging as run.py's `__main__` does. Marks: `calls-<model>`."""
+  `replay-priced-ledger-fault` also refuses ledger inserts during the review; a mode ending `-raises` then raises out of the investigation, so the driver never returns its summary. Both configure logging as run.py's `__main__` does. Marks: `calls-<model>`."""
 from __future__ import annotations
 
 import functools
@@ -138,7 +138,7 @@ def _ledger_trigger(sql: str):
     return run
 
 
-def _priced_lifecycle(*, ledger_fault: bool):
+def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False):
     """`replay-priced`: MAIN (dispatch one elastic lead, append, close, text), the lead (one query,
     then its final summary), the correlation lead (its summary) and the live review stages, each a priced stand-in. `-ledger-fault`
     refuses every ledger insert from the first review call until MAIN's turn after the close."""
@@ -187,8 +187,11 @@ def _priced_lifecycle(*, ledger_fault: bool):
     def investigate(**handed):
         # No `review_stages`: the run's own live bundle, built on the run's `make_model` (#1377).
         with override_allow_model_requests(False):
-            return asyncio.run(driver.run_investigation(
+            summary = asyncio.run(driver.run_investigation(
                 **{**handed, "verbs": verbs}, make_model=make_model, orient_shim=RH.no_orient_shims))
+        if raises:
+            raise RuntimeError("the run died after its last response")
+        return summary
 
     drive = functools.partial(run_py._drive_investigation, investigate=investigate)
     return functools.partial(run_py._run_investigation_lifecycle, investigate=drive, start_box=_unboxed)
@@ -198,7 +201,7 @@ if mode.startswith("replay-priced"):
     from defender import _log
 
     _log.configure_from_env()  # the way run.py's __main__ does: the priced modes' stderr is read for the failed-write ERROR line
-    lifecycle = _priced_lifecycle(ledger_fault=mode == "replay-priced-ledger-fault")
+    lifecycle = _priced_lifecycle(ledger_fault="ledger-fault" in mode, raises=mode.endswith("-raises"))
 elif mode.startswith("replay"):
     lifecycle = _replay_lifecycle(fault_after_close=mode == "replay-fault-after-close")
 else:
