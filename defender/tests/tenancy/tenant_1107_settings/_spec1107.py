@@ -471,7 +471,8 @@ class ProxyStandIn:
                 system_side=a["system_side"], sent=a["sent"], body_whole=False,
                 reader_fault=False))
         status = int(a["status"]) if a.get("status") is not None else 200
-        body = str(a.get("stdout", "")).encode("utf-8")
+        raw = a.get("stdout", "")
+        body = raw if isinstance(raw, bytes) else str(raw).encode("utf-8")  # bytes: sent as they are
         fault = _fault_of_status(status)
         return pc.encode_body(body) + pc.encode_final(pc.FinalRecord(
             status=status, headers={"Content-Type": "application/json"}, fault=fault,
