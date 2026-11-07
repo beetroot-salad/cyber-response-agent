@@ -132,7 +132,6 @@
  "tests/integrations/test_scaffold_rules_901.py": 0.2,
  "tests/integrations/test_sql.py": 28.2,
  "tests/integrations/test_sql_idioms.py": 34.2,
- "tests/integrations/test_stub_transport_877.py": 1.4,
  "tests/integrations/test_target_confinement_632.py": 0.6,
  "tests/integrations/test_ticket_adapter.py": 1.4,
  "tests/integrations/test_verb_grant_632.py": 0.7,
