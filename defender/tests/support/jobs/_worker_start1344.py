@@ -108,8 +108,10 @@ class ChildWatch:
         self._seen: dict[int, dict] = {}
         self._halt = threading.Event()
         self._thread: threading.Thread | None = None
+        self._proc: subprocess.Popen | None = None
 
     def begin(self, proc: subprocess.Popen) -> None:
+        self._proc = proc
         parent = _cmdline(proc.pid)
 
         def poll() -> None:
@@ -132,7 +134,7 @@ class ChildWatch:
 
     def wait_for(self, done: Callable[[list[dict]], bool], *, timeout: float, what: str) -> list[dict]:
         """Wait until `done(every child read so far)`; returns them."""
-        wait_until(lambda: bool(done(self.children())), timeout=timeout, what=what)
+        wait_until(lambda: bool(done(self.children())), timeout=timeout, what=what, proc=self._proc)
         return self.children()
 
 

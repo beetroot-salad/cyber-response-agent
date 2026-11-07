@@ -438,9 +438,11 @@ def test_a_sigterm_after_the_judge_returned_is_still_completed(tmp_path):
     done = subprocess.run([sys.executable, "-c", _LATE_STOP, str(tmp_path / "entry"), str(out)],
                           capture_output=True, text=True, timeout=300, check=False,
                           env=child_env())
-    assert out.is_file(), f"premise: the wrapper wrote no end record: {done.stderr[-2000:]}"
-    ended = json.loads(out.read_text(encoding="utf-8"))
-    assert ended is not None, f"premise: the entry left no end record: {done.stderr[-2000:]}"
+    # Read here, not from the wrapper: an entry may legally leave SIGTERM at its default, and the late signal
+    # then ends the wrapper before it reports.
+    records = sorted(Path(child_env()["DEFENDER_DATA_ROOT"]).glob("*/runs/*.learning-end.json"))
+    assert len(records) == 1, f"premise: the entry left one end record, not {records}: {done.stderr[-2000:]}"
+    ended = json.loads(records[0].read_text(encoding="utf-8"))
     assert (ended["status"], ended["reason"]) == ("completed", None), ended
 
 

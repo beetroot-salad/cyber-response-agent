@@ -229,15 +229,17 @@ print(json.dumps({"root": str(run_common.REPO_ROOT), "origin": stamp.origin, "co
 """
 
 
-def _start_form(child: dict) -> tuple[str, list[str]]:
-    """How a child was started: (`-m:<module>` or the script's path, its arguments)."""
+def _start_form(child: dict) -> tuple[str, list[str]] | None:
+    """How a Python entry child was started: (`-m:<module>` or the script's path, its arguments). None for any
+    other child (git, docker, a shell, `python -c`): the worker may run those, and they are not entries."""
     argv = child["argv"]
+    if not argv or not os.path.basename(argv[0]).startswith("python"):
+        return None
     if "-m" in argv[1:3]:
         at = argv.index("-m")
         return f"-m:{argv[at + 1]}", argv[at + 2:]
     script = next((a for a in argv[1:] if a.endswith(".py")), None)
-    assert script is not None, f"cannot tell how this child was started: {argv}"
-    return script, argv[argv.index(script) + 1:]
+    return None if script is None else (script, argv[argv.index(script) + 1:])
 
 
 def _runs_from(child: dict, copy: Path, source: Path) -> bool:
@@ -246,7 +248,9 @@ def _runs_from(child: dict, copy: Path, source: Path) -> bool:
     if "-m" in argv[1:3]:
         here = [child["cwd"]]
     else:
-        script, _ = _start_form(child)
+        form = _start_form(child)
+        assert form is not None, child["argv"]
+        script, _ = form
         here = [script if os.path.isabs(script) else os.path.join(child["cwd"], script)]
     return (all(_under(p, copy) or os.path.realpath(p) == os.path.realpath(copy) for p in here)
             and not any(_under(p, source) or os.path.realpath(p) == os.path.realpath(source) for p in here)
@@ -263,7 +267,8 @@ def _values_of(argv: list[str], flag: str) -> list[str]:
 
 def _child_of(children: list[dict], kind: str, job: str) -> dict | None:
     """The child that runs the job entry (`job_entry`) or the post-step (`post_step`) for `job`."""
-    return next((c for c in children if kind in _start_form(c)[0] and job in _values_of(c["argv"], "--job")), None)
+    return next((c for c in children if job in _values_of(c["argv"], "--job")
+                 and (form := _start_form(c)) is not None and kind in form[0]), None)
 
 
 @pytest.mark.postgres
@@ -286,7 +291,7 @@ def test_o15_children_run_from_the_copy_and_load_modules_from_nowhere_else(sourc
             W.wait_until(lambda: _job_status_by_id(db, job) not in ("queued", "running")
                          and (row(db, investigation) or {}).get("stage") not in ("queued", "running"),
                          timeout=120, what="both kinds of work to end", proc=proc)
-        ours = {name: [c for c in children if wanted in " ".join(c["argv"])] for name, wanted in
+        ours = {name: [c for c in children if wanted in " ".join(c["argv"]) and _start_form(c) is not None] for name, wanted in
                 (("investigation", investigation), ("learning", job))}
 
         assert ours["investigation"], f"no investigation child was observed; saw {[c['argv'] for c in children]}"
@@ -299,7 +304,7 @@ def test_o15_children_run_from_the_copy_and_load_modules_from_nowhere_else(sourc
                 assert child["env"].get("PYTHONDONTWRITEBYTECODE"), \
                     f"a {kind} child runs with bytecode writes on (O15: the worker sets it for its children): {child['argv']}"
 
-        entries = {_start_form(c)[0]: c for found in ours.values() for c in found}
+        entries = {form[0]: c for found in ours.values() for c in found if (form := _start_form(c)) is not None}
         assert len(entries) >= 2, f"one entry for the investigation and one for the learning job: {sorted(entries)}"
         for number, (target, entry) in enumerate(entries.items()):
             ran, modules = W.modules_of(target, ["--help"], env=entry["env"], cwd=Path(entry["cwd"]), out=tmp_path / f"mods{number}.json")
