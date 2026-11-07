@@ -100,7 +100,7 @@ def test_a_token_that_cannot_be_verified_because_keycloak_is_down_is_503_not_401
     down = s.world.bearer(token, raise_errors=False).get(f"/tenants/{T1}/alerts")
     assert down.status_code == 503, down.text
     assert EXPIRY_HEADER not in down.headers
-    assert s.program().get(f"/tenants/{T1}/alerts").status_code == 200  # a key never asks the realm
+    assert s.program().get(f"/tenants/{T1}/alerts").status_code == 200  # a key keeps working
     assert s.world.bearer(token).get(f"/tenants/{T1}/alerts").status_code == 200  # control: back up
     assert s.world.bearer("not.a.token").get(f"/tenants/{T1}/alerts").status_code == 401  # refused is not unavailable
 

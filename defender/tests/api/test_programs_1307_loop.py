@@ -14,6 +14,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from defender.identity import SignInUnavailable  # noqa: E402
 from defender.identity.service import PURGE_INTERVAL  # noqa: E402
 from defender.tests.support.api._identity1306 import ANN, NEW, T1, wait_until  # noqa: E402
 from defender.tests.support.api._programs1307 import (  # noqa: E402
@@ -78,5 +79,5 @@ def test_a_realm_that_cannot_be_listed_stops_neither_the_sending_nor_the_session
         assert world.invite(browser, T1, NEW).status_code == 202
         assert wait_until(lambda: world.signin.sends_to(NEW) == 1)
         assert wait_until(lambda: world.call(world.repo.session_by_value, "old") is None)
-    assert any(("purge" in r.getMessage().lower() or "reconcil" in r.getMessage().lower())
+    assert any(r.exc_info and isinstance(r.exc_info[1], SignInUnavailable)
                for r in caplog.records if r.levelno >= logging.ERROR)

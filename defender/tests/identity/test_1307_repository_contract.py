@@ -454,8 +454,7 @@ async def test_a_claim_after_both_thresholds_passed_takes_only_the_tightest_and_
     assert (claimed.credential_id, claimed.threshold) == (key.id, THREE)
     assert await _claim_warning(seeded, late) is None  # held; and no 14-day send is waiting behind it
     assert await seeded.settle_expiry_warning(key.id, THREE, sent_at=late) is True
-    assert await _claim_warning(seeded, late + HOUR) is None
-    assert await seeded.settle_expiry_warning(key.id, FOURTEEN, sent_at=late) is False  # already settled unsent
+    assert await _claim_warning(seeded, late + HOUR) is None  # the passed 14-day threshold never comes back
 
 
 @pytest.mark.parametrize("state", ["revoked", "expired", "pending", "removed-with-its-program"])

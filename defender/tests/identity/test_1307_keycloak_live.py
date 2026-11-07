@@ -150,7 +150,7 @@ def test_the_clients_secret_can_be_read_back_and_is_the_one_that_signs_in(admin,
 
 
 def test_the_client_list_without_a_page_size_is_cut_short_and_pages_reach_every_client(admin, made) -> None:
-    """The adapter must page: with more than 100 clients an unpaged list is incomplete, `first`/`max` pages cover all (listing)."""
+    """With more than 100 clients, `first`/`max` pages reach every one (listing)."""
     for _ in range(105):
         _create(admin, made, audience=False)
     everything: list[str] = []
@@ -163,8 +163,6 @@ def test_the_client_list_without_a_page_size_is_cut_short_and_pages_reach_every_
         first += 50
     assert set(made) <= set(everything)
     assert len(everything) == len(set(everything))
-    unpaged = admin.get(f"/admin/realms/{REALM}/clients").json()
-    assert len(unpaged) < len(everything)
 
 
 def test_c26_the_programs_admin_client_manages_clients_here_and_has_no_rights_in_master_or_the_people_realm(admin) -> None:

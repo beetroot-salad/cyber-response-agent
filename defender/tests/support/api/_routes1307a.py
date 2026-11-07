@@ -42,7 +42,7 @@ def _served(routes: Any) -> Any:
             yield route
 
 
-#: A route table smaller than this means the walk missed routes (the app serves 40+); an empty class must fail.
+#: A route table smaller than this means the walk missed routes (the app serves 35 at base, C11); an empty class must fail.
 ROUTE_FLOOR = 20
 
 
