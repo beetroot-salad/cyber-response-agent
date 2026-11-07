@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import logging
 import re
 import sys
@@ -67,27 +68,51 @@ if TYPE_CHECKING:
     from defender.records import Run
     from defender.tenancy import Tenant
 
+@dataclasses.dataclass(frozen=True)
+class LedgerCost:
+    """The run's cost as the page shows it: the ledger's priced sum, or `None` when it cannot be read; and
+    whether the host knows spend may be missing from it."""
+
+    total: float | None
+    lower_limit: bool
+
+
 #: What the dev-only copy did: landed, was not attempted (not a `dev` deployment), or failed.
 CopyOutcome = Literal["copied", "skipped", "failed"]
 
 
-def render_page(run: Run, *, update_ticket: bool = False) -> str:
+def render_page(run: Run, *, update_ticket: bool = False, spend_write_failed: bool = False) -> str:
     """This run's page, generated and returned — nothing is written, and nothing here knows
     where the page goes: the post-run step saves it as the run's record (#1110).
     `update_ticket` is `run.py`'s own `--update-ticket` (#1107 O6), handed through to the page.
+    The page's cost is the run's spend ledger, never the run file's result line, which the box can
+    rewrite (#1377 r6 S5); `spend_write_failed` is the host's own fact that a spend write failed,
+    so the headline reads "at least".
 
-    The store resolve is a precondition, not a data dependency: nothing on the page reads the
-    session store, but a run dir copied without its store pointer would otherwise render a
+    The store must resolve: a run dir copied without its store pointer would otherwise render a
     complete-looking page for a run whose record cannot be found. It fails before a page exists.
     """
+    cost = _ledger_cost(run, spend_write_failed=spend_write_failed)
+    return render_runtime_page(run.run_dir, update_ticket=update_ticket, cost=cost)
+
+
+def _ledger_cost(run: Run, *, spend_write_failed: bool) -> LedgerCost:
+    """The run's spend from its ledger, priced as the worker prices it (#1377 r6 S5). The store must resolve
+    (a run dir copied without its store pointer fails before a page exists); a ledger that cannot be read
+    leaves the cost unknown."""
+    from defender.configuration import usage_cost
     from defender.records import session_store as ss
 
-    with ss.open_store_for_read(ss.resolve_store_path(run)):
-        pass
-    return render_runtime_page(run.run_dir, update_ticket=update_ticket)
+    with ss.open_store_for_read(ss.resolve_store_path(run)) as store:
+        try:
+            total = sum(usage_cost(r.model, r.usage) for r in ss.run_spend(store, str(run.id)))
+        except Exception:  # noqa: BLE001 — an unreadable ledger is an unknown cost, never a failed page
+            _logger.warning("the spend ledger of %s could not be read; the page's cost is unknown", run.run_dir, exc_info=True)
+            return LedgerCost(None, False)
+    return LedgerCost(total, spend_write_failed)
 
 
-def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False) -> CopyOutcome:
+def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False, spend_write_failed: bool = False) -> CopyOutcome:
     """The post-run step: render the run's page, save it as the run's `runtime_html` record
     through `run` — so whatever backend the handle sits on receives it like every other record —
     then hand it to the dev-only copy, and answer what the copy did (#1110).
@@ -97,7 +122,7 @@ def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False) -> Co
     the cause chained: the caller's single "no record" signal. The copy never raises.
     """
     try:
-        page = render_page(run, update_ticket=update_ticket)
+        page = render_page(run, update_ticket=update_ticket, spend_write_failed=spend_write_failed)
     except Exception as e:
         raise VisualizeFailed(f"the page for {run.run_dir} could not be rendered") from e
     record = run.observability.runtime_html
@@ -345,14 +370,8 @@ RUNTIME_JS = read_text_utf8(ASSETS / "runtime.js")
 
 
 
-def result_total_is_null(results: list[dict]) -> bool:
-    """Whether the run file's result line carries a null total (its ledger could not be read)."""
-    return all(e.get("total_cost_usd") is None for e in results)
-
-
-def _stats(events: list[dict]) -> tuple[int, int, float]:
+def _stats(events: list[dict]) -> tuple[int, int]:
     n_events = len(events)
-    cost = sum(e.get("total_cost_usd") or 0 for e in events if e.get("type") == "result")
     n_tool_calls = sum(
         1
         for e in events
@@ -360,7 +379,7 @@ def _stats(events: list[dict]) -> tuple[int, int, float]:
         for blk in (e.get("message") or {}).get("content", [])
         if isinstance(blk, dict) and blk.get("type") == "tool_use"
     )
-    return n_events, n_tool_calls, cost
+    return n_events, n_tool_calls
 
 
 def _render_policy_denials_section(run_dir: Path) -> str:
@@ -453,7 +472,7 @@ def _display_facts(run_dir: Path) -> list[str]:
     return parts
 
 
-def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
+def render_runtime_page(run_dir: Path, *, update_ticket: bool = False, cost: LedgerCost | None = None) -> str:
     """The run's page. `update_ticket` is run.py's own `--update-ticket`, handed in as an argument
     and read from no file in the run dir (the box can write every one of them): only a run that
     was started with it has a ticket line, so a receipt an earlier attempt left, or one the box
@@ -461,13 +480,7 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     case_id = run_dir.name
     events = read_jsonl_rows(RunPaths(run_dir).tool_trace)
     messages = load_messages(run_dir)
-    _, n_tool_calls, result_total = _stats(events)
-    results = [e for e in events if e.get("type") == "result"]
-    result_is_lower_limit = any(e.get("total_cost_is_lower_limit") is True for e in results)
-    # A result line from before #1377 has no mark key and a MAIN-only total, so it is no headline; one with the key and a
-    # null total is a run whose ledger could not be read: its cost is unknown, never 0.
-    ledger_total = bool(results) and all("total_cost_is_lower_limit" in e for e in results)
-    cost_unknown = ledger_total and result_total_is_null(results)
+    _, n_tool_calls = _stats(events)
     report = parse_report(run_dir)
     leads = sorted(lead_repository.joined(run_dir), key=_lead_sort_key)
 
@@ -515,18 +528,19 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     for by_model_costs in (
         gather_cost_by_model(run_dir, messages), review_cost_by_model(run_dir, messages),
     ):
-        for model, cost in by_model_costs.items():
-            by_model[model] = by_model.get(model, 0.0) + cost
-    # The headline is the run file's total (#1377 S5): the whole run's spend, review included, from the spend ledger.
-    # The bars come from the request log, review its own segment; what they do not explain is the "unattributed"
-    # segment (never below 0), so the parts add up to the headline. A pre-#1377 line (MAIN-only total) is no headline:
-    # the bars and the review are, with nothing unattributed.
+        for model, spent in by_model_costs.items():
+            by_model[model] = by_model.get(model, 0.0) + spent
+    # The headline is the spend ledger's total (#1377 r6 S5), never the run file's result line (the box can rewrite
+    # it). The bars come from the request log, review its own segment; what they do not explain is the "unattributed"
+    # segment (never below 0), so the parts add up to the headline. With no ledger handed in (a caller that has no
+    # run), the bars are the headline.
     bars_total = main_total + gather_total + review_total
+    ledger_total = None if cost is None else cost.total
     totals = {
-        "cost": result_total if ledger_total else bars_total,
-        "cost_unknown": cost_unknown,
-        "lower_limit": result_is_lower_limit and not cost_unknown,
-        "unattributed": max(0.0, result_total - bars_total) if ledger_total and not cost_unknown else 0.0,
+        "cost": bars_total if ledger_total is None else ledger_total,
+        "cost_unknown": cost is not None and ledger_total is None,
+        "lower_limit": cost is not None and ledger_total is not None and cost.lower_limit,
+        "unattributed": 0.0 if ledger_total is None else max(0.0, ledger_total - bars_total),
         "review_cost": review_total,
         "wall_ms": wall_ms,
         "by_model": by_model,

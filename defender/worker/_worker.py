@@ -465,9 +465,9 @@ class Worker:
             _logger.exception("investigation %s: the worker failed while running it", inv)
             if is_outage(fault) or held.signalled:
                 # Nothing about the job failed: it is handed back, with what it had spent.
-                # A child that ran with no figure read yet is handed back as "at least" what the row
-                # already held (0 from its claim): a lower limit stands only beside a number (S4).
-                return End(None, 0.0 if held.cost_so_far is None else held.cost_so_far, None)
+                # Nothing launched: exactly 0. A child that ran with no figure read yet is handed back with an unknown
+                # cost (null), as before #1377: a lower limit stands only beside a number (r6 S2, S4).
+                return End(None, 0.0 if held.proc is None and held.cost_so_far is None else held.cost_so_far, None)
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR,
                               failure_message="the worker failed while running the job"), None, None)
 

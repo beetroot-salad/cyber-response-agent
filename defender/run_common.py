@@ -222,7 +222,7 @@ def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
                       "nothing downstream can prove which code it ran")
 
 
-def visualize(run: Run, *, tenant: tenancy.Tenant, update_ticket: bool = False) -> None:
+def visualize(run: Run, *, tenant: tenancy.Tenant, update_ticket: bool = False, spend_write_failed: bool = False) -> None:
     """The post-run page step as `run.py` takes it: load the renderer, then hand it the run
     (`visualize_run.publish_page` renders, saves the record through `run`, and makes the dev-only
     copy). Runs in the process holding the handle, after the sandbox has exited and the tree has
@@ -231,7 +231,7 @@ def visualize(run: Run, *, tenant: tenancy.Tenant, update_ticket: bool = False) 
         from defender.presentation import visualize_run as vr
     except Exception as e:
         raise VisualizeFailed("the renderer could not be loaded") from e
-    vr.publish_page(run, tenant=tenant, update_ticket=update_ticket)
+    vr.publish_page(run, tenant=tenant, update_ticket=update_ticket, spend_write_failed=spend_write_failed)
 
 
 def cross_check_tables(run_dir: Path) -> None:

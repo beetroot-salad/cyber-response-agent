@@ -1325,7 +1325,10 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
         operator_steps()
 
     try:
-        visualize(run, tenant=started.accepted, update_ticket=update_ticket)
+        # The host's own fact that a spend write failed reaches the page in-process; a seam that predates it is
+        # called as before when none failed.
+        extra = {"spend_write_failed": True} if summary.get("spend_write_failed") is True else {}
+        visualize(run, tenant=started.accepted, update_ticket=update_ticket, **extra)
     except _run.VisualizeFailed:
         _logger.warning("the run page was not saved", exc_info=True)
 
