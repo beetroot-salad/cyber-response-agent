@@ -27,7 +27,8 @@ TRUNCATED_BY_PROVIDER_DOWN = "provider-down"
 #: a request built wrong or too long, a key, permission or model name that no longer works).
 #: Resending gets the same answer, so the run ends with no report and the case gets the
 #: escalation note. A lead's refusal ends the run only when its status says the setup is broken
-#: (401/403/404); any other ends only that lead, stamped with this word (#1243 r3).
+#: (`providers.SETUP_STATUSES`: 401/402/403/404); any other ends only that lead, stamped with
+#: this word (#1243 r3).
 TRUNCATED_BY_PROVIDER_REJECTED = "provider-rejected"
 #: The run's box became unusable (#1421 O8): the first command that found it ends the run, with
 #: no retry the model cannot act on. The operator's to fix.

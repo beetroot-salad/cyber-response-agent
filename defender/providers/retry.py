@@ -47,9 +47,11 @@ class ProviderDown(Exception):  # noqa: N818 — named for the state it reports,
         return self.__class__, (self.model, self.status, self.attempts)
 
 
-#: Refusals that say the model's setup is broken (key, access, model name), not the request: every
-#: caller on that model gets the same answer, so even a lead's ends the run (#1243 r3).
-SETUP_STATUSES = frozenset({401, 403, 404})
+#: Refusals that say the model's setup or account is broken (key, payment or credit, access,
+#: model name), not the request: every caller on that model gets the same answer, so even a
+#: lead's ends the run (#1243 r3). A provider that reports these as a plain 400 is not caught:
+#: telling them apart would mean reading the body text.
+SETUP_STATUSES = frozenset({401, 402, 403, 404})
 #: How much of the provider's refusal text the host log keeps. Never shown to a model.
 _REASON_CAP = 500
 

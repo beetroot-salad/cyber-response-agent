@@ -342,8 +342,9 @@ async def _drive_agent(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the loop's 
         elif refused is not None:
             # The provider refused MAIN's own request, or a lead's with a broken setup, for good
             # (#1243 r3): resending gets the same answer, so like provider-down it is an
-            # infrastructure end with no report.
-            _logger.error(f"{refused}; ending the run")
+            # infrastructure end with no report. The traceback is kept: a 400 may be our own
+            # request built wrong.
+            _logger.error(f"{refused}; ending the run", exc_info=e)
             truncated_by = run_end.TRUNCATED_BY_PROVIDER_REJECTED
             exit_reason = "ProviderRejected"
         else:
@@ -594,11 +595,10 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
         if down is not None:
             _logger.error(f"{down}; stopping before the agent starts")
             return None, stop(session_store.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")
-        refused = carried_unless_overridden(
-            e, providers.ProviderRejected, (BudgetKill, RunAborted, box_mod.BoxEnding))
+        refused = _refusal_in(e)
         if refused is not None:
             # The correlation lead's model has a broken setup (#1243 r3): MAIN's leads share it.
-            _logger.error(f"{refused}; stopping before the agent starts")
+            _logger.error(f"{refused}; stopping before the agent starts", exc_info=e)
             return None, stop(run_end.TRUNCATED_BY_PROVIDER_REJECTED, "ProviderRejected")
         raise
     return lead_zero_mod.render_correlation_section(

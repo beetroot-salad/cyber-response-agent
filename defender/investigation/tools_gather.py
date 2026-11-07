@@ -604,18 +604,19 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
         # (key, access, model name) fails every lead alike, so it ends the run; any other
         # refusal ends this lead by name and MAIN decides what next. Only the status reaches
         # MAIN; the provider's text goes to the host log. Anything else HTTP passes through.
-        status = providers.refusal_status(e)
-        if status is None:
+        rejection = providers.rejected(e)
+        if rejection is None:
             raise
-        _logger.warning(f"gather for {lead_id}: the model provider refused a request "
-                        f"(HTTP {status}): {providers.refusal_reason(e)}")
-        if status in providers.SETUP_STATUSES:
+        if rejection.status in providers.SETUP_STATUSES:
+            # Logged once, by the run's end.
             stamp(run_end.TRUNCATED_BY_PROVIDER_REJECTED)
-            raise providers.ProviderRejected(status, providers.refusal_reason(e)) from e
+            raise rejection from e
+        _logger.warning(f"gather for {lead_id}: {rejection}")
         fault = _Ending(
             run_end.TRUNCATED_BY_PROVIDER_REJECTED,
-            f"gather for {lead_id} ended: the model provider refused one of its requests "
-            f"(HTTP {status}); any queries it ran are in the queries table. {INCOMPLETE_IDIOM}",
+            f"gather for {lead_id} ended: the model provider rejection one of its requests "
+            f"(HTTP {rejection.status}); any queries it ran are in the queries table. "
+            f"{INCOMPLETE_IDIOM}",
         )
     except session_store.StoreError as e:
         # The gather recorder is observational (gather never sends a store-sourced history),
