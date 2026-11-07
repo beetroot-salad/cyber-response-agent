@@ -650,7 +650,7 @@ def test_p1_a_job_end_record_of_exactly_the_five_pre_1377_keys_reads_as_no_spend
     assert parsed is not None
     assert parsed.spend_write_failed is False
     assert job_lane.JobEnd.parse(_job_end_with(spend_write_failed=True)).spend_write_failed is True, "control: the six-key record"
-    for unreadable in (_job_end_with(spend_write_failed=JSON_NULL), _job_end_with(spend_write_failed="false"),
+    for unreadable in (_job_end_with(cut_short=None, spend_write_failed=None), _job_end_with(spend_write_failed=JSON_NULL), _job_end_with(spend_write_failed="false"),
                        _job_end_with(spend_write_failed=0), _job_end_with(spend_write_failed=None, extra="x"),
                        _job_end_with(spend_write_failed=False, extra="x"), _job_end_with(cut_short=None)):
         assert job_lane.JobEnd.parse(unreadable) is None, unreadable

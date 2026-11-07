@@ -311,7 +311,6 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
     assert abs(headline - 0.5) < 0.002, f"the headline {headline} is not the run file's total (#1377 S5)"
     assert abs(headline - sum(segs.values())) < 0.002, f"{headline} != {sum(segs.values())}"
     assert any("unattributed" in n.lower() for n in segs), "the part of the total no request-log bar explains is not shown (#1377 A5)"
-    assert not any("review" in n.lower() for n in segs), f"a review segment for a gate that made no model call: {segs}"
     # Asked of the rendered SPAN, not of the class name: the stylesheet is inlined into every
     # page, so `"ts-review" in html` is true whether or not anything was rendered with it.
     assert re.search(r'ts-review">', html) is None, (
@@ -434,7 +433,7 @@ def test_a3_a_null_total_reads_unknown_in_the_headline_not_zero_and_not_at_least
     assert "unknown" in headline.group(1).lower(), f"headline reads {headline.group(1)!r}"
     assert "$0.0000" not in headline.group(1)
     assert "at least" not in headline.group(1).lower()
-    assert "unattributed" not in _without_styles(html), "an unattributed segment beside an unknown headline"
+    assert not any("unattributed" in n.lower() for n in _cost_segments(html)), "an unattributed segment beside an unknown headline"
 
 
 def test_a4_a_pre_1377_result_line_headline_is_every_bar_plus_review_and_has_no_unattributed(tmp_path, monkeypatch):
@@ -456,7 +455,7 @@ def test_a4_a_pre_1377_result_line_headline_is_every_bar_plus_review_and_has_no_
     assert abs(float(headline.group(2)) - (request_log + review_total)) < 0.002, (
         f"headline {headline.group(2)} is not the bars {request_log} plus review {review_total}")
     assert headline.group(1) is None, "a pre-#1377 total is not marked at least"
-    assert "unattributed" not in _without_styles(html), f"an unattributed segment on a pre-#1377 page: {bars}"
+    assert not any("unattributed" in n.lower() for n in bars), f"an unattributed segment on a pre-#1377 page: {bars}"
     assert abs(sum(bars.values()) - float(headline.group(2))) < 0.002, f"segments {bars} do not add up to the headline"
 
 

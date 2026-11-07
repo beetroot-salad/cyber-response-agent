@@ -831,9 +831,17 @@ def _drop_the_ledger_table(store) -> None:
         conn.close()
 
 
+def _event_shape(events: list[dict]) -> list[tuple]:
+    """Each event's type and the tool names it carries, the result line left out."""
+    def tools(e: dict) -> tuple:
+        content = (e.get("message") or {}).get("content")
+        return tuple(c.get("name") for c in content if isinstance(c, dict) and c.get("type") == "tool_use") if isinstance(content, list) else ()
+    return [(e.get("type"), tools(e)) for e in events if e.get("type") != "result"]
+
+
 def test_a1_a2_a_session_database_without_its_ledger_table_leaves_the_run_file_whole_with_no_total(tmp_path):
     """The ledger table gone from the run's own database: the events and result line stay, `num_turns` is MAIN's, total and usage are null, the mark false. (A1, A2)"""
-    control_dir, _, _ = _priced_run(tmp_path / "control", run_id="ledger-present")
+    control_dir, control_summary, _ = _priced_run(tmp_path / "control", run_id="ledger-present")
     control = _run_result(control_dir)
     assert isinstance(control["total_cost_usd"], float), "positive control: a readable ledger gives a number"
     assert control["total_cost_usd"] > 0, "positive control: a readable ledger gives a number"
@@ -864,6 +872,11 @@ def test_a1_a2_a_session_database_without_its_ledger_table_leaves_the_run_file_w
     assert calls["main"] == 2, "premise: the run made every MAIN call"
     events = [json.loads(line) for line in RunPaths(run_dir).tool_trace.read_text(encoding="utf-8").splitlines()]
     assert any(e.get("type") == "assistant" for e in events), "the run file lost its events"
+    control_events = [json.loads(line) for line in RunPaths(control_dir).tool_trace.read_text(encoding="utf-8").splitlines()]
+    assert _event_shape(events) == _event_shape(control_events), "the run file's events differ from the control's"
+    ending = ("truncated_by", "exit_reason")
+    assert {k: summary.get(k) for k in ending} == {k: control_summary.get(k) for k in ending} == {
+        "truncated_by": None, "exit_reason": None}, "an unreadable ledger changed how the run ended"
     result = _run_result(run_dir)
     assert result["num_turns"] == control["num_turns"] == 2, "`num_turns` is MAIN's turns"
     assert result["total_cost_usd"] is None
