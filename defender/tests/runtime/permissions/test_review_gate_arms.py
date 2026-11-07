@@ -349,7 +349,7 @@ def test_the_writer_and_the_reader_agree_about_a_nested_reply_from_any_stack_dep
 ):
     """The writer asks the row predicate from deep inside the gate, so its verdict on a nested
     reply must not depend on the stack left: the reader still sees one row, the gate's."""
-    from defender.tests.shared.filesystem.test_1032_json_artifact import from_a_deep_stack
+    from defender.tests.shared.filesystem.test_json_artifact import from_a_deep_stack
 
     reply = '{"finding": "holds", "review": ' + "[" * depth + "]" * depth + "}"
     run_dir = tmp_path / fixture_uuid("run")

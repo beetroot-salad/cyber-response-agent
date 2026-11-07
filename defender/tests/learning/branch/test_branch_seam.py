@@ -398,7 +398,7 @@ def control_oracle(base: Mapping[str, Any]) -> dict[str, Any]:
     control included, answers an unasked question through its oracle (the estates here leave the
     family's recording empty). It serves `base` back unchanged with an empty claim, so the row
     stays `passthrough`, in a sandboxed box. Whether the turn is TAKEN is pinned in
-    `test_1255_world_serving.py`."""
+    `test_world_serving.py`."""
     return {"oracle": S24.oracle(then=S24.submit(dict(base), S24.EMPTY_CLAIM)).model,
             "verifier": S24.passing_verifier().model, "box": S24.sandboxed_box()[0]}
 

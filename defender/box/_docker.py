@@ -20,8 +20,8 @@ from defender.records.formats import RUN_ID_ALLOWED, is_valid_run_id
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,
     BOX_MARK_ENV,
-    REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
-    RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.RESPONSE_MAGIC`
+    REQUEST_MAGIC,  # noqa: F401 — re-exported: test_exec_seam.py imports it as `box.REQUEST_MAGIC`
+    RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_exec_seam.py imports it as `box.RESPONSE_MAGIC`
     BoxFault,
 )
 from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.py/tests import `box.scrub`, `box.RunTainted`

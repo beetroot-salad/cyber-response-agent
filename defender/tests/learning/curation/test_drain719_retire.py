@@ -104,7 +104,7 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
     before = (location_path(paths.state_root) / ch.queue).read_bytes()
 
-    from defender.tests.learning.core.test_881_loop_plumbing import _StateWhoseDiskIsFull
+    from defender.tests.learning.core.test_loop_plumbing import _StateWhoseDiskIsFull
 
     cfg = h.cfg_for(
         paths,

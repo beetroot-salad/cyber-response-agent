@@ -20,7 +20,7 @@ from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.support.learning.branch import _triplet_947 as P
 from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV, current_data_root
 from defender.tests.learning.oracle.live_contracts import _spec1224 as O
-from defender.tests.learning.oracle.live_contracts.test_1224_preflight_and_outcome import (
+from defender.tests.learning.oracle.live_contracts.test_preflight_and_outcome import (
     _capture_row,
 )
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S

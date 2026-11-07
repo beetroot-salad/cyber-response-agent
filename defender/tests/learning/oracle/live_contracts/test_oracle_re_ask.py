@@ -37,7 +37,7 @@ pytest.importorskip('pydantic_ai')
 from defender.learning.branch.estate.checks import ReAsked, re_asked as _re_asked  # noqa: E402
 from defender.learning.branch.estate.registry import served_label  # noqa: E402
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S  # noqa: E402
-from defender.tests.learning.oracle.live_contracts import test_1224_host_checks as H  # noqa: E402
+from defender.tests.learning.oracle.live_contracts import test_host_checks as H  # noqa: E402
 
 
 RECONSTRUCTED = "reconstructed"
@@ -696,7 +696,7 @@ def test_1385_a_re_ask_is_shown_wherever_a_served_call_is_read_and_its_dropped_r
     assert seen.count(D_ID) == dropped.count(D_ID), "the dropped row is shown outside its section"
 
     # the judge's prompt, over the ledger as served: the call's line names the cut.
-    from defender.tests.learning.oracle.live_contracts import test_1224_judge as J1224
+    from defender.tests.learning.oracle.live_contracts import test_judge as J1224
     from defender.tests.support.learning.core import _state1135
 
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")

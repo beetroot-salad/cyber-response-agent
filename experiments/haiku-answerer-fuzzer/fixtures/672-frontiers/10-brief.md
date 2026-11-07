@@ -86,7 +86,7 @@ curl …` from the HOST (`_stub_transport.docker_exec_curl`, :163-220). Census b
   (GET `/tickets/{key}`, loop-side).
 - Floor lines classified by hand: `playground/ticket-server/app.py` = the store's own server;
   `health_check` hits in the six sibling adapters = same-name different symbols (each
-  adapter's own); `test_620_consumers.py` = a fake registry (test double);
+  adapter's own); `test_ee_consumers.py` = a fake registry (test double);
   `case_ticket.py:193` = comment only.
 
 ### Shared root 2 — `gather_raw/` (fs; the N7 carve-out; provenance: code)

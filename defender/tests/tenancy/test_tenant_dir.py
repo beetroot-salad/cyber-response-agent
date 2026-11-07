@@ -63,7 +63,7 @@ def test_an_id_that_is_not_a_single_plain_name_is_refused_naming_it(tmp_path, ba
     assert T.accept(root, fixture_uuid("tenant:acme")).id == fixture_uuid("tenant:acme")
 
 
-# ---- links (a tenant folder linked outside the root: test_1120_accept_tenant.py) -----------
+# ---- links (a tenant folder linked outside the root: test_accept_tenant.py) -----------
 
 def test_an_agent_half_linked_to_a_sibling_tenants_agent_is_refused(tmp_path):
     """`A/agent -> ../B/agent` stays inside the root, so root containment alone passes it —
@@ -138,7 +138,7 @@ def _swap_for_link(half: Path, target: Path) -> None:
     os.symlink(target, half, target_is_directory=True)
 
 
-# ---- absence (a missing or squatted half or required file: test_1120_accept_tenant.py) ----
+# ---- absence (a missing or squatted half or required file: test_accept_tenant.py) ----
 
 def test_a_missing_tenant_folder_is_refused_naming_its_path(tmp_path):
     """No fallback: another tenant beside it is there to fall back to, and may not be used."""

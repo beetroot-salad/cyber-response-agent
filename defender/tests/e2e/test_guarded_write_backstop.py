@@ -220,7 +220,7 @@ def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
     )
 
 
-# The run folder's exclusive create (`make_run_dir`) is pinned in test_1105_run_setup.py.
+# The run folder's exclusive create (`make_run_dir`) is pinned in test_run_setup.py.
 def test_the_default_mkdir_still_accepts_an_existing_final_name(tmp_path):
     run = run_tree(tmp_path)
     (run / "gather_raw" / "l-023").mkdir()

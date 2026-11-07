@@ -44,12 +44,12 @@ logs in to OpenBao itself with AppRole). Human decisions U1–U8 are in r3; U9�
 
 - **U13 (`validate_scaffold` spelling):** one spelling, `validate_scaffold.py <system> --tenant <T>
   --staged <dir>` (the staged directory agent-root-shaped), as `test_connect_propose.py` has it.
-  `e2e/test_620_consumers.py` is re-spelled onto it with every case's assertions kept. No second
+  `e2e/test_ee_consumers.py` is re-spelled onto it with every case's assertions kept. No second
   flag (`--agent-dir`). Scope: the scaffold validator's command line only.
 - **U14 (OD21 consequence):** the saved `runtime.html` (an operator page that may show the raw
   knowledge reason) must never become box-visible when a resume or branch re-binds a source run
   dir. Scope: what a box launched over a source run can read; the page stays an operator surface
-  host-side. Test: `e2e/test_920_branch_resume.py::test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason`.
+  host-side. Test: `e2e/test_branch_resume.py::test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason`.
 - **U15 (tenant template catalog):** the tenant template ships an empty catalog; the implementer
   adds it. `tests/tenancy/test_tenant_settings_location.py::test_the_templates_lead_zero_names_an_established_template_in_the_catalog`
   stays as written. Scope: the tenant template's `agent/` content.
@@ -121,7 +121,7 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 - Report-line vocabulary: `fresh <commit>` / `stale:transient <reason>` / `stale:operator <reason>` / `misconfigured <reason>`; the reason is one line; U11 line `stale:operator publish child failed: <summary>`.
 - Run copy layout `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, <token>}}`, removed in `finally`; box mounts `stage/` read-only; startup reads the token back; `DEFENDER_AGENT_DIR=/agent`.
 - `RunPaths(run_dir).knowledge_source(runs_base=None) -> <runs base>/<run_id>.knowledge-source.json`, JSON `{kind, commit, stale_kind, reason}` (host-held; U12).
-- Stamp `knowledge_source` limited to keys `{kind, commit, stale_kind}`; `STAMP_FIELD_CLASSES["knowledge_source"]` is informational (`test_1204_family_knowledge`).
+- Stamp `knowledge_source` limited to keys `{kind, commit, stale_kind}`; `STAMP_FIELD_CLASSES["knowledge_source"]` is informational (`test_family_knowledge`).
   The stamp "may carry" it (OD17): `RunProvenance(...).as_json(knowledge_source=<mapping>)` writes the key with exactly those
   three keys (never `reason`); `as_json()` without it omits the key (repair r4, F1).
 
@@ -176,7 +176,7 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 ### Open items in the seams
 
 - **`validate_scaffold` spelling conflict: resolved by owner ruling U13.** The S-D spelling
-  `<system> --tenant <T> --staged <dir>` stands; the 10 `e2e/test_620_consumers.py` cases (formerly
+  `<system> --tenant <T> --staged <dir>` stands; the 10 `e2e/test_ee_consumers.py` cases (formerly
   `--agent-dir`) are re-spelled onto it, naming a set-up tenant under a data root of the
   scaffold's own and keeping `DEFENDER_DIR` for the code tree. Their assertions are unchanged.
 - `launch_publish(spawn=)` is used by `test_publish_child.py` but absent from `_s_b_support.py`'s docstring; the test is authoritative.
@@ -189,18 +189,18 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 
 Files are under `tenant_1108_p4/` unless a path is given.
 
-- O1 layout allowlist → `test_layout.py`, `tests/learning/retrieval/test_corpus_fold_584.py`, `test_lessons_frontend.py`, `tests/tenancy/test_1108_knowledge_owner.py`
-- O2 one tenant, one revision, every surface → `test_run_isolation_e2e.py`, `test_run_copy.py`, `tests/runtime/permissions/test_permission.py`, `runtime/engine/test_read_confine_bash.py`, `test_gather_template_discovery.py`, `e2e/test_gather_template_index.py`, `alert_front_door_1222/test_1222_lessons_and_corpus.py`, `layout_contracts/test_1080_*`, `invlang/validation/test_frontier_recall_919.py`
+- O1 layout allowlist → `test_layout.py`, `tests/learning/retrieval/test_corpus_fold_584.py`, `test_lessons_frontend.py`, `tests/tenancy/test_knowledge_owner.py`
+- O2 one tenant, one revision, every surface → `test_run_isolation_e2e.py`, `test_run_copy.py`, `tests/runtime/permissions/test_permission.py`, `runtime/engine/test_read_confine_bash.py`, `test_gather_template_discovery.py`, `e2e/test_gather_template_index.py`, `alert_front_door_1222/test_lessons_and_corpus.py`, `layout_contracts/test_1080_*`, `invlang/validation/test_frontier_recall_919.py`
 - O-A box mounts stage only, token read-back, in-box `.tenant-id` retired → `test_run_copy.py`, `test_run_start.py`, `tenant_1108_p2/test_run_start.py`, `e2e/test_tenant_box_mount.py`
 - O-B one export commit for settings/knowledge/stamp → `test_run_start.py`, `test_branch_replay.py`, `e2e/test_tenant_run_start_e2e.py`
-- O-PIN `--knowledge-commit`, branch siblings → `test_run_start.py`, `test_branch_replay.py` (the held-out launcher that pinned each index is gone, #1279 A10; scoring skips its pin line: `storage/ids_1187/test_1187_held_out.py`)
-- O4 symbol census → `test_census.py`, `tests/tenancy/test_1108_knowledge_owner.py`
+- O-PIN `--knowledge-commit`, branch siblings → `test_run_start.py`, `test_branch_replay.py` (the held-out launcher that pinned each index is gone, #1279 A10; scoring skips its pin line: `storage/ids_1187/test_held_out.py`)
+- O4 symbol census → `test_census.py`, `tests/tenancy/test_knowledge_owner.py`
 - O-TEXT model-facing spellings → `test_model_text.py`, `test_connect_propose.py`
 - O5 lesson load recorded → `test_lesson_load.py`, `learning/retrieval/test_record_lesson_load.py`
-- O6 judge pre/post-move, unreadable → `test_judge_bodies.py`, `learning/judge/test_921_render.py`
+- O6 judge pre/post-move, unreadable → `test_judge_bodies.py`, `learning/judge/test_render.py`
 - O7 all corpus writes via TenantDelivery, legacy delivery deleted → `test_writers.py`, `test_drains.py`, `test_revert_cli.py`, `test_connect_propose.py`, lane suites (#773/#869/#870/#1134/lead author/pitfalls)
 - O7b merged PR read or recorded stale → `test_publish_child.py`
-- O-STALE child classification → `test_publish_child.py`, `test_run_start.py`, `learning/branch/test_1204_family_knowledge.py`
+- O-STALE child classification → `test_publish_child.py`, `test_run_start.py`, `learning/branch/test_family_knowledge.py`
 - O-WARN page/ticket/API → `test_stale_visibility.py`, `test_run_page.py`
 - O-SEE `tenant.py check` → `test_tenant_cli.py`
 - O-BUDGET child and parent halves (real subprocesses) → `test_publish_child.py`
@@ -218,14 +218,14 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - Flow 3 run start → `test_run_start.py`, `test_run_copy.py`, `tests/tenancy/test_tenant_settings_location.py`, `e2e/test_tenant_run_start_e2e.py`
 - Flow 4 drain → `test_drains.py`, `test_refused_claims.py`
 - Flow 5 revert → `test_revert_cli.py`
-- Flow 6 connect → `test_connect_propose.py`, `e2e/test_620_consumers.py`
+- Flow 6 connect → `test_connect_propose.py`, `e2e/test_ee_consumers.py`
 - Flow 7 branch replay → `test_branch_replay.py`
 - A-ID drain AppRole login → `test_drain_credentials.py`, `test_live_dev_issuer.py`
 - U9 stage layout → `test_run_copy.py`, `test_drains.py`, `test_run_isolation_e2e.py`, `tenant_1108_delivery/test_batches.py`, `tenant_1108_delivery/test_box.py`, `e2e/test_tenant_box_mount.py`
-- U10 refused claims (OD18/19/23) → `test_refused_claims.py`, `learning/curation/test_1134_curator_drain.py`, `test_drain_commit.py`, `test_lead_author.py`
+- U10 refused claims (OD18/19/23) → `test_refused_claims.py`, `learning/curation/test_curator_drain.py`, `test_drain_commit.py`, `test_lead_author.py`
 - U11 broken child (OD20) → `test_publish_child.py`
 - U12 host record (OD17/21/22') → `test_stale_visibility.py`, `test_run_page.py`, `test_run_start.py`
-- U14 (OD21 consequence) resumed box never sees the source's `runtime.html` or its reason → `e2e/test_920_branch_resume.py::test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason`
+- U14 (OD21 consequence) resumed box never sees the source's `runtime.html` or its reason → `e2e/test_branch_resume.py::test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason`
 - Also: P4 wiring (delivery has production callers outside the run process; replaces P3's dormancy ban) → `tenant_1108_delivery/test_architecture.py`.
 
 ## 4. Migrated existing suites
@@ -238,7 +238,7 @@ assertions on the new seams.
 Wholly deleted files and their successors:
 - `e2e/test_local_box_command.py`: pinned the in-box `.tenant-id` read and `AgentReadDocker`; → `test_run_copy.py` (that check no longer runs). Its incidental concern (a host stand-in must not depend on inherited `PYTHONPATH`) is not re-pinned.
 - `learning/curation/test_1134_curator_git_bounds.py` (27 cases, git over a writable worktree) → P3 ChangeSet refusals and `tenant_1108_delivery/test_network.py` stalled-forge timeout.
-- `learning/curation/test_1134_curator_git_compare.py` → P3 ChangeSet byte comparison and reset (one case moved to `test_1134_curator_drain.py`).
+- `learning/curation/test_1134_curator_git_compare.py` → P3 ChangeSet byte comparison and reset (one case moved to `test_curator_drain.py`).
 - `learning/curation/test_1134_curator_v3_holes.py` (drain-internal restore) → P3 reset and ChangeSet tests.
 - `learning/curation/test_1175_claim_session.py`, `test_1175_adversary_holes.py`, `test_1175_leads_git_liveness.py` → P3 `test_batches.py`/`test_changes.py`/`test_change_set_fuzz.py` and `tenant_1108_p4/test_writers.py`.
 - `learning/curation/test_1175_adversary_r2.py`, `test_1195_worktree_batch.py`: pinned legacy worktree delivery; successors are the same P3 batch/change tests and `test_drains.py`. The pointer here is thin.
@@ -262,33 +262,33 @@ Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as 
     → `test_changes.py::test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole`.
   - `learning/curation/test_curator_glm_survival.py`: the staged-index half (unrelated staged work not swept into the commit)
     → `test_changes.py::test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files`.
-  - `tenancy/test_1204_knowledge_revision.py`: the six `materialize_run` clone-stamp cases (versioned, plain-copy `unversioned`, unreadable `.git`,
+  - `tenancy/test_knowledge_revision.py`: the six `materialize_run` clone-stamp cases (versioned, plain-copy `unversioned`, unreadable `.git`,
     two read-fault rows, fork sibling) → `test_run_start.py::test_o_b_the_stamp_is_the_export_copied_never_the_clones_head`,
     `::test_o11_o_b_...`, `::test_o_a_no_current_and_a_failed_publish_refuses_before_message_zero`, `::test_o_pin_...`, `test_branch_replay.py::test_flow7_...`,
-    `::test_o_b_the_live_capture_...`; the arm's no-lineage fields → `storage/ids_1187/test_1187_roster_sibling.py::test_natural_and_arm_stamps_carry_no_world_lineage`.
-  - `learning/branch/test_1204_family_knowledge.py`: the two `--allow-dirty` waiver rows for an `unversioned`/`unavailable` source (OD9)
+    `::test_o_b_the_live_capture_...`; the arm's no-lineage fields → `storage/ids_1187/test_roster_sibling.py::test_natural_and_arm_stamps_carry_no_world_lineage`.
+  - `learning/branch/test_family_knowledge.py`: the two `--allow-dirty` waiver rows for an `unversioned`/`unavailable` source (OD9)
     → `test_branch_replay.py::test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allow_dirty`.
-  - `learning/retrieval/test_1195_lessons_run_windows.py`: the `before-the-run` rows (a pre-run stray tolerated, OD15)
+  - `learning/retrieval/test_lessons_run_windows.py`: the `before-the-run` rows (a pre-run stray tolerated, OD15)
     → `test_changes.py::test_change_set_is_the_draft_against_the_batch_base_...`, `::test_claims_commit_and_reset_one_after_another_within_one_batch`.
   - `e2e/test_guarded_write_backstop.py`: the planted-component case and the leaf-alias case of `drain._restore_corpus`
     → `test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`.
   - `tooling/layout_contracts/test_1080_episode_frontend_and_pricing.py::test_1080_values_derived_from_a_moved_files_location_resolve_as_before`:
     the `lessons_fm` `REPO_ROOT` cell → `learning/retrieval/test_lessons_fm.py`.
-  - `tenancy/tenant_1120_piece1/test_1120_check.py::test_1159_check_says_this_machines_git_failed_and_exits_1`: the half pinning that the grant
+  - `tenancy/tenant_1120_piece1/test_check.py::test_1159_check_says_this_machines_git_failed_and_exits_1`: the half pinning that the grant
     census goes blind with git (the census no longer starts git); r4 pins the converse (no census-not-taken line, no git cause).
-- Re-spelled, class (ii), assertions kept or made stricter: `test_1178_run_gate.py` link/out-of-lane rows (`LeadAuthorError` → `DeliveryRefused`, OD18/OD23),
-  exec rows (mode 100644, P3), the two "larger than any read commits" cases → `..._is_refused`; `test_1134_lead_author_adversary.py` link rows
-  (`DeliveryRefused`); `test_1134_curator_drain.py` hard-linked base lesson → refused claim (owner ruling 2);
-  `test_frames_680_lifecycle.py::test_lead_author_bash_reads_cross_agent_artifact` onto a batch-draft scene; `test_1195_lessons_run_windows.py`
+- Re-spelled, class (ii), assertions kept or made stricter: `test_run_gate.py` link/out-of-lane rows (`LeadAuthorError` → `DeliveryRefused`, OD18/OD23),
+  exec rows (mode 100644, P3), the two "larger than any read commits" cases → `..._is_refused`; `test_lead_author_adversary.py` link rows
+  (`DeliveryRefused`); `test_curator_drain.py` hard-linked base lesson → refused claim (owner ruling 2);
+  `test_frames_680_lifecycle.py::test_lead_author_bash_reads_cross_agent_artifact` onto a batch-draft scene; `test_lessons_run_windows.py`
   out-of-lane stray rows → refused claim (`test_a_stray_the_box_writes_outside_the_lanes_once_started_is_a_refused_claim`);
-  `test_curator_manifest.py::test_p4_both_callers_forward_the_abs_corpus_path` over a draft; `tenancy/test_1204_knowledge_revision.py`'s pointer.
+  `test_curator_manifest.py::test_p4_both_callers_forward_the_abs_corpus_path` over a draft; `tenancy/test_knowledge_revision.py`'s pointer.
 
 Repair round r4 (this round), all additive or stricter:
-- `learning/branch/test_1204_family_knowledge.py::test_1204_the_stamp_table_classes_every_record_field_exactly_as_d4_states`: the table is the
+- `learning/branch/test_family_knowledge.py::test_1204_the_stamp_table_classes_every_record_field_exactly_as_d4_states`: the table is the
   bare record's wire keys plus the one optional `knowledge_source` (OD17 "may carry"), whose class and carried keys are asserted (F1).
 - `test_run_start.py::test_o_b_a_broken_tenant_clone_does_not_stop_the_run_or_reach_its_stamp` (gitfile to nowhere, `.git` removed, uncommitted edit; F3).
-- `test_1120_check.py` git-absent V16 loop: no census-not-taken line and no census git cause (F4).
-- `runtime/state/test_1255_clock_box.py`: the run copy's stage is told by source prefix (one mount or several), and the mounts set aside are only
+- `test_check.py` git-absent V16 loop: no census-not-taken line and no census git cause (F4).
+- `runtime/state/test_clock_box.py`: the run copy's stage is told by source prefix (one mount or several), and the mounts set aside are only
   the agent and token mounts, read-only, each kind once (F5).
 - `tenant_1108_delivery/test_changes.py`: LF→CRLF rewrite of an existing lesson is a change of those bytes; a chmod-only edit is none (R-4);
   `_REFUSED_OUTPUT` gains `hardlink-to-host`, `hardlink-in-lane`, `replace-file-with-hardlink`, `replace-file-with-hardlink-same-bytes`, and the
@@ -300,7 +300,7 @@ Repair round r4 (this round), all additive or stricter:
   starting the remote anew, and reads `LockBusy` as `stale:transient` (R-3); the fixture tenant ships
   `agent/skills/tacit-knowledge/SKILL.md`, re-asserted by `tenancy/test_tacit_knowledge_registry_983.py` (R-5).
 - Older suites reading the product content P4 deleted (item 13), re-spelled, nothing deleted: `invlang/validation/test_lessons_frontier_scale_935.py` (4)
-  and `learning/retrieval/test_986_container_lesson_recall.py` (7) rank against the pre-P4 shipped lessons, now the committed test fixture
+  and `learning/retrieval/test_container_lesson_recall.py` (7) rank against the pre-P4 shipped lessons, now the committed test fixture
   `tests/fixtures/pre-p4-shipped/agent/` (byte-identical to base `0f62791e`; helper `support/shared/_pre_p4_shipped.py`);
   `invlang/validation/test_frontier_shared_walk_930.py`'s straddle case recalls from the run copy's `agent/lessons`;
   `integrations/test_scaffold_rules_901.py`'s template sweep covers every committed `knowledge/*/agent` catalog plus that fixture's (which carries
@@ -315,10 +315,10 @@ Repair round r4 (this round), all additive or stricter:
   - `e2e/test_scan_verdict_lifecycle.py::test_a_quarantined_tainted_tree_carries_its_verdict_beside_the_archive` and its driver
     `_spec771.quarantine_a_tainted_tree` (`quarantine.preserve_tainted_tree`, whose only caller was `AuthorBranch`): no successor, §6 owner item.
   - Dead support `support/learning/curation/_claim1175.py` (imported the deleted `defender._claim_git`; its suites were deleted with the contract).
-- Re-spelled with the cleanup: `tenant_1120_piece1/test_1120_operator_commands.py::test_1186_learning_operator_cli_uses_the_explicit_tenants_lock`
+- Re-spelled with the cleanup: `tenant_1120_piece1/test_operator_commands.py::test_1186_learning_operator_cli_uses_the_explicit_tenants_lock`
   rows for `lessons/run.py` and `questioner/run.py` now meet `.author-drain.lock` ("another drainer holds the lock", rc 0), as those commands run the
   author lane's tenant batch; census rows naming the deleted `version_control/restore.py` dropped (`e2e/_spec771.py`, `_census1134.py`);
-  `_census_1107.py`/`test_1107_census_lint.py` homonym docs pruned to `skills/connect/SKILL.md` (the others moved to tenants);
+  `_census_1107.py`/`test_census_lint.py` homonym docs pruned to `skills/connect/SKILL.md` (the others moved to tenants);
   `tooling/layout_contracts/_pointers1080.vanished_folder_mentions` counts a name live in a tenant's agent half (`agent/lessons/`) as ambiguous,
   so a bare `lessons/` is not a stale pointer; stale-name test data reworded or suppressed with a reason (`lint_stale_refs` clean).
 
@@ -329,14 +329,14 @@ Repair round r5:
   committed) and adapter-unreadable cases keep their assertions. Deleted, class (i): the `no defender/skills/ at HEAD` and `repo is no git
   repository` raises (the resolver no longer reads a committed tree itself) → `::test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`,
   added: the lane's systems come from the batch base, never the draft, and an unreadable base refuses the deps.
-- `tenancy/alert_front_door_1222/test_1222_lessons_and_corpus.py` p072, p074 (×2), p077 (class ii, repair-list class E): the REAL drain tick runs
+- `tenancy/alert_front_door_1222/test_lessons_and_corpus.py` p072, p074 (×2), p077 (class ii, repair-list class E): the REAL drain tick runs
   over a fixture-tenant batch draft (`draft_lane`/`draft_author_cfg`) instead of a checkout-shaped repo, and "committed" is read from the batch
   branch tip (`lane.landed()`/`text_at_tip`), never the draft; every assertion kept.
 - Vacuous or broken reads of the deleted product corpus, re-pointed at content that exists, each with a guard that it is not empty:
-  `e2e/test_540_exec_seam.py::test_relative_operand_names_the_same_file_at_all_three_sites` (a repo-root-relative operand now names the product
-  `skills/gather/SKILL.md`, with the control that its full path IS readable); `learning/curation/test_620_authoring_contract.py` (the
+  `e2e/test_exec_seam.py::test_relative_operand_names_the_same_file_at_all_three_sites` (a repo-root-relative operand now names the product
+  `skills/gather/SKILL.md`, with the control that its full path IS readable); `learning/curation/test_authoring_contract.py` (the
   placeholder<->param sweep covers the pre-P4 shipped catalog fixture, ≥20 templates, plus every committed `knowledge/*/agent` catalog);
-  `e2e/test_540_box_boundary.py::test_write_under_defender_dir_fails_erofs_by_errno` (the poisoned write goes under `skills/gather/`, a folder
+  `e2e/test_ee_box_boundary.py::test_write_under_defender_dir_fails_erofs_by_errno` (the poisoned write goes under `skills/gather/`, a folder
   the product still ships, so the probe meets the ro bind rather than ENOENT; box-only, not run locally).
 - `tooling/layout_contracts/test_1080_lints_and_pointers.py::test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_working`
   (class ii): the expected CI `tacit_cli check` step carries `--defender-dir knowledge/tenant-fixture/agent`, the spelling the r4 respell of
@@ -378,14 +378,14 @@ Collateral still naming deleted files: `tests/_shard_weights.json`, `learning/st
 - The API reading the host record is enforced only through the stub seam `InMemoryStore.add_run_knowledge` until a real store exists; the design text should say so.
 - Census residuals: tuple-unpack/loop targets, computed names, `importlib`/`getattr`/aliases, call-time joins, extension-less shims; mitigated by the O1 layout test and behavioural clone-unreadable checks. Also: no `ls /agent` control on the listing check, and the reason needle is an exact match.
 - Budget tests use real subprocesses and wall-clock bounds, so they may flake under load.
-- `declared_systems` split-root gap: 4 `@sys` folder-gate cases in `test_1134_lead_author_holes.py`.
+- `declared_systems` split-root gap: 4 `@sys` folder-gate cases in `test_lead_author_holes.py`.
 - Evals `expect.json` assertions are vacuous until the harness resolves against a draft.
 - `Investigation.knowledge` nullability for queued/running investigations (G-C3).
 - (closed by owner ruling 2) F-HARDLINK P3 half: a regular file with nlink>1 in a lane refuses the claim whole and the
   reset leaves every draft file single-linked: `tenant_1108_delivery/test_changes.py::test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole`
   rows `hardlink-to-host`, `hardlink-in-lane`, `replace-file-with-hardlink`, `replace-file-with-hardlink-same-bytes`
   (P4 half: no inode shared with the export).
-- (closed by U14) OD21 consequence: covered by `e2e/test_920_branch_resume.py::test_od21_...` on the resume re-binding (`drive(resume=)`, the path a branch sibling runs). The branch CLI's spawned siblings are observed only as argv (`test_branch_replay.py`), so the in-box half is pinned on the resume path alone.
+- (closed by U14) OD21 consequence: covered by `e2e/test_branch_resume.py::test_od21_...` on the resume re-binding (`drive(resume=)`, the path a branch sibling runs). The branch CLI's spawned siblings are observed only as argv (`test_branch_replay.py`), so the in-box half is pinned on the resume path alone.
 
 ## 7. Review record
 

@@ -1,4 +1,4 @@
-"""Watches, seams and the unprivileged child runner for `test_1134_shared_readers.py`."""
+"""Watches, seams and the unprivileged child runner for `test_shared_readers.py`."""
 from __future__ import annotations
 
 import contextlib

@@ -27,7 +27,7 @@ DISPOSITION_VALUES: tuple[str, ...] = (
 DISPOSITION_ENUM = frozenset(DISPOSITION_VALUES)
 
 #: The member only the host may commit; every model/analyst authoring surface refuses it
-#: (`test_923_authoring_surfaces.py` enumerates them).
+#: (`test_authoring_surfaces.py` enumerates them).
 HOST_ONLY_DISPOSITION = "unresolved"
 
 #: The model's own "I could not settle this", which must pay for its close with `ceiling_test`

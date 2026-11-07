@@ -35,7 +35,7 @@ from defender.box import _scrub as scan
 from defender.tests.support.tenancy import _tenants1106 as tenants
 from defender.tests.support.runtime.records._1165_flows import RecordIO, run_handle
 from defender.tests.e2e._replay_harness import DEFENDER
-from defender.tests.e2e.test_540_scrub_lifecycle import FakeDocker
+from defender.tests.e2e.test_scrub_lifecycle import FakeDocker
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 

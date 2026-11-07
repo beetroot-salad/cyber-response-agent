@@ -148,7 +148,7 @@ claims:
   - id: C4
     kind: behavior
     claim: An oversized response under runc is refused and the container is stopped.
-    probe: tests/e2e/test_1205_box_output.py::test_live_box_printing_past_limit_is_refused_and_stopped[runc], executed in the focused locked pytest run.
+    probe: tests/e2e/test_box_output.py::test_live_box_printing_past_limit_is_refused_and_stopped[runc], executed in the focused locked pytest run.
     probe_kind: executed
     observed: Passed, including an under-limit command and stopped-container inspection.
     verdict: holds
@@ -169,7 +169,7 @@ claims:
   - id: C7
     kind: behavior
     claim: R2 settles retained Python outcomes before retry and preserves fatal overflow across deadline and direct tool cancellation.
-    probe: Locked pytest run of tests/learning/oracle/test_1205_owned_box_work.py, test_1224_oracle_loop_regressions.py, and live_contracts/test_1224_oracle_context_and_box.py under R2.
+    probe: Locked pytest run of tests/learning/oracle/test_owned_box_work.py, test_oracle_loop_regressions.py, and live_contracts/test_oracle_context_and_box.py under R2.
     probe_kind: executed
     observed: 97 passed, including the previously failing regression and ordinary-timeout controls.
     verdict: holds

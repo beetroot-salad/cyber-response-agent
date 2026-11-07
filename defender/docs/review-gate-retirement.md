@@ -40,7 +40,7 @@ is closed: `REVIEW_ROLES` names the three lenses and the composer, and `NO_REVIE
 deleted. What survives the window is the ARM, and the rule it carries — a gate that cannot
 review must not let a confident finding through, and committing one silently would be
 indistinguishable from a review that ran and found nothing. Its witness is
-`test_797_retirement.py::test_797_a_confident_close_fails_closed_when_no_stage_is_bound`,
+`test_retirement.py::test_797_a_confident_close_fails_closed_when_no_stage_is_bound`,
 which now drives it through an unbound bundle: `forced-inconclusive`, cause "the challenge
 review did not complete", `failure_kind: error`, detail from `UnboundReviewStage`.
 
@@ -60,10 +60,10 @@ already shipped once.**
 
 | Rule | Where it lives now |
 |---|---|
-| **Record first, report second**, both attempted, the fault held until both writes are tried; terminality follows the REPORT, not both. | `close_tool._commit`; driven by the e2e replays and `test_797_retirement.py` |
-| `report.md` carries **host-owned vocabulary only** — a stage's prose reaches the numbered record and never the report, because the report rides verbatim into the judge's prompt and out through the ticket bridge. | `close_tool.render_report` / `_record_dict`; `test_797_retirement.py` |
+| **Record first, report second**, both attempted, the fault held until both writes are tried; terminality follows the REPORT, not both. | `close_tool._commit`; driven by the e2e replays and `test_retirement.py` |
+| `report.md` carries **host-owned vocabulary only** — a stage's prose reaches the numbered record and never the report, because the report rides verbatim into the judge's prompt and out through the ticket bridge. | `close_tool.render_report` / `_record_dict`; `test_retirement.py` |
 | The raised request ceiling is **read from the bounds the run was handed**, both terms, never restated. | `challenge_gate.raised_request_limit`; `test_replay_error_paths` |
-| A confident close that cannot be reviewed **fails closed**, and says the MACHINERY failed rather than the evidence. | `test_797_retirement.py`, `test_replay_skeleton` |
+| A confident close that cannot be reviewed **fails closed**, and says the MACHINERY failed rather than the evidence. | `test_retirement.py`, `test_replay_skeleton` |
 
 ### Rules whose CODE survives but whose witness does not
 

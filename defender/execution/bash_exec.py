@@ -29,7 +29,7 @@ _SHLEX_PUNCTUATION = frozenset("();<>|&")
 #: it). Not `str.isspace()` (true for NBSP, `\x0b`, `\x85`, ...) and not `shlex.whitespace`
 #: (includes `\r`, which bash keeps in the word). Splitting on a wider set hands the executor
 #: an argv the model did not write, e.g. `w a\r2>/dev/null` losing its `2` operand and having
-#: a stdout redirect read as fd 2. `test_955_bash_fd_prefix.py::_NOT_SHELL_BLANKS` pins it.
+#: a stdout redirect read as fd 2. `test_bash_fd_prefix.py::_NOT_SHELL_BLANKS` pins it.
 _BLANKS = frozenset(" \t\n")
 
 #: `_BLANKS` as a string, for `str.strip` and membership tests. Public so anything that needs

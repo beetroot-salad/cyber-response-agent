@@ -1103,7 +1103,7 @@ def default_main_turns() -> list[Turn]:
 
 
 def closing_main_turns(disposition: str = "inconclusive") -> list[Turn]:
-    """MAIN writes a whole valid investigation (the sshd golden's, as `test_1077_replay` does),
+    """MAIN writes a whole valid investigation (the sshd golden's, as `test_replay` does),
     closes it through the real `close_investigation` (the review gate answers through drive's
     default bundle) and stops — the script for a demand that needs the run to reach `report.md`."""
     doc = (H.GOLDEN / "investigation.md").read_text(encoding="utf-8")

@@ -936,7 +936,7 @@ cut off mid-block, the next append closes it, and
 design. Measured before arming: across the 27 documents in the tree
 carrying invlang, one investigation fires — `live-867-old` itself — and
 nothing else does. `defender/docs/investigation-language.md` §On-disk surface
-carries the rule; `tests/invlang/parser/test_932_unfenced_surface.py` is the guard.
+carries the rule; `tests/invlang/parser/test_unfenced_surface.py` is the guard.
 
 The gate is the second half of the fix, not the whole of it. The first
 half is that the split itself was derived in three places — the
