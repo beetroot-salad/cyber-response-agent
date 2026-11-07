@@ -388,19 +388,25 @@ class ManagementService(Actor):
 
     async def _retire(self, held: HeldTenant) -> None:
         """Rotation's end on the forge and OpenBao: the old chain destroyed, its bot (and with it its
-        integrations, so its JWTs) first (FR-8)."""
+        integrations, so its JWTs) first, deleted without purge so its PRs stay (FR-8, #1433)."""
         old = [g for g in await held.generations() if g.status == "retiring"]
         for gen in old:
-            await self._destroy(gen)
+            await self._destroy(held, gen)
         await self._commit_next(held, destroy=[g.salt for g in old])
 
-    async def _destroy(self, gen: Generation) -> None:
-        """A generation's chain, each part checked first (RC-4): the bot with `purge` (its
-        integrations go with it, G8), the OIDC role, the AppRole and its secret ids, the entity (its
-        alias with it), and the sign AppRole and its entity likewise when the generation records them
-        (one recorded before the sign login has none, A24')."""
+    async def _destroy(self, held: HeldTenant, gen: Generation) -> None:
+        """A generation's chain, each part checked first (RC-4): the bot (its integrations go with it,
+        G8), the OIDC role, the AppRole and its secret ids, the entity (its alias with it), and the sign
+        AppRole and its entity likewise when the generation records them (one recorded before the sign
+        login has none, A24'). The bot is removed from the repository first, then deleted WITHOUT purge
+        (#1433): purge erases the PRs, reviews and comments it wrote. A delete the forge refuses (the
+        bot owns a repository, a fork of the tenant repo included, or belongs to an organisation)
+        fails the step with the forge's reason; the bot has no access to the repository by then."""
         if answered(await self._forge.get(f"/api/v1/users/{gen.bot_login}"), 404).status_code != 404:
-            answered(await self._forge.delete(f"/api/v1/admin/users/{gen.bot_login}", params={"purge": "true"}), 404)
+            wiring = await held.forge_wiring()
+            if wiring is not None:
+                answered(await self._forge.delete(f"/api/v1/repos/{wiring.repo}/collaborators/{gen.bot_login}"), 404)
+            answered(await self._forge.delete(f"/api/v1/admin/users/{gen.bot_login}"), 404)
         paths = [f"identity/oidc/role/{gen.oidc_role}", f"auth/approle/role/{gen.approle}",
                  f"identity/entity/name/{gen.entity}"]
         if gen.sign_approle is not None:
@@ -418,7 +424,7 @@ class ManagementService(Actor):
         await self._identity.end_tenant(held.tenant_id, now=self._clock())
         for gen in await held.generations():
             if gen.status != "destroyed":
-                await self._destroy(gen)
+                await self._destroy(held, gen)
         await self._destroy_key(held.tenant_id)
         wiring = await held.forge_wiring()
         if wiring is not None:
@@ -430,7 +436,7 @@ class ManagementService(Actor):
         then `offboarded` with the repo deletion pending once the window ends; the publish status goes
         (Flow 2.4, A25)."""
         for gen in await held.generations():
-            await self._destroy(gen)
+            await self._destroy(held, gen)
         await self._destroy_key(held.tenant_id)
         now = self._clock()
         await held.commit(step="delete_repo", actor=SERVICE, state="offboarded", pending_action="delete_repo",
@@ -440,7 +446,7 @@ class ManagementService(Actor):
         """Due once `repo_delete_after` passed (the listing waits for it): the by-name sweep again
         (RC-8), the repo deleted, `repo_url` and the wiring cleared; audited after the commit."""
         for gen in await held.generations():
-            await self._destroy(gen)
+            await self._destroy(held, gen)
         wiring = await held.forge_wiring()
         if wiring is not None and answered(await self._forge.get(f"/api/v1/repos/{wiring.repo}"), 404).status_code != 404:
             answered(await self._forge.delete(f"/api/v1/repos/{wiring.repo}"), 404)

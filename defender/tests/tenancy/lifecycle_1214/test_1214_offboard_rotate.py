@@ -94,8 +94,8 @@ def test_offboard_ends_api_access_at_once_then_destroys_everything_but_the_archi
     system = {e.action for e in audit.since(mark) if e.actor == "system"}
     assert {"member.remove", "invitation.revoke"} <= system
     assert {g.status for g in world.generations(tenant)} == {"destroyed"}
-    purges = [c for c in world.forge.made("DELETE", f"/api/v1/admin/users/{gen.bot_login}")]  # SK-3
-    assert purges and all(c.query.get("purge") == ["true"] for c in purges)
+    deletes = world.forge.made("DELETE", f"/api/v1/admin/users/{gen.bot_login}")  # SK-3 (#1433: never with purge)
+    assert deletes and not any("purge" in c.query for c in deletes)
     assert gen.bot_login not in world.forge.users and gen.bot_login not in world.forge.integrations
     assert set(_gone_in_openbao(world, gen).values()) == {True}, _gone_in_openbao(world, gen)
     assert world.openbao.transit_keys == {}, "offboarding destroys the tenant's signing key (A25)"
@@ -357,3 +357,39 @@ def test_offboard_is_refused_for_an_offboarded_tenant_and_resume_without_a_failu
     before = world.item(tenant)
     assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 409
     assert world.item(tenant) == before
+
+
+# --- the old bot's pull requests outlive it (#1433) -------------------------------------------------------
+
+def test_rotation_cuts_the_old_bots_repo_access_then_deletes_it_without_purge(world):
+    """K1, K4: retire removes the old bot from the repo, then deletes its account with no `purge` (purge erases the
+    PRs, reviews and comments it wrote); the old JWT is refused (K2)."""
+    tenant = world.active_tenant()
+    old = world.live(tenant)
+    old_jwt = jwts(world, old)[-1]
+    full = f"{ORG}/{tenant}"
+    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    world.drive()
+    seen = [(c.method, c.path, "purge" in c.query) for c in world.forge.calls if old.bot_login in c.path]
+    removal = ("DELETE", f"/api/v1/repos/{full}/collaborators/{old.bot_login}", False)
+    user_delete = ("DELETE", f"/api/v1/admin/users/{old.bot_login}", False)
+    assert seen.count(user_delete) == 1 and not [c for c in seen if c[2]], seen
+    assert removal in seen and seen.index(removal) < seen.index(user_delete), seen
+    assert old.bot_login not in world.forge.users
+    assert as_bot(world, old_jwt, f"repos/{full}").status_code == 401
+
+
+def test_a_refused_delete_stops_rotation_with_the_forges_reason_and_never_purges(world):
+    """K5, K4: an old bot that owns a repository (its fork) makes the forge refuse the delete; the job fails loudly with
+    the forge's message, the bot has no access to the tenant repo, and nothing retries with purge."""
+    tenant = world.active_tenant()
+    old = world.live(tenant)
+    world.forge.add_user_repo(old.bot_login, tenant)
+    full = f"{ORG}/{tenant}"
+    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    world.drive()
+    record = world.record(tenant)
+    assert record.failure and "ownership of repositories" in record.failure, record.failure
+    assert not any("purge" in c.query for c in world.forge.calls if c.path.startswith("/api/v1/admin/users/"))
+    assert old.bot_login in world.forge.users and f"{old.bot_login}/{tenant}" in world.forge.repos
+    assert old.bot_login not in world.forge.collaborators(full)
