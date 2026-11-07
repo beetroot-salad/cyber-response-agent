@@ -8,6 +8,8 @@ import datetime as _dt
 
 import pytest
 
+pytest.importorskip('fastapi')
+
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
@@ -48,9 +50,6 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     two_tenants,
     me,
 )
-
-
-pytest.importorskip("fastapi")
 
 
 # A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
@@ -267,9 +266,6 @@ def test_one_session_reaches_every_tenant_a_person_belongs_to() -> None:
     assert nina.delete(f"/tenants/{T1}/members/{user_id(ann)}").status_code == 204
     assert ann.get(f"/tenants/{T2}/alerts").status_code == 200
     assert ann.get(f"/tenants/{T1}/alerts").status_code == 404
-
-
-pytest.importorskip("fastapi")
 
 
 def _when(row: dict[str, object]) -> _dt.datetime:

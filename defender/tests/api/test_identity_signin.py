@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 
+pytest.importorskip('fastapi')
+
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
@@ -85,9 +87,6 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     two_tenants,
     user_id,
 )
-
-
-pytest.importorskip("fastapi")
 
 
 # A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
@@ -311,9 +310,6 @@ def test_a_revoked_invitation_is_not_joined_at_first_sign_in() -> None:
     assert n.get(f"/tenants/{T2}/alerts").status_code == 404
 
 
-pytest.importorskip("fastapi")
-
-
 MINUTE = _dt.timedelta(minutes=1)
 
 
@@ -493,9 +489,6 @@ def test_the_origin_is_checked_before_the_session_and_only_for_state_changing_me
     no_origin = world.client_with_cookie(ann.cookies[SESSION_COOKIE], origin=None)
     assert no_origin.get("/me").status_code == 200
     assert no_origin.post(f"/tenants/{T2}/invitations", json={"email": NEW}).status_code == 403  # not 404
-
-
-pytest.importorskip("fastapi")
 
 
 BAD_TENANT = "not-a-tenant-id"

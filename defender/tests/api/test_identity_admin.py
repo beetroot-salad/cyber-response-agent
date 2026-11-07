@@ -11,6 +11,8 @@ import time
 
 import pytest
 
+pytest.importorskip('fastapi')
+
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     DAY,
     EMPTY,
@@ -51,9 +53,6 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     tenants_of,
     user_id,
 )
-
-
-pytest.importorskip("fastapi")
 
 
 # A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
@@ -292,9 +291,6 @@ def test_an_unflagging_made_by_another_process_takes_effect_at_this_processs_nex
     world.call(other_process.start)  # another API process, started with OPS removed from the file
     assert ops.get("/admin/tenants").status_code == 403
     assert me(ops)["administrator"] is False
-
-
-pytest.importorskip("fastapi")
 
 
 X = "x@x.example"

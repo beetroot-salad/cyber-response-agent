@@ -12,6 +12,8 @@ import asyncio
 import json
 
 import pytest
+
+pytest.importorskip('pydantic_ai')
 from pydantic_ai.messages import BinaryContent  # noqa: E402
 
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -70,9 +72,6 @@ from defender.tests.e2e._toon872 import (  # noqa: E402
     wire_text,
 )
 from defender.tests.support.storage._store_owner import reread
-
-
-pytest.importorskip("pydantic_ai")
 
 
 toons = pytest.importorskip("toons")  # noqa: E402
@@ -253,9 +252,6 @@ def _delimiter(text: str) -> str:
     a known salt."""
     start = text.index("<run-")
     return text[start:text.index(">", start) + 1]
-
-
-pytest.importorskip("pydantic_ai")
 
 
 def _substituting() -> dict:
@@ -476,9 +472,6 @@ def test_a_nan_or_infinite_float_reaches_the_model_identically_with_and_without_
     assert substituted_at_least_once, (
         "no non-finite payload substituted, so only the passthrough arm ran"
     )
-
-
-pytest.importorskip("pydantic_ai")
 
 
 def _payload() -> dict:

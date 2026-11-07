@@ -20,7 +20,7 @@ from defender.systems.verbs import ModuleVerbRegistry  # noqa: E402
 from defender.investigation.record_query import system_fingerprint  # noqa: E402
 from defender.tests.support.runtime.engine._declared869 import ADAPTER_BODY, write  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import grant_of  # noqa: E402
-from defender.tests.learning.branch.test_920_estate_seam import SERVED_FILE, World, fresh_ledger  # noqa: E402
+from defender.tests.learning.branch.test_branch_seam import SERVED_FILE, World, fresh_ledger  # noqa: E402
 from defender.systems.verbs import read_roster  # noqa: E402
 
 #: A grant that reaches the one system the fixtures declare, with the one verb they declare.

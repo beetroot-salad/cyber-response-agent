@@ -42,7 +42,7 @@ def scene(tmp_path: Path, monkeypatch) -> C.DraftLane:
     """A started batch whose base carries the reducer add-on, the declared `elastic` marker and
     skill, and the `gather` non-system skill; the product checkout holds the `elastic` and `cmdb`
     adapters. Learning state lives outside the draft (a queue file in the corpus reads as a stray).
-    Threshold 1 keeps these tests about the partition, not the gate (`test_870_threshold.py`).
+    Threshold 1 keeps these tests about the partition, not the gate (`test_reducer_queue.py`).
     """
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     product = seed_product(tmp_path, adapters=("elastic", "cmdb"))

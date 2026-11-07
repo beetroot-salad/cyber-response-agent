@@ -11,7 +11,7 @@ import pytest
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender.learning.judge import enqueue
 from defender.tests.support.learning.branch import _world_1007 as W
-from defender.tests.learning.branch.test_1007_partition import queue_row, world_row
+from defender.tests.learning.branch.test_subject_partition import queue_row, world_row
 
 
 @pytest.fixture(params=[False, True], ids=["defender", "questioner"])

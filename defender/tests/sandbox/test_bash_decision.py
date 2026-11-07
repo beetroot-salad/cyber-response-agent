@@ -17,6 +17,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
+
+pytest.importorskip('pydantic_ai')
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -34,9 +36,6 @@ from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.execution import bash_exec  # noqa: E402
 from defender.investigation.permission import bash as pbash  # noqa: E402
 from defender.investigation.permission import command_shape  # noqa: E402
-
-
-pytest.importorskip("pydantic_ai")
 
 
 CR = base.CR
@@ -268,9 +267,6 @@ def test_the_serialised_verdict_an_operator_reads_carries_the_argv_half(capsys):
     assert "pipelines" in refused
 
 
-pytest.importorskip("pydantic_ai")
-
-
 _parsed = base.parsed_argv
 
 
@@ -424,9 +420,6 @@ def test_the_line_boundary_and_incomplete_connector_causes_still_name_what_they_
         assert d.reason != permission.UNTOKENIZABLE_REASON, (
             f"{cmd!r} still gets the line-boundary reason; the blank after the connector is a word"
         )
-
-
-pytest.importorskip("pydantic_ai")
 
 
 # #971 - no word is a wrapper, and what that leaves the parser doing.

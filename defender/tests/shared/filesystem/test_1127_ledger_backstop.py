@@ -25,7 +25,7 @@ from defender.tests.shared.filesystem.test_1127_params_nesting_limit import (  #
     raised,
 )
 from defender.tests.shared.filesystem.test_1127_params_nesting_limit import dict_chain as chain  # noqa: E402
-from defender.tests.learning.branch.test_920_estate_seam import (  # noqa: E402
+from defender.tests.learning.branch.test_branch_seam import (  # noqa: E402
     CALLS_LOG,
     FAKE_GRANT,
     World,
@@ -171,7 +171,7 @@ def test_a_deep_call_to_a_denied_verb_is_refused_before_the_decision_and_files_n
 @pytest.mark.parametrize("depth", [LIMIT + 1, 99])
 def test_a_captured_row_too_deep_to_carry_is_unreadable_and_the_rest_still_primes(
         tmp_path, depth):
-    prime = importlib.import_module("defender.tests.learning.branch.test_947_capture_prime")
+    prime = importlib.import_module("defender.tests.learning.branch.test_triplet_capture_prime")
     run_dir = prime.source_run(tmp_path)
     deep = params_of_depth(depth)
     prime.append_call(run_dir, prime.call_row("l-001", 0, "cmdb", "get-host", deep), "{}")

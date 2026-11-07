@@ -7,7 +7,7 @@
 > waited, and this note is what carries it forward.
 >
 > Two entries need updating in place. **Rule 16** is no longer unwitnessed:
-> `test_796_gate_arms.py::test_moving_the_generic_subagent_deadline_does_not_move_the_reviews`
+> `test_review_gate_arms.py::test_moving_the_generic_subagent_deadline_does_not_move_the_reviews`
 > re-pins the separation. **Rule 17** has its raiser again — `ReviewStages.stage()` raises
 > `UnboundReviewStage` for a bundle built without a run dir, and the gate takes it through the
 > ordinary stage-fault arm.

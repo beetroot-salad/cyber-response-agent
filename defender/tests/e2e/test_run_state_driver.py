@@ -12,6 +12,8 @@ from typing import Any
 
 import pytest
 
+pytest.importorskip('pydantic_ai')
+
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID  # noqa: E402
 from defender.records import RunPaths  # noqa: E402

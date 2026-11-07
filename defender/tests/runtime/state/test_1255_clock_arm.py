@@ -131,7 +131,7 @@ def test_a3_an_arms_denial_log_continues_from_the_sources_reading_at_the_branch_
 def _new_host_state_question(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                              ) -> tuple[C.Launched, S.ScriptedModel, Path]:
     """Launch an arm whose host-state question needs a new oracle answer."""
-    from defender.tests.learning.branch.test_947_clock import DOCKER_LOG, fake_docker
+    from defender.tests.learning.branch.test_triplet_clock import DOCKER_LOG, fake_docker
 
     monkeypatch.setenv(S.KNOB_RATE, "1e6")
     tenant_id, source = C.record_source(tmp_path)

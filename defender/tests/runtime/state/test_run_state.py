@@ -20,6 +20,8 @@ from datetime import UTC, datetime, timedelta
 from dataclasses import replace
 
 import pytest
+
+pytest.importorskip('pydantic_ai')
 from pydantic_ai import Agent  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
@@ -54,9 +56,6 @@ from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.sandbox.test_bash_decision import Box  # noqa: E402
 from defender.tests.runtime.engine.test_budget_seams_631 import ScriptedModel, _run_dir, drive_agent  # noqa: E402
-
-
-pytest.importorskip("pydantic_ai")
 
 
 _BUDGET_KEYS = {"run_id", "tool_calls", "subagent_spawns", "created_at", "started_at"}
@@ -262,9 +261,6 @@ def test_every_state_has_a_clock_whose_credit_is_its_own(tmp_path):
     assert be.oracle_held(second) == 0.0, "a new run with a reused id inherited oracle credit"
     assert list(tmp_path.rglob("*.oracle-held.json")) == []
     assert _tree(tmp_path) == before, "the oracle clock wrote to disk"
-
-
-pytest.importorskip("pydantic_ai")
 
 
 LEAD = "l-001"
@@ -520,9 +516,6 @@ def test_breaker_failures_counts_a_systems_charged_failures(tmp_path):
     assert state.breaker_failures("idp") == 0
     assert state.breaker_failures("elastic") == \
         state.breaker_snapshot()["systems"]["elastic"]["failures"]
-
-
-pytest.importorskip("pydantic_ai")
 
 
 def test_an_enforced_gather_whose_deps_carry_no_state_raises(tmp_path):

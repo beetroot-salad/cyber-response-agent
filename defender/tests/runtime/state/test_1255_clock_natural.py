@@ -61,7 +61,7 @@ STAMPING_VERBS = [
 def test_n3_every_host_state_capture_on_a_natural_run_is_stamped_by_the_platform_with_the_run_clock(
         tmp_path, monkeypatch):
     from defender._io import read_jsonl_rows
-    from defender.tests.learning.branch.test_947_clock import DOCKER_LOG, fake_docker
+    from defender.tests.learning.branch.test_triplet_clock import DOCKER_LOG, fake_docker
 
     monkeypatch.setenv("PATH", f"{fake_docker(tmp_path)}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("DOCKER_CALL_LOG", str(tmp_path / DOCKER_LOG))
@@ -132,7 +132,7 @@ def test_channel_stamps_follow_the_run_clock(tmp_path, monkeypatch, channel, ste
         system = "elastic"
         calls = [C.query("elastic", "esql")] * len(steps)
     else:
-        from defender.tests.learning.branch.test_947_clock import DOCKER_LOG, fake_docker
+        from defender.tests.learning.branch.test_triplet_clock import DOCKER_LOG, fake_docker
 
         monkeypatch.setenv("PATH", f"{fake_docker(tmp_path)}{os.pathsep}{os.environ['PATH']}")
         monkeypatch.setenv("DOCKER_CALL_LOG", str(tmp_path / DOCKER_LOG))

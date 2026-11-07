@@ -8,13 +8,13 @@ from defender.records import RunPaths
 from defender.systems import circuit_breaker
 from defender.systems.verbs import ModuleVerbRegistry, read_roster
 from defender.tests.e2e._replay_harness import GOLDEN_AB3, Turn, drive, materialize
-from defender.tests.tenancy.startup_usability.test_1256_adapter_checks import (
+from defender.tests.tenancy.startup_usability.test_startup_adapter_checks import (
     _planted_source,
     _replies,
     planted_tree,
 )
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
-from defender.tests.learning.branch.test_920_estate_seam import SERVED_FILE, control_oracle, served_rows, world_registry
+from defender.tests.learning.branch.test_branch_seam import SERVED_FILE, control_oracle, served_rows, world_registry
 
 _TABLE = """\
 dispositions:

@@ -480,7 +480,7 @@ def test_952_m4_the_none_resolved_sentinel_is_written_or_handed_over(
 
 @pytest.fixture
 def pitfalls_repo(tmp_path: Path, monkeypatch) -> Path:
-    """A committed worktree carrying the reducer surface (as `test_870_partition.scene`), with
+    """A committed worktree carrying the reducer surface (as `test_reducer_partition.scene`), with
     the threshold at 1 so the tick is about the PARTITION rather than the gate."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     repo = seed_tree(tmp_path, adapters=("elastic", "cmdb"), markers=("elastic",),

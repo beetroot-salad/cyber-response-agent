@@ -12,6 +12,8 @@ import re
 from pathlib import Path
 
 import pytest
+
+pytest.importorskip('pydantic_ai')
 from pydantic_ai.messages import ToolReturn  # noqa: E402
 from pydantic_ai.toolsets import FunctionToolset  # noqa: E402
 
@@ -59,9 +61,6 @@ from defender.tests.e2e._toon872 import (  # noqa: E402
     wire_text,
 )
 from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
-
-
-pytest.importorskip("pydantic_ai")
 
 
 toons = pytest.importorskip("toons")  # noqa: E402
@@ -158,9 +157,6 @@ def _flatten(meta: dict) -> list:
         if isinstance(v, dict):
             out.extend(_flatten(v))
     return out
-
-
-pytest.importorskip("pydantic_ai")
 
 
 MAX_PERCENT_ENV = "DEFENDER_TOON_GATE_MAX_PERCENT"
@@ -261,9 +257,6 @@ def test_a_payload_just_under_the_configured_bar_substitutes_and_one_just_over_i
     assert framed_content(subbed.dispatched.text()) == toons.dumps(value), (
         f"a payload at {ratio:.2f}% passed through at a configured bar of {high}"
     )
-
-
-pytest.importorskip("pydantic_ai")
 
 
 def _payload() -> dict:

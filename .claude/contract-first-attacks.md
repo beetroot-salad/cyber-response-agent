@@ -95,7 +95,7 @@ This repo's record of exploit shapes that carried real bugs past a committed sui
 
 ## 2026-11-03 · PR #1392 — a new surface that re-asks an existing judgement is pinned only for the outcomes the new design lists
 - **violated**: amendment r4 "its `check_settings` must pass … Each failure is a finding naming the file at fault" and D-17 (one judgement for tenant check and the leg); `test_1359_tenant_check.py`, whose arms assert `"Traceback" not in text` but plant only settings faults.
-- **exploit**: `tenant check` caught only the case judgement's own fault class, so a case adapter whose check raised anything else crashed the command and lost every other finding. The existing judgement's crash matrix (`test_1256_adapter_checks.py`, `_ANY_BREAK`) was never replayed through the new surface. Generic replay: take the existing judgement's parametrized outcome table and run each row through every new asker; assert one finding per row, no traceback, and the other findings still reported.
+- **exploit**: `tenant check` caught only the case judgement's own fault class, so a case adapter whose check raised anything else crashed the command and lost every other finding. The existing judgement's crash matrix (`test_startup_adapter_checks.py`, `_ANY_BREAK`) was never replayed through the new surface. Generic replay: take the existing judgement's parametrized outcome table and run each row through every new asker; assert one finding per row, no traceback, and the other findings still reported.
 - **killed by**: `test_r1_a_case_adapter_whose_check_cannot_judge_is_a_finding_not_a_crash` (crash and no-check arms).
 
 ## 2026-11-03 · PR #1392 — "names the file at fault" asserted by presence only, so attributing by searching the fault's text passes

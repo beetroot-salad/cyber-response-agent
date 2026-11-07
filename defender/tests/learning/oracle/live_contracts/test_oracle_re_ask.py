@@ -32,13 +32,12 @@ import re
 
 import pytest
 
+pytest.importorskip('pydantic_ai')
+
 from defender.learning.branch.estate.checks import ReAsked, re_asked as _re_asked  # noqa: E402
 from defender.learning.branch.estate.registry import served_label  # noqa: E402
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S  # noqa: E402
 from defender.tests.learning.oracle.live_contracts import test_1224_host_checks as H  # noqa: E402
-
-
-pytest.importorskip("pydantic_ai")
 
 
 RECONSTRUCTED = "reconstructed"
@@ -341,9 +340,6 @@ def test_1385_the_label_follows_what_the_difference_shows_of_the_worlds_facts():
               "exact-removed-esql", "exact-removed-nested", "exact-dropped-whole-page"]
     thin = {name: seen[name] for name in needed if seen[name] < 5}
     assert not thin, f"the generated cases leave these kinds thin: {thin}"
-
-
-pytest.importorskip("pydantic_ai")
 
 
 # --------------------------------------------------------------------------------------
@@ -781,9 +777,6 @@ def test_1385_review_a_re_asked_esql_answer_echoes_the_calls_own_query(tmp_path)
     assert S.AS_OF not in json.dumps(served), "the served answer names the branch point"
     question = _section(verifier.all_seen(), "The re-ask's question")
     assert json.dumps(S.AS_OF) in question, f"the verifier lost the bounded question: {question!r}"
-
-
-pytest.importorskip("pydantic_ai")
 
 
 #: The keys an older adapter or pre-flight stamped into what it recorded or served.

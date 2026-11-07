@@ -21,7 +21,7 @@ from defender.records._episode_paths import LAYOUT
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.learning.branch.test_947_capture_prime import append_call, call_row, source_run
+from defender.tests.learning.branch.test_triplet_capture_prime import append_call, call_row, source_run
 from defender.tests.support.learning.core import _state1135
 from defender.records import RunPaths
 

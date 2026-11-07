@@ -583,7 +583,7 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
 
 def test_a_real_denial_in_a_sibling_world_is_that_worlds_refused_ledger_row(tmp_path):
     from defender.learning.branch.ledger import REFUSED
-    from defender.tests.learning.branch.test_920_estate_seam import (
+    from defender.tests.learning.branch.test_branch_seam import (
         FAKE_GRANT, SERVED_FILE, World, fake_estate, served_rows, world_registry,
     )
 

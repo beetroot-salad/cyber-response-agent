@@ -21,6 +21,8 @@ import threading
 
 import pytest
 
+pytest.importorskip('pydantic_ai')
+
 from defender.hooks.budget_enforcer import (  # noqa: E402
     BUDGET_REFUSAL_MESSAGE,
     DEFAULT_LIMITS,
