@@ -202,18 +202,9 @@ def test_r2_a_ticket_system_with_no_declaration_gets_no_write_back_token(tmp_pat
     assert tickets.leg("record").get("request_token") is None
 
 
-def test_r3_a_run_with_no_http_proxy_system_never_contacts_the_signer(tmp_path, data_root):
-    """No granted system is `http-proxy`: nothing is signed even by a sealed OpenBao, so existing
-    replays need none. A7."""
-    _plant(data_root, proxy=())
-    signer = A.RaisingSigner(ConfigFault("OpenBao is sealed"))
-    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, signer=signer)
-
-    assert refused is None, (rc, refused)
-    assert rc == 0, (rc, refused)
-    assert signer.asked == 0
-    assert tickets.leg("record").get("request_token") is None
-    assert rec.lifecycle_calls, "positive control: the run reached its lifecycle"
+# R3 and R7b ("a run with no http-proxy system never contacts the signer / needs no sign login") are
+# retired with #1391: every system with network access is reached through the credential proxy, so a
+# tenant with none has no usable system and is refused at start for that. R7 holds the refusal.
 
 
 ROLE, SECRET = "role-1163-own", "secret-1163-own"
@@ -609,14 +600,6 @@ def test_r7_an_http_proxy_tenant_with_no_usable_sign_login_refuses_run_start(
     assert tickets.calls == []
 
 
-def test_r7b_a_tenant_with_no_http_proxy_system_needs_no_sign_login(tmp_path, data_root):
-    """Control for R7: the same records without a generation do not stop a run whose granted systems
-    are none `http-proxy`. A20, A24."""
-    _plant(data_root, proxy=())
-    records = _no_generation(data_root, tmp_path)
-    rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, directory=records.directory)
-    assert (rc, refused) == (0, None)
-    assert rec.lifecycle_calls
 
 
 @pytest.mark.parametrize("setup", [_no_generation, _without("sign_role_id", None),

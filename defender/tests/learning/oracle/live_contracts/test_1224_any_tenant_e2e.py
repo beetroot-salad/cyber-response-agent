@@ -173,7 +173,7 @@ def test_1224_launch_over_a_tenant_with_no_elastic_system(tmp_path, elastic):
     est = S.estate(tmp_path)
     if elastic == "fails-to-resolve":
         # The estate's tenant is published for real, with this config.
-        est.place(configs={"elastic": "ELASTIC_TRANSPORT=carrier-pigeon\n"})
+        est.place(configs={"elastic": "ELASTIC_CARRIER=pigeon\n"})  # a key elastic does not read
         assert "elastic" in est.run_tenant().systems
     else:
         assert "elastic" not in est.run_tenant().systems
