@@ -95,11 +95,12 @@ def _seed_calls(state, n: int) -> None:
         count_call(state, "bash")
 
 
-def drive_agent(defn, run_dir: Path, turns, *, limits, state, enforce: bool | None = None,
-                agent_id: str = "main", request_limit: int = 40):
+def drive_agent(  # noqa: PLR0913 — one more seam: the model
+        defn, run_dir: Path, turns, *, limits, state, enforce: bool | None = None,
+                agent_id: str = "main", request_limit: int = 40, model=None):
     """Build one agent through the real `build_agent_core` (real hooks, tools and gate) and drive it
     with a scripted `FunctionModel`; `state` is the `RunState` its deps carry."""
-    model = ScriptedModel(turns)
+    model = model if model is not None else ScriptedModel(turns)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
     from dataclasses import replace as _replace
     if enforce is not None:
@@ -235,8 +236,8 @@ def _drive_gather_query(run_dir: Path, registry, state):
 
 
 def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_path):
-    """`_make_hooks` takes the posture bit as a required keyword: a caller that states nothing fails
-    loudly instead of running unenforced."""
+    """`_make_hooks` takes the posture bit and (r7.1 D) the requested model as required keywords: a caller that states
+    nothing fails loudly instead of running unenforced or pricing at a default."""
     sig = inspect.signature(driver._make_hooks)
     posture = sig.parameters["enforce"]
     assert posture.kind is inspect.Parameter.KEYWORD_ONLY
@@ -246,6 +247,14 @@ def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_pa
     logger = observe.RequestLogger(_run_dir(tmp_path) / "llm_requests.jsonl")
     with pytest.raises(TypeError):
         driver._make_hooks(logger, "main")
+    # CONFLICT-UPDATED (#1377 r7.1 D; was: only the posture bit): the requested model is a required keyword too, so a caller
+    # that states no model cannot price its rows as some default.
+    requested = sig.parameters.get("requested_model")
+    assert requested is not None, "contract-chosen keyword `requested_model`"
+    assert requested.kind is inspect.Parameter.KEYWORD_ONLY
+    assert requested.default is inspect.Parameter.empty, "the requested model has a default"
+    with pytest.raises(TypeError):
+        driver._make_hooks(logger, "main", enforce=False)
     logger.close()
 
     core_sig = inspect.signature(driver.build_agent_core)
@@ -264,6 +273,38 @@ def test_s3_a_run_side_hook_with_no_ledger_bound_counts_each_response_as_a_faile
     assert "stopping" in str(result.output)
     failures = [r for r in caplog.records if r.levelno >= logging.ERROR and "spend" in r.getMessage().lower()]
     assert len(failures) == 2, f"one failed write per response, got {[r.getMessage() for r in failures]}"
+
+
+class _FailingModel(ScriptedModel):
+    """A model whose first request raises `exc`."""
+
+    def __init__(self, exc: BaseException):
+        super().__init__([])
+        self._exc = exc
+
+    def __call__(self, messages, info):
+        raise self._exc
+
+
+def _http_error(status: int):
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    return ModelHTTPError(status, "fake", body={"error": "x"})
+
+
+@pytest.mark.parametrize("exc", [_http_error(400), _http_error(503), RuntimeError("unparseable reply")],
+                         ids=["refused", "unwrapped-5xx", "other"])
+def test_s3_r7_h_a_request_that_ends_without_a_response_while_no_ledger_is_bound_is_a_failed_spend_write_too(tmp_path, caplog, exc):
+    """The hook with no ledger bound, its one request ending refused or unseen: logged at ERROR naming spend once, and the
+    error still reaches the caller. (r7.1 H, S2c)"""
+    import logging
+
+    run_dir = _run_dir(tmp_path, "unbound-failing")
+    with pytest.raises(type(exc)):
+        drive_agent(MAIN_DEF, run_dir, [], limits=DEFAULT_LIMITS, state=_state(run_dir), enforce=False, model=_FailingModel(exc))
+
+    failures = [r for r in caplog.records if r.levelno >= logging.ERROR and "spend" in r.getMessage().lower()]
+    assert len(failures) == 1, f"one failed write for the one request, got {[r.getMessage() for r in failures]}"
 
 
 def test_limits_threaded_from_boundary(tmp_path):

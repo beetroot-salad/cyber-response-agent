@@ -69,6 +69,7 @@ from defender.tests.support.jobs._jobs1342 import (
     session_db,
     session_pointer,
     tree,
+    REFUSED,
     UNSEEN,
 )
 from defender.tests.support.shared._postgres1339 import execute
@@ -3336,6 +3337,34 @@ async def test_r7_a_live_cost_so_far_read_beside_an_unseen_row_is_not_marked_and
 
     assert (final.stage, final.cost_usd) == ("completed", pytest.approx(SONNET_IN))
     assert (lower_limit(dsn, inv), final.cost_is_lower_limit) == (True, True), "an unseen row left the final cost exact"
+
+
+_EXTRA_ROWS = {
+    "none": (None, False),
+    "refused": (dict(outcome=REFUSED, agent_id="gather:l-00c", model="claude-haiku-4-5", usage={}), False),
+    "unpriced": (dict(outcome="response", agent_id="gather:l-001", model="claude-opus-9-0", usage={"input_tokens": 1_000_000}), True),
+}
+
+
+@pytest.mark.parametrize("extra", _EXTRA_ROWS)
+async def test_r7_the_final_cost_reads_at_least_exactly_when_the_ledger_has_an_unpriced_row(world, extra):
+    """A finished job whose ledger holds one priced response beside a refused ($0) row, an unpriced response, or nothing: the
+    sum is the priced response in all three, and only the unpriced row marks it. (r7 S2b, S5)"""
+    row, marked = _EXTRA_ROWS[extra]
+    dsn, runs = world["dsn"], world["runs"]
+    child = _child(world, files=_committed())
+    plant_sessions(runs, CASE, [("main", SONNET, {"input_tokens": 1_000_000})])
+    async with job_store(dsn) as store:
+        inv = await _queued(store)
+        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})])
+        if row is not None:
+            plant_spend(runs, CASE, inv, [(row["model"], row["usage"])], outcome=row["outcome"], agent_id=row["agent_id"])
+        (runs / f"{inv}.session-pointer.json").write_text(session_pointer(CASE), encoding="utf-8")
+        await _worker(world, store, child, **_FAST).drain()
+        final = await store.get_investigation(T1, inv)
+
+    assert (final.stage, final.cost_usd) == ("completed", pytest.approx(SONNET_IN))
+    assert (lower_limit(dsn, inv), final.cost_is_lower_limit) == (marked, marked)
 
 
 @pytest.mark.parametrize("end", ["finish", "cancel", "stop"])

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests.e2e._replay_harness import priced_billed, priced_cost
+from defender.tests.support.presentation import _cost_page_1377 as C
 from defender.tests.support.jobs._jobs1342 import (
     DEFENDER,
     StandInContainers,
@@ -91,7 +92,9 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == (
             "completed", disposition, None), stored
         assert (runs / f"{inv.investigation_id}.session-pointer.json").is_file(), "premise: the run opened its session store"
-        assert stored["cost_usd"] == 0.0, "the replay model is unpriced: read from its sessions, not unknown"
+        # CONFLICT-UPDATED (r7.1; was: pinned to $0.0 as an unpriced stand-in): the ledger's figure, a number and exact, not unknown.
+        assert (type(stored["cost_usd"]), lower_limit(migrated_database, inv.investigation_id)) == (float, False), (
+            "a clean replay's cost is a number read from the ledger, exact")
         assert stored["knowledge"] == {"status": "current", "commit": t.commit, "stale_kind": None}
         assert (runs / inv.investigation_id / "report.md").is_file()
         assert (runs / f"{inv.investigation_id}.job-end.json").is_file()
@@ -258,27 +261,13 @@ def _spend_errors(stderr: Path) -> list[str]:
 
 
 def _page(run: Path, *, spend_write_failed: bool) -> str:
-    """The run page through the post-run step's own renderer, handed the host's fact (the job lane's child stubs the step)."""
+    """The run page through the post-run step's own renderer (the job lane's child stubs the step). `spend_write_failed` is what
+    production hands it: the in-process summary's flag, which this process cannot see, so each test states it from its scenario
+    (never from the job-end record)."""
     from defender.presentation.visualize_run import render_page
-    from defender.records import Run
-    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
-    return render_page(Run().under(fixture_runs_base(run.parent), run.name), spend_write_failed=spend_write_failed)
-
-
-def _headline(html: str) -> str:
-    import re
-
-    found = re.search(r'ts-cost">(.*?)</', html, flags=re.S)
-    assert found is not None, "no headline cost"
-    return found.group(1).strip()
-
-
-def _cost_segments(html: str) -> dict[str, float]:
-    """Every cost-bar segment (cb-seg title "<name> · $v · p%") by lower-cased name."""
-    import re
-
-    return {name.lower(): float(v) for name, v in re.findall(r'class="cb-seg"[^>]*title="([^"]*?) · \$([0-9.]+) · ', html)}
+    return render_page(fixture_run(run), spend_write_failed=spend_write_failed)
 
 
 def _run_result(run: Path) -> dict:
@@ -323,17 +312,64 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
         assert result["total_cost_is_lower_limit"] is False
         assert result["usage"] == priced_billed(10), "usage counts every response's four billed counts, as the total does"
         assert result["num_turns"] == 4, "num_turns stays MAIN's turns (run health reads it)"
-        # r7 S5/S6: the run page, rendered through its real entry on this job's run with the host's own fact, agrees.
+        # r7 S5/S6: the run page, rendered through its real entry on this job's run, agrees with the worker and the run file.
         monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
-        html = _page(runs / inv.investigation_id, spend_write_failed=end["spend_write_failed"])
-        assert _headline(html) == f"${stored['cost_usd']:.4f}", "the page's headline is not the worker's final cost"
-        segments = _cost_segments(html)
-        assert set(segments) == {"main", "gather", "correlation", "review"}, f"the cost bar is not by agent kind: {segments}"
+        html = _page(runs / inv.investigation_id, spend_write_failed=False)
+        assert C.headline(html) == f"${stored['cost_usd']:.4f}", "the page's headline is not the worker's final cost, exact"
+        segments = C.segments(html)
         by_kind = {"main": priced_cost(PRICED_MODELS["main"], 4), "gather": priced_cost(PRICED_MODELS["gather"], 2),
                    "correlation": priced_cost(PRICED_MODELS["gather"], 1), "review": priced_cost(PRICED_MODELS["review"], 3)}
-        for kind, spent_by in by_kind.items():
-            assert segments[kind] == pytest.approx(spent_by, abs=1e-4), f"the {kind} segment is not its agents' ledger sum"
+        assert segments == pytest.approx(by_kind, abs=1e-4), f"the cost bar is not the kinds that spent, each its agents' ledger sum: {segments}"
         assert sum(segments.values()) == pytest.approx(stored["cost_usd"], abs=5e-4), "the bar does not add up to the headline"
+        # r7.1 G: the stored figure is as of the run's end; a row written after it moves a re-rendered page, not the stored figure.
+        from defender.records import session_store as ss
+        from defender.tests.support.jobs._jobs1342 import UNSEEN, insert_spend
+        from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+        insert_spend(ss.resolve_store_path(fixture_run(runs / inv.investigation_id)), inv.investigation_id,
+                     [(PRICED_MODELS["gather"], {})], agent_id="gather:l-00c", outcome=UNSEEN)
+        assert C.at_least(C.headline(_page(runs / inv.investigation_id, spend_write_failed=False))), "a re-rendered page reads the ledger again"
+        assert (row(migrated_database, inv.investigation_id)["cost_usd"], lower_limit(migrated_database, inv.investigation_id)) == (
+            stored["cost_usd"], False), "a stored figure moved after the run's end"
+
+
+async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_the_run_file_and_the_page_alike(
+        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+    """The correlation lead's request raises an error that is no response: every other response is priced, and the job's cost,
+    the run file's total and the page's headline are that sum, each "at least", with no correlation segment. (r7 S2a, S5, S6)"""
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    root = tmp_path / "data"
+    root.mkdir()
+    _priced_env(monkeypatch, root, migrated_database)
+    golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
+    with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        (root / t.tenant_id / "runs").mkdir(exist_ok=True)
+
+        def child(launch) -> list[str]:
+            return [sys.executable, str(ENTRY), "replay-priced-unseen", t.commit, str(tmp_path / "marks"), "--job",
+                    launch.investigation_id, "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+
+        async with job_store(migrated_database) as store:
+            alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
+            inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
+            await make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers")).drain()
+
+        runs = root / t.tenant_id / "runs"
+        stored = row(migrated_database, inv.investigation_id)
+        assert stored["stage"] == "completed", stored
+        want = {"main": priced_cost(PRICED_MODELS["main"], 4), "gather": priced_cost(PRICED_MODELS["gather"], 2),
+                "review": priced_cost(PRICED_MODELS["review"], 3)}
+        assert stored["cost_usd"] == pytest.approx(sum(want.values()), rel=1e-9)
+        assert lower_limit(migrated_database, inv.investigation_id) is True
+        result = _run_result(runs / inv.investigation_id)
+        assert (result["total_cost_usd"], result["total_cost_is_lower_limit"]) == (pytest.approx(stored["cost_usd"], abs=1e-6), True)
+        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+        html = _page(runs / inv.investigation_id, spend_write_failed=False)
+        headline = C.headline(html)
+        assert (C.at_least(headline), C.dollars(headline)) == (True, pytest.approx(stored["cost_usd"], abs=1e-4))
+        assert C.segments(html) == pytest.approx(want, abs=1e-4), "a kind that did not spend has a segment, or one is missing"
 
 
 async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_report_and_marks_the_sum(
@@ -386,4 +422,8 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
         assert (result["total_cost_usd"], result["total_cost_is_lower_limit"]) == (pytest.approx(lacking_review, abs=1e-6), True)
         assert (result["usage"], result["num_turns"]) == (priced_billed(7), 4)
         assert _spend_errors(err_file), "the failed write was not logged at ERROR"
+        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+        page = C.headline(_page(runs / faulted, spend_write_failed=True))
+        assert (C.at_least(page), C.dollars(page)) == (True, pytest.approx(lacking_review, abs=1e-4)), (
+            "the job reads at least, so the page, handed the same failed write, must too")
         assert _spend_errors(tmp_path / "control.stderr") == [], "the unfaulted control logged a failed spend write"
