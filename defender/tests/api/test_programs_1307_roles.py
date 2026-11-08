@@ -14,7 +14,7 @@ from typing import Any  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 
-from defender.api.app import undeclared_routes  # noqa: E402  (forced choice FC-A1: see the contract map)
+from defender.api.app import create_app, undeclared_routes  # noqa: E402  (forced choice FC-A1: see the contract map)
 from defender.identity import DataRuleViolation  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
@@ -40,6 +40,7 @@ from defender.tests.support.api._routes1307a import (  # noqa: E402
     concrete,
     normal,
     route_id,
+    route_table_deps,
 )
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING  # noqa: E402
 
@@ -245,6 +246,23 @@ def test_the_checker_reports_a_route_that_declares_nothing_inside_or_outside_ten
     real = soar().world.app
     real.add_api_route("/tenants/{tenant_id}/widgets", lambda: {}, methods=["GET"])
     assert undeclared_routes(real) == [("GET", "/tenants/{tenant_id}/widgets")]
+
+
+def test_the_app_does_not_start_when_one_of_its_routers_holds_a_route_that_declares_nothing() -> None:
+    """P-H, D10: "a route that declares neither fails app start" is `create_app`'s own check. The seam is the one the app is built
+    from: a route added to one of its routers before `create_app` runs (the route is taken off again afterwards, so the control and
+    every other test build the real app). The failure names the route; the same call without the extra route builds."""
+    from defender.api import app as app_module
+
+    router = app_module.lessons
+    assert undeclared_routes(create_app(route_table_deps())) == []  # control: the real routers build
+    router.add_api_route("/undeclared-1307", lambda: {}, methods=["GET"])
+    try:
+        with pytest.raises(Exception, match="undeclared-1307"):
+            create_app(route_table_deps())
+    finally:
+        router.routes[:] = [r for r in router.routes if getattr(r, "path", "") != "/undeclared-1307"]
+    assert undeclared_routes(create_app(route_table_deps())) == []
 
 
 def test_an_admin_creates_a_program_that_is_an_active_automation_member_with_no_email(caplog) -> None:

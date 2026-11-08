@@ -46,14 +46,19 @@ def _served(routes: Any) -> Any:
 ROUTE_FLOOR = 20
 
 
+def route_table_deps() -> ApiDeps:
+    """Dependencies enough to build the app and read its route table: no identity service is needed to list routes."""
+    store = InMemoryStore(lambda: None)  # type: ignore[arg-type]
+    return ApiDeps(
+        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store, writes=store,
+        secrets=InMemorySecrets(), checker=StubSystemChecker(), artifact_links=StubArtifactLinks(),
+        identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None)  # type: ignore[arg-type]
+
+
 @functools.lru_cache(maxsize=1)
 def app_routes() -> tuple[tuple[str, str], ...]:
     """(METHOD, path template) for every route the real app serves, sorted."""
-    store = InMemoryStore(lambda: None)  # type: ignore[arg-type]
-    app: Any = create_app(ApiDeps(  # building the route table needs no identity service
-        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store, writes=store,
-        secrets=InMemorySecrets(), checker=StubSystemChecker(), artifact_links=StubArtifactLinks(),
-        identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None))  # type: ignore[arg-type]
+    app: Any = create_app(route_table_deps())
     found = {(method, route.path) for route in _served(app.routes)
              for method in route.methods if method not in {"HEAD", "OPTIONS"}}
     assert len(found) > ROUTE_FLOOR, f"the route walk found {len(found)} routes"
