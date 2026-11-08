@@ -715,6 +715,20 @@ def test_a_failed_send_is_retried_for_the_admin_it_missed_only() -> None:
     assert len(mail.warnings) == settled
 
 
+def test_with_no_active_person_left_a_due_warning_is_dropped_not_retried() -> None:
+    """The tenant's last person left; its program stays. The 14-day warning comes due: nobody is mailed and it is
+    settled, not held for a retry: the next warning left is the 3-day one (owner's choice in the #1450 review: the
+    program sees its expiry on every response, D9)."""
+    s = soar()
+    ann_id = s.ann.get("/me").json()["user"]["id"]
+    assert s.ann.delete(f"/tenants/{T1}/members/{ann_id}").status_code == 204
+    assert s.program().get(f"/tenants/{T1}/alerts").status_code == 200  # control: the program is still in
+    _until_remaining(s.world, s.world.clock() + DEFAULT_LIFETIME, 14 * DAY - HOUR)
+    s.world.send_pending()
+    assert s.world.mail.warnings == []
+    assert s.world.call(s.world.repo.credential_by_id, s.key_id).warn_threshold_days == 3
+
+
 # --- D9: the expiry header -----------------------------------------------------------------------------------
 
 @pytest.mark.parametrize(("method", "path", "body", "status"), [

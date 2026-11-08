@@ -89,7 +89,7 @@ def test_the_history_has_exactly_one_head():
 
 @pytest.mark.postgres
 def test_upgrading_an_empty_database_records_head_and_creates_identitys_tables(empty_database):
-    """Empty -> head: the version table in `public` holds head; identity's four tables are in `identity` (O1)."""
+    """Empty -> head: the version table in `public` holds head; identity's five tables are in `identity` (O1)."""
     from defender.migrations import head, upgrade
 
     upgrade(empty_database)
