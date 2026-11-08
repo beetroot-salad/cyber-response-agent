@@ -10,6 +10,7 @@ Grounding assumptions the fake makes (to re-establish live): the client list hon
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import datetime as dt
 import hashlib
@@ -47,6 +48,7 @@ BUILT_IN_CLIENTS = ("account", "account-console", "admin-cli", "broker", "realm-
                     "security-admin-console")
 SERVICE_ACCOUNT = "9a8b7c6d-0000-4000-8000-0000000005a1"
 WINDOW = dt.timedelta(seconds=60)
+MAX_AGE = dt.timedelta(minutes=10)
 
 
 def issuer_of(realm: str) -> str:
@@ -350,7 +352,8 @@ async def test_keycloak_down_on_a_cold_cache_is_unavailable_not_refused(kc, outa
 
 @pytest.mark.parametrize("outage", _OUTAGES)
 async def test_a_failed_key_set_fetch_spends_the_minute_so_an_outage_is_not_amplified(kc, outage):
-    """After a failed fetch, an unknown key id within 60 s makes no /certs request and is refused; after it, Keycloak is asked again (W7)."""
+    """After a failed fetch, an unknown key id within 60 s makes no /certs request and is unavailable, not refused (the
+    key may exist: a 401 would tell the client to drop a good credential); after it, Keycloak is asked again (W7)."""
     kc.fail["certs"] = outage
     clock = Clock()
     port = adapter(kc, clock)
@@ -359,7 +362,7 @@ async def test_a_failed_key_set_fetch_spends_the_minute_so_an_outage_is_not_ampl
     assert kc.certs_fetches() == 1
     for n in range(20):
         clock.now += dt.timedelta(seconds=2)
-        with pytest.raises(SignInRefused):
+        with pytest.raises(SignInUnavailable):
             await port.verify_token(kc.signer.sign(token_claims(exp=int(clock.now.timestamp()) + 290), kid=f"second-{n}"))
     assert kc.certs_fetches() == 1  # twenty unknown key ids inside the window, no traffic
     clock.now += dt.timedelta(seconds=30)  # 70 s after the failure
@@ -381,6 +384,89 @@ async def test_held_tokens_keep_verifying_while_keycloak_is_down(kc, outage):
     clock.now += dt.timedelta(seconds=61)
     with pytest.raises(SignInUnavailable):
         await port.verify_token(kc.signer.sign(token_claims(exp=int(clock.now.timestamp()) + 290), kid="rotated"))
+
+
+class _GatedCerts(httpx.AsyncBaseTransport):
+    """`kc`'s transport, with each key-set fetch held until `open` is set: a fetch that is still in flight."""
+
+    def __init__(self, kc: ProgramsKeycloak) -> None:
+        self._inner = kc.transport()
+        self.open = asyncio.Event()
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/certs"):
+            await self.open.wait()
+        return await self._inner.handle_async_request(request)
+
+
+def _gated_adapter(kc: ProgramsKeycloak, clock: Clock) -> tuple[KeycloakPrograms, _GatedCerts]:
+    gated = _GatedCerts(kc)
+    port = KeycloakPrograms(issuer=ISSUER, audience=AUDIENCE, admin_client_id=ADMIN_CLIENT_ID,
+                            admin_client_secret=ADMIN_CLIENT_SECRET, transport=gated, clock=clock)
+    kc.opened.append(port)
+    return port, gated
+
+
+async def test_requests_arriving_during_a_key_set_fetch_wait_for_it_and_verify(kc):
+    """Cold cache, five valid tokens at once: one /certs request, and every token verifies once it answers; none
+    is refused because another request's fetch was still in flight."""
+    port, gated = _gated_adapter(kc, Clock())
+    checks = [asyncio.create_task(port.verify_token(kc.signer.sign(token_claims()))) for _ in range(5)]
+    await asyncio.sleep(0)
+    assert not any(c.done() for c in checks)
+    gated.open.set()
+    assert {r.client_id for r in await asyncio.gather(*checks)} == {CREDENTIAL}
+    assert kc.certs_fetches() == 1
+
+
+@pytest.mark.parametrize("outage", _OUTAGES)
+async def test_requests_waiting_on_a_failed_fetch_are_unavailable_not_refused(kc, outage):
+    """The fetch they waited on fails: each waiting request is unavailable (503), and no second fetch is made."""
+    kc.fail["certs"] = outage
+    port, gated = _gated_adapter(kc, Clock())
+    checks = [asyncio.create_task(port.verify_token(kc.signer.sign(token_claims()))) for _ in range(3)]
+    await asyncio.sleep(0)
+    gated.open.set()
+    outcomes = await asyncio.gather(*checks, return_exceptions=True)
+    assert all(isinstance(o, SignInUnavailable) for o in outcomes), outcomes
+    assert kc.certs_fetches() == 1
+
+
+async def test_a_key_keycloak_stopped_publishing_stops_verifying_after_the_max_age(kc):
+    """A key removed from the realm (rotated out, or leaked) verifies until the held set is ten minutes old; the next
+    token under it fetches the set again and is refused, while a token under the current key verifies."""
+    clock = Clock()
+    port = adapter(kc, clock)
+    old = kc.signer
+    assert (await port.verify_token(old.sign(token_claims()))).client_id == CREDENTIAL
+    current = Signer(kid="kid-2")
+    kc.jwks_keys[:] = [current.jwk()]
+    clock.now += MAX_AGE - dt.timedelta(seconds=1)
+    fresh = token_claims(exp=int(clock.now.timestamp()) + 290)
+    assert (await port.verify_token(old.sign(fresh))).client_id == CREDENTIAL  # still within the age
+    assert kc.certs_fetches() == 1
+    clock.now += dt.timedelta(seconds=1)
+    fresh = token_claims(exp=int(clock.now.timestamp()) + 290)
+    with pytest.raises(SignInRefused):
+        await port.verify_token(old.sign(fresh))
+    assert kc.certs_fetches() == 2
+    assert (await port.verify_token(current.sign(fresh))).subject == SERVICE_ACCOUNT
+    assert kc.certs_fetches() == 2
+
+
+@pytest.mark.parametrize("outage", _OUTAGES)
+async def test_held_keys_past_the_max_age_keep_verifying_while_keycloak_is_down(kc, outage):
+    """Past the age with Keycloak down: the held key still verifies (an outage does not take the API down), and the
+    failed fetch spends the window, so the next tokens make no request."""
+    clock = Clock()
+    port = adapter(kc, clock)
+    await port.verify_token(kc.signer.sign(token_claims()))
+    kc.fail["certs"] = outage
+    clock.now += MAX_AGE
+    for _ in range(3):
+        fresh = token_claims(exp=int(clock.now.timestamp()) + 290)
+        assert (await port.verify_token(kc.signer.sign(fresh))).client_id == CREDENTIAL
+    assert kc.certs_fetches() == 2
 
 
 # --- client creation ------------------------------------------------------------------------------

@@ -7,6 +7,7 @@ tokens never leave this module: a sign-in yields the verified ID token's account
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import hmac
 import json
@@ -89,6 +90,75 @@ def _rsa_keys(published: Any) -> dict[str, Any]:
     return keys
 
 
+#: The key set is fetched at most this often, so random key ids never become Keycloak traffic.
+KEY_REFETCH_WINDOW = _dt.timedelta(seconds=60)
+#: Keys fetched this long ago are fetched again before use, so a key Keycloak stopped publishing stops verifying.
+KEY_MAX_AGE = _dt.timedelta(minutes=10)
+
+
+class _KeySet:
+    """One realm's published signing keys, shared by both realms' token checks. An unknown key id, or keys older
+    than `KEY_MAX_AGE`, fetch the set again, at most once per `KEY_REFETCH_WINDOW` (a failed fetch counts). One
+    fetch runs at a time and requests arriving meanwhile wait for its result. Only a successful fetch replaces
+    the keys: an outage keeps the held keys verifying, and an unknown key id during one is `SignInUnavailable`,
+    never `SignInRefused`, because the key may well exist."""
+
+    def __init__(
+        self, http: httpx.AsyncClient, url: str, clock: Callable[[], _dt.datetime], *, token: str, realm: str,
+    ) -> None:
+        self._http, self._url, self._clock = http, url, clock
+        self._token, self._realm = token, realm  # for the refusal and the log line
+        self._keys: dict[str, Any] = {}
+        self._fetched_at: _dt.datetime | None = None  # the last successful fetch
+        self._tried_at: _dt.datetime | None = None  # the last fetch, successful or not
+        self._lock = asyncio.Lock()
+
+    def _fresh(self, now: _dt.datetime) -> bool:
+        return self._fetched_at is not None and now - self._fetched_at < KEY_MAX_AGE
+
+    async def key_for(self, kid: object) -> Any:
+        if not isinstance(kid, str) or not kid:
+            raise SignInRefused(f"{self._token} names no signing key")
+        held = self._keys.get(kid)
+        if held is not None and (self._fresh(self._clock()) or self._lock.locked()):
+            return held  # a key we hold never waits behind a fetch
+        async with self._lock:
+            now = self._clock()
+            held = self._keys.get(kid)
+            if held is not None and self._fresh(now):
+                return held  # a fetch that finished while this request waited
+            if self._tried_at is None or now - self._tried_at >= KEY_REFETCH_WINDOW:
+                self._tried_at = now
+                try:
+                    self._keys, self._fetched_at = await self._fetch(), now
+                except SignInUnavailable:
+                    if held is None:
+                        raise
+                    _log.warning("keycloak %s key set is past its age and cannot be fetched; held keys serve",
+                                 self._realm)
+                    return held
+            elif held is not None:
+                return held  # past its age, but the next fetch is not due yet
+            elif self._fetched_at != self._tried_at:  # the last fetch failed: the key may well exist
+                raise SignInUnavailable("keycloak's signing keys cannot be fetched")
+        key = self._keys.get(kid)
+        if key is None:
+            raise SignInRefused(f"{self._token} names an unknown signing key")
+        return key
+
+    async def _fetch(self) -> dict[str, Any]:
+        try:
+            response = await self._http.get(self._url)
+            response.raise_for_status()
+            published = response.json()["keys"]
+        except httpx.HTTPError as error:
+            _log.warning("keycloak %s key set request failed: %s", self._realm, type(error).__name__)
+            raise SignInUnavailable("keycloak's signing keys cannot be fetched") from error
+        except (ValueError, KeyError, TypeError) as error:
+            raise SignInUnavailable("keycloak's signing keys are unreadable") from error
+        return _rsa_keys(published)
+
+
 class _RealmAdmin:
     """A realm's admin API as one confidential client reaches it: a client-credentials token, reused until shortly
     before it expires, and calls that treat any failure as `SignInUnavailable`. The subclass sets `_http`, `_oidc`
@@ -168,7 +238,7 @@ class KeycloakSignIn(_RealmAdmin):
         self._signin_url = f"{self._issuer}/protocol/openid-connect/auth"
         self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
         self._admin_users_url = f"{server}/admin/realms/{realm}/users"
-        self._keys: dict[str, Any] = {}
+        self._keys = _KeySet(self._http, f"{self._oidc}/certs", clock, token="the ID token", realm="sign-in")
         self._admin_token_held: tuple[str, _dt.datetime] | None = None
 
     async def close(self) -> None:
@@ -235,7 +305,7 @@ class KeycloakSignIn(_RealmAdmin):
             header = jwt.get_unverified_header(id_token)
             if header.get("alg") != _ALGORITHM:
                 raise SignInRefused("the ID token is not signed with RS256")
-            key = await self._key_for(header.get("kid"))
+            key = await self._keys.key_for(header.get("kid"))
             claims = jwt.decode(
                 id_token,
                 key,
@@ -258,28 +328,6 @@ class KeycloakSignIn(_RealmAdmin):
         ):
             raise SignInRefused("the ID token's nonce does not match")
         return claims
-
-    async def _key_for(self, kid: object) -> Any:
-        """The signing key published under `kid`; one refetch of the key set on an unknown id."""
-        if not isinstance(kid, str) or not kid:
-            raise SignInRefused("the ID token names no signing key")
-        if kid not in self._keys:
-            self._keys = await self._fetch_keys()
-        if kid not in self._keys:
-            raise SignInRefused("the ID token names an unknown signing key")
-        return self._keys[kid]
-
-    async def _fetch_keys(self) -> dict[str, Any]:
-        try:
-            response = await self._http.get(f"{self._oidc}/certs")
-            response.raise_for_status()
-            published = response.json()["keys"]
-        except httpx.HTTPError as error:
-            _log.warning("keycloak key set request failed: %s", type(error).__name__)
-            raise SignInUnavailable("keycloak's signing keys cannot be fetched") from error
-        except (ValueError, KeyError, TypeError) as error:
-            raise SignInUnavailable("keycloak's signing keys are unreadable") from error
-        return _rsa_keys(published)
 
     # --- the admin API -----------------------------------------------------------------------
 
@@ -339,8 +387,6 @@ class KeycloakSignIn(_RealmAdmin):
         return f"{self._admin_users_url}/{urllib.parse.quote(account_id, safe='')}"
 
 
-#: A key-set refetch for an unknown key id is allowed this often, so random tokens never become Keycloak traffic.
-KEY_REFETCH_WINDOW = _dt.timedelta(seconds=60)
 #: A program client's access tokens live this long (seconds).
 PROGRAM_TOKEN_LIFESPAN = 300
 _CLIENT_PAGE = 100
@@ -371,8 +417,7 @@ class KeycloakPrograms(_RealmAdmin):
         server = base if server_url is None else _server_base(server_url)
         self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
         self._clients_url = f"{server}/admin/realms/{realm}/clients"
-        self._keys: dict[str, Any] = {}
-        self._keys_fetched_at: _dt.datetime | None = None
+        self._keys = _KeySet(self._http, f"{self._oidc}/certs", clock, token="the token", realm="programs")
         self._admin_token_held = None
 
     async def close(self) -> None:
@@ -387,7 +432,7 @@ class KeycloakPrograms(_RealmAdmin):
             header = jwt.get_unverified_header(token)
             if header.get("alg") != _ALGORITHM:
                 raise SignInRefused("the token is not signed with RS256")
-            key = await self._key_for(header.get("kid"))
+            key = await self._keys.key_for(header.get("kid"))
             claims = jwt.decode(
                 token, key, algorithms=[_ALGORITHM], audience=self._audience, issuer=self._issuer,
                 options={"require": ["exp", "iss", "aud", "sub"], "verify_exp": False,
@@ -404,31 +449,6 @@ class KeycloakPrograms(_RealmAdmin):
             raise SignInRefused("the token names no client or subject")
         return VerifiedProgramToken(
             client_id=client, subject=subject, expires_at=_dt.datetime.fromtimestamp(expires, _dt.UTC))
-
-    async def _key_for(self, kid: object) -> Any:
-        if not isinstance(kid, str) or not kid:
-            raise SignInRefused("the token names no signing key")
-        if kid not in self._keys:
-            now = self._clock()
-            if self._keys_fetched_at is not None and now - self._keys_fetched_at < KEY_REFETCH_WINDOW:
-                raise SignInRefused("the token names an unknown signing key")
-            self._keys_fetched_at = now  # spent before asking, so a failed or concurrent fetch is not repeated
-            self._keys = await self._fetch_keys()
-        if kid not in self._keys:
-            raise SignInRefused("the token names an unknown signing key")
-        return self._keys[kid]
-
-    async def _fetch_keys(self) -> dict[str, Any]:
-        try:
-            response = await self._http.get(f"{self._oidc}/certs")
-            response.raise_for_status()
-            published = response.json()["keys"]
-        except httpx.HTTPError as error:
-            _log.warning("keycloak programs key set request failed: %s", type(error).__name__)
-            raise SignInUnavailable("keycloak's signing keys cannot be fetched") from error
-        except (ValueError, KeyError, TypeError) as error:
-            raise SignInUnavailable("keycloak's signing keys are unreadable") from error
-        return _rsa_keys(published)
 
     # --- clients -----------------------------------------------------------------------------
 
