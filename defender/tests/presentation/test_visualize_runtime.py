@@ -913,8 +913,7 @@ def _generated_request_log(run: Path, seed: int) -> dict[str, list[dict[str, int
 
     wire = RunPaths(run).wire_log
     kept, seen = [], {}
-    for line in wire.read_text(encoding="utf-8").splitlines():
-        row = json.loads(line)
+    for row in read_jsonl_rows(wire):
         if row.get("kind") == "response":
             agent = row.get("agent_id", "main")
             i = seen[agent] = seen.get(agent, -1) + 1
