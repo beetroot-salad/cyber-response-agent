@@ -162,6 +162,19 @@ def _build_run(tmp: Path) -> Path:
     return run
 
 
+def _run_ledger(run: Path):
+    """The run's ledger through the one read: the only thing the page prices through (#1377 r7.2 P1)."""
+    from defender.records import session_store as ss
+
+    with ss.open_store_for_read(ss.resolve_store_path(_run_handle_1165(run))) as store:
+        return ss.read_ledger(store, run.name)
+
+
+def _at_sonnet(usage: dict) -> float:
+    """The test's own oracle for MAIN's `price`: the fixture's MAIN requested Sonnet (the ledger says so)."""
+    return usage_cost("claude-sonnet-4-6", usage)
+
+
 def _phase_order(run: Path) -> list[str]:
     phases = d.normalize_phase_names(d.split_investigation_phases(run))
     return [p["name"] for p in phases if p["name"] != "preamble"]
@@ -178,9 +191,24 @@ def test_tagger_advances_on_write_file(tmp_path):
     distinct = {t for t in tags if t is not None}
     assert len(distinct) >= 3, f"tagger collapsed phases: {distinct}"
 
-    attr = d.phase_attribution(events, order)
+    attr = d.phase_attribution(events, order, price=_at_sonnet)
     nonzero = [ph for ph in order if attr[ph]["cost"] > 0]
     assert len(nonzero) >= 3, f"cost not spread across phases: {nonzero}"
+
+
+def test_phase_attribution_without_a_ledger_carries_no_dollars(tmp_path):
+    """r7.2 P1: `price=None` (no readable ledger) leaves every phase's cost None, never priced at the trace's model;
+    the counts the cost never touched still hold."""
+    run = _build_run(tmp_path)
+    events = read_jsonl_rows(run / "tool_trace.jsonl")
+    order = _phase_order(run)
+
+    attr = d.phase_attribution(events, order, price=None)
+    priced = d.phase_attribution(events, order, price=_at_sonnet)
+
+    assert {ph: a["cost"] for ph, a in attr.items()} == dict.fromkeys(order)
+    assert {ph: (a["turns"], a["in"], a["out"]) for ph, a in attr.items()} == {
+        ph: (a["turns"], a["in"], a["out"]) for ph, a in priced.items()}
 
 
 def test_gather_dispatch_phase_and_cost(tmp_path):
@@ -192,7 +220,8 @@ def test_gather_dispatch_phase_and_cost(tmp_path):
     gphase = d.gather_dispatch_phase(events, tags)
     assert gphase["l-001"].startswith("PLAN")
 
-    by_phase, gather_total = d.gather_cost_by_phase(run, events, tags, order)
+    by_phase, gather_total = d.gather_cost_by_phase(
+        run, events, tags, order, messages=d.load_messages(run), ledger=_run_ledger(run))
     assert gather_total > 0
     gather_phase = next(p for p in order if p.startswith("GATHER"))
     assert by_phase[gather_phase] > 0
@@ -214,9 +243,35 @@ def test_gather_wall_and_model_reattribution(tmp_path):
     assert from_dispatch[plan_phase] > 0
     assert to_gather[plan_phase] == 0
 
-    by_model = d.gather_cost_by_model(run)
+    by_model = d.gather_cost_by_model(run, d.load_messages(run), _run_ledger(run))
     assert list(by_model) == ["haiku-4-5"]
     assert by_model["haiku-4-5"] > 0
+
+
+def _planted_ledger(tmp_path: Path, requested: dict[str, str]):
+    """A ledger read with one row per agent at the model it requested, for tests that hand the helpers their own messages."""
+    from defender.records import session_store as ss
+
+    run_id = fixture_uuid("planted ledger")
+    with ss.open_store(case_id=f"planted-{uuid.uuid4().hex}", sessions=SessionPaths(fixture_runs_base(tmp_path / "runs"))) as store:
+        for agent_id, model in requested.items():
+            insert_spend(store.path, run_id, [(model, _USAGE)], agent_id=agent_id)
+        return ss.read_ledger(store, run_id)
+
+
+def test_without_a_ledger_gather_cost_has_no_dollars(tmp_path):
+    """r7.2 P1: no readable ledger means no gather dollars by phase or by model, not the log's reported name priced."""
+    run = _build_run(tmp_path)
+    events = read_jsonl_rows(run / "tool_trace.jsonl")
+    order = _phase_order(run)
+    tags = d.tag_events_by_phase(events, order)
+    messages = d.load_messages(run)
+
+    by_phase, gather_total = d.gather_cost_by_phase(run, events, tags, order, messages=messages, ledger=None)
+
+    assert not any(by_phase.values()), by_phase
+    assert not gather_total, gather_total
+    assert d.gather_cost_by_model(run, messages, None) == {}
 
 
 def test_gather_cost_not_dropped_without_gather_phase(tmp_path):
@@ -224,8 +279,9 @@ def test_gather_cost_not_dropped_without_gather_phase(tmp_path):
     messages = [
         {"kind": "response", "agent_id": "gather:l-001", "model": "claude-haiku-4-5", "usage": _USAGE},
     ]
-    by_phase, gather_total = d.gather_cost_by_phase(tmp_path, [], [], order, messages=messages)
-    full = sum(d.gather_cost_by_model(tmp_path, messages).values())
+    ledger = _planted_ledger(tmp_path, {"gather:l-001": "claude-haiku-4-5"})
+    by_phase, gather_total = d.gather_cost_by_phase(tmp_path, [], [], order, messages=messages, ledger=ledger)
+    full = sum(d.gather_cost_by_model(tmp_path, messages, ledger).values())
     assert full > 0
     assert gather_total == full
     assert by_phase[order[0]] == gather_total
@@ -971,7 +1027,7 @@ def test_s5_without_gather_responses_in_the_request_log_the_total_over_main_is_n
     main_only = [m for m in d.load_messages(run) if not str(m.get("agent_id", "")).startswith("gather")]
     assert len(main_only) < len(d.load_messages(run)), "premise: the log did hold a lead response to leave out"
 
-    by_phase, gather_total = d.gather_cost_by_phase(run, events, tags, order, messages=main_only)
+    by_phase, gather_total = d.gather_cost_by_phase(run, events, tags, order, messages=main_only, ledger=_run_ledger(run))
 
     assert gather_total == 0, by_phase
     assert not any(by_phase.values()), by_phase
