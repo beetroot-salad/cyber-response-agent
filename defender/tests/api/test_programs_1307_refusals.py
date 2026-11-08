@@ -81,14 +81,19 @@ def _present(s: Soar, kind: str, reason: str, programs: tuple[str, str]) -> str:
             value = f"dfk_{oauth}_" + "x" * 43
         else:
             value = s.world.realm.forge(s.key_id, s.world.realm.clients[credential].service_account_id)
-    elif reason == "unknown":
-        value = f"dfk_{'0' * 8}-0000-4000-8000-{'0' * 12}_" + "x" * 43 if kind == "key" else s.world.realm.forge(
-            "00000000-0000-4000-8000-00000000dead", "00000000-5a00-4000-8000-999999999999")
-    elif reason == "altered":
-        value = value[:-1] + ("A" if value[-1] != "A" else "B")
+    elif reason in ("unknown", "altered"):
+        value = _unknown_or_altered(s, kind, reason, value)
     else:
         assert reason in ("unused", "usable"), reason
     return value
+
+
+def _unknown_or_altered(s: Soar, kind: str, reason: str, value: str) -> str:
+    if reason == "altered":
+        return value[:-1] + ("A" if value[-1] != "A" else "B")
+    if kind == "key":
+        return "dfk_00000000-0000-4000-8000-000000000000_" + "x" * 43
+    return s.world.realm.forge("00000000-0000-4000-8000-00000000dead", "00000000-5a00-4000-8000-999999999999")
 
 
 REASONS = {

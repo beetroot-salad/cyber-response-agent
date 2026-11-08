@@ -203,7 +203,8 @@ def test_a_failed_delete_stops_no_other_and_the_first_failure_is_raised_at_the_e
         return s, audit, _reconcile_once(s), doomed, names
 
     s, audit, outcome, doomed, _ = run(set())
-    assert outcome is None and sorted(s.world.realm.deleted) == doomed  # control: nothing refused, all four deleted
+    assert outcome is None
+    assert sorted(s.world.realm.deleted) == doomed  # control: nothing refused, all four deleted
     for size in range(1, len(doomed) + 1):
         for refused in itertools.combinations(range(len(doomed)), size):
             s, audit, outcome, doomed, names = run(set(refused))

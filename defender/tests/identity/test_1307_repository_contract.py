@@ -396,7 +396,7 @@ async def test_a_name_that_postgres_text_cannot_hold_is_refused_for_programs_and
             await seeded.add_credential(program.id, kind="oauth_client", name=name, created_by=admin.id, expires_at=EXPIRES, now=NOW)
     assert [p.id for p in await seeded.programs_of_tenant(T1)] == [program.id]
     assert await seeded.credentials_of_program(program.id) == []
-    for n, name in enumerate(HOLDABLE):  # control: the same calls with holdable names
+    for name in HOLDABLE:  # control: the same calls with holdable names
         assert (await _program(seeded, admin, name=name)).display_name == name
     assert (await seeded.add_credential(program.id, kind="key", name=HOLDABLE[1], created_by=admin.id, expires_at=EXPIRES, now=NOW,
                                         key_hash=_key(2))).name == HOLDABLE[1]
@@ -455,7 +455,8 @@ async def test_one_usable_rule_decides_the_cap_the_keep_set_and_the_purge(seeded
     rows = [r for p in programs for r in await seeded.credentials_of_program(p.id)]
 
     keep = {r.id for r in rows if r.kind == "oauth_client" and _holds_a_slot(r, EVAL)}
-    assert keep and keep != {r.id for r in rows if r.kind == "oauth_client"}  # control: both outcomes occur
+    assert keep  # control: both outcomes occur
+    assert keep != {r.id for r in rows if r.kind == "oauth_client"}
     assert await seeded.oauth_credentials_to_keep(now=EVAL) == keep
 
     refused = []
@@ -474,7 +475,8 @@ async def test_one_usable_rule_decides_the_cap_the_keep_set_and_the_purge(seeded
 
     before = {r.id: r for p in programs for r in await seeded.credentials_of_program(p.id)}
     stale = {r.id for r in before.values() if r.state == "pending" and r.pending_deadline <= EVAL}
-    assert stale and stale != {r.id for r in before.values() if r.state == "pending"}  # control: some pending rows are not stale
+    assert stale  # control: some pending rows are stale, some are not
+    assert stale != {r.id for r in before.values() if r.state == "pending"}
     assert set(await seeded.revoke_stale_pending(now=EVAL)) == stale
     for p in programs:
         for after in await seeded.credentials_of_program(p.id):
