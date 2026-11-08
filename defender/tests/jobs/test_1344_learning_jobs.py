@@ -824,6 +824,18 @@ async def test_o5_jobs_are_claimed_oldest_first(world):
     assert claimed == [made[1], made[2], made[0]]
 
 
+async def test_o5_a_claim_hands_back_the_job_as_it_now_stands(world):
+    """The claimed record is the row after the claim, `running` with its start time, never the queued row it read. (O5)"""
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="J-claimed")
+        claim = await store.claim_learning_job()
+    ((status, started_at),) = execute(dsn, "SELECT status, started_at FROM jobs.learning_jobs WHERE id = %s", (job,))
+    assert (status, started_at is not None) == ("running", True), "premise: the row was claimed"
+    assert (claim.record.learning_job_id, claim.record.status) == (job, "running")
+    assert claim.record.started_at == started_at
+
+
 async def test_a_bare_worker_claims_no_job_and_learning_slots_need_both_commands(world):
     """A bare `Worker` leaves a queued job queued (control: with a learning slot and commands it runs it); a
     learning slot without both commands is refused at construction. (O5, D8)"""

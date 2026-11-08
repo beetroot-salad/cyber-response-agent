@@ -409,6 +409,15 @@ def test_a_judge_that_crashes_ends_failed_judge_failed_where_the_operator_lane_s
     assert judge.calls, "premise: the judge was reached"
 
 
+def test_one_judge_call_that_raises_among_completed_ones_costs_only_its_draw(tmp_path):
+    """The judge's first call completes and every later one raises: the pass graded something, so the job completes,
+    as the operator lane grades the rest. (r5 table, "Judge modes")"""
+    judge = J.FakeJudge(default=_GOOD_REPLY, fault=T.Fault(raise_after=1))
+    ran = run_entry(tmp_path, judge=judge)
+    _ended(ran, "completed", None)
+    assert judge.calls > 1, "premise: a call after the first was made, and raised"
+
+
 # --- entry_error and the message ----------------------------------------------------------------------
 
 

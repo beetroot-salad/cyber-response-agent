@@ -131,13 +131,12 @@ def _gate(bound: Bound, manifest: dict[str, Any]) -> tuple[str, str, dict[str, A
 def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their bounded re-asks
     episode: Episode, label: str, *, world_id: str | None, judge: Any, draws: int, model: str, effort: str,
     prompt: str, scope: str = "world", reachable_systems: list[str] | None = None,
-    shown_its_facts: bool | None = None, contain: bool = True,
+    shown_its_facts: bool | None = None,
 ) -> tuple[int, dict[int, dict[str, Any]], int, str | None]:
     """Call the judge `draws` times over `prompt`, writing one `worlds/<X>/judge/<n>.yaml` per
     draw. Returns `(completed_draws, draw documents by index, malformed replies, the last
-    refusal's reason)`. A judge call that raises costs only its draw (`contain`), except in a
-    learning job's pass (#1344), where it is raised once its wire log is written: a judge that
-    crashed fails the job (`judge_failed`), never a graded nothing."""
+    refusal's reason)`. A judge call that raises costs only its draw, in either lane: a
+    learning job's pass fails only when every call it made raised (`_Pass._refuse_graded_nothing`)."""
     from defender.learning.core.config import StageWiring
     from defender._agent_role import AgentRole
 
@@ -178,8 +177,6 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
                 doc = {"failure_reason": reason}
                 _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
                                 reply=None, failure=reason)
-                if not contain:
-                    raise
                 too_large = _is_size_failure(failed)
                 break
             _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
@@ -444,6 +441,10 @@ def _refuse_undeclared_records(manifest: dict[str, Any],
             "so the pass is refused")
 
 
+class JudgeCrashed(RuntimeError):
+    """A learning job's judge pass in which every judge call raised (`_Pass._refuse_graded_nothing`)."""
+
+
 class _Pass:
     """One grading pass's state: the rows, the ledger and the user record it writes, and the
     queue counts. Each commit (A6) writes the whole record as it stands."""
@@ -452,8 +453,11 @@ class _Pass:
                  state: LearningState, prior: EpisodeGrade | None, tenant: Any = None,
                  job_lane: bool = False) -> None:
         self.episode = episode
-        #: A learning job's pass (#1344): a judge call that raises is the pass's failure.
+        #: A learning job's pass (#1344): a pass whose every judge call raised is its failure.
         self.job_lane = job_lane
+        #: Judge calls of this pass that completed a draw, and that raised (`_count_draws`).
+        self.draws_completed = 0
+        self.calls_raised = 0
         #: The runs repository's tenant: whose exports a post-move lesson body is read from (O6).
         self.tenant = tenant
         self.bound = episode.view()
@@ -594,7 +598,21 @@ class _Pass:
         # A usable control with no usable planted world grades nothing (A3): no family call.
         if FAMILY_LABEL not in kept and runs.planted:
             self._judge_family()
+        self._refuse_graded_nothing(carried=bool(kept))
         return self._write()
+
+    def _count_draws(self, completed: int, failures: list[str]) -> None:
+        self.draws_completed += completed
+        self.calls_raised += len(failures)
+
+    def _refuse_graded_nothing(self, *, carried: bool) -> None:
+        """A learning job's pass in which judge calls raised and none completed a draw, with
+        nothing carried from an earlier pass, is the job's failure (`judge_failed`, #1344): the
+        judge crashed, and a pass that graded nothing must not read as one that found nothing.
+        One call that raised among others that completed costs only its draw, as in the
+        operator lane."""
+        if self.job_lane and self.calls_raised and not self.draws_completed and not carried:
+            raise JudgeCrashed(f"every judge call of the pass raised ({self.calls_raised} call(s))")
 
     def _alert_key(self) -> str | None:
         """The copied source record's signature, or its explicit unkeyed fallback (#1222)."""
@@ -619,7 +637,7 @@ class _Pass:
         completed, documents, malformed, refusal = _run_world_draws(
             self.episode, label, world_id=self.run_set.usable[label].token, judge=self.judge, draws=self.draws, model=self.model,
             effort=self.effort, prompt=prompt, reachable_systems=self.reachable_systems,
-            shown_its_facts=ctx.shown_its_facts, contain=not self.job_lane)
+            shown_its_facts=ctx.shown_its_facts)
         # g18: a `samples.yaml#<system>` pointer resolves exactly when this prompt showed that
         # system's section whole (the cap may have cut it), in the resolver and in O16 alike.
         shown_samples = {system: section for system, section in self.samples.items()
@@ -638,6 +656,7 @@ class _Pass:
                    draws_disagree=verdict.disagree,
                    **{enqueue_mod.WORLD_LABEL_DOUBTED: verdict.doubted})
         failures = [d["failure_reason"] for d in documents.values() if "failure_reason" in d]
+        self._count_draws(completed, failures)
         if failures:
             row["draws_failed_reason"] = failures[0]
         if not completed:
@@ -765,7 +784,7 @@ class _Pass:
             completed, documents, malformed, refusal = _run_world_draws(
                 episode, FAMILY_LABEL, world_id=None, judge=self.judge, draws=self.draws,
                 model=self.model, effort=self.effort, prompt=prompt, scope="family",
-                reachable_systems=self.reachable_systems, contain=not self.job_lane)
+                reachable_systems=self.reachable_systems)
         except Exception as family_failed:  # noqa: BLE001 — the family call's own fault costs only itself, never the already-committed worlds
             if self.job_lane:
                 raise
@@ -777,6 +796,7 @@ class _Pass:
                       draws=[{"draw": n} for n in sorted(documents)
                              if "failure_reason" not in documents[n]])
         failures = [d["failure_reason"] for d in documents.values() if "failure_reason" in d]
+        self._count_draws(completed, failures)
         if failures:
             family["draws_failed_reason"] = failures[0]
         if not completed:
@@ -890,5 +910,5 @@ def recorded_draws(grade: EpisodeGrade | None, label: str) -> frozenset[int]:
         if isinstance(draws, list) else frozenset()
 
 
-__all__ = ["EpisodeGrade", "JudgeRefused", "NotGradedStamp", "grade_episode", "read_grade",
+__all__ = ["EpisodeGrade", "JudgeCrashed", "JudgeRefused", "NotGradedStamp", "grade_episode", "read_grade",
            "recorded_draws"]

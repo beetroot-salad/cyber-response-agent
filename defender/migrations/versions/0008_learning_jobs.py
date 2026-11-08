@@ -57,3 +57,10 @@ def upgrade() -> None:
         sa.CheckConstraint("status <> 'running' OR lease_expires_at IS NOT NULL",
                            name=op.f("ck_learning_jobs_running_has_a_lease")),
         schema=SCHEMA)
+    # The worker's hot reads: the claim (oldest queued), the take-over (lapsed leases), and the
+    # investigation delete's lock and foreign-key check (the unique key leads with the tenant).
+    op.create_index("learning_jobs_queued_by_age", "learning_jobs", ["created_at", "id"], schema=SCHEMA,
+                    postgresql_where=sa.text("status = 'queued'"))
+    op.create_index("learning_jobs_running_by_lease", "learning_jobs", ["lease_expires_at", "id"], schema=SCHEMA,
+                    postgresql_where=sa.text("status = 'running'"))
+    op.create_index("learning_jobs_by_investigation", "learning_jobs", ["investigation_id"], schema=SCHEMA)

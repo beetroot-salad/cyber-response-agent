@@ -47,6 +47,7 @@ from ._spec import (
 from . import _snapshot
 from ._snapshot import ForkSnapshot, SnapshotWriter, snapshot_at
 from ._frontier import (
+    MainRead,
     _DISPATCH_TOOL,
     carried_retries,
     _appended_text,
@@ -59,6 +60,7 @@ from ._frontier import (
     _refuse_bad_as_of,
     _utc,
     branch_point_time,
+    point_time,
     fence_count_at,
     leads_at,
     main_session,
@@ -81,24 +83,54 @@ def validate(store: Any, spec: BranchSpec, *, source_run: Run,
     admitted_snapshot(store, spec, source_run=source_run, require_capture=require_capture)
 
 
+def admitted_points(main: MainRead, run_dir: Path, row_ids: list[int], *,
+                    source_run: Run) -> list[tuple[int, BranchError | None]]:
+    """Each of `row_ids` with the refusal a sibling's own admission gives it there, or `None`
+    when admitted: `admitted_snapshot` at its default, the capture required, as every sibling
+    run applies it, over the source's main session read once (`main`) for all of them."""
+    answers: list[tuple[int, BranchError | None]] = []
+    for row_id in row_ids:
+        try:
+            as_of = point_time(main, run_dir, row_id)
+            _admitted_on(main, BranchSpec(source_run_dir=run_dir, branch_message_id=row_id, as_of=as_of),
+                         source_run=source_run, require_capture=True)
+        except BranchError as refused:
+            answers.append((row_id, refused))
+        else:
+            answers.append((row_id, None))
+    return answers
+
+
 def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
                       require_capture: bool = True) -> _snapshot.ForkSnapshot:
     """Refuse a branch point that cannot carry a sibling world, and return the fork snapshot
     an arm taken there restores."""
-    from defender.skills.invlang.frontier import frontier_from_text
-    from defender.skills.invlang.parser import scan_fences
+    _refuse_not_a_message(spec)
+    return _admitted_on(MainRead(store, Path(spec.source_run_dir), source_run=source_run), spec,
+                        source_run=source_run, require_capture=require_capture)
 
-    run_dir = Path(spec.source_run_dir)
+
+def _refuse_not_a_message(spec: BranchSpec) -> None:
     # `BranchSpec` already refused a non-int at construction.
     if spec.branch_message_id <= 0:
         raise BranchError(
             f"branch_message_id must be a real message, got {spec.branch_message_id} — "
             "message 0 precedes every payload, so no world can contradict the prefix", kind=REFUSED_NOT_A_MESSAGE)
 
+
+def _admitted_on(main: MainRead, spec: BranchSpec, *, source_run: Run,  # noqa: C901 — one refusal per rule, in order
+                 require_capture: bool) -> _snapshot.ForkSnapshot:
+    """`admitted_snapshot` over the source's main session already read (`main`)."""
+    from defender.skills.invlang.frontier import frontier_from_text
+    from defender.skills.invlang.parser import scan_fences
+
+    store = main.store
+    run_dir = Path(spec.source_run_dir)
+    _refuse_not_a_message(spec)
+
     # On MAIN's path, not merely a number: an id past the tip or from a gather session would
     # fork a sub-agent's transcript as MAIN's.
-    session = source_session(store, spec, source_run=source_run)
-    path = session_store.path_row_ids(store, session)
+    session, path = main.session, main.path
     if spec.branch_message_id not in path:
         raise BranchError(
             f"message {spec.branch_message_id} is not on the source run's MAIN path "
@@ -115,8 +147,7 @@ def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
             "branched: the fold displaced turns the arm's history would have to hold. Branch "
             "an uncompacted run", kind=REFUSED_FOLDED_SESSION)
 
-    prefix = session_store.hydrate(store, session, role="analysis")
-    upto = prefix[: path.index(spec.branch_message_id) + 1]
+    upto = main.prefix[: path.index(spec.branch_message_id) + 1]
     branch_response = upto[-1]
     if not isinstance(branch_response, ModelResponse) or not any(
             isinstance(p, ToolCallPart) for p in branch_response.parts):
@@ -268,6 +299,7 @@ __all__ = [
     "BranchError",
     "BranchSpec",
     "ForkSnapshot",
+    "MainRead",
     "SnapshotWriter",
     "Counter",
     "Path",
@@ -291,6 +323,8 @@ __all__ = [
     "_utc",
     "artifact_dir",
     "artifact_file",
+    "admitted_points",
+    "point_time",
     "attach_case_pointer",
     "branch_point_time",
     "carried_retries",

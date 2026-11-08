@@ -191,6 +191,38 @@ def test_o3_the_candidates_are_mains_gather_calls_and_no_other_response(tmp_path
 
 
 @pytest.mark.e2e
+def test_o3_a_gather_before_any_captured_query_is_no_candidate(tmp_path):
+    """A sibling refuses a point with no query captured by then, so the pick must too: with the automatic lead muted,
+    the first dispatch precedes every capture and only the second, after l-001's query, is a candidate. (O3)"""
+    pytest.importorskip("pydantic_ai")
+    from defender.investigation import branch
+    from defender.tests.e2e._lead_zero_808 import VerbRecorder, answer_hits, elastic_backend, hit
+    from defender.tests.e2e._replay_harness import Turn
+    from defender.tests.support.runtime.state import _1255_snapshot as R
+
+    query = Turn(tool_calls=[("query", {"system": "elastic", "verb": "query",
+                                        "params": {"native_query": "user.name:dev.dana"}})])
+    c = R.chunks(3)
+    source = R.drive_source(
+        tmp_path, (R.append(c[0]), R.dispatch("l-001"), R.dispatch("l-002"), R.done()),
+        leads={R.CORRELATION_LEAD: [Turn(text="nothing to correlate")],
+               **{lead: (query, Turn(text=f"summary of {lead}")) for lead in ("l-001", "l-002")}},
+        verbs=elastic_backend(VerbRecorder(), answer_hits([hit(ts="2026-05-25T15:20:00.000Z")])))
+    _append, first, second = R.tool_calling_responses(source.store)
+    run = _run_of(source)
+    as_of = branch.branch_point_time(source.store, run.run_dir, first, source_run=run)
+    with pytest.raises(branch.BranchError) as refused:
+        branch.validate(source.store, branch.BranchSpec(source_run_dir=run.run_dir, branch_message_id=first,
+                                                        as_of=as_of), source_run=run)
+    assert refused.value.kind == branch.REFUSED_NO_CAPTURE, "premise: a sibling refuses the first dispatch"
+    from defender.learning.branch.fork_pick import fork_candidates
+
+    found = fork_candidates(source.store, run)
+    assert found.ids == [second]
+    assert found.refusal_kinds == (branch.REFUSED_NO_CAPTURE,)
+
+
+@pytest.mark.e2e
 def test_o3_a_source_with_tool_calls_but_no_gather_has_no_candidate(tmp_path):
     """An `append_block` was a legal operator fork point; for a job it is none. (O3)"""
     pytest.importorskip("pydantic_ai")
@@ -236,8 +268,9 @@ def gathers_of(R, source) -> list[int]:
 
 
 def admission_refusals(source, rows: list[int], store) -> list[str]:
-    """The text of the branch admission's refusal of each of `rows`, as an operator's launch would print it: what a
-    learning job's message must never carry (it holds host paths and run text). Asserts each row is refused."""
+    """The text of the branch admission's refusal of each of `rows`, as a sibling's admission gives it (the one the pick
+    applies): what a learning job's message must never carry (it holds host paths and run text). Asserts each row is
+    refused."""
     from defender.investigation import branch
 
     run, texts = _run_of(source), []

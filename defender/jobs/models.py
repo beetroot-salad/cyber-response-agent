@@ -113,6 +113,9 @@ class LearningJobRow(Base, kw_only=True):
         CheckConstraint(f"trigger IN ({_quoted(LEARNING_TRIGGERS)})", name="trigger"),
         CheckConstraint(f"publish_state IN ({_quoted(PUBLISH_STATES)})", name="publish_state"),
         CheckConstraint("status <> 'running' OR lease_expires_at IS NOT NULL", name="running_has_a_lease"),
+        Index("learning_jobs_queued_by_age", "created_at", "id", postgresql_where=text("status = 'queued'")),
+        Index("learning_jobs_running_by_lease", "lease_expires_at", "id", postgresql_where=text("status = 'running'")),
+        Index("learning_jobs_by_investigation", "investigation_id"),
         {"schema": SCHEMA},
     )
 
