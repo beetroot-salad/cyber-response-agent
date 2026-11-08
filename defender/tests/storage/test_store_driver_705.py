@@ -1104,7 +1104,8 @@ def test_s2a_r7_the_final_outcome_of_a_request_decides_whether_the_total_is_exac
 
 def _warning_exception_types(caplog) -> list[str]:
     """What the run said about the lead's failure: every WARNING with an exception attached, by logger and exception type,
-    and every WARNING message that names an exception class in parentheses (`... failed (ModelHTTPError); ...`)."""
+    every WARNING message that names an exception class in parentheses (`... failed (ModelHTTPError); ...`), and every one
+    that names a provider's status (`... refused a request (HTTP 400): ...`, #1243)."""
     import re
 
     found = []
@@ -1114,6 +1115,7 @@ def _warning_exception_types(caplog) -> list[str]:
         if record.exc_info and record.exc_info[0] is not None:
             found.append((record.name, record.exc_info[0].__name__))
         found += [(record.name, name) for name in re.findall(r"\((\w+)\)", record.getMessage())]
+        found += [(record.name, f"HTTP {status}") for status in re.findall(r"\(HTTP (\d{3})\)", record.getMessage())]
     return sorted(found)
 
 
