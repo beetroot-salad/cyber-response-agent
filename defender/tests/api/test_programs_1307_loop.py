@@ -81,3 +81,53 @@ def test_a_realm_that_cannot_be_listed_stops_neither_the_sending_nor_the_session
         assert wait_until(lambda: world.call(world.repo.session_by_value, "old") is None)
     assert any(r.exc_info and isinstance(r.exc_info[1], SignInUnavailable)
                for r in caplog.records if r.levelno >= logging.ERROR)
+
+
+@pytest.mark.parametrize("failing", ["session-purge", "reconciliation"])
+def test_each_purge_tick_job_runs_when_the_other_fails_and_the_failed_one_waits_a_full_interval(
+        failing: str, caplog: pytest.LogCaptureFixture) -> None:
+    """The purge tick runs the session purge and the realm reconciliation as independent jobs (A9, D3): when either one fails
+    the other still runs in that tick, and the failed one is retried at the next purge tick (`PURGE_INTERVAL` on the clock),
+    not on the next send pass."""
+    world = ProgramsWorld(tenants={T1: [ANN]}, send_interval=INTERVAL, failing_writes=True)
+    ann = world.sign_in(ANN)
+    live = issue_oauth(ann, T1, str(create_program(ann, T1)["id"]))
+    user = world.call(world.repo.user_by_email, ANN)
+    now = world.clock()
+    _orphan(world)
+    world.call(world.repo.add_session, "old", user.id, now=now - _dt.timedelta(days=2), expires_at=now - _dt.timedelta(seconds=1))
+
+    def attempts() -> int:
+        return world.repo.refusals.get("purge_expired_sessions", 0) if failing == "session-purge" else world.realm.list_calls
+
+    if failing == "session-purge":
+        world.repo.failing = {"purge_expired_sessions"}
+    else:
+        world.realm.fail_lists = 10_000
+
+    def other_ran() -> bool:  # the job that is not failing: it has done its work for this tick
+        if failing == "session-purge":
+            return ORPHAN not in world.realm.clients
+        return world.call(world.repo.session_by_value, "old") is None
+
+    def other_ran_again() -> bool:
+        if failing == "session-purge":
+            return ORPHAN not in world.realm.clients
+        return world.call(world.repo.session_by_value, "old-2") is None
+
+    with caplog.at_level(logging.ERROR), world.lifespan_client():
+        assert wait_until(lambda: attempts() >= 1 and other_ran())  # first tick: both jobs were tried
+        tried = attempts()
+        world.clock.advance(PURGE_INTERVAL / 2)  # the send passes keep coming; the retry is not due
+        assert not wait_until(lambda: attempts() > tried, seconds=0.5)
+        if failing == "session-purge":
+            _orphan(world)  # a second orphan, to see the reconciliation go on running at the next tick
+        else:
+            world.call(world.repo.add_session, "old-2", user.id, now=now - _dt.timedelta(days=2),
+                       expires_at=now - _dt.timedelta(seconds=1))
+        world.clock.advance(PURGE_INTERVAL)  # the next purge tick
+        assert wait_until(lambda: attempts() > tried)  # the failed job is tried again, once the tick is due
+        assert wait_until(other_ran_again)  # and the job that works did its work again at that tick
+    assert live in world.realm.clients
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR and r.exc_info]
+    assert errors, "the failure was not logged"
