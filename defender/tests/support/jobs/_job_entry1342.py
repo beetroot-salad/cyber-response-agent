@@ -140,7 +140,7 @@ def _ledger_trigger(sql: str):
     return run
 
 
-def _failing_lead(answering, *, unseen: bool, refused: bool):
+def _failing_lead(answering, *, unseen: bool, refused: bool, before_failing=None):
     """`-unseen` (r7): the correlation lead's one request raises a non-HTTP error, which the hook records as unseen;
     `-refused`: a 400 from the provider, which it records as refused."""
     if not (unseen or refused):
@@ -149,6 +149,8 @@ def _failing_lead(answering, *, unseen: bool, refused: bool):
     def lead(messages, info):
         found = RH._DISPATCHED_LEAD.search(RH.messages_text(messages))
         if found is not None and found.group(1) == "l-00c":
+            if before_failing is not None:  # the correlation lead runs before MAIN: refuse its insert from inside its own request
+                before_failing()
             if refused:
                 from pydantic_ai.exceptions import ModelHTTPError
                 raise ModelHTTPError(400, "fake-gather", body={"error": "x"})
@@ -183,8 +185,6 @@ def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False, dies: bool = 
 
     def main_before():
         main_calls["n"] += 1
-        if lead_refuse is not None and main_calls["n"] == 1:  # before the lead runs; only its row is refused, MAIN's and the review's land
-            lead_refuse()
         if allow is not None and main_calls["n"] == 4:  # the text turn after the close
             allow()
         if dies and main_calls["n"] == 4:  # inside the driver, after the review's writes and before the run returns
@@ -200,7 +200,7 @@ def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False, dies: bool = 
     ])
     # l-001 runs its query, then its final summary; the correlation lead (l-00c) answers its summary once.
     lead = RH._with_default_correlation(RH.ReplayFn([q("elastic", "query", {"native_query": "user.name:root"}), DONE]), None)
-    lead = _failing_lead(lead, unseen=unseen, refused=refused)
+    lead = _failing_lead(lead, unseen=unseen, refused=refused, before_failing=lead_refuse)
     review = RH.ReplayFn([RH.Turn(text=RH._review_bundle.composer_reply("holds"))] * 3)
     make_model = RH.priced_make_model({
         PRICED_MAIN: RH.Priced(main, before=_counted("main", main_before)),
