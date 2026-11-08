@@ -700,20 +700,26 @@ def plant_fork(runs: Path, case_id: str, parent: tuple[str, list[int]], *, agent
     return fork
 
 
-#: The spend ledger's table and columns as #1377's sketch names them (the design leaves them open).
+#: The spend ledger's table and columns as #1377's sketch names them (the design leaves them open). r7 row model: the
+#: requesting agent, the requested and reported model, the four billed counts and the request's outcome.
 SPEND_LEDGER = "spend_ledger"
-SPEND_COLUMNS = ("run_id", "model", "input_tokens", "output_tokens", "cache_read_input_tokens",
-                 "cache_creation_input_tokens")
+SPEND_COUNTS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+SPEND_COLUMNS = ("run_id", "agent_id", "requested_model", "reported_model", "outcome", *SPEND_COUNTS)
+#: r7 S2a: a request's outcome as the model-request hook saw it (sketch spelling).
+RESPONSE, REFUSED, UNSEEN = "response", "refused", "unseen"
 
 
-def insert_spend(database: Path, run_id: str, spend: list[tuple[str, dict[str, int]]]) -> None:
-    """#1377: one ledger row per `(model, billed usage)` for `run_id` in an existing session database."""
+def insert_spend(database: Path, run_id: str, spend: list[tuple[str, dict[str, int]]], *, agent_id: str = "main",
+                 outcome: str = RESPONSE, reported: str | None = None) -> None:
+    """#1377: one ledger row per `(requested model, billed usage)` for `run_id` and `agent_id` in an existing session
+    database; `reported` (default the requested name; None on a refused or unseen row) is what the provider said."""
     import sqlite3
 
     conn = sqlite3.connect(database, timeout=30)
     try:
         for model, usage in spend:
-            values = (run_id, model, *(usage.get(k, 0) for k in SPEND_COLUMNS[2:]))
+            said = reported if reported is not None else (model if outcome == RESPONSE else None)
+            values = (run_id, agent_id, model, said, outcome, *(usage.get(k, 0) for k in SPEND_COUNTS))
             conn.execute(f"INSERT INTO {SPEND_LEDGER} ({', '.join(SPEND_COLUMNS)}) "  # noqa: S608
                          f"VALUES ({', '.join('?' * len(SPEND_COLUMNS))})", values)
         conn.commit()
@@ -721,17 +727,17 @@ def insert_spend(database: Path, run_id: str, spend: list[tuple[str, dict[str, i
         conn.close()
 
 
-def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, dict[str, int]]]) -> None:
+def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, dict[str, int]]], **row: str) -> None:
     """#1377: `case_id`'s session database (made by the real store, so its own schema, and with a
     `main` session when this call makes the file) holding one ledger row per `(model, billed usage)`
-    for `run_id`."""
+    for `run_id`; `row` is `insert_spend`'s agent id, outcome and reported name."""
     from defender.records.session_store._write import open_store
 
     fresh = not session_db(runs, case_id).exists()
     with open_store(case_id=case_id, sessions=_paths(runs)) as handle:
         if fresh:
             handle.new_session("main")
-    insert_spend(session_db(runs, case_id), run_id, spend)
+    insert_spend(session_db(runs, case_id), run_id, spend, **row)
 
 
 def lower_limit(dsn: str, investigation_id: str) -> bool | None:

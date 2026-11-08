@@ -17,7 +17,7 @@ from defender.presentation import visualize_data as d
 from defender.configuration._pricing import usage_cost
 from defender.presentation.visualize_run import render_page
 from defender.records import SessionPaths
-from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER, insert_spend
+from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER, UNSEEN, insert_spend
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 _USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}
@@ -27,11 +27,15 @@ _SESSION = "9f2c1ab84e7d4f0e9c3b5a6d7e8f0a1b"
 _HAIKU_USAGE = {"input_tokens": 50, "output_tokens": 300, "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 0}
 _BIG = {"input_tokens": 400_000, "output_tokens": 50_000, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
 
-#: The run's spend ledger as the host wrote it (#1377 r6 S5): a row for every response the request log shows (four MAIN
-#: turns, one lead's) and one response the request log never held. Rows of another run in the same database are planted too.
-_LEDGER = [("claude-sonnet-4-6", _USAGE)] * 4 + [("claude-haiku-4-5", _HAIKU_USAGE), ("claude-sonnet-4-6", _BIG)]
+#: The run's spend ledger as the host wrote it (#1377 r6 S5), by requesting agent (r7): a row for every response the request
+#: log shows (four MAIN turns, one lead's) and one MAIN response the request log never held. Rows of another run in the same
+#: database are planted too.
+_MAIN_LEDGER = [("claude-sonnet-4-6", _USAGE)] * 4 + [("claude-sonnet-4-6", _BIG)]
+_GATHER_LEDGER = [("claude-haiku-4-5", _HAIKU_USAGE)]
+_LEDGER = _MAIN_LEDGER + _GATHER_LEDGER
 _OTHER_RUNS_LEDGER = [("claude-sonnet-4-6", _BIG)] * 3
-_REVIEW_LEDGER = [("kimi-k3", _USAGE)] * 3
+_REVIEW_LENSES = ("support", "ablation", "composer")
+_REVIEW_LEDGER = [("kimi-k3", _USAGE)] * len(_REVIEW_LENSES)
 
 
 def _priced(rows: list) -> float:
@@ -72,7 +76,8 @@ def _seed_session_store(run: Path, messages: list[dict]) -> None:
             message = ModelMessagesTypeAdapter.validate_python([rec["message"]])[0]
             store.append(session_id, [message], agent_id=agent_id)
         store_path = store.path
-    insert_spend(store_path, run.name, _LEDGER)
+    insert_spend(store_path, run.name, _MAIN_LEDGER, agent_id="main")
+    insert_spend(store_path, run.name, _GATHER_LEDGER, agent_id="gather:l-001")
     insert_spend(store_path, fixture_uuid("another run"), _OTHER_RUNS_LEDGER)
 
 
@@ -335,10 +340,6 @@ def _unattributed(bars: dict[str, float]) -> list[float]:
     return [v for n, v in bars.items() if "unattributed" in n.lower()]
 
 
-def _phases(bars: dict[str, float]) -> float:
-    return sum(v for n, v in bars.items() if n.lower() != "review" and "unattributed" not in n.lower())
-
-
 def _append_review_calls(run: Path) -> float:
     """Give the fixture run a review gate that actually cost something: its calls as request-log records under
     `review:{lens}` and as ledger rows. Returns the gate's priced spend."""
@@ -346,13 +347,14 @@ def _append_review_calls(run: Path) -> float:
         "agent_id": f"review:{lens}", "seq": 0, "id": f"review:{lens}#0",
         "kind": "response", "model": "kimi-k3", "usage": _USAGE, "duration_ms": 900.0,
         "message": {"kind": "response", "parts": [{"part_kind": "text", "content": "read"}]},
-    } for lens in ("support", "ablation", "composer")]
+    } for lens in _REVIEW_LENSES]
     with RunPaths(run).wire_log.open("a", encoding="utf-8") as fh:
         for row in rows:
             fh.write(json.dumps(row) + "\n")
     from defender.records import session_store as ss
 
-    insert_spend(ss.resolve_store_path(_run_handle_1165(run)), run.name, _REVIEW_LEDGER)
+    for lens, row in zip(_REVIEW_LENSES, _REVIEW_LEDGER, strict=True):
+        insert_spend(ss.resolve_store_path(_run_handle_1165(run)), run.name, [row], agent_id=f"review:{lens}")
     return _priced(_REVIEW_LEDGER)
 
 
@@ -361,6 +363,11 @@ def _cost_segments(html: str) -> dict[str, float]:
     import re
 
     return {name: float(v) for name, v in re.findall(r'class="cb-seg"[^>]*title="([^"]*?) · \$([0-9.]+) · ', html)}
+
+
+def _by_kind(html: str) -> dict[str, float]:
+    """The cost bar's segments by lower-cased name (r7 S6: one per requesting agent kind)."""
+    return {name.lower(): v for name, v in _cost_segments(html).items()}
 
 
 def _result_line(run: Path, **fields: object) -> None:
@@ -384,8 +391,8 @@ def _without_styles(html: str) -> str:
 
 
 def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
-    """CONFLICT-UPDATED (r6 S5; was: the headline is the run file's total): the page renders the fold, transcript and leads,
-    and the headline is the ledger's priced sum, which the cost-bar segments add up to."""
+    """CONFLICT-UPDATED (r7 S6; was r6: request-log bars plus "unattributed"): the page renders the fold, transcript and leads;
+    the headline is the ledger's priced sum, and the cost bar is the ledger by agent kind, which adds up to it."""
     import re
 
     run = _build_run(tmp_path)
@@ -406,7 +413,10 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
     assert abs(headline - 0.5) > 0.5, "premise: the result line's 0.5 is far from the ledger"
     assert headline == pytest.approx(_priced(_LEDGER), abs=2e-4), f"the headline {headline} is not the ledger's priced sum"
     assert abs(headline - sum(segs.values())) < 0.003, f"{headline} != {sum(segs.values())}"
-    assert _unattributed(segs), "the part of the headline no request-log bar explains is not shown"
+    kinds = _by_kind(html)
+    assert kinds["main"] == pytest.approx(_priced(_MAIN_LEDGER), abs=2e-4), f"main is not MAIN's ledger rows: {kinds}"
+    assert kinds["gather"] == pytest.approx(_priced(_GATHER_LEDGER), abs=2e-4), f"gather is not the lead's ledger rows: {kinds}"
+    assert not _unattributed(segs), f"an unattributed segment in a bar built from the ledger: {segs}"
     # Asked of the rendered SPAN, not of the class name: the stylesheet is inlined into every
     # page, so `"ts-review" in html` is true whether or not anything was rendered with it.
     assert re.search(r'ts-review">', html) is None, (
@@ -415,7 +425,8 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
 
 
 def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path, monkeypatch):
-    """UPDATED (r6 S5): the gate's ledger rows are in the headline once and its request-log calls are their own "review" segment; phases, review and unattributed (headline less both) add up to the headline."""
+    """CONFLICT-UPDATED (r7 S6; was r6: review from the request log, phases and unattributed): the gate's ledger rows are in
+    the headline once and are the "review" segment; the segments by kind add up to the headline, nothing unattributed."""
     run = _build_run(tmp_path)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     review_total = _append_review_calls(run)
@@ -431,13 +442,73 @@ def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path
     review = [v for n, v in bars.items() if n.lower() == "review"]
     assert len(review) == 1, f"expected one review segment, bars were {bars}"
     assert review[0] == pytest.approx(review_total, abs=0.002), f"review segment {review[0]} is not the gate's spend {review_total}"
-    unattributed = _unattributed(bars)
-    assert len(unattributed) == 1, f"expected one unattributed segment, bars were {bars}"
-    assert unattributed[0] == pytest.approx(headline - _phases(bars) - review[0], abs=0.003), (
-        f"unattributed {unattributed[0]} is not the headline {headline} less phases {_phases(bars)} and review {review[0]}")
+    assert not _unattributed(bars), f"an unattributed segment beside the ledger's kinds: {bars}"
+    assert _by_kind(html)["main"] == pytest.approx(_priced(_MAIN_LEDGER), abs=2e-4)
     assert sum(bars.values()) == pytest.approx(headline, abs=0.003), f"segments {bars} do not add up to the headline {headline}"
 
     assert "kimi-k3" in html, "the page does not name the model the review billed"
+
+
+_CORRELATION_LEDGER = [("claude-haiku-4-5", _BIG)]
+
+
+def _append_correlation_rows(run: Path) -> float:
+    """The correlation lead's ledger row (its reserved lead id, `l-00c`); the request log never held it. Returns its spend."""
+    from defender.records import session_store as ss
+
+    insert_spend(ss.resolve_store_path(_run_handle_1165(run)), run.name, _CORRELATION_LEDGER, agent_id="gather:l-00c")
+    return _priced(_CORRELATION_LEDGER)
+
+
+def test_s6_r7_the_cost_bar_has_one_segment_per_agent_kind_from_the_ledger_adding_up_to_the_headline(tmp_path, monkeypatch):
+    """MAIN, a lead, the correlation lead and three review lenses in the ledger: the bar is exactly main, gather, correlation
+    and review, each its agents' ledger sum, adding up to the headline; nothing unattributed, no phase segment. (r7 S6)"""
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    review_total = _append_review_calls(run)
+    correlation_total = _append_correlation_rows(run)
+
+    html = _page(run)
+
+    headline = _dollars(_headline(html))
+    assert headline == pytest.approx(_priced(_LEDGER) + review_total + correlation_total, abs=2e-4)
+    kinds = _by_kind(html)
+    assert set(kinds) == {"main", "gather", "correlation", "review"}, f"the bar is not by agent kind: {kinds}"
+    expected = {"main": _priced(_MAIN_LEDGER), "gather": _priced(_GATHER_LEDGER), "correlation": correlation_total,
+                "review": review_total}
+    for kind, spent in expected.items():
+        assert kinds[kind] == pytest.approx(spent, abs=2e-4), f"{kind}: {kinds[kind]} is not its agents' ledger sum {spent}"
+    assert sum(kinds.values()) == pytest.approx(headline, abs=2e-4)
+
+
+def test_s6_r7_a_phase_named_review_does_not_touch_the_review_segment(tmp_path, monkeypatch):
+    """The investigation doc carries a `## review` phase: the bar's one "review" segment is still the gate's ledger rows, and
+    the bar still adds up to the headline. (r7 S6; #1441 review finding 4)"""
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    doc = run / "investigation.md"
+    doc.write_text(doc.read_text(encoding="utf-8") + "\n## review\n\nNotes the model titled review.\n", encoding="utf-8")
+    assert any(n.lower().startswith("review") for n in _phase_order(run)), f"premise: a phase named review {_phase_order(run)}"
+    review_total = _append_review_calls(run)
+
+    html = _page(run)
+
+    review = [v for n, v in _cost_segments(html).items() if n.lower() == "review"]
+    assert review == [pytest.approx(review_total, abs=2e-4)], f"the review segment is not the gate's ledger rows: {_cost_segments(html)}"
+    assert sum(_cost_segments(html).values()) == pytest.approx(_dollars(_headline(html)), abs=2e-4)
+
+
+def test_s6_r7_a_run_whose_doc_has_no_phases_still_shows_main(tmp_path, monkeypatch):
+    """An investigation doc with no `## ` header: the page renders, and the bar's main segment is MAIN's ledger rows. (r7 S6)"""
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    (run / "investigation.md").write_text("Oriented on the alert; no phases were written.\n", encoding="utf-8")
+    assert _phase_order(run) == [], f"premise: no phases {_phase_order(run)}"
+
+    html = _page(run)
+
+    assert _by_kind(html).get("main") == pytest.approx(_priced(_MAIN_LEDGER), abs=2e-4), _cost_segments(html)
+    assert sum(_cost_segments(html).values()) == pytest.approx(_dollars(_headline(html)), abs=2e-4)
 
 
 @pytest.mark.parametrize("spend_write_failed", [False, True], ids=["exact", "at least"])
@@ -452,6 +523,21 @@ def test_s5_the_headline_says_at_least_exactly_when_the_host_knows_a_spend_write
     headline = _headline(_page(run, spend_write_failed=spend_write_failed))
 
     assert headline.startswith("at least ") is spend_write_failed, f"the headline reads {headline!r}"
+    assert _dollars(headline) == pytest.approx(_priced(_LEDGER), abs=2e-4)
+
+
+def test_s5_r7_an_unseen_row_in_the_ledger_makes_the_headline_at_least_without_the_hosts_fact(tmp_path, monkeypatch):
+    """One request the hook recorded as unseen (zero counts): the headline reads "at least" the same priced sum with no failed
+    spend write; the `line-false-exact` arm above is the control. (r7 S2a, S5)"""
+    from defender.records import session_store as ss
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    insert_spend(ss.resolve_store_path(_run_handle_1165(run)), run.name, [("claude-sonnet-4-6", {})], outcome=UNSEEN)
+
+    headline = _headline(_page(run, spend_write_failed=False))
+
+    assert headline.startswith("at least "), f"the headline reads {headline!r}"
     assert _dollars(headline) == pytest.approx(_priced(_LEDGER), abs=2e-4)
 
 
@@ -503,9 +589,9 @@ def test_s5_a_run_with_no_ledger_rows_reads_zero_and_the_other_runs_rows_are_not
     assert _cost_segments(html), "the request-log bars were dropped with the ledger rows"
 
 
-def test_s5_a_ledger_sum_below_what_the_bars_explain_stays_the_headline_and_no_unattributed_segment_goes_negative(tmp_path, monkeypatch):
-    """UPDATED (r6 S5): the unattributed segment is the headline minus the bars, floored at 0: a ledger sum under the request-log bars is still the headline."""
-    import re
+def test_s6_r7_the_cost_bar_is_the_ledger_not_the_request_log(tmp_path, monkeypatch):
+    """CONFLICT-UPDATED (r7 S6; was r6: "a ledger sum below the request-log bars, unattributed floored at 0"): with a ledger
+    holding far less than the request log shows, the bar is that ledger's one MAIN row, equal to the headline, nothing unattributed."""
     import sqlite3
 
     from defender.records import session_store as ss
@@ -521,13 +607,15 @@ def test_s5_a_ledger_sum_below_what_the_bars_explain_stays_the_headline_and_no_u
     small = [("claude-haiku-4-5", _HAIKU_USAGE)]
     insert_spend(ss.resolve_store_path(_run_handle_1165(run)), run.name, small)
 
+    logged = sum(usage_cost(m["model"], m["usage"]) for m in d.load_messages(run) if m.get("kind") == "response")
+    assert logged > _priced(small) + 0.01, "premise: the request log shows more than the ledger holds"
+
     html = _page(run)
 
-    bars = _cost_segments(html)
-    assert _phases(bars) > _priced(small) + 0.01, "premise: the request-log bars explain more than the ledger holds"
     assert _dollars(_headline(html)) == pytest.approx(_priced(small), abs=2e-4)
+    assert _by_kind(html)["main"] == pytest.approx(_priced(small), abs=2e-4), _cost_segments(html)
+    assert sum(_cost_segments(html).values()) == pytest.approx(_priced(small), abs=2e-4), "the bar was built from the request log"
     assert "unattributed" not in _without_styles(html), "an unattributed segment was shown with nothing unattributed"
-    assert all(float(x) >= 0 for x in re.findall(r'cb-pct">\$(-?[0-9.]+)', html))
 
 
 _NUMBERS = {"nan": float("nan"), "inf": float("inf"), "-inf": float("-inf"), "negative": -3.5, "huge": 1e15,
@@ -645,7 +733,8 @@ def _bar_figures(html: str) -> dict[str, dict[str, str]]:
 
 
 def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
-    """UPDATED (r6 S5): a repeated phase header moves no per-phase number, and the bars plus unattributed add up to the ledger's headline."""
+    """CONFLICT-UPDATED (r7 S6; was r6: the bars plus unattributed, and per-phase blocks equal to the request-log bars): a
+    repeated phase header moves no per-phase number and no bar segment; the bar adds up to the ledger's headline."""
     import re
 
     plain = _build_run(tmp_path / "plain")
@@ -666,18 +755,17 @@ def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
     headline = float(re.search(r'ts-cost">\$([0-9.]+)', doubled_html).group(1))
     bars = _cost_segments(doubled_html)
     assert abs(headline - _priced(_LEDGER)) < 0.002, f"the headline {headline} is not the ledger's priced sum (r6 S5)"
-    assert any("unattributed" in n.lower() for n in bars), f"no unattributed segment in {bars}"
+    assert not _unattributed(bars), f"an unattributed segment in {bars}"
     assert abs(headline - sum(bars.values())) < 0.002, (
-        f"the bars plus unattributed do not add up to the headline: {headline} != {sum(bars.values())}"
+        f"the bar does not add up to the headline: {headline} != {sum(bars.values())}"
     )
 
-    # The headline is the ledger's sum alone; the per-phase blocks explain only the request-log bars.
-    request_log_bars = sum(v for n, v in bars.items() if "unattributed" not in n.lower())
-    per_block = [float(x) for x in re.findall(r'ps-cost">\$([0-9.]+)', doubled_html)]
-    assert abs(request_log_bars - sum(per_block)) < 0.002, (
-        f"the repeated header re-printed its bucket's stats: request-log bars {request_log_bars} != "
-        f"per-phase blocks {sum(per_block)}"
-    )
+    # Per-phase cost is informational (r7 S6): the repeated header re-prints no bucket's figure.
+    def per_block(html: str) -> float:
+        return sum(float(x) for x in re.findall(r'ps-cost">\$([0-9.]+)', html))
+
+    assert per_block(doubled_html) == pytest.approx(per_block(_page(plain)), abs=2e-4), (
+        "the repeated header re-printed its bucket's stats")
 
 
 def test_a_repeated_planning_name_is_one_loop(tmp_path):
