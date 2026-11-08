@@ -161,14 +161,22 @@ CREATE TABLE IF NOT EXISTS session_head_log (
     reason TEXT NOT NULL
 ) STRICT;
 
--- spend_ledger (#1377): one row per model response a run received, written when the response
--- returns. Append-only and on no session's path, so forks, folds and resume never see it; it holds
--- no conversation content, only what prices the response. `run_id` says whose spend a row is: a
--- branch arm joins its source's database, and a total sums one run's rows only.
+-- spend_ledger (#1377): one row per model request a run's agent sent, written when the request
+-- ended. Append-only and on no session's path, so forks, folds and resume never see it; it holds
+-- no conversation content, only what prices the request. `run_id` says whose spend a row is: a
+-- branch arm joins its source's database, and a total sums one run's rows only. `agent_id` is the
+-- requesting agent; `requested_model` the model it was built to request, which alone selects a
+-- price when the ledger is read (r7 S1); `reported_model` the name the provider answered with
+-- (audit only; NULL unless a response came back). `outcome` is how the request ended (r7 S2a):
+-- `response` (its billed counts), `refused` (the provider refused it before its model ran: $0)
+-- or `unseen` (no response, and not known to be unbilled: the total may be short).
 CREATE TABLE IF NOT EXISTS spend_ledger (
     id INTEGER PRIMARY KEY,
     run_id TEXT NOT NULL,
-    model TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    requested_model TEXT NOT NULL,
+    reported_model TEXT,
+    outcome TEXT NOT NULL CHECK (outcome IN ('response', 'refused', 'unseen')),
     input_tokens INTEGER NOT NULL,
     output_tokens INTEGER NOT NULL,
     cache_read_input_tokens INTEGER NOT NULL,

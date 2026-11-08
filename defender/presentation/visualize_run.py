@@ -39,6 +39,8 @@ from defender.presentation.visualize_data import (
     tool_usage,
     transcript_phase_map,
 )
+from defender._agent_role import AGENT_KINDS, CORRELATION_KIND, GATHER_KIND, MAIN_KIND, REVIEW_KIND
+from defender.presentation.visualize_messages import _pretty_model
 from defender.presentation.visualize_primitives import (
     ASSETS,
     CSS,
@@ -66,15 +68,21 @@ _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from defender.records import Run
+    from defender.records.session_store import LedgerRead
     from defender.tenancy import Tenant
 
 @dataclasses.dataclass(frozen=True)
 class LedgerCost:
-    """The run's cost as the page shows it: the ledger's priced sum, or `None` when it cannot be read; and
-    whether the host knows spend may be missing from it."""
+    """The run's cost as the page shows it: the ledger's one read (`None` when it cannot be read), and
+    whether its total is "at least" (`session_store.lower_limit`: the ledger is incomplete, or the host
+    knows a spend write failed)."""
 
-    total: float | None
+    read: LedgerRead | None
     lower_limit: bool
+
+    @property
+    def total(self) -> float | None:
+        return None if self.read is None else self.read.total
 
 
 #: What the dev-only copy did: landed, was not attempted (not a `dev` deployment), or failed.
@@ -97,19 +105,18 @@ def render_page(run: Run, *, update_ticket: bool = False, spend_write_failed: bo
 
 
 def _ledger_cost(run: Run, *, spend_write_failed: bool) -> LedgerCost:
-    """The run's spend from its ledger, priced as the worker prices it (#1377 r6 S5). The store must resolve
-    (a run dir copied without its store pointer fails before a page exists); a ledger that cannot be read
-    leaves the cost unknown."""
-    from defender.configuration import usage_cost
+    """The run's spend from its ledger, through the read the worker and the run file use (#1377 r7 S5).
+    The store must resolve (a run dir copied without its store pointer fails before a page exists); a
+    ledger that cannot be read (a row of an unknown agent id included) leaves the cost unknown."""
     from defender.records import session_store as ss
 
     with ss.open_store_for_read(ss.resolve_store_path(run)) as store:
         try:
-            total = sum(usage_cost(r.model, r.usage) for r in ss.run_spend(store, str(run.id)))
+            read = ss.read_ledger(store, str(run.id))
         except Exception:  # noqa: BLE001 — an unreadable ledger is an unknown cost, never a failed page
             _logger.warning("the spend ledger of %s could not be read; the page's cost is unknown", run.run_dir, exc_info=True)
             return LedgerCost(None, False)
-    return LedgerCost(total, spend_write_failed)
+    return LedgerCost(read, ss.lower_limit(complete=read.complete, spend_write_failed=spend_write_failed))
 
 
 def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False, spend_write_failed: bool = False) -> CopyOutcome:
@@ -258,10 +265,8 @@ def render_runtime_headline(
 """
 
 
-#: The cost bar's segment for the part of the run's total no request-log bar explains (#1377 S5).
-UNATTRIBUTED = "unattributed"
-#: The cost bar's segment for the close-time review's calls (#1377 A5).
-REVIEW = "review"
+#: The cost bar's segment colour per requesting agent kind (#1377 r7 S6).
+_KIND_COLOR = {MAIN_KIND: "#58a6ff", GATHER_KIND: "#3fb950", CORRELATION_KIND: "#a371f7", REVIEW_KIND: "#f0883e"}
 
 
 def render_runtime_metrics(
@@ -272,13 +277,11 @@ def render_runtime_metrics(
     totals: dict,
     health: dict,
 ) -> str:
-    # The dict collapses repeated phase names into one bucket, in first-appearance order.
-    bars = {ph: (attribution.get(ph) or {}).get("cost", 0.0) for ph in phase_order}
-    if totals.get("review_cost", 0.0) > 5e-7:
-        bars[REVIEW] = totals["review_cost"]
-    if totals.get("unattributed", 0.0) > 5e-7:
-        bars[UNATTRIBUTED] = totals["unattributed"]
-    cost_bar = _phase_bar(bars, lambda v: f"${v:.3f}")
+    # The cost bar is the ledger by requesting agent kind (#1377 r7 S6): only the kinds that spent, so it adds up
+    # to the headline by construction; no bar when the cost is unknown. Per-phase cost stays on the phase lines.
+    by_kind = totals.get("by_kind") or {}
+    cost_bar = _phase_bar({kind: by_kind[kind] for kind in AGENT_KINDS if by_kind.get(kind, 0.0) > 5e-7},
+                          lambda v: f"${v:.4f}", color=lambda kind: _KIND_COLOR[kind], empty="(no spend by agent)")
     wall_bar = _phase_bar(
         {ph: (wall_times.get(ph) or {}).get("duration_sec", 0.0) for ph in phase_order},
         lambda v: fmt_duration(v * 1000),
@@ -314,10 +317,11 @@ def render_runtime_metrics(
 
 
 
-def _phase_bar(values: dict[str, float], fmt) -> str:
+def _phase_bar(values: dict[str, float], fmt, *, color=None, empty: str = "(no per-phase attribution)") -> str:
+    """One segment per positive value; `color` names a segment's colour from its key (default: its phase verb's)."""
     total = sum(v for v in values.values() if v and v > 0)
     if total <= 0:
-        return '<div class="empty">(no per-phase attribution)</div>'
+        return f'<div class="empty">{esc(empty)}</div>'
     segs: list[str] = []
     # One segment per bucket (the dict's keys), so widths sum to 100%.
     for ph, v in values.items():
@@ -334,7 +338,7 @@ def _phase_bar(values: dict[str, float], fmt) -> str:
         else:
             inner = ""
         segs.append(
-            f'<div class="cb-seg" style="width:{pct:.4f}%;background:{phase_color(verb)}" '
+            f'<div class="cb-seg" style="width:{pct:.4f}%;background:{color(ph) if color else phase_color(verb)}" '
             f'title="{esc(title)}">{inner}</div>'
         )
     return "".join(segs)
@@ -492,16 +496,20 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False, cost: Led
     phase_keys = list(dict.fromkeys(phase_order))
     tags = tag_events_by_phase(events, phase_order)
 
-    attribution = phase_attribution(events, phase_order, tags)
+    # The informational figures (phase lines, by-model strip, review lenses) price the request log at each
+    # agent's requested model, from the ledger (#1377 r7.1 C); with no readable ledger, at the names logged.
+    ledger = None if cost is None else cost.read
+    main_price = None if ledger is None else (lambda usage: ledger.price(MAIN_KIND, usage))
+    attribution = phase_attribution(events, phase_order, tags, price=main_price)
     main_total = sum(b["cost"] for b in attribution.values())
-    gather_by_phase, gather_total = gather_cost_by_phase(run_dir, events, tags, phase_order, messages)
+    gather_by_phase, gather_total = gather_cost_by_phase(run_dir, events, tags, phase_order, messages, ledger)
     # `phase_keys`: iterating `phase_order` would add a repeated bucket's gather cost twice.
     for ph in phase_keys:
         attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
         attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
     # Review spend is totalled but not attributed to a phase: the investigator is never in the
     # gate.
-    review_by_lens = review_cost_by_lens(run_dir, messages)
+    review_by_lens = review_cost_by_lens(run_dir, messages, ledger)
     review_total = sum(review_by_lens.values())
     wall_times = phase_wall_times(events, tags, phase_order)
     g_wall_to, g_wall_from = gather_wall_by_phase(
@@ -524,23 +532,22 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False, cost: Led
 
     wall_ms = sum(e.get("duration_ms") or 0 for e in events if e.get("type") == "result")
     main_model = md["models"][0] if md["models"] else "main"
+    if ledger is not None:
+        main_model = _pretty_model(ledger.requested.get(MAIN_KIND, "")) or "main"
     by_model = {main_model: main_total}
     for by_model_costs in (
-        gather_cost_by_model(run_dir, messages), review_cost_by_model(run_dir, messages),
+        gather_cost_by_model(run_dir, messages, ledger), review_cost_by_model(run_dir, messages, ledger),
     ):
         for model, spent in by_model_costs.items():
             by_model[model] = by_model.get(model, 0.0) + spent
     # The headline is the spend ledger's total (#1377 r6 S5), never the run file's result line (the box can rewrite
-    # it). The bars come from the request log, review its own segment; what they do not explain is the "unattributed"
-    # segment (never below 0), so the parts add up to the headline. With no ledger handed in (a caller that has no
-    # run), the bars are the headline.
-    bars_total = main_total + gather_total + review_total
-    ledger_total = None if cost is None else cost.total
+    # it), and the bar is that ledger by agent kind (r7 S6). With no ledger handed in (a caller that has no run),
+    # the headline is the request log's figures and there is no bar.
     totals = {
-        "cost": bars_total if ledger_total is None else ledger_total,
-        "cost_unknown": cost is not None and ledger_total is None,
-        "lower_limit": cost is not None and ledger_total is not None and cost.lower_limit,
-        "unattributed": 0.0 if ledger_total is None else max(0.0, ledger_total - bars_total),
+        "cost": main_total + gather_total + review_total if cost is None else (cost.total or 0.0),
+        "cost_unknown": cost is not None and ledger is None,
+        "lower_limit": ledger is not None and cost is not None and cost.lower_limit,
+        "by_kind": {} if ledger is None else ledger.by_kind(),
         "review_cost": review_total,
         "wall_ms": wall_ms,
         "by_model": by_model,

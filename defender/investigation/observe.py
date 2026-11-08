@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ from defender._io import JSON_NESTING_LIMIT, guarded_mkdir, json_safe, open_guar
 from defender.records import Run, RUN_LAYOUT, RunPaths
 from defender.records.formats import wire_digest
 
-from defender.configuration import billed_usage as _usage_dict, usage_cost
+from defender.configuration import billed_usage as _usage_dict, usage_cost  # noqa: F401 — `observe.usage_cost` is re-exported
 
 _logger = logging.getLogger(__name__)
 
@@ -92,19 +93,47 @@ class _NoLedger:
 NO_LEDGER = _NoLedger()
 
 
+@dataclass(frozen=True)
+class RequestEnd:
+    """How one model request ended, as its ledger row records it (#1377 r7 S2a): the requesting
+    agent, the model it was built to request, the outcome word, and on a response the name the
+    provider reported and the billed counts."""
+
+    agent_id: str
+    requested_model: str
+    outcome: str
+    reported_model: str | None = None
+    usage: dict[str, int] = field(default_factory=dict)
+
+    @classmethod
+    def of(cls, agent_id: str, requested_model: str, *, response: Any = None,
+           failure: BaseException | None = None) -> RequestEnd:
+        """A request's end from what its handler returned or raised: a response; an HTTP error
+        the retrier does not retry, refused ($0); any other end (a cancellation, `ProviderDown`,
+        a reply that did not parse, an HTTP error that reached the hook unretried), unseen."""
+        from defender import providers
+        from defender.records import session_store as ss
+
+        if failure is None:
+            return cls(agent_id, requested_model, ss.RESPONSE, getattr(response, "model_name", None) or None,
+                       _usage_dict(getattr(response, "usage", None)))
+        outcome = ss.REFUSED if providers.refused_by_provider(failure) else ss.UNSEEN
+        return cls(agent_id, requested_model, outcome)
+
+
 class SpendLedger:
     """A run's spend ledger: the run's session store and the run id its rows are written under."""
 
     def __init__(self, store: Any, run_id: str) -> None:
         self.store, self.run_id = store, run_id
 
-    def record(self, response: Any) -> None:
-        """Append `response`'s row. Raises whatever the store raises; `RequestLogger.record_spend`
+    def record(self, end: RequestEnd) -> None:
+        """Append `end`'s row. Raises whatever the store raises; `RequestLogger.record_spend`
         is the caller that never lets it reach an agent."""
         from defender.records import session_store as ss
 
-        ss.record_spend(self.store, self.run_id, getattr(response, "model_name", None) or "",
-                        _usage_dict(getattr(response, "usage", None)))
+        ss.record_spend(self.store, self.run_id, agent_id=end.agent_id, requested_model=end.requested_model,
+                        outcome=end.outcome, reported_model=end.reported_model, usage=end.usage)
 
 
 class RequestLogger:
@@ -141,11 +170,17 @@ class RequestLogger:
 
     def bind_ledger(self, ledger: SpendLedger | _NoLedger, *, on_failure: Any = None) -> None:
         """Bind the run's ledger (or `NO_LEDGER`); `on_failure()` is called once per failed write."""
-        self.ledger, self._on_spend_failure = ledger, on_failure
+        self.ledger = ledger
+        if on_failure is not None:
+            self._on_spend_failure = on_failure
 
-    def record_spend(self, response: Any) -> None:
-        """The ledger write for one response, the first step after it returns. It never raises: a
-        failure (or a missing binding) logs at ERROR, sets `spend_write_failed` and tells the
+    def set_spend_failure_sink(self, on_failure: Any) -> None:
+        """`on_failure()` is called once per failed spend write, a write while no ledger is bound included."""
+        self._on_spend_failure = on_failure
+
+    def record_spend(self, end: RequestEnd) -> None:
+        """The ledger write for one request, the first step after it ends, whatever its outcome.
+        It never raises: a failure (or a missing binding) logs at ERROR, sets `spend_write_failed` and tells the
         failure sink, and the agent runs on. A raise here would change a verdict (the review
         gate forces `inconclusive` on any exception from a stage)."""
         ledger = self.ledger
@@ -154,7 +189,7 @@ class RequestLogger:
         try:
             if not isinstance(ledger, SpendLedger):
                 raise RuntimeError("no spend ledger is bound to this run's request logger")
-            ledger.record(response)
+            ledger.record(end)
         except Exception as fault:  # noqa: BLE001 — bookkeeping never stops the run (#1377 S3)
             self.spend_write_failed = True
             _logger.error(f"spend write failed ({fault!r}); this run's cost is a lower limit")
@@ -431,7 +466,8 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, r
     which would otherwise be reported once per sibling. The result line's cost and usage are the
     spend ledger's rows for `run_id` (#1377 S5): every response the run received (main, every
     lead's last one, the review), never the saved conversation. `num_turns` stays MAIN's turns,
-    which run health reads. The total is marked a lower limit when a spend write failed. A ledger
+    which run health reads. The total is marked a lower limit when the ledger is incomplete or a spend
+    write failed (`session_store.lower_limit`, the page's rule too). A ledger
     that cannot be read leaves the events whole with a null total and usage (the job's cost is unknown then too).
     """
     from defender.records import session_store as ss  # local import — avoids a cycle at module load
@@ -458,14 +494,11 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, r
     responses = [m for m in messages if isinstance(m, ModelResponse)]
     total_cost: float | None
     totals: dict[str, int] | None
+    lower = False
     try:
-        counts = dict.fromkeys(ss.SPEND_COUNTS, 0)
-        spend = 0.0
-        for spent in ss.run_spend(store, run_id):
-            for k in ss.SPEND_COUNTS:
-                counts[k] += spent.usage.get(k, 0)
-            spend += usage_cost(spent.model, spent.usage)
-        total_cost, totals = spend, counts
+        read = ss.read_ledger(store, run_id)
+        total_cost, totals = read.total, dict(read.usage)
+        lower = ss.lower_limit(complete=read.complete, spend_write_failed=spend_write_failed)
     except Exception as e:  # noqa: BLE001 — an unreadable ledger leaves the events whole and the total unknown
         _logger.error(f"the spend ledger could not be read for the run file ({e!r}); its total is left null")
         total_cost = totals = None
@@ -475,7 +508,7 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, r
         "duration_ms": round(wall_ms),
         "duration_api_ms": round(wall_ms),
         "total_cost_usd": None if total_cost is None else round(total_cost, 6),
-        "total_cost_is_lower_limit": spend_write_failed and total_cost is not None,
+        "total_cost_is_lower_limit": lower,
         "num_turns": len(responses),
         "usage": totals,
     })
@@ -485,5 +518,5 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, r
 # Public path-mode helpers remain available to learning and tooling callers.
 __all__ = [
     "RequestLogger", "encode_wire_record", "denial_logger", "wire_log_path",
-    "stage_trace_path", "writer_id", "write_trace", "NO_LEDGER", "SpendLedger",
+    "stage_trace_path", "writer_id", "write_trace", "NO_LEDGER", "RequestEnd", "SpendLedger",
 ]

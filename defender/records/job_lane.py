@@ -137,11 +137,13 @@ class JobEnd:
 
 @dataclass(frozen=True)
 class RunCost:
-    """A run's spend read from its ledger, and whether the run ever opened its store (a pointer
-    exists): the worker applies the lower-limit rule from this one read (#1377)."""
+    """A run's spend read from its ledger, whether the run ever opened its store (a pointer
+    exists), and whether the ledger is complete (no unseen request, no unpriced model; r7 S2):
+    the worker applies the lower-limit rule from this one read (#1377)."""
 
     usd: float
     store_opened: bool
+    complete: bool = True
 
 
 def _run_id(raw: object) -> RunId:
@@ -334,6 +336,7 @@ class JobLane:
         """What the run spent: the sum of the spend ledger's rows for this run id in the database
         its pointer names (#1377), each priced from the pricing table. Rows of another run in the
         same database (a branch arm's source, a sibling) are not counted; no conversation is read.
+        It is `session_store.read_ledger`, the one read the run file and the page use too.
         No pointer: 0, `store_opened` false (the store was never opened, so no model request was
         made). `CostUnreadable` for a pointer or database that cannot be read, a database without
         the ledger, or a pointer naming a session the database lacks."""
@@ -342,7 +345,6 @@ class JobLane:
         if located is None:
             return RunCost(0.0, store_opened=False)
         database, session_id = located
-        from defender.configuration import usage_cost
         from defender.records import session_store
 
         try:
@@ -350,8 +352,8 @@ class JobLane:
                 main = session_id if session_id is not None else session_store.main_session_id(store)
                 if store.connection.execute("SELECT 1 FROM session WHERE session_id = ?", (main,)).fetchone() is None:
                     raise CostUnreadable(f"run {run_id}: its main session {main} is not in {database}")
-                return RunCost(sum(usage_cost(r.model, r.usage) for r in session_store.run_spend(store, str(run_id))),
-                               store_opened=True)
+                read = session_store.read_ledger(store, str(run_id))
+                return RunCost(read.total, store_opened=True, complete=read.complete)
         except CostUnreadable:
             raise
         except (OSError, sqlite3.Error, StoreError, ValueError) as fault:

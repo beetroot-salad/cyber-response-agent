@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 from defender._io import iter_plain_jsonl_rows
 from defender.records.formats import ReportRead
@@ -186,12 +187,15 @@ def gather_cost_by_phase(
     tags: list[str | None],
     phase_order: list[str],
     messages: list[dict] | None = None,
+    ledger: Any = None,
 ) -> tuple[dict[str, float], float]:
     """The leads' spend by phase, from the request log's lead responses alone. The run file's total
     is the whole run's (#1377), so "the total minus MAIN's" is no longer taken for gather spend: a
-    log with no lead response has no gather cost on any phase."""
+    log with no lead response has no gather cost on any phase. `ledger` (a `LedgerRead`) prices
+    each lead's responses at the model it requested (r7.1 C); without one, at the name logged."""
     out = {ph: 0.0 for ph in phase_order}
-    per_lead = _cost_by(_iter_gather_responses(run_dir, messages), lambda lead, _raw: lead)
+    per_lead = _cost_by(_iter_gather_responses(run_dir, messages), lambda lead, _raw: lead,
+                        GATHER_AGENT_ID_PREFIX, ledger)
     if per_lead:
         gphase = gather_dispatch_phase(events, tags)
         fallback = phase_order[0] if phase_order else None
@@ -227,38 +231,49 @@ def gather_wall_by_phase(
     return to_gather, from_dispatch
 
 
-def _cost_by(pairs, key) -> dict[str, float]:
-    """Price a namespace's wire responses and total them under whatever `key` names."""
+def _cost_by(pairs, key, prefix: str = "", ledger: Any = None) -> dict[str, float]:
+    """Price a namespace's wire responses and total them under whatever `key` names. With a
+    `ledger` (a `LedgerRead`), a response is priced at the model its agent (`prefix` + suffix)
+    requested and `key` is handed that name, never the one logged (#1377 r7.1 C)."""
     out: dict[str, float] = {}
     for suffix, rec in pairs:
-        raw = rec.get("model") or ""
+        usage = rec.get("usage") or {}
+        if ledger is None:
+            raw = rec.get("model") or ""
+            cost = usage_cost(raw, usage)
+        else:
+            agent_id = f"{prefix}{suffix}"
+            raw, cost = ledger.requested.get(agent_id, ""), ledger.price(agent_id, usage)
         k = key(suffix, raw)
-        out[k] = out.get(k, 0.0) + usage_cost(raw, rec.get("usage") or {})
+        out[k] = out.get(k, 0.0) + cost
     return out
 
 
 def gather_cost_by_model(
-    run_dir: Path, messages: list[dict] | None = None
+    run_dir: Path, messages: list[dict] | None = None, ledger: Any = None,
 ) -> dict[str, float]:
-    return _cost_by(_iter_gather_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw))
+    return _cost_by(_iter_gather_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw),
+                    GATHER_AGENT_ID_PREFIX, ledger)
 
 
 def review_cost_by_lens(
-    run_dir: Path, messages: list[dict] | None = None
+    run_dir: Path, messages: list[dict] | None = None, ledger: Any = None,
 ) -> dict[str, float]:
     """The write-time review gate's spend, split by lens — support / ablation / composer.
 
     Per lens, not per close attempt: wire records carry no round, and the ablation lens is
     sometimes skipped, so its n-th call is not its n-th round."""
-    return _cost_by(_iter_review_responses(run_dir, messages), lambda lens, _raw: lens)
+    return _cost_by(_iter_review_responses(run_dir, messages), lambda lens, _raw: lens,
+                    REVIEW_AGENT_ID_PREFIX, ledger)
 
 
 def review_cost_by_model(
-    run_dir: Path, messages: list[dict] | None = None
+    run_dir: Path, messages: list[dict] | None = None, ledger: Any = None,
 ) -> dict[str, float]:
     """The same spend keyed by model. The review has its own pinned default model, so this is
     usually a separate row, merging with main's when both use one model."""
-    return _cost_by(_iter_review_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw))
+    return _cost_by(_iter_review_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw),
+                    REVIEW_AGENT_ID_PREFIX, ledger)
 
 
 def tool_usage(events: list[dict], messages: list[dict] | None = None) -> list[dict]:

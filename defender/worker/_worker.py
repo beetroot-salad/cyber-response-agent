@@ -43,7 +43,7 @@ from defender import _log
 from defender.jobs import is_outage, is_refusal
 from defender.box import Reaped, container_name
 from defender.execution import kill_group
-from defender.records import job_facts, job_lane
+from defender.records import job_facts, job_lane, session_store
 from defender.records.formats import DataRoot, digest_of
 from defender.tenancy import data_root_for_child, data_root_from_path
 
@@ -613,7 +613,8 @@ class Worker:
     def _read_ending(self, record: Any, returncode: int) -> tuple[Ending, float | None, bool, dict | None]:  # ending, cost, cost is exact, knowledge
         """The stage, cost and knowledge from the host records, through the job lane (in a thread).
         A cost that cannot be read is None, the final figure's own meaning (R2). The cost is
-        exact (#1377 S2) unless the run reported a failed spend write, or opened its store and left no
+        exact (#1377 S2) unless its ledger is incomplete (an unseen request or an unpriced model, r7),
+        the run reported a failed spend write, or it opened its store and left no
         readable job-end record (a killed run cannot report one); `Held.lower_limit` turns that into
         the mark at the one write.  A run that never opened its store costs exactly 0."""
         inv = record.investigation_id
@@ -633,7 +634,8 @@ class Worker:
             try:
                 spent = lane.cost(inv)
                 cost = spent.usd
-                exact = not ((job_end is not None and job_end.spend_write_failed)
+                failed = job_end is not None and job_end.spend_write_failed
+                exact = not (session_store.lower_limit(complete=spent.complete, spend_write_failed=failed)
                              or (spent.store_opened and job_end is None))
             except job_lane.CostUnreadable as unreadable:
                 _logger.warning("investigation %s: its cost is unknown: %s", inv, unreadable)

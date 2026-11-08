@@ -732,6 +732,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # Under `wire_logs/`, not the run root, so it is outside the agents' one-segment run-dir
     # read shape.
     logger = observe.RequestLogger.from_record(run.observability.wire_log)
+    # The spend-failure sink from the start, before any ledger is bound: a request that ends while none
+    # is bound is a failed spend write the job-end record must carry too (#1377 S2c).
+    logger.set_spend_failure_sink(on_spend_failure)
 
     # The wire log and the store are released by this block, on every exit however the run ends:
     # a path left in `observe._ACTIVE_PATHS` would refuse a later run on this run dir, and a

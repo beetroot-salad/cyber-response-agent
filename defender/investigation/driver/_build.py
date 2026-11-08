@@ -112,7 +112,7 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
         if reused_gate is None else reused_gate
     )
     capabilities: list[Any] = [
-        _make_hooks(logger, agent_id, enforce=defn.budget_enforced, limits=limits,
+        _make_hooks(logger, agent_id, enforce=defn.budget_enforced, requested_model=model_name, limits=limits,
                     session_id=session_id, store=store, toon_gate=toon_gate),
         *extra_capabilities,
     ]

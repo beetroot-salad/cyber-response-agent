@@ -86,9 +86,11 @@ def _stamp_duration(store: Any, session_id: str | None, duration_ms: float) -> N
 
 
 def _make_hooks(  # noqa: PLR0913 — the hook set's full wiring: logging, budget, and the store stamp
-    logger: observe.RequestLogger, agent_id: str, *, enforce: bool, limits: dict = DEFAULT_LIMITS,
-    session_id: str | None = None, store: Any = None, toon_gate: Any = None,
+    logger: observe.RequestLogger, agent_id: str, *, enforce: bool, requested_model: str,
+    limits: dict = DEFAULT_LIMITS, session_id: str | None = None, store: Any = None, toon_gate: Any = None,
 ) -> Hooks[Any]:
+    """The agent's hook set. `requested_model` is the model the agent was built to request: its
+    ledger rows are priced at it, never at a name the provider reports (#1377 r7 S1, r7.1 D)."""
     hooks = Hooks()
 
     @hooks.on.tool_execute
@@ -112,12 +114,17 @@ def _make_hooks(  # noqa: PLR0913 — the hook set's full wiring: logging, budge
     @hooks.on.model_request
     async def _log_request(ctx, *, request_context, handler):  # noqa: ANN001
         t0 = time.time()
-        resp = await handler(request_context)
+        try:
+            resp = await handler(request_context)
+        except BaseException as failure:  # noqa: BLE001 — recorded, then re-raised unchanged
+            # One synchronous write, so it lands even while the task is being cancelled (#1377 r7 S2a).
+            logger.record_spend(observe.RequestEnd.of(agent_id, requested_model, failure=failure))
+            raise
         duration_ms = (time.time() - t0) * 1000.0
         # Billing first, with its own failure path: the request log's faults are swallowed below
         # and one too-deep tool call stops an agent's later logging, so the ledger write must not
         # sit behind them. It never raises into the agent (#1377).
-        logger.record_spend(resp)
+        logger.record_spend(observe.RequestEnd.of(agent_id, requested_model, response=resp))
         try:
             _stamp_duration(store, session_id, duration_ms)
             logger.log(

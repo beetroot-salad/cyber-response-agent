@@ -25,7 +25,18 @@ from defender.records.run_end import (  # noqa: F401 — re-exports
     normalized_truncated_by,
 )
 
-from ._ledger import COUNTS as SPEND_COUNTS, SpendRow as SpendRow, record_spend as record_spend, run_spend as run_spend  # noqa: F401
+from ._ledger import (  # noqa: F401
+    COUNTS as SPEND_COUNTS,
+    REFUSED as REFUSED,
+    RESPONSE as RESPONSE,
+    UNSEEN as UNSEEN,
+    LedgerRead as LedgerRead,
+    SpendRow as SpendRow,
+    lower_limit as lower_limit,
+    read_ledger as read_ledger,
+    record_spend as record_spend,
+    run_spend as run_spend,
+)
 from ._schema import (
     CyclicParentChain as CyclicParentChain,
     DDL as DDL,

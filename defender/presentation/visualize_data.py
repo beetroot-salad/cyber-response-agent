@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import re
 from datetime import datetime
 from pathlib import Path
@@ -227,7 +228,7 @@ def merge_assistant_events(events: list[dict]) -> list[dict]:
 
 
 
-def _accumulate_usage(b: dict, msg: dict) -> None:
+def _accumulate_usage(b: dict, msg: dict, price: Callable[[dict], float] | None = None) -> None:
     usage = msg.get("usage") or {}
     model = msg.get("model", "")
     b["turns"] += 1
@@ -235,7 +236,7 @@ def _accumulate_usage(b: dict, msg: dict) -> None:
     b["out"] += usage.get("output_tokens", 0)
     b["cache_r"] += usage.get("cache_read_input_tokens", 0)
     b["cache_w"] += usage.get("cache_creation_input_tokens", 0)
-    b["cost"] += usage_cost(model, usage)
+    b["cost"] += usage_cost(model, usage) if price is None else price(usage)
 
 
 def _attribute_main_agent(
@@ -243,6 +244,7 @@ def _attribute_main_agent(
     buckets: dict[str, dict],
     msg_phase: dict[str, str],
     phase_order: list[str],
+    price: Callable[[dict], float] | None = None,
 ) -> dict[str, str]:
     task_phase: dict[str, str] = {}
     for ev in deduped:
@@ -254,7 +256,7 @@ def _attribute_main_agent(
         if b is None:
             continue
         msg = ev.get("message") or {}
-        _accumulate_usage(b, msg)
+        _accumulate_usage(b, msg, price)
         for blk in (msg.get("content") or []):
             if isinstance(blk, dict) and blk.get("type") == "tool_use":
                 name = blk.get("name", "?")
@@ -270,6 +272,7 @@ def _attribute_subagents(
     deduped: list[dict],
     buckets: dict[str, dict],
     task_phase: dict[str, str],
+    price: Callable[[dict], float] | None = None,
 ) -> None:
     for ev in deduped:
         pid = ev.get("parent_tool_use_id")
@@ -280,7 +283,7 @@ def _attribute_subagents(
             continue
         msg = ev.get("message") or {}
         b = buckets[ph]
-        _accumulate_usage(b, msg)
+        _accumulate_usage(b, msg, price)
         for blk in (msg.get("content") or []):
             if isinstance(blk, dict) and blk.get("type") == "tool_use":
                 name = blk.get("name", "?")
@@ -292,7 +295,10 @@ def phase_attribution(
     events: list[dict],
     phase_order: list[str],
     tags: list[str | None] | None = None,
+    price: Callable[[dict], float] | None = None,
 ) -> dict[str, dict]:
+    """MAIN's turns, tool calls and cost by phase. `price` prices a turn's usage (the page hands
+    MAIN's requested model's, #1377 r7.1 C); without it, the model the trace names."""
     buckets: dict[str, dict] = {
         ph: {
             "turns": 0, "tool_calls": 0, "subagent_calls": 0,
@@ -309,8 +315,8 @@ def phase_attribution(
     deduped = merge_assistant_events(events)
 
     msg_phase = msg_phase_map(events, tags)
-    task_phase = _attribute_main_agent(deduped, buckets, msg_phase, phase_order)
-    _attribute_subagents(deduped, buckets, task_phase)
+    task_phase = _attribute_main_agent(deduped, buckets, msg_phase, phase_order, price)
+    _attribute_subagents(deduped, buckets, task_phase, price)
 
     return buckets
 
