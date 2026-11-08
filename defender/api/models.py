@@ -30,8 +30,9 @@ LearningJobStatus = Literal["queued", "running", "completed", "failed", "skipped
 RECORD_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 RecordId = Annotated[str, Field(pattern=RECORD_ID_PATTERN)]
 
-def _refuse_unstorable_id(value: str) -> str:
-    """Refuse text PostgreSQL cannot hold, here rather than at the store (#1379 O1a)."""
+def _must_be_storable(value: str) -> str:
+    """Refuse text PostgreSQL cannot hold, here rather than at the store (#1379 O1a; a program's name and a
+    credential's, #1307 A2)."""
     if not postgres_can_hold(value):
         raise ValueError("it holds a NUL or a lone surrogate, which cannot be stored")
     return value
@@ -44,7 +45,7 @@ ClientRequestId = Annotated[str, Field(
     description="Minted once per user action. Repeating the request with it answers the latest "
                 "attempt of the request this id started; a request answered with an investigation "
                 "already live started nothing, so repeating it is a new request.",
-), AfterValidator(_refuse_unstorable_id)]
+), AfterValidator(_must_be_storable)]
 
 
 def _not_a_number(value: object) -> object:
@@ -380,7 +381,7 @@ class ProgramCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    display_name: str = Field(min_length=1, max_length=200)
+    display_name: Annotated[str, Field(min_length=1, max_length=200), AfterValidator(_must_be_storable)]
 
 
 class Program(BaseModel):
@@ -396,7 +397,7 @@ class CredentialCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["key", "oauth_client"]
-    name: str = Field(min_length=1, max_length=200)
+    name: Annotated[str, Field(min_length=1, max_length=200), AfterValidator(_must_be_storable)]
     expires_at: Instant | None = Field(default=None, description="Between 7 and 365 days from now; 90 days when absent.")
 
 

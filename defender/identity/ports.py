@@ -52,7 +52,11 @@ class IdentityRepository(Protocol):
     - a session is found by the hash of its value, and the value itself is never kept;
     - a person has an email and the `admin` role; a program has neither an email, an account nor the
       administrator flag, is always `active`, holds only the `automation` role, is never invited, and
-      owns credentials (at most two usable or still-pending at once, only while its membership is active);
+      owns credentials (at most two usable or still-pending at once, only while its membership is active),
+      and only a program owns one: that is a rule of the data itself (a foreign key to the user's kind), not
+      something to check again when a credential is used;
+    - a program's display name and a credential's name hold only what PostgreSQL text can (no NUL, no lone
+      surrogate);
     - every write that changes a program's membership or credentials is serialised on the program's user row.
 
     Time is an explicit aware-UTC argument; the repository holds no clock. Every method is a

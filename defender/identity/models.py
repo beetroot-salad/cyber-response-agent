@@ -11,7 +11,7 @@ from typing import Annotated, Literal, get_args
 
 from pydantic import AfterValidator
 from sqlalchemy import (
-    Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, text,
+    Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, Text, UniqueConstraint, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
@@ -36,6 +36,14 @@ def normalize_email(raw: str) -> str:
     if not postgres_can_hold(email):
         raise DataRuleViolation(f"{raw!r} is not an email address: it has a NUL or an invalid character")
     return email
+
+
+def postgres_text(value: str, what: str) -> str:
+    """`value` when PostgreSQL text can hold it, else `DataRuleViolation`: both repositories refuse a program's
+    display name and a credential's name alike, rather than one failing in the database."""
+    if not postgres_can_hold(value):
+        raise DataRuleViolation(f"{what} has a NUL or an invalid character")
+    return value
 
 
 #: An email field normalized as it is built, so nothing after the boundary normalizes again.
@@ -71,6 +79,8 @@ class User(Base, kw_only=True):
     __table_args__ = (
         UniqueConstraint("email"),
         UniqueConstraint("signin_account_id"),
+        # The target of `program_credentials`' composite foreign key.
+        UniqueConstraint("id", "kind"),
         CheckConstraint("email = lower(email)", name="email_lowercase"),
         _status_check(UserStatus),
         CheckConstraint("status <> 'active' OR activated_at IS NOT NULL", name="active_is_activated"),
@@ -124,8 +134,10 @@ class User(Base, kw_only=True):
 
     @classmethod
     def new_program(cls, *, display_name: str, created_by: UserId, created_at: _dt.datetime) -> User:
-        """A program as first stored: active, with no email, account or administrator flag."""
-        return cls(email=None, kind="program", created_by=created_by, display_name=display_name,
+        """A program as first stored: active, with no email, account or administrator flag. The display
+        name must be text PostgreSQL can hold."""
+        return cls(email=None, kind="program", created_by=created_by,
+                   display_name=postgres_text(display_name, "a program's display name"),
                    status="active", created_at=created_at, updated_at=created_at, activated_at=created_at)
 
     @validates("status")
@@ -190,6 +202,10 @@ class ProgramCredential(Base, kw_only=True):
 
     __tablename__ = "program_credentials"
     __table_args__ = (
+        # A credential's program is a user of kind program: `program_kind` is always 'program', and the pair
+        # must exist in `users` (so no credential can ever authenticate a person by bearer, P-F).
+        ForeignKeyConstraint(["program_id", "program_kind"], [f"{SCHEMA}.users.id", f"{SCHEMA}.users.kind"]),
+        CheckConstraint("program_kind = 'program'", name="program_kind"),
         _in_check("kind", CredentialKind, "kind"),
         _in_check("state", CredentialState, "state"),
         CheckConstraint("(kind = 'key') = (key_hash IS NOT NULL)", name="key_iff_hash"),
@@ -201,7 +217,9 @@ class ProgramCredential(Base, kw_only=True):
     )
 
     id: Mapped[CredentialId] = mapped_column(IdColumn(CredentialId), primary_key=True, default_factory=CredentialId.mint)
-    program_id: Mapped[UserId] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"))
+    program_id: Mapped[UserId] = mapped_column(IdColumn(UserId))
+    #: Always `program`; see the foreign key above.
+    program_kind: Mapped[Literal["program"]] = mapped_column(Text, default="program")
     kind: Mapped[CredentialKind] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
     state: Mapped[CredentialState] = mapped_column(Text)
@@ -221,6 +239,10 @@ class ProgramCredential(Base, kw_only=True):
     warn_3d_settled_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     warn_14d_next_try_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     warn_3d_next_try_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+
+    @validates("name")
+    def _name(self, _key: str, value: str) -> str:
+        return postgres_text(value, "a credential's name")
 
     @validates("kind")
     def _kind(self, _key: str, value: str) -> str:

@@ -35,6 +35,8 @@ def upgrade() -> None:
         schema="identity")
     op.create_check_constraint(
         "creator_is_for_programs", "users", "kind = 'program' OR created_by IS NULL", schema="identity")
+    # The target of `program_credentials`' composite foreign key: a credential's program is a program by schema, not by recheck.
+    op.create_unique_constraint(op.f("uq_users_id_kind"), "users", ["id", "kind"], schema="identity")
 
     op.add_column("memberships", sa.Column("role", sa.Text(), nullable=False, server_default="admin"), schema="identity")
     op.alter_column("memberships", "role", server_default=None, schema="identity")
@@ -45,6 +47,8 @@ def upgrade() -> None:
         "program_credentials",
         sa.Column("id", _uuid(), nullable=False),
         sa.Column("program_id", _uuid(), nullable=False),
+        # Always 'program'; with the composite foreign key below it ties `program_id` to a user of kind program.
+        sa.Column("program_kind", sa.Text(), nullable=False, server_default="program"),
         sa.Column("kind", sa.Text(), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("state", sa.Text(), nullable=False),
@@ -62,7 +66,10 @@ def upgrade() -> None:
         sa.Column("warn_14d_next_try_at", _TIME, nullable=True),
         sa.Column("warn_3d_next_try_at", _TIME, nullable=True),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_program_credentials")),
-        sa.ForeignKeyConstraint(["program_id"], ["identity.users.id"], name=op.f("fk_program_credentials_program_id_users")),
+        sa.ForeignKeyConstraint(
+            ["program_id", "program_kind"], ["identity.users.id", "identity.users.kind"],
+            name=op.f("fk_program_credentials_program_id_program_kind_users")),
+        sa.CheckConstraint("program_kind = 'program'", name=op.f("ck_program_credentials_program_kind")),
         sa.ForeignKeyConstraint(["created_by"], ["identity.users.id"], name=op.f("fk_program_credentials_created_by_users")),
         sa.ForeignKeyConstraint(["revoked_by"], ["identity.users.id"], name=op.f("fk_program_credentials_revoked_by_users")),
         sa.CheckConstraint("kind IN ('key', 'oauth_client')", name=op.f("ck_program_credentials_kind")),

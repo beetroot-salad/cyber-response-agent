@@ -43,7 +43,8 @@ VULTURE_ARGS = [
     "--exclude", "defender/.venv,defender/tests,defender/skills/invlang/schema.py",
     # event_time is the alert mapping's entry in its wire model and its table: read through pydantic and SQLAlchemy.
     # The warn_* columns of a program credential are read and written by name (`getattr` over the threshold's column names).
-    "--ignore-names", "key_field,key_value,event_time,warn_14d_settled_at,warn_3d_settled_at,warn_14d_next_try_at,warn_3d_next_try_at",
+    # `program_kind` is a column no code reads: it is always 'program', and its composite foreign key (to users' id and kind) is what it is for.
+    "--ignore-names", "key_field,key_value,event_time,program_kind,warn_14d_settled_at,warn_3d_settled_at,warn_14d_next_try_at,warn_3d_next_try_at",
     # pydantic calls its validators by decorator registration, never by name.
     "--ignore-decorators", "@field_validator,@model_validator",
 ]
