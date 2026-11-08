@@ -333,6 +333,14 @@ class InMemoryIdentityRepository:
         row = self._live_row(user_id, tenant_id)
         return _copy(row) if row is not None and row.status == "active" else None
 
+    async def program_standing(self, program_id: UserId) -> tuple[User, Membership] | None:
+        program = self._users.get(program_id)
+        if program is None or program.kind != "program" or program.status != "active":
+            return None
+        row = next((m for m in self._memberships.values() if m.user_id == program_id and m.status == "active"
+                    and m.role == "automation" and self._active(m.tenant_id)), None)
+        return None if row is None else (_copy(program), _copy(row))
+
     # --- programs and their credentials ---------------------------------------------------------
     async def add_program(
         self, tenant_id: TenantId, *, display_name: str, created_by: UserId, now: _dt.datetime,

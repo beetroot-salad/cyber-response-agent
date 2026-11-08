@@ -36,6 +36,7 @@ import hashlib
 import pytest
 
 from defender.identity import DataRuleViolation
+from defender.records.formats import TenantId, UserId
 from defender.tests.identity.test_1306_repository_contract import (  # noqa: F401  (fixtures)
     HOUR,
     NO_SUCH_ROW,
@@ -44,6 +45,7 @@ from defender.tests.identity.test_1306_repository_contract import (  # noqa: F40
     T2,
     _active,
     _invited,
+    _seed_tenant,
     _user,
     backend,
     pg_dsn,
@@ -52,6 +54,7 @@ from defender.tests.identity.test_1306_repository_contract import (  # noqa: F40
     tenants,
     two_repositories,
 )
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._pglocks1339 import TIMEOUT, holding_row, until_blocked
 
 pytestmark = pytest.mark.anyio
@@ -518,6 +521,25 @@ async def test_removing_a_program_ends_its_membership_and_revokes_every_credenti
     assert await seeded.programs_of_tenant(T1) == [await seeded.user(other.id)]
     assert await seeded.remove_program(program.id, removed_by=admin.id, now=later + HOUR) is None
     assert (await seeded.memberships_of_user(program.id))[0].ended_at == later
+
+
+async def test_a_programs_standing_is_its_active_automation_membership_while_its_tenant_is_active(seeded, backend, tenants):
+    """One read lets a verified credential's program in: the program and its membership while that is active and its
+    tenant `active`; None once removed, for a person, for no user, and for a program of a tenant not `active` (#1450
+    review: authentication settles the tenant, so a route never reads it again)."""
+    admin = await _user(seeded)
+    program = await _program(seeded, admin)
+    standing = await seeded.program_standing(program.id)
+    assert standing is not None
+    assert (standing[0].id, standing[1].tenant_id, standing[1].role) == (program.id, T1, "automation")
+    elsewhere = TenantId(fixture_uuid("tenant:stranded"))
+    await _seed_tenant(backend, tenants, elsewhere, state="creating")
+    stranded = await _program(seeded, admin, tenant=elsewhere, name="Stranded")
+    assert await seeded.program_standing(stranded.id) is None
+    assert await seeded.program_standing(admin.id) is None
+    assert await seeded.program_standing(UserId(fixture_uuid("user:nobody"))) is None
+    await seeded.remove_program(program.id, removed_by=admin.id, now=NOW)
+    assert await seeded.program_standing(program.id) is None
 
 
 async def test_removing_a_program_answers_the_credentials_it_revoked_and_no_others(seeded):

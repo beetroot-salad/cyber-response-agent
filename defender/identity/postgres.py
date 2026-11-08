@@ -237,6 +237,16 @@ class PostgresIdentityRepository:
             Membership.user_id == user_id, Membership.tenant_id == tenant_id,
             Membership.status == "active"))
 
+    async def program_standing(self, program_id: UserId) -> tuple[User, Membership] | None:
+        async with self._tx() as s:
+            found = (await s.execute(
+                select(User, Membership).join(Membership, Membership.user_id == User.id)
+                .join(TenantRecord, TenantRecord.id == Membership.tenant_id)
+                .where(User.id == program_id, User.kind == "program", User.status == "active",
+                       Membership.status == "active", Membership.role == "automation",
+                       TenantRecord.state == "active"))).first()
+        return None if found is None else (found[0], found[1])
+
     # --- programs and their credentials -------------------------------------------------------
     @staticmethod
     async def _lock_program(s: AsyncSession, program_id: UserId) -> str | None:

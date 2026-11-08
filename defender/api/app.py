@@ -699,9 +699,7 @@ async def read_me(deps: Deps, caller: AnyCaller) -> Me | ProgramMe:
     """Who the caller is: a person with their tenants and invitations, or a program with its one tenant
     and the credential it used."""
     view = await deps.identity.me(caller)
-    if view.credential is not None:
-        if not view.tenants:  # a program's tenant is gone with its membership: fail closed
-            raise _identity.NotAuthenticated("sign in")
+    if view.credential is not None:  # a program, let in only while its one tenant is active
         return ProgramMe(
             program=ProgramRef(id=view.user.id, display_name=view.user.display_name),
             tenant=TenantRef(tenant_id=view.tenants[0]),

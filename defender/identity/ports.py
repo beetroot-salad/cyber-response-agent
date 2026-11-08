@@ -118,6 +118,10 @@ class IdentityRepository(Protocol):
         """The tenant's rows in `status`, each with its user, in one read."""
         ...
     async def active_membership(self, user_id: UserId, tenant_id: TenantId) -> Membership | None: ...
+    async def program_standing(self, program_id: UserId) -> tuple[User, Membership] | None:
+        """The program and its active `automation` membership, while the tenant it belongs to is `active`; else
+        None. One read: whether a verified credential lets its program in at all."""
+        ...
 
     # --- programs and their credentials (#1307)
     async def add_program(

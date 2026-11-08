@@ -173,10 +173,10 @@ def test_a_500_to_a_person_has_no_expiry_header() -> None:
 
 
 @pytest.mark.parametrize("kind", KINDS)
-def test_the_expiry_header_is_on_a_409_and_on_a_401_after_verification(kind: str) -> None:
-    """Statuses the contract's table lacked: cancelling an investigation that already ended (409), and `/me` of a program whose
-    tenant stopped being active (after the credential verified). Both carry the credential's expiry whatever the status (D9),
-    and `/me` no longer lists the tenant (A5)."""
+def test_the_expiry_header_is_on_a_409_and_absent_once_the_tenant_left_active(kind: str) -> None:
+    """Cancelling an investigation that already ended (409) carries the credential's expiry (D9). Once the tenant left
+    `active`, the credential no longer lets the program in: `/me` is a 401 without the header, as for any credential that
+    does not hold, and lists no tenant (A5; #1450 review: the tenant is part of whether a program's credential works)."""
     s = soar(failing_writes=True)
     program, credential = _as_program(s, kind)
     expires = {r.id: r for r in s.world.credentials(s.program_id)}[credential].expires_at
@@ -188,15 +188,17 @@ def test_the_expiry_header_is_on_a_409_and_on_a_401_after_verification(kind: str
     assert parse_time(program.get("/me").headers[EXPIRY_HEADER]) == expires  # control: the 200
     s.world.repo.missing_tenants.add(T1)  # the tenant left `active` (#1214) and the program's membership is still active
     refused = program.get("/me")
-    assert parse_time(refused.headers[EXPIRY_HEADER]) == expires  # whatever the status: the credential verified
-    assert T1 not in refused.text, refused.text  # a body that lists tenants does not list the one that left `active`
+    assert refused.status_code == 401, refused.text
+    assert EXPIRY_HEADER not in refused.headers
+    assert T1 not in refused.text, refused.text
 
 
 # --- F11: a tenant that is not active ends access for every caller kind (A5, #1214) ----------------------------------------
 
 def test_a_tenant_that_is_not_active_is_404_on_every_tenant_route_for_a_person_and_for_a_program() -> None:
-    """The tenant leaves `active` while every membership stays active: a person admin, a program by key and a program by token
-    are all told what an unknown tenant is told, on every tenant route, and neither `/me` lists the tenant (A5, O2, P-F)."""
+    """The tenant leaves `active` while every membership stays active: a person admin is told what an unknown tenant is told
+    (404) on every tenant route; a program, by key or by token, is no longer let in at all (401: its one tenant is part of
+    whether its credential works, #1450 review); no `/me` lists the tenant (A5, O2, P-F)."""
     s = soar(failing_writes=True)
     credential = issue_oauth(s.ann, T1, s.program_id)
     callers = {"person": s.ann, "key": s.program(), "token": s.world.bearer(s.world.realm.issue(credential))}
@@ -208,7 +210,7 @@ def test_a_tenant_that_is_not_active_is_404_on_every_tenant_route_for_a_person_a
     for name, caller in callers.items():
         for route in TENANT_ROUTES:
             got = _call(caller, route).status_code
-            if got != 404:
+            if got != (404 if name == "person" else 401):
                 failures.append(f"{name} {route_id(route)}: {got}")
         me = caller.get("/me")
         if T1 in me.text:

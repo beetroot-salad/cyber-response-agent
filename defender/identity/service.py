@@ -74,6 +74,9 @@ class Authenticated:
     user: User
     via: Session | ProgramCredential
     administrator: bool
+    #: A program's one active membership, read when its credential was accepted (its tenant then `active`): what
+    #: a program is a member of, with no read again. A person's are read per tenant (`member_of`).
+    membership: Membership | None = None
 
     @property
     def credential(self) -> ProgramCredential | None:
@@ -448,12 +451,14 @@ class IdentityService:
                 raise NotAuthenticated("sign in")
         if not usable(row, now):
             raise NotAuthenticated("sign in")
-        program = await self._repo.user(row.program_id)
-        if program is None or program.status != "active" or not any(
-                m.status == "active" and m.role == "automation" for m in await self._repo.memberships_of_user(program.id)):
+        # The tenant is part of whether the credential works: a program has one, and while it is not `active`
+        # nothing the credential is for can be done (#1450 review: so every refusal here is a 401, one answer).
+        standing = await self._repo.program_standing(row.program_id)
+        if standing is None:
             raise NotAuthenticated("sign in")
+        program, membership = standing
         await self._repo.touch_credential(row.id, now=now)
-        return Authenticated(user=program, via=row, administrator=False)
+        return Authenticated(user=program, via=row, administrator=False, membership=membership)
 
     async def logout(self, auth: Authenticated, value: str) -> None:
         await self._repo.delete_session(value)
@@ -464,6 +469,10 @@ class IdentityService:
         for a tenant that does not exist or is not active and a non-member): offboarding ends access with
         its request (#1214). A malformed id never gets here: the API refuses it (#1382). A program is
         asked the same question as a person."""
+        if auth.credential is not None:  # a program: its membership was settled when it was let in
+            if auth.membership is None or auth.membership.tenant_id != tenant_id:
+                raise NotFound("no such tenant")
+            return auth.membership
         membership = await self._repo.active_membership(auth.user.id, tenant_id)
         if membership is None or not await self._repo.tenant_exists(tenant_id):
             raise NotFound("no such tenant")
@@ -480,6 +489,9 @@ class IdentityService:
             raise Forbidden("platform administrators only")
 
     async def me(self, auth: Authenticated) -> MeView:
+        if auth.membership is not None:  # a program: its one tenant, active when it was let in
+            return MeView(user=auth.user, tenants=(auth.membership.tenant_id,), administrator=False,
+                          invitations=(), credential=auth.credential)
         now = self._clock()
         rows = await self._repo.memberships_of_user(auth.user.id)
         active = await self._repo.active_tenants({m.tenant_id for m in rows}) if rows else set()
