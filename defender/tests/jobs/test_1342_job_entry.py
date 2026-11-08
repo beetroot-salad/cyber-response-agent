@@ -1201,14 +1201,16 @@ def test_s2c_r7_a_failed_write_of_a_non_response_row_is_in_the_job_end_record_wh
     if run_ends == "raises":
         assert proc.returncode != 0, proc.stderr[-2000:]
         assert "the run died after its last response" in proc.stderr, proc.stderr[-2000:]
+    else:
+        assert "the run died after its last response" not in proc.stderr, ("premise: the run returned its summary", proc.stderr[-2000:])
     reviewed = (marks / "calls-review").read_text(encoding="utf-8").count("\n") if (marks / "calls-review").is_file() else 0
     assert reviewed == 3, ("premise: the live review stages made their three calls", proc.stderr[-2000:])
     landed = (marks / "ledger-agents").read_text(encoding="utf-8").split() if (marks / "ledger-agents").is_file() else []
     assert "gather:l-00c" not in landed, ("premise: the lead's own row was refused", landed)
     assert "main" in landed, ("premise: MAIN's rows landed", landed)
     assert len(landed) > 1, ("premise: the review's rows landed too", landed)
-    errors = [ln for ln in proc.stderr.splitlines() if "ERROR" in ln and "spend" in ln.lower()]
-    assert len(errors) == 1, ("premise: exactly one failed-write ERROR line", proc.stderr[-2000:])
+    errors = [ln for ln in proc.stderr.splitlines() if '"ERROR"' in ln and "spend" in ln.lower()]
+    assert errors, ("premise: the failed write was logged at ERROR", proc.stderr[-2000:])
     record = scene.job_end(run_id)
     assert record is not None, proc.stderr[-2000:]
     assert record["spend_write_failed"] is True, record

@@ -235,7 +235,7 @@ if mode.startswith("replay-priced"):
     def _landed() -> None:
         try:
             from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER
-            conn = sqlite3.connect(_session_database(), timeout=10)
+            conn = sqlite3.connect(f"file:{_session_database()}?mode=ro", uri=True, timeout=10)  # never creates a file
             try:
                 agents = sorted(r[0] for r in conn.execute(f"SELECT agent_id FROM {SPEND_LEDGER}"))
             finally:
