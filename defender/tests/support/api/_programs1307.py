@@ -388,10 +388,11 @@ class Soar:
         return self.world.bearer(self.key)
 
 
-def soar() -> Soar:
-    world = ProgramsWorld(tenants={T1: [ANN], T2: [BOB]})
-    world.store.add_alert(T1, ALERT)
-    ann, bob = world.sign_in(ANN), world.sign_in(BOB)
+def soar(**world_options: Any) -> Soar:
+    """`world_options` are passed to `ProgramsWorld` (for example `failing_writes=True`)."""
+    built = ProgramsWorld(tenants={T1: [ANN], T2: [BOB]}, **world_options)
+    built.store.add_alert(T1, ALERT)
+    ann, bob = built.sign_in(ANN), built.sign_in(BOB)
     program_id = str(create_program(ann, T1)["id"])
     key_id, key = issue_key(ann, T1, program_id)
-    return Soar(world, ann, bob, program_id, key_id, key)
+    return Soar(built, ann, bob, program_id, key_id, key)
