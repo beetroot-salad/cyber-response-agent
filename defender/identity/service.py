@@ -120,6 +120,14 @@ class MeView:
     credential: ProgramCredential | None = None
 
 
+def _audit_removal(program_id: UserId, revoked: list[CredentialId], *, actor: str, tenant_id: TenantId) -> None:
+    """A program's removal, by an admin or by its tenant's offboarding, as one record: each credential the removal
+    revoked, then the program (O8; #1450 review: both ways out read alike)."""
+    for credential_id in revoked:
+        audit.emit("program_credential.revoke", actor=actor, tenant_id=tenant_id, target=credential_id)
+    audit.emit("program.remove", actor=actor, tenant_id=tenant_id, target=program_id)
+
+
 def _pkce_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode()
 
@@ -586,9 +594,10 @@ class IdentityService:
         """One write ends the program's membership and revokes its credentials; its realm clients wait for
         the reconciliation, the only deleter (D3)."""
         await self._program_of(tenant_id, program_id)
-        if not await self._repo.remove_program(program_id, removed_by=auth.user.id, now=self._clock()):
+        revoked = await self._repo.remove_program(program_id, removed_by=auth.user.id, now=self._clock())
+        if revoked is None:
             raise NotFound("no such program")
-        audit.emit("program.remove", actor=auth.user.id, tenant_id=tenant_id, target=program_id)
+        _audit_removal(program_id, revoked, actor=auth.user.id, tenant_id=tenant_id)
 
     async def credentials(self, tenant_id: TenantId, program_id: UserId) -> list[ProgramCredential]:
         await self._program_of(tenant_id, program_id)
@@ -684,11 +693,9 @@ class IdentityService:
     async def _end_program(self, program_id: UserId, tenant_id: TenantId, now: _dt.datetime) -> None:
         """A program of an ending tenant: one write ends it and revokes its credentials; its clients are the
         reconciliation's to delete, so the realm is not touched (D3)."""
-        open_ones = [c.id for c in await self._repo.credentials_of_program(program_id) if c.state != "revoked"]
-        if await self._repo.remove_program(program_id, removed_by=None, now=now):
-            for credential_id in open_ones:
-                audit.emit("program_credential.revoke", actor=audit.SYSTEM, tenant_id=tenant_id, target=credential_id)
-            audit.emit("program.remove", actor=audit.SYSTEM, tenant_id=tenant_id, target=program_id)
+        revoked = await self._repo.remove_program(program_id, removed_by=None, now=now)
+        if revoked is not None:
+            _audit_removal(program_id, revoked, actor=audit.SYSTEM, tenant_id=tenant_id)
 
     async def end_tenant(self, tenant_id: TenantId, *, now: _dt.datetime) -> None:
         """Offboarding's people step (#1214): end every active membership of the tenant

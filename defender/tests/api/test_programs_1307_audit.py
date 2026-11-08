@@ -83,7 +83,8 @@ def test_each_write_names_the_credential_it_came_in_on_not_the_programs_other_on
 # --- identity events -----------------------------------------------------------------------------------
 
 def test_creating_and_removing_programs_and_credentials_is_audited_with_actor_target_and_tenant(caplog) -> None:
-    """program.create / program_credential.create / .revoke name the admin; removal emits only program.remove (O8, D6)."""
+    """program.create / program_credential.create / .revoke name the admin; removal emits a revoke for each credential
+    it revoked, then program.remove, as offboarding does (O8, D6; #1450 review: one record for both ways out)."""
     audit = AuditLog(caplog)
     s = soar()
     ann = user_id(s.ann)
@@ -98,7 +99,8 @@ def test_creating_and_removing_programs_and_credentials_is_audited_with_actor_ta
         (CREDENTIAL_CREATE, ann, T1, key),
         (CREDENTIAL_CREATE, ann, T1, oauth),
         (CREDENTIAL_REVOKE, ann, T1, key),
-        (PROGRAM_REMOVE, ann, T1, program),  # `oauth` is revoked with it: no event of its own
+        (CREDENTIAL_REVOKE, ann, T1, oauth),  # revoked by the removal; `key` was already revoked, so not again
+        (PROGRAM_REMOVE, ann, T1, program),
     ]
 
 

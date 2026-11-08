@@ -9,8 +9,9 @@ Forced choices (FC-7, extending the support module's list; the design names no r
 a key without its hash / an OAuth client with one -> `DataRuleViolation`);
 `go_live(credential_id, *, service_account_id, now) -> bool`; `revoke_credential(credential_id, *, revoked_by, now) -> bool`;
 `credentials_of_program(program_id)`; `credential_by_id(id)` / `credential_by_hash(key_hash)` -> row or None (any state);
-`programs_of_tenant(tenant_id) -> list[User]` (active programs); `remove_program(program_id, *, removed_by, now) -> bool`
-(one write: membership ended and every credential revoked); `touch_credential(id, *, now) -> bool` (as `touch_session`);
+`programs_of_tenant(tenant_id) -> list[User]` (active programs); `remove_program(program_id, *, removed_by, now) -> list[credential id] | None`
+(one write: membership ended and every credential revoked; the ids it revoked, oldest first, or None when nothing was
+removed); `touch_credential(id, *, now) -> bool` (as `touch_session`);
 `revoke_stale_pending(*, now) -> list[credential id]`.
 Expiry-warning outbox (F7, one claimable send per (credential, threshold), thresholds 14 and 3 days):
 `claim_expiry_warning(*, now, hold_until) -> ExpiryWarning | None` (`.credential_id`, `.threshold`: a `timedelta`) takes a
@@ -503,7 +504,7 @@ async def test_removing_a_program_ends_its_membership_and_revokes_every_credenti
     live = await _add_key(seeded, program, admin, 3, now=NOW)
     kept = await _add_key(seeded, other, admin, 4)
     later = NOW + HOUR
-    assert await seeded.remove_program(program.id, removed_by=admin.id, now=later) is True
+    assert await seeded.remove_program(program.id, removed_by=admin.id, now=later) is not None
     assert await seeded.active_membership(program.id, T1) is None
     [membership] = await seeded.memberships_of_user(program.id)
     assert (membership.status, membership.ended_at, membership.ended_by) == ("ended", later, admin.id)
@@ -515,8 +516,24 @@ async def test_removing_a_program_ends_its_membership_and_revokes_every_credenti
     assert (await seeded.active_membership(other.id, T1)) is not None
     assert (await seeded.active_membership(admin.id, T1)).id == member.id
     assert await seeded.programs_of_tenant(T1) == [await seeded.user(other.id)]
-    assert await seeded.remove_program(program.id, removed_by=admin.id, now=later + HOUR) is False
+    assert await seeded.remove_program(program.id, removed_by=admin.id, now=later + HOUR) is None
     assert (await seeded.memberships_of_user(program.id))[0].ended_at == later
+
+
+async def test_removing_a_program_answers_the_credentials_it_revoked_and_no_others(seeded):
+    """The removal names what it revoked, read inside its own write: the live and pending ones; not
+    one already revoked, not another program's (O8; #1450 review: the audit takes this list, never a read before)."""
+    admin = await _user(seeded)
+    program = await _program(seeded, admin)
+    other = await _program(seeded, admin, name="Other")
+    revoked_before = await _add_key(seeded, program, admin, 1)
+    await seeded.revoke_credential(revoked_before.id, revoked_by=admin.id, now=NOW)
+    live = await _add_key(seeded, program, admin, 2)
+    pending = await _add_oauth(seeded, program, admin, 3)
+    await _add_key(seeded, other, admin, 4)
+    revoked = await seeded.remove_program(program.id, removed_by=admin.id, now=NOW + HOUR)
+    assert sorted(revoked) == sorted([live.id, pending.id])  # same `created_at`: their order is by id
+    assert await seeded.remove_program(program.id, removed_by=admin.id, now=NOW + HOUR) is None
 
 
 @pytest.mark.postgres
@@ -538,7 +555,7 @@ async def test_a_removal_and_a_credential_creation_for_one_program_are_ordered_b
         assert not any(t.done() for t in tasks.values())
     results = await asyncio.gather(*(asyncio.wait_for(t, TIMEOUT) for t in tasks.values()), return_exceptions=True)
     outcome = dict(zip(tasks, results, strict=True))
-    assert outcome["remove"] is True
+    assert outcome["remove"] is not None
     if first == "create":
         assert outcome["create"].state == "pending"
     else:

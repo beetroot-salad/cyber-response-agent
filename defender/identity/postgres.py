@@ -267,20 +267,23 @@ class PostgresIdentityRepository:
                 .where(Membership.tenant_id == tenant_id, Membership.status == "active", User.kind == "program")
                 .order_by(Membership.created_at, Membership.id))).scalars())
 
-    async def remove_program(self, program_id: UserId, *, removed_by: UserId | None, now: _dt.datetime) -> bool:
+    async def remove_program(
+        self, program_id: UserId, *, removed_by: UserId | None, now: _dt.datetime,
+    ) -> list[CredentialId] | None:
         async with self._tx() as s:
             if await self._lock_program(s, program_id) != "program":
-                return False
+                return None
             ended = (await s.execute(
                 update(Membership).where(Membership.user_id == program_id, Membership.status == "active")
                 .values(status="ended", ended_at=now, ended_by=removed_by).returning(Membership.id))).first()
             if ended is None:
-                return False
-            await s.execute(
+                return None
+            revoked = (await s.execute(
                 update(ProgramCredential).where(
                     ProgramCredential.program_id == program_id, ProgramCredential.state.in_(("pending", "live")))
-                .values(state="revoked", revoked_at=now, revoked_by=removed_by))
-            return True
+                .values(state="revoked", revoked_at=now, revoked_by=removed_by)
+                .returning(ProgramCredential.id, ProgramCredential.created_at))).all()
+            return [r.id for r in sorted(revoked, key=lambda r: (r.created_at, r.id))]
 
     async def add_credential(
         self, program_id: UserId, *, kind: CredentialKind, name: str, created_by: UserId,

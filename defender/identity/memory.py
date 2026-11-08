@@ -357,17 +357,21 @@ class InMemoryIdentityRepository:
     def _revoke(self, row: ProgramCredential, *, by: UserId | None, now: _dt.datetime) -> None:
         self._credentials[row.id] = dataclasses.replace(row, state="revoked", revoked_at=now, revoked_by=by)
 
-    async def remove_program(self, program_id: UserId, *, removed_by: UserId | None, now: _dt.datetime) -> bool:
+    async def remove_program(
+        self, program_id: UserId, *, removed_by: UserId | None, now: _dt.datetime,
+    ) -> list[CredentialId] | None:
         program = self._users.get(program_id)
         membership = next((m for m in self._memberships.values() if m.user_id == program_id and m.status == "active"), None)
         if program is None or program.kind != "program" or membership is None:
-            return False
+            return None
         self._refuse_unknown_actor(removed_by)
         self._update_membership(membership.id, status="ended", ended_at=now, ended_by=removed_by)
-        for row in list(self._credentials.values()):
-            if row.program_id == program_id and row.state in ("pending", "live"):
-                self._revoke(row, by=removed_by, now=now)
-        return True
+        revoked = sorted((r for r in self._credentials.values()
+                          if r.program_id == program_id and r.state in ("pending", "live")),
+                         key=lambda r: (r.created_at, r.id))
+        for row in revoked:
+            self._revoke(row, by=removed_by, now=now)
+        return [r.id for r in revoked]
 
     async def add_credential(
         self, program_id: UserId, *, kind: CredentialKind, name: str, created_by: UserId,

@@ -128,9 +128,12 @@ class IdentityRepository(Protocol):
     async def programs_of_tenant(self, tenant_id: TenantId) -> list[User]:
         """The tenant's programs with an active membership."""
         ...
-    async def remove_program(self, program_id: UserId, *, removed_by: UserId | None, now: _dt.datetime) -> bool:
+    async def remove_program(
+        self, program_id: UserId, *, removed_by: UserId | None, now: _dt.datetime,
+    ) -> list[CredentialId] | None:
         """One write: end the program's active membership and revoke every credential still `pending` or
-        `live`. `False` when it has no active membership."""
+        `live`; the ids it revoked, read inside that write, so a credential added just before is among them.
+        None when it has no active membership."""
         ...
     async def add_credential(
         self, program_id: UserId, *, kind: CredentialKind, name: str, created_by: UserId,
