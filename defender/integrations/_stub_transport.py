@@ -89,6 +89,9 @@ def record_config(
     declaration, which holds the only one (A2). The keys an adapter reads are exactly
     `required` (#1391 Q4/D10): any other key in the file — a retired access-method or Docker
     key, a base key, a typo — is a `ConfigFault` naming it, as is a missing declaration (P1)."""
+    if "URL_BASE" in required:
+        raise ValueError(f"{system}'s adapter lists URL_BASE as a config key: a system's base is "
+                         f"its access.yaml's, never a config.env setting")
     entry = record_entry(tenant, system)
     declared = {f"{prefix}_{key}" for key in required}
     undeclared = sorted(key for key in entry if key not in declared)

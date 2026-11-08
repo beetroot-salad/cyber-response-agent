@@ -7,6 +7,7 @@ from defender.lazy_door import lazy_door
 
 if TYPE_CHECKING:
     from defender.integrations._stub_transport import (
+        http_get as http_get,
         load_config as load_config,
         record_config as record_config,
     )
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
-    **dict.fromkeys(("load_config", "record_config"), "_stub_transport"),
+    **dict.fromkeys(("http_get", "load_config", "record_config"), "_stub_transport"),
 }
 
 __getattr__ = lazy_door(globals(), _HOMES)

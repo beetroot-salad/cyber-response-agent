@@ -7,10 +7,6 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[4])) not in _sys.path:
     _sys.path.insert(0, _root)
 
-import json
-import urllib.error
-import urllib.parse
-import urllib.request
 from typing import TYPE_CHECKING, Any
 
 from defender.kit.verbs import VerbContext, verb
@@ -22,19 +18,23 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 
 SYSTEM = "example"
 #: The prefix this system's `config.env` keys carry: the folder name, upper-cased
-#: (`systems/example/config.env` holds `EXAMPLE_URL_BASE=...`).
+#: (`systems/example/config.env` holds `EXAMPLE_TIMEOUT_SEC=...`).
 PREFIX = "EXAMPLE"
-#: The keys every verb here needs (`_config`); the settings check judges the same set.
-REQUIRED_KEYS = ("URL_BASE", "TIMEOUT_SEC")
+#: The keys every verb here reads (`_config`), and the only ones its `config.env` may hold: any
+#: other key there is a settings fault naming it. The system's address is not one of them — it is
+#: the `base` of `systems/example/access.yaml`, the declaration the credential proxy reaches the
+#: system by.
+REQUIRED_KEYS = ("TIMEOUT_SEC",)
 
 
 def _config(ctx: VerbContext) -> dict[str, str]:
     """This system's settings, from the run's record (`ctx.tenant.systems`) — resolved once when
     the run began. Never the settings folder as it is now and never the process environment: an
     adapter reads its configuration from the record, so an exported variable changes nothing a
-    run addresses. (A credentialed system has no secret delivery yet: #1163.)
-    `load_config` strips the prefix and raises `ConfigFault` for a system with no config, or a
-    missing or blank required key — which `check_settings` below raises first, at run start."""
+    run addresses.
+    `load_config` strips the prefix, adds `URL_BASE` (the access declaration's base) and raises
+    `ConfigFault` for a system with no config or no declaration, a missing or blank required key,
+    or a key it does not read — which `check_settings` below raises first, at run start."""
     return integrations.load_config(ctx, SYSTEM, PREFIX, REQUIRED_KEYS)
 
 
@@ -51,25 +51,11 @@ def check_settings(tenant: TenantRecord) -> None:
 
 
 def _request(ctx: VerbContext, path: str, params: dict[str, str] | None = None) -> Any:
-    config = _config(ctx)
-    base = config["URL_BASE"]
-    timeout = float(config["TIMEOUT_SEC"])
-    url = base.rstrip("/") + path
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
-            return json.loads(response.read().decode())
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="replace")
-        if exc.code in (401, 403):
-            raise faults.TransportFault(
-                f"{SYSTEM}: authentication failed (HTTP {exc.code}). This system needs a "
-                f"credential, and credential delivery is not supported yet (#1163)."
-            ) from exc
-        raise faults.UpstreamFault(body or f"{SYSTEM}: query rejected (HTTP {exc.code}).") from exc
-    except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
-        raise faults.TransportFault(f"{SYSTEM}: cannot reach {base} ({exc}).") from exc
+    """GET `path` from this system, through the credential proxy: the only way an adapter reaches
+    its system. The proxy holds the credential, refuses any URL outside the declaration, and
+    answers; `http_get` raises `TransportFault` for an unreachable system or a 5xx and
+    `UpstreamFault` (the system's own detail) for a 4xx."""
+    return integrations.http_get(ctx, _config(ctx), path, system=SYSTEM, params=params)
 
 
 def health_check(ctx: VerbContext) -> dict:
@@ -83,7 +69,10 @@ def query(ctx: VerbContext, *, native_query: str, limit: int = 100) -> dict | li
 
 
 def get_record(ctx: VerbContext, *, id: str) -> dict:
-    return _request(ctx, f"/records/{id}")
+    got = _request(ctx, f"/records/{id}")
+    if not isinstance(got, dict):  # parse the answer to the API's own contract
+        raise faults.UpstreamFault(f"{SYSTEM}: record {id} answered {type(got).__name__}, not an object")
+    return got
 
 
 VERBS = {
