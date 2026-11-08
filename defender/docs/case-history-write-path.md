@@ -58,7 +58,7 @@ case; a person closes it.
   template; the drivers and the report schema never bind to ticket field names.
 
 - **One transport.** The comment goes through the shared adapter transport's host write entry
-  (`_stub_transport.http_write`, through the proxy: any 2xx is success, a 4xx is an
+  (`kit.transport.host_write`, through the proxy: any 2xx is success, a 4xx is an
   `UpstreamFault` carrying the store's status, a 5xx or unreachable store a `TransportFault`).
   There is no second copy of the route in the writer.
 

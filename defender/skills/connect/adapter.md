@@ -52,11 +52,10 @@ The reference to copy ships with this skill:
   `defender/integrations/{system}_adapter.py`.
 
 The live tree's own `integrations/<system>_adapter.py` modules are the same shape built
-on the shared `_stub_transport.py`; read it and the closest sibling before
+on the shared transport, `defender/kit/transport.py`; read it and the closest sibling before
 you write anything. Then:
 
-1. **Use the shared transport** — `integrations.http_get` (and, in the tree,
-   `_stub_transport`'s `http_get_obj` / `http_post`), which sends each
+1. **Use the shared transport** — `kit.transport.request`, which sends each
    request through the credential proxy. Never write your own: an adapter
    reaches its system only through the proxy, so there is no other transport.
 2. **Copy the closest example** to `defender/integrations/{system}_adapter.py`
@@ -116,7 +115,7 @@ def get_host(ctx: VerbContext, *, host: str) -> dict:
   `ConfigFault` naming what is wrong, or returns None when the system is
   usable. It must raise for EVERY settings fault any verb here can raise —
   the keys `_config` reads and the system's access declaration
-  (`integrations.record_config` checks both). The run calls it
+  (`kit.transport.record_config` checks both). The run calls it
   once at start: a system whose check raises is down for the whole run, the
   agent is told why, and no verb of it is called. A system needing no
   settings declares one that never raises. An adapter that declares none, or
@@ -213,9 +212,8 @@ it); the proxy applies it by the declaration's scheme. A tenant's `config.env` a
 FAILed by `validate_scaffold`, on every line of the file, an `export` line or a
 repeated key included.
 
-`system=` is required on every transport call, and an adapter reaches its store
-through `http_get` / `http_get_obj` / `http_post`, which send each request through
-the credential proxy (the proxy holds the credential and checks the route against the
+An adapter reaches its store through `kit.transport.request`, naming its system on
+every call, which sends each request through the credential proxy (the proxy holds the credential and checks the route against the
 system's declaration). **Never** accept a pasted token, password, or auth-bearing cURL — if the
 maintainer offers one, stop and refuse it. Nothing in an adapter logs a secret or
 returns one in a captured payload; this is the single most important property of
@@ -223,12 +221,22 @@ the layer.
 
 ## Transport
 
-`example_adapter.py`'s `_request` is one line: `integrations.http_get`, which
+`example_adapter.py`'s `_get` is one call: `kit.transport.request`, which
 sends the request through the credential proxy under the system's
-`TIMEOUT_SEC` and maps an unreachable system or a 5xx to `TransportFault` and
-a 4xx to `UpstreamFault`. Every adapter reaches its system this way (#1391):
-no direct HTTP, no CLI or SDK call, no forked child. The VERBS surface above
-it — verb signatures, the returned payload, the faults — is all you write.
+`TIMEOUT_SEC`, at the base its `access.yaml` names. Every adapter reaches its
+system this way (#1391): no direct HTTP, no CLI or SDK call, no forked child.
+
+**Never build a URL.** Name the path as a template and hand the values:
+`request(ctx, SYSTEM, "GET", "/records/{id}", {"id": id}, timeout_sec=...)`. Each
+value must be exactly one path segment — not empty, not `.` or `..`, holding no
+`/ \ ? # % ;`, whitespace or control character — or the call is refused before
+it is sent (`ConfinementFault`, naming the parameter). A value that may hold a
+separator (a URL, a CIDR range, a file path) goes in `query=` or the body, never
+the path. `answer=` says what the reply must be (`"object"`, the default, `"list"`
+or `"any"`); anything else is a `TransportFault`, as is an unreachable system or a
+5xx, and a 4xx is an `UpstreamFault` carrying the system's own reason. The VERBS
+surface above it — verb signatures, the returned payload, the faults — is all
+you write.
 
 Inspect a real response before writing the parser — shapes vary (a `/roles`
 endpoint may return a dict keyed by name, not a list). Run the real call

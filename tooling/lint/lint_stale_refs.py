@@ -24,6 +24,8 @@ Algorithm:
      in the post-PR tree: moved, re-exported, or an import reflowed. Idents harvested from
      paths are skipped likewise by `_path_named` when a tracked directory or file still
      carries the name. Archival trees (`_ARCHIVAL_DIRS`) cannot vouch for a name.
+  4b. A survivor that is a plain lowercase word (`PLAIN_WORD`) is also an ordinary word: its
+     hits count only where Python code uses it as a name.
   5. Grep the tree once for all survivors, word-boundary (`git grep -w -F -e A -e B ...`),
      so a removed `_by_id` does not match `template_path_by_id`. Idents with >50 hits are
      too common to be signal; idents with 1–50 hits outside the diff's changed files are
@@ -161,6 +163,11 @@ DEF_SIGNATURE = re.compile(r"^\s*(?:async\s+)?def\s")
 # runs (`1foo` yields `1foo`, not `foo`). Names that are not one run (path stems with `-`/`.`)
 # are matched one regex each.
 WORD_RUN = re.compile(r"\w+")
+
+#: A removed name that is also an ordinary word (`outbound`): lowercase letters only. It is a
+#: reference only where Python code uses it as a name (#1391 r5), never in prose, a comment, a
+#: string or a non-Python file, where the word means what it always meant.
+PLAIN_WORD = re.compile(r"[a-z]+")
 
 
 def _referencing(content: str, word_idents: set[str], other: dict[str, re.Pattern]) -> set[str]:
@@ -548,9 +555,18 @@ def _batch_grep(
         for ident in candidates:
             if _is_declaration(py.facts(rel), lineno, content, ident):
                 continue
+            if PLAIN_WORD.fullmatch(ident) and not _code_names(py.facts(rel), lineno, ident):
+                continue
             by_ident[ident].append(f"{rel}:{lineno}:{content}"[:200])
             break
     return by_ident
+
+
+def _code_names(facts: _PyFacts | None, lineno: int, ident: str) -> bool:
+    """Does Python code on this line use `ident` as a name (read, bound, or a keyword)? False
+    for a non-Python file, and for a comment or string, which the AST does not see."""
+    return facts is not None and (
+        (lineno, ident) in facts.loads or (lineno, ident) in facts.bindings)
 
 
 def _is_binding(

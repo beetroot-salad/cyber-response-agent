@@ -58,26 +58,34 @@ upgrading, or the proxy refuses to start.
 ## Upgrade from before the Docker removal (#1391 O1, O2, O5)
 
 Every system with network access is reached only through the credential proxy: a system is
-proxied because its folder holds an `access.yaml`, and there is no access-method key. Each
-adapter reads only its own keys; any other key in a system's `config.env` is refused by name at
-the settings check, so a tenant on old settings has every such system down at once until this is
-done. In one tenant commit, for each of cmdb, identity, change-mgmt, threat-intel, ticket and
-host-state:
+proxied because its folder holds an `access.yaml`, and there is no access-method key. The settings
+check now judges each system's whole folder against the keys its adapter reads, so a tenant on
+old settings has every such system down at once until this is done. In one tenant commit, make
+every folder under `settings/systems/` (elastic, cmdb, identity, change-mgmt, threat-intel, <!-- lint-shippable: ok — the vendor-specific product integration. -->
+host-state, the case system — ticket, jira or servicenow — and any other) meet this rule:
 
-1. `config.env` keeps only the keys the adapter reads — `<PREFIX>_TIMEOUT_SEC` for the stubs, plus
-   `TICKET_KEY_PATTERN` for ticket; host-state reads none, so its file may be empty. Delete
-   `<PREFIX>_TRANSPORT`, `<PREFIX>_DOCKER_CONTEXT`, `<PREFIX>_BASTION_HOST` and `<PREFIX>_URL_BASE`
-   (and, for elastic, `ELASTIC_TRANSPORT` and `ELASTIC_RETENTION_DAYS`, which nothing reads). <!-- lint-shippable: ok — the vendor-specific product integration. -->
-2. `access.yaml` with the system's `base` and `auth` (bearer, field `api_key`); the case system
-   also declares its comment write under `writes` (copy the template's ticket `access.yaml`).
-   host-state's base is an endpoint-query service (an endpoint-security product's query API)
-   that answers `GET /hosts`, `/hosts/{host}/processes`, `/hosts/{host}/accounts`,
+1. `config.env` holds only the keys the adapter reads, and none is `CHANGE-ME` or blank. Every
+   other key is refused by name. That removes, wherever they appear, `<PREFIX>_TRANSPORT`
+   (including `JIRA_TRANSPORT` and `SERVICENOW_TRANSPORT`), `<PREFIX>_DOCKER_CONTEXT`,
+   `<PREFIX>_BASTION_HOST`, `<PREFIX>_URL_BASE` and `<PREFIX>_HOST`, and for elastic  <!-- lint-shippable: ok — the vendor-specific product integration. -->
+   `ELASTIC_TRANSPORT` and `ELASTIC_RETENTION_DAYS`. The stubs read `<PREFIX>_TIMEOUT_SEC`, ticket <!-- lint-shippable: ok — the vendor-specific product integration. -->
+   also `TICKET_KEY_PATTERN`. host-state reads no key: delete its `config.env`. A key a system
+   puts in a URL path (elastic's index patterns) must be one path segment: no `/ \ ? # % ;`. <!-- lint-shippable: ok — the vendor-specific product integration. -->
+2. `access.yaml` is always required, with the system's `base` and `auth` (bearer, field
+   `api_key`), and holds no `CHANGE-ME`. Any request other than a GET is declared: the case
+   system's comment write under `writes`, and threat-intel's lookup under `reads` as
+   `{method: POST, path: "/lookup"}` (the value now travels in the body). Copy the template's
+   folders. host-state's base is an endpoint-query service (an endpoint-security product's query
+   API) that answers `GET /hosts`, `/hosts/{host}/processes`, `/hosts/{host}/accounts`,
    `/hosts/{host}/accounts/{user}/authorized-keys`, `/hosts/{host}/files/sha256?path=…`,
    `/hosts/{host}/packages` and `/containers/{id}`.
 3. A stored `bearer` credential per system, and a published export carrying the declarations
    (the proxy reads only `exports/current`).
 4. Remove a leftover folder of the case system retired by #1359 (the case system is named by
    `settings/case-record.yaml` since then; `tenant check` names the folder).
+
+A host, record id or other value the agent names that is not one path segment is now refused
+before it is sent, and the proxy refuses a path holding an escaped `/` or `\\`.
 
 host-state's `health-check` no longer reports a docker context, and a host the service does not
 enroll is now the agent's to fix (`UpstreamFault`, from the service's 404) rather than refused
