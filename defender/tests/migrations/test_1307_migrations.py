@@ -4,7 +4,7 @@ email, memberships a `role`, and adds `identity.program_credentials`; existing p
 Database cases are marked `postgres`; each runs on a database of its own (`conftest.py`).
 
 Design-implied names (the design names no column): `users.kind`, `users.created_by`, `memberships.role`, table
-`identity.program_credentials` with `id, program_id, kind, name, state, key_hash, service_account_id, created_by,
+`identity.program_credentials` with `id, program_id, program_kind (A1), kind, name, state, key_hash, service_account_id, created_by,
 created_at, expires_at, pending_deadline, last_used_at, revoked_at, revoked_by` (the repository contract's row fields).
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ BOB = "a7000000-0000-4000-8000-0000000000b1"
 SOAR = "a7000000-0000-4000-8000-0000000000c1"
 ANN_ROW = "a7000000-0000-4000-8000-0000000000d1"
 BOB_ROW = "a7000000-0000-4000-8000-0000000000d2"
-CREDENTIAL_COLUMNS = ("id", "program_id", "kind", "name", "state", "key_hash", "service_account_id", "created_by",
+CREDENTIAL_COLUMNS = ("id", "program_id", "program_kind", "kind", "name", "state", "key_hash", "service_account_id", "created_by",
                       "created_at", "expires_at", "pending_deadline", "last_used_at", "revoked_at", "revoked_by")
 
 
@@ -127,8 +127,9 @@ def test_at_head_a_role_is_admin_or_automation_and_a_credential_state_is_one_of_
     expires = CREATED + _dt.timedelta(days=90)
     deadline = CREATED + _dt.timedelta(minutes=10)
     insert = """INSERT INTO identity.program_credentials
-                (id, program_id, kind, name, state, key_hash, created_by, created_at, expires_at, pending_deadline, revoked_at, revoked_by)
-                VALUES (%s, %s, %s, 'c', %s, %s, %s, %s, %s, %s, %s, %s)"""
+                (id, program_id, program_kind, kind, name, state, key_hash, created_by, created_at, expires_at, pending_deadline,
+                 revoked_at, revoked_by)
+                VALUES (%s, %s, 'program', %s, 'c', %s, %s, %s, %s, %s, %s, %s, %s)"""
 
     def row(n: int, *, kind: str = "key", state: str = "live", expires_at: _dt.datetime | None = expires, **over: object) -> tuple:
         fields = {"key_hash": "h" if kind == "key" else None, "pending_deadline": deadline if state == "pending" else None,
@@ -143,3 +144,19 @@ def test_at_head_a_role_is_admin_or_automation_and_a_credential_state_is_one_of_
         execute(migrated_database, insert, row(3, state="disabled"))
     with pytest.raises(psycopg.errors.NotNullViolation):
         execute(migrated_database, insert, row(4, expires_at=None))
+
+
+@pytest.mark.postgres
+def test_at_head_the_credentials_program_is_a_user_of_kind_program_by_a_composite_key(migrated_database):
+    """A1: `program_credentials.program_kind` is required and constrained to `program`, `users` is unique on `(id, kind)`, and
+    `(program_id, program_kind)` is a foreign key to it, so the schema (not a recheck) keeps a person from holding a credential."""
+    import re
+
+    assert _columns(migrated_database, "program_credentials")["program_kind"][1] == "NO"
+    definitions = [d for (d,) in execute(migrated_database, """SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+        JOIN pg_class r ON r.oid = c.conrelid JOIN pg_namespace n ON n.oid = r.relnamespace
+        WHERE n.nspname = 'identity' AND r.relname IN ('users', 'program_credentials')""")]
+    assert any(re.fullmatch(r"UNIQUE \(id, kind\)", d) for d in definitions), definitions
+    assert any(re.fullmatch(r"FOREIGN KEY \(program_id, program_kind\) REFERENCES (identity\.)?users\(id, kind\)", d)
+               for d in definitions), definitions
+    assert any(re.search(r"program_kind\s*=\s*'program'", d) and d.startswith("CHECK") for d in definitions), definitions

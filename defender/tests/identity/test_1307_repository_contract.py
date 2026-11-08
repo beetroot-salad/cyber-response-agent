@@ -26,6 +26,7 @@ threshold, *, until)` (a failed send's retry). Reconciliation's keep-set read:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime as dt
 import hashlib
 
@@ -329,6 +330,159 @@ async def test_a_stale_pending_credential_is_revoked_by_the_system_and_nothing_e
     other = await _add_oauth(seeded, program, admin, 3, now=at)
     await seeded.go_live(other.id, service_account_id=SA, now=at)
     assert await seeded.revoke_stale_pending(now=at + 2 * HOUR) == []  # a live OAuth row is not pending
+
+
+# --- the schema, not a recheck, keeps a credential from authenticating a person (A1, P-F) ----------------------------------------
+
+@pytest.mark.parametrize(("owner", "program_kind"), [("person", "program"), ("person", "person"), ("program", "person"), ("program", "program")])
+async def test_a_credential_for_a_person_is_refused_by_the_schema(seeded, backend, owner, program_kind):
+    """Every combination of the credential's owner (a person or a program) and the kind it claims for it: only a program's, claiming
+    `program`, is stored. In PostgreSQL the schema refuses the rest (`program_kind` is constrained to `program`, and the composite
+    foreign key `(program_id, program_kind) -> users(id, kind)` finds no person), whatever wrote the row; the in-memory repository
+    refuses a person's credential with `DataRuleViolation`, which it states the same rule by (it has no column to disagree with)."""
+    import uuid
+
+    admin = await _user(seeded)
+    program = await _program(seeded, admin)
+    holder = program if owner == "program" else admin
+    accepted = owner == "program" and program_kind == "program"
+    if backend is None:
+        if program_kind != "program":
+            return  # no column to claim a kind in; the person case above is the memory repository's whole rule
+        if accepted:
+            assert (await _add_key(seeded, holder, admin, 1)).state == "live"
+        else:
+            with pytest.raises(DataRuleViolation):
+                await _add_key(seeded, holder, admin, 1)
+        return
+    import psycopg
+    from defender.tests.support.shared._postgres1339 import execute
+
+    insert = """INSERT INTO identity.program_credentials (id, program_id, program_kind, kind, name, state, key_hash, created_by,
+                created_at, expires_at) VALUES (%s, %s, %s, 'key', 'raw', 'live', %s, %s, %s, %s)"""  # noqa: S608
+    params = (str(uuid.uuid4()), holder.id, program_kind, _key(1), admin.id, NOW, EXPIRES)
+    if accepted:
+        execute(backend, insert, params)
+        assert [r.name for r in await seeded.credentials_of_program(program.id)] == ["raw"]
+    else:
+        with pytest.raises(psycopg.errors.IntegrityError):
+            execute(backend, insert, params)
+        assert await seeded.credentials_of_program(holder.id) == []
+
+
+# --- names Postgres text cannot hold are refused by the repository (A2) --------------------------------------------------------
+
+#: What PostgreSQL text cannot hold, embedded in otherwise valid names so that blankness is never the reason for a refusal.
+UNHOLDABLE = [f"{head}{bad}{tail}" for bad in ("\x00", "\ud800", "\udbff", "\udc00", "\udfff") for head, tail in (("", ""), ("a", ""), ("", "b"), ("a", "b"))]
+HOLDABLE = ["SOAR prod", "Zoë", "\U0001f600 emoji", "tab\tname"]
+
+
+async def test_a_name_that_postgres_text_cannot_hold_is_refused_for_programs_and_credentials(seeded):
+    """NUL and lone surrogates in a program's display name or a credential's name -> `DataRuleViolation`, nothing stored; names
+    without them (an astral character, accents) are stored (A2). The oracle is the one the emails and request ids already use."""
+    from defender._text import postgres_can_hold
+
+    assert not any(postgres_can_hold(n) for n in UNHOLDABLE)
+    assert all(postgres_can_hold(n) for n in HOLDABLE)
+    admin = await _user(seeded)
+    program = await _program(seeded, admin)
+    for name in UNHOLDABLE:
+        with pytest.raises(DataRuleViolation):
+            await _program(seeded, admin, name=name)
+        with pytest.raises(DataRuleViolation):
+            await seeded.add_credential(program.id, kind="key", name=name, created_by=admin.id, expires_at=EXPIRES, now=NOW,
+                                        key_hash=_key(1))
+        with pytest.raises(DataRuleViolation):
+            await seeded.add_credential(program.id, kind="oauth_client", name=name, created_by=admin.id, expires_at=EXPIRES, now=NOW)
+    assert [p.id for p in await seeded.programs_of_tenant(T1)] == [program.id]
+    assert await seeded.credentials_of_program(program.id) == []
+    for n, name in enumerate(HOLDABLE):  # control: the same calls with holdable names
+        assert (await _program(seeded, admin, name=name)).display_name == name
+    assert (await seeded.add_credential(program.id, kind="key", name=HOLDABLE[1], created_by=admin.id, expires_at=EXPIRES, now=NOW,
+                                        key_hash=_key(2))).name == HOLDABLE[1]
+
+
+# --- one rule for "usable" (O5, W4) -------------------------------------------------------------------------------------
+
+EVAL = NOW + 30 * DAY
+AROUND = (-dt.timedelta(seconds=1), dt.timedelta(0), dt.timedelta(seconds=1))
+
+
+def _usable(row, now) -> bool:
+    """The one rule, written once for this test: `live` and not yet expired. Expiry is computed, never a state (W4)."""
+    return row.state == "live" and row.expires_at > now
+
+
+def _holds_a_slot(row, now) -> bool:
+    """Counts toward the cap and keeps a realm client: usable, or `pending` and still before its deadline."""
+    return _usable(row, now) or (row.state == "pending" and row.pending_deadline is not None and row.pending_deadline > now)
+
+
+async def _shape(repo, admin, n, kind, state, expiry, deadline):
+    """A program holding one filler key (a live credential far from expiry) and one row of this shape at the instant `EVAL`:
+    `expiry` and `deadline` are offsets of the row's expiry and (for an OAuth row) its deadline from `EVAL`."""
+    program = await _program(repo, admin, name=f"{kind}-{state}-{expiry}-{deadline}-{n}")
+    await repo.add_credential(program.id, kind="key", name="filler", created_by=admin.id, expires_at=EVAL + 90 * DAY,
+                              now=NOW, key_hash=_key(1000 + n))
+    expires_at = EVAL + expiry
+    if kind == "key":
+        row = await repo.add_credential(program.id, kind="key", name="subject", created_by=admin.id, expires_at=expires_at,
+                                        now=NOW, key_hash=_key(n))
+        created = NOW
+    else:
+        created = EVAL - DEADLINE + deadline  # the row's deadline is `created + 10 minutes`: `EVAL + deadline`
+        row = await repo.add_credential(program.id, kind="oauth_client", name="subject", created_by=admin.id,
+                                        expires_at=expires_at, now=created)
+        if state in ("live",):
+            assert await repo.go_live(row.id, service_account_id=SA, now=created) is True
+    if state == "revoked":
+        assert await repo.revoke_credential(row.id, revoked_by=admin.id, now=created) is True
+    return program
+
+
+async def test_one_usable_rule_decides_the_cap_the_keep_set_and_the_purge(seeded):
+    """Over keys and OAuth credentials, `pending`, `live` and `revoked`, with expiry and deadline just before, at and just after the
+    instant asked about: the per-program cap, `oauth_credentials_to_keep` and `revoke_stale_pending` all agree with one rule, written
+    once here (usable = `live` and `expires_at > now`; a slot is held by a usable row or a `pending` row with `pending_deadline >
+    now`). A purge revokes exactly the `pending` rows at or past their deadline and changes no other field of any row: a live row
+    past its expiry stays `live` with no `revoked_at`, because expiry is computed, never written (O5, W4)."""
+    admin = await _user(seeded)
+    shapes = [("key", state, e, None) for state in ("live", "revoked") for e in AROUND]
+    shapes += [("oauth_client", "pending", e, d) for e in AROUND for d in AROUND]
+    shapes += [("oauth_client", "live", e, d) for e in AROUND for d in AROUND]
+    shapes += [("oauth_client", "revoked", e, AROUND[0]) for e in AROUND]
+    programs = [await _shape(seeded, admin, n, *shape) for n, shape in enumerate(shapes)]
+    rows = [r for p in programs for r in await seeded.credentials_of_program(p.id)]
+
+    keep = {r.id for r in rows if r.kind == "oauth_client" and _holds_a_slot(r, EVAL)}
+    assert keep and keep != {r.id for r in rows if r.kind == "oauth_client"}  # control: both outcomes occur
+    assert await seeded.oauth_credentials_to_keep(now=EVAL) == keep
+
+    refused = []
+    for n, program in enumerate(programs):  # the cap: a third credential is refused iff two slots are held
+        held = sum(_holds_a_slot(r, EVAL) for r in await seeded.credentials_of_program(program.id))
+        try:
+            await seeded.add_credential(program.id, kind="key", name="third", created_by=admin.id, expires_at=EVAL + 90 * DAY,
+                                        now=EVAL, key_hash=_key(2000 + n))
+            accepted = True
+        except DataRuleViolation:
+            accepted = False
+        if accepted != (held < 2):
+            refused.append((program.display_name, held, accepted))
+    assert refused == []
+    assert {_holds_a_slot(r, EVAL) for p in programs for r in await seeded.credentials_of_program(p.id)} == {True, False}
+
+    before = {r.id: r for p in programs for r in await seeded.credentials_of_program(p.id)}
+    stale = {r.id for r in before.values() if r.state == "pending" and r.pending_deadline <= EVAL}
+    assert stale and stale != {r.id for r in before.values() if r.state == "pending"}  # control: some pending rows are not stale
+    assert set(await seeded.revoke_stale_pending(now=EVAL)) == stale
+    for p in programs:
+        for after in await seeded.credentials_of_program(p.id):
+            was = before[after.id]
+            expected = dataclasses.replace(was, state="revoked", revoked_at=EVAL, revoked_by=None) if was.id in stale else was
+            assert after == expected, (p.display_name, was, after)
+    assert await seeded.oauth_credentials_to_keep(now=EVAL) == keep  # the purge changed nothing the rule counts
+    assert await seeded.revoke_stale_pending(now=EVAL) == []
 
 
 # --- removal is one write -----------------------------------------------------------------------------
