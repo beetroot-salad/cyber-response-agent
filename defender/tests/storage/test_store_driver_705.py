@@ -1145,7 +1145,7 @@ def test_s2a_r7_s2c_a_request_whose_ledger_write_is_refused_leaves_its_own_endin
     assert (summary["truncated_by"], summary.get("exit_reason"), calls) == (truncated_by, control.get("exit_reason"), control_calls), (
         "a failed ledger write changed how the run ended")
     assert control_calls == {"main": main_calls}, "premise: the control's MAIN calls"
-    if outcome != "response":
+    if outcome == "refused-400":  # the one ending the control reports as a WARNING; for the others, a WARNING must not appear
         assert control_warnings, "premise: the control reported the lead's failure, so the comparison is not empty with empty"
     assert _warning_exception_types(caplog) == control_warnings, "the lead's failure was reported differently"
     assert summary["spend_write_failed"] is True, f"{outcome}: the run's exit did not carry the failed write"
