@@ -760,8 +760,9 @@ def test_live_box_output_past_the_budget_is_a_result_and_past_the_helper_is_a_fe
         with pytest.raises(box.BoxOutputLimitExceeded):
             executor.run_parsed(bash_exec.parse(bypass), command="bypass", cwd=cwd, timeout=60)
         status = box.run_docker(["docker", "inspect", "-f", "{{.State.Status}}", executor.name])
-        # The run box is auto-removed once stopped (#1343 B10): stopped is `exited`/`dead` or already gone.
-        assert status.stdout.strip() in {"exited", "dead"} or (
+        # The run box is auto-removed once stopped (#1343 B10): stopped is `exited`/`dead`, being removed, or already
+        # gone (the product's own stopped test, `BoxRuns._stopped`, takes `removing` for an auto-removed box).
+        assert status.stdout.strip() in {"exited", "dead", "removing"} or (
             status.returncode != 0 and "no such object" in status.stderr.lower())
         with pytest.raises(box.BoxOutputLimitExceeded):
             executor.run_parsed([], command="again", cwd=cwd, timeout=5)

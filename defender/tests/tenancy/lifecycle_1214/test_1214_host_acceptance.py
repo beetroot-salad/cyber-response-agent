@@ -155,7 +155,7 @@ def test_a_refused_acceptance_raises_at_the_call_and_releases_what_it_took(place
 
 # --- the waiting line (C4, owner ruling) ------------------------------------------------------------------------
 
-def test_an_acceptance_blocked_on_the_host_lock_waits_and_says_so_once_on_stderr(placed, capfd):
+def test_an_acceptance_blocked_on_the_host_lock_waits_and_says_so_once_on_stderr(placed, capfd, monkeypatch):
     """While prepare or teardown holds T's lock exclusive, acceptance waits (no timeout) and prints one stderr line, before
     the lock is free, naming that it waits for T's host lock; a free lock prints none (r10.1 C4, C11)."""
     from defender import tenancy
@@ -170,6 +170,18 @@ def test_an_acceptance_blocked_on_the_host_lock_waits_and_says_so_once_on_stderr
 
     entered = threading.Event()
     failed: list[BaseException] = []
+    # The waiter is blocked in the wait the line announces: by then the line is written and flushed, so one read
+    # sees it. Polling `readouterr` while the waiter writes can lose the line: each read empties the capture in two
+    # steps, and a write landing between them is dropped.
+    real_acquire = host_lock.acquire
+    blocked = threading.Event()
+
+    def acquire(*args: Any, **kwargs: Any) -> int | None:
+        if kwargs.get("timeout", 0) is None:
+            blocked.set()
+        return real_acquire(*args, **kwargs)
+
+    monkeypatch.setattr(host_lock, "acquire", acquire)
 
     def accept() -> None:
         try:
@@ -178,17 +190,17 @@ def test_an_acceptance_blocked_on_the_host_lock_waits_and_says_so_once_on_stderr
         except BaseException as e:  # noqa: BLE001 — reported on the main thread
             failed.append(e)
 
-    fd = host_lock.acquire(placed, TENANT, exclusive=True, timeout=0)
+    fd = real_acquire(placed, TENANT, exclusive=True, timeout=0)
     assert fd is not None
     waiter = threading.Thread(target=accept, daemon=True)
-    out = err = ""
     try:
         waiter.start()
         deadline = time.monotonic() + 20
-        while not all(w in err for w in H.WAITING_WORDS) and time.monotonic() < deadline and not failed:
-            got = capfd.readouterr()
-            out, err = out + got.out, err + got.err
-            time.sleep(0.05)
+        while not blocked.is_set() and time.monotonic() < deadline and not failed:
+            time.sleep(0.01)
+        assert blocked.is_set(), f"acceptance never waited for the lock: {failed}"
+        got = capfd.readouterr()
+        out, err = got.out, got.err
         assert all(w in err for w in H.WAITING_WORDS), f"no waiting line on stderr while the lock is still held: {err!r}"
         time.sleep(1.0)  # no timeout: it is still waiting after the line
         assert not entered.is_set(), "acceptance went past an exclusive hold"
