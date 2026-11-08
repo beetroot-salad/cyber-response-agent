@@ -47,10 +47,14 @@ def _ctx(settings: Path, run_dir: Path, env: dict | None = None):
 
 def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path):
     transport = T.mod("kit.transport")
-    cfg = transport.load_config(_ctx(injected, tmp_path), "cmdb", "CMDB")
-    assert cfg["URL_BASE"] == f"http://cmdb-{MARK}:8080"  # the injected tenant's declaration
-    checkout = transport.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path), "cmdb", "CMDB")
-    assert checkout["URL_BASE"] != cfg["URL_BASE"], "the fixture no longer discriminates"
+    ctx = _ctx(injected, tmp_path)
+    transport.load_config(ctx, "cmdb", "CMDB")
+    base = transport.record_access(ctx.tenant, "cmdb").base
+    assert base == f"http://cmdb-{MARK}:8080"  # the injected tenant's declaration
+    checkout = _ctx(T.FIXTURE_SETTINGS, tmp_path)
+    transport.load_config(checkout, "cmdb", "CMDB")
+    assert transport.record_access(checkout.tenant, "cmdb").base != base, \
+        "the fixture no longer discriminates"
 
 
 def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
@@ -59,6 +63,11 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
     root = tmp_path / "injected-root"
     T.place_tenant(root, T.PLAYGROUND_ID, configs={})
     settings = T.accept(root, T.PLAYGROUND_ID).settings
+    # cmdb is declared, so its missing config.env is the one fault left (the declaration is
+    # judged first, #1391 r5 S1).
+    (settings / "systems" / "cmdb").mkdir(parents=True, exist_ok=True)
+    (settings / "systems" / "cmdb" / "access.yaml").write_text(
+        T.access_text("noconf", "cmdb"), encoding="utf-8")
     with pytest.raises(faults.ConfigFault) as caught:
         transport.load_config(_ctx(settings, tmp_path), "cmdb", "CMDB")
     assert "the tenant's settings/systems/cmdb/config.env" in str(caught.value)

@@ -47,7 +47,8 @@ def check_settings(*_a, **_k):
 def query(ctx: VerbContext, *, q: str = "*", start: str = "", end: str = "",
           limit: int = 50) -> dict:
     config = transport.load_config(ctx, "idp", "IDP")
-    return transport.http_get(ctx, config, "/events", system="idp", params={"q": q})
+    return transport.request(ctx, "idp", "GET", "/events", query={"q": q},
+                             timeout_sec=transport.timeout_of(config))
 
 
 @verb()

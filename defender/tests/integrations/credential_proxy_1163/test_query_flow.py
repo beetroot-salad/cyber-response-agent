@@ -71,18 +71,21 @@ def test_q1_a_query_reaches_the_upstream_with_the_key_and_returns_the_echo_unalt
 
 def test_q1b_the_transport_functions_are_called_as_today_and_routes_are_relative_to_the_base(
         tmp_path, data_root):
-    """`http_get`/`http_post` keep their signatures; a declared POST read succeeds relative to
-    the base, an undeclared POST is refused unsent. A5, O3, A2."""
+    """`transport.request` sends a GET and a declared POST read relative to the base; an
+    undeclared POST is refused unsent. A5, O3, A2; #1391 r5 T1."""
     with H.upstream() as up, _published(
             tmp_path, data_root, up, reads=(("POST", "/search"),)) as t:
         tok = T.token(t.tenant_id, GRANT)
         with A.proxy_for(t, _store(t)) as (url, _tap):
             ctx = A.ctx_for(tmp_path, T.run_record(t), url, tok)
             config = transport.load_config(ctx, "identity", "IDENTITY")
-            got = transport.http_get(ctx, config, "/users/dev.dana", system="identity")
-            posted = transport.http_post(ctx, config, "/search", {"q": 1}, system="identity")
+            got = transport.request(ctx, "identity", "GET", "/users/{user}", {"user": "dev.dana"},
+                                    timeout_sec=10)
+            posted = transport.request(ctx, "identity", "POST", "/search", body={"q": 1},
+                                       timeout_sec=10)
             with pytest.raises(ConfinementFault) as refused:
-                transport.http_post(ctx, config, "/users/dev.dana", {}, system="identity")
+                transport.request(ctx, "identity", "POST", "/users/dev.dana", body={},
+                                  timeout_sec=10)
 
     assert got["path"] == f"{API}/users/dev.dana"
     assert "path" in posted
@@ -93,13 +96,13 @@ def test_q1b_the_transport_functions_are_called_as_today_and_routes_are_relative
 
 
 def test_q1c_the_adapter_api_gains_no_credential_parameter():
-    """The shared transport's signatures are unchanged. A5, H6."""
+    """The shared transport takes no credential: the proxy holds it. A5, H6; #1391 r5 T1."""
     names = {fn.__name__: list(inspect.signature(fn).parameters) for fn in (
-        transport.http_get, transport.http_post, transport._request)}
+        transport.request, transport.host_write)}
     assert names == {
-        "http_get": ["ctx", "config", "path", "system", "params"],
-        "http_post": ["ctx", "config", "path", "body", "system"],
-        "_request": ["ctx", "config", "url", "system", "method", "body"]}
+        "request": ["ctx", "system", "method", "template", "values", "query", "body",
+                    "timeout_sec", "answer", "error_detail"],
+        "host_write": ["ctx", "system", "method", "template", "values", "body", "timeout_sec"]}
 
 
 def _redirect(_seen):
@@ -171,19 +174,20 @@ def test_q2d_a_large_reply_arrives_whole_and_one_over_the_limit_tells_the_model_
 
 
 def test_q2b_requests_the_declaration_does_not_allow_are_refused_unsent(tmp_path, data_root):
-    """`..` leaving the base is a ConfinementFault; another host and the same origin outside
-    the base are ConfigFaults; none is sent. The control is the in-base call. O2, O7, A9, A6."""
+    """`..` is a ConfinementFault before the proxy is asked (#1391 r5 T2); a URL to another host,
+    or to the same origin outside the base, handed to the proxy is a ConfigFault; none is sent.
+    The control is the in-base call. O2, O7, A9, A6."""
     with (H.upstream() as up, _published(tmp_path, data_root, up) as t,
           A.proxy_for(t, _store(t)) as (url, _tap)):
         ctx = A.ctx_for(tmp_path, T.run_record(t), url, T.token(t.tenant_id, GRANT))
-        config = transport.load_config(ctx, "identity", "IDENTITY")
         with pytest.raises(ConfinementFault) as escaped:
             identity_adapter.get_user(ctx, user="../../secret")
         refused = []
         for foreign in ("http://elsewhere.invalid/x", f"{up.url}/other/x",
                         up.url.replace("http://", "https://") + f"{API}/x"):
             with pytest.raises(ConfigFault) as raised:
-                transport._request(ctx, config, foreign, system="identity", method="GET")
+                transport._proxy_request(ctx, foreign, system="identity", method="GET",
+                                         body=None, timeout_sec=10)
             refused.append(raised.value.exit_code)
         assert up.seen == []
         identity_adapter.get_user(ctx, user="dev.dana")
@@ -495,7 +499,7 @@ def test_1391_o3_each_elastic_request_is_captured_once_and_reaches_the_proxy_onc
     assert sent == [urlsplit(up.url)._replace(path=s.path.split("?")[0])[:3] for s in up.seen], (
         "a capture names a URL other than the one sent")
     for request in capture.requests:
-        confine_read_endpoint(request.system, request.url, method=request.method, verb_class="r")
+        confine_read_endpoint(request.system, request.url, method=request.method)
 
 
 @pytest.mark.parametrize(("verb", "kw", "timeout"), [
@@ -809,13 +813,13 @@ def test_1391_o5_host_state_faults_follow_the_pinned_status_table(
     assert "service says no" in str(raised.value)
 
 
-def test_1391_o5_host_state_quotes_what_the_agent_names_into_one_path_segment(tmp_path, data_root):
-    """A host or user carrying `/` stays one path segment: the agent cannot steer the request
-    to another route of the service. #1391 O5 (the service's routes are its whole confinement)."""
+@pytest.mark.parametrize("host", ["web-1/accounts/root", "web-1%2Faccounts%2Froot"])
+def test_1391_o5_host_state_refuses_a_host_that_is_not_one_path_segment(tmp_path, data_root, host):
+    """A host carrying `/`, spelled out or encoded, is refused before anything is sent: the agent
+    cannot steer the request to another route of the service. #1391 O5, r5 T2."""
     from defender.integrations import host_state_adapter
 
-    route = "/hosts/web-1%2Faccounts%2Froot/accounts/x/authorized-keys"
-    with H.upstream() as up, _proxied(tmp_path, data_root, up, "host-state") as (ctx, _tap):
-        up.replies[route] = _json({"path": "/x", "keys": []})
-        host_state_adapter.VERBS["authorized-keys"](ctx, host="web-1/accounts/root", user="x")
-    assert [s.path for s in up.seen] == [route]
+    with (H.upstream() as up, _proxied(tmp_path, data_root, up, "host-state") as (ctx, _tap),
+          pytest.raises(ConfinementFault, match="`host`")):
+        host_state_adapter.VERBS["authorized-keys"](ctx, host=host, user="x")
+    assert up.seen == []

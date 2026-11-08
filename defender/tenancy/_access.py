@@ -25,13 +25,12 @@ from defender.kit.access import (
     Route,
 )
 from defender.kit.faults import ConfigFault
-from defender.kit.settings import NOT_CONFIGURED, pointer_to
+from defender.kit.settings import NOT_CONFIGURED, PLACEHOLDER, pointer_to
 from defender.kit.tls import trust_of_ca
 from defender.kit.verbs import is_system_name
 
 ACCESS_FILE = "access.yaml"
 #: The tenant template's mark on every value its operator must replace.
-PLACEHOLDER = "CHANGE-ME"
 _KNOWN = ("access", "base", "auth", "reads", "writes", "ca")
 #: The credential-set field names a scheme may name (the API's `CredentialKey` pattern).
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")

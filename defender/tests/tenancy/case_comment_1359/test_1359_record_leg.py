@@ -19,6 +19,13 @@ def _world(tmp_path: Path, *, key: str | None = C.TICKET_KEY, **kw: Any) -> tupl
     ensure_d9_tenant()
     root = current_data_root()
     folder = C.plant_case_tenant(root, **kw)
+    case = kw.get("case_system")
+    systems = S.settings_of(folder) / "systems"
+    if case and not (systems / case / "access.yaml").exists():
+        # A planted case system is reached through the proxy like any other (#1391 r5 O-S3):
+        # it declares the ticket store's access, comment route included.
+        (systems / case).mkdir(parents=True, exist_ok=True)
+        (systems / case / "access.yaml").write_bytes((systems / "ticket" / "access.yaml").read_bytes())
     return root, folder, C.plant_alert(tmp_path / "in", key=key)
 
 

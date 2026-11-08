@@ -77,39 +77,31 @@ def test_the_read_endpoint_allowlist_cannot_be_built_with_a_methodless_entry():
     ok = ReadEndpointAllowlist({"ticket": ((TICKET_READ_PATH, "GET"),)})
     assert tuple(ok["ticket"]) == ((TICKET_READ_PATH, "GET"),), \
         "a well-authored (endpoint, method) pair did not survive construction"
-    confine_read_endpoint("elastic", "http://es:9200/_cluster/health", method="GET",
-                          verb_class="r")
+    confine_read_endpoint("elastic", "http://es:9200/_cluster/health", method="GET")
 
 
 def test_the_two_post_with_body_reads_still_pass_the_endpoint_check():
-    confine_read_endpoint("elastic", "http://es:9200/logs-*/_search", method="POST",
-                          verb_class="r")
-    confine_read_endpoint("elastic", "http://es:9200/_query?format=json", method="POST",
-                          verb_class="r")
-    confine_read_endpoint("elastic", "http://es:9200/_cluster/health", method="GET",
-                          verb_class="r")
+    confine_read_endpoint("elastic", "http://es:9200/logs-*/_search", method="POST")
+    confine_read_endpoint("elastic", "http://es:9200/_query?format=json", method="POST")
+    confine_read_endpoint("elastic", "http://es:9200/_cluster/health", method="GET")
 
     with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/logs-*/_update/1", method="POST",
-                              verb_class="r")
+        confine_read_endpoint("elastic", "http://es:9200/logs-*/_update/1", method="POST")
     with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/logs-*/_search", method="DELETE",
-                              verb_class="r")
+        confine_read_endpoint("elastic", "http://es:9200/logs-*/_search", method="DELETE")
 
 
 def test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_query_string():
     assert normalize_endpoint("http://es:9200/logs-*/_search?pretty=true&x=1") == "/logs-*/_search"
     assert normalize_endpoint("http://es:9200//logs-*//_search/") == "/logs-*/_search"
 
-    confine_read_endpoint("elastic", "http://es:9200/logs-*/_search?pretty=true", method="POST",
-                          verb_class="r")
+    confine_read_endpoint("elastic", "http://es:9200/logs-*/_search?pretty=true", method="POST")
 
     with pytest.raises(ConfinementFault):
         confine_read_endpoint("elastic", "http://es:9200/logs-*/_search/../../_update/1",
-                              method="POST", verb_class="r")
+                              method="POST")
     with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/%5Flogs/../_update/1", method="POST",
-                              verb_class="r")
+        confine_read_endpoint("elastic", "http://es:9200/%5Flogs/../_update/1", method="POST")
 
 
 # ---- the host write entry (#1359 D-6) ----------------------------------------------------------
@@ -120,7 +112,8 @@ def test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_qu
 #: house style adds the config and `system=`). `_host_write` and the planted adapter source below
 #: both use this text, with `ctx`, `cfg`, `method`, `path`, `payload` in scope; the code stage
 #: changes the shape here only.
-HTTP_WRITE_CALL = 'transport.http_write(ctx, cfg, method, path, payload, system="ticket")'
+HTTP_WRITE_CALL = ('transport.host_write(ctx, "ticket", method, path, body=payload, '
+                   'timeout_sec=transport.timeout_of(cfg))')
 
 
 #: A planted `ticket_adapter.py`: the host's comment action exactly as the tenant's case-record

@@ -745,11 +745,15 @@ def test_verb_resolves_config_from_deps_tree(tmp_path):
         return _tenants1106.verb_context(
             DEFENDER, tmp_path / "run", {}, tenant=S1107.resolve(root, tenant_id))
 
-    cfg_a = elastic_adapter.load_config(_ctx_over(tmp_path / "a", tenant_id, "tree-a"))
-    cfg_b = elastic_adapter.load_config(_ctx_over(tmp_path / "b", tenant_id, "tree-b"))
+    from defender.kit import transport
 
-    assert cfg_a["URL_BASE"] == _tenants1106.default_base("tree-a", "elastic")
-    assert cfg_b["URL_BASE"] == _tenants1106.default_base("tree-b", "elastic"), \
+    ctx_a = _ctx_over(tmp_path / "a", tenant_id, "tree-a")
+    ctx_b = _ctx_over(tmp_path / "b", tenant_id, "tree-b")
+    elastic_adapter.load_config(ctx_a)
+    elastic_adapter.load_config(ctx_b)
+
+    assert transport.record_access(ctx_a.tenant, "elastic").base == _tenants1106.default_base("tree-a", "elastic")
+    assert transport.record_access(ctx_b.tenant, "elastic").base == _tenants1106.default_base("tree-b", "elastic"), \
         "the second tree's verb read the first tree's config (an import-time DEFENDER_DIR)"
 
     with pytest.raises(ConfigFault):

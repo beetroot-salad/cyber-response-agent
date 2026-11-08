@@ -427,8 +427,8 @@ def test_a_config_fault_observed_at_resolve_fixed_on_disk_mid_run(tmp_path):
 
     fresh = _resolve(root)  # only a fresh resolve sees the fix
     assert isinstance(fresh.systems["cmdb"], S.record_type("SystemConfig"))
-    assert transport.load_config(_ctx(fresh, tmp_path / "fresh"), "cmdb", "CMDB")[
-        "URL_BASE"] == "http://cmdb-s063:8080"
+    assert transport.load_config(_ctx(fresh, tmp_path / "fresh"), "cmdb", "CMDB") == {
+        "TIMEOUT_SEC": "10"}
 
 
 def test_o2_each_call_uses_the_record_it_was_resolved_with(tmp_path):
@@ -499,6 +499,111 @@ def test_a_tenant_copied_from_the_template_has_every_system_down_until_its_place
         assert "CHANGE-ME" in str(raised.value), \
             f"{system}.{fn.__name__}: the fault must name the placeholder left in: {raised.value}"
     assert stand_in.requests() == [], f"a placeholder system reached the proxy: {stand_in.requests()}"
+
+
+def _called(record, tmp_path, name, fn, **kw):
+    """`fn(ctx, **kw)` against a proxy stand-in answering `{}`: (the fault or None, requests)."""
+    stand_in = S.ProxyStandIn(tmp_path / f"proxy-{name}", [S.answer("{}")])
+    run_dir = tmp_path / f"run-{name}"
+    run_dir.mkdir()
+    ctx = S.verb_context(record, run_dir, {}, proxy_url=stand_in.url, request_token=f"token-{name}")
+    try:
+        fn(ctx, **kw)
+    except Exception as fault:  # noqa: BLE001 — the fault is the observation
+        return fault, stand_in.requests()
+    return None, stand_in.requests()
+
+
+@pytest.mark.parametrize(("key", "value", "named"), [
+    ("ELASTIC_EVENTS_INDEX", "CHANGE-ME", "CHANGE-ME"),        # S2: the template's placeholder
+    ("ELASTIC_EVENTS_INDEX", "logs-CHANGE-ME-*", "CHANGE-ME"),  # S2: inside a value
+    ("ELASTIC_ALERTS_INDEX", "alerts/x", "`/`"),               # T4: a settings path value
+    ("ELASTIC_EVENTS_INDEX", "logs;x", "`;`"),                 # T4
+])
+def test_r5_a_config_env_value_the_system_cannot_use_leaves_it_not_configured(
+        tmp_path, key, value, named):
+    """With its access declaration filled in, a `config.env` value still carrying the template's
+    `CHANGE-ME`, or a path value that is not one segment, is a `ConfigFault` naming the key at
+    the settings check, and no verb call reaches the proxy (#1391 r5 S2, T4)."""
+    elastic = S.mod("integrations.elastic_adapter")
+    ConfigFault = S.config_fault()
+    root = tmp_path / "tenants"
+    folder = S.plant(root, marker="r5c")
+    S.set_key(folder, "elastic", key, value)
+    record = _resolve(root)
+    with pytest.raises(ConfigFault) as raised:
+        elastic.check_settings(record)
+    assert key in str(raised.value), str(raised.value)
+    assert named in str(raised.value), str(raised.value)
+    fault, sent = _called(record, tmp_path, "q", elastic.query, native_query="*")
+    assert isinstance(fault, ConfigFault), fault
+    assert sent == [], sent
+
+
+def test_r5_a_config_env_is_optional_only_for_an_adapter_that_reads_no_key(tmp_path):
+    """host-state reads no `config.env` key: with only its `access.yaml` it is usable and its
+    verbs are sent. cmdb reads a key: without its `config.env` it is still "config file not
+    found" (#1391 r5 O-S1)."""
+    host_state = S.mod("integrations.host_state_adapter")
+    cmdb = S.mod("integrations.cmdb_adapter")
+    ConfigFault = S.config_fault()
+    root = tmp_path / "tenants"
+    folder = S.plant(root, marker="r5o")
+    S.config_path(folder, "host-state").unlink(missing_ok=True)
+    S.config_path(folder, "cmdb").unlink()
+    record = _resolve(root)
+    assert host_state.check_settings(record) is None
+    fault, sent = _called(record, tmp_path, "hs", host_state.passwd, host="web-1")
+    assert [r["url"] for r in sent] == [f"{T1106.default_base('r5o', 'host-state')}/hosts/web-1/accounts"], (fault, sent)
+    with pytest.raises(ConfigFault, match="config file not found"):
+        cmdb.check_settings(record)
+
+
+@pytest.mark.parametrize("host", ["", ".", "..", "web-1/../admin", "web-1%2Fx", "web 1", "a?b",
+                                  "a#b", "a;b", "a\\b", "a\nb"])
+def test_r5_an_agent_path_value_that_is_not_one_segment_is_refused_before_sending(tmp_path, host):
+    """A value the agent chose that is not exactly one path segment is a `ConfinementFault`
+    naming the parameter, and nothing reaches the proxy (#1391 r5 T2, O-T2)."""
+    cmdb = S.mod("integrations.cmdb_adapter")
+    root = tmp_path / "tenants"
+    S.plant(root, marker="r5s")
+    fault, sent = _called(_resolve(root), tmp_path, "g", cmdb.get_host, host=host)
+    assert type(fault).__name__ == "ConfinementFault", repr(fault)
+    assert fault.exit_code == 1, repr(fault)
+    assert "`host`" in str(fault), str(fault)
+    assert sent == [], sent
+
+
+def test_r5_a_one_segment_value_is_sent_escaped_and_a_query_value_may_hold_a_separator(tmp_path):
+    """A one-segment value is percent-encoded into its segment; a value in the query keeps its
+    `/` (#1391 r5 T2, T3)."""
+    cmdb = S.mod("integrations.cmdb_adapter")
+    host_state = S.mod("integrations.host_state_adapter")
+    root = tmp_path / "tenants"
+    S.plant(root, marker="r5e")
+    record = _resolve(root)
+    _, sent = _called(record, tmp_path, "c", cmdb.get_host, host="web:1@x")
+    assert [r["url"] for r in sent] == [f"{T1106.default_base('r5e', 'cmdb')}/hosts/web%3A1%40x"], sent
+    _, sent = _called(record, tmp_path, "f", host_state.fim_checksum, host="web-1", path="/etc/hosts")
+    assert [r["url"] for r in sent] == [
+        f"{T1106.default_base('r5e', 'host-state')}/hosts/web-1/files/sha256?path=%2Fetc%2Fhosts"], sent
+
+
+@pytest.mark.parametrize("answer", ["[]", '"text"'])
+def test_r5_an_answer_that_is_not_the_object_a_verb_needs_is_the_system_breaking_its_contract(
+        tmp_path, answer):
+    """An object endpoint answering anything else is a `TransportFault`, for every adapter
+    (#1391 r5 O-T4)."""
+    cmdb = S.mod("integrations.cmdb_adapter")
+    root = tmp_path / "tenants"
+    S.plant(root, marker="r5a")
+    stand_in = S.ProxyStandIn(tmp_path / "proxy", [S.answer(answer)])
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    ctx = S.verb_context(_resolve(root), run_dir, {}, proxy_url=stand_in.url, request_token="t")
+    with pytest.raises(S.mod("kit.faults").TransportFault):
+        cmdb.get_host(ctx, host="web-1")
+    assert len(stand_in.requests()) == 1, "the answer came from the system"
 
 
 def test_s7_mf11_record_parts_read_only(tmp_path):

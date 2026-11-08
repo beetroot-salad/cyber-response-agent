@@ -88,7 +88,8 @@ def test_a_query_verb_is_handed_the_runs_tenant_record(tmp_path):
     assert Path(call.ctx.tenant.settings).resolve() != T.FIXTURE_SETTINGS.resolve()
     # Read THROUGH what the verb was handed: the adapter's config is the run tenant's.
     transport = T.mod("kit.transport")
-    assert transport.load_config(call.ctx, "cmdb", "CMDB")["URL_BASE"] == "http://cmdb-lane:8080"
+    transport.load_config(call.ctx, "cmdb", "CMDB")
+    assert transport.record_access(call.ctx.tenant, "cmdb").base == "http://cmdb-lane:8080"
 
 
 def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_host_path(

@@ -10,8 +10,7 @@ if (_root := str(_Path(__file__).resolve().parents[4])) not in _sys.path:
 from typing import TYPE_CHECKING, Any
 
 from defender.kit.verbs import VerbContext, verb
-from defender.kit import transport
-from defender.kit import faults
+from defender.kit import faults, transport
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.kit.verbs import TenantRecord
@@ -25,6 +24,8 @@ PREFIX = "EXAMPLE"
 #: the `base` of `systems/example/access.yaml`, the declaration the credential proxy reaches the
 #: system by.
 REQUIRED_KEYS = ("TIMEOUT_SEC",)
+#: The most events one `query` may ask for.
+MAX_LIMIT = 1000
 
 
 def _config(ctx: VerbContext) -> dict[str, str]:
@@ -32,9 +33,9 @@ def _config(ctx: VerbContext) -> dict[str, str]:
     the run began. Never the settings folder as it is now and never the process environment: an
     adapter reads its configuration from the record, so an exported variable changes nothing a
     run addresses.
-    `load_config` strips the prefix, adds `URL_BASE` (the access declaration's base) and raises
-    `ConfigFault` for a system with no config or no declaration, a missing or blank required key,
-    or a key it does not read — which `check_settings` below raises first, at run start."""
+    `load_config` strips the prefix and raises `ConfigFault` for a system with no config or no
+    declaration, a missing, blank or still-`CHANGE-ME` required key, or a key it does not read —
+    which `check_settings` below raises first, at run start."""
     return transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_KEYS)
 
 
@@ -50,29 +51,33 @@ def check_settings(tenant: TenantRecord) -> None:
     transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_KEYS)
 
 
-def _request(ctx: VerbContext, path: str, params: dict[str, str] | None = None) -> Any:
-    """GET `path` from this system, through the credential proxy: the only way an adapter reaches
-    its system. The proxy holds the credential, refuses any URL outside the declaration, and
-    answers; `http_get` raises `TransportFault` for an unreachable system or a 5xx and
-    `UpstreamFault` (the system's own detail) for a 4xx."""
-    return transport.http_get(ctx, _config(ctx), path, system=SYSTEM, params=params)
+def _get(ctx: VerbContext, template: str, values: dict[str, str] | None = None, *,
+         query: dict[str, str] | None = None, answer: transport.Answer = "object") -> Any:
+    """GET `template` from this system, through the credential proxy: the only way an adapter
+    reaches its system. Never build a URL: name the path as a template (`"/records/{id}"`) and
+    hand the values. Each value must be exactly one path segment, or the call is refused before
+    it is sent (`ConfinementFault`); a value that may hold a `/` goes in `query`. The base is the
+    access declaration's. The proxy holds the credential and answers; the transport raises
+    `TransportFault` for an unreachable system, a 5xx or an answer of the wrong shape (`answer`),
+    and `UpstreamFault` (the system's own detail) for a 4xx."""
+    return transport.request(ctx, SYSTEM, "GET", template, values, query=query,
+                             timeout_sec=transport.timeout_of(_config(ctx)), answer=answer)
 
 
 def health_check(ctx: VerbContext) -> dict:
-    _request(ctx, "/health")
+    _get(ctx, "/health")
     return {"system": SYSTEM, "status": "connected"}
 
 
 @verb(engine="lucene", body_param="native_query")
 def query(ctx: VerbContext, *, native_query: str, limit: int = 100) -> dict | list:
-    return _request(ctx, "/events", {"q": native_query, "limit": str(limit)})
+    if not 1 <= limit <= MAX_LIMIT:  # the agent's to fix: an `UpstreamFault`, exit 1
+        raise faults.UpstreamFault(f"limit must be between 1 and {MAX_LIMIT}, got {limit}")
+    return _get(ctx, "/events", query={"q": native_query, "limit": str(limit)}, answer="any")
 
 
 def get_record(ctx: VerbContext, *, id: str) -> dict:
-    got = _request(ctx, f"/records/{id}")
-    if not isinstance(got, dict):  # parse the answer to the API's own contract
-        raise faults.UpstreamFault(f"{SYSTEM}: record {id} answered {type(got).__name__}, not an object")
-    return got
+    return _get(ctx, "/records/{id}", {"id": id})
 
 
 VERBS = {

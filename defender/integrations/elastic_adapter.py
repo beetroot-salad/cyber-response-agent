@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import urllib.parse
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
@@ -16,7 +15,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
 from defender.kit.verbs import VerbContext, verb
 from defender.kit import transport
 from defender.integrations.confinement import confine_index, confine_read_endpoint
-from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
+from defender.kit.faults import ConfigFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.kit.verbs import TenantRecord
@@ -25,6 +24,8 @@ SYSTEM = "elastic"
 
 #: The keys of `systems/elastic/config.env` this adapter requires (prefix stripped).
 REQUIRED_CONFIG_KEYS = ("EVENTS_INDEX", "ALERTS_INDEX")
+#: The keys whose values go in a request path (a search's index), so each is one segment (T4).
+PATH_KEYS = REQUIRED_CONFIG_KEYS
 
 RETURNED_DOC_CAP = 20
 DEFAULT_LIMIT = RETURNED_DOC_CAP
@@ -44,12 +45,13 @@ def load_config(ctx: VerbContext) -> dict[str, str]:
 
 def _record_config(tenant: TenantRecord) -> dict[str, str]:
     """This deployment's elastic config from the run's record (#1107), by the shared rules for a
-    proxied system: the two index keys (prefix stripped) and `URL_BASE`, the base of the access
-    declaration (which holds the only one, #1391 F4). Any other key (a retired base, Kibana or
-    Docker key, #1391 Q4), no declaration, or a blank index key is a `ConfigFault` —
+    proxied system: the two index keys (prefix stripped), each one path segment (#1391 T4); its
+    base is its access declaration's (F4). Any other key (a retired base, Kibana or Docker key,
+    #1391 Q4), no declaration, or a blank or placeholder index key is a `ConfigFault` —
     Elasticsearch is not configured for this run (`check_settings` raises it at run start, so
     elastic is down from the start, #1256)."""
-    return transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
+    return transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS,
+                                   path_keys=PATH_KEYS)
 
 
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
@@ -80,18 +82,17 @@ def _error_detail(body_text: str) -> object:
 
 
 def _http_json(  # noqa: PLR0913 — one request's per-call state
-    ctx, method: str, config: dict[str, str], path: str, body: dict | None = None,
+    ctx, method: str, template: str, values: dict[str, str] | None = None, *,
+    query: dict[str, str] | None = None, body: dict | None = None,
     timeout_sec: int = REQUEST_TIMEOUT_SEC,
 ) -> dict:
-    """The one door to Elasticsearch: its own confinement first (P3: the endpoint allowlist,
-    matched against `path` relative to the declared base as the proxy's routes are, before it is
-    joined to the base), then the shared send, capture and fault mapping."""
-    confine_read_endpoint(SYSTEM, path, method=method, verb_class="r")
-    answer = transport.http_timed(ctx, config, method, path, body, system=SYSTEM,
-                                  timeout_sec=timeout_sec, error_detail=_error_detail)
-    if not isinstance(answer, dict):
-        raise TransportFault("non-object JSON response from elastic")
-    return answer
+    """The one door to Elasticsearch: each path value one segment (T2), then its own
+    confinement (P3: the endpoint allowlist, matched against the path relative to the declared
+    base as the proxy's routes are), then the shared send, capture and fault mapping."""
+    given = {name: transport.require_segment(name, value) for name, value in (values or {}).items()}
+    confine_read_endpoint(SYSTEM, template.format_map(given), method=method)
+    return transport.request(ctx, SYSTEM, method, template, given, query=query, body=body,
+                             timeout_sec=timeout_sec, error_detail=_error_detail)
 
 
 SORT_NEWEST_FIRST = "desc"
@@ -149,15 +150,13 @@ def _build_search_body(query_string, time_start, time_end, time_field, limit, so
     }
 
 
-def _search(
-    ctx, config, index_pattern: str, body: dict,
-) -> tuple[list[dict], int, bool]:
-    path = f"/{urllib.parse.quote(index_pattern, safe='-*,.')}/_search?ignore_unavailable=true"
+def _search(ctx, index_pattern: str, body: dict) -> tuple[list[dict], int, bool]:
     # The index is confined to the configured patterns (`confine_index`), so a 403 is the user
     # lacking `read` on one of them: setup, not the agent's (PR #1409 review).
     with _a_403_is_setup(f"the search of {index_pattern}",
                          "`read` on the configured events and alerts indexes"):
-        resp = _http_json(ctx, "POST", config, path, body=body)
+        resp = _http_json(ctx, "POST", "/{index}/_search", {"index": index_pattern},
+                          query={"ignore_unavailable": "true"}, body=body)
 
     hits_block = resp.get("hits", {})
     total = hits_block.get("total", {})
@@ -173,11 +172,12 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
     start: str | None, end: str | None, limit: int, index: str | None, sort: str,
 ) -> dict:
     config = load_config(ctx)
-    resolved = index or config[index_key]
+    # One segment first (T2), then the expression's reach (`confine_index`).
+    resolved = transport.require_segment("index", index or config[index_key])
     resolved = confine_index(
         resolved, (config["EVENTS_INDEX"], config["ALERTS_INDEX"]))
     docs, total, truncated = _search(
-        ctx, config, resolved,
+        ctx, resolved,
         _build_search_body(native_query, start, end, "@timestamp", limit, sort),
     )
     return search_envelope(resolved, docs, total, truncated, sort)
@@ -218,9 +218,9 @@ def _a_403_is_setup(what: str, needs: str) -> Iterator[None]:
 def health_check(ctx: VerbContext) -> dict:
     """Elasticsearch's cluster health, and nothing else (Kibana is not probed, #1391 D2). A 403 is
     the read-only user lacking the cluster `monitor` privilege (`_a_403_is_setup`)."""
-    config = load_config(ctx)
+    load_config(ctx)
     with _a_403_is_setup("the health check", "the cluster `monitor` privilege"):
-        body = _http_json(ctx, "GET", config, "/_cluster/health", timeout_sec=HEALTH_TIMEOUT_SEC)
+        body = _http_json(ctx, "GET", "/_cluster/health", timeout_sec=HEALTH_TIMEOUT_SEC)
     return {
         "system": SYSTEM,
         "connected": True,
@@ -284,8 +284,8 @@ def esql_payload(query: str, resp: dict) -> dict:
 
 @verb(engine="esql", body_param="query")
 def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
-    config = load_config(ctx)
-    resp = _http_json(ctx, "POST", config, "/_query?format=json", body={"query": query})
+    load_config(ctx)
+    resp = _http_json(ctx, "POST", "/_query", query={"format": "json"}, body={"query": query})
     return esql_payload(query, resp)
 
 

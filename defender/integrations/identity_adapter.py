@@ -23,6 +23,10 @@ def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module 
     return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
+def _timeout(ctx: VerbContext) -> int:  # lint-dup: ok — per-module alias over the shared transport.timeout_of
+    return transport.timeout_of(_config(ctx))
+
+
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """This system's settings check (#1256 O-5): every `ConfigFault` a verb here can raise —
     `_config`'s keys and the access declaration — raised over the run's record, or None when
@@ -31,21 +35,22 @@ def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adap
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, _config(ctx), SYSTEM)
+    return transport.health_check(ctx, SYSTEM, timeout_sec=_timeout(ctx))
 
 
 def can_access(ctx: VerbContext, *, user: str, host: str) -> dict:
-    return transport.http_get_obj(
-        ctx, _config(ctx), f"/users/{user}/can_access", system=SYSTEM, params={"host": host},
-    )
+    return transport.request(ctx, SYSTEM, "GET", "/users/{user}/can_access", {"user": user},
+                             query={"host": host}, timeout_sec=_timeout(ctx))
 
 
 def get_user(ctx: VerbContext, *, user: str) -> dict:
-    return transport.http_get_obj(ctx, _config(ctx), f"/users/{user}", system=SYSTEM)
+    return transport.request(ctx, SYSTEM, "GET", "/users/{user}", {"user": user},
+                             timeout_sec=_timeout(ctx))
 
 
 def list_authorized_hosts(ctx: VerbContext, *, user: str) -> dict | list:
-    return transport.http_get(ctx, _config(ctx), f"/users/{user}/authorized_hosts", system=SYSTEM)
+    return transport.request(ctx, SYSTEM, "GET", "/users/{user}/authorized_hosts", {"user": user},
+                             timeout_sec=_timeout(ctx), answer="any")
 
 
 def list_users(
@@ -56,11 +61,12 @@ def list_users(
         params["role"] = role
     if enabled is not None:
         params["enabled"] = "true" if enabled else "false"
-    return transport.http_get(ctx, _config(ctx), "/users", system=SYSTEM, params=params or None)
+    return transport.request(ctx, SYSTEM, "GET", "/users", query=params or None,
+                             timeout_sec=_timeout(ctx), answer="any")
 
 
 def list_roles(ctx: VerbContext) -> dict | list:  # lint-dup: ok — distinct service
-    return transport.http_get(ctx, _config(ctx), "/roles", system=SYSTEM)
+    return transport.request(ctx, SYSTEM, "GET", "/roles", timeout_sec=_timeout(ctx), answer="any")
 
 
 VERBS = {

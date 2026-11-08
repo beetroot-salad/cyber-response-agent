@@ -1,23 +1,21 @@
-"""Shared transport for the adapters of systems with network access: every one is reached only
-through the credential proxy, at the base its access declaration names (#1391 O1, P1)."""
+"""The shared transport every adapter reaches its system with: only through the credential proxy,
+at the base the system's access declaration names (#1391 O1, P1), and the one judgement of a
+system's settings folder against the keys its adapter reads (S1).
+
+An adapter never builds a URL (T1). It names a path template, `"/hosts/{host}"`, and the values
+that fill it; each value must be exactly one path segment (`kit.paths`, T2) or the call is
+refused before anything is sent. Query parameters are always a separate argument, and a value
+that may hold a separator travels there or in the body (T3)."""
 
 from __future__ import annotations
 
 import json
+import re
 import urllib.parse
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, Literal
 
-from defender.kit.proxy_client import proxy_exchange
 from defender.kit.access import AccessDeclaration
-from defender.kit.settings import (
-    NOT_CONFIGURED,
-    SystemConfig,
-    config_pointer,
-    is_blank,
-    pointer_to,
-)
-from defender.kit.verbs import VerbContext
 from defender.kit.faults import (
     USAGE_EXIT_CODE,
     AdapterFault,
@@ -26,6 +24,18 @@ from defender.kit.faults import (
     TransportFault,
     UpstreamFault,
 )
+from defender.kit.paths import CASE_KEY_REFUSED, KEPT, REFUSED, segment_fault
+from defender.kit.proxy_client import proxy_exchange
+from defender.kit.settings import (
+    NOT_CONFIGURED,
+    PLACEHOLDER,
+    ConfigAbsent,
+    SystemConfig,
+    config_pointer,
+    is_blank,
+    pointer_to,
+)
+from defender.kit.verbs import VerbContext
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.kit.verbs import TenantRecord
@@ -38,24 +48,48 @@ REQUIRED_CONFIG_KEYS_TEMPLATE = ("TIMEOUT_SEC",)
 #: Where an operator whose settings still name a retired key is pointed (#1391 O7).
 UPGRADE_POINTER = 'defender/CLAUDE.md, "Upgrade from before the Docker removal"'
 
+#: What an answer must be: a JSON object, a JSON array, or either.
+Answer = Literal["object", "list", "any"]
+
+#: How an adapter reads its vendor's own reason out of an error body; `vendor_detail` unless the
+#: adapter hands the transport its own (a vendor whose errors have another shape).
+ErrorDetail = Callable[[str], object]
+
+#: The most characters of an error body that has no reason to pick out reach a fault.
+VENDOR_DETAIL_CAP = 2000
+
+_FIELD = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
 __all__ = [
     "REQUIRED_CONFIG_KEYS_TEMPLATE",
     "UPGRADE_POINTER",
     "USAGE_EXIT_CODE",
+    "VENDOR_DETAIL_CAP",
+    "Answer",
+    "CaseKey",
+    "ErrorDetail",
+    "capped_detail",
     "check_settings_of",
     "health_check",
-    "http_get",
-    "http_get_obj",
-    "http_post",
-    "http_timed",
+    "link",
     "load_config",
     "raise_proxy_fault",
     "record_access",
     "record_config",
     "record_entry",
+    "record_outbound",
+    "request",
+    "require_segment",
     "system_entry",
+    "timeout_of",
+    "host_write",
+    "vendor_detail",
 ]
 
+
+# --------------------------------------------------------------------------------------------
+# The settings judgement (S1): one system folder against the keys its adapter reads.
+# --------------------------------------------------------------------------------------------
 
 def system_entry(ctx: VerbContext, system: str) -> SystemConfig:
     """`record_entry` over the call's run record (`ctx.tenant`)."""
@@ -80,50 +114,76 @@ def record_entry(tenant: TenantRecord, system: str) -> SystemConfig:
 
 def load_config(
     ctx: VerbContext, system: str, prefix: str,
-    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
+    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE, *,
+    path_keys: tuple[str, ...] = (),
 ) -> dict[str, str]:
-    """`record_config` over the call's run record (`ctx.tenant`): the loader every verb calls,
-    under the signature the case-comment writer and the connect example keep."""
-    return record_config(ctx.tenant, system, prefix, required)
+    """`record_config` over the call's run record (`ctx.tenant`): the loader every verb calls."""
+    return record_config(ctx.tenant, system, prefix, required, path_keys=path_keys)
 
 
 def record_config(
     tenant: TenantRecord, system: str, prefix: str,
-    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
+    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE, *,
+    path_keys: tuple[str, ...] = (),
 ) -> dict[str, str]:
-    """`system`'s settings from the run's record: the `required` keys of its `config.env`
-    (prefix stripped), each set and not blank, and `URL_BASE`, the base of its access
-    declaration, which holds the only one (A2). The keys an adapter reads are exactly
-    `required` (#1391 Q4/D10): any other key in the file — a retired access-method or Docker
-    key, a base key, a typo — is a `ConfigFault` naming it, as is a missing declaration (P1)."""
-    if "URL_BASE" in required:
-        raise ValueError(f"{system}'s adapter lists URL_BASE as a config key: a system's base is "
-                         f"its access.yaml's, never a config.env setting")
-    entry = record_entry(tenant, system)
+    """THE judgement of `system`'s settings folder (S1), over the run's record: its `required`
+    keys (prefix stripped), or the `ConfigFault` naming what is wrong. In order:
+
+    1. its access declaration is present and usable (P1);
+    2. its `config.env` is present, unless the adapter reads no key (O-S1);
+    3. it holds no key the adapter does not read (Q4);
+    4. every key it reads is set and not blank;
+    5. no value still carries the template's `CHANGE-ME` (S2);
+    6. every key in `path_keys` (a value the adapter puts in a request path) is one path
+       segment (T2, T4);
+    7. a `TIMEOUT_SEC` is a whole number of seconds above zero.
+
+    The base is the declaration's, never a key: the dict carries no `URL_BASE` (O-T3)."""
+    record_access(tenant, system)
+    entry: Mapping[str, str]
+    if isinstance(tenant.systems.get(system), ConfigAbsent) and not required:
+        entry = {}
+    else:
+        entry = record_entry(tenant, system)
+    shown = config_pointer(system)
     declared = {f"{prefix}_{key}" for key in required}
     undeclared = sorted(key for key in entry if key not in declared)
     if undeclared:
         reads = ", ".join(sorted(declared)) or "no keys"
         raise ConfigFault(
-            f"{', '.join(undeclared)} in {config_pointer(system)} is not a setting of {system} "
+            f"{', '.join(undeclared)} in {shown} is not a setting of {system} "
             f"(it reads {reads}; its base is its access.yaml's) — remove it; a key of the "
             f"retired docker access method is removed as {UPGRADE_POINTER} says")
-    declaration = record_access(tenant, system)
     cfg = {key: entry[f"{prefix}_{key}"] for key in required
            if not is_blank(entry.get(f"{prefix}_{key}", ""))}
     missing = [k for k in required if k not in cfg]
     if missing:
         raise ConfigFault(
-            f"missing required config keys in {config_pointer(system)}: "
+            f"missing required config keys in {shown}: "
             f"{', '.join(f'{prefix}_{k}' for k in missing)}")
+    placeholders = [f"{prefix}_{k}" for k in required if PLACEHOLDER in cfg[k]]
+    if placeholders:
+        raise ConfigFault(f"{', '.join(placeholders)} in {shown} still carries the template's "
+                          f"{PLACEHOLDER} — replace it; {NOT_CONFIGURED}")
+    for key in path_keys:
+        why = segment_fault(cfg[key])
+        if why is not None:
+            raise ConfigFault(f"{prefix}_{key} in {shown} {why}: {system} puts it in a request "
+                              "path, where a value is exactly one segment — "
+                              f"{NOT_CONFIGURED}")
     _check_timeout(prefix, cfg.get("TIMEOUT_SEC"))
-    return {"URL_BASE": declaration.base, **cfg}
+    return cfg
 
 
 def _check_timeout(prefix: str, timeout: str | None) -> None:
     if timeout is not None and not (timeout.isascii() and timeout.isdigit() and len(timeout) <= 9 and int(timeout) > 0):
         raise ConfigFault(
             f"{prefix}_TIMEOUT_SEC must be a whole number of seconds above zero, got {timeout!r}")
+
+
+def timeout_of(config: Mapping[str, str]) -> int:
+    """The `TIMEOUT_SEC` of a judged config (`record_config` checked its shape)."""
+    return int(config["TIMEOUT_SEC"])
 
 
 def record_access(tenant: TenantRecord, system: str) -> AccessDeclaration:
@@ -140,76 +200,132 @@ def record_access(tenant: TenantRecord, system: str) -> AccessDeclaration:
 
 def check_settings_of(
     tenant: TenantRecord, system: str, prefix: str,
-    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
+    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE, *,
+    path_keys: tuple[str, ...] = (),
 ) -> None:
     """The settings check of an adapter whose verbs load their config (`load_config`) and then
     call through the proxy (#1256 O-5): every `ConfigFault` such a verb can raise, over the run's
     record. None when the system is usable."""
-    record_config(tenant, system, prefix, required)
+    record_config(tenant, system, prefix, required, path_keys=path_keys)
 
 
-def http_get(
-    ctx: VerbContext, config: dict[str, str], path: str, *, system: str,
-    params: dict | None = None,
-) -> dict | list:
-    """GET <URL_BASE><path>?<params>, return parsed JSON.
+# --------------------------------------------------------------------------------------------
+# Paths (T1, T2): a template and its values, never a URL an adapter built.
+# --------------------------------------------------------------------------------------------
 
-    Raises `TransportFault` (infra) on an unreachable system or a 5xx and `UpstreamFault` (a
-    query error, carrying the vendor's own `detail`) on a 4xx — a 404 included.
+class CaseKey(str):
+    """A case key (#1359 P3) as a path value: named by the alert, not chosen by the agent, so it
+    is escaped into its segment and refused only for what could split one
+    (`kit.paths.CASE_KEY_REFUSED`). Every other path value follows the strict rule (T2)."""
 
-    `system` is required: it keys the confinement allowlist, and a default would let a caller
-    confine against the wrong one.
-    """
-    qs = ("?" + urllib.parse.urlencode(params)) if params else ""
-    url = f"{config['URL_BASE'].rstrip('/')}{path}{qs}"
-    return _request(ctx, config, url, system=system, method="GET")
+    __slots__ = ()
 
 
-def http_post(
-    ctx: VerbContext, config: dict[str, str], path: str, body: dict, *, system: str,
-) -> dict | list:
-    url = f"{config['URL_BASE'].rstrip('/')}{path}"
-    return _request(ctx, config, url, system=system, method="POST", body=body)
+def require_segment(name: str, value: object) -> str:
+    """`value` when it is exactly one path segment (`kit.paths.segment_fault`), else the
+    `ConfinementFault` naming `name`: the caller chose a value that would reach another route,
+    so nothing is sent (T4: refused at the call, never counted against the system)."""
+    why = segment_fault(value, refused=CASE_KEY_REFUSED if isinstance(value, CaseKey) else
+                        REFUSED)
+    if why is not None:
+        raise ConfinementFault(f"`{name}` {why}: a value in a request path is exactly one "
+                               "segment, so this call was not sent")
+    return value  # type: ignore[return-value]  # segment_fault refuses anything but text
 
 
-def http_timed(  # noqa: PLR0913 — one request's per-call state
-    ctx: VerbContext, config: dict[str, str], method: str, path: str, body: dict | None, *,
-    system: str, timeout_sec: int, error_detail: ErrorDetail | None = None,
-) -> dict | list:
-    """`method` <URL_BASE><path> as `http_get`/`http_post` send it, under the adapter's own
-    timeout constant rather than a `TIMEOUT_SEC` setting (#1391 O3), its error bodies read by
-    `error_detail` when the adapter hands one."""
-    url = f"{config['URL_BASE'].rstrip('/')}{path}"
-    return _perform(ctx, config, url, system=system, method=method, body=body,
-                    timeout_sec=timeout_sec, error_detail=error_detail)
+def _fill(template: str, values: Mapping[str, object] | None) -> str:
+    """`template` with each `{name}` replaced by its value, percent-encoded as one segment."""
+    if not template.startswith("/") or "?" in template or "#" in template:
+        raise ValueError(f"path template {template!r} must start with `/` and hold no query "
+                         "or fragment (query parameters are a separate argument)")
+    given = dict(values or {})
+    named = _FIELD.findall(template)
+    if sorted(set(named)) != sorted(given):
+        raise ValueError(f"path template {template!r} names {sorted(set(named))}, given "
+                         f"{sorted(given)}")
+    filled = _FIELD.sub(lambda m: urllib.parse.quote(
+        require_segment(m[1], given[m[1]]), safe="" if isinstance(given[m[1]], CaseKey) else KEPT),
+        template)
+    return filled
 
 
-def http_write(
-    ctx: VerbContext, config: dict[str, str], method: str, path: str, body: dict | None, *,
-    system: str,
+def _url(base: str, template: str, values: Mapping[str, object] | None,
+         query: Mapping[str, object] | None = None) -> str:
+    qs = ("?" + urllib.parse.urlencode(query)) if query else ""
+    return f"{base.rstrip('/')}{_fill(template, values)}{qs}"
+
+
+def link(tenant: TenantRecord, system: str, template: str,
+         values: Mapping[str, object] | None = None) -> str:
+    """A human-facing link under `system`'s declared base (a case's web page), built as a
+    request path is (O-T1). Nothing is sent."""
+    return _url(record_access(tenant, system).base, template, values)
+
+
+# --------------------------------------------------------------------------------------------
+# Requests.
+# --------------------------------------------------------------------------------------------
+
+def request(  # noqa: PLR0913 — one request's per-call state
+    ctx: VerbContext, system: str, method: str, template: str,
+    values: Mapping[str, object] | None = None, *,
+    query: Mapping[str, object] | None = None, body: dict | None = None,
+    timeout_sec: int, answer: Answer = "object", error_detail: ErrorDetail | None = None,
+) -> Any:
+    """`method` <base><template filled by values>?<query> through the credential proxy, and its
+    parsed JSON answer, which must be `answer`'s shape (O-T4: anything else is a
+    `TransportFault`, the system breaking its contract).
+
+    Raises `ConfinementFault` for a path value that is not one segment (nothing sent),
+    `TransportFault` for an unreachable system or a 5xx, and `UpstreamFault` (the vendor's own
+    reason, read by `error_detail` when the adapter hands one) for a 4xx — a 404 included."""
+    url = _url(record_access(ctx.tenant, system).base, template, values, query)
+    record_outbound(ctx, system, url, method=method)
+    parsed = _proxy_request(ctx, url, system=system, method=method, body=body,
+                            timeout_sec=timeout_sec, error_detail=error_detail or vendor_detail)
+    if answer == "object" and not isinstance(parsed, dict):
+        raise TransportFault(f"expected a JSON object from {system} {template}, got "
+                             f"{type(parsed).__name__}")
+    if answer == "list" and not isinstance(parsed, list):
+        raise TransportFault(f"expected a JSON array from {system} {template}, got "
+                             f"{type(parsed).__name__}")
+    return parsed
+
+
+def host_write(  # noqa: PLR0913 — one request's per-call state
+    ctx: VerbContext, system: str, method: str, template: str,
+    values: Mapping[str, object] | None = None, *, body: dict | None, timeout_sec: int,
 ) -> None:
-    """The HOST's write to a case system (#1359): `method` <URL_BASE><path> with a JSON `body`.
+    """The HOST's write to a case system (#1359): `method` <base><template> with a JSON `body`.
     Used only by an adapter's `add_case_comment`; no query verb reaches it. The proxy's declared
     write routes judge it. Whether the store took it is `_judge_write`'s: any 2xx is success
     whatever its body, a redirect or a 4xx is an `UpstreamFault` carrying the status, and a 5xx
     or an unreachable store is a `TransportFault`."""
-    url = f"{config['URL_BASE'].rstrip('/')}{path}"
-    _perform(ctx, config, url, system=system, method=method, body=body, write=True)
+    url = _url(record_access(ctx.tenant, system).base, template, values)
+    record_outbound(ctx, system, url, method=method)
+    _proxy_request(ctx, url, system=system, method=method, body=body, write=True,
+                   timeout_sec=timeout_sec)
 
 
-def http_get_obj(
-    ctx: VerbContext, config: dict[str, str], path: str, *, system: str,
-    params: dict | None = None,
-) -> dict[str, Any]:
-    """`http_get` for endpoints whose contract is a JSON object: narrows the type and fails
-    fast on anything else. List endpoints use `http_get` with their own guard."""
-    payload = http_get(ctx, config, path, system=system, params=params)
-    if not isinstance(payload, dict):
-        raise TransportFault(
-            f"expected a JSON object from {path}, got {type(payload).__name__}"
-        )
-    return payload
+def health_check(ctx: VerbContext, system: str, *, timeout_sec: int) -> dict[str, Any]:
+    """Standard health-check: GET <base>/health and RETURN the payload.
 
+    Returns data rather than printing, so the queries table records a payload."""
+    payload = request(ctx, system, "GET", "/health", timeout_sec=timeout_sec)
+    return {"system": system, "connected": True, **payload}
+
+
+def record_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
+    """Record the request on the call's capture, if it has one: every request to a system, before
+    it goes to the credential proxy, whose route check is its guard (#1163 A6)."""
+    capture = getattr(ctx, "capture", None)
+    if capture is not None:
+        capture.record(system=system, url=url, method=method)
+
+
+# --------------------------------------------------------------------------------------------
+# Answers and faults.
+# --------------------------------------------------------------------------------------------
 
 def _judge_write(code: int, body_text: str, where: str) -> None:
     """THE judgement of the host's write (#1359), from the store's own status
@@ -221,15 +337,6 @@ def _judge_write(code: int, body_text: str, where: str) -> None:
     if code >= 500:
         raise TransportFault(f"upstream {where} returned HTTP {code}: {body_text}")
     raise UpstreamFault(f"HTTP {code} from {where}: {vendor_detail(body_text)}", status=code)
-
-
-#: The most characters of an error body that has no reason to pick out reach a fault.
-VENDOR_DETAIL_CAP = 2000
-
-
-#: How an adapter reads its vendor's own reason out of an error body; `vendor_detail` unless the
-#: adapter hands the transport its own (a vendor whose errors have another shape).
-ErrorDetail = Callable[[str], object]
 
 
 def vendor_detail(body_text: str) -> object:
@@ -249,34 +356,6 @@ def capped_detail(value: object) -> object:
     """`value` as it is when its text is within `VENDOR_DETAIL_CAP`, else that text cut there."""
     text = value if isinstance(value, str) else str(value)
     return value if len(text) <= VENDOR_DETAIL_CAP else text[:VENDOR_DETAIL_CAP] + " [cut]"
-
-
-def _request(
-    ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
-    body: dict | None = None,
-) -> dict | list:
-    return _perform(ctx, config, url, system=system, method=method, body=body)
-
-
-def _perform(  # noqa: PLR0913 — one request's per-call state
-    ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
-    body: dict | None = None, write: bool = False, timeout_sec: int | None = None,
-    error_detail: ErrorDetail | None = None,
-) -> dict | list:
-    timeout = timeout_sec if timeout_sec is not None else int(config.get("TIMEOUT_SEC", "10"))
-    # The proxy's route check is the only guard for this system (A6), bar a vendor adapter's
-    # own confinement before it calls here (P3); the capture is kept.
-    record_outbound(ctx, system, url, method=method)
-    return _proxy_request(ctx, url, system=system, method=method, body=body, write=write,
-                          timeout_sec=timeout, error_detail=error_detail or vendor_detail)
-
-
-def record_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
-    """Record the request on the call's capture, if it has one: every request to a system, before
-    it goes to the credential proxy, whose route check is its guard (#1163 A6)."""
-    capture = getattr(ctx, "capture", None)
-    if capture is not None:
-        capture.record(system=system, url=url, method=method)
 
 
 def raise_proxy_fault(fault: str, detail: str, status: int | None = None, *,
@@ -303,7 +382,7 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
     timeout_sec: int, write: bool = False, error_detail: ErrorDetail = vendor_detail,
 ) -> dict | list:
     """One request through the proxy, its faults raised as the proxy classified them. The
-    capture is `_perform`'s."""
+    capture is the caller's."""
     answer = proxy_exchange(ctx, system=system, method=method, url=url, body=body,
                             timeout_sec=timeout_sec)
     if write:
@@ -335,11 +414,3 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
     if not isinstance(parsed, dict | list):
         raise TransportFault(f"non-object JSON response from {system}")
     return parsed
-
-
-def health_check(ctx: VerbContext, config: dict[str, str], system_label: str) -> dict[str, Any]:
-    """Standard health-check: GET <URL_BASE>/health and RETURN the payload.
-
-    Returns data rather than printing, so the queries table records a payload."""
-    payload = http_get_obj(ctx, config, "/health", system=system_label)
-    return {"system": system_label, "connected": True, **payload}

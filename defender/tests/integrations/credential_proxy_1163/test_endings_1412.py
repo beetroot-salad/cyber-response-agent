@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender.kit.transport import http_write
+from defender.kit.transport import host_write
 from defender.kit.faults import TransportFault, UpstreamFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _endings1412r as E
@@ -73,8 +73,8 @@ def test_o8_a_write_the_system_took_is_accepted_whatever_became_of_its_reply(
     with E.served(tmp_path, data_root, ending, status=status, writes=(("POST", "/tickets"), ("PUT", "/tickets")),
                   grant="rw") as ex:
         ctx = A.ctx_for(tmp_path, T.run_record(ex.rig.t), ex.url, ex.tok)
-        config = {"URL_BASE": f"{ex.up.url}{E.BASE}", "TIMEOUT_SEC": str(ending.timeout)}
-        http_write(ctx, config, method, "/tickets", {"body": "x"}, system="identity")  # raises if refused
+        host_write(ctx, "identity", method, "/tickets", body={"body": "x"},  # raises if refused
+              timeout_sec=ending.timeout)
 
 
 @pytest.mark.parametrize(("status", "fault"), [(404, UpstreamFault), (500, TransportFault)])
@@ -87,9 +87,8 @@ def test_o8_the_write_judgement_still_refuses_a_non_2xx_status_on_a_complete_rep
     with E.served(tmp_path, data_root, ending, status=status, writes=(("POST", "/tickets"),),
                   grant="rw") as ex:
         ctx = A.ctx_for(tmp_path, T.run_record(ex.rig.t), ex.url, ex.tok)
-        config = {"URL_BASE": f"{ex.up.url}{E.BASE}", "TIMEOUT_SEC": str(ending.timeout)}
         with pytest.raises(fault):
-            http_write(ctx, config, "POST", "/tickets", {"body": "x"}, system="identity")
+            host_write(ctx, "identity", "POST", "/tickets", body={"body": "x"}, timeout_sec=ending.timeout)
 
 
 @pytest.mark.parametrize("ending", E.STATUSED, ids=lambda e: e.name)

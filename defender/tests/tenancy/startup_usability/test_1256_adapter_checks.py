@@ -65,7 +65,9 @@ FILE_FAMILIES: tuple[Family, ...] = (
 
 FAULTS: dict[str, tuple[Family, ...]] = {
     **{system: FILE_FAMILIES for system in (
-        "cmdb", "identity", "change-mgmt", "threat-intel", "ticket", "elastic", "host-state")},
+        "cmdb", "identity", "change-mgmt", "threat-intel", "ticket", "elastic")},
+    # host-state reads no `config.env` key, so without the file it is usable (#1391 r5 O-S1).
+    "host-state": tuple(f for f in FILE_FAMILIES if f.label != "config-env-absent"),
 }
 
 _PARAM_VALUES: dict[str, str] = {

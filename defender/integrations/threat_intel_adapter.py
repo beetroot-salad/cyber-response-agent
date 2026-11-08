@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import urllib.parse
-
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -27,6 +25,10 @@ def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module 
     return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
+def _timeout(ctx: VerbContext) -> int:  # lint-dup: ok — per-module alias over the shared transport.timeout_of
+    return transport.timeout_of(_config(ctx))
+
+
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """This system's settings check (#1256 O-5): every `ConfigFault` a verb here can raise —
     `_config`'s keys and the access declaration — raised over the run's record, or None when
@@ -35,12 +37,12 @@ def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adap
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, _config(ctx), SYSTEM)
+    return transport.health_check(ctx, SYSTEM, timeout_sec=_timeout(ctx))
 
 
 def lookup(ctx: VerbContext, *, value: str) -> dict:
-    quoted = urllib.parse.quote(value, safe="")
-    return transport.http_get_obj(ctx, _config(ctx), f"/lookup/{quoted}", system=SYSTEM)
+    return transport.request(ctx, SYSTEM, "GET", "/lookup/{value}", {"value": value},
+                             timeout_sec=_timeout(ctx))
 
 
 def list_indicators(
@@ -61,7 +63,8 @@ def list_indicators(
         params["type"] = type
     if tag:
         params["tag"] = tag
-    return transport.http_get(ctx, _config(ctx), "/indicators", system=SYSTEM, params=params or None)
+    return transport.request(ctx, SYSTEM, "GET", "/indicators", query=params or None,
+                             timeout_sec=_timeout(ctx), answer="any")
 
 
 VERBS = {

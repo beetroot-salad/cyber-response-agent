@@ -103,8 +103,7 @@ def test_s7_nf15_one_parser_line_rules(tmp_path):
     assert cmdb.get("CMDB_TIMEOUT_SEC") == "10", dict(cmdb)
     assert not any(k.startswith("﻿") for k in cmdb), list(cmdb)
     assert not any(v.endswith("\r") for v in cmdb.values()), dict(cmdb)
-    assert transport.load_config(ctx, "cmdb", "CMDB") == {
-        "URL_BASE": S.T1106.default_base("p15", "cmdb"), "TIMEOUT_SEC": "10"}
+    assert transport.load_config(ctx, "cmdb", "CMDB") == {"TIMEOUT_SEC": "10"}
     assert rec.systems["elastic"]["ELASTIC_ALERTS_INDEX"] == "p15-alerts-*"
 
     # export / no-`=` lines: skipped, not keys, and the file is not faulted for them.

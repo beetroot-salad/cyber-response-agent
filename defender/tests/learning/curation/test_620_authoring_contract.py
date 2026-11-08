@@ -167,7 +167,15 @@ def test_the_connect_example_reaches_its_system_through_the_proxy_at_its_declare
     access.write_text(T1106.access_text("oex", "example"), encoding="utf-8")
     with pytest.raises(ConfigFault, match="EXAMPLE_URL_BASE"):
         example.check_settings(S.resolve(root))
-    # An adapter listing URL_BASE among the keys it reads is the adapter's bug, not the tenant's.
-    from defender.kit import transport
-    with pytest.raises(ValueError, match="access.yaml"):
-        transport.record_config(record, "example", "EXAMPLE", ("URL_BASE", "TIMEOUT_SEC"))
+
+    # An id that is not one path segment is refused before sending; an answer that is not the
+    # object the verb needs is the system breaking its contract (#1391 r5 T2, O-T4).
+    from defender.kit.faults import ConfinementFault, TransportFault
+    with pytest.raises(ConfinementFault, match="`id`"):
+        example.get_record(ctx, id="r1/../admin")
+    assert len(stand_in.requests()) == 1, "the refused id reached the proxy"
+    listed = S.ProxyStandIn(tmp_path / "proxy-list", [S.answer("[]")])
+    (tmp_path / "run-list").mkdir()
+    with pytest.raises(TransportFault):
+        example.get_record(S.verb_context(record, tmp_path / "run-list", {}, proxy_url=listed.url,
+                                          request_token="token-oex"), id="r1")

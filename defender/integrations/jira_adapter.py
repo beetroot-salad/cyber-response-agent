@@ -11,7 +11,6 @@ comment (an Atlassian Document Format body), `yes` is the Jira Service Managemen
 
 from __future__ import annotations
 
-import urllib.parse
 from typing import TYPE_CHECKING
 
 # Workspace root on sys.path so `defender.*` namespace imports resolve when the verb registry
@@ -75,22 +74,22 @@ def _adf(text: str) -> dict:
 def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  # lint-dup: ok — every case-recording adapter exports the host's comment action under this one name (#1359)
     """The host's one write to a case (#1359): add the plain-text `body` as a comment on issue
     `key`, and return the issue's web link. Not a verb (never in `VERBS`). The key is one
-    percent-encoded path segment, so it cannot reshape the request. Faults are the shared
-    classes: a 4xx is an `UpstreamFault` carrying the status."""
+    path segment, so it cannot reshape the request. Faults are the shared classes: a 4xx is an
+    `UpstreamFault` carrying the status."""
     config, service_desk = _jira_settings(ctx.tenant)
-    quoted = urllib.parse.quote(key, safe="")
     if service_desk:
-        path = f"/rest/servicedeskapi/request/{quoted}/comment"
+        path = "/rest/servicedeskapi/request/{key}/comment"
         payload: dict = {"body": body, "public": False}
     else:
-        path = f"/rest/api/3/issue/{quoted}/comment"
+        path = "/rest/api/3/issue/{key}/comment"
         payload = {"body": _adf(body)}
-    transport.http_write(ctx, config, "POST", path, payload, system=SYSTEM)
-    return _issue_link(config, quoted)
+    transport.host_write(ctx, SYSTEM, "POST", path, {"key": transport.CaseKey(key)}, body=payload,
+                    timeout_sec=transport.timeout_of(config))
+    return _issue_link(ctx, key)
 
 
-def _issue_link(config: dict[str, str], quoted: str) -> str:
-    return f"{config['URL_BASE'].rstrip('/')}/browse/{quoted}"
+def _issue_link(ctx: VerbContext, key: str) -> str:
+    return transport.link(ctx.tenant, SYSTEM, "/browse/{key}", {"key": transport.CaseKey(key)})
 
 
 def _adf_text(node: object) -> str:
@@ -120,21 +119,21 @@ def read_case_comments(ctx: VerbContext, *, key: str) -> CaseComments:  # lint-d
     in `VERBS`). The service-desk API has no sort, so a long request's page can miss the newest. A
     comment it cannot read is left out; a reply with no comment list raises `TransportFault`."""
     config, service_desk = _jira_settings(ctx.tenant)
-    quoted = urllib.parse.quote(key, safe="")
     if service_desk:
-        path, field = f"/rest/servicedeskapi/request/{quoted}/comment", "values"
+        path, field = "/rest/servicedeskapi/request/{key}/comment", "values"
         params: dict = {"start": 0, "limit": _READ_PAGE}
     else:
-        path, field = f"/rest/api/3/issue/{quoted}/comment", "comments"
+        path, field = "/rest/api/3/issue/{key}/comment", "comments"
         params = {"startAt": 0, "maxResults": _READ_PAGE, "orderBy": "-created"}
-    rows = transport.http_get_obj(ctx, config, path, system=SYSTEM, params=params).get(field)
+    rows = transport.request(ctx, SYSTEM, "GET", path, {"key": transport.CaseKey(key)}, query=params,
+                             timeout_sec=transport.timeout_of(config)).get(field)
     if not isinstance(rows, list):
         raise TransportFault(f"the read of {key} carries no `{field}` list")
     bodies = [_body(comment) for comment in rows]
     # A document is a dict and a service-desk body is text: each API's own, and nothing else.
     texts = (b for b in bodies if isinstance(b, str)) if service_desk else (
         _adf_text(b) for b in bodies if isinstance(b, dict))
-    return CaseComments(texts=tuple(texts), link=_issue_link(config, quoted))
+    return CaseComments(texts=tuple(texts), link=_issue_link(ctx, key))
 
 
 #: A ready-made adapter grants the agent nothing.

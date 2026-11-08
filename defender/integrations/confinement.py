@@ -88,7 +88,7 @@ READ_ENDPOINT_ALLOWLIST = ReadEndpointAllowlist({
 })
 
 
-def confine_read_endpoint(system: str, url: str, *, method: str, verb_class: str) -> str:
+def confine_read_endpoint(system: str, url: str, *, method: str) -> str:
     """Refuse a request whose resolved, normalized target is not a declared read endpoint for
     `system` under `method`. Checked against REAL requests via the capture seam, never against
     the allowlist's own entries."""
@@ -97,7 +97,7 @@ def confine_read_endpoint(system: str, url: str, *, method: str, verb_class: str
     if not any(m == method and fnmatch.fnmatchcase(path, pattern) for pattern, m in entries):
         raise ConfinementFault(
             f"{system} verb attempted {method} {path}, outside its declared read-endpoint "
-            f"allowlist (verb_class={verb_class!r})"
+            "allowlist"
         )
     return url
 
