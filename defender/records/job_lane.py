@@ -34,7 +34,8 @@ from defender import _io
 from defender.records._errors import RunRefused
 from defender.records._held import hold_level, level_fault
 from defender.records._id import RunId
-from defender.records.job_facts import (
+from defender.records.job_facts import (  # noqa: F401 — the worker's reasons, re-exported
+    EXITED_WITHOUT_RESULT, EXPIRED, LEASE_LAPSED, RETRY_CAP, WORKER_ERROR,
     BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED, SETUP_CRASHED, SETUP_DONE, SETUP_REFUSED,
 )
 from defender.records._knowledge_status import UNREADABLE, api_knowledge, knowledge_status
@@ -155,9 +156,8 @@ SOURCE_UNAVAILABLE, JUDGE_FAILED, ENTRY_ERROR = "source_unavailable", "judge_fai
 SKIPPED_BY_THE_ENTRY = frozenset({NO_FORK_POINT, HISTORY_UNREADABLE, FAMILY_UNUSABLE})
 FAILED_BY_THE_ENTRY = frozenset({CONTROL_FAILED, LAUNCH_REFUSED, VERIFY_REFUSED, SOURCE_UNAVAILABLE,
                                  JUDGE_FAILED, ENTRY_ERROR})
-#: The reasons only the worker records (no end record carries them).
-EXPIRED, EXITED_WITHOUT_RESULT, WORKER_ERROR, LEASE_LAPSED, RETRY_CAP = (
-    "expired", "exited_without_result", "worker_error", "lease_lapsed", "retry_cap")
+#: The reasons only the worker records (no end record carries them): in `job_facts`, which the
+#: store reads without loading the record readers.
 
 _END_REASONS: dict[str, frozenset[str | None]] = {
     LEARNING_COMPLETED: frozenset({None}),
@@ -174,6 +174,7 @@ _PROGRESS_FIELDS = frozenset({"fork_message_id", "stage", "sibling_cost_usd"})
 _END_FIELDS = frozenset({"status", "reason", "message", "fork_message_id", "stage",
                          "findings_count", "sibling_cost_usd"})
 _POST_STEP_FIELDS = frozenset({"published", "refused"})
+_POST_STEP_PENDING_FIELDS = frozenset({"pending"})
 
 
 def _optional_text(value: object) -> bool:
@@ -485,6 +486,26 @@ class JobLane:
         under the tenant's id, `post_step_key`), replaced whole."""
         self._held.write(self._paths(post_step_key(self.tenant_id, job_id)).post_step().name,
                          record.text(), mode="replace")
+
+    def write_post_step_pending(self, job_id: object | None, pending: Sequence[str]) -> None:
+        """The jobs the worker hands the post-step for `job_id` (as `write_post_step` takes it)
+        to publish, replaced whole before it starts: a file, not the command line, so their
+        number never limits the start (#1446 review)."""
+        if not all(isinstance(j, str) for j in pending):
+            raise ValueError("pending job ids are text")
+        self._held.write(self._paths(post_step_key(self.tenant_id, job_id)).post_step_pending().name,
+                         json.dumps({"pending": list(pending)}), mode="replace")
+
+    def read_post_step_pending(self, job_id: object | None) -> tuple[str, ...] | None:
+        """The jobs handed to the post-step for `job_id`, or `None` when the record is absent,
+        unreadable or not of its shape."""
+        read = self._held.view().read(self._paths(post_step_key(self.tenant_id, job_id)).post_step_pending().name)
+        if read.text is None:
+            return None
+        obj = _record_object(read.text, _POST_STEP_PENDING_FIELDS)
+        if obj is None or not isinstance(obj["pending"], list) or not all(isinstance(j, str) for j in obj["pending"]):
+            return None
+        return tuple(obj["pending"])
 
     def read_post_step(self, job_id: object | None) -> PostStepRecord | None:
         """The post-step's record (`job_id` as `write_post_step` takes it), or `None` when it is

@@ -77,6 +77,15 @@ def _queue(ep: Path, channel=FINDINGS) -> list[dict]:
         return state.rows(channel)
 
 
+def hand_pending(data_root, tenant_id: str, job: str | None, pending: list[str]) -> None:
+    """What the worker does before it starts a post-step: the pending jobs, written where the post-step reads them."""
+    from defender.records.job_lane import JobLane
+    from defender.tenancy import data_root_from_path
+
+    with JobLane.open(data_root_from_path(Path(data_root)), tenant_id, make=True) as lane:
+        lane.write_post_step_pending(job, pending)
+
+
 def _record(ep: Path, job: str) -> dict:
     data_root, tenant_id = J.episode_location(ep)
     return json.loads((Path(data_root) / tenant_id / "runs" / f"{job}.post-step.json").read_text(encoding="utf-8"))
@@ -87,8 +96,9 @@ def _post_step(ep: Path, job: str, pending: list[str], *, tick=None) -> None:
     as the launcher and the job entry take theirs."""
     from defender.learning.branch import post_step
 
-    _data_root, tenant_id = J.episode_location(ep)
-    argv = ["--job", job, "--tenant", tenant_id, "--pending", *pending, "--parent-pid", str(os.getppid())]
+    data_root, tenant_id = J.episode_location(ep)
+    hand_pending(data_root, tenant_id, job, pending)
+    argv = ["--job", job, "--tenant", tenant_id, "--parent-pid", str(os.getppid())]
     post_step.main(argv, author_tick=tick if tick is not None else (lambda *_a, **_k: 0),
                    directory=T.launcher_directory(tenant_id))
 
@@ -257,7 +267,7 @@ _POST_STEP = textwrap.dedent("""
     def tick(*_a, **_k):
         return _default_spawn([sys.executable, "-c", sibling, pid_file], env=dict(os.environ))
 
-    post_step.main(["--job", sys.argv[4], "--tenant", tenant, "--pending", "--parent-pid", str(os.getppid())],
+    post_step.main(["--job", sys.argv[4], "--tenant", tenant, "--parent-pid", str(os.getppid())],
                    author_tick=tick, directory=T.launcher_directory(tenant))
 """)
 
@@ -281,3 +291,33 @@ def test_o9_the_real_post_step_takes_the_tick_it_started_with_it_when_its_worker
         worker.wait()
         if child is not None and _running(child):
             os.kill(child, signal.SIGKILL)
+
+
+def test_a_pending_job_whose_episode_is_gone_is_refused_not_left_pending_for_ever(tmp_path):
+    """Nothing brings a deleted episode back, so its job is refused, never retried by every later post-step; the
+    other pending job is still published. (O14, #1446 review)"""
+    import shutil
+
+    ep, _new = _job_episode(tmp_path, "kept")
+    gone, _ = _job_episode(tmp_path, "gone")
+    shutil.rmtree(gone)
+
+    _post_step(ep, ep.name, [gone.name, ep.name])
+
+    assert _record(ep, ep.name) == {"published": [ep.name], "refused": [gone.name]}
+
+
+def test_a_post_step_handed_no_readable_list_publishes_nothing_and_still_runs_the_gate(tmp_path):
+    """No list where the worker writes it: nothing is published or refused (every job stays pending for the next
+    post-step), and the drain's gate still runs. (O8, O14, #1446 review)"""
+    from defender.learning.branch import post_step
+
+    ep, _new = _job_episode(tmp_path, "unhanded")
+    _data_root, tenant_id = J.episode_location(ep)
+    ticks: list[int] = []
+    post_step.main(["--job", ep.name, "--tenant", tenant_id, "--parent-pid", str(os.getppid())],
+                   author_tick=lambda *_a, **_k: ticks.append(1) or 0, directory=T.launcher_directory(tenant_id))
+
+    assert _record(ep, ep.name) == {"published": [], "refused": []}
+    assert ticks == [1]
+    assert _queue(ep) == []

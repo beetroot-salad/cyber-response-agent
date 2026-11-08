@@ -89,8 +89,6 @@ POST_STEP_MODULE = "defender.learning.branch.post_step"
 
 _FAILED, _COMPLETED, _UNPARSEABLE = "failed", "completed", "unparseable"
 _SETUP_REFUSED, _NO_REPORT, _WORKER_ERROR = "setup_refused", "no_report", "worker_error"
-#: A job entry's end record status that ends nothing: the job is handed back (#1344 r5).
-_STOPPED = "stopped"
 
 
 @dataclass(frozen=True)
@@ -157,11 +155,11 @@ def job_entry_argv(launch: LearningLaunch) -> list[str]:
 
 
 def post_step_argv(launch: PostStepLaunch) -> list[str]:
-    """The post-step's child, as a module; `--pending` may name no job, and a family-less one has
-    no `--job`."""
+    """The post-step's child, as a module; a family-less one has no `--job`. Its pending jobs are
+    not on the command line: the worker writes them where it reads them (`_hand_pending`)."""
     job = [] if launch.job_id is None else ["--job", launch.job_id]
     return [sys.executable, "-m", POST_STEP_MODULE, *job, "--tenant", launch.tenant_id,
-            "--pending", *launch.pending_job_ids, "--parent-pid", str(launch.parent_pid)]
+            "--parent-pid", str(launch.parent_pid)]
 
 
 def _exit_words(returncode: int) -> str:
@@ -858,7 +856,7 @@ class Worker:
             started = held.proc is not None
             if is_outage(fault) or held.signalled:
                 return LearningOutcome(None, progress=held.progress), started
-            return LearningOutcome(_FAILED, _WORKER_ERROR, "the worker failed while running the job"), started
+            return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR, "the worker failed while running the job"), started
 
     async def _run_family(self, held: Held, tenant_state: str) -> tuple[LearningOutcome, bool]:
         record = held.record
@@ -866,17 +864,17 @@ class Worker:
         if self._stopping:  # claimed as the stop landed: handed back with nothing started
             return LearningOutcome(None), False
         if tenant_state != "active":
-            return LearningOutcome(_FAILED, _WORKER_ERROR,
+            return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR,
                                    f"the tenant is {tenant_state}, not active; the job was not started"), False
         if held.fenced:
-            return LearningOutcome(_FAILED, _WORKER_ERROR, "the job was ended before it started"), False
+            return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR, "the job was ended before it started"), False
         learning_argv = self._learning_argv
         assert learning_argv is not None  # a worker with learning slots has it (constructor)
         launch = LearningLaunch(job, tenant, os.getpid(), record.investigation_id)
         started = self._clock()
         proc = await self._run_child(held, lambda: learning_argv(launch), watch=self._progress_loop)
         if proc is None:
-            return LearningOutcome(_FAILED, _WORKER_ERROR, "the worker could not start the job's child process"), False
+            return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR, "the worker could not start the job's child process"), False
         returncode = await proc.wait()
         _logger.info("learning job %s: child %d %s after %s", job, proc.pid, _exit_words(returncode),
                      self._clock() - started)
@@ -888,7 +886,7 @@ class Worker:
             _logger.error("learning job %s: reading its end record: %s", job, fault)
             if held.signalled:  # a stop can never permanently fail or skip a job: handed back
                 return LearningOutcome(None, progress=held.progress), True
-            return LearningOutcome(_FAILED, _WORKER_ERROR, "the tenant's runs container could not be read after the job",
+            return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR, "the tenant's runs container could not be read after the job",
                                    held.progress), True
         if end is None:
             progress = await asyncio.to_thread(
@@ -896,9 +894,9 @@ class Worker:
             if held.signalled:  # a stop can never permanently fail or skip a job: handed back
                 return LearningOutcome(None, progress=progress), True
             return LearningOutcome(
-                _FAILED, "exited_without_result",
+                job_lane.LEARNING_FAILED, job_lane.EXITED_WITHOUT_RESULT,
                 f"the job's child left no readable end record; it {_exit_words(returncode)}", progress), True
-        if end.status == _STOPPED:
+        if end.status == job_lane.LEARNING_STOPPED:  # ends nothing: the job is handed back (#1344 r5)
             return LearningOutcome(None, progress=end), True
         # The record decided the ending, so a stop that landed after it does not override it.
         return LearningOutcome(end.status, end.reason, end.message, end, end.findings_count), True
@@ -1010,6 +1008,12 @@ class Worker:
         self._checking.add(tenant)
         try:
             launch = PostStepLaunch(job, tenant, os.getpid(), pending)
+            try:
+                await asyncio.to_thread(self._hand_pending, launch)
+            except (job_lane.JobLaneRefused, OSError) as fault:
+                _logger.warning("%s: the jobs it would publish could not be handed to it (%s); not started, "
+                                "and they stay pending", _what(held), fault)
+                return
             proc = await self._run_child(held, lambda: post_step(launch))
             if proc is None:
                 return
@@ -1028,6 +1032,11 @@ class Worker:
         await self._store.record_publish(tenant, published=published, refused=refused)
         announce("learning_post_step", actor=SYSTEM, tenant_id=tenant, target=job if job is not None else tenant,
                  detail=f"published {len(published)} job(s); refused {len(refused)} job(s)")
+
+    def _hand_pending(self, launch: PostStepLaunch) -> None:
+        """The post-step's pending jobs, written whole where it reads them (`job_lane`), in a thread."""
+        with self._open_lane(self._data_root, launch.tenant_id) as lane:
+            lane.write_post_step_pending(launch.job_id, launch.pending_job_ids)
 
     # -- the last write ---------------------------------------------------------------------------
 

@@ -41,6 +41,8 @@ from defender.records.formats import (
     derive_display,
 )
 
+from defender.records.job_facts import EXPIRED, LEASE_LAPSED, RETRY_CAP
+
 from .audit import SYSTEM, announce
 from .errors import Conflict, NotFound, UnknownReference, UnstorableText
 from defender.tenancy.models import AlertMappingRow, TenantRecord
@@ -554,7 +556,7 @@ class JobStore:
                     return None
                 old_id, tenant = lapsed.id, lapsed.tenant_id
                 capped = lapsed.attempt >= MAX_ATTEMPTS
-                reason = "retry_cap" if capped else "lease_lapsed"
+                reason = RETRY_CAP if capped else LEASE_LAPSED
                 why = ("its worker stopped and handed it back" if lapsed.finished_at is not None
                        else "its worker stopped renewing its lease")
                 lapsed.status, lapsed.reason = "failed", reason
@@ -616,47 +618,46 @@ class JobStore:
 
     async def claim_learning_job(self) -> LearningClaim | None:
         """Move the oldest queued learning job (by `created_at`, ties by id) to `running`, with
-        its tenant's state read in the same transaction, or `None`. A first attempt older than the
-        age limit when the claim reaches it is ended `skipped`/`expired` and the next one is picked
+        its tenant's state read in the same transaction, or `None`. Every first attempt older than
+        the age limit is ended `skipped`/`expired` first, in one statement in the same transaction
         (D4); a retry is exempt. A row another transaction holds is skipped, never waited for."""
-        while True:
-            expired: LearningJobRecord | None = None
-            async with self._tx() as s:
-                # Only the id, attempt and age are read here, never the row as an entity: the
-                # claim's UPDATE ... RETURNING below must hand back the row as it now stands, and an
-                # entity already in the session would be returned as loaded, still `queued`.
-                picked = (await s.execute(
-                    select(LearningJobRow.id, LearningJobRow.attempt, LearningJobRow.created_at)
-                    .where(LearningJobRow.status == "queued")
-                    .order_by(LearningJobRow.created_at, LearningJobRow.id).limit(1)
-                    .with_for_update(skip_locked=True))).first()
-                if picked is None:
-                    return None
-                now = self._clock()
-                if picked.attempt == 1 and now - picked.created_at > self._learning_max_age:
-                    message = (f"it waited in the queue longer than the age limit "
-                               f"({self._learning_max_age.total_seconds():g} s) before a learning slot reached it")
-                    ended = (await s.execute(
-                        update(LearningJobRow).where(LearningJobRow.id == picked.id)
-                        .values(status="skipped", reason="expired", finished_at=now, message=message)
-                        .returning(LearningJobRow).execution_options(synchronize_session=False))).scalars().one()
-                    expired = learning_job_record(ended)
-                else:
-                    claimed = (await s.execute(
-                        update(LearningJobRow).where(LearningJobRow.id == picked.id, LearningJobRow.status == "queued")
-                        .values(status="running", started_at=now, lease_expires_at=self._lease_end())
-                        .returning(LearningJobRow).execution_options(synchronize_session=False))).scalars().first()
-                    if claimed is None:  # not reachable while this transaction holds the row
-                        return None
-                    record = learning_job_record(claimed)
-                    state = (await s.execute(
-                        select(TenantRecord.state).where(TenantRecord.id == record.tenant_id))).scalar_one()
-            if expired is not None:
-                announce("learning_job.finish", actor=SYSTEM, tenant_id=expired.tenant_id,
-                         target=expired.learning_job_id, detail="status=skipped reason=expired")
-                continue
-            announce("learning_job.claim", actor=SYSTEM, tenant_id=record.tenant_id, target=record.learning_job_id)
-            return LearningClaim(record=record, tenant_state=state)
+        now = self._clock()
+        message = (f"it waited in the queue longer than the age limit "
+                   f"({self._learning_max_age.total_seconds():g} s) before a learning slot reached it")
+        claim: LearningClaim | None = None
+        async with self._tx() as s:
+            too_old = (select(LearningJobRow.id)
+                       .where(LearningJobRow.status == "queued", LearningJobRow.attempt == 1,
+                              LearningJobRow.created_at < now - self._learning_max_age)
+                       .with_for_update(skip_locked=True))
+            expired = (await s.execute(
+                update(LearningJobRow).where(LearningJobRow.id.in_(too_old))
+                .values(status="skipped", reason=EXPIRED, finished_at=now, message=message)
+                .returning(LearningJobRow.id, LearningJobRow.tenant_id)
+                .execution_options(synchronize_session=False))).all()
+            # Only the id is read here, never the row as an entity: the claim's UPDATE ... RETURNING
+            # below must hand back the row as it now stands, and an entity already in the session
+            # would be returned as loaded, still `queued`.
+            picked = (await s.execute(
+                select(LearningJobRow.id).where(LearningJobRow.status == "queued")
+                .order_by(LearningJobRow.created_at, LearningJobRow.id).limit(1)
+                .with_for_update(skip_locked=True))).scalar()
+            if picked is not None:
+                claimed = (await s.execute(
+                    update(LearningJobRow).where(LearningJobRow.id == picked, LearningJobRow.status == "queued")
+                    .values(status="running", started_at=now, lease_expires_at=self._lease_end())
+                    .returning(LearningJobRow).execution_options(synchronize_session=False))).scalars().one()
+                record = learning_job_record(claimed)
+                state = (await s.execute(
+                    select(TenantRecord.state).where(TenantRecord.id == record.tenant_id))).scalar_one()
+                claim = LearningClaim(record=record, tenant_state=state)
+        for job_id, tenant_id in sorted(expired, key=lambda row: str(row.id)):
+            announce("learning_job.finish", actor=SYSTEM, tenant_id=str(tenant_id), target=str(job_id),
+                     detail=f"status=skipped reason={EXPIRED}")
+        if claim is not None:
+            announce("learning_job.claim", actor=SYSTEM, tenant_id=claim.record.tenant_id,
+                     target=claim.record.learning_job_id)
+        return claim
 
     async def finish_learning_job(  # noqa: PLR0913 — the end record's values
         self, tenant_id: str, learning_job_id: str, *, status: str, reason: str | None, message: str | None,

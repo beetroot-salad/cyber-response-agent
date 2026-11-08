@@ -1711,15 +1711,15 @@ def test_o7_the_parent_check_runs_with_the_death_signal_already_set(scene, monke
 
     libc = ctypes.CDLL(None, use_errno=True)
     libc.prctl(1, 0)  # PR_SET_PDEATHSIG: clear, so only the entry itself can have set it
-    real, seen = run_py._require_parent, []
+    real, seen = run_py.require_parent, []
 
-    def observing(parent_pid: int) -> None:
+    def observing(parent_pid: int, **kw) -> None:
         got = ctypes.c_int(-1)
         libc.prctl(2, ctypes.byref(got))  # PR_GET_PDEATHSIG
         seen.append(got.value)
-        real(parent_pid)
+        real(parent_pid, **kw)
 
-    monkeypatch.setattr(run_py, "_require_parent", observing)  # lint-monkeypatch: ok — an observer of the entry's own check, no seam exists for it
+    monkeypatch.setattr(run_py, "require_parent", observing)  # lint-monkeypatch: ok — an observer of the entry's own check, no seam exists for it
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
 

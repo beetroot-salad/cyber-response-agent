@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender import _io
-from defender.records.formats import BUILD_COMMIT_ENV, is_build_commit
+from defender.records.formats import BUILD_COMMIT_ENV, CODE_COPY_MARKER, is_build_commit
 
 #: The variables the deployed worker reads (`BUILD_COMMIT_ENV` is the stamp's own, from `records`).
 DSN_ENV = "DEFENDER_DATABASE_DSN"
@@ -42,8 +42,9 @@ DEFAULT_SLOTS = 3
 #: amendment 1).
 DEFAULT_LEARNING_CHECK_SECONDS = 300
 
-#: The marker at the copy's root, and the copy's and the lock's names on the data root.
-MARKER = ".defender-code-copy.json"
+#: The marker at the copy's root (the one name a run's stamp reads, `records.formats`), and the
+#: copy's and the lock's names on the data root.
+MARKER = CODE_COPY_MARKER
 COPY_NAME = ".defender-code"
 LOCK_NAME = ".defender-worker.lock"
 #: What a copy never carries: the virtual environment, bytecode and tool caches.

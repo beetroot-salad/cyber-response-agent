@@ -41,7 +41,6 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
 import contextlib  # noqa: E402
-import ctypes  # noqa: E402
 import dataclasses  # noqa: E402
 import functools  # noqa: E402
 import inspect  # noqa: E402
@@ -58,6 +57,7 @@ from defender.records.formats import ALERT_MAPPING_MISSING, AlertMapping, DataRo
 from defender.records import formats  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
+from defender._parent_tie import require_parent, tie_to_parent  # noqa: E402
 from defender.records import Run  # noqa: E402
 from defender.records import job_facts, job_lane  # noqa: E402
 from defender.records.job_facts import BOX_STARTED as _BOX_STARTED  # noqa: E402 — `lifecycle`'s `job_facts` keyword shadows the module
@@ -1433,10 +1433,6 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
 
 # -- the job lane (#1342) --------------------------------------------------------------------------
 
-#: `prctl` option: the signal this process gets when the thread that spawned it exits.
-_PR_SET_PDEATHSIG = 1
-
-
 def parse_job_args(argv: list[str]) -> argparse.Namespace:
     """The job entry's arguments: `--job <id> --tenant <T> --parent-pid <pid>` and nothing else.
     The id is the investigation's (its launch record names it); the data root comes from
@@ -1453,24 +1449,6 @@ def parse_job_args(argv: list[str]) -> argparse.Namespace:
                           ("update_ticket", False), ("model", None), ("knowledge_commit", None)):
         setattr(ns, name, default)
     return ns
-
-
-def _tie_to_parent() -> None:
-    """Die with the worker (#1342 O7): the parent-death signal is SIGTERM, set here in the child
-    (no `preexec_fn` in a threaded worker), before anything else."""
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0) != 0:
-        err = ctypes.get_errno()
-        raise OSError(err, f"could not set the parent-death signal: {os.strerror(err)}")
-
-
-def _require_parent(parent_pid: int) -> None:
-    """Exit at once unless the parent is still the worker `--parent-pid` names: one that died
-    between the spawn and the death tie leaves this process to another parent, which no
-    parent-death signal will ever reach."""
-    if os.getppid() != parent_pid:
-        sys.exit(f"[run.py] --parent-pid {parent_pid} is not this process's parent "
-                 f"({os.getppid()}): the worker that started this job is gone; nothing was run")
 
 
 def _interrupt_on_sigterm() -> None:
@@ -1548,9 +1526,9 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
     execution (R2). The job-end record is written however it ends. Its tenant records are read
     from `DEFENDER_DATABASE_DSN` (#1214, r6 R6-2): the job's tenant must be `active` there, and
     the acceptance is held until the job-end record is written (R6-6)."""
-    _tie_to_parent()
+    tie_to_parent()  # die with the worker (#1342 O7), before anything else
     ns = parse_job_args(argv)
-    _require_parent(ns.parent_pid)
+    require_parent(ns.parent_pid, who="run.py")
     _interrupt_on_sigterm()
     data_root = _request_data_root(ns)
     try:

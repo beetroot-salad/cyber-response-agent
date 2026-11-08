@@ -164,7 +164,7 @@ def _admitted_on(main: MainRead, spec: BranchSpec, *, source_run: Run,  # noqa: 
             "the framework's per-tool retry counts cannot be seeded into an arm, so it would "
             "take that step differently. Branch at a response no tool carries a retry into", kind=REFUSED_RETRY_STREAK)
 
-    snapshot = _snapshot.load(store, session, _snapshot.request_count(upto))
+    snapshot = main.snapshot(upto)
     if snapshot is None:
         raise BranchError(
             f"{run_dir} recorded no fork snapshot for message {spec.branch_message_id} — a run "

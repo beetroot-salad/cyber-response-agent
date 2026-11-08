@@ -377,7 +377,9 @@ def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_sou
         assert _values_of(entry["argv"], "--job") == [job]
         post = _child_of(children, "post_step", job)
         assert post is not None, "no post-step child was observed"
-        assert _values_of(post["argv"], "--pending") == [], "control: nothing was pending before this job"
+        assert "--pending" not in post["argv"], "the pending jobs are handed in a record, never on the command line"
+        handed = json.loads((runs / f"{job}.post-step-pending.json").read_text(encoding="utf-8"))
+        assert handed == {"pending": []}, "control: nothing was pending before this job"
 
         end = json.loads((runs / f"{job}.learning-end.json").read_text(encoding="utf-8"))
         assert (end["status"], end["reason"]) == ("failed", "source_unavailable"), end
@@ -389,7 +391,7 @@ def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_sou
 
 @pytest.mark.postgres
 def test_o15_the_default_post_step_command_lists_the_tenants_earlier_pending_job(source, data_root, db, tmp_path):
-    """An earlier job `completed`/`pending` and a new one: the real post-step child is started with the earlier job's id after `--pending`. (O15, O14, Worker start)"""
+    """An earlier job `completed`/`pending` and a new one: the real post-step child is handed the earlier job's id in its pending record. (O15, O14, Worker start)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     with B.run_tenant(tmp_path, data_root) as t:
@@ -407,7 +409,8 @@ def test_o15_the_default_post_step_command_lists_the_tenants_earlier_pending_job
             W.wait_until(lambda: (runs / f"{new}.post-step.json").is_file(), timeout=120, what="the post-step's record", proc=proc)
         post = _child_of(children, "post_step", new)
         assert post is not None, f"no post-step child was observed; saw {[c['argv'] for c in children]}"
-        assert earlier in _values_of(post["argv"], "--pending"), post["argv"]
+        handed = json.loads((runs / f"{new}.post-step-pending.json").read_text(encoding="utf-8"))
+        assert earlier in handed["pending"], handed
 
 
 # --- image entry: the real entries from a copy, no PYTHONPATH --------------------------------------------------------

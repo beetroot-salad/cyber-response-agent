@@ -967,6 +967,27 @@ async def test_d4_an_expired_job_starts_nothing_and_the_next_job_runs_in_its_slo
     assert [h[0] for h in post.handed] == [fresh], "a post-step followed a job that started no family step"
 
 
+async def test_d4_one_claim_ends_every_first_attempt_past_the_age_limit_and_claims_the_next_job(world, caplog):
+    """A backlog of expired first attempts is ended by the one claim that reaches the queue, each audited, and that
+    claim still returns the fresh job behind them; a retry as old is exempt and is the one claimed. (D4)"""
+    async with job_store(world["dsn"]) as store:
+        old = [await queued_job(world, store, ticket=f"J-{n}") for n in range(3)]
+        retry = await queued_job(world, store, ticket="J-retry")
+        fresh = await queued_job(world, store, ticket="J-fresh")
+        for job in (*old, retry):
+            set_created(world["dsn"], "learning_jobs", job, OVER_AGE)
+        execute(world["dsn"], "UPDATE jobs.learning_jobs SET attempt = 2 WHERE id = %s", (retry,))
+        audit = JobsAudit(caplog)
+        first = await store.claim_learning_job()
+        second = await store.claim_learning_job()
+
+    assert (first.record.learning_job_id, second.record.learning_job_id) == (retry, fresh)
+    assert [(job_row(world["dsn"], j)["status"], job_row(world["dsn"], j)["reason"]) for j in old] == [
+        ("skipped", "expired")] * 3
+    ended = sorted(e.target for e in audit.events() if e.action == "learning_job.finish")
+    assert ended == sorted(old), "an expired job was not audited, or was audited twice"
+
+
 async def test_d4_expiry_waits_for_a_pick_to_reach_the_queue(world):
     """With the learning slot busy an expired job stays `queued`, not skipped; it is skipped once a pick reaches it. (O5, D4)"""
     release = world["tmp"] / "release"

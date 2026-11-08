@@ -119,8 +119,7 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, *, investigate_mod
 
             def post_step(launch) -> list[str]:
                 return [sys.executable, str(entry), "post-step", t.commit, str(marks / "post-step"), "--job", launch.job_id,
-                        "--tenant", launch.tenant_id, "--pending", *launch.pending_job_ids,
-                        "--parent-pid", str(launch.parent_pid)]
+                        "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 
             worker = make_worker(store, root, investigation, containers=StandInContainers(tmp_path / "containers"),
                                  slots=3, learning_slots=1, learning_argv=learning, post_step_argv=post_step)

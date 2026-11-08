@@ -11,7 +11,7 @@ from pathlib import Path
 
 from defender.learning.branch import post_step
 from defender.records.job_lane import post_step_key
-from defender.tests.learning.branch.test_1344_post_step import _job_episode, _queue
+from defender.tests.learning.branch.test_1344_post_step import _job_episode, _queue, hand_pending
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
 
@@ -23,9 +23,8 @@ def _record_at(ep: Path, key: str) -> dict:
 
 def test_a1_without_a_job_the_argv_parses_as_a_family_less_post_step():
     """`--job` may be left out; the parse names no job. (amendment 1)"""
-    ns = post_step.parse_post_step_args(["--tenant", "t", "--pending", "--parent-pid", "1"])
+    ns = post_step.parse_post_step_args(["--tenant", "t", "--parent-pid", "1"])
     assert ns.job is None
-    assert ns.pending == []
 
 
 def test_a1_the_record_key_is_the_job_or_else_the_tenant():
@@ -40,10 +39,11 @@ def test_a1_a_family_less_post_step_publishes_runs_the_gate_and_records_under_th
     """No `--job`: the handed pending job is published, the gate runs after it, and the record is
     `<tenant id>.post-step.json`. (amendment 1, O8, O14)"""
     ep, _new = _job_episode(tmp_path, "a")
-    _data_root, tenant_id = J.episode_location(ep)
+    data_root, tenant_id = J.episode_location(ep)
     seen: list[int] = []
 
-    post_step.main(["--tenant", tenant_id, "--pending", ep.name, "--parent-pid", str(os.getppid())],
+    hand_pending(data_root, tenant_id, None, [ep.name])
+    post_step.main(["--tenant", tenant_id, "--parent-pid", str(os.getppid())],
                    author_tick=lambda *_a, **_k: seen.append(len(_queue(ep))) or 0,
                    directory=T.launcher_directory(tenant_id))
 
@@ -58,10 +58,11 @@ def test_a1_a_family_less_post_step_publishes_runs_the_gate_and_records_under_th
 def test_a1_a_family_less_post_step_with_nothing_pending_still_runs_the_gate(tmp_path):
     """The check's point is the gate: it runs with nothing to publish, and the record says nothing was. (amendment 1)"""
     ep, _new = _job_episode(tmp_path, "b")
-    _data_root, tenant_id = J.episode_location(ep)
+    data_root, tenant_id = J.episode_location(ep)
     ticks: list[int] = []
 
-    post_step.main(["--tenant", tenant_id, "--pending", "--parent-pid", str(os.getppid())],
+    hand_pending(data_root, tenant_id, None, [])
+    post_step.main(["--tenant", tenant_id, "--parent-pid", str(os.getppid())],
                    author_tick=lambda *_a, **_k: ticks.append(1) or 0, directory=T.launcher_directory(tenant_id))
 
     assert ticks == [1]

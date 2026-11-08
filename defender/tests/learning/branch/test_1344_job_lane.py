@@ -190,6 +190,35 @@ def test_o3_the_candidates_are_mains_gather_calls_and_no_other_response(tmp_path
     assert fork_candidates(source.store, _run_of(source)).ids == [first, second]
 
 
+class _CountingStore:
+    """A session store that counts the fork snapshots asked of it, by request."""
+
+    def __init__(self, store) -> None:
+        self._store, self.asked = store, []
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    def fork_snapshot(self, session_id, request):
+        self.asked.append(request)
+        return self._store.fork_snapshot(session_id, request)
+
+
+@pytest.mark.e2e
+def test_o3_each_candidates_fork_snapshot_is_loaded_once(tmp_path):
+    """The pick reads a candidate's moment from its fork snapshot and then admits it on that snapshot: one load per
+    candidate, not one for the moment and another for the admission. (O3, #1446 review)"""
+    pytest.importorskip("pydantic_ai")
+    R, source = _driven_source(tmp_path, lambda R, c: (
+        R.append(c[0]), R.dispatch("l-001"), R.dispatch("l-002"), R.done()))
+    from defender.learning.branch.fork_pick import fork_candidates
+
+    counting = _CountingStore(source.store)
+    assert len(fork_candidates(counting, _run_of(source)).ids) == 2, "premise: both dispatches are candidates"
+    assert sorted(counting.asked) == sorted(set(counting.asked)), counting.asked
+    assert len(counting.asked) == 2, counting.asked
+
+
 @pytest.mark.e2e
 def test_o3_a_gather_before_any_captured_query_is_no_candidate(tmp_path):
     """A sibling refuses a point with no query captured by then, so the pick must too: with the automatic lead muted,
@@ -674,9 +703,10 @@ _SIBLING = textwrap.dedent("""
 _ENTRY = textwrap.dedent("""
     import os, sys
     from defender.learning.branch.cli import _default_spawn
-    from defender.run import _interrupt_on_sigterm, _tie_to_parent
+    from defender._parent_tie import tie_to_parent
+    from defender.run import _interrupt_on_sigterm
 
-    _tie_to_parent()
+    tie_to_parent()
     _interrupt_on_sigterm()
     _default_spawn([sys.executable, "-c", sys.argv[2], sys.argv[1]], env=dict(os.environ))
 """)
