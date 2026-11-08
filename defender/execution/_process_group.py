@@ -5,7 +5,8 @@ disk). The kill opens no path; the wait for the group to be gone reads only `/pr
 
 A run's end is its whole group gone, not its child's exit: a SIGKILL is sent at once but
 lands when each member is next scheduled, so a member can still run a moment after the
-signal. `end_group` sends the kill and waits for that moment to pass."""
+signal. `end_group` sends the kill and waits for that moment to pass; a caller that must send
+the kill on one thread and wait on another uses `kill_group`, then `wait_group_gone`."""
 from __future__ import annotations
 
 import contextlib
@@ -17,62 +18,81 @@ from collections.abc import Callable
 
 _logger = logging.getLogger(__name__)
 
-#: How long `end_group` waits for a killed group's members to be gone. A killed process exits
+#: How long the wait for a killed group's members to be gone lasts. A killed process exits
 #: within milliseconds; one that does not (stuck in an uninterruptible read, say) is logged and
 #: left, so no stop or cleanup ever hangs on it.
 GROUP_END_LIMIT = 10.0
-_POLL = 0.01
+#: The first and the longest gap between two looks at the group: most groups are gone at the
+#: first look; a stuck one is looked at a few times a second, not a hundred.
+_FIRST_POLL, _LONGEST_POLL = 0.005, 0.25
 
 
 def kill_group(pgid: int) -> None:
     """SIGKILL every process left in the group `pgid`, without waiting for them to be gone;
-    nothing when none is left (or the group is not this user's to signal). For a caller that
-    must not wait; any other ends the group with `end_group`."""
+    nothing when none is left (or the group is not this user's to signal)."""
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(pgid, signal.SIGKILL)
 
 
-def end_group(pgid: int, *, limit: float = GROUP_END_LIMIT,
-              running: Callable[[int], bool] | None = None) -> bool:
-    """SIGKILL every process left in the group `pgid`, then wait until none of them still runs
-    (gone, or exited and awaiting its parent's wait), at most `limit` seconds. True when the
-    group is gone; False, logged, when a member still ran at the limit. `running` is the
-    liveness test (default `group_running`), a door for tests."""
+def wait_group_gone(pgid: int, *, limit: float = GROUP_END_LIMIT,
+                    running: Callable[[int], bool] | None = None) -> bool:
+    """Wait, at most `limit` seconds, until no member of the group `pgid` still runs (its kill
+    already sent). True when none does; False, logged, when one still ran at the limit.
+    `running` is the liveness test (default `group_running`), a door for tests."""
     is_running = group_running if running is None else running
-    kill_group(pgid)
     deadline = time.monotonic() + limit
+    gap = _FIRST_POLL
     while is_running(pgid):
-        if time.monotonic() >= deadline:
+        left = deadline - time.monotonic()
+        if left <= 0:
             _logger.error("process group %d still ran %gs after it was killed; leaving it", pgid, limit)
             return False
-        time.sleep(_POLL)
+        time.sleep(min(gap, left))
+        gap = min(gap * 2, _LONGEST_POLL)
     return True
 
 
-def group_running(pgid: int) -> bool:
-    """Whether any member of the group `pgid` still runs. A member that has exited but not been
-    waited for (a zombie: a killed grandchild is reparented, and its new parent reaps it when
-    it will) runs nothing, so it does not count. Without `/proc`, any member left counts."""
+def end_group(pgid: int, *, limit: float = GROUP_END_LIMIT,
+              running: Callable[[int], bool] | None = None) -> bool:
+    """SIGKILL every process left in the group `pgid`, then `wait_group_gone`."""
+    kill_group(pgid)
+    return wait_group_gone(pgid, limit=limit, running=running)
+
+
+def group_running(pgid: int, *, proc: str = "/proc") -> bool:
+    """Whether any member of the group `pgid` still runs that waiting can see end. Not counted:
+    a member that has exited but not been waited for (a zombie: a killed grandchild is
+    reparented, and its new parent reaps it when it will), and one this user cannot signal (the
+    kill never reached it, so waiting for it would only spend the limit). Without `proc` a
+    zombie cannot be told from a live member, so nothing is counted: the kill was sent, and
+    that is all that can be known. `proc` is a door for tests."""
     try:
         os.killpg(pgid, 0)
     except ProcessLookupError:
         return False  # no member at all, zombie or not
     except PermissionError:
-        pass  # a member this user cannot signal: judged from /proc like the rest
+        pass  # some member this user cannot signal: the rest are judged one by one below
     try:
-        entries = os.listdir("/proc")
+        entries = os.listdir(proc)
     except OSError:
-        return True
+        return False
     for name in entries:
         if not name.isdigit():
             continue
         try:
-            with open(f"/proc/{name}/stat", "rb") as handle:
+            with open(f"{proc}/{name}/stat", "rb") as handle:
                 stat = handle.read()
         except OSError:
             continue  # exited while the folder was listed
         # `pid (comm) state ppid pgrp ...`; comm may hold spaces and parentheses.
         fields = stat[stat.rindex(b")") + 2:].split()
-        if len(fields) > 2 and int(fields[2]) == pgid and fields[0] not in (b"Z", b"X"):
-            return True
+        if len(fields) <= 2 or int(fields[2]) != pgid or fields[0] in (b"Z", b"X"):
+            continue
+        try:
+            os.kill(int(name), 0)
+        except ProcessLookupError:
+            continue  # gone since its stat was read
+        except PermissionError:
+            continue  # not this user's to kill: the kill never reached it
+        return True
     return False

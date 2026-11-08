@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any
 from defender import _log
 from defender.jobs import is_outage, is_refusal
 from defender.box import Reaped, container_name
-from defender.execution import end_group, kill_group
+from defender.execution import kill_group, wait_group_gone
 from defender.records import job_facts, job_lane
 from defender.records.formats import DataRoot, digest_of
 from defender.tenancy import data_root_for_child, data_root_from_path
@@ -362,7 +362,8 @@ class Worker:
         except TimeoutError:
             _logger.warning("child %d did not end within %gs of SIGTERM; killing its group",
                             proc.pid, self._stop_grace)
-            await _end_group(proc.pid)
+            if not await _end_group(proc.pid):
+                held.group_left = True
             await proc.wait()
 
     # -- the lease: renewal, cost so far, take-over -------------------------------------------------
@@ -538,10 +539,16 @@ class Worker:
                 await _end_tasks([cost_task])
             if proc is not None:
                 # One cleanup however the row ended (r7 D-ac): whatever the child left running in
-                # its session is gone (not only signalled), then its box, if it outlived it, is
-                # removed.
-                await _end_group(proc.pid)
-                await self._backstop(inv, token)
+                # its session is killed and waited for, then its box, if it outlived it, is
+                # removed. The removal runs however the wait ends, a cancel included; a group
+                # an earlier wait already gave up on is killed again but not waited for twice.
+                try:
+                    if held.group_left:
+                        kill_group(proc.pid)
+                    elif not await _end_group(proc.pid):
+                        held.group_left = True
+                finally:
+                    await self._backstop(inv, token)
         return proc
 
     async def _wait_for_child(self, held: Held, proc: asyncio.subprocess.Process) -> None:
@@ -743,12 +750,13 @@ def _what_end(end: End) -> str:
     return f"{what}, cost {end.cost}, knowledge {'kept' if end.knowledge is not None else 'none'}"
 
 
-async def _end_group(pgid: int) -> None:
-    """The child's whole group gone, not only signalled: the SIGKILL goes out here, at once, so a
+async def _end_group(pgid: int) -> bool:
+    """The child's whole group killed and waited for: the SIGKILL goes out here, at once, so a
     cancel landing in the wait cannot keep it from being sent; the wait for every member to be
-    gone (`end_group`, bounded, logged if one never goes) runs in a thread."""
+    gone (`wait_group_gone`, bounded, logged if one never goes) runs in a thread. False when a
+    member still ran at the limit."""
     kill_group(pgid)
-    await asyncio.to_thread(end_group, pgid)
+    return await asyncio.to_thread(wait_group_gone, pgid)
 
 
 async def _end_tasks(tasks: list[asyncio.Task[None]]) -> None:

@@ -4091,6 +4091,66 @@ async def test_b11_a_second_cancel_while_the_worker_stops_kills_every_child_at_o
     assert took < 5, f"the second cancel took {took:.1f} s to leave"
 
 
+async def test_d_ac_a_cancel_while_the_childs_group_is_waited_for_still_removes_its_box(world, monkeypatch):
+    """The row's cleanup waits for the child's killed group to be gone, then removes the box: a second cancel landing in that wait still removes the box (the removal runs however the wait ends). (D-ac, #1343 review r5 item 3)"""
+    import threading
+
+    from defender.worker import _worker as worker_module
+
+    in_wait = threading.Event()
+    real_wait = worker_module.wait_group_gone
+
+    def slow_wait(pgid: int, **kw) -> bool:
+        in_wait.set()
+        time.sleep(3.0)
+        return real_wait(pgid, **kw)
+
+    monkeypatch.setattr(worker_module, "wait_group_gone", slow_wait)
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        containers = StandInContainers(world["tmp"] / "containers-cancel-in-wait")
+        draining = asyncio.create_task(_worker(world, store, child, containers=containers, **_FAST).drain())
+        try:
+            await _until(in_wait.is_set, "the row's cleanup to wait for the child's group")
+            draining.cancel()
+            await asyncio.sleep(0.2)
+            draining.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(draining, timeout=10)
+        finally:
+            _kill_whatever_remains(child.seen(inv))
+            await _stop_all(draining)
+    assert [c for c in containers.calls if c[0] == "reap"], "a cancel in the group wait skipped the box's removal"
+
+
+async def test_b11_a_group_whose_wait_ran_out_is_not_waited_for_again_by_the_rows_cleanup(world, monkeypatch):
+    """A child ignores SIGTERM and its killed group never empties: the stop waits for it once (the limit, logged), and the row's own cleanup kills it again without a second wait, so a stop stays one grace plus one limit. (R3, B11)"""
+    from defender.worker import _worker as worker_module
+
+    waited: list[int] = []
+
+    def never_gone(pgid: int, **_kw) -> bool:
+        waited.append(pgid)
+        return False
+
+    monkeypatch.setattr(worker_module, "wait_group_gone", never_gone)
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release, term="ignore")
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        serving = asyncio.create_task(_worker(world, store, child, stop_grace=0.5, **_FAST).serve())
+        try:
+            await _until(lambda: child.seen(inv), "the child")
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+        finally:
+            release.touch()
+            _kill_whatever_remains(child.seen(inv))
+            await _stop_all(serving)
+    assert waited == [child.seen(inv)["pid"]], f"the group was waited for {len(waited)} times: {waited}"
+
+
 class _RenewalRacingAnEnd:
     """The real store, except that the first renewal covering `inv` answers only after that row's finish
     committed, and its answer omits the row: a renewal whose snapshot of the held rows predates the row's own end."""
