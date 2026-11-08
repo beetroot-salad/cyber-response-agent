@@ -17,7 +17,7 @@ from defender.presentation import visualize_data as d
 from defender.configuration._pricing import usage_cost
 from defender.presentation.visualize_run import render_page
 from defender.records import SessionPaths
-from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER, UNSEEN, insert_spend
+from defender.tests.support.jobs._jobs1342 import REFUSED, SPEND_LEDGER, UNSEEN, insert_spend
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 _USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}
@@ -417,6 +417,7 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
     assert kinds["main"] == pytest.approx(_priced(_MAIN_LEDGER), abs=2e-4), f"main is not MAIN's ledger rows: {kinds}"
     assert kinds["gather"] == pytest.approx(_priced(_GATHER_LEDGER), abs=2e-4), f"gather is not the lead's ledger rows: {kinds}"
     assert not _unattributed(segs), f"an unattributed segment in a bar built from the ledger: {segs}"
+    assert set(kinds) == {"main", "gather"}, f"a run with no correlation lead and no review has only the kinds that spent: {kinds}"
     # Asked of the rendered SPAN, not of the class name: the stylesheet is inlined into every
     # page, so `"ts-review" in html` is true whether or not anything was rendered with it.
     assert re.search(r'ts-review">', html) is None, (
@@ -526,24 +527,31 @@ def test_s5_the_headline_says_at_least_exactly_when_the_host_knows_a_spend_write
     assert _dollars(headline) == pytest.approx(_priced(_LEDGER), abs=2e-4)
 
 
-def test_s5_r7_an_unseen_row_in_the_ledger_makes_the_headline_at_least_without_the_hosts_fact(tmp_path, monkeypatch):
-    """One request the hook recorded as unseen (zero counts): the headline reads "at least" the same priced sum with no failed
-    spend write; the `line-false-exact` arm above is the control. (r7 S2a, S5)"""
+@pytest.mark.parametrize(("kind", "at_least"), [("refused", False), ("unseen", True), ("unpriced", True)])
+def test_s5_r7_the_ledger_alone_makes_the_headline_at_least_when_a_row_is_unseen_or_unpriced_not_when_refused(
+        tmp_path, monkeypatch, kind, at_least):
+    """One extra row beside the priced ones, no failed spend write: unseen or unpriced reads "at least" the same sum; a refused
+    ($0, complete) row leaves it exact; the `line-false-exact` arm above is the control. (r7 S2a, S2b, S5)"""
     from defender.records import session_store as ss
 
     run = _build_run(tmp_path)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
-    insert_spend(ss.resolve_store_path(_run_handle_1165(run)), run.name, [("claude-sonnet-4-6", {})], outcome=UNSEEN)
+    path = ss.resolve_store_path(_run_handle_1165(run))
+    if kind == "unpriced":
+        insert_spend(path, run.name, [("claude-opus-9-0", _USAGE)], agent_id="gather:l-002")
+    else:
+        insert_spend(path, run.name, [("claude-haiku-4-5", {})], agent_id="gather:l-002",
+                     outcome=UNSEEN if kind == "unseen" else REFUSED)
 
     headline = _headline(_page(run, spend_write_failed=False))
 
-    assert headline.startswith("at least "), f"the headline reads {headline!r}"
+    assert headline.startswith("at least ") is at_least, f"the headline reads {headline!r}"
     assert _dollars(headline) == pytest.approx(_priced(_LEDGER), abs=2e-4)
 
 
 @pytest.mark.parametrize("spend_write_failed", [False, True], ids=["no write failed", "a write failed"])
 def test_a3_an_unreadable_ledger_reads_unknown_in_the_headline_not_zero_and_not_at_least(tmp_path, monkeypatch, spend_write_failed):
-    """UPDATED (r6 S5; was: a null total on the result line): a session database without its ledger table reads "unknown", never `$0.0000` or "at least" (the mark stands only beside a number, S4), with no unattributed segment, and the page still renders."""
+    """CONFLICT-UPDATED (r7.1 S6; was r6: the request-log bars stayed): a session database without its ledger table reads "unknown", never `$0.0000` or "at least" (S4), with no bar, and the page still renders."""
     import sqlite3
 
     from defender.records import session_store as ss
@@ -562,12 +570,11 @@ def test_a3_an_unreadable_ledger_reads_unknown_in_the_headline_not_zero_and_not_
     html = _page(run, spend_write_failed=spend_write_failed)
 
     assert _headline(html) == "unknown"
-    assert not _unattributed(_cost_segments(html)), "an unattributed segment beside an unknown headline"
-    assert _cost_segments(html), "the request-log bars are gone with the ledger"
+    assert _cost_segments(html) == {}, "a cost bar beside an unknown headline (r7.1 S6: unknown cost, no bar)"
 
 
 def test_s5_a_run_with_no_ledger_rows_reads_zero_and_the_other_runs_rows_are_not_its_spend(tmp_path, monkeypatch):
-    """A readable ledger with no row for this run id (another run's rows sit beside it) reads exactly `$0.0000`: not unknown, not "at least", no negative unattributed segment. (r6 S5)"""
+    """A readable ledger with no row for this run id (another run's rows sit beside it) reads exactly `$0.0000`: not unknown, not "at least", and no cost-bar segment. CONFLICT-UPDATED (r7.1 S6; was r6: request-log bars stayed). (r6 S5)"""
     import sqlite3
 
     from defender.records import session_store as ss
@@ -585,8 +592,7 @@ def test_s5_a_run_with_no_ledger_rows_reads_zero_and_the_other_runs_rows_are_not
     html = _page(run)
 
     assert _headline(html) == "$0.0000"
-    assert "unattributed" not in _without_styles(html), "an unattributed segment was shown with nothing unattributed"
-    assert _cost_segments(html), "the request-log bars were dropped with the ledger rows"
+    assert _cost_segments(html) == {}, "a segment was shown for a run that spent nothing (r7.1 S6: no kind spent, no segment)"
 
 
 def test_s6_r7_the_cost_bar_is_the_ledger_not_the_request_log(tmp_path, monkeypatch):
@@ -616,6 +622,82 @@ def test_s6_r7_the_cost_bar_is_the_ledger_not_the_request_log(tmp_path, monkeypa
     assert _by_kind(html)["main"] == pytest.approx(_priced(small), abs=2e-4), _cost_segments(html)
     assert sum(_cost_segments(html).values()) == pytest.approx(_priced(small), abs=2e-4), "the bar was built from the request log"
     assert "unattributed" not in _without_styles(html), "an unattributed segment was shown with nothing unattributed"
+
+
+def test_s6_r7_a_kind_whose_rows_are_all_refused_unseen_or_unpriced_has_no_segment(tmp_path, monkeypatch):
+    """The correlation lead's only row refused, a review lens's only row unseen, a second lead's only row unpriced: the bar
+    is still main and gather, and the headline's "at least" carries the unseen and unpriced rows. (r7.1 S6)"""
+    from defender.records import session_store as ss
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    path = ss.resolve_store_path(_run_handle_1165(run))
+    insert_spend(path, run.name, [("claude-haiku-4-5", {})], agent_id="gather:l-00c", outcome=REFUSED)
+    insert_spend(path, run.name, [("kimi-k3", {})], agent_id="review:support", outcome=UNSEEN)
+
+    html = _page(run)
+
+    assert set(_by_kind(html)) == {"main", "gather"}, _cost_segments(html)
+    assert _headline(html).startswith("at least ")
+
+    insert_spend(path, run.name, [("claude-opus-9-0", _USAGE)], agent_id="gather:l-002")
+    kinds = _by_kind(_page(run))
+    assert kinds["gather"] == pytest.approx(_priced(_GATHER_LEDGER), abs=2e-4), "an unpriced row added to its kind"
+
+
+def test_s6_r7_h_the_bar_s_figures_carry_the_headline_s_four_decimals(tmp_path, monkeypatch):
+    """Every cost-bar segment's title and every printed label is written `$d.dddd`, as the headline is. (r7.1 H)"""
+    import re
+
+    from defender.tests.support.presentation import _cost_page_1377 as C
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    _append_review_calls(run)
+
+    html = _page(run)
+
+    titles = C.segment_titles(html)
+    labels = re.findall(r'cb-pct">(\$[0-9.]+)', html)
+    assert len(titles) >= 3, "premise: segments"
+    assert labels, "premise: a printed label"
+    assert all(re.fullmatch(r"\$\d+\.\d{4}", figure) for figure in titles + labels), (titles, labels)
+    assert re.fullmatch(r"\$\d+\.\d{4}", _headline(html))
+
+
+_REPORTED_ELSEWHERE = {"claude-sonnet-4-6": "claude-sonnet-4-6-rerouted", "claude-haiku-4-5": "claude-haiku-4-5-0905",
+                       "kimi-k3": "kimi-k3-0905"}
+
+
+def _informational(html: str) -> dict[str, object]:
+    """The page's figures that are not the headline or the bar: phase lines, the by-model strip, the review gate's lens figures."""
+    import re
+
+    models = re.search(r'me-models">(.*?)</div>', html, flags=re.S)
+    return {"phase lines": re.findall(r'ps-cost">(\$[0-9.]+)', html),
+            "by model": sorted(re.findall(r"\$([0-9.]+)", models.group(1))) if models else [],
+            "review lenses": re.findall(r'rv-cost-lenses">(.*?)</span>', html),
+            "review total": re.findall(r'rv-cost">(.*?)</span>', html)}
+
+
+def test_c_r7_1_the_phase_lines_the_by_model_strip_and_the_review_lenses_are_priced_at_the_requested_model(tmp_path, monkeypatch):
+    """The request log reports spellings with no pricing row for MAIN, the lead and the review: every informational figure
+    reads as the control's, priced at what each agent requested. (r7.1 C, S1)"""
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    _append_review_calls(run)
+    (run / RunPaths(run).review_record(1).name).write_text(json.dumps({  # a gate that ran, so the page prints its lens figures
+        "verdict": "stands", "reviewed_disposition": "malicious", "reviewed": True, "detail": "", "failure_kind": None}), encoding="utf-8")
+    control = _informational(_page(run))
+    assert all(control.values()), f"premise: the control shows every informational figure: {control}"
+    assert all(usage_cost(name, _USAGE) == 0.0 for name in _REPORTED_ELSEWHERE.values()), "premise: the spellings have no price"
+    for path in (RunPaths(run).wire_log, run / "tool_trace.jsonl"):
+        text = path.read_text(encoding="utf-8")
+        for requested, reported in _REPORTED_ELSEWHERE.items():
+            text = text.replace(requested, reported)
+        path.write_text(text, encoding="utf-8")
+
+    assert _informational(_page(run)) == control, "an informational figure was priced at the name the request log reports"
 
 
 _NUMBERS = {"nan": float("nan"), "inf": float("inf"), "-inf": float("-inf"), "negative": -3.5, "huge": 1e15,
