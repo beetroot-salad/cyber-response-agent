@@ -752,6 +752,173 @@ def test_c_r7_1_the_phase_lines_the_by_model_strip_and_the_review_lenses_are_pri
     assert not any(name in strip for name in _REPORTED_ELSEWHERE.values()), f"the by-model strip names a reported spelling: {strip}"
 
 
+def _informational_text(html: str) -> dict[str, list[str]]:
+    """The text of every informational element, whatever it holds: phase lines, the by-model strip, the review gate's figures."""
+    import re
+
+    return {"phase lines": re.findall(r'ps-cost">(.*?)</span>', html, flags=re.S),
+            "incl gather": re.findall(r'ps-gather">(.*?)</span>', html, flags=re.S),
+            "by model": re.findall(r'me-models">(.*?)</div>', html, flags=re.S),
+            "review lenses": re.findall(r'rv-cost-lenses">(.*?)</span>', html, flags=re.S),
+            "review total": re.findall(r'rv-cost">(.*?)</span>', html, flags=re.S)}
+
+
+def _a_gate_that_ran(run: Path) -> None:
+    (run / RunPaths(run).review_record(1).name).write_text(json.dumps({  # so the page prints the gate's lens figures
+        "verdict": "stands", "reviewed_disposition": "malicious", "reviewed": True, "detail": "", "failure_kind": None}), encoding="utf-8")
+
+
+def test_p1_r7_2_an_unreadable_ledger_leaves_the_phase_lines_the_by_model_strip_and_the_review_figures_without_dollars(tmp_path, monkeypatch):
+    """A session database without its ledger table: besides the headline ("unknown") and the bar (none), no informational figure
+    carries a dollar amount: the page prices nothing outside the one ledger read. A readable ledger is the control, showing
+    dollars in every one of them. (r7.2 P1; was: the figures priced the request log at the name it reports)"""
+    import sqlite3
+
+    from defender.records import session_store as ss
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    _append_review_calls(run)
+    _a_gate_that_ran(run)
+    control = _informational_text(_page(run))
+    for name, texts in control.items():
+        assert texts, f"premise: the control shows {name}"
+        assert all("$" in t for t in texts), f"premise: the control's {name} carry dollars: {texts}"
+    conn = sqlite3.connect(ss.resolve_store_path(_run_handle_1165(run)), timeout=10)
+    try:
+        conn.execute(f"DROP TABLE {SPEND_LEDGER}")
+        conn.commit()
+    finally:
+        conn.close()
+
+    html = _page(run)
+
+    assert _headline(html) == "unknown"
+    assert _cost_segments(html) == {}
+    priced = {name: texts for name, texts in _informational_text(html).items() if any("$" in t for t in texts)}
+    assert not priced, f"an informational figure carries dollars beside an unknown ledger: {priced}"
+
+
+#: One reported name per class of spelling a provider can answer with, beside the exact one: none at all, one with no pricing
+#: row, the requested row's name with a suffix (rerouted), and another priced model's name.
+_REQUESTED = {"main": "claude-sonnet-4-6", "gather:l-001": "claude-haiku-4-5", "gather:l-00c": "claude-haiku-4-5",
+              "review:support": "kimi-k3", "review:ablation": "kimi-k3", "review:composer": "kimi-k3"}
+_LOG_ONLY = "gather:l-002"  # answers in the request log, has no ledger row
+_RESPONSES_PER_AGENT = 4
+
+
+def _reported_spellings(requested: str) -> list[str]:
+    other = "claude-haiku-4-5" if requested != "claude-haiku-4-5" else "claude-sonnet-4-6"
+    return ["", "no-such-model-9", f"{requested}-rerouted", other]
+
+
+def _rate_cost(model: str, counts: dict[str, int]) -> float:
+    """The test's own oracle: the pricing table's rate row for `model` times the four counts (rates per million tokens)."""
+    from defender.configuration._pricing import PRICING
+
+    rate = PRICING[model]
+    return (counts["input_tokens"] * rate["in"] + counts["output_tokens"] * rate["out"]
+            + counts["cache_creation_input_tokens"] * rate["cache_w"]
+            + counts["cache_read_input_tokens"] * rate["cache_r"]) / 1_000_000
+
+
+def _generated_request_log(run: Path, seed: int) -> dict[str, list[dict[str, int]]]:
+    """Rewrite the run's request log (the wire log and the run file's assistant events) so each agent answers
+    `_RESPONSES_PER_AGENT` times with generated nonzero counts of all four kinds, each response under a different class of
+    reported spelling (rotated by `seed`), and plant the ledger rows that tell the page which model each agent requested.
+    Returns the counts by agent."""
+    import random
+
+    from defender.records import session_store as ss
+
+    rng = random.Random(seed)
+
+    def counts() -> dict[str, int]:
+        return {"input_tokens": rng.randint(1, 600_000), "output_tokens": rng.randint(1, 60_000),
+                "cache_read_input_tokens": rng.randint(1, 900_000), "cache_creation_input_tokens": rng.randint(1, 90_000)}
+
+    by_agent = {agent: [counts() for _ in range(_RESPONSES_PER_AGENT)] for agent in (*_REQUESTED, _LOG_ONLY)}
+
+    def spelling(agent: str, i: int) -> str:
+        names = _reported_spellings(_REQUESTED.get(agent, "claude-haiku-4-5"))
+        return names[(i + seed) % len(names)]
+
+    wire = RunPaths(run).wire_log
+    kept, seen = [], {}
+    for line in wire.read_text(encoding="utf-8").splitlines():
+        row = json.loads(line)
+        if row.get("kind") == "response":
+            agent = row.get("agent_id", "main")
+            i = seen[agent] = seen.get(agent, -1) + 1
+            row["model"], row["usage"] = spelling(agent, i), by_agent[agent][i]
+            kept.append(row)
+        else:
+            kept.append(row)
+    seen_main = seen["main"] + 1
+    assert seen_main == 4, f"premise: the fixture's four MAIN responses ({seen_main})"
+    extra = [(agent, i) for agent, rows in by_agent.items() for i in range(len(rows))
+             if not (agent == "main" or (agent == "gather:l-001" and i == 0))]
+    for agent, i in extra:
+        kept.append({"agent_id": agent, "seq": i, "id": f"{agent}#{i}", "kind": "response", "model": spelling(agent, i),
+                     "usage": by_agent[agent][i], "duration_ms": 900.0,
+                     "message": {"kind": "response", "parts": [{"part_kind": "text", "content": "read"}]}})
+    wire.write_text("".join(json.dumps(r) + "\n" for r in kept), encoding="utf-8")
+
+    trace = run / "tool_trace.jsonl"
+    events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+    assistants = [e for e in events if e.get("type") == "assistant"]
+    assert len(assistants) == 4, "premise: the fixture's four MAIN events"
+    for i, event in enumerate(assistants):
+        event["message"]["model"], event["message"]["usage"] = spelling("main", i), by_agent["main"][i]
+    trace.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+
+    path = ss.resolve_store_path(_run_handle_1165(run))
+    for agent in ("gather:l-00c", *(f"review:{lens}" for lens in _REVIEW_LENSES)):
+        insert_spend(path, run.name, [(_REQUESTED[agent], by_agent[agent][0])], agent_id=agent)
+    return by_agent
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 3], ids=lambda n: f"seed-{n}")
+def test_f6_r7_2_every_informational_figure_is_the_pricing_tables_rates_times_the_counts_at_the_requested_model(tmp_path, monkeypatch, seed):
+    """A generated request log: four responses per agent (MAIN, two leads, the correlation lead, three review lenses), all four
+    counts nonzero, reported under every class of spelling (none, no pricing row, the requested name rerouted, another priced
+    model); one lead answers in the log with no ledger row. The oracle prices each response from the pricing table's rates times
+    its counts at the model its agent requested ($0 for the agent with no row), never through the product's pricing helpers; the
+    phase lines' sum, each model's dollars in the by-model strip (keyed by requested name) and each review lens must equal it.
+    (r7.1 C, r7.2 P1, S1)"""
+    import re
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    _a_gate_that_ran(run)
+    by_agent = _generated_request_log(run, seed)
+    assert all(all(v > 0 for v in c.values()) for rows in by_agent.values() for c in rows), "premise: nonzero counts"
+
+    def oracle(agent: str) -> float:
+        return sum(_rate_cost(_REQUESTED[agent], c) for c in by_agent[agent]) if agent in _REQUESTED else 0.0
+
+    phase_sum = sum(oracle(a) for a in _REQUESTED if not a.startswith("review:"))
+    by_model: dict[str, float] = {}
+    for agent in _REQUESTED:
+        by_model[_REQUESTED[agent]] = by_model.get(_REQUESTED[agent], 0.0) + oracle(agent)
+    lenses = {lens: oracle(f"review:{lens}") for lens in _REVIEW_LENSES}
+    assert phase_sum > 0.05, "premise: figures large enough to discriminate"
+    assert all(v > 0.01 for v in lenses.values()), "premise: lens figures large enough to discriminate"
+
+    html = _page(run)
+
+    phase_lines = [float(v) for v in re.findall(r'ps-cost">\$([0-9.]+)', html)]
+    assert phase_lines, "premise: the page prints phase lines"
+    assert sum(phase_lines) == pytest.approx(phase_sum, abs=1e-3), f"phase lines {phase_lines}: want the oracle's {phase_sum}"
+    strip = re.search(r'me-models">(.*?)</div>', html, flags=re.S).group(1)
+    shown = {name.removeprefix("claude-"): float(v) for name, v in re.findall(r"([^\s·]+) \$([0-9.]+)", strip)}
+    assert shown == pytest.approx({k.removeprefix("claude-"): v for k, v in by_model.items()}, abs=2e-4), (
+        f"the by-model strip {strip!r}: want {by_model} keyed by the requested names")
+    per_lens = re.search(r'rv-cost-lenses">(.*?)</span>', html, flags=re.S).group(1)
+    assert dict((lens, float(v)) for lens, v in re.findall(r"(\w+) \$([0-9.]+)", per_lens)) == pytest.approx(lenses, abs=2e-4), (
+        f"the review lenses {per_lens!r}: want {lenses}")
+
+
 _NUMBERS = {"nan": float("nan"), "inf": float("inf"), "-inf": float("-inf"), "negative": -3.5, "huge": 1e15,
             "string": "12.5", "bool": True, "list": [1, 2], "in-range": 0.37, "zero": 0}
 #: (total on the line or the keyword for its absence, mark): every shape a box can leave the result line in.
