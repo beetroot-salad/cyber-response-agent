@@ -22,7 +22,7 @@ def _cost(model: str, n: int = 1) -> float:
 @pytest.fixture
 def ledger(tmp_path):
     """An open store, and a planter of rows into its ledger."""
-    with ss.open_store(case_id="ledger-read", sessions=SessionPaths(fixture_runs_base(tmp_path))) as store:
+    with ss.open_store(case_id="ledger-read", sessions=SessionPaths(fixture_runs_base(tmp_path / "runs"))) as store:
         def plant(rows, *, agent_id="main", run_id=RUN, **row):
             insert_spend(store.path, run_id, rows, agent_id=agent_id, **row)
         yield store, plant
