@@ -54,6 +54,7 @@ from defender.tests.support.storage._store_owner import reread
 import contextlib
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.jobs._jobs1342 import REFUSED, RESPONSE, UNSEEN
 
 pytestmark = pytest.mark.e2e
 
@@ -723,13 +724,14 @@ def _wire_responses(run_dir: Path) -> int:
                if line.strip() and json.loads(line).get("kind") == "response")
 
 
-def _refuse_ledger_inserts(store) -> None:
-    """A real sqlite fault on the run's own ledger table, made from a second connection."""
+def _refuse_ledger_inserts(store, *, agent_id: str | None = None) -> None:
+    """A real sqlite fault on the run's own ledger table, made from a second connection (`agent_id`: only that agent's rows)."""
     from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER
 
+    only = f"WHEN NEW.agent_id = '{agent_id}' " if agent_id else ""
     conn = sqlite3.connect(store.path, timeout=10)
     try:
-        conn.execute(f"CREATE TRIGGER refuse_spend BEFORE INSERT ON {SPEND_LEDGER} "
+        conn.execute(f"CREATE TRIGGER refuse_spend BEFORE INSERT ON {SPEND_LEDGER} {only}"  # noqa: S608
                      "BEGIN SELECT RAISE(ABORT, 'the disk is full'); END")
         conn.commit()
     finally:
@@ -926,6 +928,25 @@ def test_s1_r7_a_response_is_priced_at_the_model_its_agent_was_built_to_request_
         "main": priced_cost(_PRICED_NAMES["main"], 2), "gather:l-001": priced_cost(_PRICED_NAMES["gather"], 2),
         "gather:l-00c": priced_cost(_PRICED_NAMES["gather"], 1)}), "a response is not its requesting agent's, at the requested row"
     assert read.complete is True
+    assert _spend_rows(opened, run_dir.name) == sorted([
+        *[("main", _PRICED_NAMES["main"], reported["main"], RESPONSE)] * 2,
+        *[("gather:l-001", _PRICED_NAMES["gather"], reported["gather"], RESPONSE)] * 2,
+        ("gather:l-00c", _PRICED_NAMES["gather"], reported["gather"], RESPONSE)]), (
+        "a row does not carry the built name as requested and the stand-in's own name as reported")
+
+
+def _spend_rows(opened: list, run_id: str) -> list[tuple]:
+    """The run's ledger rows as the real hook wrote them, by one SQL read: (agent, requested, reported, outcome), sorted."""
+    from defender.tests.support.jobs._jobs1342 import SPEND_COLUMNS, SPEND_LEDGER
+
+    assert SPEND_COLUMNS[:5] == ("run_id", "agent_id", "requested_model", "reported_model", "outcome")
+    conn = sqlite3.connect(opened[0].path, timeout=10)
+    try:
+        found = conn.execute(f"SELECT agent_id, requested_model, reported_model, outcome FROM {SPEND_LEDGER} "  # noqa: S608
+                             "WHERE run_id = ?", (run_id,)).fetchall()
+    finally:
+        conn.close()
+    return sorted(found, key=lambda r: tuple("" if v is None else v for v in r))
 
 
 def _ledger_of(opened: list, run_id: str):
@@ -962,9 +983,10 @@ def _priced_stamped(reported: dict[str, str], *, retries: bool = True):
 
 
 def _correlation_run(tmp_path, *, label: str, gather: Any, limits: dict | None = None, retries: bool = True,
-                     names: dict[str, str] | None = None) -> tuple[Path, dict, dict, list]:
+                     names: dict[str, str] | None = None, refuse_ledger_of: str | None = None) -> tuple[Path, dict, dict, list]:
     """MAIN (one text turn) after the correlation lead `l-00c`, answered by `gather` (a `_spec1222.LeadRouter`); the agents are
-    built to request `names` (default `_PRICED_NAMES`) and report the same. Returns the run folder (named by the run id the
+    built to request `names` (default `_PRICED_NAMES`) and report the same; `refuse_ledger_of` makes the ledger refuse that
+    agent's inserts from the store's opening. Returns the run folder (named by the run id the
     ledger keys on), summary, MAIN's calls and the stores the run opened."""
     names = names or _PRICED_NAMES
     run_id = fixture_uuid(label)
@@ -976,10 +998,19 @@ def _correlation_run(tmp_path, *, label: str, gather: Any, limits: dict | None =
         calls["main"] += 1
 
     main = ReplayFn([Turn(text="done")])
+    plain = store_factory(tmp_path, sink=opened)
+
+    @contextlib.contextmanager
+    def factory(case_id, directory):
+        with plain(case_id, directory) as handle:
+            if refuse_ledger_of:
+                _refuse_ledger_inserts(handle, agent_id=refuse_ledger_of)
+            yield handle
+
     with _requested(**names):
         summary = drive(run_dir, run_id=run_id, main=Priced(main, before=count), gather=gather,
                         wrap_model=_priced_stamped(names, retries=retries), limits=limits,
-                        verbs=FakeVerbs({"elastic": {"probe": _one_hit}}), store_factory=store_factory(tmp_path, sink=opened))
+                        verbs=FakeVerbs({"elastic": {"probe": _one_hit}}), store_factory=factory)
     assert run_dir.name == run_id, "premise: the run folder is the run id"
     return run_dir, summary, calls, opened
 
@@ -1006,18 +1037,22 @@ def _outcome_router(outcome: str) -> Any:
 
     if outcome == "provider-down":  # every attempt a 503: the retrier gives up with `ProviderDown`
         return P.LeadsFailing(plans={S.L3: P.ALWAYS_503})
+    if outcome == "retried-503":  # the first attempt a 503, the retry answers: one request, one response
+        return P.LeadsFailing(plans={S.L3: P.first_n(1)})
     faults = {"response": S.CLEAN, "refused-400": S.LeadFault(raise_on=1, exc=S.provider_refusal),
               "cancelled": S.LeadFault(hang=True), "unparseable": S.LeadFault(raise_on=1, exc=_unparseable)}
     return S.LeadRouter(faults={S.L3: faults[outcome]})
 
 
-#: outcome -> (l-00c's priced responses in the total, the total is "at least", the run's `truncated_by`, MAIN's calls).
+#: outcome -> (l-00c's priced responses in the total, the total is "at least", the run's `truncated_by`, MAIN's calls,
+#: the outcome word of the lead's one ledger row).
 _OUTCOMES = {
-    "response": (1, False, None, 1),
-    "refused-400": (0, False, None, 1),
-    "cancelled": (0, True, None, 1),
-    "unparseable": (0, True, None, 1),
-    "provider-down": (0, True, "provider-down", 0),
+    "response": (1, False, None, 1, RESPONSE),
+    "retried-503": (1, False, None, 1, RESPONSE),
+    "refused-400": (0, False, None, 1, REFUSED),
+    "cancelled": (0, True, None, 1, UNSEEN),
+    "unparseable": (0, True, None, 1, UNSEEN),
+    "provider-down": (0, True, "provider-down", 0, UNSEEN),
 }
 
 
@@ -1028,13 +1063,14 @@ def test_s2a_r7_the_final_outcome_of_a_request_decides_whether_the_total_is_exac
     from defender.tests.support.presentation import _cost_page_1377 as C
     from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
-    lead_responses, at_least, truncated_by, main_calls = _OUTCOMES[outcome]
+    lead_responses, at_least, truncated_by, main_calls, lead_row = _OUTCOMES[outcome]
     limits = S.with_deadline(S.SHORT_DEADLINE_S) if outcome == "cancelled" else None
     router = _outcome_router(outcome)
     run_dir, summary, calls, opened = _correlation_run(tmp_path, label=f"ledger-outcome-{outcome}", gather=router, limits=limits)
 
-    if outcome == "provider-down":
-        assert router.attempts(S.L3) == 4, "premise: the retrier made every attempt before giving up"
+    if outcome in ("provider-down", "retried-503"):
+        assert router.attempts(S.L3) == (4 if outcome == "provider-down" else 2), "premise: the retrier's attempts"
+        assert router.requests(S.L3) == (0 if outcome == "provider-down" else 1), "premise: only the answered attempt reached the script"
     else:
         assert router.requests(S.L3) == 1, "premise: the correlation lead made its one request"
     assert calls["main"] == main_calls, ("premise: MAIN's calls", calls)
@@ -1050,34 +1086,69 @@ def test_s2a_r7_the_final_outcome_of_a_request_decides_whether_the_total_is_exac
     assert read.by_agent["gather:l-00c"] == pytest.approx(priced_cost(_PRICED_NAMES["gather"], lead_responses), abs=1e-6), (
         "the outcome left no row of the lead's own (a refused request is a $0 row, not no row)")
     assert ("main" in read.by_agent) is (main_calls > 0)
+    lead_reported = _PRICED_NAMES["gather"] if lead_row == RESPONSE else None
+    assert _spend_rows(opened, run_dir.name) == sorted([
+        *[("main", _PRICED_NAMES["main"], _PRICED_NAMES["main"], RESPONSE)] * main_calls,
+        ("gather:l-00c", _PRICED_NAMES["gather"], lead_reported, lead_row)], key=lambda r: tuple("" if v is None else v for v in r)), (
+        "the hook's one row per request: the built name as requested, the reported name only on a response, the outcome word")
 
     html = _page_of(run_dir, summary, tmp_path, monkeypatch)
     headline = C.headline(html)
     assert C.at_least(headline) is at_least, f"the page's mark: {headline!r}"
-    if total:
-        assert C.dollars(headline) == pytest.approx(total, abs=1e-4), "the page's sum is not the run file's"
+    assert C.dollars(headline) == pytest.approx(total, abs=1e-4), "the page's sum is not the run file's"
     bar = C.segments(html)
     spent = {"main": priced_cost(_PRICED_NAMES["main"], main_calls), "correlation": priced_cost(_PRICED_NAMES["gather"], lead_responses)}
     assert bar == pytest.approx({kind: v for kind, v in spent.items() if v}, abs=1e-4), (
         "the bar holds exactly the kinds that spent: no segment for a kind whose requests were refused, unseen or never made")
 
 
+@pytest.mark.parametrize("outcome", ["refused-400", "cancelled"])
+def test_s2a_r7_s2c_a_request_whose_ledger_write_is_refused_leaves_its_own_ending_and_marks_the_total(tmp_path, caplog, outcome):
+    """The correlation lead's refused (400) or deadline-cancelled request, its row's insert refused (MAIN's rows are not): the
+    run ends as the control's does (the original exception survives), the total is marked, one spend ERROR. (r7 S2a, S2c)"""
+    from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+
+    _, _, truncated_by, main_calls, _ = _OUTCOMES[outcome]
+    limits = S.with_deadline(S.SHORT_DEADLINE_S) if outcome == "cancelled" else None
+    _, control, control_calls, _ = _correlation_run(tmp_path / "control", label=f"ledger-refused-control-{outcome}",
+                                                    gather=_outcome_router(outcome), limits=limits)
+    caplog.clear()
+    router = _outcome_router(outcome)
+    run_dir, summary, calls, opened = _correlation_run(tmp_path / "refused", label=f"ledger-refused-{outcome}", gather=router,
+                                                       limits=limits, refuse_ledger_of="gather:l-00c")
+
+    assert router.requests(S.L3) == 1, "premise: the lead made its one request"
+    assert (summary["truncated_by"], summary.get("exit_reason"), calls) == (
+        truncated_by, control.get("exit_reason"), control_calls) == (truncated_by, control.get("exit_reason"), {"main": main_calls}), (
+        "a failed ledger write changed how the run ended")
+    result = _run_result(run_dir)
+    assert result["total_cost_usd"] == pytest.approx(priced_cost(_PRICED_NAMES["main"], main_calls), abs=1e-6)
+    assert result["total_cost_is_lower_limit"] is True, "the total over a lost row reads exact"
+    assert len(_spend_errors(caplog)) == 1, _spend_errors(caplog)
+    assert [r[0] for r in _spend_rows(opened, run_dir.name)] == ["main"] * main_calls, "premise: only the lead's row was refused"
+
+
 #: HTTP statuses a provider's error carries as the hook sees them with no retrier in front, and the design's reading of each
 #: (r7 S2a: "a 4xx other than 408, 409 or 429" is refused; r7.1 E: a 5xx reaching the hook unwrapped is unseen).
 _UNWRAPPED = {**{status: "refused" for status in (400, 401, 403, 404, 413, 422)},
-              **{status: "unseen" for status in (408, 409, 429, 500, 502, 503, 529)}}
+              **{status: "unseen" for status in (408, 409, 429, 500, 502, 503, 529)},
+              None: "unseen"}  # a bare `ModelAPIError` (no status: a timeout or dropped connection) is a temporary end
 
 
-@pytest.mark.parametrize("status", _UNWRAPPED, ids=[f"{s}-{v}" for s, v in _UNWRAPPED.items()])
+def _http_error(status: int | None) -> BaseException:
+    from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
+
+    return ModelAPIError("fake-gather", "x") if status is None else ModelHTTPError(status, "fake-gather", body={"error": "x"})
+
+
+@pytest.mark.parametrize("status", _UNWRAPPED, ids=[f"{s or 'no-status'}-{v}" for s, v in _UNWRAPPED.items()])
 def test_s2a_r7_e_an_http_error_reaching_the_hook_is_refused_exactly_when_the_retrier_would_not_retry_it(tmp_path, status):
     """The lead's one request fails with `status`, no retrier in front: a status the retrier does not retry is a $0 row and an
     exact total; every other is unseen and the total reads "at least". (r7.1 E)"""
-    from pydantic_ai.exceptions import ModelHTTPError
-
     from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
-    router = S.LeadRouter(faults={S.L3: S.LeadFault(raise_on=1, exc=lambda: ModelHTTPError(status, "fake-gather", body={"error": "x"}))})
-    run_dir, summary, calls, opened = _correlation_run(tmp_path, label=f"ledger-status-{status}", gather=router, retries=False)
+    router = S.LeadRouter(faults={S.L3: S.LeadFault(raise_on=1, exc=lambda: _http_error(status))})
+    run_dir, summary, calls, opened = _correlation_run(tmp_path, label=f"ledger-status-{status or 'none'}", gather=router, retries=False)
 
     assert router.requests(S.L3) == 1, "premise: the lead made its one request"
     result = _run_result(run_dir)
@@ -1086,6 +1157,8 @@ def test_s2a_r7_e_an_http_error_reaching_the_hook_is_refused_exactly_when_the_re
     read = _ledger_of(opened, run_dir.name)
     assert read.by_agent["gather:l-00c"] == 0.0, f"{status}: no row for the failed request"
     assert read.complete is (_UNWRAPPED[status] == "refused")
+    assert [r for r in _spend_rows(opened, run_dir.name) if r[0] == "gather:l-00c"] == [
+        ("gather:l-00c", _PRICED_NAMES["gather"], None, REFUSED if _UNWRAPPED[status] == "refused" else UNSEEN)]
 
 
 def test_s2b_r7_a_requested_model_with_no_pricing_row_runs_adds_nothing_and_marks_the_total(tmp_path, caplog):

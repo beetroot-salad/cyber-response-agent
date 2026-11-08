@@ -100,7 +100,7 @@ def test_s5_r7_the_read_is_one_run_s_rows_and_a_run_with_none_is_zero_and_comple
     assert (read.total, read.complete, dict(read.by_agent)) == (0.0, True, {})
 
 
-@pytest.mark.parametrize("agent_id", ["mainframe", "main:2", "gatherer:l-001", "review2", "", "planner"])
+@pytest.mark.parametrize("agent_id", ["mainframe", "main:2", "gatherer:l-001", "review2", "", "planner", "gather", "review", "gather:", "review:"])
 def test_f_r7_an_agent_id_outside_the_four_kinds_is_an_error_at_read_never_main(ledger, agent_id):
     """A row of an id that is not main, `gather:*` or `review:*`: the read raises. A known-id ledger reads (the control). (r7.1 F)"""
     store, plant = ledger
