@@ -129,9 +129,9 @@ def read_ledger(store: Any, run_id: str) -> LedgerRead:
             raise ValueError(f"a ledger row of {row.agent_id!r} has the unknown outcome {row.outcome!r}")
         requested.setdefault(row.agent_id, row.requested_model)
         spent = 0.0
-        # A refused request is $0 at any model; a response at a model no row prices, or a
-        # request whose end was never seen, leaves the sum short by an unknown amount.
-        if row.outcome == UNSEEN or (row.outcome == RESPONSE and not priced(row.requested_model)):
+        # A request whose end was never seen, or any row at a model no pricing row prices
+        # (r7 S2b, r7.1 D), leaves the sum possibly short.
+        if row.outcome == UNSEEN or not priced(row.requested_model):
             complete = False
         if row.outcome == RESPONSE:
             spent = requested_cost(row.requested_model, row.usage)
