@@ -30,7 +30,7 @@ from .errors import (
     SignInRefused,
 )
 from . import roles
-from .memory import usable
+from .memory import secret_hash, usable
 from .ports import ExpiryWarning, IdentityRepository, MailPort, ProgramsPort, SignInPort
 from .models import CredentialKind, Membership, ProgramCredential, Session, User
 from .roles import Permission
@@ -118,11 +118,6 @@ class MeView:
     administrator: bool
     invitations: tuple[OpenInvitation, ...]
     credential: ProgramCredential | None = None
-
-
-def _hash(value: str) -> str:
-    """A key's stored form: the lowercase hex SHA-256 of its whole value (256 random bits, so no slow hash)."""
-    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def _pkce_challenge(verifier: str) -> str:
@@ -429,7 +424,7 @@ class IdentityService:
         checked because the programs realm cannot be reached."""
         now = self._clock()
         if value.startswith(KEY_PREFIX):
-            row = await self._repo.credential_by_hash(_hash(value))
+            row = await self._repo.credential_by_hash(secret_hash(value))
             if row is None or row.kind != "key":
                 raise NotAuthenticated("sign in")
         else:
@@ -619,7 +614,7 @@ class IdentityService:
         try:
             row = await self._repo.add_credential(
                 program_id, kind=kind, name=name, created_by=auth.user.id, expires_at=expires_at, now=now,
-                key_hash=None if key is None else _hash(key), credential_id=credential_id)
+                key_hash=None if key is None else secret_hash(key), credential_id=credential_id)
         except DataRuleViolation as e:
             raise Conflict("the program holds two credentials already, or was removed") from e
         # `program_credential.create` is emitted at the write that made the credential usable (a key's insert,

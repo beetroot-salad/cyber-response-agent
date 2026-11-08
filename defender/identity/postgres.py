@@ -28,7 +28,7 @@ from defender.tenancy.models import TenantRecord
 from .errors import DataRuleViolation
 from .memory import (
     CREDENTIAL_CAP, PENDING_DEADLINE, TOUCH_AFTER, check_credential_fields, check_membership_fields, check_role,
-    first_warning, is_warning_threshold, session_hash, tightest_due, warning_after,
+    first_warning, is_warning_threshold, secret_hash, tightest_due, warning_after,
 )
 from .models import (
     CredentialKind, CredentialWarningDelivery, Membership, MembershipStatus, ProgramCredential, Role, Session, User,
@@ -515,23 +515,23 @@ class PostgresIdentityRepository:
         self, value: str, user_id: UserId, *, now: _dt.datetime, expires_at: _dt.datetime,
         used_otp: bool = False,
     ) -> Session:
-        row = Session(token_hash=session_hash(value), user_id=user_id, used_otp=used_otp,
+        row = Session(token_hash=secret_hash(value), user_id=user_id, used_otp=used_otp,
                       created_at=now, last_seen_at=now, expires_at=expires_at)
         async with self._tx() as s:
             s.add(row)
         return row
 
     async def session_by_value(self, value: str) -> Session | None:
-        return await self._one(select(Session).where(Session.token_hash == session_hash(value)))
+        return await self._one(select(Session).where(Session.token_hash == secret_hash(value)))
 
     async def delete_session(self, value: str) -> bool:
         return await self._applied(
-            delete(Session).where(Session.token_hash == session_hash(value)).returning(Session.token_hash))
+            delete(Session).where(Session.token_hash == secret_hash(value)).returning(Session.token_hash))
 
     async def touch_session(self, value: str, *, now: _dt.datetime) -> bool:
         return await self._applied(
             update(Session).where(
-                Session.token_hash == session_hash(value), now - Session.last_seen_at > TOUCH_AFTER)
+                Session.token_hash == secret_hash(value), now - Session.last_seen_at > TOUCH_AFTER)
             .values(last_seen_at=now).returning(Session.token_hash))
 
     async def purge_expired_sessions(self, *, now: _dt.datetime, idle_since: _dt.datetime) -> int:

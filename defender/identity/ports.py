@@ -57,7 +57,9 @@ class IdentityRepository(Protocol):
       something to check again when a credential is used;
     - a program's display name and a credential's name hold only what PostgreSQL text can (no NUL, no lone
       surrogate);
-    - every write that changes a program's membership or credentials is serialised on the program's user row.
+    - every write that decides from what it reads (the cap, removal, going live) is serialised on the program's
+      user row. The one write that does not take it, `revoke_stale_pending`, decides nothing: it revokes only a
+      `pending` row past its deadline, and going live refuses that same row, so the two cannot both apply.
 
     Time is an explicit aware-UTC argument; the repository holds no clock. Every method is a
     coroutine. A returned model is a detached copy with every field set: changing it changes

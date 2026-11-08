@@ -36,8 +36,9 @@ def is_warning_threshold(threshold: _dt.timedelta) -> bool:
     return threshold in WARNING_THRESHOLDS
 
 
-def session_hash(value: str) -> str:
-    """The lowercase hex SHA-256 of a session value: the only form in which one is stored."""
+def secret_hash(value: str) -> str:
+    """The lowercase hex SHA-256 of a session value or a program's key: the only form in which either is stored.
+    Both are 256 random bits, so no slow hash."""
     return hashlib.sha256(value.encode()).hexdigest()
 
 
@@ -564,21 +565,21 @@ class InMemoryIdentityRepository:
     ) -> Session:
         if user_id not in self._users:
             raise DataRuleViolation(f"no user {user_id!r}")
-        if session_hash(value) in self._sessions:
+        if secret_hash(value) in self._sessions:
             raise DataRuleViolation("a session with this value already exists")
-        row = Session(token_hash=session_hash(value), user_id=user_id, used_otp=used_otp,
+        row = Session(token_hash=secret_hash(value), user_id=user_id, used_otp=used_otp,
                       created_at=now, last_seen_at=now, expires_at=expires_at)
         self._sessions[row.token_hash] = row
         return _copy(row)
 
     async def session_by_value(self, value: str) -> Session | None:
-        return _copy(self._sessions.get(session_hash(value)))
+        return _copy(self._sessions.get(secret_hash(value)))
 
     async def delete_session(self, value: str) -> bool:
-        return self._sessions.pop(session_hash(value), None) is not None
+        return self._sessions.pop(secret_hash(value), None) is not None
 
     async def touch_session(self, value: str, *, now: _dt.datetime) -> bool:
-        key = session_hash(value)
+        key = secret_hash(value)
         row = self._sessions.get(key)
         if row is None or now - row.last_seen_at <= TOUCH_AFTER:
             return False

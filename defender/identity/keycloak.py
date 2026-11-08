@@ -90,7 +90,8 @@ def _rsa_keys(published: Any) -> dict[str, Any]:
     return keys
 
 
-#: The key set is fetched at most this often, so random key ids never become Keycloak traffic.
+#: The programs realm's key set is fetched at most this often, so random key ids in bearer tokens never become
+#: Keycloak traffic.
 KEY_REFETCH_WINDOW = _dt.timedelta(seconds=60)
 #: Keys fetched this long ago are fetched again before use, so a key Keycloak stopped publishing stops verifying.
 KEY_MAX_AGE = _dt.timedelta(minutes=10)
@@ -98,15 +99,17 @@ KEY_MAX_AGE = _dt.timedelta(minutes=10)
 
 class _KeySet:
     """One realm's published signing keys, shared by both realms' token checks. An unknown key id, or keys older
-    than `KEY_MAX_AGE`, fetch the set again, at most once per `KEY_REFETCH_WINDOW` (a failed fetch counts). One
+    than `KEY_MAX_AGE`, fetch the set again, at most once per `refetch_window` (a failed fetch counts). One
     fetch runs at a time and requests arriving meanwhile wait for its result. Only a successful fetch replaces
     the keys: an outage keeps the held keys verifying, and an unknown key id during one is `SignInUnavailable`,
     never `SignInRefused`, because the key may well exist."""
 
     def __init__(
         self, http: httpx.AsyncClient, url: str, clock: Callable[[], _dt.datetime], *, token: str, realm: str,
+        refetch_window: _dt.timedelta,
     ) -> None:
         self._http, self._url, self._clock = http, url, clock
+        self._window = refetch_window
         self._token, self._realm = token, realm  # for the refusal and the log line
         self._keys: dict[str, Any] = {}
         self._fetched_at: _dt.datetime | None = None  # the last successful fetch
@@ -127,7 +130,7 @@ class _KeySet:
             held = self._keys.get(kid)
             if held is not None and self._fresh(now):
                 return held  # a fetch that finished while this request waited
-            if self._tried_at is None or now - self._tried_at >= KEY_REFETCH_WINDOW:
+            if self._tried_at is None or now - self._tried_at >= self._window:
                 self._tried_at = now
                 try:
                     self._keys, self._fetched_at = await self._fetch(), now
@@ -238,7 +241,10 @@ class KeycloakSignIn(_RealmAdmin):
         self._signin_url = f"{self._issuer}/protocol/openid-connect/auth"
         self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
         self._admin_users_url = f"{server}/admin/realms/{realm}/users"
-        self._keys = _KeySet(self._http, f"{self._oidc}/certs", clock, token="the ID token", realm="sign-in")
+        # No refetch window: an ID token comes from Keycloak's own token endpoint, never from an outsider, so an
+        # unknown key id there is a rotation to follow at once, not traffic to hold back.
+        self._keys = _KeySet(self._http, f"{self._oidc}/certs", clock, token="the ID token", realm="sign-in",
+                             refetch_window=_dt.timedelta(0))
         self._admin_token_held: tuple[str, _dt.datetime] | None = None
 
     async def close(self) -> None:
@@ -417,7 +423,8 @@ class KeycloakPrograms(_RealmAdmin):
         server = base if server_url is None else _server_base(server_url)
         self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
         self._clients_url = f"{server}/admin/realms/{realm}/clients"
-        self._keys = _KeySet(self._http, f"{self._oidc}/certs", clock, token="the token", realm="programs")
+        self._keys = _KeySet(self._http, f"{self._oidc}/certs", clock, token="the token", realm="programs",
+                             refetch_window=KEY_REFETCH_WINDOW)
         self._admin_token_held = None
 
     async def close(self) -> None:
