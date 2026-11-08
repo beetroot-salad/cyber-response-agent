@@ -565,6 +565,26 @@ def test_r5_a_config_env_is_optional_only_for_an_adapter_that_reads_no_key(tmp_p
         cmdb.check_settings(record)
 
 
+@pytest.mark.parametrize("config", ["absent", "undeclared-key", "placeholder"])
+def test_r5_a_folder_without_its_access_declaration_is_judged_by_that_first(tmp_path, config):
+    """The access declaration is checked before `config.env`: a system with none is named for
+    the missing declaration, whatever else its folder lacks (#1391 r5 S1 step 1)."""
+    cmdb = S.mod("integrations.cmdb_adapter")
+    ConfigFault = S.config_fault()
+    root = tmp_path / "tenants"
+    folder = S.plant(root, marker="r5a")
+    S.drop_access(folder, "cmdb")
+    env = S.config_path(folder, "cmdb")
+    if config == "absent":
+        env.unlink()
+    elif config == "undeclared-key":
+        env.write_text(env.read_text() + "CMDB_URL_BASE=http://cmdb:8080\n")
+    else:
+        env.write_text("CMDB_TIMEOUT_SEC=CHANGE-ME\n")
+    with pytest.raises(ConfigFault, match=r"access\.yaml\S* not found — cmdb is reached only through"):
+        cmdb.check_settings(_resolve(root))
+
+
 @pytest.mark.parametrize("host", ["", ".", "..", "web-1/../admin", "web-1%2Fx", "web 1", "a?b",
                                   "a#b", "a;b", "a\\b", "a\nb"])
 def test_r5_an_agent_path_value_that_is_not_one_segment_is_refused_before_sending(tmp_path, host):

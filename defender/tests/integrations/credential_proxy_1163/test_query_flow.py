@@ -603,6 +603,8 @@ def _adapter_of(system):
 def _decl_for(system, base):
     if system == "elastic":
         return H.declaration(base, scheme=H.basic_scheme(), reads=A.ELASTIC_READS)
+    if system == "threat-intel":  # its lookup carries the value in a POST body (#1391 r5 T3)
+        return H.declaration(base, reads=(("POST", "/lookup"),))
     return H.declaration(base)
 
 
@@ -704,7 +706,7 @@ def test_1391_o1_a_network_system_with_no_declaration_is_a_settings_fault_naming
     """No `access.yaml` is a settings fault, never a fallback to another access method. P1."""
     with (H.upstream() as up,
           _proxied(tmp_path, data_root, up, system, declared=False) as (ctx, tap),
-          pytest.raises(ConfigFault, match="access")):
+          pytest.raises(ConfigFault, match=r"access\.yaml\S* not found")):
         _adapter_of(system).check_settings(ctx.tenant)
     assert (tap.tokens, up.seen) == ([], [])
 
