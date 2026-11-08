@@ -59,15 +59,16 @@ def end_group(pgid: int, *, limit: float = GROUP_END_LIMIT,
     return wait_group_gone(pgid, limit=limit, running=running)
 
 
-def group_running(pgid: int, *, proc: str = "/proc") -> bool:
+def group_running(pgid: int, *, proc: str = "/proc", killpg: Callable[[int, int], None] = os.killpg,
+                  kill: Callable[[int, int], None] = os.kill) -> bool:
     """Whether any member of the group `pgid` still runs that waiting can see end. Not counted:
     a member that has exited but not been waited for (a zombie: a killed grandchild is
     reparented, and its new parent reaps it when it will), and one this user cannot signal (the
     kill never reached it, so waiting for it would only spend the limit). Without `proc` a
     zombie cannot be told from a live member, so nothing is counted: the kill was sent, and
-    that is all that can be known. `proc` is a door for tests."""
+    that is all that can be known. `proc`, `killpg` and `kill` are doors for tests."""
     try:
-        os.killpg(pgid, 0)
+        killpg(pgid, 0)
     except ProcessLookupError:
         return False  # no member at all, zombie or not
     except PermissionError:
@@ -89,7 +90,7 @@ def group_running(pgid: int, *, proc: str = "/proc") -> bool:
         if len(fields) <= 2 or int(fields[2]) != pgid or fields[0] in (b"Z", b"X"):
             continue
         try:
-            os.kill(int(name), 0)
+            kill(int(name), 0)
         except ProcessLookupError:
             continue  # gone since its stat was read
         except PermissionError:

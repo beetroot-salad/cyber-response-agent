@@ -4091,26 +4091,25 @@ async def test_b11_a_second_cancel_while_the_worker_stops_kills_every_child_at_o
     assert took < 5, f"the second cancel took {took:.1f} s to leave"
 
 
-async def test_d_ac_a_cancel_while_the_childs_group_is_waited_for_still_removes_its_box(world, monkeypatch):
+async def test_d_ac_a_cancel_while_the_childs_group_is_waited_for_still_removes_its_box(world):
     """The row's cleanup waits for the child's killed group to be gone, then removes the box: a second cancel landing in that wait still removes the box (the removal runs however the wait ends). (D-ac, #1343 review r5 item 3)"""
     import threading
 
-    from defender.worker import _worker as worker_module
+    from defender.execution import wait_group_gone
 
     in_wait = threading.Event()
-    real_wait = worker_module.wait_group_gone
 
-    def slow_wait(pgid: int, **kw) -> bool:
+    def slow_wait(pgid: int) -> bool:
         in_wait.set()
         time.sleep(3.0)
-        return real_wait(pgid, **kw)
+        return wait_group_gone(pgid)
 
-    monkeypatch.setattr(worker_module, "wait_group_gone", slow_wait)
     child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
         containers = StandInContainers(world["tmp"] / "containers-cancel-in-wait")
-        draining = asyncio.create_task(_worker(world, store, child, containers=containers, **_FAST).drain())
+        draining = asyncio.create_task(
+            _worker(world, store, child, containers=containers, wait_group=slow_wait, **_FAST).drain())
         try:
             await _until(in_wait.is_set, "the row's cleanup to wait for the child's group")
             draining.cancel()
@@ -4124,22 +4123,19 @@ async def test_d_ac_a_cancel_while_the_childs_group_is_waited_for_still_removes_
     assert [c for c in containers.calls if c[0] == "reap"], "a cancel in the group wait skipped the box's removal"
 
 
-async def test_b11_a_group_whose_wait_ran_out_is_not_waited_for_again_by_the_rows_cleanup(world, monkeypatch):
+async def test_b11_a_group_whose_wait_ran_out_is_not_waited_for_again_by_the_rows_cleanup(world):
     """A child ignores SIGTERM and its killed group never empties: the stop waits for it once (the limit, logged), and the row's own cleanup kills it again without a second wait, so a stop stays one grace plus one limit. (R3, B11)"""
-    from defender.worker import _worker as worker_module
-
     waited: list[int] = []
 
-    def never_gone(pgid: int, **_kw) -> bool:
+    def never_gone(pgid: int) -> bool:
         waited.append(pgid)
         return False
 
-    monkeypatch.setattr(worker_module, "wait_group_gone", never_gone)
     release = world["tmp"] / "release"
     child = _child(world, files=_committed(), wait_for=release, term="ignore")
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
-        serving = asyncio.create_task(_worker(world, store, child, stop_grace=0.5, **_FAST).serve())
+        serving = asyncio.create_task(_worker(world, store, child, stop_grace=0.5, wait_group=never_gone, **_FAST).serve())
         try:
             await _until(lambda: child.seen(inv), "the child")
             os.kill(os.getpid(), signal.SIGTERM)

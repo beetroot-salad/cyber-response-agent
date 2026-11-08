@@ -50,6 +50,10 @@ def test_end_group_returns_only_once_no_member_of_a_real_group_runs():
             child.stdout.close()
 
 
+#: Signal stand-ins for a fake /proc's made-up pids: every group and member exists and is this user's to signal.
+_DOORS = {"killpg": lambda _pgid, _sig: None, "kill": lambda _pid, _sig: None}
+
+
 def _fake_proc(root, rows: dict[int, bytes]):
     """A /proc stand-in: one `<pid>/stat` per row, holding exactly those bytes."""
     for pid, stat in rows.items():
@@ -59,44 +63,38 @@ def _fake_proc(root, rows: dict[int, bytes]):
     return str(root)
 
 
-def test_the_group_is_read_after_the_last_parenthesis_of_a_command_name_holding_spaces_and_parentheses(tmp_path,
-                                                                                                        monkeypatch):
+def test_the_group_is_read_after_the_last_parenthesis_of_a_command_name_holding_spaces_and_parentheses(tmp_path):
     """`pid (comm) state ppid pgrp ...`: a name like `a) b (c` must not shift the fields. Member 11 of group 7 runs;
     12 is a zombie of 7; 13 runs in group 8."""
-    monkeypatch.setattr(os, "killpg", lambda _pgid, _sig: None)
-    monkeypatch.setattr(os, "kill", lambda _pid, _sig: None)
     proc = _fake_proc(tmp_path / "proc", {
         11: b"11 (a) b (c) S 1 7 7 0",
         12: b"12 (zz) Z 1 7 7 0",
         13: b"13 (x) R 1 8 8 0",
     })
-    assert group_running(7, proc=proc)
-    assert not group_running(9, proc=proc), "a group with no member runs nothing"
+    assert group_running(7, proc=proc, **_DOORS)
+    assert not group_running(9, proc=proc, **_DOORS), "a group with no member runs nothing"
 
     zombie_only = _fake_proc(tmp_path / "proc2", {12: b"12 (a) b (c) Z 1 7 7 0", 13: b"13 (x) R 1 8 8 0"})
-    assert not group_running(7, proc=zombie_only), "a group of zombies only runs nothing"
+    assert not group_running(7, proc=zombie_only, **_DOORS), "a group of zombies only runs nothing"
 
 
-def test_a_member_this_user_cannot_signal_is_not_waited_for(tmp_path, monkeypatch):
+def test_a_member_this_user_cannot_signal_is_not_waited_for(tmp_path):
     """The kill never reached a member this user may not signal (a setuid program, say): waiting cannot see it end, so
     it does not count."""
     def kill(pid: int, _sig: int) -> None:
         if pid == 21:
             raise PermissionError
 
-    monkeypatch.setattr(os, "killpg", lambda _pgid, _sig: None)
-    monkeypatch.setattr(os, "kill", kill)
     proc = _fake_proc(tmp_path / "proc", {21: b"21 (sudo) S 1 7 7 0"})
-    assert not group_running(7, proc=proc)
+    assert not group_running(7, proc=proc, killpg=_DOORS["killpg"], kill=kill)
     proc_with_ours = _fake_proc(tmp_path / "proc2", {21: b"21 (sudo) S 1 7 7 0", 22: b"22 (sh) S 1 7 7 0"})
-    assert group_running(7, proc=proc_with_ours), "control: a member this user can signal still counts"
+    assert group_running(7, proc=proc_with_ours, killpg=_DOORS["killpg"], kill=kill), "control: a member this user can signal still counts"
 
 
-def test_without_proc_a_group_that_still_exists_is_not_waited_for(tmp_path, monkeypatch):
+def test_without_proc_a_group_that_still_exists_is_not_waited_for(tmp_path):
     """No /proc: a zombie cannot be told from a live member, so the wait does not spend its limit on one (a git timeout
     would otherwise cost the whole limit on every call)."""
-    monkeypatch.setattr(os, "killpg", lambda _pgid, _sig: None)
-    assert not group_running(7, proc=str(tmp_path / "no-proc-here"))
+    assert not group_running(7, proc=str(tmp_path / "no-proc-here"), **_DOORS)
 
 
 def test_end_group_waits_while_a_member_still_runs_after_the_kill():

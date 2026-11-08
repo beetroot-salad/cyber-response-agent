@@ -164,6 +164,7 @@ class Worker:
         open_lane: Callable[[DataRoot, object], job_lane.JobLane] = job_lane.JobLane.open,
         store_call_limit: float = 10.0,
         spawn: Callable[..., Awaitable[asyncio.subprocess.Process]] = asyncio.create_subprocess_exec,
+        wait_group: Callable[[int], bool] = wait_group_gone,
     ) -> None:
         if slots < 1:
             raise ValueError(f"a worker needs at least one slot, not {slots!r}")
@@ -180,6 +181,7 @@ class Worker:
         self._open_lane = open_lane  # the job lane's door; a test hands in one that faults
         self._store_call_limit = store_call_limit  # how long one renewal or take-over call may take
         self._create_process = spawn  # the process door; a test lands an event inside it
+        self._wait_group = wait_group  # the wait for a killed group to be gone; a test slows or stalls it
         self._lease = float(store.lease_seconds)
         self._store_outage_at: float | None = None  # this worker's last store call that hit an outage
         self._tasks: set[asyncio.Task[None]] = set()
@@ -362,11 +364,19 @@ class Worker:
         except TimeoutError:
             _logger.warning("child %d did not end within %gs of SIGTERM; killing its group",
                             proc.pid, self._stop_grace)
-            if not await _end_group(proc.pid):
+            if not await self._end_group(proc.pid):
                 held.group_left = True
             await proc.wait()
 
     # -- the lease: renewal, cost so far, take-over -------------------------------------------------
+
+    async def _end_group(self, pgid: int) -> bool:
+        """The child's whole group killed and waited for: the SIGKILL goes out here, at once, so a
+        cancel landing in the wait cannot keep it from being sent; the wait for every member to be
+        gone (`wait_group_gone` by default: bounded, logged if one never goes) runs in a thread.
+        False when a member still ran at the limit."""
+        kill_group(pgid)
+        return await asyncio.to_thread(self._wait_group, pgid)
 
     async def _renewal_loop(self) -> None:
         """Every `renewal_interval`, renew every held row in one store call. A call that errors
@@ -545,7 +555,7 @@ class Worker:
                 try:
                     if held.group_left:
                         kill_group(proc.pid)
-                    elif not await _end_group(proc.pid):
+                    elif not await self._end_group(proc.pid):
                         held.group_left = True
                 finally:
                     await self._backstop(inv, token)
@@ -748,15 +758,6 @@ def _what_end(end: End) -> str:
     what = "a hand-back" if end.ending is None else end.ending.stage + (
         f" ({end.ending.failure_reason})" if end.ending.failure_reason else "")
     return f"{what}, cost {end.cost}, knowledge {'kept' if end.knowledge is not None else 'none'}"
-
-
-async def _end_group(pgid: int) -> bool:
-    """The child's whole group killed and waited for: the SIGKILL goes out here, at once, so a
-    cancel landing in the wait cannot keep it from being sent; the wait for every member to be
-    gone (`wait_group_gone`, bounded, logged if one never goes) runs in a thread. False when a
-    member still ran at the limit."""
-    kill_group(pgid)
-    return await asyncio.to_thread(wait_group_gone, pgid)
 
 
 async def _end_tasks(tasks: list[asyncio.Task[None]]) -> None:
