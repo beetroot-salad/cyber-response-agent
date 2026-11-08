@@ -19,6 +19,7 @@ from defender._agent_role import AgentRole
 from ..run_state import run_state_of
 
 from defender._untrusted import wrap_fresh
+from defender.execution import bash_exec, box_codec
 from defender.configuration import FatalConfigError
 from defender.kit.faults import USAGE_EXIT_CODE
 from defender.investigation.sql_engine import sql as defender_sql
@@ -37,12 +38,16 @@ def _shim_exit_code(rc: int) -> int:
     """Translate `defender-sql`'s exit codes into the dialect the queries table speaks.
 
     The shim's 2 is an agent input error, but 2 in the table means infra (whose rows are
-    dropped), so it becomes `USAGE_EXIT_CODE`. A missing runtime is infra, not a lesson. A query
-    error (1) passes through. Any other code (SIGKILL, missing binary) came from the kernel or
-    shell, not the reducer, so it is infra too rather than an agent-fixable lesson.
-    `payload_digest` still records the raw exit code.
+    dropped), so it becomes `USAGE_EXIT_CODE`. So do the helper's stop of a command that printed
+    too much (75) and a kill or crash of the tool (#1421 O7, decision 5: under the memory limit a
+    crash cannot be told from running out of room): each is the model's query to shrink. A
+    missing runtime is infra, not a lesson. A query error (1) passes through. Any other code
+    (missing binary, a signal outside the kill set) came from the kernel or shell, not the
+    reducer, so it is infra too rather than an agent-fixable lesson. `payload_digest` still
+    records the raw exit code.
     """
-    if rc == defender_sql.EXIT_INPUT_ERROR:
+    if (rc == defender_sql.EXIT_INPUT_ERROR or rc == box_codec.OVER_BUDGET_RC
+            or bash_exec.is_kill_or_crash(rc)):
         return USAGE_EXIT_CODE
     if rc == defender_sql.EXIT_NO_RUNTIME:
         return _INFRA_EXIT_CODE
@@ -116,7 +121,9 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
         )
     except subprocess.TimeoutExpired as e:
         raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}") from e
-    except box_mod.BoxOutputLimitExceeded:
+    except box_mod.BoxEnding:
+        # The box is unusable or a process wrote past its helper (#1421 O8, O9): the run ends by
+        # name. Never a retry: the model cannot fix it.
         raise
     except box_mod.BoxFault as e:
         raise ModelRetry(f"the sandbox could not run this command: {e}") from e

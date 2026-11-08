@@ -274,11 +274,16 @@ class _JobEndFacts:
     `review_state` is the run's review-state dict, which the driver uses as
     `AgentDeps.review_state` (`{"state": ReviewState}` once the close gate first runs): the
     report is committed once that state is closed. `scrub_verified` is set by the lifecycle,
-    only once `stop_and_scrub` has returned, to whether the scrub walked the tree."""
+    only once `stop_and_scrub` has returned, to whether the scrub walked the tree.
+
+    `cut_short` is the summary's `truncated_by` (#1421), set by the lifecycle when the driver
+    returns, before the teardown, so a teardown or scrub that raises cannot lose it; `None` for a
+    run nothing cut short or one whose driver never returned."""
 
     review_state: dict[str, Any] = dataclasses.field(default_factory=dict)
     scrub_verified: bool = False
     box: str = job_facts.BOX_NOT_STARTED
+    cut_short: str | None = None
 
     @property
     def report_committed(self) -> bool:
@@ -519,6 +524,9 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     keywords: dict[str, Any] = {} if job_facts is None else {"job_facts": job_facts}
     keywords |= _access_kwargs(access)
     investigation_ok = False
+    # A run its box ended (#1421) returns normally, but its failure is in flight all the same: a
+    # teardown fault on it is logged, never raised over the ending.
+    box_ending = False
     try:
         summary = drive(
             alert_path=RunPaths(run_dir).alert,
@@ -535,16 +543,24 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             **keywords,
         )
         investigation_ok = True
+        cut_short = run_end.normalized_truncated_by(summary.get("truncated_by"))
+        box_ending = cut_short in run_end.BOX_ENDINGS
+        if job_facts is not None:
+            job_facts.cut_short = cut_short
     finally:
-        box_mod.stop_and_scrub(
+        box_down = box_mod.stop_and_scrub(
             box, run_dir, stop_box=stop_box, scrub_tree=scrub_tree,
             read_verdict=verdict.read, write_verdict=write_verdict,
-            in_flight=not investigation_ok,
+            in_flight=box_ending or not investigation_ok,
         )
         # Reached only when the teardown and scrub returned: a tainted tree or a teardown fault
         # raised out of them, so the verdict's `ran: true` alone never makes a tree verified.
         if job_facts is not None:
             job_facts.scrub_verified = box_mod.tree_verified(run_dir)
+    if not box_down:
+        # Only a box ending's teardown fault gets here: its box may still be alive, so the
+        # compositions skip the post-steps that read or publish its tree.
+        summary = {**summary, TEARDOWN_FAULTED: True}
     return summary
 
 
@@ -1249,6 +1265,13 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             copy.remove()
 
 
+#: The one key the lifecycle adds to a run's summary (#1421), only when the teardown of a run its
+#: box ended could not prove the box stopped: its tree was not scrubbed and a live box may still
+#: write it, so the post-steps (the cross-check, the page, the case comment and the curation
+#: enqueue) are skipped and only the exit status is returned.
+TEARDOWN_FAULTED = "teardown_faulted"
+
+
 def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's inputs
     started: _Started, summary: dict[str, Any], *,
     visualize: Callable[..., None], update_ticket: bool,
@@ -1257,7 +1280,16 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
     """The post-steps both compositions share (#1342 M4), after the lifecycle has scrubbed the
     run folder: the readers of the scrubbed tree and the run page. `operator_steps` is the
     operator composition's own (the ticket comment and the curation enqueue), run where they
-    always ran: after the table cross-check, before the page, which shows the ticket's receipt."""
+    always ran: after the table cross-check, before the page, which shows the ticket's receipt.
+
+    None of them runs for a run whose box ending's teardown faulted (`TEARDOWN_FAULTED`, #1421):
+    they assume a dead box and a scrubbed tree, and a possibly live box's writes must not be read
+    or published. The composition still returns the run's exit status."""
+    if summary.get(TEARDOWN_FAULTED):
+        _logger.error("the box could not be proven stopped after the run ended; its folder was not "
+                      "scrubbed, so nothing is read from it or published (no run page, no case "
+                      "comment, no curation)")
+        return
     run = started.run
     run_dir = run.run_dir
     # Everything below reads the scrubbed tree; a lifecycle failure propagates uncaught.
@@ -1479,7 +1511,8 @@ class _JobFacts:
             self.held.box = job_facts.BOX_START_FAILED
         end = job_lane.JobEnd(setup=self.setup, box=self.held.box,
                              report_committed=self.held.report_committed,
-                             scrub_verified=self.held.scrub_verified)
+                             scrub_verified=self.held.scrub_verified,
+                             cut_short=self.held.cut_short)
         try:
             self._lane.write_job_end(self._job, end)
         except FileExistsError:
@@ -1556,18 +1589,26 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
 
 #: A sibling whose world went unservable exits with this (its world record says why).
 UNSERVABLE_EXIT = 3
-#: A run whose model provider stayed down past the retrier ends with this: rerun later. Non-zero, so
-#: a branched sibling that hits it is recorded `did not finish`.
-PROVIDER_DOWN_EXIT = 4
+#: What a run ended by an exit class with its own status says on the way out (#1243, #1421).
+_EXIT_WORDS = {
+    run_end.TRUNCATED_BY_PROVIDER_DOWN: "the model provider stayed down; the run ended with no "
+                                        "report (rerun later)",
+    run_end.TRUNCATED_BY_BOX_LOST: "the run's box became unusable; the run ended (the operator's "
+                                   "to fix: the run log names the command that found it)",
+    run_end.TRUNCATED_BY_BOX_OUTPUT_LIMIT: "a process in the run's box wrote past its helper and "
+                                           "tripped the host fence; the run ended",
+}
 
 
 def _exit_code(summary: dict) -> int:
-    """The exit status of a run whose post-steps are done: `PROVIDER_DOWN_EXIT` when its model
-    provider stayed down (the run wrote no report, so say why), else 0."""
-    if summary.get("truncated_by") == run_end.TRUNCATED_BY_PROVIDER_DOWN:
-        _logger.error("the model provider stayed down; the run ended with no report (rerun later)")
-        return PROVIDER_DOWN_EXIT
-    return 0
+    """The exit status of a run whose post-steps are done or skipped: its exit class's own code
+    from the one table (`run_end.EXIT_CLASSES`: provider-down 4, box-lost 5, box-output-limit 6),
+    said on the way out, else 0."""
+    truncated_by = run_end.normalized_truncated_by(summary.get("truncated_by"))
+    code = run_end.exit_code_of(truncated_by)
+    if code and truncated_by is not None:
+        _logger.error(_EXIT_WORDS.get(truncated_by, f"the run ended {truncated_by}"))
+    return code
 
 
 def _serving_abort(exc: BaseException) -> ServingAbort | None:

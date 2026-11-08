@@ -20,8 +20,9 @@ STAMP = re.compile(r"\[reply received ([^\]]+)\]")
 
 
 class TickingClock(C.FakeClock):
-    """A run clock source that moves on every read: any second reading of the clock for one call
-    shows as a different instant."""
+    """A run clock source that moves on every read. A second reading shows as a different instant
+    only while the run clock runs: an open oracle turn pauses it for every call of the run, so
+    two calls' rows written inside one turn hold the same instant, each from its own reading."""
 
     def __call__(self) -> dt.datetime:
         with self._lock:
@@ -70,10 +71,12 @@ def test_1385_each_call_is_shown_the_reading_of_its_own_row_when_calls_run_toget
     assert sorted(shown) == owned, (
         f"the stamps shown beside the replies are not their rows' received_at:\n shown {sorted(shown)}"
         f"\n rows  {owned}")
-    for mark in {m for m, _stamp in owned}:
-        stamps = [stamp for m, stamp in owned if m == mark]
-        assert len(set(stamps)) == len(stamps), (
-            f"a repeat of {mark} was given the reading of its earlier ask: {owned}")
+    # Only the repeat asked in a later round: every call of the first round ended before it began,
+    # so the clock has moved. The repeat inside the first round may share its ask's instant, when
+    # another call's oracle turn holds the clock paused across both rows (`TickingClock`).
+    stamps = [stamp for m, stamp in owned if m == _mark(1)]
+    assert len(set(stamps)) == len(stamps), (
+        f"a repeat of {_mark(1)} was given the reading of its earlier ask: {owned}")
 
 
 def test_1385_the_framework_still_closes_a_retry_prompt_with_the_tail_the_query_tool_strips():

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from defender.box import BoxOutputLimitExceeded
+from defender.box import BoxEnding
 from defender._io import read_text_utf8
 from defender.records import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill, count_call
@@ -330,8 +330,8 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
             asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, SystemExit):
         raise
     except Exception as e:  # noqa: BLE001 — the lead's own dispatch must never break the run
-        if carried(e, BoxOutputLimitExceeded) is not None:
-            raise
+        if carried(e, BoxEnding) is not None:
+            raise  # the box is unusable or its fence tripped (#1421): the run ends by name
         if carried_unless_overridden(e, providers.ProviderDown, (BudgetKill, circuit_breaker.RunAborted)):
             raise  # a provider that stayed down, inside a group (#1243)
         _logger.warning(f"correlation lead dispatch failed ({type(e).__name__}); naming it")

@@ -23,12 +23,47 @@ TRUNCATED_BY_TIMED_OUT = "timed-out"
 #: A model request kept failing temporarily until its retries ran out (#1243): an infrastructure
 #: end like the budget and store ones, so no report is written for it.
 TRUNCATED_BY_PROVIDER_DOWN = "provider-down"
+#: The run's box became unusable (#1421 O8): the first command that found it ends the run, with
+#: no retry the model cannot act on. The operator's to fix.
+TRUNCATED_BY_BOX_LOST = "box-lost"
+#: The host fence tripped (#1205, #1421 O9): a process in the box wrote past the in-box helper.
+TRUNCATED_BY_BOX_OUTPUT_LIMIT = "box-output-limit"
 TRUNCATED_BY_VALUES = (
     TRUNCATED_BY_REQUEST_LIMIT, TRUNCATED_BY_RETRY_EXHAUSTED, TRUNCATED_BY_ABORTED,
     TRUNCATED_BY_BUDGET, TRUNCATED_BY_STORE, TRUNCATED_BY_DEAD_END,
     TRUNCATED_BY_SERVED_LEDGER, TRUNCATED_BY_EXECUTED_QUERIES, TRUNCATED_BY_TIMED_OUT,
-    TRUNCATED_BY_PROVIDER_DOWN,
+    TRUNCATED_BY_PROVIDER_DOWN, TRUNCATED_BY_BOX_LOST, TRUNCATED_BY_BOX_OUTPUT_LIMIT,
 )
+
+
+@model(frozen=True)
+class ExitClass:
+    """What an exit class means past the run-end record: the process exit status a run ended
+    by it returns, and whether it is a box ending (the run's box can no longer be trusted)."""
+
+    exit_code: int
+    box_ending: bool = False
+
+
+#: The one exit-class table (#1421): every class whose run exits non-zero, by its own code. A
+#: class not here exits 0. Rerun later for provider-down; the operator's box for the other two.
+#: Each code is non-zero, so a branched sibling that meets one is recorded `did not finish`.
+EXIT_CLASSES: dict[str, ExitClass] = {
+    TRUNCATED_BY_PROVIDER_DOWN: ExitClass(4),
+    TRUNCATED_BY_BOX_LOST: ExitClass(5, box_ending=True),
+    TRUNCATED_BY_BOX_OUTPUT_LIMIT: ExitClass(6, box_ending=True),
+}
+
+#: The endings that leave the run's box possibly alive: a teardown fault on them is logged, never
+#: raised over the ending, and skips the post-steps that read the tree.
+BOX_ENDINGS = frozenset(word for word, cls in EXIT_CLASSES.items() if cls.box_ending)
+
+
+def exit_code_of(truncated_by: object) -> int:
+    """The exit status of a run that ended with `truncated_by` (normalized first): its class's
+    code, else 0."""
+    found = EXIT_CLASSES.get(normalized_truncated_by(truncated_by) or "")
+    return 0 if found is None else found.exit_code
 
 #: Exits where the model spent its budget without closing, so the host writes an `unresolved`
 #: report (otherwise the run dead-letters for a missing report.md). Shared by the driver's
@@ -114,10 +149,15 @@ def parse_record(doc: object) -> RunEnd | None:
 
 
 __all__ = [
+    "BOX_ENDINGS",
     "CALL_RECORDS",
     "CallRecordWriteFailed",
+    "EXIT_CLASSES",
+    "ExitClass",
     "FORCED_CLOSE_EXITS",
     "TRUNCATED_BY_ABORTED",
+    "TRUNCATED_BY_BOX_LOST",
+    "TRUNCATED_BY_BOX_OUTPUT_LIMIT",
     "TRUNCATED_BY_BUDGET",
     "TRUNCATED_BY_DEAD_END",
     "TRUNCATED_BY_EXECUTED_QUERIES",
@@ -129,6 +169,7 @@ __all__ = [
     "TRUNCATED_BY_TIMED_OUT",
     "TRUNCATED_BY_VALUES",
     "RunEnd",
+    "exit_code_of",
     "normalized_truncated_by",
     "parse_record",
     "sidecar_path",

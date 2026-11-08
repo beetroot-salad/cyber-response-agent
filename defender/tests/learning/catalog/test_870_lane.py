@@ -68,10 +68,22 @@ def test_an_infra_shim_failure_never_reaches_the_queue():
     assert infra == "infra"
     assert _collect(shim_lead(error_class=infra)) == [], "an infra-classed reduce enqueued a row"
 
-    for rc in (defender_sql.EXIT_INPUT_ERROR, 1):
+    for rc in (defender_sql.EXIT_INPUT_ERROR, 1, 75, -9, -11, -6, -7):  # #1421 O7
         klass = error_class_for_exit(tools._shim_exit_code(rc))
         assert klass == "agent-fixable", rc
         assert len(_collect(shim_lead(error_class=klass))) == 1, rc
+
+
+def test_the_shim_exit_table_names_every_model_fixable_code_and_nothing_else():
+    """Over every code from -64 to 255, only 0 and 1 pass through and only the six model-fixable codes are `agent-fixable`; all else is infra. (O7)"""
+    model_fixable = {defender_sql.EXIT_INPUT_ERROR, 75, -9, -11, -6, -7}
+    got = {rc: (tools._shim_exit_code(rc), error_class_for_exit(tools._shim_exit_code(rc)))
+           for rc in range(-64, 256)}
+    want = {rc: ((rc, None) if rc == 0 else (rc, "agent-fixable") if rc == 1 else
+                 (got[rc][0], "agent-fixable") if rc in model_fixable else (got[rc][0], "infra"))
+            for rc in got}
+    assert got == want, {rc: got[rc] for rc in got if got[rc] != want[rc]}
+    assert error_class_for_exit(tools._shim_exit_code(defender_sql.EXIT_NO_RUNTIME)) == "infra"
 
 
 def test_no_model_supplied_query_id_reaches_the_reducer_surface():

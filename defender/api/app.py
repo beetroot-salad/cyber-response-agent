@@ -689,8 +689,8 @@ async def get_alert_mapping(deps: Deps, caller: Caller) -> AlertMapping:
 async def put_alert_mapping(
     deps: Deps, caller: Caller, body: AlertMapping, request: Request, response: Response
 ) -> AlertMapping:
-    """Replace the tenant's alert mapping whole: all six entries, each a dotted path or null. Its alerts' title
-    and description are re-derived through it before this answers."""
+    """Replace the tenant's alert mapping whole: all six entries, each a dotted path or null. It applies to alerts
+    stored from now on; alerts already stored keep their title and description."""
     async with _transaction(deps, caller) as tx:
         mapping, created = await tx.put_alert_mapping(body)
         await tx.audit("alert_mapping.update", caller.tenant_id)

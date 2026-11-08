@@ -7,20 +7,29 @@ import subprocess
 import time
 from collections.abc import Callable, Sequence
 
-from defender.execution.box_codec import BoxFault, RawExec
+from defender.execution.box_codec import BOX_OUTPUT_LIMIT, RawExec
+from defender.records.run_end import TRUNCATED_BY_BOX_OUTPUT_LIMIT
 
-# A transport budget, independent of file-read and model-display limits.
-BOX_OUTPUT_LIMIT = 64 * 1024 * 1024
+from ._ending import BoxEnding
+
+# The transport budget (`BOX_OUTPUT_LIMIT`) lives beside the codec, so the in-box helper's own
+# budget is derived from it; it is independent of file-read and model-display limits.
 _CHUNK = 64 * 1024
 _REAP_TIMEOUT = 5.0
 
 
-class BoxOutputLimitExceeded(BoxFault):
-    """Fatal: the response exceeded its budget and its box must no longer run."""
+class BoxOutputLimitExceeded(BoxEnding):
+    """Fatal: the response exceeded its budget and its box must no longer run. The in-box helper
+    stops a cooperating command well below the fence (#1421 O5), so a trip means a process wrote
+    past the helper (O9); the wording says so, and is logged once where the run ends."""
+
+    exit_class = TRUNCATED_BY_BOX_OUTPUT_LIMIT
 
     def __init__(self, limit: int = BOX_OUTPUT_LIMIT) -> None:
         self.limit = limit
-        super().__init__(f"box output exceeded the {limit}-byte limit; ending the run")
+        super().__init__(
+            f"box output exceeded the {limit}-byte limit: a process in the box wrote past the "
+            "in-box helper, which stops a command's own output well below it; ending the run")
 
 
 def _exchange(  # noqa: C901 — one selector loop owns the request and both response streams

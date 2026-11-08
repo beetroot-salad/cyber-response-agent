@@ -78,7 +78,7 @@ class AlertSummary(BaseModel):
     alert_id: AlertId
     vendor: str = Field(description="The ticket system the alert was pulled from.")
     vendor_ticket_id: str = Field(description="The vendor's own id; unique per tenant and vendor.")
-    title: str | None = Field(description="Derived from the raw alert through the tenant's alert mapping; null when unmapped or unusable.")
+    title: str | None = Field(description="Derived from the raw alert through the tenant's alert mapping as it stood when the alert was stored; null when the tenant had no mapping then, or the entry is unmapped or unusable.")
     description: str | None = Field(description="As `title`.")
     fired_at: Instant = Field(description="When the vendor says the alert fired.")
     changed_at: Instant = Field(description="When the vendor last changed the ticket.")

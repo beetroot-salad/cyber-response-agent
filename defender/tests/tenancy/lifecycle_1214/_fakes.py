@@ -5,7 +5,7 @@ and answers as the real system was observed to (grounding G6-G9); none decides l
   are real bare git repositories under `root`, so the template commit and the host clone are real
   git (`RoutedGit` routes the forge's clone URLs to them).
 - `FakeIntegrationCommand`: `forgejo admin user create-authorized-integration`'s runner; prints
-  G6's JSON (with an `audience`); a re-run adds a second integration (G7); a purged user takes its
+  G6's JSON (with an `audience`); a re-run adds a second integration (G7); a deleted user (purged or not) takes its
   integrations with it (G8, kept on `FakeForge.integrations`).
 - `FakeOpenBao`: the OpenBao HTTP paths the design names (OIDC roles, AppRoles and their secret
   ids, wrapping, entities); a destroyed role or AppRole no longer logs in or mints.
@@ -15,7 +15,7 @@ r9 additions (slice 0):
   clears it, G23) and `prohibit_login` (PATCH, G15). A request with `Authorization: Bearer <jwt>` is an
   integration call: the JWT must resolve (via `FakeOpenBao.claims`, wired by `Fakes`) to an audience that one
   bot's integration holds; a bot with `must_change_password` is refused 403 "You must change your password"
-  (G23), a login-prohibited one 403 "This account is prohibited from signing in" (G15), a purged or
+  (G23), a login-prohibited one 403 "This account is prohibited from signing in" (G15), a deleted or
   unknown one 401. Integration routes: `GET /repos/{o}/{r}` and `GET /repos/{o}/{r}/branches/main` (G22:
   `protected` / `user_can_push` computed from the recorded protection body and the bot's collaborator
   permission; 404 for a non-collaborator of a private repo). Admin (`token`) calls are unaffected.
@@ -254,6 +254,27 @@ class FakeForge(_Recorder):
     def collaborators(self, full_name: str) -> dict[str, str]:
         return dict(self.repos[full_name]["collaborators"])
 
+    def _delete_user(self, user: str, *, purge: bool) -> httpx.Response:
+        """Forgejo 17's user delete: a user owning a repository or belonging to an organisation is refused 422
+        unless purged (purge deletes the repositories it owns); any delete ends its integrations (G8, #1433) and its collaborations."""
+        if user not in self.users:
+            return httpx.Response(404)
+        owned = [full for full in self.repos if full.startswith(f"{user}/")]
+        if owned and not purge:
+            return httpx.Response(422, json={"message": f"user still has ownership of repositories [uid: {user}]"})
+        if not purge and any(user in members for members in self.team_members.values()):
+            return httpx.Response(422, json={"message": f"user still has membership of organizations [uid: {user}]"})
+        for full in owned:
+            self.repos.pop(full)
+        self.users.discard(user)
+        self.must_change_password.pop(user, None)
+        self.prohibit_login.discard(user)
+        for audience in self.integrations.pop(user, []):
+            self.integration_rules.pop(audience, None)
+        for repo in self.repos.values():
+            repo["collaborators"].pop(user, None)
+        return httpx.Response(204)
+
     def handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0911, PLR0912 — one arm per endpoint
         call, injected = self._record(request)
         if injected is not None:
@@ -281,17 +302,7 @@ class FakeForge(_Recorder):
             case ("GET", ["users", user]):
                 return httpx.Response(200, json={"login": user}) if user in self.users else httpx.Response(404)
             case ("DELETE", ["admin", "users", user]):
-                if user not in self.users:
-                    return httpx.Response(404)
-                self.users.discard(user)
-                self.must_change_password.pop(user, None)
-                self.prohibit_login.discard(user)
-                if call.query.get("purge") == ["true"]:
-                    for audience in self.integrations.pop(user, []):  # G8
-                        self.integration_rules.pop(audience, None)
-                for repo in self.repos.values():
-                    repo["collaborators"].pop(user, None)
-                return httpx.Response(204)
+                return self._delete_user(user, purge=call.query.get("purge") == ["true"])
             case ("POST", ["orgs", org, "repos"]):
                 full = f"{org}/{body['name']}"
                 if full in self.repos:

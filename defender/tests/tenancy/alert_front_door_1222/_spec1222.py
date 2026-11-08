@@ -8,6 +8,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import asyncio
 import contextlib
+import functools
 import shutil
 from contextvars import ContextVar
 import hashlib
@@ -406,7 +407,7 @@ def admission_bytes(shape: str, base: Mapping[str, Any] | None = None) -> bytes:
     if shape == "lone_surrogate":
         return b'{"rule": {"id": "R-1001", "description": "x\\ud800y"}}'
     if shape == "oversize":
-        cap = sym("_io", "READ_LIMIT")
+        cap = sym("records.formats", "ALERT_BYTE_CAP")
         filler = b"a" * (cap + 1 - len(b'{"pad": ""}'))
         return b'{"pad": "' + filler + b'"}'
     if shape == "raw_line_separators":
@@ -1580,7 +1581,7 @@ class _ReplayLifecycle:
         self.review_stages = review_stages
         self.wrap_model = wrap_model
 
-    def __call__(self, *, run: Any, tenant: Any, **kw: Any) -> dict:
+    def __call__(self, *, run: Any, tenant: Any, box: Any = None, **kw: Any) -> dict:
         run_dir = run.run_dir
         self.d.run_dir = Path(run_dir)
         self.d.lifecycle_calls.append({"run_dir": Path(run_dir), "tenant": tenant, **kw})
@@ -1591,16 +1592,17 @@ class _ReplayLifecycle:
             self.d, Path(run_dir), tenant=tenant.tenant, verbs=self.verbs, limits=self.limits,
             store_factory=self.store_factory, defender_dir=self.defender_dir,
             orient_shim=self.orient_shim, review_stages=self.review_stages,
-            wrap_model=self.wrap_model, systems=kw.get("systems"))
+            wrap_model=self.wrap_model, systems=kw.get("systems"), box=box)
         return summary
 
 
 def drive_run(d: Drive, run_dir: Path, *, tenant: Any = None, verbs: Any = ...,  # noqa: PLR0913 — `drive`'s seams, passed through only when given
               limits: Any = None, store_factory: Any = None, defender_dir: Path | None = None,
               orient_shim: Any = None, resume: Any = None, run_id: str | None = None,
-              review_stages: Any = None, wrap_model: Any = None, systems: Any = None) -> dict:
+              review_stages: Any = None, wrap_model: Any = None, systems: Any = None,
+              box: Any = None) -> dict:
     """`_replay_harness.drive` over `run_dir` with `d`'s fakes. `verbs=...` means `d.backend`'s
-    registry; `None` drives with no registry (withheld). `review_stages` / `wrap_model` are
+    registry; `None` drives with no registry (withheld). `review_stages` / `wrap_model` / `box` are
     `drive`'s own seams, passed through only when given."""
     kw: dict[str, Any] = {}
     if defender_dir is None and LESSON_CHECKOUT.get() is not None:
@@ -1612,7 +1614,7 @@ def drive_run(d: Drive, run_dir: Path, *, tenant: Any = None, verbs: Any = ..., 
                         ("defender_dir", defender_dir), ("orient_shim", orient_shim),
                         ("tenant", tenant), ("resume", resume),
                         ("review_stages", review_stages), ("wrap_model", wrap_model),
-                        ("systems", systems)):
+                        ("systems", systems), ("box", box)):
         if value is not None:
             kw[name] = value
     d.run_dir = Path(run_dir)
@@ -1692,6 +1694,7 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     router: LeadRouter | None = None,
     materialize: Callable[..., Any] | None = None,
     directory: Any = None,
+    box_lifecycle: Mapping[str, Any] | None = None,
 ) -> Drive:
     """Drive one alert through the production front door (`run.main`) and return what happened.
 
@@ -1707,7 +1710,9 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     `visualize` (default: none) and `materialize` (default: the real setup) are `run.main`'s
     seams; `review_stages` / `wrap_model` are `_replay_harness.drive`'s. `router` is a ready-made
     gather double used instead of one built from `leads`/`lead_faults`. `directory` (default `planted.directory`)
-    is the tenant records `run.main` reads: a test that changes them mid-run, or breaks one read, holds its own."""
+    is the tenant records `run.main` reads: a test that changes them mid-run, or breaks one read, holds its own.
+    `box_lifecycle` (`start_box`, `stop_box`, `scrub`) runs the replay inside `run.py`'s real lifecycle over those
+    seams, where teardown decides what the post-steps may do."""
     if router is not None and (leads is not None or lead_faults is not None):
         raise ValueError("run_alert(router=...) scripts the leads itself; leads=/lead_faults= "
                          "beside it would be silently ignored")
@@ -1728,6 +1733,9 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     lifecycle = _ReplayLifecycle(d, verbs=verbs, limits=limits, store_factory=store_factory,
                                  defender_dir=defender_dir, orient_shim=orient_shim,
                                  review_stages=review_stages, wrap_model=wrap_model)
+    if box_lifecycle is not None:
+        lifecycle = functools.partial(sym("run", "_run_investigation_lifecycle"),  # type: ignore[assignment]
+                                      investigate=lifecycle, **box_lifecycle)
     if before is not None:
         inner = lifecycle
 

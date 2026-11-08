@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -36,12 +37,17 @@ def _config(tmp_path: Path, **extra: object) -> Path:
     return path
 
 
-def _start(config: Path, port: int, *, decoy_addr: str = "http://decoy.invalid") -> subprocess.Popen[str]:
+def _start(config: Path, port: int, *, decoy_addr: str = "http://decoy.invalid", before: str | None = None,
+           extra_env: dict[str, str] | None = None) -> subprocess.Popen[str]:
+    """The shipped program as a process; `before` is code to run first in that process."""
     env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT),
            P.PROXY_ENV_CONFIG: str(config),
            P.PROXY_ENV_PORT: str(port), "DEFENDER_LOG_LEVEL": "DEBUG",
-           "VAULT_TOKEN": ENV_TOKEN, "BAO_TOKEN": ENV_TOKEN, "VAULT_ADDR": decoy_addr}
-    return subprocess.Popen([sys.executable, "-m", P.PROXY_PROGRAM_MODULE], cwd=REPO_ROOT,
+           "VAULT_TOKEN": ENV_TOKEN, "BAO_TOKEN": ENV_TOKEN, "VAULT_ADDR": decoy_addr, **(extra_env or {})}
+    argv = ["-m", P.PROXY_PROGRAM_MODULE] if before is None else ["-c", (
+        f"{before}\nimport runpy\n"
+        f"runpy.run_module({P.PROXY_PROGRAM_MODULE!r}, run_name='__main__', alter_sys=True)")]
+    return subprocess.Popen([sys.executable, *argv], cwd=REPO_ROOT,
                             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
 
@@ -166,3 +172,130 @@ def test_m3_a_config_still_naming_a_removed_key_refuses_to_start(tmp_path, key):
     assert proc.returncode == P.PROXY_REFUSAL_EXIT, (proc.returncode, out)
     assert P.PROXY_REFUSAL_LOG in out
     assert FILE_TOKEN not in out
+
+
+# --- #1428 O1: bytes a run never takes do not hold the connection ---------------------------
+
+DELIVERY_MS = 60_000
+#: Makes the HTTP protocol underneath the shipped program write the delivery limit of each
+#: connection it is handed to the file named by OBSERVED: the option is read off the connection
+#: the program really serves.
+_OBSERVE_THE_LIMIT = """
+import os, socket
+from uvicorn.protocols.http.h11_impl import H11Protocol
+_made = H11Protocol.connection_made
+def connection_made(self, transport):
+    limit = transport.get_extra_info("socket").getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT)
+    with open(os.environ["OBSERVED"], "a") as out:
+        out.write(str(limit) + "\\n")
+    return _made(self, transport)
+H11Protocol.connection_made = connection_made
+"""
+
+
+def test_o1_the_served_proxy_gives_a_connection_the_delivery_limit(tmp_path):
+    """A connection to the shipped program carries the 60 s limit. O1, O5."""
+    port = H.free_port()
+    observed = tmp_path / "observed"
+    proc = _start(_config(tmp_path, openbao_token="t-1428"), port, before=_OBSERVE_THE_LIMIT,
+                  extra_env={"OBSERVED": str(observed)})
+    try:
+        assert _await_listening(proc, port), _stop(proc)
+        with socket.create_connection(("127.0.0.1", port)):
+            deadline = time.monotonic() + START_SEC
+            while not observed.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+    finally:
+        _stop(proc)
+
+    assert set(observed.read_text().split()) == {str(DELIVERY_MS)}
+
+
+def _read_on(conn: socket.socket, got: list[int]) -> None:
+    """Read `conn` to its end, noting each piece's size in `got`."""
+    while piece := conn.recv(1 << 20):
+        got.append(len(piece))
+
+
+def test_o1_a_reader_that_takes_nothing_past_the_limit_loses_the_connection():
+    """A reply far past the socket buffers to a reader that takes nothing: once the limit has
+    passed the connection is dropped, so reading on gets a reset where, without the limit, the
+    whole reply is still there. Run on the protocol the program serves with."""
+    from defender.credential_proxy._connections import DeliveryLimited
+
+    class TwoSeconds(DeliveryLimited):
+        limit_sec = 2
+
+    async def endless(_scope, _receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        for _ in range(96):
+            await send({"type": "http.response.body", "body": b"x" * 65536, "more_body": True})
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+    with H.serve_asgi(endless, http=TwoSeconds) as url:
+        host, port = url.removeprefix("http://").split(":")
+        with socket.create_connection((host, int(port))) as conn:
+            conn.sendall(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+            time.sleep(5)
+            conn.settimeout(10)
+            got: list[int] = []
+            with pytest.raises(ConnectionResetError):
+                _read_on(conn, got)
+
+    assert sum(got) < 6 * 2**20
+
+
+# --- #1428: the limit leaves the program's start and stop as uvicorn gives them ----------------
+
+
+def test_o5_an_interrupt_ends_the_program_cleanly(tmp_path):
+    """Ctrl-C ends the served program with exit code 0 and no traceback."""
+    port = H.free_port()
+    # A test runner may have SIGINT ignored, which its children inherit and which hides the interrupt.
+    proc = _start(_config(tmp_path, openbao_token="t-1428"), port,
+                  before="import signal\nsignal.signal(signal.SIGINT, signal.default_int_handler)")
+    try:
+        assert _await_listening(proc, port), _stop(proc)
+        proc.send_signal(signal.SIGINT)
+        out, _ = proc.communicate(timeout=EXIT_SEC)
+    finally:
+        _stop(proc)
+
+    assert (proc.returncode, "Traceback" in out) == (0, False), out
+
+
+def test_o5_a_host_name_is_served_on_every_address_it_resolves_to(tmp_path):
+    """Set to `localhost`, the program accepts on each of the name's addresses, IPv6 included."""
+    port = H.free_port()
+    addresses = {info[4][0]: info[0] for info in socket.getaddrinfo("localhost", port, type=socket.SOCK_STREAM)}
+    if len(addresses) < 2:
+        pytest.skip(f"localhost resolves only to {list(addresses)} here: one address proves nothing")
+    proc = _start(_config(tmp_path, openbao_token="t-1428"), port,
+                  extra_env={"DEFENDER_CREDENTIAL_PROXY_HOST": "localhost"})
+    try:
+        assert _await_listening(proc, port), _stop(proc)
+        refused = []
+        for address, family in addresses.items():
+            with socket.socket(family) as s:
+                s.settimeout(1)
+                if s.connect_ex((address, port)) != 0:
+                    refused.append(address)
+    finally:
+        _stop(proc)
+
+    assert refused == []
+
+
+def test_o5_a_platform_without_the_delivery_limit_refuses_to_start(tmp_path):
+    """Where the kernel option does not exist the program says so and stops, rather than announce
+    itself and leave each caller hanging on a connection it cannot serve."""
+    port = H.free_port()
+    proc = _start(_config(tmp_path, openbao_token="t-1428"), port,
+                  before="import socket\ndel socket.TCP_USER_TIMEOUT")
+    try:
+        code = proc.wait(timeout=REFUSE_SEC)
+    finally:
+        out = _stop(proc)
+
+    assert code == P.PROXY_REFUSAL_EXIT, out
+    assert P.PROXY_REFUSAL_LOG in out
