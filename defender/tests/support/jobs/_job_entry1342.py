@@ -13,7 +13,7 @@ lifecycle's `start_box` seam (never `DEFENDER_ALLOW_UNSANDBOXED`). Marks go in `
   `start-token` (the token the box start was handed), `interrupted` (the exception type that reached the investigation), `stop-box-started`, then
   `stop-box-done` once `go-on` exists (a later signal during teardown would stop the wait).
 - `replay-priced` (#1377): MAIN, one gather lead and the live review stages as priced stand-ins;
-  `replay-priced-ledger-fault` also refuses ledger inserts during the review; a mode ending `-raises` then raises out of the investigation, so the driver never returns its summary; one ending `-unseen` makes the correlation lead's request raise a non-HTTP error (an unseen outcome, #1377 r7); one ending `-dies` raises inside the driver instead, from
+  `replay-priced-ledger-fault` also refuses ledger inserts during the review; a mode ending `-raises` then raises out of the investigation, so the driver never returns its summary; one ending `-unseen` makes the correlation lead's request raise a non-HTTP error (an unseen outcome, #1377 r7); `-lead-fault` refuses only the correlation lead's own ledger insert (`agent_id = 'gather:l-00c'`) and `-refused` makes its request a 400 (#1377 r7 F3); at exit the child writes the landed rows' agent ids to the mark `ledger-agents`; one ending `-dies` raises inside the driver instead, from
   MAIN's request after the close (`KeyboardInterrupt`, after marking `fault-raised`), between the failed writes and the run's
   return. All configure logging as run.py's `__main__` does. Marks: `calls-<model>`."""
 from __future__ import annotations
@@ -140,7 +140,25 @@ def _ledger_trigger(sql: str):
     return run
 
 
-def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False, dies: bool = False, unseen: bool = False):
+def _failing_lead(answering, *, unseen: bool, refused: bool):
+    """`-unseen` (r7): the correlation lead's one request raises a non-HTTP error, which the hook records as unseen;
+    `-refused`: a 400 from the provider, which it records as refused."""
+    if not (unseen or refused):
+        return answering
+
+    def lead(messages, info):
+        found = RH._DISPATCHED_LEAD.search(RH.messages_text(messages))
+        if found is not None and found.group(1) == "l-00c":
+            if refused:
+                from pydantic_ai.exceptions import ModelHTTPError
+                raise ModelHTTPError(400, "fake-gather", body={"error": "x"})
+            raise RuntimeError("the reply could not be parsed")
+        return answering(messages, info)
+    return lead
+
+
+def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False, dies: bool = False, unseen: bool = False,
+                     lead_fault: bool = False, refused: bool = False):
     """`replay-priced`: MAIN (dispatch one elastic lead, append, close, text), the lead (one query,
     then its final summary), the correlation lead (its summary) and the live review stages, each a priced stand-in. `-ledger-fault`
     refuses every ledger insert from the first review call until MAIN's turn after the close."""
@@ -160,9 +178,13 @@ def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False, dies: bool = 
                              "BEGIN SELECT RAISE(ABORT, 'the disk is full'); END") if ledger_fault else None
     allow = _ledger_trigger("DROP TRIGGER IF EXISTS refuse_spend") if ledger_fault else None
     main_calls = {"n": 0}
+    lead_refuse = _ledger_trigger(f"CREATE TRIGGER IF NOT EXISTS refuse_lead BEFORE INSERT ON {SPEND_LEDGER} "
+                                  "WHEN NEW.agent_id = 'gather:l-00c' BEGIN SELECT RAISE(ABORT, 'the disk is full'); END") if lead_fault else None
 
     def main_before():
         main_calls["n"] += 1
+        if lead_refuse is not None and main_calls["n"] == 1:  # before the lead runs; only its row is refused, MAIN's and the review's land
+            lead_refuse()
         if allow is not None and main_calls["n"] == 4:  # the text turn after the close
             allow()
         if dies and main_calls["n"] == 4:  # inside the driver, after the review's writes and before the run returns
@@ -178,15 +200,7 @@ def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False, dies: bool = 
     ])
     # l-001 runs its query, then its final summary; the correlation lead (l-00c) answers its summary once.
     lead = RH._with_default_correlation(RH.ReplayFn([q("elastic", "query", {"native_query": "user.name:root"}), DONE]), None)
-    if unseen:  # `-unseen` (r7): the correlation lead's one request raises a non-HTTP error, which the hook records as unseen
-        answering = lead
-
-        def lead(messages, info):
-            found = RH._DISPATCHED_LEAD.search(RH.messages_text(messages))
-            if found is not None and found.group(1) == "l-00c":
-                raise RuntimeError("the reply could not be parsed")
-            return answering(messages, info)
-
+    lead = _failing_lead(lead, unseen=unseen, refused=refused)
     review = RH.ReplayFn([RH.Turn(text=RH._review_bundle.composer_reply("holds"))] * 3)
     make_model = RH.priced_make_model({
         PRICED_MAIN: RH.Priced(main, before=_counted("main", main_before)),
@@ -215,8 +229,24 @@ if mode.startswith("replay-priced"):
     from defender import _log
 
     _log.configure_from_env()  # the way run.py's __main__ does: the priced modes' stderr is read for the failed-write ERROR line
-    lifecycle = _priced_lifecycle(ledger_fault="ledger-fault" in mode, raises=mode.endswith("-raises"),
-                                  dies=mode.endswith("-dies"), unseen=mode.endswith("-unseen"))
+    import atexit
+    import sqlite3
+
+    def _landed() -> None:
+        try:
+            from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER
+            conn = sqlite3.connect(_session_database(), timeout=10)
+            try:
+                agents = sorted(r[0] for r in conn.execute(f"SELECT agent_id FROM {SPEND_LEDGER}"))
+            finally:
+                conn.close()
+            (marks / "ledger-agents").write_text("\n".join(agents), encoding="utf-8")
+        except Exception:  # noqa: BLE001 - a premise mark only
+            pass
+    atexit.register(_landed)
+    lifecycle = _priced_lifecycle(ledger_fault="ledger-fault" in mode, raises="-raises" in mode,
+                                  dies=mode.endswith("-dies"), unseen="-unseen" in mode,
+                                  lead_fault="lead-fault" in mode, refused="-refused" in mode)
 elif mode.startswith("replay"):
     lifecycle = _replay_lifecycle(fault_after_close=mode == "replay-fault-after-close")
 else:

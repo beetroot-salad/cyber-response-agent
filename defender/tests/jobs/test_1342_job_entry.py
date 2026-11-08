@@ -1181,6 +1181,39 @@ def test_s2_a_run_that_raises_after_a_failed_spend_write_still_says_so_in_its_jo
     assert record["spend_write_failed"] is failed, record
 
 
+@pytest.mark.parametrize("lead_ends", ["unseen", "refused"])
+@pytest.mark.parametrize("run_ends", ["returns", "raises"])
+def test_s2c_r7_a_failed_write_of_a_non_response_row_is_in_the_job_end_record_whatever_the_run_ends_with(
+        scene, tmp_path, lead_ends, run_ends):
+    """Only the correlation lead's own row (its unseen or refused-400 request) is refused; MAIN's and the review's rows land.
+    The job-end record still says a write failed, whether the run returns its summary or raises out of the investigation:
+    the flag is not set only by a failed response write. (r7 S2c, r7.1 H, triage F3)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    marks = tmp_path / "marks"
+    env = {**_env(scene), "DEFENDER_MODEL": "claude-sonnet-4-6", "DEFENDER_GATHER_MODEL": "claude-haiku-4-5",
+           "DEFENDER_REVIEW_MODEL": "kimi-k2.6"}
+    mode = "replay-priced-lead-fault" + ("-raises" if run_ends == "raises" else "") + f"-{lead_ends}"
+
+    proc = subprocess.run(_child_cmd(scene, marks, run_id, os.getpid(), mode), env=env,  # noqa: S603
+                          cwd=str(WORKTREE), capture_output=True, text=True, timeout=240, check=False)
+
+    if run_ends == "raises":
+        assert proc.returncode != 0, proc.stderr[-2000:]
+        assert "the run died after its last response" in proc.stderr, proc.stderr[-2000:]
+    reviewed = (marks / "calls-review").read_text(encoding="utf-8").count("\n") if (marks / "calls-review").is_file() else 0
+    assert reviewed == 3, ("premise: the live review stages made their three calls", proc.stderr[-2000:])
+    landed = (marks / "ledger-agents").read_text(encoding="utf-8").split() if (marks / "ledger-agents").is_file() else []
+    assert "gather:l-00c" not in landed, ("premise: the lead's own row was refused", landed)
+    assert "main" in landed, ("premise: MAIN's rows landed", landed)
+    assert len(landed) > 1, ("premise: the review's rows landed too", landed)
+    errors = [ln for ln in proc.stderr.splitlines() if "ERROR" in ln and "spend" in ln.lower()]
+    assert len(errors) == 1, ("premise: exactly one failed-write ERROR line", proc.stderr[-2000:])
+    record = scene.job_end(run_id)
+    assert record is not None, proc.stderr[-2000:]
+    assert record["spend_write_failed"] is True, record
+
+
 @pytest.mark.parametrize(("reported", "want"), [(True, True), (False, False), (None, False)],
                          ids=["a write failed", "none failed", "the summary names none"])
 def test_s4_the_page_step_is_told_the_hosts_spend_write_fact_only_when_a_write_failed(scene, reported, want):
