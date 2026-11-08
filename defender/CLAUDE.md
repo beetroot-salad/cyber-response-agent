@@ -85,7 +85,7 @@ host-state, the case system — ticket, jira or servicenow — and any other) me
    `settings/case-record.yaml` since then; `tenant check` names the folder).
 
 A host, record id or other value the agent names that is not one path segment is now refused
-before it is sent, and the proxy refuses a path holding an escaped `/` or `\\`.
+before it is sent, and the proxy refuses a path holding an escaped `/` or `\`.
 
 host-state's `health-check` no longer reports a docker context, and a host the service does not
 enroll is now the agent's to fix (`UpstreamFault`, from the service's 404) rather than refused
