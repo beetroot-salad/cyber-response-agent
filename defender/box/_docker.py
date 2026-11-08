@@ -231,6 +231,31 @@ START_TOKEN_LABEL = "defender.start-token"
 #: containers by it.
 TENANT_LABEL = "defender.tenant"
 
+#: The label naming the worker child a box was started under (#1446 review): the worker hands
+#: each child a fresh claim token in `CLAIM_ENV`, every box started anywhere in that child's
+#: process tree is stamped with it, and once the child is gone the worker removes every
+#: container carrying it (`remove_claimed_containers`). A box started outside a worker child
+#: carries none.
+CLAIM_LABEL = "defender.claim"
+CLAIM_ENV = "DEFENDER_BOX_CLAIM"
+#: A claim token as the worker mints it (`uuid4().hex`).
+_CLAIM_TOKEN = re.compile(r"[0-9a-f]{32}")
+
+
+def claim_label(environ: Mapping[str, str] | None = None) -> list[str]:
+    """The create flags stamping the box with its worker child's claim (`CLAIM_ENV` in
+    `environ`, by default this process's): none outside a worker child. A value that is not a
+    claim token is refused, never dropped: a box the worker cannot find would outlive the child
+    it was started for. The refusal is a `BoxStartConflict`, a configuration fault the
+    unsandboxed opt-out never degrades."""
+    token = (os.environ if environ is None else environ).get(CLAIM_ENV)
+    if token is None:
+        return []
+    if not _CLAIM_TOKEN.fullmatch(token):
+        raise BoxStartConflict(f"{CLAIM_ENV} is not a claim token the worker mints; the box is not created")
+    return ["--label", f"{CLAIM_LABEL}={token}"]
+
+
 #: Docker's own text for a label the container does not carry, which `-f {{index …}}` prints
 #: rather than failing. It means "not ours" as surely as a mismatch does.
 _NO_LABEL = "<no value>"
@@ -268,20 +293,35 @@ def _remove_container(docker: DockerFn, name: str) -> str | None:
     return f"{(first.stderr or '').strip()}; after waiting: {(second.stderr or '').strip()}"
 
 
-def remove_tenant_containers(tenant_id: str, *, docker: DockerFn = run_docker) -> str | None:
-    """Remove every container labelled with the tenant (`TENANT_LABEL`), each through
-    `_remove_container`: `None` once none is left, else why not. A host with no docker binary has
-    no box to remove (the offboarding of a tenant on a host that never ran one)."""
+def _remove_labelled(docker: DockerFn, label: str, value: str, whose: str) -> str | None:
+    """Remove every container carrying `label=value`, each through `_remove_container`: `None`
+    once none is left, else why not. A host with no docker binary has no box to remove."""
     try:
-        listed = docker(["docker", "ps", "-aq", "--filter", f"label={TENANT_LABEL}={tenant_id}"])
+        listed = docker(["docker", "ps", "-aq", "--filter", f"label={label}={value}"])
     except FileNotFoundError:
         return None
     except (OSError, subprocess.SubprocessError) as e:
         return f"could not invoke docker: {e}"
     if listed.returncode != 0:
-        return f"docker could not list the tenant's containers: {(listed.stderr or '').strip()}"
+        return f"docker could not list {whose} containers: {(listed.stderr or '').strip()}"
     faults = [f"{name}: {why}" for name in listed.stdout.split() if (why := _remove_container(docker, name)) is not None]
-    return f"docker could not remove the tenant's containers: {'; '.join(faults)}" if faults else None
+    return f"docker could not remove {whose} containers: {'; '.join(faults)}" if faults else None
+
+
+def remove_tenant_containers(tenant_id: str, *, docker: DockerFn = run_docker) -> str | None:
+    """Remove every container labelled with the tenant (`TENANT_LABEL`): `None` once none is
+    left, else why not. A host with no docker binary has no box to remove (the offboarding of a
+    tenant on a host that never ran one)."""
+    return _remove_labelled(docker, TENANT_LABEL, tenant_id, "the tenant's")
+
+
+def remove_claimed_containers(token: str, *, docker: DockerFn = run_docker) -> str | None:
+    """Remove every container a worker child's process tree started (`CLAIM_LABEL`): `None`
+    once none is left, else why not. Running, stopped or never started, each is removed: the
+    child that held it is gone."""
+    if not _CLAIM_TOKEN.fullmatch(token):
+        raise ValueError(f"not a claim token: {token!r}")
+    return _remove_labelled(docker, CLAIM_LABEL, token, "the child's")
 
 
 class BoxStartConflict(BoxFault):

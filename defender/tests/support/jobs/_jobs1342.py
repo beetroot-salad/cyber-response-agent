@@ -287,6 +287,7 @@ CHILD_SCRIPT = textwrap.dedent("""
     part.write_text(json.dumps({
         "argv": argv, "pid": os.getpid(), "pgid": os.getpgid(0), "sid": os.getsid(0),
         "data_root": os.environ.get("DEFENDER_DATA_ROOT"), "grandchild": grandchild,
+        "claim": os.environ.get("DEFENDER_BOX_CLAIM"),
         "launch_at_start": (runs / f"{run_id}.launch.json").is_file(),
         "alert_at_start": (runs / f"{run_id}.alert.json").is_file(),
         "stdio": [[os.fstat(fd).st_dev, os.fstat(fd).st_ino] for fd in (1, 2)],
@@ -302,6 +303,12 @@ CHILD_SCRIPT = textwrap.dedent("""
         planted = Path(box["dir"]) / f"defender-run-{run_id}"
         planted.parent.mkdir(parents=True, exist_ok=True)
         planted.write_text(f"{box['state']}\\n{stamp}" if box.get("state") else stamp, encoding="utf-8")
+    claimed = spec.get("claimed")
+    if claimed:  # boxes this child's process tree started: each carries the claim its worker handed it
+        folder = Path(claimed["dir"]) / "claims" / os.environ["DEFENDER_BOX_CLAIM"]
+        folder.mkdir(parents=True, exist_ok=True)
+        for name in claimed["names"]:
+            (folder / name).write_text("", encoding="utf-8")
     spend = spec.get("sessions")
     if spend:  # #1343 B2/B6: the live child writes its session database while the worker reads it
         sys.path.insert(0, spend["path"])
@@ -368,6 +375,10 @@ class ScriptedChild:
     box_dir: Path | str | None = None
     box_token: str = "launch"
     box_state: str | None = None
+    #: Boxes the child's process tree starts under the claim its worker handed it (`box.CLAIM_ENV`), as
+    #: `StandInContainers` markers in `claimed_dir`: a sibling's, an oracle's, a drain's.
+    claimed_dir: Path | str | None = None
+    claimed_names: tuple[str, ...] = ()
     #: #1343 B2/B6: `{"case", "steps": [(model, usage)], "marks"}`: the child writes its session
     #: pointer, holds its session database open and appends one priced response per step, touching
     #: `marks/wrote-<n>` (its text: how long the append took) and waiting for `marks/go-<n>`. With
@@ -390,6 +401,8 @@ class ScriptedChild:
             "grandchild": self.grandchild, "print": self.printed, "die_by": self.die_by,
             "box": None if self.box_dir is None else {"dir": str(self.box_dir), "token": self.box_token,
                                                      "state": self.box_state},
+            "claimed": None if self.claimed_dir is None else {"dir": str(self.claimed_dir),
+                                                               "names": list(self.claimed_names)},
             "wait_for": None if self.wait_for is None else str(self.wait_for),
             "sessions": None if self.sessions is None else {**self.sessions, "path": str(WORKTREE)},
         }
@@ -434,12 +447,27 @@ class StandInContainers:
     """The worker's `containers` seam over marker files: a container exists while its file does, and
     the file's text is the start token it carries (empty: no token label). `reap(name, token)` answers
     `removed` (ours, now gone), `absent`, or `not_ours` (another or no token: left in place). Records
-    every call, with the token it was given."""
+    every call, with the token it was given. A container a child's process tree started carries its
+    claim: a marker file under `claims/<claim>/`, which `remove_claimed(claim)` removes, noting the
+    claim in `swept` (apart from `calls`, which holds the per-name reaps)."""
 
     def __init__(self, where: Path) -> None:
         self.where = where
         where.mkdir(parents=True, exist_ok=True)
         self.calls: list[tuple[str, str, str]] = []
+        self.swept: list[str] = []
+
+    def claimed(self, claim: str) -> list[str]:
+        """The containers still carrying `claim`."""
+        folder = self.where / "claims" / claim
+        return sorted(p.name for p in folder.iterdir()) if folder.is_dir() else []
+
+    def remove_claimed(self, claim: str) -> None:
+        self.swept.append(claim)
+        folder = self.where / "claims" / claim
+        if folder.is_dir():
+            for path in folder.iterdir():
+                path.unlink()
 
     def plant(self, name: str, token: str = "") -> None:
         (self.where / name).write_text(token, encoding="utf-8")

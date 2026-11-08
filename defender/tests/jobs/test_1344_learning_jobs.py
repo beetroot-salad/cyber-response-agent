@@ -1622,3 +1622,56 @@ async def test_b_p3_a_take_over_leaves_a_lapsed_running_row_the_caller_holds_on_
 
     assert snap(held) == held_before, f"a {table} row in the caller's held set was taken over (B-P3)"
     assert taken == [stranger], "the row nobody holds was not taken over (alone)"
+
+
+# --- every child's boxes go with it (#1446 review) ------------------------------------------------------------
+
+
+def _containers(world: dict):
+    """The stand-in containers `make_worker` gives a worker by default: beside the data root."""
+    from defender.tests.support.jobs._jobs1342 import StandInContainers
+
+    return StandInContainers(world["tmp"] / "containers")
+
+
+async def test_every_child_is_handed_its_own_claim_and_what_its_tree_started_is_removed_when_it_ends(world):
+    """An investigation, a learning job and its post-step each leave boxes their process trees started (a run box; a
+    sibling's and the oracle's; the drain's): each child saw a fresh claim of its own, and once it ended every
+    container carrying it is gone, whatever the child did with it. (#1446 review: nothing a child started outlives it)"""
+    where = world["tmp"] / "containers"
+    inv_proc = _child(world, files=_committed(), claimed_dir=where, claimed_names=("defender-run-inv",))
+    job_proc = job_child(world, files={END: learning_end("completed", findings=1)}, claimed_dir=where,
+                         claimed_names=("defender-run-sibling-a", "defender-oracle-1"))
+    post = post_child(world, claimed_dir=where, claimed_names=("defender-tenant-drain",))
+    async with job_store(world["dsn"]) as store:
+        job = await queued_job(world, store, ticket="T-1")
+        inv = await _queued(store, ticket="T-2", key="k2")
+        await learning_worker(world, store, job=job_proc, post=post, inv=inv_proc).drain()
+
+    claims = [inv_proc.seen(inv)["claim"], job_proc.seen(job)["claim"], post.seen(job)["claim"]]
+    assert all(re.fullmatch(r"[0-9a-f]{32}", claim or "") for claim in claims), claims
+    assert len(set(claims)) == 3, "two children shared a claim"
+    containers = _containers(world)
+    assert (where / "claims").is_dir(), "premise: the children planted their boxes"
+    assert [containers.claimed(claim) for claim in claims] == [[], [], []], "a box a child started outlived it"
+
+
+async def test_the_boxes_of_a_child_a_stop_ended_are_removed_too(world):
+    """A job's child still running when the worker stops is ended by the stop; the boxes its tree started go with it,
+    as after a crash: the sweep follows every child's end, however it ended. (#1446 review)"""
+    dsn = world["dsn"]
+    where = world["tmp"] / "containers"
+    job_proc = job_child(world, term="mark", term_mark=str(world["tmp"] / "termed"), wait_for=world["tmp"] / "never",
+                         claimed_dir=where, claimed_names=("defender-run-sibling-a", "defender-oracle-1"))
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="T-1")
+        serving = asyncio.create_task(learning_worker(world, store, job=job_proc, post=post_child(world), **_FAST).serve())
+        try:
+            await _until(lambda: job_proc.seen(job), "the job's child")
+            claim = job_proc.seen(job)["claim"]
+            await _until(lambda: len(_containers(world).claimed(claim)) == 2, "the child's boxes")
+        finally:
+            _stop_serving(serving)
+            await asyncio.wait_for(serving, timeout=60)
+    assert (world["tmp"] / "termed").exists(), "premise: the stop ended the child"
+    assert _containers(world).claimed(claim) == [], "a box the stopped child started outlived it"

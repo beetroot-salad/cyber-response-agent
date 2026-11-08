@@ -1081,9 +1081,14 @@ elif verb == "rm":
         (home / "held" / n).unlink()
 elif verb == "ps":
     wanted = [f.split("=", 1)[1].strip("^$").lstrip("/") for f in filters if f.startswith("name=")]
+    # A held container's one label is its start token: a `label=K=V` filter matches only that label, so
+    # a filter on any other label (a claim's) lists none of them, as the daemon would.
+    labelled = [f.split("=", 1)[1].partition("=") for f in filters if f.startswith("label=")]
     every = any(a == "--all" or (a.startswith("-") and not a.startswith("--") and "a" in a) for a in rest)
     for n in held():  # plain `ps` shows the running (and paused) ones; `-a` every one
         if not every and state_of(n) == "exited":
+            continue
+        if any(key != "defender.start-token" or token_of(n) != value for key, _, value in labelled):
             continue
         if not wanted or any(re.search(w, n) for w in wanted):
             print(n)

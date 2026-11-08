@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING, Any
 from defender import _log
 from defender.jobs import LearningProgress, is_outage, is_refusal
 from defender.jobs.audit import SYSTEM, announce
-from defender.box import Reaped, container_name
+from defender.box import CLAIM_ENV, Reaped, container_name
 from defender.execution import kill_group
 from defender.records import job_facts, job_lane
 from defender.records.formats import DataRoot, digest_of
@@ -662,13 +662,19 @@ class Worker:
     ) -> asyncio.subprocess.Process | None:
         """Start the entry's child and wait for it to end, then run its cleanup; None when the
         child could not be started. `watch` runs beside the child (the cost or progress reads).
-        The task owns its child: cancelled, it ends the child and writes nothing."""
+        The task owns its child: cancelled, it ends the child and writes nothing.
+
+        Every child, of every kind, is handed a fresh claim (`box.CLAIM_ENV`): each box started
+        anywhere in its process tree carries it, and once the child is gone every container
+        carrying it is removed (`_sweep`), so nothing a killed or crashed child started is left
+        behind. `cleanup` is a kind's own step before that sweep (an investigation's backstop)."""
         what = _what(held)
         proc: asyncio.subprocess.Process | None = None
         watch_task: asyncio.Task[None] | None = None
+        claim = uuid.uuid4().hex
         # The start runs as its own task, so a cancel cannot land inside it and lose the child
         # it makes (r7 D-ac): a cancelled row waits for it, and the child is ended below.
-        spawn = asyncio.ensure_future(self._spawn(argv))
+        spawn = asyncio.ensure_future(self._spawn(argv, claim))
         try:
             try:
                 proc = await asyncio.shield(spawn)
@@ -694,7 +700,17 @@ class Worker:
                 kill_group(proc.pid)
                 if cleanup is not None:
                     await cleanup()
+                await self._sweep(what, claim)
         return proc
+
+    async def _sweep(self, what: str, claim: str) -> None:
+        """Remove every container the child's process tree started (its claim's label). Never an
+        error, never the row's business: what it cannot remove is logged, and the tenant's
+        teardown removes it by the tenant's label."""
+        try:
+            await asyncio.to_thread(self._containers.remove_claimed, claim)
+        except Exception:  # noqa: BLE001 — the sweep is best effort
+            _logger.exception("%s: the containers its child started could not all be removed", what)
 
     async def _wait_for_child(self, held: Held, proc: asyncio.subprocess.Process) -> None:
         try:
@@ -708,14 +724,15 @@ class Worker:
             await self._end_child(held)
             raise
 
-    async def _spawn(self, argv: Callable[[], list[str]]) -> asyncio.subprocess.Process:
+    async def _spawn(self, argv: Callable[[], list[str]], claim: str) -> asyncio.subprocess.Process:
         """The entry's child, in a session of its own (its group id is its pid), output inherited,
-        in `child_cwd` when one is set."""
+        in `child_cwd` when one is set, its boxes stamped with `claim` (`box.CLAIM_ENV`)."""
         where = {} if self._child_cwd is None else {"cwd": str(self._child_cwd)}
         return await self._create_process(
             *argv(),
             stdin=subprocess.DEVNULL, stdout=None, stderr=None, start_new_session=True,
-            env={**os.environ, "DEFENDER_DATA_ROOT": str(data_root_for_child(self._data_root))}, **where)
+            env={**os.environ, "DEFENDER_DATA_ROOT": str(data_root_for_child(self._data_root)), CLAIM_ENV: claim},
+            **where)
 
     async def _write_launch(self, record: Any, token: str, tenant_state: str) -> None:
         """The launch record (carrying this claim's box token) and the alert file, create-only,

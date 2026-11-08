@@ -40,7 +40,7 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
 from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 from defender._model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
-from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, TENANT_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _container_status, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import BoxStartConflict, Create, claim_label, DockerFn, START_TOKEN_LABEL, TENANT_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _container_status, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._host_env import provider_scrubbed_environ
 from ._spec import DEFAULT_SPEC, _HostTransport, _text
@@ -229,7 +229,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     argv = [
         "docker", "create", "-i", "--rm", "--name", name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
-        *_tenant_label(tenant_id),
+        *_tenant_label(tenant_id), *claim_label(),
         *_box_flags(spec),
     ]
     for m in lane:
@@ -704,7 +704,7 @@ def _render_argv(
     argv = [
         "docker", "create", "-i", "--name", request.name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
-        *_tenant_label(request.tenant_id),
+        *_tenant_label(request.tenant_id), *claim_label(),
         *_box_flags(request.spec),
     ]
     for m in request.mounts:
