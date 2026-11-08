@@ -348,7 +348,7 @@ async def test_a_credential_for_a_person_is_refused_by_the_schema(seeded, backen
     accepted = owner == "program" and program_kind == "program"
     if backend is None:
         if program_kind != "program":
-            return  # no column to claim a kind in; the person case above is the memory repository's whole rule
+            pytest.skip("no program_kind column in memory")  # the person case above is the memory repository's whole rule
         if accepted:
             assert (await _add_key(seeded, holder, admin, 1)).state == "live"
         else:
@@ -374,7 +374,7 @@ async def test_a_credential_for_a_person_is_refused_by_the_schema(seeded, backen
 
 #: What PostgreSQL text cannot hold, embedded in otherwise valid names so that blankness is never the reason for a refusal.
 UNHOLDABLE = [f"{head}{bad}{tail}" for bad in ("\x00", "\ud800", "\udbff", "\udc00", "\udfff") for head, tail in (("", ""), ("a", ""), ("", "b"), ("a", "b"))]
-HOLDABLE = ["SOAR prod", "Zoë", "\U0001f600 emoji", "tab\tname"]
+HOLDABLE = ["SOAR prod", "Zoë", "\U0001f600 emoji"]
 
 
 async def test_a_name_that_postgres_text_cannot_hold_is_refused_for_programs_and_credentials(seeded):

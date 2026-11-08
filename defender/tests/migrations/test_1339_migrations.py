@@ -335,7 +335,8 @@ def test_the_jobs_revision_sits_directly_on_the_sign_login_revision():
     scripts = _scripts()
     # `0008_programs` (#1307, design: data model, new columns) now sits on 0007, and later revisions may follow: the line pinned
     # here is the one from the baseline up to 0007, read from the bottom, with a single head above it.
-    assert len(scripts.get_heads()) == 1 and head() in {r.revision for r in scripts.walk_revisions()}
+    assert len(scripts.get_heads()) == 1
+    assert head() in {r.revision for r in scripts.walk_revisions()}
     assert scripts.get_revision(ALERT_MAPPING_REVISION).down_revision == "0006_job_leases"
     assert scripts.get_revision("0006_job_leases").down_revision == "0005_uuid_ids"
     assert scripts.get_revision("0005_uuid_ids").down_revision == "0004_jobs"

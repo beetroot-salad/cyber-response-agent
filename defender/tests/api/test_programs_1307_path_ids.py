@@ -38,7 +38,7 @@ def _placeholder_routes(app: Any) -> list[tuple[Any, str, list[str]]]:
 
 def test_every_path_placeholder_outside_the_allow_list_is_typed_as_an_id_family(world) -> None:
     """The placeholders and the annotations agree: each placeholder not on the allow-list is a path parameter of the route
-    with an id family, and the families the program routes need (program, credential, tenant) are among them (B5)."""
+    with an id family, and the families the program routes need (program, credential, tenant) are among them (B5; credential_id must have some family, the design does not name which)."""
     families: set[str] = set()
     placeholders: set[str] = set()
     for route, _, names in _placeholder_routes(world[0].app):
@@ -50,7 +50,7 @@ def test_every_path_placeholder_outside_the_allow_list_is_typed_as_an_id_family(
             families.add(family.__name__)
             placeholders.add(name)
     assert {"program_id", "credential_id", "tenant_id", "investigation_id"} <= placeholders, sorted(placeholders)
-    assert families >= {"TenantId", "AlertId", "InvestigationId", "LearningJobId", "MembershipId", "UserId", "CredentialId"}, families
+    assert families >= {"TenantId", "AlertId", "InvestigationId", "LearningJobId", "MembershipId", "UserId"}, families
 
 
 @pytest.mark.parametrize("bad", sorted(MALFORMED))

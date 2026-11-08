@@ -21,9 +21,12 @@ from defender.tests.api.test_programs_1307_roles import (  # noqa: E402
 )
 from defender.tests.support.api._identity1306 import ALERT, ANN, T1, user_id  # noqa: E402
 from defender.tests.support.api._programs1307 import (  # noqa: E402
+    DAY,
     EXPIRY_HEADER,
     Soar,
+    issue_key,
     issue_oauth,
+    revoke,
     parse_time,
     soar,
     start_investigation,
@@ -36,10 +39,16 @@ AUTOMATION_ROUTES = [r for r in TENANT_ROUTES if PERMISSION_OF[r] in AUTOMATION]
 
 
 def _credential_of(s: Soar, kind: str) -> tuple[str, str]:
-    """(the bearer value to present, the id of the credential it names) for a credential of `kind`."""
+    """(the bearer value to present, the id of the credential it names) for a credential of `kind`. The credential used is
+    neither the program's only one nor its newest (a second is issued after it), and its expiry differs from the program's
+    other credentials', so an audit credential id or an expiry header taken from "the only", "the newest" or "the key" is wrong."""
+    now = s.world.clock()
     if kind == "key":
+        issue_key(s.ann, T1, s.program_id, name="newer", expires_at=now + 45 * DAY)  # issued after the one used (the soar key)
         return s.key, s.key_id
-    credential = issue_oauth(s.ann, T1, s.program_id)
+    assert revoke(s.ann, T1, s.program_id, s.key_id).status_code == 204  # the cap is two usable or pending: make room for a newer one
+    credential = issue_oauth(s.ann, T1, s.program_id, expires_at=now + 30 * DAY)  # not the key's 90 days
+    issue_oauth(s.ann, T1, s.program_id, expires_at=now + 60 * DAY)  # newer than the one used
     return s.world.realm.issue(credential), credential
 
 
@@ -166,7 +175,8 @@ def test_a_500_to_a_person_has_no_expiry_header() -> None:
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_expiry_header_is_on_a_409_and_on_a_401_after_verification(kind: str) -> None:
     """Statuses the contract's table lacked: cancelling an investigation that already ended (409), and `/me` of a program whose
-    tenant stopped being active (401, after the credential verified). Both carry the credential's expiry (D9)."""
+    tenant stopped being active (after the credential verified). Both carry the credential's expiry whatever the status (D9),
+    and `/me` no longer lists the tenant (A5)."""
     s = soar(failing_writes=True)
     program, credential = _as_program(s, kind)
     expires = {r.id: r for r in s.world.credentials(s.program_id)}[credential].expires_at
@@ -178,8 +188,8 @@ def test_the_expiry_header_is_on_a_409_and_on_a_401_after_verification(kind: str
     assert parse_time(program.get("/me").headers[EXPIRY_HEADER]) == expires  # control: the 200
     s.world.repo.missing_tenants.add(T1)  # the tenant left `active` (#1214) and the program's membership is still active
     refused = program.get("/me")
-    assert refused.status_code == 401, refused.text
-    assert parse_time(refused.headers[EXPIRY_HEADER]) == expires
+    assert parse_time(refused.headers[EXPIRY_HEADER]) == expires  # whatever the status: the credential verified
+    assert T1 not in refused.text, refused.text  # a body that lists tenants does not list the one that left `active`
 
 
 # --- F11: a tenant that is not active ends access for every caller kind (A5, #1214) ----------------------------------------

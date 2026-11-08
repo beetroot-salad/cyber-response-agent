@@ -84,8 +84,38 @@ def _role_definitions(realm: dict) -> tuple[dict[str, dict], dict[str, dict[str,
     return realm_roles, {cid: {r["name"]: r for r in rows} for cid, rows in roles.get("client", {}).items()}
 
 
-def effective_roles(realm: dict, realm_roles: set[str], client_roles: dict[str, set[str]]) -> tuple[set[str], dict[str, set[str]]]:
-    """Every realm role and client role a principal holds once composites are expanded, through realm and client roles alike."""
+def _group_roles(realm: dict, paths: list[str]) -> tuple[set[str], dict[str, set[str]]]:
+    """The realm and client roles the groups at `paths` give a member: their own and those of every ancestor group (a member of a
+    subgroup inherits its parents' roles). The export spells groups as a tree (`groups`, each with `realmRoles`, `clientRoles` and
+    `subGroups`); a path that names no group gives nothing."""
+    by_path: dict[str, tuple[dict, list[dict]]] = {}
+
+    def walk(groups: list[dict], parent: str, chain: list[dict]) -> None:
+        for group in groups:
+            path = f"{parent}/{group['name']}"
+            by_path[path] = (group, [*chain, group])
+            walk(group.get("subGroups", []), path, [*chain, group])
+
+    walk(realm.get("groups", []), "", [])
+    realm_roles: set[str] = set()
+    client_roles: dict[str, set[str]] = {}
+    for path in paths:
+        for group in by_path.get(path, ({}, []))[1]:
+            realm_roles |= set(group.get("realmRoles", []))
+            for client, roles in group.get("clientRoles", {}).items():
+                client_roles.setdefault(client, set()).update(roles)
+    return realm_roles, client_roles
+
+
+def effective_roles(realm: dict, realm_roles: set[str], client_roles: dict[str, set[str]],
+                    groups: list[str] | None = None) -> tuple[set[str], dict[str, set[str]]]:
+    """Every realm role and client role a principal holds once composites are expanded, through realm and client roles alike;
+    `groups` (paths) add the roles of those groups and their ancestors before the expansion."""
+    group_realm, group_client = _group_roles(realm, groups or [])
+    realm_roles = realm_roles | group_realm
+    client_roles = {c: set(rs) for c, rs in client_roles.items()}
+    for client, roles in group_client.items():
+        client_roles.setdefault(client, set()).update(roles)
     realm_defs, client_defs = _role_definitions(realm)
     seen_realm: set[str] = set()
     seen_client: dict[str, set[str]] = {}
@@ -111,15 +141,17 @@ def effective_roles(realm: dict, realm_roles: set[str], client_roles: dict[str, 
 def check_no_service_account_gets_more_than_its_clients_roles_through_composites(realm: dict) -> None:
     """The default role every new user (every program client's service account) is given contributes no realm-management role,
     and the API's admin account holds exactly `manage-clients` of it once the default role and every composite, realm or client,
-    are expanded (OAuth clients: Realm). Direct role lists alone do not show what an account can do."""
+    are expanded, groups included (the realm's default groups, the account's own groups and their parents) (OAuth clients: Realm). Direct role lists alone do not show what an account can do."""
     default = realm.get("defaultRole", {}).get("name", f"default-roles-{REALM}")
-    _, from_default = effective_roles(realm, {default}, {})
+    default_groups = list(realm.get("defaultGroups", []))  # every new user joins these
+    _, from_default = effective_roles(realm, {default}, {}, default_groups)
     assert from_default.get("realm-management", set()) == set(), from_default
     accounts = [u for u in realm.get("users", []) if u.get("serviceAccountClientId")]
     assert ADMIN_CLIENT in {u["serviceAccountClientId"] for u in accounts}
     for account in accounts:
         direct = {k: set(v) for k, v in account.get("clientRoles", {}).items()}
-        _, held = effective_roles(realm, {default, *account.get("realmRoles", [])}, direct)
+        _, held = effective_roles(realm, {default, *account.get("realmRoles", [])}, direct,
+                                  [*default_groups, *account.get("groups", [])])
         management = held.get("realm-management", set())
         if account["serviceAccountClientId"] == ADMIN_CLIENT:
             assert management == {"manage-clients"}, management
@@ -239,6 +271,24 @@ def test_every_check_accepts_a_good_realm():
         roles={"client": {"realm-management": [{"name": "manage-clients", "composite": True,
                                                     "composites": {"client": {"realm-management": ["manage-users"]}}}]}}), id="client-composite"),
     pytest.param(check_no_service_account_gets_more_than_its_clients_roles_through_composites, _with_roles(
+        defaultGroups=["/ops"],
+        groups=[{"name": "ops", "path": "/ops", "clientRoles": {"realm-management": ["realm-admin"]}}]), id="default-group-realm-admin"),
+    pytest.param(check_no_service_account_gets_more_than_its_clients_roles_through_composites, _with_roles(
+        defaultGroups=["/ops/sub"],
+        groups=[{"name": "ops", "path": "/ops", "clientRoles": {"realm-management": ["realm-admin"]},
+                 "subGroups": [{"name": "sub", "path": "/ops/sub"}]}]), id="default-subgroup-inherits-parent-role"),
+    pytest.param(check_no_service_account_gets_more_than_its_clients_roles_through_composites, _with_roles(
+        defaultGroups=["/ops"], groups=[{"name": "ops", "path": "/ops", "realmRoles": ["deeper"]}],
+        roles={"realm": [{"name": "deeper", "composite": True, "composites": {"client": {"realm-management": ["manage-users"]}}}]}),
+        id="default-group-realm-role-composite"),
+    pytest.param(check_no_service_account_gets_more_than_its_clients_roles_through_composites, _with_roles(
+        groups=[{"name": "ops", "path": "/ops", "clientRoles": {"realm-management": ["manage-users"]}}],
+        users=[{**_good()["users"][0], "groups": ["/ops"]}]), id="admin-account-in-a-group"),
+    pytest.param(check_no_service_account_gets_more_than_its_clients_roles_through_composites, _with_roles(
+        groups=[{"name": "ops", "path": "/ops", "clientRoles": {"realm-management": ["manage-users"]}}],
+        users=[*_good()["users"], {"username": "service-account-x", "serviceAccountClientId": "x", "groups": ["/ops"]}]),
+        id="another-account-in-a-group"),
+    pytest.param(check_no_service_account_gets_more_than_its_clients_roles_through_composites, _with_roles(
         users=[*_good()["users"], {"username": "service-account-x", "serviceAccountClientId": "x",
                                        "clientRoles": {"realm-management": ["manage-clients"]}}]), id="another-account-with-a-management-role"),
 ])
@@ -255,3 +305,15 @@ def test_the_composite_check_accepts_harmless_composites_and_the_expansion_follo
     realm_roles, client_roles = effective_roles(good, {f"default-roles-{REALM}"}, {})
     assert realm_roles >= {"offline_access", "uma_authorization"}
     assert client_roles["account"] == {"view-profile", "manage-account", "manage-account-links"}
+
+
+def test_the_composite_check_accepts_a_default_group_with_harmless_roles():
+    """Control for the group mutations: a default group (and a subgroup of it) holding ordinary account roles passes, and the expansion
+    sees them, so the mutations fail on the role and not on the groups' mere presence."""
+    good = _with_roles(**HARMLESS, defaultGroups=["/staff/sub"], groups=[
+        {"name": "staff", "path": "/staff", "clientRoles": {"account": ["view-profile"]},
+         "subGroups": [{"name": "sub", "path": "/staff/sub", "realmRoles": ["offline_access"]}]}])
+    check_no_service_account_gets_more_than_its_clients_roles_through_composites(good)
+    realm_roles, client_roles = effective_roles(good, set(), {}, ["/staff/sub"])
+    assert realm_roles == {"offline_access"}
+    assert client_roles == {"account": {"view-profile"}}

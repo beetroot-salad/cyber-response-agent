@@ -252,16 +252,21 @@ def test_the_app_does_not_start_when_one_of_its_routers_holds_a_route_that_decla
     """P-H, D10: "a route that declares neither fails app start" is `create_app`'s own check. The seam is the one the app is built
     from: a route added to one of its routers before `create_app` runs (the route is taken off again afterwards, so the control and
     every other test build the real app). The failure names the route; the same call without the extra route builds."""
+    from fastapi import APIRouter
+
     from defender.api import app as app_module
 
-    router = app_module.lessons
+    routers = [v for v in vars(app_module).values() if isinstance(v, APIRouter) and v.routes]  # every one `create_app` includes
+    assert len(routers) >= 2  # control: the module's routers were found by what they are, not by a name
     assert undeclared_routes(create_app(route_table_deps())) == []  # control: the real routers build
-    router.add_api_route("/undeclared-1307", lambda: {}, methods=["GET"])
-    try:
-        with pytest.raises(Exception, match="undeclared-1307"):
-            create_app(route_table_deps())
-    finally:
-        router.routes[:] = [r for r in router.routes if getattr(r, "path", "") != "/undeclared-1307"]
+    for router in routers:
+        before = list(router.routes)
+        router.add_api_route("/undeclared-1307", lambda: {}, methods=["GET"])
+        try:
+            with pytest.raises(Exception, match="undeclared-1307"):
+                create_app(route_table_deps())
+        finally:
+            router.routes[:] = before
     assert undeclared_routes(create_app(route_table_deps())) == []
 
 

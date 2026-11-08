@@ -53,17 +53,20 @@ def _all_rows(s: Soar, *programs: str) -> dict[str, list[Any]]:
 
 def _present(s: Soar, kind: str, reason: str, programs: tuple[str, str]) -> str:
     """Arrange `reason` for a credential of `kind` that was used once (so it has a `last_used_at` the purge could advance) and
-    return the bearer value to present. Each reason breaks exactly one thing and leaves the rest of the credential sound."""
+    return the bearer value to present. Each reason breaks exactly one thing and leaves the rest of the credential sound. An
+    OAuth token is forged AFTER the clock has moved, so it is within its own `exp` when presented: only the credential's state
+    can refuse it, never the token's five minutes."""
     expires = s.world.clock() + MIN_LIFETIME
+    realm = s.world.realm
     if kind == "key":
         credential, secret = issue_key(s.ann, T1, programs[0], name="subject", expires_at=expires)
-        value = secret
+        subject = ""
     else:
         credential = issue_oauth(s.ann, T1, programs[0], expires_at=expires)
-        subject = s.world.realm.clients[credential].service_account_id
-        value = s.world.realm.forge(credential, subject)
+        subject = realm.clients[credential].service_account_id
+        secret = realm.forge(credential, subject)  # fresh now, for the control use only
     if reason != "unused":
-        assert s.world.bearer(value).get(f"/tenants/{T1}/alerts").status_code == 200  # control: it works, and is recorded
+        assert s.world.bearer(secret).get(f"/tenants/{T1}/alerts").status_code == 200  # control: it works, and is recorded
     s.world.clock.advance(_dt.timedelta(minutes=10))  # long enough that a use would be written again (every 5 minutes)
     if reason == "revoked":
         assert revoke(s.ann, T1, programs[0], credential).status_code == 204
@@ -73,18 +76,18 @@ def _present(s: Soar, kind: str, reason: str, programs: tuple[str, str]) -> str:
                             now=s.world.clock()) is True  # the credential row stays live
     elif reason == "expired":
         s.world.clock.advance(MIN_LIFETIME)
-    elif reason == "wrong-sub":
-        value = s.world.realm.forge(credential, "00000000-5a00-4000-8000-999999999999")
-    elif reason == "wrong-kind":  # a credential of the other kind named where this kind is expected
-        if kind == "key":
-            oauth = issue_oauth(s.ann, T1, programs[1])
-            value = f"dfk_{oauth}_" + "x" * 43
-        else:
-            value = s.world.realm.forge(s.key_id, s.world.realm.clients[credential].service_account_id)
+    # the value to present, made now (after every clock move) so an OAuth token is within its own `exp`
+    value = secret if kind == "key" else realm.forge(credential, subject)
+    if reason == "wrong-sub":
+        value = realm.forge(credential, "00000000-5a00-4000-8000-999999999999")
+    elif reason == "wrong-kind":  # a verified token naming a KEY credential's id as its client: the row it finds is of the other kind
+        value = realm.forge(credential if kind == "key" else s.key_id, subject or "00000000-5a00-4000-8000-000000000001")
+    elif reason == "oauth-id-as-key":  # a key-shaped value that names an OAuth credential's id (an unknown key, not a wrong kind)
+        value = f"dfk_{issue_oauth(s.ann, T1, programs[1])}_" + "x" * 43
     elif reason in ("unknown", "altered"):
         value = _unknown_or_altered(s, kind, reason, value)
     else:
-        assert reason in ("unused", "usable"), reason
+        assert reason in ("unused", "usable", "revoked", "expired", "program-inactive"), reason
     return value
 
 
@@ -97,7 +100,7 @@ def _unknown_or_altered(s: Soar, kind: str, reason: str, value: str) -> str:
 
 
 REASONS = {
-    "key": ["revoked", "expired", "program-inactive", "wrong-kind", "altered", "unknown"],
+    "key": ["revoked", "expired", "program-inactive", "wrong-kind", "oauth-id-as-key", "altered", "unknown"],
     "oauth_client": ["revoked", "expired", "program-inactive", "wrong-sub", "wrong-kind", "unknown"],
 }
 CASES = [(kind, reason) for kind in KINDS for reason in REASONS[kind]]
@@ -140,12 +143,15 @@ _WHITESPACE_ONLY = (" ", "  ", "\t", " \t ")
 
 def _classify(scheme: str, separator: str, credential: str) -> str:
     if credential == "KEY" and scheme.lower() == "bearer":
+        if separator == "":
+            return "invalid"  # "BearerKEY" is not the Bearer scheme: no separator, no scheme
         return "valid" if separator == " " else "ambiguous"  # extra whitespace: a server may or may not normalise it
     return "invalid"
 
 
 def _authorization_values(key: str) -> list[tuple[str, str]]:
-    """(value, class) for the whole generated space; class is `valid`, `invalid` or `ambiguous`."""
+    """(value, class) for the whole generated space; class is `valid`, `invalid` or `ambiguous` (only the last is skipped, and only
+    when no Cookie header is sent)."""
     out = {("", "invalid")}  # present but empty (A4)
     out |= {(w, "invalid") for w in _WHITESPACE_ONLY}
     for scheme, separator, credential in itertools.product(_SCHEMES, _SEPARATORS, _CREDENTIALS):
@@ -188,7 +194,7 @@ def test_authorization_present_means_the_bearer_path_in_both_layers_whatever_its
     values: list[tuple[str | None, str]] = [(None, "absent"), *_authorization_values(s.key)]
     for (cookie, cookie_kind), (authorization, kind) in itertools.product(_cookie_states(s), values):
         what = f"Authorization={authorization!r} Cookie={cookie_kind}"
-        if kind == "ambiguous":
+        if kind == "ambiguous" and cookie is None:  # with a Cookie header every value is refused, however it parses
             continue
         if cookie is not None:  # a Cookie header at all: the origin rule applies, and nothing is authenticated twice
             expect(f"{what} write without Origin", post(authorization, cookie, None), {403})

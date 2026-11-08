@@ -153,10 +153,21 @@ def test_at_head_the_credentials_program_is_a_user_of_kind_program_by_a_composit
     import re
 
     assert _columns(migrated_database, "program_credentials")["program_kind"][1] == "NO"
-    definitions = [d for (d,) in execute(migrated_database, """SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+    definitions = [(table, d) for table, d in execute(migrated_database, """SELECT r.relname, pg_get_constraintdef(c.oid) FROM pg_constraint c
         JOIN pg_class r ON r.oid = c.conrelid JOIN pg_namespace n ON n.oid = r.relnamespace
         WHERE n.nspname = 'identity' AND r.relname IN ('users', 'program_credentials')""")]
-    assert any(re.fullmatch(r"UNIQUE \(id, kind\)", d) for d in definitions), definitions
-    assert any(re.fullmatch(r"FOREIGN KEY \(program_id, program_kind\) REFERENCES (identity\.)?users\(id, kind\)", d)
-               for d in definitions), definitions
-    assert any(re.search(r"program_kind\s*=\s*'program'", d) and d.startswith("CHECK") for d in definitions), definitions
+    # unique on (id, kind): a constraint or a plain unique index (a constraint is backed by one, so the index list covers both)
+    unique = [tuple(columns) for (columns,) in execute(migrated_database, """SELECT array_agg(a.attname::text ORDER BY k.ord)
+        FROM pg_index i JOIN pg_class r ON r.oid = i.indrelid JOIN pg_namespace n ON n.oid = r.relnamespace
+        CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)
+        JOIN pg_attribute a ON a.attrelid = r.oid AND a.attnum = k.attnum
+        WHERE n.nspname = 'identity' AND r.relname = 'users' AND i.indisunique AND i.indpred IS NULL AND i.indexprs IS NULL
+        GROUP BY i.indexrelid""")]
+    assert ("id", "kind") in unique, unique
+    foreign = [d for table, d in definitions if table == "program_credentials"]
+    assert any(re.match(r"FOREIGN KEY \(program_id, program_kind\) REFERENCES (identity\.)?users\(id, kind\)", d)
+               for d in foreign), foreign
+    # a CHECK that leaves `program` as the only value program_kind may hold, however PostgreSQL renders it (`= 'program'::text`,
+    # `= ANY (ARRAY['program'::text])`, `IN ('program')`)
+    assert any(d.startswith("CHECK") and "program_kind" in d and set(re.findall(r"'([^']*)'", d)) == {"program"}
+               for d in foreign), foreign

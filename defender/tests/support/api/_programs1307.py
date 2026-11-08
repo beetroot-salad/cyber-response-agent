@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as _dt
+import inspect
 import itertools
 import threading
 from typing import TYPE_CHECKING, Any
@@ -131,7 +132,7 @@ class FaultingRepository:
 
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._inner, name)
-        if not callable(attr) or name == "close":
+        if not inspect.iscoroutinefunction(attr) or name == "close":
             return attr
 
         async def call(*args: Any, **kwargs: Any) -> Any:
