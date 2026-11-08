@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -60,7 +60,7 @@ from .models import (
 )
 from .pages import Order, Page, newest_first, ordered_by_id, paginate
 from .problems import install as install_problems
-from .problems import problem, refusal, responses
+from .problems import HANDLERS, problem, refusal, responses
 from .ports import (
     ApiDeps,
     Conflict,
@@ -94,14 +94,26 @@ async def _deps(request: Request) -> ApiDeps:
 
 #: The scope key under which a verified program's credential expiry travels to the response.
 _EXPIRY_SCOPE_KEY = "defender.credential_expires_at"
+#: The scope key under which the authenticated caller travels from `_AuthenticatingRoute` to the route's dependencies.
+_CALLER_SCOPE_KEY = "defender.caller"
 #: Every response to a verified program carries when the credential it used expires (#1307 D9).
 EXPIRY_HEADER = "Defender-Credential-Expires"
 
 
+def _way_in(headers: Headers) -> Literal["session", "bearer", "both"]:
+    """How a request offers to be authenticated (P-F). The one place that tests "an `Authorization` header is
+    present (whatever it holds, even nothing) and there is no `Cookie` header at all": the origin layer and the
+    authentication both ask it, so they cannot disagree (#1307 A4). No `Authorization` header is the session
+    cookie's way; with a `Cookie` header as well it is `both`, which nothing authenticates."""
+    if "authorization" not in headers:
+        return "session"
+    return "both" if "cookie" in headers else "bearer"
+
+
 class _FrontendOriginOnly:
-    """A request that changes state must come from the configured frontend (O6), unless it carries an
-    `Authorization` header and no `Cookie` header at all: a browser attaches cookies by itself, so only
-    a request with a cookie can be forged from another site (#1307 D2, O9). A layer in front of routing,
+    """A request that changes state must come from the configured frontend (O6), unless it is a `bearer`
+    request (see `_way_in`): a browser attaches cookies by itself, so only a request with a cookie can be
+    forged from another site (#1307 D2, O9). A layer in front of routing,
     so it answers before the session is looked at or the body is read: a forged request learns
     nothing, not even whether its body would have parsed."""
 
@@ -112,8 +124,7 @@ class _FrontendOriginOnly:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and scope["method"] not in _SAFE_METHODS:
             headers = Headers(scope=scope)
-            bearer_only = "authorization" in headers and "cookie" not in headers
-            if not bearer_only and headers.get("origin") != self._origin:
+            if _way_in(headers) != "bearer" and headers.get("origin") != self._origin:
                 refused = problem(status.HTTP_403_FORBIDDEN, "this request does not come from the frontend")
                 await refused(scope, receive, send)
                 return
@@ -134,11 +145,25 @@ class _ExpiryHeader:
             return
 
         async def with_header(message: Any) -> None:
-            if message["type"] == "http.response.start" and _EXPIRY_SCOPE_KEY in scope:
-                MutableHeaders(scope=message)[EXPIRY_HEADER] = scope[_EXPIRY_SCOPE_KEY]
+            if message["type"] == "http.response.start":
+                _stamp_expiry(scope, MutableHeaders(scope=message))
             await send(message)
 
         await self._app(scope, receive, with_header)
+
+
+def _stamp_expiry(scope: Scope, headers: MutableHeaders) -> None:
+    if _EXPIRY_SCOPE_KEY in scope:
+        headers[EXPIRY_HEADER] = scope[_EXPIRY_SCOPE_KEY]
+
+
+async def _server_error(request: Request, exc: Exception) -> Response:
+    """The 500 for an unhandled failure. Starlette renders it outside every middleware of the app, so the
+    expiry header cannot be added on the way out like the others: it is put on here (D9, A6). The server still
+    logs the failure: the handler answers, then the server re-raises it."""
+    response = await HANDLERS[Exception](request, exc)
+    _stamp_expiry(request.scope, response.headers)
+    return response
 
 
 def _declares(what: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -151,13 +176,13 @@ def _declares(what: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
 
 
 async def _credentialed(request: Request, deps: ApiDeps) -> Authenticated:
-    """The caller, by exactly one way in: a session cookie (a person) or `Authorization: Bearer` (a
+    """The caller, by exactly one way in (`_way_in`): a session cookie (a person) or `Authorization: Bearer` (a
     program). Both together, or an unusable header, is not authenticated: no precedence between them."""
-    header = request.headers.get("authorization")
-    if header is None:
+    way = _way_in(request.headers)
+    if way == "session":
         return await deps.identity.authenticate(request.cookies.get(SESSION_COOKIE))
-    scheme, _, value = header.partition(" ")
-    if "cookie" in request.headers or scheme.lower() != "bearer" or not value.strip():
+    scheme, _, value = request.headers["authorization"].partition(" ")
+    if way == "both" or scheme.lower() != "bearer" or not value.strip():
         raise _identity.NotAuthenticated("sign in")
     caller = await deps.identity.authenticate_bearer(value.strip())
     assert caller.credential is not None
@@ -165,8 +190,35 @@ async def _credentialed(request: Request, deps: ApiDeps) -> Authenticated:
     return caller
 
 
-async def _authenticated(request: Request, deps: Annotated[ApiDeps, Depends(_deps)]) -> Authenticated:
-    return await _credentialed(request, deps)
+async def _authenticated(request: Request) -> Authenticated:
+    """The caller `_AuthenticatingRoute` authenticated before the request's body was read (A7)."""
+    caller: Authenticated = request.scope[_CALLER_SCOPE_KEY]
+    return caller
+
+
+def _authenticates(dependant: Any) -> bool:
+    return any(sub.call is _authenticated or _authenticates(sub) for sub in dependant.dependencies)
+
+
+class _AuthenticatingRoute(APIRoute):
+    """A route whose caller is known before FastAPI reads the request: authentication first, so an invalid or
+    missing credential is a 401 whatever the body holds, a malformed body included (#1307 A7). FastAPI parses
+    the body before it resolves dependencies, so a dependency alone cannot be first; every router of this
+    module is made with this class."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+        authenticates = _authenticates(self.dependant)
+
+        async def authenticate_first(request: Request) -> Response:
+            if authenticates:
+                request.scope[_CALLER_SCOPE_KEY] = await _credentialed(request, request.app.state.deps)
+            return await handler(request)
+        return authenticate_first
+
+
+def _router(**options: Any) -> APIRouter:
+    return APIRouter(route_class=_AuthenticatingRoute, **options)
 
 
 Authed = Annotated[Authenticated, Depends(_authenticated)]
@@ -222,7 +274,9 @@ def _permitted(permission: Permission) -> Callable[..., Any]:
     return dependency
 
 
-async def _principal(member: _Membered) -> Principal:
+def _principal(member: _Membered) -> Principal:
+    """The audit's caller, built here and nowhere else: the user and, for a program, the credential it used.
+    Every tenant route takes its `Principal` from `_caller_with`, so none can leave the credential out."""
     credential = member.auth.credential
     return Principal(tenant_id=member.tenant_id, user_id=member.auth.user.id,
                      credential_id=None if credential is None else credential.id)
@@ -233,7 +287,7 @@ def _caller_with(permission: Permission) -> Callable[..., Any]:
 
     @_declares(permission)
     async def dependency(member: _Membered = Depends(check)) -> Principal:  # noqa: B008
-        return await _principal(member)
+        return _principal(member)
     return dependency
 
 
@@ -330,7 +384,7 @@ def _created_at(request: Request, response: Response, route: str, tenant_id: str
     response.headers["Location"] = str(request.url_for(route, tenant_id=tenant_id, **path))
 
 
-alerts = APIRouter(prefix="/alerts", tags=["alerts"], responses=_EVERY_ROUTE)
+alerts = _router(prefix="/alerts", tags=["alerts"], responses=_EVERY_ROUTE)
 
 
 @alerts.get("")
@@ -360,7 +414,7 @@ async def get_alert(deps: Deps, caller: WorkReader, alert_id: AlertId) -> Alert:
     return alert
 
 
-investigations = APIRouter(prefix="/investigations", tags=["investigations"], responses=_EVERY_ROUTE)
+investigations = _router(prefix="/investigations", tags=["investigations"], responses=_EVERY_ROUTE)
 
 
 @investigations.post("", responses={201: {"model": Investigation}, **responses(409)})
@@ -448,7 +502,7 @@ async def read_artifact(deps: Deps, caller: WorkReader, investigation_id: Invest
     return RedirectResponse(url, headers={"Cache-Control": "no-store"})
 
 
-learning_jobs = APIRouter(prefix="/learning-jobs", tags=["learning"], responses=_EVERY_ROUTE)
+learning_jobs = _router(prefix="/learning-jobs", tags=["learning"], responses=_EVERY_ROUTE)
 
 
 @learning_jobs.post("", responses={201: {"model": LearningJob}, **responses(409)})
@@ -492,7 +546,7 @@ async def get_learning_job(deps: Deps, caller: WorkReader, learning_job_id: Lear
     return job
 
 
-lessons = APIRouter(prefix="/lessons", tags=["learning"], responses=_EVERY_ROUTE)
+lessons = _router(prefix="/lessons", tags=["learning"], responses=_EVERY_ROUTE)
 
 
 @lessons.get("")
@@ -506,7 +560,7 @@ async def list_lessons(
     )
 
 
-systems = APIRouter(prefix="/systems", tags=["systems"], responses=_EVERY_ROUTE)
+systems = _router(prefix="/systems", tags=["systems"], responses=_EVERY_ROUTE)
 
 
 async def _served(deps: ApiDeps, caller: Principal, settings: SystemSettings) -> System:
@@ -583,7 +637,7 @@ def _cookie_options() -> dict[str, object]:
     return {"path": "/", "secure": True, "httponly": True, "samesite": "lax"}
 
 
-auth = APIRouter(tags=["auth"])
+auth = _router(tags=["auth"])
 
 
 @auth.get("/auth/login", status_code=status.HTTP_302_FOUND, response_class=RedirectResponse,
@@ -653,7 +707,7 @@ async def accept_invitation(deps: Deps, caller: Person, invitation_id: Membershi
     return TenantRef(tenant_id=await deps.identity.accept(caller, invitation_id))
 
 
-people = APIRouter(tags=["people"], responses=_EVERY_ROUTE)
+people = _router(tags=["people"], responses=_EVERY_ROUTE)
 
 
 def _invitation(view: _identity.InvitationView) -> Invitation:
@@ -691,7 +745,7 @@ async def revoke_invitation(deps: Deps, member: PeopleManager, invitation_id: Me
     await deps.identity.revoke(member.auth, member.tenant_id, invitation_id)
 
 
-programs = APIRouter(tags=["programs"], responses=_EVERY_ROUTE)
+programs = _router(tags=["programs"], responses=_EVERY_ROUTE)
 
 #: A program id in a path: a person's id is as well-formed as one, and is found to be no program.
 ProgramPath = Annotated[UserId, Path(description="A program of the tenant.")]
@@ -747,7 +801,7 @@ async def revoke_credential(
     await deps.identity.revoke_credential(member.auth, member.tenant_id, program_id, credential_id)
 
 
-admin = APIRouter(prefix="/admin", tags=["admin"], responses={**_IDENTITY, **responses(404)})
+admin = _router(prefix="/admin", tags=["admin"], responses={**_IDENTITY, **responses(404)})
 
 
 #: An administrator's tenant path. A malformed id is a 422, after the administrator check (#1382).
@@ -857,7 +911,7 @@ async def _start_identity(identity: IdentityService) -> None:
         raise
 
 
-alert_mapping = APIRouter(prefix="/alert-mapping", tags=["alert mapping"], responses=_EVERY_ROUTE)
+alert_mapping = _router(prefix="/alert-mapping", tags=["alert mapping"], responses=_EVERY_ROUTE)
 
 
 @alert_mapping.get("")
@@ -894,7 +948,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.state.deps = deps
     app.add_middleware(_ExpiryHeader)
     app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)
-    in_tenant = APIRouter(prefix="/tenants/{tenant_id}", responses=responses(404))
+    in_tenant = _router(prefix="/tenants/{tenant_id}", responses=responses(404))
     for router in (alerts, investigations, learning_jobs, lessons, systems, alert_mapping, people, programs):
         in_tenant.include_router(router)
     for router in (auth, in_tenant, admin):
@@ -914,6 +968,9 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_exception_handler(_tenancy.NotFound, refusal(status.HTTP_404_NOT_FOUND))
     app.add_exception_handler(_tenancy.Conflict, refusal(status.HTTP_409_CONFLICT))
     app.add_exception_handler(_identity.SignInUnavailable, refusal(status.HTTP_503_SERVICE_UNAVAILABLE))
+    app.add_exception_handler(Exception, _server_error)
+    if undeclared := undeclared_routes(app):
+        raise RuntimeError(f"routes declare neither a permission nor a category (P-H): {undeclared}")
     return app
 
 
