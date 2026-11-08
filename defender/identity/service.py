@@ -437,7 +437,7 @@ class IdentityService:
         if not usable(row, now):
             raise NotAuthenticated("sign in")
         program = await self._repo.user(row.program_id)
-        if program is None or program.kind != "program" or program.status != "active" or not any(
+        if program is None or program.status != "active" or not any(
                 m.status == "active" and m.role == "automation" for m in await self._repo.memberships_of_user(program.id)):
             raise NotAuthenticated("sign in")
         await self._repo.touch_credential(row.id, now=now)
@@ -613,17 +613,18 @@ class IdentityService:
                 key_hash=None if key is None else _hash(key), credential_id=credential_id)
         except DataRuleViolation as e:
             raise Conflict("the program holds two credentials already, or was removed") from e
+        # `program_credential.create` is emitted at the write that made the credential usable (a key's insert,
+        # an OAuth credential's `pending -> live`), before anything is read back (A8, W5).
         if key is not None:
-            secret = key
-        else:
-            service_account_id, secret = await self._programs.create_client(row.id)
-            if not await self._repo.go_live(row.id, service_account_id=service_account_id, now=self._clock()):
-                raise Conflict("the program was removed, or the client took too long")
-            live = await self._repo.credential_by_id(row.id)
-            assert live is not None
-            row = live
+            audit.emit("program_credential.create", actor=auth.user.id, tenant_id=tenant_id, target=row.id)
+            return row, key
+        service_account_id, secret = await self._programs.create_client(row.id)
+        if not await self._repo.go_live(row.id, service_account_id=service_account_id, now=self._clock()):
+            raise Conflict("the program was removed, or the client took too long")
         audit.emit("program_credential.create", actor=auth.user.id, tenant_id=tenant_id, target=row.id)
-        return row, secret
+        live = await self._repo.credential_by_id(row.id)
+        assert live is not None
+        return live, secret
 
     async def revoke_credential(
         self, auth: Authenticated, tenant_id: TenantId, program_id: UserId, credential_id: CredentialId,
@@ -683,9 +684,12 @@ class IdentityService:
         (`ended_by` None: the system) and revoke every open invitation, each with its usual audit line
         by `system`. Idempotent: a row already finished is left as it is."""
         for row in await self._repo.memberships_of_tenant(tenant_id):
-            if row.status == "active" and row.role == "automation":
-                await self._end_program(row.user_id, tenant_id, now)
-            elif row.status == "active" and await self._repo.end_membership(row.id, ended_by=None, now=now):
-                audit.emit("member.remove", actor=audit.SYSTEM, tenant_id=row.tenant_id, target=row.user_id)
+            if row.status == "active":
+                member = await self._repo.user(row.user_id)
+                assert member is not None, "a membership's user exists (foreign key)"
+                if member.kind == "program":  # the user's kind says it, never the membership's role
+                    await self._end_program(row.user_id, tenant_id, now)
+                elif await self._repo.end_membership(row.id, ended_by=None, now=now):
+                    audit.emit("member.remove", actor=audit.SYSTEM, tenant_id=row.tenant_id, target=row.user_id)
             elif row.status == "invited" and await self._repo.revoke_invitation(row.id):
                 audit.emit("invitation.revoke", actor=audit.SYSTEM, tenant_id=row.tenant_id, target=row.id)
