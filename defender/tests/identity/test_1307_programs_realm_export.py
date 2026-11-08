@@ -73,10 +73,64 @@ def check_admin_client_mints_no_api_tokens(realm: dict) -> None:
     assert _clients(realm)[ADMIN_CLIENT].get("protocolMappers", []) == []
 
 
+def _role_definitions(realm: dict) -> tuple[dict[str, dict], dict[str, dict[str, dict]]]:
+    """(realm role name -> definition, client id -> role name -> definition) as the export spells them; the realm's `defaultRole` is
+    the definition of the realm role it names."""
+    roles = realm.get("roles", {})
+    realm_roles = {r["name"]: r for r in roles.get("realm", [])}
+    if "defaultRole" in realm:
+        realm_roles.setdefault(realm["defaultRole"]["name"], realm["defaultRole"])
+        realm_roles[realm["defaultRole"]["name"]] = {**realm_roles[realm["defaultRole"]["name"]], **realm["defaultRole"]}
+    return realm_roles, {cid: {r["name"]: r for r in rows} for cid, rows in roles.get("client", {}).items()}
+
+
+def effective_roles(realm: dict, realm_roles: set[str], client_roles: dict[str, set[str]]) -> tuple[set[str], dict[str, set[str]]]:
+    """Every realm role and client role a principal holds once composites are expanded, through realm and client roles alike."""
+    realm_defs, client_defs = _role_definitions(realm)
+    seen_realm: set[str] = set()
+    seen_client: dict[str, set[str]] = {}
+    work: list[tuple[str | None, str]] = [(None, r) for r in realm_roles] + [(c, r) for c, rs in client_roles.items() for r in rs]
+    while work:
+        owner, name = work.pop()
+        if owner is None:
+            if name in seen_realm:
+                continue
+            seen_realm.add(name)
+            definition = realm_defs.get(name, {})
+        else:
+            if name in seen_client.setdefault(owner, set()):
+                continue
+            seen_client[owner].add(name)
+            definition = client_defs.get(owner, {}).get(name, {})
+        composites = definition.get("composites", {}) if definition.get("composite", True) else {}
+        work += [(None, r) for r in composites.get("realm", [])]
+        work += [(c, r) for c, rs in composites.get("client", {}).items() for r in rs]
+    return seen_realm, seen_client
+
+
+def check_no_service_account_gets_more_than_its_clients_roles_through_composites(realm: dict) -> None:
+    """The default role every new user (every program client's service account) is given contributes no realm-management role,
+    and the API's admin account holds exactly `manage-clients` of it once the default role and every composite, realm or client,
+    are expanded (OAuth clients: Realm). Direct role lists alone do not show what an account can do."""
+    default = realm.get("defaultRole", {}).get("name", f"default-roles-{REALM}")
+    _, from_default = effective_roles(realm, {default}, {})
+    assert from_default.get("realm-management", set()) == set(), from_default
+    accounts = [u for u in realm.get("users", []) if u.get("serviceAccountClientId")]
+    assert ADMIN_CLIENT in {u["serviceAccountClientId"] for u in accounts}
+    for account in accounts:
+        direct = {k: set(v) for k, v in account.get("clientRoles", {}).items()}
+        _, held = effective_roles(realm, {default, *account.get("realmRoles", [])}, direct)
+        management = held.get("realm-management", set())
+        if account["serviceAccountClientId"] == ADMIN_CLIENT:
+            assert management == {"manage-clients"}, management
+        else:
+            assert management == set(), (account["username"], management)
+
+
 CHECKS = [check_realm_switches, check_admin_client_may_only_manage_clients,
           check_the_audience_is_its_own_flowless_client, check_no_people_in_the_realm,
           check_only_program_relevant_clients, check_no_client_has_a_browser_flow,
-          check_admin_client_mints_no_api_tokens]
+          check_admin_client_mints_no_api_tokens, check_no_service_account_gets_more_than_its_clients_roles_through_composites]
 
 
 def _committed() -> dict:
@@ -125,6 +179,21 @@ def _mutate(path: list, value) -> dict:
     return realm
 
 
+def _with_roles(**parts: object) -> dict:
+    realm = _good()
+    realm.update(copy.deepcopy(parts))
+    return realm
+
+
+HARMLESS = {"defaultRole": {"name": f"default-roles-{REALM}", "composite": True,
+                            "composites": {"realm": ["offline_access", "uma_authorization"],
+                                           "client": {"account": ["view-profile", "manage-account"]}}},
+            "roles": {"realm": [{"name": "offline_access"}, {"name": "uma_authorization"}],
+                      "client": {"account": [{"name": "manage-account", "composite": True,
+                                              "composites": {"client": {"account": ["manage-account-links"]}}},
+                                             {"name": "manage-account-links"}, {"name": "view-profile"}]}}}
+
+
 def test_every_check_accepts_a_good_realm():
     """Positive control."""
     for check in CHECKS:
@@ -156,8 +225,33 @@ def test_every_check_accepts_a_good_realm():
         ["clients", 1, "standardFlowEnabled"], None), id="flow-left-to-default"),
     pytest.param(check_admin_client_mints_no_api_tokens, _mutate(
         ["clients", 0, "protocolMappers"], [{"protocolMapper": "oidc-audience-mapper"}]), id="admin-audience-mapper"),
+    pytest.param(check_no_service_account_gets_more_than_its_clients_roles_through_composites, _with_roles(
+        defaultRole={"name": f"default-roles-{REALM}", "composite": True,
+                         "composites": {"client": {"realm-management": ["realm-admin"]}}}), id="default-role-realm-admin"),
+    pytest.param(check_no_service_account_gets_more_than_its_clients_roles_through_composites, _with_roles(
+        roles={"realm": [{"name": f"default-roles-{REALM}", "composite": True,
+                              "composites": {"client": {"realm-management": ["manage-users"]}}}]}), id="default-role-as-a-realm-role"),
+    pytest.param(check_no_service_account_gets_more_than_its_clients_roles_through_composites, _with_roles(
+        roles={"realm": [{"name": "ops", "composite": True, "composites": {"realm": ["deeper"]}},
+                             {"name": "deeper", "composite": True, "composites": {"client": {"realm-management": ["manage-users"]}}}]},
+        users=[{**_good()["users"][0], "realmRoles": [f"default-roles-{REALM}", "ops"]}]), id="realm-composite-chain"),
+    pytest.param(check_no_service_account_gets_more_than_its_clients_roles_through_composites, _with_roles(
+        roles={"client": {"realm-management": [{"name": "manage-clients", "composite": True,
+                                                    "composites": {"client": {"realm-management": ["manage-users"]}}}]}}), id="client-composite"),
+    pytest.param(check_no_service_account_gets_more_than_its_clients_roles_through_composites, _with_roles(
+        users=[*_good()["users"], {"username": "service-account-x", "serviceAccountClientId": "x",
+                                       "clientRoles": {"realm-management": ["manage-clients"]}}]), id="another-account-with-a-management-role"),
 ])
 def test_a_check_rejects_the_setting_it_guards(check, bad):
     """Each single-field change is caught by its own check."""
     with pytest.raises(AssertionError):
         check(bad)
+
+
+def test_the_composite_check_accepts_harmless_composites_and_the_expansion_follows_chains():
+    """Controls: ordinary default-role composites (account roles, offline access) pass; a chain through a client composite is followed."""
+    good = _with_roles(**HARMLESS)
+    check_no_service_account_gets_more_than_its_clients_roles_through_composites(good)
+    realm_roles, client_roles = effective_roles(good, {f"default-roles-{REALM}"}, {})
+    assert realm_roles >= {"offline_access", "uma_authorization"}
+    assert client_roles["account"] == {"view-profile", "manage-account", "manage-account-links"}
