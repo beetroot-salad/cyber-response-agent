@@ -1,5 +1,6 @@
-"""A learning job's family step (#1344): `python -m defender.learning.branch.job_entry --job <id>
---tenant <T> --source <investigation id> --parent-pid <pid>`, the worker's child.
+"""A learning job's family step (#1344), the worker's child: its steps, started by
+`python -m defender.cli.learning.job --job <id> --tenant <T> --source <investigation id>
+--parent-pid <pid>`, which hands in the role-model preflight learning may not import.
 
 The entry ties itself to its worker, opens the tenant's runs container (the job lane's door),
 installs its own SIGTERM handler, waits a bounded time for the tenant's host lock, then runs the
@@ -25,7 +26,6 @@ from __future__ import annotations
 import argparse
 import logging
 import math
-import os
 import signal
 import sys
 import threading
@@ -64,7 +64,7 @@ from defender.tenancy import host_lock
 
 _logger = logging.getLogger(__name__)
 
-__all__ = ["JobStopped", "main", "role_preflight"]
+__all__ = ["JobStopped", "main"]
 
 #: How long the entry waits for the tenant's host lock (held exclusive by prepare or teardown)
 #: before handing the job back.
@@ -78,53 +78,13 @@ class JobStopped(BaseException):
 
 def parse_learning_job_args(argv: list[str]) -> argparse.Namespace:
     """`--job <id> --tenant <T> --source <investigation id> --parent-pid <pid>`."""
-    p = argparse.ArgumentParser(prog="python -m defender.learning.branch.job_entry",
+    p = argparse.ArgumentParser(prog="python -m defender.cli.learning.job",
                                 description="A learning job's family step, run by the worker.")
     p.add_argument("--job", required=True, help="the learning job's id; the episode's id too")
     p.add_argument("--tenant", required=True, help="the job's tenant")
     p.add_argument("--source", required=True, help="the finished investigation to fork, by its id")
     p.add_argument("--parent-pid", required=True, type=int, help="the worker that started this process")
     return p.parse_args(argv)
-
-
-def role_preflight(model: str | None = None, *, branching: bool = True) -> int:
-    """The family step's own paid roles (questioner, oracle and its verifier, judge): each one's
-    model resolves to a provider whose key is usable, and each oracle role's effort is one its
-    provider takes. Each provider's first-party key is sourced as a run sources it. 0 when every
-    role can be paid for, else 2; the siblings, `run.py` processes, check their own roles."""
-    from defender import providers
-    from defender._agent_role import AgentRole
-    from defender._first_party_key import resolve_first_party_key
-    from defender.learning.core import config
-    from defender.learning.roles import LEARNING_AGENTS
-
-    del model, branching  # the family's roles keep their own models
-    efforts = {AgentRole.ORACLE: config.oracle_effort, AgentRole.ORACLE_CHECK: config.oracle_check_effort}
-    seen: set[str] = set()
-    for role in (AgentRole.QUESTIONER, AgentRole.ORACLE, AgentRole.ORACLE_CHECK, AgentRole.JUDGE):
-        defn = LEARNING_AGENTS.get(role)
-        if defn is None:
-            _logger.error(f"preflight: the learning role {role.name} has no agent definition")
-            return 2
-        try:
-            name = str(defn.model())
-            provider = providers.provider_for(name)
-            if role in efforts:
-                provider.settings_for_effort(efforts[role]())
-        except Exception as bad:  # noqa: BLE001 — a broken model config is a preflight refusal
-            _logger.error(f"preflight: {role.name}'s model config is unusable: {bad!r}")
-            return 2
-        if provider.id in seen:
-            continue
-        seen.add(provider.id)
-        key, _found_at = resolve_first_party_key(var=provider.api_key_var)
-        if key:
-            os.environ[provider.api_key_var] = key
-        elif not os.environ.get(provider.api_key_var):
-            _logger.error(f"preflight: {role.name} runs on {provider.id}, and no "
-                          f"{provider.api_key_var} is set")
-            return 2
-    return 0
 
 
 class _Job:
@@ -329,7 +289,7 @@ def main(  # noqa: PLR0913 — the entry's inputs plus the launcher's seams
     argv: list[str], *,
     candidates: Callable[..., Any] = fork_candidates,
     grade: Callable[..., Any] | None = None,
-    preflight: Callable[..., int] = role_preflight,
+    preflight: Callable[..., int],
     **seams: Any,
 ) -> int:
     """The learning job's family step; returns 0 unless the job ended `failed` (1). The worker
@@ -384,9 +344,3 @@ def _run(job: _Job, ns: argparse.Namespace, data_root: Any, *, candidates: Calla
     finally:
         host_lock.release_lock(held)
 
-
-if __name__ == "__main__":
-    from defender import _log
-
-    _log.configure_from_env()
-    sys.exit(main(sys.argv[1:]))

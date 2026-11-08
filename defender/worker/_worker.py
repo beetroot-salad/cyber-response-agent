@@ -84,7 +84,7 @@ LEARNING_CHECK_INTERVAL = 300.0
 
 _RUN_PY = Path(__file__).resolve().parents[1] / "run.py"
 #: The learning children's modules (#1344), started with `-m` from the code tree's root.
-JOB_ENTRY_MODULE = "defender.learning.branch.job_entry"
+JOB_ENTRY_MODULE = "defender.cli.learning.job"
 POST_STEP_MODULE = "defender.learning.branch.post_step"
 
 _FAILED, _COMPLETED, _UNPARSEABLE = "failed", "completed", "unparseable"

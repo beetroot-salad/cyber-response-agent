@@ -289,7 +289,7 @@ def _values_of(argv: list[str], flag: str) -> list[str]:
 
 
 def _child_of(children: list[dict], kind: str, job: str) -> dict | None:
-    """The child that runs the job entry (`job_entry`) or the post-step (`post_step`) for `job`."""
+    """The child that runs the job entry (`cli.learning.job`) or the post-step (`post_step`) for `job`."""
     return next((c for c in children if job in _values_of(c["argv"], "--job")
                  and (form := _start_form(c)) is not None and kind in form[0]), None)
 
@@ -367,11 +367,11 @@ def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_sou
         assert not list(runs.glob("*.session-pointer.json")), "premise: the source investigation has no run folder or session store"
         watch = W.ChildWatch()
         with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: bool(W.code_copies(data_root)), watch=watch) as proc:
-            children = watch.wait_for(lambda seen: _child_of(seen, "job_entry", job) and _child_of(seen, "post_step", job),
+            children = watch.wait_for(lambda seen: _child_of(seen, "cli.learning.job", job) and _child_of(seen, "post_step", job),
                                       timeout=120, what="the job entry and the post-step children")
             W.wait_until(lambda: (runs / f"{job}.post-step.json").is_file(), timeout=120, what="the post-step's record", proc=proc)
 
-        entry = _child_of(children, "job_entry", job)
+        entry = _child_of(children, "cli.learning.job", job)
         assert entry is not None, f"no job-entry child was observed; saw {[c['argv'] for c in children]}"
         assert _values_of(entry["argv"], "--source") == [investigation], entry["argv"]
         assert _values_of(entry["argv"], "--job") == [job]
@@ -448,7 +448,7 @@ def test_image_entry_run_py_from_a_copy_with_no_pythonpath_prints_usage_and_load
     _assert_usage_from_the_copy(ran, modules, image / "defender")
 
 
-@pytest.mark.parametrize("module", ["defender.learning.branch.job_entry", "defender.learning.branch.post_step"])
+@pytest.mark.parametrize("module", ["defender.cli.learning.job", "defender.learning.branch.post_step"])
 def test_image_entry_the_job_entry_and_post_step_from_a_copy_load_only_the_copy(image, tmp_path, module):
     """Started as modules from the copy's parent, nothing on PYTHONPATH. (Image entry, O8)"""
     ran, modules = _usage_from(f"-m:{module}", image, tmp_path, cwd=image)

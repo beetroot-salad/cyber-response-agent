@@ -278,7 +278,7 @@ def admission_refusals(source, rows: list[int], store) -> list[str]:
         try:
             as_of = branch.branch_point_time(store, run.run_dir, row_id, source_run=run)
             branch.validate(store, branch.BranchSpec(source_run_dir=run.run_dir, branch_message_id=row_id, as_of=as_of),
-                            source_run=run, require_capture=False)
+                            source_run=run)
         except branch.BranchError as refused:
             texts.append(str(refused))
         else:
@@ -806,3 +806,17 @@ def test_o9_the_launcher_terminates_its_child_when_it_unwinds_on_sigterm(tmp_pat
         launcher.wait()
         if sibling is not None and _running(sibling):
             os.kill(sibling, signal.SIGKILL)
+
+
+
+def test_the_job_entrys_role_check_covers_the_roles_its_siblings_run(monkeypatch):
+    """The worker's job command hands in the operator launch's role check: a sibling model no provider serves refuses
+    the job before the questioner is paid, not inside the control's run (control: every key set, the shipped models
+    pass). (O12, r5 table)"""
+    from defender import providers
+    from defender.cli.learning import job
+
+    for var in providers.api_key_vars():
+        monkeypatch.setenv(var, "k-test")
+    assert job._preflight(branching=True) == 0, "control: the shipped models pass with every key set"
+    assert job._preflight("no-such-model", branching=True) == 2
