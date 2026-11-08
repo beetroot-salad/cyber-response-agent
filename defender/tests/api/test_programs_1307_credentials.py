@@ -237,6 +237,24 @@ def test_expiry_outside_7_to_365_days_is_refused_and_creates_nothing(
         assert s.world.realm.created == []
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_program_removed_while_its_credential_is_issued_is_404_and_gets_nothing(kind: str) -> None:
+    """The program is removed after the route found it and before the write: 404 as for any removed program, not
+    the cap's 409 (#1450 review: the write answers "removed" rather than refusing)."""
+    s = soar()
+    repo = s.world.repo
+    add = repo.add_credential
+
+    async def removed_first(program_id: Any, **kw: Any) -> Any:
+        await repo.remove_program(program_id, removed_by=None, now=s.world.clock())
+        return await add(program_id, **kw)
+
+    repo.add_credential = removed_first
+    response = issue(s.ann, T1, s.program_id, kind=kind, name="late")
+    assert response.status_code == 404, response.text
+    assert s.world.realm.clients == {} or kind == "key"  # no client made for a credential that was never written
+
+
 def test_an_unparseable_expiry_is_refused() -> None:
     """Not a timestamp -> 422, nothing created (O5)."""
     s = soar()

@@ -286,7 +286,7 @@ class PostgresIdentityRepository:
         self, program_id: UserId, *, kind: CredentialKind, name: str, created_by: UserId,
         expires_at: _dt.datetime, now: _dt.datetime, key_hash: str | None = None,
         credential_id: CredentialId | None = None,
-    ) -> ProgramCredential:
+    ) -> ProgramCredential | None:
         check_credential_fields(kind=kind, key_hash=key_hash)
         row = ProgramCredential(
             id=credential_id or CredentialId.mint(),
@@ -299,7 +299,7 @@ class PostgresIdentityRepository:
                 raise DataRuleViolation(f"{program_id!r} is no program")
             if not (await s.execute(select(exists().where(
                     Membership.user_id == program_id, Membership.status == "active")))).scalar():
-                raise DataRuleViolation("the program has no active membership")
+                return None
             slots = (await s.execute(select(func.count()).select_from(ProgramCredential).where(
                 ProgramCredential.program_id == program_id,
                 or_((ProgramCredential.state == "live") & (ProgramCredential.expires_at > now),

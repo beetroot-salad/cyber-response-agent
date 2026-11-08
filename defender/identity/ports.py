@@ -136,10 +136,11 @@ class IdentityRepository(Protocol):
         self, program_id: UserId, *, kind: CredentialKind, name: str, created_by: UserId,
         expires_at: _dt.datetime, now: _dt.datetime, key_hash: str | None = None,
         credential_id: CredentialId | None = None,
-    ) -> ProgramCredential:
+    ) -> ProgramCredential | None:
         """A key (`live`, with its hash) or an OAuth client (`pending`, deadline `now` + 10 minutes, no hash).
-        Refused for a user that is no program, a program without an active membership, a key without its hash,
-        or when the program already has two credentials that are usable or pending within their deadline.
+        None, writing nothing, for a program without an active membership (removed: an answer, as for
+        `remove_program`). Refused for a user that is no program, a key without its hash, or when the program
+        already has two credentials that are usable or pending within their deadline.
         The id is minted unless given (a key's value holds its id, so the caller mints it first)."""
         ...
     async def go_live(self, credential_id: CredentialId, *, service_account_id: str, now: _dt.datetime) -> bool:

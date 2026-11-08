@@ -32,7 +32,7 @@ from .errors import (
 from . import roles
 from .memory import secret_hash, usable
 from .ports import ExpiryWarning, IdentityRepository, MailPort, ProgramsPort, SignInPort
-from .models import CredentialKind, Membership, ProgramCredential, Session, User
+from .models import CredentialKind, Membership, ProgramCredential, Session, User, postgres_text
 from .roles import Permission
 
 _logger = logging.getLogger(__name__)
@@ -567,8 +567,9 @@ class IdentityService:
     async def _program_of(self, tenant_id: TenantId, program_id: UserId) -> User:
         """The tenant's active program, else `NotFound`: another tenant's program, a person's id and a
         removed program all answer alike."""
-        program = next((u for u in await self._repo.programs_of_tenant(tenant_id) if u.id == program_id), None)
-        if program is None:
+        membership = await self._repo.active_membership(program_id, tenant_id)
+        program = None if membership is None else await self._repo.user(program_id)
+        if program is None or program.kind != "program":
             raise NotFound("no such program")
         return program
 
@@ -604,6 +605,10 @@ class IdentityService:
         name = name.strip()
         if not name:
             raise Invalid("a credential needs a name")
+        try:
+            postgres_text(name, "a credential's name")
+        except DataRuleViolation as e:
+            raise Invalid(str(e)) from e
         now = self._clock()
         if expires_at is None:
             expires_at = now + DEFAULT_CREDENTIAL_LIFETIME
@@ -615,8 +620,10 @@ class IdentityService:
             row = await self._repo.add_credential(
                 program_id, kind=kind, name=name, created_by=auth.user.id, expires_at=expires_at, now=now,
                 key_hash=None if key is None else secret_hash(key), credential_id=credential_id)
-        except DataRuleViolation as e:
-            raise Conflict("the program holds two credentials already, or was removed") from e
+        except DataRuleViolation as e:  # the name and the program were checked above: only the cap is left
+            raise Conflict("the program holds two credentials already") from e
+        if row is None:  # removed since it was looked up
+            raise NotFound("no such program")
         # `program_credential.create` is emitted at the write that made the credential usable (a key's insert,
         # an OAuth credential's `pending -> live`), before anything is read back (A8, W5).
         if key is not None:

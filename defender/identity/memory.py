@@ -373,13 +373,13 @@ class InMemoryIdentityRepository:
         self, program_id: UserId, *, kind: CredentialKind, name: str, created_by: UserId,
         expires_at: _dt.datetime, now: _dt.datetime, key_hash: str | None = None,
         credential_id: CredentialId | None = None,
-    ) -> ProgramCredential:
+    ) -> ProgramCredential | None:
         program = self._users.get(program_id)
         if program is None or program.kind != "program":
             raise DataRuleViolation(f"{program_id!r} is no program")
-        if not any(m.user_id == program_id and m.status == "active" for m in self._memberships.values()):
-            raise DataRuleViolation("the program has no active membership")
         check_credential_fields(kind=kind, key_hash=key_hash)
+        if not any(m.user_id == program_id and m.status == "active" for m in self._memberships.values()):
+            return None
         self._refuse_unknown_actor(created_by)
         if sum(holds_slot(r, now) for r in self._credentials.values() if r.program_id == program_id) >= CREDENTIAL_CAP:
             raise DataRuleViolation("the program already has two credentials in use or being made")

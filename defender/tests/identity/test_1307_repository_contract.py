@@ -5,7 +5,7 @@ Forced choices (FC-7, extending the support module's list; the design names no r
 `add_program(tenant_id, *, display_name, created_by, now) -> User`;
 `add_membership(..., role="admin")` (the seeder takes the role; people default `admin`);
 `add_credential(program_id, *, kind, name, created_by, expires_at, now, key_hash=None) -> row` (keys `live`; OAuth
-`pending` with `pending_deadline = now + 10 min`; over the cap, for a non-program, without an active membership, or
+`pending` with `pending_deadline = now + 10 min`; None, writing nothing, without an active membership; over the cap, for a non-program, or
 a key without its hash / an OAuth client with one -> `DataRuleViolation`);
 `go_live(credential_id, *, service_account_id, now) -> bool`; `revoke_credential(credential_id, *, revoked_by, now) -> bool`;
 `credentials_of_program(program_id)`; `credential_by_id(id)` / `credential_by_hash(key_hash)` -> row or None (any state);
@@ -276,13 +276,13 @@ async def test_pending_stays_pending_or_revoked_when_its_conditions_fail(seeded,
 
 
 async def test_no_credential_is_added_for_a_program_whose_membership_ended(seeded):
-    """Insert requires the program's membership to be active (one lock per program)."""
+    """Insert requires the program's membership to be active (one lock per program); without one the answer is None
+    and nothing is written (#1450 review: removed is an answer, so the service can say 404)."""
     admin = await _user(seeded)
     program = await _program(seeded, admin)
     membership = await seeded.active_membership(program.id, T1)
     await seeded.end_membership(membership.id, ended_by=admin.id, now=NOW)
-    with pytest.raises(DataRuleViolation):
-        await _add_key(seeded, program, admin, 1)
+    assert await _add_key(seeded, program, admin, 1) is None
     assert await seeded.credentials_of_program(program.id) == []
 
 
@@ -542,7 +542,7 @@ async def test_a_removal_and_a_credential_creation_for_one_program_are_ordered_b
     if first == "create":
         assert outcome["create"].state == "pending"
     else:
-        assert isinstance(outcome["create"], DataRuleViolation), outcome["create"]
+        assert outcome["create"] is None, outcome["create"]  # removed: an answer, not a refusal
     assert await one.active_membership(program.id, T1) is None
     assert {r.state for r in await one.credentials_of_program(program.id)} <= {"revoked"}
 
