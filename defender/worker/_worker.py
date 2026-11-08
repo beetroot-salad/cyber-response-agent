@@ -7,10 +7,10 @@ claim itself, must be `active` (#1342 r7 R7-1: no host lock is taken and the wor
 no holder, so a teardown never waits for it or signals it), the launch record (carrying the token)
 and alert file are written beside the run folder (the tenant's runs container must exist; the
 worker never makes it), the child is spawned from the event loop's thread in a session of its own
-with its output inherited, its exit awaited, a leftover box carrying the claim's token removed
-(the backstop), and the job-end record read for the stage. The task owns its child: however the
-row ends once the child exists (its exit, a stop, a fence, even mid-spawn), the child's process
-group is killed and the backstop runs (r7 D-ac).
+with its output inherited, its exit awaited, every container its process tree started removed
+(the sweep, by the child's claim label), and the job-end record read for the stage. The task owns
+its child: however the row ends once the child exists (its exit, a stop, a fence, even mid-spawn),
+the child's process group is killed and the sweep runs (r7 D-ac).
 
 A row belongs to the worker that keeps renewing its lease (B-P1) and stays its worker's until the
 last write for it lands (B-P2): the one end write (B4) is the terminal stage, or, if someone else
@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING, Any
 from defender import _log
 from defender.jobs import LearningProgress, is_outage, is_refusal
 from defender.jobs.audit import SYSTEM, announce
-from defender.box import CLAIM_ENV, Reaped, container_name
+from defender.box import CLAIM_ENV, container_name
 from defender.execution import kill_group
 from defender.records import job_facts, job_lane
 from defender.records.formats import DataRoot, digest_of
@@ -307,7 +307,7 @@ class Worker:
 
     async def serve(self) -> None:
         """Poll for queued rows at a fixed interval until SIGTERM or SIGINT, then stop: each child
-        gets SIGTERM, a child still alive after `stop_grace` has its group killed, the backstop
+        gets SIGTERM, a child still alive after `stop_grace` has its group killed, the sweep
         runs, and each row it ended is handed back (B11). A store fault is logged and the claim
         retried. Installs its own handlers and removes them on return."""
         loop = asyncio.get_running_loop()
@@ -442,7 +442,7 @@ class Worker:
 
     async def _stop(self) -> None:
         """The deliberate stop: no more claims, each child ended (`_end_child`), then wait for the
-        tasks: each runs its backstop and its last write, which for a row the stop ended is the
+        tasks: each runs its sweep and its last write, which for a row the stop ended is the
         hand-back (B11). Renewal keeps running meanwhile (the caller ends it)."""
         self._stopping = True
         self._stop_signal.set()
@@ -619,8 +619,8 @@ class Worker:
         if self._stopping:  # claimed as the stop landed: handed back with nothing launched or spent
             return End(None, 0.0, None)
         started = self._clock()
-        # This claim's box token (#1342 r5 C1): the child's box is stamped with it, and the
-        # backstop removes only a container that carries it.
+        # This claim's box token (#1342 r5 C1): the child's box is stamped with it, so the box's own
+        # start-fault cleanup removes only a container that carries it.
         token = uuid.uuid4().hex
         try:
             await self._write_launch(record, token, tenant_state)
@@ -635,10 +635,11 @@ class Worker:
                        0.0, None)
         launch = Launch(inv, tenant, os.getpid())
 
-        async def backstop() -> None:
-            await self._backstop(inv, token)
+        async def name_left() -> None:
+            await self._name_left(inv)
 
-        proc = await self._run_child(held, lambda: self._child_argv(launch), watch=self._cost_loop, cleanup=backstop)
+        proc = await self._run_child(held, lambda: self._child_argv(launch), watch=self._cost_loop,
+                                     after_sweep=name_left)
         if proc is None:
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR,
                               failure_message="the worker could not start the job's child process"), 0.0, None)
@@ -653,7 +654,7 @@ class Worker:
     async def _run_child(
         self, held: Held, argv: Callable[[], list[str]], *,
         watch: Callable[[Held], Coroutine[Any, Any, None]] | None = None,
-        cleanup: Callable[[], Awaitable[None]] | None = None,
+        after_sweep: Callable[[], Awaitable[None]] | None = None,
     ) -> asyncio.subprocess.Process | None:
         """Start the entry's child and wait for it to end, then run its cleanup; None when the
         child could not be started. `watch` runs beside the child (the cost or progress reads).
@@ -662,7 +663,8 @@ class Worker:
         Every child, of every kind, is handed a fresh claim (`box.CLAIM_ENV`): each box started
         anywhere in its process tree carries it, and once the child is gone every container
         carrying it is removed (`_sweep`), so nothing a killed or crashed child started is left
-        behind. `cleanup` is a kind's own step before that sweep (an investigation's backstop)."""
+        behind. `after_sweep` is a kind's own step after it (an investigation's check of its box's
+        name)."""
         what = _what(held)
         proc: asyncio.subprocess.Process | None = None
         watch_task: asyncio.Task[None] | None = None
@@ -693,9 +695,9 @@ class Worker:
                 # One cleanup however the row ended (r7 D-ac): whatever the child left running in
                 # its session dies with it, then its box, if it outlived it, is removed.
                 kill_group(proc.pid)
-                if cleanup is not None:
-                    await cleanup()
                 await self._sweep(what, claim)
+                if after_sweep is not None:
+                    await after_sweep()
         return proc
 
     async def _sweep(self, what: str, claim: str) -> None:
@@ -762,23 +764,19 @@ class Worker:
                 _logger.error("investigation %s: writing the launch files: %s", launch.investigation_id, fault)
                 raise _WorkerFault("the worker could not write the job's launch files") from None
 
-    async def _backstop(self, inv: str, token: str) -> None:
-        """Remove the run's box if it is still there and carries this claim's token; a container
-        under the name that is not this job's is left in place and logged. Never an error, never
-        the row's business."""
+    async def _name_left(self, inv: str) -> None:
+        """After the sweep removed every container the child's tree started, a container still
+        under the run box's name is not this job's: left in place and logged (r5 C1). Never an
+        error, never the row's business."""
         name = container_name(inv)
         try:
-            reaped = await asyncio.to_thread(self._containers.reap, name, token)
-        except Exception:  # noqa: BLE001 — the backstop is best effort
-            _logger.exception("investigation %s: the backstop could not remove %s", inv, name)
+            present = await asyncio.to_thread(self._containers.present, name)
+        except Exception:  # noqa: BLE001 — best effort
+            _logger.exception("investigation %s: could not ask whether %s is still there", inv, name)
             return
-        if reaped == Reaped.REMOVED:
-            _logger.info("investigation %s: its box %s outlived the child and was removed", inv, name)
-        elif reaped == Reaped.NOT_OURS:
-            _logger.warning("investigation %s: a container named %s is not this job's; left in place",
-                            inv, name)
-        elif reaped != Reaped.ABSENT:
-            _logger.error("investigation %s: the backstop's answer for %s was %r", inv, name, reaped)
+        if present:
+            _logger.warning("investigation %s: a container named %s is not this job's (the sweep of what its "
+                            "child started left it); left in place", inv, name)
 
     def _read_ending(self, record: Any, returncode: int) -> tuple[Ending, float | None, dict | None]:
         """The stage, cost and knowledge from the host records, through the job lane (in a thread).

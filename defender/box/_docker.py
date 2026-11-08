@@ -9,7 +9,6 @@ import os
 import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
-from enum import StrEnum
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -276,7 +275,7 @@ def _remove_container(docker: DockerFn, name: str) -> str | None:
     `rm -f` removes it. Never thaws the box to remove it (#1178). The one removal step every
     site uses: `stop_box` and both reaps. A container the daemon is already removing counts as
     gone, for every caller: its removal is under way (a run box, `--rm`, removing itself once it
-    stopped, #1343 B10, or a teardown racing a backstop), and a second `rm` cannot hasten it."""
+    stopped, #1343 B10, or a teardown racing a worker's sweep), and a second `rm` cannot hasten it."""
     argv = ["docker", "rm", "-f", name]
     first = _call(docker, argv)
     if first.returncode == 0:
@@ -285,7 +284,7 @@ def _remove_container(docker: DockerFn, name: str) -> str | None:
     second = _call(docker, argv)
     if second.returncode == 0:
         return None
-    # Removed by someone else meanwhile (a teardown racing a worker's backstop): it is gone.
+    # Removed by someone else meanwhile (a teardown racing a worker's sweep): it is gone.
     with contextlib.suppress(BoxFault):
         status = _container_status(docker, name)
         if status in (None, "removing"):
@@ -354,39 +353,10 @@ def _refuse_an_existing_container(docker: DockerFn, name: str) -> None:
     )
 
 
-class Reaped(StrEnum):
-    """What `reap_if_owned` did with a name: removed the container that carried the token,
-    found no container, or found one that is not the token's and left it."""
-
-    REMOVED = "removed"
-    ABSENT = "absent"
-    NOT_OURS = "not_ours"
-
-
-def reap_if_owned(docker: DockerFn, name: str, token: str) -> Reaped:
-    """Remove the container `name` only if its start-token label is `token` (#1342 r5 C1): a
-    caller outside the box that handed a start its token can clean up after it without ever
-    removing a container another start made under the same name (#1279 O6).
-
-    Absent is `ABSENT`; another token, or none, is `NOT_OURS` and is left in place. The removal
-    is `_remove_container`'s, the one every site uses. A daemon that cannot answer, or an owned
-    container that survives the forced removal even after waiting, is a `BoxFault`: never
-    `ABSENT`, never `REMOVED`."""
-    if _container_status(docker, name) is None:
-        return Reaped.ABSENT
-    held = _inspect_field(docker, name, f'{{{{index .Config.Labels "{START_TOKEN_LABEL}"}}}}')
-    if held is None:
-        # The name answered a moment ago: gone since, or the daemon stopped answering.
-        if _container_status(docker, name) is None:
-            return Reaped.ABSENT
-        raise BoxFault(f"docker could not say which start made the container {name}")
-    if not token or held != token:
-        return Reaped.NOT_OURS
-    reason = _remove_container(docker, name)
-    if reason is not None:
-        raise BoxFault(f"could not remove the container {name}, which carries this start's "
-                       f"token: {reason}")
-    return Reaped.REMOVED
+def container_present(name: str, *, docker: DockerFn = run_docker) -> bool:
+    """Whether a container holds the name `name`, in any state. A daemon that cannot answer is a
+    `BoxFault`, never "absent"."""
+    return _container_status(docker, name) is not None
 
 
 def _reap_on_fault(docker: DockerFn, name: str, *, owned_token: str | None = None) -> None:

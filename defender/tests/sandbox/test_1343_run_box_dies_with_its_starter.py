@@ -389,13 +389,13 @@ class _RemovingItself:
         return ok()
 
 
-def test_a_container_already_removing_itself_counts_as_removed_for_the_worker_backstop_and_the_tenant_teardown():
-    """Every removal site, not only the run box's teardown, reads a container the daemon is already removing as gone: the worker's token reap removes it, the tenant teardown reports nothing left. (#1343 review, B10)"""
-    from defender.box._docker import Reaped, reap_if_owned, remove_tenant_containers
+def test_a_container_already_removing_itself_counts_as_removed_for_the_worker_sweep_and_the_tenant_teardown():
+    """Every removal site, not only the run box's teardown, reads a container the daemon is already removing as gone: the worker's claim sweep reports nothing left, as the tenant teardown does. (#1343 review, B10; #1446 review: the sweep is the worker's one removal)"""
+    from defender.box._docker import remove_claimed_containers, remove_tenant_containers
 
     daemon = _RemovingItself("defender-run-x", "tok")
-    assert reap_if_owned(daemon, daemon.name, "tok") == Reaped.REMOVED
-    assert any(c[:3] == ["docker", "rm", "-f"] for c in daemon.calls), "premise: the reap tried to remove it"
+    assert remove_claimed_containers("ab" * 16, docker=daemon) is None
+    assert any(c[:3] == ["docker", "rm", "-f"] for c in daemon.calls), "premise: the sweep tried to remove it"
     assert remove_tenant_containers("t", docker=_RemovingItself("defender-run-y", "tok")) is None
 
 # ---- real daemon: the run box dies with its starter (runc here; CI's shards run it under runsc) ----

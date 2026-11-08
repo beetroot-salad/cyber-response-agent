@@ -300,9 +300,13 @@ CHILD_SCRIPT = textwrap.dedent("""
     if box:  # the box this child's start created: stamped with the token its launch record handed it, or another
         launch_token = json.loads((runs / f"{run_id}.launch.json").read_text(encoding="utf-8")).get("box_token") or ""
         stamp = {"launch": launch_token, "other": "f" * 32, "none": ""}[box["token"]]
-        planted = Path(box["dir"]) / f"defender-run-{run_id}"
+        # Its own start's box carries the claim its worker handed it; another start's carries none. A
+        # docker stand-in's box holds it as its third line; a `StandInContainers` one is filed under it.
+        claim = os.environ.get("DEFENDER_BOX_CLAIM", "") if box["token"] == "launch" else ""
+        folder = Path(box["dir"]) / "claims" / claim if claim and not box.get("state") else Path(box["dir"])
+        planted = folder / f"defender-run-{run_id}"
         planted.parent.mkdir(parents=True, exist_ok=True)
-        planted.write_text(f"{box['state']}\\n{stamp}" if box.get("state") else stamp, encoding="utf-8")
+        planted.write_text(f"{box['state']}\\n{stamp}\\n{claim}" if box.get("state") else stamp, encoding="utf-8")
     claimed = spec.get("claimed")
     if claimed:  # boxes this child's process tree started: each carries the claim its worker handed it
         folder = Path(claimed["dir"]) / "claims" / os.environ["DEFENDER_BOX_CLAIM"]
@@ -370,8 +374,9 @@ class ScriptedChild:
     printed: str | None = None
     die_by: int | None = None
     #: A box the child leaves behind, as a start would have made it: `box_dir` is where, `box_token`
-    #: whose (`launch`: the token its launch record carries; `other`: another claim's; `none`: no
-    #: token label), `box_state` the docker stand-in's state word (unset: a `StandInContainers` marker).
+    #: whose (`launch`: its own start's, stamped with its launch record's token and, as a
+    #: `StandInContainers` marker, carrying its claim; `other`: another start's; `none`: no token
+    #: label), `box_state` the docker stand-in's state word (unset: a `StandInContainers` marker).
     box_dir: Path | str | None = None
     box_token: str = "launch"
     box_state: str | None = None
@@ -444,18 +449,16 @@ class ScriptedChild:
 
 
 class StandInContainers:
-    """The worker's `containers` seam over marker files: a container exists while its file does, and
-    the file's text is the start token it carries (empty: no token label). `reap(name, token)` answers
-    `removed` (ours, now gone), `absent`, or `not_ours` (another or no token: left in place). Records
-    every call, with the token it was given. A container a child's process tree started carries its
-    claim: a marker file under `claims/<claim>/`, which `remove_claimed(claim)` removes, noting the
-    claim in `swept` (apart from `calls`, which holds the per-name reaps)."""
+    """The worker's `containers` seam over marker files. A container a child's process tree started carries its
+    claim: a marker file under `claims/<claim>/`, which `remove_claimed(claim)` removes, noting the claim in `swept`.
+    A container under a name with no claim (another start's, `plant`) is a file directly in `where`, which no sweep
+    removes. `present(name)` answers whether either holds the name, and is noted in `probed`."""
 
     def __init__(self, where: Path) -> None:
         self.where = where
         where.mkdir(parents=True, exist_ok=True)
-        self.calls: list[tuple[str, str, str]] = []
         self.swept: list[str] = []
+        self.probed: list[str] = []
 
     def claimed(self, claim: str) -> list[str]:
         """The containers still carrying `claim`."""
@@ -473,28 +476,22 @@ class StandInContainers:
         (self.where / name).write_text(token, encoding="utf-8")
 
     def held(self, name: str) -> bool:
-        return (self.where / name).exists()
+        return (self.where / name).exists() or any((self.where / "claims").glob(f"*/{name}"))
 
-    def reap(self, name: str, token: str) -> str:
-        self.calls.append(("reap", name, token))
-        path = self.where / name
-        if not path.exists():
-            return "absent"
-        if not token or path.read_text(encoding="utf-8") != token:
-            return "not_ours"
-        path.unlink()
-        return "removed"
-
-    def reaped(self, name: str) -> list[str]:
-        """The tokens `reap` was given for `name`, in call order."""
-        return [token for _kind, called, token in self.calls if called == name]
+    def present(self, name: str) -> bool:
+        self.probed.append(name)
+        return self.held(name)
 
 
 class FaultyContainers(StandInContainers):
-    """The stand-in containers whose `reap` raises: a daemon that cannot be asked or will not remove."""
+    """The stand-in containers whose every question raises: a daemon that cannot be asked or will not remove."""
 
-    def reap(self, name: str, token: str) -> str:
-        self.calls.append(("reap", name, token))
+    def present(self, name: str) -> bool:
+        self.probed.append(name)
+        raise RuntimeError("the container daemon cannot be asked")
+
+    def remove_claimed(self, claim: str) -> None:
+        self.swept.append(claim)
         raise RuntimeError("the container daemon cannot be asked")
 
 

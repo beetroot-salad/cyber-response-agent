@@ -42,9 +42,7 @@ VULTURE_ARGS = [
     "--min-confidence", "60",
     "--exclude", "defender/.venv,defender/tests,defender/skills/invlang/schema.py",
     # event_time is the alert mapping's entry in its wire model and its table: read through pydantic and SQLAlchemy.
-    # The five job reasons only the worker and store write are named in records/job_lane.py and
-    # written there as literals by code outside records/ (lint_run_records bars importing them).
-    "--ignore-names", "key_field,key_value,event_time,EXPIRED,EXITED_WITHOUT_RESULT,WORKER_ERROR,LEASE_LAPSED,RETRY_CAP",
+    "--ignore-names", "key_field,key_value,event_time",
     # pydantic calls its validators by decorator registration, never by name.
     "--ignore-decorators", "@field_validator,@model_validator",
 ]

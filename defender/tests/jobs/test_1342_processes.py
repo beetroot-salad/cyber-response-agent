@@ -133,6 +133,12 @@ def _blocking_config(dsn: str, root: Path, tmp_path: Path, t, *, stop_grace: flo
             "containers": str(containers), "stop_grace": stop_grace}
 
 
+def _box_of(containers: Path, inv: str) -> Path:
+    """The stand-in container the child's box start made for `inv`: filed under the claim its worker handed the child."""
+    [box] = containers.glob(f"claims/*/defender-run-{inv}")
+    return box
+
+
 def _blocked_child(marks: Path, proc: subprocess.Popen) -> int:
     _wait(lambda: (marks / "in-lifecycle").exists() or proc.poll() is not None, timeout=120,
           what="the child's lifecycle")
@@ -142,7 +148,7 @@ def _blocked_child(marks: Path, proc: subprocess.Popen) -> int:
 
 async def test_o7_killing_the_worker_ends_the_child_through_its_unwind_but_leaves_the_box(
         migrated_database, tmp_path):
-    """SIGKILL of the worker: the child exits via the parent-death signal and runs stop-box; the box is not removed (no backstop); the row stays `running`. (O7, M8)"""
+    """SIGKILL of the worker: the child exits via the parent-death signal and runs stop-box; the box is not removed (no sweep); the row stays `running`. (O7, M8)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     dsn, root = migrated_database, tmp_path / "data"
@@ -153,9 +159,9 @@ async def test_o7_killing_the_worker_ends_the_child_through_its_unwind_but_leave
             alert = await an_alert(store, t.tenant_id)
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
         config = _blocking_config(dsn, root, tmp_path, t)
-        box = tmp_path / "containers" / f"defender-run-{inv.investigation_id}"  # the child's box start makes it
         with worker_process(tmp_path, config) as proc:
             child_pid = _blocked_child(tmp_path / "marks", proc)
+            box = _box_of(tmp_path / "containers", inv.investigation_id)  # the child's box start made it
             assert box.is_file(), "premise: the child's box start left its stand-in container"
             proc.kill()
             proc.wait(timeout=60)
@@ -168,7 +174,7 @@ async def test_o7_killing_the_worker_ends_the_child_through_its_unwind_but_leave
 
 async def test_o7_stopping_the_worker_terminates_the_child_removes_the_box_and_leaves_the_row(
         migrated_database, tmp_path):
-    """SIGTERM to the worker: SIGTERM to the child, stop-box runs, the backstop removes the box stamped with the claim's token, the row stays `running`. (O7, M8, D3, r5 C1)"""
+    """SIGTERM to the worker: SIGTERM to the child, stop-box runs, the sweep removes the box carrying the child's claim, the row stays `running`. (O7, M8, D3, r5 C1)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     dsn, root = migrated_database, tmp_path / "data"
@@ -179,9 +185,9 @@ async def test_o7_stopping_the_worker_terminates_the_child_removes_the_box_and_l
             alert = await an_alert(store, t.tenant_id)
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
         config = _blocking_config(dsn, root, tmp_path, t)
-        box = tmp_path / "containers" / f"defender-run-{inv.investigation_id}"  # the child's box start makes it
         with worker_process(tmp_path, config) as proc:
             child_pid = _blocked_child(tmp_path / "marks", proc)
+            box = _box_of(tmp_path / "containers", inv.investigation_id)  # the child's box start made it
             token = json.loads((root / t.tenant_id / "runs" / f"{inv.investigation_id}.launch.json").read_text(
                 encoding="utf-8"))["box_token"]
             assert box.read_text(encoding="utf-8") == token == (tmp_path / "marks" / "start-token").read_text(
@@ -191,7 +197,7 @@ async def test_o7_stopping_the_worker_terminates_the_child_removes_the_box_and_l
 
     _wait(lambda: _gone(child_pid), timeout=30, what="the child to exit")
     assert (tmp_path / "marks" / "stop-box").exists(), "the child's box teardown did not run"
-    assert not box.exists(), "the backstop left the box"
+    assert not box.exists(), "the sweep left the box"
     assert row(dsn, inv.investigation_id)["stage"] == "running"
 
 
@@ -204,7 +210,7 @@ def _scripted_config(dsn: str, root: Path, runs: Path, tmp_path: Path, **options
 @pytest.mark.parametrize("stop", [signal.SIGTERM, signal.SIGINT])
 async def test_o7_a_deliberate_stop_sends_sigterm_to_every_child_and_writes_no_row(
         migrated_database, tmp_path, stop):
-    """SIGTERM or SIGINT to the worker: each of two children gets SIGTERM, backstops run (each box carries its own claim's token), both rows stay `running`. (O7, D3, r5 C1)"""
+    """SIGTERM or SIGINT to the worker: each of two children gets SIGTERM, the sweeps run (each box carries its own child's claim and claim's token), both rows stay `running`. (O7, D3, r5 C1)"""
     dsn, root = migrated_database, tmp_path / "data"
     register_tenant(dsn, T1)
     runs = root / T1 / "runs"
@@ -222,10 +228,11 @@ async def test_o7_a_deliberate_stop_sends_sigterm_to_every_child_and_writes_no_r
         with worker_process(tmp_path, config) as proc:
             seen = tmp_path / "child" / "seen"
             _wait(lambda: len(list(seen.glob("*.json"))) == 2, timeout=60, what="both children")
-            boxes = {i: containers / f"defender-run-{i}" for i in ids}
-            for i, box in boxes.items():  # the stand-in is planted after `seen`: signal only once both exist
-                _wait(lambda b=box: b.is_file() and b.read_text(encoding="utf-8") != "", timeout=30,
-                      what="the child's box")
+            for i in ids:  # the stand-in is planted after `seen`: signal only once both exist
+                _wait(lambda i=i: list(containers.glob(f"claims/*/defender-run-{i}")), timeout=30, what="the child's box")
+            boxes = {i: _box_of(containers, i) for i in ids}
+            for i, box in boxes.items():
+                _wait(lambda b=box: b.read_text(encoding="utf-8") != "", timeout=30, what="the child's box token")
                 launch = json.loads((runs / f"{i}.launch.json").read_text(encoding="utf-8"))
                 assert box.read_text(encoding="utf-8") == launch["box_token"], "the box carries another claim's token"
             assert len({b.read_text(encoding="utf-8") for b in boxes.values()}) == 2
@@ -234,7 +241,7 @@ async def test_o7_a_deliberate_stop_sends_sigterm_to_every_child_and_writes_no_r
 
     for i in ids:
         _wait(lambda i=i: (tmp_path / f"termed-{i}").exists(), timeout=30, what="the child's SIGTERM")
-        assert not (containers / f"defender-run-{i}").exists(), "the backstop left a box"
+        assert not boxes[i].exists(), "the sweep left a box"
         assert row(dsn, i)["stage"] == "running"
 
 
@@ -248,7 +255,6 @@ async def test_o7_a_child_that_ignores_sigterm_is_group_killed_after_the_grace(m
     async with job_store(dsn) as store:
         alert = await an_alert(store, T1)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
-    box = tmp_path / "containers" / f"defender-run-{inv.investigation_id}"  # the child's box start makes it
     config = _scripted_config(dsn, root, runs, tmp_path, term="ignore", grandchild=True,
                               box_dir=str(tmp_path / "containers"))
     with worker_process(tmp_path, config) as proc:
@@ -257,7 +263,9 @@ async def test_o7_a_child_that_ignores_sigterm_is_group_killed_after_the_grace(m
         record = json.loads(next(seen.glob("*.json")).read_text(encoding="utf-8"))
         child_pid, grandchild_pid = record["pid"], record["grandchild"]
         assert grandchild_pid
-        _wait(box.is_file, timeout=30, what="the child's box")
+        _wait(lambda: list((tmp_path / "containers").glob(f"claims/*/defender-run-{inv.investigation_id}")),
+              timeout=30, what="the child's box")
+        box = _box_of(tmp_path / "containers", inv.investigation_id)  # the child's box start made it, under its claim
         started = time.monotonic()
         proc.send_signal(signal.SIGTERM)
         time.sleep(0.5)
