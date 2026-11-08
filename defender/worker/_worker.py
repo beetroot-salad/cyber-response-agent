@@ -186,6 +186,7 @@ class Worker:
         self._held: dict[str, Held] = {}
         self._stopping = False
         self._stop_signal = asyncio.Event()
+        self._takeover: asyncio.Task[None] | None = None  # serving only; a stop ends it first
         # Store writes that are failing now: claims wait for them all to recover (B5, r5 item 14).
         self._renewal_failing = False
         self._end_failing: set[str] = set()
@@ -227,8 +228,8 @@ class Worker:
         for every task; a store fault is raised. Serving, a store fault is logged and retried,
         and the stop is the deliberate one (`_stop`). However the loop leaves by an exception
         (a store fault, a cancellation), it stops as a deliberate stop does (`_leave`). The
-        renewal (and, serving, the take-over) run beside the loop until every row's last write
-        has landed."""
+        renewal runs beside the loop until every row's last write has landed; serving, the
+        take-over runs beside it until a stop begins (`_stop`)."""
         services = self._start_services(takeover=stop is not None)
         wake = asyncio.Event()
         try:
@@ -259,7 +260,8 @@ class Worker:
     def _start_services(self, *, takeover: bool) -> list[asyncio.Task[None]]:
         services = [asyncio.create_task(self._renewal_loop())]
         if takeover:
-            services.append(asyncio.create_task(self._takeover_loop()))
+            self._takeover = asyncio.create_task(self._takeover_loop())
+            services.append(self._takeover)
         return services
 
     def _writes_failing(self) -> bool:
@@ -313,11 +315,16 @@ class Worker:
         return [h for h in self._held.values() if h.proc is not None and h.proc.returncode is None]
 
     async def _stop(self) -> None:
-        """The deliberate stop: no more claims, each child ended (`_end_child`), then wait for the
-        tasks: each runs its backstop and its last write, which for a row the stop ended is the
-        hand-back (B11). Renewal keeps running meanwhile (the caller ends it)."""
+        """The deliberate stop, in order: no more claims and no more take-over (a pass under way
+        is cancelled and waited for), each child ended (`_end_child`), then wait for the tasks:
+        each runs its backstop and its last write, which for a row the stop ended is the hand-back
+        (B11). A hand-back lapses the row's lease and the row leaves `_held`, so a take-over still
+        running here would take this worker's own rows over; other workers' passes retry them.
+        Renewal keeps running meanwhile (the caller ends it)."""
         self._stopping = True
         self._stop_signal.set()
+        if self._takeover is not None:
+            await _end_tasks([self._takeover])
         await asyncio.gather(*(self._end_child(h, by_stop=True) for h in self._children()))
         if self._tasks:
             await asyncio.wait(set(self._tasks))
@@ -411,7 +418,7 @@ class Worker:
     async def _takeover_loop(self) -> None:
         """Every `takeover_interval`, take over every lapsed row this worker does not hold (B7),
         unless this worker's own store calls hit an outage within the last lease. A pass that
-        raises is logged; the next tick tries again."""
+        raises is logged; the next tick tries again. Serving only, until a stop begins."""
         while True:
             if self._store_settled():
                 try:

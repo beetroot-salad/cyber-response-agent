@@ -528,7 +528,8 @@ until its last write lands: it writes the terminal stage, or — if cancel or a 
 row — its own final cost and knowledge, once. `cost_usd` is cost so far (copied about every 15 s) until
 then. A stopping worker hands its rows back (lease lapsed, final cost) so they are retried within seconds,
 except a row whose run had already decided its ending (a report committed, or setup refused): that ending
-is recorded. A last write whose value the database refuses is written again with less (the knowledge as
+is recorded. A stopping worker takes nothing over from the moment its stop begins, so it never takes over
+the rows it is handing back; other workers' take-over retries them. A last write whose value the database refuses is written again with less (the knowledge as
 unreadable, then a bare `worker_error`), rather than dropped into a re-run.
 A cancelled or taken-over row's worker finds out at its next renewal and ends its child. Until that child
 has ended, a new run of the same alert can already be working beside it: accepted, since a repeat is safe.

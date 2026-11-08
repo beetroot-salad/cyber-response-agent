@@ -4020,6 +4020,49 @@ async def test_b11_a_stop_is_bounded_by_one_stop_grace_however_many_children_ign
         _handed_back(dsn, i)
 
 
+class _SlowSecondHandBack:
+    """The real store, except that every hand-back after the first waits `delay` first, so take-over passes run between them."""
+
+    def __init__(self, store, delay: float) -> None:
+        self._store, self._delay = store, delay
+        self.handed: list[str] = []
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def hand_back(self, tenant_id, investigation_id, **kw):
+        if self.handed:
+            await asyncio.sleep(self._delay)
+        self.handed.append(investigation_id)
+        return await self._store.hand_back(tenant_id, investigation_id, **kw)
+
+
+async def test_b11_a_stopping_worker_takes_none_of_its_own_handed_back_rows_over(world, caplog):
+    """A stop hands two rows back with many take-over intervals between the two hand-backs: the stopping worker takes over neither (it stops taking over when its stop begins; other workers' passes retry them), so both stay handed back. (B11, B7)"""
+    caplog.set_level(logging.INFO, logger="defender.jobs.audit")
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release)
+    dsn = world["dsn"]
+    async with job_store(dsn) as inner:
+        store = _SlowSecondHandBack(inner, delay=20 * _FAST["takeover_interval"])
+        invs = [await _queued(inner, ticket=f"T-{n}", key=f"k{n}") for n in range(2)]
+        serving = asyncio.create_task(_worker(world, store, child, slots=2, **_FAST).serve())
+        try:
+            await _until(lambda: all(child.seen(i) for i in invs), "both children")
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+        finally:
+            release.touch()
+            for i in invs:
+                _kill_whatever_remains(child.seen(i))
+            await _stop_all(serving)
+    assert sorted(store.handed) == sorted(invs), f"premise: both rows were handed back: {store.handed}"
+    taken = [r.getMessage() for r in caplog.records if "investigation.takeover" in r.getMessage()]
+    assert not taken, f"the stopping worker took a row over: {taken}"
+    for i in invs:
+        _handed_back(dsn, i)
+
+
 # --- #1343 review: a second cancel while stopping, and a renewal that races a row's own end ---------------------
 
 async def test_b11_a_second_cancel_while_the_worker_stops_kills_every_child_at_once_and_leaves_none_behind(world):
