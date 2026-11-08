@@ -172,10 +172,9 @@ def _send(s: Soar, method: str, path: str, authorization: str | None, cookie: st
 
 def test_authorization_present_means_the_bearer_path_in_both_layers_whatever_its_value() -> None:
     """Over every header-legal `Authorization` value (absent, empty, whitespace, any scheme, any credential) and every
-    cookie state: with a `Cookie` header the request is never authenticated by bearer or by cookie (401; a write with no
-    frontend Origin is the origin layer's 403, which comes first), and without one a header, whatever its value, is the
-    bearer path alone: a write with no Origin passes the origin layer and authentication decides (401 or served); with no
-    header the cookie decides (O1, O9, D2, A4)."""
+    cookie state: a header, whatever its value and whatever cookie is beside it, is the bearer path alone: a write with
+    no Origin passes the origin layer and authentication decides (401 or served); with no header the cookie decides, a
+    write without the frontend Origin being the origin layer's 403 (O1, O9, A4; P-F as amended in the #1450 review)."""
     s = soar()
     read, write = f"/tenants/{T1}/alerts", f"/tenants/{T1}/investigations"
     count = itertools.count()
@@ -194,39 +193,31 @@ def test_authorization_present_means_the_bearer_path_in_both_layers_whatever_its
     values: list[tuple[str | None, str]] = [(None, "absent"), *_authorization_values(s.key)]
     for (cookie, cookie_kind), (authorization, kind) in itertools.product(_cookie_states(s), values):
         what = f"Authorization={authorization!r} Cookie={cookie_kind}"
-        if kind == "ambiguous" and cookie is None:  # with a Cookie header every value is refused, however it parses
+        if kind == "ambiguous":
             continue
-        if cookie is not None:  # a Cookie header at all: the origin rule applies, and nothing is authenticated twice
-            expect(f"{what} write without Origin", post(authorization, cookie, None), {403})
-            if authorization is not None:
-                expect(f"{what} read", _send(s, "GET", read, authorization, cookie, None), {401})
-                expect(f"{what} write with Origin", post(authorization, cookie, FRONTEND_ORIGIN), {401})
-            elif cookie_kind == "session":
-                expect(f"{what} read", _send(s, "GET", read, None, cookie, None), served)
-                expect(f"{what} write with Origin", post(None, cookie, FRONTEND_ORIGIN), served)
-            else:  # no header and no session: refused
-                expect(f"{what} read", _send(s, "GET", read, None, cookie, None), {401})
-                expect(f"{what} write with Origin", post(None, cookie, FRONTEND_ORIGIN), {401})
-        elif authorization is None:  # nothing at all: the origin layer refuses a write without Origin; reads and writes with one are 401
-            expect(f"{what} write without Origin", post(None, None, None), {403})
-            expect(f"{what} read", _send(s, "GET", read, None, None, None), {401})
-            expect(f"{what} write with Origin", post(None, None, FRONTEND_ORIGIN), {401})
-        else:  # a header and no Cookie header: bearer path alone; the origin layer lets it pass whatever the value
+        if authorization is not None:  # the bearer path alone; the origin layer lets it pass, the cookie is not read
             want = served if kind == "valid" else {401}
-            expect(f"{what} read", _send(s, "GET", read, authorization, None, None), want)
-            expect(f"{what} write without Origin", post(authorization, None, None), want)
-            expect(f"{what} write with a foreign Origin", post(authorization, None, "https://evil.example"), want)
+            expect(f"{what} read", _send(s, "GET", read, authorization, cookie, None), want)
+            expect(f"{what} write without Origin", post(authorization, cookie, None), want)
+            expect(f"{what} write with a foreign Origin", post(authorization, cookie, "https://evil.example"), want)
+        else:  # no header: the cookie decides, and the origin rule applies to writes
+            want = served if cookie_kind == "session" else {401}
+            expect(f"{what} write without Origin", post(None, cookie, None), {403})
+            expect(f"{what} read", _send(s, "GET", read, None, cookie, None), want)
+            expect(f"{what} write with Origin", post(None, cookie, FRONTEND_ORIGIN), want)
     assert failures == []
     assert next(count) > 500  # control: the generated space was walked, not a handful of values
 
 
 @pytest.mark.parametrize("route", ROUTES, ids=route_id)
-def test_an_authorization_header_of_any_kind_with_a_cookie_is_401_on_every_authenticating_route(route: tuple[str, str]) -> None:
+def test_an_unusable_authorization_header_beside_a_session_cookie_is_401_on_every_authenticating_route(
+        route: tuple[str, str]) -> None:
     """The route census against the values the contract's own sample missed: an empty or whitespace `Authorization` beside a
-    real session cookie is still a request that carries both, so 401 on every route that authenticates (O1, P-F, D2, A4)."""
+    real session cookie is still the bearer path, so 401 on every route that authenticates; the cookie is not tried
+    instead (O1, P-F, A4)."""
     s = soar()
     cookie = f"{SESSION_COOKIE}={s.ann.cookies.get(SESSION_COOKIE)}"
-    for value in ("", " ", "\t", "Bearer", "Bearer ", f"Bearer {s.key}"):
+    for value in ("", " ", "\t", "Bearer", "Bearer "):
         got = s.world.client(origin=FRONTEND_ORIGIN).request(
             route[0], concrete(route[1]), headers={"Authorization": value, "Cookie": cookie}).status_code
         assert got == 401, (value, got)

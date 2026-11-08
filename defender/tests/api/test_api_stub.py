@@ -468,11 +468,13 @@ def test_every_route_refuses_a_caller_without_a_known_session_cookie(
     route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
     headers: dict[str, str],
 ) -> None:
-    """No, unknown, or Bearer-carried session → 401, no port, no Bearer challenge."""
+    """No, unknown, or Bearer-carried session → 401, no port; no Bearer challenge unless the request came with an
+    `Authorization` header (#1307: then it is the programs' way in, challenged as RFC 6750 says)."""
     api = Api(**answers)
     response = api.client.request(route[0], path, headers=headers, json=body)
     assert response.status_code == 401
-    assert "Bearer" not in response.headers.get("WWW-Authenticate", "")
+    if "Authorization" not in headers:
+        assert "WWW-Authenticate" not in response.headers
     assert api.ports.calls == []
     assert api.ports.transactions == []
 

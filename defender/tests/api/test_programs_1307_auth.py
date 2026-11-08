@@ -168,19 +168,25 @@ def test_a_person_user_id_is_not_a_bearer_identity() -> None:
 
 
 @pytest.mark.parametrize("route", ROUTES, ids=route_id)
-def test_a_cookie_and_an_authorization_header_together_are_refused_on_every_authenticating_route(
+def test_a_cookie_beside_an_authorization_header_changes_nothing_on_every_authenticating_route(
         route: tuple[str, str]) -> None:
-    """Cookie + any `Authorization` -> 401 by no precedence; each alone does not (O1, P-F, D2)."""
+    """Any `Authorization` header decides alone and the cookie is never read: a key or token answers as it does
+    alone, with the person's session cookie or any other cookie beside it; a bad header is 401 even beside a good
+    session (O1, P-F as amended in the #1450 review: a load balancer's cookie must not lock a program out)."""
     s = soar()
     credential = issue_oauth(s.ann, T1, s.program_id)
     token = s.world.realm.issue(credential)
-    cookie = _cookie(s)
-    for value in (f"Bearer {s.key}", f"Bearer {token}", "Bearer garbage", f"Basic {s.key}"):
+    for value in (f"Bearer {s.key}", f"Bearer {token}"):
+        alone = _send(s.world.bearer(value.removeprefix("Bearer ")), route)
+        assert alone.status_code != 401, value  # control: the credential alone
+        for cookie in (_cookie(s), "AWSALB=sticky; analytics=1"):
+            beside = _send(s.world.client(origin=FRONTEND_ORIGIN), route, Cookie=cookie, Authorization=value)
+            assert beside.status_code == alone.status_code, (value, cookie)
+            assert EXPIRY_HEADER in beside.headers  # authenticated as the program, not the person
+    for value in ("Bearer garbage", f"Basic {s.key}"):
         both = s.world.client(origin=FRONTEND_ORIGIN)
-        assert _send(both, route, Cookie=cookie, Authorization=value).status_code == 401, value
-    assert _send(s.world.bearer(s.key), route).status_code != 401  # control: the key alone
-    assert _send(s.world.bearer(token), route).status_code != 401  # control: the token alone
-    assert _send(s.world.client(), route, Cookie=cookie).status_code != 401  # control: the cookie alone
+        assert _send(both, route, Cookie=_cookie(s), Authorization=value).status_code == 401, value
+    assert _send(s.world.client(), route, Cookie=_cookie(s)).status_code != 401  # control: the cookie alone
 
 
 @pytest.mark.parametrize("route", ROUTES, ids=route_id)
@@ -228,17 +234,17 @@ def _origin_case(s: Soar, authorization: str | None, cookie: str | None, origin:
     pytest.param(None, "session", None, 403, 0, id="cookie-no-origin"),
     pytest.param(None, "session", EVIL, 403, 0, id="cookie-foreign-origin"),
     pytest.param(None, None, None, 403, 0, id="nothing-no-origin"),
-    pytest.param("key", "session", None, 403, 0, id="both-no-origin-origin-layer-first"),
-    pytest.param("garbage", "session", None, 403, 0, id="garbage-and-cookie-no-origin"),
-    pytest.param("key", "other", None, 403, 0, id="bearer-and-any-cookie-no-origin"),
-    pytest.param("key", "session", FRONTEND_ORIGIN, 401, 0, id="both-frontend-origin-401"),
-    pytest.param("key", "other", FRONTEND_ORIGIN, 401, 0, id="bearer-and-any-cookie-frontend-origin-401"),
+    pytest.param("key", "session", None, 201, 1, id="bearer-beside-session-no-origin"),
+    pytest.param("garbage", "session", None, 401, 0, id="garbage-beside-session-passes-origin-then-401"),
+    pytest.param("key", "other", None, 201, 1, id="bearer-beside-any-cookie-no-origin"),
+    pytest.param("key", "session", FRONTEND_ORIGIN, 201, 1, id="bearer-beside-session-frontend-origin"),
+    pytest.param("key", "other", EVIL, 201, 1, id="bearer-beside-any-cookie-foreign-origin"),
     pytest.param("basic", None, None, 401, 0, id="non-bearer-scheme-passes-origin-then-401"),
     pytest.param("empty", None, None, 401, 0, id="empty-authorization-passes-origin-then-401"),
 ])
 def test_the_origin_rule_applies_to_cookie_requests_and_runs_before_authentication(
         authorization: str | None, cookie: str | None, origin: str | None, expected: int, started: int) -> None:
-    """Writes: Authorization with no Cookie header at all is exempt (O9); a Cookie header keeps the rule (D2)."""
+    """Writes: any Authorization header is exempt, cookies or not; without one the rule holds (O9, P-F as amended)."""
     s = soar()
     auth_value = {None: None, "key": f"Bearer {s.key}", "garbage": "Bearer garbage", "basic": f"Basic {s.key}",
                   "empty": ""}[authorization]
@@ -278,7 +284,7 @@ def test_the_expiry_header_is_on_successes_and_on_403_404_and_422_alike() -> Non
 
 
 def test_the_expiry_header_is_absent_when_no_credential_verified() -> None:
-    """401 for a bad key, a bad token, a cookie beside a key, an expired key, a removed program: no header (D9)."""
+    """401 for a bad key, a bad token, a non-Bearer scheme, an expired key, a removed program: no header (D9)."""
     s = soar()
     short = s.world.clock() + 7 * DAY
     _, soon = issue_key(s.ann, T1, s.program_id, name="soon", expires_at=short)
@@ -289,7 +295,7 @@ def test_the_expiry_header_is_absent_when_no_credential_verified() -> None:
     refused = [
         s.world.bearer(s.key[:-1] + "x").get("/me"),
         s.world.bearer("eyJ.not-issued.sig").get("/me"),
-        s.world.client(origin=FRONTEND_ORIGIN).get("/me", headers={"Cookie": _cookie(s), "Authorization": f"Bearer {s.key}"}),
+        s.world.client(origin=FRONTEND_ORIGIN).get("/me", headers={"Cookie": _cookie(s), "Authorization": f"Basic {s.key}"}),
         s.world.bearer(gone_key).get("/me"),
     ]
     s.world.clock.advance(7 * DAY)
@@ -392,3 +398,30 @@ def test_a_program_is_not_listed_or_removable_as_a_member() -> None:
     assert s.ann.delete(f"/tenants/{T1}/members/{s.program_id}").status_code == 404
     assert s.program().get(f"/tenants/{T1}/alerts").status_code == 200
     assert s.ann.delete(f"/tenants/{T1}/members/{user_id(other)}").status_code == 204  # control: a person goes
+
+
+# --- the challenge on a 401 ------------------------------------------------------------------------
+
+def test_a_401_to_a_bearer_request_challenges_bearer_and_one_without_offers_nothing() -> None:
+    """RFC 6750: a presented token that fails is `invalid_token`, so an OAuth client fetches a new one; a header
+    that presents no token gets a bare `Bearer`; no `Authorization` header (a browser) is offered no challenge."""
+    s = soar()
+    credential = issue_oauth(s.ann, T1, s.program_id)
+    token = s.world.realm.issue(credential)
+    assert s.world.bearer(token).get("/me").status_code == 200  # control
+    assert s.ann.delete(f"/tenants/{T1}/programs/{s.program_id}/credentials/{credential}").status_code == 204
+    challenged = {
+        "revoked-token": s.world.bearer(token).get("/me"),
+        "unknown-key": s.world.bearer(s.key[:-1] + "x").get("/me"),
+        "beside-a-cookie": s.world.client().get("/me", headers={"Authorization": "Bearer garbage", "Cookie": _cookie(s)}),
+    }
+    for case, response in challenged.items():
+        assert response.status_code == 401, case
+        assert response.headers["www-authenticate"] == 'Bearer error="invalid_token"', case
+    for value in (f"Basic {s.key}", "Bearer", ""):
+        response = s.world.client().get("/me", headers={"Authorization": value})
+        assert (response.status_code, response.headers["www-authenticate"]) == (401, "Bearer"), value
+    for browser in (s.world.client(), s.world.client_with_cookie("no-such-session")):
+        response = browser.get("/me")
+        assert response.status_code == 401
+        assert "www-authenticate" not in response.headers

@@ -100,20 +100,21 @@ _CALLER_SCOPE_KEY = "defender.caller"
 EXPIRY_HEADER = "Defender-Credential-Expires"
 
 
-def _way_in(headers: Headers) -> Literal["session", "bearer", "both"]:
-    """How a request offers to be authenticated (P-F). The one place that tests "an `Authorization` header is
-    present (whatever it holds, even nothing) and there is no `Cookie` header at all": the origin layer and the
-    authentication both ask it, so they cannot disagree (#1307 A4). No `Authorization` header is the session
-    cookie's way; with a `Cookie` header as well it is `both`, which nothing authenticates."""
-    if "authorization" not in headers:
-        return "session"
-    return "both" if "cookie" in headers else "bearer"
+def _way_in(headers: Headers) -> Literal["session", "bearer"]:
+    """How a request offers to be authenticated (P-F): an `Authorization` header present (whatever it holds, even
+    nothing) is `bearer`, and the cookie is then never read; no `Authorization` header is the session cookie's
+    way. The origin layer and the authentication both ask it, so they cannot disagree (#1307 A4). A cookie beside
+    the header changes nothing: a load balancer's or a cookie jar's cookie must not lock a program out, and a
+    browser cannot be made to send an `Authorization` header to another site, so such a request is not forged
+    (#1450 review, amending P-F's "both is refused")."""
+    return "bearer" if "authorization" in headers else "session"
 
 
 class _FrontendOriginOnly:
     """A request that changes state must come from the configured frontend (O6), unless it is a `bearer`
-    request (see `_way_in`): a browser attaches cookies by itself, so only a request with a cookie can be
-    forged from another site (#1307 D2, O9). A layer in front of routing,
+    request (see `_way_in`): a browser attaches cookies by itself but never an `Authorization` header it was
+    not told to (a cached Basic login is the one it adds, and no Basic header authenticates), so only a request
+    authenticated by its cookie can be forged from another site (#1307 O9). A layer in front of routing,
     so it answers before the session is looked at or the body is read: a forged request learns
     nothing, not even whether its body would have parsed."""
 
@@ -166,6 +167,18 @@ async def _server_error(request: Request, exc: Exception) -> Response:
     return response
 
 
+async def _not_authenticated(request: Request, exc: Exception) -> Response:
+    """The 401. A request that came the bearer way (see `_way_in`) is challenged as RFC 6750 says, so an OAuth
+    client knows to fetch a new token; one that came with the session cookie, or with nothing, is not: a session
+    has no challenge to offer, and a browser must not be invited to try Bearer."""
+    response = problem(status.HTTP_401_UNAUTHORIZED, str(exc))
+    if _way_in(request.headers) == "bearer":
+        scheme, _, value = request.headers["authorization"].partition(" ")
+        presented = scheme.lower() == "bearer" and value.strip()
+        response.headers["WWW-Authenticate"] = 'Bearer error="invalid_token"' if presented else "Bearer"
+    return response
+
+
 def _declares(what: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Mark a dependency as the declaration a route owes (P-H): a permission, or a category outside the
     tenant (`public`, `person`, `any`, `platform`). `undeclared_routes` finds the routes without one."""
@@ -177,12 +190,12 @@ def _declares(what: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
 
 async def _credentialed(request: Request, deps: ApiDeps) -> Authenticated:
     """The caller, by exactly one way in (`_way_in`): a session cookie (a person) or `Authorization: Bearer` (a
-    program). Both together, or an unusable header, is not authenticated: no precedence between them."""
+    program). An unusable header is not authenticated, and the cookie is not tried instead."""
     way = _way_in(request.headers)
     if way == "session":
         return await deps.identity.authenticate(request.cookies.get(SESSION_COOKIE))
     scheme, _, value = request.headers["authorization"].partition(" ")
-    if way == "both" or scheme.lower() != "bearer" or not value.strip():
+    if scheme.lower() != "bearer" or not value.strip():
         raise _identity.NotAuthenticated("sign in")
     caller = await deps.identity.authenticate_bearer(value.strip())
     assert caller.credential is not None
@@ -958,9 +971,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_exception_handler(Conflict, refusal(status.HTTP_409_CONFLICT))
     # The literal, not starlette's constant: it was renamed across starlette releases.
     app.add_exception_handler(UnknownReference, refusal(422))
-    # Unlike the data ports' refusals, none of these answers carries a `WWW-Authenticate`: a
-    # session cookie has no challenge to offer.
-    app.add_exception_handler(_identity.NotAuthenticated, refusal(status.HTTP_401_UNAUTHORIZED))
+    app.add_exception_handler(_identity.NotAuthenticated, _not_authenticated)
     app.add_exception_handler(_identity.Forbidden, refusal(status.HTTP_403_FORBIDDEN))
     app.add_exception_handler(_identity.NotFound, refusal(status.HTTP_404_NOT_FOUND))
     app.add_exception_handler(_identity.Conflict, refusal(status.HTTP_409_CONFLICT))
