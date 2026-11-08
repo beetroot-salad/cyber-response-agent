@@ -14,13 +14,15 @@ if TYPE_CHECKING:
         run_sync as run_sync,
     )
     from defender.execution._process_group import (
+        end_group as end_group,
+        group_running as group_running,
         kill_group as kill_group,
     )
 
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
     **dict.fromkeys(("run_sync",), "_async"),
-    **dict.fromkeys(("kill_group",), "_process_group"),
+    **dict.fromkeys(("end_group", "group_running", "kill_group"), "_process_group"),
 }
 
 

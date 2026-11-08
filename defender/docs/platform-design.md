@@ -523,7 +523,9 @@ nothing in the database names a worker or a machine. Every worker runs take-over
 `running` row whose lease (database clock) has lapsed and that the worker does not itself hold is failed
 (`lease_lapsed`) and its retry queued in the same transaction (attempt + 1; at attempt 3, `retry_cap` and
 no retry). Take-over reads no disk and reaches no machine: everything a run starts dies with the process
-that started it (worker → child → box), so there is nothing to stop or clean up. A holder keeps its row
+that started it (worker → child → box), so there is nothing to stop or clean up. A child's end is its whole
+process group gone, not only signalled: the worker kills the group and waits (bounded, logged) until no member
+still runs before it removes the box or writes the row's end. A holder keeps its row
 until its last write lands: it writes the terminal stage, or — if cancel or a take-over already ended the
 row — its own final cost and knowledge, once. `cost_usd` is cost so far (copied about every 15 s) until
 then. A stopping worker hands its rows back (lease lapsed, final cost) so they are retried within seconds,

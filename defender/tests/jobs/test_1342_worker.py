@@ -2678,7 +2678,7 @@ async def test_d_ac_a_grandchild_is_gone_after_a_drain_cancelled_while_a_child_t
 
 
 class _ReapProbingContainers(StandInContainers):
-    """The stand-in containers whose `reap` notes, at the moment it is asked, whether anything the child left in its session is still alive."""
+    """The stand-in containers whose `reap` notes, at the moment it is asked, whether anything the child left in its session is still alive. No grace for a kill to land: the worker waits for the group to be gone before it reaps."""
 
     def __init__(self, where: Path, survivors) -> None:
         super().__init__(where)
@@ -2686,9 +2686,6 @@ class _ReapProbingContainers(StandInContainers):
         self.alive_at_reap: list[bool] = []
 
     def reap(self, name: str, token: str) -> str:
-        deadline = time.monotonic() + 2.0  # a SIGKILL already sent takes a moment to land; one not yet sent never does within this
-        while self._survivors() and time.monotonic() < deadline:
-            time.sleep(0.02)
         self.alive_at_reap.append(bool(self._survivors()))
         return super().reap(name, token)
 

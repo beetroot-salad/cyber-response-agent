@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any
 from defender import _log
 from defender.jobs import is_outage, is_refusal
 from defender.box import Reaped, container_name
-from defender.execution import kill_group
+from defender.execution import end_group, kill_group
 from defender.records import job_facts, job_lane
 from defender.records.formats import DataRoot, digest_of
 from defender.tenancy import data_root_for_child, data_root_from_path
@@ -362,7 +362,7 @@ class Worker:
         except TimeoutError:
             _logger.warning("child %d did not end within %gs of SIGTERM; killing its group",
                             proc.pid, self._stop_grace)
-            kill_group(proc.pid)
+            await _end_group(proc.pid)
             await proc.wait()
 
     # -- the lease: renewal, cost so far, take-over -------------------------------------------------
@@ -538,8 +538,9 @@ class Worker:
                 await _end_tasks([cost_task])
             if proc is not None:
                 # One cleanup however the row ended (r7 D-ac): whatever the child left running in
-                # its session dies with it, then its box, if it outlived it, is removed.
-                kill_group(proc.pid)
+                # its session is gone (not only signalled), then its box, if it outlived it, is
+                # removed.
+                await _end_group(proc.pid)
                 await self._backstop(inv, token)
         return proc
 
@@ -740,6 +741,14 @@ def _what_end(end: End) -> str:
     what = "a hand-back" if end.ending is None else end.ending.stage + (
         f" ({end.ending.failure_reason})" if end.ending.failure_reason else "")
     return f"{what}, cost {end.cost}, knowledge {'kept' if end.knowledge is not None else 'none'}"
+
+
+async def _end_group(pgid: int) -> None:
+    """The child's whole group gone, not only signalled: the SIGKILL goes out here, at once, so a
+    cancel landing in the wait cannot keep it from being sent; the wait for every member to be
+    gone (`end_group`, bounded, logged if one never goes) runs in a thread."""
+    kill_group(pgid)
+    await asyncio.to_thread(end_group, pgid)
 
 
 async def _end_tasks(tasks: list[asyncio.Task[None]]) -> None:
