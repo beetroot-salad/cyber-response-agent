@@ -23,6 +23,13 @@ TRUNCATED_BY_TIMED_OUT = "timed-out"
 #: A model request kept failing temporarily until its retries ran out (#1243): an infrastructure
 #: end like the budget and store ones, so no report is written for it.
 TRUNCATED_BY_PROVIDER_DOWN = "provider-down"
+#: The provider refused a request for good (a 4xx the retrier does not resend:
+#: a request built wrong or too long, a key, permission or model name that no longer works).
+#: Resending gets the same answer, so the run ends with no report and the case gets the
+#: escalation note. A lead's refusal ends the run only when its status says the setup is broken
+#: (`providers.SETUP_STATUSES`: 401/402/403/404); any other ends only that lead, stamped with
+#: this word (#1243 r3).
+TRUNCATED_BY_PROVIDER_REJECTED = "provider-rejected"
 #: The run's box became unusable (#1421 O8): the first command that found it ends the run, with
 #: no retry the model cannot act on. The operator's to fix.
 TRUNCATED_BY_BOX_LOST = "box-lost"
@@ -33,6 +40,7 @@ TRUNCATED_BY_VALUES = (
     TRUNCATED_BY_BUDGET, TRUNCATED_BY_STORE, TRUNCATED_BY_DEAD_END,
     TRUNCATED_BY_SERVED_LEDGER, TRUNCATED_BY_EXECUTED_QUERIES, TRUNCATED_BY_TIMED_OUT,
     TRUNCATED_BY_PROVIDER_DOWN, TRUNCATED_BY_BOX_LOST, TRUNCATED_BY_BOX_OUTPUT_LIMIT,
+    TRUNCATED_BY_PROVIDER_REJECTED,
 )
 
 
@@ -46,13 +54,22 @@ class ExitClass:
 
 
 #: The one exit-class table (#1421): every class whose run exits non-zero, by its own code. A
-#: class not here exits 0. Rerun later for provider-down; the operator's box for the other two.
+#: class not here exits 0. Rerun later for provider-down; the operator's box for box-lost and
+#: box-output-limit; the operator's model configuration (or a defect) for provider-rejected.
 #: Each code is non-zero, so a branched sibling that meets one is recorded `did not finish`.
 EXIT_CLASSES: dict[str, ExitClass] = {
     TRUNCATED_BY_PROVIDER_DOWN: ExitClass(4),
     TRUNCATED_BY_BOX_LOST: ExitClass(5, box_ending=True),
     TRUNCATED_BY_BOX_OUTPUT_LIMIT: ExitClass(6, box_ending=True),
+    TRUNCATED_BY_PROVIDER_REJECTED: ExitClass(7),
 }
+
+#: Endings with no verdict whose case gets the escalation note: a person must look, and a rerun
+#: alone will not settle it.
+ESCALATED_EXITS = frozenset({TRUNCATED_BY_ABORTED, TRUNCATED_BY_PROVIDER_REJECTED})
+#: Endings with no verdict that leave the case open with no comment at all: the infrastructure
+#: ends (budget, store, and every class with its own exit code) except the escalated ones.
+SILENT_EXITS = frozenset({TRUNCATED_BY_BUDGET, TRUNCATED_BY_STORE, *EXIT_CLASSES}) - ESCALATED_EXITS
 
 #: The endings that leave the run's box possibly alive: a teardown fault on them is logged, never
 #: raised over the ending, and skips the post-steps that read the tree.
@@ -152,6 +169,7 @@ __all__ = [
     "BOX_ENDINGS",
     "CALL_RECORDS",
     "CallRecordWriteFailed",
+    "ESCALATED_EXITS",
     "EXIT_CLASSES",
     "ExitClass",
     "FORCED_CLOSE_EXITS",
@@ -162,6 +180,7 @@ __all__ = [
     "TRUNCATED_BY_DEAD_END",
     "TRUNCATED_BY_EXECUTED_QUERIES",
     "TRUNCATED_BY_PROVIDER_DOWN",
+    "TRUNCATED_BY_PROVIDER_REJECTED",
     "TRUNCATED_BY_REQUEST_LIMIT",
     "TRUNCATED_BY_RETRY_EXHAUSTED",
     "TRUNCATED_BY_SERVED_LEDGER",
@@ -169,6 +188,7 @@ __all__ = [
     "TRUNCATED_BY_TIMED_OUT",
     "TRUNCATED_BY_VALUES",
     "RunEnd",
+    "SILENT_EXITS",
     "exit_code_of",
     "normalized_truncated_by",
     "parse_record",

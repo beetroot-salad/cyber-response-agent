@@ -1594,6 +1594,9 @@ UNSERVABLE_EXIT = 3
 _EXIT_WORDS = {
     run_end.TRUNCATED_BY_PROVIDER_DOWN: "the model provider stayed down; the run ended with no "
                                         "report (rerun later)",
+    run_end.TRUNCATED_BY_PROVIDER_REJECTED: "the model provider refused a request for good; the "
+                                            "run ended (rerunning will not help: the run log "
+                                            "names the HTTP status and the provider's reason)",
     run_end.TRUNCATED_BY_BOX_LOST: "the run's box became unusable; the run ended (the operator's "
                                    "to fix: the run log names the command that found it)",
     run_end.TRUNCATED_BY_BOX_OUTPUT_LIMIT: "a process in the run's box wrote past its helper and "
@@ -1603,7 +1606,8 @@ _EXIT_WORDS = {
 
 def _exit_code(summary: dict) -> int:
     """The exit status of a run whose post-steps are done or skipped: its exit class's own code
-    from the one table (`run_end.EXIT_CLASSES`: provider-down 4, box-lost 5, box-output-limit 6),
+    from the one table (`run_end.EXIT_CLASSES`: provider-down 4, box-lost 5, box-output-limit 6,
+    provider-rejected 7),
     said on the way out, else 0."""
     truncated_by = run_end.normalized_truncated_by(summary.get("truncated_by"))
     code = run_end.exit_code_of(truncated_by)
