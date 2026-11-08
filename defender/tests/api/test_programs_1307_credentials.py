@@ -687,8 +687,9 @@ def test_a_revoked_credential_is_not_warned_about() -> None:
     assert _warned(s.world) == [(ANN, s.key_id)]
 
 
-def test_a_failed_send_is_retried_so_every_admin_is_warned_at_least_once() -> None:
-    """Delivery is at least once: one admin's failed send is retried; once all arrived, no further sends (O7, D5)."""
+def test_a_failed_send_is_retried_for_the_admin_it_missed_only() -> None:
+    """One admin's failed send is retried until it arrives; the admin it already reached is not mailed again, and
+    once all arrived, no further sends (O7, D5; #1450 review: a bad address must not spam the others)."""
     s = soar()
     s.world.member(s.ann, T1, NINA)
     mail, refusing = s.world.mail, {NINA}
@@ -707,8 +708,7 @@ def test_a_failed_send_is_retried_so_every_admin_is_warned_at_least_once() -> No
     for _ in range(48):
         s.world.clock.advance(HOUR)
         s.world.send_pending()
-    got = {to for to, _ in _warned(s.world)}
-    assert got == {ANN, NINA}
+    assert _warned(s.world) == sorted([(ANN, s.key_id), (NINA, s.key_id)])  # each exactly once
     settled = len(mail.warnings)
     for _ in range(3):
         s.world.send_pending()

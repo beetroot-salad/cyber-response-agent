@@ -211,7 +211,11 @@ class ProgramCredential(Base, kw_only=True):
         CheckConstraint("(kind = 'key') = (key_hash IS NOT NULL)", name="key_iff_hash"),
         CheckConstraint("state <> 'pending' OR kind = 'oauth_client'", name="only_oauth_is_pending"),
         CheckConstraint("state <> 'revoked' OR revoked_at IS NOT NULL", name="revoked_is_revoked"),
+        CheckConstraint("warn_threshold_days IN (14, 3)", name="warn_threshold"),
+        CheckConstraint("(warn_threshold_days IS NULL) = (warn_next_at IS NULL)", name="warn_both_or_neither"),
         Index("program_credentials_by_program", "program_id"),
+        # The warning sender's one-row claim: the earliest due warning.
+        Index("program_credentials_warning_due", "warn_next_at", postgresql_where=text("warn_next_at IS NOT NULL")),
         Index("program_credentials_one_unrevoked_key", "key_hash", unique=True, postgresql_where=text("state <> 'revoked'")),
         {"schema": SCHEMA},
     )
@@ -234,11 +238,10 @@ class ProgramCredential(Base, kw_only=True):
     revoked_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: The admin who revoked it, or None for the system (or while not revoked).
     revoked_by: Mapped[UserId | None] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"), default=None)
-    #: Expiry warnings, one send per threshold (14 and 3 days): settled once sent (or passed over unsent), held by its next try.
-    warn_14d_settled_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
-    warn_3d_settled_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
-    warn_14d_next_try_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
-    warn_3d_next_try_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: The next expiry warning: its threshold (days before expiry: 14, then 3) and when it may be claimed (the
+    #: threshold's moment, or the end of a claim's hold or a deferral). Both unset once no warning is left.
+    warn_threshold_days: Mapped[int | None] = mapped_column(Integer, default=None)
+    warn_next_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
 
     @validates("name")
     def _name(self, _key: str, value: str) -> str:
@@ -251,3 +254,20 @@ class ProgramCredential(Base, kw_only=True):
     @validates("state")
     def _state(self, _key: str, value: str) -> str:
         return _checked_status("credential state", CredentialState, value)
+
+
+class CredentialWarningDelivery(Base, kw_only=True):
+    """One admin told of one credential's expiry warning: a send is one (credential, threshold), and it is
+    settled once every admin of the tenant at that moment has a row, so a retry mails only those still owed."""
+
+    __tablename__ = "warning_deliveries"
+    __table_args__ = (
+        CheckConstraint("threshold_days IN (14, 3)", name="threshold"),
+        {"schema": SCHEMA},
+    )
+
+    credential_id: Mapped[CredentialId] = mapped_column(
+        IdColumn(CredentialId), ForeignKey(f"{SCHEMA}.program_credentials.id"), primary_key=True)
+    threshold_days: Mapped[int] = mapped_column(Integer, primary_key=True)
+    person_id: Mapped[UserId] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"), primary_key=True)
+    sent_at: Mapped[_dt.datetime] = mapped_column(_TIME)

@@ -27,11 +27,12 @@ from defender.tenancy.models import TenantRecord
 
 from .errors import DataRuleViolation
 from .memory import (
-    CREDENTIAL_CAP, PENDING_DEADLINE, TOUCH_AFTER, WARNING_THRESHOLDS, is_warning_threshold, check_credential_fields, check_membership_fields,
-    check_role, next_try_column, session_hash, settled_column, warning_due,
+    CREDENTIAL_CAP, PENDING_DEADLINE, TOUCH_AFTER, check_credential_fields, check_membership_fields, check_role,
+    first_warning, is_warning_threshold, session_hash, tightest_due, warning_after,
 )
 from .models import (
-    CredentialKind, Membership, MembershipStatus, ProgramCredential, Role, Session, User, UserStatus, normalize_email,
+    CredentialKind, CredentialWarningDelivery, Membership, MembershipStatus, ProgramCredential, Role, Session, User,
+    UserStatus, normalize_email,
 )
 from .ports import ExpiryWarning
 
@@ -292,6 +293,7 @@ class PostgresIdentityRepository:
             program_id=program_id, kind=kind, name=name, state="live" if kind == "key" else "pending",
             created_by=created_by, created_at=now, expires_at=expires_at, key_hash=key_hash,
             pending_deadline=now + PENDING_DEADLINE if kind == "oauth_client" else None)
+        row.warn_threshold_days, row.warn_next_at = first_warning(now, expires_at)
         async with self._tx() as s:
             if await self._lock_program(s, program_id) != "program":
                 raise DataRuleViolation(f"{program_id!r} is no program")
@@ -368,37 +370,29 @@ class PostgresIdentityRepository:
 
     async def claim_expiry_warning(self, *, now: _dt.datetime, hold_until: _dt.datetime) -> ExpiryWarning | None:
         async with self._tx() as s:
-            rows = (await s.execute(
+            row = (await s.execute(
                 select(ProgramCredential).where(
                     ProgramCredential.state == "live", ProgramCredential.expires_at > now,
-                    ProgramCredential.expires_at <= now + WARNING_THRESHOLDS[0])
-                .order_by(ProgramCredential.expires_at, ProgramCredential.id)
-                .with_for_update(skip_locked=True))).scalars().all()
-            claimed: ExpiryWarning | None = None
-            for row in rows:
-                due = [t for t in WARNING_THRESHOLDS if warning_due(row, t, now)]
-                if not due or claimed is not None:
-                    continue
-                for looser in due[:-1]:
-                    setattr(row, settled_column(looser), now)
-                    setattr(row, next_try_column(looser), None)
-                tightest = due[-1]
-                held = getattr(row, next_try_column(tightest))
-                if held is not None and held > now:
-                    continue
-                setattr(row, next_try_column(tightest), hold_until)
-                claimed = ExpiryWarning(credential_id=row.id, threshold=tightest)
-            return claimed
+                    ProgramCredential.warn_next_at <= now)
+                .order_by(ProgramCredential.warn_next_at, ProgramCredential.id)
+                .limit(1).with_for_update(skip_locked=True))).scalars().first()
+            if row is None:
+                return None
+            threshold = tightest_due(row, now)
+            row.warn_threshold_days, row.warn_next_at = threshold.days, hold_until
+            return ExpiryWarning(credential_id=row.id, threshold=threshold)
 
-    async def settle_expiry_warning(
-        self, credential_id: CredentialId, threshold: _dt.timedelta, *, sent_at: _dt.datetime,
-    ) -> bool:
+    async def settle_expiry_warning(self, credential_id: CredentialId, threshold: _dt.timedelta) -> bool:
         if not is_warning_threshold(threshold):
             return False
-        return await self._applied(
-            update(ProgramCredential).where(
-                ProgramCredential.id == credential_id, getattr(ProgramCredential, settled_column(threshold)).is_(None))
-            .values(**{settled_column(threshold): sent_at, next_try_column(threshold): None}).returning(ProgramCredential.id))
+        async with self._tx() as s:
+            row = (await s.execute(select(ProgramCredential).where(
+                ProgramCredential.id == credential_id, ProgramCredential.warn_threshold_days == threshold.days)
+                .with_for_update())).scalars().first()
+            if row is None:
+                return False
+            row.warn_threshold_days, row.warn_next_at = warning_after(threshold, row.expires_at)
+            return True
 
     async def defer_expiry_warning(
         self, credential_id: CredentialId, threshold: _dt.timedelta, *, until: _dt.datetime,
@@ -406,8 +400,24 @@ class PostgresIdentityRepository:
         if not is_warning_threshold(threshold):
             return
         async with self._tx() as s:
-            await s.execute(update(ProgramCredential).where(ProgramCredential.id == credential_id)
-                            .values(**{next_try_column(threshold): until}))
+            await s.execute(update(ProgramCredential).where(
+                ProgramCredential.id == credential_id, ProgramCredential.warn_threshold_days == threshold.days)
+                .values(warn_next_at=until))
+
+    async def warning_deliveries(self, credential_id: CredentialId, threshold: _dt.timedelta) -> set[UserId]:
+        return set(await self._all(select(CredentialWarningDelivery.person_id).where(
+            CredentialWarningDelivery.credential_id == credential_id,
+            CredentialWarningDelivery.threshold_days == threshold.days)))
+
+    async def record_warning_delivery(
+        self, credential_id: CredentialId, threshold: _dt.timedelta, person_id: UserId, *, sent_at: _dt.datetime,
+    ) -> None:
+        if not is_warning_threshold(threshold):
+            raise DataRuleViolation(f"{threshold} is no warning threshold")
+        async with self._tx() as s:
+            await s.execute(insert(CredentialWarningDelivery).values(
+                credential_id=credential_id, threshold_days=threshold.days, person_id=person_id, sent_at=sent_at)
+                .on_conflict_do_nothing())
 
     # --- sends -------------------------------------------------------------------------------
     async def request_set_password(self, user_id: UserId, *, now: _dt.datetime) -> int:

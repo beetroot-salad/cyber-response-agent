@@ -84,18 +84,27 @@ def check_role(kind: str, role: str) -> None:
         raise DataRuleViolation(f"a {kind} cannot hold the {role!r} role")
 
 
-def warning_due(row: ProgramCredential, threshold: _dt.timedelta, now: _dt.datetime) -> bool:
-    """The threshold is due, was still ahead when the credential was made, and is not settled."""
-    return (row.expires_at - threshold <= now and row.expires_at - threshold >= row.created_at
-            and getattr(row, settled_column(threshold)) is None)
+def first_warning(created_at: _dt.datetime, expires_at: _dt.datetime) -> tuple[int | None, _dt.datetime | None]:
+    """A new credential's next warning (`warn_threshold_days`, `warn_next_at`): the loosest threshold still ahead
+    when it is made, at its moment; none when every threshold has passed (D5, D11)."""
+    for threshold in WARNING_THRESHOLDS:
+        if expires_at - threshold >= created_at:
+            return threshold.days, expires_at - threshold
+    return None, None
 
 
-def settled_column(threshold: _dt.timedelta) -> str:
-    return f"warn_{threshold.days}d_settled_at"
+def warning_after(threshold: _dt.timedelta, expires_at: _dt.datetime) -> tuple[int | None, _dt.datetime | None]:
+    """The next warning once `threshold`'s is settled: the next tighter threshold at its moment, or none."""
+    tighter = [t for t in WARNING_THRESHOLDS if t < threshold]
+    return (tighter[0].days, expires_at - tighter[0]) if tighter else (None, None)
 
 
-def next_try_column(threshold: _dt.timedelta) -> str:
-    return f"warn_{threshold.days}d_next_try_at"
+def tightest_due(row: ProgramCredential, now: _dt.datetime) -> _dt.timedelta:
+    """What a claim of `row` sends: of its next threshold and the tighter ones whose moment has come, the tightest;
+    the looser ones are passed over unsent (W6)."""
+    assert row.warn_threshold_days is not None
+    return [t for t in WARNING_THRESHOLDS if t.days == row.warn_threshold_days
+            or (t.days < row.warn_threshold_days and row.expires_at - t <= now)][-1]
 
 
 def check_membership_fields(
@@ -109,7 +118,7 @@ def check_membership_fields(
 
 
 def _with(row: ProgramCredential, **fields: Any) -> ProgramCredential:
-    """The row with `fields` changed; the names come from the column helpers, so they are not typed."""
+    """The row with `fields` changed."""
     return dataclasses.replace(row, **fields)
 
 
@@ -126,6 +135,7 @@ class InMemoryIdentityRepository:
         self._memberships: dict[str, Membership] = {}
         self._sessions: dict[str, Session] = {}
         self._credentials: dict[str, ProgramCredential] = {}
+        self._warning_deliveries: dict[tuple[CredentialId, int, UserId], _dt.datetime] = {}
 
     # --- tenants -----------------------------------------------------------------------------
     async def close(self) -> None:
@@ -379,6 +389,7 @@ class InMemoryIdentityRepository:
             program_id=program_id, kind=kind, name=name, state="live" if kind == "key" else "pending",
             created_by=created_by, created_at=now, expires_at=expires_at, key_hash=key_hash,
             pending_deadline=now + PENDING_DEADLINE if kind == "oauth_client" else None)
+        row.warn_threshold_days, row.warn_next_at = first_warning(now, expires_at)
         self._credentials[row.id] = row
         return _copy(row)
 
@@ -426,38 +437,42 @@ class InMemoryIdentityRepository:
         return {r.id for r in self._credentials.values() if r.kind == "oauth_client" and holds_slot(r, now)}
 
     async def claim_expiry_warning(self, *, now: _dt.datetime, hold_until: _dt.datetime) -> ExpiryWarning | None:
-        for row in sorted(self._credentials.values(), key=lambda r: (r.expires_at, r.id)):
-            if not usable(row, now):
-                continue
-            due = [t for t in WARNING_THRESHOLDS if warning_due(row, t, now)]
-            if not due:
-                continue
-            tightest = due[-1]
-            for looser in due[:-1]:
-                row = _with(row, **{settled_column(looser): now, next_try_column(looser): None})
-            self._credentials[row.id] = row
-            if not _due(getattr(row, next_try_column(tightest)), now):
-                continue
-            self._credentials[row.id] = _with(row, **{next_try_column(tightest): hold_until})
-            return ExpiryWarning(credential_id=row.id, threshold=tightest)
-        return None
+        due = sorted((r for r in self._credentials.values()
+                      if usable(r, now) and r.warn_next_at is not None and r.warn_next_at <= now),
+                     key=lambda r: (r.warn_next_at, r.id))
+        if not due:
+            return None
+        row = due[0]
+        threshold = tightest_due(row, now)
+        self._credentials[row.id] = _with(row, warn_threshold_days=threshold.days, warn_next_at=hold_until)
+        return ExpiryWarning(credential_id=row.id, threshold=threshold)
 
-    async def settle_expiry_warning(
-        self, credential_id: CredentialId, threshold: _dt.timedelta, *, sent_at: _dt.datetime,
-    ) -> bool:
+    async def settle_expiry_warning(self, credential_id: CredentialId, threshold: _dt.timedelta) -> bool:
         row = self._credentials.get(credential_id)
-        if row is None or not is_warning_threshold(threshold) or getattr(row, settled_column(threshold)) is not None:
+        if row is None or not is_warning_threshold(threshold) or row.warn_threshold_days != threshold.days:
             return False
-        self._credentials[row.id] = _with(
-            row, **{settled_column(threshold): sent_at, next_try_column(threshold): None})
+        days, at = warning_after(threshold, row.expires_at)
+        self._credentials[row.id] = _with(row, warn_threshold_days=days, warn_next_at=at)
         return True
 
     async def defer_expiry_warning(
         self, credential_id: CredentialId, threshold: _dt.timedelta, *, until: _dt.datetime,
     ) -> None:
         row = self._credentials.get(credential_id)
-        if row is not None and is_warning_threshold(threshold):
-            self._credentials[row.id] = _with(row, **{next_try_column(threshold): until})
+        if row is not None and is_warning_threshold(threshold) and row.warn_threshold_days == threshold.days:
+            self._credentials[row.id] = _with(row, warn_next_at=until)
+
+    async def warning_deliveries(self, credential_id: CredentialId, threshold: _dt.timedelta) -> set[UserId]:
+        return {person for (c, days, person) in self._warning_deliveries
+                if c == credential_id and days == threshold.days}
+
+    async def record_warning_delivery(
+        self, credential_id: CredentialId, threshold: _dt.timedelta, person_id: UserId, *, sent_at: _dt.datetime,
+    ) -> None:
+        if credential_id not in self._credentials or not is_warning_threshold(threshold):
+            raise DataRuleViolation(f"no warning {threshold} for credential {credential_id!r}")
+        self._refuse_unknown_actor(person_id)
+        self._warning_deliveries.setdefault((credential_id, threshold.days, person_id), sent_at)
 
     # --- sends -------------------------------------------------------------------------------
     async def request_set_password(self, user_id: UserId, *, now: _dt.datetime) -> int:

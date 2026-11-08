@@ -17,8 +17,10 @@ Expiry-warning outbox (F7, one claimable send per (credential, threshold), thres
 usable credential whose `expires_at - threshold <= now`, whose threshold was not passed when it was created
 (`expires_at - threshold >= created_at`) and is unsettled and not held; it returns the TIGHTEST such threshold and
 settles the looser due ones unsent (W6); it moves the send's next try to `hold_until` (Postgres: `FOR UPDATE SKIP LOCKED`);
-`settle_expiry_warning(credential_id, threshold, *, sent_at) -> bool` (once); `defer_expiry_warning(credential_id,
-threshold, *, until)` (a failed send's retry). Reconciliation's keep-set read:
+`settle_expiry_warning(credential_id, threshold) -> bool` (once); `defer_expiry_warning(credential_id,
+threshold, *, until)` (a failed send's retry); `warning_deliveries(credential_id, threshold) -> set[user id]` and
+`record_warning_delivery(credential_id, threshold, person_id, *, sent_at)` (who a send has reached, so a retry mails
+only the rest; #1450 review). Reconciliation's keep-set read:
 `oauth_credentials_to_keep(*, now) -> set[credential id]` (OAuth rows `live` with `expires_at > now`, or `pending` with
 `pending_deadline > now`; never keys, never revoked). Rows carry the design's fields (`state`, `kind`, `key_hash`,
 `service_account_id`, `pending_deadline`, `last_used_at`, `revoked_at`, `revoked_by`, ...).
@@ -574,13 +576,13 @@ async def test_each_threshold_is_claimed_once_when_due_held_while_claimed_and_re
     assert await seeded.defer_expiry_warning(key.id, FOURTEEN, until=due14 + 2 * HOUR) is None
     assert await _claim_warning(seeded, due14 + HOUR) is None
     assert (await _claim_warning(seeded, due14 + 2 * HOUR)).threshold == FOURTEEN
-    assert await seeded.settle_expiry_warning(key.id, FOURTEEN, sent_at=due14 + 2 * HOUR) is True
-    assert await seeded.settle_expiry_warning(key.id, FOURTEEN, sent_at=due14 + 3 * HOUR) is False  # once
+    assert await seeded.settle_expiry_warning(key.id, FOURTEEN) is True
+    assert await seeded.settle_expiry_warning(key.id, FOURTEEN) is False  # once
     assert await _claim_warning(seeded, key.expires_at - FOURTEEN + 6 * DAY) is None  # 14-day done, 3-day not yet due
     due3 = key.expires_at - THREE
     third = await _claim_warning(seeded, due3)
     assert (third.credential_id, third.threshold) == (key.id, THREE)
-    assert await seeded.settle_expiry_warning(key.id, THREE, sent_at=due3) is True
+    assert await seeded.settle_expiry_warning(key.id, THREE) is True
     assert await _claim_warning(seeded, key.expires_at - dt.timedelta(minutes=1)) is None
 
 
@@ -593,7 +595,7 @@ async def test_a_threshold_passed_when_the_credential_was_created_is_never_claim
     assert await _claim_warning(seeded, NOW) is None
     claimed = await _claim_warning(seeded, key.expires_at - first_claim)
     assert claimed.threshold == first_claim
-    await seeded.settle_expiry_warning(key.id, first_claim, sent_at=NOW)
+    await seeded.settle_expiry_warning(key.id, first_claim)
     if first_claim == FOURTEEN:
         assert (await _claim_warning(seeded, key.expires_at - THREE)).threshold == THREE
     else:
@@ -609,8 +611,37 @@ async def test_a_claim_after_both_thresholds_passed_takes_only_the_tightest_and_
     claimed = await _claim_warning(seeded, late)
     assert (claimed.credential_id, claimed.threshold) == (key.id, THREE)
     assert await _claim_warning(seeded, late) is None  # held; and no 14-day send is waiting behind it
-    assert await seeded.settle_expiry_warning(key.id, THREE, sent_at=late) is True
+    assert await seeded.settle_expiry_warning(key.id, THREE) is True
     assert await _claim_warning(seeded, late + HOUR) is None  # the passed 14-day threshold never comes back
+
+
+async def test_the_earliest_due_warning_is_claimed_first_and_one_claim_takes_one_credential(seeded):
+    """Three credentials due at once: three claims, earliest due first, each a different credential; a fourth finds
+    nothing (O7; one row per claim, #1450 review)."""
+    admin = await _user(seeded)
+    keys = [await _timed_key(seeded, await _program(seeded, admin, name=f"P{n}"), admin, n, (30 - n) * DAY)
+            for n in range(3)]
+    at = keys[0].expires_at - FOURTEEN  # the latest-expiring key's moment: all three are due
+    claimed = [await _claim_warning(seeded, at) for _ in range(3)]
+    assert [c.credential_id for c in claimed] == [k.id for k in reversed(keys)]
+    assert await _claim_warning(seeded, at) is None
+
+
+async def test_a_warnings_deliveries_are_kept_per_person_and_threshold(seeded):
+    """Who a send reached is kept per (credential, threshold); recording one twice keeps one; another threshold or
+    credential starts empty (#1450 review: a retry mails only the admins not yet reached)."""
+    admin = await _user(seeded)
+    other = await _user(seeded, email="other@a.example")
+    program = await _program(seeded, admin)
+    key = await _timed_key(seeded, program, admin, 1, 30 * DAY)
+    sibling = await _timed_key(seeded, program, admin, 2, 30 * DAY)
+    assert await seeded.warning_deliveries(key.id, FOURTEEN) == set()
+    await seeded.record_warning_delivery(key.id, FOURTEEN, admin.id, sent_at=NOW)
+    await seeded.record_warning_delivery(key.id, FOURTEEN, admin.id, sent_at=NOW + HOUR)  # again: no error
+    await seeded.record_warning_delivery(key.id, FOURTEEN, other.id, sent_at=NOW)
+    assert await seeded.warning_deliveries(key.id, FOURTEEN) == {admin.id, other.id}
+    assert await seeded.warning_deliveries(key.id, THREE) == set()
+    assert await seeded.warning_deliveries(sibling.id, FOURTEEN) == set()
 
 
 @pytest.mark.parametrize("state", ["revoked", "expired", "pending", "removed-with-its-program"])

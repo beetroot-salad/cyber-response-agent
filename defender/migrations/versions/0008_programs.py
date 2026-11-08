@@ -61,10 +61,8 @@ def upgrade() -> None:
         sa.Column("last_used_at", _TIME, nullable=True),
         sa.Column("revoked_at", _TIME, nullable=True),
         sa.Column("revoked_by", _uuid(), nullable=True),
-        sa.Column("warn_14d_settled_at", _TIME, nullable=True),
-        sa.Column("warn_3d_settled_at", _TIME, nullable=True),
-        sa.Column("warn_14d_next_try_at", _TIME, nullable=True),
-        sa.Column("warn_3d_next_try_at", _TIME, nullable=True),
+        sa.Column("warn_threshold_days", sa.Integer(), nullable=True),
+        sa.Column("warn_next_at", _TIME, nullable=True),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_program_credentials")),
         sa.ForeignKeyConstraint(
             ["program_id", "program_kind"], ["identity.users.id", "identity.users.kind"],
@@ -79,7 +77,27 @@ def upgrade() -> None:
                            name=op.f("ck_program_credentials_only_oauth_is_pending")),
         sa.CheckConstraint("state <> 'revoked' OR revoked_at IS NOT NULL",
                            name=op.f("ck_program_credentials_revoked_is_revoked")),
+        sa.CheckConstraint("warn_threshold_days IN (14, 3)", name=op.f("ck_program_credentials_warn_threshold")),
+        sa.CheckConstraint("(warn_threshold_days IS NULL) = (warn_next_at IS NULL)",
+                           name=op.f("ck_program_credentials_warn_both_or_neither")),
         schema="identity")
     op.create_index("program_credentials_by_program", "program_credentials", ["program_id"], schema="identity")
     op.create_index("program_credentials_one_unrevoked_key", "program_credentials", ["key_hash"], unique=True,
                     schema="identity", postgresql_where=sa.text("state <> 'revoked'"))
+    op.create_index("program_credentials_warning_due", "program_credentials", ["warn_next_at"], schema="identity",
+                    postgresql_where=sa.text("warn_next_at IS NOT NULL"))
+
+    op.create_table(
+        "warning_deliveries",
+        sa.Column("credential_id", _uuid(), nullable=False),
+        sa.Column("threshold_days", sa.Integer(), nullable=False),
+        sa.Column("person_id", _uuid(), nullable=False),
+        sa.Column("sent_at", _TIME, nullable=False),
+        sa.PrimaryKeyConstraint(
+            "credential_id", "threshold_days", "person_id", name=op.f("pk_warning_deliveries")),
+        sa.ForeignKeyConstraint(["credential_id"], ["identity.program_credentials.id"],
+                                name=op.f("fk_warning_deliveries_credential_id_program_credentials")),
+        sa.ForeignKeyConstraint(["person_id"], ["identity.users.id"],
+                                name=op.f("fk_warning_deliveries_person_id_users")),
+        sa.CheckConstraint("threshold_days IN (14, 3)", name=op.f("ck_warning_deliveries_threshold")),
+        schema="identity")

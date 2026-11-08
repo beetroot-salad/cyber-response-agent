@@ -161,13 +161,22 @@ class IdentityRepository(Protocol):
         ...
     async def claim_expiry_warning(self, *, now: _dt.datetime, hold_until: _dt.datetime) -> ExpiryWarning | None:
         """A usable credential's due warning (14 or 3 days before expiry; a threshold already passed when the
-        credential was created never is). Of several due, the tightest is returned and the looser ones are
-        settled unsent. Moves the send's next try to `hold_until`."""
+        credential was created never is), the earliest due first. Of several due, the tightest is returned and the
+        looser ones are passed over unsent. Moves the send's next try to `hold_until`. Reads one row (Postgres:
+        `FOR UPDATE SKIP LOCKED`), however many credentials are near expiry."""
         ...
-    async def settle_expiry_warning(self, credential_id: CredentialId, threshold: _dt.timedelta, *, sent_at: _dt.datetime) -> bool:
-        """Once per (credential, threshold)."""
+    async def settle_expiry_warning(self, credential_id: CredentialId, threshold: _dt.timedelta) -> bool:
+        """Once per (credential, threshold): the next warning becomes the next tighter threshold, or none."""
         ...
     async def defer_expiry_warning(self, credential_id: CredentialId, threshold: _dt.timedelta, *, until: _dt.datetime) -> None: ...
+    async def warning_deliveries(self, credential_id: CredentialId, threshold: _dt.timedelta) -> set[UserId]:
+        """The people this (credential, threshold) warning has reached."""
+        ...
+    async def record_warning_delivery(
+        self, credential_id: CredentialId, threshold: _dt.timedelta, person_id: UserId, *, sent_at: _dt.datetime,
+    ) -> None:
+        """`person_id` has the warning; recording it again keeps the first `sent_at`."""
+        ...
 
     # --- sends: a send is pending while requested_seq > sent_seq, and due while its next try
     # is unset or not after `now`

@@ -269,7 +269,8 @@ class IdentityService:
     async def _send_expiry_warnings(self, stop: asyncio.Event | None) -> None:
         """Claim and send one credential-expiry warning at a time until none is due or `stop` is set; one
         send is one (credential, threshold), to every active admin of the program's tenant at that moment.
-        A send that fails or outlives `send_deadline` is deferred; delivery is at least once."""
+        A send that fails or outlives `send_deadline` is deferred, and its retry mails only the admins it has not
+        reached yet; delivery to each is at least once."""
         while stop is None or not stop.is_set():
             now = self._clock()
             claimed: ExpiryWarning | None = None
@@ -288,21 +289,29 @@ class IdentityService:
 
     async def _send_expiry_warning(self, claimed: ExpiryWarning) -> None:
         now = self._clock()
-        row = await self._repo.credential_by_id(claimed.credential_id)
+        credential, threshold = claimed.credential_id, claimed.threshold
+        row = await self._repo.credential_by_id(credential)
         tenant_id = None if row is None or not usable(row, now) else await self._tenant_of_program(row.program_id, active=True)
         if row is None or tenant_id is None:  # revoked, expired or removed since it was claimed: nothing to say
-            await self._repo.settle_expiry_warning(claimed.credential_id, claimed.threshold, sent_at=now)
+            await self._repo.settle_expiry_warning(credential, threshold)
             return
+        reached = await self._repo.warning_deliveries(credential, threshold)
         failure: Exception | None = None
+        # A tenant with no active person left is told nothing and the warning is settled: the program itself
+        # sees the expiry on every response (D9), and a person who joins later is not owed a passed warning.
         for _, admin in await self._repo.people_of_tenant(tenant_id, "active"):
+            if admin.id in reached:
+                continue
             try:
                 await self._mail.notify_credential_expiry(
                     admin.person_email, tenant_id, row.program_id, row.id, row.expires_at)
             except Exception as e:  # every admin is tried; the send then fails as a whole and is retried
                 failure = failure or e
+                continue
+            await self._repo.record_warning_delivery(credential, threshold, admin.id, sent_at=self._clock())
         if failure is not None:
             raise failure
-        await self._repo.settle_expiry_warning(claimed.credential_id, claimed.threshold, sent_at=self._clock())
+        await self._repo.settle_expiry_warning(credential, threshold)
 
     async def _tenant_of_program(self, program_id: UserId, *, active: bool = False) -> TenantId | None:
         """The tenant a program belongs to (its one membership); with `active`, only while that membership is."""
