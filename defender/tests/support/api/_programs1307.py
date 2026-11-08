@@ -89,6 +89,85 @@ CLIENT_DELETE = "program_client.delete"
 Journal = list[tuple[str, str]]
 
 
+# --- fault injection (F3) ---------------------------------------------------------------------------------------------------
+
+class InjectedProgramsFault(Exception):
+    """What a faulted repository or realm call raises: a failure the service did not foresee, at one named call."""
+
+
+class FaultPlan:
+    """Counts the repository and realm calls the service makes and raises `InjectedProgramsFault` at call number `at` (from
+    0, counted from `arm`). `arm(None)` only counts; a disarmed plan is silent. After a run `calls` is every call made, in order, as
+    (who, method, first argument), and `fired` is the exception raised, if any."""
+
+    def __init__(self) -> None:
+        self.armed = False
+        self.at: int | None = None
+        self.calls: list[tuple[str, str, Any]] = []
+        self.fired: InjectedProgramsFault | None = None
+
+    def arm(self, at: int | None) -> None:
+        self.calls, self.at, self.fired, self.armed = [], at, None, True
+
+    def disarm(self) -> None:
+        self.armed = False
+
+    def check(self, who: str, name: str, args: tuple[Any, ...]) -> None:
+        if not self.armed:
+            return
+        index = len(self.calls)
+        self.calls.append((who, name, args[0] if args else None))
+        if self.at == index:
+            self.fired = InjectedProgramsFault(f"fault at call {index}: {who}.{name}")
+            raise self.fired
+
+
+class FaultingRepository:
+    """Delegates every coroutine method of the repository, raising at the plan's chosen call before the call is made."""
+
+    def __init__(self, inner: Any, plan: FaultPlan) -> None:
+        self._inner = inner
+        self._plan = plan
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(self._inner, name)
+        if not callable(attr) or name == "close":
+            return attr
+
+        async def call(*args: Any, **kwargs: Any) -> Any:
+            self._plan.check("repo", name, args)
+            return await attr(*args, **kwargs)
+        return call
+
+
+class FaultingRealm:
+    """Delegates the programs port to the fake realm (looked up at call time, so a test may replace a method on the fake),
+    raising at the plan's chosen call before the call is made."""
+
+    def __init__(self, inner: Any, plan: FaultPlan) -> None:
+        self._inner = inner
+        self._plan = plan
+
+    async def close(self) -> None:
+        await self._inner.close()
+
+    async def create_client(self, credential_id: str) -> tuple[str, str]:
+        self._plan.check("realm", "create_client", (credential_id,))
+        return await self._inner.create_client(credential_id)  # type: ignore[no-any-return]
+
+    async def delete_client(self, client_id: str) -> None:
+        self._plan.check("realm", "delete_client", (client_id,))
+        await self._inner.delete_client(client_id)
+
+    async def client_ids(self) -> set[str]:
+        self._plan.check("realm", "client_ids", ())
+        return await self._inner.client_ids()  # type: ignore[no-any-return]
+
+    async def verify_token(self, token: str) -> VerifiedProgramToken:
+        self._plan.check("realm", "verify_token", (token,))
+        return await self._inner.verify_token(token)  # type: ignore[no-any-return]
+
+
 # --- the programs realm (FC-1) ---------------------------------------------------------------
 
 @dataclasses.dataclass
@@ -125,6 +204,10 @@ class FakeProgramsRealm:
         self.fail_lists = 0
         #: The next N `verify_token` calls raise `SignInUnavailable` (the key set cannot be fetched, W10).
         self.fail_verifies = 0
+        #: Client ids whose `delete_client` raises `InjectedProgramsFault` and leaves the client where it is; each fault is
+        #: appended to `failed_deletes` in the order raised.
+        self.fail_deletes: set[str] = set()
+        self.failed_deletes: list[InjectedProgramsFault] = []
 
     # --- the port --------------------------------------------------------------------------
     async def close(self) -> None:
@@ -148,6 +231,10 @@ class FakeProgramsRealm:
     async def delete_client(self, client_id: str) -> None:
         with self._lock:
             self.journal.append(("realm", "delete_client"))
+            if str(client_id) in self.fail_deletes:
+                fault = InjectedProgramsFault(f"the delete of {client_id} was refused")
+                self.failed_deletes.append(fault)
+                raise fault
             self.deleted.append(str(client_id))
             self.clients.pop(str(client_id), None)
 
@@ -288,6 +375,11 @@ class ProgramsWorld(World):
     journal: Journal
     realm: FakeProgramsRealm
 
+    def __init__(self, *, faults: FaultPlan | None = None, **options: Any) -> None:
+        #: When given, every repository and realm call the service makes passes through this plan (F3).
+        self.faults = faults
+        super().__init__(**options)
+
     def build(self, *, administrators: Any, tenants: Any) -> None:
         if not isinstance(self.mail, ProgramsMail):
             self.mail = ProgramsMail()
@@ -297,10 +389,12 @@ class ProgramsWorld(World):
         extra: dict[str, Any] = {} if self.send_interval is None else {"send_interval": self.send_interval}
         if self.send_deadline is not None:
             extra["send_deadline"] = self.send_deadline
+        repo: Any = self.repo if self.faults is None else FaultingRepository(self.repo, self.faults)
+        programs: Any = self.realm if self.faults is None else FaultingRealm(self.realm, self.faults)
         self.service = IdentityService(
-            JournalRepository(self.repo, self.journal), signin=self.signin, mail=self.mail,
+            JournalRepository(repo, self.journal), signin=self.signin, mail=self.mail,
             clock=self.clock, bootstrap=Bootstrap(administrators=tuple(administrators)),
-            programs=self.realm, **extra)
+            programs=programs, **extra)
         self.app = create_app(ApiDeps(
             alerts=self.store, investigations=self.store, learning_jobs=self.store,
             lessons=self.store, systems=self.store, writes=self.store,
