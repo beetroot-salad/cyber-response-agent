@@ -55,6 +55,7 @@ from .models import (
     Claim,
     InvestigationRecord,
     InvestigationRow,
+    LearningCheckRow,
     LearningClaim,
     LearningJobRecord,
     LearningJobRow,
@@ -121,6 +122,16 @@ def _refuse_unstorable_text(**fields: str) -> None:
     for name, text in fields.items():
         if not postgres_can_hold(text):
             raise UnstorableText(f"{name} holds a NUL or a lone surrogate, which PostgreSQL text cannot hold")
+
+
+#: A check clock's time that makes it due whatever the interval: a post-step that ends with a
+#: job's findings `pending` it was not handed leaves the clock so (amendment 3).
+_DUE_AT_ONCE = _dt.datetime(1970, 1, 1, tzinfo=_dt.UTC)
+
+
+def _unheld() -> Any:
+    """No post-step holds the check clock: never held, or its hold lapsed."""
+    return (LearningCheckRow.checking_until.is_(None)) | (LearningCheckRow.checking_until < func.now())
 
 
 class JobStore:
@@ -406,6 +417,7 @@ class JobStore:
                     investigation_id=record.investigation_id,
                     request_key=f"{AUTO_REQUEST_KEY_PREFIX}{record.investigation_id}", attempt=1, trigger="auto",
                     status="queued", created_at=self._clock()))
+                await self._arm_check(s, record.tenant_id)
         detail = f"stage={stage}" + (f" reason={failure_reason}" if failure_reason else "")
         announce("investigation.finish", actor=SYSTEM, tenant_id=tenant_id, target=investigation_id, detail=detail)
         return record
@@ -414,16 +426,19 @@ class JobStore:
 
     async def renew(
         self, held: Collection[str], *, costs: Mapping[str, float] | None = None,
-        progress: Mapping[str, LearningProgress] | None = None,
+        progress: Mapping[str, LearningProgress] | None = None, checks: Collection[str] = (),
     ) -> list[str]:
         """Extend the lease of every held row, investigation or learning job, that is still
         `running` and not yet handed back, in one transaction, and return the ids it covered. A
         held row missing from the answer was cancelled, taken over or deleted (B3). `costs` copies
         a cost-so-far figure onto the investigations it names (B2), `progress` the job entry's
         progress onto the learning jobs it names (#1344 O13); a covered row without one keeps its
-        values. Late renewals of a lapsed row nobody took over succeed (B1)."""
+        values. `checks` names check-clock holds by their holder tokens (amendment 3): each one
+        still held is extended and its token returned with the ids. Late renewals of a lapsed row
+        nobody took over succeed (B1)."""
         ids = set(held)
-        if not ids:
+        holders = set(checks)
+        if not ids and not holders:
             return []
         figures = {i: c for i, c in (costs or {}).items() if i in ids}
         cost = (case(*((InvestigationRow.id == i, c) for i, c in figures.items()), else_=InvestigationRow.cost_usd)
@@ -434,7 +449,8 @@ class JobStore:
                     InvestigationRow.id.in_(ids), InvestigationRow.stage == "running",
                     InvestigationRow.accounting_written_at.is_(None))
                 .values(lease_expires_at=self._lease_end(), cost_usd=cost)
-                .returning(InvestigationRow.id).execution_options(synchronize_session=False))).scalars().all()
+                .returning(InvestigationRow.id).execution_options(synchronize_session=False))).scalars().all() \
+                if ids else []
             found = [str(i) for i in covered]
             rest = ids - set(found)
             if rest:
@@ -445,6 +461,11 @@ class JobStore:
                     .values(lease_expires_at=self._lease_end(),
                             **_progress_values({i: p for i, p in (progress or {}).items() if i in rest}))
                     .returning(LearningJobRow.id).execution_options(synchronize_session=False))).scalars().all()]
+            if holders:
+                found += [str(h) for h in (await s.execute(
+                    update(LearningCheckRow).where(LearningCheckRow.holder.in_(holders))
+                    .values(checking_until=self._lease_end())
+                    .returning(LearningCheckRow.holder).execution_options(synchronize_session=False))).scalars().all()]
         return found
 
     async def write_accounting(
@@ -571,6 +592,7 @@ class JobStore:
                         investigation_id=lapsed.investigation_id, request_key=lapsed.request_key,
                         attempt=lapsed.attempt + 1, trigger=lapsed.trigger, status="queued",
                         created_at=lapsed.created_at))
+                    await self._arm_check(s, lapsed.tenant_id)
         except _Refused:
             return _TakeOver(old_id, tenant, "", None, refused=True, of_learning=True)
         return _TakeOver(old_id, tenant, reason, retry_id, of_learning=True)
@@ -611,6 +633,7 @@ class JobStore:
                 request_key=client_request_id, attempt=1, trigger="explicit", status="queued",
                 created_at=self._clock())
             s.add(row)
+            await self._arm_check(s, tenant_id)
             record = learning_job_record(row)
         announce("learning_job.start", actor=actor, tenant_id=tenant_id, target=record.learning_job_id,
                  detail="trigger=explicit")
@@ -685,6 +708,8 @@ class JobStore:
             ).scalars().first()
             if row is None:
                 return None
+            if status == "completed":
+                await self._arm_check(s, tenant_id)
             record = learning_job_record(row)
         announce("learning_job.finish", actor=SYSTEM, tenant_id=tenant_id, target=learning_job_id,
                  detail=f"status={status}" + (f" reason={reason}" if reason else ""))
@@ -719,17 +744,64 @@ class JobStore:
                 .order_by(LearningJobRow.finished_at, LearningJobRow.id))).scalars().all()
         return [str(i) for i in found]
 
-    async def learning_tenants(self) -> list[str]:
-        """The `active` tenants with any learning job, whatever its status (#1344 amendment 1):
-        the tenants a worker checks without a family, since only they have learning state its jobs
-        feed. Sorted by id."""
+    # --- the family-less check clock (#1344 amendment 3) ---------------------------------------
+
+    @staticmethod
+    async def _arm_check(s: AsyncSession, tenant_id: str) -> None:
+        """Make the tenant's check clock not idle, creating it from now when there is none: a job
+        was queued, or one ended with findings to publish. Its time is left as it is."""
+        await s.execute(pg_insert(LearningCheckRow).values(tenant_id=tenant_id, checked_at=func.now(), idle=False)
+                        .on_conflict_do_update(index_elements=[LearningCheckRow.tenant_id], set_={"idle": False}))
+
+    async def claim_learning_check(self, interval: float, holder: str) -> str | None:
+        """Hold, as `holder`, the most overdue tenant due a family-less check, or `None`: an
+        `active` tenant whose clock is not idle, whose last post-step ended `interval` seconds ago
+        or more, and that no post-step holds. The hold runs a lease; a row another transaction
+        holds is skipped, never waited for, so two workers never hold one tenant."""
+        due = (select(LearningCheckRow.tenant_id)
+               .join(TenantRecord, TenantRecord.id == LearningCheckRow.tenant_id)
+               .where(TenantRecord.state == "active", LearningCheckRow.idle.is_(False),
+                      LearningCheckRow.checked_at <= func.now() - _dt.timedelta(seconds=interval),
+                      _unheld())
+               .order_by(LearningCheckRow.checked_at, LearningCheckRow.tenant_id).limit(1)
+               .with_for_update(of=LearningCheckRow, skip_locked=True))
         async with self._tx() as s:
-            found = (await s.execute(
-                select(LearningJobRow.tenant_id).distinct()
-                .join(TenantRecord, TenantRecord.id == LearningJobRow.tenant_id)
-                .where(TenantRecord.state == "active")
-                .order_by(LearningJobRow.tenant_id))).scalars().all()
-        return [str(t) for t in found]
+            held = (await s.execute(
+                update(LearningCheckRow).where(LearningCheckRow.tenant_id == due.scalar_subquery())
+                .values(checking_until=self._lease_end(), holder=holder)
+                .returning(LearningCheckRow.tenant_id).execution_options(synchronize_session=False))).scalar()
+        return None if held is None else str(held)
+
+    async def hold_learning_check(self, tenant_id: str, holder: str) -> bool:
+        """Hold the tenant's check clock, as `holder`, for a job's own post-step; False when
+        another post-step holds it. The clock is armed either way: the holder's end then finds
+        the job's findings not handed to it and makes the tenant due at once."""
+        async with self._tx() as s:
+            await self._arm_check(s, tenant_id)
+            held = (await s.execute(
+                update(LearningCheckRow).where(LearningCheckRow.tenant_id == tenant_id, _unheld())
+                .values(checking_until=self._lease_end(), holder=holder)
+                .returning(LearningCheckRow.tenant_id).execution_options(synchronize_session=False))).scalar()
+        return held is not None
+
+    async def end_learning_check(self, tenant_id: str, holder: str, *, idle: bool, handed: Collection[str]) -> bool:
+        """`holder`'s post-step of the tenant ended, handed the jobs `handed`: the hold is let go
+        and the clock restarts now, idle as `idle` says. A `pending` job it was not handed (one
+        that ended while it ran) makes the tenant due at once instead, never idle. False, changing
+        nothing, when the hold is no longer `holder`'s."""
+        async with self._tx() as s:
+            unhanded = (await s.execute(select(LearningJobRow.id).where(
+                LearningJobRow.tenant_id == tenant_id, LearningJobRow.status == "completed",
+                LearningJobRow.publish_state == "pending", LearningJobRow.id.notin_(set(handed))).limit(1))
+            ).first() is not None
+            clock: dict[str, Any] = ({"checked_at": _DUE_AT_ONCE, "idle": False} if unhanded
+                                     else {"checked_at": func.now(), "idle": idle})
+            ended = (await s.execute(
+                update(LearningCheckRow).where(LearningCheckRow.tenant_id == tenant_id,
+                                               LearningCheckRow.holder == holder)
+                .values(**clock, checking_until=None, holder=None)
+                .returning(LearningCheckRow.tenant_id).execution_options(synchronize_session=False))).scalar()
+        return ended is not None
 
     async def record_publish(
         self, tenant_id: str, *, published: Collection[str], refused: Collection[str],

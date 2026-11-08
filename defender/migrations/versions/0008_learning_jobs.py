@@ -1,11 +1,13 @@
-"""Learning jobs (#1344): one row per attempt of a learning job, beside the investigations.
+"""Learning jobs (#1344): one row per attempt of a learning job, beside the investigations, and
+one check clock per tenant (amendment 3).
 
 Revision ID: 0008_learning_jobs
 Revises: 0007_alert_mapping
 
 No backfill: an investigation that ended `completed` before this revision queues no job (O1). Every
 value is set by the store in Python (no server defaults). The foreign keys carry no ON DELETE
-action: the investigation delete removes its jobs itself, under their row locks (O10).
+action: the investigation delete removes its jobs itself, under their row locks (O10). The check
+clock's tenant key carries none either (M10).
 """
 import sqlalchemy as sa
 from alembic import op
@@ -64,3 +66,13 @@ def upgrade() -> None:
     op.create_index("learning_jobs_running_by_lease", "learning_jobs", ["lease_expires_at", "id"], schema=SCHEMA,
                     postgresql_where=sa.text("status = 'running'"))
     op.create_index("learning_jobs_by_investigation", "learning_jobs", ["investigation_id"], schema=SCHEMA)
+    op.create_table(
+        "learning_checks",
+        sa.Column("tenant_id", sa.Uuid(as_uuid=False), nullable=False),
+        _time("checked_at", nullable=False),
+        sa.Column("idle", sa.Boolean(), nullable=False),
+        _time("checking_until"),
+        sa.Column("holder", sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint("tenant_id", name=op.f("pk_learning_checks")),
+        sa.ForeignKeyConstraint(["tenant_id"], ["tenancy.tenants.id"], name=op.f("fk_learning_checks_tenant_id_tenants")),
+        schema=SCHEMA)

@@ -1,7 +1,7 @@
 """The job store's tables and the records it hands out. Every value is set in Python (no server
 defaults). The alerts and investigations tables carry exactly the lean constraints of #1081's
 design; the migration `0004_jobs` creates them and `0005_uuid_ids` makes their ids `uuid` (#1382).
-The learning jobs table (#1344) is `0008_learning_jobs`'s."""
+The learning jobs and learning checks tables (#1344) are `0008_learning_jobs`'s."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import dataclasses
 import datetime as _dt
 from typing import Any, Protocol
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -141,6 +141,28 @@ class LearningJobRow(Base, kw_only=True):
     reason: Mapped[str | None] = mapped_column(Text, default=None)
     message: Mapped[str | None] = mapped_column(Text, default=None)
     lease_expires_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+
+
+class LearningCheckRow(Base, kw_only=True):
+    """A tenant's family-less check clock (#1344 amendment 3): when its last post-step ended (or
+    when a queued job armed it), whether that post-step found nothing waiting, and which
+    post-step holds it now, and until when. Times are the database's clock, as a lease's are."""
+
+    __tablename__ = "learning_checks"
+    __table_args__ = (
+        # No ON DELETE action, as every jobs table (M10).
+        ForeignKeyConstraint(["tenant_id"], [f"{TENANCY_SCHEMA}.tenants.id"]),
+        {"schema": SCHEMA},
+    )
+
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), primary_key=True)
+    checked_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+    #: The last post-step found nothing waiting: no check is due until a job arms the row again.
+    idle: Mapped[bool] = mapped_column(Boolean)
+    #: A post-step of the tenant holds the row until then; renewed like a lease. NULL when none.
+    checking_until: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: The hold's token, minted by the worker that took it: only it renews or lets go of the hold.
+    holder: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 @model(frozen=True)

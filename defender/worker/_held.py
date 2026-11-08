@@ -19,7 +19,8 @@ class Held:
     `fenced`: a renewal that succeeded omitted the row, so it was cancelled, taken over or
     deleted. `signalled`: a deliberate stop signalled this entry's child while it was alive.
     `cost_so_far`: the last figure the cost task read for an investigation; `progress`: the last
-    progress record read for a learning job. The renewal copies either."""
+    progress record read for a learning job. The renewal copies either. A post-step's
+    `check_holder` is renewed with the rows' leases, and a renewal that omits it fences it too."""
 
     record: Any
     kind: str = INVESTIGATION
@@ -28,6 +29,9 @@ class Held:
     signalled: bool = False
     cost_so_far: float | None = None
     progress: Any = None
+    #: A post-step's hold on its tenant's check clock (#1344 amendment 3): the token the
+    #: renewal extends it by. None for a row, and for a post-step that holds nothing yet.
+    check_holder: str | None = None
     #: The fence's ender tasks, held so the event loop's weak reference is not their only one.
     enders: list[asyncio.Task[None]] = field(default_factory=list)
 

@@ -1,7 +1,8 @@
 """#1344 amendment 1 (from #1278, owner-approved 2026-11-07): a worker wakes a tenant without a family.
 
 A worker with learning slots, not stopping, starts a family-less post-step for an `active` tenant with learning jobs
-once that tenant has gone `learning_check_interval` without a post-step (its clock starting with the worker). The
+once that tenant has gone `learning_check_interval` without a post-step (amendment 3: its clock is a row in the store,
+started by the tenant's first queued job, and stops while the tenant's last post-step left nothing waiting). The
 check is learning-class, is picked before a queued job, and is handed the tenant's `pending` jobs; its record is
 `<tenant id>.post-step.json`. Real database, scripted children, as `test_1344_learning_jobs`."""
 from __future__ import annotations
@@ -101,9 +102,9 @@ async def test_a1_a_tenant_no_family_follows_is_checked_and_its_stranded_job_pub
     assert (events[0].actor, events[0].tenant_id, events[0].target) == ("system", T1, T1)
 
 
-async def test_a1_the_check_clock_starts_with_the_worker(world):
+async def test_a1_the_check_clock_starts_with_the_tenant_s_first_job(world):
     """With an interval longer than the serve, no family-less post-step starts, so a stranded job waits for it.
-    (amendment 1: per-tenant clocks start at worker start)"""
+    (amendment 3: a tenant's clock starts with its first queued job, not with the worker; amendment 1)"""
     dsn = world["dsn"]
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn)
     async with job_store(dsn) as store:
@@ -223,16 +224,17 @@ async def test_a1_a_stopping_worker_signals_its_family_less_post_step(world):
 
 
 async def test_a1_only_active_tenants_with_learning_jobs_are_checked(world):
-    """The store names the tenants to check: `active`, with any learning job. (amendment 1)"""
+    """The store claims a check only for an `active` tenant whose queued job armed its clock. (amendments 1, 3)"""
     dsn = world["dsn"]
     register_tenant(dsn, T2)
     async with job_store(dsn) as store:
-        assert await store.learning_tenants() == []
+        assert await store.claim_learning_check(0.01, "h0") is None, "no tenant has a learning job"
         await queued_job(world, store, ticket="J-1")
         await queued_job(world, store, ticket="J-2", tenant=T2)
-        assert sorted(await store.learning_tenants()) == sorted([T1, T2])
         move_tenant(dsn, T2, state="offboarding")
-        assert await store.learning_tenants() == [T1]
+        await asyncio.sleep(0.05)
+        assert await store.claim_learning_check(0.01, "h1") == T1
+        assert await store.claim_learning_check(0.01, "h2") is None, "T2 is not active, and T1 is held"
 
 
 @pytest.mark.parametrize("bad", [0, -1])

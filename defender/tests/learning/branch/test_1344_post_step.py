@@ -91,7 +91,7 @@ def _record(ep: Path, job: str) -> dict:
     return json.loads((Path(data_root) / tenant_id / "runs" / f"{job}.post-step.json").read_text(encoding="utf-8"))
 
 
-def _post_step(ep: Path, job: str, pending: list[str], *, tick=None) -> None:
+def _post_step(ep: Path, job: str, pending: list[str], *, tick=None, waiting=lambda *_a, **_k: True) -> None:
     """The real post-step, its tenant admitted through the host acceptance from records handed in as `directory=`,
     as the launcher and the job entry take theirs."""
     from defender.learning.branch import post_step
@@ -100,7 +100,7 @@ def _post_step(ep: Path, job: str, pending: list[str], *, tick=None) -> None:
     hand_pending(data_root, tenant_id, job, pending)
     argv = ["--job", job, "--tenant", tenant_id, "--parent-pid", str(os.getppid())]
     post_step.main(argv, author_tick=tick if tick is not None else (lambda *_a, **_k: 0),
-                   directory=T.launcher_directory(tenant_id))
+                   directory=T.launcher_directory(tenant_id), still_waiting=waiting)
 
 
 def test_o8_the_post_step_publishes_then_runs_the_drain_gate_and_records_it(tmp_path):
@@ -316,8 +316,53 @@ def test_a_post_step_handed_no_readable_list_publishes_nothing_and_still_runs_th
     _data_root, tenant_id = J.episode_location(ep)
     ticks: list[int] = []
     post_step.main(["--job", ep.name, "--tenant", tenant_id, "--parent-pid", str(os.getppid())],
-                   author_tick=lambda *_a, **_k: ticks.append(1) or 0, directory=T.launcher_directory(tenant_id))
+                   author_tick=lambda *_a, **_k: ticks.append(1) or 0, directory=T.launcher_directory(tenant_id),
+                   still_waiting=lambda *_a, **_k: True)
 
     assert _record(ep, ep.name) == {"published": [], "refused": []}
     assert ticks == [1]
     assert _queue(ep) == []
+
+
+def test_a3_a_post_step_whose_gate_would_find_nothing_left_says_so_after_the_gate(tmp_path):
+    """After the gate, the drain's own test is asked whether work still waits; `waiting: false` is written only when
+    nothing does, and only after the gate ran. (amendment 3)"""
+    ep, _ = _job_episode(tmp_path, "idle", findings=False)
+    order: list[str] = []
+
+    _post_step(ep, ep.name, [], tick=lambda *_a, **_k: order.append("gate") or 0,
+               waiting=lambda *_a, **_k: order.append("asked") or False)
+
+    assert order == ["gate", "asked"]
+    assert _record(ep, ep.name) == {"published": [], "refused": [], "waiting": False}
+
+
+@pytest.mark.parametrize("answer", [True, "fault"])
+def test_a3_work_still_waiting_or_an_unknown_answer_leaves_the_record_without_the_flag(tmp_path, answer):
+    """A record without `waiting` keeps the tenant's checks running: written so when work waits or the question
+    faults. (amendment 3)"""
+    ep, _ = _job_episode(tmp_path, "busy", findings=False)
+
+    def waiting(*_a, **_k):
+        if answer == "fault":
+            raise RuntimeError("the learning state could not be opened")
+        return answer
+
+    _post_step(ep, ep.name, [], waiting=waiting)
+
+    assert _record(ep, ep.name) == {"published": [], "refused": []}
+
+
+@pytest.mark.parametrize(("threshold", "waiting"), [("2", True), ("3", False)])
+def test_a3_still_waiting_is_the_author_drain_gate_s_own_test(tmp_path, monkeypatch, threshold, waiting):
+    """Two published findings: at threshold 2 the author drain's gate would open, so work waits; at 3 it stays shut, so
+    nothing does. The question the post-step asks is the gate's own. (amendment 3)"""
+    from defender.learning.core.drains import author_work_waiting
+
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", threshold)
+    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "5")
+    ep, _ = _job_episode(tmp_path, f"gate-{threshold}")
+    _post_step(ep, ep.name, [ep.name])
+    assert len(_queue(ep)) == 2, "premise: the job's two findings were published"
+
+    assert author_work_waiting(_learning_paths(ep)) is waiting

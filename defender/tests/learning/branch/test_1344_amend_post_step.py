@@ -49,7 +49,7 @@ def test_a1_a_family_less_post_step_publishes_runs_the_gate_and_records_under_th
 
     assert seen, "the gate did not run"
     assert seen[0] > 0, "the gate ran before publishing"
-    assert _record_at(ep, tenant_id) == {"published": [ep.name], "refused": []}
+    assert _record_at(ep, tenant_id) == {"published": [ep.name], "refused": [], "waiting": False}  # below threshold (amendment 3)
     data_root, _ = J.episode_location(ep)
     assert not (Path(data_root) / tenant_id / "runs" / f"{ep.name}.post-step.json").exists(), \
         "a family-less post-step wrote under a job's name"
@@ -66,4 +66,4 @@ def test_a1_a_family_less_post_step_with_nothing_pending_still_runs_the_gate(tmp
                    author_tick=lambda *_a, **_k: ticks.append(1) or 0, directory=T.launcher_directory(tenant_id))
 
     assert ticks == [1]
-    assert _record_at(ep, tenant_id) == {"published": [], "refused": []}
+    assert _record_at(ep, tenant_id) == {"published": [], "refused": [], "waiting": False}  # nothing queued (amendment 3)

@@ -19,7 +19,7 @@ from defender.tests.support.shared._postgres1339 import VERSION_TABLE, database,
 #: The schemas PostgreSQL itself owns; everything else in a database is ours to compare.
 _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
 IDENTITY_TABLES = {"users", "memberships", "sessions"}  # #1214: `tenants` moved to `tenancy`
-JOBS_TABLES = {"alerts", "investigations", "learning_jobs"}  # #1342, #1344 (#1345 r5: the mapping table is a tenant record, in `tenancy`)
+JOBS_TABLES = {"alerts", "investigations", "learning_jobs", "learning_checks"}  # #1342, #1344 (amendment 3: learning_checks) (#1345 r5: the mapping table is a tenant record, in `tenancy`)
 UNKNOWN_REVISION = "f00dfeedbeef"
 #: #1345 r5 Upgrade: the migration after `0006_job_leases`. r5 names no id: this one is DESIGN-IMPLIED for the code stage.
 ALERT_MAPPING_REVISION = "0007_alert_mapping"

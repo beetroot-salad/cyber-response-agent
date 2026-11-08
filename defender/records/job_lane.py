@@ -283,10 +283,13 @@ class PostStepRecord:
     """The post-step's record (`<runs>/<key>.post-step.json`, `post_step_key`: the job it
     followed, or the tenant's own id for a family-less one): the pending jobs whose findings it
     published and those it refused for good (their rows failed validation). A job in neither
-    stays pending (a queue-level or transient failure)."""
+    stays pending (a queue-level or transient failure). `waiting` (amendment 3): whether, after
+    its gate ran, the gate would still find something to do; a record without it says so, which
+    keeps the tenant's check clock running."""
 
     published: tuple[str, ...] = ()
     refused: tuple[str, ...] = ()
+    waiting: bool = True
 
     def __post_init__(self) -> None:
         for ids in (self.published, self.refused):
@@ -294,22 +297,26 @@ class PostStepRecord:
                 raise ValueError(f"not a post-step record: {self!r}")
         if set(self.published) & set(self.refused):
             raise ValueError("a job is published or refused, never both")
+        if not isinstance(self.waiting, bool):
+            raise ValueError(f"not a post-step record: {self!r}")
 
     def text(self) -> str:
-        return json.dumps({"published": list(self.published), "refused": list(self.refused)})
+        # `waiting` is written only when it says something: its absence is the safe reading.
+        return json.dumps({"published": list(self.published), "refused": list(self.refused),
+                           **({} if self.waiting else {"waiting": False})})
 
     @classmethod
-    def of(cls, published: Sequence[str], refused: Sequence[str]) -> PostStepRecord:
-        return cls(published=tuple(published), refused=tuple(refused))
+    def of(cls, published: Sequence[str], refused: Sequence[str], *, waiting: bool = True) -> PostStepRecord:
+        return cls(published=tuple(published), refused=tuple(refused), waiting=waiting)
 
     @classmethod
     def parse(cls, text: str) -> PostStepRecord | None:
         """The record `text` holds, or `None` when it is not one of this shape."""
-        obj = _record_object(text, _POST_STEP_FIELDS)
+        obj = _record_object(text, _POST_STEP_FIELDS) or _record_object(text, _POST_STEP_FIELDS | {"waiting"})
         if obj is None or not all(isinstance(obj[k], list) for k in _POST_STEP_FIELDS):
             return None
         try:
-            return cls.of(obj["published"], obj["refused"])
+            return cls.of(obj["published"], obj["refused"], waiting=obj.get("waiting", True))
         except ValueError:
             return None
 
