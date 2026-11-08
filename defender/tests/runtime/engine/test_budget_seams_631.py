@@ -100,7 +100,7 @@ def drive_agent(  # noqa: PLR0913 — one more seam: the model
                 agent_id: str = "main", request_limit: int = 40, model=None):
     """Build one agent through the real `build_agent_core` (real hooks, tools and gate) and drive it
     with a scripted `FunctionModel`; `state` is the `RunState` its deps carry."""
-    model = model if model is not None else ScriptedModel(turns)
+    scripted = model if model is not None else ScriptedModel(turns)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
     from dataclasses import replace as _replace
     if enforce is not None:
@@ -111,7 +111,7 @@ def drive_agent(  # noqa: PLR0913 — one more seam: the model
         instructions="probe",
         logger=logger,
         agent_id=agent_id,
-        make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
+        make_model=lambda name, effort: BuiltModel(FunctionModel(scripted), None),
         limits=limits,
     )
     from defender import box as box_mod
@@ -129,7 +129,7 @@ def drive_agent(  # noqa: PLR0913 — one more seam: the model
                                    usage_limits=UsageLimits(request_limit=request_limit))
 
     try:
-        return asyncio.run(_go()), model
+        return asyncio.run(_go()), scripted
     finally:
         logger.close()
 
