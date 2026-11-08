@@ -5,3 +5,6 @@ base: https://CHANGE-ME
 auth:
   scheme: bearer
   field: api_key
+# An indicator may hold a `/` (a URL, a CIDR range), so a lookup sends it in the body (#1391).
+reads:
+  - {method: POST, path: "/lookup"}

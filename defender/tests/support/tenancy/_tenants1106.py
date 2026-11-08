@@ -235,14 +235,15 @@ def access_text(marker: str, system: str, *, base: str | None = None) -> str:
     """The access declaration a fixture tenant carries for `system` (#1391 P1: every system with
     network access has one): at `base` (default: a made-up one carrying `marker` and `system`, so
     a reader handed another tenant's base is caught by the value alone). Elastic: basic auth with
-    its two POST reads; ticket: the case-comment write; the rest bearer, GETs only (JSON is YAML)."""
+    its two POST reads; threat-intel: its `POST /lookup` read (#1391 r5 O-T2b); ticket: the
+    case-comment write; the rest bearer, GETs only (JSON is YAML)."""
     import json
     if system == "elastic":
         auth: dict[str, str] = {"scheme": "basic"}
         reads = [{"method": "POST", "path": "/*/_search"}, {"method": "POST", "path": "/_query"}]
     else:
         auth = {"scheme": "bearer", "field": "api_key"}
-        reads = []
+        reads = [{"method": "POST", "path": "/lookup"}] if system == "threat-intel" else []
     writes = ([{"method": "POST", "path": "/tickets/*/comments"}] if system == "ticket" else [])
     return json.dumps({
         "access": "http-proxy",

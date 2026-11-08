@@ -331,12 +331,16 @@ def test_d2_shipped_tenants_complete():
             assert name in S.PREFIX, f"{tenant_settings}: no known prefix for system {name!r}"
             prefix = S.PREFIX[name]
             config_env = systems / name / "config.env"
+            expected = SHIPPED_KEYS.get(name, {f"{prefix}_TIMEOUT_SEC"})
+            # #1391 O1/O2/Q4: every system is declared, and its config.env holds exactly the keys
+            # its adapter reads (no Docker, transport or base key); a system whose adapter reads
+            # none ships no config.env (r5 O-S1).
+            assert (systems / name / "access.yaml").is_file(), (tenant_settings, name, "no declaration")
+            if not expected:
+                assert not config_env.exists(), config_env
+                continue
             assert config_env.is_file(), config_env
             keys = _config_keys(config_env)
-            # #1391 O1/O2/Q4: every system is declared, and its config.env holds exactly the keys
-            # its adapter reads (no Docker, transport or base key).
-            assert (systems / name / "access.yaml").is_file(), (tenant_settings, name, "no declaration")
-            expected = SHIPPED_KEYS.get(name, {f"{prefix}_TIMEOUT_SEC"})
             assert keys == expected, (tenant_settings, name, sorted(keys ^ expected))
 
     # The committed fixture, set up under this test's data root as `playground`.
@@ -344,8 +348,10 @@ def test_d2_shipped_tenants_complete():
     rec = _resolve(current_data_root(), S.PLAYGROUND_ID)
     ConfigFault = S.config_fault()
     faulted = {name: str(entry) for name, entry in rec.systems.items()
-               if isinstance(entry, ConfigFault)}
+               if isinstance(entry, ConfigFault) and SHIPPED_KEYS.get(name) != set()}
     assert not faulted, faulted
+    # host-state reads no key, so its absent config.env leaves it usable.
+    assert S.mod("integrations.host_state_adapter").check_settings(rec) is None
 
 
 def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys):
@@ -604,6 +610,27 @@ def test_r5_an_answer_that_is_not_the_object_a_verb_needs_is_the_system_breaking
     with pytest.raises(S.mod("kit.faults").TransportFault):
         cmdb.get_host(ctx, host="web-1")
     assert len(stand_in.requests()) == 1, "the answer came from the system"
+
+
+@pytest.mark.parametrize("value", ["http://static-cdn-sync.example/api/v2/telemetry",
+                                   "10.0.0.0/8", "203.0.113.7"])
+def test_r5_a_threat_intel_lookup_sends_its_value_in_the_body(tmp_path, value):
+    """An indicator may hold a `/` (a URL, a CIDR range), so `lookup` sends it in the body of
+    `POST /lookup` and answers the one result (#1391 r5 T3, O-T2b)."""
+    import json as _json
+
+    threat_intel = S.mod("integrations.threat_intel_adapter")
+    root = tmp_path / "tenants"
+    S.plant(root, marker="r5t")
+    found = {"value": value, "verdict": "malicious"}
+    stand_in = S.ProxyStandIn(tmp_path / "proxy", [S.answer(_json.dumps({"results": [found]}))])
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    ctx = S.verb_context(_resolve(root), run_dir, {}, proxy_url=stand_in.url, request_token="t")
+    assert threat_intel.lookup(ctx, value=value) == found
+    [request] = stand_in.requests()
+    assert (request["method"], request["url"], request["body"]) == (
+        "POST", f"{T1106.default_base('r5t', 'threat-intel')}/lookup", {"values": [value]}), request
 
 
 def test_s7_mf11_record_parts_read_only(tmp_path):

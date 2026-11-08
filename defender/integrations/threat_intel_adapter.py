@@ -11,7 +11,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
 
 from defender.kit.verbs import VerbContext
 from defender.kit import transport
-from defender.kit.faults import UpstreamFault
+from defender.kit.faults import TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.kit.verbs import TenantRecord
@@ -41,8 +41,15 @@ def health_check(ctx: VerbContext) -> dict:
 
 
 def lookup(ctx: VerbContext, *, value: str) -> dict:
-    return transport.request(ctx, SYSTEM, "GET", "/lookup/{value}", {"value": value},
-                             timeout_sec=_timeout(ctx))
+    """One indicator's reputation. An indicator may hold a `/` (a URL, a CIDR range), so it is
+    sent in the body of `POST /lookup` (a read its access declaration lists), never the path
+    (#1391 r5 T3); the answer is that one indicator's result."""
+    answer = transport.request(ctx, SYSTEM, "POST", "/lookup", body={"values": [value]},
+                               timeout_sec=_timeout(ctx))
+    results = answer.get("results")
+    if not (isinstance(results, list) and len(results) == 1 and isinstance(results[0], dict)):
+        raise TransportFault(f"{SYSTEM} answered the lookup of one indicator without one result")
+    return results[0]
 
 
 def list_indicators(
