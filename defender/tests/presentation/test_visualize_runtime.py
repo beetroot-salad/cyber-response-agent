@@ -244,8 +244,8 @@ def test_gather_wall_and_model_reattribution(tmp_path):
     assert to_gather[plan_phase] == 0
 
     by_model = d.gather_cost_by_model(run, d.load_messages(run), _run_ledger(run))
-    assert list(by_model) == ["haiku-4-5"]
-    assert by_model["haiku-4-5"] > 0
+    assert list(by_model) == ["claude-haiku-4-5"]
+    assert by_model["claude-haiku-4-5"] > 0
 
 
 def _planted_ledger(tmp_path: Path, requested: dict[str, str]):
