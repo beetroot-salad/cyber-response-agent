@@ -237,7 +237,7 @@ def test_the_three_namespaces_do_not_read_each_other(tmp_path):
     main transcript, and the review reader must not pick up either of theirs."""
     ledger = _ledger(tmp_path, _MIXED_REQUESTED)
     assert gather_cost_by_model(tmp_path, _MIXED, ledger) == {
-        "haiku-4-5": pytest.approx(usage_cost("claude-haiku-4-5", _USAGE))
+        "claude-haiku-4-5": pytest.approx(usage_cost("claude-haiku-4-5", _USAGE))
     }
     assert [r["agent_id"] for r in deduped_main_records(_MIXED)] == ["main"]
 
