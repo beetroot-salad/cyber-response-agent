@@ -133,8 +133,13 @@ def test_a_finished_run_resumes_at_one_of_its_own_messages(tmp_path):
         "the resumed run appended nothing at all, so 'it appended no duplicates' is vacuous")
 
 
-def test_s5_a_branch_arm_sharing_the_database_totals_only_its_own_run(tmp_path):
-    """The arm and its source share one database; the arm's run file totals the arm's own responses, the source's stays its own. (S1, S5)"""
+def test_s5_a_branch_arm_sharing_the_database_totals_only_its_own_run(tmp_path, monkeypatch):
+    """The arm and its source share one database; the arm's run file totals the arm's own responses, the source's stays its own. (S1, S5)
+
+    CONFLICT-UPDATED (r7 S1): each response is priced at the model its agent was built to request, not the name the stand-in
+    reports; the requested models are pinned to the names priced below."""
+    monkeypatch.setenv("DEFENDER_MODEL", "claude-sonnet-4-6")
+    monkeypatch.setenv("DEFENDER_GATHER_MODEL", "claude-haiku-4-5")
     import json
     from types import SimpleNamespace
 
