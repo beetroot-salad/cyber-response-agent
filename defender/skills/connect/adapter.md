@@ -55,10 +55,10 @@ The live tree's own `integrations/<system>_adapter.py` modules are the same shap
 on the shared `_stub_transport.py`; read it and the closest sibling before
 you write anything. Then:
 
-1. **Reuse the shared transport module** if one exists (the siblings'
-   `_stub_transport.py`, or whatever they import) — import *that*. Only on a
-   truly greenfield tree do you write your own transport, modelled on
-   `example_adapter.py`'s `_request`. One shared transport per tree, never two.
+1. **Use the shared transport** — `integrations.http_get` (and, in the tree,
+   `_stub_transport`'s `http_get_obj` / `http_post`), which sends each
+   request through the credential proxy. Never write your own: an adapter
+   reaches its system only through the proxy, so there is no other transport.
 2. **Copy the closest example** to `defender/integrations/{system}_adapter.py`
    — a sibling adapter if one exists, else `examples/example_adapter.py` —
    change `SYSTEM`, and adapt the verbs and response parsing to the real
@@ -191,15 +191,27 @@ adapter's shape:
 A hand-rolled filter DSL or an adapter-side reducer is the anti-pattern the
 gather redesign removed — never the recommended shape.
 
+## Access declaration
+
+`settings/systems/{system}/access.yaml`, beside `config.env`, is how the credential
+proxy reaches the system — and its presence is what makes the system usable at all:
+without it the settings check refuses the system as not configured. It holds
+`access: http-proxy`, the system's `base` URL (the only place the address lives —
+never a `config.env` key), `auth` (its `scheme` — `bearer`, `header`, `basic` or
+`oauth-client-credentials` — and the credential *field name* the scheme reads, never
+a value), and the `reads` / `writes` routes the adapter calls (`{method, path}`).
+The proxy refuses any request outside them. Copy a sibling's (the template's
+ticket `access.yaml` is a worked one) and change the base, scheme and routes.
+
 ## Credentials
 
-**There is no credential delivery yet** (#1163). A tenant's `config.env` holds
-non-secret config only — endpoints, timeouts, `AUTH_TYPE`, the access lines.
-A key that holds a secret (`PASSWORD` / `TOKEN` / `SECRET` / `API_KEY`) or
-references one (`*_SECRET_REF`) is FAILed by `validate_scaffold`, on every line of
-the file, an `export` line or a repeated key included. A system whose
-read source needs a credential cannot be connected until #1163 lands: say so and
-stop.
+The operator stores a system's credential with the credential proxy
+(`PUT /systems/{system}/credentials` on the product API, write-only: nothing returns
+it); the proxy applies it by the declaration's scheme. A tenant's `config.env` and
+`access.yaml` hold non-secret settings only. A key that holds a secret
+(`PASSWORD` / `TOKEN` / `SECRET` / `API_KEY`) or references one (`*_SECRET_REF`) is
+FAILed by `validate_scaffold`, on every line of the file, an `export` line or a
+repeated key included.
 
 `system=` is required on every transport call, and an adapter reaches its store
 through `http_get` / `http_get_obj` / `http_post`, which send each request through
@@ -211,24 +223,12 @@ the layer.
 
 ## Transport
 
-`example_adapter.py`'s `_request` does HTTP via `urllib`. Swap that one layer
-for whatever your environment needs — direct HTTP, an existing CLI you wrap
-and parse, or a vendor SDK call. (The lab's own adapters reach their systems only through the credential proxy,
-#1391.) The right
-transport is a property of *your* deployment, not of this skill; the VERBS
-surface above it — verb signatures, the returned payload, the faults —
-does not change with it.
-
-Two rules the transport always obeys:
-
-- **Fork with `ctx.env`, never bare.** A child forked with no `env=`
-  inherits the driver's own process, provider keys included. Every
-  `subprocess.run` in the transport passes `env=dict(ctx.env)` — handed whole,
-  never read from: a setting is never looked up in it.
-- **Always set a `timeout=` on the fork.** The outer wall-clock budget died
-  with the capture subprocess, so the transport's own `subprocess.run(...,
-  timeout=…)` is the only real kill left. Map a `TimeoutExpired` to a
-  `TransportFault`.
+`example_adapter.py`'s `_request` is one line: `integrations.http_get`, which
+sends the request through the credential proxy under the system's
+`TIMEOUT_SEC` and maps an unreachable system or a 5xx to `TransportFault` and
+a 4xx to `UpstreamFault`. Every adapter reaches its system this way (#1391):
+no direct HTTP, no CLI or SDK call, no forked child. The VERBS surface above
+it — verb signatures, the returned payload, the faults — is all you write.
 
 Inspect a real response before writing the parser — shapes vary (a `/roles`
 endpoint may return a dict keyed by name, not a list). Run the real call
@@ -269,9 +269,10 @@ verb and param conventions only when the system genuinely demands it.
 
 ## Dependencies and packaging
 
-Python 3.11+, stdlib first (`urllib`, `json`, `ssl`, `subprocess` cover most
-adapters). Reach for a vendor SDK only when the API genuinely needs one
-(SigV4 signing, streaming, proprietary auth). When a dep is required, add it
+Python 3.11+, stdlib first (`json` covers most adapters' parsing). A vendor SDK
+that makes its own network calls has no place: the request goes through the
+proxy (an auth scheme the proxy cannot apply is a divergence to surface, not
+to work around). When a parsing dep is genuinely required, add it
 as a named extra in `defender/pyproject.toml`, mirror it into `[dev]`, and
 rebuild the venv:
 
