@@ -824,6 +824,18 @@ def _a_gate_that_ran(run: Path) -> None:
         "verdict": "stands", "reviewed_disposition": "malicious", "reviewed": True, "detail": "", "failure_kind": None}), encoding="utf-8")
 
 
+def test_p1_r7_2_the_page_renders_only_from_a_cost_it_is_handed():
+    """`render_runtime_page` takes `cost` with no default: no rendering path exists that prices the run without the one
+    ledger read. (r7.2 P1: "its rendering path that takes no cost is removed")"""
+    import inspect
+
+    from defender.presentation import visualize_run
+
+    parameter = inspect.signature(visualize_run.render_runtime_page).parameters.get("cost")
+    assert parameter is not None, "render_runtime_page takes no `cost`"
+    assert parameter.default is inspect.Parameter.empty, f"`cost` has a default: {parameter.default!r}"
+
+
 def test_p1_r7_2_an_unreadable_ledger_leaves_the_phase_lines_the_by_model_strip_and_the_review_figures_without_dollars(tmp_path, monkeypatch):
     """A session database without its ledger table: besides the headline ("unknown") and the bar (none), no informational figure
     carries a dollar amount: the page prices nothing outside the one ledger read. A readable ledger is the control, showing

@@ -1113,7 +1113,7 @@ def _warning_exception_types(caplog) -> list[str]:
             continue
         if record.exc_info and record.exc_info[0] is not None:
             found.append((record.name, record.exc_info[0].__name__))
-        found += [(record.name, name) for name in re.findall(r"\((\w+(?:Error|Down|Exception))\)", record.getMessage())]
+        found += [(record.name, name) for name in re.findall(r"\((\w+)\)", record.getMessage())]
     return sorted(found)
 
 
@@ -1145,6 +1145,8 @@ def test_s2a_r7_s2c_a_request_whose_ledger_write_is_refused_leaves_its_own_endin
     assert (summary["truncated_by"], summary.get("exit_reason"), calls) == (truncated_by, control.get("exit_reason"), control_calls), (
         "a failed ledger write changed how the run ended")
     assert control_calls == {"main": main_calls}, "premise: the control's MAIN calls"
+    if outcome != "response":
+        assert control_warnings, "premise: the control reported the lead's failure, so the comparison is not empty with empty"
     assert _warning_exception_types(caplog) == control_warnings, "the lead's failure was reported differently"
     assert summary["spend_write_failed"] is True, f"{outcome}: the run's exit did not carry the failed write"
     result = _run_result(run_dir)
@@ -1235,6 +1237,22 @@ def _endings_by_membership() -> dict[str, Any]:
     endings["no-status"] = lambda: _http_error(None)
     endings["test-defined"] = lambda: ValueError("a test-defined ending")
     return endings
+
+
+
+def test_f2_r7_1_e_the_published_classifier_refuses_exactly_the_non_temporary_http_errors():
+    """Every HTTP error status from 400 to 599: refused exactly for a 4xx other than 408, 409, 429; never a `ProviderDown`
+    (whatever its last status) or a status-less error. (r7 S2a, r7.1 E; triage F2, every member of the class)"""
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    from defender.providers import ProviderDown, refused_by_provider
+
+    wrong = [s for s in range(400, 600)
+             if refused_by_provider(ModelHTTPError(s, "fake-gather", body={"error": "x"})) is not (s < 500 and s not in (408, 409, 429))]
+    assert wrong == [], f"the classifier disagrees with the design at {wrong}"
+    for last in (None, *range(400, 600)):
+        assert refused_by_provider(ProviderDown(model="fake-gather", status=last, attempts=4)) is False, last
+    assert refused_by_provider(_http_error(None)) is False
 
 
 _ENDINGS = _endings_by_membership()
