@@ -100,8 +100,9 @@ def _temporary(exc: BaseException) -> tuple[bool, int | None]:
 
 def refusal_status(exc: BaseException) -> int | None:
     """The HTTP status of `exc` if it is the provider refusing a request for good (an HTTP
-    error the retrier does not resend), else `None`. What a refusal means is the caller's: a
-    gather lead's ends that lead, MAIN's own ends the run `provider-rejected` (#1243)."""
+    error the retrier does not resend), else `None`. What a refusal means is the caller's: MAIN's
+    own, or a lead's whose status is in `SETUP_STATUSES`, ends the run `provider-rejected`; any
+    other refusal on a lead ends only that lead (#1243)."""
     from pydantic_ai.exceptions import ModelHTTPError
 
     if isinstance(exc, ModelHTTPError) and not _temporary(exc)[0]:

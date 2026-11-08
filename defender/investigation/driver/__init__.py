@@ -384,8 +384,18 @@ def _refusal_in(exc: BaseException) -> providers.ProviderRejected | None:
     found = carried_unless_overridden(exc, providers.ProviderRejected, overriding)
     if found is not None:
         return found
-    http = carried_unless_overridden(exc, ModelHTTPError, overriding)
-    return None if http is None else providers.rejected(http)
+    if carried_unless_overridden(exc, ModelHTTPError, overriding) is None:
+        return None
+    # Every HTTP error the group carries, not only the first: a temporary one ahead of a
+    # refusal must not hide it.
+    pending = [exc]
+    while pending:
+        leaf = pending.pop(0)
+        if isinstance(leaf, BaseExceptionGroup):
+            pending.extend(leaf.exceptions)
+        elif isinstance(leaf, ModelHTTPError) and (rejection := providers.rejected(leaf)):
+            return rejection
+    return None
 
 
 def _provider_down_in(exc: BaseException) -> providers.ProviderDown | None:
@@ -559,8 +569,9 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
     """Run the correlation lead to its end and return `(the correlation section of MAIN's
     opening message, None)`, or `(None, the run summary)` when a run-level stop arrived first.
 
-    A run-level kill or a store fault while the lead runs ends the run the way MAIN's own would,
-    with the agent never started. An interrupt, a cancellation or a run folder that refuses the
+    A run-level kill, a store fault, or a provider refusal that ends the run (`ProviderRejected`,
+    #1243) while the lead runs ends the run the way MAIN's own would, with the agent never
+    started. An interrupt, a cancellation or a run folder that refuses the
     lead's summary propagates (the run's block releases the wire log and the store)."""
     from .. import lead_zero as lead_zero_mod
 

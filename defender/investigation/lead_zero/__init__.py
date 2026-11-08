@@ -232,8 +232,11 @@ def _classify_end(end: LeadEnd, run_state: RunState, system: str) -> str | None:
 
 
 def _breaker_ending(end: LeadEnd) -> str | None:
-    """The two endings decided before the lead's results are read: a store that could not
-    record the lead stops the run; a call the breaker refused names the breaker."""
+    """The endings decided before the lead's results are read: a store that could not record
+    the lead stops the run; a provider refusal names the dispatch as failing; a call the breaker
+    refused names the breaker. The refusal is checked before the breaker and before
+    `_classify_end`'s down-mid-lead reading on purpose: the provider refusing the lead's own
+    request is the cause, and a refused or down system call after it is only a symptom."""
     from defender.records import session_store  # lazy: the store needs the agent framework, and the operator tools that read this package's census run without it
 
     if end.fault_terminator == session_store.TRUNCATED_BY_STORE:
@@ -274,7 +277,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
 
     Every way it fails to run or yields nothing is a returned ending, never a raise (A2); a
     run-level kill (`BudgetKill`, `RunAborted`), a provider that stayed down (`ProviderDown`,
-    #1243), an interrupt, a store fault after the lead began, and a run folder that refuses its
+    #1243), a provider refusal that ends the run (`ProviderRejected`), an interrupt, a store fault after the lead began, and a run folder that refuses its
     produced summary propagate and stop the run."""
     from defender.records import session_store  # lazy, as in `_breaker_ending`
 
