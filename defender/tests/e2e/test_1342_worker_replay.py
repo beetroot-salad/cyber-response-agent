@@ -257,6 +257,30 @@ def _spend_errors(stderr: Path) -> list[str]:
     return [line for line in lines if '"ERROR"' in line and "spend" in line.lower()]
 
 
+def _page(run: Path, *, spend_write_failed: bool) -> str:
+    """The run page through the post-run step's own renderer, handed the host's fact (the job lane's child stubs the step)."""
+    from defender.presentation.visualize_run import render_page
+    from defender.records import Run
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
+    return render_page(Run().under(fixture_runs_base(run.parent), run.name), spend_write_failed=spend_write_failed)
+
+
+def _headline(html: str) -> str:
+    import re
+
+    found = re.search(r'ts-cost">(.*?)</', html, flags=re.S)
+    assert found is not None, "no headline cost"
+    return found.group(1).strip()
+
+
+def _cost_segments(html: str) -> dict[str, float]:
+    """Every cost-bar segment (cb-seg title "<name> · $v · p%") by lower-cased name."""
+    import re
+
+    return {name.lower(): float(v) for name, v in re.findall(r'class="cb-seg"[^>]*title="([^"]*?) · \$([0-9.]+) · ', html)}
+
+
 def _run_result(run: Path) -> dict:
     lines = (run / "tool_trace.jsonl").read_text(encoding="utf-8").splitlines()
     return [e for e in map(json.loads, lines) if e.get("type") == "result"][-1]
@@ -264,7 +288,8 @@ def _run_result(run: Path) -> dict:
 
 async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated_database, tmp_path, monkeypatch):  # noqa: F811
     """`cost_usd` is every priced response, all four billed counts priced: MAIN, the lead's final one included, and the
-    review's; exact, and the run file agrees on the total at full precision and on every usage count. (S1, S2, S5)"""
+    review's; exact, and the run file agrees on the total at full precision and on every usage count. EXTENDED (r7 S5, S6): the
+    run page's headline is that cost, and its bar is one segment per agent kind from the ledger. (S1, S2, S5)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     root = tmp_path / "data"
@@ -298,6 +323,17 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
         assert result["total_cost_is_lower_limit"] is False
         assert result["usage"] == priced_billed(10), "usage counts every response's four billed counts, as the total does"
         assert result["num_turns"] == 4, "num_turns stays MAIN's turns (run health reads it)"
+        # r7 S5/S6: the run page, rendered through its real entry on this job's run with the host's own fact, agrees.
+        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+        html = _page(runs / inv.investigation_id, spend_write_failed=end["spend_write_failed"])
+        assert _headline(html) == f"${stored['cost_usd']:.4f}", "the page's headline is not the worker's final cost"
+        segments = _cost_segments(html)
+        assert set(segments) == {"main", "gather", "correlation", "review"}, f"the cost bar is not by agent kind: {segments}"
+        by_kind = {"main": priced_cost(PRICED_MODELS["main"], 4), "gather": priced_cost(PRICED_MODELS["gather"], 2),
+                   "correlation": priced_cost(PRICED_MODELS["gather"], 1), "review": priced_cost(PRICED_MODELS["review"], 3)}
+        for kind, spent_by in by_kind.items():
+            assert segments[kind] == pytest.approx(spent_by, abs=1e-4), f"the {kind} segment is not its agents' ledger sum"
+        assert sum(segments.values()) == pytest.approx(stored["cost_usd"], abs=5e-4), "the bar does not add up to the headline"
 
 
 async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_report_and_marks_the_sum(

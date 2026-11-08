@@ -69,6 +69,7 @@ from defender.tests.support.jobs._jobs1342 import (
     session_db,
     session_pointer,
     tree,
+    UNSEEN,
 )
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.tenancy._mapping1345 import mapping_value
@@ -3305,6 +3306,36 @@ async def test_b2_b6_cost_so_far_is_copied_while_the_live_child_writes_its_sessi
     assert (final["stage"], final["cost_usd"]) == ("completed", pytest.approx(SONNET_IN + SONNET_OUT))
     assert final["knowledge"] is not None
     assert accounting_written(dsn, inv) is not None, "finish did not mark the final accounting written"
+
+
+async def test_r7_a_live_cost_so_far_read_beside_an_unseen_row_is_not_marked_and_the_final_read_is(world):
+    """A running job whose ledger holds one priced response and one unseen request: the live copy is the sum and reads
+    exact, stored and on the record; the final read over the same rows is "at least". (r7 S2 live reads, S2a)"""
+    release = world["tmp"] / "release"
+    dsn, runs = world["dsn"], world["runs"]
+    child = _child(world, files=_committed(), wait_for=release)
+    plant_sessions(runs, CASE, [("main", SONNET, {"input_tokens": 1_000_000})])
+    async with job_store(dsn) as store:
+        inv = await _queued(store)
+        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})])
+        plant_spend(runs, CASE, inv, [(SONNET, {})], outcome=UNSEEN)
+        (runs / f"{inv}.session-pointer.json").write_text(session_pointer(CASE), encoding="utf-8")
+        drained = asyncio.create_task(_worker(world, store, child, **_FAST).drain())
+        try:
+            await _until(lambda: child.seen(inv), "the child to start")
+            await _until(lambda: row(dsn, inv)["cost_usd"] == pytest.approx(SONNET_IN), "the live copy", timeout=5.0)
+            for _ in range(5):  # several cost ticks
+                await asyncio.sleep(0.3)
+                live = await store.get_investigation(T1, inv)
+                assert (live.stage, live.cost_usd) == ("running", pytest.approx(SONNET_IN)), "premise: a live row"
+                assert (lower_limit(dsn, inv), live.cost_is_lower_limit) == (False, False), "a live read was marked"
+        finally:
+            release.touch()
+            await asyncio.wait_for(drained, timeout=60)
+        final = await store.get_investigation(T1, inv)
+
+    assert (final.stage, final.cost_usd) == ("completed", pytest.approx(SONNET_IN))
+    assert (lower_limit(dsn, inv), final.cost_is_lower_limit) == (True, True), "an unseen row left the final cost exact"
 
 
 @pytest.mark.parametrize("end", ["finish", "cancel", "stop"])
