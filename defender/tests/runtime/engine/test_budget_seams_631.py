@@ -261,6 +261,90 @@ def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_pa
     assert "limits" in core_sig.parameters
 
 
+@pytest.mark.parametrize("name", ["write_trace", "_run_summary"])
+def test_p2_r7_2_the_run_file_writer_and_the_run_summary_require_the_failed_write_fact(name):
+    """`observe.write_trace` and `driver._run_summary` take `spend_write_failed` as a keyword with no default: a run exit that
+    forgets the fact is a TypeError, not a total that silently reads exact. (r7.2 P2)"""
+    function = getattr(observe if name == "write_trace" else driver, name)
+    parameter = inspect.signature(function).parameters.get("spend_write_failed")
+
+    assert parameter is not None, f"{name} takes no `spend_write_failed`"
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty, f"{name}'s `spend_write_failed` has a default: {parameter.default!r}"
+
+
+class _HookTestFailure(BaseException):  # noqa: N818 — a test-defined ending that is neither an Exception nor a cancellation
+    pass
+
+
+def _every_ending():
+    """The class of endings the model-request hook can see: a response, and every way a request fails. Each is (label, a
+    zero-argument factory of the response or of the exception the handler raises)."""
+    import asyncio
+
+    from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
+
+    from defender.providers import ProviderDown
+
+    yield "response", lambda: ModelResponse(parts=[TextPart(content="ok")])
+    yield "test-defined BaseException", lambda: _HookTestFailure("boom")
+    yield "CancelledError", asyncio.CancelledError
+    yield "RuntimeError", lambda: RuntimeError("anything")
+    yield "unparseable reply", lambda: UnexpectedModelBehavior("Invalid response from openai chat completions endpoint")
+    yield "no-status ModelAPIError", lambda: ModelAPIError("m", "dropped")
+    for status in range(100, 600):
+        yield f"ModelHTTPError {status}", lambda status=status: ModelHTTPError(status, "m", body={"error": "x"})
+    for status in (408, 409, 429, *range(500, 600), None):
+        yield f"ProviderDown {status}", lambda status=status: ProviderDown(model="m", status=status, attempts=4)
+
+
+@pytest.mark.parametrize("agent_id", ["main", "gather:l-001", "gather:l-00c", "review:support", "review:ablation", "review:composer"])
+def test_f1_r7_2_a_request_s_ending_reaches_the_agent_unchanged_whatever_the_ledger_does_with_it(tmp_path, agent_id):
+    """The model-request hook built by `_make_hooks` for each agent kind, with no ledger bound (so every ending is a failed
+    spend write): over every ending the handler can have (a response; a test-defined BaseException, a cancellation, an unparseable
+    reply, a status-less API error; a provider error at every HTTP status 100 to 599; `ProviderDown` at every temporary last
+    status and none), the hook returns the very response or re-raises the very exception, and nothing else propagates.
+    Bookkeeping never changes how a request ends. (r3 decision 2; r7 S2c; triage F1)"""
+    import asyncio
+    from types import SimpleNamespace
+
+    run_dir = _run_dir(tmp_path, f"ending-{agent_id.replace(':', '-')}")
+    logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
+    hooks = driver._make_hooks(logger, agent_id, enforce=False, requested_model="claude-sonnet-4-6")
+    ctx = SimpleNamespace(run_step=1, deps=None)
+    context = SimpleNamespace(messages=[])
+    changed: list[str] = []
+
+    async def through(label: str, made):
+        ending = made()
+
+        async def handler(_context):
+            if isinstance(ending, BaseException):
+                raise ending
+            return ending
+
+        try:
+            got = await hooks.wrap_model_request(ctx, request_context=context, handler=handler)
+        except BaseException as raised:  # noqa: BLE001 — the point: whatever else came out is a finding
+            if raised is not ending:
+                changed.append(f"{label}: raised {type(raised).__name__}({raised}) instead of {type(ending).__name__}")
+        else:
+            if got is not ending:
+                changed.append(f"{label}: returned {got!r} instead of the handler's own response" if not isinstance(ending, BaseException)
+                               else f"{label}: swallowed {type(ending).__name__}")
+
+    async def run_all():
+        for label, made in _every_ending():
+            await through(label, made)
+
+    try:
+        asyncio.run(run_all())
+    finally:
+        logger.close()
+
+    assert not changed, f"{len(changed)} endings reached the agent changed, e.g. {changed[:5]}"
+
+
 def test_s3_a_run_side_hook_with_no_ledger_bound_counts_each_response_as_a_failed_spend_write(tmp_path, caplog):
     """A response recorded while no ledger is bound is logged at ERROR naming spend, never dropped silently; the agent runs on. (S3, r4 carrier)"""
     import logging

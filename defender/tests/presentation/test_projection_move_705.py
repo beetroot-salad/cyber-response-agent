@@ -137,7 +137,11 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
     run_dir, store, replay = _driven_run(tmp_path, run_id="runtime-html")
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
 
-    page = visualize_run.render_runtime_page(run_dir)
+    from defender.records import session_store as ss
+
+    # r7.2 P1: the page takes its cost as an argument; this run's own ledger, read as the post-run step reads it.
+    cost = visualize_run.LedgerCost(ss.read_ledger(store, run_dir.name), False)
+    page = visualize_run.render_runtime_page(run_dir, cost=cost)
     assert page.strip(), "runtime.html rendered empty"
 
     events = [json.loads(line) for line in
@@ -170,7 +174,8 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
         return len([line for line in text.splitlines() if line.strip()])
 
     try:
-        observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=1.0, run_id=run_dir.name)
+        observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=1.0, run_id=run_dir.name,
+                                spend_write_failed=False)
     except FileExistsError:
         return  # failing loud on a second write discharges the demand
     second = (run_dir / "tool_trace.jsonl").read_text()

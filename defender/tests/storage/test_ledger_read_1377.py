@@ -110,3 +110,82 @@ def test_f_r7_an_agent_id_outside_the_four_kinds_is_an_error_at_read_never_main(
 
     with pytest.raises(Exception):  # noqa: B017, PT011 — the design says an error, not which
         ss.read_ledger(store, RUN)
+
+
+_UNKNOWN_IDS = ("gather", "review", "gather:", "review:", "planner", "mainframe", "")
+_ROW_FAULTS = {"unpriced requested model": UNPRICED, "empty requested model": ""}
+_FAULTS = {**{name: ("model", value) for name, value in _ROW_FAULTS.items()},
+           **{f"unknown agent id {i!r}": ("agent", i) for i in _UNKNOWN_IDS}}
+
+
+@pytest.mark.parametrize("outcome", [RESPONSE, REFUSED, UNSEEN])
+@pytest.mark.parametrize(("kind", "value"), _FAULTS.values(), ids=_FAULTS.keys())
+def test_f5_r7_a_row_fault_is_a_fault_whatever_the_row_s_outcome(ledger, outcome, kind, value):
+    """Every outcome (response, refused, unseen) crossed with every row fault (a requested model with no pricing row, an empty
+    one, an agent id outside the four kinds), planted beside a priced response row: a model fault leaves the ledger incomplete
+    with the row adding nothing, an unknown agent id makes the read raise; the outcome never excuses either. The same outcome
+    at a priced model and a known agent is the control. (r7 S2b, D; r7.1 F)"""
+    store, plant = ledger
+    counts = USAGE if outcome == RESPONSE else {}
+    plant([(SONNET, USAGE)])
+    plant([(HAIKU, counts)], agent_id="gather:l-001", outcome=outcome)
+    control = ss.read_ledger(store, RUN)
+    assert control.complete is (outcome != UNSEEN), "control: the outcome alone decides completeness"
+    assert control.total == pytest.approx(_cost(SONNET) + (_cost(HAIKU) if outcome == RESPONSE else 0.0))
+
+    if kind == "model":
+        plant([(value, counts)], agent_id="gather:l-002", outcome=outcome, reported=SONNET if outcome == RESPONSE else None)
+        read = ss.read_ledger(store, RUN)
+        assert read.complete is False, f"a {outcome} row requesting {value!r} reads complete"
+        assert read.total == pytest.approx(control.total), "the faulted row was priced"
+        assert read.by_agent["gather:l-002"] == 0.0
+    else:
+        plant([(SONNET, counts)], agent_id=value, outcome=outcome)
+        with pytest.raises(Exception):  # noqa: B017, PT011 — the design says an error, not which
+            ss.read_ledger(store, RUN)
+
+
+def _lead_ids_by_membership() -> list[str]:
+    """Lead ids drawn from the whole class `LEAD_ID_RE` matches: every one-step edit of the correlation lead's id over the
+    lead-id alphabet (one character inserted, dropped, replaced or re-cased at each position), its prefixes and extensions,
+    and seeded random bodies of every length from 1 to 64."""
+    import random
+    import string
+
+    from defender.records import LEAD_ID_RE
+
+    reserved, alphabet = "l-00c", string.ascii_letters + string.digits
+    body = reserved.removeprefix("l-")
+    found: set[str] = {reserved, "l-00C", "l-" + body.upper()}
+    for i in range(len(body) + 1):
+        for ch in alphabet:
+            found.add(f"l-{body[:i]}{ch}{body[i:]}")
+            if i < len(body):
+                found.add(f"l-{body[:i]}{ch}{body[i + 1:]}")
+    found |= {f"l-{body[:i] + body[i + 1:]}" for i in range(len(body))}
+    found |= {f"l-{body[:i]}" for i in range(1, len(body))}
+    rng = random.Random(1377)
+    found |= {"l-" + "".join(rng.choice(alphabet) for _ in range(n)) for n in range(1, 65) for _ in range(3)}
+    found.add("l-" + "0" * 64)
+    found.add("l-" + body + "c" * 61)
+    ids = sorted(i for i in found if LEAD_ID_RE.match(i))
+    assert reserved in ids
+    assert len(ids) > 400
+    return ids
+
+
+def test_f8_r7_1_f_an_agent_id_is_the_correlation_kind_exactly_when_its_lead_is_the_reserved_one():
+    """Over every lead id the lead-id rule admits (generated: the reserved id's one-step edits, prefixes, extensions and random
+    bodies up to the longest), `gather:<id>` is the correlation kind iff `<id>` is exactly the reserved `l-00c`, and the gather
+    kind otherwise; no id starting with, containing or ending in the reserved one is. (r7.1 F; triage F8)"""
+    from defender._agent_role import agent_kind
+
+    def kind(agent_id: str) -> str:
+        found = agent_kind(agent_id)
+        return str(getattr(found, "value", found)).lower()
+
+    wrong = {i: kind(f"gather:{i}") for i in _lead_ids_by_membership()
+             if kind(f"gather:{i}") != ("correlation" if i == "l-00c" else "gather")}
+    assert not wrong, f"{len(wrong)} lead ids of the wrong kind, e.g. {dict(list(wrong.items())[:5])}"
+    assert kind("main") == "main"
+    assert kind("review:support") == "review"

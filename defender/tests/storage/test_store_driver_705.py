@@ -1102,25 +1102,51 @@ def test_s2a_r7_the_final_outcome_of_a_request_decides_whether_the_total_is_exac
         "the bar holds exactly the kinds that spent: no segment for a kind whose requests were refused, unseen or never made")
 
 
-@pytest.mark.parametrize("outcome", ["refused-400", "cancelled"])
+def _warning_exception_types(caplog) -> list[str]:
+    """What the run said about the lead's failure: every WARNING with an exception attached, by logger and exception type,
+    and every WARNING message that names an exception class in parentheses (`... failed (ModelHTTPError); ...`)."""
+    import re
+
+    found = []
+    for record in caplog.records:
+        if record.levelno != logging.WARNING:
+            continue
+        if record.exc_info and record.exc_info[0] is not None:
+            found.append((record.name, record.exc_info[0].__name__))
+        found += [(record.name, name) for name in re.findall(r"\((\w+(?:Error|Down|Exception))\)", record.getMessage())]
+    return sorted(found)
+
+
+@pytest.mark.parametrize("outcome", ["response", "refused-400", "cancelled", "provider-down", "unparseable"])
 def test_s2a_r7_s2c_a_request_whose_ledger_write_is_refused_leaves_its_own_ending_and_marks_the_total(tmp_path, caplog, outcome):
-    """The correlation lead's refused (400) or deadline-cancelled request, its row's insert refused (MAIN's rows are not): the
-    run ends as the control's does (the original exception survives), the total is marked, one spend ERROR. (r7 S2a, S2c)"""
+    """The correlation lead's request ends each way the hook sees it (a response, a refused 400, a deadline cancellation,
+    `ProviderDown`, an unparseable reply), its row's insert refused (MAIN's rows are not): the run ends as the control's does
+    (truncated_by, exit_reason, MAIN's calls, the lead's WARNING exception type), the run file's total and the summary's
+    `spend_write_failed` carry the fact, and exactly one spend ERROR is logged. Every exit of the run passes the fact on,
+    including the one that stops before MAIN. (r7 S2a, S2c; r7.2 P2; triage F3)"""
     from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
     _, _, truncated_by, main_calls, _ = _OUTCOMES[outcome]
     limits = S.with_deadline(S.SHORT_DEADLINE_S) if outcome == "cancelled" else None
+    caplog.clear()
     _, control, control_calls, _ = _correlation_run(tmp_path / "control", label=f"ledger-refused-control-{outcome}",
                                                     gather=_outcome_router(outcome), limits=limits)
+    control_warnings = _warning_exception_types(caplog)
     caplog.clear()
     router = _outcome_router(outcome)
     run_dir, summary, calls, opened = _correlation_run(tmp_path / "refused", label=f"ledger-refused-{outcome}", gather=router,
                                                        limits=limits, refuse_ledger_of="gather:l-00c")
 
-    assert router.requests(S.L3) == 1, "premise: the lead made its one request"
-    assert (summary["truncated_by"], summary.get("exit_reason"), calls) == (
-        truncated_by, control.get("exit_reason"), control_calls) == (truncated_by, control.get("exit_reason"), {"main": main_calls}), (
+    if outcome == "provider-down":
+        assert router.attempts(S.L3) == 4, "premise: the retrier's attempts"
+    else:
+        assert router.requests(S.L3) == 1, "premise: the lead made its one request"
+    assert control["spend_write_failed"] is False, "premise: the control lost no write"
+    assert (summary["truncated_by"], summary.get("exit_reason"), calls) == (truncated_by, control.get("exit_reason"), control_calls), (
         "a failed ledger write changed how the run ended")
+    assert control_calls == {"main": main_calls}, "premise: the control's MAIN calls"
+    assert _warning_exception_types(caplog) == control_warnings, "the lead's failure was reported differently"
+    assert summary["spend_write_failed"] is True, f"{outcome}: the run's exit did not carry the failed write"
     result = _run_result(run_dir)
     assert result["total_cost_usd"] == pytest.approx(priced_cost(_PRICED_NAMES["main"], main_calls), abs=1e-6)
     assert result["total_cost_is_lower_limit"] is True, "the total over a lost row reads exact"
@@ -1184,3 +1210,60 @@ def test_s2b_r7_a_requested_model_with_no_pricing_row_runs_adds_nothing_and_mark
     read = _ledger_of(opened, run_dir.name)
     assert read.by_agent["gather:l-00c"] == 0.0
     assert read.complete is False
+
+
+def _endings_by_membership() -> dict[str, Any]:
+    """Endings of the correlation lead's one request, drawn from the whole class the hook can see unwrapped: provider errors
+    at statuses of every range (each range's ends and seeded random members, plus the statuses that bound the retrier's rule),
+    `ProviderDown` at each kind of last status, a status-less API error and a test-defined exception. Each is a factory of the
+    exception the lead's model raises."""
+    import random
+
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    from defender.providers import ProviderDown
+
+    rng = random.Random(1377)
+    ranges = {"1xx": list(range(100, 200)), "2xx": list(range(200, 300)), "3xx": list(range(300, 400)),
+              "4xx": [s for s in range(400, 500) if s not in (408, 409, 429)], "5xx": list(range(500, 600))}
+    statuses = {429, 408, 409, 407, 410, 428, 430, 451, 499, 500, 599}
+    for members in ranges.values():
+        statuses |= {members[0], members[-1], *rng.sample(members, 5)}
+    endings: dict[str, Any] = {f"http-{s}": (lambda s=s: ModelHTTPError(s, "fake-gather", body={"error": "x"})) for s in sorted(statuses)}
+    for last in (408, 409, 429, 500, 503, 529, 599, None):
+        endings[f"provider-down-{last}"] = lambda last=last: ProviderDown(model="fake-gather", status=last, attempts=4)
+    endings["no-status"] = lambda: _http_error(None)
+    endings["test-defined"] = lambda: ValueError("a test-defined ending")
+    return endings
+
+
+_ENDINGS = _endings_by_membership()
+
+
+@pytest.mark.parametrize("ending", _ENDINGS, ids=_ENDINGS)
+def test_f2_r7_a_request_is_refused_exactly_when_the_published_classifier_says_the_provider_refused_it(tmp_path, ending):
+    """The correlation lead's one request ends in each generated ending (no retrier in front): its ledger row is `refused`
+    iff `providers.refused_by_provider(error)`, and `unseen` otherwise; and the classifier itself agrees with the design on the
+    statuses the design names (a 4xx other than 408, 409, 429 is refused; a 5xx is not; `ProviderDown` and a status-less
+    error never are). The ledger read's completeness follows the row. (r7 S2a, r7.1 E; triage F2)"""
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    from defender.providers import ProviderDown
+    from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+
+    error = _ENDINGS[ending]()
+    router = S.LeadRouter(faults={S.L3: S.LeadFault(raise_on=1, exc=_ENDINGS[ending])})
+    run_dir, summary, calls, opened = _correlation_run(tmp_path, label=f"ledger-class-{ending}", gather=router, retries=False)
+    assert router.requests(S.L3) == 1, "premise: the lead made its one request"
+
+    from defender.providers import refused_by_provider  # the published classifier (r7.1 E; contract-chosen name)
+
+    refused = refused_by_provider(error)
+    if isinstance(error, ModelHTTPError) and 400 <= error.status_code < 600:
+        assert refused is (error.status_code < 500 and error.status_code not in (408, 409, 429)), (
+            f"{error.status_code}: the classifier disagrees with the design")
+    if isinstance(error, ProviderDown) or not isinstance(error, ModelHTTPError):
+        assert refused is False, f"{ending}: {type(error).__name__} is not a refusal"
+    rows = [r for r in _spend_rows(opened, run_dir.name) if r[0] == "gather:l-00c"]
+    assert rows == [("gather:l-00c", _PRICED_NAMES["gather"], None, REFUSED if refused else UNSEEN)], rows
+    assert _ledger_of(opened, run_dir.name).complete is refused

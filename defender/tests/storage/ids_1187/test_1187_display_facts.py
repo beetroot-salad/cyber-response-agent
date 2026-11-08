@@ -70,9 +70,10 @@ def _rewrite_stamp(run: Any, **changes: Any) -> dict:
 
 
 def _page(run: Any) -> str:
-    from defender.presentation.visualize_run import render_runtime_page
+    from defender.presentation.visualize_run import LedgerCost, render_runtime_page
 
-    return render_runtime_page(run.run_dir)
+    # r7.2 P1: the page takes its cost as an argument; these tests read stamped labels and times, so the cost is the unknown one.
+    return render_runtime_page(run.run_dir, cost=LedgerCost(None, False))
 
 
 def _shows_time(page: str, instant: _dt.datetime) -> bool:
