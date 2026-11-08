@@ -461,6 +461,46 @@ def test_o2_each_call_uses_the_record_it_was_resolved_with(tmp_path):
                     (f"{old_base}/hosts/web-1", 7)], seen
 
 
+def test_a_tenant_copied_from_the_template_has_every_system_down_until_its_placeholders_go(tmp_path):
+    """Every system of a tenant copied from the template is down for its settings — a
+    `ConfigFault` naming the CHANGE-ME left in it — and no call reaches the proxy, whether the
+    placeholder sits in its `config.env` or only in its access declaration's base (host-state
+    reads no keys; elastic's indexes are not checked)."""
+    import json
+    import shutil
+
+    ConfigFault = S.config_fault()
+    root = tmp_path / "tenants"
+    folder = root / S.PLAYGROUND_ID / "knowledge"
+    shutil.copytree(S.TEMPLATE_DIR, folder)
+    (folder / "agent" / ".tenant-id").write_text(f"{S.PLAYGROUND_ID}\n", encoding="utf-8")
+    (root / S.PLAYGROUND_ID / "tenant.json").write_text(json.dumps(
+        {"tenant_id": S.PLAYGROUND_ID, "created_at": "2026-09-28T00:00:00+00:00"}) + "\n",
+        encoding="utf-8")
+    # The template grants nothing (the run would be refused for that, not for its placeholders).
+    (S.settings_of(folder) / "verb-grants.yaml").write_text(T1106.TABLE_A, encoding="utf-8")
+    declared = sorted(p.parent.name for p in (S.settings_of(folder) / "systems").glob("*/access.yaml"))
+    assert declared == sorted(S.PREFIX), f"precondition: the template declares every system: {declared}"
+
+    record = _resolve(root)
+    stand_in = S.ProxyStandIn(tmp_path / "proxy", [S.answer('{"hosts": []}')])
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    ctx = S.verb_context(record, run_dir, {}, proxy_url=stand_in.url, request_token="token-tpl")
+    adapter = {system: S.mod(f"integrations.{system.replace('-', '_')}_adapter") for system in S.PREFIX}
+    calls = [(system, adapter[system].health_check, {}) for system in sorted(S.PREFIX)] + [
+        ("host-state", adapter["host-state"].proc_tree, {"host": "web-1"}),
+        ("elastic", adapter["elastic"].query, {"native_query": "*"}),
+    ]
+    for system, fn, kw in calls:
+        with pytest.raises(ConfigFault) as raised:
+            fn(ctx, **kw)
+        assert raised.value.exit_code == 2, f"{system}.{fn.__name__}: {raised.value!r}"
+        assert "CHANGE-ME" in str(raised.value), \
+            f"{system}.{fn.__name__}: the fault must name the placeholder left in: {raised.value}"
+    assert stand_in.requests() == [], f"a placeholder system reached the proxy: {stand_in.requests()}"
+
+
 def test_s7_mf11_record_parts_read_only(tmp_path):
     root = tmp_path / "tenants"
     S.plant(root, marker="mf11")

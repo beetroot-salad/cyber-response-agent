@@ -30,6 +30,8 @@ from defender.kit.tls import trust_of_ca
 from defender.kit.verbs import is_system_name
 
 ACCESS_FILE = "access.yaml"
+#: The tenant template's mark on every value its operator must replace.
+PLACEHOLDER = "CHANGE-ME"
 _KNOWN = ("access", "base", "auth", "reads", "writes", "ca")
 #: The credential-set field names a scheme may name (the API's `CredentialKey` pattern).
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
@@ -91,6 +93,9 @@ def parse_access(text: str, *, system: str) -> AccessDeclaration:  # noqa: C901 
     if not isinstance(data, Mapping):
         raise ConfigFault(f"{shown} must be a mapping carrying the key(s) {list(_KNOWN)}")
     _yaml.reject_unread_keys(shown, data, _KNOWN, error=ConfigFault)
+    if _carries_placeholder(data):
+        raise ConfigFault(f"{shown} still carries the template's {PLACEHOLDER} — replace it; "
+                          f"{NOT_CONFIGURED}")
     if data.get("access") != HTTP_PROXY:
         raise ConfigFault(f"{shown}: `access` must be {HTTP_PROXY!r}")
     base = _base(shown, data.get("base"), "base")
@@ -101,6 +106,18 @@ def parse_access(text: str, *, system: str) -> AccessDeclaration:  # noqa: C901 
         writes=_routes(shown, data.get("writes", []), "writes"),
         ca=_ca(shown, data.get("ca"), base, auth),
     )
+
+
+def _carries_placeholder(value: object) -> bool:
+    """Whether any value of the declaration still holds the tenant template's placeholder: a
+    copied template's declaration is unconfigured, not an address to call."""
+    if isinstance(value, str):
+        return PLACEHOLDER in value
+    if isinstance(value, Mapping):
+        return any(_carries_placeholder(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_carries_placeholder(v) for v in value)
+    return False
 
 
 def _ca(shown: str, value: object, base: str, auth: Auth) -> str | None:
