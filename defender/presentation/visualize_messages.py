@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from defender._io import iter_plain_jsonl_rows
 from defender.records.formats import ReportRead
@@ -12,9 +12,11 @@ from defender.records import GATE_METADATA_KEY, RUN_LAYOUT, RunPaths
 # From `agent_role`, not `review_roles`: the latter pulls in the whole runtime (pydantic-ai
 # included), and `cli/learning/lessons_page.py` imports this package just for the page CSS.
 from defender._agent_role import GATHER_AGENT_ID_PREFIX, REVIEW_AGENT_ID_PREFIX
-from defender.configuration import usage_cost
 from defender.presentation.visualize_data import phase_verb
 from defender.presentation.visualize_primitives import parse_report
+
+if TYPE_CHECKING:
+    from defender.records.session_store import LedgerRead
 
 _logger = logging.getLogger(__name__)
 
@@ -186,13 +188,13 @@ def gather_cost_by_phase(
     events: list[dict],
     tags: list[str | None],
     phase_order: list[str],
-    messages: list[dict] | None = None,
-    ledger: Any = None,
+    messages: list[dict] | None,
+    ledger: LedgerRead | None,
 ) -> tuple[dict[str, float], float]:
     """The leads' spend by phase, from the request log's lead responses alone. The run file's total
     is the whole run's (#1377), so "the total minus MAIN's" is no longer taken for gather spend: a
-    log with no lead response has no gather cost on any phase. `ledger` (a `LedgerRead`) prices
-    each lead's responses at the model it requested (r7.1 C); without one, at the name logged."""
+    log with no lead response has no gather cost on any phase. `ledger` prices each lead's
+    responses at the model it requested (r7.1 C); with none (unreadable), nothing is priced (r7.2 P1)."""
     out = {ph: 0.0 for ph in phase_order}
     per_lead = _cost_by(_iter_gather_responses(run_dir, messages), lambda lead, _raw: lead,
                         GATHER_AGENT_ID_PREFIX, ledger)
@@ -231,38 +233,35 @@ def gather_wall_by_phase(
     return to_gather, from_dispatch
 
 
-def _cost_by(pairs, key, prefix: str = "", ledger: Any = None) -> dict[str, float]:
-    """Price a namespace's wire responses and total them under whatever `key` names. With a
-    `ledger` (a `LedgerRead`), a response is priced at the model its agent (`prefix` + suffix)
-    requested and `key` is handed that name, never the one logged (#1377 r7.1 C)."""
+def _cost_by(pairs, key, prefix: str, ledger: LedgerRead | None) -> dict[str, float]:
+    """Price a namespace's wire responses through the ledger's one read and total them under
+    whatever `key` names: a response is priced at the model its agent (`prefix` + suffix)
+    requested and `key` is handed that name, never the one logged (#1377 r7.1 C). With no
+    readable ledger nothing is priced, so the result is empty (r7.2 P1)."""
     out: dict[str, float] = {}
+    if ledger is None:
+        return out
     for suffix, rec in pairs:
-        usage = rec.get("usage") or {}
-        if ledger is None:
-            raw = rec.get("model") or ""
-            cost = usage_cost(raw, usage)
-        else:
-            agent_id = f"{prefix}{suffix}"
-            raw, cost = ledger.requested.get(agent_id, ""), ledger.price(agent_id, usage)
-        k = key(suffix, raw)
+        agent_id = f"{prefix}{suffix}"
+        requested, cost = ledger.requested.get(agent_id, ""), ledger.price(agent_id, rec.get("usage") or {})
+        k = key(suffix, requested)
         out[k] = out.get(k, 0.0) + cost
     return out
 
 
-def _model_key(ledger: Any):
-    """The by-model key: the requested model as the ledger names it (#1377 r7.1 addendum), or, with
-    no ledger, the logged name shortened for display."""
-    return (lambda _s, raw: raw) if ledger is not None else (lambda _s, raw: _pretty_model(raw))
+def _by_requested_model(_suffix: str, requested: str) -> str:
+    """The by-model key: the requested model as the ledger names it (#1377 r7.1 addendum)."""
+    return requested
 
 
 def gather_cost_by_model(
-    run_dir: Path, messages: list[dict] | None = None, ledger: Any = None,
+    run_dir: Path, messages: list[dict] | None, ledger: LedgerRead | None,
 ) -> dict[str, float]:
-    return _cost_by(_iter_gather_responses(run_dir, messages), _model_key(ledger), GATHER_AGENT_ID_PREFIX, ledger)
+    return _cost_by(_iter_gather_responses(run_dir, messages), _by_requested_model, GATHER_AGENT_ID_PREFIX, ledger)
 
 
 def review_cost_by_lens(
-    run_dir: Path, messages: list[dict] | None = None, ledger: Any = None,
+    run_dir: Path, messages: list[dict] | None, ledger: LedgerRead | None,
 ) -> dict[str, float]:
     """The write-time review gate's spend, split by lens — support / ablation / composer.
 
@@ -273,11 +272,11 @@ def review_cost_by_lens(
 
 
 def review_cost_by_model(
-    run_dir: Path, messages: list[dict] | None = None, ledger: Any = None,
+    run_dir: Path, messages: list[dict] | None, ledger: LedgerRead | None,
 ) -> dict[str, float]:
     """The same spend keyed by model. The review has its own pinned default model, so this is
     usually a separate row, merging with main's when both use one model."""
-    return _cost_by(_iter_review_responses(run_dir, messages), _model_key(ledger), REVIEW_AGENT_ID_PREFIX, ledger)
+    return _cost_by(_iter_review_responses(run_dir, messages), _by_requested_model, REVIEW_AGENT_ID_PREFIX, ledger)
 
 
 def tool_usage(events: list[dict], messages: list[dict] | None = None) -> list[dict]:

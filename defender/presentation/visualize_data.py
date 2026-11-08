@@ -8,7 +8,6 @@ from pathlib import Path
 from defender._clock import parse_iso_utc
 from defender._io import read_text_utf8
 from defender.records import RUN_LAYOUT, RunPaths
-from defender.configuration import PRICING, usage_cost  # noqa: F401  (re-exported for this module's consumers)
 from defender.presentation.visualize_primitives import slugify
 
 
@@ -228,15 +227,18 @@ def merge_assistant_events(events: list[dict]) -> list[dict]:
 
 
 
-def _accumulate_usage(b: dict, msg: dict, price: Callable[[dict], float] | None = None) -> None:
+def _accumulate_usage(b: dict, msg: dict, price: Callable[[dict], float] | None) -> None:
+    """Add one turn's counts to its bucket, and its cost when `price` is given (the ledger's, at
+    the agent's requested model). With no `price` the bucket's cost stays `None`: never the
+    model the trace names (#1377 r7.2 P1)."""
     usage = msg.get("usage") or {}
-    model = msg.get("model", "")
     b["turns"] += 1
     b["in"] += usage.get("input_tokens", 0)
     b["out"] += usage.get("output_tokens", 0)
     b["cache_r"] += usage.get("cache_read_input_tokens", 0)
     b["cache_w"] += usage.get("cache_creation_input_tokens", 0)
-    b["cost"] += usage_cost(model, usage) if price is None else price(usage)
+    if price is not None:
+        b["cost"] += price(usage)
 
 
 def _attribute_main_agent(
@@ -244,7 +246,7 @@ def _attribute_main_agent(
     buckets: dict[str, dict],
     msg_phase: dict[str, str],
     phase_order: list[str],
-    price: Callable[[dict], float] | None = None,
+    price: Callable[[dict], float] | None,
 ) -> dict[str, str]:
     task_phase: dict[str, str] = {}
     for ev in deduped:
@@ -272,7 +274,7 @@ def _attribute_subagents(
     deduped: list[dict],
     buckets: dict[str, dict],
     task_phase: dict[str, str],
-    price: Callable[[dict], float] | None = None,
+    price: Callable[[dict], float] | None,
 ) -> None:
     for ev in deduped:
         pid = ev.get("parent_tool_use_id")
@@ -295,15 +297,17 @@ def phase_attribution(
     events: list[dict],
     phase_order: list[str],
     tags: list[str | None] | None = None,
-    price: Callable[[dict], float] | None = None,
+    *,
+    price: Callable[[dict], float] | None,
 ) -> dict[str, dict]:
     """MAIN's turns, tool calls and cost by phase. `price` prices a turn's usage (the page hands
-    MAIN's requested model's, #1377 r7.1 C); without it, the model the trace names."""
+    the ledger's, at MAIN's requested model, #1377 r7.1 C); `None` (no readable ledger) leaves
+    every bucket's cost `None`, never priced at the model the trace names (r7.2 P1)."""
     buckets: dict[str, dict] = {
         ph: {
             "turns": 0, "tool_calls": 0, "subagent_calls": 0,
             "tool_counts": {},
-            "in": 0, "out": 0, "cache_r": 0, "cache_w": 0, "cost": 0.0,
+            "in": 0, "out": 0, "cache_r": 0, "cache_w": 0, "cost": None if price is None else 0.0,
         }
         for ph in phase_order
     }

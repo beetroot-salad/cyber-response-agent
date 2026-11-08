@@ -73,9 +73,12 @@ def render_runtime_investigation(
 def _phase_stats_html(stats: dict, wall: dict | None = None) -> str:
     if not stats:
         return ""
-    pieces = [f'<span class="ps-cost">${stats["cost"]:.4f}</span>']
-    if stats.get("gather_cost"):
-        pieces.append(f'<span class="ps-gather">(incl gather ${stats["gather_cost"]:.4f})</span>')
+    pieces: list[str] = []
+    # No cost (an unreadable ledger, #1377 r7.2 P1): the line shows no dollars, its counts stay.
+    if stats.get("cost") is not None:
+        pieces.append(f'<span class="ps-cost">${stats["cost"]:.4f}</span>')
+        if stats.get("gather_cost"):
+            pieces.append(f'<span class="ps-gather">(incl gather ${stats["gather_cost"]:.4f})</span>')
     if wall and wall.get("duration_sec"):
         pieces += [
             '<span class="ps-sep">·</span>',
@@ -93,6 +96,8 @@ def _phase_stats_html(stats: dict, wall: dict | None = None) -> str:
         f'<span class="ps-tok">in {stats["in"]:,} / out {stats["out"]:,}'
         f' / cache_r {stats["cache_r"]:,} / cache_w {stats["cache_w"]:,}</span>',
     ]
+    if pieces[0] == '<span class="ps-sep">·</span>':  # no dollars led the line
+        pieces = pieces[1:]
     return f'<div class="phase-stats">{"".join(pieces)}</div>'
 
 

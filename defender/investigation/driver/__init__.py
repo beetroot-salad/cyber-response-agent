@@ -182,7 +182,7 @@ def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None, *, s
 
 def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named once
     *, output: Any, model_name: str | None, requests: int, end: run_end.RunEnd,
-    exit_reason: str | None, case_id: str, store_path: Any, spend_write_failed: bool = False,
+    exit_reason: str | None, case_id: str, store_path: Any, spend_write_failed: bool,
 ) -> dict:
     """The one shape `run_investigation` returns on every exit, so exits cannot drift apart.
 
@@ -190,7 +190,8 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
     post-steps read it in-process rather than off disk. The run's live state is not on it
     (#1235): a caller that wants it hands it in (`run_investigation(run_state=…)`) and keeps its
     own reference. `spend_write_failed` is the host's own fact that a spend write failed (#1377):
-    the run page reads "at least" on it, from this in-process summary, never from a file."""
+    the run page reads "at least" on it, from this in-process summary, never from a file. Required, the
+    run's request logger's fact, so no exit can forget it (r7.2 P2)."""
     return {
         "output": output, "model": model_name, "requests": requests,
         "truncated_by": end.truncated_by, "closed_before_cut": end.closed_before_cut,
@@ -732,9 +733,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # Under `wire_logs/`, not the run root, so it is outside the agents' one-segment run-dir
     # read shape.
     logger = observe.RequestLogger.from_record(run.observability.wire_log)
-    # The spend-failure sink from the start, before any ledger is bound: a request that ends while none
-    # is bound is a failed spend write the job-end record must carry too (#1377 S2c).
-    logger.set_spend_failure_sink(on_spend_failure)
 
     # The wire log and the store are released by this block, on every exit however the run ends:
     # a path left in `observe._ACTIVE_PATHS` would refuse a later run on this run dir, and a

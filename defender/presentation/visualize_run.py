@@ -311,7 +311,7 @@ def render_runtime_metrics(
   <h3>tool usage</h3>
   {tools_html}
   <div class="me-foot">{esc(foot)}</div>"""
-    return section("sec-metrics", "defender", "Metrics", "— per-phase cost / wall + tool usage", body)
+    return section("sec-metrics", "defender", "Metrics", "— cost by agent kind / wall by phase + tool usage", body)
 
 
 
@@ -475,11 +475,13 @@ def _display_facts(run_dir: Path) -> list[str]:
     return parts
 
 
-def render_runtime_page(run_dir: Path, *, update_ticket: bool = False, cost: LedgerCost | None = None) -> str:
+def render_runtime_page(run_dir: Path, *, cost: LedgerCost, update_ticket: bool = False) -> str:
     """The run's page. `update_ticket` is run.py's own `--update-ticket`, handed in as an argument
     and read from no file in the run dir (the box can write every one of them): only a run that
     was started with it has a ticket line, so a receipt an earlier attempt left, or one the box
-    planted, shows nothing on a run that never meant to write a ticket."""
+    planted, shows nothing on a run that never meant to write a ticket.
+
+    `cost` is the ledger's one read, required: every dollar on the page comes from it (#1377 r7.2 P1)."""
     case_id = run_dir.name
     events = read_jsonl_rows(RunPaths(run_dir).tool_trace)
     messages = load_messages(run_dir)
@@ -496,16 +498,18 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False, cost: Led
     tags = tag_events_by_phase(events, phase_order)
 
     # The informational figures (phase lines, by-model strip, review lenses) price the request log at each
-    # agent's requested model, from the ledger (#1377 r7.1 C); with no readable ledger, at the names logged.
-    ledger = None if cost is None else cost.read
+    # agent's requested model, through the ledger's one read (#1377 r7.1 C). With no readable ledger they
+    # carry no dollars at all (r7.2 P1): nothing on the page prices at a reported name.
+    ledger = cost.read
     main_price = None if ledger is None else (lambda usage: ledger.price(MAIN_KIND, usage))
     attribution = phase_attribution(events, phase_order, tags, price=main_price)
-    main_total = sum(b["cost"] for b in attribution.values())
-    gather_by_phase, gather_total = gather_cost_by_phase(run_dir, events, tags, phase_order, messages, ledger)
+    main_total = sum(b["cost"] or 0.0 for b in attribution.values())
+    gather_by_phase, _gather_total = gather_cost_by_phase(run_dir, events, tags, phase_order, messages, ledger)
     # `phase_keys`: iterating `phase_order` would add a repeated bucket's gather cost twice.
-    for ph in phase_keys:
-        attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
-        attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
+    if ledger is not None:
+        for ph in phase_keys:
+            attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
+            attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
     # Review spend is totalled but not attributed to a phase: the investigator is never in the
     # gate.
     review_by_lens = review_cost_by_lens(run_dir, messages, ledger)
@@ -530,22 +534,21 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False, cost: Led
     md = run_metadata(run_dir, events, messages)
 
     wall_ms = sum(e.get("duration_ms") or 0 for e in events if e.get("type") == "result")
-    main_model = md["models"][0] if md["models"] else "main"
+    # The by-model strip is keyed by requested model, from the ledger; with none readable it is empty (r7.2 P1).
+    by_model: dict[str, float] = {}
     if ledger is not None:
-        main_model = ledger.requested.get(MAIN_KIND, "") or "main"
-    by_model = {main_model: main_total}
-    for by_model_costs in (
-        gather_cost_by_model(run_dir, messages, ledger), review_cost_by_model(run_dir, messages, ledger),
-    ):
-        for model, spent in by_model_costs.items():
-            by_model[model] = by_model.get(model, 0.0) + spent
+        by_model[ledger.requested.get(MAIN_KIND, "") or "main"] = main_total
+        for by_model_costs in (
+            gather_cost_by_model(run_dir, messages, ledger), review_cost_by_model(run_dir, messages, ledger),
+        ):
+            for model, spent in by_model_costs.items():
+                by_model[model] = by_model.get(model, 0.0) + spent
     # The headline is the spend ledger's total (#1377 r6 S5), never the run file's result line (the box can rewrite
-    # it), and the bar is that ledger by agent kind (r7 S6). With no ledger handed in (a caller that has no run),
-    # the headline is the request log's figures and there is no bar.
+    # it), and the bar is that ledger by agent kind (r7 S6). An unreadable ledger reads "unknown" with no bar.
     totals = {
-        "cost": main_total + gather_total + review_total if cost is None else (cost.total or 0.0),
-        "cost_unknown": cost is not None and ledger is None,
-        "lower_limit": ledger is not None and cost is not None and cost.lower_limit,
+        "cost": cost.total or 0.0,
+        "cost_unknown": ledger is None,
+        "lower_limit": ledger is not None and cost.lower_limit,
         "by_kind": {} if ledger is None else ledger.by_kind(),
         "review_cost": review_total,
         "wall_ms": wall_ms,

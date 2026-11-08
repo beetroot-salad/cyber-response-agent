@@ -171,11 +171,6 @@ class RequestLogger:
     def bind_ledger(self, ledger: SpendLedger | _NoLedger, *, on_failure: Any = None) -> None:
         """Bind the run's ledger (or `NO_LEDGER`); `on_failure()` is called once per failed write."""
         self.ledger = ledger
-        if on_failure is not None:
-            self._on_spend_failure = on_failure
-
-    def set_spend_failure_sink(self, on_failure: Any) -> None:
-        """`on_failure()` is called once per failed spend write, a write while no ledger is bound included."""
         self._on_spend_failure = on_failure
 
     def record_spend(self, end: RequestEnd) -> None:
@@ -459,7 +454,7 @@ def _user_event(message: Any) -> dict | None:
 
 
 def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, run_id: str,
-                spend_write_failed: bool = False) -> None:
+                spend_write_failed: bool) -> None:
     """`{run_dir}/tool_trace.jsonl`: the events this run produced, and its own cost.
 
     The events are sliced at the branch point: a resumed run hydrates the source run's prefix too,
@@ -467,7 +462,8 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, r
     spend ledger's rows for `run_id` (#1377 S5): every response the run received (main, every
     lead's last one, the review), never the saved conversation. `num_turns` stays MAIN's turns,
     which run health reads. The total is marked a lower limit when the ledger is incomplete or a spend
-    write failed (`session_store.lower_limit`, the page's rule too). A ledger
+    write failed (`session_store.lower_limit`, the page's rule too); `spend_write_failed` is the run's request
+    logger's fact, required so no exit can forget it (#1377 r7.2 P2). A ledger
     that cannot be read leaves the events whole with a null total and usage (the job's cost is unknown then too).
     """
     from defender.records import session_store as ss  # local import — avoids a cycle at module load
