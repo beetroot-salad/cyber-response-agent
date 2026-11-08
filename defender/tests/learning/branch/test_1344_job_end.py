@@ -195,6 +195,21 @@ def test_a_session_store_of_another_version_ends_skipped_history_unreadable_nami
     assert (broken.questioner.calls, broken.spawn.launches) == (0, [])
 
 
+def test_a_source_history_with_no_single_main_session_ends_skipped_history_unreadable(tmp_path):
+    """The fork pick's one read of MAIN's session refuses the store (zero or several root sessions, the shared
+    read's `BranchError`): the history is not one current code can fork, so the job is skipped, never an
+    `entry_error`. (r5 table, L5)"""
+    from defender.investigation import branch
+
+    def no_single_root(*_a, **_k):
+        raise branch.BranchError("the source store holds no single root 'main' session: found 2")
+
+    ran = run_entry(tmp_path, candidates=no_single_root)
+    message = _failed_with(ran, "skipped", "history_unreadable")
+    assert "found 2" not in message, "the refusal's own text reached the message"
+    assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
+
+
 @pytest.mark.parametrize("where", ["questioner", "candidates"])
 def test_an_untyped_fault_before_the_first_sibling_is_not_history_unreadable(tmp_path, where):
     """The steps before the first sibling failing with a fault no one typed (the questioner's, or one raised while the
@@ -416,6 +431,20 @@ def test_one_judge_call_that_raises_among_completed_ones_costs_only_its_draw(tmp
     ran = run_entry(tmp_path, judge=judge)
     _ended(ran, "completed", None)
     assert judge.calls > 1, "premise: a call after the first was made, and raised"
+
+
+def test_a_family_judge_call_that_raises_before_its_draws_costs_only_itself(tmp_path, monkeypatch):
+    """The family-level call fails building its prompt while every world was graded: the worlds' findings stand,
+    so the job completes, as the operator lane records the family's failure and keeps them. (r5 table, "Judge
+    modes")"""
+    from defender.learning.judge import run as judge_run
+
+    def broken(*_a, **_k):
+        raise RuntimeError("the family prompt could not be built")
+
+    monkeypatch.setattr(judge_run, "_build_family_prompt", broken)  # lint-monkeypatch: ok — no seam builds the family prompt
+    ran = run_entry(tmp_path)
+    _ended(ran, "completed", None)
 
 
 # --- entry_error and the message ----------------------------------------------------------------------

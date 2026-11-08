@@ -1,6 +1,7 @@
 """Where a learning job forks its source (#1344 O3): the candidates, and the pick among them.
 
-A candidate is a response on the source run's MAIN path that called `gather`, and that the
+A candidate is a response on the source run's MAIN path that called `gather` (the branch's
+`DISPATCH_TOOL`, the one name the sibling's lead census also matches), and that the
 branch admission each sibling run applies (`branch.admitted_points`: the capture required)
 admits, so the pick never lands on a point the family cannot run from. Anything else MAIN did
 (an `append_block`, an `echo`) was a legal operator fork point but is none for a job: a job's
@@ -42,7 +43,7 @@ def _calls_gather(message: Any) -> bool:
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
     return isinstance(message, ModelResponse) and any(
-        isinstance(part, ToolCallPart) and part.tool_name == "gather" for part in message.parts)
+        isinstance(part, ToolCallPart) and part.tool_name == branch.DISPATCH_TOOL for part in message.parts)
 
 
 def fork_candidates(store: Any, run: Run) -> ForkCandidates:

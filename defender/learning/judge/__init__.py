@@ -786,8 +786,9 @@ class _Pass:
                 model=self.model, effort=self.effort, prompt=prompt, scope="family",
                 reachable_systems=self.reachable_systems)
         except Exception as family_failed:  # noqa: BLE001 — the family call's own fault costs only itself, never the already-committed worlds
-            if self.job_lane:
-                raise
+            # In either lane: a call that raised, counted as one, so a pass in which nothing
+            # completed is still the job's failure (`_refuse_graded_nothing`).
+            self.calls_raised += 1
             family["draws_failed_reason"] = f"{type(family_failed).__name__}: {family_failed}"
             return
         # The draws this commit records, as a world row's `draws` does: the readers show these

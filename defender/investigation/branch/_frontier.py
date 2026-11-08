@@ -222,7 +222,7 @@ def _refuse_bad_as_of(spec: BranchSpec, derived: datetime) -> None:
 #: The tool whose call/return pair is the only join from a message id to a run's evidence — the
 #: name pydantic-ai registers for `tools_gather`'s `gather`. If wrong, no part matches and every
 #: sibling silently inherits every lead.
-_DISPATCH_TOOL = "gather"
+DISPATCH_TOOL = "gather"
 
 
 def _drop_refused_dispatch(
@@ -246,7 +246,7 @@ def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path,
     landed: set[str] = set()
     for row_id, message in zip(ids, messages, strict=True):
         for part in getattr(message, "parts", []):
-            if getattr(part, "tool_name", None) != _DISPATCH_TOOL:
+            if getattr(part, "tool_name", None) != DISPATCH_TOOL:
                 continue
             if isinstance(part, ToolCallPart):
                 # The store's own extractor (first-wins on duplicate JSON keys), so this and the

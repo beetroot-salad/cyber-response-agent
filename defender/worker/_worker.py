@@ -863,7 +863,16 @@ class Worker:
         returncode = await proc.wait()
         _logger.info("learning job %s: child %d %s after %s", job, proc.pid, _exit_words(returncode),
                      self._clock() - started)
-        end = await asyncio.to_thread(self._read_learning, tenant, lambda lane: lane.read_learning_end(job))
+        try:
+            end = await asyncio.to_thread(self._read_learning_strict, tenant, lambda lane: lane.read_learning_end(job))
+        except (job_lane.JobLaneRefused, OSError) as fault:
+            # The worker's own failure, as an investigation's records that cannot be read are
+            # (`_read_ending`): the child may have left a good record, so not `exited_without_result`.
+            _logger.error("learning job %s: reading its end record: %s", job, fault)
+            if held.signalled:  # a stop can never permanently fail or skip a job: handed back
+                return LearningOutcome(None, progress=held.progress), True
+            return LearningOutcome(_FAILED, _WORKER_ERROR, "the tenant's runs container could not be read after the job",
+                                   held.progress), True
         if end is None:
             progress = await asyncio.to_thread(
                 self._read_learning, tenant, lambda lane: lane.read_learning_progress(job)) or held.progress
@@ -890,12 +899,18 @@ class Worker:
             if found is not None:
                 held.progress = found
 
+    def _read_learning_strict(self, tenant: str, read: Callable[[job_lane.JobLane], Any]) -> Any:
+        """One of a learning job's records, through the job lane; a runs container that cannot be
+        used, or an OS error reading it, raises (`JobLaneRefused`, `OSError`). A record absent,
+        unreadable or not of its shape is the lane's `None`."""
+        with self._open_lane(self._data_root, tenant) as lane:
+            return read(lane)
+
     def _read_learning(self, tenant: str, read: Callable[[job_lane.JobLane], Any]) -> Any:
-        """One of a learning job's records, through the job lane; None when the runs container
-        cannot be used (the record then counts as absent)."""
+        """`_read_learning_strict`, where a runs container that cannot be used counts as the
+        record absent (progress and post-step records: nothing is decided on their absence)."""
         try:
-            with self._open_lane(self._data_root, tenant) as lane:
-                return read(lane)
+            return self._read_learning_strict(tenant, read)
         except (job_lane.JobLaneRefused, OSError) as fault:
             _logger.warning("tenant %s: a learning record could not be read: %s", tenant, fault)
             return None

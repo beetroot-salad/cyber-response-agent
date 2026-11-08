@@ -416,6 +416,54 @@ async def test_no_record_from_a_child_nobody_signalled_is_exited_without_result(
     assert [j["attempt"] for j in jobs_of(world["dsn"], investigation_of(world["dsn"], job))] == [1]
 
 
+class _EndReadFaults:
+    """The real job lane, except that reading a learning end record raises `fault`."""
+
+    def __init__(self, lane, fault: Exception) -> None:
+        self._lane, self._fault = lane, fault
+
+    def __enter__(self):
+        self._lane.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        return self._lane.__exit__(*exc)
+
+    def __getattr__(self, name):
+        return getattr(self._lane, name)
+
+    def read_learning_end(self, _job):
+        raise self._fault
+
+
+def _lanes_whose_end_read(fails: str):
+    """A job-lane door that refuses to open (`open`), or whose lanes fail the end read with an OS error (`read`)."""
+    from defender.records import job_lane
+
+    def door(root, tenant):
+        if fails == "open":
+            raise job_lane.JobLaneRefused("the runs container is not a directory")
+        return _EndReadFaults(job_lane.JobLane.open(root, tenant), OSError(24, "Too many open files"))
+    return door
+
+
+@pytest.mark.parametrize("fails", ["open", "read"])
+async def test_an_end_record_the_worker_itself_cannot_read_is_its_own_failure_not_exited_without_result(world, fails):
+    """The child left a good record, and the worker could not open the runs container or read the record (its own
+    fault: no file handles, the container refused): `failed`/`worker_error`, as an investigation's unreadable records
+    are, never `exited_without_result`, which says the child left none. (End record, outcome table)"""
+    job_proc = job_child(world, files={END: learning_end("completed", findings=2)})
+    async with job_store(world["dsn"]) as store:
+        job = await queued_job(world, store, ticket="T-1")
+        await learning_worker(world, store, job=job_proc, post=post_child(world),
+                              open_lane=_lanes_whose_end_read(fails)).drain()
+
+    stored = job_row(world["dsn"], job)
+    assert (stored["status"], stored["reason"]) == ("failed", "worker_error"), stored
+    assert stored["message"]
+    assert "Too many open files" not in stored["message"], "the fault's own text reached the row"
+
+
 @pytest.mark.parametrize("text", UNREADABLE_END)
 async def test_an_end_record_that_cannot_be_read_counts_as_none_from_a_child_nobody_signalled(world, text):
     """An unreadable record is no record: `failed`/`exited_without_result`, one attempt, a post-step follows. (End record, O12)"""

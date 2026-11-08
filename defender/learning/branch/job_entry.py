@@ -225,8 +225,11 @@ def _candidates_of(source: Run, candidates: Callable[..., Any]) -> Any:
     A source whose session pointer is absent is a run recorded before #1235 (its link still
     inside the folder: `LegacyRunLink`, `skipped: history_unreadable`) or one whose store is gone
     (`failed: source_unavailable`), as is a pointer naming a database that is not there. Only a
-    typed format refusal (`session_store.StoreError`) is `history_unreadable`, its message naming
-    the refusal's type; anything else propagates, and the entry records `failed: entry_error`."""
+    typed refusal of the history is `history_unreadable`, its message naming the refusal's type: a
+    store format's (`session_store.StoreError`), or the one read of MAIN's session refusing the
+    store (`branch.BranchError`: no single root session; each fork point's own admission refusal
+    is the candidates' and never raises). Anything else propagates, and the entry records
+    `failed: entry_error`."""
     if source.observability.session_pointer.read_result().absent:
         try:
             session_store.refuse_legacy_link(source.run_dir)
@@ -248,7 +251,7 @@ def _candidates_of(source: Run, candidates: Callable[..., Any]) -> Any:
             raise ending(f"[learning job] {brief}", reason=SOURCE_UNAVAILABLE, brief=brief)
         with opened as store:
             return candidates(store, source)
-    except session_store.StoreError as unreadable:
+    except (session_store.StoreError, branch.BranchError) as unreadable:
         raise _history_unreadable(unreadable) from unreadable
 
 

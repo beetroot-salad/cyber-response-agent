@@ -48,7 +48,7 @@ from . import _snapshot
 from ._snapshot import ForkSnapshot, SnapshotWriter, snapshot_at
 from ._frontier import (
     MainRead,
-    _DISPATCH_TOOL,
+    DISPATCH_TOOL,
     carried_retries,
     _appended_text,
     _as_of_of,
@@ -307,7 +307,7 @@ __all__ = [
     "RunPaths",
     "ToolCallPart",
     "ToolReturnPart",
-    "_DISPATCH_TOOL",
+    "DISPATCH_TOOL",
     "inherited_artifact_names",
     "lead_dirs",
     "_appended_text",
