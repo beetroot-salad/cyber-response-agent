@@ -95,6 +95,7 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         # CONFLICT-UPDATED (r7.1; was: pinned to $0.0 as an unpriced stand-in): the ledger's figure, a number and exact, not unknown.
         assert (type(stored["cost_usd"]), lower_limit(migrated_database, inv.investigation_id)) == (float, False), (
             "a clean replay's cost is a number read from the ledger, exact")
+        assert stored["cost_usd"] > 0, "r7.1: a number, not $0: the stand-in is built under priced names"
         assert stored["knowledge"] == {"status": "current", "commit": t.commit, "stale_kind": None}
         assert (runs / inv.investigation_id / "report.md").is_file()
         assert (runs / f"{inv.investigation_id}.job-end.json").is_file()
@@ -297,10 +298,12 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
             await make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers")).drain()
+            served = await store.get_investigation(t.tenant_id, inv.investigation_id)
 
         runs = root / t.tenant_id / "runs"
         stored = row(migrated_database, inv.investigation_id)
         assert _calls(tmp_path / "marks") == PRICED_CALLS, ("premise: the run made exactly the scripted calls", stored)
+        assert (served.cost_usd, served.cost_is_lower_limit) == (stored["cost_usd"], False), "the API read of the finished job"
         assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive"), stored
         spent = _priced_spend(**PRICED_CALLS)
         assert stored["cost_usd"] == pytest.approx(spent, rel=1e-9)
@@ -329,8 +332,9 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
         insert_spend(ss.resolve_store_path(fixture_run(runs / inv.investigation_id)), inv.investigation_id,
                      [(PRICED_MODELS["gather"], {})], agent_id="gather:l-00c", outcome=UNSEEN)
         assert C.at_least(C.headline(_page(runs / inv.investigation_id, spend_write_failed=False))), "a re-rendered page reads the ledger again"
-        assert (row(migrated_database, inv.investigation_id)["cost_usd"], lower_limit(migrated_database, inv.investigation_id)) == (
-            stored["cost_usd"], False), "a stored figure moved after the run's end"
+        async with job_store(migrated_database) as reread_store:
+            later = await reread_store.get_investigation(t.tenant_id, inv.investigation_id)
+        assert (later.cost_usd, later.cost_is_lower_limit) == (served.cost_usd, False), "a stored figure moved after the run's end"
 
 
 async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_the_run_file_and_the_page_alike(

@@ -3367,6 +3367,24 @@ async def test_r7_the_final_cost_reads_at_least_exactly_when_the_ledger_has_an_u
     assert (lower_limit(dsn, inv), final.cost_is_lower_limit) == (marked, marked)
 
 
+@pytest.mark.parametrize("agent_id", ["gather", "review", "planner"])
+async def test_r7_s4_a_ledger_row_of_an_unknown_agent_id_leaves_the_finished_job_s_cost_unknown(world, agent_id):
+    """A finished job whose ledger holds a priced MAIN response and one row of an id outside the four kinds: stage completed, cost None (unknown, not the priced sum), mark false. (r7.1 F, S4)"""
+    dsn, runs = world["dsn"], world["runs"]
+    child = _child(world, files=_committed())
+    plant_sessions(runs, CASE, [("main", SONNET, {"input_tokens": 1_000_000})])
+    async with job_store(dsn) as store:
+        inv = await _queued(store)
+        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})])
+        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})], agent_id=agent_id)
+        (runs / f"{inv}.session-pointer.json").write_text(session_pointer(CASE), encoding="utf-8")
+        await _worker(world, store, child, **_FAST).drain()
+        final = await store.get_investigation(T1, inv)
+
+    assert (final.stage, final.cost_usd) == ("completed", None)
+    assert (lower_limit(dsn, inv), final.cost_is_lower_limit) == (False, False)
+
+
 @pytest.mark.parametrize("end", ["finish", "cancel", "stop"])
 async def test_b2_a_failed_cost_read_keeps_the_last_good_figure_mid_run_and_writes_null_in_the_end_write(world, end):
     """The pointer goes unreadable after one copied figure: the row keeps 3.0 for several ticks while still renewed; the end write (finish, final accounting or hand-back) then carries cost NULL, not 3.0. (B2, R2)"""

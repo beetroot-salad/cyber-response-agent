@@ -31,15 +31,22 @@ _BIG = {"input_tokens": 400_000, "output_tokens": 50_000, "cache_read_input_toke
 #: log shows (four MAIN turns, one lead's) and one MAIN response the request log never held. Rows of another run in the same
 #: database are planted too.
 _MAIN_LEDGER = [("claude-sonnet-4-6", _USAGE)] * 4 + [("claude-sonnet-4-6", _BIG)]
-_GATHER_LEDGER = [("claude-haiku-4-5", _HAIKU_USAGE)]
+#: The lead's and the lenses' ledger rows differ from what the request log shows for them, so a bar or figure built from the log fails.
+_LEDGER_ONLY_GATHER_USAGE = {"input_tokens": 90, "output_tokens": 700, "cache_read_input_tokens": 3000, "cache_creation_input_tokens": 100}
+_GATHER_LEDGER = [("claude-haiku-4-5", _LEDGER_ONLY_GATHER_USAGE)]
 _LEDGER = _MAIN_LEDGER + _GATHER_LEDGER
 _OTHER_RUNS_LEDGER = [("claude-sonnet-4-6", _BIG)] * 3
 _REVIEW_LENSES = ("support", "ablation", "composer")
-_REVIEW_LEDGER = [("kimi-k3", _USAGE)] * len(_REVIEW_LENSES)
+_LEDGER_ONLY_REVIEW_USAGE = {"input_tokens": 300, "output_tokens": 1500, "cache_read_input_tokens": 9000, "cache_creation_input_tokens": 0}
+_REVIEW_LEDGER = [("kimi-k3", _LEDGER_ONLY_REVIEW_USAGE)] * len(_REVIEW_LENSES)
 
 
 def _priced(rows: list) -> float:
     return sum(usage_cost(model, usage) for model, usage in rows)
+
+
+assert _priced(_GATHER_LEDGER) != pytest.approx(_priced([("claude-haiku-4-5", _HAIKU_USAGE)]), abs=1e-6), "premise: the lead's ledger differs from its request log"
+assert _priced(_REVIEW_LEDGER) != pytest.approx(_priced([("kimi-k3", _USAGE)] * 3), abs=1e-6), "premise: the lenses' ledger differs from their request log"
 
 _TURNS = [
     (1, "main#1", "ORIENT", "## ORIENT\n\nOriented on the alert: ssh auth anomaly.\n", None),
@@ -573,6 +580,22 @@ def test_a3_an_unreadable_ledger_reads_unknown_in_the_headline_not_zero_and_not_
     assert _cost_segments(html) == {}, "a cost bar beside an unknown headline (r7.1 S6: unknown cost, no bar)"
 
 
+@pytest.mark.parametrize("agent_id", ["gather", "planner"])
+def test_a3_r7_a_ledger_holding_a_row_of_an_unknown_agent_id_reads_unknown_with_no_bar(tmp_path, monkeypatch, agent_id):
+    """One row beside the run's others whose agent id is not main, `gather:*` or `review:*`: the headline reads "unknown" and the page has no bar, as for any unreadable ledger. (r7.1 F, S4)"""
+    from defender.records import session_store as ss
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    assert _dollars(_headline(_page(run))) > 0, "positive control: the known ids read"
+    insert_spend(ss.resolve_store_path(_run_handle_1165(run)), run.name, [("claude-sonnet-4-6", _USAGE)], agent_id=agent_id)
+
+    html = _page(run)
+
+    assert _headline(html) == "unknown"
+    assert _cost_segments(html) == {}
+
+
 def test_s5_a_run_with_no_ledger_rows_reads_zero_and_the_other_runs_rows_are_not_its_spend(tmp_path, monkeypatch):
     """A readable ledger with no row for this run id (another run's rows sit beside it) reads exactly `$0.0000`: not unknown, not "at least", and no cost-bar segment. CONFLICT-UPDATED (r7.1 S6; was r6: request-log bars stayed). (r6 S5)"""
     import sqlite3
@@ -645,6 +668,29 @@ def test_s6_r7_a_kind_whose_rows_are_all_refused_unseen_or_unpriced_has_no_segme
     assert kinds["gather"] == pytest.approx(_priced(_GATHER_LEDGER), abs=2e-4), "an unpriced row added to its kind"
 
 
+@pytest.mark.parametrize(("agent_id", "kind"), [("review:support", "review"), ("gather:l-00c", "correlation")])
+def test_s6_r7_a_kind_with_only_an_unpriced_row_on_its_own_page_has_no_segment(tmp_path, monkeypatch, agent_id, kind):
+    """The review gate's (or the correlation lead's) only row requests a model with no pricing row: no segment for the kind, "at least" on the headline; the same row at a priced model is the control. (r7.1 S6, S2b)"""
+    from defender.records import session_store as ss
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    path = ss.resolve_store_path(_run_handle_1165(run))
+    insert_spend(path, run.name, [("claude-haiku-4-5", _USAGE)], agent_id=agent_id)
+    assert kind in _by_kind(_page(run)), "control: the same row priced has its segment"
+    other = tmp_path / "unpriced"
+    other.mkdir()
+    run2 = _build_run(other)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(other / "state"))
+    insert_spend(ss.resolve_store_path(_run_handle_1165(run2)), run2.name, [("claude-opus-9-0", _USAGE)], agent_id=agent_id)
+
+    html = _page(run2)
+
+    assert set(_by_kind(html)) == {"main", "gather"}, _cost_segments(html)
+    assert _headline(html).startswith("at least ")
+    assert _dollars(_headline(html)) == pytest.approx(_priced(_LEDGER), abs=2e-4)
+
+
 def test_s6_r7_h_the_bar_s_figures_carry_the_headline_s_four_decimals(tmp_path, monkeypatch):
     """Every cost-bar segment's title and every printed label is written `$d.dddd`, as the headline is. (r7.1 H)"""
     import re
@@ -683,6 +729,8 @@ def _informational(html: str) -> dict[str, object]:
 def test_c_r7_1_the_phase_lines_the_by_model_strip_and_the_review_lenses_are_priced_at_the_requested_model(tmp_path, monkeypatch):
     """The request log reports spellings with no pricing row for MAIN, the lead and the review: every informational figure
     reads as the control's, priced at what each agent requested. (r7.1 C, S1)"""
+    import re
+
     run = _build_run(tmp_path)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     _append_review_calls(run)
@@ -697,7 +745,11 @@ def test_c_r7_1_the_phase_lines_the_by_model_strip_and_the_review_lenses_are_pri
             text = text.replace(requested, reported)
         path.write_text(text, encoding="utf-8")
 
-    assert _informational(_page(run)) == control, "an informational figure was priced at the name the request log reports"
+    after = _page(run)
+    assert _informational(after) == control, "an informational figure was priced at the name the request log reports"
+    strip = re.search(r'me-models">(.*?)</div>', after, flags=re.S).group(1)
+    assert all(name in strip for name in _REPORTED_ELSEWHERE), f"the by-model strip does not name the requested models: {strip}"
+    assert not any(name in strip for name in _REPORTED_ELSEWHERE.values()), f"the by-model strip names a reported spelling: {strip}"
 
 
 _NUMBERS = {"nan": float("nan"), "inf": float("inf"), "-inf": float("-inf"), "negative": -3.5, "huge": 1e15,
