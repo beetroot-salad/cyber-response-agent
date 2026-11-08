@@ -48,7 +48,7 @@ def upgrade() -> None:
         sa.Column("id", _uuid(), nullable=False),
         sa.Column("program_id", _uuid(), nullable=False),
         # Always 'program'; with the composite foreign key below it ties `program_id` to a user of kind program.
-        sa.Column("program_kind", sa.Text(), nullable=False, server_default="program"),
+        sa.Column("program_kind", sa.Text(), nullable=False),
         sa.Column("kind", sa.Text(), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("state", sa.Text(), nullable=False),
