@@ -12,7 +12,9 @@ class Held:
 
     `fenced`: a renewal that succeeded omitted the row, so it was cancelled, taken over or
     deleted. `signalled`: a deliberate stop signalled this row's child while it was alive.
-    `cost_so_far`: the last figure the cost task read for the row; the renewal copies it."""
+    `cost_so_far`: the last figure the cost task read for the row; the renewal copies it.
+    `group_left`: a wait for the child's killed group ran out with a member still running; no
+    later cleanup waits for that group again (the stop stays bounded by one grace)."""
 
     record: Any
     proc: asyncio.subprocess.Process | None = None
@@ -23,6 +25,7 @@ class Held:
     #: job-end record says no spend write failed, or the run never opened its store). Everything
     #: else a child leaves behind is "at least" (#1377 S2); `Held.lower_limit` is the one rule.
     read_exact: bool = False
+    group_left: bool = False
     #: The fence's ender tasks, held so the event loop's weak reference is not their only one.
     enders: list[asyncio.Task[None]] = field(default_factory=list)
 

@@ -252,7 +252,7 @@ class InMemoryStore:
 
     async def put_alert_mapping(self, tenant_id: TenantId, body: AlertMapping) -> tuple[AlertMapping, bool]:
         """Rule-free like the rest of the fake: the wire model has applied the path rules, and nothing here derives
-        alert titles (the real store does, in the same transaction)."""
+        alert titles (the real store derives them when it stores an alert)."""
         created = tenant_id not in self._alert_mappings
         self._alert_mappings[tenant_id] = body
         return body, created

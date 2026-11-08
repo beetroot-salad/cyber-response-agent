@@ -5,7 +5,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from defender.execution import kill_group
+from defender.execution import end_group
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -138,8 +138,8 @@ def git_network(
                 # The group is git's own session (`start_new_session`), its id git's pid. On a
                 # timeout, exception or interrupt git is not yet reaped, so the id is still its
                 # own; after git's exit (reaped) it is held by any member still alive, and with
-                # none the kill finds no group.
-                kill_group(proc.pid)
+                # none the kill finds no group. Its members are gone before this returns.
+                end_group(proc.pid)
     if proc.returncode != 0:
         raise GitError(args, proc.returncode, err.decode("utf-8", "surrogateescape"))
     return out.decode("utf-8", "surrogateescape").strip()

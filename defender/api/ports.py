@@ -184,8 +184,8 @@ class WriteTransaction(Protocol):
         ...
 
     async def put_alert_mapping(self, body: AlertMapping) -> tuple[AlertMapping, bool]:
-        """Replace the tenant's alert mapping whole, re-deriving its alerts' title and description in the same
-        transaction (#1345). Returns `(mapping, created)`, `created` only for the tenant's first save."""
+        """Replace the tenant's alert mapping whole (#1345); it applies to alerts stored from now on, and stored
+        alerts keep their title and description (#1420). Returns `(mapping, created)`, `created` only for the tenant's first save."""
         ...
 
     async def audit(self, action: AuditAction, target: str, detail: str = "") -> None:

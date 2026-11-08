@@ -187,12 +187,12 @@ async def test_1345_o4_a_queued_job_whose_tenant_has_no_mapping_ends_failed_setu
         assert " ".join(ALERT_MAPPING_MISSING.split()) in " ".join(err_file.read_text(encoding="utf-8").split())
 
 
-async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_runs_stamped_label_as_launched(
+async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_alert_and_the_runs_stamped_label_as_launched(
         migrated_database, tmp_path, monkeypatch):  # noqa: F811
     """The real worker and child complete a run labelled with the alert's title at launch (the golden's `rule.description`
-    under the default mapping); the tenant then replaces its mapping so the alert's title is something else, and the run's
-    provenance stamp and launch record still say the title it launched with. (#1345 Design "Alerts": the label is fixed
-    at launch in the run's stamp; round 1 repair 11)"""
+    under the default mapping); the tenant then replaces its mapping with one that would title it otherwise, and the
+    alert, the run's provenance stamp and its launch record all keep the title it launched with. (#1345 Design "Alerts":
+    the label is fixed at launch in the run's stamp; round 1 repair 11; #1420: a save leaves stored alerts as they were)"""
     from defender.records.formats import DISPLAY_CAPS
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
@@ -220,7 +220,7 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_runs_stamped_l
             await make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers")).drain()
             assert row(migrated_database, inv.investigation_id)["stage"] == "completed", "premise: the run completed"
             seed_postgres(migrated_database, t.tenant_id, {**FIXTURE_ALERT_MAPPING, "title": "rule.id"})
-            assert (await store.get_alert(t.tenant_id, alert.alert_id)).title == later, "premise: the edit retitled the alert"
+            assert (await store.get_alert(t.tenant_id, alert.alert_id)).title == launched_with, "a save never retitles a stored alert"
 
         runs = root / t.tenant_id / "runs"
         launch = json.loads((runs / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))

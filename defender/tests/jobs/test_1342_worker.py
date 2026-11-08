@@ -294,16 +294,16 @@ async def test_1345_o2_the_launch_label_is_the_alerts_title_or_its_vendor_ticket
     assert launch["label"] == label
 
 
-async def test_1345_o2_the_label_is_the_title_at_launch_not_at_queueing(world):
-    """A mapping saved after the investigation is queued and before it launches decides the label: the launch reads the
-    alert as it then is. (#1345 O2, M3)"""
+async def test_1420_the_label_is_the_title_stored_with_the_alert_not_one_from_a_later_mapping(world):
+    """A mapping saved after the investigation is queued and before it launches does not change the label: the launch
+    reads the title the alert was stored with, and a save leaves stored alerts as they were. (#1345 O2, #1420 I1)"""
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
         await store.put_alert_mapping(T1, mapping_value({"title": "a"}), actor="u-1")
         await _worker(world, store, _child(world)).drain()
 
     launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
-    assert launch["label"] == "\u00e9"
+    assert launch["label"] == TITLE
 
 
 @pytest.mark.parametrize("raw", [AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES, ZWNBSP_ALERT_BYTES,
@@ -2793,7 +2793,7 @@ async def test_d_ac_a_grandchild_is_gone_after_a_drain_cancelled_while_a_child_t
 
 
 class _ReapProbingContainers(StandInContainers):
-    """The stand-in containers whose `reap` notes, at the moment it is asked, whether anything the child left in its session is still alive."""
+    """The stand-in containers whose `reap` notes, at the moment it is asked, whether anything the child left in its session is still alive. No grace for a kill to land: the worker waits for the group to be gone before it reaps."""
 
     def __init__(self, where: Path, survivors) -> None:
         super().__init__(where)
@@ -2801,9 +2801,6 @@ class _ReapProbingContainers(StandInContainers):
         self.alive_at_reap: list[bool] = []
 
     def reap(self, name: str, token: str) -> str:
-        deadline = time.monotonic() + 2.0  # a SIGKILL already sent takes a moment to land; one not yet sent never does within this
-        while self._survivors() and time.monotonic() < deadline:
-            time.sleep(0.02)
         self.alive_at_reap.append(bool(self._survivors()))
         return super().reap(name, token)
 
@@ -4224,6 +4221,49 @@ async def test_b11_a_stop_is_bounded_by_one_stop_grace_however_many_children_ign
         _handed_back(dsn, i)
 
 
+class _SlowSecondHandBack:
+    """The real store, except that every hand-back after the first waits `delay` first, so take-over passes run between them."""
+
+    def __init__(self, store, delay: float) -> None:
+        self._store, self._delay = store, delay
+        self.handed: list[str] = []
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def hand_back(self, tenant_id, investigation_id, **kw):
+        if self.handed:
+            await asyncio.sleep(self._delay)
+        self.handed.append(investigation_id)
+        return await self._store.hand_back(tenant_id, investigation_id, **kw)
+
+
+async def test_b11_a_stopping_worker_takes_none_of_its_own_handed_back_rows_over(world, caplog):
+    """A stop hands two rows back with many take-over intervals between the two hand-backs: the stopping worker takes over neither (it stops taking over when its stop begins; other workers' passes retry them), so both stay handed back. (B11, B7)"""
+    caplog.set_level(logging.INFO, logger="defender.jobs.audit")
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release)
+    dsn = world["dsn"]
+    async with job_store(dsn) as inner:
+        store = _SlowSecondHandBack(inner, delay=20 * _FAST["takeover_interval"])
+        invs = [await _queued(inner, ticket=f"T-{n}", key=f"k{n}") for n in range(2)]
+        serving = asyncio.create_task(_worker(world, store, child, slots=2, **_FAST).serve())
+        try:
+            await _until(lambda: all(child.seen(i) for i in invs), "both children")
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+        finally:
+            release.touch()
+            for i in invs:
+                _kill_whatever_remains(child.seen(i))
+            await _stop_all(serving)
+    assert sorted(store.handed) == sorted(invs), f"premise: both rows were handed back: {store.handed}"
+    taken = [r.getMessage() for r in caplog.records if "investigation.takeover" in r.getMessage()]
+    assert not taken, f"the stopping worker took a row over: {taken}"
+    for i in invs:
+        _handed_back(dsn, i)
+
+
 # --- #1343 review: a second cancel while stopping, and a renewal that races a row's own end ---------------------
 
 async def test_b11_a_second_cancel_while_the_worker_stops_kills_every_child_at_once_and_leaves_none_behind(world):
@@ -4253,6 +4293,62 @@ async def test_b11_a_second_cancel_while_the_worker_stops_kills_every_child_at_o
             _kill_whatever_remains(child.seen(inv))
             await _stop_all(draining)
     assert took < 5, f"the second cancel took {took:.1f} s to leave"
+
+
+async def test_d_ac_a_cancel_while_the_childs_group_is_waited_for_still_removes_its_box(world):
+    """The row's cleanup waits for the child's killed group to be gone, then removes the box: a second cancel landing in that wait still removes the box (the removal runs however the wait ends). (D-ac, #1343 review r5 item 3)"""
+    import threading
+
+    from defender.execution import wait_group_gone
+
+    in_wait = threading.Event()
+
+    def slow_wait(pgid: int) -> bool:
+        in_wait.set()
+        time.sleep(3.0)
+        return wait_group_gone(pgid)
+
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        containers = StandInContainers(world["tmp"] / "containers-cancel-in-wait")
+        draining = asyncio.create_task(
+            _worker(world, store, child, containers=containers, wait_group=slow_wait, **_FAST).drain())
+        try:
+            await _until(in_wait.is_set, "the row's cleanup to wait for the child's group")
+            draining.cancel()
+            await asyncio.sleep(0.2)
+            draining.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(draining, timeout=10)
+        finally:
+            _kill_whatever_remains(child.seen(inv))
+            await _stop_all(draining)
+    assert [c for c in containers.calls if c[0] == "reap"], "a cancel in the group wait skipped the box's removal"
+
+
+async def test_b11_a_group_whose_wait_ran_out_is_not_waited_for_again_by_the_rows_cleanup(world):
+    """A child ignores SIGTERM and its killed group never empties: the stop waits for it once (the limit, logged), and the row's own cleanup kills it again without a second wait, so a stop stays one grace plus one limit. (R3, B11)"""
+    waited: list[int] = []
+
+    def never_gone(pgid: int) -> bool:
+        waited.append(pgid)
+        return False
+
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release, term="ignore")
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        serving = asyncio.create_task(_worker(world, store, child, stop_grace=0.5, wait_group=never_gone, **_FAST).serve())
+        try:
+            await _until(lambda: child.seen(inv), "the child")
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+        finally:
+            release.touch()
+            _kill_whatever_remains(child.seen(inv))
+            await _stop_all(serving)
+    assert waited == [child.seen(inv)["pid"]], f"the group was waited for {len(waited)} times: {waited}"
 
 
 class _RenewalRacingAnEnd:

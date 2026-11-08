@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any
 from defender import _log
 from defender.jobs import is_outage, is_refusal
 from defender.box import Reaped, container_name
-from defender.execution import kill_group
+from defender.execution import kill_group, wait_group_gone
 from defender.records import job_facts, job_lane, session_store
 from defender.records.formats import DataRoot, digest_of
 from defender.tenancy import data_root_for_child, data_root_from_path
@@ -164,6 +164,7 @@ class Worker:
         open_lane: Callable[[DataRoot, object], job_lane.JobLane] = job_lane.JobLane.open,
         store_call_limit: float = 10.0,
         spawn: Callable[..., Awaitable[asyncio.subprocess.Process]] = asyncio.create_subprocess_exec,
+        wait_group: Callable[[int], bool] = wait_group_gone,
     ) -> None:
         if slots < 1:
             raise ValueError(f"a worker needs at least one slot, not {slots!r}")
@@ -180,12 +181,14 @@ class Worker:
         self._open_lane = open_lane  # the job lane's door; a test hands in one that faults
         self._store_call_limit = store_call_limit  # how long one renewal or take-over call may take
         self._create_process = spawn  # the process door; a test lands an event inside it
+        self._wait_group = wait_group  # the wait for a killed group to be gone; a test slows or stalls it
         self._lease = float(store.lease_seconds)
         self._store_outage_at: float | None = None  # this worker's last store call that hit an outage
         self._tasks: set[asyncio.Task[None]] = set()
         self._held: dict[str, Held] = {}
         self._stopping = False
         self._stop_signal = asyncio.Event()
+        self._takeover: asyncio.Task[None] | None = None  # serving only; a stop ends it first
         # Store writes that are failing now: claims wait for them all to recover (B5, r5 item 14).
         self._renewal_failing = False
         self._end_failing: set[str] = set()
@@ -227,8 +230,8 @@ class Worker:
         for every task; a store fault is raised. Serving, a store fault is logged and retried,
         and the stop is the deliberate one (`_stop`). However the loop leaves by an exception
         (a store fault, a cancellation), it stops as a deliberate stop does (`_leave`). The
-        renewal (and, serving, the take-over) run beside the loop until every row's last write
-        has landed."""
+        renewal runs beside the loop until every row's last write has landed; serving, the
+        take-over runs beside it until a stop begins (`_stop`)."""
         services = self._start_services(takeover=stop is not None)
         wake = asyncio.Event()
         try:
@@ -259,7 +262,8 @@ class Worker:
     def _start_services(self, *, takeover: bool) -> list[asyncio.Task[None]]:
         services = [asyncio.create_task(self._renewal_loop())]
         if takeover:
-            services.append(asyncio.create_task(self._takeover_loop()))
+            self._takeover = asyncio.create_task(self._takeover_loop())
+            services.append(self._takeover)
         return services
 
     def _writes_failing(self) -> bool:
@@ -313,11 +317,16 @@ class Worker:
         return [h for h in self._held.values() if h.proc is not None and h.proc.returncode is None]
 
     async def _stop(self) -> None:
-        """The deliberate stop: no more claims, each child ended (`_end_child`), then wait for the
-        tasks: each runs its backstop and its last write, which for a row the stop ended is the
-        hand-back (B11). Renewal keeps running meanwhile (the caller ends it)."""
+        """The deliberate stop, in order: no more claims and no more take-over (a pass under way
+        is cancelled and waited for), each child ended (`_end_child`), then wait for the tasks:
+        each runs its backstop and its last write, which for a row the stop ended is the hand-back
+        (B11). A hand-back lapses the row's lease and the row leaves `_held`, so a take-over still
+        running here would take this worker's own rows over; other workers' passes retry them.
+        Renewal keeps running meanwhile (the caller ends it)."""
         self._stopping = True
         self._stop_signal.set()
+        if self._takeover is not None:
+            await _end_tasks([self._takeover])
         await asyncio.gather(*(self._end_child(h, by_stop=True) for h in self._children()))
         if self._tasks:
             await asyncio.wait(set(self._tasks))
@@ -355,10 +364,19 @@ class Worker:
         except TimeoutError:
             _logger.warning("child %d did not end within %gs of SIGTERM; killing its group",
                             proc.pid, self._stop_grace)
-            kill_group(proc.pid)
+            if not await self._end_group(proc.pid):
+                held.group_left = True
             await proc.wait()
 
     # -- the lease: renewal, cost so far, take-over -------------------------------------------------
+
+    async def _end_group(self, pgid: int) -> bool:
+        """The child's whole group killed and waited for: the SIGKILL goes out here, at once, so a
+        cancel landing in the wait cannot keep it from being sent; the wait for every member to be
+        gone (`wait_group_gone` by default: bounded, logged if one never goes) runs in a thread.
+        False when a member still ran at the limit."""
+        kill_group(pgid)
+        return await asyncio.to_thread(self._wait_group, pgid)
 
     async def _renewal_loop(self) -> None:
         """Every `renewal_interval`, renew every held row in one store call. A call that errors
@@ -411,7 +429,7 @@ class Worker:
     async def _takeover_loop(self) -> None:
         """Every `takeover_interval`, take over every lapsed row this worker does not hold (B7),
         unless this worker's own store calls hit an outage within the last lease. A pass that
-        raises is logged; the next tick tries again."""
+        raises is logged; the next tick tries again. Serving only, until a stop begins."""
         while True:
             if self._store_settled():
                 try:
@@ -534,9 +552,16 @@ class Worker:
                 await _end_tasks([cost_task])
             if proc is not None:
                 # One cleanup however the row ended (r7 D-ac): whatever the child left running in
-                # its session dies with it, then its box, if it outlived it, is removed.
-                kill_group(proc.pid)
-                await self._backstop(inv, token)
+                # its session is killed and waited for, then its box, if it outlived it, is
+                # removed. The removal runs however the wait ends, a cancel included; a group
+                # an earlier wait already gave up on is killed again but not waited for twice.
+                try:
+                    if held.group_left:
+                        kill_group(proc.pid)
+                    elif not await self._end_group(proc.pid):
+                        held.group_left = True
+                finally:
+                    await self._backstop(inv, token)
         return proc
 
     async def _wait_for_child(self, held: Held, proc: asyncio.subprocess.Process) -> None:
