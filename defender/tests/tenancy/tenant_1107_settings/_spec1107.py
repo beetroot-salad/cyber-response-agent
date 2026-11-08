@@ -425,7 +425,7 @@ class ProxyStandIn:
                 outer._record(doc, self.headers.get("Authorization", ""))
                 raw = outer._reply(len(outer._requests) - 1)
                 self.send_response(200)
-                self.send_header("Content-Type", mod("_proxy_client").REPLY_CONTENT_TYPE)
+                self.send_header("Content-Type", mod("kit.proxy_client").REPLY_CONTENT_TYPE)
                 self.send_header("Content-Length", str(len(raw)))
                 self.end_headers()
                 self.wfile.write(raw)
@@ -464,7 +464,7 @@ class ProxyStandIn:
             "token": authorization.removeprefix("Bearer ")})
 
     def _reply(self, n: int) -> bytes:
-        pc = mod("_proxy_client")
+        pc = mod("kit.proxy_client")
         a = self._answers[min(n, len(self._answers) - 1)]
         if "proxy_fault" in a:
             return pc.encode_final(pc.FinalRecord(

@@ -11,10 +11,10 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.integrations import elastic_adapter, identity_adapter
+from defender.kit.faults import ConfinementFault
 from defender.integrations.confinement import (
-    ConfinementFault,
     TransportCapture,
     confine_read_endpoint,
 )

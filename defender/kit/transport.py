@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import json
 import urllib.parse
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from defender._proxy_client import proxy_exchange
+from defender.kit.proxy_client import proxy_exchange
 from defender.kit.access import AccessDeclaration
 from defender.kit.settings import (
     NOT_CONFIGURED,
@@ -17,8 +18,14 @@ from defender.kit.settings import (
     pointer_to,
 )
 from defender.kit.verbs import VerbContext
-from defender.integrations.confinement import ConfinementFault, record_outbound
-from defender.kit.faults import USAGE_EXIT_CODE, AdapterFault, ConfigFault, TransportFault, UpstreamFault
+from defender.kit.faults import (
+    USAGE_EXIT_CODE,
+    AdapterFault,
+    ConfigFault,
+    ConfinementFault,
+    TransportFault,
+    UpstreamFault,
+)
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.kit.verbs import TenantRecord
@@ -167,13 +174,14 @@ def http_post(
 
 def http_timed(  # noqa: PLR0913 — one request's per-call state
     ctx: VerbContext, config: dict[str, str], method: str, path: str, body: dict | None, *,
-    system: str, timeout_sec: int,
+    system: str, timeout_sec: int, error_detail: ErrorDetail | None = None,
 ) -> dict | list:
     """`method` <URL_BASE><path> as `http_get`/`http_post` send it, under the adapter's own
-    timeout constant rather than a `TIMEOUT_SEC` setting (Elastic's, #1391 O3)."""
+    timeout constant rather than a `TIMEOUT_SEC` setting (#1391 O3), its error bodies read by
+    `error_detail` when the adapter hands one."""
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
     return _perform(ctx, config, url, system=system, method=method, body=body,
-                    timeout_sec=timeout_sec)
+                    timeout_sec=timeout_sec, error_detail=error_detail)
 
 
 def http_write(
@@ -212,39 +220,32 @@ def _judge_write(code: int, body_text: str, where: str) -> None:
         return
     if code >= 500:
         raise TransportFault(f"upstream {where} returned HTTP {code}: {body_text}")
-    raise UpstreamFault(f"HTTP {code} from {where}: {_vendor_detail(body_text)}", status=code)
+    raise UpstreamFault(f"HTTP {code} from {where}: {vendor_detail(body_text)}", status=code)
 
 
 #: The most characters of an error body that has no reason to pick out reach a fault.
 VENDOR_DETAIL_CAP = 2000
 
 
-def _vendor_detail(body_text: str) -> object:
-    """The vendor's own reason from an error body: its `detail` (verbatim), or Elasticsearch's
-    `error` when it is text, else its `error.root_cause` reasons (else `error.reason`), each with
-    its type. A body that names none
-    is handed on whole, cut at `VENDOR_DETAIL_CAP` characters."""
+#: How an adapter reads its vendor's own reason out of an error body; `vendor_detail` unless the
+#: adapter hands the transport its own (a vendor whose errors have another shape).
+ErrorDetail = Callable[[str], object]
+
+
+def vendor_detail(body_text: str) -> object:
+    """The vendor's own reason from an error body: its `detail` (verbatim), else the body whole,
+    cut at `VENDOR_DETAIL_CAP` characters. An adapter whose vendor answers errors in another
+    shape hands the transport its own reader (`ErrorDetail`)."""
     try:
         payload = json.loads(body_text) if body_text else {}
     except json.JSONDecodeError:
-        payload = {"detail": _capped_detail(body_text)}
-    if not isinstance(payload, dict):
-        return _capped_detail(payload)
-    if "detail" in payload:
+        return capped_detail(body_text)
+    if isinstance(payload, dict) and "detail" in payload:
         return payload["detail"]
-    error = payload.get("error")
-    if isinstance(error, str):  # Elasticsearch's plain form, e.g. "no handler found for uri […]"
-        return _capped_detail(error)
-    if isinstance(error, dict):
-        causes = [c for c in error.get("root_cause") or [] if isinstance(c, dict)] or [error]
-        reasons = [f"{c.get('type')}: {c['reason']}" if c.get("type") else c["reason"]
-                   for c in causes if isinstance(c.get("reason"), str)]
-        if reasons:
-            return _capped_detail("; ".join(dict.fromkeys(reasons)))
-    return _capped_detail(payload)
+    return capped_detail(payload)
 
 
-def _capped_detail(value: object) -> object:
+def capped_detail(value: object) -> object:
     """`value` as it is when its text is within `VENDOR_DETAIL_CAP`, else that text cut there."""
     text = value if isinstance(value, str) else str(value)
     return value if len(text) <= VENDOR_DETAIL_CAP else text[:VENDOR_DETAIL_CAP] + " [cut]"
@@ -260,13 +261,22 @@ def _request(
 def _perform(  # noqa: PLR0913 — one request's per-call state
     ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
     body: dict | None = None, write: bool = False, timeout_sec: int | None = None,
+    error_detail: ErrorDetail | None = None,
 ) -> dict | list:
     timeout = timeout_sec if timeout_sec is not None else int(config.get("TIMEOUT_SEC", "10"))
     # The proxy's route check is the only guard for this system (A6), bar a vendor adapter's
     # own confinement before it calls here (P3); the capture is kept.
     record_outbound(ctx, system, url, method=method)
     return _proxy_request(ctx, url, system=system, method=method, body=body, write=write,
-                          timeout_sec=timeout)
+                          timeout_sec=timeout, error_detail=error_detail or vendor_detail)
+
+
+def record_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
+    """Record the request on the call's capture, if it has one: every request to a system, before
+    it goes to the credential proxy, whose route check is its guard (#1163 A6)."""
+    capture = getattr(ctx, "capture", None)
+    if capture is not None:
+        capture.record(system=system, url=url, method=method)
 
 
 def raise_proxy_fault(fault: str, detail: str, status: int | None = None, *,
@@ -290,7 +300,7 @@ def raise_proxy_fault(fault: str, detail: str, status: int | None = None, *,
 
 def _proxy_request(  # noqa: PLR0913 — one request's per-call state
     ctx: VerbContext, url: str, *, system: str, method: str, body: dict | None,
-    timeout_sec: int, write: bool = False,
+    timeout_sec: int, write: bool = False, error_detail: ErrorDetail = vendor_detail,
 ) -> dict | list:
     """One request through the proxy, its faults raised as the proxy classified them. The
     capture is `_perform`'s."""
@@ -307,14 +317,14 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
         # The system answered: its own reason, unaltered by the proxy (#1412), reaches the model
         # and curation.
         # With no body to hand on (withheld, or the reply broke) the proxy's reason says why.
-        why = _vendor_detail(answer.body) if answer.body else answer.detail
+        why = error_detail(answer.body) if answer.body else answer.detail
         raise_proxy_fault(answer.fault, f"HTTP {answer.status} from {system}: {why}",
                           answer.status, from_system=True)
     if answer.fault is not None:
         raise_proxy_fault(answer.fault, answer.detail, from_system=answer.from_system,
                           sent=answer.sent)
     if answer.status >= 400:
-        raise UpstreamFault(f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
+        raise UpstreamFault(f"HTTP {answer.status} from {system}: {error_detail(answer.body)}",
                             status=answer.status)
     if not answer.body:
         return {}

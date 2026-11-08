@@ -10,7 +10,7 @@ if (_root := str(_Path(__file__).resolve().parents[4])) not in _sys.path:
 from typing import TYPE_CHECKING, Any
 
 from defender.kit.verbs import VerbContext, verb
-from defender import integrations
+from defender.kit import transport
 from defender.kit import faults
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -35,7 +35,7 @@ def _config(ctx: VerbContext) -> dict[str, str]:
     `load_config` strips the prefix, adds `URL_BASE` (the access declaration's base) and raises
     `ConfigFault` for a system with no config or no declaration, a missing or blank required key,
     or a key it does not read — which `check_settings` below raises first, at run start."""
-    return integrations.load_config(ctx, SYSTEM, PREFIX, REQUIRED_KEYS)
+    return transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_KEYS)
 
 
 def check_settings(tenant: TenantRecord) -> None:
@@ -47,7 +47,7 @@ def check_settings(tenant: TenantRecord) -> None:
     anything else, is down as broken. A system needing no settings still declares one that never
     raises. This system's verbs fault only in `_config`, so the check is `_config`'s, over the
     record."""
-    integrations.record_config(tenant, SYSTEM, PREFIX, REQUIRED_KEYS)
+    transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_KEYS)
 
 
 def _request(ctx: VerbContext, path: str, params: dict[str, str] | None = None) -> Any:
@@ -55,7 +55,7 @@ def _request(ctx: VerbContext, path: str, params: dict[str, str] | None = None) 
     its system. The proxy holds the credential, refuses any URL outside the declaration, and
     answers; `http_get` raises `TransportFault` for an unreachable system or a 5xx and
     `UpstreamFault` (the system's own detail) for a 4xx."""
-    return integrations.http_get(ctx, _config(ctx), path, system=SYSTEM, params=params)
+    return transport.http_get(ctx, _config(ctx), path, system=SYSTEM, params=params)
 
 
 def health_check(ctx: VerbContext) -> dict:

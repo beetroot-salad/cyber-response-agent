@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.integrations import elastic_adapter
 from defender.kit.faults import ConfigFault
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S

@@ -87,7 +87,7 @@ def test_a_query_verb_is_handed_the_runs_tenant_record(tmp_path):
     assert Path(call.ctx.tenant.settings).resolve() == tenant.settings
     assert Path(call.ctx.tenant.settings).resolve() != T.FIXTURE_SETTINGS.resolve()
     # Read THROUGH what the verb was handed: the adapter's config is the run tenant's.
-    transport = T.mod("integrations._stub_transport")
+    transport = T.mod("kit.transport")
     assert transport.load_config(call.ctx, "cmdb", "CMDB")["URL_BASE"] == "http://cmdb-lane:8080"
 
 
@@ -97,7 +97,7 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
     model view or run-dir table holds the data root."""
     tenant = _tenant(tmp_path, T.TABLE_A, "fault")
     (tenant.settings / "systems" / "cmdb" / "config.env").unlink()
-    transport = T.mod("integrations._stub_transport")
+    transport = T.mod("kit.transport")
     rec = VerbRecorder()
 
     def get_host(ctx, *, host: str = "web-1") -> dict:

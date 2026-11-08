@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender.integrations._stub_transport import http_write
+from defender.kit.transport import http_write
 from defender.kit.faults import TransportFault, UpstreamFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _endings1412r as E

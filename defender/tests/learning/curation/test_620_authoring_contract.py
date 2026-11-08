@@ -168,6 +168,6 @@ def test_the_connect_example_reaches_its_system_through_the_proxy_at_its_declare
     with pytest.raises(ConfigFault, match="EXAMPLE_URL_BASE"):
         example.check_settings(S.resolve(root))
     # An adapter listing URL_BASE among the keys it reads is the adapter's bug, not the tenant's.
-    from defender import integrations
+    from defender.kit import transport
     with pytest.raises(ValueError, match="access.yaml"):
-        integrations.record_config(record, "example", "EXAMPLE", ("URL_BASE", "TIMEOUT_SEC"))
+        transport.record_config(record, "example", "EXAMPLE", ("URL_BASE", "TIMEOUT_SEC"))

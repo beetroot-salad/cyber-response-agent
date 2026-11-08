@@ -30,7 +30,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from defender import tenancy
-from defender._internal_http import internal_client, tls_trust
+from defender.kit.internal_http import internal_client, tls_trust
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
 
 from .auth import CLOCK_SKEW, CredentialMisconfigured, ForgejoAuthError, ForgejoIdentity

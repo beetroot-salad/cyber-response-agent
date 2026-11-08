@@ -15,7 +15,7 @@ from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 CASE_RECORD = f"settings/{C.CASE_RECORD_REL}"
 CASE_SYSTEM = "casesys"
 ADAPTER = (
-    "from defender.integrations import _stub_transport as transport\n\n\n"
+    "from defender.kit import transport\n\n\n"
     "def check_settings(tenant):\n"
     "    transport.check_settings_of(tenant, 'casesys', 'CASESYS')\n\n\n"
     "def health_check(ctx):\n    return {}\n\n\n"

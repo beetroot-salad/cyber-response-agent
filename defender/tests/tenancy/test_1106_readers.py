@@ -46,7 +46,7 @@ def _ctx(settings: Path, run_dir: Path, env: dict | None = None):
 # ---- the adapters' config.env ---------------------------------------------------------------------
 
 def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path):
-    transport = T.mod("integrations._stub_transport")
+    transport = T.mod("kit.transport")
     cfg = transport.load_config(_ctx(injected, tmp_path), "cmdb", "CMDB")
     assert cfg["URL_BASE"] == f"http://cmdb-{MARK}:8080"  # the injected tenant's declaration
     checkout = transport.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path), "cmdb", "CMDB")
@@ -55,7 +55,7 @@ def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path
 
 def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
     faults = T.mod("kit.faults")
-    transport = T.mod("integrations._stub_transport")
+    transport = T.mod("kit.transport")
     root = tmp_path / "injected-root"
     T.place_tenant(root, T.PLAYGROUND_ID, configs={})
     settings = T.accept(root, T.PLAYGROUND_ID).settings

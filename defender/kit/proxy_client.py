@@ -15,17 +15,13 @@ import json
 import struct
 from collections.abc import Iterator, Mapping
 from dataclasses import asdict, dataclass, fields
-from typing import TYPE_CHECKING
 
 import httpx
 
-from defender._internal_http import internal_client, tls_trust
 from defender.kit.access import caller_wait_sec
 from defender.kit.faults import AdapterFault, TransportFault
+from defender.kit.internal_http import internal_client, tls_trust
 from defender.kit.verbs import VerbContext
-
-if TYPE_CHECKING:
-    pass
 
 #: The proxy's one endpoint.
 PROXY_PATH = "/v1/request"
@@ -231,7 +227,7 @@ def _check_head(response: httpx.Response) -> None:
 
 @functools.cache
 def _client() -> httpx.Client:
-    """The process's one pooled client to the proxy (`_internal_http`: no outbound web proxy)."""
+    """The process's one pooled client to the proxy (`internal_http`: no outbound web proxy)."""
     return internal_client(trust=tls_trust())
 
 

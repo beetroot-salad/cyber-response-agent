@@ -2,7 +2,7 @@
 
 Elasticsearch's read-endpoint allowlist and index confinement, which its adapter checks before a
 request goes to the credential proxy (#1391 P3: the proxy's route grammar cannot express them),
-plus the transport capture seam and the allowlist's authoring-integrity constructor. Every other
+plus the transport capture types and the allowlist's authoring-integrity constructor. Every other
 system reached through the proxy is confined by the proxy's route check alone (#1163 A6).
 """
 from __future__ import annotations
@@ -19,14 +19,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender._model import model
-from defender.kit.faults import AdapterFault
-
-
-class ConfinementFault(AdapterFault):
-    """A target-fidelity refusal: never an infra fault (not in circuit_breaker's
-    INFRA_EXIT_CODES), and refused before any transport is attempted."""
-
-    exit_code = 1
+from defender.kit.faults import ConfinementFault
 
 
 class AllowlistError(Exception):
@@ -129,14 +122,6 @@ class TransportCapture:
         self.requests.append(CapturedRequest(system=system, url=url, method=method))
 
 
-def record_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
-    """Record the request on the call's capture, if it has one: every request to a system, before
-    it goes to the credential proxy, whose route check is its guard (#1163 A6)."""
-    capture = getattr(ctx, "capture", None)
-    if capture is not None:
-        capture.record(system=system, url=url, method=method)
-
-
 # the elastic index confinement
 
 
@@ -179,11 +164,9 @@ __all__ = [
     "READ_ENDPOINT_ALLOWLIST",
     "AllowlistError",
     "CapturedRequest",
-    "ConfinementFault",
     "ReadEndpointAllowlist",
     "TransportCapture",
     "confine_index",
     "confine_read_endpoint",
     "normalize_endpoint",
-    "record_outbound",
 ]

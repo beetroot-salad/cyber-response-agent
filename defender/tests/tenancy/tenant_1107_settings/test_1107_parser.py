@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from defender.systems import run_tenant
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 

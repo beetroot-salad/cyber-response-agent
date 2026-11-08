@@ -6,7 +6,7 @@ import urllib.parse
 import pytest
 
 from defender.systems.verbs import VerbContext
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.integrations import ticket_adapter
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 from defender.tests.support.shared._fixture_uuid import fixture_uuid

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import urllib.parse
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
@@ -13,7 +14,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender.kit.verbs import VerbContext, verb
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.integrations.confinement import confine_index, confine_read_endpoint
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 
@@ -58,6 +59,26 @@ def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adap
     _record_config(tenant)
 
 
+def _error_detail(body_text: str) -> object:
+    """Elasticsearch's own reason from an error body, for the transport: its `error` when it is
+    text, else its `error.root_cause` reasons (else `error.reason`), each with its type; any other
+    body as the transport reads one (`vendor_detail`)."""
+    try:
+        payload = json.loads(body_text) if body_text else {}
+    except json.JSONDecodeError:
+        return transport.vendor_detail(body_text)
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error, str):  # the plain form, e.g. "no handler found for uri […]"
+        return transport.capped_detail(error)
+    if isinstance(error, dict):
+        causes = [c for c in error.get("root_cause") or [] if isinstance(c, dict)] or [error]
+        reasons = [f"{c.get('type')}: {c['reason']}" if c.get("type") else c["reason"]
+                   for c in causes if isinstance(c.get("reason"), str)]
+        if reasons:
+            return transport.capped_detail("; ".join(dict.fromkeys(reasons)))
+    return transport.vendor_detail(body_text)
+
+
 def _http_json(  # noqa: PLR0913 — one request's per-call state
     ctx, method: str, config: dict[str, str], path: str, body: dict | None = None,
     timeout_sec: int = REQUEST_TIMEOUT_SEC,
@@ -66,9 +87,8 @@ def _http_json(  # noqa: PLR0913 — one request's per-call state
     matched against `path` relative to the declared base as the proxy's routes are, before it is
     joined to the base), then the shared send, capture and fault mapping."""
     confine_read_endpoint(SYSTEM, path, method=method, verb_class="r")
-    answer = transport.http_timed(ctx, config, method, path,
-                                  body,
-                                  system=SYSTEM, timeout_sec=timeout_sec)
+    answer = transport.http_timed(ctx, config, method, path, body, system=SYSTEM,
+                                  timeout_sec=timeout_sec, error_detail=_error_detail)
     if not isinstance(answer, dict):
         raise TransportFault("non-object JSON response from elastic")
     return answer

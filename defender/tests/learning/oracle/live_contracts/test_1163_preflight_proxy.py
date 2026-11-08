@@ -35,7 +35,7 @@ FIXTURE_SYSTEMS = ("identity", "ticket", "host-state", "threat-intel", "change-m
 #: `idp` is a tenant-only name: no product allowlist knows it (A6). Its `query` goes through the
 #: shared transport; its other verbs answer locally.
 IDP_ADAPTER = '''\
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.kit.verbs import VerbContext, verb
 
 

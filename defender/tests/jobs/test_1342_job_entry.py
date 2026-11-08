@@ -1468,7 +1468,7 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
         monkeypatch.setattr(writer_module, name, getattr(wire, name))  # lint-monkeypatch: ok — same tripwire, ticket writer
     # an import-time alias of the writer's helpers or of `DEFAULT_DEPS.request` escapes all of those: the
     # transport every route ends in is tripped too
-    from defender.integrations import _stub_transport
+    from defender.kit import transport as _stub_transport
 
     monkeypatch.setattr(_stub_transport, "_proxy_request", wire._proxy_request)  # lint-monkeypatch: ok — same tripwire, the writer's transport (every request goes through the proxy, #1391 O1)
     # a function object bound at import time escapes even that: trip the process launch beneath it, on

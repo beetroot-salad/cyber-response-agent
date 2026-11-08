@@ -11,7 +11,8 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 DEFENDER = S.DEFENDER
 #: The shared transport's own route functions: only the transport and the proxy client call them.
 ROUTE_NAMES = {"proxy_exchange", "proxy_call"}
-TRANSPORT_HOMES = {"integrations", "_proxy_client.py"}
+#: Where they may be called: the two kit modules that are the transport.
+TRANSPORT_HOMES = {"kit/transport.py", "kit/proxy_client.py"}
 
 
 def _product_py() -> list[Path]:
@@ -58,6 +59,6 @@ def test_o3_no_second_copy_of_a_transport_route():
                   if isinstance(n, ast.ImportFrom) for a in n.names}
         if names & ROUTE_NAMES:
             seen[str(rel)] = names & ROUTE_NAMES
-    assert any(k.startswith("integrations") for k in seen), f"positive control: {seen}"
-    outside = {k: v for k, v in seen.items() if Path(k).parts[0] not in TRANSPORT_HOMES}
+    assert "kit/transport.py" in seen, f"positive control: {seen}"
+    outside = {k: v for k, v in seen.items() if k not in TRANSPORT_HOMES}
     assert outside == {}, outside

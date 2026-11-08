@@ -14,9 +14,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.systems import run_tenant  # noqa: E402
-from defender.integrations import (  # noqa: E402
-    _stub_transport,
-)
+from defender.kit import transport as _stub_transport  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root  # noqa: E402
 from defender.tests.support.learning.branch import _triplet_947 as T

@@ -23,7 +23,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender.kit.verbs import CaseComments, VerbContext
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.kit.faults import ConfigFault, TransportFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only

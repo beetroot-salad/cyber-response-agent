@@ -10,10 +10,10 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S  # noqa: E402
+from defender.kit.faults import ConfinementFault
 from defender.integrations.confinement import (  # noqa: E402
     READ_ENDPOINT_ALLOWLIST,
     AllowlistError,
-    ConfinementFault,
     ReadEndpointAllowlist,
     confine_index,
     confine_read_endpoint,
@@ -126,7 +126,7 @@ HTTP_WRITE_CALL = 'transport.http_write(ctx, cfg, method, path, payload, system=
 #: A planted `ticket_adapter.py`: the host's comment action exactly as the tenant's case-record
 #: file reaches it, but it writes where the call below says (the write-table-bypass shape).
 PLANTED_TICKET_ADAPTER = '''\
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 
 
 def check_settings(tenant):
