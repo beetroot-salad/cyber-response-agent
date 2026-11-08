@@ -40,7 +40,6 @@ from defender.presentation.visualize_data import (
     transcript_phase_map,
 )
 from defender._agent_role import AGENT_KINDS, CORRELATION_KIND, GATHER_KIND, MAIN_KIND, REVIEW_KIND
-from defender.presentation.visualize_messages import _pretty_model
 from defender.presentation.visualize_primitives import (
     ASSETS,
     CSS,
@@ -533,7 +532,7 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False, cost: Led
     wall_ms = sum(e.get("duration_ms") or 0 for e in events if e.get("type") == "result")
     main_model = md["models"][0] if md["models"] else "main"
     if ledger is not None:
-        main_model = _pretty_model(ledger.requested.get(MAIN_KIND, "")) or "main"
+        main_model = ledger.requested.get(MAIN_KIND, "") or "main"
     by_model = {main_model: main_total}
     for by_model_costs in (
         gather_cost_by_model(run_dir, messages, ledger), review_cost_by_model(run_dir, messages, ledger),

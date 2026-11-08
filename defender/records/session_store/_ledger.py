@@ -122,7 +122,7 @@ def read_ledger(store: Any, run_id: str) -> LedgerRead:
     total, complete = 0.0, True
     by_agent: dict[str, float] = {}
     requested: dict[str, str] = {}
-    counts = dict.fromkeys(COUNTS, 0)
+    billed: list[dict[str, int]] = []
     for row in run_spend(store, run_id):
         agent_kind(row.agent_id)
         if row.outcome not in OUTCOMES:
@@ -135,8 +135,8 @@ def read_ledger(store: Any, run_id: str) -> LedgerRead:
             complete = False
         if row.outcome == RESPONSE:
             spent = requested_cost(row.requested_model, row.usage)
-            for k in COUNTS:
-                counts[k] += int(row.usage.get(k, 0))
+            billed.append(row.usage)
         by_agent[row.agent_id] = by_agent.get(row.agent_id, 0.0) + spent
         total += spent
-    return LedgerRead(total=total, complete=complete, by_agent=by_agent, requested=requested, usage=counts)
+    usage = {k: sum(int(u.get(k, 0)) for u in billed) for k in COUNTS}
+    return LedgerRead(total=total, complete=complete, by_agent=by_agent, requested=requested, usage=usage)

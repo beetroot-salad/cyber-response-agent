@@ -249,11 +249,16 @@ def _cost_by(pairs, key, prefix: str = "", ledger: Any = None) -> dict[str, floa
     return out
 
 
+def _model_key(ledger: Any):
+    """The by-model key: the requested model as the ledger names it (#1377 r7.1 addendum), or, with
+    no ledger, the logged name shortened for display."""
+    return (lambda _s, raw: raw) if ledger is not None else (lambda _s, raw: _pretty_model(raw))
+
+
 def gather_cost_by_model(
     run_dir: Path, messages: list[dict] | None = None, ledger: Any = None,
 ) -> dict[str, float]:
-    return _cost_by(_iter_gather_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw),
-                    GATHER_AGENT_ID_PREFIX, ledger)
+    return _cost_by(_iter_gather_responses(run_dir, messages), _model_key(ledger), GATHER_AGENT_ID_PREFIX, ledger)
 
 
 def review_cost_by_lens(
@@ -272,8 +277,7 @@ def review_cost_by_model(
 ) -> dict[str, float]:
     """The same spend keyed by model. The review has its own pinned default model, so this is
     usually a separate row, merging with main's when both use one model."""
-    return _cost_by(_iter_review_responses(run_dir, messages), lambda _s, raw: _pretty_model(raw),
-                    REVIEW_AGENT_ID_PREFIX, ledger)
+    return _cost_by(_iter_review_responses(run_dir, messages), _model_key(ledger), REVIEW_AGENT_ID_PREFIX, ledger)
 
 
 def tool_usage(events: list[dict], messages: list[dict] | None = None) -> list[dict]:
