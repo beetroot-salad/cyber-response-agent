@@ -228,3 +228,27 @@ async def test_a3_a_post_step_that_leaves_a_handed_job_pending_keeps_its_tenant_
             _stop_serving(serving)
             await asyncio.wait_for(serving, timeout=15)
     assert check.handed[0] == (None, [job], T1)
+
+
+async def test_a3_the_worker_renews_a_running_check_s_hold_so_no_second_check_starts_beside_it(world):
+    """A one-second lease, two learning slots, and a check held open for several leases: the worker renews the hold, so
+    the tenant is never claimed again while the check runs, and the check is not fenced. (amendment 3)"""
+    dsn = world["dsn"]
+    release = world["tmp"] / "release-check"
+    check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn, wait_for=release)
+    async with job_store(dsn, lease=1.0) as store:
+        stranded = await queued_job(world, store, ticket="J-0")
+        _strand(dsn, stranded)
+        worker = learning_worker(world, store, job=job_child(world), post=_either(post_child(world), check),
+                                 learning_check_interval=0.3, learning_slots=2, **_FAST)
+        serving = asyncio.create_task(worker.serve())
+        try:
+            await _until(lambda: check.handed, "the check")
+            await asyncio.sleep(3.5)
+            assert len(check.handed) == 1, "a second check started beside the first: its hold lapsed"
+            assert [kind for kind, _ in check.events()] == ["start"], "the running check was ended"
+            assert _clock(dsn)["held"] is True
+        finally:
+            release.touch()
+            _stop_serving(serving)
+            await asyncio.wait_for(serving, timeout=15)
