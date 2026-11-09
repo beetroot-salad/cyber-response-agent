@@ -26,12 +26,13 @@ concurrency:
 # stall in any of them still runs to GitHub's 6-hour job default.
 #
 # 10 minutes, and the bound NESTS over the step bound the same way the step bound nests over
-# its commands. `test` is the binding job and carries 12: before #1333 rebalanced it, its heavier
+# its commands. `test` is the binding job and carries 15: before #1333 rebalanced it, its heavier
 # shard ran ~9m50s on main (run 40495781426) and PR runs were cancelled at 10 minutes with every
 # test passed. A shard that drifts heavy again as files are added gets two minutes of warning
 # before it cancels green runs (it did again on 2026-11-02: main's heavier shard ran 11m06s and
-# a PR's two shards both passed every test past 12 minutes, so the suite went to three shards),
-# and a stall that burns the gVisor step's full 5-minute bound still lands inside 12, so the
+# a PR's two shards both passed every test past 12 minutes, so the suite went to three shards;
+# on 2026-11-09 main's shards ran 10-11m and #1448's were cancelled at 99% with 12, so it is 15),
+# and a stall that burns the gVisor step's full 5-minute bound still lands inside 15, so the
 # step's own timeout fires first and names the command. Raising the step bound without raising
 # this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
@@ -47,7 +48,7 @@ jobs:
   test:
     name: test (shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
