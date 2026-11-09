@@ -414,3 +414,51 @@ def test_1414_what_the_old_generations_bot_made_is_still_the_bots(fb):
     assert fb.tick(decider, directory=directory) == 0
     assert decider.decided == [spoken["id"], positive["id"]]
     assert len(fb.replies(number, positive["id"])) == 1
+
+
+# ---- regressions (#1414 attack triage)
+
+def test_1414_a_lookup_with_a_lone_surrogate_does_not_wedge_the_requests_beside_it(fb):
+    """A run whose captured lookups held a lone surrogate (a model's tool argument) queues no request the tick cannot send;
+    its ordinary neighbour's issue still opens and its comment is still decided, tick after tick. F1/F2 (P3)."""
+    import shutil
+    from pathlib import Path
+
+    from defender import run_common
+    from defender.box import _scrub as scrub_mod
+    from defender.investigation.run_state import RunState
+    from defender.records import RunPaths
+    from defender.tests.support.learning.core._state1135 import run_of
+    from defender.tests.support.sandbox._spec791 import make_run_dir
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+    from defender.tests.support.shared._locations_1210 import location_path
+    from defender.tests.support.storage import _feedback1414 as F
+    from defender.tests.support.tenancy import _tenants1106 as T1106
+
+    settings = fb.tmp / "settings-copy"
+    shutil.copytree(location_path(fb.t.tenant.settings), settings)
+    (settings / S.SETTING_FILE).write_text(S.setting_text(["inconclusive"]), encoding="utf-8")
+    runs = Path(location_path(fb.t.tenant.tenant_root)) / "runs"
+    runs.mkdir(exist_ok=True)
+    bad_dir = make_run_dir(runs, name=fixture_uuid("case-surrogate"), disposition="inconclusive",
+                           alert_bytes=b'{"rule": {"id": "1414-surrogate"}}')
+    scrub_mod.scrub(bad_dir)
+    rows = {"l-1": [F.lookup_row("l-1", 0, {"actor": "ann", "host": "db-03", "pattern": "\ud800"}),
+                    F.lookup_row("l-1", 1, {"actor": "ann", "host": "db-03", "pattern": "id"})]}
+    run_state = RunState(bad_dir, str(run_of(bad_dir).id))
+    run_state.rows.update(rows)
+    queued = run_common.enqueue_feedback_issue(
+        run_of(bad_dir), RunPaths(bad_dir).alert, tenant=T1106.run_tenant(fb.t.tenant, settings_root=settings),
+        run_state=run_state)
+    assert queued is True, "premise: the run's end queued its request"
+
+    decider = S.Decider()
+    fb.request("case-ok")  # the ordinary request, queued beside the bad run's
+    assert fb.tick(decider) == 0
+    [number] = [i["number"] for i in fb.issues("case-ok")]
+    spoken = fb.forge.add_comment(number, user=OWNER, body="nothing to change")
+    for _ in range(3):
+        assert fb.tick(decider) == 0
+    assert decider.decided == [spoken["id"]], "the ordinary run's comment was not decided"
+    assert len(fb.replies(number, spoken["id"])) == 1
+    assert S.open_issue_requests(fb.paths) == {}, "a request stayed queued, to fail again every tick"

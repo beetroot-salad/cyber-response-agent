@@ -2,7 +2,9 @@
 """
 from __future__ import annotations
 
+import functools
 import json
+import random
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -10,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from defender import run as run_py
+from defender import run_common
 from defender.box import _scrub as scrub_mod
 from defender.records import RunPaths, run_end
 from defender.tests.learning.feedback_1414 import _spec1414 as S
@@ -177,6 +180,77 @@ def test_1414_a_later_run_whose_outcome_is_not_listed_leaves_the_earlier_request
     assert (request["outcome"], request["run_id"]) == ("aborted", _run_id(first))
 
 
+# ---------------------------------------------------------------- F1's flow predicate, through the real entry
+
+def _held_set(tmp_path: Path) -> Path:
+    """A held-out fixture set holding one member the digest walk reads (`m01/alert.json`)."""
+    fixtures = tmp_path / "held-out"
+    (fixtures / "m01").mkdir(parents=True)
+    (fixtures / "m01" / "alert.json").write_bytes(HELD_OUT_ALERT)
+    return fixtures
+
+
+def _main_with(fixtures: Path):
+    """`run.main` whose feedback enqueue judges the held-out set `fixtures` (the seam `main` exposes)."""
+    return functools.partial(run_py.main, enqueue_feedback=functools.partial(
+        run_common.enqueue_feedback_issue, fixtures_dir=fixtures))
+
+
+def _drive_main(main, alert: Path, tail: F.FeedbackTail, *args: str) -> None:
+    drive_tail(main, alert, tail, *args)
+
+
+def _drive_sibling(tmp_path, tenant, tail: F.FeedbackTail) -> None:
+    """The sibling's door (`--episode <id> --world b`) over a held episode of the run's own tenant."""
+    from defender.records._episode_handle import Episode
+    from defender.tests.support.learning.branch import _triplet_947 as T
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+    from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as P
+
+    source = P.source_run(Path(location_path(tenant.runs)))
+    manifest = P.family_for(source)
+    with Episode.open(manifest.parent) as held:
+        T.episode_view(held, tenant=tenant).close()
+    argv = ["--tenant", str(tenant.id), "--episode", manifest.parent.name, "--world", "b"]
+    run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize, ticket_writer=tail,
+                preflight=lambda *a, **k: 0, publish=in_process_publish(), directory=directory_for_argv(argv))
+
+
+_REFUSED_ENDS = ["sibling world", "--no-learn", "held-out by path", "held-out by digest", "unverified tree"]
+
+
+@pytest.mark.parametrize("row", _REFUSED_ENDS)
+def test_1414_a_run_end_curation_refuses_opens_no_issue_through_the_real_entry(tmp_path, tenant, state, row):
+    """A sibling world, `--no-learn`, a held-out alert (by path or by digest) and an unverified tree queue nothing, though the
+    setting lists the outcome; the ordinary run beside them queues one. F1 (flow predicate, as curation's refusals)."""
+    _set(tenant, ["aborted"])
+    fixtures = _held_set(tmp_path)
+    main = _main_with(fixtures)
+    plan = F.plan_for("aborted")
+    refused = F.FeedbackTail(state, plan=plan, certify=row != "unverified tree")
+    if row == "sibling world":
+        _drive_sibling(tmp_path, tenant, refused)
+    elif row == "--no-learn":
+        _drive_main(main, plant_alert(tmp_path / "x"), refused, "--no-learn")
+    elif row == "held-out by path":
+        # inside the set, but not at `<slug>/alert.json`, so the digest walk never reads it: only the path arm refuses
+        planted = fixtures / "m02" / "note.json"
+        planted.parent.mkdir()
+        planted.write_bytes(json.dumps({"rule": {"id": "4242"}}).encode("utf-8"))
+        _drive_main(main, planted, refused)
+    else:
+        held = HELD_OUT_ALERT if row == "held-out by digest" else None
+        _drive_main(main, plant_alert(tmp_path / "x", alert_bytes=held), refused)
+    assert len(refused.run_dirs) == 1, f"{row}: the run did not reach its end"
+    assert S.open_issue_requests(state) == {}, f"{row}: a refused end queued an open-issue request"
+
+    other = {"alert_bytes": json.dumps({"rule": {"id": "5711"}}).encode("utf-8")}
+    tail = F.FeedbackTail(state, plan=plan)
+    _drive_main(main, plant_alert(tmp_path / "ordinary", **other), tail)
+    [request] = S.open_issue_requests(state).values()
+    assert (request["outcome"], request["run_id"]) == ("aborted", _run_id(tail)), "control: the live run queues one"
+
+
 # ---------------------------------------------------------------- the setting: absent, unknown, the run's copy
 
 def test_1414_an_absent_setting_opens_nothing(tmp_path, tenant, state):
@@ -198,13 +272,15 @@ def test_1414_a_setting_with_an_unknown_word_is_refused_at_run_end(tmp_path, ten
     assert S.open_issue_requests(state) == {}
 
 
-def _tenant_folder(tmp_path: Path, outcomes: list[str] | None) -> Path:
+def _tenant_folder(tmp_path: Path, outcomes: list[str] | None, *, raw: str | None = None) -> Path:
     folder = tmp_path / "tenant"
     shutil.copytree(H.FIXTURE, folder, symlinks=True)
     H.write_tenant_id_file(folder, H.TID, None)
     shutil.rmtree(folder / "settings" / "systems" / "case-history", ignore_errors=True)
     if outcomes is not None:
         (folder / "settings" / S.SETTING_FILE).write_text(S.setting_text(outcomes), encoding="utf-8")
+    if raw is not None:
+        (folder / "settings" / S.SETTING_FILE).write_text(raw, encoding="utf-8")
     return folder
 
 
@@ -223,6 +299,38 @@ def test_1414_tenant_check_refuses_an_unknown_word_naming_it(tmp_path, word):
 
     folder = _tenant_folder(tmp_path, ["benign", word])
     H.assert_refused(H.check(tenant_py, None, "--folder", str(folder)), S.SETTING_FILE, word)
+
+
+#: Settings whose keys cannot stand: a key written twice (the later would silently win) and a key nothing reads (a typo
+#: that would silently list nothing). Each names the key the refusal must name.
+_BAD_KEYS = {
+    "duplicate key": ("open_issue_on:\n  - benign\nopen_issue_on:\n  - aborted\n", "open_issue_on"),
+    "unknown key": ("open_issue_on:\n  - aborted\nopen_issues_on:\n  - benign\n", "open_issues_on"),
+}
+
+
+@pytest.mark.parametrize("why", sorted(_BAD_KEYS))
+def test_1414_a_setting_with_a_duplicate_or_unknown_key_is_refused_at_run_end(tmp_path, tenant, state, caplog, why):
+    """A setting repeating a key or holding one nothing reads opens nothing at run end and is logged as refused, naming the key. O1."""
+    import logging
+
+    text, key = _BAD_KEYS[why]
+    (Path(location_path(tenant.settings)) / S.SETTING_FILE).write_text(text, encoding="utf-8")
+    with caplog.at_level(logging.INFO):
+        _drive(tmp_path, state, "bad-keys", plan=F.plan_for("aborted"))
+    assert S.open_issue_requests(state) == {}
+    refusals = [r.getMessage() for r in caplog.records if "NOT enqueuing a feedback issue" in r.getMessage()]
+    assert any(key in line for line in refusals), refusals
+
+
+@pytest.mark.parametrize("why", sorted(_BAD_KEYS))
+def test_1414_tenant_check_refuses_a_duplicate_or_unknown_key_naming_it(tmp_path, why):
+    """`tenant check --folder` refuses a setting repeating a key or holding an unread one, naming the file and the key. O1."""
+    from defender.cli import tenant as tenant_py
+
+    text, key = _BAD_KEYS[why]
+    folder = _tenant_folder(tmp_path, None, raw=text)
+    H.assert_refused(H.check(tenant_py, None, "--folder", str(folder)), S.SETTING_FILE, key)
 
 
 @pytest.mark.parametrize(("before", "edit", "opens"), [
@@ -301,13 +409,36 @@ def test_1414_only_successful_string_lookups_are_captured(why):
     assert S.captured_lookups(run_state) == [LOOKUP]
 
 
-def test_1414_captured_lookups_are_deduplicated_across_leads():
-    """One lookup made by two leads, twice by one, is captured once. P3."""
-    run_state = _state({
-        "l-1": [F.lookup_row("l-1", 0, LOOKUP), F.lookup_row("l-1", 1, dict(LOOKUP)),
-                F.lookup_row("l-1", 2, LOOKUP_2)],
-        "l-2": [F.lookup_row("l-2", 0, dict(LOOKUP_2)), F.lookup_row("l-2", 1, dict(LOOKUP))]})
-    assert sorted(S.captured_lookups(run_state), key=json.dumps) == sorted([LOOKUP, LOOKUP_2], key=json.dumps)
+@pytest.mark.parametrize("seed", [1414, 7, 20261109])
+def test_1414_captured_lookups_are_the_distinct_qualifying_triples_in_first_seen_order(seed):
+    """Over generated rows (repeats across and within leads, refused, foreign, non-string and non-UTF-8 calls), the captured list is
+    the distinct (actor, host, pattern) triples of the qualifying rows in first-seen order. P3 (C17, C23)."""
+    rng = random.Random(seed)
+    actors, hosts, patterns = ("ann", "svc-backup", "root"), ("db-03", "web-01"), ("rm -rf", "curl x", "id")
+    spoilers = [{"exit_code": 2}, {"exit_code": 3}, {"system": "cmdb"}, {"verb": "list"}]
+    spoiled_values = [["x"], 7, None, {"a": 1}, True, "\ud800", "ok\udfff"]
+    rows: dict[str, list[dict]] = {}
+    expected: list[dict] = []
+    for lead in (f"l-{n}" for n in rng.sample(range(1, 9), 4)):
+        rows[lead] = []
+        for seq in range(rng.randint(3, 9)):
+            triple = {"actor": rng.choice(actors), "host": rng.choice(hosts), "pattern": rng.choice(patterns)}
+            kw: dict = {}
+            kind = rng.random()
+            if kind < 0.2:
+                kw = rng.choice(spoilers)
+            elif kind < 0.3:
+                triple[rng.choice(sorted(triple))] = rng.choice(spoiled_values)
+            elif kind < 0.35:
+                del triple[rng.choice(sorted(triple))]
+            else:
+                if triple not in expected:
+                    expected.append(dict(triple))
+            rows[lead].append(F.lookup_row(lead, seq, triple, **kw))
+    assert len(expected) > 3, "premise: several distinct triples"
+    assert sum(map(len, rows.values())) > len(expected) + 3, "premise: repeats and spoilers occur"
+
+    assert S.captured_lookups(_state(rows)) == expected
 
 
 def test_1414_the_request_carries_the_lookups_from_the_runs_memory_not_the_box_file(tmp_path, tenant, state):
@@ -384,3 +515,33 @@ def test_1414_a_held_out_copy_and_an_unverified_tree_open_nothing(tmp_path, tena
     assert _enqueue(tmp_path, tenant, _certified_run("f1-unverified", certify=False), fixtures_dir=fixtures) is False
     assert S.open_issue_requests(state) == {}
     assert _enqueue(tmp_path, tenant, _certified_run("f1-ordinary"), fixtures_dir=fixtures) is True
+
+
+def test_1414_a_request_for_another_tenant_than_the_runs_or_for_a_handle_with_no_tenant_is_refused(tmp_path, tenant, state):
+    """The enqueue refuses a tenant whose id is not the run's, and a run handle carrying no tenant address; the run's own tenant is admitted. F1."""
+    from defender import _paths
+    from defender.records import Run
+    from defender.learning.core.config import LoopPaths
+    from defender.tenancy import _tenant
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    _set(tenant, ["inconclusive"])
+    root = fixture_data_root(_tenant.resolve_data_root())
+    other = set_up_tenant(current_data_root(), fixture_uuid("feedback-other-tenant"))
+    location_path(other.learning).mkdir(exist_ok=True)
+    copy = tmp_path / "settings-copy"
+    shutil.copytree(location_path(tenant.settings), copy)
+
+    def ask(run, accepted) -> bool:
+        return S.enqueue_feedback_issue(run, RunPaths(run.run_dir).alert,
+                                        tenant=T1106.run_tenant(accepted, settings_root=copy))
+
+    run_dir = _certified_run("f1-tenant")
+    run = run_of(run_dir)
+    assert str(other.id) != run.tenant_id
+    assert ask(run, other) is False
+    assert ask(Run.at(run_dir), tenant) is False
+    assert S.open_issue_requests(state) == {}
+    assert S.open_issue_requests(LoopPaths.for_tenant(other)) == {}, "the refused request was written to the handed tenant"
+    accepted = _tenant.accept_tenant(root, run.tenant_id, defender_dir=_paths.process_defender_dir())
+    assert ask(run, accepted) is True, "control: the run's own tenant queues"
