@@ -86,10 +86,11 @@ def check_role(kind: str, role: str) -> None:
 
 
 def first_warning(created_at: _dt.datetime, expires_at: _dt.datetime) -> tuple[int | None, _dt.datetime | None]:
-    """A new credential's next warning (`warn_threshold_days`, `warn_next_at`): the loosest threshold still ahead
-    when it is made, at its moment; none when every threshold has passed (D5, D11)."""
+    """A new credential's next warning (`warn_threshold_days`, `warn_next_at`): the loosest threshold strictly ahead
+    when it is made, at its moment (one at the very moment of creation has passed: no warning about a credential just
+    made); none when every threshold has passed (D5, D11)."""
     for threshold in WARNING_THRESHOLDS:
-        if expires_at - threshold >= created_at:
+        if expires_at - threshold > created_at:
             return threshold.days, expires_at - threshold
     return None, None
 

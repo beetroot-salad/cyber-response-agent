@@ -20,6 +20,7 @@ import datetime as _dt  # noqa: E402
 
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
+    ANN,
     FRONTEND_ORIGIN,
     SESSION_COOKIE,
     T1,
@@ -131,7 +132,7 @@ def test_a_refused_bearer_is_401_and_changes_no_credential_row(kind: str, reason
     assert after == before
 
 
-# --- "Authorization present" is one test (O1, O9, D2, A4) ------------------------------------------------------------
+# --- "a Bearer header" is one test (O1, O9, D2, A4) ------------------------------------------------------------
 
 #: Header-legal values of `Authorization`: an optional scheme, an optional separator and an optional credential, in every
 #: combination, plus the values that are only whitespace. `valid` ones carry the program's key once, as `Bearer`.
@@ -170,11 +171,18 @@ def _send(s: Soar, method: str, path: str, authorization: str | None, cookie: st
     return int(s.world.client(origin=origin).request(method, path, headers=headers, **kw).status_code)
 
 
-def test_authorization_present_means_the_bearer_path_in_both_layers_whatever_its_value() -> None:
+def _bearer_way(authorization: str | None) -> bool:
+    """The header's scheme (up to the first whitespace) is `Bearer`, in any case, with or without a value."""
+    parts = (authorization or "").split(None, 1)
+    return bool(parts) and parts[0].lower() == "bearer"
+
+
+def test_a_bearer_header_is_the_bearer_path_in_both_layers_and_any_other_value_leaves_it_to_the_cookie() -> None:
     """Over every header-legal `Authorization` value (absent, empty, whitespace, any scheme, any credential) and every
-    cookie state: a header, whatever its value and whatever cookie is beside it, is the bearer path alone: a write with
-    no Origin passes the origin layer and authentication decides (401 or served); with no header the cookie decides, a
-    write without the frontend Origin being the origin layer's 403 (O1, O9, A4; P-F as amended in the #1450 review)."""
+    cookie state: a `Bearer` header, whatever its value and whatever cookie is beside it, is the bearer path alone: a
+    write with no Origin passes the origin layer and authentication decides (401 or served). Any other value (none,
+    empty, another scheme) is not ours to read: the cookie decides, a write without the frontend Origin being the
+    origin layer's 403 (O1, O9, A4; P-F as amended in the #1450 reviews: a proxy's Basic login locks no person out)."""
     s = soar()
     read, write = f"/tenants/{T1}/alerts", f"/tenants/{T1}/investigations"
     count = itertools.count()
@@ -195,34 +203,40 @@ def test_authorization_present_means_the_bearer_path_in_both_layers_whatever_its
         what = f"Authorization={authorization!r} Cookie={cookie_kind}"
         if kind == "ambiguous":
             continue
-        if authorization is not None:  # the bearer path alone; the origin layer lets it pass, the cookie is not read
+        if _bearer_way(authorization):  # the bearer path alone; the origin layer lets it pass, the cookie is not read
             want = served if kind == "valid" else {401}
             expect(f"{what} read", _send(s, "GET", read, authorization, cookie, None), want)
             expect(f"{what} write without Origin", post(authorization, cookie, None), want)
             expect(f"{what} write with a foreign Origin", post(authorization, cookie, "https://evil.example"), want)
-        else:  # no header: the cookie decides, and the origin rule applies to writes
+        else:  # no Bearer header: the cookie decides, and the origin rule applies to writes
             want = served if cookie_kind == "session" else {401}
-            expect(f"{what} write without Origin", post(None, cookie, None), {403})
-            expect(f"{what} read", _send(s, "GET", read, None, cookie, None), want)
-            expect(f"{what} write with Origin", post(None, cookie, FRONTEND_ORIGIN), want)
+            expect(f"{what} write without Origin", post(authorization, cookie, None), {403})
+            expect(f"{what} read", _send(s, "GET", read, authorization, cookie, None), want)
+            expect(f"{what} write with Origin", post(authorization, cookie, FRONTEND_ORIGIN), want)
     assert failures == []
     assert next(count) > 500  # control: the generated space was walked, not a handful of values
 
 
 @pytest.mark.parametrize("route", ROUTES, ids=route_id)
-def test_an_unusable_authorization_header_beside_a_session_cookie_is_401_on_every_authenticating_route(
+def test_a_valueless_bearer_header_beside_a_session_cookie_is_401_and_another_scheme_is_the_cookies_on_every_route(
         route: tuple[str, str]) -> None:
-    """The route census against the values the contract's own sample missed: an empty or whitespace `Authorization` beside a
-    real session cookie is still the bearer path, so 401 on every route that authenticates; the cookie is not tried
-    instead (O1, P-F, A4)."""
+    """The route census: a Bearer header without a value beside a real session cookie is still the bearer path, so 401 on
+    every route that authenticates, the cookie not tried instead; an empty, whitespace or other-scheme header (a staging
+    proxy's Basic login) is not ours, so the cookie authenticates as if it were absent (O1, P-F, A4; #1450 review)."""
     s = soar()
-    cookie = f"{SESSION_COOKIE}={s.ann.cookies.get(SESSION_COOKIE)}"
-    for value in ("", " ", "\t", "Bearer", "Bearer "):
-        got = s.world.client(origin=FRONTEND_ORIGIN).request(
-            route[0], concrete(route[1]), headers={"Authorization": value, "Cookie": cookie}).status_code
-        assert got == 401, (value, got)
-    assert s.world.client(origin=FRONTEND_ORIGIN).request(
-        route[0], concrete(route[1]), headers={"Cookie": cookie}).status_code != 401  # control: the cookie alone
+
+    def status(headers: dict[str, str]) -> int:
+        """On a session of its own, since the route may be the one that signs out."""
+        cookie = f"{SESSION_COOKIE}={s.world.sign_in(ANN).cookies.get(SESSION_COOKIE)}"
+        return int(s.world.client(origin=FRONTEND_ORIGIN).request(
+            route[0], concrete(route[1]), headers={**headers, "Cookie": cookie}).status_code)
+
+    for value in ("Bearer", "Bearer ", "bearer\t"):
+        assert status({"Authorization": value}) == 401, value
+    alone = status({})
+    assert alone != 401  # control: the cookie alone
+    for value in ("", " ", "\t", "Basic dXNlcjpwYXNz", f"Basic {s.key}"):
+        assert status({"Authorization": value}) == alone, value
 
 
 # --- authentication comes before the body (O1, A7) ---------------------------------------------------------------------
@@ -242,7 +256,12 @@ def test_an_invalid_or_missing_credential_is_401_whatever_the_body_holds(route: 
     refused = [
         s.world.client(origin=None).request(
             route[0], path, headers={"Authorization": value, **_JSON}, content=_MALFORMED)
-        for value in ("Bearer garbage", f"Bearer {s.key[:-1]}x", "Bearer eyJ.not-issued.sig", f"Basic {s.key}", "Bearer ", "")
+        for value in ("Bearer garbage", f"Bearer {s.key[:-1]}x", "Bearer eyJ.not-issued.sig", "Bearer ")
+    ]
+    refused += [  # not the Bearer scheme: the cookie's way, from the frontend, with no cookie
+        s.world.client(origin=FRONTEND_ORIGIN).request(
+            route[0], path, headers={"Authorization": value, **_JSON}, content=_MALFORMED)
+        for value in (f"Basic {s.key}", "")
     ]
     refused.append(s.world.client(origin=FRONTEND_ORIGIN).request(route[0], path, headers=_JSON, content=_MALFORMED))  # nothing at all
     stale = s.world.client(origin=FRONTEND_ORIGIN)

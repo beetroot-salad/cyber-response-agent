@@ -554,6 +554,27 @@ def test_removal_racing_an_oauth_creation_answers_409_and_returns_no_usable_secr
     assert credential not in realm.clients
 
 
+def test_a_client_made_after_the_deadline_is_answered_409_and_its_row_revoked_at_once() -> None:
+    """Keycloak answers only after the 10-minute deadline: the row cannot go live, so the request revokes it as it
+    ends instead of leaving it `pending` for the hourly reconciliation, which then deletes the client (B1)."""
+    s = soar()
+    realm, create = s.world.realm, s.world.realm.create_client
+
+    async def slow(credential_id: str) -> tuple[str, str]:
+        made = await create(credential_id)
+        s.world.clock.advance(PENDING_DEADLINE + SECOND)
+        return made
+
+    realm.create_client = slow  # type: ignore[method-assign]
+    response = issue(s.ann, T1, s.program_id, kind="oauth_client")
+    assert response.status_code == 409, response.text
+    [late] = realm.created
+    assert realm.clients[late].secret not in response.text
+    assert _states(s.world, s.program_id)[late] == "revoked"
+    _reconcile(s.world)
+    assert late not in realm.clients
+
+
 def test_an_oauth_creation_with_no_race_goes_live_with_the_same_wiring() -> None:
     """Control for the race: the same hook doing nothing yields 201 and a working token (O5)."""
     s = soar()
@@ -764,6 +785,35 @@ def test_a_failed_send_is_retried_for_the_admin_it_missed_only() -> None:
     for _ in range(3):
         s.world.send_pending()
     assert len(mail.warnings) == settled
+
+
+@pytest.mark.parametrize("unrecorded", [ANN, NINA])
+def test_a_failed_delivery_record_skips_no_other_admin(unrecorded: str) -> None:
+    """Recording one admin's delivery fails after the mail went out: the other admins are still mailed in the same
+    pass; the retry mails only the admin with no record (at least once, never skipped). Each admin in turn, so the
+    failing one comes first in one of the cases (O7; #1450 review)."""
+    s = soar()
+    nina = s.world.member(s.ann, T1, NINA)
+    record = s.world.raw_repo.record_warning_delivery
+    unrecordable = {user_id(s.ann if unrecorded == ANN else nina)}
+
+    async def flaky(credential: Any, threshold: Any, person: Any, **kwargs: Any) -> None:
+        if str(person) in unrecordable:
+            raise InjectedFailure("the delivery insert failed")
+        await record(credential, threshold, person, **kwargs)
+
+    s.world.repo.record_warning_delivery = flaky
+    _until_remaining(s.world, s.world.clock() + DEFAULT_LIFETIME, 14 * DAY - HOUR)
+    s.world.send_pending()
+    assert {to for to, _ in _warned(s.world)} == {ANN, NINA}  # neither was skipped
+    unrecordable.clear()
+    s.world.clock.advance(HOUR)
+    s.world.send_pending()
+    assert sorted(to for to, _ in _warned(s.world)) == sorted([ANN, NINA, unrecorded])  # only the unrecorded one twice
+    settled = len(s.world.mail.warnings)
+    s.world.clock.advance(HOUR)
+    s.world.send_pending()
+    assert len(s.world.mail.warnings) == settled
 
 
 def test_with_no_active_person_left_a_due_warning_is_dropped_not_retried() -> None:

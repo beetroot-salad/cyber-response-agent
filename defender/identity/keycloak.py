@@ -77,6 +77,8 @@ def _server_base(server_url: str) -> str:
 
 def _rsa_keys(published: Any) -> dict[str, Any]:
     """The usable RS256 signing keys of a published key set, by key id; others are skipped."""
+    if not isinstance(published, list):
+        raise ValueError("the key set's `keys` is no list")
     keys: dict[str, Any] = {}
     for jwk in published:
         if not isinstance(jwk, dict) or jwk.get("kty") != "RSA" or not isinstance(jwk.get("kid"), str):
@@ -101,8 +103,9 @@ class _KeySet:
     """One realm's published signing keys, shared by both realms' token checks. An unknown key id, or keys older
     than `KEY_MAX_AGE`, fetch the set again, at most once per `refetch_window` (a failed fetch counts). One
     fetch runs at a time and requests arriving meanwhile wait for its result. Only a successful fetch replaces
-    the keys: an outage keeps the held keys verifying, and an unknown key id during one is `SignInUnavailable`,
-    never `SignInRefused`, because the key may well exist."""
+    the keys: an outage keeps the held keys verifying. A token's key is refused as unknown (`SignInRefused`) only
+    when a fetch started after the token arrived lacks it; while none could (an outage, or the window after any
+    fetch) it is `SignInUnavailable`, because the key may well exist (a rotation inside the window)."""
 
     def __init__(
         self, http: httpx.AsyncClient, url: str, clock: Callable[[], _dt.datetime], *, token: str, realm: str,
@@ -114,6 +117,7 @@ class _KeySet:
         self._keys: dict[str, Any] = {}
         self._fetched_at: _dt.datetime | None = None  # the last successful fetch
         self._tried_at: _dt.datetime | None = None  # the last fetch, successful or not
+        self._fetches = 0  # fetches started, so a request can tell whether one started after it arrived
         self._lock = asyncio.Lock()
 
     def _fresh(self, now: _dt.datetime) -> bool:
@@ -122,6 +126,7 @@ class _KeySet:
     async def key_for(self, kid: object) -> Any:
         if not isinstance(kid, str) or not kid:
             raise SignInRefused(f"{self._token} names no signing key")
+        arrived = self._fetches
         held = self._keys.get(kid)
         if held is not None and (self._fresh(self._clock()) or self._lock.locked()):
             return held  # a key we hold never waits behind a fetch
@@ -131,7 +136,7 @@ class _KeySet:
             if held is not None and self._fresh(now):
                 return held  # a fetch that finished while this request waited
             if self._tried_at is None or now - self._tried_at >= self._window:
-                self._tried_at = now
+                self._tried_at, self._fetches = now, self._fetches + 1
                 try:
                     self._keys, self._fetched_at = await self._fetch(), now
                 except SignInUnavailable:
@@ -142,24 +147,25 @@ class _KeySet:
                     return held
             elif held is not None:
                 return held  # past its age, but the next fetch is not due yet
-            elif self._fetched_at != self._tried_at:  # the last fetch failed: the key may well exist
-                raise SignInUnavailable("keycloak's signing keys cannot be fetched")
         key = self._keys.get(kid)
-        if key is None:
+        if key is not None:
+            return key
+        if self._fetches > arrived and self._fetched_at == self._tried_at:  # a fetch since it arrived, and it worked
             raise SignInRefused(f"{self._token} names an unknown signing key")
-        return key
+        raise SignInUnavailable(f"keycloak's signing keys cannot be checked for this {self._token} yet")
 
     async def _fetch(self) -> dict[str, Any]:
         try:
             response = await self._http.get(self._url)
             response.raise_for_status()
-            published = response.json()["keys"]
         except httpx.HTTPError as error:
             _log.warning("keycloak %s key set request failed: %s", self._realm, type(error).__name__)
             raise SignInUnavailable("keycloak's signing keys cannot be fetched") from error
-        except (ValueError, KeyError, TypeError) as error:
+        try:  # whatever the body is, a set we cannot read is an unavailable one, never a crash
+            return _rsa_keys(response.json()["keys"])
+        except Exception as error:
+            _log.warning("keycloak %s key set is unreadable: %s", self._realm, type(error).__name__)
             raise SignInUnavailable("keycloak's signing keys are unreadable") from error
-        return _rsa_keys(published)
 
 
 class _RealmAdmin:

@@ -101,19 +101,26 @@ EXPIRY_HEADER = "Defender-Credential-Expires"
 
 
 def _way_in(headers: Headers) -> Literal["session", "bearer"]:
-    """How a request offers to be authenticated (P-F): an `Authorization` header present (whatever it holds, even
-    nothing) is `bearer`, and the cookie is then never read; no `Authorization` header is the session cookie's
-    way. The origin layer and the authentication both ask it, so they cannot disagree (#1307 A4). A cookie beside
-    the header changes nothing: a load balancer's or a cookie jar's cookie must not lock a program out, and a
-    browser cannot be made to send an `Authorization` header to another site, so such a request is not forged
-    (#1450 review, amending P-F's "both is refused")."""
-    return "bearer" if "authorization" in headers else "session"
+    """How a request offers to be authenticated (P-F): an `Authorization` header of the `Bearer` scheme (with a value
+    or not) is `bearer`, and the cookie is then never read; anything else is the session cookie's way, an
+    `Authorization` header of another scheme included, which is not ours to read (a staging proxy's or a browser's
+    cached Basic login must not lock every person out; #1450 review). The origin layer and the authentication both
+    ask it, so they cannot disagree (#1307 A4). A cookie beside a Bearer header changes nothing: a load balancer's
+    or a cookie jar's cookie must not lock a program out, and a browser cannot be made to send a Bearer header to
+    another site, so such a request is not forged (#1450 review, amending P-F's "both is refused")."""
+    return "bearer" if _scheme_and_value(headers)[0].lower() == "bearer" else "session"
+
+
+def _scheme_and_value(headers: Headers) -> tuple[str, str]:
+    """The `Authorization` header's scheme and value, split at the first whitespace; empty strings for no header."""
+    parts = headers.get("authorization", "").split(None, 1)
+    return (parts[0] if parts else "", parts[1].strip() if len(parts) > 1 else "")
 
 
 class _FrontendOriginOnly:
     """A request that changes state must come from the configured frontend (O6), unless it is a `bearer`
     request (see `_way_in`): a browser attaches cookies by itself but never an `Authorization` header it was
-    not told to (a cached Basic login is the one it adds, and no Basic header authenticates), so only a request
+    not told to (a cached Basic login is the one it adds, and that is the cookie's way), so only a request
     authenticated by its cookie can be forged from another site (#1307 O9). A layer in front of routing,
     so it answers before the session is looked at or the body is read: a forged request learns
     nothing, not even whether its body would have parsed."""
@@ -173,8 +180,7 @@ async def _not_authenticated(request: Request, exc: Exception) -> Response:
     has no challenge to offer, and a browser must not be invited to try Bearer."""
     response = problem(status.HTTP_401_UNAUTHORIZED, str(exc))
     if _way_in(request.headers) == "bearer":
-        scheme, _, value = request.headers["authorization"].partition(" ")
-        presented = scheme.lower() == "bearer" and value.strip()
+        presented = _scheme_and_value(request.headers)[1]
         response.headers["WWW-Authenticate"] = 'Bearer error="invalid_token"' if presented else "Bearer"
     return response
 
@@ -190,14 +196,13 @@ def _declares(what: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
 
 async def _credentialed(request: Request, deps: ApiDeps) -> Authenticated:
     """The caller, by exactly one way in (`_way_in`): a session cookie (a person) or `Authorization: Bearer` (a
-    program). An unusable header is not authenticated, and the cookie is not tried instead."""
-    way = _way_in(request.headers)
-    if way == "session":
+    program). A Bearer header without a value is not authenticated, and the cookie is not tried instead."""
+    if _way_in(request.headers) == "session":
         return await deps.identity.authenticate(request.cookies.get(SESSION_COOKIE))
-    scheme, _, value = request.headers["authorization"].partition(" ")
-    if scheme.lower() != "bearer" or not value.strip():
+    value = _scheme_and_value(request.headers)[1]
+    if not value:
         raise _identity.NotAuthenticated("sign in")
-    caller = await deps.identity.authenticate_bearer(value.strip())
+    caller = await deps.identity.authenticate_bearer(value)
     assert caller.credential is not None
     request.scope[_EXPIRY_SCOPE_KEY] = caller.credential.expires_at.astimezone(_dt.UTC).isoformat()
     return caller
@@ -980,6 +985,8 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_exception_handler(Exception, _server_error)
     if undeclared := undeclared_routes(app):
         raise RuntimeError(f"routes declare neither a permission nor a category (P-H): {undeclared}")
+    if unauthenticated := unauthenticated_routes(app):
+        raise RuntimeError(f"routes ask for the caller but are not made by `_router` (A7): {unauthenticated}")
     return app
 
 
@@ -1005,3 +1012,14 @@ def undeclared_routes(app: FastAPI) -> list[tuple[str, str]]:
         (method, route.path)
         for route in _served_routes(app.routes) if not _has_declaration(route.dependant)
         for method in route.methods if method not in {"HEAD", "OPTIONS"}})
+
+
+def unauthenticated_routes(app: FastAPI) -> list[tuple[str, str]]:
+    """The (method, path) of every route of `app` that asks for its caller but is not an `_AuthenticatingRoute`: only
+    that class puts the caller where the route's dependencies read it, so such a route would answer every request
+    with a server error. A router made by `_router` cannot hold one; a plain `APIRouter` or the app's own can."""
+    return sorted({
+        (method, route.path)
+        for route in _served_routes(app.routes)
+        if isinstance(route, APIRoute) and _authenticates(route.dependant) and not isinstance(route, _AuthenticatingRoute)
+        for method in route.methods or () if method not in {"HEAD", "OPTIONS"}})

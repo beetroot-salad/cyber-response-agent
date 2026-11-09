@@ -14,7 +14,7 @@ from typing import Any  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 
-from defender.api.app import create_app, undeclared_routes  # noqa: E402  (forced choice FC-A1: see the contract map)
+from defender.api.app import Authed, create_app, unauthenticated_routes, undeclared_routes  # noqa: E402  (forced choice FC-A1: see the contract map)
 from defender.identity import DataRuleViolation  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
@@ -246,6 +246,23 @@ def test_the_checker_reports_a_route_that_declares_nothing_inside_or_outside_ten
     real = soar().world.app
     real.add_api_route("/tenants/{tenant_id}/widgets", lambda: {}, methods=["GET"])
     assert undeclared_routes(real) == [("GET", "/tenants/{tenant_id}/widgets")]
+
+
+def test_a_route_that_asks_for_its_caller_outside_the_authenticating_routers_is_reported() -> None:
+    """Only the module's routers authenticate before the body is read and hand the caller on (A7): a route asking for
+    the caller anywhere else would answer every request with a 500, so `create_app` refuses it (#1450 review)."""
+    real = soar().world.app
+    assert unauthenticated_routes(real) == []  # control: every route of the real app is made by `_router`
+
+    async def asks(caller: Authed) -> dict[str, str]:
+        return {}
+
+    async def public() -> dict[str, str]:
+        return {}
+
+    real.add_api_route("/tenants/{tenant_id}/widgets", asks, methods=["GET"])
+    real.add_api_route("/open", public, methods=["GET"])  # control: a route not asking for the caller is fine anywhere
+    assert unauthenticated_routes(real) == [("GET", "/tenants/{tenant_id}/widgets")]
 
 
 def test_the_app_does_not_start_when_one_of_its_routers_holds_a_route_that_declares_nothing() -> None:

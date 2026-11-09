@@ -309,13 +309,15 @@ class IdentityService:
         for _, admin in await self._repo.people_of_tenant(tenant_id, "active"):
             if admin.id in reached:
                 continue
+            # One admin's send and its record are one step: either failing leaves the others tried, and the
+            # warning as a whole fails and is retried for whoever has no record (a record that failed after its
+            # mail went out means that admin is mailed again: at least once, never skipped).
             try:
                 await self._mail.notify_credential_expiry(
                     admin.person_email, tenant_id, row.program_id, row.id, row.expires_at)
-            except Exception as e:  # every admin is tried; the send then fails as a whole and is retried
+                await self._repo.record_warning_delivery(credential, threshold, admin.id, sent_at=self._clock())
+            except Exception as e:
                 failure = failure or e
-                continue
-            await self._repo.record_warning_delivery(credential, threshold, admin.id, sent_at=self._clock())
         if failure is not None:
             raise failure
         await self._repo.settle_expiry_warning(credential, threshold)
@@ -651,29 +653,31 @@ class IdentityService:
         if key is not None:
             audit.emit("program_credential.create", actor=auth.user.id, tenant_id=tenant_id, target=row.id)
             return row, key
-        service_account_id, secret = await self._create_client(row.id, tenant_id)
-        if not await self._repo.go_live(row.id, service_account_id=service_account_id, now=self._clock()):
+        went_live = False
+        try:
+            service_account_id, secret = await self._programs.create_client(row.id)
+            went_live = await self._repo.go_live(row.id, service_account_id=service_account_id, now=self._clock())
+        finally:
+            if not went_live:
+                await self._abandon_pending(row.id, tenant_id)
+        if not went_live:
             raise Conflict("the program was removed, or the client took too long")
         audit.emit("program_credential.create", actor=auth.user.id, tenant_id=tenant_id, target=row.id)
         live = await self._repo.credential_by_id(row.id)
         assert live is not None
         return live, secret
 
-    async def _create_client(self, credential_id: CredentialId, tenant_id: TenantId) -> tuple[str, str]:
-        """The realm client of a `pending` credential: its service-account id and secret. A failure seen here
-        revokes the row, freeing its slot at once; `pending` and its deadline are for a crash in between (B1). A
-        client the realm made anyway is deleted by the reconciliation, as the row no longer keeps it."""
+    async def _abandon_pending(self, credential_id: CredentialId, tenant_id: TenantId) -> None:
+        """An issue that ends without making its OAuth credential live (the realm failed or was too slow, the program
+        was removed, the request was cancelled) revokes the `pending` row, freeing its slot at once; only a crash
+        leaves it to the deadline (B1). A client the realm made anyway is deleted by the reconciliation, as the row
+        no longer keeps it. A revoke that fails too is logged: the deadline still frees the slot, and the issue's own
+        failure is the one raised."""
         try:
-            return await self._programs.create_client(credential_id)
+            if await self._repo.revoke_credential(credential_id, revoked_by=None, now=self._clock()):
+                audit.emit("program_credential.revoke", actor=audit.SYSTEM, tenant_id=tenant_id, target=credential_id)
         except Exception:
-            # If this revoke fails too, the deadline still frees the slot; the realm's failure is the one raised.
-            try:
-                if await self._repo.revoke_credential(credential_id, revoked_by=None, now=self._clock()):
-                    audit.emit("program_credential.revoke", actor=audit.SYSTEM, tenant_id=tenant_id,
-                               target=credential_id)
-            except Exception:
-                _logger.exception("revoking the pending credential %s failed", credential_id)
-            raise
+            _logger.exception("revoking the pending credential %s failed", credential_id)
 
     async def revoke_credential(
         self, auth: Authenticated, tenant_id: TenantId, program_id: UserId, credential_id: CredentialId,

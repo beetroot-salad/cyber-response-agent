@@ -78,7 +78,7 @@ class ProgramsKeycloak:
         self.seen: list[Seen] = []
         self.clients: dict[str, dict] = {}  # internal id -> representation
         self.opened: list[KeycloakPrograms] = []
-        self.fail: dict[str, Exception | int] = {}
+        self.fail: dict[str, Exception | int | httpx.Response] = {}
 
     def transport(self) -> httpx.AsyncBaseTransport:
         return _AsyncOnly(self._handle)
@@ -87,6 +87,8 @@ class ProgramsKeycloak:
         failure = self.fail.get(op)
         if isinstance(failure, Exception):
             raise failure
+        if isinstance(failure, httpx.Response):  # a whole answer, as given (a malformed body)
+            return failure
         return None if failure is None else httpx.Response(failure, json={"error": "scripted"})
 
     def _admin_authenticated(self, form: dict[str, list[str]], request: httpx.Request) -> bool:
@@ -287,26 +289,48 @@ async def test_a_known_key_id_never_refetches_the_key_set(kc):
 
 
 async def test_an_unknown_key_id_refetches_the_key_set_at_most_once_per_minute(kc):
-    """Unknown kid: one refetch, then refusals without traffic until the minute passes; a rotated key then verifies (Verify, C1)."""
+    """Unknown kid: one refetch, which refuses that token; the others inside the minute cost no traffic and are
+    unavailable, not refused, since a key Keycloak rotated in meanwhile would look the same; once the minute passes a
+    rotated key verifies (Verify, C1; #1450 review: a junk token must not get a real one refused after a rotation)."""
     clock = Clock()
     port = adapter(kc, clock)
     assert (await port.verify_token(kc.signer.sign(token_claims()))).client_id == CREDENTIAL
     assert kc.certs_fetches() == 1  # the cold cache's own fetch
     clock.now += dt.timedelta(seconds=61)
-    for n in range(100):
-        with pytest.raises(SignInRefused):
+    with pytest.raises(SignInRefused):  # the fetch it caused lacks its key: that is a refusal
+        await port.verify_token(kc.signer.sign(token_claims(exp=int(clock.now.timestamp()) + 290), kid="random-first"))
+    for n in range(99):
+        with pytest.raises(SignInUnavailable):
             await port.verify_token(kc.signer.sign(token_claims(exp=int(clock.now.timestamp()) + 290), kid=f"random-{n}"))
     assert kc.certs_fetches() == 2  # one refetch for a hundred random key ids
     rotated = Signer(kid="kid-2")
     kc.jwks_keys.append(rotated.jwk())
     clock.now += dt.timedelta(seconds=59)
     fresh = token_claims(exp=int(clock.now.timestamp()) + 290)
-    with pytest.raises(SignInRefused):
+    with pytest.raises(SignInUnavailable):  # rotated after the fetch, inside the window: retry, not "bad token"
         await port.verify_token(rotated.sign(fresh))
     assert kc.certs_fetches() == 2
     clock.now += dt.timedelta(seconds=2)
     assert (await port.verify_token(rotated.sign(fresh))).subject == SERVICE_ACCOUNT
     assert kc.certs_fetches() == 3
+
+
+@pytest.mark.parametrize("body", [{"keys": None}, {"keys": 5}, {"keys": "abc"}, {"keys": {"kid": "x"}}, [], "keys"],
+                         ids=["null", "number", "string", "object", "list-body", "string-body"])
+async def test_a_malformed_key_set_is_unavailable_and_held_keys_keep_serving(kc, body):
+    """Whatever the key set's body is, one that cannot be read is an outage (`SignInUnavailable`), never a crash or a
+    refusal; a key already held keeps verifying through it (Verify, W7; #1450 review)."""
+    clock = Clock()
+    port = adapter(kc, clock)
+    assert (await port.verify_token(kc.signer.sign(token_claims()))).client_id == CREDENTIAL  # holds the key
+    kc.fail["certs"] = httpx.Response(200, json=body)
+    clock.now += MAX_AGE + dt.timedelta(seconds=1)  # held keys are past their age: the next use refetches
+    fresh = token_claims(exp=int(clock.now.timestamp()) + 290)
+    assert (await port.verify_token(kc.signer.sign(fresh))).client_id == CREDENTIAL
+    assert kc.certs_fetches() == 2  # it did try the malformed set
+    cold = adapter(kc, clock)
+    with pytest.raises(SignInUnavailable):  # nothing held: unavailable
+        await cold.verify_token(kc.signer.sign(fresh))
 
 
 async def test_two_realms_never_share_cached_keys():

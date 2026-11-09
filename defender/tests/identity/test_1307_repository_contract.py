@@ -16,7 +16,7 @@ removed); `touch_credential(id, *, now) -> bool` (as `touch_session`);
 Expiry-warning outbox (F7, one claimable send per (credential, threshold), thresholds 14 and 3 days):
 `claim_expiry_warning(*, now, hold_until) -> ExpiryWarning | None` (`.credential_id`, `.threshold`: a `timedelta`) takes a
 usable credential whose `expires_at - threshold <= now`, whose threshold was not passed when it was created
-(`expires_at - threshold >= created_at`) and is unsettled and not held; it returns the TIGHTEST such threshold and
+(`expires_at - threshold > created_at`: one falling at the very moment of creation has passed) and is unsettled and not held; it returns the TIGHTEST such threshold and
 settles the looser due ones unsent (W6); it moves the send's next try to `hold_until` (Postgres: `FOR UPDATE SKIP LOCKED`);
 `settle_expiry_warning(credential_id, threshold) -> bool` (once); `defer_expiry_warning(credential_id,
 threshold, *, until)` (a failed send's retry); `warning_deliveries(credential_id, threshold) -> set[user id]` and
@@ -626,9 +626,10 @@ async def test_each_threshold_is_claimed_once_when_due_held_while_claimed_and_re
     assert await _claim_warning(seeded, key.expires_at - dt.timedelta(minutes=1)) is None
 
 
-@pytest.mark.parametrize(("lifetime_days", "first_claim"), [(20, FOURTEEN), (10, THREE), (7, THREE)])
+@pytest.mark.parametrize(("lifetime_days", "first_claim"), [(20, FOURTEEN), (15, FOURTEEN), (14, THREE), (10, THREE), (7, THREE)])
 async def test_a_threshold_passed_when_the_credential_was_created_is_never_claimed(seeded, lifetime_days, first_claim):
-    """Created with 10 or 7 days left: only the 3-day send exists; with 20: the 14-day one first (D5, D11)."""
+    """Created with 14, 10 or 7 days left: only the 3-day send exists (a threshold falling at the very moment of creation
+    has passed: no warning about a credential just made); with 15 or 20: the 14-day one first (D5, D11; #1450 review)."""
     admin = await _user(seeded)
     program = await _program(seeded, admin)
     key = await _timed_key(seeded, program, admin, 1, lifetime_days * DAY)
