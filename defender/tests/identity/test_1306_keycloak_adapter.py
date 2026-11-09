@@ -646,3 +646,19 @@ def test_a_malformed_server_url_refuses_construction(server_url):
         KeycloakSignIn(
             issuer=ISSUER, client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI,
             admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET, server_url=server_url)
+
+
+async def test_a_sign_in_right_after_keycloak_rotates_its_key_verifies(kc):
+    """The sign-in realm follows a rotation at once: a second sign-in seconds after the first, under a key the held
+    set lacks, fetches the set again and verifies (#1450 review: no refetch window on this realm, whose ID tokens
+    come from Keycloak itself)."""
+    port = adapter(kc)
+    kc.id_token = kc.signer.sign(claims())
+    await port.begin_signin(state="s1", nonce="n1", code_challenge="chal")
+    assert (await port.finish_signin(code="code-1", code_verifier="verifier-1", nonce="n1")).account_id
+    rotated = Signer(kid="kid-rotated")
+    kc.jwks_keys.append(rotated.jwk())
+    kc.id_token = rotated.sign(claims())
+    await port.begin_signin(state="s2", nonce="n1", code_challenge="chal")
+    assert (await port.finish_signin(code="code-1", code_verifier="verifier-1", nonce="n1")).account_id
+    assert sum(1 for s in kc.seen if s.path.endswith("/certs")) == 2

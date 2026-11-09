@@ -15,14 +15,17 @@ from .errors import (
     DataRuleViolation,
     Forbidden,
     IdentityError,
+    Invalid,
     NotAuthenticated,
     NotFound,
     SignInRefused,
     SignInUnavailable,
 )
 from .memory import InMemoryIdentityRepository
-from .ports import IdentityRepository, MailPort, SignInPort, VerifiedSignIn
-from .models import Membership, Session, User
+from .models import Membership, ProgramCredential, Session, User
+from .ports import (
+    ExpiryWarning, IdentityRepository, MailPort, ProgramsPort, SignInPort, VerifiedProgramToken, VerifiedSignIn,
+)
 from .service import (
     Authenticated,
     IdentityService,
@@ -35,8 +38,8 @@ from .service import (
 
 __all__ = [
     "Authenticated", "Bootstrap", "BootstrapRefused", "CallbackRefused", "Conflict",
-    "DataRuleViolation", "Forbidden", "IdentityError", "IdentityRepository", "IdentityService",
-    "InMemoryIdentityRepository", "InvitationView", "LoginStart", "MailPort", "MemberView",
-    "Membership", "MeView", "NotAuthenticated", "NotFound", "OpenInvitation", "Session",
-    "SignInPort", "SignInRefused", "SignInUnavailable", "User", "VerifiedSignIn",
+    "DataRuleViolation", "ExpiryWarning", "Forbidden", "IdentityError", "IdentityRepository", "IdentityService",
+    "InMemoryIdentityRepository", "Invalid", "InvitationView", "LoginStart", "MailPort", "MemberView",
+    "Membership", "MeView", "NotAuthenticated", "NotFound", "OpenInvitation", "ProgramCredential", "ProgramsPort", "Session",
+    "SignInPort", "SignInRefused", "SignInUnavailable", "User", "VerifiedProgramToken", "VerifiedSignIn",
 ]

@@ -28,6 +28,7 @@ from defender.tests.support.runtime.engine._spec767 import (
     record,
     use_case_record,
 )
+from defender.tests.support.api._programs1307 import NoProgramsRealm  # #1307 D7: the programs port is required
 
 # ---------------------------------------------------------------------------------------------
 # The run record's `knowledge_source`, spelled in one place.
@@ -592,7 +593,7 @@ def _client(*investigations: Any) -> Any:
 
     anyio.run(seed)
     identity = IdentityService(repo, signin=_NoPort(), mail=_NoPort(), clock=now,
-                               bootstrap=Bootstrap(administrators=()))
+                               bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
     deps = ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=_ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
