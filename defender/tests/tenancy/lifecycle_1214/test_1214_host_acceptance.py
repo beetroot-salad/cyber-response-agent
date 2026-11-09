@@ -181,7 +181,7 @@ def test_an_acceptance_blocked_on_the_host_lock_waits_and_says_so_once_on_stderr
             blocked.set()
         return real_acquire(*args, **kwargs)
 
-    monkeypatch.setattr(host_lock, "acquire", acquire)
+    monkeypatch.setattr(host_lock, "acquire", acquire)  # lint-monkeypatch: ok — a recording wrapper; the real acquire runs, and no seam reports the unbounded wait has begun
 
     def accept() -> None:
         try:
