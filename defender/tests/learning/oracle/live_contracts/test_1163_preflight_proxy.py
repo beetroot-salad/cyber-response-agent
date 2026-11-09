@@ -94,7 +94,9 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool, env
         merged.replies[f"{API}/events"] = (200, {"Content-Type": "application/json"},
                                            json.dumps(idp.payload).encode())
         files = {"settings/verb-grants.yaml": est.table(),
-                 **{f"settings/systems/{s}/config.env": None for s in FIXTURE_SYSTEMS},
+                 # host-state reads no key, so it ships no config.env to remove (#1391 r5 O-S1).
+                 **{f"settings/systems/{s}/config.env": None for s in FIXTURE_SYSTEMS
+                    if s != "host-state"},
                  **A.system_files("idp", H.declaration(merged.url + API)),
                  # Another http-proxy system the source run never called: the grant must not reach it.
                  **A.system_files("crm", H.declaration(merged.url + "/crm"))}
