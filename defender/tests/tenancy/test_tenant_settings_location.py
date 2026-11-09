@@ -182,20 +182,28 @@ def _ctx(settings: Path, run_dir: Path, env: dict | None = None):
 # ---- the adapters' config.env ---------------------------------------------------------------------
 
 def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path):
-    transport = T.mod("integrations._stub_transport")
-    cfg = transport.load_config(_ctx(injected, tmp_path), "cmdb", "CMDB")
-    assert cfg["URL_BASE"] == f"http://cmdb-{MARK}:8080"
-    assert cfg["BASTION_HOST"] == f"bastion-{MARK}"
-    checkout = transport.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path), "cmdb", "CMDB")
-    assert checkout["URL_BASE"] != cfg["URL_BASE"], "the fixture no longer discriminates"
+    transport = T.mod("kit.transport")
+    ctx = _ctx(injected, tmp_path)
+    transport.load_config(ctx, "cmdb", "CMDB")
+    base = transport.record_access(ctx.tenant, "cmdb").base
+    assert base == f"http://cmdb-{MARK}:8080"  # the injected tenant's declaration
+    checkout = _ctx(T.FIXTURE_SETTINGS, tmp_path)
+    transport.load_config(checkout, "cmdb", "CMDB")
+    assert transport.record_access(checkout.tenant, "cmdb").base != base, \
+        "the fixture no longer discriminates"
 
 
 def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
     faults = T.mod("kit.faults")
-    transport = T.mod("integrations._stub_transport")
+    transport = T.mod("kit.transport")
     root = tmp_path / "injected-root"
     T.place_tenant(root, T.PLAYGROUND_ID, configs={})
     settings = T.accept(root, T.PLAYGROUND_ID).settings
+    # cmdb is declared, so its missing config.env is the one fault left (the declaration is
+    # judged first, #1391 r5 S1).
+    (settings / "systems" / "cmdb").mkdir(parents=True, exist_ok=True)
+    (settings / "systems" / "cmdb" / "access.yaml").write_text(
+        T.access_text("noconf", "cmdb"), encoding="utf-8")
     with pytest.raises(faults.ConfigFault) as caught:
         transport.load_config(_ctx(settings, tmp_path), "cmdb", "CMDB")
     assert "the tenant's settings/systems/cmdb/config.env" in str(caught.value)
@@ -220,15 +228,15 @@ def test_the_record_leg_comments_to_the_injected_tenants_store_with_its_case_rec
     run_dir.mkdir()
     C.plant_record(run_dir)
     write_report(run_dir)  # a readable report: the injected body renders over it
-    shim = S.DockerShim(tmp_path / "shim", S.store_answers_ok())
-    S.record_step(run_dir, _record(injected), env=shim.env({}))
+    proxy = S.ProxyStandIn(tmp_path / "proxy", S.store_answers_ok())
+    S.record_step(run_dir, _record(injected), env={}, proxy_url=proxy.url,
+                  request_token="write-token-1106")
 
-    posts = [c["argv"] for c in shim.calls() if "POST" in c["argv"]]
-    assert len(posts) == 1, shim.calls()
-    argv = posts[0]
-    assert S.curl_url(argv) == f"http://ticket-{MARK}:8080/tickets/{C.TICKET_KEY}/comments", argv
-    assert S.context_of(argv) == T.context_name(MARK, "ticket"), argv
-    assert any("injected-tenant-body" in a for a in argv), "the injected case-record body was not sent"
+    posts = [r for r in proxy.requests() if r["method"] == "POST"]
+    assert len(posts) == 1, proxy.requests()
+    (post,) = posts
+    assert post["url"] == f"http://ticket-{MARK}:8080/tickets/{C.TICKET_KEY}/comments", post
+    assert "injected-tenant-body" in post["body"]["body"], "the injected case-record body was not sent"
     checkout_text = (T.FIXTURE_SETTINGS / "case-record.yaml").read_text(encoding="utf-8")
     assert "injected-tenant-body" not in checkout_text, "the fixture no longer discriminates"
 

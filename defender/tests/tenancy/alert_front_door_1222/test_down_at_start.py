@@ -51,7 +51,7 @@ BROKEN_MARK = "FD1256-PLANTED-ADAPTER-IMPORT-FAILURE"
 
 def _names_system(text: str, system: str) -> bool:
     """`text` names `system` as a word of its own — not as the head of a key that merely starts
-    with it (`ELASTIC_EVENTS_INDEX`, `CMDB_URL_BASE`), so the check is independent of the reason's."""
+    with it (`ELASTIC_EVENTS_INDEX`, `CMDB_TIMEOUT_SEC`), so the check is independent of the reason's."""
     return re.search(rf"(?<![\w-]){re.escape(system)}(?![\w-])", text, re.IGNORECASE) is not None
 
 
@@ -559,13 +559,13 @@ def test_o8_every_granted_system_down_at_start_refuses_the_run_naming_each(
         tmp_path: Path) -> None:
     """Refused at start — before the run folder, any model call or any adapter call — naming each down system with its reason, never the breaker's words."""
     scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-all-down"))
-    _drop(scene, "cmdb", "CMDB_URL_BASE")
+    _drop(scene, "cmdb", "CMDB_TIMEOUT_SEC")
     _no_access(scene, "elastic")
     before = _runs_entries(scene.tenant)
     d = scene.run("all-down", **_down_lead())
 
     text = _refusal_text(d, scene.tenant)
-    _assert_names_each(text, (("cmdb", "CMDB_URL_BASE"), ("elastic", "access.yaml")),
+    _assert_names_each(text, (("cmdb", "CMDB_TIMEOUT_SEC"), ("elastic", "access.yaml")),
                        "every granted system down")
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
     _assert_refused_before_anything(d, scene.tenant, before, "every granted system down")
@@ -594,7 +594,7 @@ def test_o8_one_usable_system_among_several_down_runs(tmp_path: Path) -> None:
     """Control: with elastic and identity down at start and cmdb up (a query verb granted), the run proceeds to its close."""
     scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-one-up"), table=TABLE_THREE)
     _no_access(scene, "elastic")
-    _drop(scene, "identity", "IDENTITY_URL_BASE")
+    _drop(scene, "identity", "IDENTITY_TIMEOUT_SEC")
     d = scene.run("one-up", main=S.closing_main_turns("inconclusive"), **_down_lead())
 
     _assert_continued(d, "one usable system among several down", requests=3)
@@ -614,16 +614,11 @@ def test_o8_gather_granted_no_query_verb_is_still_refused(tmp_path: Path) -> Non
 
 # --- O-8, discriminating arms (each: refused naming each down system; one system repaired runs) -
 
-def _drop_present(scene: _Scene, system: str, key: str) -> None:
-    """`_drop`, after checking the key is there to drop (`drop_key` is silent on an absent key)."""
-    before = S7.config_path(scene.tenant.knowledge, system).read_text(encoding="utf-8")
-    assert any(ln.split("=", 1)[0].strip() == key for ln in before.splitlines()), (
-        f"premise: {system}'s planted config.env carries no {key} to drop:\n{before}")
-    _drop(scene, system, key)
+
 
 
 def test_o8_all_down_through_settings_load_config_never_reads(tmp_path: Path) -> None:
-    """Every granted system down, elastic through its declaration on the `load_config` path and cmdb through CMDB_DOCKER_CONTEXT, beyond `load_config`, is refused at start naming each key,
+    """Every granted system down through a missing declaration (#1391 O1: no system is reachable without one) is refused at start naming each,
     from the adapters' declared checks, not a pre-check. Repairing cmdb lets the tenant run."""
     repaired = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-access-repaired"))
     _no_access(repaired, "elastic")
@@ -631,16 +626,16 @@ def test_o8_all_down_through_settings_load_config_never_reads(tmp_path: Path) ->
     _assert_continued(ran, "control: cmdb repaired, elastic still down")
 
     scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-access-down"))
-    _drop_present(scene, "cmdb", "CMDB_DOCKER_CONTEXT")
+    _no_access(scene, "cmdb")
     _no_access(scene, "elastic")
     before = _runs_entries(scene.tenant)
     d = scene.run("access-down", **_down_lead())
 
     text = _refusal_text(d, scene.tenant)
-    _assert_names_each(text, (("cmdb", "CMDB_DOCKER_CONTEXT"),
-                              ("elastic", "access.yaml")), "down beyond load_config")
+    _assert_names_each(text, (("cmdb", "access.yaml"),
+                              ("elastic", "access.yaml")), "down without a declaration")
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
-    _assert_refused_before_anything(d, scene.tenant, before, "down beyond load_config")
+    _assert_refused_before_anything(d, scene.tenant, before, "down without a declaration")
 
 
 #: What the planted cmdb's check raises: not a ConfigFault, so cmdb is Down(AdapterBroken).
@@ -798,7 +793,7 @@ def test_o8_d4_acceptance_adopts_an_all_down_tenant_whose_runs_are_refused(
     # granted system.
     authored = S.plant_tenant(tenant_id, root=tmp_path / "authored",
                               alert_mapping=S.DEFAULT_MAPPING, table=S.TABLE_ELASTIC)
-    S7.drop_key(authored.knowledge, "cmdb", "CMDB_URL_BASE")
+    S7.drop_key(authored.knowledge, "cmdb", "CMDB_TIMEOUT_SEC")
     S7.drop_access(authored.knowledge, "elastic")
     root = current_data_root()
     H20.place_knowledge(root, tenant_id, source=authored.knowledge)
@@ -823,7 +818,7 @@ def test_o8_d4_acceptance_adopts_an_all_down_tenant_whose_runs_are_refused(
     before = _runs_entries(tenant)
     d = S.run_alert(tmp_path / "run", alert=_alert(), tenant=tenant, **_down_lead())
     text = _refusal_text(d, tenant)
-    _assert_names_each(text, (("cmdb", "CMDB_URL_BASE"), ("elastic", "access.yaml")),
+    _assert_names_each(text, (("cmdb", "CMDB_TIMEOUT_SEC"), ("elastic", "access.yaml")),
                        "an adopted all-down tenant")
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
     _assert_refused_before_anything(d, tenant, before, "an adopted all-down tenant")

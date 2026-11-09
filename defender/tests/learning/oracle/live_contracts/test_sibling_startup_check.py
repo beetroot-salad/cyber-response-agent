@@ -40,7 +40,7 @@ LEAD = "l-001"
 #: What the family's base recording answers for `cmdb.get-host {host: web-1}`.
 CAPTURE_MARK = "FD1256-CAPTURED-OWNER-OF-WEB-1"
 #: The key the sibling's settings lose between the source run and the branch.
-DROPPED = "CMDB_URL_BASE"
+DROPPED = "CMDB_TIMEOUT_SEC"
 
 
 def _plant_tenant() -> tuple[Path, Any]:
@@ -213,7 +213,7 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
 
 #: Every system the playground tenant's table (`TABLE_A`) grants gather, with a key its adapter's
 #: settings check requires; dropping one makes that system not configured.
-ALL_DOWN = (("cmdb", "CMDB_URL_BASE"), ("elastic", "ELASTIC_EVENTS_INDEX"))
+ALL_DOWN = (("cmdb", "CMDB_TIMEOUT_SEC"), ("elastic", "ELASTIC_EVENTS_INDEX"))
 
 
 def _episode_census(episode: Path) -> dict[str, bytes]:

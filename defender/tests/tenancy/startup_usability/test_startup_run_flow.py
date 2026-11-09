@@ -77,15 +77,14 @@ REAL = "real"
 OK = "ok"
 
 
-def _no_docker_context(folder: Path) -> None:
-    # `access_context`'s key: read on every docker call, never by `load_config` — a check that
-    # covers only `load_config` judges cmdb usable.
-    S.drop_key(folder, "cmdb", "CMDB_DOCKER_CONTEXT")
+def _no_declaration(folder: Path) -> None:
+    # No `access.yaml`: the system cannot be reached through the proxy (#1391 O1).
+    (S.config_path(folder, "cmdb").parent / "access.yaml").unlink()
 
 
-def _no_url_base(folder: Path) -> None:
+def _no_timeout(folder: Path) -> None:
     # `load_config`'s required-key check.
-    S.drop_key(folder, "identity", "IDENTITY_URL_BASE")
+    S.drop_key(folder, "identity", "IDENTITY_TIMEOUT_SEC")
 
 
 def _no_settings_folder(folder: Path) -> None:
@@ -97,8 +96,8 @@ def _no_settings_folder(folder: Path) -> None:
 #: How each system is made unusable, and the distinctive token of the reason its adapter gives
 #: (three different `ConfigFault` sites). Each token is matched case-insensitively.
 UNCONFIGURE: dict[str, tuple[Callable[[Path], None], str]] = {
-    "cmdb": (_no_docker_context, "CMDB_DOCKER_CONTEXT"),
-    "identity": (_no_url_base, "IDENTITY_URL_BASE"),
+    "cmdb": (_no_declaration, "access.yaml"),
+    "identity": (_no_timeout, "IDENTITY_TIMEOUT_SEC"),
     "change-mgmt": (_no_settings_folder, "not found"),
 }
 

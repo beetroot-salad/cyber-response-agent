@@ -218,8 +218,7 @@ def test_1224_elastic_confine_index_admits_the_same_indices_for_a_run_and_a_sibl
         "defender.tests.tenancy.tenant_1108_p4._support").published_tenant
     files = H.access_files("elastic", H.declaration(
         "http://elastic.invalid:9200", scheme=H.basic_scheme(), reads=A.ELASTIC_READS),
-        env='ELASTIC_TRANSPORT="http-proxy"\nELASTIC_EVENTS_INDEX="logs-*"\n'
-            'ELASTIC_ALERTS_INDEX="security-audit-*"\n')
+        env='ELASTIC_EVENTS_INDEX="logs-*"\nELASTIC_ALERTS_INDEX="security-audit-*"\n')
     # An index the gate admits goes on to the transport: the proxy's address is a closed port.
     with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
         run_ctx = A.ctx_for(tmp_path, T.run_record(t), f"http://127.0.0.1:{H.free_port()}",

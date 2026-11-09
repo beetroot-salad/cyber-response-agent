@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 
 from defender import _git
-from defender._internal_http import internal_async_client, tls_trust
+from defender.kit.internal_http import internal_async_client, tls_trust
 from defender.lifecycle.config import LifecycleConfig
 
 _logger = logging.getLogger(__name__)

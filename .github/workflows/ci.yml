@@ -30,12 +30,14 @@ concurrency:
 # shard ran ~9m50s on main (run 40495781426) and PR runs were cancelled at 10 minutes with every
 # test passed. A shard that drifts heavy again as files are added gets two minutes of warning
 # before it cancels green runs (it did again on 2026-11-02: main's heavier shard ran 11m06s and
-# a PR's two shards both passed every test past 12 minutes, so the suite went to three shards),
+# a PR's two shards both passed every test past 12 minutes, so the suite went to three shards,
+# and again on 2026-11-09: all three shards ran ~11m45s, and main and PR runs lost a shard at 12
+# minutes with every test passed, so the suite went to four),
 # and a stall that burns the gVisor step's full 5-minute bound still lands inside 12, so the
 # step's own timeout fires first and names the command. Raising the step bound without raising
 # this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
-  # Three shards of the unit suite, run in parallel: this job is the critical path (~6-8 min against
+  # Four shards of the unit suite, run in parallel: this job is the critical path (~6-8 min against
   # <2.5 min for every other job), and its CPU time is balanced across the runner's four cores, so
   # the only way down is more cores. `--shard I/N` (defender/tests/_shard.py) hands each shard whole
   # test files, balanced by each file's recorded cost, so together they run every test exactly once
@@ -45,13 +47,13 @@ jobs:
   # the extra runner minutes are free. `fail-fast: false` so one shard failing still reports the
   # other's results.
   test:
-    name: test (shard ${{ matrix.shard }}/3)
+    name: test (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
 
     steps:
       - uses: actions/checkout@v5
@@ -159,7 +161,7 @@ jobs:
         run: >-
           uv run pytest tests/ -v -m "not live and not gate"
           -n auto --dist loadfile --durations=25
-          --shard ${{ matrix.shard }}/3
+          --shard ${{ matrix.shard }}/4
           --ignore tests/e2e/test_box_boundary_e2e.py
 
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to

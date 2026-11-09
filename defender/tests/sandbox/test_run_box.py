@@ -17,6 +17,7 @@ from defender.tests.support.storage._alert_plant import plant_alert
 from defender import box as box_mod
 from defender.box import BoxExecutor, BoxFault, BoxSpec, unboxed_executor
 from defender.tests.support.sandbox import _box1195 as X
+from defender.tests.support.sandbox._box1343 import input_open
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender import _git
 from defender.tests.support.sandbox._docker import dood_anchor, is_dood
@@ -33,7 +34,8 @@ from defender.tests.tenancy.tenant_1108_delivery._support import target as p3_ta
 
 NAME = "defender-drain-u1195"
 
-
+#: A run window's start (#1344 amendment 2): attached, its input held by the window's holder.
+ATTACH = ["docker", "start", "-a", "-i", NAME]
 START = ["docker", "start", NAME]
 
 
@@ -134,15 +136,21 @@ def test_the_opt_out_handle_yields_the_executor_and_asks_no_docker(
 
 def test_a_run_starts_the_stopped_box_for_its_body_and_stops_it_after(tmp_path: Path,
                                                                       monkeypatch):
+    """The window's start is attached (#1344 amendment 2): its input is held open while the body
+    runs and closed once the window ends, so the box cannot outlive the window's holder."""
     daemon, box, runs = _stopped(tmp_path, monkeypatch)
-    saw: list[str | None] = []
-    got = _run(daemon, runs, body=lambda: saw.append(daemon.status(NAME)))
+    saw: list[tuple[str | None, bool]] = []
+    got = _run(daemon, runs, body=lambda: saw.append(
+        (daemon.status(NAME), input_open(daemon.asks[-1].read_fd))))
     assert got is box, "the run did not yield the batch's executor"
-    assert saw == ["running"], "the body ran while the box was not running"
-    assert daemon.steps() == ["status", "start", "status", "body", "stop", "status"], (
+    assert saw == [("running", True)], "the body ran while the box was not running, or its input was not held"
+    assert daemon.steps() == ["status", "attach", "status", "body", "stop", "status"], (
         daemon.steps())
-    assert START in daemon.docker_calls()
+    assert [a.argv for a in daemon.asks] == [ATTACH]
+    assert START not in daemon.docker_calls(), "the window started the box detached from its holder"
     assert STOP in daemon.docker_calls()
+    assert daemon.asks[-1].returncode is not None, "the window's attached start outlived it"
+    assert not input_open(daemon.asks[-1].read_fd), "the window's input was left open"
     assert daemon.status(NAME) == "exited"
     X.no_path_docker(daemon)
 
@@ -155,7 +163,7 @@ def test_each_run_starts_and_stops_the_one_box(tmp_path: Path, monkeypatch):
         _run(daemon, runs)
         assert daemon.status(NAME) == "exited", "the box outlived its run running"
     assert daemon.windows() == [["body"]] * 3, daemon.steps()
-    assert [c for c in daemon.docker_calls() if c[1] in ("run", "rm")] == []
+    assert [c for c in daemon.docker_calls() if c[1] in ("run", "create", "rm")] == []
 
 
 @pytest.mark.parametrize("status", ["running", "paused", "dead", "created", "restarting", None],
@@ -173,7 +181,8 @@ def test_a_box_that_is_not_exited_before_the_start_is_refused_naming_its_status(
         assert status in str(got), f"the refusal does not name the status {status!r}: {got}"
     steps = daemon.steps()
     assert "body" not in steps, "the body ran beside a box that was not stopped"
-    assert "start" not in steps, f"the box was started though it was not stopped: {steps}"
+    assert not {"start", "attach"} & set(steps), (
+        f"the box was started though it was not stopped: {steps}")
     assert STOP in daemon.docker_calls(), f"no best-effort stop on the refusal: {steps}"
     if status == "running":
         assert daemon.status(NAME) == "exited", "the refusal left the box running"
@@ -183,13 +192,15 @@ def test_a_box_that_is_not_exited_before_the_start_is_refused_naming_its_status(
                                    "status-seam-OSError", "status-seam-TimeoutExpired"])
 def test_a_start_that_cannot_be_proven_runs_no_body_and_is_stopped_again(
         tmp_path: Path, monkeypatch, start: str):
+    """`status-unanswered`: no status ask after the attached start answers, so its wait for
+    `running` (#1344 amendment 2; production's 30 s) runs out."""
     daemon, _box, runs = _stopped(tmp_path, monkeypatch)
     if start == "refused":
         daemon.refuse_start()
     elif start == "takes-no-effect":
         daemon.start_takes_no_effect()
     elif start == "status-unanswered":
-        daemon.refuse_inspect(at=[2])  # the status asked after the start
+        daemon.refuse_inspect(at=range(2, 2000))  # every status asked after the start
     else:  # the status asked after the start: the run's second
         daemon.seam_raises(start.removeprefix("status-seam-"), step="status", at=[2])
     got = X.caught(lambda: _run(daemon, runs))
@@ -199,7 +210,8 @@ def test_a_start_that_cannot_be_proven_runs_no_body_and_is_stopped_again(
         assert daemon.seam_raised, "the seam never raised after the start: the row is vacuous"
     steps = daemon.steps()
     assert "body" not in steps, steps
-    assert "stop" in steps[steps.index("start"):], f"no stop after the unproven start: {steps}"
+    assert "stop" in steps[steps.index("attach"):], f"no stop after the unproven start: {steps}"
+    assert daemon.asks[-1].returncode is not None, "the unproven start's client was left running"
     assert daemon.status(NAME) == "exited", "the unproven start left the box running"
 
 
@@ -223,14 +235,15 @@ def test_a_stop_that_failed_and_was_swallowed_makes_the_next_run_refuse_before_i
     swallowed = X.caught(lambda: _run(daemon, runs))
     assert isinstance(swallowed, BoxFault), swallowed
     assert daemon.status(NAME) == "running", "the fake did not leave the box running"
-    starts_before = daemon.steps().count("start")
+    starts_before = daemon.steps().count("attach")
 
     got = X.caught(lambda: _run(daemon, runs))
 
     assert isinstance(got, BoxFault), got
     assert "running" in str(got), got
     assert daemon.steps().count("body") == 1, "run 2's body ran beside a running box"
-    assert daemon.steps().count("start") == starts_before, "run 2 started a running box"
+    assert daemon.steps().count("attach") == starts_before, "run 2 started a running box"
+    assert "start" not in daemon.steps(), "a window started the box plainly"
     assert daemon.status(NAME) == "exited", "the refusal left the box running"
 
 
@@ -239,7 +252,7 @@ def test_control_a_stop_that_holds_lets_the_next_run_start(tmp_path: Path, monke
     _run(daemon, runs)
     _run(daemon, runs)
     assert daemon.steps().count("body") == 2
-    assert daemon.steps().count("start") == 2
+    assert daemon.steps().count("attach") == 2
 
 
 def _body_failures() -> list:
@@ -351,7 +364,7 @@ def test_a_stop_that_leaves_the_box_dead_counts_as_stopped(tmp_path: Path, monke
     assert isinstance(got, BoxFault), got
     assert "dead" in str(got), got
     assert daemon.steps().count("body") == 1
-    assert daemon.steps().count("start") == 1
+    assert daemon.steps().count("attach") == 1
 
 
 LEFT_AFTER_A_STOP = ["paused", "restarting", "dead"]
@@ -448,6 +461,7 @@ def test_every_lifecycle_call_reaches_the_carried_docker_and_none_reaches_path(
     box_mod.stop_box(box)
     verbs = [c[1] for c in daemon.docker_calls() if c[1] in ("start", "stop", "rm")]
     assert verbs == ["stop", "start", "stop", "rm"], daemon.docker_calls()
+    assert ATTACH in daemon.docker_calls(), "the window's start was not the attached one"
     assert daemon.names() == []
     X.no_path_docker(daemon)
 

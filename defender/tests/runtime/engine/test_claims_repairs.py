@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from defender.tenancy import tenant_settings as ts
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.investigation import ticket_writer
 from defender.presentation import visualize_run
 from defender.tests.support.shared.filesystem import _spec1047
@@ -68,7 +68,9 @@ def test_a_raising_record_step_writes_an_error_receipt(tmp_path, monkeypatch):
     S.receipt_path(run_dir).write_text(
         json.dumps({"key": "K-1", "status": "commented", "url": None, "ok": True,
                     "reason": None}), encoding="utf-8")
-    S.record_step(run_dir, record, env={})
+    # A token and an address, so the leg reaches the step that raises (#1391 O1: every case
+    # comment goes through the credential proxy).
+    S.record_step(run_dir, record, env={}, proxy_url="http://proxy.invalid", request_token="token-1107")
     got = S.receipt(run_dir)
     assert got is not None, "the raising step left no receipt"
     assert got["ok"] is False, got

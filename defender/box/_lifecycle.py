@@ -40,7 +40,7 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
 from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 from defender._model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
-from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, TENANT_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _container_status, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import BoxStartConflict, Create, claim_label, DockerFn, START_TOKEN_LABEL, TENANT_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _container_status, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._host_env import provider_scrubbed_environ
 from ._spec import DEFAULT_SPEC, _HostTransport, _text
@@ -184,8 +184,13 @@ def _reaping_main(command: str) -> str:
 
 #: The run box's main process: `cat` reads the held input, so the box ends when its starter does.
 _RUN_BOX_MAIN = _reaping_main("cat")
-#: The request-lane box's main process: nothing holds it open, so it waits to be stopped.
-_LANE_BOX_MAIN = _reaping_main("sleep infinity")
+#: The request-lane box's main process (#1344 amendment 2): `cat` too, so in a `BoxRuns.run`
+#: window, which starts it attached, the box runs only while the window's holder keeps the input
+#: open, and ends when that holder does, by any means: nothing outlives its worker, and no label
+#: is needed.
+_LANE_BOX_MAIN = _reaping_main("cat")
+#: How long a `BoxRuns.run` window waits for its attached start to report the box running.
+_WINDOW_RUNNING_WAIT = 30.0
 
 
 def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus its tenant's half
@@ -224,7 +229,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     argv = [
         "docker", "create", "-i", "--rm", "--name", name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
-        *_tenant_label(tenant_id),
+        *_tenant_label(tenant_id), *claim_label(),
         *_box_flags(spec),
     ]
     for m in lane:
@@ -690,10 +695,16 @@ def _render_argv(
     request: BoxRequest, mounts: Sequence[tuple[Path, Path]] = (),
     start_token: str = "",
 ) -> Create:
+    """The request-lane box's create argv (#1344 amendment 2): created with its input open (`-i`),
+    its main process `cat` reading it. `docker run --detach -i` would not do: a detached run does
+    not close the input when an attached client leaves (`StdinOnce` false), a create does. Each
+    `BoxRuns.run` window starts it attached, so a closed input (its holder ended) ends the box. No
+    `--rm`: between windows the stopped box is kept, and its owner removes it (`stop_box`); one
+    left by a dead holder is stopped, so inert."""
     argv = [
-        "docker", "run", "--detach", "--name", request.name,
+        "docker", "create", "-i", "--name", request.name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
-        *_tenant_label(request.tenant_id),
+        *_tenant_label(request.tenant_id), *claim_label(),
         *_box_flags(request.spec),
     ]
     for m in request.mounts:
@@ -773,11 +784,19 @@ def _start_boxed_request(
         # read-only mount with no kind, is refused here, after create, so the container is
         # reaped and the trees marked like any other startup fault.
         _refuse_a_second_code_mount(request)
+        # Its first start is a plain one through the seam (the daemon holds the unattached input
+        # open, so `cat` waits): the probes run in it, and a drain stops it before its first
+        # window (`BoxRuns`), each of which attaches. A box used whole (the oracle's) is held
+        # by the daemon, as the detached start held it before #1344 amendment 2.
+        started = _call(docker, ["docker", "start", request.name])
+        if started.returncode != 0:
+            raise BoxFault(f"could not start the box {request.name}: {(started.stderr or '').strip()}")
         for m in request.mounts:
             _check_mount_sentinel(m, docker, request.name, code_dir=request.model_code_dir)
         _probe_alias_ban(docker, request.name, _probe_cwd_for_request(request), request.spec.runtime)
     except BaseException as e:
-        # The box is ours; best-effort reap, then mark (sentinels were already planted).
+        # The box is ours (no `--rm`: the name is still this create's); best-effort reap, then
+        # mark (sentinels were already planted).
         _reap_on_fault(docker, request.name)
         _did_not_run_for_request(
             request, f"box startup faulted before the reap scan could run: {e}"
@@ -860,7 +879,8 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     one the box mints its own. `tenant_id` labels the run box's container `defender.tenant=<T>`,
     so the tenant's teardown stops it (#1214 O4; P2's in-box `.tenant-id` check stays retired).
     `running_wait` bounds, in seconds, the run box's wait for its attached start to report the
-    box running (#1343 B10); a request's box is started detached and does not wait.
+    box running (#1343 B10); a request's box is started plainly and does not wait (its windows,
+    `BoxRuns.run`, attach, #1344 amendment 2).
     The tenant arguments are illegal with a `BoxRequest`, which carries its own mounts (and its
     own `tenant_id`)."""
     if isinstance(run_dir_or_request, BoxRequest):
@@ -995,6 +1015,9 @@ class BoxRuns:
         #: stopped for it alone. A stop/start box is removed only by its owner, so for it
         #: either state is a box that did not stop as asked.
         self._auto_removed = getattr(box, "auto_removed", False) is True
+        #: The open window's attached start (#1344 amendment 2): this process holds its input,
+        #: so the box runs only while the window is open and its holder lives.
+        self._window: subprocess.Popen[bytes] | None = None
 
     def _status(self) -> str | None:
         assert self._docker is not None
@@ -1017,17 +1040,29 @@ class BoxRuns:
         if self._docker is None:
             return
         name = self._name
-        proc = _call(self._docker, ["docker", "stop", "-t", "0", name])
-        status = self._status()
+        try:
+            proc = _call(self._docker, ["docker", "stop", "-t", "0", name])
+            status = self._status()
+        finally:
+            self._end_window()
         if not self._stopped(status):
             raise BoxFault(
                 f"could not stop the box {name} (stop rc={proc.returncode}: "
                 f"{(proc.stderr or '').strip()}; status {status!r})"
             )
 
+    def _end_window(self) -> None:
+        """End the open window's attached start, if any: its input closes, so a box the stop did
+        not reach ends on its own."""
+        window, self._window = self._window, None
+        if window is not None:
+            _end_starter(window)
+
     @contextlib.contextmanager
     def run(self) -> Iterator[BoxExecutor]:
-        """One agent run's window on the box."""
+        """One agent run's window on the box: started attached (#1344 amendment 2), its input held
+        by this process for the window and closed at its end, so the box never outlives the
+        window's holder; then the proven stop."""
         if self._docker is None:
             yield self._box
             return
@@ -1039,13 +1074,13 @@ class BoxRuns:
                     f"refusing to start the box {name} for an agent run: its status is "
                     f"{status!r}, not 'exited'"
                 )
-            proc = _call(self._docker, ["docker", "start", name])
-            status = self._status()
-            if status != "running":
-                raise BoxFault(
-                    f"could not start the box {name} (start rc={proc.returncode}: "
-                    f"{(proc.stderr or '').strip()}; status {status!r})"
-                )
+            self._window = _attach(self._docker, name)
+            try:
+                _await_running(self._docker, name, self._window, _WINDOW_RUNNING_WAIT)
+            except _StarterExited as exited:
+                # The private class must not reach a durable record other packages read; a lane
+                # box is never `--rm`, so the run box's name-reuse reasoning does not apply.
+                raise BoxFault(str(exited)) from exited
             # A proven start: a loss found in an earlier window no longer refuses this one's
             # commands (#1421 decision 4). The fence's refusal is never lifted.
             readmit = getattr(self._box, "readmit", None)

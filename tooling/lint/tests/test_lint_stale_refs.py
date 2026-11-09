@@ -538,3 +538,26 @@ def test_a_module_deleted_on_disk_no_longer_vouches_for_its_own_name(tmp_path):
     assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
         "notes.md:helper_module"
     }
+
+
+def test_a_removed_plain_word_counts_only_where_code_names_it(tmp_path):
+    """A removed name that is a plain lowercase word (`outbound`) is also an ordinary word: it
+    counts only where Python code uses it as a name, never in prose, a comment, a string or a
+    non-Python file (#1391 r5). A name with an underscore still counts everywhere."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "net.py": "def outbound():\n    return 1\n",
+            "uses.py": "import net\nz = net.outbound()\n",
+            "prose.md": "Block outbound traffic.\n",
+            "words.py": "# outbound traffic\nNOTE = 'outbound'\n",
+            "notes.txt": "see some_removed_helper\n",
+        },
+        pr_files={"net.py": None},
+    )
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "uses.py:outbound" in fingerprints, fingerprints
+    assert not {"prose.md:outbound", "words.py:outbound"} & fingerprints, fingerprints
+    assert "notes.txt:some_removed_helper" in fingerprints, fingerprints

@@ -35,7 +35,7 @@ from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A 
 from defender.tests.integrations.credential_proxy_1163 import _harness as H  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S  # noqa: E402
-from defender.integrations import elastic_adapter, host_state_adapter  # noqa: E402
+from defender.integrations import elastic_adapter  # noqa: E402
 from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402
     branch_mod,
     spec_at,
@@ -223,12 +223,11 @@ def docker_ctx(tmp_path: Path, *, defender_dir: Path | None = None,
 
 
 def _fixture_tenant(tmp_path: Path) -> Any:
-    """The record resolved from a tenant folder planted under `tmp_path`, whose host-state config
-    names the docker context `spec-947` and whose elastic holds this file's indices."""
+    """The record resolved from a tenant folder planted under `tmp_path`, whose elastic holds this
+    file's indices."""
     root = tmp_path / "tenants"
     texts = S.config_texts("spec947", events_index=EVENTS_INDEX, alerts_index=ALERTS_INDEX)
-    folder = S.plant(root, marker="spec947", configs=texts)
-    S.set_key(folder, "host-state", "HOST_STATE_DOCKER_CONTEXT", "spec-947")
+    S.plant(root, marker="spec947", configs=texts)
     return S.resolve(root)
 
 
@@ -320,20 +319,10 @@ def tz_east_of_utc(monkeypatch):
 # 2. the seam: no adapter context carries the branch point (#1385 O1)
 
 
-def test_a_registry_served_host_state_capture_carries_no_time_of_its_own(tmp_path):
-    """Design O7: the capture holds no `captured_at` (the platform stamps the reply), served or
-    recorded."""
-    ctx = docker_ctx(tmp_path)
-    reg = build_registry(read_roster(REAL_ADAPTERS), _gather_grant(), world=World("w1"),
-                        ledger=primed_ledger(tmp_path), **pass_through())
-
-    payload = reg.verbs("host-state")["proc-tree"](ctx, host="web-1")
-
-    assert payload, "the served capture is empty, so nothing below is observed"
-    assert "captured_at" not in payload
-    recorded = json.loads(served_rows(reg.ledger)[-1]["payload_text"])
-    assert "captured_at" not in recorded
-    assert recorded == payload, "the ledger recorded something other than what was served"
+# Retired by #1391 O5 (design r4's retire list): host-state's captures were driven through a
+# fake `docker`. Host-state is now an HTTP adapter, and
+# credential_proxy_1163/test_query_flow.py::test_1391_o5_host_state_verbs_are_gets_on_the_endpoint_query_api_with_unchanged_outputs
+# pins each verb's whole output, so a `captured_at` of its own would fail there.
 
 
 def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
@@ -379,24 +368,8 @@ def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
 
 # 3. no adapter stamps a time or cuts a window (#1385 O1, O7: the platform stamps, the oracle cuts)
 
-STAMPING_VERBS = [
-    ("container-inspect", {"container_id": "abc123def456"}),
-    ("proc-tree", {"host": "web-1"}),
-    ("passwd", {"host": "web-1"}),
-    ("authorized-keys", {"host": "web-1"}),
-    ("fim-checksum", {"host": "web-1", "path": "/etc/hosts"}),
-    ("package-list", {"host": "web-1"}),
-    ("health-check", {}),
-]
 
 
-@pytest.mark.parametrize(("verb", "params"), STAMPING_VERBS)
-def test_no_host_state_capture_carries_a_time_of_its_own(tmp_path, verb, params):
-    """Design O7: host-state's `captured_at` goes; the platform's arrival stamp replaces it."""
-    payload = host_state_adapter.VERBS[verb](docker_ctx(tmp_path), **params)
-
-    assert payload, f"{verb} produced no capture, so nothing below is observed"
-    assert "captured_at" not in payload, f"{verb} still stamps a time of its own: {payload}"
 
 
 @pytest.mark.parametrize("verb", ["query", "alerts"])

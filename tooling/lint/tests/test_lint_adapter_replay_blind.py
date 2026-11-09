@@ -177,3 +177,13 @@ def test_the_tenant_adapter_template_reading_the_branch_point_is_found(tmp_path,
 def test_a_replay_blind_adapter_template_is_not_found(tmp_path):
     """Positive control: a template reading only `ctx.env` is clean (L1)."""
     assert _GATE.scan(_tree(tmp_path, {_TEMPLATE: _CLEAN_ADAPTER})) == []
+
+
+@pytest.mark.parametrize("rel", ["kit/transport.py", "kit/proxy_client.py"])
+def test_the_shared_transport_reading_the_branch_point_is_found(tmp_path, rel):
+    """The transport every adapter calls (moved to `kit`, #1391 r5) is held to the adapters'
+    rule; a clean one is not found (L1)."""
+    src = "def request(ctx, system):\n    at = ctx.as_of\n    return at\n"
+    found = _GATE.scan(_tree(tmp_path, {rel: src}))
+    assert found and all(f"{rel}:2" in f for f in found), found
+    assert _GATE.scan(_tree(tmp_path, {rel: _CLEAN_ADAPTER})) == []

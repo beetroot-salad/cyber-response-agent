@@ -224,27 +224,21 @@ def test_use_utf8_stdio_moves_the_encoding_and_leaves_the_error_handler_alone():
 
 def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
     """At the gather ingestion boundary, the TRANSPORT replaces a vendor's undecodable byte
-    (#611)."""
-    from defender.integrations import _stub_transport as transport
-    from defender.systems.verbs import VerbContext
+    (#611): a system's reply carrying one, through the credential proxy (#1391 O1), reaches the
+    verb as text with the byte replaced."""
+    from defender.integrations import host_state_adapter
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    docker = fake_bin / "docker"
-    docker.write_text("#!/bin/sh\nprintf '{\"host\": \"caf\\351-01\"}'\n")
-    docker.chmod(0o755)
+    proxy = S.ProxyStandIn(tmp_path / "proxy", [S.answer(
+        b'{"name": "caf\xe9-01", "image": "nginx:1.25"}')])
+    S.plant(tmp_path / "tenants")
+    ctx = S.verb_context(S.resolve(tmp_path / "tenants"), tmp_path, {},
+                         proxy_url=proxy.url, request_token="token-589")
 
-    env = {"PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"}
-    folder = S.plant(tmp_path / "tenants")
-    S.set_key(folder, "host-state", "HOST_STATE_DOCKER_CONTEXT", "test-ctx")
-    ctx = VerbContext(defender_dir=tmp_path, run_dir=tmp_path, env=env,
-                      tenant=S.resolve(tmp_path / "tenants"))
+    got = host_state_adapter.container_inspect(ctx, container_id="abc123")
 
-    rc, stdout, _stderr = transport.docker_exec_raw(ctx, "bastion", ["cat", "/x"],
-                                                    system="host-state")
-
-    assert rc == 0, "the fake docker exec failed — wrong thing under test"
-    assert "�" in stdout, "the undecodable byte was not replaced"
-    assert "caf" in stdout, "the payload before the bad byte was lost"
-    assert "-01" in stdout, "the payload after the bad byte was lost"
+    assert proxy.requests(), "the verb never reached the proxy's stand-in — wrong thing under test"
+    assert "\ufffd" in got["name"], f"the undecodable byte was not replaced: {got!r}"
+    assert got["name"].startswith("caf"), f"the payload before the bad byte was lost: {got!r}"
+    assert got["name"].endswith("-01"), f"the payload after the bad byte was lost: {got!r}"
+    assert got["image"] == "nginx:1.25", got

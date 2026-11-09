@@ -1,16 +1,17 @@
-"""#767 — no model role reaches a ticket write; the agent-facing transport entries stay read-only."""
+"""#767 — no model role reaches a ticket write. Since #1391 O1 the ticket store is reached only
+through the credential proxy, whose route check is its one guard (#1163 A6): the shipped ticket
+declaration admits GETs as reads and the one comment POST as a write, which only the host's
+write-back token may make."""
 from __future__ import annotations
 
 import json
 import re
 from pathlib import Path
 
-import pytest
 
 from defender._paths import PATHS
 from defender.systems import verb_dispositions
-from defender.integrations import confinement
-from defender.integrations.confinement import ConfinementFault
+from defender.kit.access import Route
 from defender.tests.support.runtime.engine._spec767 import (
     COMMENTS_SUFFIX,
     TICKETS_PATH,
@@ -27,7 +28,14 @@ def _shipped_rows():
     return verb_dispositions.load_dispositions(
         verb_dispositions.dispositions_path(T1106.FIXTURE_SETTINGS))
 REPO_ROOT = PATHS.repo_root
-URL_BASE = "http://ticket.test"
+
+
+def _shipped_ticket_declaration():
+    """The committed playground tenant's `ticket` access declaration, parsed by the product."""
+    from defender import tenancy
+    from defender.tests.support.tenancy import _tenants1106 as T1106
+
+    return tenancy.read_access(T1106.FIXTURE_SETTINGS, "ticket")
 
 SHIPPED_PY = tuple(
     p for p in sorted(DEFENDER_DIR.rglob("*.py"))
@@ -65,10 +73,13 @@ def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
                     f"{role} holds an unexpected ticket verb {verb!r}"
                 )
 
-    for path in (TICKETS_PATH, f"{TICKETS_PATH}/SOC-1{COMMENTS_SUFFIX}",
-                 f"{TICKETS_PATH}/SOC-1{TRANSITIONS_SUFFIX}"):
-        with pytest.raises(ConfinementFault):
-            confinement.guard_outbound(None, "ticket", f"{URL_BASE}{path}", method="POST")
+    declaration = _shipped_ticket_declaration()
+    assert declaration.reads == (), (
+        f"the ticket declaration admits a non-GET read, which a read token could send: "
+        f"{declaration.reads}")
+    assert declaration.writes == (Route("POST", f"{TICKETS_PATH}/*{COMMENTS_SUFFIX}"),), (
+        f"the ticket declaration admits a write other than the host's one comment: "
+        f"{declaration.writes}")
 
     from defender.investigation.permission.policies import _common
 
@@ -98,24 +109,15 @@ def test_767_list_tickets_still_granted_to_gather():
         row = by_pair[("ticket", verb)]
         assert row.roles == frozenset(), f"ticket.{verb} is granted to {sorted(row.roles)}"
         assert row.reason, f"ticket.{verb} is granted to nobody with no recorded reason"
-
-    confinement.guard_outbound(None, "ticket", f"{URL_BASE}{TICKETS_PATH}", method="GET")
-    confinement.guard_outbound(None, "ticket", f"{URL_BASE}{TICKETS_PATH}/SOC-1", method="GET")
+    assert _shipped_ticket_declaration().base, "positive control: the shipped declaration parsed"
 
 
-def test_767_transitions_route_is_not_on_the_confinement_allowlist(tmp_path):
-    allowlist = confinement.READ_ENDPOINT_ALLOWLIST["ticket"]
-    assert all(method == "GET" for _, method in allowlist), (
-        f"the ticket allowlist is no longer GET-only: {allowlist}"
-    )
-    assert not any(pattern.endswith("transitions") for pattern, _ in allowlist)
-
-    for method in ("POST", "PUT", "PATCH", "DELETE"):
-        with pytest.raises(ConfinementFault):
-            confinement.guard_outbound(
-                None, "ticket", f"{URL_BASE}{TICKETS_PATH}/SOC-1{TRANSITIONS_SUFFIX}",
-                method=method,
-            )
+def test_767_transitions_route_is_not_in_the_ticket_declaration(tmp_path):
+    declaration = _shipped_ticket_declaration()
+    routes = (*declaration.reads, *declaration.writes)
+    assert routes, "positive control: the declaration names the comment write"
+    assert not any(r.path.endswith(TRANSITIONS_SUFFIX) for r in routes), (
+        f"the ticket declaration names a transitions route: {routes}")
 
     rows = _shipped_rows()
     for d in rows:
@@ -127,25 +129,11 @@ def test_767_transitions_route_is_not_on_the_confinement_allowlist(tmp_path):
                 )
 
 
-def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
-    """Positive control: `guard_outbound` records the request it allows, not the one it refuses."""
-    capture = confinement.TransportCapture()
-    ctx = type("Ctx", (), {"capture": capture})()
-
-    confinement.guard_outbound(ctx, "ticket", f"{URL_BASE}{TICKETS_PATH}", method="GET")
-    assert [(r.system, r.method) for r in capture.requests] == [("ticket", "GET")], (
-        "the established via no longer records what it sent — `guard_outbound` is the capture "
-        "recorder, so a door that stops calling it stops recording"
-    )
-
-    with pytest.raises(ConfinementFault):
-        confinement.guard_outbound(
-            ctx, "ticket", f"{URL_BASE}{TICKETS_PATH}/SOC-1{COMMENTS_SUFFIX}", method="POST")
-    assert len(capture.requests) == 1, "a refused request was still recorded as sent"
-
-    # #1359: the host writer's system is the tenant's `ticket`, not a `case-history` system of
-    # its own; its one comment write is the write-endpoint table's, reached only through the
-    # host write entry (test_target_confinement), never through `guard_outbound`'s read class.
+# Retired by #1391 O1/O2: `test_767_adapter_http_confinement_and_capture_hold` pinned
+# `guard_outbound` and the stub systems' read-endpoint allowlist, both deleted (design r4: "the stub
+# systems' allowlist entries become dead once Docker goes (A6)"). What the proxy refuses is
+# `credential_proxy_1163/test_proxy_scope.py`'s; that each request is captured once is
+# `test_query_flow.py::test_1391_o3_each_elastic_request_is_captured_once_and_reaches_the_proxy_once`.
 
 
 def test_767_query_tool_is_only_ticket_reader(tmp_path):

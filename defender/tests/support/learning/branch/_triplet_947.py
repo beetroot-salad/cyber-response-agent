@@ -991,7 +991,7 @@ def refusals() -> tuple[type[BaseException], ...]:
     from defender.learning.branch.estate.registry import EstateError
     from defender.learning.branch.ledger import LedgerError
     from defender.investigation.branch import BranchError
-    from defender.integrations.confinement import ConfinementFault
+    from defender.kit.faults import ConfinementFault
     from defender.kit.faults import AdapterFault
     out: list[type[BaseException]] = [
         SystemExit, EstateError, LedgerError, BranchError, ConfinementFault,

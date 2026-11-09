@@ -232,7 +232,7 @@ def test_a_dispatch_to_a_system_down_at_start_claims_no_lead_id(tmp_path: Path) 
         f"control: a claimed id was claimed again by the second dispatch: goal={kept!r}")
 
     scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-claim-down"), table=TABLE_THREE)
-    _drop(scene, "identity", "IDENTITY_URL_BASE")
+    _drop(scene, "identity", "IDENTITY_TIMEOUT_SEC")
     d, main = _claim_scene(scene, "claim-down", "identity")
     _assert_gate_before_claim(d, main, "identity", "identity down at start")
 

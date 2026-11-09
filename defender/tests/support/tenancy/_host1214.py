@@ -74,6 +74,7 @@ ENTRY_POINT_MODULES = (
     "learning/frontend/serialize.py",
     "cli/learning/trace_lesson.py",
     "cli/retire_legacy_runs.py",
+    "learning/branch/post_step.py",   # #1344: the learning job's post-step, a host entry of its own
 )
 
 

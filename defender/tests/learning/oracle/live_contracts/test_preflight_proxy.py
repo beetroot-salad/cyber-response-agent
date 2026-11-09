@@ -35,7 +35,7 @@ FIXTURE_SYSTEMS = ("identity", "ticket", "host-state", "threat-intel", "change-m
 #: `idp` is a tenant-only name: no product allowlist knows it (A6). Its `query` goes through the
 #: shared transport; its other verbs answer locally.
 IDP_ADAPTER = '''\
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.kit.verbs import VerbContext, verb
 
 
@@ -47,7 +47,8 @@ def check_settings(*_a, **_k):
 def query(ctx: VerbContext, *, q: str = "*", start: str = "", end: str = "",
           limit: int = 50) -> dict:
     config = transport.load_config(ctx, "idp", "IDP")
-    return transport.http_get(ctx, config, "/events", system="idp", params={"q": q})
+    return transport.request(ctx, "idp", "GET", "/events", query={"q": q},
+                             timeout_sec=transport.timeout_of(config))
 
 
 @verb()
@@ -93,7 +94,9 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool, env
         merged.replies[f"{API}/events"] = (200, {"Content-Type": "application/json"},
                                            json.dumps(idp.payload).encode())
         files = {"settings/verb-grants.yaml": est.table(),
-                 **{f"settings/systems/{s}/config.env": None for s in FIXTURE_SYSTEMS},
+                 # host-state reads no key, so it ships no config.env to remove (#1391 r5 O-S1).
+                 **{f"settings/systems/{s}/config.env": None for s in FIXTURE_SYSTEMS
+                    if s != "host-state"},
                  **A.system_files("idp", H.declaration(merged.url + API)),
                  # Another http-proxy system the source run never called: the grant must not reach it.
                  **A.system_files("crm", H.declaration(merged.url + "/crm"))}

@@ -1,6 +1,5 @@
-"""The fault classes the proxy answers with (#1163 O7, A9), by name: the proxy sits below
-`integrations`, where `ConfinementFault` lives, so it names classes rather than raising them. The
-adapter side raises the class an answer names."""
+"""The fault classes the proxy answers with (#1163 O7, A9), by name: an answer carries the class's
+name, never the class, and the adapter side raises the class an answer names."""
 from __future__ import annotations
 
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
@@ -8,7 +7,7 @@ from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 CONFIG = ConfigFault.__name__
 TRANSPORT = TransportFault.__name__
 UPSTREAM = UpstreamFault.__name__
-#: `integrations.confinement.ConfinementFault`: a path escaping the base, an undeclared route,
+#: `kit.faults.ConfinementFault`: a path escaping the base, an undeclared route,
 #: a write without a write grant.
 CONFINEMENT = "ConfinementFault"
 

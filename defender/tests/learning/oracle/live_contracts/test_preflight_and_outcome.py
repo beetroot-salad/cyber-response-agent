@@ -432,7 +432,7 @@ def test_the_launchers_preflight_builds_its_oracle_side_for_the_source_runs_tena
     _base, src = S.source_run(tmp_path, est, calls=_calls())
     tenant = src.parent.parent.name
     _main(src, est, oracle=oracle, verifier=S.passing_verifier())
-    creates = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+    creates = [c for c in daemon.docker_calls() if c[:2] == ["docker", "create"]]  # #1344 amendment 2
     assert creates, "no oracle box was started: the preflight's python turns never reached the box layer"
     for create in creates:
         labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]

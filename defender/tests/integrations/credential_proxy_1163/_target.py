@@ -92,12 +92,6 @@ def request_access_type() -> Any:
 RUN_STATE_ACCESS_ATTR = "access"
 
 
-def transport_uses_proxy(record: Any, system: str) -> bool:
-    """`defender.integrations._stub_transport.uses_proxy(record, system)`: whether the run
-    record declares `system` as `http-proxy` (A5, A6; test_x5)."""
-    return importlib.import_module("defender.integrations._stub_transport").uses_proxy(record, system)
-
-
 #: The shipped program `python -m defender.credential_proxy` (O5; test_m1, test_m2): the module
 #: run, the environment variables naming its operator config file and port, the config key naming
 #: an OpenBao token file, the text it logs when it refuses to start, and its refusal exit code.

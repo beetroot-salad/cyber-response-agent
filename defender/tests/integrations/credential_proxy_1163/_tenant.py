@@ -129,7 +129,7 @@ def fields_of(final: Any) -> dict[str, Any]:
 def answer_of(raw: bytes) -> dict[str, Any]:
     """The final record of the proxy's framed reply `raw` as a dict, with `body` added as the run
     reads it: the body frames' text when the record says the body counts, else empty (#1412)."""
-    from defender._proxy_client import decode_reply
+    from defender.kit.proxy_client import decode_reply
 
     reply = decode_reply(raw)
     final = fields_of(reply.final)

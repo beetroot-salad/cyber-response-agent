@@ -50,7 +50,6 @@ from defender.systems.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     VerbContext,
 )
-from defender.integrations import _stub_transport  # noqa: E402
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault  # noqa: E402
 from defender.systems.verbs import read_roster  # noqa: E402
 
@@ -736,27 +735,29 @@ def test_provider_key_absent_from_transport_children(tmp_path, monkeypatch):
 
 def test_verb_resolves_config_from_deps_tree(tmp_path):
     tenant_id = fixture_uuid("tenant:query-tool-611")
+    elastic_adapter = S1107.mod("integrations.elastic_adapter")
 
-    def _ctx_over(root: Path, tenant_id: str, url: str | None) -> VerbContext:
-        configs = {} if url is None else {"elastic": (
-            f"ELASTIC_URL_BASE={url}\nELASTIC_BASTION_HOST=bastion\nELASTIC_TIMEOUT_SEC=30\n"
-            "ELASTIC_TRANSPORT=docker-exec\nELASTIC_DOCKER_CONTEXT=ctx-elastic\n")}
-        S1107.plant(root, tenant_id, configs=configs)
+    def _ctx_over(root: Path, tenant_id: str, marker: str | None) -> VerbContext:
+        """A tree whose elastic base (its declaration's) carries `marker`; None: no declaration."""
+        knowledge = S1107.plant(root, tenant_id, marker=marker or "nowhere")
+        if marker is None:
+            S1107.drop_access(knowledge, "elastic")
         return _tenants1106.verb_context(
             DEFENDER, tmp_path / "run", {}, tenant=S1107.resolve(root, tenant_id))
 
-    cfg_a = _stub_transport.load_config(
-        _ctx_over(tmp_path / "a", tenant_id, "http://tree-a:9200"), "elastic", "ELASTIC")
-    cfg_b = _stub_transport.load_config(
-        _ctx_over(tmp_path / "b", tenant_id, "http://tree-b:9200"), "elastic", "ELASTIC")
+    from defender.kit import transport
 
-    assert cfg_a["URL_BASE"] == "http://tree-a:9200"
-    assert cfg_b["URL_BASE"] == "http://tree-b:9200", \
+    ctx_a = _ctx_over(tmp_path / "a", tenant_id, "tree-a")
+    ctx_b = _ctx_over(tmp_path / "b", tenant_id, "tree-b")
+    elastic_adapter.load_config(ctx_a)
+    elastic_adapter.load_config(ctx_b)
+
+    assert transport.record_access(ctx_a.tenant, "elastic").base == _tenants1106.default_base("tree-a", "elastic")
+    assert transport.record_access(ctx_b.tenant, "elastic").base == _tenants1106.default_base("tree-b", "elastic"), \
         "the second tree's verb read the first tree's config (an import-time DEFENDER_DIR)"
 
     with pytest.raises(ConfigFault):
-        _stub_transport.load_config(
-            _ctx_over(tmp_path / "nowhere", tenant_id, None), "elastic", "ELASTIC")
+        elastic_adapter.load_config(_ctx_over(tmp_path / "nowhere", tenant_id, None))
 
 
 ROW_KEYS = {

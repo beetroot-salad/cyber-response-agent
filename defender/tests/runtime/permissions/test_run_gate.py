@@ -414,7 +414,8 @@ def test_a_lead_author_start_fault_runs_no_agent_and_commits_nothing(
     assert not (RunPaths(s.run_dir).lead_author / "done").exists()
     assert daemon.status(NAME) == "exited", "the refused run left its box running"
     if fault == "left-running":
-        assert "start" not in daemon.steps(), "a box found running was started over"
+        assert not {"start", "attach"} & set(daemon.steps()), (
+            "a box found running was started over")
 
 
 STOP_FAULTS = [*X.STOP_FAULTS, "holds"]
@@ -1135,12 +1136,14 @@ def test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row(
 
 
 def _run_calls(daemon: X.FakeDaemon) -> list[str]:
-    """The daemon's starts, stops and status asks, in order (the direct drives' box)."""
-    return [x for x in daemon.steps() if x in ("status", "start", "stop")]
+    """The daemon's starts (plain or attached), stops and status asks, in order (the direct
+    drives' box)."""
+    return [x for x in daemon.steps() if x in ("status", "start", "attach", "stop")]
 
 
-#: One run that holds: its check, its start and proof, its stop and proof.
-ONE_RUN = ["status", "start", "status", "stop", "status"]
+#: One run that holds: its check, its attached start (#1344 amendment 2) and proof, its stop and
+#: proof.
+ONE_RUN = ["status", "attach", "status", "stop", "status"]
 
 
 #: What the pitfalls curator raises inside its run: `AuthorError` (a `RETIRE_SET` member), a
@@ -1421,7 +1424,7 @@ def _production_lead_drain(s: TenantLeadScene, daemon: X.FakeDaemon,
 
 def _kept(daemon: X.FakeDaemon) -> list[str]:
     return [x for x in daemon.steps()
-            if x in ("create", "start", "stop", "rm") or x.startswith("agent:")]
+            if x in ("create", "start", "attach", "stop", "rm") or x.startswith("agent:")]
 
 
 LEAD_F1_FAILURES = [
@@ -1462,8 +1465,9 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
             assert got is None, got
             assert _failed(s) == ["case-run-0.json"], _failed(s)
             if follows == "next-claim":
-                assert kept == ["create", "stop", "start", f"agent:{fixture_uuid('run-0')}", "stop",
-                                "start", f"agent:{fixture_uuid('run-1')}", "stop", "rm"], kept
+                # #1344 amendment 2: one plain start for the probes, then each run's window attaches.
+                assert kept == ["create", "start", "stop", "attach", f"agent:{fixture_uuid('run-0')}",
+                                "stop", "attach", f"agent:{fixture_uuid('run-1')}", "stop", "rm"], kept
                 assert _delivered_text(s, AGENT_NAME) == VETTED.strip()
             return
         X.assert_the_stop_fault_won(got, raised, daemon, stop)
@@ -1473,8 +1477,9 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
             f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
         assert _claim_files(s) == (["case-run-1.json"] if follows == "next-claim" else [],
                                    ["case-run-0.json"]), _claim_files(s)
-        assert kept[:4] == ["create", "stop", "start", f"agent:{fixture_uuid('run-0')}"], kept
-        assert "start" not in kept[4:], f"a later run was started beside the box: {kept}"
+        assert kept[:5] == ["create", "start", "stop", "attach", f"agent:{fixture_uuid('run-0')}"], kept
+        assert not {"start", "attach"} & set(kept[5:]), (
+            f"a later run was started beside the box: {kept}")
         assert kept[-1:] == ["rm"], kept
         assert lanes.pitfalls_ticks == 0
         _nothing_delivered(s)

@@ -397,9 +397,8 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
     merged = tenant.merge(B.MERGE_FILES)
-    # The real writer; the store is the docker route's fake `docker` first on the run env's PATH.
+    # The real writer; the store is behind the credential proxy's stand-in (#1391 O1).
     store = FakeStore(tmp_path / "ticket-store")
-    monkeypatch.setenv("PATH", store.shim.path_value())
     lines: list[str] = []
 
     def seed(seen: B.Seen) -> None:
@@ -410,7 +409,7 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
     secrets = scene.secrets
     out = B.launch(tenant, tmp_path, publish=_child_publish(tenant, lines=lines, identity=scene.credential),
                    argv_extra=("--update-ticket",), during=seed,
-                   visualize=run_common.visualize)
+                   visualize=run_common.visualize, **store.stand_in.seams())
     assert out.reached, out.text()
     scene.assert_logged_in_with_the_file()
     assert store.calls, "control: the run posted its comment"

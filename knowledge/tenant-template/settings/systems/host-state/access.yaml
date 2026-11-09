@@ -1,0 +1,9 @@
+# How the credential proxy reaches the endpoint-security product's query API — replace CHANGE-ME.
+# The API answers GET /hosts, /hosts/{host}/processes, /hosts/{host}/accounts,
+# /hosts/{host}/accounts/{user}/authorized-keys, /hosts/{host}/files/sha256?path=…,
+# /hosts/{host}/packages and /containers/{id}. The proxy adds the stored bearer key.
+access: http-proxy
+base: https://CHANGE-ME
+auth:
+  scheme: bearer
+  field: api_key

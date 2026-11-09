@@ -12,7 +12,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender.kit.verbs import VerbContext
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.kit.faults import UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -30,11 +30,15 @@ def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module 
     return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
+def _timeout(ctx: VerbContext) -> int:  # lint-dup: ok — per-module alias over the shared transport.timeout_of
+    return transport.timeout_of(_config(ctx))
+
+
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """This system's settings check (#1256 O-5): every `ConfigFault` a verb here can raise —
-    `_config`'s keys, then the docker transport's access method — raised over the run's
-    record, or None when the system is usable."""
-    transport.check_docker_curl_settings(tenant, SYSTEM, PREFIX)
+    `_config`'s keys and the access declaration — raised over the run's record, or None when
+    the system is usable."""
+    transport.check_settings_of(tenant, SYSTEM, PREFIX)
 
 
 def _require_utc(value: str) -> str:
@@ -48,16 +52,18 @@ def _require_utc(value: str) -> str:
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, _config(ctx), SYSTEM)
+    return transport.health_check(ctx, SYSTEM, timeout_sec=_timeout(ctx))
 
 
 def active_changes(ctx: VerbContext, *, host: str, at: str) -> dict | list:
     params = {"host": host, "at": _require_utc(at)}
-    return transport.http_get(ctx, _config(ctx), "/changes/active", system=SYSTEM, params=params)
+    return transport.request(ctx, SYSTEM, "GET", "/changes/active", query=params,
+                             timeout_sec=_timeout(ctx), answer="any")
 
 
 def get_change(ctx: VerbContext, *, cr_id: str) -> dict:
-    return transport.http_get_obj(ctx, _config(ctx), f"/changes/{cr_id}", system=SYSTEM)
+    return transport.request(ctx, SYSTEM, "GET", "/changes/{cr_id}", {"cr_id": cr_id},
+                             timeout_sec=_timeout(ctx))
 
 
 def list_changes(
@@ -78,7 +84,8 @@ def list_changes(
         params["host"] = host
     if active_at:
         params["active_at"] = _require_utc(active_at)
-    return transport.http_get(ctx, _config(ctx), "/changes", system=SYSTEM, params=params or None)
+    return transport.request(ctx, SYSTEM, "GET", "/changes", query=params or None,
+                             timeout_sec=_timeout(ctx), answer="any")
 
 
 VERBS = {

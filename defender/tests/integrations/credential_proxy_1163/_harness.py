@@ -23,13 +23,13 @@ CANARY_SECRET = "canary-client-secret-1163-b2e4d8"
 CLIENT_ID = "client-1163"
 #: The http-proxy identity system's config.env: an access method and a timeout, no URL_BASE
 #: and no bastion (the declaration holds the only base, r5 A2).
-HTTP_PROXY_IDENTITY_ENV = 'IDENTITY_TRANSPORT="http-proxy"\nIDENTITY_TIMEOUT_SEC="5"\n'
+HTTP_PROXY_IDENTITY_ENV = 'IDENTITY_TIMEOUT_SEC="5"\n'
 
 
 def http_proxy_env(system: str) -> str:
     """`system`'s config.env when it is reached through the proxy: access method and timeout."""
     prefix = system.upper().replace("-", "_")
-    return f'{prefix}_TRANSPORT="http-proxy"\n{prefix}_TIMEOUT_SEC="5"\n'
+    return f'{prefix}_TIMEOUT_SEC="5"\n'
 
 
 @dataclass(frozen=True)

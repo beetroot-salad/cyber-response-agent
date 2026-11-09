@@ -639,16 +639,15 @@ def test_c17_scratch_is_gone_once_the_load_finishes_so_a_killed_query_leaves_non
         proc = subprocess.Popen([*SQL_ARGV, *args], stdin=stdin, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, env=sql_env({**os.environ, "TMPDIR": str(scratch)}))
         try:
-            # Keep the first non-empty listing: the load is brief, so re-reading the directory after the
-            # loop can find it already cleaned up if this process was descheduled in between.
-            seen: list[Path] = []
+            # The premise is what the poll saw: looking again can miss scratch the load has already removed.
+            made_scratch = False
             deadline = time.monotonic() + 60
             while proc.poll() is None and time.monotonic() < deadline:
-                seen = list(scratch.iterdir())
-                if seen:
+                if any(scratch.iterdir()):
+                    made_scratch = True
                     break
-                time.sleep(0.001)
-            assert seen, f"the load never made scratch: {proc.poll()} {proc.stderr.read()[-300:] if proc.poll() is not None else ''}"
+                time.sleep(0.005)
+            assert made_scratch, f"the load never made scratch: {proc.poll()} {proc.stderr.read()[-300:] if proc.poll() is not None else ''}"
             deadline = time.monotonic() + 60
             while any(scratch.iterdir()) and proc.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.05)

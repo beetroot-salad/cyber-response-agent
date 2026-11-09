@@ -1,19 +1,13 @@
 """Forked runs continue the source clock and elapsed budget."""
 from __future__ import annotations
 
-import json
-import os
-import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from defender._io import read_jsonl_rows
-from defender.learning.branch.estate.oracle import BASE_HANDLE
 from defender.tests.support.runtime.state import _1255_clock as C
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 pytestmark = pytest.mark.e2e
 
@@ -128,56 +122,7 @@ def test_a3_an_arms_denial_log_continues_from_the_sources_reading_at_the_branch_
         f"30 s ({C.at(R, 30)}): {rows}")
 
 
-def _new_host_state_question(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                             ) -> tuple[C.Launched, S.ScriptedModel, Path]:
-    """Launch an arm whose host-state question needs a new oracle answer."""
-    from defender.tests.learning.branch.test_triplet_clock import DOCKER_LOG, fake_docker
-
-    monkeypatch.setenv(S.KNOB_RATE, "1e6")
-    tenant_id, source = C.record_source(tmp_path)
-    time.sleep(1.1)
-    monkeypatch.setenv("PATH", f"{fake_docker(tmp_path)}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("DOCKER_CALL_LOG", str(tmp_path / DOCKER_LOG))
-    oracle = S.oracle(then=S.submit(BASE_HANDLE, S.EMPTY_CLAIM))
-    arm_clock = C.FakeClock(C.ARM_START)
-    gather = C.script(arm_clock, (10, C.query("host-state", "proc-tree", {"host": "web-1"})),
-                      (0, _summary("Summary: captured the process tree.")))
-    out, _main = launch_arm(tmp_path, tenant_id, source,
-                            (20, C.gather_turn("l-002", "host-state")), (0, C.DONE),
-                            clock=arm_clock, gather=gather, oracle=oracle.model,
-                            verifier=S.passing_verifier().model)
-    _launched(out)
-    return out, oracle, source
-
-
-def test_a4_an_arms_host_state_capture_is_stamped_by_the_platform_with_its_run_clock(tmp_path, monkeypatch):
-    out, oracle, _source = _new_host_state_question(tmp_path, monkeypatch)
-
-    rows = [r for r in read_jsonl_rows(out.run_dir / "executed_queries.jsonl")
-            if r.get("lead_id") == "l-002" and r.get("verb") == "proc-tree"]
-    assert len(rows) == 1, f"the arm's host-state question was not served to its lead: {rows}"
-    assert rows[0].get("exit_code") == 0, f"the arm's host-state question was not served to its lead: {rows}"
-    assert rows[0].get("payload_path"), f"the arm's host-state question was not served to its lead: {rows}"
-    assert oracle.submissions() == 1, (
-        f"the control world's new question took {oracle.submissions()} oracle turns, not one")
-    payload = json.loads((out.run_dir / rows[0]["payload_path"]).read_text(encoding="utf-8"))
-    assert "captured_at" not in payload, f"the adapter stamped a time of its own: {payload}"
-    assert C.instant(rows[0].get("received_at")) == C.at(R, 30), (
-        "the arm's host-state reply is not stamped by the platform with its run clock's reading "
-        f"at the call ({C.at(R, 30)}): {rows[0].get('received_at')!r}")
-
-
-def test_a5_the_oracle_is_handed_the_snapshots_run_clock_reading_as_the_fork_time(
-        tmp_path, monkeypatch):
-    out, oracle, source = _new_host_state_question(tmp_path, monkeypatch)
-
-    assert oracle.requests >= 1, "the control world's oracle was never consulted"
-    shown = oracle.all_seen()
-    assert C.mentions(shown, R), (
-        f"the oracle was not handed the snapshot's run-clock reading {R} as the fork time")
-    framework_times = C.source_message_times(source)
-    assert framework_times, "the source's messages carry no timestamps; the check below is empty"
-    leaked = [t for t in framework_times if C.mentions(shown, t)]
-    assert not leaked, (
-        "the oracle was handed a fork time taken from the source's message timestamps (the "
-        f"wall clock) rather than the run clock: {leaked}")
+# A4 (an arm's live host-state capture is stamped with its run clock) and A5 (the oracle is handed the
+# run-clock fork time) are retired with #1391: host-state is reached only through the credential proxy,
+# and a world mints no read token (O10, learning holds no token), so an arm can read no system live.
+# Tracked in #1449; they come back against whichever path it settles.

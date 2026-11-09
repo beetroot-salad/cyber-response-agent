@@ -78,8 +78,11 @@ This file covers the rest — the calls a script can't make.
 - [ ] **Credential boundary held by eye, too.** No tokens, passwords, or
       auth-bearing cURL anywhere in the adapter, docs, examples, or commit
       — not just in `config.env` (which the script scans).
-- [ ] **No credential needed.** The system's read source is auth-less;
-      a system that needs a credential waits for #1163 (noted in the commit).
+- [ ] **Declared for the proxy.** `access.yaml` names the base, the auth
+      scheme and field name (never a value), and every route the adapter
+      calls; `config.env` holds exactly the adapter's `REQUIRED_KEYS`. A
+      credential is the operator's to store with the proxy (noted in the
+      summary).
 - [ ] **One system.** If others came up in the interview, they were noted
       for a separate re-run, not folded in here.
 - [ ] **Divergences surfaced.** Any legitimate departure from the default
