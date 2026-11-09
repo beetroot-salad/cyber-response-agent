@@ -105,13 +105,16 @@ def test_1414_an_escalated_run_files_no_curation_but_a_disposition_run_does(tmp_
 
 @pytest.mark.parametrize("exit_class", FORCED_CLOSE)
 def test_1414_a_forced_close_is_its_disposition_or_unreadable(tmp_path, tenant, state, exit_class):
-    """A forced close with a readable report is its disposition; with an unparsable one it is `unreadable`. O1/A5 (C21)."""
+    """A forced close with a readable report is its disposition; with an unparsable one it is `unreadable`. O1/A5 (C21).
+    One request per run: each run's request carries its own outcome, found by run id."""
     _set(tenant, ["unresolved", "unreadable"])
-    _drive(tmp_path, state, "read", plan=F.Plan(exit_class, "unresolved"))
+    read = _drive(tmp_path, state, "read", plan=F.Plan(exit_class, "unresolved"))
     assert _outcomes(state) == ["unresolved"]
 
-    _drive(tmp_path, state, "unread", plan=F.Plan(exit_class, "unresolved", F.UNPARSABLE))
-    assert _outcomes(state) == ["unreadable"], "the same case's later run replaced the earlier request"
+    unread = _drive(tmp_path, state, "unread", plan=F.Plan(exit_class, "unresolved", F.UNPARSABLE))
+    by_run = {r["run_id"]: r["outcome"] for r in S.open_issue_requests(state).values()}
+    assert by_run.get(_run_id(read)) == "unresolved", by_run
+    assert by_run.get(_run_id(unread)) == "unreadable", by_run
 
 
 @pytest.mark.parametrize("exit_class", sorted(run_end.SILENT_EXITS))
@@ -193,6 +196,8 @@ def _held_set(tmp_path: Path) -> Path:
 
 def _main_with(fixtures: Path):
     """`run.main` whose feedback enqueue judges the held-out set `fixtures` (the seam `main` exposes)."""
+    #: FC: `run.main(enqueue_feedback=...)` is the seam through which run end's feedback enqueue is injected. The test needs
+    #: it because the held-out rows judge against a planted `fixtures_dir`, which `main` has no other way to be handed.
     return functools.partial(run_py.main, enqueue_feedback=functools.partial(
         run_common.enqueue_feedback_issue, fixtures_dir=fixtures))
 
@@ -320,7 +325,7 @@ def test_1414_a_setting_with_a_duplicate_or_unknown_key_is_refused_at_run_end(tm
     with caplog.at_level(logging.INFO):
         _drive(tmp_path, state, "bad-keys", plan=F.plan_for("aborted"))
     assert S.open_issue_requests(state) == {}
-    refusals = [r.getMessage() for r in caplog.records if "NOT enqueuing a feedback issue" in r.getMessage()]
+    refusals = [r.getMessage() for r in caplog.records if "NOT enqueuing" in r.getMessage()]
     assert any(key in line for line in refusals), refusals
 
 
@@ -413,7 +418,10 @@ def test_1414_only_successful_string_lookups_are_captured(why):
 @pytest.mark.parametrize("seed", [1414, 7, 20261109])
 def test_1414_captured_lookups_are_the_distinct_qualifying_triples_in_first_seen_order(seed):
     """Over generated rows (repeats across and within leads, refused, foreign, non-string and non-UTF-8 calls), the captured list is
-    the distinct (actor, host, pattern) triples of the qualifying rows in first-seen order. P3 (C17, C23)."""
+    the distinct (actor, host, pattern) triples of the qualifying rows in first-seen order. P3 (C17, C23).
+
+    FC: first-seen order is the order the captured lookups are listed, so the indices the model answers with stay stable.
+    FC: a lookup holding text that is not valid UTF-8 (a lone surrogate) is not captured: it could never be sent to Forgejo."""
     rng = random.Random(seed)
     actors, hosts, patterns = ("ann", "svc-backup", "root"), ("db-03", "web-01"), ("rm -rf", "curl x", "id")
     spoilers = [{"exit_code": 2}, {"exit_code": 3}, {"system": "cmdb"}, {"verb": "list"}]
@@ -519,7 +527,10 @@ def test_1414_a_held_out_copy_and_an_unverified_tree_open_nothing(tmp_path, tena
 
 
 def test_1414_a_request_for_another_tenant_than_the_runs_or_for_a_handle_with_no_tenant_is_refused(tmp_path, tenant, state):
-    """The enqueue refuses a tenant whose id is not the run's, and a run handle carrying no tenant address; the run's own tenant is admitted. F1."""
+    """The enqueue refuses a tenant whose id is not the run's, and a run handle carrying no tenant address; the run's own tenant is admitted. F1.
+
+    Design detail, not user-visible: fail closed. Run end queues a request only for the run's own tenant, so a request can
+    never be filed into another tenant's queue."""
     from defender import _paths
     from defender.records import Run
     from defender.learning.core.config import LoopPaths
