@@ -6,6 +6,7 @@ readers below read what the code under test wrote.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import importlib
 import json
@@ -44,6 +45,11 @@ def entry_id(issue: int, comment: int, n: int = 1) -> str:
     return f"fb-{issue}-{comment}-{n}"
 
 
+def run_marker(run_id: str) -> str:
+    """The marker a run's summary comment (and the issue body, for the first run) carries (A6; FC: its spelling)."""
+    return f"<!-- defender-feedback-run:{run_id} -->"
+
+
 def answer(*, approve: tuple[int, ...] = (), review_by: str | None = None,
            instruction: str | None = None, reason: str | None = None) -> dict:
     """The model's answer for one comment (FC: its schema): lookup indices it approves, an earlier
@@ -62,6 +68,12 @@ def enqueue_feedback_issue(run: Any, alert: Path | None, **kw: Any) -> bool:
     """F1's enqueue beside `enqueue_curation` (FC: `run_common.enqueue_feedback_issue`, keywords
     `tenant=`, `truncated_by=`, `closed_before_cut=`, `run_state=`, `fixtures_dir=`)."""
     return run_common().enqueue_feedback_issue(run, alert, **kw)
+
+
+def entry_problem(raw: Any) -> str | None:
+    """A7's public per-entry validity check (FC: `tacit_registry.entry_problem(raw) -> str | None`:
+    None for a loadable entry, else why not)."""
+    return importlib.import_module("defender.systems.tacit_registry").entry_problem(raw)
 
 
 def run_outcome(run: Any, *, truncated_by: str | None, closed_before_cut: bool) -> str:
@@ -111,28 +123,47 @@ def feedback_drain(t: Any, paths: Any, *, decide: Any, **seams: Any) -> int:
 
 
 def lessons_rows(paths: Any) -> list[dict]:
-    """The lessons author's pending finding rows (D8: feedback rows go there)."""
-    from defender.learning.core.state import FINDINGS
+    """The lessons author's pending feedback-channel rows (D11)."""
+    from defender.learning.core import state
     from defender.tests.support.learning.curation._drain719 import pending
 
-    return pending(paths, FINDINGS)
+    return pending(paths, getattr(state, FEEDBACK_LESSONS_CHANNEL))
+
+
+def lessons_queue_file(paths: Any) -> Path:
+    """The feedback channel's queue file, for a test that loses a row the way a crash would."""
+    from defender.learning.core import state
+
+    return Path(location_path(paths.state_root)) / getattr(state, FEEDBACK_LESSONS_CHANNEL).queue
 
 
 class Decider:
-    """The tick's `decide` seam (FC: `decide(item, *, box=None) -> answer`, `item["comment_id"]`):
-    answers each comment from `script` by comment id, and records the items it was handed."""
+    """The tick's `decide` seam (FC: `decide(item, *, box=None) -> answer`). The item carries (FC):
+    `comment_id`, `issue`, `author`, `body`, `case_id`, `run_id` and `outcome` (the framing run's, A6/A3),
+    and `lookups` (that run's captured lookups, indexed by position). It answers each comment from `script`
+    by comment id: a dict every time, or a list consumed one per attempt (the last repeats); an `Exception`
+    value is raised. It records the items it was handed."""
 
-    def __init__(self, script: dict[int, dict] | None = None) -> None:
+    def __init__(self, script: dict[int, Any] | None = None) -> None:
         self.script = dict(script or {})
         self.items: list[dict] = []
 
-    def __call__(self, item: Any, *, box: Any = None, **_kw: Any) -> dict:
+    def __call__(self, item: Any, *, box: Any = None, **_kw: Any) -> Any:
         self.items.append(dict(item))
-        return self.script.get(int(item["comment_id"]), answer(reason="script: nothing"))
+        cid = int(item["comment_id"])
+        got = self.script.get(cid, answer(reason="script: nothing"))
+        if isinstance(got, list):
+            got = got[min(self.decided.count(cid) - 1, len(got) - 1)]
+        if isinstance(got, Exception):
+            raise got
+        return got
 
     @property
     def decided(self) -> list[int]:
         return [int(i["comment_id"]) for i in self.items]
+
+    def item(self, comment_id: int) -> dict:
+        return [i for i in self.items if int(i["comment_id"]) == comment_id][-1]
 
 
 # ---------------------------------------------------------------- the tick's scene
@@ -140,7 +171,7 @@ class Decider:
 #: A lookup a run made: what a drafted entry copies (P3).
 LOOKUP = {"actor": "svc-backup", "host": "db-07.prod", "pattern": "pg_dump --all as root"}
 LOOKUP_2 = {"actor": "svc-backup", "host": "db-07.prod", "pattern": "read /etc/pgpass"}
-#: The merge whitelist: `ann` through the Owners team, `bea` by name; `mallory` is on neither.
+#: Two eligible people (the service's record, D13); `mallory` is on no record (the forge's own rule names her: a decoy).
 OWNER, NAMED, OUTSIDER = "ann", "bea", "mallory"
 
 
@@ -153,6 +184,23 @@ class Feedback:
     bot: str
     tmp: Path
     runs_made: int = 0
+
+    def eligible(self, *logins: str, age: dt.timedelta = dt.timedelta(0)) -> None:
+        """What the lifecycle service wrote to the tenant's row (D13): `logins` read `age` ago.
+        """
+        repo = self.t.repository
+        asyncio.run(repo.record_merge_eligibility(
+            self.t.tenant_id, logins=frozenset(logins), read_at=dt.datetime.now(dt.UTC) - age))
+
+    def at(self, seconds: float) -> str:
+        """Forgejo's timestamp `seconds` from now (negative: the past), whole seconds."""
+        when = dt.datetime.now(dt.UTC).replace(microsecond=0) + dt.timedelta(seconds=seconds)
+        return when.isoformat().replace("+00:00", "Z")
+
+    def requests_to(self, *fragments: str) -> list[str]:
+        """The forge requests made so far whose path holds any fragment, as `METHOD path`."""
+        return [f"{r.method} {r.url.path}" for r in self.forge.requests
+                if any(f in r.url.path.lower() for f in fragments)]
 
     @property
     def forge(self) -> Any:
@@ -196,6 +244,13 @@ class Feedback:
         return [c for c in self.forge.comments_on(number, by=self.bot) if marker(comment_id) in c["body"]]
 
 
+def run_id_of(run_dir: Path) -> str:
+    """The id a request carries for the run folder `Feedback.request` returned."""
+    from defender.tests.support.learning.core._state1135 import run_of
+
+    return str(run_of(run_dir).id)
+
+
 def today() -> dt.date:
     return dt.datetime.now(dt.UTC).date()
 
@@ -219,11 +274,15 @@ ELIGIBILITY_MAX_AGE_ENV = "LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE"
 
 #: D11: the lessons author's feedback channel. FC: `defender.learning.core.state.FEEDBACK_LESSONS`
 #: (a `Channel`), one row per comment keyed by `comment_id`:
-#:   {"comment_id": int, "issue": int, "author": str, "case_id": str, "instruction": str}
+#:   {"comment_id": str, "issue": int, "author": str, "case_id": str, "instruction": str}
+#: `comment_id` is the Forgejo comment id as a decimal STRING: the curator queues dedup and retire
+#: by string id (`LearningState.append(dedup_key=)`, `retire_rows`). Wakes on any one row (no knob).
+#: Module `defender.learning.author.feedback.run` (curator key "feedback_curator"); a feedback lesson
+#: cites the comment id under `source_finding_ids`.
 FEEDBACK_LESSONS_CHANNEL = "FEEDBACK_LESSONS"
 
 
 def feedback_lesson_row(*, comment_id: int, issue: int, author: str, case_id: str, instruction: str) -> dict:
     """One D11 feedback-channel row, as the tick writes it and the lessons author reads it."""
-    return {"comment_id": comment_id, "issue": issue, "author": author, "case_id": case_id,
+    return {"comment_id": str(comment_id), "issue": issue, "author": author, "case_id": case_id,
             "instruction": instruction}

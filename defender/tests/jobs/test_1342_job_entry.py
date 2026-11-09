@@ -1524,6 +1524,25 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
 
     _operator_composition_still_clears_records_and_enqueues(scene, tmp_path)
 
+def test_1414_a_job_run_opens_no_feedback_issue_whatever_the_setting_lists(tmp_path, monkeypatch, migrated_database):
+    """A tenant whose setting lists every outcome still gets no open-issue request from a job-lane run. F1 (#1414)."""
+    from defender.tests.learning.feedback_1414 import _spec1414 as FB
+    from defender.tests.support.storage import _feedback1414 as F
+
+    files = {f"settings/{FB.SETTING_FILE}": FB.setting_text(F.VOCABULARY)}
+    with _scene(tmp_path, monkeypatch, migrated_database, files=files) as scene:
+        run_id = str(uuid.uuid4())
+        scene.plant(run_id)
+        (scene.root / scene.t.tenant_id / "learning").mkdir()
+        before = set(tree(scene.root))
+        got = run_job(scene, run_id)
+
+        assert got.calls["lifecycle"] == 1, got
+        assert got.raised is None, got
+        made = [k for k in set(tree(scene.root)) - before if re.search(r"feedback", k, re.IGNORECASE)]
+        assert made == [], f"the job lane left feedback state behind: {made}"
+
+
 def test_m4_the_job_entry_has_no_open_seam_and_refuses_a_ticket_writer(scene):
     """`job_main` takes no `*args` or `**kwargs`, and a call handing it a `ticket_writer` or an `enqueue` is a `TypeError`. (M4, O11)"""
     import inspect

@@ -264,6 +264,9 @@ class ForgeHTTP:
         #: A predicate over a request: when it answers true, the forge APPLIES the request and the reply
         #: is lost on the way back (`httpx.ReadError`), the fault a retried create meets.
         self.lose_reply = None
+        #: A function of a request giving a ready `httpx.Response` (a 5xx, a 422) or None, to refuse it
+        #: without applying it; checked beside `fault`, which raises a transport error instead.
+        self.respond = None
         self._ids = 900
         self.client = httpx.Client(transport=httpx.MockTransport(self.reply))
 
@@ -303,6 +306,9 @@ class ForgeHTTP:
         fault = self.fault(request) if self.fault is not None else None
         if fault is not None:
             raise fault
+        refused = self.respond(request) if self.respond is not None else None
+        if refused is not None:
+            return refused
         api = self.api if self.api is not None else _api(ORIGIN)
         path = request.url.path.lower()  # Forgejo resolves owner and repository without case
         if self._ours(request) and (teams := self._org_answer(request, path, api)) is not None:
@@ -354,7 +360,7 @@ class ForgeHTTP:
         by_name = {label["name"]: label for label in self.labels}
         issue = {"number": number, "id": number, "title": title, "body": body, "state": state,
                  "user": self._user(user), "labels": [by_name[n] for n in labels],
-                 "created_at": _forge_now(), "pull_request": None,
+                 "created_at": _forge_now(), "closed_at": None, "pull_request": None,
                  "html_url": f"http://forge.invalid:3000/tenants/blue/issues/{number}"}
         self.issues.append(issue)
         self.issue_comments[number] = []
@@ -375,9 +381,29 @@ class ForgeHTTP:
         self.issue_comments[number].append(comment)
         return comment
 
-    def set_issue_state(self, number, state):
+    def set_issue_state(self, number, state, *, at=None):
+        """Close or reopen an issue as Forgejo records it: `closed_at` is set on a close (to `at`, else now), cleared on a reopen."""
         [issue] = [i for i in self.issues if i["number"] == number]
         issue["state"] = state
+        issue["closed_at"] = (at or _forge_now()) if state == "closed" else None
+
+    def remove_issue(self, number):
+        """The issue is gone: it and its comments are no longer served (a 404)."""
+        self.issues = [i for i in self.issues if i["number"] != number]
+        self.issue_comments.pop(number, None)
+
+    def remove_comment(self, number, comment_id):
+        self.issue_comments[number] = [c for c in self.issue_comments[number] if c["id"] != comment_id]
+
+    def _paged(self, request, rows):
+        """One page of `rows` as Forgejo serves a list: `page`/`limit` honoured (limit capped at `page_size`),
+        `X-Total-Count` always, `Link rel=next` while more remain."""
+        page = int(request.url.params.get("page") or "1")
+        size = min(int(request.url.params.get("limit") or self.page_size), self.page_size)
+        headers = {"X-Total-Count": str(len(rows))}
+        if page * size < len(rows):
+            headers["Link"] = f'<{LINK_ROOT}{request.url.path}?page={page + 1}>; rel="next"'
+        return httpx.Response(200, json=rows[(page - 1) * size:page * size], headers=headers)
 
     def comments_on(self, number, *, by=None):
         return [c for c in self.issue_comments.get(number, []) if by is None or c["user"]["login"] == by]
@@ -390,7 +416,7 @@ class ForgeHTTP:
         method, params = request.method, request.url.params
         parts = rest.strip("/").split("/")
         if rest == "/labels" and method == "GET":
-            return httpx.Response(200, json=self.labels)
+            return self._paged(request, self.labels)
         if rest == "/labels" and method == "POST":
             return httpx.Response(201, json=self.add_label(json.loads(request.content)["name"]))
         if rest == "/branch_protections/main" and method == "GET":
@@ -409,7 +435,7 @@ class ForgeHTTP:
                     and all(n in {label["name"] for label in i["labels"]}
                             for n in filter(None, (params.get("labels") or "").split(",")))
                     and params.get("created_by") in (None, i["user"]["login"])]
-            return httpx.Response(200, json=rows, headers={"X-Total-Count": str(len(rows))})
+            return self._paged(request, rows)
         if parts[0] == "issues" and len(parts) in (2, 3):
             return self._one_issue_answer(request, parts)
         return None
@@ -423,8 +449,7 @@ class ForgeHTTP:
         if len(parts) == 2 and request.method == "GET":
             return httpx.Response(200, json=found[0])
         if parts[2:] == ["comments"] and request.method == "GET":
-            rows = self.issue_comments[number]
-            return httpx.Response(200, json=rows, headers={"X-Total-Count": str(len(rows))})
+            return self._paged(request, self.issue_comments[number])
         if parts[2:] == ["comments"] and request.method == "POST":
             return httpx.Response(201, json=self.add_comment(
                 number, user=self.login, body=json.loads(request.content)["body"]))
@@ -479,6 +504,7 @@ class ForgeHTTP:
                 return httpx.Response(422, json={"message": f"no branch {body['head']}"})
         number = max([6, *(row["number"] for row in self.prs)]) + 1
         row = pr_row(number, body["head"], sha=sha)
+        row["user"] = {"login": self.login}  # #1414 P6/A2: who opened it, as the listing shows
         if "body" in body:  # #1414 P6: a PR body is read back from the listing
             row["body"] = body["body"]
         row = self.add_pr(row)

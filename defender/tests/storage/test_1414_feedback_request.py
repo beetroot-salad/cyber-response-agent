@@ -1,8 +1,9 @@
-"""#1414 F1: a run's end queues an open-issue request when the tenant's feedback setting lists its outcome.
+"""#1414 F1/O1: a run's end queues an open-issue request when the run's own feedback setting lists its outcome.
 """
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -14,7 +15,6 @@ from defender.records import RunPaths, run_end
 from defender.tests.learning.feedback_1414 import _spec1414 as S
 from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of, set_state_dir
 from defender.tests.support.sandbox._spec791 import (
-    SpecTail,
     author_markers,
     drive_tail,
     loop_paths,
@@ -24,12 +24,14 @@ from defender.tests.support.sandbox._spec791 import (
 )
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
+from defender.tests.support.storage import _feedback1414 as F
+from defender.tests.support.tenancy import _tenants1106 as T1106
+from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
 HELD_OUT_ALERT = json.dumps({"rule": {"id": "9999"}, "held": "out"}).encode("utf-8")
-#: Every outcome word of the setting's vocabulary (design: "Outcome vocabulary for the setting").
-VOCABULARY = ["benign", "malicious", "inconclusive", "unresolved", "aborted", "provider-rejected",
-              "unreadable"]
-LOOKUP = {"actor": "svc-backup", "host": "db-07.prod", "pattern": "pg_dump --all as root"}
+LOOKUP, LOOKUP_2 = S.LOOKUP, S.LOOKUP_2
+OTHER = {"actor": "svc-backup", "host": "db-03.prod", "pattern": LOOKUP["pattern"]}
+FORCED_CLOSE = sorted(run_end.FORCED_CLOSE_EXITS)
 
 
 @pytest.fixture
@@ -55,177 +57,287 @@ def _set(tenant, outcomes: list[str] | None) -> None:
         path.write_text(S.setting_text(outcomes), encoding="utf-8")
 
 
-def _run(name: str, *, disposition: str = "inconclusive", report: str | None = None,
-         alert_bytes: bytes | None = None, certify: bool = True) -> Path:
-    planted = curation_run_dir(name)
-    run_dir = make_run_dir(planted.parent, name=planted.name, disposition=disposition,
-                           alert_bytes=alert_bytes)
-    if report is not None:
-        (run_dir / "report.md").write_text(report, encoding="utf-8")
-    if certify:
-        scrub_mod.scrub(run_dir)
-    return run_dir
-
-
-def _accepted(run_dir: Path):
-    from defender import _paths
-    from defender.tenancy import _tenant
-
-    run = run_of(run_dir)
-    return run, _tenant.accept_tenant(fixture_data_root(_tenant.resolve_data_root()), run.tenant_id,
-                                      defender_dir=_paths.process_defender_dir())
-
-
-def _enqueue(run_dir: Path, **kw) -> bool:
-    run, accepted = _accepted(run_dir)
-    return S.enqueue_feedback_issue(run, RunPaths(run_dir).alert, tenant=accepted, **kw)
-
-
-def _curation(run_dir: Path, **kw) -> bool:
-    from defender import run_common
-
-    run, accepted = _accepted(run_dir)
-    return run_common.enqueue_curation(run, RunPaths(run_dir).alert, tenant=accepted, **kw)
+def _drive(tmp_path, state, tag: str, *args: str, **tail_kw) -> F.FeedbackTail:
+    """Drive the real entry over one alert (the same bytes every time: one case) with the tail `tail_kw` describes."""
+    tail = F.FeedbackTail(state, **tail_kw)
+    drive_tail(run_py.main, plant_alert(tmp_path / tag), tail, *args)
+    return tail
 
 
 def _outcomes(state) -> list[str]:
     return sorted(r["outcome"] for r in S.open_issue_requests(state).values())
 
 
-def test_1414_a_listed_escalated_outcome_opens_an_issue_the_curation_gate_refuses(tenant, state):
-    """An `aborted` run listed in the setting queues one request naming the case and the escalated word, where curation refuses it. O1/F1."""
-    _set(tenant, ["inconclusive", "aborted"])
-    run_dir = _run("f1-aborted")
+def _run_id(tail: F.FeedbackTail) -> str:
+    return str(run_of(tail.run_dirs[-1]).id)
 
-    assert _enqueue(run_dir, truncated_by="aborted") is True
-    assert _curation(run_dir, truncated_by="aborted") is False, "premise: the learning gate refuses a truncation"
 
+# ---------------------------------------------------------------- the outcome, through the real entry
+
+@pytest.mark.parametrize("outcome", F.VOCABULARY)
+def test_1414_every_outcome_word_opens_exactly_when_listed(tmp_path, tenant, state, outcome):
+    """Each word of the vocabulary, listed, queues one request naming the case, run and word; unlisted it queues none. O1/A5."""
+    _set(tenant, [w for w in F.VOCABULARY if w != outcome])
+    _drive(tmp_path, state, "unlisted", plan=F.plan_for(outcome))
+    assert S.open_issue_requests(state) == {}
+
+    _set(tenant, [outcome])
+    tail = _drive(tmp_path, state, "listed", plan=F.plan_for(outcome))
     [request] = S.open_issue_requests(state).values()
-    assert request["outcome"] == "aborted"
-    assert request["run_id"] == str(run_of(run_dir).id)
-    assert request["tenant_id"] == str(tenant.id)
+    assert (request["outcome"], request["run_id"], request["tenant_id"]) == (
+        outcome, _run_id(tail), str(tenant.id))
+    assert request["case_id"]
+
+
+def test_1414_an_escalated_run_files_no_curation_but_a_disposition_run_does(tmp_path, tenant, state):
+    """The request is beside curation, not through its gate: an escalated run feeds no corpus. O1/F1 (C18)."""
+    _set(tenant, ["aborted", "benign"])
+    _drive(tmp_path, state, "esc", plan=F.plan_for("aborted"))
+    assert _outcomes(state) == ["aborted"]
     assert author_markers(state) == []
 
+    _drive(tmp_path, state, "disp", plan=F.plan_for("benign"))
+    assert author_markers(state), "control: curation fires for the disposition run"
 
-def test_1414_only_listed_outcomes_open_an_issue(tenant, state):
-    """A disposition the setting does not list queues nothing; one it lists does (positive control on the same channel). O1."""
-    _set(tenant, ["inconclusive"])
-    assert _enqueue(_run("f1-benign", disposition="benign")) is False
+
+@pytest.mark.parametrize("exit_class", FORCED_CLOSE)
+def test_1414_a_forced_close_is_its_disposition_or_unreadable(tmp_path, tenant, state, exit_class):
+    """A forced close with a readable report is its disposition; with an unparsable one it is `unreadable`. O1/A5 (C21)."""
+    _set(tenant, ["unresolved", "unreadable"])
+    _drive(tmp_path, state, "read", plan=F.Plan(exit_class, "unresolved"))
+    assert _outcomes(state) == ["unresolved"]
+
+    _drive(tmp_path, state, "unread", plan=F.Plan(exit_class, "unresolved", F.UNPARSABLE))
+    assert _outcomes(state) == ["unreadable"], "the same case's later run replaced the earlier request"
+
+
+@pytest.mark.parametrize("exit_class", sorted(run_end.SILENT_EXITS))
+def test_1414_a_silent_exit_opens_no_issue(tmp_path, tenant, state, exit_class):
+    """A run cut short silently opens nothing, whatever the setting lists; an ordinary run under the same setting does. O1."""
+    _set(tenant, F.VOCABULARY)
+    _drive(tmp_path, state, "silent", plan=F.Plan(exit_class, "inconclusive"))
     assert S.open_issue_requests(state) == {}
 
-    assert _enqueue(_run("f1-inconclusive", disposition="inconclusive")) is True
+    _drive(tmp_path, state, "ordinary")
     assert _outcomes(state) == ["inconclusive"]
 
 
-def test_1414_a_forced_close_with_a_verdict_opens_on_its_disposition(tenant, state):
-    """A forced-close truncation that reached a verdict is its disposition, and is not refused as truncated. O1/F1 (C18)."""
-    _set(tenant, ["inconclusive"])
+def test_1414_runs_whose_post_steps_never_run_open_nothing(tmp_path, tenant, state):
+    """An exception out of the lifecycle and a box whose teardown faulted skip F1; the ordinary run does not. O1 (C22)."""
+    _set(tenant, F.VOCABULARY)
+    with pytest.raises(RuntimeError):
+        _drive(tmp_path, state, "raised", raises=RuntimeError("the lifecycle broke"))
+    _drive(tmp_path, state, "faulted", plan=F.plan_for("aborted"), teardown_faulted=True)
+    assert S.open_issue_requests(state) == {}
 
-    assert _enqueue(_run("f1-forced"), truncated_by="request-limit") is True
+    _drive(tmp_path, state, "ordinary")
     assert _outcomes(state) == ["inconclusive"]
 
 
-def test_1414_an_unparsable_report_is_the_unreadable_outcome(tenant, state):
-    """A report the ticket cannot parse is outcome `unreadable`, never its planted disposition. O1."""
-    _set(tenant, ["unreadable"])
-    run_dir = _run("f1-unreadable", report="this is no report\n")
-
-    assert _enqueue(run_dir) is True
-    assert _outcomes(state) == ["unreadable"]
-
-
-def test_1414_the_outcome_function_is_the_tickets(tenant, state):
-    """One function names a run's outcome: the escalated word unless closed before the cut, else the disposition, else `unreadable`. O1 (C2, C21)."""
-    run, _ = _accepted(_run("f1-words", disposition="malicious"))
-    unreadable, _ = _accepted(_run("f1-words-unreadable", report="no frontmatter\n"))
-
-    assert S.run_outcome(run, truncated_by="provider-rejected", closed_before_cut=False) == "provider-rejected"
-    assert S.run_outcome(run, truncated_by="aborted", closed_before_cut=True) == "malicious"
-    assert S.run_outcome(run, truncated_by=None, closed_before_cut=False) == "malicious"
-    assert S.run_outcome(unreadable, truncated_by=None, closed_before_cut=False) == "unreadable"
-
-
-@pytest.mark.parametrize("truncated_by", sorted(run_end.SILENT_EXITS))
-def test_1414_a_silent_exit_opens_no_issue(tenant, state, truncated_by):
-    """A run cut short silently (every member of the silent exits) opens nothing, whatever the setting lists. O1."""
-    _set(tenant, VOCABULARY)
-
-    assert _enqueue(_run(f"f1-silent-{truncated_by}"), truncated_by=truncated_by) is False
+def test_1414_no_learn_and_an_unverified_tree_open_nothing(tmp_path, tenant, state):
+    """`--no-learn` and a tree with no scan verdict queue nothing; the same run without either queues one. F1."""
+    _set(tenant, ["aborted"])
+    _drive(tmp_path, state, "nolearn", "--no-learn", plan=F.plan_for("aborted"))
+    _drive(tmp_path, state, "unverified", plan=F.plan_for("aborted"), certify=False)
     assert S.open_issue_requests(state) == {}
 
+    _drive(tmp_path, state, "ordinary", plan=F.plan_for("aborted"))
+    assert _outcomes(state) == ["aborted"]
 
-def test_1414_an_absent_or_unknown_setting_opens_nothing(tenant, state):
-    """No setting opens nothing (#1390 P4); a setting naming an unknown outcome is refused at run end and by `tenant check`. O1."""
-    run_dir = _run("f1-setting")
+
+def test_1414_a_later_run_of_the_case_replaces_the_earlier_request(tmp_path, tenant, state):
+    """Two runs of one case leave one request, the later run's with its outcome. O1 (C3)."""
+    _set(tenant, ["aborted", "benign"])
+    first = _drive(tmp_path, state, "first", plan=F.plan_for("aborted"))
+    assert _outcomes(state) == ["aborted"]
+    second = _drive(tmp_path, state, "second", plan=F.plan_for("benign"))
+
+    [request] = S.open_issue_requests(state).values()
+    assert (request["outcome"], request["run_id"]) == ("benign", _run_id(second))
+    assert _run_id(first) != _run_id(second)
+
+
+# ---------------------------------------------------------------- the setting: absent, unknown, the run's copy
+
+def test_1414_an_absent_setting_opens_nothing(tmp_path, tenant, state):
+    """No `settings/feedback.yaml` opens nothing (#1390 P4); with one listing the outcome, the same run opens. O1."""
     _set(tenant, None)
-    assert _enqueue(run_dir) is False
-
-    _set(tenant, ["inconclusive", "escalated"])
-    assert _enqueue(run_dir) is False
+    _drive(tmp_path, state, "absent", plan=F.plan_for("aborted"))
     assert S.open_issue_requests(state) == {}
-    found = S.feedback_setting_findings(Path(location_path(tenant.knowledge)))
-    assert any("escalated" in f for f in found), found
 
-    _set(tenant, ["inconclusive"])
-    assert S.feedback_setting_findings(Path(location_path(tenant.knowledge))) == []
-    assert _enqueue(run_dir) is True, "positive control: the same run with a valid setting opens one"
+    _set(tenant, ["aborted"])
+    _drive(tmp_path, state, "listed", plan=F.plan_for("aborted"))
+    assert _outcomes(state) == ["aborted"]
 
 
-def test_1414_held_out_and_unverified_runs_open_nothing(tmp_path, tenant, state):
-    """F1's predicate refuses a held-out fixture copy and an unverified box tree, and admits an ordinary run. F1."""
+@pytest.mark.parametrize("word", F.REFUSED_WORDS)
+def test_1414_a_setting_with_an_unknown_word_is_refused_at_run_end(tmp_path, tenant, state, word):
+    """A setting naming any word outside the vocabulary opens nothing, not even for its valid entries. O1."""
+    _set(tenant, ["aborted", word])
+    _drive(tmp_path, state, "unknown", plan=F.plan_for("aborted"))
+    assert S.open_issue_requests(state) == {}
+
+
+def _tenant_folder(tmp_path: Path, outcomes: list[str] | None) -> Path:
+    folder = tmp_path / "tenant"
+    shutil.copytree(H.FIXTURE, folder, symlinks=True)
+    H.write_tenant_id_file(folder, H.TID, None)
+    shutil.rmtree(folder / "settings" / "systems" / "case-history", ignore_errors=True)
+    if outcomes is not None:
+        (folder / "settings" / S.SETTING_FILE).write_text(S.setting_text(outcomes), encoding="utf-8")
+    return folder
+
+
+def test_1414_tenant_check_passes_the_whole_vocabulary_and_no_setting(tmp_path):
+    """`tenant check --folder` is clean for a setting listing every word, and for none at all. O1."""
+    from defender.cli import tenant as tenant_py
+
+    H.assert_clean(H.check(tenant_py, None, "--folder", str(_tenant_folder(tmp_path / "all", F.VOCABULARY))))
+    H.assert_clean(H.check(tenant_py, None, "--folder", str(_tenant_folder(tmp_path / "none", None))))
+
+
+@pytest.mark.parametrize("word", F.REFUSED_WORDS)
+def test_1414_tenant_check_refuses_an_unknown_word_naming_it(tmp_path, word):
+    """`tenant check --folder` refuses a setting with an unknown word, naming the file and the word. O1."""
+    from defender.cli import tenant as tenant_py
+
+    folder = _tenant_folder(tmp_path, ["benign", word])
+    H.assert_refused(H.check(tenant_py, None, "--folder", str(folder)), S.SETTING_FILE, word)
+
+
+@pytest.mark.parametrize(("before", "edit", "opens"), [
+    (["aborted"], ["benign"], True),
+    (["benign"], ["aborted"], False),
+])
+def test_1414_the_setting_is_read_from_the_runs_copy_not_the_working_tree(
+        tmp_path, tenant, state, before, edit, opens):
+    """An edit to the clone's setting after the run's copy was taken changes nothing; the run's copy decides. O1/A5."""
+    _set(tenant, before)
+    tail = _drive(tmp_path, state, "edited", plan=F.plan_for("aborted"), mid_run=lambda: _set(tenant, edit))
+
+    assert tail.copy_text == S.setting_text(before), "premise: the run's copy holds the pre-launch setting"
+    assert (Path(location_path(tenant.settings)) / S.SETTING_FILE).read_text(encoding="utf-8") == S.setting_text(edit)
+    assert _outcomes(state) == (["aborted"] if opens else [])
+
+
+# ---------------------------------------------------------------- the outcome function
+
+def _planned_run(name: str, outcome: str):
+    plan = F.plan_for(outcome)
+    planted = curation_run_dir(name)
+    run_dir = make_run_dir(planted.parent, name=planted.name, disposition=plan.disposition)
+    if plan.report is not None:
+        (run_dir / "report.md").write_text(plan.report, encoding="utf-8")
+    scrub_mod.scrub(run_dir)
+    return run_of(run_dir)
+
+
+@pytest.mark.parametrize("outcome", F.VOCABULARY)
+def test_1414_the_outcome_function_names_every_vocabulary_word(outcome):
+    """The shared function maps each way a run can end to its word. O1/A5 (C2, C21)."""
+    plan = F.plan_for(outcome)
+    run = _planned_run(f"outcome-{outcome}", outcome)
+    assert S.run_outcome(run, truncated_by=plan.truncated_by, closed_before_cut=False) == outcome
+
+
+def test_1414_the_outcome_function_prefers_a_verdict_to_an_exit(tmp_path):
+    """A verdict reached before the cut is its disposition, whatever the exit class. O1."""
+    run = _planned_run("outcome-verdict", "malicious")
+    for exit_class in (*sorted(run_end.ESCALATED_EXITS), *FORCED_CLOSE):
+        assert S.run_outcome(run, truncated_by=exit_class, closed_before_cut=True) == "malicious"
+        if exit_class in FORCED_CLOSE:
+            assert S.run_outcome(run, truncated_by=exit_class, closed_before_cut=False) == "malicious"
+    unreadable = _planned_run("outcome-verdict-unreadable", "unreadable")
+    for exit_class in FORCED_CLOSE:
+        assert S.run_outcome(unreadable, truncated_by=exit_class, closed_before_cut=False) == "unreadable"
+
+
+# ---------------------------------------------------------------- captured lookups
+
+def _state(rows: dict[str, list[dict]]):
+    from defender.investigation.run_state import RunState
+
+    run_state = RunState(Path("/run/lookups"), "r-lookups")
+    run_state.rows.update(rows)
+    return run_state
+
+
+_BAD_ROWS = {
+    "refused": F.lookup_row("l-1", 1, OTHER, exit_code=2),
+    "config fault": F.lookup_row("l-1", 1, OTHER, exit_code=3),
+    "another system": F.lookup_row("l-1", 1, OTHER, system="cmdb"),
+    "another verb": F.lookup_row("l-1", 1, OTHER, verb="list"),
+    "no pattern": F.lookup_row("l-1", 1, {"actor": "a", "host": "h"}),
+    **{f"{field} a {name}": F.lookup_row("l-1", 1, {**OTHER, field: value})
+       for field in ("actor", "host", "pattern")
+       for name, value in (("list", ["x"]), ("number", 7), ("null", None), ("map", {"a": 1}), ("bool", True))},
+}
+
+
+@pytest.mark.parametrize("why", sorted(_BAD_ROWS))
+def test_1414_only_successful_string_lookups_are_captured(why):
+    """A refused, foreign or non-string call is not captured; the good lookup beside it is. P3 (C17, C23)."""
+    run_state = _state({"l-1": [F.lookup_row("l-1", 0, LOOKUP), _BAD_ROWS[why]]})
+    assert S.captured_lookups(run_state) == [LOOKUP]
+
+
+def test_1414_captured_lookups_are_deduplicated_across_leads():
+    """One lookup made by two leads, twice by one, is captured once. P3."""
+    run_state = _state({
+        "l-1": [F.lookup_row("l-1", 0, LOOKUP), F.lookup_row("l-1", 1, dict(LOOKUP)),
+                F.lookup_row("l-1", 2, LOOKUP_2)],
+        "l-2": [F.lookup_row("l-2", 0, dict(LOOKUP_2)), F.lookup_row("l-2", 1, dict(LOOKUP))]})
+    assert sorted(S.captured_lookups(run_state), key=json.dumps) == sorted([LOOKUP, LOOKUP_2], key=json.dumps)
+
+
+def test_1414_the_request_carries_the_lookups_from_the_runs_memory_not_the_box_file(tmp_path, tenant, state):
+    """Through `run.main` the request's lookups are the run state's, not the box-writable queries file's. F1/P3 (C16, C17)."""
+    _set(tenant, ["aborted"])
+    rows = {"l-001": [F.lookup_row("l-001", 0, LOOKUP), F.lookup_row("l-001", 1, OTHER, exit_code=2)],
+            "l-002": [F.lookup_row("l-002", 0, dict(LOOKUP_2))]}
+    tail = _drive(tmp_path, state, "lookups", plan=F.plan_for("aborted"), rows=rows,
+                  box_planted=F.box_row(F.lookup_row("l-009", 0, OTHER)))
+
+    assert tail.run_state is not None, "run.py handed the lifecycle no RunState to carry the run's calls"
+    assert (tail.run_state.run_dir, tail.run_state.run_id) == (tail.run_dirs[-1], _run_id(tail))
+    [request] = S.open_issue_requests(state).values()
+    assert sorted(request["lookups"], key=json.dumps) == sorted([LOOKUP, LOOKUP_2], key=json.dumps)
+
+
+# ---------------------------------------------------------------- the predicate, called directly
+
+def _certified_run(name: str, *, certify: bool = True, alert_bytes: bytes | None = None) -> Path:
+    planted = curation_run_dir(name)
+    run_dir = make_run_dir(planted.parent, name=planted.name, disposition="inconclusive", alert_bytes=alert_bytes)
+    if certify:
+        scrub_mod.scrub(run_dir)
+    return run_dir
+
+
+def _enqueue(tmp_path, tenant, run_dir: Path, **kw) -> bool:
+    """`enqueue_feedback_issue` over the run's tenant: a `RunTenant` whose settings are a separate copy of the clone's."""
+    from defender import _paths
+    from defender.tenancy import _tenant
+
+    run = run_of(run_dir)
+    accepted = _tenant.accept_tenant(fixture_data_root(_tenant.resolve_data_root()), run.tenant_id,
+                                     defender_dir=_paths.process_defender_dir())
+    copy = tmp_path / "settings-copy"
+    shutil.rmtree(copy, ignore_errors=True)
+    shutil.copytree(location_path(tenant.settings), copy)
+    return S.enqueue_feedback_issue(run, RunPaths(run_dir).alert,
+                                    tenant=T1106.run_tenant(accepted, settings_root=copy), **kw)
+
+
+def test_1414_a_held_out_copy_and_an_unverified_tree_open_nothing(tmp_path, tenant, state):
+    """F1's predicate refuses a held-out alert copy and an unverified tree, and admits an ordinary run. F1."""
     _set(tenant, ["inconclusive"])
     fixtures = tmp_path / "held-out"
     (fixtures / "m01").mkdir(parents=True)
     (fixtures / "m01" / "alert.json").write_bytes(HELD_OUT_ALERT)
 
-    assert _enqueue(_run("f1-held", alert_bytes=HELD_OUT_ALERT), fixtures_dir=fixtures) is False
-    assert _enqueue(_run("f1-unverified", certify=False), fixtures_dir=fixtures) is False
+    held = _certified_run("f1-held", alert_bytes=HELD_OUT_ALERT)
+    assert _enqueue(tmp_path, tenant, held, fixtures_dir=fixtures) is False
+    assert _enqueue(tmp_path, tenant, _certified_run("f1-unverified", certify=False), fixtures_dir=fixtures) is False
     assert S.open_issue_requests(state) == {}
-    assert _enqueue(_run("f1-ordinary"), fixtures_dir=fixtures) is True
-
-
-def _row(lead: str, seq: int, params: dict, *, exit_code: int = 0, system: str = "tacit-knowledge",
-         verb: str = "lookup") -> dict:
-    from defender.investigation.record_query import QUERY_ROW_COLUMNS
-
-    row = dict.fromkeys(QUERY_ROW_COLUMNS)
-    row.update(lead_id=lead, seq=seq, system=system, verb=verb, query_id=f"q-{lead}-{seq}",
-               params=params, exit_code=exit_code)
-    return row
-
-
-def test_1414_the_request_carries_the_successful_lookups_from_the_runs_memory(tenant, state):
-    """The request's lookups are the run state's successful string-valued registry lookups, de-duplicated across leads; refused, non-string and other calls are not. F1/P3 (C17, C23)."""
-    from defender.investigation.run_state import RunState
-
-    _set(tenant, ["inconclusive"])
-    run_dir = _run("f1-lookups")
-    other = {"actor": "svc-backup", "host": "db-03.prod", "pattern": LOOKUP["pattern"]}
-    run_state = RunState(run_dir, str(run_of(run_dir).id))
-    run_state.rows.update({
-        "l-001": [_row("l-001", 0, LOOKUP), _row("l-001", 1, other, exit_code=2)],
-        "l-002": [_row("l-002", 0, dict(LOOKUP)),
-                  _row("l-002", 1, {"actor": ["svc-backup"], "host": "db-07.prod", "pattern": "x"}),
-                  _row("l-002", 2, LOOKUP, system="cmdb", verb="get-host")],
-    })
-    # The box-writable run folder says otherwise: it is never read for this (C16).
-    (run_dir / "executed_queries.jsonl").write_text(json.dumps(_row("l-009", 0, other)) + "\n",
-                                                    encoding="utf-8")
-
-    assert S.captured_lookups(run_state) == [LOOKUP]
-    assert _enqueue(run_dir, run_state=run_state) is True
-    [request] = S.open_issue_requests(state).values()
-    assert request["lookups"] == [LOOKUP]
-
-
-def test_1414_run_end_queues_the_request_beside_curation(tmp_path, tenant, state):
-    """The real entry point queues the request for an escalated run, which files no curation; `--no-learn` queues neither. F1."""
-    _set(tenant, ["aborted"])
-    suppressed = SpecTail(state, truncated_by="aborted")
-    assert drive_tail(run_py.main, plant_alert(tmp_path / "suppressed"), suppressed, "--no-learn") == 0
-    assert S.open_issue_requests(state) == {}
-
-    aborted = SpecTail(state, truncated_by="aborted")
-    assert drive_tail(run_py.main, plant_alert(tmp_path / "aborted"), aborted) == 0
-    assert _outcomes(state) == ["aborted"]
-    assert author_markers(state) == [], "premise: an escalated run feeds no curation"
+    assert _enqueue(tmp_path, tenant, _certified_run("f1-ordinary"), fixtures_dir=fixtures) is True

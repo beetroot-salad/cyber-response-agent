@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 
+from defender import _vocab
+from defender.records import run_end
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
@@ -490,3 +492,38 @@ def test_1374_the_page_tells_unknown_from_error_by_its_words(tmp_path):
         assert f"why {status}" in line, line
     assert "ticket-ok" in lines[C.COMMENTED], lines
     assert "ticket-ok" not in lines[C.UNKNOWN], lines
+
+
+def _sent_comment(shim: S.DockerShim) -> str:
+    [argv] = C.comment_calls(shim)
+    return " ".join(argv)
+
+
+@pytest.mark.parametrize(("exit_class", "report", "status", "marker"), [
+    *[(None, f"---\ndisposition: {d}\nconfidence: high\n---\n\nbody\n", C.COMMENTED, None)
+      for d in _vocab.DISPOSITION_VALUES],
+    *[(e, "---\ndisposition: benign\nconfidence: high\n---\n\nbody\n", C.ESCALATED, f"exit: {e}")
+      for e in sorted(run_end.ESCALATED_EXITS)],
+    *[(e, "---\ndisposition: unresolved\nconfidence: high\n---\n\nbody\n", C.COMMENTED, None)
+      for e in sorted(run_end.FORCED_CLOSE_EXITS)],
+    *[(e, "no front matter\n", C.ESCALATED, f"exit: {e}") for e in sorted(run_end.FORCED_CLOSE_EXITS)],
+    (None, "no front matter\n", C.COMMENTED, "No disposition could be recorded"),
+])
+def test_1414_the_ticket_comment_holds_for_every_way_a_run_ends(
+        tmp_path, monkeypatch, exit_class, report, status, marker):
+    """The ticket's receipt and body are unchanged by the shared outcome function: unreadable on a forced close still escalates. O1/A5 (C21)."""
+    root, _folder, alert = _world(tmp_path)
+    shim = _shim(tmp_path, monkeypatch)
+    rc, refused, run_dir = _run(tmp_path, root, alert, summary={
+        "output": "spec1414", "requests": 0, "truncated_by": exit_class, "closed_before_cut": False},
+        before=lambda d: (d / "report.md").write_text(report, encoding="utf-8"))
+
+    assert refused is None, refused
+    assert rc == (7 if exit_class == "provider-rejected" else 0), rc
+    got = S.receipt(run_dir)
+    assert got is not None, "no receipt"
+    assert (got["status"], got["ok"]) == (status, True), got
+    sent = _sent_comment(shim)
+    assert ("ended without a verdict" in sent) == (status == C.ESCALATED), sent
+    if marker is not None:
+        assert marker in sent, sent
