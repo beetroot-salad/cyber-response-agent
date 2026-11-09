@@ -28,9 +28,7 @@ from pathlib import Path
 import pytest
 import yaml
 from _lab_fakes import (AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, FREEZE_ID, FROZEN_PROXY_URL,
-                        LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SLUG, SPAN_START,
-                        SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T, LabRig, canonical_digest,
-                        counts_of, expected_copy, instant, seconds)
+                        LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SLUG, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T, LabRig, expected_copy, instant, seconds)
 
 LAUNCH = Path(__file__).resolve().parents[1] / "launch_frozen.py"
 KINDS = ["none", "drop", "drift", "cmdb"]
@@ -283,16 +281,22 @@ def test_the_read_only_user_gets_the_current_password_and_the_node_cert_is_mount
     rig.write_expected_case("none")
     parts_before = {p.name: p.read_bytes() for p in (rig.parts / FREEZE_ID).iterdir()}
     rig.launch()
+    first_end = len(rig.journal)
     rig.ops.password = "pw-rotated"
     rig.launch()
-    j = rig.journal.ops()
+    slices = [rig.journal.ops()[:first_end], rig.journal.ops()[first_end:]]
 
     assert [pw for pw, _ in rig.ops.users] == ["pw-0", "pw-rotated"], rig.ops.users
-    assert rig.ops.users[0][1] is False and rig.ops.cert_mounts == [False, False]
-    assert j.index("create_readonly_user") < j.index("start_proxy") and j.index("mount_node_cert") < j.index("start_proxy")
+    assert all(up is False for _, up in rig.ops.users) and rig.ops.cert_mounts == [False, False]
+    for ops in slices:
+        assert ops.index("create_readonly_user") < ops.index("start_proxy"), ops
+        assert ops.index("mount_node_cert") < ops.index("start_proxy"), ops
+        assert ops.index("mount_node_cert") < ops.index("restart_node"), ops
     assert {p.name: p.read_bytes() for p in (rig.parts / FREEZE_ID).iterdir()} == parts_before
     assert not any(b"pw-" in b for b in parts_before.values())
-    assert "pw-0" not in (rig.freeze_dir / "freeze.yaml").read_text() + (rig.case_dir / "case.yaml").read_text()
+    after = (rig.freeze_dir / "freeze.yaml").read_text() + (rig.case_dir / "case.yaml").read_text()
+    after += "".join(p.read_text(errors="ignore") for p in (rig.parts / FREEZE_ID).iterdir())
+    assert "pw-0" not in after and "pw-rotated" not in after
 
 
 # -- the marker (A4) -------------------------------------------------------------------------------
@@ -422,13 +426,21 @@ def _launch_failures():
 _NOT_A_REFUSAL = (AttributeError, TypeError, NameError, ImportError)
 
 
-def _fails_to_launch(rig):
+def _chain(exc):
+    while exc is not None:
+        yield exc
+        exc = exc.__cause__ or exc.__context__
+
+
+def _fails_to_launch(rig, injected=None):
     """The launch module loads first (a missing script fails here, outside the failure under test);
-    the launch then raises something that is not a bug in the caller's own code."""
+    the launch then raises, with the injected failure (when named) in the exception chain."""
     rig.launch_module
     with pytest.raises(Exception) as caught:
         rig.launch()
-    assert not isinstance(caught.value, _NOT_A_REFUSAL), repr(caught.value)
+    assert not isinstance(caught.value, _NOT_A_REFUSAL + (AssertionError, NotImplementedError)), repr(caught.value)
+    if injected:
+        assert any(injected in str(e) for e in _chain(caught.value)), repr(caught.value)
     return caught.value
 
 
@@ -439,7 +451,7 @@ def test_a_copy_that_cannot_be_made_is_a_launch_failure_with_no_row(tmp_path, ri
     rig = LabRig(tmp_path, **rig_kw)
     rig.write_expected_case("drift")
     rig.ops.fail_at = ops_fail
-    _fails_to_launch(rig)
+    _fails_to_launch(rig, f"{ops_fail} failed" if ops_fail else f"{reached} failed")
 
     assert (ops_fail in rig.journal.ops()) if ops_fail else rig.es_at(lambda m, p: reached in p)
     assert "run" not in rig.journal.ops() and rig.rows() == []

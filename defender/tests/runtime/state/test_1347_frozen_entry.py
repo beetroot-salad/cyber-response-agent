@@ -280,6 +280,8 @@ def run_files(run_dir: Path) -> dict[str, str]:
 
 #: What would tell the agent a run is frozen: the flag's name, a freeze, a cut.
 FREEZE_WORDS = re.compile(r"as[_-]?of|arrived[_-]?by|frozen|freez|\bcut\b", re.IGNORECASE)
+
+
 def test_an_as_of_run_writes_nothing_about_the_freeze_into_its_run_dir(tmp_path):
     """P4/A9: the run dir has an ordinary run's files, the provenance start is T, none names the
     freeze; trace and wire-log timestamps are not required to move."""

@@ -17,12 +17,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-from _lab_fakes import CMDB_STALE, FROZEN_PROXY_URL, T, instant
+from _lab_fakes import CMDB_STALE, T, instant
 
 LAB_OPS = Path(__file__).resolve().parents[1] / "lab_ops.py"
 HOSTS = ["elastic.lab.example", "kibana.lab.example"]
@@ -66,8 +66,9 @@ def test_the_stub_containers_are_loaded_with_the_freeze_moment_and_the_resolved_
     lab.ops.load_stubs(parts, T, [CMDB_STALE])
 
     assert lab.rec.calls, "no command was sent"
-    values = [a.split("=", 1)[1] for argv, kw in lab.rec.calls for a in [*argv, *(f"{k}={v}" for k, v in (kw.get("env") or {}).items())]
-              if a.startswith("V2_STUB_AS_OF=")]
+    values = [ln.split("V2_STUB_AS_OF=", 1)[1].split()[0].strip('",\'') for ln in lab.rec.blob().splitlines()
+              if "V2_STUB_AS_OF=" in ln]
+    values += [str(kw["env"]["V2_STUB_AS_OF"]) for _, kw in lab.rec.calls if "V2_STUB_AS_OF" in (kw.get("env") or {})]
     assert values and all(instant(v) == instant(T) for v in values), values
     for needle in (CMDB_STALE["kind"], CMDB_STALE["host"], CMDB_STALE["new_value"]):
         assert needle in lab.rec.blob(), needle
@@ -105,10 +106,26 @@ def test_the_frozen_proxy_resolves_every_declared_host_name_to_the_frozen_endpoi
     blob = lab.rec.blob()
 
     ip = ENDPOINT.split(":")[0]
-    assert all(h in blob for h in HOSTS) and ip in blob, blob
     for h in HOSTS:
-        line = next((ln for ln in blob.splitlines() if h in ln), "")
-        assert ip in line or ENDPOINT in blob, (h, line)
+        assert _mapped_ips(lab.rec, h) == {ip}, (h, blob)
+
+
+def _mapped_ips(rec, host):
+    """The IPs written on `host`'s own mapping entry (same argv token or same line), `host:ip` or `ip host`."""
+    found = set()
+    texts = [str(a) for argv, _ in rec.calls for a in argv] + [str(kw.get("input", "")) for _, kw in rec.calls]
+    for text in texts:
+        for ln in text.splitlines():
+            for m in re.finditer(rf"{re.escape(host)}[:=\s]+(\d+\.\d+\.\d+\.\d+)|(\d+\.\d+\.\d+\.\d+)[\s]+{re.escape(host)}", ln):
+                found.add(m.group(1) or m.group(2))
+    return found
+
+
+def test_a_host_mapped_to_another_ip_is_not_read_as_the_frozen_endpoint():
+    """O12 control: the shape read above tells the live IP apart from the frozen one."""
+    rec = Recorder()
+    rec(["docker", "run", "--add-host", f"{HOSTS[0]}:10.0.0.9", "--add-host", f"{HOSTS[1]}:10.99.0.1"])
+    assert _mapped_ips(rec, HOSTS[0]) == {"10.0.0.9"} and _mapped_ips(rec, HOSTS[1]) == {"10.99.0.1"}
 
 
 def test_the_node_restart_hands_the_clock_offset_to_the_frozen_elasticsearch_through_the_preload_shim(tmp_path):
@@ -117,5 +134,8 @@ def test_the_node_restart_hands_the_clock_offset_to_the_frozen_elasticsearch_thr
     lab.ops.restart_node(-1_234_567)
     blob = lab.rec.blob()
 
-    assert "LD_PRELOAD" in blob and "1234567" in blob, blob
+    env = [kw.get("env") or {} for _, kw in lab.rec.calls]
+    assert "LD_PRELOAD" in blob, blob
+    assert any(v == "-1234567" for e in env for v in map(str, e.values())) or any(
+        a.split("=", 1)[-1] == "-1234567" for argv, _ in lab.rec.calls for a in map(str, argv) if "=" in a), blob
     assert any("restart" in a or "elasticsearch" in a for argv, _ in lab.rec.calls for a in argv)
