@@ -1296,12 +1296,14 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             elif launch is not None:
                 run = materialize(alert, run=early, tenant=accepted, model=model,
                                   mapping=mapping, knowledge=knowledge, launch=launch)
-            else:
+            elif ns.as_of is not None:
                 # A frozen run's recorded start is its run clock's origin, never the wall time
                 # (#1347 O5); named only then, so a seam that predates `--as-of` is called as before.
-                stamp: dict[str, Any] = {} if ns.as_of is None else {"started_at": ns.as_of}
                 run = materialize(alert, run=early, tenant=accepted, model=model,
-                                  mapping=mapping, knowledge=knowledge, **stamp)
+                                  mapping=mapping, knowledge=knowledge, started_at=ns.as_of)
+            else:
+                run = materialize(alert, run=early, tenant=accepted, model=model,
+                                  mapping=mapping, knowledge=knowledge)
             run_dir = run.run_dir
             # The run's id, announced as the first line of stdout (#1279 O5), before the ticket
             # or the box exists.
