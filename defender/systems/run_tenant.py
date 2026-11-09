@@ -15,6 +15,7 @@ from __future__ import annotations
 from defender.records.formats import DataRoot, RunsBase, EpisodesRoot
 
 import contextlib
+import os
 import dataclasses
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -32,8 +33,8 @@ from defender.systems.verb_grant import GrantError, VerbGrant
 from defender import tenancy
 from defender.tenancy import tenant_settings
 from defender.tenancy.case_ticket import CaseRecordSettings, CaseTicketError, load_case_record
-from defender.kit.access import HTTP_PROXY, AccessDeclaration
-from defender.kit.settings import SystemConfig, system_prefix
+from defender.kit.access import AccessDeclaration
+from defender.kit.settings import SystemConfig
 from defender.kit.faults import ConfigFault
 
 if TYPE_CHECKING:
@@ -87,7 +88,7 @@ class RunTenant:
     #: template, loaded once and held for the run (D-18); `None` for a tenant with no such file;
     #: a bad file is kept as its error.
     case_record: CaseRecordSettings | CaseTicketError | None
-    #: One entry per `http-proxy` system (its `config.env` says so), each `access.yaml` parsed
+    #: One entry per system whose folder holds an `access.yaml` (#1391 P1), each parsed
     #: ONCE here: the `AccessDeclaration`, or the `ConfigFault` for why there is none (#1163).
     #: Adapters, the ticket writer and the run-start settings check read this, never the file.
     access: Mapping[str, AccessDeclaration | ConfigFault] = dataclasses.field(
@@ -370,10 +371,12 @@ def folder_settings(settings: Path) -> dict[str, Any]:
 def _read_access(
     settings: Path, systems: Mapping[str, SystemConfig | ConfigFault],
 ) -> Mapping[str, AccessDeclaration | ConfigFault]:
-    """The declaration of every system whose `config.env` names the `http-proxy` access method."""
+    """The declaration of every system whose folder holds an `access.yaml` (#1391 P1: holding
+    one is what being reached through the proxy is). A system with none gets no entry; whether
+    it needs one is its adapter's settings check to say."""
     out: dict[str, AccessDeclaration | ConfigFault] = {}
-    for name, entry in systems.items():
-        if isinstance(entry, ConfigFault) or entry.get(f"{system_prefix(name)}_TRANSPORT") != HTTP_PROXY:
+    for name in systems:
+        if not os.path.lexists(settings / "systems" / name / tenancy.ACCESS_FILE):
             continue
         try:
             out[name] = tenancy.read_access(settings, name)

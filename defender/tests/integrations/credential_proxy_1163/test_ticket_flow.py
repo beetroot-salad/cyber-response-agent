@@ -10,7 +10,6 @@ from defender.box import run_env
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
-from defender.tests.support.tenancy import _tenants1106
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
 
@@ -42,8 +41,8 @@ def _published(scratch, root, decl):
     """The fixture tenant (its case-record file names `ticket`) with `ticket` on `http-proxy`;
     `decl=None` leaves `ticket` with no `access.yaml` at all."""
     files = A.system_files(SYSTEM, decl or "", env_extra=KEY_PATTERN)
-    if decl is None:
-        files.pop(H.ACCESS_FILE.format(system=SYSTEM))
+    if decl is None:  # the committed fixture declares `ticket`: take its declaration away too
+        files[H.ACCESS_FILE.format(system=SYSTEM)] = None
     with published_tenant(scratch, root=root, files=files) as t:
         yield t
 
@@ -91,17 +90,8 @@ def test_t1_the_comment_reaches_the_store_through_the_proxy_and_leaks_nothing(
     assert "run_dir=" in caplog.text, "positive control: logs are read"
 
 
-def test_t2_the_docker_exec_case_system_still_uses_docker(tmp_path, data_root):
-    """Control for t1: the fixture's docker-exec `ticket` system reaches the docker shim with one
-    comment POST and needs no token. O3, regression guard."""
-    shim = S.DockerShim(tmp_path / "shim", S.store_answers_ok())
-    rec, run = _run(tmp_path)
-    S.ticket_writer().record_case_ticket(
-        run, tenant=_tenants1106.fixture_run_tenant(), defender_dir=DEFENDER,
-        env=shim.env(run_env(DEFENDER, rec.run_dir_at)))
-    posts = [c["argv"] for c in shim.calls() if "POST" in c["argv"]]
-    assert len(posts) == 1, shim.calls()
-    assert (S.curl_url(posts[0]) or "").endswith(f"/tickets/{KEY}/comments"), posts
+# t2 (the docker-exec `ticket` system still used docker) is retired: #1391 O1 removed the
+# Docker access method; every case system is reached through the proxy, as t1 shows.
 
 
 def test_t3_failures_are_text_in_the_receipt_and_carry_no_credential(tmp_path, data_root, caplog):

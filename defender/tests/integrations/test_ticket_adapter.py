@@ -6,9 +6,9 @@ import urllib.parse
 import pytest
 
 from defender.systems.verbs import VerbContext
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.integrations import ticket_adapter
-from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
+from defender.kit.faults import ConfigFault, ConfinementFault, TransportFault, UpstreamFault
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
@@ -27,74 +27,80 @@ def ctx(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _stub_config(monkeypatch):
-    _SHAPED = {"URL_BASE": "http://x", "BASTION_HOST": "web-1", "TIMEOUT_SEC": "10"}
+    _SHAPED = {"TIMEOUT_SEC": "10"}
 
-    def _fake(ctx, system, prefix, required=transport.REQUIRED_CONFIG_KEYS_TEMPLATE):
+    def _fake(ctx, system, prefix, required=transport.REQUIRED_CONFIG_KEYS_TEMPLATE, **_kw):
         return {k: _SHAPED.get(k, f"stub-{k}") for k in required}
 
-    monkeypatch.setattr(transport, "load_config", _fake)  # lint-monkeypatch: ok — the docker-exec-curl transport has no in-process DI seam (this file's established pattern)
+    monkeypatch.setattr(transport, "load_config", _fake)  # lint-monkeypatch: ok — the shared transport has no in-process DI seam (this file's established pattern)
 
 
-def test_require_closed_passes_on_closed(monkeypatch, ctx):
-    monkeypatch.setattr(  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-        transport, "http_get_obj",
-                        lambda c, cfg, p, system=None, params=None: {"key": "c", "status": "closed",
-                                                        "resolution": "benign — r"})
+class _Wire:
+    """The transport's one send to the proxy, replaced: each request's method and URL, and the
+    answer handed back."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+        self.answer: object = {"key": "c", "status": "closed"}
+
+    def __call__(self, ctx, url, *, system, method, body, timeout_sec, write=False, **_kw):
+        self.sent.append((method, url))
+        return {} if write else self.answer
+
+    def paths(self) -> list[str]:
+        return [urllib.parse.urlsplit(url).path for _, url in self.sent]
+
+    def queries(self) -> list[dict[str, list[str]]]:
+        return [urllib.parse.parse_qs(urllib.parse.urlsplit(url).query, strict_parsing=True)
+                for _, url in self.sent]
+
+
+@pytest.fixture
+def wire(monkeypatch):
+    sent = _Wire()
+    monkeypatch.setattr(transport, "_proxy_request", sent)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
+    return sent
+
+
+def test_require_closed_passes_on_closed(wire, ctx):
+    wire.answer = {"key": "c", "status": "closed", "resolution": "benign — r"}
     payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=True)
     assert payload["status"] == "closed"
 
 
-def test_require_closed_rejects_open(monkeypatch, ctx):
+def test_require_closed_rejects_open(wire, ctx):
     # A non-closed ticket is a query error: `UpstreamFault`, which the capture layer maps to exit 1.
-    monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-                        lambda c, cfg, p, system=None, params=None: {"key": "c", "status": "open"})
+    wire.answer = {"key": "c", "status": "open"}
     with pytest.raises(UpstreamFault):
         ticket_adapter.get_ticket(ctx, key="c", require_closed=True)
 
 
-def test_no_flag_allows_any_status(monkeypatch, ctx):
+def test_no_flag_allows_any_status(wire, ctx):
     # Without require_closed, open tickets still fetch.
-    monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-                        lambda c, cfg, p, system=None, params=None: {"key": "c", "status": "open"})
+    wire.answer = {"key": "c", "status": "open"}
     payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=False)
     assert payload["status"] == "open"
 
 
-def test_list_require_closed_pins_status_over_widening(monkeypatch, ctx):
+def test_list_require_closed_pins_status_over_widening(wire, ctx):
     # require_closed forces status=closed even when a (last-wins) status=open tries to widen the
     # list — the scoped read can't reach the in-flight OPEN ticket.
-    seen = {}
-
-    def fake_get(c, cfg, path, system=None, params=None):
-        seen["params"] = params
-        return {"tickets": [], "total": 0}
-
-    monkeypatch.setattr(transport, "http_get", fake_get)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
+    wire.answer = {"tickets": [], "total": 0}
     ticket_adapter.list_tickets(ctx, status="open", require_closed=True)
-    assert seen["params"]["status"] == "closed"
+    assert [q["status"] for q in wire.queries()] == [["closed"]]
 
 
-def test_list_no_flag_passes_status_through(monkeypatch, ctx):
-    seen = {}
-
-    def fake_get(c, cfg, path, system=None, params=None):
-        seen["params"] = params
-        return {"tickets": [], "total": 0}
-
-    monkeypatch.setattr(transport, "http_get", fake_get)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
+def test_list_no_flag_passes_status_through(wire, ctx):
+    wire.answer = {"tickets": [], "total": 0}
     ticket_adapter.list_tickets(ctx, status="open", require_closed=False)
-    assert seen["params"]["status"] == "open"
+    assert [q["status"] for q in wire.queries()] == [["open"]]
 
 
 # the key grammar as REQUIRED environment config (#684)
 
 
 _BASE_CONFIG = {
-    "TICKET_URL_BASE": "http://x",
-    "TICKET_BASTION_HOST": "web-1",
     "TICKET_TIMEOUT_SEC": "10",
-    "TICKET_TRANSPORT": S1107.DOCKER_EXEC,
-    "TICKET_DOCKER_CONTEXT": "ctx-ticket",
 }
 
 
@@ -144,56 +150,47 @@ def test_run_env_does_not_override_the_declared_grammar(tmp_path, real_config):
     [
         ("SOC-1042", "/tickets/SOC-1042"),
         ("20260720T0000Z-sshd-672", "/tickets/20260720T0000Z-sshd-672"),
-        ("SOC 1", "/tickets/SOC%201"),
-        ("SOC-1?x=1", "/tickets/SOC-1%3Fx%3D1"),
-        ("SOC-1#frag", "/tickets/SOC-1%23frag"),
-        ("a/b", "/tickets/a%2Fb"),
-        ("../SOC-1", "/tickets/..%2FSOC-1"),
-        ("SOC-1\r\nHost: evil", "/tickets/SOC-1%0D%0AHost%3A%20evil"),
         ("SOC-λ42", "/tickets/SOC-%CE%BB42"),
+        ("SOC:1@x", "/tickets/SOC%3A1%40x"),
     ],
-    ids=["plain", "minted-case-id", "space", "query-delimiter", "fragment", "separator",
-         "dotdot", "crlf", "non-ascii"],
+    ids=["plain", "minted-case-id", "non-ascii", "reserved"],
 )
-def test_get_ticket_percent_encodes_the_key_into_the_path(monkeypatch, ctx, key, expect_path):
-    """The key is percent-encoded into `/tickets/{key}`, so no key can reshape the request."""
-    seen = {}
-
-    def fake_get_obj(c, cfg, path, system=None, params=None):
-        seen["path"] = path
-        return {"key": key, "status": "closed"}
-
-    monkeypatch.setattr(transport, "http_get_obj", fake_get_obj)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
+def test_get_ticket_percent_encodes_the_key_into_the_path(wire, ctx, key, expect_path):
+    """The key is percent-encoded into `/tickets/{key}`."""
     ticket_adapter.get_ticket(ctx, key=key)
-    assert seen["path"] == expect_path
+    assert wire.paths() == [expect_path]
 
 
-def test_reader_fetches_the_key_the_comment_action_writes(monkeypatch, ctx):
-    """The key is the alert's (the host mints none, #1359): the reader asks for the very path
-    segment the comment action posts to, whatever the key's URL-special characters. P3."""
-    reads, writes = [], []
+@pytest.mark.parametrize(
+    "key", ["SOC 1", "a/b", "../SOC-1", "..", "a\\b", "a;b", "SOC-1\r\nHost: evil", ""],
+    ids=["space", "separator", "dotdot-path", "dotdot", "backslash", "semicolon", "crlf", "empty"])
+@pytest.mark.parametrize("read", ["get_ticket", "case_opened_at", "read_case_comments"])
+def test_a_ticket_read_refuses_a_key_that_could_split_its_segment(wire, ctx, read, key):
+    """A case key that could split its path segment is refused before anything is sent, by every
+    read of a ticket, so no key can reshape the request (#1391 r5 T2, case keys per #1359 P3)."""
+    with pytest.raises(ConfinementFault, match="`key`"):
+        getattr(ticket_adapter, read)(ctx, key=key)
+    assert wire.sent == []
 
-    def fake_get_obj(c, cfg, path, system=None, params=None):
-        reads.append(path)
-        return {"key": "k", "status": "closed"}
 
-    def fake_write(c, *args, **kwargs):
-        # The host write entry (D-6); only the path it was handed matters here.
-        strings = [a for a in (*args, *kwargs.values()) if isinstance(a, str)]
-        writes.append(next(a for a in strings if a.startswith("/")))
-        return {"id": 1}
-
-    monkeypatch.setattr(transport, "http_get_obj", fake_get_obj)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-    monkeypatch.setattr(transport, "http_write", fake_write)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-    for key in ("SOC-1042", "SOC#42", "a?b=c", "50%", 'q"uote', "a+b"):
+def test_every_ticket_read_fetches_the_key_the_comment_action_writes(wire, ctx):
+    """The key is the alert's (the host mints none, #1359): every read of the case — the agent's
+    get-ticket and case-opened-at, and the host's read-back — asks for the very path segment the
+    comment action posts to, whatever the key's URL-special characters. P3."""
+    wire.answer = {"key": "k", "status": "open", "comments": [], "created": "2026-01-01T00:00:00Z"}
+    keys = ("SOC-1042", "SOC#42", "a?b=c", "50%", 'q"uote', "a+b", "INC,7*")
+    for key in keys:
         ticket_adapter.get_ticket(ctx, key=key)
+        ticket_adapter.case_opened_at(ctx, key=key)
+        ticket_adapter.read_case_comments(ctx, key=key)
         ticket_adapter.add_case_comment(ctx, key=key, body="note")
         segment = f"/tickets/{urllib.parse.quote(key, safe='')}"
-        assert reads[-1] == segment, f"the reader asks for {reads[-1]}, not {segment}"
-        assert writes[-1] == f"{segment}/comments", (
-            f"the comment action posts to {writes[-1]}, not {segment}/comments — the two sides "
+        *reads, written = wire.paths()[-4:]
+        assert reads == [segment] * 3, f"the reads ask for {reads}, not {segment}"
+        assert written == f"{segment}/comments", (
+            f"the comment action posts to {written}, not {segment}/comments — the two sides "
             "encode the key differently")
-    assert len(reads) == len(writes) == 6, (reads, writes)
+    assert [m for m, _ in wire.sent] == ["GET", "GET", "GET", "POST"] * len(keys), wire.sent
 
 
 @pytest.mark.parametrize(
@@ -205,20 +202,13 @@ def test_reader_fetches_the_key_the_comment_action_writes(monkeypatch, ctx):
     ],
     ids=["shell-metachars", "spaces-and-words", "url-delimiters"],
 )
-def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
-    seen = {}
-
-    def fake_request(c, cfg, url, system=None, method="GET", body=None):
-        seen["url"] = url
-        return {"tickets": [], "total": 0}
-
-    monkeypatch.setattr(transport, "_request", fake_request)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-    monkeypatch.setattr(transport, "load_config", lambda *a, **k: {"URL_BASE": "http://x"})  # lint-monkeypatch: ok — same
+def test_list_filters_ride_urlencoded_not_raw(wire, ctx, label, q):
+    wire.answer = {"tickets": [], "total": 0}
     ticket_adapter.list_tickets(ctx, label=label, q=q, require_closed=True)
 
-    url = seen["url"]
+    [(_, url)] = wire.sent
     base, _, query = url.partition("?")
-    assert base == "http://x/tickets", "a filter value escaped into the PATH"
+    assert urllib.parse.urlsplit(base).path == "/tickets", "a filter value escaped into the PATH"
     parsed = urllib.parse.parse_qs(query, strict_parsing=True)
     assert parsed["label"] == [label], "the label did not survive the round trip verbatim"
     assert parsed["q"] == [q], "the q value did not survive the round trip verbatim"
@@ -229,7 +219,7 @@ def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
 # the case-opened boundary verb
 
 
-def test_case_opened_at_yields_a_timestamp_and_never_the_record(monkeypatch, ctx):
+def test_case_opened_at_yields_a_timestamp_and_never_the_record(wire, ctx):
     record = {
         "key": "20260720T0000Z-sshd-672",
         "status": "in_progress",
@@ -239,8 +229,7 @@ def test_case_opened_at_yields_a_timestamp_and_never_the_record(monkeypatch, ctx
         "resolution": "ANSWER-KEY-RESOLUTION",
         "comments": [{"author": "soc", "body": "ANSWER-KEY-COMMENT"}],
     }
-    monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-                        lambda *a, **k: record)
+    wire.answer = record
     out = ticket_adapter.case_opened_at(ctx, key="20260720T0000Z-sshd-672")
     assert out == "2026-07-20T00:00:00+00:00"
     assert isinstance(out, str), "a non-scalar return would let the whole record through"
@@ -248,21 +237,18 @@ def test_case_opened_at_yields_a_timestamp_and_never_the_record(monkeypatch, ctx
         assert f"ANSWER-KEY-{marker}" not in out
 
 
-def test_case_opened_at_percent_encodes_the_key_like_every_other_reader(monkeypatch, ctx):
-    """A reader interpolating the key raw would reopen the request-reshaping hole (#684)."""
-    seen = {}
-
-    def fake_get_obj(_ctx, _config, path, **_kw):
-        seen["path"] = path
-        return {"created": "2026-01-01T00:00:00+00:00"}
-
-    monkeypatch.setattr(transport, "http_get_obj", fake_get_obj)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-    ticket_adapter.case_opened_at(ctx, key="SOC 42/x?y")
-    assert seen["path"] == f"/tickets/{urllib.parse.quote('SOC 42/x?y', safe='')}"
+def test_case_opened_at_reads_the_key_like_every_other_reader(wire, ctx):
+    """A reader interpolating the key raw would reopen the request-reshaping hole (#684): the key
+    is one encoded segment, and one that is not a segment is refused unsent (#1391 r5 T2)."""
+    wire.answer = {"created": "2026-01-01T00:00:00+00:00"}
+    ticket_adapter.case_opened_at(ctx, key="SOC:42")
+    assert wire.paths() == ["/tickets/SOC%3A42"]
+    with pytest.raises(ConfinementFault):
+        ticket_adapter.case_opened_at(ctx, key="SOC 42/x?y")
+    assert len(wire.sent) == 1
 
 
-def test_case_opened_at_faults_as_infra_when_the_store_cannot_date_the_case(monkeypatch, ctx):
-    monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-                        lambda *a, **k: {"key": "SOC-1", "status": "open"})
+def test_case_opened_at_faults_as_infra_when_the_store_cannot_date_the_case(wire, ctx):
+    wire.answer = {"key": "SOC-1", "status": "open"}
     with pytest.raises(TransportFault):
         ticket_adapter.case_opened_at(ctx, key="SOC-1")

@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 import logging
-import os
 import re
 import time
 from pathlib import Path
@@ -48,71 +46,19 @@ def test_lessons_follow_the_run_clock(tmp_path, advance):
         assert second[0] >= first[0], f"lesson time went backwards: {first} -> {second}"
 
 
-STAMPING_VERBS = [
-    ("container-inspect", {"container_id": "abc123def456"}),
-    ("proc-tree", {"host": "web-1"}),
-    ("passwd", {"host": "web-1"}),
-    ("authorized-keys", {"host": "web-1"}),
-    ("fim-checksum", {"host": "web-1", "path": "/etc/hosts"}),
-    ("package-list", {"host": "web-1"}),
-]
+# Retired by #1391 O5: host-state's natural-run captures were driven through a fake `docker`,
+# and the replay harness hands verbs no proxy address. A capture carrying no time of its own is
+# pinned by credential_proxy_1163/test_query_flow.py's o5 output test.
 
 
-def test_n3_every_host_state_capture_on_a_natural_run_is_stamped_by_the_platform_with_the_run_clock(
-        tmp_path, monkeypatch):
-    from defender._io import read_jsonl_rows
-    from defender.tests.learning.branch.test_947_clock import DOCKER_LOG, fake_docker
-
-    monkeypatch.setenv("PATH", f"{fake_docker(tmp_path)}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("DOCKER_CALL_LOG", str(tmp_path / DOCKER_LOG))
-    clock = C.FakeClock(START)
-    run_dir = _run_dir(tmp_path)
-    main = C.script(clock, (10, C.gather_turn("l-001", "host-state")), (0, C.DONE))
-    gather = C.script(clock, *[(7, C.query("host-state", verb, params))
-                               for verb, params in STAMPING_VERBS],
-                      (0, C.H.Turn(text="Summary: captured.")))
-
-    C.drive_clocked(run_dir, clock=clock, main=main, gather=gather)
-
-    rows = [r for r in read_jsonl_rows(run_dir / "executed_queries.jsonl")
-            if r.get("lead_id") == "l-001"]
-    assert [r["verb"] for r in rows] == [v for v, _ in STAMPING_VERBS], (
-        f"the six captures did not all run through the query tool: {rows}")
-    stamps = []
-    for row in rows:
-        assert row["exit_code"] == 0, f"a capture failed: {row}"
-        assert row["payload_path"], f"a capture failed: {row}"
-        payload = json.loads((run_dir / row["payload_path"]).read_text(encoding="utf-8"))
-        assert "captured_at" not in payload, (
-            f"the adapter stamped a time of its own (#1385 O7): {payload}")
-        stamps.append(C.instant(row.get("received_at")))
-    expected = [C.at(START, 10 + 7 * (k + 1)) for k in range(6)]
-    assert stamps == expected, (
-        "a host-state capture is not stamped by the platform with the run clock's reading at its "
-        f"call — expected {expected}, got {stamps}")
-
-
-def _channel_stamps(run_dir: Path, channel: str) -> list[dt.datetime | None]:
-    """Read denial timestamps or the platform's arrival stamps (`received_at`) of host-state
-    captures in call order."""
-    if channel == "denials":
-        return [C.instant(r.get("ts")) for r in C.denial_rows(run_dir) if r.get("verb") == "esql"]
-    from defender._io import read_jsonl_rows
-
-    stamps: list[dt.datetime | None] = []
-    for row in read_jsonl_rows(run_dir / "executed_queries.jsonl"):
-        if row.get("lead_id") != "l-001":
-            continue
-        assert row.get("exit_code") == 0, f"a capture failed: {row}"
-        assert row.get("payload_path"), f"a capture failed: {row}"
-        stamps.append(C.instant(row.get("received_at")))
-    return stamps
+def _channel_stamps(run_dir: Path) -> list[dt.datetime | None]:
+    """The denial timestamps, in call order."""
+    return [C.instant(r.get("ts")) for r in C.denial_rows(run_dir) if r.get("verb") == "esql"]
 
 
 @pytest.mark.parametrize(("channel", "steps"), [
     pytest.param("denials", (20, 30), id="denials-forward"),
     pytest.param("denials", (-3600, 20, -3600), id="denials-step-back"),
-    pytest.param("capture", (-3600, 20, -3600), id="captures-step-back"),
 ])
 def test_channel_stamps_follow_the_run_clock(tmp_path, monkeypatch, channel, steps):
     clock = C.FakeClock(START)
@@ -131,13 +77,6 @@ def test_channel_stamps_follow_the_run_clock(tmp_path, monkeypatch, channel, ste
             grant_of("gather", (("elastic", "query"),)))
         system = "elastic"
         calls = [C.query("elastic", "esql")] * len(steps)
-    else:
-        from defender.tests.learning.branch.test_947_clock import DOCKER_LOG, fake_docker
-
-        monkeypatch.setenv("PATH", f"{fake_docker(tmp_path)}{os.pathsep}{os.environ['PATH']}")
-        monkeypatch.setenv("DOCKER_CALL_LOG", str(tmp_path / DOCKER_LOG))
-        system = "host-state"
-        calls = [C.query("host-state", verb, params) for verb, params in STAMPING_VERBS[:3]]
     main = C.script(clock, (10, C.read_lesson(L1)), (0, C.gather_turn("l-001", system)),
                     (0, C.DONE))
     gather = C.script(clock, *zip(steps, calls, strict=True),
@@ -148,7 +87,7 @@ def test_channel_stamps_follow_the_run_clock(tmp_path, monkeypatch, channel, ste
     lesson = C.lesson_reads(run_dir, L1)
     assert lesson == [C.at(START, 10)], (
         f"positive control: the lessons row is not the run clock's reading (START+10): {lesson}")
-    stamps = _channel_stamps(run_dir, channel)
+    stamps = _channel_stamps(run_dir)
     assert len(stamps) == len(steps), f"{len(steps)} {channel} calls left {len(stamps)} stamps"
     if steps == (20, 30):
         assert stamps == [C.at(START, 30), C.at(START, 60)], stamps

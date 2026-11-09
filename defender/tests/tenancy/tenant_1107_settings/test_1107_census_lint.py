@@ -223,19 +223,19 @@ def test_whole_run_env_handed_to_an_in_tree_helper_that_looks_keys_up(tmp_path, 
     exported = "http://exported-s017:9"
     S.plant(tmp_path / "tenants", marker=marker)
     record = S.resolve(tmp_path / "tenants")
-    # The shim on the verb env's PATH receives the argv the transport forks.
-    shim = S.DockerShim(tmp_path / "shim", [S.answer('{"host": "web-1"}', "200")])
+    # The credential proxy's stand-in receives the request the transport sends (#1391 O1).
+    proxy = S.ProxyStandIn(tmp_path / "proxy", [S.answer('{"host": "web-1"}')])
     monkeypatch.setenv("CMDB_URL_BASE", exported)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    ctx = S.verb_context(record, run_dir, shim.env(CMDB_URL_BASE=exported))
+    ctx = S.verb_context(record, run_dir, {"CMDB_URL_BASE": exported},
+                         proxy_url=proxy.url, request_token="token-s017")
 
     cmdb_adapter.get_host(ctx, host="web-1")
 
-    calls = shim.calls()
-    assert calls, "the cmdb verb never reached the docker shim — nothing was observed"
-    url = S.curl_url(calls[-1]["argv"])
-    assert url is not None, f"the cmdb call did not use the tenant file's CMDB_URL_BASE: {url!r}"
-    assert url.startswith(f"http://cmdb-{marker}:8080/"), f"the cmdb call did not use the tenant file's CMDB_URL_BASE: {url!r}"
-    assert exported not in " ".join(calls[-1]["argv"]), (
-        f"the exported CMDB_URL_BASE reached the call's argv: {calls[-1]['argv']}")
+    sent = proxy.requests()
+    assert sent, "the cmdb verb never reached the proxy's stand-in — nothing was observed"
+    url = str(sent[-1]["url"])
+    assert url.startswith(S.T1106.default_base(marker, "cmdb") + "/"), (
+        f"the cmdb call did not use the base its declaration names: {url!r}")
+    assert exported not in repr(sent[-1]), f"the exported CMDB_URL_BASE reached the request: {sent[-1]}"

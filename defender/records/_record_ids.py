@@ -70,6 +70,13 @@ class MembershipId(UuidId):
     domain = "membership"
 
 
+class CredentialId(UuidId):
+    """A program credential's id; for an OAuth client it is also the realm client's id (#1307)."""
+
+    __slots__ = ()
+    domain = "program credential"
+
+
 class AlertId(UuidId):
     __slots__ = ()
     domain = "alert"

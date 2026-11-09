@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.kit.access import CALLER_GRACE_SEC
 from defender.kit.faults import TransportFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A

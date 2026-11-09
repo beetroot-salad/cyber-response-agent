@@ -2,7 +2,7 @@
 
 `POST /v1/request` with `Authorization: Bearer <request token>` and the JSON body
 `{system, method, url, headers, body}` (`headers` a name -> value object, `body` text or null).
-The answer is always HTTP 200 in the reply format of `defender._proxy_client` (#1412): the
+The answer is always HTTP 200 in the reply format of `defender.kit.proxy_client` (#1412): the
 upstream's body as body frames, passed on as it arrives, then one final record `{status, headers,
 fault, detail, system_side, sent, body_whole, reader_fault}`. `status` is the upstream's status (null when nothing was
 sent), `headers` its headers, `body_whole` whether the frames carried its whole body; `fault` is
@@ -55,7 +55,7 @@ from starlette.types import Receive, Scope
 from starlette.types import Send as AsgiSend
 
 from defender import _clock, _io, tenancy
-from defender._proxy_client import PROXY_PATH, REPLY_CONTENT_TYPE, FinalRecord, encode_body, encode_final
+from defender.kit.proxy_client import PROXY_PATH, REPLY_CONTENT_TYPE, FinalRecord, encode_body, encode_final
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
 from defender.kit.access import (
     CALLER_GRACE_SEC, HEADER, OAUTH_CLIENT_CREDENTIALS, PROXY_OVERHEAD_SEC, AccessDeclaration, Auth)

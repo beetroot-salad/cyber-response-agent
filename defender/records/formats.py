@@ -118,9 +118,13 @@ if TYPE_CHECKING:
         unwrap_tenant_root as unwrap_tenant_root,
     )
     from defender.records._provenance import (
+        CODE_COPY_MARKER as CODE_COPY_MARKER,
         KnowledgeRevision as KnowledgeRevision,
+        ORIGIN_CODE_COPY as ORIGIN_CODE_COPY,
         RunProvenance as RunProvenance,
+        BUILD_COMMIT_ENV as BUILD_COMMIT_ENV,
         capture_tree as capture_tree,
+        is_build_commit as is_build_commit,
         read_provenance as read_provenance,
     )
     from defender.records._report import (
@@ -149,6 +153,7 @@ if TYPE_CHECKING:
     from defender.records._record_ids import (
         UUID_PATTERN as UUID_PATTERN,
         AlertId as AlertId,
+        CredentialId as CredentialId,
         IdRefused as IdRefused,
         InvestigationId as InvestigationId,
         LearningJobId as LearningJobId,
@@ -177,13 +182,13 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("PinUnreadable", "pin_text", "read_pin",), "_knowledge_pin"),
     **dict.fromkeys(("FRESH", "OPERATOR", "TRANSIENT", "api_knowledge", "knowledge_status", "read_knowledge_status",), "_knowledge_status"),
     **dict.fromkeys(("CommitRecord", "DataRoot", "DraftsRoot", "EpisodesRoot", "ExportsRoot", "KnowledgeLock", "LearningRoot", "LegacyEpisodesRoot", "LegacyRunsRoot", "RunsBase", "SessionsRoot", "TenantRecord", "TenantRoot", "WorktreesRoot", "unwrap_commit_record", "unwrap_data_root", "unwrap_drafts_root", "unwrap_episodes_root", "unwrap_exports_root", "unwrap_knowledge_lock", "unwrap_learning_root", "unwrap_runs_base", "unwrap_tenant_root",), "_locations"),
-    **dict.fromkeys(("KnowledgeRevision", "RunProvenance", "capture_tree", "read_provenance",), "_provenance"),
+    **dict.fromkeys(("BUILD_COMMIT_ENV", "CODE_COPY_MARKER", "KnowledgeRevision", "ORIGIN_CODE_COPY", "RunProvenance", "capture_tree", "is_build_commit", "read_provenance",), "_provenance"),
     **dict.fromkeys(("ReportRead", "ReportUnreadable", "UNKNOWN_DISPOSITION", "parse_report_text", "read_report", "repeats_disposition", "require_report",), "_report"),
     **dict.fromkeys(("OID", "RUN_ID_ALLOWED", "is_valid_run_id", "run_id_fault", "uuid_id_fault",), "_run_id"),
     **dict.fromkeys(("BranchError", "holds_content", "inherited_artifact_names", "lead_dirs", "refuse_seeded_run_dir",), "_seeded"),
     **dict.fromkeys(("parse_mapping",), "_alert_mapping_file"),
     **dict.fromkeys(("TenantId", "TenantRefused",), "_tenant_id"),
-    **dict.fromkeys(("UUID_PATTERN", "AlertId", "IdRefused", "InvestigationId", "LearningJobId", "MembershipId", "UserId",
+    **dict.fromkeys(("UUID_PATTERN", "AlertId", "CredentialId", "IdRefused", "InvestigationId", "LearningJobId", "MembershipId", "UserId",
                      "UuidId",), "_record_ids"),
     **dict.fromkeys(("wire_digest",), "_wire"),
 }

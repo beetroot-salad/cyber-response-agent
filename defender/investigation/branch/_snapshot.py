@@ -21,7 +21,7 @@ from defender.records import session_store
 from ..run_state import RunState
 from defender.systems.system_status import down_from_snapshot
 from ._frontier import lead_records, source_session
-from ._spec import BranchError, BranchSpec
+from ._spec import REFUSED_SOURCE_CHANGED, REFUSED_UNREADABLE_FORK_SNAPSHOT, BranchError, BranchSpec
 
 _logger = logging.getLogger(__name__)
 
@@ -207,7 +207,8 @@ class ForkSnapshot:
         reading = parse_iso_utc(raw)
         if reading is None:
             raise BranchError(f"the fork snapshot's run-clock reading {raw!r} is not an ISO-8601 "
-                              "timestamp, so the branch point has no moment")
+                              "timestamp, so the branch point has no moment",
+                              kind=REFUSED_UNREADABLE_FORK_SNAPSHOT)
         return reading.astimezone(UTC).replace(microsecond=0)
 
     @property
@@ -289,7 +290,7 @@ class ForkSnapshot:
                 raise BranchError(
                     f"the source's {name} no longer opens on the {length} byte(s) it held at the "
                     f"branch point (it holds {len(data)}) — the arm cannot be restored to what "
-                    "the source held there")
+                    "the source held there", kind=REFUSED_SOURCE_CHANGED)
             out[name] = prefix
         return out
 
@@ -301,7 +302,7 @@ class ForkSnapshot:
             raise BranchError(
                 f"the source's {what} is not the one it held at the branch point "
                 f"({'gone' if data is None else 'changed'}) — the arm cannot be restored to "
-                "what the source held there")
+                "what the source held there", kind=REFUSED_SOURCE_CHANGED)
         return data
 
     @staticmethod
@@ -312,11 +313,13 @@ class ForkSnapshot:
             handle = record()
             named = f"{what} (`{handle.path.name}`)"
         except OSError as error:
-            raise BranchError(f"the source's {what} could not be named: {error}") from error
+            raise BranchError(f"the source's {what} could not be named: {error}",
+                              kind=REFUSED_SOURCE_CHANGED) from error
         try:
             return _bytes_of(handle)
         except OSError as error:
-            raise BranchError(f"the source's {named} could not be read: {error}") from error
+            raise BranchError(f"the source's {named} could not be read: {error}",
+                              kind=REFUSED_SOURCE_CHANGED) from error
 
 
 def _rows_of(data: bytes) -> list[dict]:
@@ -362,12 +365,13 @@ def load(store: Any, session_id: str, request: int) -> ForkSnapshot | None:
         digest = body["document"]
     except (ValueError, KeyError, TypeError) as error:
         raise BranchError(
-            f"the fork snapshot at request {request} cannot be read: {error!r}") from error
+            f"the fork snapshot at request {request} cannot be read: {error!r}",
+            kind=REFUSED_UNREADABLE_FORK_SNAPSHOT) from error
     document = None
     if digest is not None:
         document = store.fork_snapshot_blob(digest)
         if document is None or _sha(document.encode("utf-8")) != digest:
             raise BranchError(
                 f"the fork snapshot at request {request} names a document the store does not "
-                "hold as recorded")
+                "hold as recorded", kind=REFUSED_UNREADABLE_FORK_SNAPSHOT)
     return ForkSnapshot(body, document)

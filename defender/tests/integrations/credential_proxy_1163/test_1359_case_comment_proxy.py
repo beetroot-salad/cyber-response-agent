@@ -180,18 +180,18 @@ def test_no_write_back_token_is_minted_for_a_tenant_with_no_case_file(tmp_path, 
     assert [kw.get("request_token") for kw in writer.calls] == [None]
 
 
-@pytest.mark.parametrize("arm", ["no sign login", "signer config fault", "signer transport fault"])
+# The "no sign login" arm is retired with #1391: every system is proxied, so a tenant with no sign login
+# is refused at run start (test_run_start_tokens R7) rather than running on without a write-back token.
+@pytest.mark.parametrize("arm", ["signer config fault", "signer transport fault"])
 def test_r4_no_signing_access_mints_nothing_the_run_goes_on_and_the_leg_says_so(
         tmp_path, data_root, arm):
-    """With no signing access (no sign login, or a signer fault) nothing is minted, the run goes on and the
-    receipt says so; no store is reached. R4, D-11."""
+    """With a signer fault nothing is minted, the run goes on and the receipt says so; no store is
+    reached. R4, D-11."""
     _case_tenant(data_root, C.CASE_SYSTEM_TICKET)
-    witness = A.MarkedSigner()  # would mint if asked: the no-login arm must never ask
-    seams: dict[str, Any] = {"no_generation": True, "signer": witness}  # no live generation: no sign login (R4)
-    if arm != "no sign login":
-        seams = {"signer": A.RaisingSigner(ConfigFault("OpenBao is sealed") if "config" in arm
-                                           else TransportFault("OpenBao is unreachable")),
-                 "directory": _records(data_root, tmp_path)[0].directory}
+    seams: dict[str, Any] = {
+        "signer": A.RaisingSigner(ConfigFault("OpenBao is sealed") if "config" in arm
+                                  else TransportFault("OpenBao is unreachable")),
+        "directory": _records(data_root, tmp_path)[0].directory}
     with H.upstream() as up:
         rec, rc, refused = _drive_real_leg(tmp_path, data_root, **seams)
     assert (rc, refused) == (0, None), "the run was refused instead of going on"
@@ -202,8 +202,6 @@ def test_r4_no_signing_access_mints_nothing_the_run_goes_on_and_the_leg_says_so(
     assert got["url"] is None, got
     assert "write-back token" in got["reason"], got
     assert up.seen == []
-    if arm == "no sign login":
-        assert witness.payloads == [], "a mint was attempted with no sign login"
 
 
 @pytest.mark.parametrize("spoil", ["bad config.env", "bad case-record file"])

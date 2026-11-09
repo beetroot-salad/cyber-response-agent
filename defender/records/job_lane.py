@@ -1,6 +1,14 @@
 """The job lane's door to one tenant's runs container (#1342 M1): every host file the worker and
 the job entry share, keyed by `(data root, tenant id)` and opened without accepting the tenant.
 
+Learning jobs (#1344) share three host-held records here, keyed by the learning job's id and
+written by its children, read by the worker: the job entry's progress record
+(`LearningProgress`, replaced whole), its end record (`LearningEnd`, create-only) and the
+post-step's record (`PostStepRecord`). Each has one parser, and text that is not a record of its
+shape parses as no record (`None`), which the worker treats like an absent one. A family-less
+post-step (#1344 amendment 1: no job to follow) keys its record by the tenant's own id instead
+(`post_step_key`), one record per tenant replaced at each check.
+
 The worker writes a job's launch record and alert file here before it starts the child; the
 child's job entry opens the same door first thing — before tenant acceptance, so a refusal there
 still leaves its job-end record — checks the launch record, and writes the job-end record as it
@@ -13,9 +21,12 @@ no-follow, size-limited read off that held folder; every write is create-only.""
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 import stat
+import sys
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 
@@ -23,7 +34,8 @@ from defender import _io
 from defender.records._errors import RunRefused
 from defender.records._held import hold_level, level_fault
 from defender.records._id import RunId
-from defender.records.job_facts import (
+from defender.records.job_facts import (  # noqa: F401 — the worker's reasons, re-exported
+    EXITED_WITHOUT_RESULT, EXPIRED, LEASE_LAPSED, RETRY_CAP, WORKER_ERROR,
     BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED, SETUP_CRASHED, SETUP_DONE, SETUP_REFUSED,
 )
 from defender.records._knowledge_status import UNREADABLE, api_knowledge, knowledge_status
@@ -137,6 +149,195 @@ class RunCost:
 
     usd: float
     complete: bool
+# -- learning jobs (#1344): the vocabulary and the three records -----------------------------------
+
+#: How the job entry ended, in its end record. `stopped` is a hand-back (the worker retries it,
+#: using an attempt); the other three are the row's own terminal statuses.
+LEARNING_COMPLETED, LEARNING_SKIPPED, LEARNING_FAILED, LEARNING_STOPPED = (
+    "completed", "skipped", "failed", "stopped")
+
+#: The reasons the job entry decides (r5's outcome table, plus `entry_error`), by the status each
+#: belongs to. `completed` and `stopped` carry no reason.
+NO_FORK_POINT, HISTORY_UNREADABLE, FAMILY_UNUSABLE = (
+    "no_fork_point", "history_unreadable", "family_unusable")
+CONTROL_FAILED, LAUNCH_REFUSED, VERIFY_REFUSED = "control_failed", "launch_refused", "verify_refused"
+SOURCE_UNAVAILABLE, JUDGE_FAILED, ENTRY_ERROR = "source_unavailable", "judge_failed", "entry_error"
+SKIPPED_BY_THE_ENTRY = frozenset({NO_FORK_POINT, HISTORY_UNREADABLE, FAMILY_UNUSABLE})
+FAILED_BY_THE_ENTRY = frozenset({CONTROL_FAILED, LAUNCH_REFUSED, VERIFY_REFUSED, SOURCE_UNAVAILABLE,
+                                 JUDGE_FAILED, ENTRY_ERROR})
+#: The reasons only the worker records (no end record carries them): in `job_facts`, which the
+#: store reads without loading the record readers.
+
+_END_REASONS: dict[str, frozenset[str | None]] = {
+    LEARNING_COMPLETED: frozenset({None}),
+    LEARNING_STOPPED: frozenset({None}),
+    LEARNING_SKIPPED: frozenset(SKIPPED_BY_THE_ENTRY),
+    LEARNING_FAILED: frozenset(FAILED_BY_THE_ENTRY),
+}
+
+#: The largest findings count an end record may carry: what the row's `findings_count` column
+#: (a 32-bit `INTEGER`) holds. A larger one is no count, so the record is not one.
+MAX_FINDINGS_COUNT = 2**31 - 1
+
+_PROGRESS_FIELDS = frozenset({"fork_message_id", "stage", "sibling_cost_usd"})
+_END_FIELDS = frozenset({"status", "reason", "message", "fork_message_id", "stage",
+                         "findings_count", "sibling_cost_usd"})
+_POST_STEP_FIELDS = frozenset({"published", "refused"})
+_POST_STEP_PENDING_FIELDS = frozenset({"pending"})
+
+
+def _optional_text(value: object) -> bool:
+    return value is None or isinstance(value, str)
+
+
+def _cost(value: object) -> bool:
+    """A cost in dollars: a finite, non-negative JSON number (never a bool). An integer beyond
+    the float range is not one (`math.isfinite` would overflow on it)."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    if isinstance(value, int) and abs(value) > sys.float_info.max:
+        return False
+    return math.isfinite(value) and value >= 0
+
+
+def _record_object(text: str, fields: frozenset[str]) -> dict | None:
+    """`text` as a JSON object of exactly `fields`, or `None`."""
+    obj, unreadable = _io.load_json_artifact(text)
+    if unreadable is not None or not isinstance(obj, dict) or set(obj) != fields:
+        return None
+    return obj
+
+
+@dataclass(frozen=True)
+class LearningProgress:
+    """The job entry's progress record (`<runs>/<job id>.learning-progress.json`): the fork it
+    picked (a message id as text, `None` until picked), its stage, and what its siblings have cost
+    so far (dollars, partial: each sibling's own main session and descendants). Replaced whole as
+    each changes; the worker copies it to the row on its loop."""
+
+    fork_message_id: str | None
+    stage: str | None
+    sibling_cost_usd: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not (_optional_text(self.fork_message_id) and _optional_text(self.stage)
+                and _cost(self.sibling_cost_usd)):
+            raise ValueError(f"not a learning progress record: {self!r}")
+
+    def text(self) -> str:
+        return json.dumps({"fork_message_id": self.fork_message_id, "stage": self.stage,
+                           "sibling_cost_usd": self.sibling_cost_usd})
+
+    @classmethod
+    def parse(cls, text: str) -> LearningProgress | None:
+        """The record `text` holds, or `None` when it is not one of this shape."""
+        obj = _record_object(text, _PROGRESS_FIELDS)
+        if obj is None:
+            return None
+        try:
+            return cls(fork_message_id=obj["fork_message_id"], stage=obj["stage"],
+                       sibling_cost_usd=obj["sibling_cost_usd"])
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+
+@dataclass(frozen=True)
+class LearningEnd:
+    """The job entry's end record (`<runs>/<job id>.learning-end.json`), written create-only at
+    every exit: the status and reason it decided (a reason only for `skipped` and `failed`, one
+    of that status's own), a message from the entry's own code (required for `skipped` and
+    `failed`; never run text), and the final pick, stage, findings count and sibling cost."""
+
+    status: str
+    reason: str | None
+    message: str | None
+    fork_message_id: str | None
+    stage: str | None
+    findings_count: int = 0
+    sibling_cost_usd: float = 0.0
+
+    def __post_init__(self) -> None:
+        allowed = _END_REASONS.get(self.status) if isinstance(self.status, str) else None
+        if allowed is None or self.reason not in allowed:
+            raise ValueError(f"not an end the job entry decides: {self.status!r}/{self.reason!r}")
+        if not (_optional_text(self.message) and _optional_text(self.fork_message_id)
+                and _optional_text(self.stage) and _cost(self.sibling_cost_usd)):
+            raise ValueError(f"not a learning end record: {self!r}")
+        if not isinstance(self.findings_count, int) or isinstance(self.findings_count, bool) \
+                or not 0 <= self.findings_count <= MAX_FINDINGS_COUNT:
+            raise ValueError(f"not a findings count: {self.findings_count!r}")
+        if self.reason is not None and not (self.message or "").strip():
+            raise ValueError(f"a {self.status} end names why in its message")
+
+    def text(self) -> str:
+        return json.dumps({"status": self.status, "reason": self.reason, "message": self.message,
+                           "fork_message_id": self.fork_message_id, "stage": self.stage,
+                           "findings_count": self.findings_count,
+                           "sibling_cost_usd": self.sibling_cost_usd})
+
+    @classmethod
+    def parse(cls, text: str) -> LearningEnd | None:
+        """The record `text` holds, or `None` when it is not one the job entry could write."""
+        obj = _record_object(text, _END_FIELDS)
+        if obj is None:
+            return None
+        try:
+            return cls(**{name: obj[name] for name in _END_FIELDS})
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+
+@dataclass(frozen=True)
+class PostStepRecord:
+    """The post-step's record (`<runs>/<key>.post-step.json`, `post_step_key`: the job it
+    followed, or the tenant's own id for a family-less one): the pending jobs whose findings it
+    published and those it refused for good (their rows failed validation). A job in neither
+    stays pending (a queue-level or transient failure). `waiting` (amendment 3): whether, after
+    its gate ran, the gate would still find something to do; a record without it says so, which
+    keeps the tenant's check clock running."""
+
+    published: tuple[str, ...] = ()
+    refused: tuple[str, ...] = ()
+    waiting: bool = True
+
+    def __post_init__(self) -> None:
+        for ids in (self.published, self.refused):
+            if not isinstance(ids, tuple) or not all(isinstance(i, str) for i in ids):
+                raise ValueError(f"not a post-step record: {self!r}")
+        if set(self.published) & set(self.refused):
+            raise ValueError("a job is published or refused, never both")
+        if not isinstance(self.waiting, bool):
+            raise ValueError(f"not a post-step record: {self!r}")
+
+    def text(self) -> str:
+        # `waiting` is written only when it says something: its absence is the safe reading.
+        return json.dumps({"published": list(self.published), "refused": list(self.refused),
+                           **({} if self.waiting else {"waiting": False})})
+
+    @classmethod
+    def of(cls, published: Sequence[str], refused: Sequence[str], *, waiting: bool = True) -> PostStepRecord:
+        return cls(published=tuple(published), refused=tuple(refused), waiting=waiting)
+
+    @classmethod
+    def parse(cls, text: str) -> PostStepRecord | None:
+        """The record `text` holds, or `None` when it is not one of this shape."""
+        obj = _record_object(text, _POST_STEP_FIELDS) or _record_object(text, _POST_STEP_FIELDS | {"waiting"})
+        if obj is None or not all(isinstance(obj[k], list) for k in _POST_STEP_FIELDS):
+            return None
+        try:
+            return cls.of(obj["published"], obj["refused"], waiting=obj.get("waiting", True))
+        except ValueError:
+            return None
+
+
+def post_step_key(tenant_id: object, job_id: object | None) -> RunId:
+    """The name a post-step's record is kept under (#1344): the job it followed, or, for a
+    family-less post-step (amendment 1: `job_id` None), the tenant's own id. Both are canonical
+    UUID text, so the name has the job lane's `<id><suffix>` shape; a tenant's id never names a
+    job or a run in its own runs folder, so the two never meet, and the family-less record is one
+    per tenant, replaced at each check rather than one more file per check. The one place the
+    choice is made: the post-step writes, and the worker reads, through it."""
+    return _run_id(str(tenant_id) if job_id is None else job_id)
 
 
 def _run_id(raw: object) -> RunId:
@@ -158,9 +359,12 @@ class JobLane:
         self.tenant_id = tenant_id
 
     @classmethod
-    def open(cls, data_root: DataRoot, tenant_id: object) -> JobLane:
-        """`<data root>/<tenant_id>/runs`, held no-follow from the tenant's folder; never made.
-        The tenant is not accepted here: only its id's grammar is judged."""
+    def open(cls, data_root: DataRoot, tenant_id: object, *, make: bool = False) -> JobLane:
+        """`<data root>/<tenant_id>/runs`, held no-follow from the tenant's folder. Never made,
+        except with `make` (a learning post-step, #1344, whose record must land for a tenant whose
+        runs folder nothing has made yet): then a missing one is made below the held tenant
+        folder, never through a link. The tenant is not accepted here: only its id's grammar is
+        judged."""
         try:
             tenant = TenantId(tenant_id)
         except TenantRefused as refused:
@@ -174,6 +378,11 @@ class JobLane:
         except OSError as exc:
             raise JobLaneRefused(f"the tenant folder {folder} {level_fault(exc)}") from None
         try:
+            if make:
+                try:
+                    top.mkdir(_RUNS)  # lint-unguarded-tree-write: ok — `Held.mkdir`, the rooted mkdir below the tenant folder held no-follow
+                except OSError as exc:
+                    raise JobLaneRefused(f"the runs folder {runs} {level_fault(exc)}") from None
             held = hold_level(top, _RUNS, runs, io=_io, what="the runs folder")
         except FileNotFoundError:
             raise JobLaneRefused(f"the runs folder {runs} is absent: tenant setup makes it, and "
@@ -265,6 +474,61 @@ class JobLane:
         read = self._held.view().read(self._paths(_run_id(run_id)).job_end().name)
         return None if read.text is None else JobEnd.parse(read.text)
 
+    # -- a learning job's three records (#1344) ------------------------------------------------------
+
+    def write_learning_progress(self, job_id: object, progress: LearningProgress) -> None:
+        """The progress record, replaced whole (a reader sees the old record or the new one)."""
+        self._held.write(self._paths(_run_id(job_id)).learning_progress().name, progress.text(),
+                         mode="replace")
+
+    def read_learning_progress(self, job_id: object) -> LearningProgress | None:
+        """The progress record, or `None` when it is absent, unreadable or not of its shape."""
+        read = self._held.view().read(self._paths(_run_id(job_id)).learning_progress().name)
+        return None if read.text is None else LearningProgress.parse(read.text)
+
+    def write_learning_end(self, job_id: object, end: LearningEnd) -> None:
+        """The end record, create-only: one already there is `FileExistsError` and is kept."""
+        self._held.write(self._paths(_run_id(job_id)).learning_end().name, end.text(),
+                         mode="create")
+
+    def read_learning_end(self, job_id: object) -> LearningEnd | None:
+        """The end record, or `None` when it is absent, unreadable or not one the job entry
+        writes (the worker treats all three alike)."""
+        read = self._held.view().read(self._paths(_run_id(job_id)).learning_end().name)
+        return None if read.text is None else LearningEnd.parse(read.text)
+
+    def write_post_step(self, job_id: object | None, record: PostStepRecord) -> None:
+        """The post-step's record for the job it followed (`None`: a family-less post-step, kept
+        under the tenant's id, `post_step_key`), replaced whole."""
+        self._held.write(self._paths(post_step_key(self.tenant_id, job_id)).post_step().name,
+                         record.text(), mode="replace")
+
+    def write_post_step_pending(self, job_id: object | None, pending: Sequence[str]) -> None:
+        """The jobs the worker hands the post-step for `job_id` (as `write_post_step` takes it)
+        to publish, replaced whole before it starts: a file, not the command line, so their
+        number never limits the start (#1446 review)."""
+        if not all(isinstance(j, str) for j in pending):
+            raise ValueError("pending job ids are text")
+        self._held.write(self._paths(post_step_key(self.tenant_id, job_id)).post_step_pending().name,
+                         json.dumps({"pending": list(pending)}), mode="replace")
+
+    def read_post_step_pending(self, job_id: object | None) -> tuple[str, ...] | None:
+        """The jobs handed to the post-step for `job_id`, or `None` when the record is absent,
+        unreadable or not of its shape."""
+        read = self._held.view().read(self._paths(post_step_key(self.tenant_id, job_id)).post_step_pending().name)
+        if read.text is None:
+            return None
+        obj = _record_object(read.text, _POST_STEP_PENDING_FIELDS)
+        if obj is None or not isinstance(obj["pending"], list) or not all(isinstance(j, str) for j in obj["pending"]):
+            return None
+        return tuple(obj["pending"])
+
+    def read_post_step(self, job_id: object | None) -> PostStepRecord | None:
+        """The post-step's record (`job_id` as `write_post_step` takes it), or `None` when it is
+        absent, unreadable or not of its shape."""
+        read = self._held.view().read(self._paths(post_step_key(self.tenant_id, job_id)).post_step().name)
+        return None if read.text is None else PostStepRecord.parse(read.text)
+
     # -- what the run left ------------------------------------------------------------------------
 
     def run_started(self, run_id: object) -> bool:
@@ -353,3 +617,36 @@ class JobLane:
         except (OSError, sqlite3.Error, StoreError, ValueError) as fault:
             raise CostUnreadable(f"run {run_id}: its session database {database} cannot be read: "
                                  f"{fault!r}") from None
+
+
+def sibling_cost(store: object, session_id: str) -> float:
+    """What one sibling cost (#1344 O13): its own main session `session_id` and every session
+    forked from it, at any depth, priced from their own model responses — never the prefix a
+    fork inherited, never the source's sessions or any other sibling's, and never the
+    questioner, oracle or judge, which are outside it. Siblings fork the source's database, so
+    the lineage there has a parent; unlike `JobLane.cost`, a forked lineage is what this reads.
+    `store` is an open session store holding `session_id`; a session it does not hold is
+    `CostUnreadable`."""
+    from defender.configuration import billed_usage, usage_cost
+    from defender.records import session_store
+
+    try:
+        sessions = session_store.list_sessions(store)
+        children: dict[str | None, list[str]] = {}
+        for row in sessions:
+            children.setdefault(row.parent_session_id, []).append(row.session_id)
+        if session_id not in {row.session_id for row in sessions}:
+            raise CostUnreadable(f"session {session_id} is not in the store")
+        lineage, frontier = set(), [session_id]
+        while frontier:
+            current = frontier.pop()
+            if current in lineage:
+                continue
+            lineage.add(current)
+            frontier.extend(children.get(current, ()))
+        return sum(usage_cost(m.model_name or "", billed_usage(m.usage))
+                   for s in sorted(lineage) for m in session_store.own_responses(store, s))
+    except CostUnreadable:
+        raise
+    except (OSError, sqlite3.Error, StoreError, ValueError) as fault:
+        raise CostUnreadable(f"session {session_id}: its cost cannot be read: {fault!r}") from None

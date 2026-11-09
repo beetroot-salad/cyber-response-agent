@@ -15,7 +15,8 @@ from defender.kit.access import secret_fields
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
 from defender.records.formats import (
-    AlertId, AlertMappingFault, InvestigationId, LearningJobId, MembershipId, TenantId, UserId, check_mapping,
+    AlertId, AlertMappingFault, CredentialId, InvestigationId, LearningJobId, MembershipId, TenantId, UserId,
+    check_mapping,
 )
 
 InvestigationStatus = Literal["queued", "running", "completed", "unparseable", "failed", "aborted"]
@@ -29,8 +30,9 @@ LearningJobStatus = Literal["queued", "running", "completed", "failed", "skipped
 RECORD_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 RecordId = Annotated[str, Field(pattern=RECORD_ID_PATTERN)]
 
-def _refuse_unstorable_id(value: str) -> str:
-    """Refuse text PostgreSQL cannot hold, here rather than at the store (#1379 O1a)."""
+def _must_be_storable(value: str) -> str:
+    """Refuse text PostgreSQL cannot hold, here rather than at the store (#1379 O1a; a program's name and a
+    credential's, #1307 A2)."""
     if not postgres_can_hold(value):
         raise ValueError("it holds a NUL or a lone surrogate, which cannot be stored")
     return value
@@ -43,7 +45,7 @@ ClientRequestId = Annotated[str, Field(
     description="Minted once per user action. Repeating the request with it answers the latest "
                 "attempt of the request this id started; a request answered with an investigation "
                 "already live started nothing, so repeating it is a new request.",
-), AfterValidator(_refuse_unstorable_id)]
+), AfterValidator(_must_be_storable)]
 
 
 def _not_a_number(value: object) -> object:
@@ -170,7 +172,14 @@ class LearningJob(BaseModel):
         description="`auto` when the investigation's completion queued it; `explicit` for a re-learn."
     )
     stage: str | None = None
-    status_detail: str | None = Field(default=None, description="A skip reason or error summary.")
+    reason: str | None = Field(default=None, description=(
+        "Why a `skipped` or `failed` job ended, one fixed word: `no_fork_point`, `history_unreadable`, "
+        "`expired`, `family_unusable`, `control_failed`, `launch_refused`, `verify_refused`, "
+        "`source_unavailable`, `judge_failed`, `entry_error`, `exited_without_result`, `worker_error`, "
+        "`lease_lapsed` or `retry_cap`; null otherwise."))
+    message: str | None = Field(default=None, description=(
+        "A sentence of our own code's about the ending (never run or launcher text); a `completed` job "
+        "with no findings carries the judge's verdict word here."))
     created_at: Instant
     finished_at: Instant | None = None
 
@@ -349,7 +358,75 @@ class InvitationRef(BaseModel):
 
 
 class Me(BaseModel):
+    """A person's view of themselves."""
+
+    kind: Literal["person"] = "person"
     user: MeUser
     tenants: list[TenantRef]
     administrator: bool = Field(description="Whether this session holds platform administrator powers.")
     invitations: list[InvitationRef] = Field(description="Open invitations addressed to this user.")
+
+
+class ProgramRef(BaseModel):
+    id: UserId
+    display_name: str
+
+
+class CredentialRef(BaseModel):
+    """The credential a program's request came in on: never its secret."""
+
+    id: CredentialId
+    expires_at: Instant
+
+
+class ProgramMe(BaseModel):
+    """A program's view of itself: who it is, the one tenant it belongs to, and the credential it used."""
+
+    kind: Literal["program"] = "program"
+    program: ProgramRef
+    tenant: TenantRef
+    credential: CredentialRef
+
+
+class ProgramCreate(BaseModel):
+    """Make a program: a non-human caller of the tenant (a SOAR, a script)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: Annotated[str, Field(min_length=1, max_length=200), AfterValidator(_must_be_storable)]
+
+
+class Program(BaseModel):
+    id: UserId
+    display_name: str
+    created_by: UserId | None = Field(description="The administrator who made it.")
+    created_at: Instant
+
+
+class CredentialCreate(BaseModel):
+    """Issue a credential for a program: an API key, or an OAuth client of the programs realm."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["key", "oauth_client"]
+    name: Annotated[str, Field(min_length=1, max_length=200), AfterValidator(_must_be_storable)]
+    expires_at: Instant | None = Field(default=None, description="Between 7 and 365 days from now; 90 days when absent.")
+
+
+class Credential(BaseModel):
+    """A credential as its administrators see it: facts only, never a secret or a hash."""
+
+    id: CredentialId
+    kind: Literal["key", "oauth_client"]
+    name: str
+    state: Literal["pending", "live", "revoked"]
+    created_by: UserId | None
+    created_at: Instant
+    expires_at: Instant
+    last_used_at: Instant | None
+
+
+class CredentialIssued(Credential):
+    """The create answer: the only time the secret is shown."""
+
+    secret: str

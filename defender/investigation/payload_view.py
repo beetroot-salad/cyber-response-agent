@@ -103,7 +103,7 @@ def completeness(obj: Any) -> Completeness:
     # One direction only: `row_count` above the rows present declares a cap, but equality
     # declares nothing (`esql_payload` sets `row_count = len(values)`, which may itself be ES's
     # 1000-row cap or a `LIMIT`), so it stays `unknown`. A real ES|QL total needs response
-    # headers, which `docker_exec_curl` does not capture.
+    # headers, which the shared transport does not hand on.
     if (
         row_count is not None
         and (rows := _rows_for(obj, row_count)) is not None

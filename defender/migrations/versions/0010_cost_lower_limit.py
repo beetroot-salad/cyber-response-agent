@@ -1,7 +1,7 @@
 """Whether an investigation's cost is only a lower limit (#1377 S2).
 
-Revision ID: 0008_cost_lower_limit
-Revises: 0007_alert_mapping
+Revision ID: 0010_cost_lower_limit
+Revises: 0009_programs
 
 A cost is exact unless the host knows spend may be missing from it (a failed spend write, a run
 killed before it reported, a row ended without its holder's final figure). Rows from before this
@@ -13,8 +13,8 @@ only ever stands beside a number, so the row refuses `true` beside a null cost.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0008_cost_lower_limit"
-down_revision = "0007_alert_mapping"
+revision = "0010_cost_lower_limit"
+down_revision = "0009_programs"
 
 TABLE, SCHEMA = "investigations", "jobs"
 

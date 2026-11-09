@@ -394,9 +394,14 @@ def _driver_call(recording: Recording, main: RoleModel, gather: RoleModel,
     return investigate
 
 
+def _no_scrub(*_a: Any, **_kw: Any) -> None:
+    return None
+
+
 def lifecycle(recording: Recording, *, main_turns: list[Any], clock: SteppingClock,
-              registry_cls: type | None = None) -> Callable[..., dict[str, Any]]:
-    """The fixed arm composition, for either run."""
+              registry_cls: type | None = None, scrub: Callable[..., None] = _no_scrub) -> Callable[..., dict[str, Any]]:
+    """The fixed arm composition, for either run. `scrub`: the run tree's reap scan (none by default; a caller whose
+    run must read as walked, e.g. a sibling a family verifies and archives, passes `box.scrub`)."""
     import defender.run as run_mod
     from defender import box as box_mod
     from defender.tests.e2e._replay_harness import _no_docker_daemon
@@ -411,7 +416,7 @@ def lifecycle(recording: Recording, *, main_turns: list[Any], clock: SteppingClo
         investigate=functools.partial(run_mod._drive_investigation, **drive_kw),
         start_box=functools.partial(box_mod.start_box, docker=_no_docker_daemon),
         stop_box=lambda *_a, **_k: None,
-        scrub=lambda *_a, **_k: None,
+        scrub=scrub,
     )
 
 
@@ -428,8 +433,8 @@ def _no_queue(*_a: Any, **_kw: Any) -> bool:
 
 
 def run_main(argv: list[str], recording: Recording, *, main_turns: list[Any],
-             clock: SteppingClock, registry_cls: type | None = None) -> None:
-    """Run the production CLI composition and record its return code or refusal."""
+             clock: SteppingClock, registry_cls: type | None = None, scrub: Callable[..., None] = _no_scrub) -> None:
+    """Run the production CLI composition and record its return code or refusal (`scrub`: as `lifecycle`'s)."""
     import defender.run as run_mod
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
 
@@ -438,7 +443,7 @@ def run_main(argv: list[str], recording: Recording, *, main_turns: list[Any],
         # launches it.
         recording.exit_code = run_mod.main(
             argv, directory=directory_for_argv(argv), lifecycle=lifecycle(recording, main_turns=main_turns, clock=clock,
-                                      registry_cls=registry_cls),
+                                      registry_cls=registry_cls, scrub=scrub),
             preflight=_no_preflight, visualize=_no_page, enqueue=_no_queue,
             publish=in_process_publish())
     except SystemExit as refused:

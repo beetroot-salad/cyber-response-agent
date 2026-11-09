@@ -18,12 +18,13 @@ from defender.tests.support.shared._postgres1339 import VERSION_TABLE, database,
 
 #: The schemas PostgreSQL itself owns; everything else in a database is ours to compare.
 _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
-IDENTITY_TABLES = {"users", "memberships", "sessions"}  # #1214: `tenants` moved to `tenancy`
-JOBS_TABLES = {"alerts", "investigations"}  # #1342 (#1345 r5: the mapping table is a tenant record, in `tenancy`)
+IDENTITY_TABLES = {"users", "memberships", "sessions", "program_credentials", "warning_deliveries"}  # #1214: `tenants` moved to `tenancy`; #1307 adds credentials and their warning deliveries
+JOBS_TABLES = {"alerts", "investigations", "learning_jobs", "learning_checks"}  # #1342, #1344 (amendment 3: learning_checks) (#1345 r5: the mapping table is a tenant record, in `tenancy`)
 UNKNOWN_REVISION = "f00dfeedbeef"
 #: #1345 r5 Upgrade: the migration after `0006_job_leases`. r5 names no id: this one is DESIGN-IMPLIED for the code stage.
 ALERT_MAPPING_REVISION = "0007_alert_mapping"
-COST_LOWER_LIMIT_REVISION = "0008_cost_lower_limit"  # #1377
+#: #1344: the learning jobs table, on the alert-mapping revision; head. The handoff names it.
+LEARNING_JOBS_REVISION = "0008_learning_jobs"
 ROOT = Path(__file__).resolve().parents[3]  # the checkout under test, put first on the child's path
 
 
@@ -90,7 +91,7 @@ def test_the_history_has_exactly_one_head():
 
 @pytest.mark.postgres
 def test_upgrading_an_empty_database_records_head_and_creates_identitys_tables(empty_database):
-    """Empty -> head: the version table in `public` holds head; identity's four tables are in `identity` (O1)."""
+    """Empty -> head: the version table in `public` holds head; identity's five tables are in `identity` (O1)."""
     from defender.migrations import head, upgrade
 
     upgrade(empty_database)
@@ -330,21 +331,24 @@ def test_the_dev_command_without_a_database_refuses_loudly():
 def test_the_jobs_revision_sits_directly_on_the_sign_login_revision():
     """The history is the baseline, `0002_tenancy`, `0003_sign_login`, then `0004_jobs` (#1342 O1; r6: tenants are
     #1214's records; jobs follows #1163's revision, so the history stays one line), then #1382's `0005_uuid_ids`,
-    #1343's `0006_job_leases`, #1345's `0007_alert_mapping` and #1377's `0008_cost_lower_limit` as head. (The name predates
-    them; the node id is kept. #1377 Design "Data and API": a migration after the latest.)"""
+    #1343's `0006_job_leases`, #1345's `0007_alert_mapping` and #1344's `0008_learning_jobs` (#1307's `0009_programs` above it). (The name predates
+    them; the node id is kept.)"""
     from defender.migrations import _scripts, head
 
     scripts = _scripts()
-    assert head() == COST_LOWER_LIMIT_REVISION
-    assert scripts.get_revision(COST_LOWER_LIMIT_REVISION).down_revision == ALERT_MAPPING_REVISION
+    # `0009_programs` (#1307, design: data model, new columns) now sits on 0008, and later revisions may follow: the line pinned
+    # here is the one from the baseline up to 0008, read from the bottom, with a single head above it.
+    assert len(scripts.get_heads()) == 1
+    assert head() in {r.revision for r in scripts.walk_revisions()}
+    assert scripts.get_revision(LEARNING_JOBS_REVISION).down_revision == ALERT_MAPPING_REVISION
     assert scripts.get_revision(ALERT_MAPPING_REVISION).down_revision == "0006_job_leases"
     assert scripts.get_revision("0006_job_leases").down_revision == "0005_uuid_ids"
     assert scripts.get_revision("0005_uuid_ids").down_revision == "0004_jobs"
     assert scripts.get_revision("0004_jobs").down_revision == "0003_sign_login"
     assert scripts.get_revision("0003_sign_login").down_revision == "0002_tenancy"
     assert scripts.get_revision("0002_tenancy").down_revision == "0001_baseline"
-    assert [r.revision for r in scripts.walk_revisions()] == [
-        COST_LOWER_LIMIT_REVISION, ALERT_MAPPING_REVISION, "0006_job_leases", "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy",
+    assert [r.revision for r in scripts.walk_revisions()][-8:] == [
+        LEARNING_JOBS_REVISION, ALERT_MAPPING_REVISION, "0006_job_leases", "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy",
         "0001_baseline"]
 
 

@@ -82,7 +82,7 @@ class _Tail(SpecTail):
 
 
 def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None, directory: Any = None, during: Any = None,
-           tails: list[Any] | None = None, sample: Any = None):
+           tails: list[Any] | None = None, sample: Any = None, signer: Any = None):
     """The REAL `run.main` over one alert under `--update-ticket`, with the tail's seams
     injected and this arm's own learning state; returns (the order the steps ran in, main's
     return value or what it raised, the curation requests queued)."""
@@ -118,7 +118,8 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None, directory: An
             outcome: Any = run_py.main(argv, directory=given, lifecycle=lifecycle,
                                        visualize=tail.visualize,
                                        ticket_writer=tail, enqueue=tail.enqueue,
-                                       publish=in_process_publish())
+                                       publish=in_process_publish(),
+                                       **({} if signer is None else {"signer": signer}))
         except Exception as exc:  # noqa: BLE001 — a raising step's propagation is observed
             outcome = exc
     finally:
@@ -183,8 +184,11 @@ def test_the_run_end_curation_request_uses_the_runs_tenant_with_no_second_read(t
         run_sync(twin.request_offboard(tenant_id, now=CREATED))
 
     tails: list[Any] = []
+    # The case system is proxied (#1391), so the record step mints a write-back token at run end; a
+    # signer that needs no login keeps that mint's own record read (#1163 R4d) out of this count.
+    from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
     order, outcome, queued = _drive(tmp_path / "offboarded-mid-run", monkeypatch, directory=directory,
-                                    during=offboard, tails=tails)
+                                    during=offboard, tails=tails, signer=FakeSigner())
     assert outcome == 0, f"a completing run exits 0: {outcome!r}"
     assert at_flip, "control: the run reached its lifecycle"
     assert at_flip[0] >= 1, "control: the run read its tenant record before the flip"

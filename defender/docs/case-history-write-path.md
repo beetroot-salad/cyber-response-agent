@@ -20,8 +20,7 @@ case; a person closes it.
   moves its status. What makes a close MEAN "a person did this" is structural: the comment action
   is not a verb (`kit.verbs.COMMENT_ACTION`, refused in any adapter's `VERBS`), so no grant, query
   tool or model reaches it; and its call carries the host's write-back token, the only token with
-  `rw`, matched by the proxy against the system's declared write routes (the docker route has no
-  token layer; there the transport's write-endpoint table holds the first layer alone). The writer
+  `rw`, matched by the proxy against the system's declared write routes. The writer
   does not read the case back before it appends (#1221 A1).
 
 - **The product owns what and when; the adapter owns how (#1359 P1).** Exit-class rules, comment
@@ -59,9 +58,9 @@ case; a person closes it.
   template; the drivers and the report schema never bind to ticket field names.
 
 - **One transport.** The comment goes through the shared adapter transport's host write entry
-  (`_stub_transport.http_write`: docker route or proxy route, any 2xx is success, a 4xx is an
+  (`kit.transport.host_write`, through the proxy: any 2xx is success, a 4xx is an
   `UpstreamFault` carrying the store's status, a 5xx or unreachable store a `TransportFault`).
-  There is no second copy of either route in the writer.
+  There is no second copy of the route in the writer.
 
 - **Never breaks the run.** Every failure is a WARN, a receipt and a return, never a raise/exit.
   The write-back token is minted at the record step; a run that cannot sign goes on and the

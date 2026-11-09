@@ -27,7 +27,7 @@ BAD = {
 
 
 #: What each defect's reason must name, so a system down for being unimplemented does not pass.
-WORDS = {"url-base": ("http-proxy", "URL_BASE"), "bastion": ("http-proxy", "BASTION_HOST"),
+WORDS = {"url-base": ("access.yaml", "URL_BASE"), "bastion": ("access.yaml", "BASTION_HOST"),
          "malformed": ("access.yaml",), "duplicate-key": ("access.yaml", "duplicate"),
          "no-declaration": ("access.yaml",)}
 
@@ -36,6 +36,8 @@ def _down(tmp_path, data_root, env, decl):
     files = {"settings/systems/identity/config.env": env}
     if decl is not None:
         files.update(H.access_files("identity", decl))
+    else:  # the committed fixture declares identity; this row takes the declaration away
+        files["settings/systems/identity/access.yaml"] = None
     with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
         record = T.run_record(t)  # resolving the record never raises on a bad declaration
         roster = read_roster(adapters_under(DEFENDER))
@@ -45,7 +47,7 @@ def _down(tmp_path, data_root, env, decl):
 @pytest.mark.parametrize("name", [n for n in BAD if n != "good"])
 def test_a5_a_bad_http_proxy_system_is_down_at_run_start_and_the_rest_are_up(
         tmp_path, data_root, name):
-    """URL_BASE or BASTION_HOST beside `http-proxy`, a malformed, duplicate-key or missing
+    """URL_BASE or BASTION_HOST (keys identity does not read), a malformed, duplicate-key or missing
     declaration: that system is down with a ConfigFault's reason, others stay up. A5, #1256."""
     down = _down(tmp_path, data_root, *BAD[name])
     assert "identity" in down, f"{name}: identity was judged usable"
@@ -68,7 +70,7 @@ def test_a5_run_main_continues_with_the_bad_system_down(tmp_path, data_root):
     from defender.tests.integrations.credential_proxy_1163 import test_run_start_tokens as R
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
-    R._plant(data_root, proxy=("identity",))
+    S.plant(data_root, table=R.TABLE)  # every system declared; identity's is then broken
     folder = data_root / S.PLAYGROUND_ID / "knowledge"
     (folder / "settings/systems/identity/access.yaml").write_text("access: [bad\n", encoding="utf-8")
     rec = S.RunRecorder(tmp_path / "run")

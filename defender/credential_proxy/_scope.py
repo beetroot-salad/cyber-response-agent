@@ -3,7 +3,8 @@ one declared base, the route against the declared reads and writes and the token
 
 A URL is judged as written, never normalised: another scheme, host or port, a login part, or a
 path outside the base is `ConfigFault` (a correct adapter builds its URL from the same base); a
-`.` or `..` segment, spelled out or percent-encoded, is `ConfinementFault` wherever it is.
+`.` or `..` segment, spelled out or percent-encoded, or a segment that decodes to hold a `/` or
+`\\` (`kit.paths`, #1391 r5 O-T5), is `ConfinementFault` wherever it is.
 Routes are paths relative to the base; `*` stands for exactly one non-empty segment."""
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
 from defender.kit.access import AccessDeclaration, Route
+from defender.kit.paths import holds_separator
 from defender.credential_proxy._refusal import CONFIG, CONFINEMENT, Refused
 from defender.credential_proxy._tokens import READ_WRITE
 
@@ -60,6 +62,10 @@ def locate(declaration: AccessDeclaration, url: str) -> Target:
     base_path = base.path.rstrip("/")
     if not (path == base_path or path.startswith(base_path + "/")):
         raise Refused(CONFIG, "the URL path is not under the declared base")
+    if any(holds_separator(unquote(segment)) for segment in path[len(base_path):].split("/")):
+        # A server that decodes the path before routing would split it there (#1391 r5 O-T5).
+        # Only the part under the base: the tenant's own base may name an escaped `/`.
+        raise Refused(CONFINEMENT, "a URL path segment holds an encoded `/` or `\\`")
     sent = f"{base.scheme}://{base.netloc}{path}" + (f"?{asked.query}" if asked.query else "")
     return Target(url=sent, path=path[len(base_path):] or "/")
 

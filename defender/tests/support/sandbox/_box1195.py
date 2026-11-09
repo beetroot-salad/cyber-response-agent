@@ -40,9 +40,10 @@ POINTER = "origin/main @ "
 
 #: A batch box's docker calls from its post-create stop on (`FakeDaemon.calls_from_the_first_stop`)
 #: when the batch's first run's start is refused: the stop and its proof; the run's check
-#: (`exited`), the refused start and its proof; the best-effort stop and its proof; the batch-end
-#: removal. Nothing between the post-create stop and the run's check: no call outside a run.
-REFUSED_FIRST_RUN = ["stop", "status", "status", "start", "status", "stop", "status", "rm"]
+#: (`exited`), the refused attached start (#1344 amendment 2: its client's exit is the proof); the
+#: best-effort stop and its proof; the batch-end removal. Nothing between the post-create stop and
+#: the run's check: no call outside a run.
+REFUSED_FIRST_RUN = ["stop", "status", "status", "attach", "stop", "status", "rm"]
 
 
 def spawn_timeout() -> subprocess.TimeoutExpired:
@@ -167,12 +168,13 @@ def caught(fn: Callable[[], object]) -> BaseException | None:
 # ---------------------------------------------------------------------------------------
 
 #: The names `FakeDaemon.steps` gives docker calls (anything else in the log is a mark).
-_DOCKER_STEPS = frozenset({"create", "rm", "status", "start", "stop", "inspect", "exec"})
+_DOCKER_STEPS = frozenset({"create", "rm", "status", "start", "attach", "stop", "inspect", "exec"})
 
 def _step_of(argv: list[str]) -> str:
     """A docker call's name in `FakeDaemon.steps`: its verb, `create` for `docker run` or `docker
-    create`, `attach` for the run box's held `docker start -a -i` (#1343 B10; not a batch start, so
-    no run window opens on it), and `status` for an inspect of the status."""
+    create`, `attach` for a held `docker start -a -i` (the run box's start, #1343 B10; each run
+    window's start of a request-lane box, #1344 amendment 2), `start` for a plain `docker start`
+    (a request-lane box's one start for its probes), and `status` for an inspect of the status."""
     verb = argv[1] if len(argv) > 1 else ""
     if verb in ("run", "create"):
         return "create"
@@ -218,8 +220,10 @@ class FakeDaemon(AttachedStartSeam):
         self._seam_fault(argv)
         daemon_mod.log(self.dir, argv)
 
-    def _landed(self, argv: list[str]) -> None:
-        daemon_mod.attach(self.dir, argv)
+    def _landed(self, argv: list[str]) -> tuple[int, str] | None:
+        """An attached start is a start (#1344 amendment 2: each run window's): its faults and
+        on-start writes apply, and a start that does not hold ends its client at once."""
+        return daemon_mod.attach(self.dir, argv)
 
     def _seam_fault(self, argv: list[str]) -> None:
         """Raise instead of answering, when a `seam_raises` fault is due at this call."""
@@ -319,12 +323,14 @@ class FakeDaemon(AttachedStartSeam):
         self._edit(edit)
 
     def refuse_start(self, *, at: Iterable[int] | None = None, times: int = 1) -> None:
-        """`docker start` fails (rc 1, the box stays as it was): the starts numbered `at`
-        (from 1), else the next `times` (-1: every one)."""
+        """`docker start` fails (rc 1, the box stays as it was; an attached start's client exits
+        with it): the starts numbered `at` (from 1; plain and attached counted together), else
+        the next `times` (-1: every one)."""
         self._verb_fault("start", "refuse", at, times)
 
     def start_takes_no_effect(self, *, at: Iterable[int] | None = None, times: int = 1) -> None:
-        """`docker start` answers rc 0 and changes nothing (as `refuse_start` picks)."""
+        """`docker start` answers rc 0 and changes nothing (an attached start's client exits 0, no
+        box having come up to attach to), as `refuse_start` picks."""
         self._verb_fault("start", "noop", at, times)
 
     def refuse_stop(self, *, at: Iterable[int] | None = None, times: int = 1) -> None:
@@ -411,7 +417,7 @@ class FakeDaemon(AttachedStartSeam):
 
     def steps(self, *, of: str | None = None) -> list[str]:
         """The log as one sequence: each mark, and each docker call as `create`, `rm`,
-        `status` (an inspect of the status), `start`, `stop` or its verb. With `of`, only the
+        `status` (an inspect of the status), `start`, `attach`, `stop` or its verb. With `of`, only the
         calls naming that container, and the marks."""
         out: list[str] = []
         for argv in self.calls():
@@ -436,11 +442,12 @@ class FakeDaemon(AttachedStartSeam):
         return [a[a.index("--name") + 1] for a in self.calls() if a[:2] in (["docker", "run"], ["docker", "create"])]
 
     def windows(self) -> list[list[str]]:
-        """The marks inside each run window: from a `docker start` to the next `docker stop`."""
+        """The marks inside each run window: from an attached `docker start -a -i` (a window's start,
+        #1344 amendment 2) to the next `docker stop`. A plain start opens none."""
         out: list[list[str]] = []
         current: list[str] | None = None
         for step in self.steps():
-            if step == "start":
+            if step == "attach":
                 current = []
             elif step == "stop":
                 if current is not None:

@@ -119,10 +119,9 @@ class CaseRunRecorder(S.RunRecorder):
         return fixture_run(run_dir)
 
 
-def comment_calls(shim: S.DockerShim) -> list[list[str]]:
-    """The docker argvs whose curl POSTs to a `/comments` URL."""
-    return [c["argv"] for c in shim.calls()
-            if "POST" in c["argv"] and (S.curl_url(c["argv"]) or "").endswith("/comments")]
+def comment_calls(proxy: S.ProxyStandIn) -> list[dict[str, Any]]:
+    """The requests that POST to a `/comments` path."""
+    return [r for r in proxy.requests() if r["method"] == "POST" and r["path"].endswith("/comments")]
 
 
 def plant_record(run_dir: Path, *, key: str | None = TICKET_KEY) -> None:

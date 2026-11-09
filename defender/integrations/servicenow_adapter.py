@@ -10,7 +10,6 @@ the request against the system's declared write routes. The adapter grants the a
 from __future__ import annotations
 
 import re
-import urllib.parse
 from typing import TYPE_CHECKING
 
 # Workspace root on sys.path so `defender.*` namespace imports resolve when the verb registry
@@ -22,8 +21,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender.kit.verbs import CaseComments, VerbContext
-from defender.integrations import _stub_transport as transport
-from defender.kit.access import HTTP_PROXY
+from defender.kit import transport
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -45,11 +43,6 @@ _READ_PAGE = 100
 
 def _servicenow_settings(tenant: TenantRecord) -> dict[str, str]:
     """The system's config over the run's record, or the `ConfigFault` for why it is unusable."""
-    method = transport.record_entry(tenant, SYSTEM).get(f"{PREFIX}_TRANSPORT")
-    if method != HTTP_PROXY:
-        raise ConfigFault(
-            f"{PREFIX}_TRANSPORT={method!r}: the ready-made ServiceNow adapter is reached only "
-            f"through the credential proxy — set {PREFIX}_TRANSPORT to {HTTP_PROXY!r}")
     config = transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
     if not _TABLE_NAME.fullmatch(config["TABLE"]):
         raise ConfigFault(
@@ -67,14 +60,14 @@ def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adap
 def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  # lint-dup: ok — every case-recording adapter exports the host's comment action under this one name (#1359)
     """The host's one write to a case (#1359): add the plain-text `body` as a work note on the
     record whose sys_id is `key`. Returns None: there is no link. Not a verb (never in `VERBS`).
-    The key is one percent-encoded path segment, so it cannot reshape the request. Faults are the
+    The key is one path segment, so it cannot reshape the request. Faults are the
     shared classes: a 4xx is an `UpstreamFault` carrying the status; a 404 also says records are
     addressed by sys_id."""
     config = _servicenow_settings(ctx.tenant)
-    quoted = urllib.parse.quote(key, safe="")
     try:
-        transport.http_write(ctx, config, "PATCH", f"/api/now/table/{config['TABLE']}/{quoted}",
-                             {"work_notes": body}, system=SYSTEM)
+        transport.host_write(ctx, SYSTEM, "PATCH", "/api/now/table/{table}/{key}",
+                        {"table": config["TABLE"], "key": transport.CaseKey(key)}, body={"work_notes": body},
+                        timeout_sec=transport.timeout_of(config))
     except UpstreamFault as fault:
         if fault.status != _NOT_FOUND:
             raise
@@ -91,10 +84,11 @@ def read_case_comments(ctx: VerbContext, *, key: str) -> CaseComments:  # lint-d
     config = _servicenow_settings(ctx.tenant)
     if "^" in key:
         raise TransportFault("the record's key holds `^`, so its journal cannot be queried")
-    page = transport.http_get_obj(
-        ctx, config, "/api/now/table/sys_journal_field", system=SYSTEM,
-        params={"sysparm_query": f"element_id={key}^element=work_notes^ORDERBYDESCsys_created_on",
-                "sysparm_fields": "value", "sysparm_limit": _READ_PAGE})
+    page = transport.request(
+        ctx, SYSTEM, "GET", "/api/now/table/sys_journal_field",
+        query={"sysparm_query": f"element_id={key}^element=work_notes^ORDERBYDESCsys_created_on",
+               "sysparm_fields": "value", "sysparm_limit": _READ_PAGE},
+        timeout_sec=transport.timeout_of(config))
     rows = page.get("result")
     if not isinstance(rows, list):
         raise TransportFault(f"the journal read of {key} carries no `result` list")

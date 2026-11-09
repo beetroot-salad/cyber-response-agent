@@ -1,4 +1,4 @@
-"""#1377's migration (`0008_cost_lower_limit`, on `0007_alert_mapping`): the investigation row's `cost_is_lower_limit`."""
+"""#1377's migration (`0010_cost_lower_limit`, on #1307's `0009_programs`; renumbered after merging #1344 and #1307): the investigation row's `cost_is_lower_limit`."""
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +15,7 @@ def test_s2_b3_rows_whose_holder_wrote_its_figure_read_exact_and_an_ended_row_wi
     """After the migration a row ended before 0006 (accounting back-filled), an unknown cost and a never-started row read exact; a row started, ended with a cost and no accounting reads "at least"; the column is a NOT NULL boolean with no server default. (S2, B3)"""
     from alembic import command
 
-    from defender.migrations import _config, head, upgrade
+    from defender.migrations import _config, upgrade
 
     config = _config()
     config.attributes["dsn"] = empty_database
@@ -29,7 +29,9 @@ def test_s2_b3_rows_whose_holder_wrote_its_figure_read_exact_and_an_ended_row_wi
     execute(empty_database, "UPDATE jobs.investigations SET started_at = NULL WHERE id = %s", (_inv("cancelled"),))
     upgrade(empty_database)
 
-    assert head() == "0008_cost_lower_limit"
+    from defender.migrations import _scripts
+
+    assert _scripts().get_revision("0010_cost_lower_limit").down_revision == "0009_programs"
     assert sorted(execute(empty_database, "SELECT cost_usd, cost_is_lower_limit FROM jobs.investigations"),
                   key=lambda r: (r[0] is None, r[0])) == [(0, False), (2.5, False), (3.5, False), (None, False)], (
         "the migration stores no mark: B2 derives it")

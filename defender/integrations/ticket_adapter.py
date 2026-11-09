@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import urllib.parse
-
 # Workspace root on sys.path so `defender.*` namespace imports resolve when the verb registry
 # loads this module BY PATH.
 import sys as _sys
@@ -22,7 +20,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender.kit.verbs import CaseComments, VerbContext, verb
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.kit.faults import TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -42,11 +40,15 @@ def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module 
     return transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
 
 
+def _timeout(ctx: VerbContext) -> int:  # lint-dup: ok — per-module alias over the shared transport.timeout_of
+    return transport.timeout_of(_config(ctx))
+
+
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """This system's settings check (#1256 O-5): every `ConfigFault` a verb here can raise —
-    `_config`'s keys, then the docker transport's access method — raised over the run's
-    record, or None when the system is usable."""
-    transport.check_docker_curl_settings(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
+    `_config`'s keys and the access declaration — raised over the run's record, or None when
+    the system is usable."""
+    transport.check_settings_of(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
 
 
 def key_pattern(ctx: VerbContext) -> str:
@@ -60,6 +62,14 @@ def key_pattern(ctx: VerbContext) -> str:
     return _config(ctx)["KEY_PATTERN"]
 
 
+def _fetch_ticket(ctx: VerbContext, key: str) -> dict:
+    """Ticket `key` as the store answers it: the one read of a ticket. The key is a case key
+    (#1359 P3), escaped into its segment and refused only for what could split one, so every
+    read and the comment action reach the same ticket for the same key."""
+    return transport.request(ctx, SYSTEM, "GET", "/tickets/{key}", {"key": transport.CaseKey(key)},
+                             timeout_sec=_timeout(ctx))
+
+
 def case_opened_at(ctx: VerbContext, *, key: str) -> str:
     """When the case `key` was opened, as the store's own `created` timestamp — never the
     record.
@@ -71,9 +81,7 @@ def case_opened_at(ctx: VerbContext, *, key: str) -> str:
     A 404 is an `UpstreamFault` (exit 1): the case was never filed. A ticket without a string
     `created` fails as infra, so the recency screen never silently stands down.
     """
-    payload = transport.http_get_obj(
-        ctx, _config(ctx), f"/tickets/{urllib.parse.quote(key, safe='')}", system=SYSTEM,
-    )
+    payload = _fetch_ticket(ctx, key)
     created = payload.get("created")
     if not isinstance(created, str) or not created:
         raise TransportFault(
@@ -84,7 +92,7 @@ def case_opened_at(ctx: VerbContext, *, key: str) -> str:
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, _config(ctx), SYSTEM)
+    return transport.health_check(ctx, SYSTEM, timeout_sec=_timeout(ctx))
 
 
 @verb(wrapper_only=("require_closed",))
@@ -112,7 +120,8 @@ def list_tickets(
         params["label"] = label
     if q:
         params["q"] = q
-    return transport.http_get(ctx, _config(ctx), "/tickets", system=SYSTEM, params=params or None)
+    return transport.request(ctx, SYSTEM, "GET", "/tickets", query=params or None,
+                             timeout_sec=_timeout(ctx), answer="any")
 
 
 @verb(wrapper_only=("require_closed",))
@@ -122,13 +131,10 @@ def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> d
     `require_closed` confirms a cited closed case; refusing here (exit 1) means the scoped read
     cannot reach the in-flight ticket even by key.
 
-    The key is percent-encoded into the path, matching `ticket_writer`. Raw interpolation
-    would send minted keys to the wrong URL, and a key with `?`/`#`/CR-LF would reshape the
-    HTTP request.
+    The key is escaped into one path segment, and one holding `/`, `\\`, `;`, whitespace or a
+    control character is refused unsent, so no key can reshape the request.
     """
-    payload = transport.http_get_obj(
-        ctx, _config(ctx), f"/tickets/{urllib.parse.quote(key, safe='')}", system=SYSTEM,
-    )
+    payload = _fetch_ticket(ctx, key)
     if require_closed and payload.get("status") != "closed":
         raise UpstreamFault(
             f"{key} is status={payload.get('status')!r}, not 'closed' (--require-closed)"
@@ -141,31 +147,30 @@ def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> d
 COMMENT_AUTHOR = "defender"
 
 
-def _ticket_link(config: dict[str, str], key: str) -> str:
-    return f"{config['URL_BASE'].rstrip('/')}/tickets/{urllib.parse.quote(key, safe='')}"
+def _ticket_link(ctx: VerbContext, key: str) -> str:
+    return transport.link(ctx.tenant, SYSTEM, "/tickets/{key}", {"key": transport.CaseKey(key)})
 
 
 def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  # lint-dup: ok — every case-recording adapter exports the host's comment action under this one name (#1359)
     """The host's one write to a case (#1359): add the plain-text `body` as a comment on ticket
     `key`, and return the ticket's web link. Not a verb (never in `VERBS`): no role or query tool
-    can reach it. The key is one percent-encoded path segment, so it cannot reshape the request.
-    Faults are the shared classes: a 4xx is an `UpstreamFault` carrying the status."""
-    config = _config(ctx)
-    quoted = urllib.parse.quote(key, safe="")
-    transport.http_write(ctx, config, "POST", f"/tickets/{quoted}/comments",
-                         {"author": COMMENT_AUTHOR, "body": body}, system=SYSTEM)
-    return _ticket_link(config, key)
+    can reach it. The key is one path segment, so it cannot reshape the request. Faults are the
+    shared classes: a 4xx is an `UpstreamFault` carrying the status."""
+    transport.host_write(ctx, SYSTEM, "POST", "/tickets/{key}/comments", {"key": transport.CaseKey(key)},
+                    body={"author": COMMENT_AUTHOR, "body": body}, timeout_sec=_timeout(ctx))
+    return _ticket_link(ctx, key)
 
 
 def read_case_comments(ctx: VerbContext, *, key: str) -> CaseComments:  # lint-dup: ok — every case-recording adapter's read goes by this one name (#1374)
     """The case's comments, for the host's read-back after a comment whose answer was lost. Not a
     verb (never in `VERBS`). A comment it cannot read is left out. A read with no comment list is
     a `TransportFault`."""
-    comments = get_ticket(ctx, key=key).get("comments")
+    ticket = _fetch_ticket(ctx, key)
+    comments = ticket.get("comments")
     if not isinstance(comments, list):
         raise TransportFault(f"ticket {key}'s read carries no comment list")
     texts = tuple(c["body"] for c in comments if isinstance(c, dict) and isinstance(c.get("body"), str))
-    return CaseComments(texts=texts, link=_ticket_link(_config(ctx), key))
+    return CaseComments(texts=texts, link=_ticket_link(ctx, key))
 
 
 VERBS = {

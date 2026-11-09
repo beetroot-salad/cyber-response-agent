@@ -510,6 +510,12 @@ _OWNER_NON_RECORD_EXPORTS: frozenset[str] = frozenset({
     # tool-return part, a refusal sentence, and the tenant vocabulary.
     "LEAD_ID_RE", "LEAD_ID_BODY", "GATHER_RAW_SHAPE", "GATE_METADATA_KEY",
     "ALIAS_READ_REFUSAL", "CASE_STABLE_REQUIRED",
+    # A learning job's status and reason words (#1344, records/job_lane.py): vocabulary of the
+    # job's row and end record, never a file or folder name.
+    "LEARNING_COMPLETED", "LEARNING_SKIPPED", "LEARNING_FAILED", "LEARNING_STOPPED",
+    "NO_FORK_POINT", "HISTORY_UNREADABLE", "FAMILY_UNUSABLE", "CONTROL_FAILED", "LAUNCH_REFUSED",
+    "VERIFY_REFUSED", "SOURCE_UNAVAILABLE", "JUDGE_FAILED", "ENTRY_ERROR",
+    "EXPIRED", "EXITED_WITHOUT_RESULT", "WORKER_ERROR", "LEASE_LAPSED", "RETRY_CAP",
 })
 
 #: The owner modules' dotted names (`defender.records`, `defender.tenancy._tenant`, ...): arm

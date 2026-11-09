@@ -1,4 +1,4 @@
-"""#1412 the proxy's reply format, as `defender._proxy_client` owns it: body frames then exactly one
+"""#1412 the proxy's reply format, as `defender.kit.proxy_client` owns it: body frames then exactly one
 final frame, length-delimited, so upstream bytes are only ever data (P2) and anything malformed is
 refused. Generated inputs use fixed seeds; the layout itself is the implementer's."""
 from __future__ import annotations

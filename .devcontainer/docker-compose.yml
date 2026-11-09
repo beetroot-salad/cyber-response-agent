@@ -203,6 +203,8 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: dev-only-change-me
     volumes:
       - ./keycloak/realm-defender.json:/opt/keycloak/data/import/realm-defender.json:ro
+      # The programs' realm (#1307): the OAuth clients of program credentials and nothing else.
+      - ./keycloak/realm-defender-programs.json:/opt/keycloak/data/import/realm-defender-programs.json:ro
     ports:
       # Loopback only: the sign-in pages are for this machine's browser, not the network.
       - "127.0.0.1:${KEYCLOAK_HTTP_PORT:-8080}:8080"
