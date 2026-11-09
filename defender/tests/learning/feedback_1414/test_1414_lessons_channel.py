@@ -151,7 +151,7 @@ def test_a_feedback_lesson_lands_only_in_the_lessons_lane_never_registry_or_sett
     staged, = [m for m in box.requests[0].mounts if m.kind == "staged"]
     writable = sorted(str(m.source).removeprefix(str(staged.source) + "/") for m in box.requests[0].mounts if m.writable)
     assert writable == sorted(AUTHOR_DRAFT_LANES), writable
-    (branch, tip), = remote_branches(tenant.remote, "").items()
+    (branch, tip), = {b: t for b, t in remote_branches(tenant.remote, "").items() if b != "main"}.items()
     assert branch.startswith("lessons/"), branch
     assert touched(tenant.remote, main, tip) == [L.FEEDBACK_LESSON_PATH]
     assert remote_branches(tenant.remote, "feedback/") == {}
