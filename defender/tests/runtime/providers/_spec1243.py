@@ -34,9 +34,11 @@ WINDOW_S = 600.0
 
 #: Temporary statuses, and statuses that are not. The rule is ">=500" (plus 408/409/429), not a
 #: list: unlisted 5xx (501, 505, 507, 599) are in, so a retrier keyed on named statuses fails;
-#: every other 4xx (402, 405, 410, 418, 451 included) is out, so a 4xx denylist fails too.
+#: every other 4xx (402, 405, 410, 412, 418, 451 included) is out, so a 4xx denylist fails too.
+#: 412 is Fireworks' suspended account (#1447): resending it would turn a setup refusal into
+#: `provider-down`.
 RETRIED_STATUSES = (408, 409, 429, 500, 501, 502, 503, 504, 505, 507, 529, 599)
-NOT_RETRIED_STATUSES = (400, 401, 402, 403, 404, 405, 410, 413, 418, 422, 451)
+NOT_RETRIED_STATUSES = (400, 401, 402, 403, 404, 405, 410, 412, 413, 418, 422, 451)
 
 L3 = S.L3
 
