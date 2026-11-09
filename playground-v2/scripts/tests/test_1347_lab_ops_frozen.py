@@ -65,7 +65,7 @@ def _search_texts(rec):
 def _stub_as_of_values(rec):
     """`V2_STUB_AS_OF=v` / `V2_STUB_AS_OF: v` in any command text or input, plus env values."""
     values = [m.group(1) for text in _search_texts(rec) + [rec.blob()]
-              for m in re.finditer(r"V2_STUB_AS_OF[\"']?\s*[=:]\s*[\"']?([^;\"'\s,]+)", text)]
+              for m in re.finditer(r"V2_STUB_AS_OF[\"']?\s*[=:]\s*[\"']?([^;\"'\s,}\]]+)", text)]
     values += [str(kw["env"]["V2_STUB_AS_OF"]) for _, kw in rec.calls if "V2_STUB_AS_OF" in (kw.get("env") or {})]
     return values
 
@@ -128,7 +128,7 @@ def _mapped_ips(rec, host):
     q, ip, h = "[\"']?", r"(\d+\.\d+\.\d+\.\d+)", re.escape(host)
     for text in texts:
         for ln in text.splitlines():
-            for m in re.finditer(rf"{q}{h}{q}\s*[:=\s]\s*{q}{ip}|{q}{ip}{q}[ \t]+(?:[\w.-]+[ \t]+)*{q}{h}(?![\w.-])", ln):
+            for m in re.finditer(rf"(?<![\w.-]){q}{h}{q}\s*[:=\s]\s*{q}{ip}|{q}{ip}{q}[ \t]+(?:(?!\d+(?:\.\d+){{3}}(?![\w.-]))[\w.-]+[ \t]+)*{q}{h}(?![\w.-])", ln):
                 found.add(m.group(1) or m.group(2))
     return found
 
@@ -148,7 +148,7 @@ def test_the_node_restart_hands_the_clock_offset_to_the_frozen_elasticsearch_thr
 
     env = [kw.get("env") or {} for _, kw in lab.rec.calls]
     assert "LD_PRELOAD" in blob, blob
-    stop = r"[;\"'\s,]"
+    stop = r"[;\"'\s,}\]]"
     assert any(v == "-1234567" for e in env for v in map(str, e.values())) or any(
         re.search(rf"[=:]\s*[\"']?-1234567(?={stop}|$)", t) for t in _search_texts(lab.rec)), blob
     assert any("restart" in a or "elasticsearch" in a for argv, _ in lab.rec.calls for a in argv)
