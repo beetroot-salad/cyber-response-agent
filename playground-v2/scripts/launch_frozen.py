@@ -143,17 +143,6 @@ def _stale(case: dict, observed: dict[str, int], content: str, alert: dict | Non
     return reasons
 
 
-def _holds(record: str | None, token: str) -> bool:
-    """`token` is the holder's: the record's `token` field, or (a bare record) the record itself."""
-    if not record or not token:
-        return False
-    try:
-        held = json.loads(record).get("token")
-    except (ValueError, AttributeError):
-        held = record
-    return held == token
-
-
 def _run_id(stdout: str) -> str | None:
     first = stdout.splitlines()[0] if stdout else ""
     if not first.startswith("run_id="):
@@ -222,8 +211,13 @@ def launch(case_dir: Path, *, freezes_dir: Path, patterns: list[str], index: Pat
     if token is None:
         token = lock.take(lock_store, lock.FROZEN_ENGINE)
     else:
-        if not _holds(lock_store.read(lock.FROZEN_ENGINE), token):
-            raise LaunchRefused("lock_token does not name the holder of the frozen-engine lock")
+        # Joining needs a held lock whose holder is `token`; `lock.require` alone passes a free one.
+        if lock_store.read(lock.FROZEN_ENGINE) is None:
+            raise LaunchRefused("lock_token was passed, but the frozen-engine lock is not held")
+        try:
+            lock.require(lock_store, lock.FROZEN_ENGINE, token)
+        except (lock.Held, lock.WrongToken) as exc:
+            raise LaunchRefused(f"lock_token does not name the holder of the frozen-engine lock: {exc}") from exc
     try:
         try:
             reasons = _serve_copy(es, ops, clock, case=case, freeze=freeze, freeze_id=case["freeze"],
