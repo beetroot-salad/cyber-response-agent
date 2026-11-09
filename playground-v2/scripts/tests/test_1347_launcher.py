@@ -626,11 +626,31 @@ def test_a_reference_launch_serves_an_unconfirmed_case_and_writes_no_row(tmp_pat
 def test_a_launch_handed_the_lock_token_joins_it_and_leaves_it_held(tmp_path):
     """A1: make-a-case holds the engine lock through labelling; its reference run is launched with
     the token, does not take or release the lock."""
+    from chaos import lock
+
     rig = LabRig(tmp_path)
     rig.write_expected_case("none", confirmed=False)
-    rig.store.records["frozen-engine"] = "tok-1"
+    token = lock.take(rig.store, lock.FROZEN_ENGINE)
+    record, before = rig.store.records["frozen-engine"], len(rig.journal)
 
-    rig.launch(reference=True, lock_token="tok-1")
+    rig.launch(reference=True, lock_token=token)
 
-    assert rig.store.records["frozen-engine"] == "tok-1" and rig.lock_in_run
-    assert "lock.create" not in rig.journal.ops()
+    assert rig.store.records["frozen-engine"] == record and rig.lock_in_run
+    assert "lock.create" not in rig.journal.ops()[before:]
+
+
+def test_a_launch_handed_a_token_that_is_not_the_holders_is_refused_and_leaves_the_lock_held(tmp_path):
+    """A1/O10: a wrong token stops the launch before any cluster request; the holder keeps the lock."""
+    from chaos import lock
+
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("none", confirmed=False)
+    lock.take(rig.store, lock.FROZEN_ENGINE)
+    record = rig.store.records["frozen-engine"]
+
+    with pytest.raises(Exception) as caught:
+        rig.launch(reference=True, lock_token="not-the-holders-token")
+
+    assert not isinstance(caught.value, (AttributeError, TypeError, NameError))
+    assert not rig.cluster.requests and rig.rows() == [] and rig.lock_in_run is None
+    assert rig.store.records["frozen-engine"] == record
