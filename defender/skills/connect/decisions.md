@@ -4,12 +4,12 @@ The irreversible calls behind this skill, for whoever edits it next. Each
 is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
 `adapter.md`, and `mcp.md`; this is just the *why*, kept short.
 
-- **The skill never handles secret values.** `config.env` holds non-secret
-  config only, and there is no credential delivery yet (#1163): a generated
-  adapter can't improvise the credential boundary, and every child the
-  transport forks gets the run's scrubbed environment, never the driver's own,
-  so no provider key leaks into it. An LLM context is not an auditable
-  credential store — this is the single most important property of the layer.
+- **The skill never handles secret values.** `config.env` and `access.yaml`
+  hold non-secret settings only; the operator stores a credential with the
+  credential proxy, which applies it by the declared scheme, so a generated
+  adapter never holds one and can't improvise the credential boundary. An LLM
+  context is not an auditable credential store — this is the single most
+  important property of the layer.
 
 - **Native queries pass through unmodified.** A query source takes its
   native language as-is; a lookup source keys on an identifier. No
@@ -42,10 +42,10 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   per-vendor PR queue for a marginal speedup.
 
 - **The bundled example is a greenfield seed, not a mandate to duplicate.**
-  On a fresh tree connect copies `example_adapter.py` and writes its own
-  transport; on a populated tree it conforms to the shared transport module
-  and conventions the existing adapters already use — one shared module per
-  tree, never two. A
+  On a fresh tree connect copies `example_adapter.py`; on a populated tree it
+  conforms to the conventions the existing adapters already use. Either way
+  the transport is the shared proxied one — an adapter reaches its system
+  only through the credential proxy (#1391), so it never writes its own. A
   second parallel pattern (duplicate transport/config schemes) is exactly
   the drift per-system consistency exists to avoid, and it fragments the
   prior the gather subagent relies on.

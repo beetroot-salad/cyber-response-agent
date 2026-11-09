@@ -1,8 +1,9 @@
 """Target fidelity: a verb cannot be aimed outside the system it is declared under.
 
-An HTTP read-endpoint allowlist for the URL-shaped adapters, plus the transport capture seam the
-endpoint rule is checked through and the allowlist's authoring-integrity constructor. A system
-with no URL keeps its own rule in its adapter (host-state, #1215).
+Elasticsearch's read-endpoint allowlist and index confinement, which its adapter checks before a
+request goes to the credential proxy (#1391 P3: the proxy's route grammar cannot express them),
+plus the transport capture types and the allowlist's authoring-integrity constructor. Every other
+system reached through the proxy is confined by the proxy's route check alone (#1163 A6).
 """
 from __future__ import annotations
 
@@ -18,14 +19,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender._model import model
-from defender.kit.faults import AdapterFault
-
-
-class ConfinementFault(AdapterFault):
-    """A target-fidelity refusal: never an infra fault (not in circuit_breaker's
-    INFRA_EXIT_CODES), and refused before any transport is attempted."""
-
-    exit_code = 1
+from defender.kit.faults import ConfinementFault
 
 
 class AllowlistError(Exception):
@@ -91,76 +85,19 @@ READ_ENDPOINT_ALLOWLIST = ReadEndpointAllowlist({
         ("/_query", "POST"),
         ("/_cluster/health", "GET"),
     ),
-    "change-mgmt": (
-        ("/health", "GET"),
-        ("/changes", "GET"),
-        ("/changes/active", "GET"),
-        ("/changes/*", "GET"),
-    ),
-    "cmdb": (
-        ("/health", "GET"),
-        ("/hosts", "GET"),
-        ("/hosts/*", "GET"),
-        ("/roles", "GET"),
-    ),
-    "identity": (
-        ("/health", "GET"),
-        ("/users", "GET"),
-        ("/roles", "GET"),
-        ("/users/*/can_access", "GET"),
-        ("/users/*/authorized_hosts", "GET"),
-        ("/users/*", "GET"),
-    ),
-    "threat-intel": (
-        ("/health", "GET"),
-        ("/indicators", "GET"),
-        ("/lookup/*", "GET"),
-    ),
-    "ticket": (
-        ("/health", "GET"),
-        ("/tickets", "GET"),
-        ("/tickets/*", "GET"),
-    ),
 })
 
 
-#: The writes the HOST makes to a case system on the docker route (#1359 D-6): the one comment
-#: path of the playground ticket store. Consulted only for the write class (`rw`), which only the
-#: shared transport's host write entry passes; the read allowlist above never admits a write, so no
-#: query verb can reach any of these. A `*` is exactly one path segment here.
-WRITE_ENDPOINT_ALLOWLIST = ReadEndpointAllowlist({
-    "ticket": (
-        ("/tickets/*/comments", "POST"),
-    ),
-})
-
-#: The verb class of a host write; every other class is a read.
-WRITE_CLASS = "rw"
-
-
-def _segments_match(path: str, pattern: str) -> bool:
-    got, want = path.split("/"), pattern.split("/")
-    return len(got) == len(want) and all(fnmatch.fnmatchcase(g, w) for g, w in zip(got, want, strict=True))
-
-
-def confine_read_endpoint(system: str, url: str, *, method: str, verb_class: str) -> str:
-    """Refuse a request whose resolved, normalized target is not a declared endpoint for
-    `system` under `method`: a read endpoint for the read class, a write endpoint for the write
-    class (`WRITE_CLASS`). Checked against REAL requests via the capture seam, never against the
-    allowlist's own entries."""
+def confine_read_endpoint(system: str, url: str, *, method: str) -> str:
+    """Refuse a request whose resolved, normalized target is not a declared read endpoint for
+    `system` under `method`. Checked against REAL requests via the capture seam, never against
+    the allowlist's own entries."""
     path = normalize_endpoint(url)
-    if verb_class == WRITE_CLASS:
-        entries = WRITE_ENDPOINT_ALLOWLIST.get(system, ())
-        allowed = any(m == method and _segments_match(path, pattern) for pattern, m in entries)
-        kind = "write"
-    else:
-        entries = READ_ENDPOINT_ALLOWLIST.get(system, ())
-        allowed = any(m == method and fnmatch.fnmatchcase(path, pattern) for pattern, m in entries)
-        kind = "read"
-    if not allowed:
+    entries = READ_ENDPOINT_ALLOWLIST.get(system, ())
+    if not any(m == method and fnmatch.fnmatchcase(path, pattern) for pattern, m in entries):
         raise ConfinementFault(
-            f"{system} verb attempted {method} {path}, outside its declared {kind}-endpoint "
-            f"allowlist (verb_class={verb_class!r})"
+            f"{system} verb attempted {method} {path}, outside its declared read-endpoint "
+            "allowlist"
         )
     return url
 
@@ -183,21 +120,6 @@ class TransportCapture:
 
     def record(self, *, system: str, url: str, method: str) -> None:
         self.requests.append(CapturedRequest(system=system, url=url, method=method))
-
-
-def guard_outbound(ctx: Any, system: str, url: str, *, method: str, verb_class: str = "r") -> None:
-    """Confine, then record — what every outbound HTTP path does before connecting. Both
-    transports call this rather than restating the pair."""
-    confine_read_endpoint(system, url, method=method, verb_class=verb_class)
-    record_outbound(ctx, system, url, method=method)
-
-
-def record_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
-    """Record the request on the call's capture, if it has one. The whole guard for a system
-    reached through the credential proxy, whose route check is the proxy's (#1163 A6)."""
-    capture = getattr(ctx, "capture", None)
-    if capture is not None:
-        capture.record(system=system, url=url, method=method)
 
 
 # the elastic index confinement
@@ -240,16 +162,11 @@ def confine_index(index: str, configured_patterns: Iterable[str]) -> str:
 
 __all__ = [
     "READ_ENDPOINT_ALLOWLIST",
-    "WRITE_CLASS",
-    "WRITE_ENDPOINT_ALLOWLIST",
     "AllowlistError",
     "CapturedRequest",
-    "ConfinementFault",
     "ReadEndpointAllowlist",
     "TransportCapture",
     "confine_index",
     "confine_read_endpoint",
-    "guard_outbound",
     "normalize_endpoint",
-    "record_outbound",
 ]

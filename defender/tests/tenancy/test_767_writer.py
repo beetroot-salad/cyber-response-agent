@@ -1,5 +1,5 @@
 """#767/#1359 — the host records its investigation as one comment on the ticket the alert names
-(`record_case_ticket`, the docker route's fake `docker` as the store)."""
+(`record_case_ticket`, a stand-in for the credential proxy in front of the store)."""
 from __future__ import annotations
 
 import json
@@ -14,10 +14,10 @@ from defender.tests.support.runtime.engine._spec767 import (
     CASE_KEY,
     CASE_RECORD_RELPATH,
     COMMENTS_SUFFIX,
-    CONFIG,
     ELLIPSIS,
     HOST_CAUSE,
     NO_NOTES,
+    TICKET_BASE,
     TICKETS_PATH,
     TRANSITIONS_SUFFIX,
     WIRE_BOUND_BYTES,
@@ -37,11 +37,11 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 STANDALONE_FENCE = re.compile(r"(?m)^---\s*$")
 WARNING = "WARNING defender.investigation.ticket_writer"
 COMMENT_PATH = f"{TICKETS_PATH}/{CASE_KEY}{COMMENTS_SUFFIX}"
-M_URL_BASE = CONFIG["URL_BASE"]
+M_URL_BASE = TICKET_BASE
 
 
 def _store(tmp_path, **kw) -> FakeStore:
-    """A store whose fake `docker` lives under a fresh folder (one per call)."""
+    """A store whose proxy stand-in lives under a fresh folder (one per call)."""
     n = len(list(tmp_path.glob("store-*")))
     return FakeStore(tmp_path / f"store-{n}", **kw)
 
@@ -69,7 +69,7 @@ def test_767_record_posts_one_comment_on_the_alerts_ticket_and_receipts(tmp_path
     assert good["url"].endswith(f"{TICKETS_PATH}/{CASE_KEY}"), good
 
     failed_dir = make_run(tmp_path, name="20260917t000001z-sshd")
-    record(failed_dir, _store(tmp_path, answers=[S.curl_timed_out()]))
+    record(failed_dir, _store(tmp_path, answers=[S.timed_out()]))
     bad = receipt(failed_dir)
     # The write timed out after it may have reached the store and the read-back timed out too (#1374).
     assert (bad["key"], bad["ok"], bad["status"]) == (CASE_KEY, False, ticket_writer.RECEIPT_UNKNOWN), bad
@@ -403,8 +403,8 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(("arm", "answer", "reasons"), [
-    ("an unreachable bastion (curl timed out)", S.curl_timed_out(), ("may have reached the store",)),
-    ("no parseable response at all", S.answer("", None, rc=1, stderr="docker: unavailable"),
+    ("the store took the request and never answered", S.timed_out(), ("may have reached the store",)),
+    ("the store's reply broke off", S.timed_out("the system's reply broke off"),
      ("may have reached the store",)),
     ("a key the store does not hold (404)", S.answer('{"detail": "no such ticket"}', "404"),
      ("the store refused", "404", "not found")),
@@ -431,7 +431,7 @@ def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch,
 def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatch):
     _setup(monkeypatch, tmp_path)
     lost = make_run(tmp_path, name="run-unreachable")
-    assert record(lost, _store(tmp_path, answers=[S.curl_timed_out()])) is None
+    assert record(lost, _store(tmp_path, answers=[S.timed_out()])) is None
     assert receipt(lost)["ok"] is False
     assert "may have reached the store" in receipt(lost)["reason"], receipt(lost)
 
@@ -454,7 +454,7 @@ def test_767_failed_write_leaves_no_capture_record(tmp_path, monkeypatch, capsys
     _setup(monkeypatch, tmp_path)
     run_dir = make_run(tmp_path)
     before = {p.name for p in run_dir.iterdir()}
-    record(run_dir, _store(tmp_path, answers=[S.curl_timed_out()]))
+    record(run_dir, _store(tmp_path, answers=[S.timed_out()]))
     assert {p.name for p in run_dir.iterdir()} - before == set()
     assert not (run_dir / "executed_queries.jsonl").exists()
     assert not (run_dir / "gather_raw").exists()

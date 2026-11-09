@@ -129,11 +129,10 @@ def judge_case_system(
                                 str(case).removeprefix(f"settings/{CASE_RECORD_REL} "))
     system = case.system
     module, roster = _adapter_of(system, defender_dir=defender_dir, roster=roster)
-    if system in record.access:
-        # Only a system reached through the credential proxy has an access declaration (or the
-        # fault for why it has none): it must declare the comment's route. Judged before the
-        # settings check, so a fault the check raises is about `config.env`, never this file.
-        _judge_access(system, record.access)
+    # Every case system is reached through the credential proxy (#1391 P1): its access
+    # declaration must be usable and declare the comment's route. Judged before the settings
+    # check, so a fault the check raises is about `config.env`, never this file (O-S3).
+    _judge_access(system, record.access)
     # The run's own reason scope, as run start's judgement uses: a crash text naming the
     # tenant's folder or the data root is shown by name, never located.
     scope = ReasonScope(tenant=record if isinstance(record, RunTenant) else None,
@@ -161,15 +160,15 @@ def case_verdict(
 
 
 def _judge_access(system: str, access: Mapping[str, AccessDeclaration | ConfigFault]) -> None:
-    """A system reached through the credential proxy must declare its comment route: at least one
-    write route in its `access.yaml` (D-16)."""
+    """The case system's access declaration must be usable and declare its comment route: at
+    least one write route in its `access.yaml` (D-16)."""
     pointer = pointer_to(f"systems/{system}/access.yaml")
     found = access.get(system)
     if isinstance(found, ConfigFault):
         raise CaseSettingsFault(pointer, found.detail.removeprefix(f"{pointer} ").lstrip(": "))
     if found is None:
-        raise CaseSettingsFault(pointer, "is absent: the system is reached through the "
-                                "credential proxy and declares no access")
+        raise CaseSettingsFault(pointer, "is absent: a case system is reached only through the "
+                                "credential proxy, at the base its access declaration names")
     if not found.writes:
         raise CaseSettingsFault(pointer, "declares no write route: the host's comment has no "
                                 "route to be sent on")

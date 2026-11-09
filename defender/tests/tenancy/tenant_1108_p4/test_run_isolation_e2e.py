@@ -288,7 +288,7 @@ def test_r_i6_reads_climbing_out_of_the_agent_half_are_refused(tenants, tmp_path
     listing of `/agent/..` shows the model neither the token nor any copy sibling. Positive
     control: the own-copy lesson read in the same run returns its bytes."""
     t, _other = tenants
-    climb = f"/agent/../../{B.CMDB_ENV}"
+    climb = f"/agent/../../{B.MARK_ENV}"
     listing = R.Turn(tool_calls=[("bash", {"command": "ls -a /agent/.. /agent/../.."})])
     main = StageClimbReplay([_read(surface, LESSON_IN_BOX), _read(surface, climb), listing,
                              R.Turn(text="done")], t, surface)

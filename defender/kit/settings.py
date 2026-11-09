@@ -6,16 +6,26 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from types import MappingProxyType
 
+from defender.kit.faults import ConfigFault
+
 #: How model-facing text names a tenant's host-only `settings/` folder: by what it is, never by
 #: its host path. The table pointers, the fault redaction and every settings fault build on it.
 SETTINGS_POINTER = "the tenant's settings/"
 
-#: The one implemented access method (D2). A system's `<PREFIX>_TRANSPORT` names it.
-DOCKER_EXEC = "docker-exec"
-
 #: The text a missing system folder raises — one wording for "this tenant's settings do not
 #: configure this system", whether the folder is absent or its `config.env` is.
 NOT_CONFIGURED = "this tenant's settings do not configure this system"
+
+
+#: The word the tenant template leaves in every value an operator must fill in. A value still
+#: carrying it, in `config.env` or `access.yaml`, means the system is not configured (#1391 S2).
+PLACEHOLDER = "CHANGE-ME"
+
+
+class ConfigAbsent(ConfigFault):
+    """A system folder with no `config.env`: "config file not found" to every reader, except the
+    settings judgement of an adapter that reads no key, for which there is nothing to read
+    (#1391 O-S1)."""
 
 
 def pointer_to(rel: str) -> str:
@@ -66,9 +76,10 @@ def system_prefix(system: str) -> str:
 
 
 __all__ = [
-    "DOCKER_EXEC",
     "NOT_CONFIGURED",
+    "PLACEHOLDER",
     "SETTINGS_POINTER",
+    "ConfigAbsent",
     "SystemConfig",
     "config_pointer",
     "is_blank",

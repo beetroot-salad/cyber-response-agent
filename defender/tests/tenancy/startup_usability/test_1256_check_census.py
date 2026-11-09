@@ -29,8 +29,12 @@ _GRAMMAR: dict[str, tuple[tuple[str, str], ...]] = {
     "_TIMEOUT_SEC": (("non-numeric", "abc"), ("negative", "-5"), ("fractional", "1.5"),
                      ("zero", "0"), ("ten-digits", "1234567890"), ("padded", " 10"),
                      ("non-ascii-digits", "١٠")),
-    "_TRANSPORT": (("other-method", "http"), ("other-case", "Docker-Exec")),
 }
+
+
+#: Adapters with settings faults but no config.env key: host-state's settings are its access
+#: declaration alone (#1391 O5), whose faults `test_1256_adapter_checks` covers.
+READS_NO_KEY = frozenset({"host-state"})
 
 
 def _keys(text: str) -> list[str]:
@@ -66,7 +70,7 @@ def _key_cases() -> list[Any]:
 
 def test_o5_the_key_census_covers_every_settings_reading_adapter() -> None:
     texts = S.config_texts(MARKER)
-    readers = sorted(s for s, families in FAULTS.items() if families)
+    readers = sorted(s for s, families in FAULTS.items() if families and s not in READS_NO_KEY)
     assert readers, "precondition: FAULTS names settings-reading adapters"
     empty = [s for s in readers if not _keys(texts.get(s, ""))]
     assert empty == [], f"settings-reading adapters with no planted key to mutate: {empty}"
@@ -88,8 +92,7 @@ def test_o5_the_check_raises_exactly_where_a_verb_raises(
     # The disk is complete again; the record is not (the check reads the record).
     S.write_config(folder, system, S.config_texts(MARKER)[system])
 
-    shim = S.DockerShim(tmp_path / "shim")
-    outcomes = _every_verb(module, _ctx(record, tmp_path, shim))
+    outcomes = _every_verb(module, _ctx(record, tmp_path))
     raising = {v: str(e) for v, e in outcomes.items() if isinstance(e, ConfigFault)}
     if raising:
         assert any(family.key in text for text in raising.values()), (

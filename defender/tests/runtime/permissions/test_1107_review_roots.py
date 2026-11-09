@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.integrations import elastic_adapter
 from defender.kit.faults import ConfigFault
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
@@ -23,26 +23,14 @@ def _tenant(tmp_path: Path, marker: str, **kw) -> tuple[Path, Path]:
     return root, S.plant(root, marker=marker, **kw)
 
 
-def _ctx(record, where: Path, shim: S.DockerShim):
+def _ctx(record, where: Path):
     run_dir = where / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    return S.verb_context(record, run_dir, shim.env())
+    return S.verb_context(record, run_dir, {})
 
 
-@pytest.mark.parametrize("call", [
-    lambda ctx: transport.docker_exec_curl(ctx, "bastion-x", "http://cmdb-x:8080/health"),
-    lambda ctx: transport.docker_exec_raw(ctx, "web-1", ["true"]),
-    lambda ctx: transport.docker_inspect_raw(ctx, "c0ffee"),
-], ids=["curl", "raw", "inspect"])
-def test_transport_lanes_require_a_named_system(tmp_path, call):
-    """No lane picks a system for a caller that did not name one: not by URL prefix, not by a
-    host-state default. Omitting `system=` is a call error, and no docker child runs."""
-    root, _ = _tenant(tmp_path, "sys")
-    shim = S.DockerShim(tmp_path / "shim")
-    ctx = _ctx(S.resolve(root), tmp_path, shim)
-    with pytest.raises(TypeError, match="system"):
-        call(ctx)
-    assert shim.calls() == []
+# test_transport_lanes_require_a_named_system (curl/raw/inspect) is retired: #1391 O1 removed
+# those Docker lanes; design r4's retire list names it (test_1107_review_roots.py:33-52).
 
 
 def test_settings_faults_name_no_host_path(tmp_path):
@@ -50,11 +38,10 @@ def test_settings_faults_name_no_host_path(tmp_path):
 
     root, folder = _tenant(tmp_path, "pth")
     S.write_config(folder, "identity", b"IDENTITY_URL_BASE=\xff\n")
-    S.drop_key(folder, "cmdb", "CMDB_URL_BASE")
+    S.drop_key(folder, "cmdb", "CMDB_TIMEOUT_SEC")
     S.drop_key(folder, "elastic", "ELASTIC_EVENTS_INDEX")
     record = S.resolve(root)
-    shim = S.DockerShim(tmp_path / "shim")
-    ctx = _ctx(record, tmp_path, shim)
+    ctx = _ctx(record, tmp_path)
 
     texts = {
         "not utf-8": str(record.systems["identity"]),
@@ -77,11 +64,11 @@ def test_lone_cr_line_endings_parse_as_lines(tmp_path):
     assert parse_env("A=x\x0cy\n") == {"A": "x\x0cy"}, "only CR/LF end a line, as in the validator"
 
     root, folder = _tenant(tmp_path, "crx")
-    text = S.config_path(folder, "cmdb").read_text(encoding="utf-8").replace("\n", "\r")
-    S.write_config(folder, "cmdb", text)
+    text = S.config_path(folder, "ticket").read_text(encoding="utf-8").replace("\n", "\r")
+    S.write_config(folder, "ticket", text)
     record = S.resolve(root)
-    assert record.systems["cmdb"]["CMDB_TRANSPORT"] == S.DOCKER_EXEC
-    assert record.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-crx:8080"
+    assert record.systems["ticket"]["TICKET_TIMEOUT_SEC"] == "10"
+    assert record.systems["ticket"]["TICKET_KEY_PATTERN"] == "CRX-[0-9]+"
 
 
 def test_oversized_config_is_that_system_down_not_a_crash(tmp_path):

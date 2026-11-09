@@ -47,20 +47,20 @@ def lesson_text(mark: str) -> str:
             f"Fixture content for tests (#1108 P4). {mark}\n")
 
 
-#: Settings marker: the cmdb system's `config.env` gains a key whose value names the revision.
-CMDB_ENV = "settings/systems/cmdb/config.env"
-MARK_KEY = "CMDB_S_B_REVISION_MARK"
+#: Settings marker: a system folder no adapter reads, whose `config.env` holds a key whose value
+#: names the revision. The resolver keeps it like any system's settings; no adapter judges it, so
+#: it never takes a real system down (#1391 Q4 refuses a key an adapter does not read).
+MARK_SYSTEM = "s-b-mark"
+MARK_ENV = f"settings/systems/{MARK_SYSTEM}/config.env"
+MARK_KEY = "S_B_MARK_REVISION_MARK"
 
 
-def cmdb_env(mark: str) -> str:
-    from defender.tests.tenancy.tenant_1108_p4._support import FIXTURE_SETTINGS
-
-    base = (FIXTURE_SETTINGS / "systems" / "cmdb" / "config.env").read_text(encoding="utf-8")
-    return base + f'\n{MARK_KEY}="{mark}"\n'
+def mark_env(mark: str) -> str:
+    return f'{MARK_KEY}="{mark}"\n'
 
 
-SEED_FILES = {LESSON: lesson_text(SEEDED_MARK), CMDB_ENV: cmdb_env(SEEDED_MARK)}
-MERGE_FILES = {LESSON: lesson_text(MERGED_MARK), CMDB_ENV: cmdb_env(MERGED_MARK)}
+SEED_FILES = {LESSON: lesson_text(SEEDED_MARK), MARK_ENV: mark_env(SEEDED_MARK)}
+MERGE_FILES = {LESSON: lesson_text(MERGED_MARK), MARK_ENV: mark_env(MERGED_MARK)}
 
 
 @contextlib.contextmanager

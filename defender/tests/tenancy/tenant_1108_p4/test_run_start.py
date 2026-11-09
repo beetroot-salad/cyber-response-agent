@@ -63,10 +63,10 @@ def test_o11_o_b_an_unpinned_launch_publishes_once_and_the_run_reads_settings_an
     assert seen.agent_files == B.export_half(tenant, tenant.commit, "agent"), (
         "the run copy's agent/ is not byte-equal to the export `current` names")
     assert seen.settings_files == B.export_half(tenant, tenant.commit, "settings")
-    cmdb = seen.kw["tenant"].systems["cmdb"]
-    assert cmdb.get(B.MARK_KEY) == B.SEEDED_MARK, (
-        f"the run resolved cmdb's settings from somewhere other than the copied export: "
-        f"{dict(cmdb) if hasattr(cmdb, 'keys') else cmdb!r}")
+    marked = seen.kw["tenant"].systems[B.MARK_SYSTEM]
+    assert marked.get(B.MARK_KEY) == B.SEEDED_MARK, (
+        f"the run resolved its settings from somewhere other than the copied export: "
+        f"{dict(marked) if hasattr(marked, 'keys') else marked!r}")
 
 
 def test_o_b_the_stamp_is_the_export_copied_never_the_clones_head(tenant, tmp_path):
@@ -74,7 +74,7 @@ def test_o_b_the_stamp_is_the_export_copied_never_the_clones_head(tenant, tmp_pa
     and stamps the export `current` names, nothing of the clone."""
     clone = B.clone_dir(tenant)
     (clone / B.LESSON).write_text(B.lesson_text(B.CLONE_ONLY_MARK), encoding="utf-8")
-    (clone / B.CMDB_ENV).write_text(B.cmdb_env(B.CLONE_ONLY_MARK), encoding="utf-8")
+    (clone / B.MARK_ENV).write_text(B.mark_env(B.CLONE_ONLY_MARK), encoding="utf-8")
     git(clone, "commit", "-am", "local, never published")
     head = git(clone, "rev-parse", "HEAD")
     assert head != tenant.commit
@@ -87,7 +87,7 @@ def test_o_b_the_stamp_is_the_export_copied_never_the_clones_head(tenant, tmp_pa
     assert B.CLONE_ONLY_MARK not in seen.agent_files[B.LESSON_REL].decode(), (
         "the run read the clone's HEAD, not the export")
     assert B.SEEDED_MARK in seen.agent_files[B.LESSON_REL].decode()
-    assert seen.kw["tenant"].systems["cmdb"].get(B.MARK_KEY) == B.SEEDED_MARK
+    assert seen.kw["tenant"].systems[B.MARK_SYSTEM].get(B.MARK_KEY) == B.SEEDED_MARK
     assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
         f"the run's knowledge stamp is not the export it copied ({tenant.commit}); the "
         f"clone's HEAD is {head}: {B.stamped_commit(out.stamp_after)!r}")
@@ -105,7 +105,7 @@ def _git_removed(clone: Path) -> None:
 
 def _uncommitted_edit(clone: Path) -> None:
     (clone / B.LESSON).write_text(B.lesson_text(B.CLONE_ONLY_MARK), encoding="utf-8")
-    (clone / B.CMDB_ENV).write_text(B.cmdb_env(B.CLONE_ONLY_MARK), encoding="utf-8")
+    (clone / B.MARK_ENV).write_text(B.mark_env(B.CLONE_ONLY_MARK), encoding="utf-8")
 
 
 # Behavioural complement to the census: the run never reads the clone's working tree.
@@ -137,7 +137,7 @@ def test_o_b_a_broken_tenant_clone_does_not_stop_the_run_or_reach_its_stamp(
     assert seen.settings_files == B.export_half(tenant, tenant.commit, "settings")
     assert B.CLONE_ONLY_MARK not in seen.agent_files[B.LESSON_REL].decode(), (
         "the run read the clone's working tree")
-    assert seen.kw["tenant"].systems["cmdb"].get(B.MARK_KEY) == B.SEEDED_MARK
+    assert seen.kw["tenant"].systems[B.MARK_SYSTEM].get(B.MARK_KEY) == B.SEEDED_MARK
     assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
         f"the stamp is not the export copied ({tenant.commit}): "
         f"{B.stamped_commit(out.stamp_after)!r}")
@@ -279,7 +279,7 @@ def test_o_pin_a_pinned_launch_reads_that_export_skips_publish_and_records_pinne
     assert out.publish_calls == []
     seen = out.seen[0]
     assert seen.agent_files == B.export_half(tenant, tenant.commit, "agent")
-    assert seen.kw["tenant"].systems["cmdb"].get(B.MARK_KEY) == B.SEEDED_MARK
+    assert seen.kw["tenant"].systems[B.MARK_SYSTEM].get(B.MARK_KEY) == B.SEEDED_MARK
     assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
         "a pinned run's stamp is not the pinned export (it read the clone's HEAD?)")
     source = B.knowledge_source(out)

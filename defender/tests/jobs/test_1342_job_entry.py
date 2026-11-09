@@ -1468,9 +1468,9 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
         monkeypatch.setattr(writer_module, name, getattr(wire, name))  # lint-monkeypatch: ok — same tripwire, ticket writer
     # an import-time alias of the writer's helpers or of `DEFAULT_DEPS.request` escapes all of those: the
     # transport every route ends in is tripped too
-    from defender.integrations import _stub_transport
+    from defender.kit import transport as _stub_transport
 
-    monkeypatch.setattr(_stub_transport, "docker_exec_curl", wire.docker_exec_curl)  # lint-monkeypatch: ok — same tripwire, the writer's transport
+    monkeypatch.setattr(_stub_transport, "_proxy_request", wire._proxy_request)  # lint-monkeypatch: ok — same tripwire, the writer's transport (every request goes through the proxy, #1391 O1)
     # a function object bound at import time escapes even that: trip the process launch beneath it, on
     # any `docker ... exec` (the one thing the transport does), whatever route reached it
     import subprocess
@@ -1506,9 +1506,9 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
         writer_module._verb_context(None, tmp_path, tmp_path, {}, None, None)
     assert wire.called == ["_verb_context"]
     wire.called.clear()
-    with pytest.raises(AssertionError):  # control: the transport every docker route ends in is tripped
-        _stub_transport.docker_exec_curl(None, "bastion.invalid", "http://store.invalid/tickets")
-    assert wire.called == ["docker_exec_curl"]
+    with pytest.raises(AssertionError):  # control: the transport every request ends in is tripped
+        _stub_transport._proxy_request(None, "http://store.invalid/tickets", system="ticket", method="POST")
+    assert wire.called == ["_proxy_request"]
     wire.called.clear()
     with pytest.raises(AssertionError):  # control: the process tripwire is live
         subprocess.run(["docker", "--context", "c", "exec", "box", "curl"], check=False)
@@ -1815,11 +1815,6 @@ def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path, spe
 
 PROXY_ADDRESS = "http://proxy.invalid"
 SIGN_ROLE, SIGN_SECRET = "role-1342-sign", "secret-1342-sign"
-ELASTIC_NOT_PROXIED = (
-    'ELASTICSEARCH_URL="https://localhost:9200"\nKIBANA_URL="http://localhost:5601"\n'
-    'ELASTIC_EVENTS_INDEX="logs-*"\nELASTIC_ALERTS_INDEX=".internal.alerts-security.alerts-default-*"\n'
-    'ELASTIC_TRANSPORT="docker-exec"\nELASTIC_DOCKER_CONTEXT="soc-playground"\n'
-    'ELASTIC_ES_CONTAINER="elasticsearch"\nELASTIC_KIBANA_CONTAINER="kibana"\n')
 
 
 @pytest.fixture
@@ -1835,7 +1830,7 @@ def proxied_scene(tmp_path, monkeypatch, migrated_database):
 
     stack = contextlib.ExitStack()
 
-    def make(*, sign: bool, address: bool, proxied: bool = True) -> Scene:
+    def make(*, sign: bool, address: bool) -> Scene:
         root = tmp_path / "data"
         root.mkdir()
         monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
@@ -1845,13 +1840,8 @@ def proxied_scene(tmp_path, monkeypatch, migrated_database):
             monkeypatch.setenv(PROXY_URL_ENV, PROXY_ADDRESS)
         else:
             monkeypatch.delenv(PROXY_URL_ENV, raising=False)
-        systems = {"identity": H.declaration("http://x.invalid/api")} if proxied else {}
-        # The committed fixture tenant's elastic is itself `http-proxy` (#1391 D12): "no http-proxy system"
-        # takes elastic back to a non-proxied method (no declaration, no proxy method).
-        unproxied = None if proxied else {
-            "settings/systems/elastic/access.yaml": None,
-            "settings/systems/elastic/config.env": ELASTIC_NOT_PROXIED}
-        t = stack.enter_context(A.published(tmp_path / "forge", root, systems, extra_files=unproxied))
+        systems = {"identity": H.declaration("http://x.invalid/api")}
+        t = stack.enter_context(A.published(tmp_path / "forge", root, systems))
         register_tenant(migrated_database, t.tenant_id, data_root=root, generations=())  # the case's own, below
         if sign:
             insert_generation(migrated_database, t.tenant_id, A.generation(
@@ -1930,28 +1920,8 @@ def test_r6_8_a_job_whose_tenant_can_sign_gets_the_read_access_on_its_investigat
     assert set(bao.origins) == {A.deployment_origin()}, bao.origins
 
 
-def test_r6_8_a_job_whose_tenant_has_no_http_proxy_system_is_handed_no_access_and_needs_no_signing(proxied_scene, monkeypatch):
-    """Control: no `http-proxy` system, and neither a sign login nor an address, still runs; no access is
-    handed (the operator path's #1163 R3). (R6-8)"""
-    scene = proxied_scene(sign=False, address=False, proxied=False)
-    bao = _openbao_under_httpx(monkeypatch, {SIGN_ROLE: SIGN_SECRET})
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
-    seen: list[Any] = []
-    ran = Ran()
-    inner = verified_lifecycle(ran)
-
-    def lifecycle(**kw: Any) -> dict[str, Any]:
-        seen.append(kw.get("access"))
-        return inner(**kw)
-
-    got = run_job(scene, run_id, lifecycle=lifecycle, ran=ran)
-
-    assert got.raised is None, got
-    assert scene.job_end(run_id) == SETTLED
-    assert len(seen) == 1, seen
-    assert not seen[0], seen  # no access to sign with, and the job was not refused
-    assert (bao.requests, bao.logins, bao.signs) == ([], [], []), "the signer was contacted"
+# R6-8 "no http-proxy system needs no signing" is retired with #1391: every system with network access
+# is reached through the credential proxy, so a tenant with none has no usable system.
 
 
 # --- #1345: run start reads the tenant's alert mapping from the database (O3, O4, O5) -------------------------

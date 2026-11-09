@@ -55,7 +55,7 @@ def test_o4_no_canary_reaches_any_channel_of_a_real_run(tmp_path, data_root, mon
                                                          caplog, capsys):
     """The key, the request token and its signature are absent from the run's files, logs, box
     commands and environment and the text the models saw; the token reaches the proxy and the
-    query tool's grant is a read on the http-proxy system only. O4, O10, A7."""
+    query tool's grant is a read on the one declared system only. O4, O10, A7."""
     run_py = S.mod("run")
 
     caplog.set_level(logging.DEBUG)
@@ -66,6 +66,8 @@ def test_o4_no_canary_reaches_any_channel_of_a_real_run(tmp_path, data_root, mon
                                                f'{{"path": "{API}/users/dev.dana"}}'.encode())
         planted = S.plant_tenant(TENANT, alert_mapping=S.DEFAULT_MAPPING, table=T6.TABLE_B,
                                  configs=configs)
+        for other in (planted.knowledge / "settings" / "systems").glob("*/access.yaml"):
+            other.unlink()  # identity is the one declared system (#1391 O1: the rest are down)
         for rel, text in H.access_files("identity", H.declaration(up.url + API)).items():
             (planted.knowledge / rel).parent.mkdir(parents=True, exist_ok=True)
             (planted.knowledge / rel).write_text(text, encoding="utf-8")

@@ -49,14 +49,10 @@ def prefix_of(system: str) -> str:
     return system.upper().replace("-", "_")
 
 
-def transport_line(system: str) -> str:
-    """The config.env line putting `system` on `http-proxy`: the one place a case writes it."""
-    return f'{prefix_of(system)}_TRANSPORT="http-proxy"\n'
-
-
 def env_text(system: str, *, extra: str = "") -> str:
-    """`system`'s config.env on `http-proxy`: an access method and a timeout, no base, no bastion."""
-    return f'{transport_line(system)}{prefix_of(system)}_TIMEOUT_SEC="5"\n{extra}'
+    """`system`'s config.env behind the proxy: a timeout, no base, no bastion, no access method
+    (its declaration is what puts it behind the proxy, #1391 P1)."""
+    return f'{prefix_of(system)}_TIMEOUT_SEC="5"\n{extra}'
 
 
 #: The two POST reads an Elastic declaration lists (#1391 O3); GET /_cluster/health is a read by method.
@@ -65,17 +61,15 @@ ELASTIC_EVENTS = "logs-*"
 ELASTIC_ALERTS = "alerts-*"
 
 
-def elastic_files(base: str, *, ca: str | bytes | None = None, transport: str | None = "http-proxy",
-                  env_extra: str = "", scheme: dict[str, object] | None = None,
+def elastic_files(base: str, *, ca: str | bytes | None = None, env_extra: str = "", scheme: dict[str, object] | None = None,
                   declared: bool = True) -> dict[str, str | None]:
     """Repo files making `elastic` a proxied system at `base`: a basic-auth declaration with
-    `ELASTIC_READS` (and `ca` when given), and a config.env holding the access method (`transport`;
-    None writes none), the two index keys and `env_extra` (no URL, Kibana or container key);
+    `ELASTIC_READS` (and `ca` when given), and a config.env holding the two index keys and
+    `env_extra` (no access method, URL, Kibana or container key);
     `declared=False` deletes the declaration from the placed fixture (the shipped
     fixture tenant carries one, #1391 D12), as a `None` entry `files` applies after placement."""
     decl = H.declaration(base, scheme=scheme or H.basic_scheme(), reads=ELASTIC_READS, ca=ca)
-    method = "" if transport is None else f'ELASTIC_TRANSPORT="{transport}"\n'
-    env = (f'{method}ELASTIC_EVENTS_INDEX="{ELASTIC_EVENTS}"\n'
+    env = (f'ELASTIC_EVENTS_INDEX="{ELASTIC_EVENTS}"\n'
            f'ELASTIC_ALERTS_INDEX="{ELASTIC_ALERTS}"\n{env_extra}')
     files: dict[str, str | None] = dict(H.access_files("elastic", decl, env=env))
     if not declared:

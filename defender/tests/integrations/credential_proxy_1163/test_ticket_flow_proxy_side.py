@@ -11,7 +11,7 @@ import types
 import pytest
 
 from defender.box import run_env
-from defender.integrations._stub_transport import raise_proxy_fault
+from defender.kit.transport import raise_proxy_fault
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.kit.settings import config_pointer
 from defender.systems import case_system
@@ -370,7 +370,7 @@ def test_t16_a_write_that_may_have_reached_the_store_says_so(tmp_path, data_root
 def test_t17_the_final_record_says_whether_the_proxy_sent_and_only_a_false_proves_not(sent):
     """#1374 P1: the proxy's final record carries `sent`; the fault the run raises may have reached
     the store unless the record says the proxy never sent. #1412: `sent` is one of its fields."""
-    from defender import _proxy_client
+    from defender.kit import proxy_client as _proxy_client
 
     record = W.final_record(None, fault="TransportFault", detail="the store's call failed",
                             sent=sent, body_whole=False)
@@ -389,7 +389,7 @@ def test_t17_an_answer_in_a_format_that_is_not_the_proxys_may_have_reached_the_s
     not even its `sent`, so the proxy's-own fault the run raises may have reached the store."""
     from fastapi import FastAPI
 
-    from defender import _proxy_client
+    from defender.kit import proxy_client as _proxy_client
 
     answer = {"status": 0, "headers": {}, "body": "", "fault": "TransportFault",
               "detail": "the store's call failed", **field}
