@@ -19,6 +19,12 @@ def _cost(model: str, n: int = 1) -> float:
     return n * usage_cost(model, USAGE)
 
 
+def _sealed_read(store, run_id=RUN):
+    """The run's ledger as a run that ended without a failed write leaves it: sealed (r7.3 T1), then read."""
+    ss.seal_ledger(store, run_id)
+    return ss.read_ledger(store, run_id)
+
+
 @pytest.fixture
 def ledger(tmp_path):
     """An open store, and a planter of rows into its ledger."""
@@ -37,7 +43,7 @@ def test_s5_r7_the_read_sums_every_priced_row_and_each_agent_s_own(ledger):
     plant([(KIMI, USAGE)], agent_id="review:support")
     plant([(KIMI, USAGE)], agent_id="review:ablation")
 
-    read = ss.read_ledger(store, RUN)
+    read = _sealed_read(store)
 
     want = {"main": _cost(SONNET, 2), "gather:l-001": _cost(HAIKU), "gather:l-00c": _cost(HAIKU, 3),
             "review:support": _cost(KIMI), "review:ablation": _cost(KIMI)}
@@ -53,7 +59,7 @@ def test_s5_r7_a_row_is_priced_at_its_requested_model_never_the_name_the_provide
     plant([(HAIKU, USAGE)], agent_id="gather:l-001", reported=SONNET)
     assert usage_cost("claude-sonnet-4-6-rerouted", USAGE) == 0.0, "premise: the reported spelling has no price"
 
-    read = ss.read_ledger(store, RUN)
+    read = _sealed_read(store)
 
     assert read.by_agent == pytest.approx({"main": _cost(SONNET), "gather:l-001": _cost(HAIKU)})
     assert read.complete is True
@@ -66,7 +72,7 @@ def test_s2a_r7_refused_and_unseen_rows_add_nothing_and_only_an_unseen_row_makes
     plant([(SONNET, USAGE)])
     plant([(HAIKU, {})] if outcome != RESPONSE else [(HAIKU, USAGE)], agent_id="gather:l-00c", outcome=outcome)
 
-    read = ss.read_ledger(store, RUN)
+    read = _sealed_read(store)
 
     lead = _cost(HAIKU) if outcome == RESPONSE else 0.0
     assert read.by_agent == pytest.approx({"main": _cost(SONNET), "gather:l-00c": lead}), (
@@ -82,7 +88,7 @@ def test_s2b_r7_d_an_unpriced_requested_model_adds_nothing_and_leaves_the_ledger
     plant([(SONNET, USAGE)])
     plant([(requested, USAGE)], agent_id="gather:l-001", reported=SONNET)
 
-    read = ss.read_ledger(store, RUN)
+    read = _sealed_read(store)
 
     assert read.total == pytest.approx(_cost(SONNET)), "an unpriced row was priced"
     assert read.by_agent["gather:l-001"] == 0.0
@@ -95,7 +101,7 @@ def test_s5_r7_the_read_is_one_run_s_rows_and_a_run_with_none_is_zero_and_comple
     plant([(SONNET, USAGE)] * 4, run_id=fixture_uuid("another run"))
     plant([(HAIKU, {})], run_id=fixture_uuid("another run"), outcome=UNSEEN)
 
-    read = ss.read_ledger(store, RUN)
+    read = _sealed_read(store)
 
     assert (read.total, read.complete, dict(read.by_agent)) == (0.0, True, {})
 
@@ -127,22 +133,25 @@ def test_f5_r7_a_row_fault_is_a_fault_whatever_the_row_s_outcome(ledger, outcome
     at a priced model and a known agent is the control. (r7 S2b, D; r7.1 F)"""
     store, plant = ledger
     counts = USAGE if outcome == RESPONSE else {}
-    plant([(SONNET, USAGE)])
-    plant([(HAIKU, counts)], agent_id="gather:l-001", outcome=outcome)
-    control = ss.read_ledger(store, RUN)
+    control_run = fixture_uuid("f5 control")
+    plant([(SONNET, USAGE)], run_id=control_run)
+    plant([(HAIKU, counts)], agent_id="gather:l-001", outcome=outcome, run_id=control_run)
+    control = _sealed_read(store, control_run)
     assert control.complete is (outcome != UNSEEN), "control: the outcome alone decides completeness"
     assert control.total == pytest.approx(_cost(SONNET) + (_cost(HAIKU) if outcome == RESPONSE else 0.0))
+    plant([(SONNET, USAGE)])
+    plant([(HAIKU, counts)], agent_id="gather:l-001", outcome=outcome)
 
     if kind == "model":
         plant([(value, counts)], agent_id="gather:l-002", outcome=outcome, reported=SONNET if outcome == RESPONSE else None)
-        read = ss.read_ledger(store, RUN)
+        read = _sealed_read(store)
         assert read.complete is False, f"a {outcome} row requesting {value!r} reads complete"
         assert read.total == pytest.approx(control.total), "the faulted row was priced"
         assert read.by_agent["gather:l-002"] == 0.0
     else:
         plant([(SONNET, counts)], agent_id=value, outcome=outcome)
         with pytest.raises(Exception):  # noqa: B017, PT011 — the design says an error, not which
-            ss.read_ledger(store, RUN)
+            _sealed_read(store)
 
 
 def _lead_ids_by_membership() -> list[str]:
@@ -189,3 +198,59 @@ def test_f8_r7_1_f_an_agent_id_is_the_correlation_kind_exactly_when_its_lead_is_
     assert not wrong, f"{len(wrong)} lead ids of the wrong kind, e.g. {dict(list(wrong.items())[:5])}"
     assert kind("main") == "main"
     assert kind("review:support") == "review"
+
+
+# --- r7.3 T1: the ledger says for itself whether it is complete (the seal) ------------------------------
+
+OTHER = fixture_uuid("another run")
+#: Each case is a sequence of writes to the ledger (`rows`: a priced response of the run or of the other run; `seal`: that run's
+#: seal) and whether the run's ledger then reads complete. The sum is every priced row whatever the seal says.
+_SEALS = {
+    "sealed after its rows": ([("rows", RUN), ("seal", RUN)], True),
+    "never sealed": ([("rows", RUN)], False),
+    "a run with no rows, never sealed": ([], False),
+    "a run with no rows, sealed": ([("seal", RUN)], True),
+    "a row after the seal": ([("rows", RUN), ("seal", RUN), ("rows", RUN)], False),
+    "a row after the seal of a run with none": ([("seal", RUN), ("rows", RUN)], False),
+    "another run's row after the seal": ([("rows", RUN), ("seal", RUN), ("rows", OTHER)], True),
+    "another run's row before the seal": ([("rows", RUN), ("rows", OTHER), ("seal", RUN)], True),
+    "only another run sealed": ([("rows", RUN), ("rows", OTHER), ("seal", OTHER)], False),
+    "another run's row after the other's seal": ([("rows", RUN), ("seal", RUN), ("rows", OTHER), ("seal", OTHER)], True),
+}
+
+
+@pytest.mark.parametrize("case", _SEALS, ids=_SEALS)
+def test_t1_r7_3_a_ledger_reads_complete_only_when_its_seal_matches_the_run_s_last_row(ledger, case):
+    """A run's ledger is complete only with its own seal and no row of the run written after it (another run's rows, written
+    before or after, change nothing); the sum is the priced rows either way. (r7.3 T1)"""
+    store, plant = ledger
+    steps, complete = _SEALS[case]
+    for what, run in steps:
+        if what == "seal":
+            ss.seal_ledger(store, run)
+        else:
+            plant([(SONNET, USAGE)], run_id=run)
+
+    read = ss.read_ledger(store, RUN)
+
+    assert read.complete is complete, case
+    own = sum(1 for what, run in steps if what == "rows" and run == RUN)
+    assert read.total == pytest.approx(_cost(SONNET, own)), "the seal changed the sum"
+    assert read.by_agent == (pytest.approx({"main": _cost(SONNET, own)}) if own else {})
+    again = ss.read_ledger(store, RUN)
+    assert (again.complete, again.total) == (read.complete, read.total), "reading changed the ledger"
+
+
+@pytest.mark.parametrize(("outcome", "model"), [(UNSEEN, HAIKU), (RESPONSE, UNPRICED), (REFUSED, UNPRICED)],
+                         ids=["unseen", "unpriced response", "unpriced refused"])
+def test_t1_r7_3_a_seal_does_not_excuse_an_unseen_or_unpriced_row(ledger, outcome, model):
+    """The three conditions hold together: a sealed ledger with an unseen or an unpriced row still reads incomplete, and the
+    same ledger without that row reads complete. (r7.3 T1; r7 S2a, S2b)"""
+    store, plant = ledger
+    plant([(SONNET, USAGE)])
+    assert _sealed_read(store).complete is True, "control: sealed and priced"
+    other = fixture_uuid("t1 faulted")
+    plant([(SONNET, USAGE)], run_id=other)
+    plant([(model, {} if outcome != RESPONSE else USAGE)], agent_id="gather:l-001", outcome=outcome, run_id=other)
+
+    assert _sealed_read(store, other).complete is False

@@ -17,7 +17,7 @@ from defender.presentation import visualize_data as d
 from defender.configuration._pricing import usage_cost
 from defender.presentation.visualize_run import render_page
 from defender.records import SessionPaths
-from defender.tests.support.jobs._jobs1342 import REFUSED, SPEND_LEDGER, UNSEEN, insert_spend
+from defender.tests.support.jobs._jobs1342 import REFUSED, SPEND_LEDGER, UNSEEN, insert_spend, seal_at
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 _USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}
@@ -376,11 +376,25 @@ def test_run_health(tmp_path):
     assert any("retr" in det for det in health["details"])
 
 
-def _page(run: Path, *, spend_write_failed: bool = False) -> str:
-    """The run's page through the post-run step's own entry: it holds the `Run` (the host's handle on the run's store).
-    `spend_write_failed` is the host's own fact that a spend write failed, handed in as an argument and read from no file
-    in the run dir, as `update_ticket` is (r6 S5: the "at least" mark)."""
-    return render_page(_run_handle_1165(run), spend_write_failed=spend_write_failed)
+_SEALED: set[Path] = set()
+
+
+@pytest.fixture(autouse=True)
+def _no_seals_carried_between_tests():
+    """A run folder's path can repeat across tests (truncated tmp names): each test starts with no run sealed."""
+    _SEALED.clear()
+
+
+def _page(run: Path, *, sealed: bool = True) -> str:
+    """The run's page through the post-run step's own entry: it holds the `Run` (the host's handle on the run's store), and
+    nothing else is handed in. r7.3 T1: the ledger is sealed first (once per run, as a run that ended without a failed write
+    leaves it); `sealed=False` is a run whose seal never landed (a failed write, a kill)."""
+    from defender.records import session_store as ss
+
+    if sealed and run not in _SEALED:
+        _SEALED.add(run)
+        seal_at(ss.resolve_store_path(_run_handle_1165(run)), run.name)
+    return render_page(_run_handle_1165(run))
 
 
 def _headline(html: str) -> str:
@@ -575,18 +589,18 @@ def test_s6_r7_a_run_whose_doc_has_no_phases_still_shows_main(tmp_path, monkeypa
     assert sum(_cost_segments(html).values()) == pytest.approx(_dollars(_headline(html)), abs=2e-4)
 
 
-@pytest.mark.parametrize("spend_write_failed", [False, True], ids=["exact", "at least"])
+@pytest.mark.parametrize("sealed", [True, False], ids=["sealed", "unsealed"])
 @pytest.mark.parametrize("result_line_mark", [False, True, None], ids=["line-false", "line-true", "line-none"])
-def test_s5_the_headline_says_at_least_exactly_when_the_host_knows_a_spend_write_failed(
-        tmp_path, monkeypatch, spend_write_failed, result_line_mark):
-    """UPDATED (r6 S5; was: the run file's mark): "at least" leads the ledger sum exactly when the host's own fact says a spend write failed, whatever the result line's mark says."""
+def test_s5_the_headline_says_at_least_exactly_when_the_ledger_is_not_sealed(tmp_path, monkeypatch, sealed, result_line_mark):
+    """UPDATED (r7.3 T1; was: the host's argument): "at least" leads the ledger sum exactly when the run's ledger was never sealed
+    (a failed write, a kill), whatever the result line's mark says, and the page is handed nothing else. (r7.3 T1; r6 S5)"""
     run = _build_run(tmp_path)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     _result_line(run, total_cost_is_lower_limit=result_line_mark)
 
-    headline = _headline(_page(run, spend_write_failed=spend_write_failed))
+    headline = _headline(_page(run, sealed=sealed))
 
-    assert headline.startswith("at least ") is spend_write_failed, f"the headline reads {headline!r}"
+    assert headline.startswith("at least ") is (not sealed), f"the headline reads {headline!r}"
     assert _dollars(headline) == pytest.approx(_priced(_LEDGER), abs=2e-4)
 
 
@@ -606,23 +620,29 @@ def test_s5_r7_the_ledger_alone_makes_the_headline_at_least_when_a_row_is_unseen
         insert_spend(path, run.name, [("claude-haiku-4-5", {})], agent_id="gather:l-002",
                      outcome=UNSEEN if kind == "unseen" else REFUSED)
 
-    headline = _headline(_page(run, spend_write_failed=False))
+    headline = _headline(_page(run))
 
     assert headline.startswith("at least ") is at_least, f"the headline reads {headline!r}"
     assert _dollars(headline) == pytest.approx(_priced(_LEDGER), abs=2e-4)
 
 
-@pytest.mark.parametrize("spend_write_failed", [False, True], ids=["no write failed", "a write failed"])
-def test_a3_an_unreadable_ledger_reads_unknown_in_the_headline_not_zero_and_not_at_least(tmp_path, monkeypatch, spend_write_failed):
-    """CONFLICT-UPDATED (r7.1 S6; was r6: the request-log bars stayed): a session database without its ledger table reads "unknown", never `$0.0000` or "at least" (S4), with no bar, and the page still renders."""
+def test_q1_r7_3_a_database_with_no_ledger_table_shows_the_run_file_s_total_labelled_and_no_other_dollars(tmp_path, monkeypatch):
+    """A run from before the ledger (its database opens, the table never existed): the headline is the total saved in its run
+    file, labelled as recorded before the spend ledger, never "unknown"; no bar and no informational figure carries dollars. The
+    sealed ledger of the same run is the control: ledger headline, no label. (r7.3 Q1; was r7.1 S6, r7.2 P1 for this case)"""
     import sqlite3
 
     from defender.records import session_store as ss
 
+    label = "before the spend ledger"
     run = _build_run(tmp_path)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    _append_review_calls(run)
+    _a_gate_that_ran(run)
     control = _page(run)
-    assert _dollars(_headline(control)) > 0, "positive control: a readable ledger gives a figure"
+    assert _dollars(_headline(control)) > _priced(_LEDGER) - 2e-4, "positive control: the ledger's figure, the review's spend beside it"
+    assert label not in _headline(control).lower(), "positive control: a ledger the page reads is not labelled"
+    _result_line(run, total_cost_usd=1.2345, total_cost_is_lower_limit=False)
     conn = sqlite3.connect(ss.resolve_store_path(_run_handle_1165(run)), timeout=10)
     try:
         conn.execute(f"DROP TABLE {SPEND_LEDGER}")
@@ -630,10 +650,14 @@ def test_a3_an_unreadable_ledger_reads_unknown_in_the_headline_not_zero_and_not_
     finally:
         conn.close()
 
-    html = _page(run, spend_write_failed=spend_write_failed)
+    html = _page(run)
 
-    assert _headline(html) == "unknown"
-    assert _cost_segments(html) == {}, "a cost bar beside an unknown headline (r7.1 S6: unknown cost, no bar)"
+    headline = _headline(html)
+    assert headline.startswith("$1.2345"), f"the headline reads {headline!r}, not the run file's total"
+    assert label in headline.lower(), f"the headline is not labelled: {headline!r}"
+    assert _cost_segments(html) == {}, "a bar beside a total no ledger backs"
+    priced = {name: texts for name, texts in _informational_text(html).items() if any("$" in t for t in texts)}
+    assert not priced, f"an informational figure carries dollars beside a run with no ledger: {priced}"
 
 
 @pytest.mark.parametrize("agent_id", ["gather", "planner"])
@@ -837,11 +861,9 @@ def test_p1_r7_2_the_page_renders_only_from_a_cost_it_is_handed():
 
 
 def test_p1_r7_2_an_unreadable_ledger_leaves_the_phase_lines_the_by_model_strip_and_the_review_figures_without_dollars(tmp_path, monkeypatch):
-    """A session database without its ledger table: besides the headline ("unknown") and the bar (none), no informational figure
-    carries a dollar amount: the page prices nothing outside the one ledger read. A readable ledger is the control, showing
-    dollars in every one of them. (r7.2 P1; was: the figures priced the request log at the name it reports)"""
-    import sqlite3
-
+    """A ledger that exists but cannot be read (a row of an agent id outside the four kinds): besides the headline ("unknown")
+    and the bar (none), no informational figure carries a dollar amount: the page prices nothing outside the one ledger read. A
+    readable ledger is the control, showing dollars in every one of them. (r7.2 P1; r7.3 Q1: a dropped table is another case)"""
     from defender.records import session_store as ss
 
     run = _build_run(tmp_path)
@@ -852,12 +874,7 @@ def test_p1_r7_2_an_unreadable_ledger_leaves_the_phase_lines_the_by_model_strip_
     for name, texts in control.items():
         assert texts, f"premise: the control shows {name}"
         assert all("$" in t for t in texts), f"premise: the control's {name} carry dollars: {texts}"
-    conn = sqlite3.connect(ss.resolve_store_path(_run_handle_1165(run)), timeout=10)
-    try:
-        conn.execute(f"DROP TABLE {SPEND_LEDGER}")
-        conn.commit()
-    finally:
-        conn.close()
+    insert_spend(ss.resolve_store_path(_run_handle_1165(run)), run.name, [("claude-sonnet-4-6", _USAGE)], agent_id="planner")
 
     html = _page(run)
 

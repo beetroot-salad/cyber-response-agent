@@ -572,7 +572,7 @@ def test_o8_every_run_end_word_reaches_the_job_fact_and_only_the_two_box_words_s
             drive()
     assert held.cut_short == word
     end = job_lane.JobEnd(setup=job_facts.SETUP_DONE, box=job_facts.BOX_STARTED, report_committed=False,
-                          scrub_verified=False, cut_short=word, spend_write_failed=False)
+                          scrub_verified=False, cut_short=word)
     ending = _ending_from(end, 5, lambda: None)
     assert word is None or word in ending.failure_message
     assert ending.decided_by_run is False
