@@ -619,34 +619,16 @@ class JobLane:
                                  f"{fault!r}") from None
 
 
-def sibling_cost(store: object, session_id: str) -> float:
-    """What one sibling cost (#1344 O13): its own main session `session_id` and every session
-    forked from it, at any depth, priced from their own model responses — never the prefix a
-    fork inherited, never the source's sessions or any other sibling's, and never the
-    questioner, oracle or judge, which are outside it. Siblings fork the source's database, so
-    the lineage there has a parent; unlike `JobLane.cost`, a forked lineage is what this reads.
-    `store` is an open session store holding `session_id`; a session it does not hold is
-    `CostUnreadable`."""
-    from defender.configuration import billed_usage, usage_cost
+def sibling_cost(store: object, run_id: str) -> float:
+    """What one sibling cost (#1344 O13, #1377 r7.5 L1): its own spend ledger's total, from the one
+    ledger read, so every agent of the sibling run counts, priced at the model it was built to
+    request. The source run's rows and every other sibling's belong to other run ids, an inherited
+    conversation prefix made no request, and the questioner, oracle and judge write no ledger row.
+    Not marked when the ledger is not complete (r7.5 L2). `store` is an open session store; a
+    ledger that cannot be read is `CostUnreadable`."""
     from defender.records import session_store
 
     try:
-        sessions = session_store.list_sessions(store)
-        children: dict[str | None, list[str]] = {}
-        for row in sessions:
-            children.setdefault(row.parent_session_id, []).append(row.session_id)
-        if session_id not in {row.session_id for row in sessions}:
-            raise CostUnreadable(f"session {session_id} is not in the store")
-        lineage, frontier = set(), [session_id]
-        while frontier:
-            current = frontier.pop()
-            if current in lineage:
-                continue
-            lineage.add(current)
-            frontier.extend(children.get(current, ()))
-        return sum(usage_cost(m.model_name or "", billed_usage(m.usage))
-                   for s in sorted(lineage) for m in session_store.own_responses(store, s))
-    except CostUnreadable:
-        raise
+        return session_store.read_ledger(store, run_id).total
     except (OSError, sqlite3.Error, StoreError, ValueError) as fault:
-        raise CostUnreadable(f"session {session_id}: its cost cannot be read: {fault!r}") from None
+        raise CostUnreadable(f"run {run_id}: its spend ledger cannot be read: {fault!r}") from None
