@@ -692,3 +692,20 @@ def dead_end_reason(system: str, verb: str, trip: RepeatTrip, executed: int) -> 
         f"this lead executed {executed} {plural} before this repeat. The result is structural, "
         "not a transient to retry through."
     )
+
+
+def captured_lookups(state: RunState) -> list[dict[str, str]]:
+    """The successful `tacit-knowledge` `lookup` calls in the run's in-memory rows whose actor,
+    host and pattern are all strings, de-duplicated across leads (#1414 P3, C17, C23)."""
+    seen: list[dict[str, str]] = []
+    with state.lock:
+        for rows in state.rows.values():
+            for row in rows:
+                params = row.get("params")
+                if (row.get("system") != "tacit-knowledge" or row.get("verb") != "lookup"
+                        or row.get("exit_code") != 0 or not isinstance(params, dict)):
+                    continue
+                found = {k: params.get(k) for k in ("actor", "host", "pattern")}
+                if all(isinstance(v, str) for v in found.values()) and found not in seen:
+                    seen.append(found)  # type: ignore[arg-type]
+    return seen

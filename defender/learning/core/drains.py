@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import contextlib
 import dataclasses
 import functools
@@ -41,6 +42,8 @@ from defender.learning.core.pitfalls_disposition import PitfallsDisposition
 from defender.records import Run
 from defender.learning.core.state import (
     AUTHOR_DRAIN_LOCK,
+    FEEDBACK_DRAIN_LOCK,
+    FEEDBACK_LESSONS,
     FINDINGS,
     PITFALLS,
     LEAD_AUTHOR_DRAIN_LOCK,
@@ -121,7 +124,7 @@ def _maybe_trigger_author(  # noqa: PLR0913 — the trigger seam's call shape, p
     this step (to `_drain_one_curator`'s stuck record), never as a swallowed crash. With no
     `batch` (a checkout-shaped scene), the label's trees over `paths` are held instead, and the
     curator refuses any commit (it commits only into a batch's draft)."""
-    threshold = env_int(threshold_env, 5)
+    threshold = _wake_threshold(channel, threshold_env)
     # Held is logged beside authorable: the count is authorable rows, not queue depth, so
     # without it a queue of permanent holds would log `pending=0` with no explanation.
     pending_count, held_count = _pending_queue_counts(state, channel)
@@ -153,7 +156,16 @@ _CURATOR_MODULES = {
     # Runs as one unit with `author` — same tick, batch, box, branch and PR lease — with its
     # own channel, corpus, claim and consumption.
     "questioner_curator": "defender.learning.author.questioner.run",
+    # The same, for a person's feedback instructions (#1414 D11): the lessons corpus, its own
+    # channel, claim and consumption.
+    "feedback_curator": "defender.learning.author.feedback.run",
 }
+
+
+def _wake_threshold(channel: Channel, threshold_env: str) -> int:
+    """How many authorable rows wake `channel`'s curator: its env knob, default 5 — except the
+    feedback channel, which one row wakes and which has no knob (#1414 D11)."""
+    return 1 if channel is FEEDBACK_LESSONS else env_int(threshold_env, 5)
 
 
 def _run_curator_module(module_name: str, call: Callable[[Any], int]):
@@ -166,14 +178,15 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
 
 
 def _curator_queue_checks() -> list[tuple[Channel, str]]:
-    """The queues whose depth can wake this drain: the findings and questioner-findings
-    channels.
+    """The queues whose depth can wake this drain: the findings, questioner-findings and
+    feedback-lessons channels (the last's env name is unread: one row wakes it).
 
     Named rather than derived from another table, so adding or removing a channel is an
     explicit edit here."""
     return [
         (FINDINGS, "LEARNING_AUTHOR_THRESHOLD"),
         (QUESTIONER_FINDINGS, "LEARNING_QUESTIONER_THRESHOLD"),
+        (FEEDBACK_LESSONS, ""),
     ]
 
 
@@ -195,7 +208,7 @@ def _has_curator_work(state: LearningState) -> bool:
     queue gets its line."""
     woken = False
     for channel, env in _curator_queue_checks():
-        threshold = env_int(env, 5)
+        threshold = _wake_threshold(channel, env)
         authorable, held = _pending_queue_counts(state, channel)
         if authorable >= threshold:
             woken = True
@@ -283,7 +296,7 @@ def _drain_curators(
     box: Any = None,
     batch: Batch | None = None,
 ) -> None:
-    # The same two channels the wake gate (`_curator_queue_checks`) answers for. Both curators
+    # The same three channels the wake gate (`_curator_queue_checks`) answers for. All curators
     # share one tick — batch, box, branch, PR lease — each its own claim, and
     # `_drain_one_curator` contains each one's non-retiring fault, so it never stops the other
     # or its commit. A `RETIRE_SET` fault propagates, so one in the first curator can cost the
@@ -296,6 +309,11 @@ def _drain_curators(
     _drain_one_curator(paths, state, trigger_author, QUESTIONER_FINDINGS,
                        "LEARNING_QUESTIONER_THRESHOLD", "questioner_curator",
                        "questioner_pending", box=box, batch=batch)
+    # The feedback curator is a late addition to the tick (#1414 D11): its trigger is asked only
+    # when its queue holds a row, so a tick with no feedback is the two-curator tick it always was.
+    if _pending_queue_counts(state, FEEDBACK_LESSONS)[0] >= _wake_threshold(FEEDBACK_LESSONS, ""):
+        _drain_one_curator(paths, state, trigger_author, FEEDBACK_LESSONS, "", "feedback_curator",
+                           "feedback_pending", box=box, batch=batch)
 
 
 def _batch_kw(batch: Batch | None) -> dict[str, Any]:
@@ -659,6 +677,8 @@ def _branch_prefix(label: DrainLabel) -> str:
     for both the no-network pre-check and the delivery it opens."""
     from defender.learning.author.version_control.delivery import LESSONS_BRANCH_PREFIX
 
+    if label is DrainLabel.FEEDBACK:
+        return "feedback/"
     return LESSONS_BRANCH_PREFIX if label is AUTHOR_DRAIN_LABEL else "lead-author/"
 
 
@@ -684,7 +704,7 @@ def _classified_refusal(message: str, fault: BaseException) -> _Refused:
 def _open_delivery(
     paths: LoopPaths, *, directory: TenantDirectory, client: httpx.Client | None,
     identity: ForgeCredential | None, credential_config: Any,
-    issuer_transport: httpx.BaseTransport | None,
+    issuer_transport: httpx.BaseTransport | None, purpose: str = "drain",
 ) -> Iterator[TenantDelivery]:
     """Flow 4's front: the selected tenant's delivery, opened by `vc.opened_delivery` (its forge
     wiring from the tenant records, then its credential — the given one, else the tenant's forge
@@ -702,7 +722,7 @@ def _open_delivery(
             # The batch box's code mount is this process's own code tree, never the checkout
             # the learning paths name (whose adapters the lanes read).
             delivery = opened.enter_context(vc.opened_delivery(
-                tenant, defender_dir=process_defender_dir(), directory=directory, purpose="drain",
+                tenant, defender_dir=process_defender_dir(), directory=directory, purpose=purpose,
                 client=client, identity=identity, credential_config=credential_config,
                 issuer_transport=issuer_transport))
         except RecordsUnreachable as down:
@@ -766,7 +786,7 @@ def _deliver_pending(state: LearningState, delivery: TenantDelivery, label: Drai
 
     for pending in state.deliveries(delivery.branch_prefix):
         try:
-            delivered = delivery.deliver(pending.batch_id)
+            delivered = delivery.deliver(pending.batch_id, body_from_commit=label is DrainLabel.FEEDBACK)
         except DeliveryRefused as e:
             _logger.error(
                 f"{label}: delivery of retained batch {pending.branch} failed again: "
@@ -785,6 +805,7 @@ def _deliver_pending(state: LearningState, delivery: TenantDelivery, label: Drai
 
 def _land_batch(
     state: LearningState, delivery: TenantDelivery, batch: Batch, label: DrainLabel,
+    body_from_commit: bool = False,
 ) -> None:
     """`TenantDelivery.finish`: the batch's branch pushed and its PR opened, or the status the
     forge already gives its PR (D-closed). On a refusal the commits stay on the batch branch of
@@ -793,7 +814,7 @@ def _land_batch(
     from defender.learning.author.version_control import DeliveryRefused, DeliveryStatus
 
     try:
-        delivered = delivery.finish(batch)
+        delivered = delivery.finish(batch, body_from_commit=body_from_commit)
     except DeliveryRefused as e:
         _record_pending_delivery(state, batch, prefix=delivery.branch_prefix, label=label,
                                  reason=one_line(str(e)))
@@ -1050,3 +1071,37 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
                 ),
                 open_delivery=open_delivery, start_box=start_box, stop_box=stop_box,
             ))
+
+
+def feedback_drain(  # noqa: PLR0913 — the stage's seams: the model's decision, the forge, the records, the issuer
+    paths: LoopPaths,
+    *,
+    decide: Callable[..., dict] | None = None,
+    client: httpx.Client | None = None,
+    identity: ForgeCredential | None = None,
+    directory: TenantDirectory | None = None,
+    credential_config: Any = None,
+    issuer_transport: httpx.BaseTransport | None = None,
+    eligibility_max_age: datetime.timedelta | None = None,
+) -> int:
+    """The feedback tick (#1414 F2): open issues, read eligible comments, decide each once, draft
+    approved entries onto a registry PR, and post the replies owed."""
+    from defender.learning.core import feedback
+    from defender.learning.core.feedback_model import model_decide
+
+    _validate_merge_mode()
+    records = _drain_directory(directory)
+
+    def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
+        return _open_delivery(paths, directory=records, client=client, identity=identity,
+                              credential_config=credential_config, issuer_transport=issuer_transport,
+                              purpose="feedback")
+
+    with LearningState.open(paths) as state, state.lock(
+            FEEDBACK_DRAIN_LOCK, wait=TRY_ONCE) as locked:
+        if not locked:
+            _logger.warning("feedback_drain: another drainer holds the lock — exiting")
+            return 0
+        return _refusing(lambda: feedback.tick(
+            paths, state, open_delivery, records, decide=decide or model_decide,
+            eligibility_max_age=eligibility_max_age))

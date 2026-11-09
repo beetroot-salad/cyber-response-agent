@@ -416,6 +416,7 @@ def _findings(knowledge: Path) -> list[str]:
         findings += [f"adapter `{name}` refused: {why}" for name, why in census.refused.items()
                      if is_platform_served(name)]
     findings += _registry_findings(knowledge)
+    findings += _feedback_findings(knowledge)
     findings += _registry_grant_findings(knowledge)
     try:
         findings += (_tenant_census.table_findings(settings, census).lines(table)
@@ -427,6 +428,17 @@ def _findings(knowledge: Path) -> list[str]:
     if committed is not None:
         findings.append(committed)
     return findings
+
+
+def _feedback_findings(knowledge: Path) -> list[str]:
+    """The feedback setting (#1414 O1): an unreadable file, or one naming an unknown outcome."""
+    from defender.tenancy import feedback_setting
+
+    try:
+        feedback_setting.load_feedback_outcomes(knowledge / SETTINGS_HALF)
+    except feedback_setting.FeedbackSettingError as bad:
+        return [str(bad)]
+    return []
 
 
 def _registry_findings(knowledge: Path) -> list[str]:

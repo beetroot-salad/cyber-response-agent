@@ -12,7 +12,16 @@ from .auth import ForgeCredential
 
 
 class ForgeError(Exception):
-    pass
+    """A forge call that failed; `status` is the HTTP status when the forge answered, else None (#1414 A4:
+    a transport fault or a 5xx is the forge being unreachable, a 4xx its refusal)."""
+
+    def __init__(self, message: str = "", *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def refused(self) -> bool:
+        return self.status is not None and 400 <= self.status < 500
 
 
 #: The port each network scheme means when an origin spells none (O-G: made explicit at parse).
@@ -151,6 +160,10 @@ class PullRequest:
     url: str
     head_sha: str | None
     status: str
+    #: The PR's body, head branch and author as the listing carries them (#1414 P6/A2: whose PR names an entry id).
+    body: str = ""
+    branch: str = ""
+    author: str = ""
 
 
 def _pull_request(row: dict) -> PullRequest:
@@ -169,6 +182,9 @@ def _pull_request(row: dict) -> PullRequest:
         url=row["html_url"],
         head_sha=sha if isinstance(sha, str) and sha else None,
         status=status,
+        body=row.get("body") if isinstance(row.get("body"), str) else "",
+        branch=row["head"].get("ref") if isinstance(row["head"].get("ref"), str) else "",
+        author=(row.get("user") or {}).get("login", "") if isinstance(row.get("user"), dict) else "",
     )
 
 
@@ -200,7 +216,8 @@ class ForgejoForge:
             response.raise_for_status()
             return response
         except httpx.HTTPError as e:
-            raise ForgeError(f"Forgejo {method} failed: {e}") from e
+            status = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else None
+            raise ForgeError(f"Forgejo {method} failed: {e}", status=status) from e
 
     @staticmethod
     def _json(response: httpx.Response) -> object:
@@ -307,3 +324,67 @@ class ForgejoForge:
         if not isinstance(value, dict) or not isinstance(value.get("html_url"), str):
             raise ForgeError("Forgejo pull creation returned no PR URL")
         return value["html_url"]
+
+
+    # -- #1414: issues, comments, the merge whitelist ----------------------------------------
+
+    def _pages(self, path: str, params: dict[str, str]) -> list[dict]:
+        """Every row of a listing, page by page, until the forge's total is seen."""
+        import httpx
+
+        rows: list[dict] = []
+        page = 1
+        while True:
+            url = httpx.URL(f"{self.address.api}{path}",
+                            params={**params, "page": str(page), "limit": str(_PAGE_LIMIT)})
+            response = self._request("GET", str(url))
+            value = self._json(response)
+            if not isinstance(value, list) or not all(isinstance(r, dict) for r in value):
+                raise ForgeError(f"Forgejo {path} JSON must be an array of objects")
+            if not value:
+                return rows
+            rows.extend(value)
+            total = _total_count(response)
+            if total is not None and len(rows) >= total:
+                return rows
+            if total is None and len(value) < _PAGE_LIMIT:  # no header: a short page ends it
+                return rows
+            page += 1
+
+    def label_id(self, name: str) -> int:
+        """The id of repository label `name`, created when absent."""
+        for row in self._pages("/labels", {}):
+            if row.get("name") == name and type(row.get("id")) is int:
+                return row["id"]
+        made = self._json(self._request("POST", f"{self.address.api}/labels",
+                                        json={"name": name, "color": "#ededed"}))
+        if not isinstance(made, dict) or type(made.get("id")) is not int:
+            raise ForgeError("Forgejo label creation returned no id")
+        return made["id"]
+
+    def create_issue(self, *, title: str, body: str, label: str) -> dict:
+        made = self._json(self._request(
+            "POST", f"{self.address.api}/issues",
+            json={"title": title, "body": body, "labels": [self.label_id(label)]}))
+        if not isinstance(made, dict) or type(made.get("number")) is not int:
+            raise ForgeError("Forgejo issue creation returned no number")
+        return made
+
+    def list_issues(self, *, label: str, created_by: str, state: str = "all") -> list[dict]:
+        return self._pages("/issues", {"labels": label, "created_by": created_by,
+                                       "state": state, "type": "issues"})
+
+    def get_issue(self, number: int) -> dict:
+        value = self._json(self._request("GET", f"{self.address.api}/issues/{number}"))
+        if not isinstance(value, dict):
+            raise ForgeError("Forgejo issue JSON must be an object")
+        return value
+
+    def list_comments(self, number: int) -> list[dict]:
+        return self._pages(f"/issues/{number}/comments", {})
+
+    def create_comment(self, number: int, body: str) -> dict:
+        made = self._json(self._request("POST", f"{self.address.api}/issues/{number}/comments", json={"body": body}))
+        if not isinstance(made, dict):
+            raise ForgeError("Forgejo comment creation returned no comment")
+        return made

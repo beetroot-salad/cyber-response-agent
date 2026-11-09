@@ -80,6 +80,24 @@ def _ticket_key(run: Run) -> str | None:
     return None if record is None else record.facts.case_key
 
 
+def escalated(truncated_by: str | None, closed_before_cut: bool) -> bool:
+    """Did the run end in an escalated exit without a verdict (`run_end.ESCALATED_EXITS`)?"""
+    return truncated_by in run_end.ESCALATED_EXITS and not closed_before_cut
+
+
+def run_outcome(run: Run, *, truncated_by: str | None, closed_before_cut: bool) -> str:
+    """The word naming how a run ended, shared by the case ticket and the feedback setting (#1414
+    O1): the escalated word when the run ended in an escalated exit without a verdict;
+    `unreadable` when the report cannot be parsed; otherwise the report's disposition."""
+    truncated_by = run_end.normalized_truncated_by(truncated_by)
+    if escalated(truncated_by, closed_before_cut):
+        return str(truncated_by)
+    try:
+        return case_ticket.read_case_record(run).disposition
+    except case_ticket.ReportNotParsable:
+        return "unreadable"
+
+
 def comments_on(truncated_by: str | None, closed_before_cut: bool) -> bool:
     """Does a run that ended this way comment on its case? Not a run cut short by its budget,
     its store, its model provider (down) or its box (unusable, or its fence tripped: #1421)
@@ -126,7 +144,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
             _leg_refused(run, key, REASON_NO_TOKEN)
             return
         try:
-            if truncated_by in run_end.ESCALATED_EXITS and not closed_before_cut:
+            if escalated(truncated_by, closed_before_cut):
                 body, word = case_ticket.escalation_comment_body(truncated_by), RECEIPT_ESCALATED
             else:
                 body, word = _comment_body(run, truncated_by, target.template)

@@ -26,13 +26,19 @@ from defender.tenancy import Tenant
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+#: Queue id keys whose lessons cite them under another key's provenance field.
+_CITED_AS = {"comment_id": "finding_id"}
+
+
 def provenance_field(id_key: str) -> str:
     """The corpus frontmatter list a lesson cites its source queue rows under.
 
     Derived in one place because two gates must agree on it: the pre-author idempotency gate
     and the drain's attribution gate. If they disagreed, a file would be re-authored every
     tick."""
-    return f"source_{id_key}s"
+    # #1414 D11: a feedback row is keyed by its comment id, and the lesson authored from it cites
+    # that id under the same key as any other lesson, the one the corpus readers know.
+    return f"source_{_CITED_AS.get(id_key, id_key)}s"
 
 
 class DrainLabel(enum.Enum):
@@ -41,6 +47,7 @@ class DrainLabel(enum.Enum):
 
     AUTHOR = "author_drain"
     LEAD_AUTHOR = "lead_author_drain"  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+    FEEDBACK = "feedback_drain"
 
     def __str__(self) -> str:
         """@owns DrainLabel display and written form — the value, never `DrainLabel.AUTHOR`."""
@@ -68,17 +75,21 @@ class DrainLabel(enum.Enum):
 _LANES: dict[DrainLabel, tuple[str, ...]] = {
     DrainLabel.AUTHOR: (LESSONS, LESSONS_QUESTIONER),
     DrainLabel.LEAD_AUTHOR: (SKILLS,),
+    # The registry's folder alone: a lane is a folder, so "exactly registry.yaml" is not expressible.
+    DrainLabel.FEEDBACK: (f"{SKILLS}/tacit-knowledge",),
 }
 #: Each lane's writable trees, by the `LoopPaths` attribute that spells each, in order.
 _WRITABLE_TREE_ATTRS: dict[DrainLabel, tuple[str, ...]] = {
     DrainLabel.AUTHOR: ("lessons_dir", "lessons_questioner_dir"),
     DrainLabel.LEAD_AUTHOR: ("skills_dir",),
+    DrainLabel.FEEDBACK: ("skills_dir",),
 }
 
 
 #: Each lane's label, by the name its call sites and the census anchors spell.
 AUTHOR_DRAIN_LABEL = DrainLabel.AUTHOR
 LEAD_AUTHOR_DRAIN_LABEL = DrainLabel.LEAD_AUTHOR
+FEEDBACK_DRAIN_LABEL = DrainLabel.FEEDBACK
 
 
 #: The quarantine directory's name under `worktree_base` (`LoopPaths.quarantine_dir`).
@@ -181,6 +192,15 @@ def judge_model() -> str:
 
 def judge_effort() -> str:
     return env_str("JUDGE_EFFORT", "medium")
+
+
+def feedback_model() -> str:
+    """The model that decides a person's feedback comment (#1414 A3)."""
+    return env_str("FEEDBACK_MODEL", "glm-5.3")
+
+
+def feedback_effort() -> str:
+    return env_str("FEEDBACK_EFFORT", "medium")
 
 
 
