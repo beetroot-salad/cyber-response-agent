@@ -16,6 +16,7 @@ from evaluations.held_out import (
     warn_if_outside_the_net,
 )
 from defender.run_common import HELD_OUT_FIXTURES, _alert_label
+from evaluations.tests import _frozen_cases as F
 from defender.tests.support.storage._alert_plant import plant_alert
 
 SLUG = "m05-lsass-access"
@@ -28,7 +29,7 @@ def _fixture_set(root: Path, truths: dict[str, str]) -> Path:
         (member / "alert.json").write_text("{}", encoding="utf-8")
         (member / "ground_truth.yaml").write_text(
             f"held_out: true\ndisposition: {disposition}\n", encoding="utf-8")
-    return root
+    return F.make_cases(root)  # every labelled fixture is a case (A2); rows bind to it (O9/A8)
 
 
 def _run(runs: Path, name: str | None = None, *, says: str | None = None) -> Path:
@@ -45,15 +46,14 @@ def _run(runs: Path, name: str | None = None, *, says: str | None = None) -> Pat
 
 def _scored(tmp_path: Path, runs: Path, fixtures: Path,
             *rows: tuple[str, str]) -> tuple[dict[str, str], list[str], str]:
-    """Score `runs` through `held_out.main` with an index holding `rows` (`(slug, run_id)`,
-    oldest first) in the operator's folder. Returns `({slug: "OK" | "WRONG"}, not-run slugs,
-    stdout)`."""
+    """Score `runs` through `held_out.main` with an index holding bound `rows` (`(slug, run_id)`,
+    oldest first, each valid and bound to its case's current binding) in the operator's folder.
+    Returns `({slug: "OK" | "WRONG"}, not-run slugs, stdout)`."""
     from evaluations import held_out
 
     index = tmp_path / "ops" / "held-out-index.jsonl"
     index.parent.mkdir(parents=True, exist_ok=True)
-    index.write_text("".join(json.dumps({"slug": s, "run_id": r}) + "\n" for s, r in rows),
-                     encoding="utf-8")
+    F.write_index(index, *(F.row(fixtures, s, r) for s, r in rows))
     out, err = io.StringIO(), io.StringIO()
     try:
         with redirect_stdout(out), redirect_stderr(err):
@@ -91,16 +91,15 @@ def test_secondary_harness_run_dirs_are_not_claimed_by_the_primary_metric(tmp_pa
 
 
 def test_no_run_id_convention_claims_a_fixture(tmp_path: Path):
-    """With no index row for the slug, a recorded, reported folder named `<slug>`,
-    `<slug>-<attempt>` or `{utc_timestamp}-<slug>` leaves the slug `not_run`, out of the
-    accuracy (#1187)."""
+    """With no index row for the slug, a folder named `<slug>`, `<slug>-<attempt>` or
+    `{utc_timestamp}-<slug>` leaves it unscored and listed, the set incomplete (#1187, O11)."""
     for name in (SLUG, f"{SLUG}-attempt2", f"20260718t101500z-{SLUG}"):
         runs = tmp_path / name / "runs"
         _run(runs, name, says="benign")
         fixtures = _fixture_set(tmp_path / name / "held-out", {SLUG: "benign"})
         verdicts, not_run, said = _scored(tmp_path / name, runs, fixtures)
         assert verdicts == {}, f"{name}: a folder was claimed by its name:\n{said}"
-        assert not_run == [SLUG], f"{name}: the slug with no row is not reported not run:\n{said}"
+        assert SLUG in said and "incomplete" in said.lower(), f"{name}: the slug with no row is not listed:\n{said}"
 
 
 def test_the_alert_label_comes_from_the_fixture_folder_not_the_stem():
@@ -112,14 +111,15 @@ def test_the_alert_label_comes_from_the_fixture_folder_not_the_stem():
 
 def test_a_slug_that_prefixes_another_takes_nothing_from_its_row(tmp_path: Path):
     """A row names its slug exactly: `m05-lsass-access-v2`'s row scores its own run, and
-    `m05-lsass-access`, with no row, is `not_run` despite a `<slug>-v2-attempt1` folder."""
+    `m05-lsass-access`, with no row, is listed unscored (set incomplete, O11) despite a
+    `<slug>-v2-attempt1` folder."""
     runs = tmp_path / "runs"
     _run(runs, f"{SLUG}-v2-attempt1", says="benign")
     v2 = _run(runs, says="benign")
     fixtures = _fixture_set(tmp_path / "held-out", {SLUG: "benign", f"{SLUG}-v2": "benign"})
     verdicts, not_run, said = _scored(tmp_path, runs, fixtures, (f"{SLUG}-v2", v2.name))
     assert verdicts == {f"{SLUG}-v2": "OK"}, said
-    assert not_run == [SLUG], said
+    assert SLUG in said.replace(f"{SLUG}-v2", "") and "incomplete" in said.lower(), said
 
 
 def test_the_newest_row_wins_not_the_newest_folder(tmp_path: Path):

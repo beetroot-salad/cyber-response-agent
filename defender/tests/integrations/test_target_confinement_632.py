@@ -1,7 +1,9 @@
-"""#632 target fidelity: a verb cannot be aimed outside the system it is declared under. Elastic refuses indices outside the configured patterns and reaches only its declared (path, method) read endpoints; a case adapter the cold read refused serves no comment. The other systems are confined by the proxy's route check (#1391 A6). Not covered: `elastic.esql` selects its target inside the FROM clause, which the verb-level check does not reach."""
+"""#632 target fidelity: a verb cannot be aimed outside the system it is declared under. Elastic refuses indices outside the configured patterns and reaches only its declared (path, method) read endpoints; a case adapter the cold read refused serves no comment. The other systems are confined by the proxy's route check (#1391 A6). `elastic.esql` names its sources inside the query text, so every source it reads must fall within the same patterns (#1347 O2a)."""
 from __future__ import annotations
 
-from collections.abc import Mapping
+import contextlib
+import json
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -202,3 +204,103 @@ def test_a_case_adapter_the_cold_read_refused_serves_no_comment(
     assert str(tmp_path).lower() not in reason, f"the reason carries a host path: {got}"
     assert "adapter" in reason, got
     assert "refused" in reason, got
+
+
+@contextlib.contextmanager
+def _esql_channel(tmp_path: Path, data_root: Path) -> Iterator[tuple[Any, Any, Any]]:
+    """The real elastic adapter over the real proxy to a recording upstream that answers `/_query`."""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.integrations.credential_proxy_1163 import _harness as H
+
+    rows = json.dumps({"columns": [], "values": []}).encode()
+    with H.upstream() as up, A.elastic_proxied(tmp_path, data_root, up.url) as (ctx, tap):
+        up.replies["/_query"] = (200, {"Content-Type": "application/json"}, rows)
+        yield ctx, tap, up
+
+
+def _events() -> str:
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    return A.ELASTIC_EVENTS
+
+
+@pytest.mark.parametrize("query", [
+    pytest.param("FROM .security-7 | LIMIT 1", id="from-outside"),
+    pytest.param("from .security-7 | limit 1", id="lowercase"),
+    pytest.param("FROM\n  .security-7\n| LIMIT 1", id="source-on-the-next-line"),
+    pytest.param('FROM ".security-7" | LIMIT 1', id="quoted"),
+    pytest.param("FROM {events}, .security-7 | LIMIT 1", id="second-source-outside"),
+    pytest.param("FROM {events},.security-7 METADATA _id | LIMIT 1", id="outside-before-metadata"),
+    pytest.param("FROM * | LIMIT 1", id="wildcard-wider-than-the-patterns"),
+    pytest.param("FROM -{events} | LIMIT 1", id="exclusion"),
+    pytest.param("TS .security-7 | LIMIT 1", id="ts-outside"),
+    pytest.param("FROM {events} | LOOKUP JOIN .security-7 ON user.name", id="lookup-join-outside"),
+    pytest.param("FROM {events}\n| WHERE a > 1\n| LOOKUP JOIN .security-7 ON user.name", id="lookup-join-later-line"),
+])
+def test_1347_o2a_an_esql_source_outside_the_configured_patterns_never_reaches_the_proxy(
+        tmp_path: Path, data_root: Path, query: str):
+    """O2a/A6: FROM, TS and LOOKUP JOIN name sources; one outside the configured patterns is a
+    ConfinementFault before the proxy is asked. Control: a FROM on the events pattern is sent."""
+    from defender.integrations import elastic_adapter
+
+    with _esql_channel(tmp_path, data_root) as (ctx, tap, up):
+        with pytest.raises(ConfinementFault):
+            elastic_adapter.VERBS["esql"](ctx, query=query.replace("{events}", _events()))
+        refused = (list(tap.tokens), list(up.seen))
+        elastic_adapter.VERBS["esql"](ctx, query=f"FROM {_events()} | LIMIT 1")
+
+    assert refused == ([], [])
+    assert [s.path.split("?")[0] for s in up.seen] == ["/_query"]
+
+
+@pytest.mark.parametrize("query", [
+    pytest.param("FROM {events} | ENRICH hosts ON host.name", id="enrich"),
+    pytest.param("FROM {events} | FORK (WHERE a > 1) (WHERE a < 1)", id="fork"),
+    pytest.param("FROM (FROM {events}) | LIMIT 1", id="subquery-in-the-patterns"),
+    pytest.param("FROM {events}, (FROM .security-7) | LIMIT 1", id="subquery-beside-a-source"),
+    pytest.param("FROM remote:{events} | LIMIT 1", id="remote-cluster"),
+    pytest.param("FROM *:{events} | LIMIT 1", id="every-remote-cluster"),
+    pytest.param("FROM {events}, remote:{events} | LIMIT 1", id="remote-among-sources"),
+    pytest.param("FROM | LIMIT 1", id="from-without-a-source"),
+    pytest.param("FROM {events},, | LIMIT 1", id="empty-source-in-a-list"),
+    pytest.param("", id="empty"),
+    pytest.param("LIMIT 1", id="no-source-command"),
+    pytest.param("SELECT * FROM {events}", id="not-esql"),
+])
+def test_1347_o2a_an_esql_query_that_cannot_be_confined_is_refused_on_every_run(
+        tmp_path: Path, data_root: Path, query: str):
+    """O2a/A6: ENRICH, FORK, subqueries, remote `cluster:index` and unparsable text are a ConfinementFault
+    before the proxy is asked. Control: a FROM on the events pattern is sent."""
+    from defender.integrations import elastic_adapter
+
+    with _esql_channel(tmp_path, data_root) as (ctx, tap, up):
+        with pytest.raises(ConfinementFault):
+            elastic_adapter.VERBS["esql"](ctx, query=query.replace("{events}", _events()))
+        refused = (list(tap.tokens), list(up.seen))
+        elastic_adapter.VERBS["esql"](ctx, query=f"FROM {_events()} | LIMIT 1")
+
+    assert refused == ([], [])
+    assert [s.path.split("?")[0] for s in up.seen] == ["/_query"]
+
+
+@pytest.mark.parametrize("query", [
+    pytest.param("FROM {events} | LIMIT 1", id="the-pattern"),
+    pytest.param("FROM logs-2026.11.03 | LIMIT 1", id="a-concrete-index-under-it"),
+    pytest.param("FROM {events}, alerts-* | LIMIT 1", id="both-configured-patterns"),
+    pytest.param('FROM "{events}" METADATA _id, _index | LIMIT 1', id="quoted-with-metadata"),
+    pytest.param("from {events}\n| keep user.name\n| lookup join logs-2026.11.03 on user.name", id="lowercase-lookup-join"),
+    pytest.param('FROM {events} | WHERE message RLIKE "x|FROM .security-7" | LIMIT 1', id="source-text-in-a-string-literal"),
+    pytest.param("ROW a = 1 | EVAL b = a + 1", id="row"),
+    pytest.param("SHOW INFO", id="show"),
+])
+def test_1347_o2a_an_esql_query_within_the_patterns_or_naming_no_source_is_sent(
+        tmp_path: Path, data_root: Path, query: str):
+    """O2a/A6: sources inside the configured patterns, and ROW/SHOW (which read nothing), are
+    sent unchanged, on a run like any other."""
+    from defender.integrations import elastic_adapter
+
+    sent = query.replace("{events}", _events())
+    with _esql_channel(tmp_path, data_root) as (ctx, _tap, up):
+        elastic_adapter.VERBS["esql"](ctx, query=sent)
+
+    assert [(s.path.split("?")[0], json.loads(s.body)) for s in up.seen] == [("/_query", {"query": sent})]

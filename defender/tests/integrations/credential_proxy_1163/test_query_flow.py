@@ -343,26 +343,22 @@ def _answered(status: int) -> tuple[int, dict, bytes]:
     return status, {"Content-Type": "application/json"}, b'{"error": {"reason": "no privilege"}}'
 
 
+_ES_IN_PATTERN = {"query": f"FROM {A.ELASTIC_EVENTS} | LIMIT 1"}
+
+
 @pytest.mark.parametrize(("verb", "kw", "path", "status", "fault"), [
-    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 401, ConfigFault,
-                 id="esql-401"),
-    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 403, UpstreamFault,
-                 id="esql-403-role-lacks-the-index"),
-    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 503, TransportFault,
-                 id="esql-503"),
+    pytest.param("esql", _ES_IN_PATTERN, "/_query", 401, ConfigFault, id="esql-401"),
+    pytest.param("esql", _ES_IN_PATTERN, "/_query", 403, ConfigFault, id="esql-403-is-setup"),
+    pytest.param("esql", _ES_IN_PATTERN, "/_query", 503, TransportFault, id="esql-503"),
     pytest.param("query", {"native_query": "*"}, f"/{A.ELASTIC_EVENTS}/_search", 403,
                  ConfigFault, id="query-403"),
     pytest.param("alerts", {"native_query": "*"}, f"/{A.ELASTIC_ALERTS}/_search", 403,
                  ConfigFault, id="alerts-403"),
-    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 403,
-                 UpstreamFault, id="esql-403"),
 ])
 def test_1391_o3_elastic_faults_follow_the_proxys_classification(
         tmp_path, data_root, verb, kw, path, status, fault):
-    """ES|QL `FROM .security-7` passes the adapter and is sent; 401 and 5xx come back as
-    ConfigFault and TransportFault. A 403 on `query`/`alerts` (whose index is confined to the
-    configured ones) is a setup fault (ConfigFault); on `esql`, which names its own indexes, it
-    is the agent's (UpstreamFault). #1391 O3, D8, D11; PR #1409 review (human decision)."""
+    """401/5xx follow the proxy's classification and a 403 is a setup fault naming `read`, on `esql`
+    too now its sources are confined (A6). #1391 O3, D8, D11; #1347 O2a."""
     with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, _tap):
         up.replies[path] = _answered(status)
         with pytest.raises(AdapterFault) as raised:
