@@ -512,12 +512,17 @@ nothing in the database names a worker or a machine. Every worker runs take-over
 `running` row whose lease (database clock) has lapsed and that the worker does not itself hold is failed
 (`lease_lapsed`) and its retry queued in the same transaction (attempt + 1; at attempt 3, `retry_cap` and
 no retry). Take-over reads no disk and reaches no machine: everything a run starts dies with the process
-that started it (worker → child → box), so there is nothing to stop or clean up. A holder keeps its row
+that started it (worker → child → box), so there is nothing to stop or clean up. A child's end is its whole
+process group killed and waited for, not only signalled: the worker removes the box and writes the row's end
+once no member it can signal still runs. The wait is bounded (10 s, logged, once per row), so a member that
+never dies is left running; and a worker cancelled a second time while stopping kills every group at once and
+leaves without waiting. A holder keeps its row
 until its last write lands: it writes the terminal stage, or — if cancel or a take-over already ended the
 row — its own final cost and knowledge, once. `cost_usd` is cost so far (copied about every 15 s) until
 then. A stopping worker hands its rows back (lease lapsed, final cost) so they are retried within seconds,
 except a row whose run had already decided its ending (a report committed, or setup refused): that ending
-is recorded. A last write whose value the database refuses is written again with less (the knowledge as
+is recorded. A stopping worker takes nothing over from the moment its stop begins, so it never takes over
+the rows it is handing back; other workers' take-over retries them. A last write whose value the database refuses is written again with less (the knowledge as
 unreadable, then a bare `worker_error`), rather than dropped into a re-run.
 A cancelled or taken-over row's worker finds out at its next renewal and ends its child. Until that child
 has ended, a new run of the same alert can already be working beside it: accepted, since a repeat is safe.
