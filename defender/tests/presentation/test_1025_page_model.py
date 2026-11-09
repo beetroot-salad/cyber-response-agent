@@ -92,6 +92,23 @@ def test_1025_non_numeric_usage_and_odd_message_shapes_in_a_wire_log_leave_that_
     assert "partial" in judge, judge
 
 
+def test_1025_a_non_string_model_in_a_wire_log_row_leaves_that_call_unpriced(tmp_path):
+    """A wire log is box-writable: a response row naming `"model": 7` renders, and that call reads unpriced. (r7.3 F5)"""
+    ep = E.sample_episode(tmp_path)
+    agent_id = f"judge:{T.fixture_world_id(E.GRADED_WORLD)}:1"
+    rows = E.trace_rows(agent_id)
+    assert any(r.get("kind") == "response" for r in rows), "premise: the trace has a response row"
+    for row in rows:
+        if row.get("kind") == "response":
+            row["model"] = 7
+    E.write_trace(ep.dir, agent_id, rows)
+    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 1)))
+
+    block = render(ep).text_of(f"tx-{E.trace_stem(agent_id)}")
+
+    assert "unpriced" in block, block
+
+
 def test_1025_a_scalar_list_field_in_the_outcome_or_the_provenance_record_degrades_its_own_slot(tmp_path):
     ep = E.sample_episode(tmp_path)
     outcome_path = ep.dir / "outcome.yaml"

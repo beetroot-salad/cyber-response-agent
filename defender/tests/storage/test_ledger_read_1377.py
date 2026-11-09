@@ -254,3 +254,13 @@ def test_t1_r7_3_a_seal_does_not_excuse_an_unseen_or_unpriced_row(ledger, outcom
     plant([(model, {} if outcome != RESPONSE else USAGE)], agent_id="gather:l-001", outcome=outcome, run_id=other)
 
     assert _sealed_read(store, other).complete is False
+
+
+@pytest.mark.parametrize("model", [None, True, False, 0, 7, 0.0, 1.5, [], ["claude-sonnet-4-6"], {}, {"name": "claude-sonnet-4-6"}],
+                         ids=lambda m: f"{type(m).__name__}-{m}")
+def test_is_priced_is_false_for_every_json_value_that_is_not_a_string(model):
+    """A name read from a box-writable record may be any JSON value: none is priced, and none raises. (r7.3 F5)"""
+    from defender.configuration import is_priced
+
+    assert is_priced(SONNET) is True, "positive control: a priced name"
+    assert is_priced(model) is False

@@ -625,22 +625,19 @@ def test_s5_r7_the_ledger_alone_makes_the_headline_at_least_when_a_row_is_unseen
     assert _dollars(headline) == pytest.approx(_priced(_LEDGER), abs=2e-4)
 
 
-def test_q1_r7_3_a_database_with_no_ledger_table_shows_the_run_file_s_total_labelled_and_no_other_dollars(tmp_path, monkeypatch):
-    """A run from before the ledger (its database opens, the table never existed): the headline is the total saved in its run
-    file, labelled as recorded before the spend ledger, never "unknown"; no bar and no informational figure carries dollars. The
-    sealed ledger of the same run is the control: ledger headline, no label. (r7.3 Q1; was r7.1 S6, r7.2 P1 for this case)"""
+def test_r1_r7_4_a_database_with_no_ledger_table_reads_unknown_with_no_dollars_even_when_the_run_file_has_a_total(tmp_path, monkeypatch):
+    """CONFLICT-UPDATED (was r7.3 Q1): a database whose ledger table is gone is an unreadable ledger (r7.4 R1, r7.2 P1): the
+    headline is exactly "unknown", no bar, no informational dollars, and the run file's total (1.2345) appears nowhere."""
     import sqlite3
 
     from defender.records import session_store as ss
 
-    label = "before the spend ledger"
     run = _build_run(tmp_path)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     _append_review_calls(run)
     _a_gate_that_ran(run)
     control = _page(run)
     assert _dollars(_headline(control)) > _priced(_LEDGER) - 2e-4, "positive control: the ledger's figure, the review's spend beside it"
-    assert label not in _headline(control).lower(), "positive control: a ledger the page reads is not labelled"
     _result_line(run, total_cost_usd=1.2345, total_cost_is_lower_limit=False)
     conn = sqlite3.connect(ss.resolve_store_path(_run_handle_1165(run)), timeout=10)
     try:
@@ -651,12 +648,11 @@ def test_q1_r7_3_a_database_with_no_ledger_table_shows_the_run_file_s_total_labe
 
     html = _page(run)
 
-    headline = _headline(html)
-    assert headline.startswith("$1.2345"), f"the headline reads {headline!r}, not the run file's total"
-    assert label in headline.lower(), f"the headline is not labelled: {headline!r}"
+    assert _headline(html) == "unknown"
     assert _cost_segments(html) == {}, "a bar beside a total no ledger backs"
     priced = {name: texts for name, texts in _informational_text(html).items() if any("$" in t for t in texts)}
     assert not priced, f"an informational figure carries dollars beside a run with no ledger: {priced}"
+    assert "1.2345" not in html, "the run file's total reached the page"
 
 
 @pytest.mark.parametrize("agent_id", ["gather", "planner"])
