@@ -174,8 +174,7 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
         return len([line for line in text.splitlines() if line.strip()])
 
     try:
-        observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=1.0, run_id=run_dir.name,
-                                spend_write_failed=False)
+        observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=1.0, run_id=run_dir.name)
     except FileExistsError:
         return  # failing loud on a second write discharges the demand
     second = (run_dir / "tool_trace.jsonl").read_text()

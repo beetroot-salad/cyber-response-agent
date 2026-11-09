@@ -102,7 +102,7 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         assert Path(runs / f"{inv.investigation_id}.launch.json").is_file()
         assert json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8")) == {
             "setup": "done", "box": "started", "report_committed": True, "scrub_verified": True,
-            "cut_short": None, "spend_write_failed": False}
+            "cut_short": None}
         from defender.records import RunPaths
 
         launch = json.loads((runs / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
@@ -261,14 +261,13 @@ def _spend_errors(stderr: Path) -> list[str]:
     return [line for line in lines if '"ERROR"' in line and "spend" in line.lower()]
 
 
-def _page(run: Path, *, spend_write_failed: bool) -> str:
-    """The run page through the post-run step's own renderer (the job lane's child stubs the step). `spend_write_failed` is what
-    production hands it: the in-process summary's flag, which this process cannot see, so each test states it from its scenario
-    (never from the job-end record)."""
+def _page(run: Path) -> str:
+    """The run page through the post-run step's own renderer (the job lane's child stubs the step), handed the run and nothing
+    else: the page reads the ledger, as the command-line re-render does (r7.3 T1)."""
     from defender.presentation.visualize_run import render_page
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
-    return render_page(fixture_run(run), spend_write_failed=spend_write_failed)
+    return render_page(fixture_run(run))
 
 
 def _run_result(run: Path) -> dict:
@@ -309,7 +308,7 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
         assert stored["cost_usd"] == pytest.approx(spent, rel=1e-9)
         assert lower_limit(migrated_database, inv.investigation_id) is False
         end = json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8"))
-        assert end["spend_write_failed"] is False, end
+        assert set(end) == {"setup", "box", "report_committed", "scrub_verified", "cut_short"}, end
         result = _run_result(runs / inv.investigation_id)
         assert result["total_cost_usd"] == pytest.approx(spent, abs=1e-6), "the run file's total is not the job's cost"
         assert result["total_cost_is_lower_limit"] is False
@@ -317,7 +316,7 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
         assert result["num_turns"] == 4, "num_turns stays MAIN's turns (run health reads it)"
         # r7 S5/S6: the run page, rendered through its real entry on this job's run, agrees with the worker and the run file.
         monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
-        html = _page(runs / inv.investigation_id, spend_write_failed=False)
+        html = _page(runs / inv.investigation_id)
         assert C.headline(html) == f"${stored['cost_usd']:.4f}", "the page's headline is not the worker's final cost, exact"
         segments = C.segments(html)
         by_kind = {"main": priced_cost(PRICED_MODELS["main"], 4), "gather": priced_cost(PRICED_MODELS["gather"], 2),
@@ -331,7 +330,7 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
 
         insert_spend(ss.resolve_store_path(fixture_run(runs / inv.investigation_id)), inv.investigation_id,
                      [(PRICED_MODELS["gather"], {})], agent_id="gather:l-00c", outcome=UNSEEN)
-        assert C.at_least(C.headline(_page(runs / inv.investigation_id, spend_write_failed=False))), "a re-rendered page reads the ledger again"
+        assert C.at_least(C.headline(_page(runs / inv.investigation_id))), "a re-rendered page reads the ledger again"
         async with job_store(migrated_database) as reread_store:
             later = await reread_store.get_investigation(t.tenant_id, inv.investigation_id)
         assert (later.cost_usd, later.cost_is_lower_limit) == (served.cost_usd, False), "a stored figure moved after the run's end"
@@ -370,7 +369,7 @@ async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_th
         result = _run_result(runs / inv.investigation_id)
         assert (result["total_cost_usd"], result["total_cost_is_lower_limit"]) == (pytest.approx(stored["cost_usd"], abs=1e-6), True)
         monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
-        html = _page(runs / inv.investigation_id, spend_write_failed=False)
+        html = _page(runs / inv.investigation_id)
         headline = C.headline(html)
         assert (C.at_least(headline), C.dollars(headline)) == (True, pytest.approx(stored["cost_usd"], abs=1e-4))
         assert C.segments(html) == pytest.approx(want, abs=1e-4), "a kind that did not spend has a segment, or one is missing"
@@ -421,13 +420,13 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
         assert lower_limit(migrated_database, faulted) is True
         assert lower_limit(migrated_database, control) is False
         end = json.loads((runs / f"{faulted}.job-end.json").read_text(encoding="utf-8"))
-        assert (end["report_committed"], end["spend_write_failed"]) == (True, True), end
+        assert end["report_committed"] is True, end
         result = _run_result(runs / faulted)
         assert (result["total_cost_usd"], result["total_cost_is_lower_limit"]) == (pytest.approx(lacking_review, abs=1e-6), True)
         assert (result["usage"], result["num_turns"]) == (priced_billed(7), 4)
         assert _spend_errors(err_file), "the failed write was not logged at ERROR"
         monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
-        page = C.headline(_page(runs / faulted, spend_write_failed=True))
+        page = C.headline(_page(runs / faulted))
         assert (C.at_least(page), C.dollars(page)) == (True, pytest.approx(lacking_review, abs=1e-4)), (
-            "the job reads at least, so the page, handed the same failed write, must too")
+            "the job reads at least, so the page, rendered from the run alone, must too (r7.3 T1; review finding 1)")
         assert _spend_errors(tmp_path / "control.stderr") == [], "the unfaulted control logged a failed spend write"

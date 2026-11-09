@@ -10,8 +10,10 @@ from dataclasses import replace as _with_fixture_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
 from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
 
+import dataclasses
 import inspect
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -97,7 +99,7 @@ def _seed_calls(state, n: int) -> None:
 
 def drive_agent(  # noqa: PLR0913 — one more seam: the model
         defn, run_dir: Path, turns, *, limits, state, enforce: bool | None = None,
-                agent_id: str = "main", request_limit: int = 40, model=None):
+                agent_id: str = "main", request_limit: int = 40, model=None, extra_capabilities=(), bind_ledger=None):
     """Build one agent through the real `build_agent_core` (real hooks, tools and gate) and drive it
     with a scripted `FunctionModel`; `state` is the `RunState` its deps carry."""
     scripted = model if model is not None else ScriptedModel(turns)
@@ -113,7 +115,10 @@ def drive_agent(  # noqa: PLR0913 — one more seam: the model
         agent_id=agent_id,
         make_model=lambda name, effort: BuiltModel(FunctionModel(scripted), None),
         limits=limits,
+        extra_capabilities=extra_capabilities,
     )
+    if bind_ledger is not None:
+        bind_ledger(logger)
     from defender import box as box_mod
     from defender.tests.e2e._replay_harness import _no_docker_daemon, _unsandboxed_allowed
 
@@ -236,8 +241,8 @@ def _drive_gather_query(run_dir: Path, registry, state):
 
 
 def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_path):
-    """`_make_hooks` takes the posture bit and (r7.1 D) the requested model as required keywords: a caller that states
-    nothing fails loudly instead of running unenforced or pricing at a default."""
+    """`_make_hooks` takes the posture bit as a required keyword: a caller that states nothing fails loudly instead of running
+    unenforced. It takes no requested model any more (r7.3 T3)."""
     sig = inspect.signature(driver._make_hooks)
     posture = sig.parameters["enforce"]
     assert posture.kind is inspect.Parameter.KEYWORD_ONLY
@@ -247,30 +252,39 @@ def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_pa
     logger = observe.RequestLogger(_run_dir(tmp_path) / "llm_requests.jsonl")
     with pytest.raises(TypeError):
         driver._make_hooks(logger, "main")
-    # CONFLICT-UPDATED (#1377 r7.1 D; was: only the posture bit): the requested model is a required keyword too, so a caller
-    # that states no model cannot price its rows as some default.
-    requested = sig.parameters.get("requested_model")
-    assert requested is not None, "contract-chosen keyword `requested_model`"
-    assert requested.kind is inspect.Parameter.KEYWORD_ONLY
-    assert requested.default is inspect.Parameter.empty, "the requested model has a default"
+    # CONFLICT-UPDATED (#1377 r7.3 T3; was r7.1 D: `requested_model` a required keyword): spend is recorded by a model wrapper
+    # built where the agent is, with the name it was asked for, so the hook takes no model name.
+    assert "requested_model" not in sig.parameters, "the hook still takes the requested model (r7.3 T3: the model wrapper owns it)"
     with pytest.raises(TypeError):
-        driver._make_hooks(logger, "main", enforce=False)
+        driver._make_hooks(logger, "main", requested_model="claude-sonnet-4-6", enforce=False)
     logger.close()
 
     core_sig = inspect.signature(driver.build_agent_core)
     assert "limits" in core_sig.parameters
 
 
-@pytest.mark.parametrize("name", ["write_trace", "_run_summary"])
-def test_p2_r7_2_the_run_file_writer_and_the_run_summary_require_the_failed_write_fact(name):
-    """`observe.write_trace` and `driver._run_summary` take `spend_write_failed` as a keyword with no default: a run exit that
-    forgets the fact is a TypeError, not a total that silently reads exact. (r7.2 P2)"""
-    function = getattr(observe if name == "write_trace" else driver, name)
-    parameter = inspect.signature(function).parameters.get("spend_write_failed")
+def test_t1_r7_3_no_run_exit_or_reader_is_handed_the_failed_write_fact(tmp_path):
+    """The failed-write fact is held by the request logger alone, and read through the ledger's seal: no run file writer, run
+    summary, post-run step, page function, job fact or job-end record takes or carries it. CONFLICT-UPDATED (r7.3 T1; was
+    r7.2 P2: the argument required of the run file writer and the run summary)."""
+    from defender import run as run_py
+    from defender import run_common
+    from defender.presentation import visualize_run
+    from defender.records import job_lane
 
-    assert parameter is not None, f"{name} takes no `spend_write_failed`"
-    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
-    assert parameter.default is inspect.Parameter.empty, f"{name}'s `spend_write_failed` has a default: {parameter.default!r}"
+    taking = {"observe.write_trace": (observe.write_trace, "spend_write_failed"),
+              "driver._run_summary": (driver._run_summary, "spend_write_failed"),
+              "driver.run_investigation": (driver.run_investigation, "on_spend_failure"),
+              "RequestLogger.bind_ledger": (observe.RequestLogger.bind_ledger, "on_failure"),
+              "visualize_run.render_page": (visualize_run.render_page, "spend_write_failed"),
+              "visualize_run.publish_page": (visualize_run.publish_page, "spend_write_failed"),
+              "run_common.visualize": (run_common.visualize, "spend_write_failed")}
+    still = [name for name, (function, parameter) in taking.items() if parameter in inspect.signature(function).parameters]
+    assert not still, f"still taking the failed-write fact: {still}"
+    assert "spend_write_failed" not in {f.name for f in dataclasses.fields(job_lane.JobEnd)}, "the job-end record still carries it"
+    facts = run_py._JobEndFacts
+    assert not hasattr(facts, "note_spend_write_failed"), "the job facts still take the callback"
+    assert "spend_write_failed" not in {f.name for f in dataclasses.fields(facts)}, "the job facts still hold the fact"
 
 
 class _HookTestFailure(BaseException):  # noqa: N818 — a test-defined ending that is neither an Exception nor a cancellation
@@ -298,40 +312,59 @@ def _every_ending():
         yield f"ProviderDown {status}", lambda status=status: ProviderDown(model="m", status=status, attempts=4)
 
 
+async def _what_the_agent_got(agent, deps, label: str, ending) -> str | None:
+    """Run `agent` once on a model whose request ends as `ending`; None when the agent got that very response or exception."""
+    try:
+        with override_allow_model_requests(False):
+            got = await agent.run("go", deps=deps, usage_limits=UsageLimits(request_limit=4))
+    except BaseException as raised:  # noqa: BLE001 — the point: whatever else came out is a finding
+        if raised is not ending:
+            return f"{label}: raised {type(raised).__name__}({raised}) instead of {type(ending).__name__}"
+        return None
+    if isinstance(ending, BaseException):
+        return f"{label}: swallowed {type(ending).__name__}"
+    if got.response is not ending and got.response.parts != ending.parts:
+        return f"{label}: the agent got {got.response!r}, not the model's own response"
+    return None
+
+
 @pytest.mark.parametrize("agent_id", ["main", "gather:l-001", "gather:l-00c", "review:support", "review:ablation", "review:composer"])
 def test_f1_r7_2_a_request_s_ending_reaches_the_agent_unchanged_whatever_the_ledger_does_with_it(tmp_path, agent_id):
-    """The model-request hook built by `_make_hooks` for each agent kind, with no ledger bound (so every ending is a failed
-    spend write): over every ending the handler can have (a response; a test-defined BaseException, a cancellation, an unparseable
-    reply, a status-less API error; a provider error at every HTTP status 100 to 599; `ProviderDown` at every temporary last
-    status and none), the hook returns the very response or re-raises the very exception, and nothing else propagates.
-    Bookkeeping never changes how a request ends. (r3 decision 2; r7 S2c; triage F1)"""
+    """CONFLICT-UPDATED (r7.3 T3; was: the hook built by `_make_hooks` called directly): an agent built by `build_agent_core`
+    for each agent kind, with no ledger bound (so every ending is a failed spend write), on a model whose request ends each way
+    in turn (a response; a test-defined BaseException, a cancellation, an unparseable reply, a status-less API error; a provider
+    error at every HTTP status 100 to 599; `ProviderDown` at every temporary last status and none): the agent gets the very
+    response or the very exception, and nothing else propagates. Bookkeeping never changes how a request ends. (r3 decision 2;
+    r7 S2c; triage F1)"""
     import asyncio
-    from types import SimpleNamespace
+    from dataclasses import replace
+
+    from defender import box as box_mod
+    from defender.tests.e2e._replay_harness import _no_docker_daemon, _unsandboxed_allowed
 
     run_dir = _run_dir(tmp_path, f"ending-{agent_id.replace(':', '-')}")
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
-    hooks = driver._make_hooks(logger, agent_id, enforce=False, requested_model="claude-sonnet-4-6")
-    ctx = SimpleNamespace(run_step=1, deps=None)
-    context = SimpleNamespace(messages=[])
+    current: list = []
+
+    async def model(messages, info):
+        ending = current[0]
+        if isinstance(ending, BaseException):
+            raise ending
+        return ending
+
+    agent = driver.build_agent_core(MAIN_DEF, deps_type=MAIN_DEF.deps_cls, instructions="probe", logger=logger, agent_id=agent_id,
+                                    make_model=lambda name, effort: BuiltModel(FunctionModel(model), None), limits=DEFAULT_LIMITS)
+    with _unsandboxed_allowed():
+        box = box_mod.start_box(run_dir, DEFENDER, docker=_no_docker_daemon, tenant_id=TEST_TENANT)
+    bindable = replace(MAIN_DEF, tools=effective_tools_for(MAIN_DEF))
+    deps = replace(bind(bindable, run_dir, defender_dir=DEFENDER, box=box), run_state=_state(run_dir))
     changed: list[str] = []
 
     async def through(label: str, made):
-        ending = made()
-
-        async def handler(_context):
-            if isinstance(ending, BaseException):
-                raise ending
-            return ending
-
-        try:
-            got = await hooks.wrap_model_request(ctx, request_context=context, handler=handler)
-        except BaseException as raised:  # noqa: BLE001 — the point: whatever else came out is a finding
-            if raised is not ending:
-                changed.append(f"{label}: raised {type(raised).__name__}({raised}) instead of {type(ending).__name__}")
-        else:
-            if got is not ending:
-                changed.append(f"{label}: returned {got!r} instead of the handler's own response" if not isinstance(ending, BaseException)
-                               else f"{label}: swallowed {type(ending).__name__}")
+        current[:] = [made()]
+        found = await _what_the_agent_got(agent, deps, label, current[0])
+        if found is not None:
+            changed.append(found)
 
     async def run_all():
         for label, made in _every_ending():
@@ -343,6 +376,78 @@ def test_f1_r7_2_a_request_s_ending_reaches_the_agent_unchanged_whatever_the_led
         logger.close()
 
     assert not changed, f"{len(changed)} endings reached the agent changed, e.g. {changed[:5]}"
+
+
+def _ledger_rows_of(tmp_path, label: str, capabilities=()):
+    """One agent (MAIN) driven through `build_agent_core` on a scripted model, its request logger bound to the ledger of a real
+    session store, as the driver binds it; returns the model, the ledger's rows (agent, outcome) and the capabilities' notes."""
+    from defender.records import SessionPaths
+    from defender.records import session_store as ss
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
+    run_dir = _run_dir(tmp_path, label)
+    with ss.open_store(case_id=f"t3-{label}", sessions=SessionPaths(fixture_runs_base(tmp_path / "runs"))) as store:
+        _, model = drive_agent(MAIN_DEF, run_dir, [], limits=DEFAULT_LIMITS, state=_state(run_dir), enforce=False,
+                               extra_capabilities=list(capabilities),
+                               bind_ledger=lambda logger: logger.bind_ledger(observe.SpendLedger(store, run_dir.name)))
+        return model, [(r.agent_id, r.outcome) for r in ss.run_spend(store, run_dir.name)]
+
+
+def _capability(behaviour: str):
+    """A capability that, on the agent's first model request, `skip-wrap`s it (answers without calling the model), `skip-before`
+    it (the same, one hook earlier) or `retry-after` the model has answered (calls it, then raises `ModelRetry` as an output
+    check does); later requests pass through."""
+    from pydantic_ai.capabilities import AbstractCapability
+    from pydantic_ai.exceptions import ModelRetry, SkipModelRequest
+
+    class Once(AbstractCapability):
+        def __init__(self) -> None:
+            self.fired = 0
+
+        def _first(self) -> bool:
+            self.fired += 1
+            return self.fired == 1
+
+        async def before_model_request(self, ctx, request_context):
+            if behaviour == "skip-before" and self._first():
+                raise SkipModelRequest(ModelResponse(parts=[TextPart(content="answered without the model")]))
+            return request_context
+
+        async def wrap_model_request(self, ctx, *, request_context, handler):
+            if behaviour == "skip-wrap" and self._first():
+                raise SkipModelRequest(ModelResponse(parts=[TextPart(content="answered without the model")]))
+            response = await handler(request_context)
+            if behaviour == "retry-after" and self._first():
+                raise ModelRetry("the answer failed its output check")
+            return response
+
+    return Once()
+
+
+@pytest.mark.parametrize("behaviour", ["skip-wrap", "skip-before"])
+def test_t3_r7_3_a_capability_that_skips_a_model_request_writes_no_ledger_row(tmp_path, caplog, behaviour):
+    """Another capability answers the agent's request without calling the model: the ledger holds no row for it (spend is
+    recorded at the model, not around the request step) and no failed write is logged; the same agent with no such capability
+    is the control, one row. (r7.3 T3)"""
+    control_model, control_rows = _ledger_rows_of(tmp_path, f"control-{behaviour}")
+    assert (control_model.calls, control_rows) == (1, [("main", "response")]), "control: the model's one answer is one row"
+    caplog.clear()
+
+    model, rows = _ledger_rows_of(tmp_path, behaviour, [_capability(behaviour)])
+
+    assert model.calls == 0, "premise: the model was never asked"
+    assert rows == [], f"a request the model never saw left ledger rows: {rows}"
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR and "spend" in r.getMessage().lower()]
+
+
+def test_t3_r7_3_an_error_raised_after_the_model_answered_leaves_the_response_row_in_place(tmp_path):
+    """The model answers and a capability then rejects the answer (a retry asked for, as output validation does): the answer
+    keeps its `response` row, and the retry's answer has its own. (r7.3 T3: "an output-validation retry after a response keeps
+    the response row")"""
+    model, rows = _ledger_rows_of(tmp_path, "retry-after", [_capability("retry-after")])
+
+    assert model.calls == 2, "premise: the model was asked twice, the first answer rejected"
+    assert rows == [("main", "response"), ("main", "response")], rows
 
 
 def test_s3_a_run_side_hook_with_no_ledger_bound_counts_each_response_as_a_failed_spend_write(tmp_path, caplog):

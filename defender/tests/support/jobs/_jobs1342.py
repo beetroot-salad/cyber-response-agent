@@ -265,6 +265,17 @@ CHILD_SCRIPT = textwrap.dedent("""
             path.parent.mkdir(parents=True, exist_ok=True)
             path.symlink_to(target)
 
+    sealed_by = {}  # r7.3 T1: what a child that ends cleanly seals: set once its ledger rows are being written
+
+    def sealing():
+        if sealed_by and not sealed_by.get("done"):
+            sealed_by["done"] = True
+            try:
+                sealed_by["seal"](runs, sealed_by["case"], run_id)
+                Path(spec["sessions"]["marks"], "sealed").touch()
+            except Exception as fault:  # noqa: BLE001 - a missing seal is the code stage's red, named by its own mark
+                Path(spec["sessions"]["marks"], "seal-failed").write_text(repr(fault), encoding="utf-8")
+
     term = spec.get("term", "default")
     if term == "ignore":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -272,6 +283,7 @@ CHILD_SCRIPT = textwrap.dedent("""
         def on_term(*_):
             Path(fill(spec["term_mark"])).touch()
             if term == "finish":  # #1343 B11: a child that completes on its own as the SIGTERM lands
+                sealing()  # it completes: the run's exit seals its ledger before the records are left
                 leave_records()
             event("end")
             os._exit(0)
@@ -306,12 +318,14 @@ CHILD_SCRIPT = textwrap.dedent("""
     if spend:  # #1343 B2/B6: the live child writes its session database while the worker reads it
         sys.path.insert(0, spend["path"])
         from defender.records.session_store._write import open_store
-        from defender.tests.support.jobs._jobs1342 import _paths, _response, insert_spend, session_db, session_pointer
+        from defender.tests.support.jobs._jobs1342 import _paths, _response, insert_spend, seal_spend, session_db, session_pointer
         import hashlib
         case = hashlib.md5(run_id.encode()).hexdigest() if spend.get("per_run") else spend["case"]  # per run: a retry never shares its parent's database
         (runs / f"{run_id}.session-pointer.json").write_text(session_pointer(case), encoding="utf-8")
         marks = Path(spend["marks"])
         marks.mkdir(parents=True, exist_ok=True)
+        if spend.get("seal", True):
+            sealed_by.update(seal=seal_spend, case=case)
         with open_store(case_id=case, sessions=_paths(runs)) as handle:
             session = handle.new_session("main")
             for n, (model, usage) in enumerate(spend["steps"]):
@@ -329,6 +343,7 @@ CHILD_SCRIPT = textwrap.dedent("""
                 until = time.monotonic() + 60
                 while not (marks / f"go-{n}").exists() and time.monotonic() < until:
                     time.sleep(0.02)
+            sealing()
     release = spec.get("wait_for")
     deadline = time.monotonic() + 60
     while release and not Path(release).exists() and time.monotonic() < deadline:
@@ -618,11 +633,11 @@ def is_box_token(value: object) -> bool:
 
 
 def job_end(*, setup: str = "done", box: str = "started", report_committed: bool = True,
-            scrub_verified: bool = True, cut_short: str | None = None, spend_write_failed: bool = False) -> str:
-    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its six facts (#1421, #1377)."""
+            scrub_verified: bool = True, cut_short: str | None = None) -> str:
+    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its five facts (#1421). r7.3 T1: no spend fact
+    rides on it; the ledger's seal says whether the run's spend is complete."""
     return json.dumps({"setup": setup, "box": box, "report_committed": report_committed,
-                       "scrub_verified": scrub_verified, "cut_short": cut_short,
-                       "spend_write_failed": spend_write_failed})
+                       "scrub_verified": scrub_verified, "cut_short": cut_short})
 
 
 def scrub_verdict(*, ran: bool) -> str:
@@ -727,10 +742,14 @@ def insert_spend(database: Path, run_id: str, spend: list[tuple[str, dict[str, i
         conn.close()
 
 
-def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, dict[str, int]]], **row: str) -> None:
+def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, dict[str, int]]], *, sealed: bool = True,
+                **row: str) -> None:
     """#1377: `case_id`'s session database (made by the real store, so its own schema, and with a
     `main` session when this call makes the file) holding one ledger row per `(model, billed usage)`
-    for `run_id`; `row` is `insert_spend`'s agent id, outcome and reported name."""
+    for `run_id`; `row` is `insert_spend`'s agent id, outcome and reported name. r7.3 T1: `sealed` (default) seals the
+    run's ledger after the rows land, as a run that ended without a failed write leaves it; a test that plants a run's rows in
+    several calls seals with the last one only (`sealed=False` before), and `sealed=False` throughout is a run killed before
+    its seal."""
     from defender.records.session_store._write import open_store
 
     fresh = not session_db(runs, case_id).exists()
@@ -738,6 +757,33 @@ def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, di
         if fresh:
             handle.new_session("main")
     insert_spend(session_db(runs, case_id), run_id, spend, **row)
+    if sealed:
+        seal_spend(runs, case_id, run_id)
+
+
+def seal_spend(runs: Path, case_id: str, run_id: str) -> None:
+    """r7.3 T1: seal `run_id`'s ledger in `case_id`'s database through the real `session_store.seal_ledger`."""
+    from defender.records import session_store
+    from defender.records.session_store._write import open_store
+
+    with open_store(case_id=case_id, sessions=_paths(runs)) as handle:
+        session_store.seal_ledger(handle, run_id)
+
+
+def seal_at(database: Path, run_id: str) -> None:
+    """r7.3 T1: seal `run_id`'s ledger in the session database at `database` (a store a test did not open itself: a fixture
+    run's, a planted one) through the real `session_store.seal_ledger`, on a connection of its own."""
+    import sqlite3
+    from types import SimpleNamespace
+
+    from defender.records import session_store
+
+    conn = sqlite3.connect(database, timeout=30)
+    try:
+        session_store.seal_ledger(SimpleNamespace(connection=conn, path=database), run_id)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def lower_limit(dsn: str, investigation_id: str) -> bool | None:

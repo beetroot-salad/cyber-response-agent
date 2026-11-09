@@ -417,7 +417,7 @@ JSON_NULL = object()  # `_job_end_with(key=JSON_NULL)` writes an explicit JSON n
 def _job_end_with(**changes) -> str:
     """A job-end record of the ratified keys with `changes` applied (a `None` value drops the key)."""
     body = json.loads(job_end())
-    body["cut_short"] = JSON_NULL  # the fifth fact reads null on a run nothing cut short (#1421); the sixth, `spend_write_failed`, is #1377's
+    body["cut_short"] = JSON_NULL  # the fifth fact reads null on a run nothing cut short (#1421); r7.3 T1: there is no sixth, the ledger's seal says the rest
     body.update(changes)
     return json.dumps({k: (None if v is JSON_NULL else v) for k, v in body.items() if v is not None})
 
@@ -495,18 +495,6 @@ CASES = {
     "1-job-end-without-the-cut-short-fact": _spec(
         files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=None)}), exit=EXIT,
         expect=("failed", "no_report", None), code=EXIT),
-    "1-job-end-an-extra-key-beside-the-five-old-ones": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=None, extra="x")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
-    "1-job-end-spend-fact-null": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=JSON_NULL)}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
-    "1-job-end-spend-fact-as-a-word": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed="false")}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
-    "1-job-end-spend-fact-as-a-number": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=0)}), exit=EXIT,
-        expect=("failed", "no_report", None), code=EXIT),
     "1-job-end-cut-short-as-a-number": _spec(
         files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=5)}), exit=EXIT,
         expect=("failed", "no_report", None), code=EXIT),
@@ -540,9 +528,6 @@ CASES = {
         expect=("failed", "worker_error", None)),
     # rule 4
     "4-completed-inconclusive": _spec(files=_committed(), expect=("completed", None, "inconclusive")),
-    "4-completed-from-a-job-end-record-of-the-five-pre-1377-keys": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(spend_write_failed=None)}), exit=EXIT,
-        expect=("completed", None, "inconclusive")),
     "4-completed-malicious-whatever-the-exit": _spec(
         files=_committed(**{"{id}/report.md": MALICIOUS_REPORT.read_text(encoding="utf-8") + f"\n{MARKER}\n"}),
         exit=4, expect=("completed", None, "malicious")),
@@ -641,20 +626,18 @@ async def test_o8_the_stage_comes_from_the_job_end_record_and_the_report(world, 
 def _job_end_cut_short(cut_short: str, *, report_committed: bool, scrub_verified: bool) -> str:
     """The real record's own text with the fifth fact set (#1421)."""
     return job_lane.JobEnd(setup="done", box="started", report_committed=report_committed,
-                           scrub_verified=scrub_verified, cut_short=cut_short, spend_write_failed=False).text()
+                           scrub_verified=scrub_verified, cut_short=cut_short).text()
 
 
-def test_p1_a_job_end_record_of_exactly_the_five_pre_1377_keys_reads_as_no_spend_write_failed():
-    """The old five keys parse as `spend_write_failed=False`; an extra key, or a non-bool value, still does not parse. (P1)"""
-    old = json.loads(_job_end_with(spend_write_failed=None))
-    assert sorted(old) == ["box", "cut_short", "report_committed", "scrub_verified", "setup"], "premise: the five old keys"
-    parsed = job_lane.JobEnd.parse(json.dumps(old))
+def test_p1_r7_3_a_job_end_record_is_exactly_its_five_facts_and_names_no_spend_fact():
+    """CONFLICT-UPDATED (r7.3 T1; was r5 P1: the five old keys parse as `spend_write_failed=False`): the record the host writes
+    has the five facts and parses; a missing or an extra key does not. (r7.3 T1; P1)"""
+    five = json.loads(job_end())
+    assert sorted(five) == ["box", "cut_short", "report_committed", "scrub_verified", "setup"], "premise: the five keys"
+    parsed = job_lane.JobEnd.parse(json.dumps(five))
     assert parsed is not None
-    assert parsed.spend_write_failed is False
-    assert job_lane.JobEnd.parse(_job_end_with(spend_write_failed=True)).spend_write_failed is True, "control: the six-key record"
-    for unreadable in (_job_end_with(cut_short=None, spend_write_failed=None), _job_end_with(spend_write_failed=JSON_NULL), _job_end_with(spend_write_failed="false"),
-                       _job_end_with(spend_write_failed=0), _job_end_with(spend_write_failed=None, extra="x"),
-                       _job_end_with(spend_write_failed=False, extra="x"), _job_end_with(cut_short=None)):
+    assert json.loads(parsed.text()) == five, "the record writes keys the host's fact table does not have, or drops one"
+    for unreadable in (_job_end_with(extra="x"), _job_end_with(cut_short=None), _job_end_with(scrub_verified=None)):
         assert job_lane.JobEnd.parse(unreadable) is None, unreadable
 
 
@@ -764,12 +747,12 @@ def _pointer_files(case_id: str, **extra) -> dict[str, str]:
     return _committed(**{"{id}.session-pointer.json": session_pointer(case_id), **extra})
 
 
-async def _run_spent(world: dict, child: ScriptedChild, spend=None, *, then: str | None = None) -> tuple[str, dict]:
-    """One queued row run to its end, its ledger rows (when `spend`) planted in `CASE`'s database under its run id first, then the SQL `then` run on that database."""
+async def _run_spent(world: dict, child: ScriptedChild, spend=None, *, then: str | None = None, sealed: bool = True) -> tuple[str, dict]:
+    """One queued row run to its end, its ledger rows (when `spend`) planted in `CASE`'s database under its run id first (sealed, as a run that ended without a failed write leaves them, unless `sealed=False`), then the SQL `then` run on that database."""
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
         if spend is not None:
-            plant_spend(world["runs"], CASE, inv, spend)
+            plant_spend(world["runs"], CASE, inv, spend, sealed=sealed)
         if then is not None:
             _sqlite(world["runs"], then)
         await _worker(world, store, child).drain()
@@ -899,31 +882,31 @@ _DONE, _NO_REPORT = ("completed", None), ("failed", "no_report")
 
 
 @pytest.mark.parametrize(("ending", "ledger", "expect"), [
-    ("clean", "rows", (*_DONE, 8.0, False)),
-    ("spend write failed", "rows", (*_DONE, 8.0, True)),
-    ("no job-end, exit 77", "rows", (*_NO_REPORT, 8.0, True)),
+    # A sealed ledger is exact whatever the ending; an unsealed one is "at least" (r7.3 T2: the worker reads only the ledger).
+    ("clean", "sealed rows", (*_DONE, 8.0, False)),
+    ("clean", "unsealed rows", (*_DONE, 8.0, True)),  # a failed write (or a kill) left the run unsealed, however cleanly it ended
+    ("no job-end, exit 77", "sealed rows", (*_NO_REPORT, 8.0, False)),  # killed after sealing, before its job-end: every request was recorded
+    ("no job-end, exit 77", "unsealed rows", (*_NO_REPORT, 8.0, True)),
     # A run killed with exit 0 is no more exact than one that exited 77: the mark is not read from the exit code.
-    ("no job-end, exit 0", "rows", (*_NO_REPORT, 8.0, True)),
-    ("job-end unreadable, exit 77", "rows", (*_NO_REPORT, 8.0, True)),
-    # A job-end of the five pre-#1377 keys parses as "no spend write failed" (P1): the run ends as a clean one does, exact.
-    ("job-end of the five pre-1377 keys, exit 77", "rows", (*_DONE, 8.0, False)),
-    ("job-end of valid JSON with an extra key, exit 77", "rows", (*_NO_REPORT, 8.0, True)),
-    ("no job-end, exit 77", "no rows", (*_NO_REPORT, 0.0, True)),
-    ("clean", "no rows", (*_DONE, 0.0, False)),
+    ("no job-end, exit 0", "sealed rows", (*_NO_REPORT, 8.0, False)),
+    ("no job-end, exit 0", "unsealed rows", (*_NO_REPORT, 8.0, True)),
+    ("job-end unreadable, exit 77", "sealed rows", (*_NO_REPORT, 8.0, False)),
+    ("job-end unreadable, exit 77", "unsealed rows", (*_NO_REPORT, 8.0, True)),
+    ("job-end of valid JSON with an extra key, exit 77", "sealed rows", (*_NO_REPORT, 8.0, False)),
+    ("job-end of valid JSON with an extra key, exit 77", "unsealed rows", (*_NO_REPORT, 8.0, True)),
+    ("no job-end, exit 77", "sealed, no rows", (*_NO_REPORT, 0.0, False)),  # a run that made no request and sealed: exactly 0
+    ("no job-end, exit 77", "unsealed, no rows", (*_NO_REPORT, 0.0, True)),  # opened its store, never sealed
+    ("clean", "sealed, no rows", (*_DONE, 0.0, False)),
     ("clean", "unreadable database", (*_DONE, None, False)),
-    ("spend write failed", "unreadable database", (*_DONE, None, False)),
     ("no job-end, exit 77", "unreadable database", (*_NO_REPORT, None, False)),
     ("clean", "no ledger table", (*_DONE, None, False)),
-    ("no job-end, exit 77", "no pointer", (*_NO_REPORT, 0.0, False)),
+    ("no job-end, exit 77", "no pointer", (*_NO_REPORT, 0.0, False)),  # the store was never opened: no ledger, exactly 0 (a different case from an unsealed one)
     ("clean", "no pointer", (*_DONE, 0.0, False)),
-    ("spend write failed", "no pointer", (*_DONE, 0.0, True)),  # a run that reported a failed write is never exact
 ])
 async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_table(world, ending, ledger, expect):
-    """Each row of the final-read flag table: the ledger's sum for this run, "at least" only where spend may be missing, never beside null; the ending the job-end decides stands beside it (never replaced by `worker_error`). (S2, S4, r4)"""
-    job_end_text = {"clean": job_end(), "spend write failed": job_end(spend_write_failed=True),
-                    "job-end unreadable, exit 77": "{not json",
-                    "job-end of the five pre-1377 keys, exit 77": _job_end_with(spend_write_failed=None),
-                    "job-end of valid JSON with an extra key, exit 77": _job_end_with(spend_write_failed=None, extra="x")}.get(ending)
+    """Each row of the final-read flag table: the ledger's sum for this run, "at least" exactly when its ledger is not complete (unsealed, or an unseen or unpriced row), never beside null, and exactly 0 for a run with no store; the ending the job-end decides stands beside it (never replaced by `worker_error`). (r7.3 T2; S2, S4, r4)"""
+    job_end_text = {"clean": job_end(), "job-end unreadable, exit 77": "{not json",
+                    "job-end of valid JSON with an extra key, exit 77": _job_end_with(extra="x")}.get(ending)
     files = _committed(**{"{id}.job-end.json": job_end_text}) if job_end_text is not None else {}
     if ledger != "no pointer":
         files["{id}.session-pointer.json"] = session_pointer(CASE)
@@ -931,8 +914,9 @@ async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_tab
     child = _child(world, files=files, exit=code)
     if ledger == "unreadable database":
         _break_database(world["runs"], CASE)
-    spend = {"rows": _LEDGER, "no rows": [], "no ledger table": _LEDGER}.get(ledger)
-    inv, _ = await _run_spent(world, child, spend, then="DROP TABLE spend_ledger" if ledger == "no ledger table" else None)
+    spend = {"sealed rows": _LEDGER, "unsealed rows": _LEDGER, "sealed, no rows": [], "unsealed, no rows": [], "no ledger table": _LEDGER}.get(ledger)
+    inv, _ = await _run_spent(world, child, spend, sealed=not ledger.startswith("unsealed"),
+                              then="DROP TABLE spend_ledger" if ledger == "no ledger table" else None)
     stored = row(world["dsn"], inv)
 
     assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], lower_limit(world["dsn"], inv)) == (
@@ -1723,15 +1707,13 @@ class _StoreWhoseFinishFails:
 
 
 async def _run_with_failing_finish(world, fault, *, marked: bool = False, **kw) -> tuple[str, str, _StoreWhoseFinishFails]:
-    """`marked`: the failing row's run left a ledger worth 8.0 and a job-end saying a spend write failed (a figure with its lower-limit mark)."""
-    child = _child(world, files=_committed(**(
-        {"{id}.job-end.json": job_end(spend_write_failed=True), "{id}.session-pointer.json": session_pointer(CASE)}
-        if marked else {})))
+    """`marked`: the failing row's run left a ledger worth 8.0 that was never sealed (a failed write: a figure with its lower-limit mark)."""
+    child = _child(world, files=_committed(**({"{id}.session-pointer.json": session_pointer(CASE)} if marked else {})))
     async with job_store(world["dsn"]) as store:
         bad = await _queued(store, ticket="T-1", key="k1")
         good = await _queued(store, ticket="T-2", key="k2")
         if marked:
-            plant_spend(world["runs"], CASE, bad, _LEDGER)
+            plant_spend(world["runs"], CASE, bad, _LEDGER, sealed=False)
         used = _StoreWhoseFinishFails(store, bad, fault, **kw)
         await _worker(world, used, child).drain()
     assert row(world["dsn"], good)["stage"] == "completed", "one row's failed finish stopped the others"
@@ -3315,7 +3297,7 @@ async def test_r7_a_live_cost_so_far_read_beside_an_unseen_row_is_not_marked_and
     plant_sessions(runs, CASE, [("main", SONNET, {"input_tokens": 1_000_000})])
     async with job_store(dsn) as store:
         inv = await _queued(store)
-        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})])
+        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})], sealed=False)
         plant_spend(runs, CASE, inv, [(SONNET, {})], outcome=UNSEEN)
         (runs / f"{inv}.session-pointer.json").write_text(session_pointer(CASE), encoding="utf-8")
         drained = asyncio.create_task(_worker(world, store, child, **_FAST).drain())
@@ -3353,7 +3335,7 @@ async def test_r7_the_final_cost_reads_at_least_exactly_when_the_ledger_has_an_u
     plant_sessions(runs, CASE, [("main", SONNET, {"input_tokens": 1_000_000})])
     async with job_store(dsn) as store:
         inv = await _queued(store)
-        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})])
+        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})], sealed=row is None)
         if row is not None:
             plant_spend(runs, CASE, inv, [(row["model"], row["usage"])], outcome=row["outcome"], agent_id=row["agent_id"])
         (runs / f"{inv}.session-pointer.json").write_text(session_pointer(CASE), encoding="utf-8")
@@ -3372,7 +3354,7 @@ async def test_r7_s4_a_ledger_row_of_an_unknown_agent_id_leaves_the_finished_job
     plant_sessions(runs, CASE, [("main", SONNET, {"input_tokens": 1_000_000})])
     async with job_store(dsn) as store:
         inv = await _queued(store)
-        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})])
+        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})], sealed=False)
         plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})], agent_id=agent_id)
         (runs / f"{inv}.session-pointer.json").write_text(session_pointer(CASE), encoding="utf-8")
         await _worker(world, store, child, **_FAST).drain()
@@ -4636,6 +4618,32 @@ async def test_s2_a_cancelled_running_row_stays_at_least_until_its_holder_writes
 
     assert (row(dsn, inv)["stage"], row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (
         "aborted", pytest.approx(SONNET_IN), expect)
+
+
+@pytest.mark.parametrize("sealed", [True, False], ids=["killed after its seal", "killed before its seal"])
+async def test_t2_r7_3_a_child_killed_before_its_job_end_reads_exact_after_its_seal_and_at_least_before_it(world, sealed):
+    """A running child's ledger holds its response; it is cancelled (SIGTERM, no job-end left) either after the child sealed or while
+    it was still working: the holder's final figure is the ledger's sum, exact after the seal ("every request was recorded") and
+    "at least" before it. (r7.3 T2)"""
+    release = world["tmp"] / "release"
+    child, marks = _spending(world, _SPEND, released=sealed, term="mark", term_mark=_term_mark(world), wait_for=release)
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        inv = await _queued(store)
+        drained = asyncio.create_task(_worker(world, store, child, cost_interval=60.0).drain())
+        try:
+            await _until(lambda: (marks / ("sealed" if sealed else "wrote-0")).exists(), "the child's seal" if sealed else "the child's spend")
+            assert not list(marks.glob("seal-failed")), (marks / "seal-failed").read_text(encoding="utf-8")
+            await store.cancel_investigation(T1, inv, actor="u-1")
+            await _until(lambda: _termed(world, inv), "the child to get SIGTERM", timeout=3.0)
+        finally:
+            (marks / "go-0").touch()
+            release.touch()
+            await asyncio.wait_for(drained, timeout=60)
+
+    assert (row(dsn, inv)["stage"], row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (
+        "aborted", pytest.approx(SONNET_IN), not sealed)
+    assert (marks / "sealed").exists() is sealed, "premise: the child sealed exactly when it was meant to"
 
 
 class _CallFinishingAsItIsCancelled:

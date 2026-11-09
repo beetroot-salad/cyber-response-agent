@@ -768,3 +768,49 @@ def test_run_duration_includes_correlation_and_main(tmp_path: Path) -> None:
                if r.get("type") == "result")
     # The persisted duration is rounded to whole milliseconds.
     assert result["duration_ms"] >= minimum_ms - 1
+
+
+# --- r7.3 T1: every run exit seals the run's ledger -------------------------------------------------------
+
+def _sealed_ledger(stores: list, d: S.Drive):
+    """The run's ledger through the one read, on a fresh connection to the run's own store (a store the run closed still reads)."""
+    from defender.records import session_store as ss
+    from defender.tests.support.storage._store_owner import reread
+
+    assert stores, "the run opened no session store"
+    assert d.run_dir is not None
+    return ss.read_ledger(reread(stores[-1]), d.run_dir.name)
+
+
+def _priced_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEFENDER_MODEL", "claude-sonnet-4-6")
+    monkeypatch.setenv("DEFENDER_GATHER_MODEL", "claude-haiku-4-5")
+
+
+@pytest.mark.parametrize("ending", ["finished", "stop-before-main", "refused-only"])
+def test_t1_r7_3_every_run_exit_seals_its_ledger_so_a_run_with_priced_or_refused_rows_reads_complete(tmp_path, monkeypatch, ending):
+    """A run that finishes, one stopped before MAIN's first request (a budget kill at the lead's tool call) and one whose every
+    request the provider refused (400) each end with their ledger sealed: complete, beside the rows each made. (r7.3 T1)"""
+    _priced_names(monkeypatch)
+    stores: list = []
+    tenant = S.plant_tenant()
+    if ending == "finished":
+        d = S.run_alert(tmp_path, tenant=tenant, leads={L3: [S.text(SUMMARY)]},
+                        store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
+        want_agents = {"main", "gather:l-00c"}
+    elif ending == "stop-before-main":
+        d = _budget_kill_during_lead(tmp_path, tenant, monkeypatch, stores=stores)
+        _assert_budget_kill_during_lead(d, stores)
+        want_agents = {"gather:l-00c"}
+    else:
+        d = S.run_alert(tmp_path, tenant=tenant, main=S.MainScript(S.default_main_turns(), S.LeadFault(raise_on=1)),
+                        leads={L3: [S.text(SUMMARY)]}, lead_faults={L3: S.LeadFault(raise_on=1)},
+                        store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
+        want_agents = {"main", "gather:l-00c"}
+
+    read = _sealed_ledger(stores, d)
+
+    assert set(read.by_agent) == want_agents, ("premise: the rows the run made", dict(read.by_agent))
+    assert read.complete is True, f"{ending}: the run's exit did not seal its ledger"
+    if ending == "refused-only":
+        assert read.total == 0.0, "premise: a refused request is a $0 row"
