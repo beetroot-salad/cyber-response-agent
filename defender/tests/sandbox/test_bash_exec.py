@@ -39,14 +39,6 @@ def test_empty_command_is_noop():
     assert _run("   ") == (0, "", "")
 
 
-def test_two_stage_pipe(tmp_path):
-    f = tmp_path / "p.txt"
-    f.write_text("alpha\nbeta\nalpha\n")
-    rc, out, err = _run(f"cat {f} | grep alpha")
-    assert rc == 0
-    assert out == "alpha\nalpha\n"
-
-
 @pytest.mark.parametrize(("cmd", "rc", "out"), [
     ("echo hello | cat | cat", 0, "hello\n"),        # pipes chain past two stages
     ("echo 'a | b'", 0, "a | b\n"),                  # a QUOTED pipe is data, not a split
@@ -63,12 +55,14 @@ def test_a_composed_command_runs_and_returns_exactly_bashs_output(cmd, rc, out):
     assert _run(cmd)[:2] == (rc, out)
 
 
-def test_pipe_exit_code_is_last_stage(tmp_path):
+@pytest.mark.parametrize(("content", "pattern", "rc", "out"), [
+    ("alpha\nbeta\nalpha\n", "alpha", 0, "alpha\nalpha\n"),  # a two-stage pipe
+    ("alpha\n", "zzz", 1, ""),  # the exit code is the last stage's
+])
+def test_pipe_output_and_exit_code_are_the_last_stages(tmp_path, content, pattern, rc, out):
     f = tmp_path / "p.txt"
-    f.write_text("alpha\n")
-    rc, out, err = _run(f"cat {f} | grep zzz")
-    assert rc == 1
-    assert out == ""
+    f.write_text(content)
+    assert _run(f"cat {f} | grep {pattern}")[:2] == (rc, out)
 
 
 def test_cd_then_relative_read(tmp_path):

@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from defender.tests.api.test_1382_uuid_ids import GOOD, MALFORMED, _id_family, _params  # noqa: E402
+from defender.tests.api.test_uuid_ids import GOOD, MALFORMED, _id_family, _params  # noqa: E402
 from defender.tests.api.test_api_stub import _api_routes  # noqa: E402
 from defender.tests.support.api._identity1306 import ANN, OPS, T1  # noqa: E402
 from defender.tests.support.api._programs1307 import ProgramsWorld, create_program, issue_key  # noqa: E402

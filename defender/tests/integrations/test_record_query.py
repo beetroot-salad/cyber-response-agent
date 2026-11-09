@@ -24,7 +24,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
-from defender.tests.e2e.test_query_tool_611 import DONE, LEAD, q  # noqa: E402
+from defender.tests.e2e.test_query_tool import DONE, LEAD, q  # noqa: E402
 
 
 def test_derive_system_from_defender_shim():

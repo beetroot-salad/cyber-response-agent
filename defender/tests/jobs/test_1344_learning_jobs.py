@@ -20,7 +20,7 @@ import pytest
 from defender.jobs import Conflict, UnknownReference
 from defender.jobs.models import LEARNING_TRIGGERS
 from defender.jobs.store import is_refusal
-from defender.tests.jobs.test_1342_worker import _FAST, _child, _committed, _queued, _run_one, _until, _worker
+from defender.tests.jobs.test_worker import _FAST, _child, _committed, _queued, _run_one, _until, _worker
 from defender.tests.support.jobs._jobs1342 import (
     NOW,
     T1,

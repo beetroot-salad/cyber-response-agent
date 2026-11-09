@@ -38,7 +38,7 @@ import pytest
 
 from defender.identity import DataRuleViolation
 from defender.records.formats import TenantId, UserId
-from defender.tests.identity.test_1306_repository_contract import (  # noqa: F401  (fixtures)
+from defender.tests.identity.test_identity_repository_contract import (  # noqa: F401  (fixtures)
     HOUR,
     NO_SUCH_ROW,
     NOW,

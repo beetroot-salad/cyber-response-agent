@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 
 from defender.records import _provenance
-from defender.tests.learning.branch import test_976_family_anchor as A
-from defender.tests.learning.branch.test_976_family_anchor import _outcome, _prepare, _verify
+from defender.tests.learning.branch import test_family_anchor as A
+from defender.tests.learning.branch.test_family_anchor import _outcome, _prepare, _verify
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._fixture_uuid import fixture_uuid

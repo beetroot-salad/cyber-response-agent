@@ -25,7 +25,7 @@ from defender.tests.jobs.test_1344_learning_jobs import (
     post_child,
     queued_job,
 )
-from defender.tests.jobs.test_1342_worker import _FAST, _until
+from defender.tests.jobs.test_worker import _FAST, _until
 from defender.tests.support.jobs._jobs1342 import T1, job_store, register_tenant
 from defender.tests.support.shared._postgres1339 import execute
 

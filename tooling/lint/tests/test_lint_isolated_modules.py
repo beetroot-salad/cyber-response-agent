@@ -106,16 +106,12 @@ def test_cwd_is_allowed_in_lead_zero(tmp_path):
     assert _GATE.scan(_tree(tmp_path, **{"investigation__lead_zero__run.py": src})) == []
 
 
-def test_a_missing_file_is_a_finding(tmp_path):
+@pytest.mark.parametrize("rel", ["box/_image.py", "systems/correlation.py"])
+def test_a_missing_file_is_a_finding(tmp_path, rel):
     root = _tree(tmp_path)
-    (root / "box/_image.py").unlink()
-    assert any("_image.py" in f and "missing" in f for f in _GATE.scan(root))
-
-
-def test_a_missing_correlation_module_is_a_finding(tmp_path):
-    root = _tree(tmp_path)
-    (root / "systems/correlation.py").unlink()
-    assert any("correlation.py" in f and "missing" in f for f in _GATE.scan(root))
+    (root / rel).unlink()
+    name = rel.rsplit("/", 1)[1]
+    assert any(name in f and "missing" in f for f in _GATE.scan(root))
 
 
 def test_a_file_that_does_not_parse_is_exit_2(tmp_path):

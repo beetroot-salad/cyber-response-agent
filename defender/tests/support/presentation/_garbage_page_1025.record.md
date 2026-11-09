@@ -1,6 +1,6 @@
 # Garbage-page control — run record
 
-Instrument: `defender/tests/support/presentation/_garbage_page_1025.py` (this record is written by it). Interpreter: `python` 3.11.15. Suite: `test_1025_page_contract.py`, `test_1025_page_verdict.py`, `test_1025_page_worlds.py`, `test_1025_page_stages.py`, `test_1025_page_records.py`.
+Instrument: `defender/tests/support/presentation/_garbage_page_1025.py` (this record is written by it). Interpreter: `python` 3.11.15. Suite: `test_episode_page_contract.py`, `test_episode_page_verdict.py`, `test_episode_page_worlds.py`, `test_episode_page_stages.py`, `test_episode_page_records.py`.
 
 A test is `green` when the stub SATISFIED it (the finding), `red-content` when its own assertion (or the fixture's page helper) refused the page, `red-other` when it failed for a reason no page stub can reach (the launcher hook, a reader arm, a lint, a subprocess import), `skipped` when pytest skipped it.
 

@@ -62,10 +62,11 @@ def wire(monkeypatch):
     return sent
 
 
-def test_require_closed_passes_on_closed(wire, ctx):
-    wire.answer = {"key": "c", "status": "closed", "resolution": "benign — r"}
-    payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=True)
-    assert payload["status"] == "closed"
+@pytest.mark.parametrize(("status", "require_closed"), [("closed", True), ("open", False)])  # without the flag, open tickets still fetch
+def test_a_ticket_is_fetched_when_closed_or_when_closure_is_not_required(wire, ctx, status, require_closed):
+    wire.answer = {"key": "c", "status": status, "resolution": "benign — r"}
+    payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=require_closed)
+    assert payload["status"] == status
 
 
 def test_require_closed_rejects_open(wire, ctx):
@@ -73,13 +74,6 @@ def test_require_closed_rejects_open(wire, ctx):
     wire.answer = {"key": "c", "status": "open"}
     with pytest.raises(UpstreamFault):
         ticket_adapter.get_ticket(ctx, key="c", require_closed=True)
-
-
-def test_no_flag_allows_any_status(wire, ctx):
-    # Without require_closed, open tickets still fetch.
-    wire.answer = {"key": "c", "status": "open"}
-    payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=False)
-    assert payload["status"] == "open"
 
 
 def test_list_require_closed_pins_status_over_widening(wire, ctx):

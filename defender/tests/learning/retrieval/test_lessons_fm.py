@@ -105,14 +105,10 @@ def test_tags_all_dimensions(corpus, capsys):
         assert dim in out
 
 
-def test_bad_regex_exits_2(corpus, capsys):
+@pytest.mark.parametrize("argv", [["["], ["--tags", "nonsense"]], ids=["bad_regex", "unknown_dimension"])
+def test_a_bad_argument_exits_2(corpus, capsys, argv):
     mod = _load(corpus)
-    assert mod.main(["prog", "["]) == 2
-
-
-def test_unknown_dimension_exits_2(corpus, capsys):
-    mod = _load(corpus)
-    assert mod.main(["prog", "--tags", "nonsense"]) == 2
+    assert mod.main(["prog", *argv]) == 2
 
 
 def test_show_is_confined_to_the_corpus(corpus, tmp_path, capsys):

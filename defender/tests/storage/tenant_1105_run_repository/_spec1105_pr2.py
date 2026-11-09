@@ -107,7 +107,7 @@ def launched_episodes() -> list[Path]:
 
 
 #: The one answer every captured call recorded and the live estate gives
-#: (`test_1025_stage_timing._BASE`), so an oracle serving it unchanged calibrates every world.
+#: (`test_episode_stage_timing._BASE`), so an oracle serving it unchanged calibrates every world.
 BASE_ANSWER = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon",
                          "host": "web-1", "ts": "2026-07-28T15:00:00Z"}]}
 
