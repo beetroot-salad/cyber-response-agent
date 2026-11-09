@@ -320,10 +320,14 @@ def test_a_slow_tool_is_cut_off_by_the_attempt_deadline(tmp_path):
             stopped.set()
         return subprocess.CompletedProcess(argv, 0, "exited", "")
 
+    # The deadline runs on the real clock, so it is generous: the second attempt has to submit inside it on a loaded
+    # runner too. Cut off by it, the call ends in about two deadlines; waiting out the tool would take `slow`.
+    deadline, slow = 3.0, 30.0
+
     def slow_box() -> Any:
         def run_parsed(*_a: Any, **_kw: Any) -> Any:
             try:
-                assert stopped.wait(4), "the deadline did not stop Python"
+                assert stopped.wait(slow), "the deadline did not stop Python"
                 return SimpleNamespace(out=b"", err=b"", rc=0)
             finally:
                 finished.set()
@@ -332,14 +336,14 @@ def test_a_slow_tool_is_cut_off_by_the_attempt_deadline(tmp_path):
 
     o = S.oracle(S.python("print('slow')"), S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, box=slow_box,
-                           verifier=S.passing_verifier(), retry_cap=2, turn_deadline=0.5)
+                           verifier=S.passing_verifier(), retry_cap=2, turn_deadline=deadline)
 
     began = time.monotonic()
     served = S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
     assert finished.is_set(), "the attempt returned before its Python worker settled"
 
     assert served == ALICE_ROWS
-    assert time.monotonic() - began < 3.0, "the attempt waited out the slow tool"
+    assert time.monotonic() - began < slow / 2, "the attempt waited out the slow tool"
 
 
 def test_an_unpriced_model_is_refused_before_any_request(tmp_path):

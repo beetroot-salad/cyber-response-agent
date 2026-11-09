@@ -3369,23 +3369,28 @@ async def test_b_p3_b6_b3_a_worker_never_takes_over_a_row_it_holds_another_does_
     assert attempts == [(1,), (2,)]
 
 
-async def test_b7_b5_a_worker_takes_a_lapsed_row_over_though_its_own_end_write_keeps_failing_but_claims_nothing(world):
-    """One row's end write fails as an outage for good: the same worker still takes a stranger's lapsed row over (`lease_lapsed`, retry queued), yet claims nothing, the retry included. (B7: independent of failing writes; B5: no claims meanwhile)"""
+async def test_b7_b5_a_worker_whose_own_end_write_keeps_failing_as_an_outage_takes_nothing_over_and_claims_nothing(world):
+    """CONFLICT-UPDATED: one row's end write fails as an outage for good: the same worker leaves a stranger's lapsed row alone (its own calls hit an outage within the last lease, so others' leases may have lapsed in the same outage) and claims nothing. (B7 as amended by #1343's second review; B5: no claims meanwhile)
+
+    The stranger and the queued row appear only once the end write is failing: present from the start, the stranger
+    was taken over and its retry claimed and run before the first failure, and the test raced that order."""
     child = _child(world, files=_committed())
     dsn = world["dsn"]
     async with job_store(dsn) as store:
         bad = await _queued(store, ticket="T-1", key="k1")
-        stranger = _plant_running_lapsed(dsn, (await an_alert(store, T1, ticket="T-9")).alert_id)
+        stranger_alert = (await an_alert(store, T1, ticket="T-9")).alert_id
         used = _StoreWhoseFinishFails(store, bad, ConnectionError("the database is gone"), fails=10**6)
         serving = asyncio.create_task(_worker(world, used, child, **_FAST).serve())
         try:
             await _until(lambda: len(used.tries(bad)) >= 2, "the end write to be failing")
-            await _until(lambda: row(dsn, stranger)["failure_reason"] == "lease_lapsed", "the stranger's row to be taken over", timeout=5)
-            await _until(lambda: execute(dsn, "SELECT stage FROM jobs.investigations WHERE request_key = 'planted' "
-                                               "AND attempt = 2") == [("queued",)], "the stranger's retry to be queued", timeout=5)
-            await asyncio.sleep(2.5)
-            assert execute(dsn, "SELECT stage FROM jobs.investigations WHERE request_key = 'planted' "
-                                "AND attempt = 2") == [("queued",)], "a row was claimed while a write was failing"
+            stranger = _plant_running_lapsed(dsn, stranger_alert)
+            waiting = await _queued(store, ticket="T-2", key="k2")
+            tries = len(used.tries(bad))
+            await asyncio.sleep(2.5)  # many take-over intervals and claim polls
+            assert len(used.tries(bad)) > tries, "premise: the end write stopped being tried"
+            assert row(dsn, stranger)["stage"] == "running", "a worker in an outage took a lapsed row over"
+            assert row(dsn, stranger)["failure_reason"] is None
+            assert row(dsn, waiting)["stage"] == "queued", "a row was claimed while a write was failing"
         finally:
             if not serving.done():
                 os.kill(os.getpid(), signal.SIGTERM)
@@ -3691,7 +3696,8 @@ async def test_b3_a_fence_landing_while_the_spawn_is_prepared_ends_the_child_as_
         serving = asyncio.create_task(_worker(world, store, argv, **_FAST).serve())
         pid = None
         try:
-            await _until(pidfile.exists, "the child to be spawned")
+            # `>` creates the file before `echo` writes it: wait for the pid itself, one short write, not the name.
+            await _until(lambda: pidfile.exists() and pidfile.read_text().strip(), "the child to be spawned")
             pid = int(pidfile.read_text())
             await _until(lambda: _gone(pid), "the fenced row's child to be ended", timeout=10)
         finally:
