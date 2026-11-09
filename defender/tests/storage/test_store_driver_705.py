@@ -859,7 +859,7 @@ def test_s3_r7_3_a_page_re_rendered_after_a_failed_write_through_the_post_run_st
     assert C.at_least(heads["lost-write"]), f"a re-rendered page forgot the failed write: {heads['lost-write']!r}"
 
 
-@pytest.mark.parametrize(("held_for", "failed"), [(0.2, False), (5.0, True)], ids=["a short hold waits", "a long hold fails"])
+@pytest.mark.parametrize(("held_for", "failed"), [(0.2, False), (2.5, True)], ids=["a short hold waits", "a long hold fails"])
 def test_q2_r7_3_a_ledger_write_held_up_beyond_about_a_second_is_a_failed_write_not_a_stall(tmp_path, caplog, monkeypatch, held_for, failed):
     """Another connection holds the database's write lock across MAIN's last request: a write that waits well under a second
     lands (the control); one held up for seconds is a failed write (ERROR logged, the run not sealed, the total "at least" on the
@@ -875,7 +875,7 @@ def test_q2_r7_3_a_ledger_write_held_up_beyond_about_a_second_is_a_failed_write_
 
     assert calls == {"main": 2, "gather": 3}, ("premise: the run still made every call", calls)
     assert (summary["truncated_by"], summary["exit_reason"]) == (None, None), summary
-    assert elapsed < 25, f"the run stalled behind another connection's lock for {elapsed:.0f}s"
+    assert elapsed < 20, f"the run stalled behind another connection's lock for {elapsed:.0f}s"
     result = _run_result(run_dir)
     read = _ledger_of(opened, run_dir.name)
     assert (result["total_cost_is_lower_limit"], read.complete) == (failed, not failed)

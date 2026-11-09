@@ -770,20 +770,10 @@ def seal_spend(runs: Path, case_id: str, run_id: str) -> None:
         session_store.seal_ledger(handle, run_id)
 
 
-def seal_at(database: Path, run_id: str) -> None:
-    """r7.3 T1: seal `run_id`'s ledger in the session database at `database` (a store a test did not open itself: a fixture
-    run's, a planted one) through the real `session_store.seal_ledger`, on a connection of its own."""
-    import sqlite3
-    from types import SimpleNamespace
-
-    from defender.records import session_store
-
-    conn = sqlite3.connect(database, timeout=30)
-    try:
-        session_store.seal_ledger(SimpleNamespace(connection=conn, path=database), run_id)
-        conn.commit()
-    finally:
-        conn.close()
+def seal_at(runs: Path, case_id: str, run_id: str) -> None:
+    """r7.3 T1: seal `run_id`'s ledger in `case_id`'s database (a store a test did not open itself: a fixture run's) through the
+    real `session_store.seal_ledger`, on a handle opened as production opens a store for writing."""
+    seal_spend(runs, case_id, run_id)
 
 
 def lower_limit(dsn: str, investigation_id: str) -> bool | None:
