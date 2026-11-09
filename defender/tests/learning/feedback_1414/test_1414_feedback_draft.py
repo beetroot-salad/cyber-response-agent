@@ -448,7 +448,9 @@ def _naming_line(reply: str, eid: str) -> str | None:
 
 
 def _assert_names(reply: str, eid: str, lookup: dict, *fields: str) -> None:
-    """The reply names `eid` and, on the same line, shows the named lookup fields' values."""
+    """The reply names `eid` and, on the same line, shows the named lookup fields' values. Deliberately weak on which
+    lookup: the entry id's `<n>` already identifies it, and the design does not ask the reply to quote the pattern
+    (O5: "this lookup cannot be written as an entry"), so only actor and host are required (round-3 review N4)."""
     line = _naming_line(reply, eid)
     assert line is not None, f"{eid} is not named in the reply"
     for field in fields:
@@ -473,7 +475,7 @@ def _assert_drafted_or_named(fb, mains_text: str, lookups: list[dict], number: i
             assert tick_logged, "main reads fine, nothing was drafted and the refusal was not logged"
         elif reply_bodies:  # entry by entry: every approved lookup is named, with the value that stopped it
             for eid, lookup in zip(ids, lookups, strict=True):
-                _assert_names(reply, eid, lookup, "actor", "host", "pattern")
+                _assert_names(reply, eid, lookup, "actor", "host")
         else:  # a file-level refusal: logged, and the approval settles nothing
             assert tick_logged, "nothing was drafted, no reply was posted and no refusal was logged"
         return {}
@@ -496,7 +498,7 @@ def _assert_drafted_or_named(fb, mains_text: str, lookups: list[dict], number: i
                 (lookup["actor"], lookup["host"], lookup["pattern"]), \
                 f"{eid} was drafted as {got!r}, not as the lookup {lookup!r}"
         else:
-            _assert_names(reply, eid, lookup, "actor", "host", "pattern")
+            _assert_names(reply, eid, lookup, "actor", "host")
     assert _pr_of(fb, branch)["html_url"] in reply
     return drafted
 
