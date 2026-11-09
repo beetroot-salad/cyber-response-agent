@@ -885,6 +885,52 @@ def test_q2_r7_3_a_ledger_write_held_up_beyond_about_a_second_is_a_failed_write_
     assert C.at_least(C.headline(_page_of(run_dir, tmp_path, monkeypatch))) is failed
 
 
+@pytest.mark.parametrize("outcome", ["lands", "times-out", "fails"])
+@pytest.mark.parametrize("write", ["row", "seal"])
+def test_q2_r7_3_every_ledger_write_waits_about_a_second_at_most_and_leaves_the_stores_own_timeout_as_it_was(tmp_path, write, outcome):
+    """A spend row and the seal, each landing, held up by another connection's 2.5 s lock, and refused by sqlite: a held-up write
+    fails before the lock is given up, and the store's busy timeout afterwards is its own. (r7.3 Q2)"""
+    import time
+
+    from defender.records import SessionPaths
+    from defender.records import session_store as ss
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
+    run_id = fixture_uuid(f"q2-{write}-{outcome}")
+
+    def record(store) -> None:
+        ss.record_spend(store, run_id, agent_id="main", requested_model="claude-sonnet-4-6", outcome=RESPONSE,
+                        reported_model=None, usage={})
+
+    with ss.open_store(case_id=f"q2-{write}-{outcome}", sessions=SessionPaths(fixture_runs_base(tmp_path))) as store:
+        record(store)  # a row to seal at
+        assert store.connection.execute("PRAGMA busy_timeout").fetchone()[0] == ss.STORE_BUSY_TIMEOUT_MS, "premise"
+        table = "spend_ledger" if write == "row" else "spend_ledger_seal"
+        if outcome == "fails":
+            other = sqlite3.connect(store.path, timeout=10)
+            other.execute(f"CREATE TRIGGER refuse BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT, 'refused'); END")  # noqa: S608
+            other.commit()
+            other.close()
+        until = time.monotonic() + 2.5  # no later than the lock's release
+        if outcome == "times-out":
+            _hold_the_write_lock(store, 2.5)
+
+        def attempt() -> None:
+            record(store) if write == "row" else ss.seal_ledger(store, run_id)
+
+        if outcome == "lands":
+            attempt()
+        else:
+            with pytest.raises(sqlite3.Error):
+                attempt()
+        if outcome == "times-out":
+            assert time.monotonic() < until, "the write waited out the other connection's lock instead of failing at the cap"
+        assert store.connection.execute("PRAGMA busy_timeout").fetchone()[0] == ss.STORE_BUSY_TIMEOUT_MS, (
+            "the ledger write left the store connection's busy timeout changed")
+        if outcome == "times-out":
+            time.sleep(max(0.0, until - time.monotonic()) + 0.2)  # the lock holder gives up its lock before the store closes
+
+
 def test_s3_the_ledger_is_written_ahead_of_the_request_log_so_a_log_fault_does_not_cost_a_response(tmp_path, caplog):
     """The wire log's file replaced by a directory from MAIN's second request on: every later response still reaches the ledger. (S1, S3)"""
     run_dir = materialize(tmp_path, GOLDEN, run_id="ledger-before-log")
