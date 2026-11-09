@@ -98,7 +98,8 @@ def test_a_row_for_another_binding_does_not_count_and_the_set_is_incomplete(tmp_
     rc, verdicts, said = scored(tmp_path, runs, root, old, other)
 
     assert verdicts == {OTHER: "OK"}, said
-    assert GOOD in said and GOOD not in verdicts, said
+    assert GOOD in said, said
+    assert GOOD not in verdicts, said
     assert "incomplete" in said.lower(), said
     assert rc not in (0, 2), said
 
@@ -126,7 +127,9 @@ def test_the_scorer_module_owns_the_binding_function(tmp_path):
     bound = held_out.binding(FREEZE, case_doc(GOOD))
 
     assert bound == F.digest([F.digest(FREEZE), F.digest(case_doc(GOOD))])
-    assert len(bound) == 64 and bound == bound.lower() and set(bound) <= set("0123456789abcdef")
+    assert len(bound) == 64
+    assert bound == bound.lower()
+    assert set(bound) <= set("0123456789abcdef")
 
 
 def test_a_changed_freeze_file_unbinds_every_older_row(tmp_path):
@@ -139,7 +142,9 @@ def test_a_changed_freeze_file_unbinds_every_older_row(tmp_path):
     rc, verdicts, said = scored(tmp_path, runs, root, *rows)
 
     assert verdicts == {}, said
-    assert GOOD in why(said, GOOD) + said and OTHER in said and "incomplete" in said.lower(), said
+    assert GOOD in why(said, GOOD) + said, said
+    assert OTHER in said, said
+    assert "incomplete" in said.lower(), said
     assert rc not in (0, 2), said
 
 
@@ -190,7 +195,9 @@ def test_only_the_whole_lowercase_binding_binds(tmp_path, variant):
                                 row(root, OTHER, other))
 
     assert verdicts == {OTHER: "OK"}, said
-    assert GOOD in said and "incomplete" in said.lower() and rc not in (0, 2), said
+    assert GOOD in said, said
+    assert "incomplete" in said.lower(), said
+    assert rc not in (0, 2), said
 
 
 def test_a_row_with_the_old_freeze_key_and_no_binding_never_counts_and_is_not_refused(tmp_path):
@@ -204,7 +211,9 @@ def test_a_row_with_the_old_freeze_key_and_no_binding_never_counts_and_is_not_re
     rc, verdicts, said = scored(tmp_path, runs, root, legacy, row(root, OTHER, other))
 
     assert verdicts == {OTHER: "OK"}, said
-    assert GOOD in said and "incomplete" in said.lower() and rc not in (0, 2), said
+    assert GOOD in said, said
+    assert "incomplete" in said.lower(), said
+    assert rc not in (0, 2), said
 
 
 def test_a_stale_newest_row_is_not_scored_and_the_case_needs_reconfirmation(tmp_path):
@@ -218,8 +227,10 @@ def test_a_stale_newest_row_is_not_scored_and_the_case_needs_reconfirmation(tmp_
     rc, verdicts, said = scored(tmp_path, runs, root, row(root, GOOD, good), stale)
 
     assert verdicts == {GOOD: "OK"}, said
-    assert "re-confirm" in why(said, OTHER) and reason in why(said, OTHER), said
-    assert "Aggregate accuracy: 1/1" in said and "incomplete" in said.lower(), said
+    assert "re-confirm" in why(said, OTHER), said
+    assert reason in why(said, OTHER), said
+    assert "Aggregate accuracy: 1/1" in said, said
+    assert "incomplete" in said.lower(), said
     assert rc not in (0, 2), said
 
 
@@ -232,7 +243,8 @@ def test_the_newest_matching_row_decides_between_stale_and_valid(tmp_path):
     foreign = row(root, GOOD, pair(runs)[1], binding="0" * 64, verdict="stale")
 
     _rc, went_stale, said = scored(tmp_path, runs, root, valid, stale, other)
-    assert GOOD not in went_stale and "re-confirm" in why(said, GOOD), said
+    assert GOOD not in went_stale, said
+    assert "re-confirm" in why(said, GOOD), said
     rc, recovered, said = scored(tmp_path, runs, root, stale, valid, foreign, other)
     assert (rc, recovered) == (0, {GOOD: "OK", OTHER: "OK"}), said
 
@@ -254,7 +266,8 @@ def test_every_case_not_scored_is_listed_with_its_reason_and_the_set_is_incomple
     assert "not run" in why(said, "b-no-row"), said
     assert "re-confirm" in why(said, "c-stale"), said
     assert why(said, "d-old"), said
-    assert "Aggregate accuracy: 1/1" in said and "incomplete" in said.lower(), said
+    assert "Aggregate accuracy: 1/1" in said, said
+    assert "incomplete" in said.lower(), said
     assert rc not in (0, 2), said
 
 
@@ -269,7 +282,9 @@ def test_a_reference_run_without_a_row_leaves_its_case_unscored(tmp_path):
     rc, verdicts, said = scored(tmp_path, runs, root, row(root, OTHER, pair(runs)[1]))
 
     assert verdicts == {OTHER: "OK"}, said
-    assert "not run" in why(said, GOOD) and "incomplete" in said.lower() and rc not in (0, 2), said
+    assert "not run" in why(said, GOOD), said
+    assert "incomplete" in said.lower(), said
+    assert rc not in (0, 2), said
 
 
 def test_a_fixture_without_a_case_file_is_not_a_case(tmp_path):
@@ -285,7 +300,8 @@ def test_a_fixture_without_a_case_file_is_not_a_case(tmp_path):
     rc, verdicts, said = scored(tmp_path, runs, root, *rows)
 
     assert (rc, verdicts) == (0, {GOOD: "OK", OTHER: "OK"}), said
-    assert "z-legacy" not in said and "incomplete" not in said.lower(), said
+    assert "z-legacy" not in said, said
+    assert "incomplete" not in said.lower(), said
 
 
 def test_a_case_naming_a_missing_freeze_refuses_the_whole_set(tmp_path):
@@ -296,8 +312,10 @@ def test_a_case_naming_a_missing_freeze_refuses_the_whole_set(tmp_path):
 
     rc, verdicts, said = scored(tmp_path, runs, root, row(root, GOOD, pair(runs)[0]))
 
-    assert rc == 2 and verdicts == {}, said
-    assert OTHER in said and "refused" in said, said
+    assert rc == 2, said
+    assert verdicts == {}, said
+    assert OTHER in said, said
+    assert "refused" in said, said
 
 
 def test_a_case_value_canonical_json_cannot_carry_refuses_the_whole_set(tmp_path):
@@ -311,8 +329,10 @@ def test_a_case_value_canonical_json_cannot_carry_refuses_the_whole_set(tmp_path
 
     rc, verdicts, said = scored(tmp_path, runs, root, row(root, GOOD, pair(runs)[0]))
 
-    assert rc == 2 and verdicts == {}, said
-    assert OTHER in said and "refused" in said, said
+    assert rc == 2, said
+    assert verdicts == {}, said
+    assert OTHER in said, said
+    assert "refused" in said, said
 
 
 MALFORMED = {
@@ -343,7 +363,8 @@ def test_a_malformed_index_row_refuses_the_whole_index(tmp_path, kind):
 
     rc, verdicts, said = scored(tmp_path, runs, root, row(root, GOOD, good), bad)
 
-    assert rc == 2 and verdicts == {}, said
+    assert rc == 2, said
+    assert verdicts == {}, said
 
 
 @pytest.mark.parametrize("pinless", [None, ""], ids=["null", "empty"])

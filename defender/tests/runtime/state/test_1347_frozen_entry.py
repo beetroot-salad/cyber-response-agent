@@ -163,8 +163,10 @@ def test_an_as_of_run_records_the_run_clocks_start_not_wall_time(tmp_path, data_
         frozen, frozen_seen = run("frozen", ["--as-of", AS_OF_Z])
         ordinary, ordinary_seen = run("ordinary", [])
 
-    assert frozen.exit == 0 and ordinary.exit == 0, (frozen.refusal, ordinary.refusal)
-    assert frozen_seen.budget and ordinary_seen.budget, "no call reached the registry with a run state"
+    assert frozen.exit == 0, (frozen.refusal, ordinary.refusal)
+    assert ordinary.exit == 0, (frozen.refusal, ordinary.refusal)
+    assert frozen_seen.budget, "no call reached the registry with a run state"
+    assert ordinary_seen.budget, "no call reached the registry with a run state"
     for key in ("created_at", "started_at"):
         assert C.instant(frozen_seen.budget[key]) == AS_OF, f"{key}={frozen_seen.budget[key]}"
         assert C.instant(ordinary_seen.budget[key]) == C.ARM_START, ordinary_seen.budget[key]
@@ -226,7 +228,8 @@ def test_arrived_by_is_not_accepted(tmp_path, capsys):
     assert out.exit == "SystemExit", f"--arrived-by was accepted: exit={out.exit}"
     message = f"{out.refusal} {capsys.readouterr().err}"
     assert "--arrived-by" in message, message
-    assert out.run_dir is None and sorted(p.name for p in base.iterdir()) == before
+    assert out.run_dir is None
+    assert sorted(p.name for p in base.iterdir()) == before
 
 
 @pytest.mark.parametrize(("flags", "enqueued"), [

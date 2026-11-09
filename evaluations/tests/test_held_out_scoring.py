@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import io
-import json
 import os
 import uuid
 from contextlib import redirect_stderr, redirect_stdout
@@ -99,7 +98,8 @@ def test_no_run_id_convention_claims_a_fixture(tmp_path: Path):
         fixtures = _fixture_set(tmp_path / name / "held-out", {SLUG: "benign"})
         verdicts, not_run, said = _scored(tmp_path / name, runs, fixtures)
         assert verdicts == {}, f"{name}: a folder was claimed by its name:\n{said}"
-        assert SLUG in said and "incomplete" in said.lower(), f"{name}: the slug with no row is not listed:\n{said}"
+        assert SLUG in said, f"{name}: the slug with no row is not listed:\n{said}"
+        assert "incomplete" in said.lower(), f"{name}: the slug with no row is not listed:\n{said}"
 
 
 def test_the_alert_label_comes_from_the_fixture_folder_not_the_stem():
@@ -119,7 +119,8 @@ def test_a_slug_that_prefixes_another_takes_nothing_from_its_row(tmp_path: Path)
     fixtures = _fixture_set(tmp_path / "held-out", {SLUG: "benign", f"{SLUG}-v2": "benign"})
     verdicts, not_run, said = _scored(tmp_path, runs, fixtures, (f"{SLUG}-v2", v2.name))
     assert verdicts == {f"{SLUG}-v2": "OK"}, said
-    assert SLUG in said.replace(f"{SLUG}-v2", "") and "incomplete" in said.lower(), said
+    assert SLUG in said.replace(f"{SLUG}-v2", ""), said
+    assert "incomplete" in said.lower(), said
 
 
 def test_the_newest_row_wins_not_the_newest_folder(tmp_path: Path):

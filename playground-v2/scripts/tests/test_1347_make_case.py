@@ -23,8 +23,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from _lab_fakes import (ALERT_DOCS, ALERTS, AUTH, FREEZE_ID, NGINX, PARTS, RUN_ID, SLUG, SPAN_START, SYSLOG, SYSLOG_AFTER_T, T,
-                        LabRig, canonical_digest, content_of, counts_of, expected_copy, instant, stub_state)
+from _lab_fakes import (ALERT_DOCS, ALERTS, AUTH, FREEZE_ID, NGINX, PARTS, RUN_ID, SPAN_START, SYSLOG, SYSLOG_AFTER_T, LabRig, canonical_digest, content_of, counts_of, expected_copy, instant, stub_state)
 
 from chaos.guard import GuardRefused, check_mutations
 from chaos.mutations import resolve_mutations
