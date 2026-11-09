@@ -23,7 +23,7 @@ import pytest
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender.records._episode_handle import Episode
 from defender.records.formats import BASE_ROLE, load_family
-from defender.tests.learning.branch.test_947_triplet_launcher import _BASE, _calls, _launch
+from defender.tests.learning.branch.test_triplet_launcher import _BASE, _calls, _launch
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core import _state1135
