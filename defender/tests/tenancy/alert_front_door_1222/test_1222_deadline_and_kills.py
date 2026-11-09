@@ -809,8 +809,18 @@ def _install_trigger(store: Any, table: str) -> None:
         conn.close()
 
 
-def _store_factory_for(ending: str, tmp_path: Path, stores: list) -> Any:
+def _store_factory_for(ending: str, tmp_path: Path, stores: list, held: dict[str, Any]) -> Any:
     """The run's store, with the ending's fault put into the real database (or the plain factory)."""
+    if ending == "seal-write-held-up":
+        plain_store = S.store_factory(tmp_path, sink=stores)
+
+        @contextlib.contextmanager
+        def seal_held_up(case_id: str, run_dir: Path) -> Iterator[Any]:
+            with plain_store(case_id, run_dir) as store:
+                store.connection.set_trace_callback(_hold_the_lock_at_the_seal(store.path, held))
+                yield store
+
+        return seal_held_up
     if ending == "no-request":
         base = location_path(SS.runs_base)(tmp_path)
 
@@ -835,6 +845,32 @@ def _store_factory_for(ending: str, tmp_path: Path, stores: list) -> Any:
             yield store
 
     return faulted
+
+
+def _hold_the_lock_at_the_seal(path: Path, held: dict[str, Any]) -> Any:
+    """A statement trace for the store's connection: when the seal's insert starts (every row has landed), a second
+    connection takes the write lock and keeps it ~2.5 s; the connection's next statement marks when the seal gave up."""
+    import threading
+
+    def trace(sql: str) -> None:
+        if "until" in held:
+            held.setdefault("returned", time.monotonic())
+            return
+        if not sql.lstrip().upper().startswith("INSERT INTO SPEND_LEDGER_SEAL"):
+            return
+        conn = sqlite3.connect(path, timeout=10, isolation_level=None, check_same_thread=False)
+        conn.execute("BEGIN IMMEDIATE")
+        held["until"] = time.monotonic() + 2.5
+
+        def release() -> None:
+            time.sleep(2.5)
+            conn.execute("ROLLBACK")
+            conn.close()
+
+        held["thread"] = threading.Thread(target=release, daemon=True)
+        held["thread"].start()
+
+    return trace
 
 
 @pytest.mark.parametrize("ending", ["finished", "stop-before-main", "refused-only", "no-request", "row-write-fails",
@@ -862,45 +898,21 @@ def test_t1_r7_3_every_run_exit_seals_its_ledger_so_the_ledger_the_run_file_and_
     elif ending == "refused-only":
         d = S.run_alert(tmp_path, tenant=tenant, main=S.MainScript(S.default_main_turns(), S.LeadFault(raise_on=1)),
                         leads={L3: [S.text(SUMMARY)]}, lead_faults={L3: S.LeadFault(raise_on=1)},
-                        store_factory=_store_factory_for(ending, tmp_path, stores), stores=stores)
+                        store_factory=_store_factory_for(ending, tmp_path, stores, held), stores=stores)
     else:
-        if ending == "seal-write-held-up":
-            import threading
-
-            from defender.investigation import observe
-
-            real_seal = observe.SpendLedger.seal
-
-            def seal_under_a_lock(self: Any) -> None:
-                """Another connection takes the write lock now (every row has landed) and keeps it ~2.5 s; then the real seal."""
-                conn = sqlite3.connect(self.store.path, timeout=10, isolation_level=None, check_same_thread=False)
-                conn.execute("BEGIN IMMEDIATE")
-                held["until"] = time.monotonic() + 2.5
-
-                def release() -> None:
-                    time.sleep(2.5)
-                    conn.execute("ROLLBACK")
-                    conn.close()
-
-                held["thread"] = threading.Thread(target=release, daemon=True)
-                held["thread"].start()
-                try:
-                    real_seal(self)
-                finally:
-                    held["returned"] = time.monotonic()
-
-            monkeypatch.setattr(observe.SpendLedger, "seal", seal_under_a_lock)
         d = S.run_alert(tmp_path, tenant=tenant, leads={L3: [S.text(SUMMARY)]},
-                        store_factory=_store_factory_for(ending, tmp_path, stores), stores=stores)
+                        store_factory=_store_factory_for(ending, tmp_path, stores, held), stores=stores)
         if ending == "no-request":
             want_agents = set()
             assert d.router.requests(L3) == 0, "premise: the lead made no model request"
             _assert_main_never_asked(d, "the lead's first append was refused")
         if ending == "row-write-fails":
             want_agents = set()
-    if held:
+    if ending == "seal-write-held-up":
+        assert "until" in held, "premise: the run reached its seal"
         held["thread"].join()
-        assert held["returned"] < held["until"], "the seal waited out another connection's lock instead of failing at the cap"
+        assert held.get("returned", float("inf")) < held["until"], (
+            "the seal waited out another connection's lock instead of failing at the cap")
 
     read = _sealed_ledger(stores, d)
     result, = (r for r in read_jsonl_rows(RunPaths(d.folder).tool_trace) if r.get("type") == "result")
