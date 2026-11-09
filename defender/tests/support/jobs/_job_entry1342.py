@@ -171,7 +171,7 @@ def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False, dies: bool = 
     from defender.investigation import driver
     from defender.records.formats import parse_report_text
     from defender.tests.e2e._replay_harness import FakeVerbs
-    from defender.tests.e2e.test_query_tool_611 import DONE, q
+    from defender.tests.e2e.test_query_tool import DONE, q
 
     disposition = parse_report_text((GOLDEN / "report.md").read_text(encoding="utf-8")).disposition
     from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER
