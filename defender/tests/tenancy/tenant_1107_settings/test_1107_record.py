@@ -585,6 +585,32 @@ def test_r5_a_folder_without_its_access_declaration_is_judged_by_that_first(tmp_
         cmdb.check_settings(_resolve(root))
 
 
+def test_r5_a_folder_that_cannot_be_read_is_named_for_that_not_for_its_declaration(tmp_path):
+    """A system folder or `config.env` the run could not read is reported as that, ahead of the
+    access declaration it may also seem to lack: an unreadable folder hides its access.yaml, so
+    "access.yaml not found" would send the operator after a file that is there (#1391 r5 S1)."""
+    cmdb = S.mod("integrations.cmdb_adapter")
+    ConfigFault = S.config_fault()
+    root = tmp_path / "tenants"
+    folder = S.plant(root, marker="r5u")
+    S.drop_access(folder, "cmdb")
+    S.config_path(folder, "cmdb").write_bytes(b"CMDB_TIMEOUT_SEC=\xff\n")
+    with pytest.raises(ConfigFault, match="not UTF-8"):
+        cmdb.check_settings(_resolve(root))
+
+
+@pytest.mark.parametrize("required", [("URL_BASE", "TIMEOUT_SEC"), ("TIMEOUT_SEC", "HOST")])
+def test_r5_an_adapter_reading_a_base_or_host_key_is_broken_not_configured(tmp_path, required):
+    """The base is the access declaration's and a host is a verb parameter, never a key: an adapter
+    that lists either among the keys it reads is itself wrong (a `ValueError`, which the settings
+    check reports as the adapter broken), so a tenant never sets a key that is silently ignored
+    (#1391 r5 O-T3)."""
+    root = tmp_path / "tenants"
+    S.plant(root, marker="r5b")
+    with pytest.raises(ValueError, match="URL_BASE|HOST"):
+        transport.record_config(_resolve(root), "cmdb", "CMDB", required)
+
+
 @pytest.mark.parametrize("host", ["", ".", "..", "web-1/../admin", "web-1%2Fx", "web 1", "a?b",
                                   "a#b", "a;b", "a\\b", "a\nb"])
 def test_r5_an_agent_path_value_that_is_not_one_segment_is_refused_before_sending(tmp_path, host):

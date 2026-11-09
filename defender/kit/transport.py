@@ -121,6 +121,10 @@ def load_config(
     return record_config(ctx.tenant, system, prefix, required, path_keys=path_keys)
 
 
+#: Keys no adapter may read (O-T3): the base is the access declaration's, a host a verb parameter.
+_NEVER_KEYS = frozenset({"URL_BASE", "HOST"})
+
+
 def record_config(
     tenant: TenantRecord, system: str, prefix: str,
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE, *,
@@ -129,6 +133,7 @@ def record_config(
     """THE judgement of `system`'s settings folder (S1), over the run's record: its `required`
     keys (prefix stripped), or the `ConfigFault` naming what is wrong. In order:
 
+    0. its folder and `config.env`, when present, could be read;
     1. its access declaration is present and usable (P1);
     2. its `config.env` is present, unless the adapter reads no key (O-S1);
     3. it holds no key the adapter does not read (Q4);
@@ -139,9 +144,17 @@ def record_config(
     7. a `TIMEOUT_SEC` is a whole number of seconds above zero.
 
     The base is the declaration's, never a key: the dict carries no `URL_BASE` (O-T3)."""
+    wrong = [key for key in required if key in _NEVER_KEYS]
+    if wrong:
+        raise ValueError(f"{system}'s adapter reads {', '.join(wrong)}: a base is its access.yaml's "
+                         "and a host a verb parameter, never a config key")
+    found = tenant.systems.get(system)
+    if isinstance(found, ConfigFault) and not isinstance(found, ConfigAbsent):
+        # A folder or file the run could not read hides what else it holds: name that first.
+        raise ConfigFault(str(found))
     record_access(tenant, system)
     entry: Mapping[str, str]
-    if isinstance(tenant.systems.get(system), ConfigAbsent) and not required:
+    if isinstance(found, ConfigAbsent) and not required:
         entry = {}
     else:
         entry = record_entry(tenant, system)

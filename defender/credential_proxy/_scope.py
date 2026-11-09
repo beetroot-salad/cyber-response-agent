@@ -56,15 +56,16 @@ def locate(declaration: AccessDeclaration, url: str) -> Target:
     decoded = unquote(path)
     if any(part in (".", "..") for part in _SEPARATOR.split(decoded)):
         raise Refused(CONFINEMENT, "the URL path holds a `.` or `..` segment")
-    if any(holds_separator(unquote(segment)) for segment in path.split("/")):
-        # A server that decodes the path before routing would split it there (#1391 r5 O-T5).
-        raise Refused(CONFINEMENT, "a URL path segment holds an encoded `/` or `\\`")
     if ";" in decoded:
         # Some servers read `;` as starting a path parameter and resolve `/..;/` as `/../`.
         raise Refused(CONFINEMENT, "the URL path holds a `;` (a path parameter)")
     base_path = base.path.rstrip("/")
     if not (path == base_path or path.startswith(base_path + "/")):
         raise Refused(CONFIG, "the URL path is not under the declared base")
+    if any(holds_separator(unquote(segment)) for segment in path[len(base_path):].split("/")):
+        # A server that decodes the path before routing would split it there (#1391 r5 O-T5).
+        # Only the part under the base: the tenant's own base may name an escaped `/`.
+        raise Refused(CONFINEMENT, "a URL path segment holds an encoded `/` or `\\`")
     sent = f"{base.scheme}://{base.netloc}{path}" + (f"?{asked.query}" if asked.query else "")
     return Target(url=sent, path=path[len(base_path):] or "/")
 

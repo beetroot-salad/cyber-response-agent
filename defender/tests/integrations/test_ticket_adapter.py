@@ -162,30 +162,35 @@ def test_get_ticket_percent_encodes_the_key_into_the_path(wire, ctx, key, expect
 
 
 @pytest.mark.parametrize(
-    "key", ["SOC 1", "SOC-1?x=1", "SOC-1#frag", "a/b", "../SOC-1", "SOC-1\r\nHost: evil", "50%"],
-    ids=["space", "query-delimiter", "fragment", "separator", "dotdot", "crlf", "escape"])
-def test_get_ticket_refuses_a_key_that_is_not_one_path_segment(wire, ctx, key):
-    """The agent's key is exactly one path segment or the verb is refused before anything is
-    sent, so no key can reshape the request (#1391 r5 T2)."""
+    "key", ["SOC 1", "a/b", "../SOC-1", "..", "a\\b", "a;b", "SOC-1\r\nHost: evil", ""],
+    ids=["space", "separator", "dotdot-path", "dotdot", "backslash", "semicolon", "crlf", "empty"])
+@pytest.mark.parametrize("read", ["get_ticket", "case_opened_at", "read_case_comments"])
+def test_a_ticket_read_refuses_a_key_that_could_split_its_segment(wire, ctx, read, key):
+    """A case key that could split its path segment is refused before anything is sent, by every
+    read of a ticket, so no key can reshape the request (#1391 r5 T2, case keys per #1359 P3)."""
     with pytest.raises(ConfinementFault, match="`key`"):
-        ticket_adapter.get_ticket(ctx, key=key)
+        getattr(ticket_adapter, read)(ctx, key=key)
     assert wire.sent == []
 
 
-def test_reader_fetches_the_key_the_comment_action_writes(wire, ctx):
-    """The key is the alert's (the host mints none, #1359): the host's read-back asks for the very
-    path segment the comment action posts to, whatever the key's URL-special characters. P3."""
-    wire.answer = {"key": "k", "status": "open", "comments": []}
-    for key in ("SOC-1042", "SOC#42", "a?b=c", "50%", 'q"uote', "a+b"):
+def test_every_ticket_read_fetches_the_key_the_comment_action_writes(wire, ctx):
+    """The key is the alert's (the host mints none, #1359): every read of the case — the agent's
+    get-ticket and case-opened-at, and the host's read-back — asks for the very path segment the
+    comment action posts to, whatever the key's URL-special characters. P3."""
+    wire.answer = {"key": "k", "status": "open", "comments": [], "created": "2026-01-01T00:00:00Z"}
+    keys = ("SOC-1042", "SOC#42", "a?b=c", "50%", 'q"uote', "a+b", "INC,7*")
+    for key in keys:
+        ticket_adapter.get_ticket(ctx, key=key)
+        ticket_adapter.case_opened_at(ctx, key=key)
         ticket_adapter.read_case_comments(ctx, key=key)
         ticket_adapter.add_case_comment(ctx, key=key, body="note")
         segment = f"/tickets/{urllib.parse.quote(key, safe='')}"
-        read, written = wire.paths()[-2:]
-        assert read == segment, f"the reader asks for {read}, not {segment}"
+        *reads, written = wire.paths()[-4:]
+        assert reads == [segment] * 3, f"the reads ask for {reads}, not {segment}"
         assert written == f"{segment}/comments", (
             f"the comment action posts to {written}, not {segment}/comments — the two sides "
             "encode the key differently")
-    assert [m for m, _ in wire.sent] == ["GET", "POST"] * 6, wire.sent
+    assert [m for m, _ in wire.sent] == ["GET", "GET", "GET", "POST"] * len(keys), wire.sent
 
 
 @pytest.mark.parametrize(

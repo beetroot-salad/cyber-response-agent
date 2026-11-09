@@ -62,6 +62,14 @@ def key_pattern(ctx: VerbContext) -> str:
     return _config(ctx)["KEY_PATTERN"]
 
 
+def _fetch_ticket(ctx: VerbContext, key: str) -> dict:
+    """Ticket `key` as the store answers it: the one read of a ticket. The key is a case key
+    (#1359 P3), escaped into its segment and refused only for what could split one, so every
+    read and the comment action reach the same ticket for the same key."""
+    return transport.request(ctx, SYSTEM, "GET", "/tickets/{key}", {"key": transport.CaseKey(key)},
+                             timeout_sec=_timeout(ctx))
+
+
 def case_opened_at(ctx: VerbContext, *, key: str) -> str:
     """When the case `key` was opened, as the store's own `created` timestamp — never the
     record.
@@ -73,8 +81,7 @@ def case_opened_at(ctx: VerbContext, *, key: str) -> str:
     A 404 is an `UpstreamFault` (exit 1): the case was never filed. A ticket without a string
     `created` fails as infra, so the recency screen never silently stands down.
     """
-    payload = transport.request(ctx, SYSTEM, "GET", "/tickets/{key}", {"key": key},
-                                timeout_sec=_timeout(ctx))
+    payload = _fetch_ticket(ctx, key)
     created = payload.get("created")
     if not isinstance(created, str) or not created:
         raise TransportFault(
@@ -124,11 +131,10 @@ def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> d
     `require_closed` confirms a cited closed case; refusing here (exit 1) means the scoped read
     cannot reach the in-flight ticket even by key.
 
-    The key is one path segment (the shared transport refuses any other), so a key with
-    `/`, `?`, `#` or CR-LF cannot reshape the request.
+    The key is escaped into one path segment, and one holding `/`, `\\`, `;`, whitespace or a
+    control character is refused unsent, so no key can reshape the request.
     """
-    payload = transport.request(ctx, SYSTEM, "GET", "/tickets/{key}", {"key": key},
-                                timeout_sec=_timeout(ctx))
+    payload = _fetch_ticket(ctx, key)
     if require_closed and payload.get("status") != "closed":
         raise UpstreamFault(
             f"{key} is status={payload.get('status')!r}, not 'closed' (--require-closed)"
@@ -159,8 +165,7 @@ def read_case_comments(ctx: VerbContext, *, key: str) -> CaseComments:  # lint-d
     """The case's comments, for the host's read-back after a comment whose answer was lost. Not a
     verb (never in `VERBS`). A comment it cannot read is left out. A read with no comment list is
     a `TransportFault`."""
-    ticket = transport.request(ctx, SYSTEM, "GET", "/tickets/{key}", {"key": transport.CaseKey(key)},
-                               timeout_sec=_timeout(ctx))
+    ticket = _fetch_ticket(ctx, key)
     comments = ticket.get("comments")
     if not isinstance(comments, list):
         raise TransportFault(f"ticket {key}'s read carries no comment list")

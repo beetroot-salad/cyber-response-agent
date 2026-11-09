@@ -30,7 +30,7 @@ from defender.kit.tls import trust_of_ca
 from defender.kit.verbs import is_system_name
 
 ACCESS_FILE = "access.yaml"
-#: The tenant template's mark on every value its operator must replace.
+#: The keys an access declaration may hold.
 _KNOWN = ("access", "base", "auth", "reads", "writes", "ca")
 #: The credential-set field names a scheme may name (the API's `CredentialKey` pattern).
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")

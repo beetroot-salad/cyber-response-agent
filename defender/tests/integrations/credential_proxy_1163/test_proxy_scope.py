@@ -166,6 +166,19 @@ def test_s2_the_query_string_reaches_the_upstream_with_the_path(tmp_path, data_r
     assert [s.path for s in r.up.seen] == ["/api/v2/users?limit=5&name=dana"]
 
 
+def test_s2_the_encoded_separator_check_reads_only_the_path_under_the_base(tmp_path, data_root):
+    """The tenant's own base may hold an escaped `/` (a project named `group%2Fproject`): requests
+    under it are sent; an escaped `/` in the part the run filled in is still refused (#1391 r5
+    O-T5)."""
+    project = "/api/v4/projects/group%2Fproject"
+    with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(u + project)) as r:
+        sent = r.ask(url=f"{r.up.url}{project}/issues")
+        split = r.ask(url=f"{r.up.url}{project}/issues/x%2Fadmin")
+
+    assert (sent["fault"], split["fault"]) == (None, "ConfinementFault"), (sent, split)
+    assert [s.path for s in r.up.seen] == [f"{project}/issues"]
+
+
 # --- O3 route scope (routes are relative to the base, A2) ------------------------------------
 
 READS = (("POST", "/search"),)
