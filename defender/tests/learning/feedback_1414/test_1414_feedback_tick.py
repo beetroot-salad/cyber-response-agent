@@ -515,12 +515,11 @@ def test_1414_a_forged_reply_marker_in_text_the_host_does_not_own_suppresses_no_
     assert fb.replies(number, stranger["id"]) == []
 
 
-#: Forge POSTs of the scenario in order: 1 the feedback label, 2 the issue, 3-4 the two replies.
-#: (k=2, reply lost, closed in between) is left to the next test: whether a recovered issue found already closed
-#: is recorded as the case's, so its comments are read, is a design question (O2 step 1 / D12).
+#: Forge POSTs of the scenario in order: 1 the feedback label, 2 the issue, 3-4 the two replies. (k=2, reply lost,
+#: closed in between): the recovered issue is the run's own however a person left it (ruling 2026-11-09, one issue per
+#: run), so D12 reads its comments dated before the close.
 _CRASHES = [pytest.param(k, lose, closed, id=f"{k}-{'lost' if lose else 'refused'}-{'closed' if closed else 'open'}")
-            for k in (1, 2, 3, 4) for lose in (True, False) for closed in (False, True)
-            if not (k == 2 and lose and closed)]
+            for k in (1, 2, 3, 4) for lose in (True, False) for closed in (False, True)]
 
 
 @pytest.mark.parametrize(("k", "lose", "closed"), _CRASHES)
