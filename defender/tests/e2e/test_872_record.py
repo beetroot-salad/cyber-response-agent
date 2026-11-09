@@ -284,7 +284,7 @@ def test_the_rendered_runtime_page_shows_the_original_json_of_a_substituted_call
     assert _every_view(main, toons.dumps(value))
 
     # r7.2 P1: the page takes its cost as an argument; this test reads the substituted call, so the cost is the unknown one.
-    no_cost = LedgerCost(None, False)
+    no_cost = LedgerCost(None)
     page = render_runtime_page(run_dir, cost=no_cost)
     needle = json.dumps(value["values"][0], separators=(",", ":"))
     assert needle in page or json.dumps(value["values"][0]) in page, (

@@ -140,7 +140,7 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
     from defender.records import session_store as ss
 
     # r7.2 P1: the page takes its cost as an argument; this run's own ledger, read as the post-run step reads it.
-    cost = visualize_run.LedgerCost(ss.read_ledger(store, run_dir.name), False)
+    cost = visualize_run.LedgerCost(ss.read_ledger(store, run_dir.name))
     page = visualize_run.render_runtime_page(run_dir, cost=cost)
     assert page.strip(), "runtime.html rendered empty"
 
