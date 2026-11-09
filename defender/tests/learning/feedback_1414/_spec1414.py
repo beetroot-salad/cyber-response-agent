@@ -31,6 +31,17 @@ FEEDBACK_PREFIX = "feedback/"
 REGISTRY = "agent/skills/tacit-knowledge/registry.yaml"
 
 
+#: FC: the host state layout the failed-state-write test needs to fail a real write without a hook in the code. Each
+#: name is a folder beneath the state root that the tick writes into; the test makes it (or one record file in it)
+#: unwritable on disk. The design names no state layout, so the names are the test's to fix.
+STATE_CASES_FOLDER = "feedback-cases"
+STATE_ITEMS_FOLDER = "feedback-items"
+STATE_POSITIONS_FOLDER = "feedback-positions"
+STATE_PENDING_FOLDER = "_pending"
+#: FC: a record in a state folder is `<comment_id>.json` (the file the test takes with a directory to fail one write).
+STATE_RECORD_SUFFIX = ".json"
+
+
 def setting_text(outcomes: list[str]) -> str:
     """The feedback setting listing `outcomes` (FC: a top-level `open_issue_on:` list)."""
     return "open_issue_on:\n" + "".join(f"  - {o}\n" for o in outcomes)

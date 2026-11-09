@@ -46,6 +46,15 @@ def tick_until_quiet(fb: Any, decide: Any, *, limit: int = 12, **seams: Any) -> 
     return ran
 
 
+def blocked_tick(fb: Any, decide: Any) -> BaseException | int | None:
+    """One tick; what it died of: the exception it raised, its non-zero exit code, else None (it completed)."""
+    try:
+        rc = fb.tick(decide)
+    except Exception as exc:  # noqa: BLE001 - a crashed tick is what the caller asks about
+        return exc
+    return rc or None
+
+
 class Crasher:
     """Fails the k-th POST to the forge: `lose` applies it and loses the reply, else a transport fault refuses it
     unapplied. `fired` says whether it did (so a test can tell a crash from a k past the last write)."""
@@ -81,7 +90,7 @@ class BlockedFolder:
         self.kept = self.path.with_name(self.path.name + ".kept")
         if record is not None:  # one record's file name is taken by a folder: only that write fails, with a plain OSError
             self.path.mkdir(exist_ok=True)
-            self.kept = self.path / f"{record}.json"
+            self.kept = self.path / f"{record}{S.STATE_RECORD_SUFFIX}"
             self.kept.mkdir()
             return
         if self.path.exists():

@@ -94,6 +94,38 @@ def test_1414_recovery_ignores_an_issue_not_created_by_the_bot(fb):
     assert {i["user"]["login"] for i in fb.issues("case-decoy")} == {OUTSIDER, fb.bot}
 
 
+@pytest.mark.parametrize("applied", [True, False], ids=["create-applied", "create-never-applied"])
+def test_1414_recovery_matches_only_the_first_line_never_a_title_or_a_fenced_body(fb, applied):
+    """After a lost create, a labelled bot issue whose title alone names the run id, or whose fenced body below the first line does, is not the run's issue: the real one is recovered or a new one made. O2/A6 (ruling 2026-11-09: only the first line matches)."""
+    if applied:
+        fb.forge.lose_reply = lambda r: r.method == "POST" and r.url.path.endswith("/issues")
+    else:
+        fb.forge.fault = lambda r: (httpx.ConnectError("down", request=r)
+                                    if r.method == "POST" and r.url.path.endswith("/issues") else None)
+    run = fb.request("case-decoys")
+    rid = S.run_id_of(run)
+    fb.tick(S.Decider())
+    fb.forge.lose_reply = fb.forge.fault = None
+    assert len(_run_issues(fb, run)) == (1 if applied else 0), "premise: the lost create's state"
+    label = S.FEEDBACK_LABEL
+    by_title = fb.forge.add_issue(title=f"Feedback on run {rid} (inconclusive)", body="Feedback on some other run\n",
+                                  user=fb.bot, labels=[label])
+    by_body = fb.forge.add_issue(title="Feedback on some other run (inconclusive)", user=fb.bot, labels=[label],
+                                 body=f"Feedback on some other run\n\nlookups:\n```\n{rid}\n```\n")
+
+    assert fb.tick(S.Decider()) == 0
+    [issue] = _run_issues(fb, run)
+    assert issue["number"] not in {by_title["number"], by_body["number"]}
+    assert len(fb.forge.issues) == 3, "premise: one real issue and the two decoys"
+    decider = S.Decider()
+    decoy_talk = [fb.forge.add_comment(d["number"], user=OWNER, body="expected") for d in (by_title, by_body)]
+    comment = fb.forge.add_comment(issue["number"], user=OWNER, body="expected")
+    assert fb.tick(decider) == 0
+    assert decider.decided == [comment["id"]], "a decoy was recorded as the run's issue"
+    assert not {c["id"] for c in decoy_talk} & set(decider.decided)
+    assert S.open_issue_requests(fb.paths) == {}
+
+
 def test_1414_recovery_finds_the_runs_own_issue_never_another_runs_of_the_case(fb):
     """A create the forge applied but whose reply was lost is recovered as that run's issue, never taken for an earlier run's of
     the same case or another case's; a create the forge never applied is made on the retry. O2/F2.1/A6 (ruling 2026-11-09)."""
@@ -139,7 +171,10 @@ def test_1414_an_issue_the_forge_no_longer_has_is_treated_as_closed_and_logged(f
         assert fb.tick(S.Decider()) == 0
         assert fb.tick(S.Decider()) == 0
     assert len(fb.forge.issue_creates()) == 1, "the gone issue was made again"
-    assert any(str(number) in r.getMessage() for r in caplog.records), "the missing issue is not in the log"
+    gone = ("gone", "missing", "no longer", "not found", "404")
+    assert any(r.levelno >= logging.WARNING and re.search(rf"(?<!\d){number}(?!\d)", r.getMessage())
+               and any(w in r.getMessage().lower() for w in gone) for r in caplog.records), \
+        "no warning names the issue and says it is gone"
 
     later = fb.request("case-gone")
     assert fb.tick(S.Decider()) == 0
@@ -434,8 +469,11 @@ def test_1414_what_the_old_generations_bot_made_is_still_the_bots(fb):
 # ---- regressions (#1414 attack triage)
 
 def test_1414_a_lookup_with_a_lone_surrogate_does_not_wedge_the_requests_beside_it(fb):
-    """A run whose captured lookups held a lone surrogate (a model's tool argument) queues no request the tick cannot send;
-    its ordinary neighbour's issue still opens and its comment is still decided, tick after tick. F1/F2 (P3)."""
+    """A lookup that is not valid UTF-8 (a lone surrogate) is not captured at run end, but its run still gets its own issue with its other lookups; the ordinary neighbour is unaffected. F1/F2 (P3).
+
+    FC: a lookup that cannot be encoded as UTF-8 can never be sent, so run end leaves it out of the request; the design
+    names no other treatment, and dropping that one lookup (not the run's request) is the test's fixed choice.
+    """
     import shutil
     from pathlib import Path
 
@@ -467,14 +505,20 @@ def test_1414_a_lookup_with_a_lone_surrogate_does_not_wedge_the_requests_beside_
         run_state=run_state)
     assert queued is True, "premise: the run's end queued its request"
 
+    [kept] = [r for r in S.open_issue_requests(fb.paths).values() if r["run_id"] == S.run_id_of(bad_dir)]
+    assert kept["lookups"] == [{"actor": "ann", "host": "db-03", "pattern": "id"}], \
+        "the surrogate lookup was captured, or the run's other lookup was lost with it"
     decider = S.Decider()
     fb.request("case-ok")  # the ordinary request, queued beside the bad run's
     assert fb.tick(decider) == 0
+    [bad_issue] = _run_issues(fb, bad_dir)  # the run's own issue, opened by the same tick
+    bad_said = fb.forge.add_comment(bad_issue["number"], user=NAMED, body="nothing to change")
     [number] = [i["number"] for i in fb.issues("case-ok")]
     spoken = fb.forge.add_comment(number, user=OWNER, body="nothing to change")
     for _ in range(3):
         assert fb.tick(decider) == 0
-    assert decider.decided == [spoken["id"]], "the ordinary run's comment was not decided"
+    assert sorted(decider.decided) == sorted([spoken["id"], bad_said["id"]]), "a comment was not decided"
+    assert decider.item(bad_said["id"])["lookups"] == [kept["lookups"][0]], "the surrogate run is framed by other lookups"
     assert len(fb.replies(number, spoken["id"])) == 1
     assert S.open_issue_requests(fb.paths) == {}, "a request stayed queued, to fail again every tick"
 
@@ -564,11 +608,19 @@ def test_1414_an_issue_made_but_not_recorded_and_closed_before_the_redo_is_not_m
     assert S.open_issue_requests(fb.paths) == {}
 
 
-@pytest.mark.parametrize(("folder", "stage"), [
-    ("feedback-cases", "open"), ("feedback-items", "read"), ("feedback-positions", "read"), ("_pending", "read"),
-    ("feedback-items", "first-comment"), ("feedback-items", "second-comment")])
-def test_1414_a_failed_state_write_loses_no_comment_and_makes_no_second_issue(fb, folder, stage):
-    """A tick that dies on a write into one of its state folders (the folder made unwritable on disk, no hook in the code) is redone whole: one issue, every eligible comment decided and replied to once, its lessons row written. P5/O4/A6."""
+_BLOCKED_WRITES = [
+    pytest.param(S.STATE_CASES_FOLDER, "open", id="cases-open"),
+    pytest.param(S.STATE_ITEMS_FOLDER, "read", id="items-read"),
+    pytest.param(S.STATE_POSITIONS_FOLDER, "read", id="positions-read"),
+    pytest.param(S.STATE_PENDING_FOLDER, "read", id="pending-read"),
+    pytest.param(S.STATE_ITEMS_FOLDER, "first-comment", id="items-first-comment"),
+    pytest.param(S.STATE_ITEMS_FOLDER, "second-comment", id="items-second-comment"),
+]
+
+
+@pytest.mark.parametrize(("folder", "stage"), _BLOCKED_WRITES)
+def test_1414_a_failed_state_write_loses_no_comment_and_makes_no_second_issue(fb, caplog, folder, stage):
+    """A tick that dies (exit code and a logged refusal naming the path) on a write into one of its state folders, made unwritable on disk with no hook in the code, is redone whole: one issue, each eligible comment decided and replied to once, its lessons row written. P5/O4/A6."""
     scene = A.Scene(fb)
     record = None
     if stage != "open":
@@ -577,14 +629,21 @@ def test_1414_a_failed_state_write_loses_no_comment_and_makes_no_second_issue(fb
         record = {"first-comment": 0, "second-comment": 1}.get(stage)
         record = None if record is None else str(scene.comments[record]["id"])
     blocked = A.BlockedFolder(fb, folder, record)
-    scene.step()
+    creates = len(fb.forge.issue_creates())
+    with caplog.at_level(logging.INFO):
+        died = A.blocked_tick(fb, scene.decider)
     blocked.restore()
+    named = f"{folder}/{record}{S.STATE_RECORD_SUFFIX}" if record else folder
+    assert died, "premise: the tick did not die at the blocked write"
+    assert any(r.levelno >= logging.ERROR and named in r.getMessage() for r in caplog.records), \
+        f"premise: no logged refusal names the blocked path {named}"
+    if stage == "open":
+        assert len(fb.forge.issue_creates()) == creates, "premise: the tick opened an issue past the blocked write"
+    else:
+        assert fb.forge.comments_on(scene.number, by=fb.bot) == [], "premise: the failed write stopped the tick before its replies"
     for _ in range(3):
         if not scene.comments:
             scene.step()
-    if stage != "open":
-        assert fb.forge.comments_on(scene.number, by=fb.bot) == [] or folder == "_pending", \
-            "premise: the failed write stopped the tick before its replies"
     A.tick_until_quiet(fb, scene.decider)
     scene.verify()
 
@@ -592,27 +651,30 @@ def test_1414_a_failed_state_write_loses_no_comment_and_makes_no_second_issue(fb
 # ---------------------------------------------------------------- honest-code regressions (pre-fix e990542ab fails these)
 
 def test_1414_a_newer_request_filed_while_the_older_is_served_survives_the_tick(fb):
-    """A request for the case filed by a newer run while a tick opens the issue for the older one is still queued afterwards. A4/F1."""
+    """A request filed by a newer run while a tick opens the issue for the older one is not lost with it: the newer run ends with its own issue. A4/F1 (ruling 2026-11-09, consequence 1: one request per run; H2 lost update)."""
     older = fb.request("case-mid")
     newer = {}
 
     def file_newer(request):
         if request.method == "POST" and request.url.path.endswith("/issues") and not newer:
-            newer["run"] = S.run_id_of(fb.request("case-mid"))
+            newer["dir"] = fb.request("case-mid")
         return None
 
     fb.forge.respond = file_newer
     assert fb.tick(S.Decider()) == 0
     assert newer, "premise: the hook ran while the older request was served"
-    assert newer["run"] != S.run_id_of(older)
-    assert newer["run"] in {r["run_id"] for r in S.open_issue_requests(fb.paths).values()}, \
-        "the newer run's request was released with the older one's"
+    assert S.run_id_of(newer["dir"]) != S.run_id_of(older)
+    fb.forge.respond = None
+    A.tick_until_quiet(fb, S.Decider())
+    assert len(_run_issues(fb, older)) == 1
+    assert len(_run_issues(fb, newer["dir"])) == 1, "the newer run's request was released with the older one's and it got no issue"
+    assert S.open_issue_requests(fb.paths) == {}
 
 
 @pytest.mark.parametrize(("ahead", "fresh"), [
-    (dt.timedelta(seconds=2), True), (dt.timedelta(seconds=60), False), (dt.timedelta(hours=1), False)])
+    (dt.timedelta(seconds=2), True), (dt.timedelta(seconds=10), False), (dt.timedelta(seconds=60), False), (dt.timedelta(hours=1), False)])
 def test_1414_an_eligibility_record_dated_in_the_future_is_stale_beyond_the_clock_skew(fb, caplog, ahead, fresh):
-    """A record dated more than 5 s ahead of the host's clock reads no comments and is logged; one within 5 s is fresh. D13."""
+    """A record dated more than 5 s ahead of the host's clock (10 s, 60 s, an hour) reads no comments and is logged; one 2 s ahead is fresh. D13."""
     number = fb.opened("case-future")
     comment = fb.forge.add_comment(number, user=OWNER, body="expected")
     fb.eligible(OWNER, NAMED, age=-ahead)
