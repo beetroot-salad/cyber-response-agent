@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from defender import run as run_mod
-from defender.providers import ProviderDown
+from defender.providers import SETUP_STATUSES, ProviderDown
 from defender.hooks.budget_enforcer import BudgetKill
 from defender.investigation.challenge_gate import REVIEW_ROLES
 from defender.investigation.review_roles import ReviewStages
@@ -556,3 +556,32 @@ def test_o5_the_run_end_record_written_for_provider_down_round_trips(tmp_path: P
     `write_sidecar`'s document shape, read back by `parse_record` as the same value."""
     doc = rb.RunEnd(P.PROVIDER_DOWN, False).doc()
     assert rb.parse_record(json.loads(json.dumps(doc))) == rb.RunEnd(P.PROVIDER_DOWN, False)
+
+
+@pytest.mark.parametrize(("status", "ends_run"),
+                         [(s, True) for s in sorted(SETUP_STATUSES)] + [(400, False)])
+def test_1447_a_lead_refused_for_its_setup_ends_the_run_and_a_400_only_the_lead(
+        tmp_path: Path, status: int, ends_run: bool) -> None:
+    """A lead refused with a setup status (401-404, and 412: Fireworks' suspended or blocked
+    account, #1447) ends the run `provider-rejected`: every lead on the key gets the same
+    answer. A 400 ends only that lead, and the run finishes. Either way the lead's session is
+    stamped `provider-rejected`."""
+    stores: list = []
+    d = S.run_alert(
+        tmp_path, main=[S.gather(LEAD, "cmdb"), S.text(S.DONE)],
+        leads={L3: [S.text(CORR)], LEAD: [S.list_verbs("cmdb"), S.text("unreached")]},
+        lead_faults={LEAD: S.LeadFault(raise_on=2, exc=lambda: P.http_error(status))},
+        store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
+    assert d.router.requests(LEAD) == 2, "MAIN's lead never reached its refused request"
+    assert d.raised is None, f"the run crashed on a lead's {status}: {d.raised!r}"
+    ended = (d.summary or {}).get("truncated_by")
+    if ends_run:
+        assert ended == run_end.TRUNCATED_BY_PROVIDER_REJECTED, (
+            f"a lead's {status} ended the run {ended!r}, not provider-rejected")
+        assert not d.paths.report.exists(), "a provider-rejected run wrote report.md"
+        assert d.rc == 7, f"run.py exited {d.rc!r} on a provider-rejected run, not 7"
+    else:
+        assert ended is None, f"a lead's {status} ended the whole run {ended!r}; only the lead ends"
+        assert d.rc == 0, f"a run whose lead was refused {status} exited {d.rc!r}, not 0"
+    assert P.sessions(_store(stores)).get(P.gather_agent(LEAD)) == (
+        run_end.TRUNCATED_BY_PROVIDER_REJECTED), "the refused lead's session is not stamped"

@@ -22,7 +22,7 @@ from defender import box as box_mod
 from defender.box import _lifecycle
 from defender.tests.e2e._box665 import RecordingDocker
 from defender.tests.e2e._spec771 import requires_real_box
-from defender.tests.sandbox.test_1195_run_box_live import _batch, _status, live_worktree_base  # noqa: F401 — a fixture
+from defender.tests.sandbox.test_run_box import _batch, _status, live_worktree_base  # noqa: F401 — a fixture
 from defender.tests.support.sandbox import _box1195 as X
 from defender.tests.support.sandbox._box1279 import request_lane
 from defender.tests.support.sandbox._box1343 import input_open

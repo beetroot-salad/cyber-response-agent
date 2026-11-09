@@ -112,9 +112,10 @@ def test_sign_in_ends_in_a_host_session_cookie_and_me_names_the_user() -> None:
     assert (attrs["samesite"].lower(), attrs["path"]) == ("lax", "/")
     assert "domain" not in attrs
     body = me(browser)
-    assert set(body) == {"user", "tenants", "administrator", "invitations"}
+    assert set(body) == {"user", "tenants", "administrator", "invitations", "kind"}
     assert body["user"] == {"id": world.signin.account_of(ANN).username,  # P-C: username = user id
                             "email": ANN, "display_name": "Ann Example"}
+    assert body["kind"] == "person"  # #1307 D10: both /me views carry `kind` (person | program); a session is a person's
     assert body["tenants"] == [{"tenant_id": T1}]
     assert (body["administrator"], body["invitations"]) == (False, [])
 
@@ -358,14 +359,15 @@ def test_the_session_value_is_random_and_only_a_hash_of_it_is_stored() -> None:
     assert all(b.get("/me").status_code == 200 for b in browsers)
 
 
-def test_a_bearer_header_is_not_a_session_and_a_401_offers_no_bearer_challenge() -> None:
-    """The value works only as the cookie; the refusal does not invite Bearer (O6)."""
+def test_a_bearer_header_is_not_a_session() -> None:
+    """The value works only as the cookie (O6). Since #1307, Bearer is the programs' way in, so this 401 is
+    challenged like any refused bearer request; a 401 to a request without the header still offers none."""
     world = World(tenants={T1: [ANN]})
     value = world.sign_in(ANN).cookies[SESSION_COOKIE]
     bearer = world.client()
     refused = bearer.get("/me", headers={"Authorization": f"Bearer {value}"})
     assert refused.status_code == 401
-    assert "bearer" not in refused.headers.get("www-authenticate", "").lower()
+    assert "www-authenticate" not in world.client().get("/me").headers
     for name in ("defender_session", "__Secure-defender_session", "session"):  # DC-6: only the __Host- name
         assert world.client_with_cookie(value, name=name).get("/me").status_code == 401, name
     assert world.client_with_cookie(value).get("/me").status_code == 200

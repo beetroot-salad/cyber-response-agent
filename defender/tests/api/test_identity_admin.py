@@ -42,6 +42,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     BootstrapRefused,
     World,
 )
+from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402  #1307 D7: the programs port is required
 
 
 # A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
@@ -276,7 +277,7 @@ def test_an_unflagging_made_by_another_process_takes_effect_at_this_processs_nex
     ops = world.sign_in_admin()
     assert ops.get("/admin/tenants").status_code == 200  # the session has been used
     other_process = IdentityService(world.repo, signin=world.signin, mail=world.mail, clock=world.clock,
-                                    bootstrap=Bootstrap(administrators=()))
+                                    bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
     world.call(other_process.start)  # another API process, started with OPS removed from the file
     assert ops.get("/admin/tenants").status_code == 403
     assert me(ops)["administrator"] is False
@@ -389,6 +390,7 @@ def test_a_file_that_still_has_a_tenants_section_makes_no_first_member() -> None
         world.call(IdentityService(
             world.repo, signin=world.signin, mail=world.mail, clock=world.clock,
             bootstrap=Bootstrap(administrators=(OPS,), tenants={LAB: (ME,)}),  # type: ignore[call-arg]
+            programs=NoProgramsRealm(),
         ).start)
     world.send_pending()
     assert ME not in {a.email for a in world.signin.accounts.values()}

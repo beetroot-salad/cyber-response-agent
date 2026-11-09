@@ -27,6 +27,7 @@ from defender.tests.support.shared._pglocks1339 import (
     until_blocked,
 )
 from defender.tests.support.shared._postgres1339 import database, execute
+from defender.tests.support.api._programs1307 import NoProgramsRealm  # #1307 D7: the programs port is required
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -134,7 +135,8 @@ async def _build(dsn: str) -> Stack:
     repo = Spy(PostgresIdentityRepository(dsn))
     signin, mail = SignIn(), Mail()
     service = IdentityService(
-        repo, signin=signin, mail=mail, clock=lambda: NOW, bootstrap=Bootstrap(administrators=()))
+        repo, signin=signin, mail=mail, clock=lambda: NOW, bootstrap=Bootstrap(administrators=()),
+        programs=NoProgramsRealm())
     for tenant in (T1, T2):  # active tenants are seeded through tenancy, not an identity port (r9 DC-6)
         insert_active_tenant(dsn, str(tenant), wiring=False)
     return Stack(dsn, repo, service, signin, mail)

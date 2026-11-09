@@ -84,13 +84,17 @@ def test_the_history_is_the_baseline_and_five_revisions_on_it_in_a_line():
 
     script = ScriptDirectory.from_config(_config())
     chain = [(r.revision, r.down_revision) for r in script.walk_revisions()]  # newest first
-    assert len(chain) == 8
-    assert [revision for revision, _ in chain] == [
+    # #1307 puts `0009_programs` (and a later change may put more) on top of #1344's `0008_learning_jobs` (design:
+    # migrations): what this test pins is the line from the baseline to 0008, so it is read from the bottom.
+    old = chain[-8:]
+    assert [revision for revision, _ in old] == [
         "0008_learning_jobs", "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY,
         BASELINE]
-    assert [down for _, down in chain] == [
+    assert [down for _, down in old] == [
         "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE, None]
-    assert script.get_heads() == ["0008_learning_jobs"], "the history branches"
+    assert len(script.get_heads()) == 1, "the history branches"
+    # The whole line, newest first: each revision's down revision is the next one listed, and the last has none.
+    assert all(down == chain[i + 1][0] for i, (_, down) in enumerate(chain[:-1])), "the history is not one line"
 
 @pytest.mark.postgres
 def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_database):
@@ -136,8 +140,8 @@ def test_set_schema_keeps_the_rows_the_memberships_and_the_foreign_keys_name(emp
     assert execute(empty_database, "SELECT id, tenant_id, status FROM identity.memberships") == [("e1000000-0000-4000-8000-000000000001", LAB, "invited")]
     with pytest.raises(psycopg.errors.ForeignKeyViolation):  # a membership of a tenant that is not there
         execute(empty_database, """INSERT INTO identity.memberships (id, user_id, tenant_id, status, invited_by, created_at,
-                                   notify_requested_seq, notify_sent_seq, notify_attempts)
-                                   VALUES ('e1000000-0000-4000-8000-000000000002', 'd1000000-0000-4000-8000-000000000001', 'f1000000-0000-4000-8000-000000000009', 'invited', NULL, %s, 0, 0, 0)""", (CREATED,))
+                                   notify_requested_seq, notify_sent_seq, notify_attempts, role)
+                                   VALUES ('e1000000-0000-4000-8000-000000000002', 'd1000000-0000-4000-8000-000000000001', 'f1000000-0000-4000-8000-000000000009', 'invited', NULL, %s, 0, 0, 0, 'admin')""", (CREATED,))
     with pytest.raises(psycopg.errors.ForeignKeyViolation):  # a tenant with a membership cannot be deleted
         execute(empty_database, "DELETE FROM tenancy.tenants WHERE id = %s", (LAB,))
     execute(empty_database, "DELETE FROM tenancy.tenants WHERE id = %s", (OTHER,))  # control: one without can
