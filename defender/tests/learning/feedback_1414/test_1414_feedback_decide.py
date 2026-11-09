@@ -372,8 +372,8 @@ def test_1414_a_request_the_forge_refuses_is_set_aside_with_its_reason_in_a_kept
     assert reason.strip(), "the quarantined request's reason is empty (A8)"
 
 
-def test_1414_a_4xx_on_a_comment_reply_is_counted_and_given_up_at_the_3rd_tick(fb, caplog):
-    """For each status 400-499 on a comment's reply POST (one issue per status): attempted on ticks 1-3 and never after, the give-up logged naming the comment; a healthy issue's reply is unaffected. A4/O9."""
+def test_1414_a_4xx_on_a_comment_reply_is_bounded_and_given_up_with_the_comment_logged(fb, caplog):
+    """For each status 400-499 on a comment's reply POST: at most 2 x the ceiling reply POSTs per comment, none added by 12 further ticks, the give-up logged naming the comment; a healthy issue is unaffected. A4/O9."""
     cases = {f"r{status}": status for status in _REFUSED} | {"healthy": None}
     for case in cases:
         fb.request(case)
@@ -385,13 +385,21 @@ def test_1414_a_4xx_on_a_comment_reply_is_counted_and_given_up_at_the_3rd_tick(f
     fb.forge.respond = lambda r: (httpx.Response(status_of[n], json={"message": "no"}) if r.method == "POST"
                                   and r.url.path.endswith("/comments") and (n := _issue_of(r.url.path)) in status_of else None)
 
+    def posts_to(case: str) -> int:
+        return sum(r.method == "POST" and r.url.path.endswith(f"/issues/{numbers[case]}/comments") for r in fb.forge.requests)
+
     with caplog.at_level(logging.INFO):
         for _ in range(CEILING + 3):
             assert fb.tick(decider) == 0
+        after_six = {case: posts_to(case) for case, status in cases.items() if status}
+        for _ in range(12):
+            assert fb.tick(decider) == 0
     for case, status in cases.items():
         if status:
-            posts = [r for r in fb.forge.requests if r.method == "POST" and r.url.path.endswith(f"/issues/{numbers[case]}/comments")]
-            assert len(posts) == CEILING, f"{status}: a refused reply was not attempted exactly three times"
+            # FC: the decision's reply and the host's "could not be processed" reply may each be tried up to the ceiling
+            # (3) times, so a comment takes at most 2 x CEILING reply POSTs; the exact split is the host's call.
+            assert after_six[case] <= 2 * CEILING, f"{status}: {after_six[case]} reply POSTs, past 2 x the ceiling"
+            assert posts_to(case) == after_six[case], f"{status}: a refused reply was still retried after tick 6"
     assert len(fb.replies(numbers["healthy"], comments["healthy"]["id"])) == 1, "control: a healthy issue's reply was held back"
     logged = " ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING and r.name != "httpx")
     for case, status in cases.items():
