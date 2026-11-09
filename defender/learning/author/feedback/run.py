@@ -114,7 +114,7 @@ def _gate_feedback(
             consumed.append({**entry, "consumed_category": "consumed_idempotent"})
         elif cid not in seen:
             seen.add(cid)
-            to_author.append({**entry, "finding_id": cid})
+            to_author.append(entry)
     return [], consumed, to_author
 
 

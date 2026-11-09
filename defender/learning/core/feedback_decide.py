@@ -28,6 +28,10 @@ REVIEW_DAYS = tacit_registry.TACIT_KNOWLEDGE_MAX_REVIEW_SPAN_DAYS
 NO_LOOKUP = "the run made no registry lookup this could approve"
 
 
+#: The answer's whole schema (A3): exactly these keys, each present.
+ANSWER_KEYS = frozenset({"approve", "review_by", "instruction", "reason"})
+
+
 class InvalidAnswer(Exception):
     """The model's answer breaks A3's schema; it is refused whole and the comment asked again."""
 
@@ -41,9 +45,7 @@ def comment_day(item: dict) -> dt.date:
 
 def _indexes(answer: dict, lookups: list[dict]) -> list[int]:
     """The distinct lookup indexes the answer approves, in order; a bad one refuses the answer."""
-    approve = answer.get("approve")
-    if approve is None:
-        return []
+    approve = answer["approve"]
     if not isinstance(approve, list):
         raise InvalidAnswer("`approve` is not a list")
     if not lookups:
@@ -60,7 +62,7 @@ def _indexes(answer: dict, lookups: list[dict]) -> list[int]:
 def _review_by(answer: dict, added: dt.date) -> str | None:
     """The review date the comment names, capped at added_at + 180 (O6's "earlier of"); a date that is not
     an ISO date, or falls before the comment's own day, refuses the answer."""
-    named = answer.get("review_by")
+    named = answer["review_by"]
     if named is None:
         return None
     parsed = tacit_registry.parse_date(named) if isinstance(named, str) else None
@@ -72,7 +74,7 @@ def _review_by(answer: dict, added: dt.date) -> str | None:
 
 
 def _answer_text(answer: dict, field: str) -> str | None:
-    value = answer.get(field)
+    value = answer[field]
     if value is not None and not isinstance(value, str):
         raise InvalidAnswer(f"`{field}` is not text")
     return value.strip() or None if value else None
@@ -82,6 +84,8 @@ def validate_answer(answer: Any, item: dict) -> dict:
     """The decision the answer means, or `InvalidAnswer`."""
     if not isinstance(answer, dict):
         raise InvalidAnswer("the answer is not an object")
+    if set(answer) != ANSWER_KEYS:
+        raise InvalidAnswer(f"the answer's keys are {sorted(answer)}, not exactly {sorted(ANSWER_KEYS)}")
     lookups = item["lookups"]
     approved = _indexes(answer, lookups)
     review_by = _review_by(answer, comment_day(item))

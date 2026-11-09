@@ -34,6 +34,10 @@ _TOP_KEY = re.compile(r"^([A-Za-z_][\w-]*)[ \t]*:")
 _RANK = {"open": 0, "merged": 1, "closed": 2}
 
 
+#: Counted refusals of one reply before it is given up (A4; as the request ceiling).
+MAX_REPLY_ATTEMPTS = 3
+
+
 class ShapeRefused(Exception):
     """The registry file is not in a shape entries may be appended to (A7), or the append broke the reader."""
 
@@ -130,6 +134,21 @@ def read_back(before: str, after: str, entries: list[dict[str, str]]) -> str | N
     return None
 
 
+#: A plain entry no real one can be: used only to ask whether the reader can read anything appended to a file.
+_PROBE = {"id": "fb-0-0-0", "pattern": "probe pattern", "actor_scope": "probe-actor", "host_scope": "probe-host.invalid",
+          "added_by": "probe@example.invalid", "added_at": "2026-01-01", "review_by": "2026-02-01",
+          "justification": "a probe, never written"}
+
+
+def file_level_problem(text: str) -> str | None:
+    """Why the reader cannot read back even a plain entry appended to `text`, or None: then a failing entry is that
+    entry's own fault (not-draftable); otherwise the file is (the draft is refused, O9)."""
+    try:
+        return read_back(text, append_entries(text, [_PROBE]), [_PROBE])
+    except ShapeRefused as e:
+        return str(e)
+
+
 def main_registry(delivery: Any) -> tuple[str, list[dict[str, str]]]:
     """The registry text on the remote `main`, and the entries the reader loads from it."""
     repo = delivery.repository
@@ -192,6 +211,8 @@ def _judge(state: LearningState, text: str, main_entries: list[dict[str, str]]) 
         entry = entry_for(decision, approved)
         actor, host, pattern = entry["actor_scope"], entry["host_scope"], entry["pattern"]
         if (why := unwritable(entry) or read_back(text, append_entries(text, [entry]), [entry])) is not None:
+            if (broken := file_level_problem(text)) is not None:
+                raise ShapeRefused(f"the registry on main cannot be appended to: {broken}")
             _settle(state, decision, approved, {"how": "not-draftable", "why": why})
         elif (hit := tacit_registry.find_entry(main_entries, actor=actor, host=host, pattern=pattern, now=today)) is not None:
             _settle(state, decision, approved, {"how": "covered", "by": hit["id"]})
@@ -288,7 +309,24 @@ def _reply_is_on_issue(forge: Any, seen: dict[int, str], bots: frozenset[str], d
         return True
     if not all(a["settled"] for a in decision["approved"]):
         return False
-    forge.create_comment(number, reply_text(decision))
+    return _post_reply(forge, decision)
+
+
+def _post_reply(forge: Any, decision: dict) -> bool:
+    """Post the reply. A refusal (4xx) counts toward the ceiling and the reply is given up at it, logged naming the
+    comment; an unreachable forge (transport fault, 5xx) counts for nothing and is retried (A4/O9)."""
+    try:
+        forge.create_comment(decision["issue"], reply_text(decision))
+    except ForgeError as e:
+        if not e.refused:
+            raise
+        decision["reply_attempts"] = int(decision.get("reply_attempts", 0)) + 1
+        if decision["reply_attempts"] < MAX_REPLY_ATTEMPTS:
+            _logger.error(f"feedback: the reply to comment {decision['comment_id']} was refused "
+                          f"(attempt {decision['reply_attempts']}/{MAX_REPLY_ATTEMPTS}): {e}")
+            return False
+        _logger.warning(f"feedback: the reply to comment {decision['comment_id']} was refused "
+                        f"{decision['reply_attempts']} times ({e}); given up")
     return True
 
 
@@ -309,3 +347,5 @@ def reply(state: LearningState, forge: Any, bots: frozenset[str]) -> None:
             done = True
         if done:
             _mark_replied(state, decision)
+        elif decision.get("reply_attempts"):
+            state.put_record(FEEDBACK_DECISIONS, str(decision["comment_id"]), decision)  # the refusal is counted

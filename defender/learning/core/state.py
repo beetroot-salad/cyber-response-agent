@@ -693,8 +693,9 @@ class LearningState:
         _logger.info(f"enqueued for curation: {self._abs(name)}")
 
     def enqueue_feedback_issue(self, case_id: str, spec: dict) -> None:
-        """File the open-issue request `spec` for `case_id` (#1414 F1), replacing an earlier one."""
-        name = f"{FEEDBACK_REQUESTS}/{case_id}.json"
+        """File the open-issue request `spec` for a run of `case_id` (#1414 F1): one file per run, so a rerun of the
+        case never replaces an earlier run's request (one issue per run)."""
+        name = f"{FEEDBACK_REQUESTS}/{case_id}--{spec['run_id']}.json"
         try:
             self._write(name, json.dumps(spec) + "\n", "replace")
         except OSError as failed:
