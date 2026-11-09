@@ -37,8 +37,6 @@ mod = T1106.mod
 
 #: The field `VerbContext` and `AgentDeps` carry the record under.
 RECORD_FIELD = "tenant"
-#: The one implemented access method.
-DOCKER_EXEC = T1106.DOCKER_EXEC
 #: The per-tenant secret store's file name, under `settings/`.
 SECRETS_ENV = "secrets.env"
 #: The env lint's program name.
@@ -100,14 +98,11 @@ def settings_pointer() -> str:
 #: Each system folder's key prefix, as the adapters spell it.
 PREFIX = T1106.PREFIX
 
-context_name = T1106.context_name
-
-
 def config_texts(marker: str, *, events_index: str | None = None,
                  alerts_index: str | None = None) -> dict[str, str]:
-    """One complete `config.env` per system (`_tenants1106.config_texts`), access method and
-    elastic's containers included: a system whose settings check fails is down from run start,
-    and a scenario about one fault must not ride on eight."""
+    """One complete `config.env` per system (`_tenants1106.config_texts`): a system whose
+    settings check fails is down from run start, and a scenario about one fault must not ride on
+    eight. `plant` writes each system's access declaration beside it."""
     return T1106.config_texts(marker, events_index=events_index, alerts_index=alerts_index)
 
 
@@ -134,7 +129,7 @@ def plant(root: Path, tenant_id: str = PLAYGROUND_ID, *, marker: str = "t1107",
             else:
                 entry.unlink()
     folder = T1106.place_tenant(
-        root, tenant_id, table=table,
+        root, tenant_id, table=table, marker=marker,
         configs=configs if configs is not None else config_texts(marker), **kw)
     if secrets is not None:
         write_secrets(folder, secrets)
@@ -299,9 +294,8 @@ sys.exit(int(a.get("rc", 0)))
 
 def answer(stdout: str = "{}", status: str | None = "200", *, rc: int = 0,
            stderr: str = "") -> dict[str, Any]:
-    """One canned `docker` reply. `status` is appended on its own trailing line, curl's
-    `-w '\\n%{http_code}'` shape that `split_status` recovers (the transport's own contract);
-    `None` emits stdout as-is (a non-curl `docker` call, or a curl that printed nothing)."""
+    """One canned reply: the system's `stdout` body and HTTP `status`, as `ProxyStandIn` hands
+    it back in the proxy's reply format (`DockerShim` still reads the same shape)."""
     return {"stdout": stdout, "status": status, "rc": rc, "stderr": stderr}
 
 
@@ -375,6 +369,131 @@ class DockerShim:
         if not self.log.is_file():
             return []
         return [json.loads(ln) for ln in self.log.read_text(encoding="utf-8").splitlines() if ln]
+
+
+def timed_out(detail: str = "the system did not answer in time") -> dict[str, Any]:
+    """The proxy's answer when the system took the request and never answered: a transport
+    fault on the system's side that may have reached it."""
+    return {"proxy_fault": "TransportFault", "detail": detail, "sent": True, "system_side": True}
+
+
+def never_connected(detail: str = "the system refused the connection") -> dict[str, Any]:
+    """The proxy's answer when it never connected to the system: nothing was sent."""
+    return {"proxy_fault": "TransportFault", "detail": detail, "sent": False, "system_side": True}
+
+
+def proxy_refused(fault: str, detail: str) -> dict[str, Any]:
+    """The proxy's own refusal (no status, never sent): e.g. a route the declaration does not
+    allow (`ConfinementFault`) or no stored credential (`ConfigFault`)."""
+    return {"proxy_fault": fault, "detail": detail, "sent": False, "system_side": False}
+
+
+#: How the real proxy classifies a status the system answered (`credential_proxy._app`).
+def _fault_of_status(status: int) -> str | None:
+    if status < 300:  # noqa: PLR2004 — HTTP status classes
+        return None
+    if status == 401:  # noqa: PLR2004
+        return "ConfigFault"
+    return "TransportFault" if status >= 500 else "UpstreamFault"  # noqa: PLR2004
+
+
+class ProxyStandIn:
+    """The credential proxy as the run sees it (#1391 O1: every system is reached through it): a
+    loopback server at `url` that records every request a run sends it and answers from `answers`
+    in order (the last repeats), in the proxy's own reply format. An answer is `answer(body,
+    status)` (the system's reply: a docker `rc`/`stderr` is refused, there is no docker), or
+    `timed_out()`, `never_connected()`, `proxy_refused(...)`. Signs nothing and checks no token:
+    `seams()` hands `run.main` a signer that signs anything, and `install` points the run at it.
+    Closed when the test ends."""
+
+    def __init__(self, root: Path, answers: Iterable[dict[str, Any]] | None = None) -> None:
+        import http.server
+        import threading
+
+        from defender.tests.support.storage._store_owner import owning_stack
+
+        self.root = Path(root)
+        self.root.mkdir(parents=True, exist_ok=True)
+        self._requests: list[dict[str, Any]] = []
+        self.respond(*(list(answers) if answers is not None else [answer()]))
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:  # noqa: N802 — http.server's dispatch name
+                length = int(self.headers.get("Content-Length") or 0)
+                doc = json.loads(self.rfile.read(length).decode("utf-8"))
+                outer._record(doc, self.headers.get("Authorization", ""))
+                raw = outer._reply(len(outer._requests) - 1)
+                self.send_response(200)
+                self.send_header("Content-Type", mod("kit.proxy_client").REPLY_CONTENT_TYPE)
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def log_message(self, *_: Any) -> None:
+                pass
+
+        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self._server.server_address[1]}"
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        owning_stack().callback(self.close)
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+    def respond(self, *answers: dict[str, Any]) -> ProxyStandIn:
+        for a in answers:
+            assert not a.get("rc"), f"a docker failure is not an answer the proxy can give: {a}"
+            assert not a.get("stderr"), f"a docker failure is not an answer the proxy can give: {a}"
+        self._answers = list(answers) or [answer()]
+        return self
+
+    def _record(self, doc: dict[str, Any], authorization: str) -> None:
+        from urllib.parse import urlsplit
+
+        body = doc.get("body")
+        try:
+            parsed = json.loads(body) if isinstance(body, str) else body
+        except ValueError:
+            parsed = body
+        self._requests.append({
+            "system": doc.get("system"), "method": doc.get("method"), "url": doc.get("url"),
+            "path": urlsplit(str(doc.get("url"))).path, "body": parsed,
+            "timeout_sec": doc.get("timeout_sec"),
+            "token": authorization.removeprefix("Bearer ")})
+
+    def _reply(self, n: int) -> bytes:
+        pc = mod("kit.proxy_client")
+        a = self._answers[min(n, len(self._answers) - 1)]
+        if "proxy_fault" in a:
+            return pc.encode_final(pc.FinalRecord(
+                status=None, headers={}, fault=a["proxy_fault"], detail=a["detail"],
+                system_side=a["system_side"], sent=a["sent"], body_whole=False,
+                reader_fault=False))
+        status = int(a["status"]) if a.get("status") is not None else 200
+        raw = a.get("stdout", "")
+        body = raw if isinstance(raw, bytes) else str(raw).encode("utf-8")  # bytes: sent as they are
+        fault = _fault_of_status(status)
+        return pc.encode_body(body) + pc.encode_final(pc.FinalRecord(
+            status=status, headers={"Content-Type": "application/json"}, fault=fault,
+            detail=None if fault is None else f"HTTP {status}", system_side=True, sent=True,
+            body_whole=True, reader_fault=False))
+
+    def requests(self) -> list[dict[str, Any]]:
+        """Every request sent: `{"system", "method", "url", "path", "body", "token"}`."""
+        return list(self._requests)
+
+    def install(self, monkeypatch: Any) -> ProxyStandIn:
+        """Point every run this test starts at this stand-in (the operator's address variable)."""
+        monkeypatch.setenv(mod("kit.access").PROXY_URL_ENV, self.url)
+        return self
+
+    def seams(self) -> dict[str, Any]:
+        """`run.main` seams: the address, and a signer that signs anything (no OpenBao)."""
+        from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
+
+        return {"proxy_url": self.url, "signer": FakeSigner()}
 
 
 def context_of(argv: list[str]) -> str | None:
@@ -517,11 +636,13 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
 
     Unless the caller passes its own, the launch-time publish is `_launch_publish_p4`'s
     in-process stand-in, which publishes the tenant's folder for real, so the run reads an
-    export."""
+    export. No request signer is injected: a run that must reach a system passes one (or
+    `ProxyStandIn.seams()`), so the tests of the production signing path stay on it."""
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
     try:
-        return run_py().main(argv, **with_publish({**rec.seams(), **seams}, argv)), None
+        return run_py().main(argv, **with_publish(
+            {**rec.seams(), **seams}, argv)), None
     except SystemExit as refused:
         return None, refused
 

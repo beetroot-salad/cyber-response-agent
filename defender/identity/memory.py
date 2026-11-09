@@ -12,22 +12,37 @@ from typing import Any, TypeVar, overload
 
 from defender.tenancy import InMemoryTenantRepository
 
-from defender.records.formats import MembershipId, TenantId, UserId
+from defender.records.formats import CredentialId, MembershipId, TenantId, UserId
 
-from .errors import DataRuleViolation
-from .models import Membership, MembershipStatus, Session, User, UserStatus, normalize_email
+from .errors import CredentialCapReached, DataRuleViolation
+from .models import (
+    CredentialKind, Membership, MembershipStatus, ProgramCredential, Role, Session, User, UserStatus,
+    normalize_email,
+)
+from .ports import ExpiryWarning
 
 #: How stale `last_seen_at` must be before a request writes it again.
 TOUCH_AFTER = _dt.timedelta(minutes=5)
 _LIVE = ("invited", "active")
+#: How long an OAuth credential may stay `pending`: well past the realm admin calls (10 s each).
+PENDING_DEADLINE = _dt.timedelta(minutes=10)
+#: How many credentials a program may have that are usable or still pending.
+CREDENTIAL_CAP = 2
+#: The expiry-warning thresholds, loosest first.
+WARNING_THRESHOLDS = (_dt.timedelta(days=14), _dt.timedelta(days=3))
 
 
-def session_hash(value: str) -> str:
-    """The lowercase hex SHA-256 of a session value: the only form in which one is stored."""
+def is_warning_threshold(threshold: _dt.timedelta) -> bool:
+    return threshold in WARNING_THRESHOLDS
+
+
+def secret_hash(value: str) -> str:
+    """The lowercase hex SHA-256 of a session value or a program's key: the only form in which either is stored.
+    Both are 256 random bits, so no slow hash."""
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-_Row = TypeVar("_Row", User, Membership, Session)
+_Row = TypeVar("_Row", User, Membership, Session, ProgramCredential)
 
 
 @overload
@@ -43,6 +58,57 @@ def _due(next_try_at: _dt.datetime | None, now: _dt.datetime) -> bool:
     return next_try_at is None or next_try_at <= now
 
 
+def usable(row: ProgramCredential, now: _dt.datetime) -> bool:
+    """`live` and not yet expired (expiry is computed, never a state)."""
+    return row.state == "live" and row.expires_at > now
+
+
+def holds_slot(row: ProgramCredential, now: _dt.datetime) -> bool:
+    """Counts toward the cap: usable, or `pending` within its deadline."""
+    return usable(row, now) or (
+        row.state == "pending" and row.pending_deadline is not None and row.pending_deadline > now)
+
+
+def check_credential_fields(*, kind: str, key_hash: str | None) -> None:
+    """A key has its hash and an OAuth client has none (the SQL schema carries it as a CHECK)."""
+    if kind not in ("key", "oauth_client"):
+        raise DataRuleViolation(f"{kind!r} is not a credential kind")
+    if (kind == "key") != (key_hash is not None):
+        raise DataRuleViolation("a key has its hash, an OAuth client has none")
+
+
+def check_role(kind: str, role: str) -> None:
+    """A person is `admin`, a program `automation`."""
+    if role not in ("admin", "automation"):
+        raise DataRuleViolation(f"{role!r} is not a membership role")
+    if (kind == "program") != (role == "automation"):
+        raise DataRuleViolation(f"a {kind} cannot hold the {role!r} role")
+
+
+def first_warning(created_at: _dt.datetime, expires_at: _dt.datetime) -> tuple[int | None, _dt.datetime | None]:
+    """A new credential's next warning (`warn_threshold_days`, `warn_next_at`): the loosest threshold strictly ahead
+    when it is made, at its moment (one at the very moment of creation has passed: no warning about a credential just
+    made); none when every threshold has passed (D5, D11)."""
+    for threshold in WARNING_THRESHOLDS:
+        if expires_at - threshold > created_at:
+            return threshold.days, expires_at - threshold
+    return None, None
+
+
+def warning_after(threshold: _dt.timedelta, expires_at: _dt.datetime) -> tuple[int | None, _dt.datetime | None]:
+    """The next warning once `threshold`'s is settled: the next tighter threshold at its moment, or none."""
+    tighter = [t for t in WARNING_THRESHOLDS if t < threshold]
+    return (tighter[0].days, expires_at - tighter[0]) if tighter else (None, None)
+
+
+def tightest_due(row: ProgramCredential, now: _dt.datetime) -> _dt.timedelta:
+    """What a claim of `row` sends: of its next threshold and the tighter ones whose moment has come, the tightest;
+    the looser ones are passed over unsent (W6)."""
+    assert row.warn_threshold_days is not None
+    return [t for t in WARNING_THRESHOLDS if t.days == row.warn_threshold_days
+            or (t.days < row.warn_threshold_days and row.expires_at - t <= now)][-1]
+
+
 def check_membership_fields(
     status: MembershipStatus, *, accepted_at: _dt.datetime | None, ended_at: _dt.datetime | None,
 ) -> None:
@@ -51,6 +117,11 @@ def check_membership_fields(
         raise DataRuleViolation("an active membership needs accepted_at")
     if status == "ended" and ended_at is None:
         raise DataRuleViolation("an ended membership needs ended_at")
+
+
+def _with(row: ProgramCredential, **fields: Any) -> ProgramCredential:
+    """The row with `fields` changed."""
+    return dataclasses.replace(row, **fields)
 
 
 class InMemoryIdentityRepository:
@@ -65,6 +136,8 @@ class InMemoryIdentityRepository:
         self._by_account: dict[str, str] = {}
         self._memberships: dict[str, Membership] = {}
         self._sessions: dict[str, Session] = {}
+        self._credentials: dict[str, ProgramCredential] = {}
+        self._warning_deliveries: dict[tuple[CredentialId, int, UserId], _dt.datetime] = {}
 
     # --- tenants -----------------------------------------------------------------------------
     async def close(self) -> None:
@@ -80,14 +153,16 @@ class InMemoryIdentityRepository:
         return {t for t in tenant_ids if self._active(t)}
 
     async def tenant_has_active_members(self, tenant_id: TenantId) -> bool:
-        return any(m.tenant_id == tenant_id and m.status == "active"
+        return any(m.tenant_id == tenant_id and m.status == "active" and self._users[m.user_id].kind == "person"
                    for m in self._memberships.values())
 
     # --- users -------------------------------------------------------------------------------
     def _new_user(
-        self, email: str, *, created_at: _dt.datetime, status: UserStatus = "invited",
+        self, email: str | None, *, created_at: _dt.datetime, status: UserStatus = "invited",
         display_name: str = "", signin_account_id: str | None = None, is_platform_admin: bool = False,
     ) -> User:
+        if email is None:
+            raise DataRuleViolation("a person needs an email address")
         email = normalize_email(email)
         if email in self._by_email:
             raise DataRuleViolation(f"the email {email!r} already belongs to a user")
@@ -103,7 +178,7 @@ class InMemoryIdentityRepository:
         return user
 
     async def add_user(
-        self, email: str, *, created_at: _dt.datetime, status: UserStatus = "invited",
+        self, email: str | None, *, created_at: _dt.datetime, status: UserStatus = "invited",
         display_name: str = "", signin_account_id: str | None = None, is_platform_admin: bool = False,
     ) -> User:
         """Seeder."""
@@ -153,6 +228,8 @@ class InMemoryIdentityRepository:
             self._update_user(user_id, display_name=display_name, updated_at=now)
 
     async def set_platform_admin(self, user_id: UserId, flag: bool) -> None:
+        if flag and user_id in self._users and self._users[user_id].kind == "program":
+            raise DataRuleViolation("a program cannot be a platform administrator")
         if user_id in self._users:
             self._update_user(user_id, is_platform_admin=flag)
 
@@ -182,10 +259,11 @@ class InMemoryIdentityRepository:
         self, user_id: UserId, tenant_id: TenantId, *, status: MembershipStatus, invited_by: UserId | None,
         created_at: _dt.datetime, expires_at: _dt.datetime | None = None,
         accepted_at: _dt.datetime | None = None, ended_at: _dt.datetime | None = None,
-        ended_by: UserId | None = None,
+        ended_by: UserId | None = None, role: Role = "admin",
     ) -> Membership:
         """Seeder."""
         self._refuse_dangling(user_id, tenant_id)
+        check_role(self._users[user_id].kind, role)
         self._refuse_unknown_actor(invited_by, ended_by)
         check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at)
         if status in _LIVE and self._live_row(user_id, tenant_id) is not None:
@@ -193,13 +271,15 @@ class InMemoryIdentityRepository:
         return _copy(self._insert_membership(
             user_id=user_id, tenant_id=tenant_id, status=status, invited_by=invited_by,
             created_at=created_at, expires_at=expires_at, accepted_at=accepted_at,
-            ended_at=ended_at, ended_by=ended_by))
+            ended_at=ended_at, ended_by=ended_by, role=role))
 
     async def ensure_invitation(
         self, user_id: UserId, tenant_id: TenantId, *, invited_by: UserId | None, now: _dt.datetime,
         expires_at: _dt.datetime | None = None,
     ) -> Membership | None:
         self._refuse_dangling(user_id, tenant_id)
+        if self._users[user_id].kind == "program":
+            raise DataRuleViolation("a program is never invited")
         live = self._live_row(user_id, tenant_id)
         if live is not None:
             return None if live.status == "active" else _copy(live)
@@ -247,11 +327,172 @@ class InMemoryIdentityRepository:
         self, tenant_id: TenantId, status: MembershipStatus,
     ) -> list[tuple[Membership, User]]:
         return [(m, _copy(self._users[m.user_id]))
-                for m in await self.memberships_of_tenant(tenant_id) if m.status == status]
+                for m in await self.memberships_of_tenant(tenant_id)
+                if m.status == status and self._users[m.user_id].kind == "person"]
 
     async def active_membership(self, user_id: UserId, tenant_id: TenantId) -> Membership | None:
         row = self._live_row(user_id, tenant_id)
         return _copy(row) if row is not None and row.status == "active" else None
+
+    def _standing_membership(self, program_id: UserId) -> Membership | None:
+        """The program's active `automation` membership in an `active` tenant (the store's one reading of it)."""
+        return next((m for m in self._memberships.values() if m.user_id == program_id and m.status == "active"
+                     and m.role == "automation" and self._active(m.tenant_id)), None)
+
+    async def program_standing(self, program_id: UserId) -> tuple[User, Membership] | None:
+        program = self._users.get(program_id)
+        if program is None or program.kind != "program" or program.status != "active":
+            return None
+        row = self._standing_membership(program_id)
+        return None if row is None else (_copy(program), _copy(row))
+
+    # --- programs and their credentials ---------------------------------------------------------
+    async def add_program(
+        self, tenant_id: TenantId, *, display_name: str, created_by: UserId, now: _dt.datetime,
+    ) -> User:
+        creator = self._users.get(created_by)
+        if creator is None or creator.kind != "person":
+            raise DataRuleViolation(f"no person {created_by!r} to create a program")
+        if self._tenants.state_of(tenant_id) is None:
+            raise DataRuleViolation(f"no tenant {tenant_id!r}")
+        program = User.new_program(display_name=display_name, created_by=created_by, created_at=now)
+        self._users[program.id] = program
+        self._insert_membership(
+            user_id=program.id, tenant_id=tenant_id, status="active", invited_by=created_by, created_at=now,
+            accepted_at=now, role="automation")
+        return _copy(program)
+
+    async def programs_of_tenant(self, tenant_id: TenantId) -> list[User]:
+        rows = [m for m in self._memberships.values()
+                if m.tenant_id == tenant_id and m.status == "active" and self._users[m.user_id].kind == "program"]
+        return [_copy(self._users[m.user_id]) for m in sorted(rows, key=lambda m: (m.created_at, m.id))]
+
+    def _revoke(self, row: ProgramCredential, *, by: UserId | None, now: _dt.datetime) -> None:
+        self._credentials[row.id] = dataclasses.replace(row, state="revoked", revoked_at=now, revoked_by=by)
+
+    async def remove_program(
+        self, program_id: UserId, *, removed_by: UserId | None, now: _dt.datetime,
+    ) -> list[CredentialId] | None:
+        program = self._users.get(program_id)
+        membership = next((m for m in self._memberships.values() if m.user_id == program_id and m.status == "active"), None)
+        if program is None or program.kind != "program" or membership is None:
+            return None
+        self._refuse_unknown_actor(removed_by)
+        self._update_membership(membership.id, status="ended", ended_at=now, ended_by=removed_by)
+        revoked = sorted((r for r in self._credentials.values()
+                          if r.program_id == program_id and r.state in ("pending", "live")),
+                         key=lambda r: (r.created_at, r.id))
+        for row in revoked:
+            self._revoke(row, by=removed_by, now=now)
+        return [r.id for r in revoked]
+
+    async def add_credential(
+        self, program_id: UserId, *, kind: CredentialKind, name: str, created_by: UserId,
+        expires_at: _dt.datetime, now: _dt.datetime, key_hash: str | None = None,
+        credential_id: CredentialId | None = None,
+    ) -> ProgramCredential | None:
+        program = self._users.get(program_id)
+        if program is None or program.kind != "program":
+            raise DataRuleViolation(f"{program_id!r} is no program")
+        check_credential_fields(kind=kind, key_hash=key_hash)
+        if not any(m.user_id == program_id and m.status == "active" for m in self._memberships.values()):
+            return None
+        self._refuse_unknown_actor(created_by)
+        if sum(holds_slot(r, now) for r in self._credentials.values() if r.program_id == program_id) >= CREDENTIAL_CAP:
+            raise CredentialCapReached("the program already has two credentials in use or being made")
+        if key_hash is not None and any(r.key_hash == key_hash and r.state != "revoked" for r in self._credentials.values()):
+            raise DataRuleViolation("a credential with this key hash exists")
+        row = ProgramCredential(
+            id=credential_id or CredentialId.mint(),
+            program_id=program_id, kind=kind, name=name, state="live" if kind == "key" else "pending",
+            created_by=created_by, created_at=now, expires_at=expires_at, key_hash=key_hash,
+            pending_deadline=now + PENDING_DEADLINE if kind == "oauth_client" else None)
+        row.warn_threshold_days, row.warn_next_at = first_warning(now, expires_at)
+        self._credentials[row.id] = row
+        return _copy(row)
+
+    async def go_live(self, credential_id: CredentialId, *, service_account_id: str, now: _dt.datetime) -> bool:
+        row = self._credentials.get(credential_id)
+        if (row is None or row.state != "pending" or row.pending_deadline is None or row.pending_deadline <= now
+                or not any(m.user_id == row.program_id and m.status == "active" for m in self._memberships.values())):
+            return False
+        self._credentials[row.id] = dataclasses.replace(row, state="live", service_account_id=service_account_id)
+        return True
+
+    async def revoke_credential(self, credential_id: CredentialId, *, revoked_by: UserId | None, now: _dt.datetime) -> bool:
+        row = self._credentials.get(credential_id)
+        if row is None or row.state == "revoked":
+            return False
+        self._refuse_unknown_actor(revoked_by)
+        self._revoke(row, by=revoked_by, now=now)
+        return True
+
+    async def credential_by_id(self, credential_id: CredentialId) -> ProgramCredential | None:
+        return _copy(self._credentials.get(credential_id))
+
+    async def credential_by_hash(self, key_hash: str) -> ProgramCredential | None:
+        return _copy(next((r for r in self._credentials.values() if r.key_hash == key_hash), None))
+
+    async def credentials_of_program(self, program_id: UserId) -> list[ProgramCredential]:
+        rows = [r for r in self._credentials.values() if r.program_id == program_id]
+        return [_copy(r) for r in sorted(rows, key=lambda r: (r.created_at, r.id))]
+
+    async def touch_credential(self, credential_id: CredentialId, *, now: _dt.datetime) -> bool:
+        row = self._credentials.get(credential_id)
+        if row is None or (row.last_used_at is not None and now - row.last_used_at <= TOUCH_AFTER):
+            return False
+        self._credentials[row.id] = dataclasses.replace(row, last_used_at=now)
+        return True
+
+    async def revoke_stale_pending(self, *, now: _dt.datetime) -> list[CredentialId]:
+        stale = [r for r in self._credentials.values()
+                 if r.state == "pending" and r.pending_deadline is not None and r.pending_deadline <= now]
+        for row in stale:
+            self._revoke(row, by=None, now=now)
+        return [r.id for r in stale]
+
+    async def oauth_credentials_to_keep(self, *, now: _dt.datetime) -> set[CredentialId]:
+        return {r.id for r in self._credentials.values()
+                if r.kind == "oauth_client" and holds_slot(r, now) and self._standing_membership(r.program_id)}
+
+    async def claim_expiry_warning(self, *, now: _dt.datetime, hold_until: _dt.datetime) -> ExpiryWarning | None:
+        due = sorted((r for r in self._credentials.values()
+                      if usable(r, now) and r.warn_next_at is not None and r.warn_next_at <= now
+                      and self._standing_membership(r.program_id)),
+                     key=lambda r: (r.warn_next_at, r.id))
+        if not due:
+            return None
+        row = due[0]
+        threshold = tightest_due(row, now)
+        self._credentials[row.id] = _with(row, warn_threshold_days=threshold.days, warn_next_at=hold_until)
+        return ExpiryWarning(credential_id=row.id, threshold=threshold)
+
+    async def settle_expiry_warning(self, credential_id: CredentialId, threshold: _dt.timedelta) -> bool:
+        row = self._credentials.get(credential_id)
+        if row is None or not is_warning_threshold(threshold) or row.warn_threshold_days != threshold.days:
+            return False
+        days, at = warning_after(threshold, row.expires_at)
+        self._credentials[row.id] = _with(row, warn_threshold_days=days, warn_next_at=at)
+        return True
+
+    async def defer_expiry_warning(
+        self, credential_id: CredentialId, threshold: _dt.timedelta, *, until: _dt.datetime,
+    ) -> None:
+        row = self._credentials.get(credential_id)
+        if row is not None and is_warning_threshold(threshold) and row.warn_threshold_days == threshold.days:
+            self._credentials[row.id] = _with(row, warn_next_at=until)
+
+    async def warning_deliveries(self, credential_id: CredentialId, threshold: _dt.timedelta) -> set[UserId]:
+        return {person for (c, days, person) in self._warning_deliveries
+                if c == credential_id and days == threshold.days}
+
+    async def record_warning_delivery(
+        self, credential_id: CredentialId, threshold: _dt.timedelta, person_id: UserId, *, sent_at: _dt.datetime,
+    ) -> None:
+        if credential_id not in self._credentials or not is_warning_threshold(threshold):
+            raise DataRuleViolation(f"no warning {threshold} for credential {credential_id!r}")
+        self._refuse_unknown_actor(person_id)
+        self._warning_deliveries.setdefault((credential_id, threshold.days, person_id), sent_at)
 
     # --- sends -------------------------------------------------------------------------------
     async def request_set_password(self, user_id: UserId, *, now: _dt.datetime) -> int:
@@ -343,21 +584,21 @@ class InMemoryIdentityRepository:
     ) -> Session:
         if user_id not in self._users:
             raise DataRuleViolation(f"no user {user_id!r}")
-        if session_hash(value) in self._sessions:
+        if secret_hash(value) in self._sessions:
             raise DataRuleViolation("a session with this value already exists")
-        row = Session(token_hash=session_hash(value), user_id=user_id, used_otp=used_otp,
+        row = Session(token_hash=secret_hash(value), user_id=user_id, used_otp=used_otp,
                       created_at=now, last_seen_at=now, expires_at=expires_at)
         self._sessions[row.token_hash] = row
         return _copy(row)
 
     async def session_by_value(self, value: str) -> Session | None:
-        return _copy(self._sessions.get(session_hash(value)))
+        return _copy(self._sessions.get(secret_hash(value)))
 
     async def delete_session(self, value: str) -> bool:
-        return self._sessions.pop(session_hash(value), None) is not None
+        return self._sessions.pop(secret_hash(value), None) is not None
 
     async def touch_session(self, value: str, *, now: _dt.datetime) -> bool:
-        key = session_hash(value)
+        key = secret_hash(value)
         row = self._sessions.get(key)
         if row is None or now - row.last_seen_at <= TOUCH_AFTER:
             return False

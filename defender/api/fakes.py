@@ -30,6 +30,7 @@ from .ports import (
     AuditAction,
     Conflict,
     NotFound,
+    Principal,
     TimePosition,
     UnknownReference,
 )
@@ -74,6 +75,7 @@ class AuditEvent:
     target: str
     at: AwareDatetime
     detail: str = ""
+    credential_id: str | None = None
 
 
 class InMemoryStore:
@@ -97,8 +99,8 @@ class InMemoryStore:
         they were minted, as the `prefix-000001` ids before #1382 did."""
         return family(f"00000000-0000-4000-8000-{next(self._ids):012x}")
 
-    def transaction(self, tenant_id: TenantId, actor: str) -> _InMemoryTransaction:
-        return _InMemoryTransaction(self, tenant_id, actor, self._clock)
+    def transaction(self, tenant_id: TenantId, principal: Principal) -> _InMemoryTransaction:
+        return _InMemoryTransaction(self, tenant_id, principal, self._clock)
 
     # --- seeding ------------------------------------------------------------------------
 
@@ -252,7 +254,7 @@ class InMemoryStore:
 
     async def put_alert_mapping(self, tenant_id: TenantId, body: AlertMapping) -> tuple[AlertMapping, bool]:
         """Rule-free like the rest of the fake: the wire model has applied the path rules, and nothing here derives
-        alert titles (the real store does, in the same transaction)."""
+        alert titles (the real store derives them when it stores an alert)."""
         created = tenant_id not in self._alert_mappings
         self._alert_mappings[tenant_id] = body
         return body, created
@@ -269,12 +271,13 @@ class _InMemoryTransaction:
     """A write transaction on `InMemoryStore` for one tenant and actor: writes apply at once,
     audit events are kept only if the block exits normally."""
 
-    def __init__(self, store: InMemoryStore, tenant_id: TenantId, actor: str,
+    def __init__(self, store: InMemoryStore, tenant_id: TenantId, principal: Principal,
                  clock: Callable[[], _dt.datetime]) -> None:
         self._store = store
         self._clock = clock
         self._tenant_id = tenant_id
-        self._actor = actor
+        self._actor = principal.user_id
+        self._credential_id = principal.credential_id
         self._pending: list[AuditEvent] = []
 
     async def __aenter__(self) -> _InMemoryTransaction:
@@ -305,7 +308,7 @@ class _InMemoryTransaction:
     async def audit(self, action: AuditAction, target: str, detail: str = "") -> None:
         self._pending.append(AuditEvent(
             tenant_id=self._tenant_id, user_id=self._actor, action=action, target=target,
-            at=self._clock(), detail=detail,
+            at=self._clock(), detail=detail, credential_id=self._credential_id,
         ))
 
 

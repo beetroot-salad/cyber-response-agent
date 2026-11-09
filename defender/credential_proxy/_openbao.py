@@ -23,7 +23,7 @@ from typing import Any
 import httpx
 
 from defender import tenancy
-from defender._internal_http import internal_async_client, internal_client, tls_trust
+from defender.kit.internal_http import internal_async_client, internal_client, tls_trust
 from defender.configuration.issuer import DEPLOYMENT_ISSUER, TRANSIT_MOUNT
 from defender.kit.access import CREDENTIAL_KINDS
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault

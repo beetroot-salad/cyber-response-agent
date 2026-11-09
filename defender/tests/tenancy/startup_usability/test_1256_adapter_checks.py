@@ -65,7 +65,9 @@ FILE_FAMILIES: tuple[Family, ...] = (
 
 FAULTS: dict[str, tuple[Family, ...]] = {
     **{system: FILE_FAMILIES for system in (
-        "cmdb", "identity", "change-mgmt", "threat-intel", "ticket", "elastic", "host-state")},
+        "cmdb", "identity", "change-mgmt", "threat-intel", "ticket", "elastic")},
+    # host-state reads no `config.env` key, so without the file it is usable (#1391 r5 O-S1).
+    "host-state": tuple(f for f in FILE_FAMILIES if f.label != "config-env-absent"),
 }
 
 _PARAM_VALUES: dict[str, str] = {
@@ -133,10 +135,13 @@ def _plant(tmp_path: Path, marker: str) -> tuple[Path, Path]:
     return root, S.plant(root, marker=marker)
 
 
-def _ctx(record: Any, tmp_path: Path, shim: S.DockerShim) -> Any:
+def _ctx(record: Any, tmp_path: Path) -> Any:
+    """A context whose calls reach the credential proxy's stand-in (#1391 O1), which answers every
+    request with a JSON object (host-state's health-check reads its `hosts`)."""
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    return S.verb_context(record, run_dir, shim.env())
+    proxy = S.ProxyStandIn(tmp_path / "proxy", [S.answer('{"hosts": []}')])
+    return S.verb_context(record, run_dir, {}, proxy_url=proxy.url, request_token="token-1256")
 
 
 def _landed(record: Any, system: str, family: Family) -> bool:
@@ -191,8 +196,7 @@ def test_o5_settings_that_make_a_verb_raise_make_the_check_raise(
         path.rmdir()
     S.write_config(folder, system, complete)  # the disk is complete again; the record is not
 
-    shim = S.DockerShim(tmp_path / "shim")
-    outcomes = _every_verb(module, _ctx(record, tmp_path, shim))
+    outcomes = _every_verb(module, _ctx(record, tmp_path))
     raising = {v: str(e) for v, e in outcomes.items() if isinstance(e, ConfigFault)}
     assert raising, (
         f"premise: some {system} verb raises ConfigFault under {family.label}: {outcomes}")
@@ -215,8 +219,7 @@ def test_o5_complete_settings_pass_every_verb_and_the_check(tmp_path, checkout_r
     root, folder = _plant(tmp_path, "okc")
     record = S.resolve(root)
     shutil.rmtree(S.config_path(folder, system).parent, ignore_errors=True)
-    shim = S.DockerShim(tmp_path / "shim")
-    outcomes = _every_verb(module, _ctx(record, tmp_path, shim))
+    outcomes = _every_verb(module, _ctx(record, tmp_path))
     config = {v: e for v, e in outcomes.items() if isinstance(e, ConfigFault)}
     assert config == {}, f"precondition: the complete fixture is complete for {system}: {config}"
     assert "health-check" in outcomes, f"precondition: {system} declares health-check: {sorted(outcomes)}"
@@ -298,9 +301,8 @@ def test_1390_the_platform_verbs_answer_over_a_record_holding_a_stored_config_fa
     record = S.resolve(root)
     assert isinstance(record.systems.get("tacit-knowledge"), ConfigFault), (
         f"premise: the record holds the stored fault: {record.systems.get('tacit-knowledge')!r}")
-    shim = S.DockerShim(tmp_path / "shim")
     verbs = ModuleVerbRegistry(checkout_roster, record.grants.gather).verbs("tacit-knowledge")
-    ctx = _ctx(record, tmp_path, shim)
+    ctx = _ctx(record, tmp_path)
 
     outcomes: dict[str, Any] = {}
     for name, params in (("lookup", {"actor": "a", "host": "h", "pattern": "p"}), ("health-check", {})):

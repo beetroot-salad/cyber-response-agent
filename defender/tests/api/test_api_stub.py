@@ -62,6 +62,7 @@ from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 from defender.records.formats import AlertId  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
+from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
@@ -180,6 +181,16 @@ IDENTITY_ROUTES = {
     ("POST", "/admin/tenants/{tenant_id}/offboard"),
     ("POST", "/admin/tenants/{tenant_id}/rotate-forge-credential"),
 }
+#: What #1307 adds (design "Program and credential routes"; param names pinned by this suite). Conflict updated: r3.
+PROGRAM_ROUTES = {
+    ("POST", "/tenants/{tenant_id}/programs"),
+    ("GET", "/tenants/{tenant_id}/programs"),
+    ("DELETE", "/tenants/{tenant_id}/programs/{program_id}"),
+    ("POST", "/tenants/{tenant_id}/programs/{program_id}/credentials"),
+    ("GET", "/tenants/{tenant_id}/programs/{program_id}/credentials"),
+    ("DELETE", "/tenants/{tenant_id}/programs/{program_id}/credentials/{credential_id}"),
+}
+IDENTITY_ROUTES = IDENTITY_ROUTES | PROGRAM_ROUTES  # same refusal contract as the members/invitations routes
 PUBLIC_ROUTES = EXISTING_ROUTES | IDENTITY_ROUTES
 
 #: One successful call per route: (route, concrete path, body, the port answers it needs).
@@ -237,8 +248,9 @@ class Scripted:
         self.transactions: list[tuple[str, str]] = []
         self.audits: list[tuple[str, str, str, str, str]] = []
 
-    def transaction(self, tenant_id: str, actor: str) -> _ScriptedTransaction:
-        return _ScriptedTransaction(self, tenant_id, actor)
+    def transaction(self, tenant_id: str, principal: Any) -> _ScriptedTransaction:
+        # Conflict updated (#1307 D6): the transaction takes the principal in place of the bare actor id.
+        return _ScriptedTransaction(self, tenant_id, principal.user_id)
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         if name.startswith("_"):
@@ -313,8 +325,9 @@ async def _seed_identity() -> tuple[IdentityService, dict[str, str], InMemoryTen
                             created_at=NOW, accepted_at=NOW)
     await repo.add_session(SESSION_AB, cy.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
     users[SESSION_AB] = cy.id
+    # Conflict updated (#1307 D7): the programs port is required; these routes never reach the realm.
     service = IdentityService(repo, signin=_Unused(), mail=_Unused(), clock=lambda: NOW,
-                              bootstrap=Bootstrap(administrators=()))
+                              bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
     return service, users, tenants
 
 
@@ -455,11 +468,13 @@ def test_every_route_refuses_a_caller_without_a_known_session_cookie(
     route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
     headers: dict[str, str],
 ) -> None:
-    """No, unknown, or Bearer-carried session → 401, no port, no Bearer challenge."""
+    """No, unknown, or Bearer-carried session → 401, no port; no Bearer challenge unless the request came with an
+    `Authorization` header (#1307: then it is the programs' way in, challenged as RFC 6750 says)."""
     api = Api(**answers)
     response = api.client.request(route[0], path, headers=headers, json=body)
     assert response.status_code == 401
-    assert "Bearer" not in response.headers.get("WWW-Authenticate", "")
+    if "Authorization" not in headers:
+        assert "WWW-Authenticate" not in response.headers
     assert api.ports.calls == []
     assert api.ports.transactions == []
 
@@ -1505,7 +1520,7 @@ def test_every_fake_port_method_is_a_coroutine_function_and_a_transaction_an_asy
     assert len(implemented) >= 9
     assert ("InMemoryStore", "AlertsRepository") in implemented
     assert ("_InMemoryTransaction", "WriteTransaction") in implemented
-    transaction = InMemoryStore(lambda: NOW).transaction(A, USER)
+    transaction = InMemoryStore(lambda: NOW).transaction(A, Principal(tenant_id=A, user_id=USER))  # the principal, not the bare id (#1307 D6)
     assert hasattr(transaction, "__aenter__")
     assert hasattr(transaction, "__aexit__")
 

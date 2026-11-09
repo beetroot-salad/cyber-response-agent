@@ -8,6 +8,11 @@ class DataRuleViolation(ValueError):
     membership, a status without its timestamps, a reference to a record that is not there)."""
 
 
+class CredentialCapReached(DataRuleViolation):
+    """The program already holds two credentials that are usable or pending within their deadline: the one
+    refusal of `add_credential` a caller answers as a conflict; any other is a fault."""
+
+
 class BootstrapRefused(Exception):
     """The bootstrap file cannot be applied safely; the message names the email or tenant id."""
 
@@ -50,3 +55,7 @@ class CallbackRefused(IdentityError):
     def __init__(self, reason: str, detail: str) -> None:
         super().__init__(detail)
         self.reason = reason
+
+
+class Invalid(IdentityError):
+    """A request the rules refuse before anything is written: a 422."""

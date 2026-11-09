@@ -141,14 +141,14 @@ def test_any_import_of_adapter_code_from_outside_is_found(tmp_path):
         "imports-adapters:cli/tacit_cli.py:defender.integrations._transport"]
 
 
-_DOOR = ('_HOMES = {**dict.fromkeys(("load_config", "split_status"), "_transport")}\n'
+_DOOR = ('_HOMES = {**dict.fromkeys(("load_config", "record_config"), "_transport")}\n'
          "__getattr__ = None\n")
 
 
 @pytest.mark.parametrize(("src", "expected"), [
     ("from defender.integrations import load_config\n", ["defender.integrations.load_config"]),
-    ("from defender import integrations\nintegrations.load_config()\nintegrations.split_status()\n",
-     ["defender.integrations.load_config", "defender.integrations.split_status"]),
+    ("from defender import integrations\nintegrations.load_config()\nintegrations.record_config()\n",
+     ["defender.integrations.load_config", "defender.integrations.record_config"]),
     ("import defender.integrations as t\nt.load_config()\n", ["defender.integrations.load_config"]),
     ("from defender import integrations\nintegrations.other()\n", ["defender.integrations"]),
     ("from defender import integrations\nuse(integrations)\n", ["defender.integrations"]),

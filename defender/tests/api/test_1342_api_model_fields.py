@@ -263,3 +263,52 @@ def test_s2_the_demo_investigations_carry_an_exact_mark_beside_a_number():
 
     seeded = anyio.run(run)
     assert [(i.cost_is_lower_limit, i.cost_usd is not None) for i in seeded] == [(False, True)] * 2
+
+
+#: r5's outcome table, reasons only (#1344 O12).
+LEARNING_REASONS = (
+    "no_fork_point", "history_unreadable", "expired", "family_unusable", "control_failed", "launch_refused",
+    "verify_refused", "source_unavailable", "judge_failed", "entry_error", "exited_without_result", "worker_error",
+    "lease_lapsed", "retry_cap",
+)
+
+
+def _learning_job(**extra):
+    return models.LearningJob(
+        learning_job_id="c1000000-0000-4000-8000-000000000001", investigation_id="b1000000-0000-4000-8000-000000000001",
+        alert_id="a1000000-0000-4000-8000-000000000001", status="failed", trigger="auto", created_at=NOW, **extra)
+
+
+def test_1344_o12_the_learning_job_wire_model_says_reason_and_message_not_status_detail():
+    """`status_detail` became `reason` + `message`, in the model and in the schema; both default to null. (#1344 O12)"""
+    assert {"reason", "message"} <= set(models.LearningJob.model_fields)
+    assert "status_detail" not in models.LearningJob.model_fields
+    properties = models.LearningJob.model_json_schema()["properties"]
+    assert {"reason", "message"} <= set(properties)
+    assert "status_detail" not in properties
+    plain = _learning_job()
+    assert (plain.reason, plain.message) == (None, None)
+
+
+@pytest.mark.parametrize("reason", LEARNING_REASONS)
+def test_1344_o12_every_reason_of_the_outcome_table_round_trips_with_its_message(reason):
+    """Each fixed reason validates and serves with a message. (#1344 O12)"""
+    job = _learning_job(reason=reason, message="why")
+    dumped = job.model_dump(mode="json")
+    assert (dumped["reason"], dumped["message"]) == (reason, "why")
+    assert models.LearningJob.model_validate(dumped) == job
+
+
+def test_1344_o12_a_completed_job_can_carry_a_verdict_message_with_no_reason():
+    """`not comparable` is a `completed` job with 0 findings: a message and no reason. (#1344 O12)"""
+    job = models.LearningJob.model_validate({**_learning_job().model_dump(mode="json"), "status": "completed",
+                                             "message": "not comparable"})
+    assert (job.status, job.reason, job.message) == ("completed", None, "not comparable")
+
+
+def test_1344_o8_the_post_step_audit_action_is_in_both_vocabularies():
+    """The jobs' and the API's lists of audit actions both carry `learning_post_step`; the API's covers the job store's. (#1344 O8)"""
+    from defender.jobs.audit import AuditAction as JobsAuditAction
+
+    assert "learning_post_step" in typing.get_args(JobsAuditAction)
+    assert "learning_post_step" in typing.get_args(ports.AuditAction)

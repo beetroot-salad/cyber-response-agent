@@ -249,6 +249,12 @@ class _StopsInto(RecordingDocker):
             self.status = "running"
         return out
 
+    def _landed(self, argv: list[str]) -> None:
+        """A landed attached start (#1344 amendment 2: a stop/start box's window) runs a stopped box."""
+        super()._landed(argv)
+        if self.status in ("created", "exited"):
+            self.status = "running"
+
 
 def _overflow(box: Any) -> BaseException:
     box.transport = _Overflowing(box.name, box.spec)
@@ -269,36 +275,55 @@ def test_b10_the_output_limit_stop_of_a_run_box_counts_a_removing_or_gone_box_as
     assert any(c[1:2] in (["stop"], ["rm"]) and box.name in c for c in rec.calls), "the box was never stopped"
 
 
-# ---- the stop/start boxes keep today's start and stop (out of scope for B10; guards) ----
+# ---- the stop/start boxes keep their own lifecycle (out of scope for B10; guards). #1344 amendment 2 gives their
+# windows an attached start too; what still tells them from the run box: no `--rm`, one plain start for the probes,
+# attached starts only inside a window, the proven stop, and removal by their owner. ----
 
 def _stop_start_box(tmp_path: Path, rec: RecordingDocker) -> Any:
     lane = request_lane(tmp_path)
     return box_mod.start_box(lane.request(require_sandbox=True), docker=rec)
 
 
-def test_b10_a_stop_start_box_is_still_started_detached_forever_and_removed_explicitly(tmp_path: Path):
-    """A request-lane (learning drain / oracle) box: `docker run --detach … sh -c <the reaping sleep>`, no -i/--rm, no attached start. (B10 scope)"""
+def test_b10_a_stop_start_box_keeps_no_rm_starts_plainly_for_its_probes_and_is_removed_explicitly(tmp_path: Path):
+    """A request-lane (learning drain / oracle) box beside the run box: both are `docker create -i` reading their input
+    (#1344 amendment 2), but only the run box is `--rm` and attached at its start; the stop/start box gets one plain
+    start for its probes, no attached start until a window, and is removed by its owner. (B10 scope)"""
+    run = RecordingDocker()
+    _start(run, make_run_dir(tmp_path / "run"))
+    run_argv = run.create_argv or []
+    assert "--rm" in run_argv, "premise: the run box is --rm"
+    assert len(run.asks) == 1, "premise: the run box is attached at its start"
+
     rec = _StopsInto("exited")
     box = _stop_start_box(tmp_path, rec)
     argv = rec.create_argv or []
-    assert argv[:3] == ["docker", "run", "--detach"], argv
+    assert argv[:3] == ["docker", "create", "-i"], argv
     assert argv[-3:] == ["sh", "-c", _lifecycle._LANE_BOX_MAIN], argv
-    assert "--rm" not in argv
-    assert "-i" not in argv
-    assert not [c for c in rec.calls if c[:2] == ["docker", "start"]], "a stop/start box was started at its start"
+    assert "--rm" not in argv, "a stop/start box must outlive each stop, so it is never --rm"
+    assert rec.asks == [], "a stop/start box was started attached outside a window"
+    assert [c for c in rec.calls if c[:2] == ["docker", "start"]] == [["docker", "start", box.name]], (
+        "a stop/start box gets exactly one plain start, for its probes")
     box_mod.stop_box(box)
     assert ["docker", "rm", "-f", box.name] in rec.calls, "a stop/start box is removed explicitly"
 
 
-def test_b10_a_stop_start_boxs_window_still_uses_plain_start_and_proven_stop(tmp_path: Path):
-    """BoxRuns: `docker start <name>` for the window, `docker stop -t 0` after, no attached start. (B10 scope)"""
+def test_b10_a_stop_start_boxs_window_attaches_holding_its_input_then_proves_its_stop(tmp_path: Path):
+    """BoxRuns (#1344 amendment 2): the window starts the box attached (`docker start -a -i <name>`), its input held
+    for the window and its start ended after it, never a plain start; then `docker stop -t 0`, its outcome asked of
+    the status. (B10 scope)"""
     rec = _StopsInto("exited")
     box = _stop_start_box(tmp_path, rec)
     rec.status = "exited"
+    before = len(rec.calls)
     with box_mod.BoxRuns(box).run():
-        assert ["docker", "start", box.name] in rec.calls
-    assert ["docker", "stop", "-t", "0", box.name] in rec.calls
-    assert not [c for c in rec.calls if c[:4] == ["docker", "start", "-a", "-i"]]
+        assert [a.argv for a in rec.asks] == [["docker", "start", "-a", "-i", box.name]]
+        assert input_open(rec.asks[-1].read_fd), "the window's input was not held while it ran"
+    window = rec.calls[before:]
+    assert ["docker", "start", box.name] not in window, "the window started the box plainly"
+    stop_at = window.index(["docker", "stop", "-t", "0", box.name])
+    assert any(c[:2] == ["docker", "inspect"] and "{{.State.Status}}" in c for c in window[stop_at + 1:]), (
+        "the window's stop was read off its exit code, not proven by the status")
+    assert rec.asks[-1].returncode is not None, "the window's attached start outlived it"
 
 
 @pytest.mark.parametrize("after", [None, "removing"], ids=["vanished", "removing"])
@@ -364,13 +389,13 @@ class _RemovingItself:
         return ok()
 
 
-def test_a_container_already_removing_itself_counts_as_removed_for_the_worker_backstop_and_the_tenant_teardown():
-    """Every removal site, not only the run box's teardown, reads a container the daemon is already removing as gone: the worker's token reap removes it, the tenant teardown reports nothing left. (#1343 review, B10)"""
-    from defender.box._docker import Reaped, reap_if_owned, remove_tenant_containers
+def test_a_container_already_removing_itself_counts_as_removed_for_the_worker_sweep_and_the_tenant_teardown():
+    """Every removal site, not only the run box's teardown, reads a container the daemon is already removing as gone: the worker's claim sweep reports nothing left, as the tenant teardown does. (#1343 review, B10; #1446 review: the sweep is the worker's one removal)"""
+    from defender.box._docker import remove_claimed_containers, remove_tenant_containers
 
     daemon = _RemovingItself("defender-run-x", "tok")
-    assert reap_if_owned(daemon, daemon.name, "tok") == Reaped.REMOVED
-    assert any(c[:3] == ["docker", "rm", "-f"] for c in daemon.calls), "premise: the reap tried to remove it"
+    assert remove_claimed_containers("ab" * 16, docker=daemon) is None
+    assert any(c[:3] == ["docker", "rm", "-f"] for c in daemon.calls), "premise: the sweep tried to remove it"
     assert remove_tenant_containers("t", docker=_RemovingItself("defender-run-y", "tok")) is None
 
 # ---- real daemon: the run box dies with its starter (runc here; CI's shards run it under runsc) ----

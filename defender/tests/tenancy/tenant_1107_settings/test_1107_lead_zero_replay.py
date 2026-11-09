@@ -14,9 +14,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.systems import run_tenant  # noqa: E402
-from defender.integrations import (  # noqa: E402
-    _stub_transport,
-)
+from defender.kit import transport as _stub_transport  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root  # noqa: E402
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -128,7 +126,7 @@ def test_d_agentdeps_record(tmp_path):
             assert record.settings == tenant.settings, (lead, record.settings)
             assert record.systems["elastic"]["ELASTIC_ALERTS_INDEX"] == f"{marker}-alerts-*", (
                 lead, record.systems["elastic"])
-            assert record.systems["cmdb"]["CMDB_URL_BASE"] == f"http://cmdb-{marker}:8080", lead
+            assert record.systems["ticket"]["TICKET_KEY_PATTERN"] == f"{marker.upper()}-[0-9]+", lead
 
 
 # ---- resumed runs re-resolve at their own start --------------------------------------------------
@@ -137,9 +135,9 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
     marker = "mf16"
     _base, source = H.tenant_source(data_root, S.PLAYGROUND_ID)
     root, folder, _tenant = _plant_at_data_root(marker)
-    original = f"http://cmdb-{marker}:8080"
-    edited = "http://cmdb-mf16-edited:8080"
-    later = "http://cmdb-mf16-later:8080"
+    original = f"{marker.upper()}-[0-9]+"
+    edited = "MF16-EDITED-[0-9]+"
+    later = "MF16-LATER-[0-9]+"
 
     first = S.RunRecorder(tmp_path / "runs" / "mf16-first")
     rc, refused = S.drive_run(S.run_argv(S.plant_alert(tmp_path / "in"), root), first,
@@ -147,12 +145,12 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
     assert refused is None, (rc, refused and H.refusal_text(refused))
     assert rc == 0, (rc, refused and H.refusal_text(refused))
 
-    S.set_key(folder, "cmdb", "CMDB_URL_BASE", edited)
+    S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", edited)
     fresh = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                       dispatches_lead_zero=False)
 
     def edit_within(_run_dir: Path) -> None:
-        S.set_key(folder, "cmdb", "CMDB_URL_BASE", later)
+        S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", later)
 
     episode = _sibling_episode(tmp_path, T.family_doc(source_run_dir=str(source),
                                                       worlds=_identity_worlds()),
@@ -165,15 +163,16 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
 
     before = first.lifecycle_calls[0]["tenant"]
     after = sibling.lifecycle_calls[0]["tenant"]
-    assert before.systems["cmdb"]["CMDB_URL_BASE"] == original, before.systems["cmdb"]
-    assert after.systems["cmdb"]["CMDB_URL_BASE"] == edited, (
+    assert before.systems["ticket"]["TICKET_KEY_PATTERN"] == original, before.systems["ticket"]
+    assert after.systems["ticket"]["TICKET_KEY_PATTERN"] == edited, (
         "the resumed sibling did not re-resolve at its own start")
-    assert after.systems["cmdb"] == fresh.systems["cmdb"]
+    assert after.systems["ticket"] == fresh.systems["ticket"]
 
     # Within the resumed run: the files moved on again, and the record did not.
-    assert f'CMDB_URL_BASE="{later}"' in S.config_path(folder, "cmdb").read_text(encoding="utf-8")
+    assert f'TICKET_KEY_PATTERN="{later}"' in S.config_path(folder, "ticket").read_text(encoding="utf-8")
     ctx = S.verb_context(after, sibling.run_dir_at, {"PATH": ""})
-    assert _stub_transport.load_config(ctx, "cmdb", "CMDB")["URL_BASE"] == edited
+    assert _stub_transport.load_config(
+        ctx, "ticket", "TICKET", ("TIMEOUT_SEC", "KEY_PATTERN"))["KEY_PATTERN"] == edited
     # Nothing copied the resolved values into the run or the episode.
     for where in (sibling.run_dir_at, episode):
         assert S.holders(where, edited) == [], (where, S.holders(where, edited))

@@ -10,7 +10,8 @@ under that rule; a replay guarantee that rested in each adapter would hold only 
 we wrote.
 
 WHAT IS A FINDING (paths are relative to the `defender/` tree):
-  * in `integrations/` and in the adapter template `skills/connect/examples/`: an attribute read
+  * in `integrations/`, the adapter template `skills/connect/examples/` and the shared transport
+    (`kit/transport.py`, `kit/proxy_client.py`): an attribute read
     of `.as_of` or `.run_state`, `getattr(x, "as_of" | "run_state", ...)`, and any reference to
     `CALL_RUN_STATE` (a name, an attribute, an import);
   * in `kit/verbs.py`: any class declaring `as_of` or `run_state` (a field, method, property or
@@ -72,6 +73,9 @@ _KIT = "kit/verbs.py"
 _PLATFORM_CONTEXT = "systems/verbs.py"
 _CONTEXT_CLASS = "VerbContext"
 _ADAPTER_TREES = ("integrations/", "skills/connect/examples/")
+#: The shared transport every adapter calls, held to the adapters' rule (#1391 r5: it moved to
+#: `kit`, out of `integrations/`).
+_ADAPTER_FILES = ("kit/transport.py", "kit/proxy_client.py")
 
 
 def _python_files(root: Path, prefix: str) -> Iterator[tuple[str, Path]]:
@@ -408,6 +412,9 @@ def scan(root: Path) -> list[str]:
             findings += _adapter_findings(rel, tree)
             if rel == _HOST_STATE:
                 findings += _host_state_findings(rel, tree)
+    for rel in _ADAPTER_FILES:
+        if (root / rel).is_file():
+            findings += _adapter_findings(rel, _parsed(root / rel, rel))
     for rel in (_KIT, _PLATFORM_CONTEXT):
         if (root / rel).is_file():
             tree = _parsed(root / rel, rel)

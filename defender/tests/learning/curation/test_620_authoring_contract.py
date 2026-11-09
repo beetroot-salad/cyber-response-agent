@@ -130,3 +130,52 @@ def test_connect_examples_compile_against_the_live_tree():
         for dead in ("AdapterArgumentParser", "build_parser", "main", "die", "resolve_auth",  # lint-stale-ref: ok — asserts the retired shim name is absent from connect/
                      "EXIT_USAGE"):
             assert not hasattr(mod, dead), f"examples/{name}.py still defines the dead symbol {dead!r}"
+
+
+def test_the_connect_example_reaches_its_system_through_the_proxy_at_its_declared_base(tmp_path):
+    """The example a custom adapter is copied from calls its system through the credential proxy,
+    at the base of the system's own access declaration, with the timeout from its record — the
+    folder gone from disk after resolve, so the record is all it reads. A base written in its
+    `config.env` is not a setting it reads: the settings check refuses it by name."""
+    import pytest
+
+    from defender.kit.faults import ConfigFault
+    from defender.tests.support.tenancy import _tenants1106 as T1106
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
+
+    example = _load_example("example_adapter")
+    root = tmp_path / "tenants"
+    folder = S.plant(root, marker="oex")
+    S.write_config(folder, "example", 'EXAMPLE_TIMEOUT_SEC="5"\n')
+    access = S.settings_of(folder) / "systems" / "example" / "access.yaml"
+    access.write_text(T1106.access_text("oex", "example"), encoding="utf-8")
+    record = S.resolve(root)
+    S.config_path(folder, "example").unlink()
+    access.unlink()
+
+    assert example.check_settings(record) is None, "a declared, timed system is usable"
+    stand_in = S.ProxyStandIn(tmp_path / "proxy", [S.answer('{"id": "r1"}')])
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    ctx = S.verb_context(record, run_dir, {}, proxy_url=stand_in.url, request_token="token-oex")
+    assert example.get_record(ctx, id="r1") == {"id": "r1"}
+    [request] = stand_in.requests()
+    assert (request["system"], request["method"], request["url"], request["timeout_sec"]) == (
+        "example", "GET", f"{T1106.default_base('oex', 'example')}/records/r1", 5), request
+
+    S.write_config(folder, "example", 'EXAMPLE_TIMEOUT_SEC="5"\nEXAMPLE_URL_BASE="http://elsewhere:1"\n')
+    access.write_text(T1106.access_text("oex", "example"), encoding="utf-8")
+    with pytest.raises(ConfigFault, match="EXAMPLE_URL_BASE"):
+        example.check_settings(S.resolve(root))
+
+    # An id that is not one path segment is refused before sending; an answer that is not the
+    # object the verb needs is the system breaking its contract (#1391 r5 T2, O-T4).
+    from defender.kit.faults import ConfinementFault, TransportFault
+    with pytest.raises(ConfinementFault, match="`id`"):
+        example.get_record(ctx, id="r1/../admin")
+    assert len(stand_in.requests()) == 1, "the refused id reached the proxy"
+    listed = S.ProxyStandIn(tmp_path / "proxy-list", [S.answer("[]")])
+    (tmp_path / "run-list").mkdir()
+    with pytest.raises(TransportFault):
+        example.get_record(S.verb_context(record, tmp_path / "run-list", {}, proxy_url=listed.url,
+                                          request_token="token-oex"), id="r1")

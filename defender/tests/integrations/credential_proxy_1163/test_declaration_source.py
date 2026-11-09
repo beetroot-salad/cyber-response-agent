@@ -376,3 +376,29 @@ def test_1391_o4_a_ca_with_an_http_token_url_is_a_settings_fault(token_url, ca, 
     else:
         with pytest.raises(fault):
             parse_access(text, system="elastic")
+
+
+_CLEAN = H.declaration(ES, scheme=H.oauth_scheme("https://idp.corp.example/token"))
+
+
+@pytest.mark.parametrize(("text", "fault"), [
+    pytest.param(_CLEAN, False, id="control"),
+    pytest.param("# replace every CHANGE-ME\n" + _CLEAN, False, id="only-in-a-comment"),
+    pytest.param(_CLEAN.replace(ES, "https://CHANGE-ME"), True, id="in-the-base"),
+    pytest.param(_CLEAN.replace("idp.corp.example", "CHANGE-ME"), True, id="in-auth"),
+    pytest.param(_CLEAN.replace('"read"', '"CHANGE-ME"'), True, id="in-a-list"),
+])
+def test_a_declaration_still_carrying_the_templates_placeholder_is_not_configured(text, fault):
+    """A value still holding the tenant template's CHANGE-ME, at any depth, is a settings fault
+    that says the system is not configured — never an address to call."""
+    from defender.kit.settings import NOT_CONFIGURED
+    from defender.tenancy._access import parse_access
+
+    assert ("CHANGE-ME" in text) or not fault, "precondition: the faulting case carries the placeholder"
+    if not fault:
+        assert parse_access(text, system="elastic").base == ES
+        return
+    with pytest.raises(ConfigFault) as raised:
+        parse_access(text, system="elastic")
+    assert "CHANGE-ME" in str(raised.value), str(raised.value)
+    assert NOT_CONFIGURED in str(raised.value), str(raised.value)

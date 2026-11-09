@@ -1,7 +1,4 @@
 {
   "//": "lint_import_order baseline (#1080): upward imports and per-package breaches accepted until their owner issue resolves them. Each reason names that owner (#<n>). The list only shrinks: an entry no import matches fails. Regenerate with `python tooling/lint/lint_import_order.py --update-baseline`.",
-  "entries": {
-    "imports-adapters:skills/connect/examples/example_adapter.py:defender.integrations.load_config": "#1172: the connect skill's example adapter uses the shared transport",
-    "imports-adapters:skills/connect/examples/example_adapter.py:defender.integrations.record_config": "#1172: the connect skill's example adapter uses the shared transport"
-  }
+  "entries": {}
 }

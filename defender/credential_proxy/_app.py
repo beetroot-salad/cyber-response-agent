@@ -2,7 +2,7 @@
 
 `POST /v1/request` with `Authorization: Bearer <request token>` and the JSON body
 `{system, method, url, headers, body}` (`headers` a name -> value object, `body` text or null).
-The answer is always HTTP 200 in the reply format of `defender._proxy_client` (#1412): the
+The answer is always HTTP 200 in the reply format of `defender.kit.proxy_client` (#1412): the
 upstream's body as body frames, passed on as it arrives, then one final record `{status, headers,
 fault, detail, system_side, sent, body_whole, reader_fault}`. `status` is the upstream's status (null when nothing was
 sent), `headers` its headers, `body_whole` whether the frames carried its whole body; `fault` is
@@ -33,6 +33,7 @@ departure, ends the read of the system (`_ReaderLeft`), whatever is left of the 
 from __future__ import annotations
 
 import dataclasses
+import enum
 import json
 import logging
 import math
@@ -48,12 +49,13 @@ import anyio
 import httpx
 from fastapi import FastAPI, Request
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 from starlette.responses import Response
 from starlette.types import Receive, Scope
 from starlette.types import Send as AsgiSend
 
 from defender import _clock, _io, tenancy
-from defender._proxy_client import PROXY_PATH, REPLY_CONTENT_TYPE, FinalRecord, encode_body, encode_final
+from defender.kit.proxy_client import PROXY_PATH, REPLY_CONTENT_TYPE, FinalRecord, encode_body, encode_final
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
 from defender.kit.access import (
     CALLER_GRACE_SEC, HEADER, OAUTH_CLIENT_CREDENTIALS, PROXY_OVERHEAD_SEC, AccessDeclaration, Auth)
@@ -87,6 +89,10 @@ DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 #: The most time, in seconds, a request may ask for its upstream call (r7 A21), and what it gets
 #: when it asks none; over it is `TransportFault`.
 DEFAULT_UPSTREAM_TIMEOUT_SEC = 30.0
+#: How long a request may take to arrive in full (#1428 O2). Past it the proxy stops waiting and
+#: closes the connection. An operator who raises the upstream timeout raises it too: it is never
+#: shorter than the request's own longest deadline (see `create_app`).
+REQUEST_BODY_SEC = 60.0
 #: The most a request to the proxy may hold, in bytes.
 MAX_REQUEST_BYTES = 16 * 1024 * 1024
 #: The most of a request's path an audit line keeps.
@@ -131,11 +137,15 @@ class ProxyDeps:
     proxy_overhead_sec: float = PROXY_OVERHEAD_SEC
     #: The PEM bundle a system without `ca` is verified against; None: the one httpx ships.
     public_ca_file: Path | None = None
+    #: How long a request may take to arrive (a test's seam, never configuration).
+    request_body_sec: float = REQUEST_BODY_SEC
 
     def __post_init__(self) -> None:
         if (isinstance(self.max_response_bytes, bool) or not isinstance(self.max_response_bytes, int)
                 or self.max_response_bytes < 1):
             raise ConfigFault("max_response_bytes must be a positive whole number")
+        if not self.request_body_sec > 0:
+            raise ConfigFault("request_body_sec must be positive")
         if not self.upstream_timeout_sec > 0:
             raise ConfigFault("upstream_timeout_sec must be positive")
         if not 0 < self.proxy_overhead_sec <= PROXY_OVERHEAD_SEC:
@@ -200,7 +210,7 @@ class _Proxy:
         self._trust = public_trust(None if ca_file is None else str(ca_file))
         self.access_tokens = AccessTokens()
 
-    def handle(self, authorization: str | None, raw: bytes | None, send: Sink,
+    def handle(self, authorization: str | None, raw: bytes | _Unread, send: Sink,
                arrived: float | None = None) -> FinalRecord:
         """The final record of one request, audited before it is returned (A13); the upstream's
         body went to `send` meanwhile, on this thread's behalf, which stays with the request until
@@ -231,7 +241,7 @@ class _Proxy:
         # Decided once, at the one send boundary (`_sent`), whatever answer follows (#1374).
         return dataclasses.replace(answer, sent=trail.sent)
 
-    def _proxied(self, authorization: str | None, raw: bytes | None, send: Sink,
+    def _proxied(self, authorization: str | None, raw: bytes | _Unread, send: Sink,
                  trail: _Trail, began: float) -> FinalRecord:
         asked = _parse_request(raw)
         trail.system, trail.method = asked.system[:80], asked.method[:20]
@@ -401,9 +411,13 @@ def _fault_of(status: int) -> str | None:
     return UPSTREAM
 
 
-def _parse_request(raw: bytes | None) -> _Asked:  # noqa: C901 — one flat shape check
-    if raw is None:
+def _parse_request(raw: bytes | _Unread) -> _Asked:  # noqa: C901 — one flat shape check
+    if raw is _Unread.TOO_LARGE:
         raise Refused(CONFIG, f"the request is over {MAX_REQUEST_BYTES} bytes")
+    if raw is _Unread.TOO_SLOW:
+        raise Refused(TRANSPORT, "the request did not arrive in time")
+    if raw is _Unread.PEER_LEFT:
+        raise Refused(TRANSPORT, "the caller left before its request arrived")
     try:
         doc = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError):
@@ -459,13 +473,29 @@ def _forwarded(headers: Mapping[str, str], auth: Auth) -> dict[str, str]:
     return sent
 
 
-async def _body_of(request: Request) -> bytes | None:
-    """The request body, or None once it passes `MAX_REQUEST_BYTES`."""
+class _Unread(enum.Enum):
+    """Why a request body was not read to its end."""
+
+    TOO_LARGE = enum.auto()
+    TOO_SLOW = enum.auto()
+    PEER_LEFT = enum.auto()
+
+
+async def _body_of(request: Request, wait: float) -> bytes | _Unread:
+    """The request body; or why it was not read: it passed `MAX_REQUEST_BYTES`, it had not all
+    arrived `wait` seconds after the call (whether the peer went silent or trickled), or the peer
+    left first."""
     body = bytearray()
-    async for chunk in request.stream():
-        body += chunk
-        if len(body) > MAX_REQUEST_BYTES:
-            return None
+    try:
+        with anyio.fail_after(wait):
+            async for chunk in request.stream():
+                body += chunk
+                if len(body) > MAX_REQUEST_BYTES:
+                    return _Unread.TOO_LARGE
+    except TimeoutError:
+        return _Unread.TOO_SLOW
+    except ClientDisconnect:
+        return _Unread.PEER_LEFT
     return bytes(body)
 
 
@@ -475,16 +505,18 @@ class _Framed(Response):
     send for each upstream chunk, which gives up on a run that left or takes none of it within
     `CALLER_GRACE_SEC` (`_ReaderLeft`); the final record goes last, under the same bound. A reader
     still stalled then sees the connection closed unfinished once it resumes (the timeout is not
-    caught). Until it resumes or dies the socket and its unsent bytes stay: a server closes only
-    after flushing, and the ASGI interface offers no abort."""
+    caught). Until it resumes or dies the socket and its unsent bytes stay for the delivery limit
+    (`_connections`): a server closes only after flushing, and the ASGI interface offers no abort."""
 
-    def __init__(self, work: Callable[[Sink], FinalRecord]) -> None:
+    def __init__(self, work: Callable[[Sink], FinalRecord], *, close: bool = False) -> None:
         super().__init__(content=None, media_type=REPLY_CONTENT_TYPE)
         self._work = work
+        self._close = close  # the proxy stopped reading the request: the connection ends with this reply (#1428)
 
     async def __call__(self, scope: Scope, receive: Receive, send: AsgiSend) -> None:
         await send({"type": "http.response.start", "status": 200,
-                    "headers": [(b"content-type", REPLY_CONTENT_TYPE.encode("ascii"))]})
+                    "headers": [(b"content-type", REPLY_CONTENT_TYPE.encode("ascii")),
+                                *([(b"connection", b"close")] if self._close else [])]})
 
         request = Request(scope, receive)
 
@@ -515,9 +547,12 @@ def create_app(deps: ProxyDeps) -> FastAPI:  # lint-dup: ok — the proxy's own 
         # The deadline runs from here: reading the body and waiting for a worker thread count
         # against it, as they count against the caller's wait (#1364).
         arrived = time.monotonic()
-        raw = await _body_of(request)
+        # Never shorter than the request's own longest deadline: waiting for the body is part of it.
+        wait = max(deps.request_body_sec, deps.upstream_timeout_sec + deps.proxy_overhead_sec)
+        raw = await _body_of(request, wait)
         authorization = request.headers.get("authorization")
-        return _Framed(lambda send: proxy.handle(authorization, raw, send, arrived))
+        return _Framed(lambda send: proxy.handle(authorization, raw, send, arrived),
+                       close=isinstance(raw, _Unread))
 
     app.add_api_route(PROXY_PATH, proxy_request, methods=["POST"], response_model=None)
     return app

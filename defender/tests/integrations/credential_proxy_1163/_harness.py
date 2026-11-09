@@ -23,13 +23,13 @@ CANARY_SECRET = "canary-client-secret-1163-b2e4d8"
 CLIENT_ID = "client-1163"
 #: The http-proxy identity system's config.env: an access method and a timeout, no URL_BASE
 #: and no bastion (the declaration holds the only base, r5 A2).
-HTTP_PROXY_IDENTITY_ENV = 'IDENTITY_TRANSPORT="http-proxy"\nIDENTITY_TIMEOUT_SEC="5"\n'
+HTTP_PROXY_IDENTITY_ENV = 'IDENTITY_TIMEOUT_SEC="5"\n'
 
 
 def http_proxy_env(system: str) -> str:
     """`system`'s config.env when it is reached through the proxy: access method and timeout."""
     prefix = system.upper().replace("-", "_")
-    return f'{prefix}_TRANSPORT="http-proxy"\n{prefix}_TIMEOUT_SEC="5"\n'
+    return f'{prefix}_TIMEOUT_SEC="5"\n'
 
 
 @dataclass(frozen=True)
@@ -144,13 +144,17 @@ async def answer_gauge(send: Any, readings: Mapping[str, int]) -> None:
 
 
 @contextlib.contextmanager
-def serve_asgi(app: Any) -> Iterator[str]:
+def serve_asgi(app: Any, *, http: Any = None) -> Iterator[str]:
     """`app` served by uvicorn on a loopback port in a thread, for a caller that must reach it
-    over real HTTP (the adapter's transport). Yields the base URL."""
+    over real HTTP (the adapter's transport). Connections are the shipped program's, with its
+    delivery limit, unless `http` names another protocol. Yields the base URL."""
     import uvicorn
 
+    from defender.credential_proxy._connections import DeliveryLimited
+
     port = free_port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning",
+                                           http=http or DeliveryLimited))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     deadline = time.monotonic() + 10

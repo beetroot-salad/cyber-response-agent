@@ -110,13 +110,12 @@ greenfield tree there's nothing cached yet, so ask all four.
    shape from training; verify it against the real docs during the build.
    For something obscure, ask for a docs pointer.
 2. **How do you reach it from this environment?** A configured MCP server
-   routes to MCP. Everything else routes to an adapter, and the answer
-   picks its **transport** — the one part of the adapter that varies:
-   direct API (endpoint + token) → HTTP; an existing CLI/script → a
-   transport that shells out to it and parses. Reachable only by SSHing
-   to a bastion and running tools there → **stop**, the agent must run on
-   the bastion, not here. The verb surface above the transport is the same
-   either way (see `adapter.md` → "The shape to copy").
+   routes to MCP. Everything else routes to an adapter, and an adapter
+   reaches its system only over HTTP, through the credential proxy, at
+   the base its `access.yaml` declares (see `adapter.md` → "Access
+   declaration"). A system reachable only through a CLI or script, or by
+   SSHing to a bastion and running tools there, has no HTTP API the proxy
+   can call → **stop** and say so: it cannot be connected as an adapter.
 3. **What questions does this system answer for an investigation?**
    Freeform — "host inventory and trust edges", "who is authorized on a
    host", "auth events", "IoC reputation". You need this for the
@@ -125,8 +124,10 @@ greenfield tree there's nothing cached yet, so ask all four.
    read sources are auth-less. You never ask for a secret value, token, or
    auth-bearing cURL — if one is offered, refuse it: it never goes in a file you
    write or in this conversation. This is the credential boundary; it is
-   non-negotiable. A system that needs a credential cannot be connected yet:
-   there is no credential delivery until #1163 lands — say so and stop.
+   non-negotiable. A credential is stored by the operator with the
+   credential proxy (`PUT /systems/{system}/credentials` on the product
+   API, write-only); you need only its scheme and the field name the
+   access declaration names (`adapter.md` → "Credentials").
 
 ### 3. Route and build
 
@@ -178,12 +179,15 @@ Step 6 validates it and proposes it to the tenant's repo.
   connectivity detail live here, never in `SKILL.md` — the split exists so
   the orchestrator physically can't ingest it.
 
-`settings/systems/{system}/config.env` in the connected tenant's OWN repo (deployed as
-`$DEFENDER_DATA_ROOT/{tenant}/knowledge/`, never in this repo) — the tenant's non-secret
-config (endpoint, timeout, `AUTH_TYPE`). Also add a `CHANGE-ME` placeholder copy at
-`knowledge/tenant-template/settings/systems/{system}/config.env` in this repo, so a tenant
-scaffolded from the template knows the keys.
-Track it in the tenant's repo when it holds no secrets. A secret is never in this file.
+`settings/systems/{system}/config.env` and `settings/systems/{system}/access.yaml` in the
+connected tenant's OWN repo (deployed as `$DEFENDER_DATA_ROOT/{tenant}/knowledge/`, never in
+this repo) — the tenant's non-secret config: `config.env` holds exactly the keys the adapter
+reads (its `REQUIRED_KEYS`, prefixed; any other key is refused by name), and `access.yaml`
+the system's base, auth scheme and routes (`adapter.md` → "Access declaration"). Also add
+`CHANGE-ME` placeholder copies of both at
+`knowledge/tenant-template/settings/systems/{system}/` in this repo, so a tenant scaffolded
+from the template knows the keys; a system whose files still carry `CHANGE-ME` is not
+configured. Track them in the tenant's repo. A secret is never in either file.
 
 `<staged>/skills/gather/queries/{system}/` — write only the **couple of
 seed templates you're certain of** (an entry-point measurement, a by-key
@@ -262,6 +266,7 @@ the branch and just leave the files in place for review:
 git checkout -b connect/{system}
 git add defender/integrations/{system}_adapter.py \
         knowledge/tenant-template/settings/systems/{system}/config.env \
+        knowledge/tenant-template/settings/systems/{system}/access.yaml \
         knowledge/tenant-template/settings/verb-grants.yaml \
         knowledge/tenant-fixture/settings/verb-grants.yaml
 # add pyproject.toml / uv.lock only if a dependency was added
@@ -294,10 +299,11 @@ Then stop. `/ship` can open the PR.
 
 - **Never handle credential values.** Tokens, passwords, API keys, pasted
   auth-bearing cURL — all forbidden. If offered one, stop and refuse it.
-  `config.env` holds no secret and no reference to one: credential delivery is
-  #1163, and the skill never sees a value.
+  `config.env` and `access.yaml` hold no secret and no reference to one: the operator
+  stores the value with the credential proxy, and the skill never sees it.
 - **Stay in your lane.** Write only the `{system}_adapter.py` adapter,
-  the staged `skills/{system}/`, that system's `config.env`, its staged seed templates, and
+  the staged `skills/{system}/`, that system's `config.env` and `access.yaml`, its staged
+  seed templates, and
   its rows in every tenant's and the template's `settings/verb-grants.yaml`
   (plus `pyproject.toml` / `uv.lock` if a dep was added). Never `hooks/`,
   `learning/`, `agent/lessons/`, the runtime `defender/SKILL.md`, the invlang

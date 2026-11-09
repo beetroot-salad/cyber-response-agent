@@ -52,13 +52,12 @@ The reference to copy ships with this skill:
   `defender/integrations/{system}_adapter.py`.
 
 The live tree's own `integrations/<system>_adapter.py` modules are the same shape built
-on the shared `_stub_transport.py`; read it and the closest sibling before
+on the shared transport, `defender/kit/transport.py`; read it and the closest sibling before
 you write anything. Then:
 
-1. **Reuse the shared transport module** if one exists (the siblings'
-   `_stub_transport.py`, or whatever they import) — import *that*. Only on a
-   truly greenfield tree do you write your own transport, modelled on
-   `example_adapter.py`'s `_request`. One shared transport per tree, never two.
+1. **Use the shared transport** — `kit.transport.request`, which sends each
+   request through the credential proxy. Never write your own: an adapter
+   reaches its system only through the proxy, so there is no other transport.
 2. **Copy the closest example** to `defender/integrations/{system}_adapter.py`
    — a sibling adapter if one exists, else `examples/example_adapter.py` —
    change `SYSTEM`, and adapt the verbs and response parsing to the real
@@ -115,8 +114,8 @@ def get_host(ctx: VerbContext, *, host: str) -> dict:
   run's tenant record (never a `VerbContext`, never a call) that raises
   `ConfigFault` naming what is wrong, or returns None when the system is
   usable. It must raise for EVERY settings fault any verb here can raise —
-  the keys `_config` reads and, for a docker-reached system, the access
-  method (`_stub_transport.check_docker_curl_settings`). The run calls it
+  the keys `_config` reads and the system's access declaration
+  (`kit.transport.record_config` checks both). The run calls it
   once at start: a system whose check raises is down for the whole run, the
   agent is told why, and no verb of it is called. A system needing no
   settings declares one that never raises. An adapter that declares none, or
@@ -191,44 +190,53 @@ adapter's shape:
 A hand-rolled filter DSL or an adapter-side reducer is the anti-pattern the
 gather redesign removed — never the recommended shape.
 
+## Access declaration
+
+`settings/systems/{system}/access.yaml`, beside `config.env`, is how the credential
+proxy reaches the system — and its presence is what makes the system usable at all:
+without it the settings check refuses the system as not configured. It holds
+`access: http-proxy`, the system's `base` URL (the only place the address lives —
+never a `config.env` key), `auth` (its `scheme` — `bearer`, `header`, `basic` or
+`oauth-client-credentials` — and the credential *field name* the scheme reads, never
+a value), and the `reads` / `writes` routes the adapter calls (`{method, path}`).
+The proxy refuses any request outside them. Copy a sibling's (the template's
+ticket `access.yaml` is a worked one) and change the base, scheme and routes.
+
 ## Credentials
 
-**There is no credential delivery yet** (#1163). A tenant's `config.env` holds
-non-secret config only — endpoints, timeouts, `AUTH_TYPE`, the access lines.
-A key that holds a secret (`PASSWORD` / `TOKEN` / `SECRET` / `API_KEY`) or
-references one (`*_SECRET_REF`) is FAILed by `validate_scaffold`, on every line of
-the file, an `export` line or a repeated key included. A system whose
-read source needs a credential cannot be connected until #1163 lands: say so and
-stop.
+The operator stores a system's credential with the credential proxy
+(`PUT /systems/{system}/credentials` on the product API, write-only: nothing returns
+it); the proxy applies it by the declaration's scheme. A tenant's `config.env` and
+`access.yaml` hold non-secret settings only. A key that holds a secret
+(`PASSWORD` / `TOKEN` / `SECRET` / `API_KEY`) or references one (`*_SECRET_REF`) is
+FAILed by `validate_scaffold`, on every line of the file, an `export` line or a
+repeated key included.
 
-`system=` is required on every transport call, and an adapter reaches its store
-through `http_get` / `http_get_obj` / `http_post`, which run `guard_outbound`
-first. **Never** accept a pasted token, password, or auth-bearing cURL — if the
+An adapter reaches its store through `kit.transport.request`, naming its system on
+every call, which sends each request through the credential proxy (the proxy holds the credential and checks the route against the
+system's declaration). **Never** accept a pasted token, password, or auth-bearing cURL — if the
 maintainer offers one, stop and refuse it. Nothing in an adapter logs a secret or
 returns one in a captured payload; this is the single most important property of
 the layer.
 
 ## Transport
 
-`example_adapter.py`'s `_request` does HTTP via `urllib`. Swap that one layer
-for whatever your environment needs — direct HTTP, an existing CLI you wrap
-and parse, or a vendor SDK call. (The lab's own adapters reach its stand-in
-services through `docker exec` on a Docker host the lab controls; that is the
-lab's wiring, not a transport to copy for a tenant's system.) The right
-transport is a property of *your* deployment, not of this skill; the VERBS
-surface above it — verb signatures, the returned payload, the faults —
-does not change with it.
+`example_adapter.py`'s `_get` is one call: `kit.transport.request`, which
+sends the request through the credential proxy under the system's
+`TIMEOUT_SEC`, at the base its `access.yaml` names. Every adapter reaches its
+system this way (#1391): no direct HTTP, no CLI or SDK call, no forked child.
 
-Two rules the transport always obeys:
-
-- **Fork with `ctx.env`, never bare.** A child forked with no `env=`
-  inherits the driver's own process, provider keys included. Every
-  `subprocess.run` in the transport passes `env=dict(ctx.env)` — handed whole,
-  never read from: a setting is never looked up in it.
-- **Always set a `timeout=` on the fork.** The outer wall-clock budget died
-  with the capture subprocess, so the transport's own `subprocess.run(...,
-  timeout=…)` is the only real kill left. Map a `TimeoutExpired` to a
-  `TransportFault`.
+**Never build a URL.** Name the path as a template and hand the values:
+`request(ctx, SYSTEM, "GET", "/records/{id}", {"id": id}, timeout_sec=...)`. Each
+value must be exactly one path segment — not empty, not `.` or `..`, holding no
+`/ \ ? # % ;`, whitespace or control character — or the call is refused before
+it is sent (`ConfinementFault`, naming the parameter). A value that may hold a
+separator (a URL, a CIDR range, a file path) goes in `query=` or the body, never
+the path. `answer=` says what the reply must be (`"object"`, the default, `"list"`
+or `"any"`); anything else is a `TransportFault`, as is an unreachable system or a
+5xx, and a 4xx is an `UpstreamFault` carrying the system's own reason. The VERBS
+surface above it — verb signatures, the returned payload, the faults — is all
+you write.
 
 Inspect a real response before writing the parser — shapes vary (a `/roles`
 endpoint may return a dict keyed by name, not a list). Run the real call
@@ -269,9 +277,10 @@ verb and param conventions only when the system genuinely demands it.
 
 ## Dependencies and packaging
 
-Python 3.11+, stdlib first (`urllib`, `json`, `ssl`, `subprocess` cover most
-adapters). Reach for a vendor SDK only when the API genuinely needs one
-(SigV4 signing, streaming, proprietary auth). When a dep is required, add it
+Python 3.11+, stdlib first (`json` covers most adapters' parsing). A vendor SDK
+that makes its own network calls has no place: the request goes through the
+proxy (an auth scheme the proxy cannot apply is a divergence to surface, not
+to work around). When a parsing dep is genuinely required, add it
 as a named extra in `defender/pyproject.toml`, mirror it into `[dev]`, and
 rebuild the venv:
 

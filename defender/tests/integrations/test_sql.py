@@ -644,10 +644,15 @@ def test_c17_scratch_is_gone_once_the_load_finishes_so_a_killed_query_leaves_non
         proc = subprocess.Popen([*SQL_ARGV, *args], stdin=stdin, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, env=sql_env({**os.environ, "TMPDIR": str(scratch)}))
         try:
+            # The premise is what the poll saw: looking again can miss scratch the load has already removed.
+            made_scratch = False
             deadline = time.monotonic() + 60
-            while not any(scratch.iterdir()) and proc.poll() is None and time.monotonic() < deadline:
+            while proc.poll() is None and time.monotonic() < deadline:
+                if any(scratch.iterdir()):
+                    made_scratch = True
+                    break
                 time.sleep(0.005)
-            assert any(scratch.iterdir()), f"the load never made scratch: {proc.poll()} {proc.stderr.read()[-300:] if proc.poll() is not None else ''}"
+            assert made_scratch, f"the load never made scratch: {proc.poll()} {proc.stderr.read()[-300:] if proc.poll() is not None else ''}"
             deadline = time.monotonic() + 60
             while any(scratch.iterdir()) and proc.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.05)

@@ -67,7 +67,7 @@ KNOWLEDGE_JOINS = ("settings", "knowledge", "agent")
 SETTINGS_LOADER_MODULES = (
     "systems/verb_dispositions.py", "systems/lead_zero_config.py", "systems/run_tenant.py",
     "tenancy/case_ticket.py", "integrations/elastic_adapter.py",
-    "integrations/_stub_transport.py", "learning/branch/estate/stagers/elastic.py",
+    "kit/transport.py", "learning/branch/estate/stagers/elastic.py",
     "learning/branch/staging.py", "skills/connect/validate_scaffold.py",
 )
 

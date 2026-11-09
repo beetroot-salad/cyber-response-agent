@@ -177,7 +177,7 @@ NOT_COMPARED = frozenset({"informational", "expected_to_differ"})
 def test_the_fork_checks_field_table_never_compares_the_display_facts():
     from defender.learning.branch.cli import STAMP_FIELD_CLASSES
 
-    assert STAMP_FIELD_CLASSES.get("commit") == "anchored", (
+    assert STAMP_FIELD_CLASSES.get("commit") == "constant", (
         f"control: not the fork check's table: {STAMP_FIELD_CLASSES}")
     for fact in ("started_at", "alert_label"):
         assert STAMP_FIELD_CLASSES.get(fact) in NOT_COMPARED, (

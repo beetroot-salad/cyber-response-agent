@@ -667,11 +667,10 @@ def _scaffold_cmdb_tree(root: Path, template_body: str) -> Path:
     tenant's cmdb skill + execution.md plus one crafted cmdb query template. Returns the
     defender tree."""
     (root / "integrations").mkdir(parents=True)
-    for f in ("cmdb_adapter.py", "_stub_transport.py"):
-        src = DEFENDER / "integrations" / f
-        if src.exists():
-            (root / "integrations" / f).write_text(
-                src.read_text(encoding="utf-8"), encoding="utf-8")
+    # The shared transport moved to kit/ (#1391 r5); the probe reads only the adapter's source.
+    src = DEFENDER / "integrations" / "cmdb_adapter.py"
+    (root / "integrations" / "cmdb_adapter.py").write_text(
+        src.read_text(encoding="utf-8"), encoding="utf-8")
     agent = _staged_agent(root)
     for rel in ("skills/cmdb/SKILL.md", "skills/cmdb/execution.md"):
         dst = agent / rel

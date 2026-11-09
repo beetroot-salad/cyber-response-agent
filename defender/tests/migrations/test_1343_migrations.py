@@ -23,7 +23,10 @@ def _inv(name: str) -> str:
 
 
 def test_b_the_history_stays_one_line_with_the_new_revision_on_the_uuid_ids_revision():
-    """One head (#1345's `0007_alert_mapping`, then #1377's `0008_cost_lower_limit`, since), with `0006_job_leases` directly on `0005_uuid_ids`, which sits on `0004_jobs`; both keep their id and place. (B Data model: one migration on A's; renumbered after #1382)"""
+    """One head (later revisions stack on it: #1345's `0007_alert_mapping`, #1344's `0008_learning_jobs`), with
+    `0006_job_leases` directly on `0005_uuid_ids`, which sits on `0004_jobs`, and the next revision (`0007_alert_mapping`)
+    directly on `0006_job_leases`; both keep their id and place. (B Data model: one migration on A's; renumbered after
+    #1382)"""
     from defender.migrations import _scripts, head, heads
 
     scripts = _scripts()
@@ -32,7 +35,8 @@ def test_b_the_history_stays_one_line_with_the_new_revision_on_the_uuid_ids_revi
     assert scripts.get_revision("0006_job_leases").down_revision == "0005_uuid_ids"
     assert scripts.get_revision("0005_uuid_ids").down_revision == "0004_jobs"
     assert scripts.get_revision("0004_jobs").down_revision == "0003_sign_login"
-    assert [r.revision for r in scripts.walk_revisions()][3:] == [
+    history = [r.revision for r in scripts.walk_revisions()]
+    assert history[history.index("0006_job_leases") + 1:] == [
         "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy", "0001_baseline"]
 
 
