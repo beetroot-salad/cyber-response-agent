@@ -1,0 +1,17 @@
+id: schema-drift-source-port
+description: >
+  The auth pipeline's source.port field is renamed to source.client_port, as if a
+  parser or schema change quietly relabeled it. No detection rule reads it, so
+  every alert stays true under the fault.
+mode: schema-drift
+seed: 42
+params:
+  rename:
+    from: source.port
+    to: source.client_port
+cover: >
+  Guarded by chaos.guard.check_profile at activate time: refused if either
+  field is ever added to a rule's threshold.field or query text (O4). Unlike
+  schema-drift-username (rules read user.name), this one passes the guard, so
+  it can also be applied as a fault overlay on a frozen copy (#1347 D22).
+  ignore_missing + ignore_failure are always set by chaos.mutations.

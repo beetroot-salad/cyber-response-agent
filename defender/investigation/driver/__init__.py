@@ -25,6 +25,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -669,6 +670,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     orient_shim: orient.ShimRunner | None = None,
     run_state: RunState | None = None,
     clock: ClockSource | None = None,
+    clock_origin: datetime | None = None,
     #: The review gate's state container MAIN's deps use (`AgentDeps.review_state`), when the
     #: caller holds it (#1342 r5 C2: a job's facts holder, which reads the close however the
     #: run ends). `None`: a fresh one of the run's own.
@@ -689,8 +691,13 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # `clock` is the run clock's source (#1255 "Time"): a zero-argument callable returning an
     # aware UTC datetime, the single source every model-visible time of the run is read from
     # (`RunState.now`). Omitted, the host's own (wall time).
+    #
+    # `clock_origin` is the run clock's reading at the run's start when it is not the source's
+    # own (`run.py --as-of`, #1347 O5): the clock starts there and advances by the source.
     run_dir, run_id = run.run_dir, str(run.id)
     state = _run_state_at_boundary(run_state, run_dir, run_id, clock)
+    if clock_origin is not None:
+        state.resume_clock(clock_origin, 0.0)
     state.access = access
     _box_follows_run_clock(box, state)
     model_name = resolve_main_model(model_name)

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Answers the process-tree listing from a captured tree (#1347 D6). Installed as `ps` only on
+# replica hosts, with PS_SHIM_TREE naming the captured file. The verb's fixed argv never falls
+# through to the live ps: without a readable tree it fails, so an empty or live list is never
+# taken for the process list as of T. Any other argv runs the real ps.
+if [ "$*" = "-eo pid,ppid,user,stat,etime,cmd --forest" ]; then
+    if [ -z "$PS_SHIM_TREE" ] || [ ! -r "$PS_SHIM_TREE" ]; then
+        echo "ps-shim: no captured process tree (PS_SHIM_TREE unset or unreadable)" >&2
+        exit 1
+    fi
+    exec cat "$PS_SHIM_TREE"
+fi
+exec /bin/ps "$@"

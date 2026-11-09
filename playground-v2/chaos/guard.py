@@ -5,12 +5,15 @@ Reads the real `detection-rules/*.json` at activate time and builds two sets:
   * rule-key fields — from both `threshold.field` (where `source.ip` and some
     `host.name` keys live) and the parsed query/EQL text; either alone misses some.
   * rule-read datasets — the dataset behind each rule's `index` pattern
-    (`logs-system.auth-*` -> `system.auth`).
+    (`logs-system.auth-*` -> `system.auth`), or behind each source an ES|QL
+    rule's query reads, taken from the product's one reader
+    (`defender.integrations.esql_text.sources`).
 
 A mutation's `fields` may not include a rule-key field or an ancestor of one
 (removing `event` removes `event.outcome`), and its `dataset` may not be one a
 rule reads. A rule whose index pattern is too wide to name one dataset
-(`logs-*`) blocks every data-drop.
+(`logs-*`) blocks every data-drop. So does an ES|QL rule whose sources are
+empty or unreadable: the guard fails closed and reads `*` for it.
 
 `check_profile` runs on a profile's parameters (cheap, before resolution);
 `check_mutations` runs the same predicates on the resolved mutations.
@@ -19,10 +22,18 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-from chaos.mutations import dataset_of_stream
+# The ES|QL source reader is the product's; the repo root has to be importable (run as a script,
+# only this directory and playground-v2/ are).
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+if _REPO_ROOT not in sys.path:
+    sys.path.append(_REPO_ROOT)
+
+from chaos.mutations import dataset_of_stream  # noqa: E402
+from defender.integrations.esql_text import sources as esql_sources  # noqa: E402
 
 # Field names in these rules are dotted and nothing else in the query text is,
 # so a dotted-identifier scan suffices without a real query parser.
@@ -50,14 +61,24 @@ def rule_key_fields(rules_dir: Path) -> set[str]:
     return fields
 
 
+def _is_esql(rule: dict[str, Any]) -> bool:
+    return "esql" in (rule.get("type"), rule.get("language"))
+
+
+def _rule_indices(rule: dict[str, Any]) -> list[str]:
+    """What a rule reads: its `index` patterns, and for an ES|QL rule the sources of its query.
+    Sources that are empty (`ROW`) or unreadable (`None`) read everything."""
+    indices = list(rule.get("index") or [])
+    if _is_esql(rule):
+        found = esql_sources(rule.get("query") or "")
+        indices += found if found else [READS_EVERY_DATASET]
+    return indices
+
+
 def rule_read_datasets(rules_dir: Path) -> set[str]:
-    """Every dataset any rule's `index` reads; `*` if any pattern is too
-    wide to name one dataset."""
-    datasets: set[str] = set()
-    for rule in _load_rules(rules_dir):
-        for index in rule.get("index") or []:
-            datasets.add(dataset_of_stream(index) or READS_EVERY_DATASET)
-    return datasets
+    """Every dataset any rule reads; `*` if any pattern is too wide to name one dataset."""
+    return {dataset_of_stream(index) or READS_EVERY_DATASET
+            for rule in _load_rules(rules_dir) for index in _rule_indices(rule)}
 
 
 # -- predicates ---------------------------------------------------------------

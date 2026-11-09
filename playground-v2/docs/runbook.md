@@ -686,6 +686,62 @@ cd /workspace/playground-v2
 - `audit` checks the sample against what the ledger says was written; harness-shaped words are advisories only. Its positive control is the fault's own observable effect, never something injected.
 - **The CMDB stub must carry `GET`/`PUT /admin/overlay/{name}`** (added with #401): `docker --context soc-playground compose up -d --build cmdb` before the first activation against a stack built earlier, or every activation fails at the snapshot with HTTP 405 (nothing pushed, no record written).
 - Unit suite: `chaos/tests/` — see its `conftest.py` for the `uv run` invocation (under the machine-wide pytest lock).
+- While a capture holds the lab (next section), `activate` and the runner refuse unless handed the capture's `--lock-token`.
+- `schema-drift-username` is refused by the guard (the rules read `user.name`); `schema-drift-source-port` renames a field no rule reads, so it passes and can also be a fault overlay on a frozen copy (#1347 D22). The guard reads ES|QL rules' sources through `defender.integrations.esql_text.sources` (the repo root must be importable: it is when `ctl.py` runs from a checkout); a rule whose sources are empty or unreadable counts as reading every dataset.
+
+### Frozen held-out cases: capture (issue #1347 r6.4)
+
+One **freeze** per capture: the playground at a moment T, shared by every case sampled from it. `capture_case.py` writes `held_out/freezes/<freeze-id>/freeze.yaml` (T, the snapshot's repository/name/UUID with each index's document count from a verification restore, every part by bare sha256 hex, who captured). The parts' bytes live on the lab disk under `$V2_FROZEN_PARTS_DIR/<freeze-id>/`, never in git: process trees (for the `ps` shim), stub dumps, the detection rules installed at T (`detection-rules.tar`), host image commits and volume copies (certs and tokens excluded).
+
+```bash
+python3 playground-v2/scripts/capture_case.py evaluations/fixtures/held_out/freezes/<freeze-id> \
+    --repository frozen-cases --pattern 'logs-*' --pattern '.internal.alerts-security.alerts-default-*' \
+    [--scenario <id> ...] [--T <iso>] [--parts-dir "$V2_FROZEN_PARTS_DIR"]
+```
+
+- **The operator registers the snapshot repository once** (`path.repo` set on the live cluster, one restart); capture only verifies it (`POST /_snapshot/<repo>/_verify`) and never registers it.
+- **No fault may be active.** Capture refuses (naming the profile) if `ops.active_faults()` is not empty; revert first (`chaos/ctl.py revert --all`).
+- **The batch.** With `--scenario`, capture fires each scenario once, spread over `[T - 6 h, T - 15 min]`, so the set has alerts of every age. The capture lock and the hold-off on the alert-ticket watcher and live pickups last from before the first scenario until the snapshot is taken: at least `make_case.MAX_AGE` (6 h) per freeze. Pick `T` at least 6 h ahead; the default is now plus 6 h 15 min when scenarios are given, now otherwise.
+- **All-or-nothing.** Any failure deletes the snapshot this run wrote, removes the partial parts, frees the lock, resumes the pickups, and writes no `freeze.yaml`. A freeze that exists is never overwritten.
+- **Locks** (`chaos/lock.py`) are records inside the `elasticsearch` container (`/tmp/lab-locks/`), taken by an exclusive create over `docker --context soc-playground exec`, so they hold whichever machine fires. `capture` guards the runner and `chaos/ctl.py activate` (both take `--lock-token`); `frozen-engine` serialises frozen runs. They never expire: `python3 chaos/lock.py status|clear <name>` is the operator's explicit clear of a dead holder. A recreate of the `elasticsearch` container drops the records.
+- **`ps` on a replica host** is `hosts/base/ps-shim` (baked dormant into every host image at `/opt/soc-playground/ps-shim`, linked in as `/usr/local/bin/ps` only on replicas): the proc-tree verb's fixed argv prints the file `PS_SHIM_TREE` names, and fails without it rather than answer with a live or empty list. Any other `ps` argv runs the real `ps`. container-inspect is a named gap.
+- **Stub clocks:** change-mgmt and ticket-server read `V2_STUB_AS_OF` at start and answer every "now" with it; change-mgmt's `STANDING_REFRESH_SECONDS=0` starts no refresh loop.
+- Unit suite: `scripts/tests/` (all lab operations faked).
+
+### Frozen held-out cases: make a case, launch a run (issue #1347 r6.4)
+
+A **variant** is a freeze plus the fault overlay's Elasticsearch part; every case of one variant shares one frozen copy. Both commands below ready the variant with the same step (`scripts/frozen_copy.py`): register the snapshot repository `readonly`, check the snapshot UUID, and unless a clean copy-state marker names this variant, restore the whole snapshot (ILM stopped, each stream's lifecycle removed), delete everything stamped after T (base overlay), then apply the fault overlay (the profile's processor, verbatim, through a temporary pipeline; `_id`, `_index`, `_version` kept; for schema-drift also the alerts whose `kibana.alert.ancestors` reach an in-span event). The marker (`{freeze, variant, dirty, index_uuids}`, on the `lab-engine-state` volume) is dirty from before the first change until the copy is ready; anything but a clean marker for the same variant, with the same index UUIDs, restores whole (about 6 min at 14 GB).
+
+```bash
+python3 playground-v2/scripts/make_case.py list <freeze-dir>                    # candidates: open alerts within make_case.MAX_AGE (6 h) of T, no live run, no ticket at T
+python3 playground-v2/scripts/make_case.py write <held_out>/<slug> --freeze <freeze-dir> --alert <kibana.alert.uuid> \
+    [--profile schema-drift-source-port --seed 42 --span-start <iso>]               # guard against the rules as of T; writes alert.json + case.yaml (confirmed empty)
+python3 playground-v2/scripts/launch_frozen.py <held_out>/<slug> --reference --lock-token <token> --tenant "$TENANT_ID" --parts-dir "$V2_FROZEN_PARTS_DIR"
+# label against the copy, fill `confirmed` in case.yaml, then: python3 playground-v2/chaos/lock.py clear frozen-engine
+python3 playground-v2/scripts/launch_frozen.py <held_out>/<slug> --tenant "$TENANT_ID" --index <index.jsonl> --parts-dir "$V2_FROZEN_PARTS_DIR" [--knowledge-commit K]
+```
+
+- `write` keeps the `frozen-engine` lock for labelling (it prints the token). The reference run joins it with `--lock-token`, restores nothing, writes no row. A refusal or failure writes nothing and frees the lock.
+- **A scored launch** verifies case and parts first (refused, no cluster request, no row: unconfirmed, malformed or missing `case.yaml`, a part missing or altered, rules part included, the snapshot with another UUID). A copy that cannot be made (restore, overlay, marker, services, health) raises with no row and no clean marker: re-run. A copy that differs from `case.yaml` (per-index counts, content digest, the copy's alert) is a `stale` row naming it; the scorer does not score it and the report says incomplete until a human re-confirms.
+- The row (`slug, run_id, binding, verdict, reason, verified_at, knowledge`) is appended before teardown; `binding` is `evaluations.held_out.binding(freeze, case)`, never recomputed here. Teardown stops the proxy, frontends and stubs and keeps the frozen cluster's data.
+- The run gets `--as-of T` and the frozen proxy's own URL (`DEFENDER_CREDENTIAL_PROXY_URL`); nothing else in its environment changes.
+- **Clock (D15).** `clockshim/clockshim.c` (about 50 lines) is `LD_PRELOAD`ed into the frozen Elasticsearch with `V2_CLOCK_OFFSET_S=<T - now>` taken just before the node restart: CLOCK_REALTIME, `gettimeofday` and `time` shift by it, monotonic clocks do not. `lab_ops.py` builds it from `clockshim/Dockerfile` into the `lab-clockshim` volume the engine mounts at `/lab/shim`. The node runs about a restart's duration ahead of T (a named gap).
+- **Credentials.** Every launch reads the read-only user's current password (`V2_FROZEN_READONLY_PASSWORD`), creates the user in the frozen cluster with it, and mounts the live node certificate from the certs volume (`/lab/certs`, read-only) before the node restart and before the proxy starts. Neither is ever a freeze part. The frozen cluster's own `elastic` password is generated once on the engine's state volume.
+- **Frozen proxy (O12).** A second container on the deployment network, `--volumes-from` the live proxy, running `python -m defender.credential_proxy` unmodified with its own audit file (`V2_FROZEN_PROXY_AUDIT`, never the live one) and `--add-host <declared host>:<V2_FROZEN_ENDPOINT's host>` for each name in the live lab tenant's `settings/systems/*/access.yaml` (`V2_FROZEN_TENANT_DIR`; an IP literal there is refused, #1391 O6). The engine publishes one frontend per declared port on the lab server's loopback at `10000 + port`; the operator's ssh forward maps `V2_FROZEN_ENDPOINT` to them. The host-state port maps to nothing (staged, D20).
+- Settings: `V2_FROZEN_ENDPOINT`, `V2_FROZEN_PROXY_AUDIT`, `V2_LIVE_PROXY_AUDIT`, `V2_FROZEN_TENANT_DIR`, `V2_FROZEN_PROXY_CONTEXT` (the docker context the deployment runs on; default the local engine), `V2_FROZEN_ES_IMAGE` (the live `STACK_VERSION` image), `V2_FROZEN_CERTS_VOLUME`, `V2_FROZEN_REPO_DIR` (the lab-disk directory of the snapshot repository), `V2_FROZEN_PARTS_DIR`, `V2_RUNS_DIR` (run directories, to exclude alerts that have a live run).
+- **Deferred lab verification (operator, next lever-up), what each check is:**
+  1. `path.repo` on the live cluster: register `frozen-cases` once; `capture_case.py` verifies it.
+  2. Restore of real data streams and the alerts index over an existing copy: the launcher closes the old indices and restores over them; if Elasticsearch refuses, delete the streams first (`DELETE _data_stream/*?expand_wildcards=all`) and add that to `frozen_copy._clear`. Time the first full restore.
+  3. The shim with TLS on: after a launch, `GET /_cluster/health` through the engine and `SELECT NOW()` (`ROW t = NOW()` in ES|QL) read T plus seconds, not the lab's now.
+  4. The frozen proxy: `docker logs frozen-credential-proxy` starts clean; `curl` from a run container to each declared host name reaches the frontend; the frozen audit file grows and the live one does not; the proxy can reach OpenBao and the read-only data root through `--volumes-from`; `V2_FROZEN_PROXY_AUDIT`'s directory is writable.
+  5. The engine can bind the repository (`GET _snapshot/frozen-cases/_verify` from the frozen node).
+  6. The lab tenant's access.yaml names hosts, not IPs.
+  7. Overlay documents keep `_id`, `_index`, `_version`: after a drift launch, compare `GET <index>/_doc/<id>` with the live one. The in-place rewrite (copy through `<index>-overlay`, delete, copy back with external versioning and `index.gc_deletes: 0ms`) may need `external_gte`, a rollover of the write index, or a named gap.
+  8. Tie ordering on truncated queries after a fresh restore versus a re-restore.
+  9. Reindex with external versioning keeps `_version` (see 7).
+  10. Lab alerts carry `kibana.alert.ancestors` / `original_time` (the schema-drift overlay selects derived alerts by them; none carrying them means no alert is rewritten).
+  11. The stubs honour `V2_STUB_AS_OF`: `GET /changes/active` on the frozen change-mgmt answers as of T.
+  12. The cert mount works from the certs volume (`mount_node_cert` tests both files exist).
 
 ### Shuffle SOAR (batch 12)
 

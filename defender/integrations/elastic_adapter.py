@@ -14,7 +14,8 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
 
 from defender.kit.verbs import VerbContext, verb
 from defender.integrations import _stub_transport as transport
-from defender.integrations.confinement import confine_index, confine_read_endpoint
+from defender.integrations import esql_text
+from defender.integrations.confinement import ConfinementFault, confine_index, confine_read_endpoint
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -183,8 +184,8 @@ def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: s
 def _a_403_is_setup(what: str, needs: str) -> Iterator[None]:
     """A 403 inside is the read-only user lacking `needs`: a setup mistake, so a `ConfigFault`
     naming it rather than the agent's `UpstreamFault` (D11). Every other reply follows the
-    proxy's classification. Only for a request whose target the agent cannot widen: `esql` names
-    its own indexes, so its 403 stays the agent's."""
+    proxy's classification. Only for a request whose targets are confined to the configured
+    patterns (`confine_index`), `esql`'s included (#1347 O2a), so the agent cannot cause one."""
     try:
         yield
     except UpstreamFault as e:
@@ -262,10 +263,23 @@ def esql_payload(query: str, resp: dict) -> dict:
     }
 
 
+def _confine_esql(query: str, patterns: tuple[str, str]) -> None:
+    """Refuse a query that reads an index outside the configured patterns, or whose sources
+    cannot be read (#1347 O2a): the copy a frozen run reads holds only those patterns, so no
+    query may tell it from live."""
+    named = esql_text.sources(query)
+    if named is None:
+        raise ConfinementFault("the ES|QL query's sources cannot be read, so it is refused")
+    for index in named:
+        confine_index(index, patterns)
+
+
 @verb(engine="esql", body_param="query")
 def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
     config = load_config(ctx)
-    resp = _http_json(ctx, "POST", config, "/_query?format=json", body={"query": query})
+    _confine_esql(query, (config["EVENTS_INDEX"], config["ALERTS_INDEX"]))
+    with _a_403_is_setup("the ES|QL query", "`read` on the configured events and alerts indexes"):
+        resp = _http_json(ctx, "POST", config, "/_query?format=json", body={"query": query})
     return esql_payload(query, resp)
 
 
