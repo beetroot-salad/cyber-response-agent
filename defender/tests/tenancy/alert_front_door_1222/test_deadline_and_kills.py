@@ -768,3 +768,161 @@ def test_run_duration_includes_correlation_and_main(tmp_path: Path) -> None:
                if r.get("type") == "result")
     # The persisted duration is rounded to whole milliseconds.
     assert result["duration_ms"] >= minimum_ms - 1
+
+
+# --- r7.3 T1: every run exit seals the run's ledger -------------------------------------------------------
+
+def _sealed_ledger(stores: list, d: S.Drive):
+    """The run's ledger through the one read, on a fresh connection to the run's own store (a store the run closed still reads)."""
+    from defender.records import session_store as ss
+    from defender.tests.support.storage._store_owner import reread
+
+    assert stores, "the run opened no session store"
+    assert d.run_dir is not None
+    return ss.read_ledger(reread(stores[-1]), d.run_dir.name)
+
+
+def _priced_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEFENDER_MODEL", "claude-sonnet-4-6")
+    monkeypatch.setenv("DEFENDER_GATHER_MODEL", "claude-haiku-4-5")
+
+
+class _LeadAppendRefusedOnce(_AgentAppendFault):
+    """The correlation lead's first conversation append meets the database's real write lock (held by a second connection,
+    given up as soon as that append is refused), so the lead stops before it makes a model request."""
+
+    def append(self, session_id: Any, messages: Any, **kw: Any) -> Any:
+        try:
+            return super().append(session_id, messages, **kw)
+        finally:
+            self.release()
+
+
+def _install_trigger(store: Any, table: str) -> None:
+    """A real sqlite fault on `table`: every insert is refused (made from a second connection, as `_refuse_ledger_inserts` does)."""
+    conn = sqlite3.connect(store.path, timeout=10)
+    try:
+        conn.execute(f"CREATE TRIGGER refuse_{table} BEFORE INSERT ON {table} "  # noqa: S608
+                     "BEGIN SELECT RAISE(ABORT, 'the disk is full'); END")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _store_factory_for(ending: str, tmp_path: Path, stores: list, held: dict[str, Any]) -> Any:
+    """The run's store, with the ending's fault put into the real database (or the plain factory)."""
+    if ending == "seal-write-held-up":
+        plain_store = S.store_factory(tmp_path, sink=stores)
+
+        @contextlib.contextmanager
+        def seal_held_up(case_id: str, run_dir: Path) -> Iterator[Any]:
+            with plain_store(case_id, run_dir) as store:
+                store.connection.set_trace_callback(_hold_the_lock_at_the_seal(store.path, held))
+                yield store
+
+        return seal_held_up
+    if ending == "no-request":
+        base = location_path(SS.runs_base)(tmp_path)
+
+        @contextlib.contextmanager
+        def lead_append_refused(case_id: str, run_dir: Path) -> Iterator[Any]:
+            with SS.store_mod().open_store(case_id=case_id, sessions=S.sym("records", "SessionPaths")(
+                    fixture_runs_base(base))) as real:
+                handle = _LeadAppendRefusedOnce(real, SS.StoreFault(on="append", after=0, mode="locked"), agent_id=f"gather:{L3}")
+                stores.append(handle)
+                yield handle
+
+        return lead_append_refused
+    table = {"row-write-fails": "spend_ledger", "seal-write-fails": "spend_ledger_seal"}.get(ending)
+    if table is None:
+        return S.store_factory(tmp_path, sink=stores)
+    plain = S.store_factory(tmp_path, sink=stores)
+
+    @contextlib.contextmanager
+    def faulted(case_id: str, run_dir: Path) -> Iterator[Any]:
+        with plain(case_id, run_dir) as store:
+            _install_trigger(store, table)
+            yield store
+
+    return faulted
+
+
+def _hold_the_lock_at_the_seal(path: Path, held: dict[str, Any]) -> Any:
+    """A statement trace for the store's connection: when the seal's insert starts (every row has landed), a second
+    connection takes the write lock and keeps it ~2.5 s; the connection's next statement marks when the seal gave up."""
+    import threading
+
+    def trace(sql: str) -> None:
+        if "until" in held:
+            held.setdefault("returned", time.monotonic())
+            return
+        if not sql.lstrip().upper().startswith("INSERT INTO SPEND_LEDGER_SEAL"):
+            return
+        conn = sqlite3.connect(path, timeout=10, isolation_level=None, check_same_thread=False)
+        conn.execute("BEGIN IMMEDIATE")
+        held["until"] = time.monotonic() + 2.5
+
+        def release() -> None:
+            time.sleep(2.5)
+            conn.execute("ROLLBACK")
+            conn.close()
+
+        held["thread"] = threading.Thread(target=release, daemon=True)
+        held["thread"].start()
+
+    return trace
+
+
+@pytest.mark.parametrize("ending", ["finished", "stop-before-main", "refused-only", "no-request", "row-write-fails",
+                                    "seal-write-fails", "seal-write-held-up"])
+def test_t1_r7_3_every_run_exit_seals_its_ledger_so_the_ledger_the_run_file_and_the_page_say_complete_exactly_when_it_is(
+        tmp_path, monkeypatch, ending):
+    """Run endings with the fault each injected (none, a refused row write, a refused seal write, a seal write held up past the
+    cap by another connection's lock): the ledger read, the run file's mark and the page's headline agree, and "complete" is
+    exactly what the test injected. A run with no request seals $0. (r7.3 T1, Q2)"""
+    from defender.presentation.visualize_run import render_page
+    from defender.tests.support.presentation import _cost_page_1377 as C
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+    _priced_names(monkeypatch)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    stores: list = []
+    tenant = S.plant_tenant()
+    complete = ending not in ("row-write-fails", "seal-write-fails", "seal-write-held-up")
+    want_agents = {"main", "gather:l-00c"}
+    held: dict[str, Any] = {}
+    if ending == "stop-before-main":
+        d = _budget_kill_during_lead(tmp_path, tenant, monkeypatch, stores=stores)
+        _assert_budget_kill_during_lead(d, stores)
+        want_agents = {"gather:l-00c"}
+    elif ending == "refused-only":
+        d = S.run_alert(tmp_path, tenant=tenant, main=S.MainScript(S.default_main_turns(), S.LeadFault(raise_on=1)),
+                        leads={L3: [S.text(SUMMARY)]}, lead_faults={L3: S.LeadFault(raise_on=1)},
+                        store_factory=_store_factory_for(ending, tmp_path, stores, held), stores=stores)
+    else:
+        d = S.run_alert(tmp_path, tenant=tenant, leads={L3: [S.text(SUMMARY)]},
+                        store_factory=_store_factory_for(ending, tmp_path, stores, held), stores=stores)
+        if ending == "no-request":
+            want_agents = set()
+            assert d.router.requests(L3) == 0, "premise: the lead made no model request"
+            _assert_main_never_asked(d, "the lead's first append was refused")
+        if ending == "row-write-fails":
+            want_agents = set()
+    if ending == "seal-write-held-up":
+        assert "until" in held, "premise: the run reached its seal"
+        held["thread"].join()
+        assert held.get("returned", float("inf")) < held["until"], (
+            "the seal waited out another connection's lock instead of failing at the cap")
+
+    read = _sealed_ledger(stores, d)
+    result, = (r for r in read_jsonl_rows(RunPaths(d.folder).tool_trace) if r.get("type") == "result")
+    headline = C.headline(render_page(fixture_run(d.folder)))
+
+    assert set(read.by_agent) == want_agents, ("premise: the rows the run made", dict(read.by_agent))
+    assert read.complete is complete, f"{ending}: the ledger reads complete={read.complete}"
+    assert result["total_cost_is_lower_limit"] is (not complete), f"{ending}: the run file's mark disagrees with the ledger"
+    assert C.at_least(headline) is (not complete), f"{ending}: the page reads {headline!r}"
+    if ending in ("refused-only", "no-request", "row-write-fails"):
+        assert read.total == 0.0, "premise: no priced response"
+        assert result["total_cost_usd"] == 0.0
+        assert C.dollars(headline) == 0.0

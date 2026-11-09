@@ -10,9 +10,15 @@ from defender._io import read_jsonl_rows
 from defender.investigation import observe
 from defender.investigation.review_roles import REVIEW_AGENT_ID_PREFIX, live_review_stages
 from defender.configuration._pricing import usage_cost
+from defender.records import SessionPaths
+from defender.records import session_store as ss
+from defender.tests.support.jobs._jobs1342 import insert_spend
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
 from defender.presentation.visualize_data import (
     deduped_main_records,
+    load_messages,
     gather_cost_by_model,
     review_cost_by_model,
     review_cost_by_lens,
@@ -68,6 +74,18 @@ def _recording_build(seen: dict):
         return _FakeAgent(logger, agent_id)
 
     return build
+
+
+_RUN = fixture_uuid("787-review-cost")
+
+
+def _ledger(tmp_path: Path, requested: dict[str, str], *, case: str = "r787"):
+    """The run's ledger through the one read (#1377 r7 S5): one row per agent, at the model that agent requested.
+    The page prices only through this (r7.2 P1)."""
+    with ss.open_store(case_id=case, sessions=SessionPaths(fixture_runs_base(tmp_path / "runs"))) as store:
+        for agent_id, model in requested.items():
+            insert_spend(store.path, _RUN, [(model, _USAGE)], agent_id=agent_id)
+        return ss.read_ledger(store, _RUN)
 
 
 def _stage_request(prompt: str = "the projection"):
@@ -137,7 +155,8 @@ def test_the_two_support_calls_stay_apart_in_the_log(run_dir):
     ], "two review calls share an agent id — their readings collapse into one"
     ids = [r["id"] for r in rows]
     assert len(set(ids)) == len(ids), f"two review calls share a record id: {ids}"
-    assert set(review_cost_by_lens(run_dir)) == set(_LENSES)
+    ledger = _ledger(run_dir, {f"{REVIEW_AGENT_ID_PREFIX}{lens}": "kimi-k3" for lens in _LENSES})
+    assert set(review_cost_by_lens(run_dir, load_messages(run_dir), ledger)) == set(_LENSES)
 
 
 # The read side: the review is priced, and it is disjoint from main's and gather's.
@@ -164,8 +183,16 @@ _MIXED = [
 _ONE_CALL = usage_cost("kimi-k3", _USAGE)
 
 
+#: The ledger for `_MIXED`: each agent requested the model its wire records say (so the reported name is not what decides).
+_MIXED_REQUESTED = {
+    "main": "claude-sonnet-4-6", "gather:l-001": "claude-haiku-4-5",
+    **{f"{REVIEW_AGENT_ID_PREFIX}{lens}": "kimi-k3" for lens in _LENSES},
+}
+
+
 def test_the_review_s_spend_is_priced_per_lens(tmp_path):
-    by_lens = review_cost_by_lens(tmp_path, _MIXED)
+    """Lens attribution survives; the dollars come from the ledger's requested model (r7 S5, r7.1 C)."""
+    by_lens = review_cost_by_lens(tmp_path, _MIXED, _ledger(tmp_path, _MIXED_REQUESTED))
 
     assert set(by_lens) == {"support", "ablation", "composer"}, (
         "the lens is read off the agent id, so a key carrying the prefix means the reader "
@@ -177,30 +204,52 @@ def test_the_review_s_spend_is_priced_per_lens(tmp_path):
 
 def test_the_review_s_spend_is_priced_per_model(tmp_path):
     """The review runs on its own pinned default, apart from the investigator's, so it is
-    normally a row of its own in the by-model breakdown, priced at that model's rate."""
+    normally a row of its own in the by-model breakdown, priced at the model it requested (r7.1 C)."""
     same_usage_as_main = usage_cost("claude-sonnet-4-6", _USAGE)
     assert pytest.approx(same_usage_as_main) != _ONE_CALL, (
         "fixture no longer discriminates — pick a review model whose price row differs"
     )
-    assert review_cost_by_model(tmp_path, _MIXED) == {"kimi-k3": pytest.approx(3 * _ONE_CALL)}
+    ledger = _ledger(tmp_path, _MIXED_REQUESTED)
+    assert review_cost_by_model(tmp_path, _MIXED, ledger) == {"kimi-k3": pytest.approx(3 * _ONE_CALL)}
+
+
+def test_the_review_is_priced_at_the_requested_model_not_the_reported_one(tmp_path):
+    """Retires the old reported-name pricing (r7.2 P1, r7.1 C "never the reported name"): the wire records here
+    report the investigator's model for every review call, the ledger says kimi-k3 was requested."""
+    reported_as_main = [{**r, "model": "claude-sonnet-4-6"} if str(r["agent_id"]).startswith(REVIEW_AGENT_ID_PREFIX) else r
+                        for r in _MIXED]
+    ledger = _ledger(tmp_path, _MIXED_REQUESTED)
+
+    assert review_cost_by_model(tmp_path, reported_as_main, ledger) == {"kimi-k3": pytest.approx(3 * _ONE_CALL)}
+    assert all(c == pytest.approx(_ONE_CALL) for c in review_cost_by_lens(tmp_path, reported_as_main, ledger).values())
+
+
+def test_without_a_readable_ledger_no_reader_prices_the_wire_log(tmp_path):
+    """r7.2 P1: with no ledger there are no dollars, and no fallback to the name the log reports (an empty name once
+    priced as Sonnet). Lens attribution of the review's rows needs the ledger too."""
+    assert review_cost_by_lens(tmp_path, _MIXED, None) == {}
+    assert review_cost_by_model(tmp_path, _MIXED, None) == {}
+    assert gather_cost_by_model(tmp_path, _MIXED, None) == {}
 
 
 def test_the_three_namespaces_do_not_read_each_other(tmp_path):
     """Disjointness in both directions. The review rows must not move gather's figure or the
     main transcript, and the review reader must not pick up either of theirs."""
-    assert gather_cost_by_model(tmp_path, _MIXED) == {
-        "haiku-4-5": pytest.approx(usage_cost("claude-haiku-4-5", _USAGE))
+    ledger = _ledger(tmp_path, _MIXED_REQUESTED)
+    assert gather_cost_by_model(tmp_path, _MIXED, ledger) == {
+        "claude-haiku-4-5": pytest.approx(usage_cost("claude-haiku-4-5", _USAGE))
     }
     assert [r["agent_id"] for r in deduped_main_records(_MIXED)] == ["main"]
 
     without_review = [r for r in _MIXED if not str(r["agent_id"]).startswith(REVIEW_AGENT_ID_PREFIX)]
-    assert gather_cost_by_model(tmp_path, without_review) == gather_cost_by_model(tmp_path, _MIXED)
+    assert gather_cost_by_model(tmp_path, without_review, ledger) == gather_cost_by_model(tmp_path, _MIXED, ledger)
     assert deduped_main_records(without_review) == deduped_main_records(_MIXED)
-    assert review_cost_by_lens(tmp_path, without_review) == {}
+    assert review_cost_by_lens(tmp_path, without_review, ledger) == {}
 
 
 def test_a_request_record_is_not_priced(tmp_path):
     """Only responses carry usage. A reader that counted requests would multiply the review's
     cost by however many turns of history the wire log restates."""
+    ledger = _ledger(tmp_path, _MIXED_REQUESTED)
     with_request = [*_MIXED, _wire(f"{REVIEW_AGENT_ID_PREFIX}support", "kimi-k3", kind="request")]
-    assert review_cost_by_lens(tmp_path, with_request) == review_cost_by_lens(tmp_path, _MIXED)
+    assert review_cost_by_lens(tmp_path, with_request, ledger) == review_cost_by_lens(tmp_path, _MIXED, ledger)

@@ -424,6 +424,10 @@ class _NullLogger:
     def log_budget_refusal(self, **kw: Any) -> None:
         self.records.append({"budget_refusal": kw})
 
+    def record_spend(self, response: Any) -> None:
+        """#1377 (r4 carrier): the run's request logger carries the spend ledger; this drive keeps none."""
+        self.records.append({"spend": response})
+
 
 def _built(model):
     from defender.providers import BuiltModel

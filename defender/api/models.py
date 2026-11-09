@@ -125,6 +125,11 @@ class Investigation(BaseModel):
         description="Model cost so far while the investigation is live (0 until its first update), "
                     "final once the status is terminal and its worker has written its last figure; "
                     "null when the run ended but its cost could not be read (unknown).")
+    cost_is_lower_limit: bool = Field(
+        description="True when `cost_usd` is a lower limit: the run's cost is at least that much, because "
+                    "spend recorded for the run may be missing from it (a spend write failed, the run was "
+                    "killed before it reported, or its row was ended without its final figure). False when "
+                    "the figure is exact, and always false beside a null `cost_usd`.")
     created_at: Instant
     started_at: Instant | None = None
     finished_at: Instant | None = None

@@ -217,7 +217,7 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId
     done = store.add_investigation(tenant, Investigation(
         investigation_id=demo_id(InvestigationId, tenant, "inv-completed"), alert_id=brute.alert_id, status="completed",
         request_key="demo-request-1", attempt=1,
-        disposition="benign", cost_usd=1.84, created_at=now - 29 * hour,
+        disposition="benign", cost_usd=1.84, cost_is_lower_limit=False, created_at=now - 29 * hour,
         started_at=now - 29 * hour, finished_at=now - 29 * hour + _dt.timedelta(minutes=11),
         artifacts=[RUN_LAYOUT.report.name, RUN_LAYOUT.investigation.name,
                    RUN_LAYOUT.runtime_html.name],
@@ -225,7 +225,7 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId
     running = store.add_investigation(tenant, Investigation(
         investigation_id=demo_id(InvestigationId, tenant, "inv-running"), alert_id=shell.alert_id, status="running",
         request_key="demo-request-2", attempt=1,
-        cost_usd=0.0, created_at=now - 2 * hour, started_at=now - 2 * hour,
+        cost_usd=0.0, cost_is_lower_limit=False, created_at=now - 2 * hour, started_at=now - 2 * hour,
     ))
     # Each run's knowledge record as run start writes it (#1108 P4, O-WARN): the completed run
     # read the latest approved knowledge; the running one started on the last published

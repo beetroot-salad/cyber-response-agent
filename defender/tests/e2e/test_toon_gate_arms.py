@@ -697,13 +697,15 @@ def test_the_rendered_runtime_page_shows_the_original_json_of_a_substituted_call
     import defender.presentation.visualize_data  # noqa: F401 — enter the cycle at the
     # other end first: importing `visualize_messages` (and therefore `visualize_run`, which
     # imports it) as the module head raises ImportError on this pre-existing cycle.
-    from defender.presentation.visualize_run import render_runtime_page
+    from defender.presentation.visualize_run import LedgerCost, render_runtime_page
 
     value = _payload()
     run_dir, main = _substituting_run(tmp_path / "sub", turns=2, gather=True)
     assert _every_view(main, toons.dumps(value))
 
-    page = render_runtime_page(run_dir)
+    # r7.2 P1: the page takes its cost as an argument; this test reads the substituted call, so the cost is the unknown one.
+    no_cost = LedgerCost(None)
+    page = render_runtime_page(run_dir, cost=no_cost)
     needle = json.dumps(value["values"][0], separators=(",", ":"))
     assert needle in page or json.dumps(value["values"][0]) in page, (
         "the rendered page shows the TOON view and not the original JSON the gate replaced"
@@ -718,6 +720,6 @@ def test_the_rendered_runtime_page_shows_the_original_json_of_a_substituted_call
           })]), Turn(text="Complete.")]),
           gather=ReplayFn([q("elastic", "query", {"native_query": "FROM logs"}), DONE]),
           verbs=elastic_ok(rec))
-    plain_page = render_runtime_page(plain_dir)
+    plain_page = render_runtime_page(plain_dir, cost=no_cost)
     assert plain_page, "the reader produced nothing for a run with no substitution"
     assert wire_text(value) not in plain_page

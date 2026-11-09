@@ -140,6 +140,16 @@ def test_reader_stage_aborts_on_any_content_less_final(tmp_path, tag, text):
         _reader_stage(tmp_path, text, tag)
 
 
+def test_s3_a_learning_stage_has_no_ledger_and_its_responses_are_not_failed_spend_writes(tmp_path, caplog):
+    """A learning stage's logger has no ledger by design: recording its responses logs no spend failure. (S3, r4 carrier)"""
+    import logging
+
+    assert _reader_stage(tmp_path, "a real answer", "no-ledger") == "a real answer"
+    trace = observe.stage_trace_path(tmp_path / "learning_run", "questioner-no-ledger.trace.jsonl")
+    assert '"kind": "response"' in trace.read_text(encoding="utf-8"), "premise: the stage's response went through the logging hook"
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR and "spend" in r.getMessage().lower()] == []
+
+
 @pytest.mark.parametrize(("tag", "text"), CONTENT, ids=[t for t, _ in CONTENT])
 def test_reader_stage_returns_real_output_verbatim(tmp_path, tag, text):
     """The controls, and the guard's blast radius: one visible character is content, and the stage's

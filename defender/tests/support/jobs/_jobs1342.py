@@ -265,6 +265,17 @@ CHILD_SCRIPT = textwrap.dedent("""
             path.parent.mkdir(parents=True, exist_ok=True)
             path.symlink_to(target)
 
+    sealed_by = {}  # r7.3 T1: what a child that ends cleanly seals: set once its ledger rows are being written
+
+    def sealing():
+        if sealed_by and not sealed_by.get("done"):
+            sealed_by["done"] = True
+            try:
+                sealed_by["seal"](runs, sealed_by["case"], run_id)
+                Path(spec["sessions"]["marks"], "sealed").touch()
+            except Exception as fault:  # noqa: BLE001 - a missing seal is the code stage's red, named by its own mark
+                Path(spec["sessions"]["marks"], "seal-failed").write_text(repr(fault), encoding="utf-8")
+
     term = spec.get("term", "default")
     if term == "ignore":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -272,6 +283,7 @@ CHILD_SCRIPT = textwrap.dedent("""
         def on_term(*_):
             Path(fill(spec["term_mark"])).touch()
             if term == "finish":  # #1343 B11: a child that completes on its own as the SIGTERM lands
+                sealing()  # it completes: the run's exit seals its ledger before the records are left
                 leave_records()
             event("end")
             os._exit(0)
@@ -317,21 +329,32 @@ CHILD_SCRIPT = textwrap.dedent("""
     if spend:  # #1343 B2/B6: the live child writes its session database while the worker reads it
         sys.path.insert(0, spend["path"])
         from defender.records.session_store._write import open_store
-        from defender.tests.support.jobs._jobs1342 import _paths, _response, session_pointer
+        from defender.tests.support.jobs._jobs1342 import _paths, _response, insert_spend, seal_spend, session_db, session_pointer
         import hashlib
         case = hashlib.md5(run_id.encode()).hexdigest() if spend.get("per_run") else spend["case"]  # per run: a retry never shares its parent's database
         (runs / f"{run_id}.session-pointer.json").write_text(session_pointer(case), encoding="utf-8")
         marks = Path(spend["marks"])
         marks.mkdir(parents=True, exist_ok=True)
+        if spend.get("seal", True):
+            sealed_by.update(seal=seal_spend, case=case)
         with open_store(case_id=case, sessions=_paths(runs)) as handle:
             session = handle.new_session("main")
             for n, (model, usage) in enumerate(spend["steps"]):
                 began = time.monotonic()
                 handle.append(session, _response(model, usage), agent_id="main")
-                (marks / f"wrote-{n}").write_text(str(time.monotonic() - began), encoding="utf-8")
+                appended = time.monotonic() - began
+                began = time.monotonic()
+                try:
+                    insert_spend(session_db(runs, case), run_id, [(model, usage)])  # #1377: the ledger row cost is read from
+                except Exception as fault:  # noqa: BLE001 - a missing ledger is the code stage's red, named by its own mark
+                    (marks / f"insert-failed-{n}").write_text(repr(fault), encoding="utf-8")
+                else:
+                    (marks / f"ledger-{n}").write_text(str(time.monotonic() - began), encoding="utf-8")
+                (marks / f"wrote-{n}").write_text(str(appended), encoding="utf-8")  # after the insert: a test that waits on this mark then signals the child must find the ledger row (or insert-failed-n)
                 until = time.monotonic() + 60
                 while not (marks / f"go-{n}").exists() and time.monotonic() < until:
                     time.sleep(0.02)
+            sealing()
     release = spec.get("wait_for")
     deadline = time.monotonic() + 60
     while release and not Path(release).exists() and time.monotonic() < deadline:
@@ -616,7 +639,7 @@ def plant_queued_investigation(dsn: str, *, tenant: str, alert_id: str, investig
     """A `queued` row with a chosen id, as SQL (the store mints ids; a case that must plant a file
     named for the id before the claim needs to know it)."""
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
-                 "stage, created_at, cost_usd) VALUES (%s, %s, %s, %s, 1, 'queued', %s, 0)",
+                 "stage, created_at, cost_usd, cost_is_lower_limit) VALUES (%s, %s, %s, %s, 1, 'queued', %s, 0, false)",
             (investigation_id, tenant, alert_id, key, NOW))
 
 
@@ -644,7 +667,8 @@ def is_box_token(value: object) -> bool:
 
 def job_end(*, setup: str = "done", box: str = "started", report_committed: bool = True,
             scrub_verified: bool = True, cut_short: str | None = None) -> str:
-    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its five facts (#1421)."""
+    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its five facts (#1421). r7.3 T1: no spend fact
+    rides on it; the ledger's seal says whether the run's spend is complete."""
     return json.dumps({"setup": setup, "box": box, "report_committed": report_committed,
                        "scrub_verified": scrub_verified, "cut_short": cut_short})
 
@@ -722,6 +746,73 @@ def plant_fork(runs: Path, case_id: str, parent: tuple[str, list[int]], *, agent
         fork = handle.fork(parent[0], parent[1][-1])
         handle.append(fork, _response(model, usage), agent_id=agent_id)
     return fork
+
+
+#: The spend ledger's table and columns as #1377's sketch names them (the design leaves them open). r7 row model: the
+#: requesting agent, the requested and reported model, the four billed counts and the request's outcome.
+SPEND_LEDGER = "spend_ledger"
+SPEND_COUNTS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+SPEND_COLUMNS = ("run_id", "agent_id", "requested_model", "reported_model", "outcome", *SPEND_COUNTS)
+#: r7 S2a: a request's outcome as the model-request hook saw it (sketch spelling).
+RESPONSE, REFUSED, UNSEEN = "response", "refused", "unseen"
+
+
+def insert_spend(database: Path, run_id: str, spend: list[tuple[str, dict[str, int]]], *, agent_id: str = "main",
+                 outcome: str = RESPONSE, reported: str | None = None) -> None:
+    """#1377: one ledger row per `(requested model, billed usage)` for `run_id` and `agent_id` in an existing session
+    database; `reported` (default the requested name; None on a refused or unseen row) is what the provider said."""
+    import sqlite3
+
+    conn = sqlite3.connect(database, timeout=30)
+    try:
+        for model, usage in spend:
+            said = reported if reported is not None else (model if outcome == RESPONSE else None)
+            values = (run_id, agent_id, model, said, outcome, *(usage.get(k, 0) for k in SPEND_COUNTS))
+            conn.execute(f"INSERT INTO {SPEND_LEDGER} ({', '.join(SPEND_COLUMNS)}) "  # noqa: S608
+                         f"VALUES ({', '.join('?' * len(SPEND_COLUMNS))})", values)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, dict[str, int]]], *, sealed: bool = True,
+                **row: str) -> None:
+    """#1377: `case_id`'s session database (made by the real store, so its own schema, and with a
+    `main` session when this call makes the file) holding one ledger row per `(model, billed usage)`
+    for `run_id`; `row` is `insert_spend`'s agent id, outcome and reported name. r7.3 T1: `sealed` (default) seals the
+    run's ledger after the rows land, as a run that ended without a failed write leaves it; a test that plants a run's rows in
+    several calls seals with the last one only (`sealed=False` before), and `sealed=False` throughout is a run killed before
+    its seal."""
+    from defender.records.session_store._write import open_store
+
+    fresh = not session_db(runs, case_id).exists()
+    with open_store(case_id=case_id, sessions=_paths(runs)) as handle:
+        if fresh:
+            handle.new_session("main")
+    insert_spend(session_db(runs, case_id), run_id, spend, **row)
+    if sealed:
+        seal_spend(runs, case_id, run_id)
+
+
+def seal_spend(runs: Path, case_id: str, run_id: str) -> None:
+    """r7.3 T1: seal `run_id`'s ledger in `case_id`'s database through the real `session_store.seal_ledger`."""
+    from defender.records import session_store
+    from defender.records.session_store._write import open_store
+
+    with open_store(case_id=case_id, sessions=_paths(runs)) as handle:
+        session_store.seal_ledger(handle, run_id)
+
+
+def seal_at(runs: Path, case_id: str, run_id: str) -> None:
+    """r7.3 T1: seal `run_id`'s ledger in `case_id`'s database (a store a test did not open itself: a fixture run's) through the
+    real `session_store.seal_ledger`, on a handle opened as production opens a store for writing."""
+    seal_spend(runs, case_id, run_id)
+
+
+def lower_limit(dsn: str, investigation_id: str) -> bool | None:
+    """#1377: the row's `cost_is_lower_limit` (kept apart from `row`, whose columns every #1342 case reads)."""
+    found = execute(dsn, "SELECT cost_is_lower_limit FROM jobs.investigations WHERE id = %s", (investigation_id,))
+    return found[0][0] if found else None
 
 
 @contextmanager

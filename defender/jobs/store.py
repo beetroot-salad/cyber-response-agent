@@ -51,6 +51,7 @@ from .models import (
     LEARNING_TERMINAL,
     LIVE,
     TERMINAL,
+    is_terminal,
     AlertRow,
     Claim,
     InvestigationRecord,
@@ -384,9 +385,9 @@ class JobStore:
 
     # --- the worker's write -------------------------------------------------------------
 
-    async def finish(
+    async def finish(  # noqa: PLR0913 — the one terminal write: stage, figures, knowledge and failure detail
         self, tenant_id: TenantId, investigation_id: InvestigationId, *, stage: str, disposition: str | None = None,
-        cost_usd: float | None = None, knowledge: dict[str, Any] | None = None,
+        cost_usd: float | None = None, cost_is_lower_limit: bool = False, knowledge: dict[str, Any] | None = None,
         failure_reason: str | None = None, failure_message: str | None = None,
     ) -> InvestigationRecord | None:
         """Record the one terminal stage of a running investigation, with its final cost (null when
@@ -396,7 +397,7 @@ class JobStore:
         final accounting instead (`write_accounting`). A `completed` end queues the investigation's
         auto learning job in the same transaction (#1344 O1); a job the schema refuses takes the
         end back with it, raised as a refusal (D10)."""
-        if stage not in TERMINAL:
+        if not is_terminal(stage):
             raise ValueError(f"{stage!r} is not a terminal stage")
         async with self._tx() as s:
             row = (await s.execute(
@@ -404,7 +405,7 @@ class JobStore:
                     InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id,
                     InvestigationRow.stage == "running")
                 .values(stage=stage, finished_at=self._clock(), disposition=disposition, cost_usd=cost_usd,
-                        knowledge=knowledge, failure_reason=failure_reason, failure_message=failure_message,
+                        cost_is_lower_limit=cost_is_lower_limit, knowledge=knowledge, failure_reason=failure_reason, failure_message=failure_message,
                         accounting_written_at=self._clock())
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             if row is None:
@@ -469,7 +470,8 @@ class JobStore:
         return found
 
     async def write_accounting(
-        self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, knowledge: dict[str, Any] | None,
+        self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, cost_is_lower_limit: bool = False,
+        knowledge: dict[str, Any] | None,
     ) -> InvestigationRecord | None:
         """The holder's final cost and knowledge on a row someone else already ended (cancel,
         take-over): written once, changing no stage or failure detail (B-P2, B4). `None` when the
@@ -479,12 +481,14 @@ class JobStore:
                 update(InvestigationRow).where(
                     InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id,
                     InvestigationRow.stage.in_(TERMINAL), InvestigationRow.accounting_written_at.is_(None))
-                .values(cost_usd=cost_usd, knowledge=knowledge, accounting_written_at=self._clock())
+                .values(cost_usd=cost_usd, cost_is_lower_limit=cost_is_lower_limit, knowledge=knowledge,
+                        accounting_written_at=self._clock())
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             return None if row is None else investigation_record(row)
 
     async def hand_back(
-        self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, knowledge: dict[str, Any] | None,
+        self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, cost_is_lower_limit: bool = False,
+        knowledge: dict[str, Any] | None,
     ) -> InvestigationRecord | None:
         """A stopping worker gives a running row back: its lease lapses at once, so any worker takes
         it over within seconds, and its final cost and knowledge and the mark are written (B11).
@@ -495,7 +499,7 @@ class JobStore:
                     InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id,
                     InvestigationRow.stage == "running", InvestigationRow.accounting_written_at.is_(None))
                 .values(lease_expires_at=func.now() - _dt.timedelta(seconds=1), cost_usd=cost_usd,
-                        knowledge=knowledge, accounting_written_at=self._clock())
+                        cost_is_lower_limit=cost_is_lower_limit, knowledge=knowledge, accounting_written_at=self._clock())
                 .returning(InvestigationRow).execution_options(synchronize_session=False))).scalars().first()
             return None if row is None else investigation_record(row)
 

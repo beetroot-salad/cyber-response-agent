@@ -189,7 +189,8 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
     `end` (exit class, and whether the model had already closed) is flattened on so `run.py`'s
     post-steps read it in-process rather than off disk. The run's live state is not on it
     (#1235): a caller that wants it hands it in (`run_investigation(run_state=…)`) and keeps its
-    own reference."""
+    own reference. Nothing about spend rides on it: the run's ledger says for itself whether it is
+    complete (#1377 r7.3 T1)."""
     return {
         "output": output, "model": model_name, "requests": requests,
         "truncated_by": end.truncated_by, "closed_before_cut": end.closed_before_cut,
@@ -547,14 +548,7 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
         run_end.write_sidecar(run, end)
     except OSError as e:
         _logger.warning(f"run-end record write skipped: {e!r}")
-    try:
-        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
-    except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
-        _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
-        try:
-            write_guarded(RunPaths(run_dir).tool_trace, "")
-        except OSError as fallback_err:
-            _logger.error(f"the empty-trace fallback also failed ({fallback_err!r})")  # lint-run-records: ok — an operator diagnostic naming the missing record
+    _write_trace_or_empty(run_dir, store, session_id, wall_ms, run_id=str(run.id), logger=logger)
     return _run_summary(
         output=None, model_name=model_name, requests=logger.n_requests, end=end,
         exit_reason=exit_reason, case_id=case_id, store_path=store.path)
@@ -664,11 +658,15 @@ def _snapshot_writer(  # noqa: PLR0913 — the run's identity plus the caps its 
         base_request_limit=bounds.base_request_limit, extra_turns=bounds.extra_turns)
 
 
-def _write_trace_or_empty(run_dir: Path, store: Any, session_id: str, wall_ms: float) -> None:
-    """Write the run's tool trace, or an empty one when the store cannot produce it; never
-    fails the run (the trace is observability)."""
+def _write_trace_or_empty(run_dir: Path, store: Any, session_id: str, wall_ms: float, *,
+                          run_id: str, logger: observe.RequestLogger) -> None:
+    """Seal the run's ledger (its request logger does, unless a spend write failed), then write the
+    run's tool trace, or an empty one when the store cannot produce it; never fails the run (the
+    trace is observability). The one place a run file is written, so every exit that writes one
+    seals first and the file reads the sealed ledger (#1377 r7.3 T1)."""
+    logger.seal_spend()
     try:
-        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
+        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms, run_id=run_id)
     except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
         _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
         try:
@@ -776,6 +774,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             review_stages if review_stages is not None
             else review_roles.live_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir and the run's logger are)
                 run_dir, defender_dir, logger=logger, model_override=model_override,
+                make_model=make_model,
             )
         )
 
@@ -784,6 +783,10 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         try:
             factory = _resolve_store_factory(resume, store_factory, source_run=source_run)
             store = owns_the_run.enter_context(factory(case_id, run_dir))
+            # The ledger every agent of the run writes its spend to, bound to the run's one logger
+            # now that the store is open (the logger and the review stages exist before it, so a
+            # store-setup failure still leaves a wire log).
+            logger.bind_ledger(observe.SpendLedger(store, run_id))
             # A resume joins the source run's case, so the case pointer comes from the store,
             # not the uuid minted above (they match on a fresh run). `run_dir` is passed because
             # a resumed MAIN inherits the investigation document as well as the message history.
@@ -866,7 +869,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         wall_ms = (time.monotonic() - run_started) * 1000.0
 
         result = agent_run.result if agent_run is not None else None
-        _write_trace_or_empty(run_dir, store, session_id, wall_ms)
+        _write_trace_or_empty(run_dir, store, session_id, wall_ms, run_id=run_id, logger=logger)
         output = result.output if result is not None else None
         return _run_summary(
             output=output, model_name=model_name, requests=logger.n_requests,

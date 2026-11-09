@@ -546,6 +546,7 @@ def _investigation(investigation_id: str, knowledge: dict[str, Any] | None) -> A
         "disposition": "benign", "cost_usd": 1.0, "created_at": _NOW, "started_at": _NOW,
         "finished_at": _NOW,
         "request_key": f"rk-{investigation_id}", "attempt": 1,  # required on the wire model (#1342 D-d)
+        "cost_is_lower_limit": False,  # required on the wire model too (#1377 r4 API field)
     }
     if knowledge is not None:
         doc["knowledge"] = knowledge

@@ -1131,6 +1131,99 @@ def test_o8_a_tainted_tree_still_raises_with_the_cut_short_fact_already_set(scen
     assert scene.job_end(run_id)["cut_short"] == "box-lost", scene.job_end(run_id)
 
 
+def _ledger_after(scene: Scene, run_id: str) -> Any:
+    """The run's ledger through the one read (`session_store.read_ledger`), from the database its session pointer names, once
+    the child has exited (r7.3 T1: the ledger says for itself whether it is complete)."""
+    from defender.records import session_store as ss
+
+    pointer = json.loads((scene.runs / f"{run_id}.session-pointer.json").read_text(encoding="utf-8"))
+    with ss.open_store_for_read(Path(pointer["store_path"])) as store:
+        return ss.read_ledger(store, run_id)
+
+
+@pytest.mark.parametrize(("mode", "complete"), [("replay-priced-raises", True), ("replay-priced-ledger-fault-raises", False),
+                                                ("replay-priced-ledger-fault-dies", False)],
+                         ids=["no write failed", "a write failed", "a write failed, dies inside the run"])
+def test_s2_a_run_that_raises_after_a_failed_spend_write_leaves_its_ledger_unsealed_and_its_job_end_record_five_facts(
+        scene, tmp_path, mode, complete):
+    """CONFLICT-UPDATED (r7.3 T1; was: the record says a spend write failed): a run that raises after it returned (or dies inside
+    after a failed write) leaves a ledger that reads incomplete when a write failed and complete when none did; the job-end record
+    carries its five facts and no spend fact. (r7.3 T1, T2; S2, O8)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    marks = tmp_path / "marks"
+    env = {**_env(scene), "DEFENDER_MODEL": "claude-sonnet-4-6", "DEFENDER_GATHER_MODEL": "claude-haiku-4-5",
+           "DEFENDER_REVIEW_MODEL": "kimi-k2.6"}
+
+    # A real fault: the child makes a SQLite trigger on its own spend_ledger refuse inserts from the first review call (ENTRY).
+    proc = subprocess.run(_child_cmd(scene, marks, run_id, os.getpid(), mode), env=env,  # noqa: S603
+                          cwd=str(WORKTREE), capture_output=True, text=True, timeout=240, check=False)
+
+    assert proc.returncode != 0, proc.stderr[-2000:]
+    if mode.endswith("-dies"):
+        assert (marks / "fault-raised").is_file(), ("premise: MAIN's request after the close raised inside the run", proc.stderr[-2000:])
+    else:
+        assert "the run died after its last response" in proc.stderr, proc.stderr[-2000:]
+    reviewed = (marks / "calls-review").read_text(encoding="utf-8").count("\n") if (marks / "calls-review").is_file() else 0
+    assert reviewed == 3, "premise: the run's live review stages are built on its model factory and made their three calls (#1377 r4)"
+    record = scene.job_end(run_id)
+    assert record is not None, proc.stderr[-2000:]
+    assert record["setup"] == "done", record
+    assert set(record) == {"setup", "box", "report_committed", "scrub_verified", "cut_short"}, record
+    assert _ledger_after(scene, run_id).complete is complete
+
+
+@pytest.mark.parametrize("lead_ends", ["unseen", "refused"])
+@pytest.mark.parametrize("run_ends", ["returns", "raises"])
+def test_s2c_r7_a_failed_write_of_a_non_response_row_is_in_the_job_end_record_whatever_the_run_ends_with(
+        scene, tmp_path, lead_ends, run_ends):
+    """Only the correlation lead's own row (its unseen or refused-400 request) is refused; MAIN's and the review's rows land.
+    The ledger reads incomplete, whether the run returns its summary or raises out of the investigation: no seal follows a
+    failed write of any row. (r7 S2c, r7.1 H, r7.3 T1; triage F3)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    marks = tmp_path / "marks"
+    env = {**_env(scene), "DEFENDER_MODEL": "claude-sonnet-4-6", "DEFENDER_GATHER_MODEL": "claude-haiku-4-5",
+           "DEFENDER_REVIEW_MODEL": "kimi-k2.6"}
+    mode = "replay-priced-lead-fault" + ("-raises" if run_ends == "raises" else "") + f"-{lead_ends}"
+
+    proc = subprocess.run(_child_cmd(scene, marks, run_id, os.getpid(), mode), env=env,  # noqa: S603
+                          cwd=str(WORKTREE), capture_output=True, text=True, timeout=240, check=False)
+
+    if run_ends == "raises":
+        assert proc.returncode != 0, proc.stderr[-2000:]
+        assert "the run died after its last response" in proc.stderr, proc.stderr[-2000:]
+    else:
+        assert "the run died after its last response" not in proc.stderr, ("premise: the run returned its summary", proc.stderr[-2000:])
+    reviewed = (marks / "calls-review").read_text(encoding="utf-8").count("\n") if (marks / "calls-review").is_file() else 0
+    assert reviewed == 3, ("premise: the live review stages made their three calls", proc.stderr[-2000:])
+    landed = (marks / "ledger-agents").read_text(encoding="utf-8").split() if (marks / "ledger-agents").is_file() else []
+    assert "gather:l-00c" not in landed, ("premise: the lead's own row was refused", landed)
+    assert "main" in landed, ("premise: MAIN's rows landed", landed)
+    assert len(landed) > 1, ("premise: the review's rows landed too", landed)
+    errors = [ln for ln in proc.stderr.splitlines() if '"ERROR"' in ln and "spend" in ln.lower()]
+    assert errors, ("premise: the failed write was logged at ERROR", proc.stderr[-2000:])
+    assert scene.job_end(run_id) is not None, proc.stderr[-2000:]
+    assert _ledger_after(scene, run_id).complete is False, "a run that lost the lead's row sealed its ledger"
+
+
+def test_s4_r7_3_the_page_step_is_handed_the_run_and_its_tenant_and_no_spend_fact(scene):
+    """CONFLICT-UPDATED (r7.3 T1; was: handed `spend_write_failed=True` exactly when the summary reported a failed write): the
+    post-step is handed nothing about spend, whatever the run's summary says; the page reads the ledger. (r7.3 T1; S4, r6 S5)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    seen: list[dict[str, Any]] = []
+
+    def visualize(_run: Any, **kw: Any) -> None:
+        seen.append(kw)
+
+    got = run_job(scene, run_id, visualize=visualize, lifecycle=_lifecycle(scene, investigate=_investigate(Ran(), spend_write_failed=True)))
+
+    assert got.raised is None, got
+    assert len(seen) == 1, seen
+    assert "spend_write_failed" not in seen[0], seen
+
+
 @pytest.mark.parametrize("scrub_ends", ["returns", "raises"])
 def test_c2_the_lifecycle_sets_scrub_verified_only_when_stop_and_scrub_returns(scene, scrub_ends):
     """On the holder the job entry handed it, `scrub_verified` is still false while the scrub runs, true after a clean return, and false after a raise even though the verdict says `ran: true`. (C2, O8)"""
