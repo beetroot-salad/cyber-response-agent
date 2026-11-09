@@ -158,16 +158,17 @@ def test_1414_no_learn_and_an_unverified_tree_open_nothing(tmp_path, tenant, sta
     assert _outcomes(state) == ["aborted"]
 
 
-def test_1414_a_later_run_of_the_case_replaces_the_earlier_request(tmp_path, tenant, state):
-    """Two runs of one case leave one request, the later run's with its outcome. O1 (C3)."""
+def test_1414_each_listed_run_of_a_case_queues_its_own_request(tmp_path, tenant, state):
+    """Two listed runs of one case leave two requests, each run's with its own outcome: each run gets its own issue. O1/O2
+    (ruling 2026-11-09: one issue per run; supersedes C3's later-replaces-earlier for this queue)."""
     _set(tenant, ["aborted", "benign"])
     first = _drive(tmp_path, state, "first", plan=F.plan_for("aborted"))
     assert _outcomes(state) == ["aborted"]
     second = _drive(tmp_path, state, "second", plan=F.plan_for("benign"))
 
-    [request] = S.open_issue_requests(state).values()
-    assert (request["outcome"], request["run_id"]) == ("benign", _run_id(second))
     assert _run_id(first) != _run_id(second)
+    assert sorted((r["run_id"], r["outcome"]) for r in S.open_issue_requests(state).values()) == sorted(
+        [(_run_id(first), "aborted"), (_run_id(second), "benign")])
 
 
 def test_1414_a_later_run_whose_outcome_is_not_listed_leaves_the_earlier_request(tmp_path, tenant, state):

@@ -23,7 +23,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 FEEDBACK_LABEL = "defender-feedback"
 #: The tenant's feedback setting, under `settings/` (FC: file name and shape).
 SETTING_FILE = "feedback.yaml"
-#: Run end's open-issue requests, one file per case, beside `author-queue/` (FC).
+#: Run end's open-issue requests, one file per request, beside `author-queue/` (FC; one issue per run, ruling 2026-11-09).
 REQUEST_QUEUE = "feedback-issue-queue"
 #: The registry lane's branch prefix, the third value of the lane-prefix choice (FC).
 FEEDBACK_PREFIX = "feedback/"
@@ -44,11 +44,6 @@ def marker(comment_id: int) -> str:
 def entry_id(issue: int, comment: int, n: int = 1) -> str:
     """The design's entry id `fb-<issue>-<comment>-<n>` (O6). Whether `n` starts at 1 is FC."""
     return f"fb-{issue}-{comment}-{n}"
-
-
-def run_marker(run_id: str) -> str:
-    """The marker a run's summary comment (and the issue body, for the first run) carries (A6; FC: its spelling)."""
-    return f"<!-- defender-feedback-run:{run_id} -->"
 
 
 def answer(*, approve: tuple[int, ...] = (), review_by: str | None = None,
@@ -157,8 +152,8 @@ def lessons_queue_file(paths: Any) -> Path:
 
 class Decider:
     """The tick's `decide` seam (FC: `decide(item, *, box=None) -> answer`). The item carries (FC):
-    `comment_id`, `issue`, `author`, `body`, `case_id`, `run_id` and `outcome` (the framing run's, A6/A3),
-    and `lookups` (that run's captured lookups, indexed by position). It answers each comment from `script`
+    `comment_id`, `issue`, `author`, `body`, `case_id`, `run_id` and `outcome` (of the run whose issue the comment is
+    on, A3; ruling 2026-11-09), and `lookups` (that run's captured lookups, indexed by position). It answers each comment from `script`
     by comment id: a dict every time, or a list consumed one per attempt (the last repeats); an `Exception`
     value is raised. It records the items it was handed."""
 

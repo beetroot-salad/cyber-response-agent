@@ -1,5 +1,5 @@
-"""#1414 F2 steps 1-2 and Replies: the tick opens one issue per case, reads only eligible comments (D13's record,
-D12's close rule), frames each by its run, and replies once where the person spoke.
+"""#1414 F2 steps 1-2 and Replies: the tick opens one issue per run (ruling 2026-11-09), reads only eligible comments
+(D13's record, D12's close rule), frames each by its issue's run, and replies once where the person spoke.
 """
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import asyncio
 import datetime as dt
 import json
 import logging
+import re
 
 import httpx
 import pytest
@@ -22,27 +23,42 @@ def _loud(caplog, *words: str) -> bool:
                for r in caplog.records)
 
 
+def _run_issues(fb, run_dir) -> list[dict]:
+    """The labelled bot-made issues whose title and host-written first body line name `run_dir`'s run id exactly
+    (ruling 2026-11-09: the run id is on the issue body's first line, with the bot as creator, and in the title)."""
+    named = re.compile(rf"(?<![\w-]){re.escape(S.run_id_of(run_dir))}(?![\w-])")
+    return [i for i in fb.forge.issues
+            if S.FEEDBACK_LABEL in {label["name"] for label in i["labels"]}
+            and named.search((i["body"].splitlines() or [""])[0]) and named.search(i["title"])]
+
+
 # ---------------------------------------------------------------- F2 step 1: open (O2, A6)
 
-def test_1414_a_request_opens_one_labelled_bot_issue_and_a_rerun_comments_on_it(fb):
-    """The first request creates one labelled issue whose first line names the case; a rerun comments on it; a closed one gets nothing. O2/F2.1."""
-    number = fb.opened("case-db07")
-
-    [issue] = fb.issues("case-db07")
+def test_1414_each_run_opens_its_own_labelled_bot_issue_naming_the_run(fb):
+    """A request creates one labelled bot issue whose title and first line name its run; a rerun of the case opens a new one,
+    whether the earlier issue is open or closed, and comments on neither. O2/F2.1 (ruling 2026-11-09: one issue per run)."""
+    first = fb.request("case-db07")
+    assert fb.tick(S.Decider()) == 0
+    [issue] = _run_issues(fb, first)
     assert issue["user"]["login"] == fb.bot
     assert len(fb.forge.issue_creates()) == 1
     assert S.open_issue_requests(fb.paths) == {}, "the served request was not released"
 
-    fb.request("case-db07")
+    second = fb.request("case-db07")
     assert fb.tick(S.Decider()) == 0
-    assert len(fb.forge.issue_creates()) == 1, "a rerun of an open case opened a second issue"
-    assert len(fb.forge.comments_on(number, by=fb.bot)) == 1, "the rerun's summary was not commented"
+    assert len(fb.forge.issue_creates()) == 2, "a rerun of the case did not open its own issue"
+    [again] = _run_issues(fb, second)
+    assert again["number"] != issue["number"]
+    assert again["user"]["login"] == fb.bot
+    assert _run_issues(fb, first) == [issue], "the rerun's issue names the earlier run"
+    assert fb.forge.comments_on(issue["number"], by=fb.bot) == [], "the rerun commented on the earlier run's issue"
 
-    fb.forge.set_issue_state(number, "closed")
-    fb.request("case-db07")
+    fb.forge.set_issue_state(again["number"], "closed")
+    third = fb.request("case-db07")
     assert fb.tick(S.Decider()) == 0
-    assert len(fb.forge.issue_creates()) == 1
-    assert len(fb.forge.comments_on(number, by=fb.bot)) == 1, "a closed issue was commented (D6)"
+    assert len(fb.forge.issue_creates()) == 3, "a rerun after a closed issue opened nothing"
+    assert len(_run_issues(fb, third)) == 1
+    assert [len(fb.forge.comments_on(n, by=fb.bot)) for n in (issue["number"], again["number"])] == [0, 0]
     assert S.open_issue_requests(fb.paths) == {}
 
 
@@ -78,74 +94,77 @@ def test_1414_recovery_ignores_an_issue_not_created_by_the_bot(fb):
     assert {i["user"]["login"] for i in fb.issues("case-decoy")} == {OUTSIDER, fb.bot}
 
 
-def test_1414_recovery_matches_the_case_id_exactly_not_as_a_substring(fb):
-    """Bot-made labelled issues whose first line holds `case-1` only inside a longer id are not case-1's issue; a new one is made. O2/F2.1."""
-    decoys = [fb.opened(name) for name in ("case-10", "my-case-1")]
-    assert len(fb.forge.issue_creates()) == 2, "premise: the decoys were made by real ticks"
-    fb.request("case-1")
+def test_1414_recovery_finds_the_runs_own_issue_never_another_runs_of_the_case(fb):
+    """A create the forge applied but whose reply was lost is recovered as that run's issue, never taken for an earlier run's of
+    the same case or another case's; a create the forge never applied is made on the retry. O2/F2.1/A6 (ruling 2026-11-09)."""
+    first = fb.request("case-1")
+    other = fb.request("case-10")
+    assert fb.tick(S.Decider()) == 0
+    assert len(fb.forge.issues) == 2, "premise: the earlier run's and another case's issues were made by a real tick"
+    fb.forge.lose_reply = lambda r: r.method == "POST" and r.url.path.endswith("/issues")
+    second = fb.request("case-1")
+    fb.tick(S.Decider())
+    fb.forge.lose_reply = None
+    assert len(fb.forge.issues) == 3, "premise: the forge applied the lost create"
 
     assert fb.tick(S.Decider()) == 0
-    assert len(fb.forge.issue_creates()) == 3, "a decoy naming a longer id was taken for the case's issue"
-    [issue] = fb.issues("case-1")
-    assert issue["number"] not in decoys
-    assert issue["user"]["login"] == fb.bot
+    assert len(fb.forge.issues) == 3, "the retried open made a second issue for the run"
+    [one], [two], [ten] = (_run_issues(fb, r) for r in (first, second, other))
+    assert len({one["number"], two["number"], ten["number"]}) == 3
+    comment = fb.forge.add_comment(two["number"], user=OWNER, body="expected")
+    decider = S.Decider()
+    assert fb.tick(decider) == 0
+    assert decider.decided == [comment["id"]], "the recovered issue was not recorded as the run's"
+    assert decider.item(comment["id"])["run_id"] == S.run_id_of(second)
 
-
-def test_1414_a_rerun_summary_lost_in_transit_is_not_commented_twice(fb):
-    """A summary comment the forge applied but whose reply was lost is not posted again on the retry; a lost comment is. A6."""
-    number = fb.opened("case-summary")
-    fb.forge.lose_reply = lambda r: r.method == "POST" and r.url.path.endswith(f"/issues/{number}/comments")
-    fb.request("case-summary")
+    fb.forge.fault = lambda r: (httpx.ConnectError("down", request=r)
+                                if r.method == "POST" and r.url.path.endswith("/issues") else None)
+    third = fb.request("case-1")
     fb.tick(S.Decider())
-    assert len(fb.forge.comments_on(number, by=fb.bot)) == 1, "premise: the forge applied the comment"
-
-    fb.forge.lose_reply = None
-    fb.tick(S.Decider())
-    assert len(fb.forge.comments_on(number, by=fb.bot)) == 1, "the retried step posted the run's summary again"
-    assert S.open_issue_requests(fb.paths) == {}
-
-    fb.forge.fault = lambda r: httpx.ConnectError("down", request=r) if r.method == "POST" and r.url.path.endswith("/comments") else None
-    fb.request("case-summary")
-    fb.tick(S.Decider())
-    assert len(fb.forge.comments_on(number, by=fb.bot)) == 1, "premise: this summary was not applied"
+    assert _run_issues(fb, third) == [], "premise: this create was never applied"
     fb.forge.fault = None
-    fb.tick(S.Decider())
-    assert len(fb.forge.comments_on(number, by=fb.bot)) == 2, "positive control: a summary never applied is posted"
+    assert fb.tick(S.Decider()) == 0
+    assert len(_run_issues(fb, third)) == 1, "positive control: a create never applied is made on the retry"
+    assert len(fb.forge.issues) == 4
+    assert S.open_issue_requests(fb.paths) == {}
 
 
 def test_1414_an_issue_the_forge_no_longer_has_is_treated_as_closed_and_logged(fb, caplog):
-    """A case whose recorded issue is gone gets no new issue and no comment; the request is released and the loss logged. A6."""
+    """A recorded issue the forge no longer has is read as closed: the loss is logged, the issue is never made again, and a
+    later run of the case still opens its own. A6 (ruling 2026-11-09: one issue per run)."""
     number = fb.opened("case-gone")
     fb.forge.remove_issue(number)
-    fb.request("case-gone")
 
     with caplog.at_level(logging.INFO):
         assert fb.tick(S.Decider()) == 0
-    assert len(fb.forge.issue_creates()) == 1, "a new issue replaced the gone one"
-    assert S.open_issue_requests(fb.paths) == {}
+        assert fb.tick(S.Decider()) == 0
+    assert len(fb.forge.issue_creates()) == 1, "the gone issue was made again"
     assert any(str(number) in r.getMessage() for r in caplog.records), "the missing issue is not in the log"
 
+    later = fb.request("case-gone")
+    assert fb.tick(S.Decider()) == 0
+    assert len(_run_issues(fb, later)) == 1, "a later run of the case opened nothing"
+    assert len(fb.forge.issue_creates()) == 2
+    assert S.open_issue_requests(fb.paths) == {}
 
-def test_1414_a_comment_is_framed_by_the_latest_run_marker_before_it(fb):
-    """Each comment is decided with the lookups and outcome of the latest run summary above it; the issue body marks the first run. A6/A3."""
+
+def test_1414_a_comment_is_framed_by_its_issues_run(fb):
+    """Each comment is decided with the run id, lookups and outcome of the run whose issue it is on, even when a later run
+    of the case has its own issue by then. A3 (ruling 2026-11-09: no run markers; a comment is framed by its issue's run)."""
     decider = S.Decider()
     first = fb.request("case-frame", lookups=[LOOKUP])
     assert fb.tick(decider) == 0
-    [issue] = fb.issues("case-frame")
-    number = issue["number"]
-    assert S.run_marker(S.run_id_of(first)) in issue["body"]
-    early = fb.forge.add_comment(number, user=OWNER, body="about the first run")
     second = fb.request("case-frame", lookups=[LOOKUP_2])
     assert fb.tick(decider) == 0
-    late = fb.forge.add_comment(number, user=NAMED, body="about the second run")
+    [one], [two] = _run_issues(fb, first), _run_issues(fb, second)
+    late = fb.forge.add_comment(one["number"], user=OWNER, body="about the first run, said after the second")
+    other = fb.forge.add_comment(two["number"], user=NAMED, body="about the second run")
     assert fb.tick(decider) == 0
 
-    assert decider.decided == [early["id"], late["id"]]
-    assert decider.item(early["id"])["lookups"] == [LOOKUP]
-    assert decider.item(early["id"])["run_id"] == S.run_id_of(first)
-    assert decider.item(late["id"])["lookups"] == [LOOKUP_2]
-    assert decider.item(late["id"])["run_id"] == S.run_id_of(second)
-    assert decider.item(late["id"])["outcome"] == "inconclusive"
+    assert sorted(decider.decided) == sorted([late["id"], other["id"]])
+    assert (decider.item(late["id"])["run_id"], decider.item(late["id"])["lookups"]) == (S.run_id_of(first), [LOOKUP])
+    assert (decider.item(other["id"])["run_id"], decider.item(other["id"])["lookups"]) == (S.run_id_of(second), [LOOKUP_2])
+    assert decider.item(other["id"])["outcome"] == "inconclusive"
 
 
 # ---------------------------------------------------------------- F2 step 2: read (O3, O4, D12, D13)
@@ -372,44 +391,38 @@ def _rotated(fb):
 
 
 def test_1414_what_the_old_generations_bot_made_is_still_the_bots(fb):
-    """After a rotation the old bot's issue is recovered, its run summaries and replies are seen, and its comments are never decided. D13/O2/O3/A6."""
+    """After a rotation the old bot's issue is recovered as its run's, its replies are seen, and its comments are never
+    decided. D13/O2/O3/A6 (ruling 2026-11-09: recovery by first line and a bot creator of any generation)."""
     directory, old_bot = _rotated(fb)
     case = "case-rotated"
-    # What the old generation's bot made is made by real ticks while the forge authenticates as that bot; the
-    # first create's reply is lost, so the host never records the issue and the next tick must recover it.
+    # The old generation's bot makes the run's issue, and the create's reply is lost, so the host never records it.
     fb.forge.login = old_bot
     fb.forge.lose_reply = lambda r: r.method == "POST" and r.url.path.endswith("/issues")
-    fb.request(case)
+    run = fb.request(case)
     fb.tick(S.Decider(), directory=directory)
     fb.forge.lose_reply = None
-    [issue] = fb.issues(case)
+    [issue] = _run_issues(fb, run)
     number = issue["number"]
     assert issue["user"]["login"] == old_bot, "premise: the old bot made the issue"
-    creates = len(fb.forge.issue_creates())
+    fb.forge.login = fb.bot  # the live generation's bot recovers it
+    decider = S.Decider()
+    assert fb.tick(decider, directory=directory) == 0
+    assert len(fb.forge.issue_creates()) == 1, "the old bot's issue was not recognised and a second was made"
+    assert S.open_issue_requests(fb.paths) == {}
+
     spoken = fb.forge.add_comment(number, user=OWNER, body="nothing to change")
-    decider = S.Decider({spoken["id"]: S.answer(reason="nothing to learn")})
-    assert fb.tick(decider, directory=directory) == 0  # recovers the old bot's issue; replies as the old bot
-    second = fb.run("case-rotated-2")
-    S.queue_open_issue(fb.paths, case_id=case, tenant_id=fb.t.tenant_id, run_id=S.run_id_of(second),
-                       outcome="inconclusive", lookups=[S.LOOKUP])
-    assert fb.tick(decider, directory=directory) == 0  # the old bot's later run summary
-    assert [c["user"]["login"] for c in fb.forge.comments_on(number)
-            if S.run_marker(S.run_id_of(second)) in c["body"]] == [old_bot], "premise: the old bot made the summary"
+    decider.script[spoken["id"]] = S.answer(reason="nothing to learn")
+    fb.forge.login = old_bot  # the old bot is still the forge's login when it replies
+    assert fb.tick(decider, directory=directory) == 0
     assert [c["user"]["login"] for c in fb.forge.comments_on(number) if S.marker(spoken["id"]) in c["body"]] == [old_bot], \
         "premise: the old bot replied"
-    fb.forge.login = fb.bot  # the live generation's bot from here on
+    fb.forge.login = fb.bot
     chatter = fb.forge.add_comment(number, user=old_bot, body="a note the old bot left")
     posted = len(fb.forge.comments_on(number))
 
-    S.queue_open_issue(fb.paths, case_id=case, tenant_id=fb.t.tenant_id, run_id=S.run_id_of(second),
-                       outcome="inconclusive", lookups=[S.LOOKUP])
     assert fb.tick(decider, directory=directory) == 0
     assert fb.tick(decider, directory=directory) == 0
-
-    assert len(fb.forge.issue_creates()) == creates, "the old bot's issue was not recognised and a second was made"
-    assert [i["number"] for i in fb.issues(case)] == [number]
-    assert S.open_issue_requests(fb.paths) == {}
-    assert len(fb.forge.comments_on(number)) == posted, "a summary or reply the old bot already made was posted again"
+    assert len(fb.forge.comments_on(number)) == posted, "a reply the old bot already made was posted again"
     assert decider.decided == [spoken["id"]], "the old bot's comment was decided, or the person's was not"
     assert chatter["id"] not in decider.decided
     positive = fb.forge.add_comment(number, user=NAMED, body="control: a person's later comment")
