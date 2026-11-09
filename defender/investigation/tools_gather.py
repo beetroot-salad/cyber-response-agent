@@ -601,9 +601,10 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
         )
     except ModelHTTPError as e:
         # The provider refused one of this lead's requests for good (#1243 r3). A broken setup
-        # (401-404: key, payment, access, model name) fails every lead alike, so it ends the run; any other
-        # refusal ends this lead by name and MAIN decides what next. Only the status reaches
-        # MAIN; the provider's text goes to the host log. Anything else HTTP passes through.
+        # (401-404, 412: key, payment, access, model name, suspended account) fails every lead
+        # alike, so it ends the run; any other refusal ends this lead by name and MAIN decides
+        # what next. Only the status reaches MAIN; the provider's text goes to the host log.
+        # Anything else HTTP passes through.
         rejection = providers.rejected(e)
         if rejection is None:
             raise

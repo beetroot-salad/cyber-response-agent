@@ -48,10 +48,13 @@ class ProviderDown(Exception):  # noqa: N818 — named for the state it reports,
 
 
 #: Refusals that say the model's setup or account is broken (key, payment or credit, access,
-#: model name), not the request: every caller on that model gets the same answer, so even a
-#: lead's ends the run (#1243 r3). A provider that reports these as a plain 400 is not caught:
-#: telling them apart would mean reading the body text.
-SETUP_STATUSES = frozenset({401, 402, 403, 404})
+#: model name, account suspended), not the request: every caller on that model gets the same
+#: answer, so even a lead's ends the run (#1243 r3). 412 is Fireworks' suspended or blocked
+#: account, and its fine-tuned model that failed to load (#1447). Read by status alone: a
+#: provider that reports these another way (Anthropic's low credit as 400, OpenAI's
+#: `insufficient_quota` as 429) is not caught, since telling them apart would mean reading
+#: the body text, which Fireworks, the provider in use, does not document.
+SETUP_STATUSES = frozenset({401, 402, 403, 404, 412})
 #: How much of the provider's refusal text the host log keeps. Never shown to a model.
 _REASON_CAP = 500
 

@@ -336,3 +336,29 @@ def test_o6_d4_a_sibling_world_ending_provider_down_exits_4(tmp_path: Path,
     assert d.raised is None, f"the sibling crashed instead of ending {ends}: {d.raised!r}"
     assert (d.summary or {}).get("truncated_by") == ends, d.summary
     assert d.rc == rc, f"a sibling world that ended {ends} exited {d.rc!r}, not {rc}"
+
+
+@pytest.mark.parametrize(("status", "ends_run"), [(412, True), (400, False)])
+def test_1447_a_lead_refused_412_ends_the_run_and_a_400_only_the_lead(
+        tmp_path: Path, status: int, ends_run: bool) -> None:
+    """Fireworks reports a suspended or blocked account as 412: every lead on the key gets it,
+    so a lead's 412 ends the run `provider-rejected` like 401-404. A 400 still ends only the
+    lead, and the run finishes (#1447)."""
+    stores: list = []
+    d = S.run_alert(
+        tmp_path, main=[S.gather(LEAD, "cmdb"), S.text(S.DONE)],
+        leads={L3: [S.text(CORR)], LEAD: [S.list_verbs("cmdb"), S.text("unreached")]},
+        lead_faults={LEAD: S.LeadFault(raise_on=2, exc=lambda: P.http_error(status))},
+        store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
+    assert d.raised is None, f"the run crashed on a lead's {status}: {d.raised!r}"
+    ended = (d.summary or {}).get("truncated_by")
+    if ends_run:
+        assert ended == run_end.TRUNCATED_BY_PROVIDER_REJECTED, (
+            f"a lead's {status} ended the run {ended!r}, not provider-rejected")
+        assert not d.paths.report.exists(), "a provider-rejected run wrote report.md"
+        assert d.rc == 7, f"run.py exited {d.rc!r} on a provider-rejected run, not 7"
+    else:
+        assert ended != run_end.TRUNCATED_BY_PROVIDER_REJECTED, (
+            f"a lead's {status} ended the whole run; it should end only that lead")
+        assert P.sessions(_store(stores)).get(P.gather_agent(LEAD)) == (
+            run_end.TRUNCATED_BY_PROVIDER_REJECTED), "the refused lead's session is not stamped"
