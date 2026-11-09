@@ -47,12 +47,12 @@ def _entries_at(fb, rev: str) -> list[dict]:
 
 
 def _approved(fb, case: str, *, by: str = OWNER, body: str = "expected: the nightly backup",
-              lookups=None, **answer):
-    """An issue for `case` (one tick), a comment by `by` on it, and a decider approving it."""
+              lookups=None, created_at: str | None = None, **answer):
+    """An issue for `case` (one tick), a comment by `by` on it (dated `created_at`, else now), and a decider approving it."""
     fb.request(case, lookups=lookups)
     assert fb.tick(S.Decider()) == 0
     [issue] = fb.issues(case)
-    comment = fb.forge.add_comment(issue["number"], user=by, body=body)
+    comment = fb.forge.add_comment(issue["number"], user=by, body=body, created_at=created_at)
     return issue["number"], comment, S.Decider({comment["id"]: S.answer(**answer)})
 
 
@@ -78,7 +78,9 @@ def _covering(**over) -> dict:
 def test_1414_an_approval_drafts_host_filled_entries_on_a_registry_only_pr(fb):
     """Approved lookups become appended entries whose every field but the justification the host fills; the PR touches only the registry and names the ids. O6/P2/P3."""
     named_date = today() + dt.timedelta(days=30)
-    number, first, decider = _approved(fb, "case-draft", lookups=[LOOKUP, LOOKUP_2], approve=(0,))
+    then = today() - dt.timedelta(days=3)
+    number, first, decider = _approved(fb, "case-draft", lookups=[LOOKUP, LOOKUP_2], approve=(0,),
+                                       created_at=fb.at(-3 * 86400))
     second = fb.forge.add_comment(number, user=NAMED, body=f"also fine until {named_date}")
     decider.script[second["id"]] = S.answer(approve=(1,), review_by=named_date.isoformat())
     main_before = _registry_at(fb, "main")
@@ -94,8 +96,8 @@ def test_1414_an_approval_drafts_host_filled_entries_on_a_registry_only_pr(fb):
     one, two = by_id[S.entry_id(number, first["id"])], by_id[S.entry_id(number, second["id"])]
     assert {k: one[k] for k in FIELDS} == {
         "pattern": LOOKUP["pattern"], "actor_scope": LOOKUP["actor"], "host_scope": LOOKUP["host"],
-        "added_by": OWNER, "added_at": today().isoformat(),
-        "review_by": (today() + dt.timedelta(days=180)).isoformat()}
+        "added_by": OWNER, "added_at": then.isoformat(),
+        "review_by": (then + dt.timedelta(days=180)).isoformat()}
     assert first["body"] in one["justification"]
     assert f"/issues/{number}" in one["justification"]
     assert (two["pattern"], two["added_by"], two["review_by"]) == (LOOKUP_2["pattern"], NAMED, named_date.isoformat())
@@ -206,17 +208,21 @@ def test_1414_a_draft_lost_before_its_pr_is_drafted_again_once(fb):
 
 def test_1414_a_person_pr_naming_an_id_settles_nothing(fb):
     """A closed PR not opened by the bot under feedback/ that names an entry id does not settle it, while the bot's own does. P6/A2."""
-    number, comment, decider = _approved(fb, "case-impostor", approve=(0,))
-    ident = S.entry_id(number, comment["id"])
-    for head, user in (("feedback/fake", S.OUTSIDER), ("someone/fix", fb.bot)):
+    number, first, decider = _approved(fb, "case-impostor", lookups=[LOOKUP, LOOKUP_2], approve=(0,))
+    second = fb.forge.add_comment(number, user=NAMED, body="and this")
+    decider.script[second["id"]] = S.answer(approve=(1,))
+    unsettled, settled = S.entry_id(number, first["id"]), S.entry_id(number, second["id"])
+    for head, user, names in (("feedback/fake", S.OUTSIDER, unsettled), ("someone/fix", fb.bot, unsettled),
+                              ("feedback/own", fb.bot, settled)):
         row = pr_row(40 + len(fb.forge.prs), head, state="closed")
-        row["body"] = f"settles {ident}"
+        row["body"] = f"settles {names}"
         row["user"] = {"login": user}
         fb.forge.add_pr(row)
 
     assert fb.tick(decider) == 0
     [(branch, tip)] = _drafts(fb).items()
-    assert [e["id"] for e in _entries_at(fb, tip)] == [ident], "a PR that was not the bot's feedback PR declined the entry"
+    assert [e["id"] for e in _entries_at(fb, tip)] == [unsettled], \
+        "a PR that was not the bot's feedback PR settled the entry, or the bot's own did not"
 
 
 # ---------------------------------------------------------------- A2: one recovery path
@@ -249,6 +255,69 @@ def test_1414_a_retained_delivery_holds_the_lease_and_is_redelivered_with_the_sa
     set_pull_state(fb.t.remote, branch, merged=False)
     assert fb.tick(decider) == 0
     assert len(fb.forge.prs) == 2, "positive control: the lease did not release when the PR closed"
+
+
+def test_1414_a_pr_the_forge_applied_but_never_answered_is_found_not_drafted_again(fb):
+    """A crash between the PR's creation and the settlement record: the next tick reads the bot's feedback/ PR body, drafts nothing more and replies with its link. A1/A2/P6."""
+    number, comment, decider = _approved(fb, "case-crash", approve=(0,))
+    fb.forge.lose_reply = lambda r: r.method == "POST" and r.url.path.endswith("/pulls")
+    fb.tick(decider)
+    [(branch, _)] = _drafts(fb).items()
+    assert len(fb.forge.prs) == 1, "premise: the forge applied the create"
+
+    fb.forge.lose_reply = None
+    for _ in range(3):
+        assert fb.tick(decider) == 0
+    assert len(fb.forge.prs) == 1, "the entry was drafted into a second PR"
+    assert list(_drafts(fb)) == [branch]
+    assert decider.decided == [comment["id"]]
+    [reply] = fb.replies(number, comment["id"])
+    assert _pr_of(fb, branch)["html_url"] in reply["body"]
+
+
+def test_1414_while_a_feedback_pr_is_open_new_requests_and_no_change_replies_still_go_out(fb):
+    """With the writer lease held by an open feedback PR, a new open-issue request still opens its issue and a no-change comment still gets its reply, in the same tick. P6/A2/O2/O5."""
+    number, comment, decider = _approved(fb, "case-held", approve=(0,))
+    assert fb.tick(decider) == 0
+    [(branch, _)] = _drafts(fb).items()
+    assert _pr_of(fb, branch)["state"] == "open"
+    thanks = fb.forge.add_comment(number, user=NAMED, body="thanks")
+    decider.script[thanks["id"]] = S.answer(reason="a thanks")
+    fb.request("case-while-open")
+
+    assert fb.tick(decider) == 0
+    [fresh] = fb.issues("case-while-open")
+    assert fresh["user"]["login"] == fb.bot
+    assert S.open_issue_requests(fb.paths) == {}
+    [reply] = fb.replies(number, thanks["id"])
+    assert "a thanks" in reply["body"]
+    assert len(fb.forge.prs) == 1
+
+
+def test_1414_an_entry_the_reader_drops_on_main_does_not_block_drafting(fb):
+    """A registry on main holding an entry the reader drops still takes the new entry, and keeps the dropped one's lines. O6/A7."""
+    bad = {"id": "tk-bad", "pattern": "x"}  # missing every other field: the reader drops it
+    _main_with(fb, [bad])
+    number, comment, decider = _approved(fb, "case-dropped", approve=(0,))
+
+    assert fb.tick(decider) == 0
+    [(_, tip)] = _drafts(fb).items()
+    drafted = _registry_at(fb, tip)
+    assert [e["id"] for e in yaml.safe_load(drafted)["entries"]] == ["tk-bad", S.entry_id(number, comment["id"])]
+    assert "tk-bad" in drafted
+    assert fb.replies(number, comment["id"]), "the approval got no reply"
+
+
+def test_1414_a_closed_issues_approval_is_drafted_and_replied_to(fb):
+    """A comment written before an issue closed and approving a lookup is drafted and answered with the PR link after the close. D12/O6/O5."""
+    number, comment, decider = _approved(fb, "case-closed-approval", approve=(0,), created_at=fb.at(-20))
+    fb.forge.set_issue_state(number, "closed", at=fb.at(-10))
+
+    assert fb.tick(decider) == 0
+    [(branch, tip)] = _drafts(fb).items()
+    assert [e["id"] for e in _entries_at(fb, tip)] == [S.entry_id(number, comment["id"])]
+    [reply] = fb.replies(number, comment["id"])
+    assert _pr_of(fb, branch)["html_url"] in reply["body"]
 
 
 # ---------------------------------------------------------------- A7: the format contract
@@ -290,6 +359,28 @@ def test_1414_the_registry_is_appended_to_only_in_the_two_shapes_the_contract_na
     assert ids[-1] == S.entry_id(number, comment["id"])
     assert len(ids) == 1 + (shape != "empty flow list")
     assert "entries: []" not in drafted
+
+
+def test_1414_a_refused_registry_shape_is_uncounted_unquarantined_and_logged_each_tick(fb, caplog):
+    """A registry shape the contract refuses fails the draft every tick, past the ceiling, with no reply and no decision quarantined; once a person fixes the file the approval drafts. A7/A8."""
+    fb.t.merge({S.REGISTRY: "entries: [{id: tk-old}]\n"})
+    number, comment, decider = _approved(fb, "case-refused-shape", approve=(0,))
+
+    for tick in range(5):
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            assert fb.tick(decider) == 0
+        assert any(r.levelno >= logging.WARNING for r in caplog.records), f"tick {tick}: the refusal is not logged"
+    assert _drafts(fb) == {}
+    assert fb.forge.prs == []
+    assert fb.replies(number, comment["id"]) == [], "the refusal was turned into a recorded no-change"
+    assert decider.decided == [comment["id"]]
+
+    fb.t.merge({S.REGISTRY: "entries: []\n"})
+    assert fb.tick(decider) == 0
+    [(_, tip)] = _drafts(fb).items()
+    assert [e["id"] for e in _entries_at(fb, tip)] == [S.entry_id(number, comment["id"])]
+    assert decider.decided == [comment["id"]]
 
 
 def test_1414_a_second_batch_after_a_merge_appends_to_the_block_the_first_made(fb):

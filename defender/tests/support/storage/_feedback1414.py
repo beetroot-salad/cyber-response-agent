@@ -58,15 +58,19 @@ class FeedbackTail(SpecTail):
 
     `rows` (lead -> rows) go into the `RunState` found among the lifecycle's keywords; `run_state` stays `None` when `run.py`
     hands none. `copy_text` is what the run's own settings copy held for `feedback.yaml` when the lifecycle began.
-    `box_planted` is written over the box-writable `executed_queries.jsonl`."""
+    `box_planted` is written over the box-writable `executed_queries.jsonl`. With `investigate`, the tail runs production's
+    `_run_investigation_lifecycle` (unboxed executor, the real scrub) around that fake investigation, so what `run.py` hands
+    the lifecycle reaches it as the driver would receive it; the fake then fills the run state itself."""
 
     def __init__(  # noqa: PLR0913 — one knob per way a test ends a run
             self, paths: Any, *, plan: Plan | None = None, rows: dict[str, list[dict]] | None = None,
                  box_planted: str | None = None, mid_run: Callable[[], None] | None = None,
                  raises: BaseException | None = None, teardown_faulted: bool = False,
-                 certify: bool = True, setting_file: str = "feedback.yaml") -> None:
+                 certify: bool = True, setting_file: str = "feedback.yaml", closed_before_cut: bool = False,
+                 investigate: Callable[..., dict] | None = None) -> None:
         plan = plan or Plan(truncated_by=None, disposition="inconclusive")
-        super().__init__(paths, truncated_by=plan.truncated_by, certify=certify)
+        super().__init__(paths, truncated_by=plan.truncated_by, closed_before_cut=closed_before_cut, certify=certify)
+        self.investigate = investigate
         self.plan = plan
         self.rows = rows or {}
         self.box_planted = box_planted
@@ -97,6 +101,8 @@ class FeedbackTail(SpecTail):
             self.run_state.rows.update(self.rows)
         if self.mid_run is not None:
             self.mid_run()
+        if self.investigate is not None:
+            return self._through_production(run, kw)
         if self._certify:
             scrub_mod.scrub(run_dir)
         self._note("lifecycle", run_dir)
@@ -106,6 +112,20 @@ class FeedbackTail(SpecTail):
             from defender.run import TEARDOWN_FAULTED
 
             summary[TEARDOWN_FAULTED] = True
+        return summary
+
+
+    def _through_production(self, run: Any, kw: dict) -> dict:
+        import functools
+
+        from defender import box as box_mod
+        from defender import run as run_py
+
+        lifecycle = functools.partial(
+            run_py._run_investigation_lifecycle, investigate=self.investigate,
+            start_box=lambda *a, **k: box_mod.unboxed_executor(), stop_box=lambda *a, **k: None)
+        summary = lifecycle(run=run, **kw)
+        self._note("lifecycle", run.run_dir)
         return summary
 
 

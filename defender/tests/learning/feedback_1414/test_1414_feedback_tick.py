@@ -3,6 +3,7 @@ D12's close rule), frames each by its run, and replies once where the person spo
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 
@@ -72,6 +73,20 @@ def test_1414_recovery_ignores_an_issue_not_created_by_the_bot(fb):
     assert {i["user"]["login"] for i in fb.issues("case-decoy")} == {OUTSIDER, fb.bot}
 
 
+def test_1414_recovery_matches_the_case_id_exactly_not_as_a_substring(fb):
+    """Bot-made labelled issues whose first line holds `case-1` only inside a longer id are not case-1's issue; a new one is made. O2/F2.1."""
+    fb.forge.add_label(S.FEEDBACK_LABEL)
+    decoys = [fb.forge.add_issue(title=name, body=f"{name}\n\nplanted", user=fb.bot, labels=[S.FEEDBACK_LABEL])
+              for name in ("case-10", "my-case-1")]
+    fb.request("case-1")
+
+    assert fb.tick(S.Decider()) == 0
+    assert len(fb.forge.issue_creates()) == 1, "a decoy naming a longer id was taken for the case's issue"
+    [issue] = fb.issues("case-1")
+    assert issue["number"] not in {d["number"] for d in decoys}
+    assert issue["user"]["login"] == fb.bot
+
+
 def test_1414_a_rerun_summary_lost_in_transit_is_not_commented_twice(fb):
     """A summary comment the forge applied but whose reply was lost is not posted again on the retry; a lost comment is. A6."""
     number = fb.opened("case-summary")
@@ -109,18 +124,18 @@ def test_1414_an_issue_the_forge_no_longer_has_is_treated_as_closed_and_logged(f
 
 def test_1414_a_comment_is_framed_by_the_latest_run_marker_before_it(fb):
     """Each comment is decided with the lookups and outcome of the latest run summary above it; the issue body marks the first run. A6/A3."""
+    decider = S.Decider()
     first = fb.request("case-frame", lookups=[LOOKUP])
-    assert fb.tick(S.Decider()) == 0
+    assert fb.tick(decider) == 0
     [issue] = fb.issues("case-frame")
     number = issue["number"]
     assert S.run_marker(S.run_id_of(first)) in issue["body"]
     early = fb.forge.add_comment(number, user=OWNER, body="about the first run")
     second = fb.request("case-frame", lookups=[LOOKUP_2])
-    assert fb.tick(S.Decider()) == 0
-    late = fb.forge.add_comment(number, user=NAMED, body="about the second run")
-
-    decider = S.Decider()
     assert fb.tick(decider) == 0
+    late = fb.forge.add_comment(number, user=NAMED, body="about the second run")
+    assert fb.tick(decider) == 0
+
     assert decider.decided == [early["id"], late["id"]]
     assert decider.item(early["id"])["lookups"] == [LOOKUP]
     assert decider.item(early["id"])["run_id"] == S.run_id_of(first)
@@ -162,8 +177,8 @@ def test_1414_a_login_dropped_from_the_record_stops_counting_at_the_next_tick(fb
 
 
 @pytest.mark.parametrize(("age", "bound", "fresh"), [
-    (dt.timedelta(seconds=30), None, True),       # inside the default bound (300 s)
-    (dt.timedelta(hours=1), None, False),
+    (dt.timedelta(seconds=50), None, True),       # inside the default bound (60 s, D13 ruling)
+    (dt.timedelta(seconds=70), None, False),      # past it
     (dt.timedelta(seconds=30), dt.timedelta(seconds=60), True),
     (dt.timedelta(seconds=120), dt.timedelta(seconds=60), False),
 ])
@@ -187,22 +202,28 @@ def test_1414_a_stale_record_reads_no_comments_and_a_fresh_one_reads_them(fb, ca
 
 
 def test_1414_an_absent_record_reads_no_comments_and_counts_nothing(fb, caplog):
-    """A tenant whose row holds no eligibility record is read as stale: nothing decided, logged, and many ticks later the first fresh tick still decides it normally. D13/A4."""
+    """A tenant whose row holds no eligibility record is read as stale: nothing decided, logged, and a comment two attempts into its ceiling is still decided normally once fresh. D13/A4."""
     number = fb.opened("case-absent")
     comment = fb.forge.add_comment(number, user=OWNER, body="expected")
-    decider = S.Decider({comment["id"]: S.answer(reason="nothing to learn")})
+    decider = S.Decider({comment["id"]: [S.answer(approve=(9,)), S.answer(approve=(9,)),
+                                         S.answer(reason="nothing to learn")]})
+    for _ in range(2):  # two refused answers: the comment stands at 2 of 3
+        assert fb.tick(decider) == 0
+    assert decider.decided == [comment["id"]] * 2
     bare = fb.t.directory_with()  # a tenant row the service never wrote a record to
 
     with caplog.at_level(logging.INFO):
         for _ in range(5):
             assert fb.tick(decider, directory=bare) == 0
-    assert decider.decided == []
+    assert decider.decided == [comment["id"]] * 2, "a comment was read under an absent record"
     assert _loud(caplog, "eligib")
+    assert fb.replies(number, comment["id"]) == []
 
     assert fb.tick(decider) == 0  # the scene's directory holds a fresh record
-    assert decider.decided == [comment["id"]]
+    assert decider.decided == [comment["id"]] * 3
     [reply] = fb.replies(number, comment["id"])
     assert "could not be processed" not in reply["body"], "stale ticks were counted as attempts"
+    assert "nothing to learn" in reply["body"]
 
 
 def test_1414_a_comment_is_decided_once_across_ticks(fb):
@@ -319,3 +340,54 @@ def test_1414_a_lost_reply_is_posted_again_but_a_seen_one_is_settled_for_good(fb
     assert fb.replies(number, lost["id"]) == [], "a settled decision was read again and its reply re-posted"
     assert decider.decided == [lost["id"]]
     assert remote_branches(fb.t.remote, S.FEEDBACK_PREFIX) == {}
+
+
+# ---------------------------------------------------------------- a rotated tenant (D13: every generation's bot)
+
+def _rotated(fb):
+    """The tenant after a rotation: its first generation destroyed, the fixture's bot live; the directory and the old bot's login."""
+    from defender.tenancy import TenantDirectory
+    from defender.tests.support.tenancy._active1214 import generation_fields
+    from defender.tests.support.tenancy._proxied1391 import with_sign_login
+
+    tid = fb.t.tenant_id
+    old = with_sign_login(tid, generation_fields(tid, fb.tmp / "secrets", salt="g0", status="destroyed"))
+    new = with_sign_login(tid, generation_fields(tid, fb.tmp / "secrets", salt="g1"))
+    assert new["bot_login"] == fb.bot, "premise: the live generation is the forge's login"
+    twin = fb.t.repository_with(generations=[old, new])
+    asyncio.run(twin.record_merge_eligibility(
+        tid, logins=frozenset({OWNER, NAMED, old["bot_login"]}), read_at=dt.datetime.now(dt.UTC)))
+    return TenantDirectory(lambda: twin), old["bot_login"]
+
+
+def test_1414_what_the_old_generations_bot_made_is_still_the_bots(fb):
+    """After a rotation the old bot's issue is recovered, its run summaries and replies are seen, and its comments are never decided. D13/O2/O3/A6."""
+    directory, old_bot = _rotated(fb)
+    case = "case-rotated"
+    first, second = fb.request(case), fb.run("case-rotated-2")
+    fb.forge.add_label(S.FEEDBACK_LABEL)
+    issue = fb.forge.add_issue(title=case, body=f"{case}\n\n{S.run_marker(S.run_id_of(first))}", user=old_bot,
+                               labels=[S.FEEDBACK_LABEL])
+    number = issue["number"]
+    fb.forge.add_comment(number, user=old_bot, body=f"a later run {S.run_marker(S.run_id_of(second))}")
+    spoken = fb.forge.add_comment(number, user=OWNER, body="nothing to change")
+    fb.forge.add_comment(number, user=old_bot, body=f"no change {S.marker(spoken['id'])}")
+    chatter = fb.forge.add_comment(number, user=old_bot, body="a note the old bot left")
+    decider = S.Decider({spoken["id"]: S.answer(reason="nothing to learn")})
+    posted = len(fb.forge.comments_on(number))
+
+    assert fb.tick(decider, directory=directory) == 0
+    S.queue_open_issue(fb.paths, case_id=case, tenant_id=fb.t.tenant_id, run_id=S.run_id_of(second),
+                       outcome="inconclusive", lookups=[S.LOOKUP])
+    assert fb.tick(decider, directory=directory) == 0
+
+    assert fb.forge.issue_creates() == [], "the old bot's issue was not recognised and a second was made"
+    assert [i["number"] for i in fb.issues(case)] == [number]
+    assert S.open_issue_requests(fb.paths) == {}
+    assert len(fb.forge.comments_on(number)) == posted, "a summary or reply the old bot already made was posted again"
+    assert decider.decided == [spoken["id"]], "the old bot's comment was decided, or the person's was not"
+    assert chatter["id"] not in decider.decided
+    positive = fb.forge.add_comment(number, user=NAMED, body="control: a person's later comment")
+    assert fb.tick(decider, directory=directory) == 0
+    assert decider.decided == [spoken["id"], positive["id"]]
+    assert len(fb.replies(number, positive["id"])) == 1

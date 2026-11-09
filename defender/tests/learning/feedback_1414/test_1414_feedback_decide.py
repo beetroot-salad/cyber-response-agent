@@ -3,6 +3,7 @@ lessons row an instruction becomes (O7).
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import logging
 
@@ -20,11 +21,17 @@ def _drafts(fb):
     return remote_branches(fb.t.remote, S.FEEDBACK_PREFIX)
 
 
-def _scene(fb, case, *, lookups=None, by=OWNER, body="expected: the nightly backup"):
+def _open(fb, case, *, lookups=None):
+    """The issue for `case`, opened by one tick with no comment on it yet; its number."""
     fb.request(case, lookups=lookups)
     assert fb.tick(S.Decider()) == 0
     [issue] = fb.issues(case)
-    return issue["number"], fb.forge.add_comment(issue["number"], user=by, body=body)
+    return issue["number"]
+
+
+def _scene(fb, case, *, lookups=None, by=OWNER, body="expected: the nightly backup"):
+    number = _open(fb, case, lookups=lookups)
+    return number, fb.forge.add_comment(number, user=by, body=body)
 
 
 # ---------------------------------------------------------------- A3: the answer schema
@@ -104,20 +111,45 @@ def test_1414_an_instruction_becomes_one_keyed_lessons_row_and_never_a_draft(fb)
     assert "lessons author" in reply["body"]
 
 
-def test_1414_a_lost_lessons_row_is_written_again_and_a_present_one_is_not_duplicated(fb):
-    """A decision whose row is missing has it re-written identically; one whose row is present gets no second row. D11."""
+def test_1414_a_lessons_row_that_faulted_after_the_decision_is_written_once_later(fb):
+    """The row write faults once after the decision is recorded: the next tick writes it identically, without asking again; a present row is not duplicated. D11."""
     instruction = "ask the owner of the host first"
     number, comment = _scene(fb, "case-row", body=instruction)
     decider = S.Decider({comment["id"]: S.answer(instruction=instruction)})
+    queue_file = S.lessons_queue_file(fb.paths)
+    queue_file.unlink(missing_ok=True)
+    queue_file.mkdir(parents=True)  # the row cannot be appended: a real fault at the write
+
+    with contextlib.suppress(Exception):
+        fb.tick(decider)
+    assert decider.decided == [comment["id"]], "premise: the decision was taken before the write faulted"
+    queue_file.rmdir()
+    assert S.lessons_rows(fb.paths) == []
+
     assert fb.tick(decider) == 0
     [row] = S.lessons_rows(fb.paths)
+    assert row["comment_id"] == str(comment["id"])
+    assert decider.decided == [comment["id"]], "the recorded decision was asked again"
     assert fb.tick(decider) == 0
     assert S.lessons_rows(fb.paths) == [row], "positive control: a present row was duplicated"
 
-    S.lessons_queue_file(fb.paths).write_text("", encoding="utf-8")  # the crash between decision and row
-    assert fb.tick(decider) == 0
-    assert S.lessons_rows(fb.paths) == [row]
-    assert decider.decided == [comment["id"]]
+
+def test_1414_a_framing_run_with_no_lookups_records_a_no_change_and_still_sends_the_instruction(fb):
+    """An approval over a run with no captured lookups is not refused: the host records its own no-change reason, and the instruction goes to lessons. A9."""
+    instruction = "check the VPN log first"
+    number, comment = _scene(fb, "case-nolookups", lookups=[], body=instruction)
+    decider = S.Decider({comment["id"]: S.answer(approve=(0,), instruction=instruction)})
+
+    for _ in range(2):
+        assert fb.tick(decider) == 0
+    assert decider.decided == [comment["id"]], "the answer was refused instead of recorded"
+    [reply] = fb.replies(number, comment["id"])
+    assert "no change" in reply["body"].lower()
+    assert "the run made no registry lookup this could approve" in reply["body"]
+    assert "could not be processed" not in reply["body"]
+    assert _drafts(fb) == {}
+    [row] = S.lessons_rows(fb.paths)
+    assert (row["comment_id"], row["instruction"]) == (str(comment["id"]), instruction)
 
 
 # ---------------------------------------------------------------- A4: retries and the ceiling
@@ -142,9 +174,11 @@ def test_1414_a_comment_refused_three_times_ends_as_a_replied_no_change_and_stop
 
 def test_1414_a_failing_comment_stops_its_issues_later_comments_but_not_other_issues(fb):
     """While a comment is failing, the issue's later comments wait (order) and another issue's comment is decided; each comment has its own count. A4/O4."""
-    number, first = _scene(fb, "case-order")
+    number = _open(fb, "case-order")
+    other_number = _open(fb, "case-other")
+    first = fb.forge.add_comment(number, user=OWNER, body="first")
     second = fb.forge.add_comment(number, user=NAMED, body="second")
-    other_number, other = _scene(fb, "case-other")
+    other = fb.forge.add_comment(other_number, user=OWNER, body="elsewhere")
     decider = S.Decider({first["id"]: [S.answer(approve=(9,))], second["id"]: S.answer(reason="fine"),
                          other["id"]: S.answer(reason="fine")})
 
@@ -174,6 +208,7 @@ def test_1414_an_unreachable_forge_is_never_counted_against_a_request(fb):
     fb.forge.respond = None
     assert fb.tick(S.Decider()) == 0
     assert len(fb.issues("case-down")) == 1, "unreachable ticks were counted and the request quarantined"
+    assert S.quarantined_requests(fb.paths, "case-down") == []
 
     fb.request("case-refused")
     fb.forge.respond = lambda r: httpx.Response(422, json={"message": "refused"}) if r.method == "POST" and r.url.path.endswith("/issues") else None
@@ -183,18 +218,23 @@ def test_1414_an_unreachable_forge_is_never_counted_against_a_request(fb):
     fb.tick(S.Decider())
     assert fb.issues("case-refused") == [], "a refused request was retried forever"
     assert S.open_issue_requests(fb.paths) == {}
+    [kept] = S.quarantined_requests(fb.paths, "case-refused")
+    assert kept.is_file(), "the quarantined request is not kept in a quarantine folder (A8)"
 
 
 def test_1414_an_unreachable_forge_is_never_counted_against_a_comment_decision(fb):
-    """A reply or read the forge cannot take for many ticks does not spend the comment's attempts; the comment is decided on its first valid answer. A4."""
+    """A reply the forge refuses for many ticks does not spend the comment's attempts: the decision stands and its own reply is posted once the forge answers. A4."""
     number, comment = _scene(fb, "case-down-comment")
-    fb.forge.respond = lambda r: httpx.Response(502, json={}) if r.method == "GET" and r.url.path.endswith("/comments") else None
-    decider = S.Decider({comment["id"]: [S.answer(approve=(9,)), S.answer(reason="fine")]})
+    decider = S.Decider({comment["id"]: S.answer(reason="a thanks, nothing to learn")})
+    fb.forge.respond = lambda r: (httpx.Response(502, json={}) if r.method == "POST" and r.url.path.endswith(f"/issues/{number}/comments") else None)
     for _ in range(CEILING + 2):
         fb.tick(decider)
-    assert decider.decided == []
+    assert fb.replies(number, comment["id"]) == [], "premise: the forge refused the reply"
+    assert decider.decided == [comment["id"]], "the recorded decision was taken again"
+
     fb.forge.respond = None
     assert fb.tick(decider) == 0
-    assert fb.tick(decider) == 0
     [reply] = fb.replies(number, comment["id"])
-    assert "could not be processed" not in reply["body"]
+    assert "a thanks, nothing to learn" in reply["body"]
+    assert "could not be processed" not in reply["body"], "refused replies were counted as failed attempts"
+    assert decider.decided == [comment["id"]]

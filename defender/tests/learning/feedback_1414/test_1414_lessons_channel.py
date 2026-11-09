@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import logging
 import re
 
 import pytest
@@ -88,6 +89,23 @@ def test_control_a_lone_judge_finding_still_waits_for_its_threshold_D11(tenant, 
     assert remote_branches(tenant.remote) == {}
     assert tenant.forge.creates == []
     assert author.calls == []
+
+
+def test_one_feedback_row_wakes_the_drains_default_step_whatever_the_judge_threshold_D11(
+        tenant, tmp_path, monkeypatch, caplog):
+    """Through the drain's own default step (no injected trigger) one feedback row reaches its curator with the judge threshold at 5; a lone judge row does not. D11."""
+    monkeypatch.setenv("LEARNING_AUTHOR_MODEL", "no-such-model")  # the agent call is refused before any model is reached
+    paths, _, box = _tick(tenant, tmp_path, judge=[S.finding_row("f1", run_id="f1")])
+    with caplog.at_level(logging.INFO):
+        assert author_drain(tenant, paths, trigger=None, box=box) == 0
+    assert not [r for r in caplog.records if r.getMessage().startswith("step=")], "control: a lone judge row woke a curator"
+
+    queue(paths, [L.row(101)], channel=L.channel())
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        assert author_drain(tenant, paths, trigger=None, box=box) == 0
+    steps = [r.getMessage() for r in caplog.records if r.getMessage().startswith("step=")]
+    assert [m.split()[0] for m in steps] == [f"step={L.FEEDBACK_MODULE}"], steps
 
 
 # ------------------------------------------------------------------- one PR, two paths, no crossing
@@ -200,13 +218,18 @@ def test_a_row_rewritten_after_it_was_authored_is_not_authored_again_D11(tmp_pat
     assert sc.head_files() == [L.FEEDBACK_LESSON_PATH]
 
 
-def test_an_authored_feedback_row_leaves_the_queue_for_the_ledger_by_comment_id_D11(tmp_path):
-    """Consumption follows the channel's lifecycle: the row is consumed as committed, keyed by comment id."""
-    sc = L.feedback_scene(tmp_path, curator=L.FeedbackCurator(writes={L.FEEDBACK_LESSON_NAME: L.lesson(101)}))
+def test_an_authored_feedback_row_follows_the_held_lifecycle_by_comment_id_D11(tmp_path):
+    """As the questioner channel: unheld, the authored row is consumed keyed by comment id; held (the drain's mode), it stays pending until its PR settles (A9)."""
+    free = L.feedback_scene(tmp_path / "free", curator=L.FeedbackCurator(writes={L.FEEDBACK_LESSON_NAME: L.lesson(101)}))
+    assert free.run() == 0
+    assert free.pending() == []
+    assert [(r["comment_id"], r["consumed_category"]) for r in free.consumed()] == [("101", "consumed_committed")]
 
-    assert sc.run(hold_committed=True) == 0
-    assert sc.pending() == []
-    assert [(r["comment_id"], r["consumed_category"]) for r in sc.consumed()] == [("101", "consumed_committed")]
+    held = L.feedback_scene(tmp_path / "held", curator=L.FeedbackCurator(writes={L.FEEDBACK_LESSON_NAME: L.lesson(101)}))
+    assert held.run(hold_committed=True) == 0
+    assert held.head_files() == [L.FEEDBACK_LESSON_PATH]
+    assert [r["comment_id"] for r in held.pending()] == ["101"], "an authored row left the queue before its PR settled"
+    assert held.consumed() == []
 
 
 def test_a_feedback_row_that_keeps_failing_is_deadlettered_by_its_comment_id_D11(tmp_path):

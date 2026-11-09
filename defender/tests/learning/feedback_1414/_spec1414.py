@@ -10,6 +10,7 @@ import asyncio
 import datetime as dt
 import importlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -109,6 +110,23 @@ def open_issue_requests(paths: Any) -> dict[str, dict]:
     q = Path(location_path(paths.state_root)) / REQUEST_QUEUE
     return ({p.name: json.loads(p.read_text(encoding="utf-8")) for p in sorted(q.glob("*.json"))}
             if q.is_dir() else {})
+
+
+def quarantined_requests(paths: Any, case_id: str) -> list[Path]:
+    """Open-issue requests for `case_id` kept in a quarantine folder beneath the state root (A8: as the lead-author
+    lane's `failed/`; FC: the folder's name holds `fail` or `quarantin`), apart from the live queue."""
+    root = Path(location_path(paths.state_root))
+    live = root / REQUEST_QUEUE
+    found = []
+    for p in sorted(root.rglob("*.json")):
+        kept = str(p.relative_to(root)).lower()
+        if p.parent != live and ("fail" in kept or "quarantin" in kept):
+            try:
+                if json.loads(p.read_text(encoding="utf-8")).get("case_id") == case_id:
+                    found.append(p)
+            except (ValueError, AttributeError):
+                continue
+    return found
 
 
 def feedback_drain(t: Any, paths: Any, *, decide: Any, **seams: Any) -> int:
@@ -228,10 +246,11 @@ class Feedback:
         return feedback_drain(self.t, self.paths, decide=decide, **seams)
 
     def issues(self, case_id: str) -> list[dict]:
-        """The feedback issues whose host-written first line names `case_id`."""
+        """The feedback issues whose host-written first line names exactly `case_id` (`case-1` is not `case-10`)."""
+        named = re.compile(rf"(?<![\w-]){re.escape(case_id)}(?![\w-])")
         return [i for i in self.forge.issues
                 if FEEDBACK_LABEL in {label["name"] for label in i["labels"]}
-                and case_id in (i["body"].splitlines() or [""])[0]]
+                and named.search((i["body"].splitlines() or [""])[0])]
 
     def opened(self, case_id: str, decide: Any = None) -> int:
         """Queue a request for `case_id`, tick once, and return its issue's number."""
@@ -269,7 +288,7 @@ def today() -> dt.date:
 ELIGIBILITY_RECORD = "merge_eligibility"
 
 #: D13: the tick's staleness bound. FC: `feedback_drain(..., eligibility_max_age=timedelta)`; default
-#: from env `LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE` (seconds), default 300.
+#: from env `LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE` (seconds), default 60 (human ruling 2026-11-09).
 ELIGIBILITY_MAX_AGE_ENV = "LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE"
 
 #: D11: the lessons author's feedback channel. FC: `defender.learning.core.state.FEEDBACK_LESSONS`

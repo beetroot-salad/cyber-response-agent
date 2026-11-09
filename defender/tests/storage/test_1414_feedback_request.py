@@ -122,6 +122,16 @@ def test_1414_a_silent_exit_opens_no_issue(tmp_path, tenant, state, exit_class):
     assert _outcomes(state) == ["inconclusive"]
 
 
+@pytest.mark.parametrize("exit_class", sorted(run_end.SILENT_EXITS))
+def test_1414_a_silent_exit_after_a_verdict_opens_with_the_disposition(tmp_path, tenant, state, exit_class):
+    """A silent cut after the run reached its verdict opens, with the disposition as outcome, as the case ticket comments on it. O1/A8."""
+    _set(tenant, F.VOCABULARY)
+    tail = _drive(tmp_path, state, "verdict", plan=F.Plan(exit_class, "benign"), closed_before_cut=True)
+
+    [request] = S.open_issue_requests(state).values()
+    assert (request["outcome"], request["run_id"]) == ("benign", _run_id(tail))
+
+
 def test_1414_runs_whose_post_steps_never_run_open_nothing(tmp_path, tenant, state):
     """An exception out of the lifecycle and a box whose teardown faulted skip F1; the ordinary run does not. O1 (C22)."""
     _set(tenant, F.VOCABULARY)
@@ -155,6 +165,16 @@ def test_1414_a_later_run_of_the_case_replaces_the_earlier_request(tmp_path, ten
     [request] = S.open_issue_requests(state).values()
     assert (request["outcome"], request["run_id"]) == ("benign", _run_id(second))
     assert _run_id(first) != _run_id(second)
+
+
+def test_1414_a_later_run_whose_outcome_is_not_listed_leaves_the_earlier_request(tmp_path, tenant, state):
+    """The case's later run ending in an unlisted outcome does not replace or remove the earlier queued request. O1/A8."""
+    _set(tenant, ["aborted"])
+    first = _drive(tmp_path, state, "first", plan=F.plan_for("aborted"))
+    _drive(tmp_path, state, "second", plan=F.plan_for("benign"))
+
+    [request] = S.open_issue_requests(state).values()
+    assert (request["outcome"], request["run_id"]) == ("aborted", _run_id(first))
 
 
 # ---------------------------------------------------------------- the setting: absent, unknown, the run's copy
@@ -302,6 +322,29 @@ def test_1414_the_request_carries_the_lookups_from_the_runs_memory_not_the_box_f
     assert (tail.run_state.run_dir, tail.run_state.run_id) == (tail.run_dirs[-1], _run_id(tail))
     [request] = S.open_issue_requests(state).values()
     assert sorted(request["lookups"], key=json.dumps) == sorted([LOOKUP, LOOKUP_2], key=json.dumps)
+
+
+def test_1414_the_run_state_run_py_hands_the_enqueue_is_the_one_the_investigation_receives(tmp_path, tenant, state):
+    """Through production's lifecycle, the state the investigation is handed is the one the enqueue reads: rows the investigation leaves in it reach the request. F1/P3 (C17)."""
+    from defender.investigation.run_state import RunState
+
+    _set(tenant, ["aborted"])
+    plan = F.plan_for("aborted")
+    handed: list[RunState] = []
+
+    def investigate(**kw):
+        given = next((v for v in kw.values() if isinstance(v, RunState)), None)
+        assert given is not None, "production's lifecycle handed the investigation no RunState"
+        handed.append(given)
+        given.rows.update({"l-001": [F.lookup_row("l-001", 0, LOOKUP)]})
+        return {"output": "feedback1414", "requests": 1, "truncated_by": plan.truncated_by, "closed_before_cut": False}
+
+    tail = _drive(tmp_path, state, "threaded", plan=plan, investigate=investigate)
+
+    assert len(handed) == 1, "the investigation was not handed a RunState"
+    assert handed[0] is tail.run_state
+    [request] = S.open_issue_requests(state).values()
+    assert request["lookups"] == [LOOKUP]
 
 
 # ---------------------------------------------------------------- the predicate, called directly

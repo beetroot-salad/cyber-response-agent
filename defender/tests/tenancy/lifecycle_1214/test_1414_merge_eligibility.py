@@ -204,6 +204,30 @@ def test_a_tenant_whose_first_read_fails_has_no_record_not_an_empty_one(world):
     assert _logins(world, tenant) == frozenset({"dave", "olga"})
 
 
+@pytest.mark.parametrize("how", ["no-rule", "whitelist-disabled"])
+def test_a_missing_rule_or_a_disabled_whitelist_is_a_failure_never_an_empty_set(world, how):
+    """A8: `main` without a rule (404), or with its merge whitelist disabled, leaves the record as it was, read_at included,
+    never an empty set; once the rule is whole again the tenant is refreshed."""
+    tenant = world.active_tenant()
+    full = f"{ORG}/{tenant}"
+    whole = {"rule_name": "main", "branch_name": "main", "enable_merge_whitelist": True,
+             "merge_whitelist_usernames": ["dave"], "merge_whitelist_teams": ["Owners"]}
+    _whitelist(world, tenant, users=["dave"], teams={"Owners": {"olga"}})
+    _pass(world)
+    kept = _recorded(world, tenant)
+    assert kept.logins == frozenset({"dave", "olga"}), "control: the whole rule was read first"
+    if how == "no-rule":
+        world.forge.repos[full]["protections"].pop("main")
+    else:
+        world.forge.put_rule(full, **{**world.forge.rule(full), "enable_merge_whitelist": False})
+    _pass(world)
+    assert _recorded(world, tenant) == kept
+    world.forge.put_rule(full, **whole)
+    later = _pass(world)
+    healed = _recorded(world, tenant)
+    assert (healed.logins, healed.read_at) == (frozenset({"dave", "olga"}), later)
+
+
 # --- tenants that are not active -------------------------------------------------------------------------------
 
 def _creating_failed(world) -> str:
