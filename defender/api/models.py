@@ -80,7 +80,7 @@ class AlertSummary(BaseModel):
     alert_id: AlertId
     vendor: str = Field(description="The ticket system the alert was pulled from.")
     vendor_ticket_id: str = Field(description="The vendor's own id; unique per tenant and vendor.")
-    title: str | None = Field(description="Derived from the raw alert through the tenant's alert mapping; null when unmapped or unusable.")
+    title: str | None = Field(description="Derived from the raw alert through the tenant's alert mapping as it stood when the alert was stored; null when the tenant had no mapping then, or the entry is unmapped or unusable.")
     description: str | None = Field(description="As `title`.")
     fired_at: Instant = Field(description="When the vendor says the alert fired.")
     changed_at: Instant = Field(description="When the vendor last changed the ticket.")
@@ -167,7 +167,14 @@ class LearningJob(BaseModel):
         description="`auto` when the investigation's completion queued it; `explicit` for a re-learn."
     )
     stage: str | None = None
-    status_detail: str | None = Field(default=None, description="A skip reason or error summary.")
+    reason: str | None = Field(default=None, description=(
+        "Why a `skipped` or `failed` job ended, one fixed word: `no_fork_point`, `history_unreadable`, "
+        "`expired`, `family_unusable`, `control_failed`, `launch_refused`, `verify_refused`, "
+        "`source_unavailable`, `judge_failed`, `entry_error`, `exited_without_result`, `worker_error`, "
+        "`lease_lapsed` or `retry_cap`; null otherwise."))
+    message: str | None = Field(default=None, description=(
+        "A sentence of our own code's about the ending (never run or launcher text); a `completed` job "
+        "with no findings carries the judge's verdict word here."))
     created_at: Instant
     finished_at: Instant | None = None
 

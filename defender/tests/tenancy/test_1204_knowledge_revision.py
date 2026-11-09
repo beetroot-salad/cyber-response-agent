@@ -13,13 +13,13 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 #: A record with EVERY field set to a non-default value, so "everything else intact" is a claim
-#: about eleven fields rather than about two.
+#: about every field rather than about two.
 RICH: dict[str, Any] = {
     "commit": "a" * 40, "dirty": True, "dirty_paths": ["x.md", "y.md"], "dirty_path_count": 3,
     "unavailable": "git status: a note beside the dirt", "scope": "defender", "model": "m-1",
     "tenant_id": fixture_uuid("tenant:acme"), "world_id": fixture_uuid("world:knowledge-revision:b"),
     "parent_run_id": fixture_uuid("run:knowledge-revision:source"), "fork_turn": 59,
-    "started_at": "2026-07-28T16:18:45+00:00", "alert_label": "fresh-case",
+    "started_at": "2026-07-28T16:18:45+00:00", "alert_label": "fresh-case", "origin": "git",
 }
 
 SHA = "b" * 40

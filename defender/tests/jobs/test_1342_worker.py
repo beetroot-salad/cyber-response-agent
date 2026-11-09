@@ -1,5 +1,5 @@
 """#1342 the worker in-process over a real database and real child processes: slots (O4), the fence
-(O5), the job lane files (O6), the container backstop (O7), the ending rules 1-5 read from the
+(O5), the job lane files (O6), the containers a child leaves (O7), the ending rules 1-5 read from the
 job-end record (O8), cost and knowledge at finish, and system-actor audit (O13).
 
 Entry: `defender.worker.Worker(store, data_root=, child_argv=, containers=, slots=, clock=)` and
@@ -290,16 +290,16 @@ async def test_1345_o2_the_launch_label_is_the_alerts_title_or_its_vendor_ticket
     assert launch["label"] == label
 
 
-async def test_1345_o2_the_label_is_the_title_at_launch_not_at_queueing(world):
-    """A mapping saved after the investigation is queued and before it launches decides the label: the launch reads the
-    alert as it then is. (#1345 O2, M3)"""
+async def test_1420_the_label_is_the_title_stored_with_the_alert_not_one_from_a_later_mapping(world):
+    """A mapping saved after the investigation is queued and before it launches does not change the label: the launch
+    reads the title the alert was stored with, and a save leaves stored alerts as they were. (#1345 O2, #1420 I1)"""
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
         await store.put_alert_mapping(T1, mapping_value({"title": "a"}), actor="u-1")
         await _worker(world, store, _child(world)).drain()
 
     launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
-    assert launch["label"] == "\u00e9"
+    assert launch["label"] == TITLE
 
 
 @pytest.mark.parametrize("raw", [AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES, ZWNBSP_ALERT_BYTES,
@@ -897,16 +897,16 @@ async def test_o8_knowledge_is_null_when_there_is_no_run_folder(world, stray_rec
     assert stored["knowledge"] is None
 
 
-# --- O7: the backstop, in-process ------------------------------------------------------------------
+# --- O7: the containers a child leaves, in-process (#1446 review: the claim sweep is the one remover) ----
 
 def _claim_token(world: dict, inv: str) -> str:
     """The `box_token` the worker wrote into this row's launch record."""
     return json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))["box_token"]
 
 
-async def test_o7_after_the_child_exits_the_backstop_reaps_under_the_claims_token_and_a_missing_box_is_normal(
-        world, tmp_path, caplog):
-    """`reap(name, token)` is asked with the token in the launch record, per claim: a box that start stamped is removed, an absent one reads `absent`, and the row is the rules' alone. (O7, r5 C1)"""
+async def test_o7_after_the_child_exits_its_own_box_is_swept_and_a_missing_box_is_normal(world, tmp_path, caplog):
+    """One launch token per claim; the box the child's start made is removed with its claim, the name is asked about
+    for both rows, an absent box warns about nothing, and the row is the rules' alone. (O7, r5 C1)"""
     caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
     containers = StandInContainers(tmp_path / "containers")
     owning = _child(world, files=_committed(), box_dir=containers.where)  # its start made and stamped the box
@@ -921,47 +921,52 @@ async def test_o7_after_the_child_exits_the_backstop_reaps_under_the_claims_toke
     assert is_box_token(left_token), left_token
     assert is_box_token(clean_token), clean_token
     assert left_token != clean_token, "one token per claim"
-    assert containers.reaped(f"defender-run-{left}") == [left_token]
-    assert containers.reaped(f"defender-run-{clean}") == [clean_token], "an absent box is still asked about"
+    assert containers.probed == [f"defender-run-{left}", f"defender-run-{clean}"], "an absent box is still asked about"
     assert not containers.held(f"defender-run-{left}")
     assert row(world["dsn"], clean)["stage"] == "completed"
-    assert row(world["dsn"], left)["stage"] == "completed", "the backstop must not decide the row"
+    assert row(world["dsn"], left)["stage"] == "completed", "the cleanup must not decide the row"
     assert not _warned(caplog, clean), "an absent box is normal: nothing to warn about"
 
 
-async def test_o7_the_backstop_runs_for_a_run_that_failed_and_never_writes_the_row(world, tmp_path):
-    """A failed run's leftover box (this claim's token) is removed; the row keeps the rules' verdict, not a backstop's. (O7, M8, r5 C1)"""
+async def test_o7_the_sweep_runs_for_a_run_that_failed_and_never_writes_the_row(world, tmp_path):
+    """A failed run's leftover box (its child's claim) is removed; the row keeps the rules' verdict. (O7, M8, r5 C1)"""
     containers = StandInContainers(tmp_path / "containers")
     child = _child(world, exit=EXIT, box_dir=containers.where)  # no job-end record: rule 1
     inv, stored = await _run_one(world, child, containers=containers)
 
-    assert containers.reaped(f"defender-run-{inv}") == [_claim_token(world, inv)]
     assert not containers.held(f"defender-run-{inv}")
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
     assert _names_code(stored, inv, EXIT), stored["failure_message"]
 
 
-async def test_o7_the_backstop_runs_after_the_child_has_exited(world, tmp_path):
-    """The reap happens once the child is gone, never while it runs (its box may still be in use). (O7, r5 C1)"""
+async def test_o7_the_sweep_and_then_the_name_check_run_after_the_child_has_exited(world, tmp_path):
+    """The sweep happens once the child is gone, never while it runs (its box may still be in use), and the name is
+    asked about only after the sweep. (O7, r5 C1)"""
     containers = StandInContainers(tmp_path / "containers")
     child = _child(world, files=_committed(), box_dir=containers.where)
-    seen_at_reap: list[list[tuple[str, str]]] = []
-    real_reap = containers.reap
+    seen: list[tuple[str, list[tuple[str, str]]]] = []
+    real_sweep, real_present = containers.remove_claimed, containers.present
 
-    def reap(name: str, token: str) -> str:
-        seen_at_reap.append(child.events())
-        return real_reap(name, token)
+    def sweep(claim: str) -> None:
+        seen.append(("sweep", child.events()))
+        real_sweep(claim)
 
-    containers.reap = reap  # a recording wrapper on the test's own stand-in, not a patch of production
+    def present(name: str) -> bool:
+        seen.append(("present", child.events()))
+        return real_present(name)
+
+    containers.remove_claimed, containers.present = sweep, present  # recording wrappers on the test's own stand-in
     inv, _ = await _run_one(world, child, containers=containers)
 
-    assert seen_at_reap == [[("start", inv), ("end", inv)]], seen_at_reap
+    gone = [("start", inv), ("end", inv)]
+    assert seen == [("sweep", gone), ("present", gone)], seen
 
 
 @pytest.mark.parametrize("stamp", ["other", "none"])
 async def test_o7_a_container_already_holding_the_name_that_is_not_the_claims_is_left_and_logged(
         world, tmp_path, caplog, stamp):
-    """A same-name container with another token or none is left in place and logged at WARNING; the row is `failed`/`worker_error` (box start_failed), as before. (O7, r5 C1)"""
+    """A same-name container another start made (another token, or none, and not the child's claim) survives the sweep,
+    is left in place and logged at WARNING; the row is `failed`/`worker_error` (box start_failed), as before. (O7, r5 C1)"""
     caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
     containers = StandInContainers(tmp_path / "containers")
     refused = job_end(box="start_failed", report_committed=False, scrub_verified=False)
@@ -971,7 +976,7 @@ async def test_o7_a_container_already_holding_the_name_that_is_not_the_claims_is
     name = f"defender-run-{inv}"
     assert containers.held(name), "a container that is not this job's was removed"
     assert (containers.where / name).read_text(encoding="utf-8") == {"other": "f" * 32, "none": ""}[stamp]
-    assert containers.reaped(name) == [_claim_token(world, inv)]
+    assert containers.probed == [name]
     warned = [r.getMessage() for r in caplog.records
               if r.name.startswith(WORKER_LOGGER) and r.levelno >= logging.WARNING]
     assert any(name in m and "left in place" in m for m in warned), warned
@@ -988,15 +993,18 @@ async def test_o7_a_box_that_is_ours_is_removed_without_a_warning(world, tmp_pat
     assert not _warned(caplog, inv), "an own leftover is routine"
 
 
-async def test_o7_a_backstop_that_cannot_ask_leaves_the_row_to_the_rules_and_the_worker_goes_on(world, tmp_path):
-    """A containers seam whose `reap` raises: both rows keep the stage the rules gave, the worker carries on. (O7, r5 C1)"""
+async def test_o7_a_container_runtime_that_cannot_answer_leaves_the_row_to_the_rules_and_the_worker_goes_on(
+        world, tmp_path):
+    """A containers seam whose sweep and name check both raise: both rows keep the stage the rules gave, the worker
+    carries on. (O7, r5 C1)"""
     containers = FaultyContainers(tmp_path / "containers")
     child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as store:
         ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(2)]
         await _worker(world, store, child, containers=containers).drain()
 
-    assert sorted(name for _kind, name, _token in containers.calls) == sorted(f"defender-run-{i}" for i in ids)
+    assert sorted(containers.probed) == sorted(f"defender-run-{i}" for i in ids)
+    assert len(containers.swept) == 2
     for i in ids:
         stored = row(world["dsn"], i)
         assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("completed", "inconclusive", None)
@@ -1022,7 +1030,9 @@ verb, rest = (args[0] if args else ""), args[1:]
 verb = {"remove": "rm", "ls": "ps", "list": "ps"}.get(verb, verb)
 held = lambda: sorted(p.name for p in (home / "held").iterdir())
 state_of = lambda n: (home / "held" / n).read_text(encoding="utf-8").split("\\n")[0].strip() or "exited"  # exited, running or paused
-token_of = lambda n: (home / "held" / n).read_text(encoding="utf-8").partition("\\n")[2]  # the start-token label exactly as stored, "" for none
+lines_of = lambda n: (home / "held" / n).read_text(encoding="utf-8").split("\\n")
+token_of = lambda n: (lines_of(n) + ["", ""])[1]  # the start-token label exactly as stored, "" for none
+claim_of = lambda n: (lines_of(n) + ["", "", ""])[2]  # the claim label, "" for none
 operands, filters, fmt, skip = [], [], None, None
 for a in rest:
     if skip:
@@ -1081,9 +1091,15 @@ elif verb == "rm":
         (home / "held" / n).unlink()
 elif verb == "ps":
     wanted = [f.split("=", 1)[1].strip("^$").lstrip("/") for f in filters if f.startswith("name=")]
+    # A held container's labels are its start token and its claim: a `label=K=V` filter matches only
+    # those, so a filter on any other label lists none of them, as the daemon would.
+    labelled = [f.split("=", 1)[1].partition("=") for f in filters if f.startswith("label=")]
+    label_of = {"defender.start-token": token_of, "defender.claim": claim_of}
     every = any(a == "--all" or (a.startswith("-") and not a.startswith("--") and "a" in a) for a in rest)
     for n in held():  # plain `ps` shows the running (and paused) ones; `-a` every one
         if not every and state_of(n) == "exited":
+            continue
+        if any(key not in label_of or not label_of[key](n) or label_of[key](n) != value for key, _, value in labelled):
             continue
         if not wanted or any(re.search(w, n) for w in wanted):
             print(n)
@@ -1123,10 +1139,10 @@ class _DockerStandIn:
         return subprocess.run([sys.executable, str(self.script), str(self.home), *map(str, argv)],
                               capture_output=True, text=True, check=False)
 
-    def hold(self, name: str, state: str = "exited", token: str | None = None) -> None:
+    def hold(self, name: str, state: str = "exited", token: str | None = None, claim: str = "") -> None:
         """The daemon holds `name` in `state` (`exited`, `running` or `paused`), carrying `token` as its
-        `defender.start-token` label (`None`: no such label)."""
-        (self.home / "held" / name).write_text(state if token is None else f"{state}\n{token}", encoding="utf-8")
+        `defender.start-token` label (`None`: no such label) and `claim` as its `defender.claim` one ("": none)."""
+        (self.home / "held" / name).write_text(f"{state}\n{token or ''}\n{claim}", encoding="utf-8")
 
     def stick(self, name: str) -> None:
         """Every `rm` of `name` fails until a `docker wait` on it has returned (a paused box under runsc)."""
@@ -1135,14 +1151,6 @@ class _DockerStandIn:
     def jam(self, name: str) -> None:
         """Every `rm` of `name` fails, `docker wait` or not: a box that cannot be removed."""
         (self.home / "jammed" / name).write_text("", encoding="utf-8")
-
-    def empty_the_label(self, name: str) -> None:
-        """`name` carries the start-token label, set to the empty string (not an absent label)."""
-        (self.home / "emptied" / name).write_text("", encoding="utf-8")
-
-    def go_blind(self) -> None:
-        """Reading a container's labels fails (rc 1, no "no such object"), though its state still answers."""
-        (self.home / "blind").write_text("", encoding="utf-8")
 
     def go_down(self) -> None:
         """The daemon answers nothing: every call exits non-zero."""
@@ -1180,207 +1188,95 @@ TOKEN = "3f9a1c07be52d84e6a0b7c19e3d5f248"  # not periodic: no swap, rotation or
 OTHER_TOKEN = "cd" * 16
 
 
-def _with(token: str, at: int, char: str) -> str:
-    return token[:at] + char + token[at + 1:]
-
-
 @pytest.mark.parametrize("state", ["exited", "running", "paused"])
-def test_o7_the_docker_seam_removes_a_box_carrying_the_claims_token_and_nothing_else(tmp_path, state):
-    """`DockerContainers(docker=fn).reap(name, token)`: a container with this token, in any state → `removed` and gone; another container is untouched. (O7, r5 C1)"""
+def test_o7_the_docker_seam_sweeps_every_box_carrying_the_childs_claim_and_nothing_else(tmp_path, state):
+    """`DockerContainers(docker=fn).remove_claimed(claim)`: every container with that claim label, in any state, is gone;
+    one with another claim, with the claim's text only as its start token, or with no label, is untouched.
+    (O7, r5 C1, #1446 review)"""
     from defender.worker import DockerContainers
 
     daemon, docker = _docker_world(tmp_path)
-    daemon.hold("defender-run-here", state, TOKEN)
-    daemon.hold("defender-run-other", "running", TOKEN)  # the same token on another name is not this job's box
+    daemon.hold("defender-run-here", state, TOKEN, claim=TOKEN)
+    daemon.hold("defender-sibling-here", "running", None, claim=TOKEN)
+    daemon.hold("defender-run-other", "running", OTHER_TOKEN, claim=OTHER_TOKEN)
+    daemon.hold("defender-run-tokened", "running", TOKEN)  # this text, but as a start token: no claim
+    daemon.hold("defender-run-bare", state)
 
-    assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "removed"
-    assert daemon.names() == ["defender-run-other"]
-    assert not _removes(daemon.calls, "defender-run-other")
+    DockerContainers(docker=docker).remove_claimed(TOKEN)
+
+    assert daemon.names() == ["defender-run-bare", "defender-run-other", "defender-run-tokened"]
+    for left in daemon.names():
+        assert not _removes(daemon.calls, left), daemon.calls
 
 
-def test_o7_the_docker_seam_removes_an_owned_box_the_first_forced_removal_cannot(tmp_path):
-    """A paused own box that survives `rm -f` until it has exited (#1202) still reads `removed` and is gone. (O7, r5 C1, D5-3)"""
+def test_o7_the_sweep_removes_a_claimed_box_the_first_forced_removal_cannot(tmp_path):
+    """A paused claimed box that survives `rm -f` until it has exited (#1202) is still removed. (O7, D5-3)"""
     from defender.worker import DockerContainers
 
     daemon, docker = _docker_world(tmp_path)
-    daemon.hold("defender-run-here", "paused", TOKEN)
+    daemon.hold("defender-run-here", "paused", TOKEN, claim=TOKEN)
     daemon.stick("defender-run-here")
 
-    assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "removed"
+    DockerContainers(docker=docker).remove_claimed(TOKEN)
     assert daemon.names() == []
 
 
-def test_o7_a_box_that_survives_the_forced_removal_even_after_waiting_is_a_box_fault_and_stays_held(tmp_path):
-    """An owned box whose `rm -f`, `wait` and second `rm -f` all fail: `reap` raises `BoxFault`, never answers `removed`, and the box is still held. (O7, r5 C1, D-u)"""
+def test_o7_a_claimed_box_that_survives_every_removal_is_a_box_fault_and_stays_held(tmp_path):
+    """A claimed box whose `rm -f`, `wait` and second `rm -f` all fail: the sweep raises `BoxFault`, and the box is still
+    held. (O7, D-u)"""
     from defender.box import BoxFault
     from defender.worker import DockerContainers
 
     daemon, docker = _docker_world(tmp_path)
-    daemon.hold("defender-run-here", "paused", TOKEN)
+    daemon.hold("defender-run-here", "paused", TOKEN, claim=TOKEN)
     daemon.jam("defender-run-here")
 
     with pytest.raises(BoxFault):
-        DockerContainers(docker=docker).reap("defender-run-here", TOKEN)
+        DockerContainers(docker=docker).remove_claimed(TOKEN)
 
     assert daemon.names() == ["defender-run-here"], daemon.calls
     assert _removes(daemon.calls, "defender-run-here"), "the forced removal was never tried"
 
 
-def test_o7_the_docker_seam_reads_an_absent_box_as_absent_and_removes_nothing(tmp_path):
-    """No such container → `absent`, looked at, no removal, other boxes untouched. (O7, r5 C1)"""
+@pytest.mark.parametrize("state", ["exited", "running", "paused"])
+def test_o7_the_docker_seam_says_whether_a_name_is_held_and_removes_nothing(tmp_path, state):
+    """`present(name)`: a container under the name, in any state, whatever its labels → True; none → False; nothing is
+    removed either way. (O7, r5 C1)"""
     from defender.worker import DockerContainers
 
     daemon, docker = _docker_world(tmp_path)
-    daemon.hold("defender-run-other", "running", TOKEN)
+    daemon.hold("defender-run-here", state, OTHER_TOKEN)
 
-    assert DockerContainers(docker=docker).reap("defender-run-gone", TOKEN) == "absent"
-    assert daemon.calls, "an absent container was not even looked at"
+    seam = DockerContainers(docker=docker)
+    assert seam.present("defender-run-here") is True
+    assert seam.present("defender-run-gone") is False
     assert not any("rm" in argv or "remove" in argv for argv in daemon.calls), daemon.calls
-    assert daemon.names() == ["defender-run-other"]
-
-
-#: Tokens that look like `TOKEN` to a prefix, case-folding, containment, position-skipping or
-#: letter-multiset compare but are not it.
-NEAR_MISS_TOKENS = {
-    "another token": OTHER_TOKEN,
-    "no token": None,
-    "first character differs": _with(TOKEN, 0, "4"),
-    "a middle character differs": _with(TOKEN, 16, "f"),
-    "last character differs": TOKEN[:-1] + "c",
-    "an adjacent pair swapped": TOKEN[:4] + TOKEN[5] + TOKEN[4] + TOKEN[6:],
-    "a distant pair swapped": TOKEN[-1] + TOKEN[1:-1] + TOKEN[0],
-    "rotated by one": TOKEN[1:] + TOKEN[0],
-    "reversed": TOKEN[::-1],
-    "case changed": _with(TOKEN, 1, TOKEN[1].upper()),
-    "a prefix of it": TOKEN[:-1],
-    "it with a suffix": TOKEN + "0",
-    "it with a prefix": "0" + TOKEN,
-}
-
-
-def _one_character_changed(token: str, at: int) -> str:
-    """`token` with the character at `at` replaced by the next hex digit, so it is still a well-formed token."""
-    digits = "0123456789abcdef"
-    return token[:at] + digits[(digits.index(token[at]) + 1) % 16] + token[at + 1:]
-
-
-#: Tokens that are the claim's token with something added: no non-alphanumeric is ignored, nothing is trimmed.
-DECORATED_TOKENS = {
-    "a hyphen after it": TOKEN + "-",
-    "an underscore after it": TOKEN + "_",
-    "an exclamation mark after it": TOKEN + "!",
-    "a hyphen before it": "-" + TOKEN,
-    "an underscore before it": "_" + TOKEN,
-    "a hyphen inside it": TOKEN[:16] + "-" + TOKEN[16:],
-    "an underscore inside it": TOKEN[:16] + "_" + TOKEN[16:],
-    "a space inside it": TOKEN[:16] + " " + TOKEN[16:],
-    "a tab inside it": TOKEN[:16] + "\t" + TOKEN[16:],
-}
-
-
-@pytest.mark.parametrize("state", ["exited", "running", "paused"])
-def test_o7_a_box_whose_token_differs_in_any_one_character_is_not_the_claims_wherever_it_differs(tmp_path, state):
-    """For every position of the token, a container whose token differs from the claim's in that one character alone → `not_ours`, still held, never removed (no position is skipped). (O7, r5 C1)"""
-    from defender.worker import DockerContainers
-
-    daemon, docker = _docker_world(tmp_path)
-    for at in range(len(TOKEN)):
-        daemon.hold("defender-run-here", state, _one_character_changed(TOKEN, at))
-        assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "not_ours", f"position {at}"
-        assert daemon.names() == ["defender-run-here"], f"position {at}"
-    assert not _removes(daemon.calls, "defender-run-here"), daemon.calls
-
-
-@pytest.mark.parametrize("state", ["exited", "running", "paused"])
-@pytest.mark.parametrize("holds", list(DECORATED_TOKENS))
-def test_o7_a_box_whose_token_is_the_claims_with_something_added_is_not_the_claims(tmp_path, state, holds):
-    """The claim's token with a hyphen, underscore, mark or whitespace added before, inside or after it is another token: `not_ours`, never removed. (O7, r5 C1)"""
-    from defender.worker import DockerContainers
-
-    daemon, docker = _docker_world(tmp_path)
-    daemon.hold("defender-run-here", state, DECORATED_TOKENS[holds])
-
-    assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "not_ours"
     assert daemon.names() == ["defender-run-here"]
-    assert not _removes(daemon.calls, "defender-run-here"), daemon.calls
-
-
-@pytest.mark.parametrize("padding", ["{} ", " {}", "{}\t", "\t{}"])
-def test_o7_a_box_whose_token_is_the_claims_padded_with_whitespace_is_not_the_claims(tmp_path, padding):
-    """The claim's token with whitespace before or after it is another token: `not_ours`, never removed. (O7, r5 C1)"""
-    from defender.worker import DockerContainers
-
-    daemon, docker = _docker_world(tmp_path)
-    daemon.hold("defender-run-here", "running", padding.format(TOKEN))
-
-    assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "not_ours"
-    assert daemon.names() == ["defender-run-here"]
-
-
-@pytest.mark.parametrize("state", ["exited", "running", "paused"])
-@pytest.mark.parametrize("holds", list(NEAR_MISS_TOKENS))
-def test_o7_the_docker_seam_leaves_a_box_that_is_not_the_claims_in_place(tmp_path, state, holds):
-    """A container with another start token, a near miss of it (same prefix, case, containment) or none → `not_ours`, still held, never removed. (O7, r5 C1)"""
-    from defender.worker import DockerContainers
-
-    daemon, docker = _docker_world(tmp_path)
-    daemon.hold("defender-run-here", state, NEAR_MISS_TOKENS[holds])
-
-    assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "not_ours"
-    assert daemon.names() == ["defender-run-here"]
-    assert not _removes(daemon.calls, "defender-run-here"), daemon.calls
 
 
 @pytest.mark.parametrize("held", [True, False])
 def test_o7_a_daemon_that_does_not_answer_is_a_box_fault_never_absent(tmp_path, held):
-    """With the daemon down the seam raises `BoxFault` (held or not) and removes nothing; it never reports `absent`. (O7, r5 C1)"""
+    """With the daemon down both questions raise `BoxFault` (held or not) and remove nothing; the name is never read
+    as free. (O7, r5 C1)"""
     from defender.box import BoxFault
     from defender.worker import DockerContainers
 
     daemon, docker = _docker_world(tmp_path)
     if held:
-        daemon.hold("defender-run-here", "running", TOKEN)
+        daemon.hold("defender-run-here", "running", TOKEN, claim=TOKEN)
     daemon.go_down()
 
     with pytest.raises(BoxFault):
-        DockerContainers(docker=docker).reap("defender-run-here", TOKEN)
-
-
-@pytest.mark.parametrize("state", ["exited", "running", "paused"])
-def test_o7_a_label_read_that_fails_while_the_box_answers_is_a_box_fault_never_absent(tmp_path, state):
-    """The container answers its state but not its label: `reap` raises `BoxFault`, never `absent` or `removed`, and the box stays. (O7, r5 C1)"""
-    from defender.box import BoxFault
-    from defender.worker import DockerContainers
-
-    daemon, docker = _docker_world(tmp_path)
-    daemon.hold("defender-run-here", state, TOKEN)
-    daemon.go_blind()
-
+        DockerContainers(docker=docker).present("defender-run-here")
     with pytest.raises(BoxFault):
-        DockerContainers(docker=docker).reap("defender-run-here", TOKEN)
-
-    assert daemon.names() == ["defender-run-here"]
-    assert not _removes(daemon.calls, "defender-run-here"), daemon.calls
-
-
-@pytest.mark.parametrize("state", ["exited", "running", "paused"])
-def test_o7_a_box_whose_token_label_is_set_to_nothing_is_not_the_claims_and_stays(tmp_path, state):
-    """A start-token label that exists but is empty (`k=`) is no token: `not_ours`, still held, never removed. (O7, r5 C1)"""
-    from defender.worker import DockerContainers
-
-    daemon, docker = _docker_world(tmp_path)
-    daemon.hold("defender-run-here", state, TOKEN)
-    daemon.empty_the_label("defender-run-here")
-
-    assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "not_ours"
-    assert daemon.names() == ["defender-run-here"]
-    assert not _removes(daemon.calls, "defender-run-here"), daemon.calls
+        DockerContainers(docker=docker).remove_claimed(TOKEN)
 
 
 @pytest.mark.parametrize("state", ["exited", "running"])
 async def test_o7_a_worker_given_no_containers_uses_docker_and_removes_only_its_own_leftover(
         world, monkeypatch, state):
-    """Omitting `containers` → the backstop is the docker one (a `docker` first on PATH): the box this claim's start stamped goes, a same-name box with another token and another run's box stay. (O7, r5 C1)"""
+    """Omitting `containers` → the docker seam (a `docker` first on PATH): the box this child's start made (its claim)
+    goes; a same-name box another start made, and another run's box, stay. (O7, r5 C1)"""
     from defender.worker import Worker
 
     daemon, _docker = _docker_world(world["tmp"])
@@ -1998,6 +1894,8 @@ async def test_o7_the_same_id_claimed_twice_by_one_worker_gets_two_different_tok
             await worker.drain()
             assert row(world["dsn"], inv)["stage"] == "completed", "premise: the claim ran"
             tokens.append(_claim_token(world, inv))
+            # A completed investigation queued its learning job (#1344 O1), which refers to it: rows cleared child first.
+            execute(world["dsn"], "DELETE FROM jobs.learning_jobs WHERE investigation_id = %s", (inv,))
             execute(world["dsn"], "DELETE FROM jobs.investigations WHERE id = %s", (inv,))
             for path in world["runs"].glob(f"{inv}*"):
                 shutil.rmtree(path) if path.is_dir() else path.unlink()
@@ -2058,18 +1956,18 @@ async def _a_drain_that_lost_its_store_with_children_running(world, *, children:
             release.touch()
 
 
-async def test_o4_a_store_fault_in_drain_ends_every_running_child_reaps_every_box_and_hands_every_row_back(world):
-    """CONFLICT-UPDATED (#1343 B11 `_abandon` is a stop): `drain()` leaving by a store fault with two children running: both are dead, both boxes (each under its claim's token) removed, and each row is handed back, not given a stage. (O4, D3, D-w)"""
+async def test_o4_a_store_fault_in_drain_ends_every_running_child_sweeps_every_box_and_hands_every_row_back(world):
+    """CONFLICT-UPDATED (#1343 B11 `_abandon` is a stop): `drain()` leaving by a store fault with two children running: both are dead, both boxes (each by its child's claim) removed, and each row is handed back, not given a stage. (O4, D3, D-w)"""
     async with _a_drain_that_lost_its_store_with_children_running(world) as left:
         for inv, name in zip(left.ids, left.names, strict=True):
             assert _gone(left.child.seen(inv)["pid"]), f"the fault left {inv}'s child running"
             assert not left.containers.held(name), f"the fault left {inv}'s box behind"
-            assert set(left.containers.reaped(name)) == {_claim_token(world, inv)}
+            assert name in left.containers.probed, "the name was never asked about after the sweep"
             _handed_back(world["dsn"], inv)
 
 
 async def test_o7_a_drain_cancelled_while_two_children_run_ends_both_and_reaps_both_boxes(world):
-    """`drain()` cancelled with two children running: both are dead and both boxes (each under its claim's token) removed, the rows handed back. (O7, B11 `_abandon`)"""
+    """`drain()` cancelled with two children running: both are dead and both boxes (each by its child's claim) removed, the rows handed back. (O7, B11 `_abandon`)"""
     containers = StandInContainers(world["tmp"] / "containers")
     release = world["tmp"] / "release"
     child = _child(world, files=_committed(), box_dir=containers.where, wait_for=release)
@@ -2088,7 +1986,7 @@ async def test_o7_a_drain_cancelled_while_two_children_run_ends_both_and_reaps_b
         for inv, name in zip(ids, names, strict=True):
             assert _gone(child.seen(inv)["pid"]), f"the cancelled drain left {inv}'s child running"
             assert not containers.held(name), f"the cancelled drain left {inv}'s box behind"
-            assert set(containers.reaped(name)) == {_claim_token(world, inv)}
+            assert name in containers.probed, "the name was never asked about after the sweep"
             _handed_back(world["dsn"], inv)
 
 
@@ -2112,7 +2010,7 @@ async def test_o7_a_drain_cancelled_while_a_child_that_ignores_sigterm_runs_stil
 
         assert _gone(child.seen(inv)["pid"]), "the cancelled drain left the child running"
         assert not containers.held(name), "the box of a child that had to be killed was left behind"
-        assert set(containers.reaped(name)) == {_claim_token(world, inv)}
+        assert name in containers.probed, "the name was never asked about after the sweep"
         _handed_back(world["dsn"], inv)
 
 
@@ -2567,9 +2465,9 @@ async def test_d_ac_a_grandchild_left_by_a_child_that_exits_normally_is_gone_aft
         _kill_whatever_remains(seen or child.seen())
 
 
-async def test_d_ac_a_row_cancelled_while_its_spawn_is_in_flight_ends_the_spawned_childs_group_and_runs_the_backstop(
+async def test_d_ac_a_row_cancelled_while_its_spawn_is_in_flight_ends_the_spawned_childs_group_and_runs_the_sweep(
         world):
-    """A claim fault ends `drain()` while a row's spawn has not yet returned: the child and its grandchild die, the box is reaped under the claim's token, the row stays running. (D-ac)
+    """A claim fault ends `drain()` while a row's spawn has not yet returned: the child and its grandchild die, the box is swept with the child's claim, the row stays running. (D-ac)
 
     The worker's `spawn` door is a test seam (r7 D-ac), like `JobLane.write_launch` (D-ab): this test hands in one that holds the spawn in flight."""
     containers = StandInContainers(world["tmp"] / "containers")
@@ -2599,7 +2497,7 @@ async def test_d_ac_a_row_cancelled_while_its_spawn_is_in_flight_ends_the_spawne
             await _until(lambda: _gone(seen["pid"]) and _gone(seen["grandchild"]), "the child's group to be dead",
                          timeout=5)
             assert not containers.held(f"defender-run-{inv}"), "the box of the cancelled row was left behind"
-            assert set(containers.reaped(f"defender-run-{inv}")) == {_claim_token(world, inv)}
+            assert f"defender-run-{inv}" in containers.probed, "the name was never asked about after the sweep"
             assert row(world["dsn"], inv)["stage"] == "running"  # stage only: production cancels row tasks only in `_abandon`, which r5 item 3 makes a stop; the hand-back tests pin lease and mark
         finally:
             release.touch()
@@ -2677,38 +2575,35 @@ async def test_d_ac_a_grandchild_is_gone_after_a_drain_cancelled_while_a_child_t
     _handed_back(world["dsn"], inv)
 
 
-class _ReapProbingContainers(StandInContainers):
-    """The stand-in containers whose `reap` notes, at the moment it is asked, whether anything the child left in its session is still alive."""
+class _SweepProbingContainers(StandInContainers):
+    """The stand-in containers whose sweep notes, at the moment it is asked, whether anything the child left in its session is still alive. No grace for a kill to land: the worker waits for the group to be gone before it sweeps."""
 
     def __init__(self, where: Path, survivors) -> None:
         super().__init__(where)
         self._survivors = survivors
-        self.alive_at_reap: list[bool] = []
+        self.alive_at_sweep: list[bool] = []
 
-    def reap(self, name: str, token: str) -> str:
-        deadline = time.monotonic() + 2.0  # a SIGKILL already sent takes a moment to land; one not yet sent never does within this
-        while self._survivors() and time.monotonic() < deadline:
-            time.sleep(0.02)
-        self.alive_at_reap.append(bool(self._survivors()))
-        return super().reap(name, token)
+    def remove_claimed(self, claim: str) -> None:
+        self.alive_at_sweep.append(bool(self._survivors()))
+        super().remove_claimed(claim)
 
 
-async def test_d_ac_the_childs_group_is_ended_before_the_backstop_runs(world):
-    """A child that exits normally and leaves a grandchild: when the backstop asks the container seam to reap, the grandchild is already dead (the group is ended first, then the box is removed). (D-ac: one step follows the child: the group kill, then the backstop)"""
+async def test_d_ac_the_childs_group_is_ended_before_the_sweep_runs(world):
+    """A child that exits normally and leaves a grandchild: when the worker asks the container seam to sweep, the grandchild is already dead (the group is ended first, then the boxes are removed). (D-ac: one step follows the child: the group kill, then the sweep)"""
     seen: dict = {}
 
     def survivors() -> bool:
         grandchild = (child.seen() or {}).get("grandchild")
         return bool(grandchild) and not _gone(grandchild)
 
-    containers = _ReapProbingContainers(world["tmp"] / "containers", survivors)
+    containers = _SweepProbingContainers(world["tmp"] / "containers", survivors)
     child = _child(world, files=_committed(), grandchild=True)
     try:
         inv, stored = await _run_one(world, child, containers=containers)
         seen = child.seen(inv) or {}
         assert stored["stage"] == "completed", stored
         assert seen.get("grandchild"), "premise: the child started a grandchild"
-        assert containers.alive_at_reap == [False], "the backstop ran while the child's group still lived"
+        assert containers.alive_at_sweep == [False], "the sweep ran while the child's group still lived"
     finally:
         _kill_whatever_remains(seen or child.seen())
 
@@ -2744,9 +2639,9 @@ def _is_a_rows_task(task: asyncio.Task) -> bool:
     return frame is not None and any(isinstance(v, Claim) for v in frame.f_locals.values())
 
 
-async def test_d_ac_a_row_cancelled_twice_while_its_spawn_is_in_flight_still_ends_the_spawned_childs_group_and_runs_the_backstop(
+async def test_d_ac_a_row_cancelled_twice_while_its_spawn_is_in_flight_still_ends_the_spawned_childs_group_and_runs_the_sweep(
         world):
-    """The row's task is cancelled, and cancelled again while it waits for its spawn: the child the spawn then returns is still ended with its grandchild, and the box is reaped under the claim's token. (D-ac: a cancelled row waits out its spawn however many cancels arrive)
+    """The row's task is cancelled, and cancelled again while it waits for its spawn: the child the spawn then returns is still ended with its grandchild, and the box is swept with the child's claim. (D-ac: a cancelled row waits out its spawn however many cancels arrive)
 
     The worker's `spawn` door is the seam (r7 D-ac): the one handed in holds the spawn in flight while the test cancels the row's task twice (the one task the worker made for the claim)."""
     containers = StandInContainers(world["tmp"] / "containers")
@@ -2780,7 +2675,7 @@ async def test_d_ac_a_row_cancelled_twice_while_its_spawn_is_in_flight_still_end
             assert seen is not None, "premise: the child was spawned"
             await _the_group_to_be_gone(seen, "the twice-cancelled row's group to be gone")
             assert not containers.held(f"defender-run-{inv}"), "the box of the cancelled row was left behind"
-            assert set(containers.reaped(f"defender-run-{inv}")) == {_claim_token(world, inv)}
+            assert f"defender-run-{inv}" in containers.probed, "the name was never asked about after the sweep"
             assert row(world["dsn"], inv)["stage"] == "running"  # stage only: production cancels row tasks only in `_abandon`, which r5 item 3 makes a stop; the hand-back tests pin lease and mark
         finally:
             release.touch()
@@ -4020,6 +3915,49 @@ async def test_b11_a_stop_is_bounded_by_one_stop_grace_however_many_children_ign
         _handed_back(dsn, i)
 
 
+class _SlowSecondHandBack:
+    """The real store, except that every hand-back after the first waits `delay` first, so take-over passes run between them."""
+
+    def __init__(self, store, delay: float) -> None:
+        self._store, self._delay = store, delay
+        self.handed: list[str] = []
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def hand_back(self, tenant_id, investigation_id, **kw):
+        if self.handed:
+            await asyncio.sleep(self._delay)
+        self.handed.append(investigation_id)
+        return await self._store.hand_back(tenant_id, investigation_id, **kw)
+
+
+async def test_b11_a_stopping_worker_takes_none_of_its_own_handed_back_rows_over(world, caplog):
+    """A stop hands two rows back with many take-over intervals between the two hand-backs: the stopping worker takes over neither (it stops taking over when its stop begins; other workers' passes retry them), so both stay handed back. (B11, B7)"""
+    caplog.set_level(logging.INFO, logger="defender.jobs.audit")
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release)
+    dsn = world["dsn"]
+    async with job_store(dsn) as inner:
+        store = _SlowSecondHandBack(inner, delay=20 * _FAST["takeover_interval"])
+        invs = [await _queued(inner, ticket=f"T-{n}", key=f"k{n}") for n in range(2)]
+        serving = asyncio.create_task(_worker(world, store, child, slots=2, **_FAST).serve())
+        try:
+            await _until(lambda: all(child.seen(i) for i in invs), "both children")
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+        finally:
+            release.touch()
+            for i in invs:
+                _kill_whatever_remains(child.seen(i))
+            await _stop_all(serving)
+    assert sorted(store.handed) == sorted(invs), f"premise: both rows were handed back: {store.handed}"
+    taken = [r.getMessage() for r in caplog.records if "investigation.takeover" in r.getMessage()]
+    assert not taken, f"the stopping worker took a row over: {taken}"
+    for i in invs:
+        _handed_back(dsn, i)
+
+
 # --- #1343 review: a second cancel while stopping, and a renewal that races a row's own end ---------------------
 
 async def test_b11_a_second_cancel_while_the_worker_stops_kills_every_child_at_once_and_leaves_none_behind(world):
@@ -4042,13 +3980,76 @@ async def test_b11_a_second_cancel_while_the_worker_stops_kills_every_child_at_o
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(draining, timeout=10)
             took = time.monotonic() - began
-            assert [c for c in containers.calls if c[0] == "reap"], "the worker left before its row's cleanup ran"
+            assert containers.swept, "the worker left before its row's cleanup ran"
             await _until(lambda: _gone(pid), "the child to die after the second cancel", timeout=5)
         finally:
             release.touch()
             _kill_whatever_remains(child.seen(inv))
             await _stop_all(draining)
     assert took < 5, f"the second cancel took {took:.1f} s to leave"
+
+
+async def test_d_ac_a_cancel_while_the_childs_group_is_waited_for_still_removes_its_box(world):
+    """The row's cleanup waits for the child's killed group to be gone, then removes the box: a second cancel landing in that wait still removes the box (the removal runs however the wait ends). (D-ac, #1343 review r5 item 3)"""
+    import threading
+
+    from defender.execution import wait_group_gone
+
+    in_wait = threading.Event()
+
+    def slow_wait(pgid: int) -> bool:
+        in_wait.set()
+        time.sleep(3.0)
+        return wait_group_gone(pgid)
+
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        swept: list[str] = []
+
+        class _Recording(StandInContainers):
+            def remove_claimed(self, claim: str) -> None:
+                swept.append(claim)
+                super().remove_claimed(claim)
+
+        containers = _Recording(world["tmp"] / "containers-cancel-in-wait")
+        draining = asyncio.create_task(
+            _worker(world, store, child, containers=containers, wait_group=slow_wait, **_FAST).drain())
+        try:
+            await _until(in_wait.is_set, "the row's cleanup to wait for the child's group")
+            draining.cancel()
+            await asyncio.sleep(0.2)
+            draining.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(draining, timeout=10)
+        finally:
+            _kill_whatever_remains(child.seen(inv))
+            await _stop_all(draining)
+    assert swept, "a cancel in the group wait skipped the sweep of the child's boxes"
+
+
+async def test_b11_a_group_whose_wait_ran_out_is_not_waited_for_again_by_the_rows_cleanup(world):
+    """A child ignores SIGTERM and its killed group never empties: the stop waits for it once (the limit, logged), and the row's own cleanup kills it again without a second wait, so a stop stays one grace plus one limit. (R3, B11)"""
+    waited: list[int] = []
+
+    def never_gone(pgid: int) -> bool:
+        waited.append(pgid)
+        return False
+
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release, term="ignore")
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        serving = asyncio.create_task(_worker(world, store, child, stop_grace=0.5, wait_group=never_gone, **_FAST).serve())
+        try:
+            await _until(lambda: child.seen(inv), "the child")
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+        finally:
+            release.touch()
+            _kill_whatever_remains(child.seen(inv))
+            await _stop_all(serving)
+    assert waited == [child.seen(inv)["pid"]], f"the group was waited for {len(waited)} times: {waited}"
 
 
 class _RenewalRacingAnEnd:

@@ -45,6 +45,7 @@ from defender.tests.support.runtime.engine._engine_helpers import fake_model as 
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import replay_once as _replay  # noqa: E402
 from defender.records import WIRE_LOG_DIR  # noqa: E402
+from defender.tests.support.sandbox._box1343 import AttachedStartSeam  # noqa: E402
 
 
 # The lane writes a batch draft's `agent/skills`; the adapters and product prompts stay in the
@@ -469,14 +470,22 @@ def test_box_output_overflow_is_not_an_unprocessable_learning_stage(tmp_path, gr
     assert carried(caught.value, BoxOutputLimitExceeded) is overflow
 
 
-class _LaneDaemon:
-    """A lane box's daemon, as words: `exited` until started, and whatever a fault leaves it after.
-    `blind` makes it stop answering status: `gone` (no such container) or `mute` (no answer)."""
+class _LaneDaemon(AttachedStartSeam):
+    """A lane box's daemon, as words: `exited` until started (attached, #1344 amendment 2), and
+    whatever a fault leaves it after. `blind` makes it stop answering status: `gone` (no such
+    container) or `mute` (no answer)."""
 
     def __init__(self) -> None:
         self.status = "exited"
         self.blind: str | None = None
         self.calls: list[list[str]] = []
+        self._attached_state()
+
+    def _record(self, argv: list[str]) -> None:
+        self.calls.append(argv)
+
+    def _landed(self, argv: list[str]) -> None:
+        self.status = "running"
 
     def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
         argv = list(argv)

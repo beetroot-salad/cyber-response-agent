@@ -117,6 +117,39 @@ def session_for_run(store: Any, run_dir: Path, *, source_run: Run) -> str:
     return recorded if recorded is not None else main_session(store)
 
 
+class MainRead:
+    """A source run's own main session read once: its id, its MAIN path's row ids, and its
+    messages hydrated on first use, and each fork snapshot loaded once (`snapshot`). Several
+    branch points of one run (a learning job's fork candidates) share one, so the session is not
+    re-read and re-hydrated per point, and a point's snapshot is not loaded again by its admission
+    after its time was read from it."""
+
+    def __init__(self, store: Any, run_dir: Path, *, source_run: Run) -> None:
+        self.store = store
+        self.session = session_for_run(store, run_dir, source_run=source_run)
+        self.path: list[int] = session_store.path_row_ids(store, self.session)
+        self._prefix: list | None = None
+        self._snapshots: dict[int, Any] = {}
+
+    def snapshot(self, upto: list) -> Any:
+        """The fork snapshot recorded at the last response of `upto` (a slice of `prefix`), or
+        `None` when none was recorded; loaded once per point (`_snapshot.load`, whose refusal of
+        a body it cannot read is not kept)."""
+        from . import _snapshot  # _snapshot reads this module's frontier
+
+        request = _snapshot.request_count(upto)
+        if request not in self._snapshots:
+            self._snapshots[request] = _snapshot.load(self.store, self.session, request)
+        return self._snapshots[request]
+
+    @property
+    def prefix(self) -> list:
+        """The session's messages, aligned with `path`."""
+        if self._prefix is None:
+            self._prefix = session_store.hydrate(self.store, self.session, role="analysis")
+        return self._prefix
+
+
 def branch_point_time(store: Any, run_dir: Path, branch_message_id: int, *, source_run: Run) -> datetime:
     """The moment the branch point was written — the clock a sibling resumes into.
 
@@ -125,16 +158,17 @@ def branch_point_time(store: Any, run_dir: Path, branch_message_id: int, *, sour
     message timestamps, which are wall times a natural run's clock need not agree with; those
     are used only for a source with no snapshot, which `validate` refuses.
     """
-    session = session_for_run(store, run_dir, source_run=source_run)
-    path = session_store.path_row_ids(store, session)
-    if branch_message_id not in path:
+    return point_time(MainRead(store, run_dir, source_run=source_run), run_dir, branch_message_id)
+
+
+def point_time(main: MainRead, run_dir: Path, branch_message_id: int) -> datetime:
+    """`branch_point_time` over the source's main session already read (`main`)."""
+    if branch_message_id not in main.path:
         raise BranchError(
             f"message {branch_message_id} is not on {run_dir}'s own main session, so it has no "
             "branch-point time — the id has to be one this run's main path actually holds")
-    prefix = session_store.hydrate(store, session, role="analysis")
-    upto = prefix[: path.index(branch_message_id) + 1]
-    from . import _snapshot  # _snapshot reads this module's frontier
-    snapshot = _snapshot.load(store, session, _snapshot.request_count(upto))
+    upto = main.prefix[: main.path.index(branch_message_id) + 1]
+    snapshot = main.snapshot(upto)
     if snapshot is None:
         # No snapshot: `validate` refuses this source (N4), whatever moment is named here.
         return _as_of_of(upto, run_dir, branch_message_id)
@@ -201,7 +235,7 @@ def _refuse_bad_as_of(spec: BranchSpec, derived: datetime) -> None:
 #: The tool whose call/return pair is the only join from a message id to a run's evidence — the
 #: name pydantic-ai registers for `tools_gather`'s `gather`. If wrong, no part matches and every
 #: sibling silently inherits every lead.
-_DISPATCH_TOOL = "gather"
+DISPATCH_TOOL = "gather"
 
 
 def _drop_refused_dispatch(
@@ -225,7 +259,7 @@ def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path,
     landed: set[str] = set()
     for row_id, message in zip(ids, messages, strict=True):
         for part in getattr(message, "parts", []):
-            if getattr(part, "tool_name", None) != _DISPATCH_TOOL:
+            if getattr(part, "tool_name", None) != DISPATCH_TOOL:
                 continue
             if isinstance(part, ToolCallPart):
                 # The store's own extractor (first-wins on duplicate JSON keys), so this and the

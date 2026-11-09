@@ -75,25 +75,26 @@ def _fk_to_tenants(dsn: str) -> list[tuple[str, str]]:
 def test_the_history_is_the_baseline_and_five_revisions_on_it_in_a_line():
     """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11); #1163 adds one more, the six
     sign columns of the generation record (A24/r8.4); #1342 puts its jobs revision on #1163's, #1382 its uuid ids
-    revision on that, #1343 its lease revision on that, and #1345 its mapping revision on that: a single line baseline
-    -> #1214's -> #1163's -> #1342's -> #1382's -> #1343's -> #1345's, no branch. (The name predates the later revisions;
-    the node id is kept.)"""
+    revision on that, #1343 its lease revision on that, #1345 its mapping revision on that, and #1344 its learning jobs
+    revision on that: a single line baseline -> #1214's -> #1163's -> #1342's -> #1382's -> #1343's -> #1345's -> #1344's,
+    no branch. (The name predates the later revisions; the node id is kept.)"""
     from alembic.script import ScriptDirectory
 
     from defender.migrations import _config
 
     script = ScriptDirectory.from_config(_config())
     chain = [(r.revision, r.down_revision) for r in script.walk_revisions()]  # newest first
-    # #1307 puts `0008_programs` (and a later change may put more) on top of #1345's `0007_alert_mapping` (design:
-    # migrations): what this test pins is the line from the baseline to 0007, so it is read from the bottom.
-    old = chain[-7:]
+    # #1307 puts `0009_programs` (and a later change may put more) on top of #1344's `0008_learning_jobs` (design:
+    # migrations): what this test pins is the line from the baseline to 0008, so it is read from the bottom.
+    old = chain[-8:]
     assert [revision for revision, _ in old] == [
-        "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE]
-    assert [down for _, down in old] == ["0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE, None]
+        "0008_learning_jobs", "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY,
+        BASELINE]
+    assert [down for _, down in old] == [
+        "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE, None]
     assert len(script.get_heads()) == 1, "the history branches"
     # The whole line, newest first: each revision's down revision is the next one listed, and the last has none.
     assert all(down == chain[i + 1][0] for i, (_, down) in enumerate(chain[:-1])), "the history is not one line"
-    assert chain[-1][1] is None
 
 @pytest.mark.postgres
 def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_database):

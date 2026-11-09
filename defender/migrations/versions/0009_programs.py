@@ -2,14 +2,14 @@
 program has no email, so `users.email` may be absent (exactly for programs). A membership has a `role`
 (`admin` | `automation`): every existing row is a person's, so `admin`. A new table holds the programs' credentials.
 
-Revision ID: 0008_programs
-Revises: 0007_alert_mapping
+Revision ID: 0009_programs
+Revises: 0008_learning_jobs
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0008_programs"
-down_revision = "0007_alert_mapping"
+revision = "0009_programs"
+down_revision = "0008_learning_jobs"
 
 _TIME = sa.DateTime(timezone=True)
 

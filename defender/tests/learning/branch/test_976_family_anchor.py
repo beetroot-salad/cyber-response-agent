@@ -1,4 +1,4 @@
-"""#976: the family is anchored to its source's commit (detect-and-refuse)."""
+"""#976 as amended by #1344 r5: siblings agree with each other, knowledge stays on the source, the source is recorded."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -186,7 +186,7 @@ def _accepted(launch: Launch, *argv_extra: str) -> dict:
     return launch.family_stamp
 
 
-# a source that cannot anchor the family is refused before the questioner is paid
+# a source with no stamp cannot be recorded; any other source is only recorded, never judged (#1344 r5)
 
 
 def test_976_a_source_with_no_stamp_is_refused_before_the_questioner_and_never_waived(tmp_path):
@@ -197,29 +197,27 @@ def test_976_a_source_with_no_stamp_is_refused_before_the_questioner_and_never_w
         _never_waivable(message, "source", "no usable provenance stamp")
 
 
-def test_976_a_source_whose_git_could_not_be_asked_is_refused_and_never_waived(tmp_path):
-    """A source stamped with no commit (`git unavailable`) has no sha to hold the family to; the
-    live tree is never even captured."""
+def test_976_a_source_whose_git_could_not_be_asked_launches_and_is_recorded(tmp_path):
+    """Source with no commit no longer faults; its record rides the family stamp whole. (Family check)"""
     for argv in ((), ("--allow-dirty",)):
         launch = _prepare(tmp_path)
         _restamp(launch.src, commit=None, dirty=None, unavailable=T.GIT_UNAVAILABLE)
-        message = _refused_before_spending(launch, *argv)
-        _never_waivable(message, "source", "names no commit", T.GIT_UNAVAILABLE)
-        assert launch.live_tree.calls == 0, "the live tree was captured for a source with no anchor"
+        stamp = _accepted(launch, *argv)
+        assert launch.live_tree.calls == 1
+        assert stamp["source"]["commit"] is None
+        assert stamp["source"]["unavailable"] == T.GIT_UNAVAILABLE
+        assert stamp["agreed"]["commit"] == "deadbee"
 
 
-def test_976_a_dirty_source_is_refused_without_the_override_and_proceeds_with_it(tmp_path):
-    """The refusal names the dirt and offers the override; with it, the stamp records both."""
-    launch = _prepare(tmp_path)
-    _restamp(launch.src, dirty=True)
-    message = _refused_before_spending(launch)
-    _waivable(message, "source", "not certified clean", "dirty=True")
-
-    waived = _prepare(tmp_path)
-    _restamp(waived.src, dirty=True)
-    stamp = _accepted(waived, "--allow-dirty")
-    assert stamp["source"]["dirty"] is True
-    assert stamp["allow_dirty"] is True
+def test_976_a_dirty_source_launches_without_the_override_and_is_recorded(tmp_path):
+    """Source cleanliness is recorded, not judged: no flag needed, nothing waived. (Family check)"""
+    for argv in ((), ("--allow-dirty",)):
+        launch = _prepare(tmp_path)
+        _restamp(launch.src, dirty=True)
+        stamp = _accepted(launch, *argv)
+        assert stamp["source"]["dirty"] is True
+        assert stamp["allow_dirty"] is bool(argv)
+        assert stamp["waived"] == []
 
 
 def test_976_a_clean_matching_source_and_live_tree_launch_and_archive(tmp_path):
@@ -231,25 +229,12 @@ def test_976_a_clean_matching_source_and_live_tree_launch_and_archive(tmp_path):
     assert stamp["agreed"]["commit"] == "deadbee"
 
 
-# a live tree that does not match the source refuses before anything is spent
-
-
-def test_976_a_live_tree_at_another_commit_is_refused_and_never_waived(tmp_path):
-    """The family would run code the source did not. Abbreviated-sha lookalikes are refused too:
-    equality, not prefix."""
-    for argv, live in (((), "0ther"), (("--allow-dirty",), "0ther"), ((), "deadbee0"),
-                       ((), "deadbe")):
-        # `deadbee0` and `deadbe` are the abbreviated-sha shapes: a prefix comparison in either
-        # direction reads them as the source's `deadbee`. Equality is the rule.
-        launch = _prepare(tmp_path, live_tree=T.source_capture(commit=live))
-        message = _refused_before_spending(launch, *argv)
-        _never_waivable(message, "live tree is at commit", repr(live), "'deadbee'")
-        assert "scope" not in message, ("a commit mismatch is not a scope mismatch", message)
-        assert launch.live_tree.calls == 1, "the live tree was captured other than once"
+# the live tree is judged on its own stamp; its commit and scope are not compared with the source's
+# (live tree at another commit: retired into test_1344_family_check's launch cases)
 
 
 def test_976_a_dirty_live_tree_is_refused_without_the_override_and_proceeds_with_it(tmp_path):
-    """The live tree is at the source's commit but dirty: the override's one legitimate use."""
+    """The live tree is dirty: the override's one legitimate use."""
     launch = _prepare(tmp_path, live_tree=T.source_capture(dirty=True))
     message = _refused_before_spending(launch)
     _waivable(message, "live tree", "not certified clean", "dirty=True")
@@ -260,14 +245,14 @@ def test_976_a_dirty_live_tree_is_refused_without_the_override_and_proceeds_with
     assert stamp["allow_dirty"] is True
 
 
-def test_976_a_live_scope_differing_from_the_sources_is_refused_and_never_waived(tmp_path):
-    """A live capture measured over another scope than the source's `repo` is not comparable,
-    and the message quotes both labels cleanly."""
+def test_976_a_live_scope_differing_from_the_sources_launches(tmp_path):
+    """Scope moves to sibling agreement: the live tree's scope is not held to the source's. (Family check)"""
     for argv in ((), ("--allow-dirty",)):
         launch = _prepare(tmp_path, live_tree=T.source_capture(scope="defender"))
-        message = _refused_before_spending(launch, *argv)
-        _never_waivable(message, "measured over scope", "'defender'", "'repo'")
-        assert "''" not in message, ("a possessive on a quoted label doubles the quote", message)
+        _restamp(launch.src, scope="repo")
+        stamp = _accepted(launch, *argv)
+        assert stamp["source"]["scope"] == "repo"
+        assert stamp["agreed"]["scope"] == "repo"
 
 
 def test_976_a_source_stamped_before_scope_existed_is_compared_on_commit_alone(tmp_path):
@@ -278,61 +263,56 @@ def test_976_a_source_stamped_before_scope_existed_is_compared_on_commit_alone(t
     assert stamp["agreed"]["scope"] == "repo"
 
 
-# the verify tier holds the siblings to the source
+# the verify tier holds the siblings to each other, not to the source
 
 
-def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_incomplete(tmp_path):
-    """Siblings agreeing with each other at `cafe1` against a `deadbee` source are NOT comparable,
-    though every world is archived; the same siblings under a `cafe1` source are the control."""
+def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_comparable(tmp_path):
+    """Siblings at `cafe1` under a `deadbee` source are comparable and both commits are recorded; equality, not prefix, makes siblings agree. (Family check)"""
     location_path(T.runs_base)(tmp_path)
 
     def dirs(ep, w):
         return T.arm_run_dir(ep, w, commit="cafe1")
 
-    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-drifted"))
-    report = _verify(ep, dirs, source=T.provenance_record(commit="deadbee"))
+    ok = T.episode(tmp_path, episode_id=fixture_uuid("976-drifted"))
+    report = _verify(ok, dirs, source=T.provenance_record(commit="deadbee"))
+    assert report["comparable"] is True, report["reason"]
+    stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
+    assert stamp["agreed"]["commit"] == "cafe1"
+    assert stamp["source"]["commit"] == "deadbee"
+
+    # abbreviated-sha lookalikes among the siblings are three commits, not one
+    def lookalikes(ep, w):
+        return T.arm_run_dir(ep, w, commit={"a": "cafe1", "b": "cafe10", "c": "cafe"}[w])
+
+    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-lookalikes"))
+    report = _verify(ep, lookalikes, source=T.provenance_record(commit="cafe1"))
     assert report["comparable"] is False
-    assert "source" in report["reason"], report["reason"]
-    assert "commit" in report["reason"], report["reason"]
+    assert "siblings disagree on commit" in report["reason"], report["reason"]
     assert not (ep / "provenance.json").exists()
     assert sorted(p.name for p in (ep / "worlds").iterdir()) == sorted(T.world_id(ep, label) for label in T.WORLDS)
     assert not (ep / "outcome.yaml").exists(), "verify wrote the outcome pre-flight owns"
 
-    # EQUALITY, NOT PREFIX: siblings at `cafe10` and at `cafe` are not siblings
-    # of a `cafe1` source, whichever side an abbreviated sha would be read as extending.
-    for extended in ("cafe10", "cafe"):
-        def near(ep, w, extended=extended):
-            return T.arm_run_dir(ep, w, commit=extended)
 
-        ep = T.episode(tmp_path, episode_id=fixture_uuid(f"976-{extended}"))
-        report = _verify(ep, near, source=T.provenance_record(commit="cafe1"))
-        assert report["comparable"] is False, extended
-        assert "commit" in report["reason"], report["reason"]
-        assert not (ep / "provenance.json").exists()
-
-    ok = T.episode(tmp_path, episode_id=fixture_uuid("976-anchored"))
-    report = _verify(ok, dirs, source=T.provenance_record(commit="cafe1"))
-    assert report["comparable"] is True
-    stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
-    assert stamp["agreed"]["commit"] == "cafe1"
-    assert stamp["source"]["commit"] == "cafe1"
-
-
-def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_path):
-    """Siblings measured over scope `repo` against a source measured over `defender` are not
-    comparable even at one commit."""
+def test_976_siblings_agreeing_on_a_scope_the_source_did_not_measure_are_comparable(tmp_path):
+    """Scope is held across siblings, not against the source, with or without the override. (Family check)"""
     location_path(T.runs_base)(tmp_path)
 
-    # WITH AND WITHOUT THE OVERRIDE: a scope mismatch is not dirt, so
-    # `--allow-dirty` does not reach it at this tier any more than at preflight.
     for allow_dirty in (False, True):
         ep = T.episode(tmp_path, episode_id=fixture_uuid(f"976-scoped-{str(allow_dirty).lower()}"))
-        report = _verify(ep, source=T.provenance_record(scope="defender"),
+        report = _verify(ep, source=T.provenance_record(scope="defender"), allow_dirty=allow_dirty)
+        assert report["comparable"] is True, (allow_dirty, report["reason"])
+        stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
+        assert (stamp["source"]["scope"], stamp["agreed"]["scope"]) == ("defender", "repo")
+
+    def split_scopes(ep, w):
+        return T.arm_run_dir(ep, w, scope="defender" if w == "b" else "repo")
+
+    for allow_dirty in (False, True):
+        ep = T.episode(tmp_path, episode_id=fixture_uuid(f"976-split-{str(allow_dirty).lower()}"))
+        report = _verify(ep, split_scopes, source=T.provenance_record(scope="repo"),
                          allow_dirty=allow_dirty)
         assert report["comparable"] is False, allow_dirty
-        assert "scope" in report["reason"], report["reason"]
-        # The sibling label is quoted (`sibling 'b'`), so a possessive built onto it renders
-        # `'b''s` in the archived reason.
+        assert "siblings disagree on scope" in report["reason"], report["reason"]
         assert "''" not in report["reason"], report["reason"]
         assert not (ep / "provenance.json").exists()
 
@@ -343,32 +323,28 @@ def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_pa
     assert stamp["source"]["scope"] is None
 
 
-def test_976_a_dirty_source_under_the_override_is_still_held_to_its_commit(tmp_path):
-    """Under `--allow-dirty` a dirty source is compared on the fields it carries: siblings at its
-    commit are accepted, siblings elsewhere are not."""
-    location_path(T.runs_base)(tmp_path)
+class _SplitSiblings(J.FakeSibling):
+    """Siblings that ran, with sibling `b`'s stamp then rewritten (a real disagreement among
+    arms of one family)."""
 
-    def elsewhere(ep, w):
-        return T.arm_run_dir(ep, w, commit="cafe1")
+    def __init__(self, **edit: Any) -> None:
+        super().__init__()
+        self.edit = edit
 
-    ok = T.episode(tmp_path, episode_id=fixture_uuid("976-dirty-anchored"))
-    report = _verify(ok, source=T.provenance_record(dirty=True), allow_dirty=True)
-    assert report["comparable"] is True
-    stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
-    assert stamp["source"]["dirty"] is True
-    assert stamp["allow_dirty"] is True
-
-    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-dirty-drifted"))
-    report = _verify(ep, elsewhere, source=T.provenance_record(dirty=True), allow_dirty=True)
-    assert report["comparable"] is False
-    assert "commit" in report["reason"], report["reason"]
-    assert not (ep / "provenance.json").exists()
+    def __call__(self, argv: list[str], **kw: Any) -> int:
+        code = super().__call__(argv, **kw)
+        if code != 97 and "--world" in argv and argv[argv.index("--world") + 1] == "b":
+            ep = self.episode_dir
+            stamp = ep / "runs" / T.read_roster(ep)[T.world_id(ep, "b")] / "provenance.json"
+            doc = json.loads(stamp.read_text(encoding="utf-8"))
+            stamp.write_text(json.dumps({**doc, **self.edit}), encoding="utf-8")
+        return code
 
 
-def test_976_a_launch_whose_siblings_ran_another_commit_ends_incomplete_end_to_end(
+def test_976_a_launch_whose_siblings_disagree_on_commit_ends_incomplete_end_to_end(
         tmp_path, caplog):
     """Through the real launcher: pre-flight accepts, but the family stamp is withheld."""
-    launch = _prepare(tmp_path, siblings_at="cafe1")
+    launch = _prepare(tmp_path, spawn=_SplitSiblings(commit="cafe2"))
     assert launch.run() == 0, "the exit is about the launch; the outcome is about the family"
     assert launch.questioner.calls > 0, "the launch was refused at preflight instead"
     assert sorted(launch.spawn.worlds) == list(T.WORLDS)
@@ -376,16 +352,16 @@ def test_976_a_launch_whose_siblings_ran_another_commit_ends_incomplete_end_to_e
     # is the withheld stamp and the reason it logs.
     assert _outcome(launch.episode_dir)["outcome"] == "accepted"
     withheld = _withheld_reason(caplog)
-    assert "commit" in withheld, withheld
+    assert "siblings disagree on commit" in withheld, withheld
     assert not (launch.episode_dir / "provenance.json").exists()
 
 
-def test_976_the_override_does_not_waive_a_sibling_commit_mismatch_end_to_end(
+def test_976_the_override_does_not_waive_a_sibling_commit_disagreement_end_to_end(
         tmp_path, caplog):
-    launch = _prepare(tmp_path, siblings_at="cafe1")
+    launch = _prepare(tmp_path, spawn=_SplitSiblings(commit="cafe2"))
     assert launch.run("--allow-dirty") == 0
     assert launch.questioner.calls > 0
-    assert "commit" in _withheld_reason(caplog)
+    assert "siblings disagree on commit" in _withheld_reason(caplog)
     assert not (launch.episode_dir / "provenance.json").exists()
 
 
@@ -405,54 +381,57 @@ def test_976_the_override_waives_dirt_on_both_sides_and_the_family_is_accepted(t
 
 
 # one judgement at both tiers
+# (the verify tier judging the source's own dirt: retired into test_1344_family_check)
 
 
-def test_976_the_authority_judges_the_sources_own_dirt_not_only_the_siblings(tmp_path):
-    """The verify tier is the authority, so it asks everything the preflight asks — including whether the SOURCE's tree was certified clean."""
+def test_976_two_problems_are_reported_at_once_before_anything_is_spent(tmp_path):
+    """A dirty live tree and a pre-#1204 source are both named in one refusal that offers the flag; the flag waives both."""
+    launch = _prepare(tmp_path, live_tree=T.source_capture(dirty=True))
+    _restamp(launch.src, knowledge=T.NO_KNOWLEDGE_KEY)
+    message = _refused_before_spending(launch)
+    _waivable(message, "live tree", "not certified clean", "records no tenant knowledge")
+
+    waived = _prepare(tmp_path, live_tree=T.source_capture(dirty=True))
+    _restamp(waived.src, knowledge=T.NO_KNOWLEDGE_KEY)
+    assert _accepted(waived, "--allow-dirty")["allow_dirty"] is True
+
+
+def test_976_unwaivable_faults_are_listed_first_and_the_flag_is_offered_only_for_dirt_alone(
+        tmp_path):
+    """A silent sibling and a dirty one are both named, the silent one first, with no offer of the flag; the flag then waives the dirt only."""
     location_path(T.runs_base)(tmp_path)
 
-    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-dirty-source-unwaived"))
-    report = _verify(ep, source=T.provenance_record(dirty=True))
+    def mixed(ep, w):
+        if w == "b":
+            return T.arm_run_dir(ep, w, commit=None, dirty=None, unavailable=T.GIT_UNAVAILABLE)
+        return T.arm_run_dir(ep, w, dirty=(w == "c"))
+
+    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-mixed"))
+    report = _verify(ep, mixed, source=T.provenance_record())
     assert report["comparable"] is False
-    assert "source" in report["reason"], report["reason"]
-    assert "dirty=True" in report["reason"], report["reason"]
-    assert not (ep / "provenance.json").exists()
+    reason = report["reason"]
+    assert "names no commit" in reason, reason
+    assert "not certified clean" in reason, reason
+    assert reason.index("names no commit") < reason.index("not certified clean"), reason
+    assert "allow-dirty" not in reason, reason
 
-    ok = T.episode(tmp_path, episode_id=fixture_uuid("976-dirty-source-waived"))
-    report = _verify(ok, source=T.provenance_record(dirty=True), allow_dirty=True)
-    assert report["comparable"] is True
-    stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
-    assert stamp["source"]["dirty"] is True
-    assert stamp["allow_dirty"] is True
-
-
-def test_976_two_problems_are_reported_at_once_never_waivable_first_and_without_the_flag(
-        tmp_path):
-    launch = _prepare(tmp_path, live_tree=T.source_capture(commit="0ther"))
-    _restamp(launch.src, dirty=True)
-    message = _refused_before_spending(launch)
-    _never_waivable(message, "live tree is at commit '0ther'", "not certified clean",
-                    "dirty=True")
-    assert message.index("is at commit") < message.index("not certified clean"), message
-    assert launch.live_tree.calls == 1
-    # Under the override the dirt is waived and the commit alone remains — still refused.
-    waived = _prepare(tmp_path, live_tree=T.source_capture(commit="0ther"))
-    _restamp(waived.src, dirty=True)
-    message = _refused_before_spending(waived, "--allow-dirty")
-    _never_waivable(message, "live tree is at commit '0ther'")
-    assert "not certified clean" not in message, message
+    waived = T.episode(tmp_path, episode_id=fixture_uuid("976-mixed-waived"))
+    report = _verify(waived, mixed, source=T.provenance_record(), allow_dirty=True)
+    assert report["comparable"] is False
+    assert "names no commit" in report["reason"], report["reason"]
+    assert "not certified clean" not in report["reason"], report["reason"]
 
 
 def test_976_a_verify_reason_the_override_cannot_reach_never_names_the_flag(tmp_path):
     """The recorded `episode.reason` holds to the same message rule as a preflight refusal"""
     location_path(T.runs_base)(tmp_path)
     never = {
-        "dirty-and-drifted": lambda ep, w: T.arm_run_dir(ep, w, commit="cafe1",
-                                                         dirty=(w == "b")),
+        "dirty-and-split": lambda ep, w: T.arm_run_dir(ep, w, commit="cafe1" if w == "b" else "deadbee",
+                                                       dirty=(w == "b")),
         "silent": lambda ep, w: T.arm_run_dir(ep, w, **({"commit": None, "dirty": None,
                                                          "unavailable": T.GIT_UNAVAILABLE}
                                                         if w == "b" else {})),
-        "drifted": lambda ep, w: T.arm_run_dir(ep, w, commit="cafe1"),
+        "split": lambda ep, w: T.arm_run_dir(ep, w, commit="cafe1" if w == "b" else "deadbee"),
     }
     for name, dirs in never.items():
         ep = T.episode(tmp_path, episode_id=fixture_uuid(f"976-{name}"))
@@ -470,8 +449,8 @@ def test_976_a_verify_reason_the_override_cannot_reach_never_names_the_flag(tmp_
     assert "allow-dirty" in report["reason"]
 
 
-def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_path):
-    """An archived reason tells each fact once."""
+def test_976_siblings_that_disagree_are_named_against_each_other_once(tmp_path):
+    """An archived reason tells each fact once, and none of it is against the source. (Family check)"""
     location_path(T.runs_base)(tmp_path)
 
     def two_commits(ep, w):
@@ -481,9 +460,8 @@ def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_
     report = _verify(ep, two_commits, source=T.provenance_record(commit="s"))
     assert report["comparable"] is False
     reason = report["reason"]
-    assert reason.count("while the source run it continues ran at") == len(T.WORLDS), reason
-    assert "siblings disagree on commit" not in reason, reason
-    assert "siblings disagree on scope" not in reason, reason
+    assert reason.count("siblings disagree on commit") == 1, reason
+    assert "the source run it continues ran at" not in reason, reason
 
     def two_scopes(ep, w):
         arm = T.arm_run_dir(ep, w)
