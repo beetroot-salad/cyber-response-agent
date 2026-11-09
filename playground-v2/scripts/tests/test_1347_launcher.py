@@ -273,6 +273,28 @@ def test_the_launch_pins_the_clock_restarts_the_node_and_checks_the_copy_in_orde
     assert j.first("load_stubs") < j.first("run")
 
 
+# -- credentials (A9) ------------------------------------------------------------------------------
+
+
+def test_the_read_only_user_gets_the_current_password_and_the_node_cert_is_mounted_before_the_proxy(tmp_path):
+    """A9: each launch reads the password as it is then, creates the user with it and mounts the live
+    node certificate, both before the frozen proxy starts; neither is written into a freeze part."""
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("none")
+    parts_before = {p.name: p.read_bytes() for p in (rig.parts / FREEZE_ID).iterdir()}
+    rig.launch()
+    rig.ops.password = "pw-rotated"
+    rig.launch()
+    j = rig.journal.ops()
+
+    assert [pw for pw, _ in rig.ops.users] == ["pw-0", "pw-rotated"], rig.ops.users
+    assert rig.ops.users[0][1] is False and rig.ops.cert_mounts == [False, False]
+    assert j.index("create_readonly_user") < j.index("start_proxy") and j.index("mount_node_cert") < j.index("start_proxy")
+    assert {p.name: p.read_bytes() for p in (rig.parts / FREEZE_ID).iterdir()} == parts_before
+    assert not any(b"pw-" in b for b in parts_before.values())
+    assert "pw-0" not in (rig.freeze_dir / "freeze.yaml").read_text() + (rig.case_dir / "case.yaml").read_text()
+
+
 # -- the marker (A4) -------------------------------------------------------------------------------
 
 
@@ -387,25 +409,39 @@ def _launch_failures():
         return p.startswith("/_reindex")
 
     return [
-        pytest.param({"fail": lambda m, p, b: p.endswith("/_restore")}, None, id="restore"),
-        pytest.param({"fail": lambda m, p, b: p.endswith("/_delete_by_query")}, None, id="base-overlay"),
-        pytest.param({"fail": reindex}, None, id="fault-overlay"),
-        pytest.param({}, "write_marker", id="marker"),
-        pytest.param({}, "load_stubs", id="stubs"),
-        pytest.param({}, "restart_node", id="node-restart"),
-        pytest.param({}, "start_proxy", id="proxy"),
+        pytest.param({"fail": lambda m, p, b: p.endswith("/_restore")}, None, "/_restore", id="restore"),
+        pytest.param({"fail": lambda m, p, b: p.endswith("/_delete_by_query")}, None, "/_delete_by_query", id="base-overlay"),
+        pytest.param({"fail": reindex}, None, "/_reindex", id="fault-overlay"),
+        pytest.param({}, "write_marker", None, id="marker"),
+        pytest.param({}, "load_stubs", None, id="stubs"),
+        pytest.param({}, "restart_node", None, id="node-restart"),
+        pytest.param({}, "start_proxy", None, id="proxy"),
     ]
 
 
-@pytest.mark.parametrize("rig_kw, ops_fail", _launch_failures())
-def test_a_copy_that_cannot_be_made_is_a_launch_failure_with_no_row(tmp_path, rig_kw, ops_fail):
-    """A2/O6: not stale: nothing runs, no row, the copy is torn down, the lock is free and no clean marker is left."""
+_NOT_A_REFUSAL = (AttributeError, TypeError, NameError, ImportError)
+
+
+def _fails_to_launch(rig):
+    """The launch module loads first (a missing script fails here, outside the failure under test);
+    the launch then raises something that is not a bug in the caller's own code."""
+    rig.launch_module
+    with pytest.raises(Exception) as caught:
+        rig.launch()
+    assert not isinstance(caught.value, _NOT_A_REFUSAL), repr(caught.value)
+    return caught.value
+
+
+@pytest.mark.parametrize("rig_kw, ops_fail, reached", _launch_failures())
+def test_a_copy_that_cannot_be_made_is_a_launch_failure_with_no_row(tmp_path, rig_kw, ops_fail, reached):
+    """A2/O6: not stale: the failing step was reached, nothing runs, no row, the copy is torn down,
+    the lock is free and no clean marker is left."""
     rig = LabRig(tmp_path, **rig_kw)
     rig.write_expected_case("drift")
     rig.ops.fail_at = ops_fail
-    with pytest.raises(Exception):
-        rig.launch()
+    _fails_to_launch(rig)
 
+    assert (ops_fail in rig.journal.ops()) if ops_fail else rig.es_at(lambda m, p: reached in p)
     assert "run" not in rig.journal.ops() and rig.rows() == []
     assert "teardown" in rig.journal.ops() and "frozen-engine" not in rig.store.records
     if not ops_fail or ops_fail == "write_marker":     # a copy that was made stays clean when only a service failed
@@ -413,14 +449,15 @@ def test_a_copy_that_cannot_be_made_is_a_launch_failure_with_no_row(tmp_path, ri
 
 
 def test_a_cluster_that_never_turns_green_is_a_launch_failure_with_no_row(tmp_path):
-    """O6: "wait for primaries active" gives up: no run, no row, lock free."""
+    """O6: "wait for primaries active" gives up after polling health: no run, no row, torn down, lock free."""
     rig = LabRig(tmp_path)
     rig.write_expected_case("none")
     rig.cluster.health_status = "red"
-    with pytest.raises(Exception):
-        rig.launch()
+    _fails_to_launch(rig)
 
+    assert len(rig.es_at(lambda m, p: p == "/_cluster/health")) >= 1, "health was never polled"
     assert "run" not in rig.journal.ops() and rig.rows() == [] and "frozen-engine" not in rig.store.records
+    assert "teardown" in rig.journal.ops()
 
 
 def _damage(rig, how, name):

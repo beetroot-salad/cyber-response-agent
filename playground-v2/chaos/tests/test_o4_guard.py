@@ -58,11 +58,23 @@ def test_rule_read_datasets_is_every_rule_index_dataset(rules_dir):
 
 def _esql_rules(tmp_path, *queries):
     d = tmp_path / "rules"
-    d.mkdir()
+    d.mkdir(parents=True, exist_ok=True)
     for i, q in enumerate(queries):
         (d / f"r{i}.json").write_text(json.dumps(
             {"rule_id": f"r{i}", "type": "esql", "language": "esql", "query": q}))
     return d
+
+
+def test_the_guard_reads_esql_sources_through_the_products_esql_text_not_its_own_pattern():
+    """A5: one reader: chaos/guard.py imports `defender.integrations.esql_text`, as the launcher
+    imports the scorer's binding; a guard-side regex cannot satisfy this."""
+    import ast
+    tree = ast.parse((Path(__file__).resolve().parents[1] / "guard.py").read_text())
+    imported = {f"{n.module}.{a.name}" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+                for a in n.names} | {a.name for n in ast.walk(tree) if isinstance(n, ast.Import)
+                                     for a in n.names}
+    assert any(i == "defender.integrations.esql_text" or i.startswith("defender.integrations.esql_text.")
+               for i in imported), sorted(imported)
 
 
 def test_the_committed_esql_rule_reads_the_dataset_its_from_clause_names(tmp_path, rules_dir):

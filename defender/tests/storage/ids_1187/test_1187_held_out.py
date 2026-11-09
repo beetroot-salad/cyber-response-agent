@@ -219,10 +219,11 @@ def test_a_slug_with_no_row_is_unscored_whatever_folders_are_named_after_it(tmp_
     _index(index, fixtures, (OTHER, indexed.name))
 
     res = _score(runs, index, fixtures)
-    assert (res.crashed, res.verdicts(), res.accuracy()) == (None, {OTHER: "OK"}, (1, 1)), res.said
-    assert SLUG in res.said.replace(f"{OTHER}", ""), f"the case with no row is not listed:\n{res.said}"
-    assert "incomplete" in res.said.lower(), res.said
-    assert res.rc not in (0, 2), f"O11: a set with an unscored case exits non-zero:\n{res.said}"
+    said = f"{res.out}\n{res.err}"
+    assert (res.crashed, res.verdicts(), res.accuracy()) == (None, {OTHER: "OK"}, (1, 1)), said
+    assert SLUG in said.replace(f"{OTHER}", ""), f"the case with no row is not listed:\n{said}"
+    assert "incomplete" in said.lower(), said
+    assert res.rc not in (0, 2), f"O11: a set with an unscored case exits non-zero:\n{said}"
 
 
 def test_scoring_without_an_index_scores_no_folder_by_its_name(tmp_path, scoring):

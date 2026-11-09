@@ -280,32 +280,20 @@ def run_files(run_dir: Path) -> dict[str, str]:
 
 #: What would tell the agent a run is frozen: the flag's name, a freeze, a cut.
 FREEZE_WORDS = re.compile(r"as[_-]?of|arrived[_-]?by|frozen|freez|\bcut\b", re.IGNORECASE)
-#: Other ways a wall date is written; date part only, so any time of day after it matches.
-WALL_DATE_SPELLINGS = ("%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y", "%d-%m-%Y", "%Y/%m/%d", "%d %b %Y",
-                       "%b %d, %Y", "%a %b %d")
-
-
 def test_an_as_of_run_writes_nothing_about_the_freeze_into_its_run_dir(tmp_path):
-    """P4: the run dir has an ordinary run's files, none names the freeze, and no launch wall time
-    is in it; T's stamps are (control)."""
-    began = dt.datetime.now(dt.UTC)
-    ordinary = launch(tmp_path, [])
-    plain = run_files(ordinary.run_dir)
+    """P4/A9: the run dir has an ordinary run's files, the provenance start is T, none names the
+    freeze; trace and wire-log timestamps are not required to move."""
+    plain = run_files(launch(tmp_path, []).run_dir)
     out = launch(tmp_path, ["--as-of", "2026-03-02T09:00:00Z"])
 
-    wall = {n for at in (began, dt.datetime.now(dt.UTC))
-            for n in (at.date().isoformat(), at.strftime("%Y%m%d"), str(int(at.timestamp()))[:8],
-                      *(at.strftime(f) for f in WALL_DATE_SPELLINGS))}
-    wall |= {dt.date.today().isoformat(), C.ARM_START.date().isoformat()}
-    assert not wall & {"2026-03-02", "20260302"}, "fixture date collides with the wall clock"
     assert out.exit == 0, f"refusal={out.refusal}"
     text = run_files(out.run_dir)
     assert any("2026-03-02T09:00:20" in t for t in text.values()), (
         "no file carries T's run-clock stamp: the walk is not reading the run")
+    stamped = _provenance.read_provenance(RunPaths(out.run_dir).provenance).started_at
+    assert C.instant(stamped) == dt.datetime(2026, 3, 2, 9, 0, tzinfo=dt.UTC), stamped
     assert set(text) == set(plain), (
         f"an --as-of run's dir differs from an ordinary run's: {sorted(set(text) ^ set(plain))}")
-    leaks = {name: needle for name, t in text.items() for needle in wall if needle in t or needle in name}
-    assert not leaks, f"the launch's wall time is written into the run dir: {leaks}"
     named = {name: m.group() for name, t in text.items()
              if name in plain and (m := FREEZE_WORDS.search(t)) and not FREEZE_WORDS.search(plain[name])}
     assert not named, f"a file of the --as-of run names the freeze: {named}"

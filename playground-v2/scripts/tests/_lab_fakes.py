@@ -611,7 +611,8 @@ class LabOps:
     """The lab operations both make-a-case and the launcher drive. Records; implements no policy.
 
     read_marker() -> dict | None; write_marker(marker); load_stubs(parts_dir_of_the_freeze, as_of, mutations);
-    restart_node(clock_offset); start_proxy() -> url; content_digest() -> hex (needs stubs loaded
+    restart_node(clock_offset); start_proxy() -> url; current_password(); create_readonly_user(password);
+    mount_node_cert(); content_digest() -> hex (needs stubs loaded
     since the last teardown); teardown(); and for make-a-case: snapshot_alerts(freeze_dir),
     live_run_alerts(), ticketed_alerts(), freeze_rules(freeze_dir) -> dir of rule JSON."""
 
@@ -625,6 +626,9 @@ class LabOps:
         self.loads: list[tuple] = []
         self.proxy_up = False
         self.fail_at: str | None = None      # an op name that raises when called
+        self.password = "pw-0"               # the lab's current read-only password (changes over time)
+        self.users: list[tuple] = []         # (password, proxy_up) at each create_readonly_user
+        self.cert_mounts: list[bool] = []    # proxy_up at each mount_node_cert
 
     def _j(self, name: str, detail: Any = None) -> None:
         self.rig.journal.append((name, detail))
@@ -651,6 +655,18 @@ class LabOps:
     def restart_node(self, clock_offset):
         self.offset, self.offset_reading = clock_offset, self.rig.clock.last
         self._j("restart_node", clock_offset)
+
+    def current_password(self):
+        self._j("current_password")
+        return self.password
+
+    def create_readonly_user(self, password):
+        self.users.append((password, self.proxy_up))
+        self._j("create_readonly_user", password)
+
+    def mount_node_cert(self):
+        self.cert_mounts.append(self.proxy_up)
+        self._j("mount_node_cert")
 
     def start_proxy(self):
         self.proxy_up = True

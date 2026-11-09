@@ -10,6 +10,7 @@ The test-side oracle is `_frozen_cases`. Entry point:
 from __future__ import annotations
 
 import io
+import re
 import json
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -324,6 +325,7 @@ MALFORMED = {
     "verdict-uppercase": {"verdict": "VALID"},
     "verdict-number": {"verdict": 1},
     "knowledge-number": {"knowledge": 7},
+    "knowledge-list": {"knowledge": ["k"]},
     "run-id-missing": {"run_id": None},
     "run-id-not-an-id": {"run_id": "../escape"},
     "slug-number": {"slug": 5},
@@ -342,3 +344,36 @@ def test_a_malformed_index_row_refuses_the_whole_index(tmp_path, kind):
     rc, verdicts, said = scored(tmp_path, runs, root, row(root, GOOD, good), bad)
 
     assert rc == 2 and verdicts == {}, said
+
+
+@pytest.mark.parametrize("pinless", [None, ""], ids=["null", "empty"])
+def test_a_row_with_no_knowledge_pin_scores_normally(tmp_path, pinless):
+    """A2/O9 (FR7): a null or "" `knowledge` (a pinless launch) does not refuse the index."""
+    root, runs = fixtures(tmp_path), tmp_path / "runs"
+    good, other = pair(runs)
+    index = F.write_index(tmp_path / "ops" / "held-out-index.jsonl", row(root, GOOD, good),
+                          {**row(root, OTHER, other), "knowledge": pinless})
+
+    rc, verdicts, said = scored(tmp_path, runs, root, *[json.loads(ln) for ln in index.read_text().splitlines()])
+
+    assert (rc, verdicts) == (0, {GOOD: "OK", OTHER: "OK"}), said
+
+
+def test_the_report_gives_each_cases_age_band_at_t(tmp_path):
+    """A2 note (G1): under 1 h, 1-3 h and 3-6 h each appear on the line naming the case."""
+    slugs = {"a-young": (1800, r"(under|<)\s*1\s*h"), "b-mid": (7200, r"1\s*[-\u2013]\s*3\s*h"),
+             "c-old": (14400, r"3\s*[-\u2013]\s*6\s*h")}
+    root = _fixture_set(tmp_path / "held_out", {s: "benign" for s in slugs})
+    runs = tmp_path / "runs"
+    for slug, (age, _) in slugs.items():
+        case_file(root, slug).write_text(yaml.safe_dump(case_doc(slug, age=age)))
+
+    rc, verdicts, said = scored(tmp_path, runs, root,
+                                *[row(root, s, _run(runs, says="benign").name) for s in slugs])
+
+    for slug, (_, band) in slugs.items():
+        lines = [ln.lower() for ln in said.splitlines() if slug in ln]
+        assert any(re.search(band, ln) for ln in lines), f"{slug} has no age band {band}:\n{said}"
+        for other, (_, wrong) in slugs.items():
+            if other != slug:
+                assert not any(re.search(wrong, ln) for ln in lines), f"{slug} shows {other}'s band:\n{said}"

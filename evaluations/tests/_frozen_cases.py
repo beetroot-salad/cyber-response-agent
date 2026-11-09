@@ -46,7 +46,7 @@ def binding(root: Path, slug: str) -> str:
     return digest([digest(freeze), digest(case)])
 
 
-def row(root: Path, slug: str, run_id: str, **over: object) -> dict:
+def row(root: Path, slug: str, run_id: str, /, **over: object) -> dict:
     base = {"slug": slug, "run_id": run_id, "binding": binding(root, slug), "knowledge": "k" * 40,
             "verdict": "valid", "reason": "", "verified_at": "2026-11-08T12:30:00Z"}
     return {k: v for k, v in {**base, **over}.items() if v is not None}
