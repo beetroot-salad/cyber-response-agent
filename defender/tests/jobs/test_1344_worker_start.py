@@ -440,7 +440,9 @@ def _assert_usage_from_the_copy(ran: subprocess.CompletedProcess, modules: dict[
     assert "usage" in (ran.stdout + ran.stderr).lower(), (ran.stdout + ran.stderr)[-800:]
     assert sum(1 for n in modules if n.startswith("defender.")) > 20, "control: the entry loaded the package"
     assert W.module_files_outside(modules, copy) == {}
-    assert [f for f in modules.values() if _under(f, W.DEFENDER)] == [], "a module came from the checkout"
+    # The interpreter's own environment is not the checkout, even where it is installed inside it (CI's `defender/.venv`).
+    from_checkout = [f for f in modules.values() if _under(f, W.DEFENDER) and not _under(f, Path(sys.prefix))]
+    assert from_checkout == [], "a module came from the checkout"
 
 
 def test_image_entry_run_py_from_a_copy_with_no_pythonpath_prints_usage_and_loads_only_the_copy(image, tmp_path):
