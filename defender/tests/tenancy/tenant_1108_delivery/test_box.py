@@ -348,7 +348,7 @@ def test_the_oracle_start_requires_a_sandbox_and_leaves_no_stray_marker(tmp_path
     with pytest.raises(_oracle.BoxStartRefused):
         _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
     assert wrong.names() == []
-    creates = [argv for argv in wrong.docker_calls() if argv[1:2] == ["run"]]
+    creates = [argv for argv in wrong.docker_calls() if argv[1:2] == ["create"]]  # #1344 amendment 2
     assert creates, "the refused start never reached the daemon"
     sources = [part.split("source=", 1)[1].split(",", 1)[0]
                for part in creates[-1] if part.startswith("type=bind,")]
@@ -681,7 +681,7 @@ def test_oracle_production_start_reads_the_runner_check_and_refuses_a_wrong_mapp
     with pytest.raises(_oracle.BoxStartRefused):
         _oracle.start_oracle_box(env={**env, "PATH": os.environ["PATH"]}, tenant_id=TEST_TENANT)
     assert wrong.names() == []
-    creates = [argv for argv in wrong.docker_calls() if argv[1:2] == ["run"]]
+    creates = [argv for argv in wrong.docker_calls() if argv[1:2] == ["create"]]  # #1344 amendment 2
     assert creates, "the refused start never reached the daemon"
     sources = [part.split("source=", 1)[1].split(",", 1)[0]
                for part in creates[-1] if part.startswith("type=bind,")]

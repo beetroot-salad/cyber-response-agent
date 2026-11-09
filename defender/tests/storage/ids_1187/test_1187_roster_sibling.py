@@ -906,12 +906,15 @@ def test_1279_o8_setup_refuses_an_existing_run_dir_at_the_arms_id_and_resumes_no
 
 #: Every suffix that means "this id was used" (#1342 split the layout's list in two), spelled out:
 #: the refusal tests run over THIS list, and the coverage test pins it to the layout's, so a suffix
-#: added there cannot be missed silently. The job lane's launch record and alert file are accepted
-#: beside a run folder but do not mean "used".
+#: added there cannot be missed silently. The job lane's launch record and alert file, and a learning
+#: job's three host-held records (#1344, keyed by the job id), are accepted beside a run folder but do
+#: not mean "used".
 ALL_SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json",
                         ".ticket-write.json", ".session-pointer.json", ".call-join.jsonl",
                         ".ticket-comments.jsonl", ".knowledge-source.json", ".job-end.json")
-ACCEPTED_ONLY_SIDECAR_SUFFIXES = (".launch.json", ".alert.json")
+LEARNING_RECORD_SUFFIXES = (
+    ".learning-progress.json", ".learning-end.json", ".post-step.json", ".post-step-pending.json")
+ACCEPTED_ONLY_SIDECAR_SUFFIXES = (".launch.json", ".alert.json", *LEARNING_RECORD_SUFFIXES)
 
 
 def test_1279_o8_the_sidecar_tests_cover_every_reserved_suffix():
@@ -923,6 +926,31 @@ def test_1279_o8_the_sidecar_tests_cover_every_reserved_suffix():
     assert sorted(ACCEPTED_ONLY_SIDECAR_SUFFIXES) == sorted(
         set(ACCEPTED_SIDECAR_SUFFIXES) - set(USED_SIDECAR_SUFFIXES)), (
         "the layout accepts a different set of unused-id sidecars: update ACCEPTED_ONLY_SIDECAR_SUFFIXES")
+
+
+@pytest.mark.parametrize("suffix", LEARNING_RECORD_SUFFIXES)
+def test_1344_a_runs_listing_lists_the_runs_beside_a_learning_jobs_record(tmp_path, suffix):
+    """A learning job's progress, end and post-step records sit beside the tenant's runs, keyed by the job id: the
+    runs listing lists the runs past each, as written and as staged, rather than refusing the folder (#1344). An
+    unknown file there is still refused (the control)."""
+    import uuid
+
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
+    from defender.tests.support.shared._locations_1210 import location_path
+
+    ids = sorted(str(uuid.uuid4()) for _ in range(2))
+    _root, t = H.tenant_with_runs(tmp_path, *ids)
+    runs = Path(location_path(t.runs))
+    job = str(uuid.uuid4())   # a learning job's id: no run folder carries it
+    (runs / f"{job}{suffix}").write_text("{}\n", encoding="utf-8")
+    (runs / f"{job}{suffix}.staged-0123456789abcdef").write_text("{}\n", encoding="utf-8")
+
+    listed = [str(r) for r in t.runs_repository().list()]
+
+    assert sorted(listed) == ids, f"the listing did not list the runs past a {suffix} record: {listed}"
+
+    (runs / f"{job}.not-a-learning-record.json").write_text("{}\n", encoding="utf-8")
+    assert H.raised(t.runs_repository().list) is not None, "control: an unknown file beside the runs is refused"
 
 
 @pytest.mark.parametrize("suffix", ALL_SIDECAR_SUFFIXES)
@@ -961,7 +989,8 @@ def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
 @pytest.mark.parametrize("suffix", ACCEPTED_ONLY_SIDECAR_SUFFIXES)
 def test_1342_a_launch_record_or_alert_file_at_the_arms_id_does_not_refuse_setup(
         tmp_path, data_root, suffix):
-    """The job lane's launch and alert files do not mean "used": setup goes on over one beside the id."""
+    """The job lane's launch and alert files, and a learning job's records (#1344), do not mean "used": setup goes
+    on over one beside the id."""
     scene = _Scene(tmp_path, data_root, B_ID)
     scene.start_runs_by_hand()
     arm = scene.roster[WORLD_ID]
