@@ -55,6 +55,15 @@ def blocked_tick(fb: Any, decide: Any) -> BaseException | int | None:
     return rc or None
 
 
+def died_at(died: BaseException | int | None, records: list, named: str) -> bool:
+    """Whether a tick's death names `named`: an ERROR-or-higher log record naming it, or an exception (raised, as
+    `blocked_tick` returns it) whose str() names it. The base stage does not log a plain OSError, so either will do."""
+    import logging
+
+    return any(r.levelno >= logging.ERROR and named in r.getMessage() for r in records) or \
+        (isinstance(died, BaseException) and named in str(died))
+
+
 class Crasher:
     """Fails the k-th POST to the forge: `lose` applies it and loses the reply, else a transport fault refuses it
     unapplied. `fired` says whether it did (so a test can tell a crash from a k past the last write)."""

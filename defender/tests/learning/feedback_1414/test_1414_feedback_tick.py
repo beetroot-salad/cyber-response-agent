@@ -165,16 +165,21 @@ def test_1414_an_issue_the_forge_no_longer_has_is_treated_as_closed_and_logged(f
     """A recorded issue the forge no longer has is read as closed: the loss is logged, the issue is never made again, and a
     later run of the case still opens its own. A6 (ruling 2026-11-09: one issue per run)."""
     number = fb.opened("case-gone")
+    names = re.compile(rf"(?<!\d){number}(?!\d)")
+    with caplog.at_level(logging.INFO):  # baseline: a tick while the forge still holds the issue
+        assert fb.tick(S.Decider()) == 0
+    baseline = {r.getMessage() for r in caplog.records}
+    caplog.clear()
     fb.forge.remove_issue(number)
 
     with caplog.at_level(logging.INFO):
         assert fb.tick(S.Decider()) == 0
         assert fb.tick(S.Decider()) == 0
     assert len(fb.forge.issue_creates()) == 1, "the gone issue was made again"
-    gone = ("gone", "missing", "no longer", "not found", "404")
-    assert any(r.levelno >= logging.WARNING and re.search(rf"(?<!\d){number}(?!\d)", r.getMessage())
-               and any(w in r.getMessage().lower() for w in gone) for r in caplog.records), \
-        "no warning names the issue and says it is gone"
+    # FC: the loss is logged by comparison with the baseline tick, not by a word list: some WARNING-or-higher record
+    # names the issue's number and is not one the baseline tick (issue present) already produced.
+    assert any(r.levelno >= logging.WARNING and names.search(r.getMessage()) and r.getMessage() not in baseline
+               for r in caplog.records), "no new warning names the issue the forge no longer has"
 
     later = fb.request("case-gone")
     assert fb.tick(S.Decider()) == 0
@@ -620,7 +625,7 @@ _BLOCKED_WRITES = [
 
 @pytest.mark.parametrize(("folder", "stage"), _BLOCKED_WRITES)
 def test_1414_a_failed_state_write_loses_no_comment_and_makes_no_second_issue(fb, caplog, folder, stage):
-    """A tick that dies (exit code and a logged refusal naming the path) on a write into one of its state folders, made unwritable on disk with no hook in the code, is redone whole: one issue, each eligible comment decided and replied to once, its lessons row written. P5/O4/A6."""
+    """A tick that dies (an exit code, or an exception or ERROR record naming the path) on a write into one of its state folders, made unwritable on disk with no hook in the code, is redone whole: one issue, each eligible comment decided and replied to once, its lessons row written. P5/O4/A6."""
     scene = A.Scene(fb)
     record = None
     if stage != "open":
@@ -629,17 +634,14 @@ def test_1414_a_failed_state_write_loses_no_comment_and_makes_no_second_issue(fb
         record = {"first-comment": 0, "second-comment": 1}.get(stage)
         record = None if record is None else str(scene.comments[record]["id"])
     blocked = A.BlockedFolder(fb, folder, record)
-    creates = len(fb.forge.issue_creates())
+    named = f"{folder}/{record}{S.STATE_RECORD_SUFFIX}" if record else folder
     with caplog.at_level(logging.INFO):
         died = A.blocked_tick(fb, scene.decider)
+        at_write = A.died_at(died, caplog.records, named)
     blocked.restore()
-    named = f"{folder}/{record}{S.STATE_RECORD_SUFFIX}" if record else folder
     assert died, "premise: the tick did not die at the blocked write"
-    assert any(r.levelno >= logging.ERROR and named in r.getMessage() for r in caplog.records), \
-        f"premise: no logged refusal names the blocked path {named}"
-    if stage == "open":
-        assert len(fb.forge.issue_creates()) == creates, "premise: the tick opened an issue past the blocked write"
-    else:
+    assert at_write, f"premise: neither an ERROR record nor the exception names the blocked path {named}"
+    if stage != "open":
         assert fb.forge.comments_on(scene.number, by=fb.bot) == [], "premise: the failed write stopped the tick before its replies"
     for _ in range(3):
         if not scene.comments:

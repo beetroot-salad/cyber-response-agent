@@ -92,6 +92,8 @@ def test_1414_an_approval_drafts_host_filled_entries_on_a_registry_only_pr(fb):
     assert fb.tick(decider) == 0
     [(branch, tip)] = _drafts(fb).items()
     assert touched(fb.t.remote, "main", tip) == [S.REGISTRY]
+    # No gate test exists for F2: no test route puts a stray path into a batch's change set (draft and change set come
+    # from the same export commit, and step 4 has no box or forge call between), so this census is what is observable.
     drafted = _registry_at(fb, tip)
     assert [ln for ln in main_before.splitlines() if ln.startswith("#")] == \
         [ln for ln in drafted.splitlines() if ln.startswith("#")], "the file's comments did not survive"
@@ -397,6 +399,7 @@ def _mains(number: int, cid: int) -> dict[str, str]:
         "crlf empty flow list": _crlf("# header\nentries: []\n"),
         "duplicate id on main": f"entries:\n{_ENTRY}{taken}",
         "refused entry on main": f"entries:\n{_ENTRY}{bad}",
+        "non-empty flow list": "# header\nentries: [{id: tk-old}]\n",
     }
 
 
@@ -445,7 +448,9 @@ def _naming_line(reply: str, eid: str) -> str | None:
 
 
 def _assert_names(reply: str, eid: str, lookup: dict, *fields: str) -> None:
-    """The reply names `eid` and, on the same line, shows the named lookup fields' values."""
+    """The reply names `eid` and, on the same line, shows the named lookup fields' values. Deliberately weak on which
+    lookup: the entry id's `<n>` already identifies it, and the design does not ask the reply to quote the pattern
+    (O5: "this lookup cannot be written as an entry"), so only actor and host are required (round-3 review N4)."""
     line = _naming_line(reply, eid)
     assert line is not None, f"{eid} is not named in the reply"
     for field in fields:
@@ -463,7 +468,12 @@ def _assert_drafted_or_named(fb, mains_text: str, lookups: list[dict], number: i
     reply = reply_bodies[0] if reply_bodies else ""
     if not drafts:
         assert fb.forge.prs == [], "a PR was opened with nothing drafted"
-        if reply_bodies:  # entry by entry: every approved lookup is named, with the value that stopped it
+        if _reading(mains_text, fb.tmp, "main-first").fatal is None:
+            # main reads fine and the plain lookup was not drafted: the read-back failed for every entry, which is a
+            # file-level failure (ruling 2), never an entry failing alone: no reply, a logged refusal, retried next tick
+            assert not reply_bodies, "main reads fine, nothing was drafted, yet the approval was answered"
+            assert tick_logged, "main reads fine, nothing was drafted and the refusal was not logged"
+        elif reply_bodies:  # entry by entry: every approved lookup is named, with the value that stopped it
             for eid, lookup in zip(ids, lookups, strict=True):
                 _assert_names(reply, eid, lookup, "actor", "host")
         else:  # a file-level refusal: logged, and the approval settles nothing
@@ -507,13 +517,14 @@ def test_1414_every_drafted_entry_reads_back_as_the_lookup_and_the_rest_are_name
         assert fb.tick(decider) == 0
     logged = any(r.levelno >= logging.WARNING and r.name != "httpx" for r in caplog.records)
     drafted = _assert_drafted_or_named(fb, text, lookups, number, comment, tick_logged=logged)
-    assert drafted.get(0) or not any(drafted.values()), (
-        "positive control: the plain lookup was not drafted although this main took another approved lookup "
-        "(drafting nothing is allowed only as a whole: every entry named, or a logged file-level refusal)")
+    assert drafted.get(0) or (not fb.replies(number, comment["id"]) and logged), (
+        "positive control: the plain lookup was not drafted although main reads fine "
+        "(then the read-back failed for every entry: a file-level failure, so no reply and a logged refusal)")
 
 
-#: FC: candidate mains the test itself writes; each is kept only if the shared reader cannot read main at all, so no append
-#: can read back as main plus an entry. Which texts the host treats as file-level is the reader's call, not named here.
+#: FC: candidate mains the test itself writes; each is kept only if the shared reader's own reading of main is fatal
+#: (the premise is asserted below), so refusing the draft is the only honest outcome. `no entries key` is defensible
+#: on that ground alone: main's own reading is fatal. Which texts the reader finds fatal is its call, not named here.
 _UNREADABLE_MAINS = {
     "multi-document": "---\nentries: []\n---\nentries: []\n",
     "broken flow list": "entries: [unclosed\n",
