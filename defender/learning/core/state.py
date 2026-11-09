@@ -725,6 +725,20 @@ class LearningState:
         with contextlib.suppress(OSError):
             self._unlink(f"{folder}/{key}.json")
 
+    def drop_record_if(self, folder: str, key: str, served: dict) -> bool:
+        """Drop the record only while it is still `served`: a newer one filed meanwhile survives. False then."""
+        if self.get_record(folder, key) != served:
+            return False
+        self.drop_record(folder, key)
+        return True
+
+    def replace_record_if(self, folder: str, key: str, served: dict, spec: dict) -> bool:
+        """Write `spec` over the record only while it is still `served`; a newer record is left alone."""
+        if self.get_record(folder, key) != served:
+            return False
+        self.put_record(folder, key, spec)
+        return True
+
     def _json_names(self, folder: str) -> list[str]:
         """The `*.json` record names directly in `folder`, of every kind (an entry at a record
         name is judged when it is opened, so a planted one halts there); a folder that is absent

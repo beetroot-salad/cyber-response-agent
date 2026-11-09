@@ -36,6 +36,10 @@ ELIGIBILITY_MAX_AGE_ENV = "LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE"
 DEFAULT_ELIGIBILITY_MAX_AGE = dt.timedelta(seconds=60)
 #: Counted refusals of one request before it is set aside (A4; the lead-author lane's ceiling).
 MAX_ATTEMPTS = 3
+#: How far ahead of this host's clock the service's record may be dated and still count as fresh.
+CLOCK_SKEW = dt.timedelta(seconds=5)
+#: The issue body's host-written head: the case line, then the first run's line (markers are read there only).
+ISSUE_HEAD = 2
 _RUN_MARKER = re.compile(r"<!-- defender-feedback-run:(\S+) -->")
 
 
@@ -99,6 +103,10 @@ def _eligible_logins(records: Any, tenant_id: Any, bound: dt.timedelta, bots: fr
                         "has not written one): reading and deciding no comments this tick")
         return None
     age = dt.datetime.now(dt.UTC) - record.read_at
+    if age < -CLOCK_SKEW:
+        _logger.warning(f"feedback: the merge-eligibility record is dated {-age.total_seconds():.0f}s ahead of "
+                        "this host's clock: a clock is wrong; reading and deciding no comments this tick")
+        return None
     if age > bound:
         _logger.warning(f"feedback: the merge-eligibility record is {age.total_seconds():.0f}s old, past the "
                         f"{bound.total_seconds():.0f}s bound: reading and deciding no comments this tick")
@@ -141,8 +149,9 @@ def _recover(ctx: Tick, case_id: str) -> int | None:
 
 def _bot_text(ctx: Tick, number: int, issue: dict) -> str:
     """The issue body and every bot comment on it: where a run's marker or a reply's is looked for."""
-    return "\n".join([issue.get("body") or "", *(c["body"] for c in ctx.forge.list_comments(number)
-                                                  if c["user"]["login"] in ctx.bots)])
+    return "\n".join([feedback_registry.marker_head(issue.get("body") or "", ISSUE_HEAD),
+                      *(feedback_registry.marker_head(c["body"]) for c in ctx.forge.list_comments(number)
+                        if c["user"]["login"] in ctx.bots)])
 
 
 def _record_run(ctx: Tick, case_id: str, number: int, request: dict) -> None:
@@ -157,9 +166,9 @@ def _serve_request(ctx: Tick, case_id: str, request: dict) -> None:
     if number is None:
         made = ctx.forge.create_issue(
             title=f"Feedback on case {case_id} ({request['outcome']})",
-            body=_first_line(case_id) + "\n\n" + _summary(request), label=FEEDBACK_LABEL)
+            body=_first_line(case_id) + "\n" + _summary(request), label=FEEDBACK_LABEL)
         _record_run(ctx, case_id, made["number"], request)
-        ctx.state.drop_record(FEEDBACK_REQUESTS, case_id)
+        ctx.state.drop_record_if(FEEDBACK_REQUESTS, case_id, request)
         return
     try:
         issue = ctx.forge.get_issue(number)
@@ -167,13 +176,13 @@ def _serve_request(ctx: Tick, case_id: str, request: dict) -> None:
         if e.status != 404:
             raise
         _logger.warning(f"feedback: issue {number} of case {case_id} is gone from the forge; treated as closed")
-        ctx.state.drop_record(FEEDBACK_REQUESTS, case_id)
+        ctx.state.drop_record_if(FEEDBACK_REQUESTS, case_id, request)
         return
     if issue["state"] == "open":
         _record_run(ctx, case_id, number, request)
         if run_marker(request["run_id"]) not in _bot_text(ctx, number, issue):
             ctx.forge.create_comment(number, _summary(request))
-    ctx.state.drop_record(FEEDBACK_REQUESTS, case_id)
+    ctx.state.drop_record_if(FEEDBACK_REQUESTS, case_id, request)
 
 
 def _fail_request(ctx: Tick, case_id: str, request: dict, failure: ForgeError) -> None:
@@ -188,10 +197,10 @@ def _fail_request(ctx: Tick, case_id: str, request: dict, failure: ForgeError) -
                       "set aside")
         ctx.state.put_record(f"{FEEDBACK_REQUESTS}/failed", case_id,
                              {**request, "attempts": attempts, "failed": f"refused {attempts} times: {failure}"})
-        ctx.state.drop_record(FEEDBACK_REQUESTS, case_id)
+        ctx.state.drop_record_if(FEEDBACK_REQUESTS, case_id, request)  # a newer request stays queued
         return
     _logger.error(f"feedback: the request of case {case_id} was refused (attempt {attempts}/{MAX_ATTEMPTS}): {failure}")
-    ctx.state.put_record(FEEDBACK_REQUESTS, case_id, {**request, "attempts": attempts})
+    ctx.state.replace_record_if(FEEDBACK_REQUESTS, case_id, request, {**request, "attempts": attempts})
 
 
 def _open_requests(ctx: Tick) -> None:
@@ -203,6 +212,8 @@ def _open_requests(ctx: Tick) -> None:
             _serve_request(ctx, case_id, request)
         except ForgeError as e:
             _fail_request(ctx, case_id, request, e)
+        except UnicodeEncodeError as e:  # text the forge cannot be sent: a refusal, counted, never a wedge
+            _fail_request(ctx, case_id, request, ForgeError(f"the request holds text that is not UTF-8: {e}", status=400))
 
 
 # ------------------------------------------------------------------ step 2: read
@@ -211,8 +222,9 @@ def _framing(case: dict, issue: dict, comments: list[dict], bots: frozenset[str]
     """The run a comment answers: the latest run marker a bot wrote above it, the issue body first, in the
     forge's comment order (A6). `{}` when no known run precedes it."""
     run_id = None
-    for text in [issue.get("body") or "",
-                 *(c["body"] for c in comments if c["id"] < comment_id and c["user"]["login"] in bots)]:
+    for text in [feedback_registry.marker_head(issue.get("body") or "", ISSUE_HEAD),
+                 *(feedback_registry.marker_head(c["body"]) for c in comments
+                   if c["id"] < comment_id and c["user"]["login"] in bots)]:
         found = _RUN_MARKER.findall(text)
         run_id = found[-1] if found else run_id
     run = case["runs"].get(run_id) if run_id else None
@@ -222,13 +234,13 @@ def _framing(case: dict, issue: dict, comments: list[dict], bots: frozenset[str]
 
 def _readable(issue: dict, new: list[dict]) -> list[dict]:
     """The comments of `new` a tick may read: all of them on an open issue, only those written before
-    the close on a closed one (D12)."""
+    the close, or in the same second as it, on a closed one (D12: as the tick observes it)."""
     if issue["state"] == "open":
         return new
     closed_at = issue.get("closed_at")
     if not closed_at:
         return []
-    return [c for c in new if _forge_time(c["created_at"]) < _forge_time(closed_at)]
+    return [c for c in new if _forge_time(c["created_at"]) <= _forge_time(closed_at)]
 
 
 def _queue_comment(ctx: Tick, case_id: str, case: dict, issue: dict, comments: list[dict], c: dict) -> None:

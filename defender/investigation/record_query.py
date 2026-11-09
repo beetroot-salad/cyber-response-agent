@@ -694,9 +694,19 @@ def dead_end_reason(system: str, verb: str, trip: RepeatTrip, executed: int) -> 
     )
 
 
+def _encodes(text: str) -> bool:
+    """Whether `text` is UTF-8 text: a lone surrogate in a model's tool argument is not, and would fail every
+    forge request that carries it."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def captured_lookups(state: RunState) -> list[dict[str, str]]:
     """The successful `tacit-knowledge` `lookup` calls in the run's in-memory rows whose actor,
-    host and pattern are all strings, de-duplicated across leads (#1414 P3, C17, C23)."""
+    host and pattern are all UTF-8 text, de-duplicated across leads (#1414 P3, C17, C23)."""
     seen: list[dict[str, str]] = []
     with state.lock:
         for rows in state.rows.values():
@@ -706,6 +716,6 @@ def captured_lookups(state: RunState) -> list[dict[str, str]]:
                         or row.get("exit_code") != 0 or not isinstance(params, dict)):
                     continue
                 found = {k: params.get(k) for k in ("actor", "host", "pattern")}
-                if all(isinstance(v, str) for v in found.values()) and found not in seen:
+                if all(isinstance(v, str) and _encodes(v) for v in found.values()) and found not in seen:
                     seen.append(found)  # type: ignore[arg-type]
     return seen
