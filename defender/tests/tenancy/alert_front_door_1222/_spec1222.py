@@ -407,7 +407,7 @@ def admission_bytes(shape: str, base: Mapping[str, Any] | None = None) -> bytes:
     if shape == "lone_surrogate":
         return b'{"rule": {"id": "R-1001", "description": "x\\ud800y"}}'
     if shape == "oversize":
-        cap = sym("_io", "READ_LIMIT")
+        cap = sym("records.formats", "ALERT_BYTE_CAP")
         filler = b"a" * (cap + 1 - len(b'{"pad": ""}'))
         return b'{"pad": "' + filler + b'"}'
     if shape == "raw_line_separators":

@@ -232,12 +232,19 @@ def _classify_end(end: LeadEnd, run_state: RunState, system: str) -> str | None:
 
 
 def _breaker_ending(end: LeadEnd) -> str | None:
-    """The two endings decided before the lead's results are read: a store that could not
-    record the lead stops the run; a call the breaker refused names the breaker."""
+    """The endings decided before the lead's results are read: a store that could not record
+    the lead stops the run; a provider refusal names the dispatch as failing; a call the breaker
+    refused names the breaker. The refusal is checked before the breaker and before
+    `_classify_end`'s down-mid-lead reading on purpose: the provider refusing the lead's own
+    request is the cause, and a refused or down system call after it is only a symptom."""
     from defender.records import session_store  # lazy: the store needs the agent framework, and the operator tools that read this package's census run without it
 
     if end.fault_terminator == session_store.TRUNCATED_BY_STORE:
         raise session_store.StoreError("the correlation lead's session could not be recorded")
+    if end.fault_terminator == run_end.TRUNCATED_BY_PROVIDER_REJECTED:
+        # The provider refused one of its requests (#1243 r3): named as the dispatch failing,
+        # ahead of anything the lead's calls would otherwise read as.
+        return ENDING_DISPATCH_RAISED
     if end.breaker_refused is not None:
         return ENDING_TRIPPED_BREAKER
     return None
@@ -270,7 +277,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
 
     Every way it fails to run or yields nothing is a returned ending, never a raise (A2); a
     run-level kill (`BudgetKill`, `RunAborted`), a provider that stayed down (`ProviderDown`,
-    #1243), an interrupt, a store fault after the lead began, and a run folder that refuses its
+    #1243), a provider refusal that ends the run (`ProviderRejected`), an interrupt, a store fault after the lead began, and a run folder that refuses its
     produced summary propagate and stop the run."""
     from defender.records import session_store  # lazy, as in `_breaker_ending`
 
@@ -325,7 +332,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
             return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
         _stamp_timed_out(store, session_id)
         return CorrelationOutcome(ending=ENDING_TIMED_OUT, system=system)
-    except (BudgetKill, circuit_breaker.RunAborted, providers.ProviderDown,
+    except (BudgetKill, circuit_breaker.RunAborted, providers.ProviderDown, providers.ProviderRejected,
             run_end.CallRecordWriteFailed, session_store.StoreError, sqlite3.Error,
             asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, SystemExit):
         raise
@@ -334,6 +341,8 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
             raise  # the box is unusable or its fence tripped (#1421): the run ends by name
         if carried_unless_overridden(e, providers.ProviderDown, (BudgetKill, circuit_breaker.RunAborted)):
             raise  # a provider that stayed down, inside a group (#1243)
+        if carried_unless_overridden(e, providers.ProviderRejected, (BudgetKill, circuit_breaker.RunAborted)):
+            raise  # a model whose setup is broken, inside a group (#1243 r3)
         _logger.warning(f"correlation lead dispatch failed ({type(e).__name__}); naming it")
         return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
     if not ends:

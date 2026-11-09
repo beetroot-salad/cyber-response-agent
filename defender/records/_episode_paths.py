@@ -49,6 +49,11 @@ SOURCE_RECORD_NAME = "source_record.json"
 #: reads and the judge reads lesson bodies at, decided by the launcher from the source run's
 #: host-held knowledge record and created once, here, where no box writes.
 KNOWLEDGE_PIN_NAME = "knowledge_pin.json"
+#: A learning job's judge findings (#1344, judge job lane): the rows the judge would have put on
+#: the defender and questioner queues, held in the episode until the job's row has ended and its
+#: post-step publishes them. Appended by the judge pass only.
+JOB_FINDINGS_NAME = "job_findings.jsonl"
+JOB_QUESTIONER_FINDINGS_NAME = "job_questioner_findings.jsonl"
 
 WORLDS_DIRNAME = "worlds"
 #: Each sibling's own record of why its world ended without a full run (#1224):
@@ -356,6 +361,14 @@ class EpisodeLayout:
     @property
     def knowledge_pin(self) -> PurePosixPath:
         return PurePosixPath(KNOWLEDGE_PIN_NAME)
+
+    @property
+    def job_findings(self) -> PurePosixPath:
+        return PurePosixPath(JOB_FINDINGS_NAME)
+
+    @property
+    def job_questioner_findings(self) -> PurePosixPath:
+        return PurePosixPath(JOB_QUESTIONER_FINDINGS_NAME)
 
     @property
     def served(self) -> PurePosixPath:

@@ -82,8 +82,9 @@ def _assert_one_ulimit(argv: list[str], resource: str, want: str, lane: str) -> 
         f"{lane}: the create argv carries {resource} ulimit(s) {got}, expected exactly "
         f"[{want!r}] — argv: {argv}"
     )
-    # The run box is `docker create` (#1343 B10), the lane (request) box `docker run`; each ends `<image> sh -c <main>`.
-    tail = ["sh", "-c", _lifecycle._RUN_BOX_MAIN if argv[:2] == ["docker", "create"] else _lifecycle._LANE_BOX_MAIN]
+    # Both boxes are `docker create` (the run box, #1343 B10; the lane box, #1344 amendment 2); each ends
+    # `<image> sh -c <main>`, its own.
+    tail = ["sh", "-c", _lifecycle._LANE_BOX_MAIN if lane == "lane box" else _lifecycle._RUN_BOX_MAIN]
     assert argv[-len(tail):] == tail, f"{lane}: unexpected argv tail {argv[-3:]}"
     image_at = len(argv) - len(tail) - 1
     at = argv.index(want) - 1    # the `--ulimit` token `_ulimits` read the value after

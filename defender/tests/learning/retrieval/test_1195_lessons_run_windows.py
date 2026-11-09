@@ -561,7 +561,7 @@ def test_a_box_fault_in_the_first_curator_halts_the_tick_before_the_second(
     assert len(f.curator.calls) == (0 if source.startswith("start") else 1)
     assert not (t.sc.corpus / "a.md").exists(), "the curator's lesson was not undone"
     steps = f.daemon.steps()
-    assert steps.count("stop") >= steps.count("start"), f"a start was never stopped: {steps}"
+    assert steps.count("stop") >= steps.count("attach"), f"a start was never stopped: {steps}"
 
 
 @pytest.mark.parametrize("source", SECOND_CURATOR_SOURCES)
@@ -600,7 +600,7 @@ def test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_secon
 
     assert t.modules() == ["author", "questioner_curator"]
     assert len(q_curator.calls) == 1
-    assert daemon.steps().count("start") == 2, daemon.steps()
+    assert daemon.steps().count("attach") == 2, daemon.steps()
     assert daemon.status(NAME) == "exited", "a run left the box running"
     assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
     assert t.sc.head_text(_rel(t.sc, "a.md")) is None
@@ -1097,10 +1097,11 @@ def test_the_production_drain_runs_one_box_stopped_between_its_agent_runs(
     assert drains.author_drain(tt.paths, trigger_author=tt.trigger, **seams) == 0
 
     [name] = daemon.created()
-    kept = [s for s in daemon.steps() if s in ("create", "start", "stop", "rm") or ":" in s
+    kept = [s for s in daemon.steps() if s in ("create", "start", "attach", "stop", "rm") or ":" in s
             or s in ("curator", "questioner")]
-    assert kept == ["create", "stop", "trigger:author", "start", "curator", "stop",
-                    "trigger:questioner_curator", "start", "questioner", "stop", "rm"], kept
+    # #1344 amendment 2: one plain start for the probes, then each run's window starts attached.
+    assert kept == ["create", "start", "stop", "trigger:author", "attach", "curator", "stop",
+                    "trigger:questioner_curator", "attach", "questioner", "stop", "rm"], kept
     assert daemon.windows() == [["curator"], ["questioner"]], daemon.steps()
     handed = curator.calls[-1]["cfg"].box
     assert handed.sandboxed, handed
@@ -1159,7 +1160,8 @@ def test_a_stop_fault_under_a_failing_spawn_halts_author_drain_with_the_failure_
     assert tt.modules() == ["author"], "the drain went on past a box that would not stop"
     assert q_curator.calls == []
     assert _stuck_classes(tt.paths, "questioner_findings") == []
-    assert daemon.steps().count("start") == 1, daemon.steps()
+    assert daemon.steps().count("attach") == 1, daemon.steps()
+    assert "start" not in daemon.steps(), daemon.steps()
     _nothing_delivered(tt)
 
 
@@ -1204,7 +1206,8 @@ def test_a_swallowed_stop_fault_makes_the_next_curators_run_refuse(
     _nothing_delivered(tt)
     steps = daemon.steps()
     tail = steps[steps.index("trigger:questioner_curator"):]
-    assert "start" not in tail, f"the questioner's run started a running box: {tail}"
+    assert not {"start", "attach"} & set(tail), (
+        f"the questioner's run started a running box: {tail}")
     assert "stop" in tail[:tail.index("rm")], f"no best-effort stop on the refusal: {tail}"
 
 
@@ -1272,14 +1275,14 @@ def _default_drain(tt: TenantTick, daemon: X.FakeDaemon) -> BaseException | None
 def test_a_run_start_fault_through_the_default_curator_step_halts_the_drain(
         tmp_path: Path, monkeypatch, tenant_of: Any, queued: str):
     tt, daemon = _default_tick(tmp_path, monkeypatch, tenant_of, findings=queued == "both")
-    daemon.refuse_start(at=[1])
+    daemon.refuse_start(at=[2])  # 1: the probes' plain start; 2: the first run's attached start
     q_before = (location_path(tt.paths.state_root) / QUESTIONER_FINDINGS.queue).read_bytes()
 
     got = _default_drain(tt, daemon)
 
     assert isinstance(got, BoxFault), got
     X.no_path_docker(daemon)
-    assert daemon.steps().count("start") == 1, f"a start was asked after a box fault: {daemon.steps()}"
+    assert daemon.steps().count("attach") == 1, f"a start was asked after a box fault: {daemon.steps()}"
     assert _batch_calls(daemon) == X.REFUSED_FIRST_RUN, "a default step called docker outside its run"
     _nothing_delivered(tt)
     if queued == "questioner-only":
@@ -1308,12 +1311,12 @@ def test_a_stop_fault_under_a_failing_default_spawn_halts_the_drain(
     X.no_path_docker(daemon)
     _nothing_delivered(tt)
     calls = _batch_calls(daemon)
-    first_run = ["stop", "status", "status", "start", "status", "stop", "status"]
+    first_run = ["stop", "status", "status", "attach", "status", "stop", "status"]
     if stop == "holds":
         assert got is None, got
         assert _stuck_classes(tt.paths, "findings") == ["FatalConfigError"], (
             "the findings curator's spawn never ran in its window")
-        assert calls == [*first_run, "status", "start", "status", "stop", "status", "rm"], calls
+        assert calls == [*first_run, "status", "attach", "status", "stop", "status", "rm"], calls
         return
     assert isinstance(got, BoxFault), f"the spawn's fault outranked its stop fault: {got!r}"
     assert isinstance(got.__context__, FatalConfigError), X.chain(got)

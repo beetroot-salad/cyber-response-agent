@@ -117,6 +117,7 @@ This repo's record of exploit shapes that carried real bugs past a committed sui
 - **violated**: any "recompute over all alerts" obligation; the tests plant fewer alerts than one batch.
 - **exploit**: the recompute handles the first batch and stops. Generic replay: plant more alerts than the batch size (and exactly one batch, and one over) and assert every one is recomputed.
 - **killed by**: contract repair rounds (tags contract-1345-v2..v6).
+- **superseded by #1420**: the alert-mapping recompute is gone (a save no longer touches stored alerts); the generic replay still applies to any future batched pass.
 
 ## 2026-11-04 · PR #1345 (impl) — a lock namespace equal to another subsystem's is raced only against the one pair the tests name
 - **violated**: lock-isolation obligations; tests race the new lock against its intended peer only.

@@ -257,26 +257,26 @@ Permission profiles and process/container placement remain explicit; a single
 all-privileged worker pool is not required.
 
 The worker pool counts capacity in **slots**, roughly one brain plus its executor,
-not in jobs. An investigation needs one slot. A learning family needs one slot per
-sibling it runs at once. At least one slot is reserved for investigations, so a
-running learning job never blocks one; there is no preemption. Other slots go to
-the highest effective priority, computed in the claim query:
+not in jobs. A slot is a machine's resource, counted per worker. An investigation
+needs one slot, and so does a learning job: a job's sibling worlds run one after
+another, control first, so a slot holds one family (#1344; operator-started
+families keep running their worlds together). A worker has `slots` S (default 3)
+and `learning slots` L, both the guarantee and the limit for learning-class work
+(family steps and the post-steps that follow them), 0 ≤ L ≤ S − 1, defaulting to
+min(1, S − 1) in the deployed settings; L = 0 is the off switch. A worker with a
+free slot picks, in order (#1344 r5 "Scheduling"):
 
-- Investigations have a higher base priority than learning.
-- Effective priority grows with time waited, not with skip count, so a steady
-  stream of investigations cannot starve learning.
-- Once a multi-slot job has waited past a limit, admission stops starting smaller
-  jobs until it fits, so small jobs cannot keep it out indefinitely.
+1. if fewer than L learning-class tasks run and a job is queued: the oldest job;
+2. otherwise the oldest investigation.
 
-Learning does not have to run siblings at once. Today the launcher starts every
-sibling world together, with each holding an equal share of the episode's query
-rate. No stated experimental requirement depends on that: preflight freezes each
-world's store before any sibling starts. Running siblings one after another is
-acceptable and lowers a family to one slot. Pausing learning between siblings to
-yield to investigations, or surviving a worker restart mid-episode, additionally
-requires resumable episodes. A relaunch today starts a new episode. Budget
+There is no preemption and no priority that grows with time waited: with the
+defaults learning never holds more than 1 of 3 slots, and it takes the next free
+slot whenever none of its own runs. Idle slots stay idle while jobs wait. A queued
+job's first attempt past an age limit (default 24 h) is skipped when a pick
+reaches it, so under sustained load some jobs expire rather than queue without
+bound. No job needs several slots, so there is no wait limit for one. Budget
 aggregate brains, parsers, adapters, provider requests, memory, disk, and spend
-as well as slots. Pool size and family width must be set before execution-host sizing.
+as well as slots; learning has no spending cap until #1431.
 
 The API commits an investigation or learning-job record and its audit atomically.
 Job status/claim fields belong to those domain records; no separate dispatch row
@@ -311,8 +311,13 @@ lands or it ends. Cancellation updates the row; the holder's
 next renewal (within about a second) tells the child to stop, and the child has
 ended within `stop_grace` (30 s) of that.
 
-Workers are not tied to hosts: any number run on any number of machines, and
-nothing in the database names a worker or machine. There is no restart
+Nothing in the database names a worker or machine. Investigations alone could run
+on any number of machines; with learning, run evidence and learning state are on
+the execution machine's disk, so there is one execution machine until #1082 (#1344).
+There is one worker per machine: the deployed start (`python -m defender.worker`)
+takes an exclusive lock on the data root, so a second worker refuses to start,
+because owner checks read `/proc` and would judge another container's live process
+dead (lifted with #1434). Capacity grows by raising `slots`. There is no restart
 reconcile and no per-machine cleanup; the one container that can outlive its
 starter is a box created but never started (the starter died between the two
 steps), which is inert and removed at tenant offboarding. A stopping worker hands

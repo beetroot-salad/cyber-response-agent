@@ -137,7 +137,7 @@ class TenantRepository(Protocol):
         ...
     async def alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
         """The tenant's alert mapping (#1345), None until one is saved. Read here, written only by the jobs
-        store's replace, which re-derives the tenant's alerts in the same transaction."""
+        store's replace."""
         ...
 
     # --- requests (the API)
