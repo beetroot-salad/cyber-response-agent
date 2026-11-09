@@ -7,6 +7,7 @@ import contextlib
 import datetime as dt
 import json
 import logging
+import re
 from pathlib import Path
 
 import httpx
@@ -246,10 +247,14 @@ _REFUSED = range(400, 500)
 _UNREACHABLE = range(500, 600)
 
 
-def _request_case(request) -> str | None:
-    """The case an issue-open POST is for (read from the title the host wrote), else None."""
+def _request_case(fb, request) -> str | None:
+    """The case an issue-open POST is for: the request whose case id or run id stands as a whole token in the title
+    the host wrote (ruling 2026-11-09 puts the run id there; a per-case host may write the case id), else None."""
     if request.method == "POST" and request.url.path.endswith("/issues"):
-        return json.loads(request.content)["title"].split()[3]
+        title = json.loads(request.content)["title"]
+        for case, run_ids in fb.run_ids.items():
+            if any(re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", title) for n in (case, *run_ids)):
+                return case
     return None
 
 
@@ -275,8 +280,8 @@ def test_1414_every_4xx_on_a_request_is_counted_to_the_3rd_tick_and_no_5xx_or_fa
     for case in (*cases, "fault", "healthy"):
         fb.request(case)
     fb.forge.respond = lambda r: (httpx.Response(cases[c], json={"message": "no"})
-                                  if (c := _request_case(r)) in cases else None)
-    fb.forge.fault = lambda r: httpx.ConnectError("down", request=r) if _request_case(r) == "fault" else None
+                                  if (c := _request_case(fb, r)) in cases else None)
+    fb.forge.fault = lambda r: httpx.ConnectError("down", request=r) if _request_case(fb, r) == "fault" else None
     refused = {c for c, status in cases.items() if status < 500}
     kept = set(cases) - refused | {"fault"}
 
@@ -301,9 +306,15 @@ def test_1414_every_4xx_on_a_request_is_counted_to_the_3rd_tick_and_no_5xx_or_fa
     assert len(fb.issues("healthy")) == 1
 
 
+def _issue_of(path: str) -> int | None:
+    """The issue number in a forge path `.../issues/<n>/...`, else None."""
+    parts = path.split("/")
+    return int(parts[parts.index("issues") + 1]) if "issues" in parts[:-1] and parts[parts.index("issues") + 1].isdigit() else None
+
+
 def _sweep(fb, *, step):
-    """One issue with a comment per status of a spread of 5xx classes (the request test sweeps them all) and a transport fault."""
-    cases = {f"c{status}": status for status in (500, 501, 502, 503, 504, 507, 511, 599)} | {"cfault": None}
+    """One issue with a comment per status 500-599 and a transport fault, the forge failing `step` on the issue's own path."""
+    cases = {f"c{status}": status for status in _UNREACHABLE} | {"cfault": None}
     for case in cases:
         fb.request(case)
     assert fb.tick(S.Decider()) == 0
@@ -312,11 +323,9 @@ def _sweep(fb, *, step):
     status_of = {number: cases[case] for case, number in numbers.items()}
 
     def trouble(r):
-        parts = r.url.path.split("/")
-        if "issues" in parts and r.method == step[0] and r.url.path.endswith(step[1]):
-            number = int(parts[parts.index("issues") + 1])
-            if number in status_of:
-                return status_of[number]
+        number = _issue_of(r.url.path)
+        if number in status_of and r.method == step[0] and r.url.path.endswith(step[1]):
+            return status_of[number]
         return False
 
     fb.forge.respond = lambda r: (httpx.Response(t, json={}) if (t := trouble(r)) else None)
@@ -326,7 +335,7 @@ def _sweep(fb, *, step):
 
 @pytest.mark.parametrize("step", [("POST", "/comments"), ("GET", "/comments")], ids=["reply", "listing"])
 def test_1414_no_5xx_or_fault_on_a_comment_step_is_counted_and_nothing_past_it_is_lost(fb, step):
-    """For a spread of 5xx statuses and a transport fault on a comment's reply POST or its issue's comment listing: after many ticks the comment is still live and never ended 'could not be processed', and once the forge answers it and a comment added meanwhile are each decided and replied to once. A4/O9."""
+    """For each status 500-599 and a transport fault on a comment's reply POST or its issue's comment listing: after many ticks the comment is still live and never ended 'could not be processed', and once the forge answers it and a comment added meanwhile are each decided and replied to once. A4/O9."""
     numbers, comments = _sweep(fb, step=step)
     decider = S.Decider({c["id"]: S.answer(reason="a thanks") for c in comments.values()})
     for _ in range(CEILING + 3):
@@ -349,7 +358,7 @@ def test_1414_no_5xx_or_fault_on_a_comment_step_is_counted_and_nothing_past_it_i
 def test_1414_a_request_the_forge_refuses_is_set_aside_with_its_reason_in_a_kept_file(fb):
     """A request refused three times (422) is kept in a quarantine folder with a non-empty reason and never retried. A4/A8."""
     fb.request("case-refused")
-    fb.forge.respond = lambda r: httpx.Response(422, json={"message": "refused"}) if _request_case(r) else None
+    fb.forge.respond = lambda r: httpx.Response(422, json={"message": "refused"}) if _request_case(fb, r) else None
     for _ in range(CEILING + 1):
         fb.tick(S.Decider())
     fb.forge.respond = None
@@ -363,20 +372,28 @@ def test_1414_a_request_the_forge_refuses_is_set_aside_with_its_reason_in_a_kept
     assert reason.strip(), "the quarantined request's reason is empty (A8)"
 
 
-@pytest.mark.parametrize("status", [400, 401, 403, 404, 409, 422, 429, 499])
-def test_1414_a_4xx_on_a_comment_reply_is_counted_and_given_up_at_the_3rd_tick(fb, status, caplog):
-    """A reply POST the forge refuses (4xx) is attempted on ticks 1-3 and never after, and the give-up is logged naming the comment; another issue's reply is unaffected. A4/O9."""
-    number, comment = _scene(fb, "case-4xx")
-    other_number, other = _scene(fb, "case-4xx-other")
-    decider = S.Decider({comment["id"]: S.answer(reason="a thanks"), other["id"]: S.answer(reason="a thanks")})
-    fb.forge.respond = lambda r: (httpx.Response(status, json={"message": "no"}) if r.method == "POST"
-                                  and r.url.path.endswith(f"/issues/{number}/comments") else None)
+def test_1414_a_4xx_on_a_comment_reply_is_counted_and_given_up_at_the_3rd_tick(fb, caplog):
+    """For each status 400-499 on a comment's reply POST (one issue per status): attempted on ticks 1-3 and never after, the give-up logged naming the comment; a healthy issue's reply is unaffected. A4/O9."""
+    cases = {f"r{status}": status for status in _REFUSED} | {"healthy": None}
+    for case in cases:
+        fb.request(case)
+    assert fb.tick(S.Decider()) == 0
+    numbers = {case: fb.issues(case)[0]["number"] for case in cases}
+    comments = {case: fb.forge.add_comment(n, user=OWNER, body="a thanks") for case, n in numbers.items()}
+    status_of = {numbers[case]: status for case, status in cases.items() if status}
+    decider = S.Decider({c["id"]: S.answer(reason="a thanks") for c in comments.values()})
+    fb.forge.respond = lambda r: (httpx.Response(status_of[n], json={"message": "no"}) if r.method == "POST"
+                                  and r.url.path.endswith("/comments") and (n := _issue_of(r.url.path)) in status_of else None)
 
     with caplog.at_level(logging.INFO):
         for _ in range(CEILING + 3):
             assert fb.tick(decider) == 0
-    posts = [r for r in fb.forge.requests if r.method == "POST" and r.url.path.endswith(f"/issues/{number}/comments")]
-    assert len(posts) == CEILING, "a refused reply was not attempted exactly three times"
-    assert len(fb.replies(other_number, other["id"])) == 1, "control: a healthy issue's reply was held back"
-    assert any(r.levelno >= logging.WARNING and str(comment["id"]) in r.getMessage() for r in caplog.records
-               if r.name != "httpx"), "the given-up reply is not logged with its comment id"
+    for case, status in cases.items():
+        if status:
+            posts = [r for r in fb.forge.requests if r.method == "POST" and r.url.path.endswith(f"/issues/{numbers[case]}/comments")]
+            assert len(posts) == CEILING, f"{status}: a refused reply was not attempted exactly three times"
+    assert len(fb.replies(numbers["healthy"], comments["healthy"]["id"])) == 1, "control: a healthy issue's reply was held back"
+    logged = " ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING and r.name != "httpx")
+    for case, status in cases.items():
+        if status:
+            assert re.search(rf"\b{comments[case]['id']}\b", logged), f"{status}: the given-up reply is not logged with its comment id"
