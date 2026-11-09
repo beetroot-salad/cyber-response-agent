@@ -550,10 +550,10 @@ def test_o13_a_siblings_cost_is_its_own_ledger_total_in_the_shared_database(tmp_
     opus = "claude-opus-4-1"
     with open_store(case_id=CASE, sessions=_paths(runs)) as store:
         _row(store, source, one_out, agent_id="main")                       # the source run's own: never counted
-        _row(store, source, one_in, agent_id="gather")
+        _row(store, source, one_in, agent_id="gather:l-001")
         _row(store, first, one_out, agent_id="main")                        # 15.0
-        _row(store, first, one_in, agent_id="gather")                       # 3.0
-        _row(store, first, one_in, agent_id="review")                       # 3.0: a review call counts
+        _row(store, first, one_in, agent_id="gather:l-001")                       # 3.0
+        _row(store, first, one_in, agent_id="review:quality")                       # 3.0: a review call counts
         _row(store, first, one_in, agent_id="main", outcome="refused", requested=SONNET, reported=None)  # $0
         _row(store, second, one_in, agent_id="main")                        # 3.0
         _row(store, third, one_in, agent_id="main", requested=SONNET, reported=opus)  # priced at the requested model: 3.0
