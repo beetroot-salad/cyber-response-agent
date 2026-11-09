@@ -129,9 +129,25 @@ def pr_row(number, head, *, repo=OURS, state="open", sha=None, merged=False):
     if repo is not None:
         head_side.update(repo_id=repo["id"], repo=repo)
     return {"number": number, "state": "closed" if merged else state, "merged": merged,
-            "merged_at": "2026-10-16T00:00:00Z" if merged else None, "head": head_side,
+            "merged_at": "2026-10-16T00:00:00Z" if merged else None, "merge_commit_sha": None,
+            "head": head_side,
             "base": {"ref": "main", "label": "tenants:main", "repo_id": OURS["id"], "repo": OURS},
             "html_url": f"http://forge.invalid:3000/tenants/blue/pulls/{number}"}
+
+
+def review_row(review_id, login, state, *, body="", dismissed=False, official=True):
+    """A Forgejo `PullReview` (C9, C24, C25): `state` one of `APPROVED`, `REQUEST_CHANGES`,
+    `COMMENT`; `dismissed` as the forge reports it (a later approval by the same reviewer
+    dismisses their changes-requested review); `official` false for a read-only reviewer."""
+    return {"id": review_id, "user": {"login": login}, "state": state, "body": body,
+            "dismissed": dismissed, "official": official, "stale": False, "commit_id": None,
+            "submitted_at": "2026-11-09T10:00:00Z", "comments_count": 0}
+
+
+def comment_row(comment_id, login, body):
+    """A Forgejo issue `Comment` as `GET /issues/N/comments` lists a PR's plain comment."""
+    return {"id": comment_id, "user": {"login": login}, "body": body,
+            "created_at": "2026-11-09T10:05:00Z", "updated_at": "2026-11-09T10:05:00Z"}
 
 
 def forge_pulls(remote):
@@ -169,11 +185,11 @@ def _sync_open_pulls(remote):
     return rows
 
 
-def set_pull_state(remote, branch, *, merged, delete_branch=False):
+def set_pull_state(remote, branch, *, merged, delete_branch=False, merge_commit=None):
     """A human closing, or merging, the open PR of our repository whose head is `branch`
     (raising when there is none, so no case passes on a PR that never existed). Deleting the
     branch leaves the row as Forgejo 15 lists it: `head.ref` `refs/pull/N/head`, no label,
-    `head.sha` kept."""
+    `head.sha` kept. `merge_commit` is what Forgejo reports as `merge_commit_sha` (#1278)."""
     with _pulls_updating(remote):
         rows = _sync_open_pulls(remote)
         mine = [row for row in rows if row["state"] == "open" and row["head"]["ref"] == branch
@@ -181,7 +197,8 @@ def set_pull_state(remote, branch, *, merged, delete_branch=False):
         assert mine, f"no open PR of ours has the head {branch!r}: {rows}"
         for row in mine:
             row.update(state="closed", merged=merged,
-                       merged_at="2026-10-16T00:00:00Z" if merged else None)
+                       merged_at="2026-10-16T00:00:00Z" if merged else None,
+                       merge_commit_sha=merge_commit if merged else None)
             if delete_branch:
                 row["head"].update(ref=f"refs/pull/{row['number']}/head", label="")
         _save_pulls(remote, rows)
@@ -241,6 +258,14 @@ class ForgeHTTP:
         self.every_page = None
         self.link = None
         self._rows = []
+        #: #1278 (C23): the scopes the bot's token carries. Reviews, PR state and closing need
+        #: `write:repository`; reading plain PR comments also needs `read:issue` (403 without).
+        self.scopes = {"write:repository"}
+        #: #1278: PR number -> Forgejo `PullReview` rows / issue `Comment` rows, as planted by a
+        #: case (`review_row`, `comment_row`). The fake never computes dismissal (C24): a case
+        #: plants `dismissed` as the forge would report it.
+        self.reviews = {}
+        self.comments = {}
         self.client = httpx.Client(transport=httpx.MockTransport(self.reply))
 
     @property
@@ -299,6 +324,9 @@ class ForgeHTTP:
                                   headers={"Content-Type": "application/json"})
         if rest == "/pulls" and request.method == "GET":
             return self._listing(request)
+        feedback = self._feedback(request, rest.split("/"))
+        if feedback is not None:
+            return feedback
         if rest.startswith("/pulls/") and request.method == "GET":
             found = [row for row in self.prs if str(row["number"]) == rest.split("/")[2]]
             return httpx.Response(200, json=found[0]) if found else httpx.Response(404, json={})
@@ -328,6 +356,42 @@ class ForgeHTTP:
         elif self.every_page is not None or more:
             headers["Link"] = f'<{LINK_ROOT}/api/v1/repos/tenants/blue/pulls?page={page + 1}>; rel="next"'
         return httpx.Response(200, json=rows, headers=headers)
+
+    def _feedback(self, request, parts):
+        """#1278 (C9, C23): `GET /pulls/N/reviews`, `GET /issues/N/comments` (Forgejo files a
+        PR's plain comments as issue comments; 403 without `read:issue`), and `PATCH /pulls/N`
+        taking `state` (closing a PR). `None` for any other route."""
+        if len(parts) == 4 and parts[1] == "pulls" and parts[3] == "reviews" and request.method == "GET":
+            if not self._pull(parts[2]):
+                return httpx.Response(404, json={"message": "pull request does not exist"})
+            return httpx.Response(200, json=self.reviews.get(int(parts[2]), []))
+        if len(parts) == 4 and parts[1] == "issues" and parts[3] == "comments" and request.method == "GET":
+            if "read:issue" not in self.scopes:
+                return httpx.Response(403, json={
+                    "message": "token does not have at least one of required scope(s): [read:issue]"})
+            if not self._pull(parts[2]):
+                return httpx.Response(404, json={"message": "issue does not exist"})
+            return httpx.Response(200, json=self.comments.get(int(parts[2]), []))
+        if len(parts) == 3 and parts[1] == "pulls" and request.method == "PATCH":
+            rows = list(self.prs)
+            found = [row for row in rows if str(row["number"]) == parts[2]]
+            if not found:
+                return httpx.Response(404, json={"message": "pull request does not exist"})
+            if json.loads(request.content).get("state") == "closed" and found[0]["state"] == "open":
+                found[0]["state"] = "closed"
+            if self.remote is not None:
+                _save_pulls(self.remote, rows)
+            return httpx.Response(201, json=found[0])
+        return None
+
+    def _pull(self, number):
+        return [row for row in self.prs if str(row["number"]) == number]
+
+    @property
+    def patches(self):
+        """#1278: the `PATCH /pulls/N` calls made, in order, as `(N, body)`."""
+        return [(int(r.url.path.rstrip("/").split("/")[-1]), json.loads(r.content))
+                for r in self.requests if r.method == "PATCH"]
 
     def _create(self, body):
         if self.fail_create:
@@ -444,8 +508,9 @@ def merge_on_remote(repo, tmp_path, branch, style="merge", *, delete_branch=Fals
     else:
         git(writer, "cherry-pick", f"main..origin/{branch}", env=_FORGE_COMMITTER)
     git(writer, "push", "origin", "main")
-    set_pull_state(repo[1], branch, merged=True, delete_branch=delete_branch)
-    return git(writer, "rev-parse", "HEAD")
+    head = git(writer, "rev-parse", "HEAD")
+    set_pull_state(repo[1], branch, merged=True, delete_branch=delete_branch, merge_commit=head)
+    return head
 
 
 def merged_agent_lesson(repo, tmp_path, batch_id, path, content, style="merge"):
