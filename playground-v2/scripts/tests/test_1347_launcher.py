@@ -647,10 +647,11 @@ def test_a_launch_handed_a_token_that_is_not_the_holders_is_refused_and_leaves_t
     rig.write_expected_case("none", confirmed=False)
     lock.take(rig.store, lock.FROZEN_ENGINE)
     record = rig.store.records["frozen-engine"]
+    rig.launch_module
 
     with pytest.raises(Exception) as caught:
         rig.launch(reference=True, lock_token="not-the-holders-token")
 
-    assert not isinstance(caught.value, (AttributeError, TypeError, NameError))
+    assert not isinstance(caught.value, (AttributeError, TypeError, NameError, ImportError, OSError))
     assert not rig.cluster.requests and rig.rows() == [] and rig.lock_in_run is None
     assert rig.store.records["frozen-engine"] == record
