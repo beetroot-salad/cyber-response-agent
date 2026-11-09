@@ -57,6 +57,19 @@ def _ops(tmp_path):
     return SimpleNamespace(ops=ops, rec=rec)
 
 
+def _search_texts(rec):
+    """Every argv token and `input=` text the recorder saw."""
+    return [str(a) for argv, _ in rec.calls for a in argv] + [str(kw.get("input", "")) for _, kw in rec.calls]
+
+
+def _stub_as_of_values(rec):
+    """`V2_STUB_AS_OF=v` / `V2_STUB_AS_OF: v` in any command text or input, plus env values."""
+    values = [m.group(1) for text in _search_texts(rec) + [rec.blob()]
+              for m in re.finditer(r"V2_STUB_AS_OF[\"']?\s*[=:]\s*[\"']?([^;\"'\s,]+)", text)]
+    values += [str(kw["env"]["V2_STUB_AS_OF"]) for _, kw in rec.calls if "V2_STUB_AS_OF" in (kw.get("env") or {})]
+    return values
+
+
 def test_the_stub_containers_are_loaded_with_the_freeze_moment_and_the_resolved_mutations(tmp_path):
     """A3/A9: `V2_STUB_AS_OF` carries T and the case's resolved mutations reach the stub containers."""
     lab = _ops(tmp_path)
@@ -66,9 +79,7 @@ def test_the_stub_containers_are_loaded_with_the_freeze_moment_and_the_resolved_
     lab.ops.load_stubs(parts, T, [CMDB_STALE])
 
     assert lab.rec.calls, "no command was sent"
-    values = [ln.split("V2_STUB_AS_OF=", 1)[1].split()[0].strip('",\'') for ln in lab.rec.blob().splitlines()
-              if "V2_STUB_AS_OF=" in ln]
-    values += [str(kw["env"]["V2_STUB_AS_OF"]) for _, kw in lab.rec.calls if "V2_STUB_AS_OF" in (kw.get("env") or {})]
+    values = _stub_as_of_values(lab.rec)
     assert values and all(instant(v) == instant(T) for v in values), values
     for needle in (CMDB_STALE["kind"], CMDB_STALE["host"], CMDB_STALE["new_value"]):
         assert needle in lab.rec.blob(), needle
@@ -113,10 +124,11 @@ def test_the_frozen_proxy_resolves_every_declared_host_name_to_the_frozen_endpoi
 def _mapped_ips(rec, host):
     """The IPs written on `host`'s own mapping entry (same argv token or same line), `host:ip` or `ip host`."""
     found = set()
-    texts = [str(a) for argv, _ in rec.calls for a in argv] + [str(kw.get("input", "")) for _, kw in rec.calls]
+    texts = _search_texts(rec) + [str(v) for _, kw in rec.calls for v in (kw.get("env") or {}).values()]
+    q, ip, h = "[\"']?", r"(\d+\.\d+\.\d+\.\d+)", re.escape(host)
     for text in texts:
         for ln in text.splitlines():
-            for m in re.finditer(rf"{re.escape(host)}[:=\s]+(\d+\.\d+\.\d+\.\d+)|(\d+\.\d+\.\d+\.\d+)[\s]+{re.escape(host)}", ln):
+            for m in re.finditer(rf"{q}{h}{q}\s*[:=\s]\s*{q}{ip}|{q}{ip}{q}[ \t]+(?:[\w.-]+[ \t]+)*{q}{h}(?![\w.-])", ln):
                 found.add(m.group(1) or m.group(2))
     return found
 
@@ -136,6 +148,7 @@ def test_the_node_restart_hands_the_clock_offset_to_the_frozen_elasticsearch_thr
 
     env = [kw.get("env") or {} for _, kw in lab.rec.calls]
     assert "LD_PRELOAD" in blob, blob
+    stop = r"[;\"'\s,]"
     assert any(v == "-1234567" for e in env for v in map(str, e.values())) or any(
-        a.split("=", 1)[-1] == "-1234567" for argv, _ in lab.rec.calls for a in map(str, argv) if "=" in a), blob
+        re.search(rf"[=:]\s*[\"']?-1234567(?={stop}|$)", t) for t in _search_texts(lab.rec)), blob
     assert any("restart" in a or "elasticsearch" in a for argv, _ in lab.rec.calls for a in argv)

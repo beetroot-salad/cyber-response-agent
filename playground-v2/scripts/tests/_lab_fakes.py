@@ -113,9 +113,9 @@ class FakeES:
         path = path if path.startswith("/") else "/" + path  # one spelling for every reader below
         self.requests.append((method, path, body))
         self.journal.append(("es", (method, path)))
-        if self.fail is not None and self.fail(method, path, body):
-            raise RuntimeError(f"{method} {path} failed")
         key = (method, path.split("?", 1)[0])
+        if self.fail is not None and self.fail(method, key[1], body):   # faults match and report on the query-stripped path
+            raise RuntimeError(f"{method} {key[1]} failed")
         if key in self.answers:
             answer = self.answers[key]
             return answer(body) if callable(answer) else answer
