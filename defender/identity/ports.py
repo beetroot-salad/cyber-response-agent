@@ -146,8 +146,9 @@ class IdentityRepository(Protocol):
     ) -> ProgramCredential | None:
         """A key (`live`, with its hash) or an OAuth client (`pending`, deadline `now` + 10 minutes, no hash).
         None, writing nothing, for a program without an active membership (removed: an answer, as for
-        `remove_program`). Refused for a user that is no program, a key without its hash, or when the program
-        already has two credentials that are usable or pending within their deadline.
+        `remove_program`). Refused for a user that is no program or a key without its hash; and, as
+        `CredentialCapReached`, when the program already has two credentials that are usable or pending within
+        their deadline.
         The id is minted unless given (a key's value holds its id, so the caller mints it first)."""
         ...
     async def go_live(self, credential_id: CredentialId, *, service_account_id: str, now: _dt.datetime) -> bool:
@@ -167,10 +168,12 @@ class IdentityRepository(Protocol):
         ...
     async def oauth_credentials_to_keep(self, *, now: _dt.datetime) -> set[CredentialId]:
         """The OAuth credentials whose realm client must exist: `live` and unexpired, or `pending`
-        within the deadline."""
+        within the deadline, of a program in standing (as `program_standing`). A credential whose program
+        or tenant has gone keeps nothing, whether or not its own row was revoked in time."""
         ...
     async def claim_expiry_warning(self, *, now: _dt.datetime, hold_until: _dt.datetime) -> ExpiryWarning | None:
-        """A usable credential's due warning (14 or 3 days before expiry; a threshold already passed when the
+        """A usable credential's due warning, while its program is in standing (as `program_standing`: nobody is
+        warned about a credential that no longer lets anything in) (14 or 3 days before expiry; a threshold already passed when the
         credential was created never is), the earliest due first. Of several due, the tightest is returned and the
         looser ones are passed over unsent. Moves the send's next try to `hold_until`. Reads one row (Postgres:
         `FOR UPDATE SKIP LOCKED`), however many credentials are near expiry."""
@@ -269,12 +272,13 @@ class ProgramsPort(Protocol):
         """Create the confidential client (service account only) whose client id and internal id are the
         credential's id; its service-account user id and secret, read back."""
         ...
-    async def delete_client(self, client_id: str) -> None:
-        """Delete the client; one that is already gone is fine."""
+    async def delete_client(self, client_id: str) -> bool:
+        """Delete the client: whether it was there to delete (one already gone is no error)."""
         ...
     async def client_ids(self) -> set[str]:
-        """The program clients now in the realm (client ids that are UUIDs); the adapter's own clients and
-        the realm's built-in ones are never listed."""
+        """The program clients now in the realm: those `create_client` made (client id and internal id one UUID),
+        each as `delete_client` addresses it; the adapter's own clients, the realm's built-in ones and any
+        made by hand are never listed."""
         ...
     async def verify_token(self, token: str) -> VerifiedProgramToken: ...
 

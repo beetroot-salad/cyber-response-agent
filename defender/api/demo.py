@@ -112,8 +112,11 @@ class _DemoProgramsRealm:
         self._clients.add(credential_id)
         return str(uuid.uuid4()), uuid.uuid4().hex
 
-    async def delete_client(self, client_id: str) -> None:
+    async def delete_client(self, client_id: str) -> bool:
+        if client_id not in self._clients:
+            return False
         self._clients.discard(client_id)
+        return True
 
     async def client_ids(self) -> set[str]:
         return set(self._clients)

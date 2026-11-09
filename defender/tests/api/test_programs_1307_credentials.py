@@ -17,7 +17,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
-from defender.identity import Bootstrap, IdentityService  # noqa: E402
+from defender.identity import Bootstrap, DataRuleViolation, IdentityService  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     NEW,
@@ -287,12 +287,26 @@ def test_an_expired_credential_frees_its_slot() -> None:
     assert short in _states(s.world, s.program_id)
 
 
-def test_a_pending_credential_holds_a_slot_until_its_deadline_even_without_the_purge() -> None:
-    """A lost Keycloak response leaves `pending`: it counts for 10 minutes, then not, with no reconciliation run (O5, B1)."""
+def test_only_the_cap_is_answered_409_and_any_other_refused_write_is_a_fault() -> None:
+    """The store refusing the insert for another reason (here a duplicate key hash) is not "two credentials already":
+    it reaches the server as the fault it is (#1450 review)."""
     s = soar()
-    s.world.realm.lose_create_responses = 1
-    assert issue(s.ann, T1, s.program_id, kind="oauth_client").status_code == 503
-    [lost] = s.world.realm.created
+
+    async def refusing(*args: Any, **kwargs: Any) -> Any:
+        raise DataRuleViolation("a credential with this key hash exists")
+
+    s.world.repo.add_credential = refusing
+    with pytest.raises(DataRuleViolation):
+        issue(s.ann, T1, s.program_id, name="second")
+    del s.world.repo.add_credential
+    assert issue(s.ann, T1, s.program_id, name="second").status_code == 201  # control: the same route, the real store
+    assert issue(s.ann, T1, s.program_id, name="third").status_code == 409  # control: the cap itself
+
+
+def test_a_pending_credential_holds_a_slot_until_its_deadline_even_without_the_purge() -> None:
+    """A crash mid-create leaves `pending`: it counts for 10 minutes, then not, with no reconciliation run (O5, B1)."""
+    s = soar()
+    lost = s.world.crashed_oauth_create(s.ann, s.program_id)
     assert _states(s.world, s.program_id)[lost] == "pending"
     assert issue(s.ann, T1, s.program_id, name="third").status_code == 409
     s.world.clock.advance(PENDING_DEADLINE - SECOND)
@@ -475,38 +489,46 @@ def test_offboarding_one_tenant_leaves_another_tenants_programs_working() -> Non
 
 # --- OAuth creation: failure, loss, race --------------------------------------------------------------
 
-def test_keycloak_failing_before_creating_the_client_answers_503_and_leaves_a_stale_pending_row() -> None:
-    """Keycloak down at create -> 503 with no secret; the row stays `pending` until the reconciliation revokes it after the deadline (B1)."""
+def test_keycloak_failing_before_creating_the_client_answers_503_and_frees_the_slot_at_once() -> None:
+    """Keycloak down at create -> 503 with no secret; the failure is seen, so the row is revoked at once and its slot
+    is free for a retry within the deadline (B1)."""
     s = soar()
     s.world.realm.fail_creates = 1
     response = issue(s.ann, T1, s.program_id, kind="oauth_client")
     assert response.status_code == 503
     assert "secret" not in response.text
     [attempt] = s.world.realm.created
-    assert _states(s.world, s.program_id)[attempt] == "pending"
-    _reconcile(s.world)
-    assert _states(s.world, s.program_id)[attempt] == "pending"  # within its deadline
-    s.world.clock.advance(PENDING_DEADLINE + SECOND)
-    _reconcile(s.world)
     assert _states(s.world, s.program_id)[attempt] == "revoked"
-    assert issue(s.ann, T1, s.program_id, kind="oauth_client", name="retry").status_code == 201  # control: Keycloak is back
+    assert issue(s.ann, T1, s.program_id, kind="oauth_client", name="retry").status_code == 201  # no clock advanced
 
 
-def test_a_lost_response_leaves_a_client_that_is_deleted_after_the_deadline() -> None:
-    """The client was made but the answer lost: 503, no usable secret; reconciliation removes it after 10 minutes (B1, D3)."""
+def test_a_lost_response_leaves_a_client_that_the_next_reconciliation_deletes() -> None:
+    """The client was made but the answer lost: 503, no usable secret; the row is revoked at once, so the next
+    reconciliation removes the client without waiting for a deadline (B1, D3)."""
     s = soar()
     s.world.realm.lose_create_responses = 1
     response = issue(s.ann, T1, s.program_id, kind="oauth_client")
     assert response.status_code == 503
     [lost] = s.world.realm.created
     assert s.world.realm.clients[lost].secret not in response.text
-    assert s.world.bearer(s.world.realm.issue(lost)).get(f"/tenants/{T1}/alerts").status_code == 401  # pending is not usable
-    _reconcile(s.world)
-    assert lost in s.world.realm.clients
-    s.world.clock.advance(PENDING_DEADLINE + SECOND)
+    assert s.world.bearer(s.world.realm.issue(lost)).get(f"/tenants/{T1}/alerts").status_code == 401  # revoked is not usable
+    assert _states(s.world, s.program_id)[lost] == "revoked"
     _reconcile(s.world)
     assert lost not in s.world.realm.clients
-    assert _states(s.world, s.program_id)[lost] == "revoked"
+
+
+def test_a_crash_mid_create_leaves_a_pending_row_that_the_reconciliation_revokes_after_the_deadline() -> None:
+    """Only a crash between the row and Keycloak's answer leaves `pending`: kept inside the deadline, then revoked and
+    its client deleted (B1, D3)."""
+    s = soar()
+    crashed = s.world.crashed_oauth_create(s.ann, s.program_id)
+    _reconcile(s.world)
+    assert _states(s.world, s.program_id)[crashed] == "pending"  # within its deadline
+    assert crashed in s.world.realm.clients
+    s.world.clock.advance(PENDING_DEADLINE + SECOND)
+    _reconcile(s.world)
+    assert _states(s.world, s.program_id)[crashed] == "revoked"
+    assert crashed not in s.world.realm.clients
 
 
 def test_removal_racing_an_oauth_creation_answers_409_and_returns_no_usable_secret() -> None:
@@ -560,9 +582,7 @@ def test_reconciliation_deletes_every_client_without_a_usable_credential_and_kee
     world.realm.clients[ORPHAN] = Client(ORPHAN, "00000000-5a00-4000-8000-0000000000bb", "s")
     assert revoke(ann, T1, program_id, live).status_code == 204
     kept = issue_oauth(ann, T1, program_id)
-    world.realm.lose_create_responses = 1  # armed after `kept` exists: the lost response belongs to the pending create
-    assert issue(ann, T1, program_id, kind="oauth_client").status_code == 503  # pending, inside its deadline
-    [pending] = world.realm.created[-1:]
+    pending = world.crashed_oauth_create(ann, program_id)  # pending, inside its deadline
     _reconcile(world)
     assert set(world.realm.clients) == {kept, pending}
     assert sorted(world.realm.deleted) == sorted([live, revoked, ORPHAN])
@@ -642,6 +662,19 @@ def test_every_active_admin_and_only_they_are_warned_14_days_ahead_once() -> Non
     s.world.send_pending()
     assert _warned(s.world) == sorted([(ANN, s.key_id), (nina, s.key_id)])
     assert {(w.tenant_id, w.program_id, w.expires_at) for w in s.world.mail.warnings} == {(T1, s.program_id, expiry)}
+
+
+def test_no_one_is_warned_about_a_credential_of_a_tenant_being_offboarded() -> None:
+    """A tenant that left `active` lets no credential in (401), so none is warned about, though offboarding has not
+    yet ended its memberships or revoked its credentials (#1450 review)."""
+    s, control = soar(), soar()
+    s.world.call(s.world.tenants.request_offboard, T1, now=s.world.clock())
+    for world in (s.world, control.world):
+        _until_remaining(world, world.clock() + DEFAULT_LIFETIME, 14 * DAY - HOUR)
+        world.send_pending()
+    assert s.world.mail.warnings == []
+    assert _warned(control.world) == [(ANN, control.key_id)]  # control: the same steps, the tenant still active
+    assert _states(s.world, s.program_id)[s.key_id] == "live"  # the row itself is untouched: only its use is decided
 
 
 def test_warnings_come_at_14_and_3_days_and_the_second_goes_to_whoever_is_admin_then() -> None:

@@ -85,7 +85,7 @@ def upgrade() -> None:
     op.create_index("program_credentials_one_unrevoked_key", "program_credentials", ["key_hash"], unique=True,
                     schema="identity", postgresql_where=sa.text("state <> 'revoked'"))
     op.create_index("program_credentials_warning_due", "program_credentials", ["warn_next_at"], schema="identity",
-                    postgresql_where=sa.text("warn_next_at IS NOT NULL"))
+                    postgresql_where=sa.text("warn_next_at IS NOT NULL AND state = 'live'"))
 
     op.create_table(
         "warning_deliveries",

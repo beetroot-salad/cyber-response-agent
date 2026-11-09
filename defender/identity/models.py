@@ -214,8 +214,10 @@ class ProgramCredential(Base, kw_only=True):
         CheckConstraint("warn_threshold_days IN (14, 3)", name="warn_threshold"),
         CheckConstraint("(warn_threshold_days IS NULL) = (warn_next_at IS NULL)", name="warn_both_or_neither"),
         Index("program_credentials_by_program", "program_id"),
-        # The warning sender's one-row claim: the earliest due warning.
-        Index("program_credentials_warning_due", "warn_next_at", postgresql_where=text("warn_next_at IS NOT NULL")),
+        # The warning sender's one-row claim: the earliest due warning. Only live rows: a revocation takes its
+        # credential out of the claim's way without having to clear its warning.
+        Index("program_credentials_warning_due", "warn_next_at",
+              postgresql_where=text("warn_next_at IS NOT NULL AND state = 'live'")),
         Index("program_credentials_one_unrevoked_key", "key_hash", unique=True, postgresql_where=text("state <> 'revoked'")),
         {"schema": SCHEMA},
     )

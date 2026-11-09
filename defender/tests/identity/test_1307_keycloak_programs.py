@@ -551,6 +551,16 @@ async def test_listing_names_program_clients_only(kc):
     assert kc.writes() == [s for s in kc.seen if s.method == "POST" and s.path.endswith("/clients")]  # reading changed nothing
 
 
+async def test_a_client_made_by_hand_with_a_uuid_client_id_is_not_listed(kc):
+    """Only a client whose internal id is its client id is ours (`create_client` makes them so): one made by hand with a
+    UUID client id has an internal id of Keycloak's own, and listing it would have `delete_client` miss it on every pass
+    (#1450 review)."""
+    port = adapter(kc)
+    await port.create_client(CREDENTIAL)
+    kc.clients["kc-internal-1"] = {"id": "kc-internal-1", "clientId": OTHER_CREDENTIAL}
+    assert await port.client_ids() == {CREDENTIAL}
+
+
 async def test_listing_follows_the_pages_to_the_last_client(kc):
     """More program clients than one page hold are all listed (Reconciliation)."""
     _seed_foreign_clients(kc)
@@ -567,8 +577,8 @@ async def test_deleting_removes_that_client_by_our_id_and_an_absent_one_is_no_er
     port = adapter(kc)
     await port.create_client(CREDENTIAL)
     await port.create_client(OTHER_CREDENTIAL)
-    await port.delete_client(CREDENTIAL)
-    await port.delete_client(CREDENTIAL)
+    assert await port.delete_client(CREDENTIAL) is True
+    assert await port.delete_client(CREDENTIAL) is False  # already gone: no error, and not a deletion
     assert [s.path for s in kc.seen if s.method == "DELETE"] == [f"/admin/realms/{REALM}/clients/{CREDENTIAL}"] * 2
     assert await port.client_ids() == {OTHER_CREDENTIAL}
     assert len(kc.clients) == 1 + 8 + 2  # the API's own clients, built-ins and look-alikes stay

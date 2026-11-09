@@ -487,17 +487,20 @@ class KeycloakPrograms(_RealmAdmin):
         return account, secret
 
     async def client_ids(self) -> set[str]:
-        """The program clients: client ids that are credential ids (UUIDs). Built-in clients and the API's own
-        have plain names and are never listed."""
+        """The program clients: those whose client id and internal id are one credential id (UUID), as
+        `create_client` makes them, so that `delete_client` addresses what was listed. Built-in clients and the
+        API's own have plain names, and a client made by hand has an internal id of Keycloak's own: none is listed."""
         found: set[str] = set()
         first = 0
         while True:
             response = await self._admin("GET", self._clients_url, params={"first": first, "max": _CLIENT_PAGE})
             try:
-                page = [str(c["clientId"]) for c in response.json()]
+                page = [(str(c["id"]), str(c["clientId"])) for c in response.json()]
             except (ValueError, KeyError, TypeError) as error:
                 raise SignInUnavailable("keycloak's client list is unreadable") from error
-            for client_id in page:
+            for internal_id, client_id in page:
+                if internal_id != client_id:
+                    continue
                 try:
                     found.add(str(CredentialId(client_id)))
                 except IdRefused:
@@ -506,6 +509,9 @@ class KeycloakPrograms(_RealmAdmin):
                 return found
             first += _CLIENT_PAGE
 
-    async def delete_client(self, client_id: str) -> None:
-        """Delete the client with this internal id (our credential id); one already gone is fine."""
-        await self._admin("DELETE", f"{self._clients_url}/{urllib.parse.quote(client_id, safe='')}", accept=(404,))
+    async def delete_client(self, client_id: str) -> bool:
+        """Delete the client with this internal id (our credential id): whether it was there to delete; one already
+        gone is no error."""
+        response = await self._admin(
+            "DELETE", f"{self._clients_url}/{urllib.parse.quote(client_id, safe='')}", accept=(404,))
+        return response.status_code != 404

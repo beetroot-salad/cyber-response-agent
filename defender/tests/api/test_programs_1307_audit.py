@@ -106,14 +106,16 @@ def test_creating_and_removing_programs_and_credentials_is_audited_with_actor_ta
 
 @pytest.mark.parametrize("failure", ["fail_creates", "lose_create_responses"])
 def test_an_oauth_creation_that_ends_in_503_emits_no_create_event_until_it_is_usable(failure: str, caplog) -> None:
-    """program_credential.create is emitted when the credential becomes usable: a 503 leaves none; a later success emits one (W5)."""
+    """program_credential.create is emitted when the credential becomes usable: a 503 leaves none, only the
+    system's revoke of the failed row; a later success emits one (W5, B1)."""
     audit = AuditLog(caplog)
     s = soar()
     setattr(s.world.realm, failure, 1)
     mark = audit.mark()
     assert issue(s.ann, T1, s.program_id, kind="oauth_client").status_code == 503
-    assert CREDENTIAL_CREATE not in audit.actions(mark)
-    s.world.clock.advance(_dt.timedelta(minutes=11))  # the stuck row's deadline: its slot is free again
+    [failed] = s.world.realm.created
+    assert [(e.action, e.actor, e.tenant_id, e.target) for e in audit.since(mark)] == [
+        (CREDENTIAL_REVOKE, SYSTEM, T1, failed)]
     oauth = issue_oauth(s.ann, T1, s.program_id)
     created = [e for e in audit.since(mark) if e.action == CREDENTIAL_CREATE]
     assert [(e.target, e.tenant_id) for e in created] == [(oauth, T1)]
@@ -137,9 +139,7 @@ def test_a_stale_pending_credential_is_revoked_by_the_system_after_its_deadline(
     """The reconciliation's revoke of a stuck `pending` row is actor `system`; its client deletion follows (O8, D6)."""
     audit = AuditLog(caplog)
     s = soar()
-    s.world.realm.lose_create_responses = 1
-    assert issue(s.ann, T1, s.program_id, kind="oauth_client").status_code == 503
-    [lost] = s.world.realm.created
+    lost = s.world.crashed_oauth_create(s.ann, s.program_id)
     mark = audit.mark()
     s.world.call(s.world.service.reconcile_program_clients)
     assert audit.since(mark) == []  # inside the deadline
@@ -147,6 +147,30 @@ def test_a_stale_pending_credential_is_revoked_by_the_system_after_its_deadline(
     s.world.call(s.world.service.reconcile_program_clients)
     assert sorted((e.action, e.actor, e.tenant_id, e.target) for e in audit.since(mark)) == sorted([
         (CREDENTIAL_REVOKE, SYSTEM, T1, lost), (CLIENT_DELETE, SYSTEM, T1, lost)])
+
+
+def test_a_client_already_gone_when_the_reconciliation_deletes_it_is_not_audited(caplog) -> None:
+    """Another replica's pass deleted the client between this pass's listing and its delete: nothing was deleted
+    here, so no `program_client.delete` is written; the one this pass did delete is (D6, #1450 review)."""
+    audit = AuditLog(caplog)
+    s = soar()
+    gone, deleted = [], []
+    for name, into in (("first", gone), ("second", deleted)):  # one at a time: the program holds a key already
+        into.append(issue_oauth(s.ann, T1, s.program_id, name=name))
+        assert revoke(s.ann, T1, s.program_id, into[0]).status_code == 204
+    [gone], [deleted] = gone, deleted
+    realm, listing = s.world.realm, s.world.realm.client_ids
+
+    async def listed_then_deleted_elsewhere() -> set[str]:
+        found = await listing()
+        realm.clients.pop(gone)
+        return found
+
+    realm.client_ids = listed_then_deleted_elsewhere  # type: ignore[method-assign]
+    mark = audit.mark()
+    s.world.call(s.world.service.reconcile_program_clients)
+    assert sorted(realm.deleted) == sorted([gone, deleted])  # both were tried
+    assert [(e.action, e.target) for e in audit.since(mark)] == [(CLIENT_DELETE, deleted)]
 
 
 def test_offboarding_revokes_each_programs_credentials_as_the_system(caplog) -> None:

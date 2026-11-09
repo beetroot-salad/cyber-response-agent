@@ -69,7 +69,7 @@ def _orphan(s: Soar, client_id: str) -> None:
 
 
 def _reconcilable(s: Soar) -> list[str]:
-    """A realm with a kept client, one whose credential was revoked, two no row names, and one whose creation was lost and whose
+    """A realm with a kept client, one whose credential was revoked, two no row names, and one whose creation crashed midway and whose
     `pending` row is past its deadline: the clients reconciliation deletes are returned (sorted)."""
     kept = issue_oauth(s.ann, T1, str(create_program(s.ann, T1, "Kept")["id"]))
     revoked = issue_oauth(s.ann, T1, s.program_id)
@@ -77,9 +77,7 @@ def _reconcilable(s: Soar) -> list[str]:
     for orphan in ORPHANS:
         _orphan(s, orphan)
     other = str(create_program(s.ann, T1, "Other")["id"])
-    s.world.realm.lose_create_responses = 1
-    assert issue(s.ann, T1, other, kind="oauth_client").status_code == 503
-    [stale] = s.world.realm.created[-1:]
+    stale = s.world.crashed_oauth_create(s.ann, other)
     s.world.clock.advance(PENDING_DEADLINE + _dt.timedelta(seconds=1))
     assert kept in s.world.realm.clients
     return sorted([revoked, stale, *ORPHANS])

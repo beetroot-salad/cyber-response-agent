@@ -14,7 +14,7 @@ from defender.tenancy import InMemoryTenantRepository
 
 from defender.records.formats import CredentialId, MembershipId, TenantId, UserId
 
-from .errors import DataRuleViolation
+from .errors import CredentialCapReached, DataRuleViolation
 from .models import (
     CredentialKind, Membership, MembershipStatus, ProgramCredential, Role, Session, User, UserStatus,
     normalize_email,
@@ -333,12 +333,16 @@ class InMemoryIdentityRepository:
         row = self._live_row(user_id, tenant_id)
         return _copy(row) if row is not None and row.status == "active" else None
 
+    def _standing_membership(self, program_id: UserId) -> Membership | None:
+        """The program's active `automation` membership in an `active` tenant (the store's one reading of it)."""
+        return next((m for m in self._memberships.values() if m.user_id == program_id and m.status == "active"
+                     and m.role == "automation" and self._active(m.tenant_id)), None)
+
     async def program_standing(self, program_id: UserId) -> tuple[User, Membership] | None:
         program = self._users.get(program_id)
         if program is None or program.kind != "program" or program.status != "active":
             return None
-        row = next((m for m in self._memberships.values() if m.user_id == program_id and m.status == "active"
-                    and m.role == "automation" and self._active(m.tenant_id)), None)
+        row = self._standing_membership(program_id)
         return None if row is None else (_copy(program), _copy(row))
 
     # --- programs and their credentials ---------------------------------------------------------
@@ -394,7 +398,7 @@ class InMemoryIdentityRepository:
             return None
         self._refuse_unknown_actor(created_by)
         if sum(holds_slot(r, now) for r in self._credentials.values() if r.program_id == program_id) >= CREDENTIAL_CAP:
-            raise DataRuleViolation("the program already has two credentials in use or being made")
+            raise CredentialCapReached("the program already has two credentials in use or being made")
         if key_hash is not None and any(r.key_hash == key_hash and r.state != "revoked" for r in self._credentials.values()):
             raise DataRuleViolation("a credential with this key hash exists")
         row = ProgramCredential(
@@ -447,11 +451,13 @@ class InMemoryIdentityRepository:
         return [r.id for r in stale]
 
     async def oauth_credentials_to_keep(self, *, now: _dt.datetime) -> set[CredentialId]:
-        return {r.id for r in self._credentials.values() if r.kind == "oauth_client" and holds_slot(r, now)}
+        return {r.id for r in self._credentials.values()
+                if r.kind == "oauth_client" and holds_slot(r, now) and self._standing_membership(r.program_id)}
 
     async def claim_expiry_warning(self, *, now: _dt.datetime, hold_until: _dt.datetime) -> ExpiryWarning | None:
         due = sorted((r for r in self._credentials.values()
-                      if usable(r, now) and r.warn_next_at is not None and r.warn_next_at <= now),
+                      if usable(r, now) and r.warn_next_at is not None and r.warn_next_at <= now
+                      and self._standing_membership(r.program_id)),
                      key=lambda r: (r.warn_next_at, r.id))
         if not due:
             return None

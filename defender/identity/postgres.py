@@ -25,7 +25,7 @@ from defender.database import async_engine, sessions
 from defender.records.formats import CredentialId, MembershipId, TenantId, UserId
 from defender.tenancy.models import TenantRecord
 
-from .errors import DataRuleViolation
+from .errors import CredentialCapReached, DataRuleViolation
 from .memory import (
     CREDENTIAL_CAP, PENDING_DEADLINE, TOUCH_AFTER, check_credential_fields, check_membership_fields, check_role,
     first_warning, is_warning_threshold, secret_hash, tightest_due, warning_after,
@@ -42,6 +42,14 @@ _LIVE = ("invited", "active")
 def _active_tenant(tenant_id: Any) -> Any:
     """`tenant_id` names an `active` tenant: a condition to put inside the statement that needs it."""
     return (TenantRecord.id == tenant_id) & (TenantRecord.state == "active")
+
+
+def _program_in_standing() -> Any:
+    """The credential's program is a member of an `active` tenant (as `program_standing` reads it): a condition on
+    `ProgramCredential` for the statements that decide whether a credential is still in use."""
+    return exists().where(
+        Membership.user_id == ProgramCredential.program_id, Membership.status == "active",
+        Membership.role == "automation", _active_tenant(Membership.tenant_id))
 
 
 class PostgresIdentityRepository:
@@ -318,7 +326,7 @@ class PostgresIdentityRepository:
                 or_((ProgramCredential.state == "live") & (ProgramCredential.expires_at > now),
                     (ProgramCredential.state == "pending") & (ProgramCredential.pending_deadline > now))))).scalar_one()
             if slots >= CREDENTIAL_CAP:
-                raise DataRuleViolation("the program already has two credentials in use or being made")
+                raise CredentialCapReached("the program already has two credentials in use or being made")
             s.add(row)
         return row
 
@@ -377,7 +385,7 @@ class PostgresIdentityRepository:
 
     async def oauth_credentials_to_keep(self, *, now: _dt.datetime) -> set[CredentialId]:
         return set(await self._all(select(ProgramCredential.id).where(
-            ProgramCredential.kind == "oauth_client",
+            ProgramCredential.kind == "oauth_client", _program_in_standing(),
             or_((ProgramCredential.state == "live") & (ProgramCredential.expires_at > now),
                 (ProgramCredential.state == "pending") & (ProgramCredential.pending_deadline > now)))))
 
@@ -386,7 +394,7 @@ class PostgresIdentityRepository:
             row = (await s.execute(
                 select(ProgramCredential).where(
                     ProgramCredential.state == "live", ProgramCredential.expires_at > now,
-                    ProgramCredential.warn_next_at <= now)
+                    ProgramCredential.warn_next_at <= now, _program_in_standing())
                 .order_by(ProgramCredential.warn_next_at, ProgramCredential.id)
                 .limit(1).with_for_update(skip_locked=True))).scalars().first()
             if row is None:

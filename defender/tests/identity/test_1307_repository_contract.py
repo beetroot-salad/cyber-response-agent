@@ -6,7 +6,7 @@ Forced choices (FC-7, extending the support module's list; the design names no r
 `add_membership(..., role="admin")` (the seeder takes the role; people default `admin`);
 `add_credential(program_id, *, kind, name, created_by, expires_at, now, key_hash=None) -> row` (keys `live`; OAuth
 `pending` with `pending_deadline = now + 10 min`; None, writing nothing, without an active membership; over the cap, for a non-program, or
-a key without its hash / an OAuth client with one -> `DataRuleViolation`);
+a key without its hash / an OAuth client with one -> `DataRuleViolation`, the cap as its subclass `CredentialCapReached`);
 `go_live(credential_id, *, service_account_id, now) -> bool`; `revoke_credential(credential_id, *, revoked_by, now) -> bool`;
 `credentials_of_program(program_id)`; `credential_by_id(id)` / `credential_by_hash(key_hash)` -> row or None (any state);
 `programs_of_tenant(tenant_id) -> list[User]` (active programs); `remove_program(program_id, *, removed_by, now) -> list[credential id] | None`
@@ -23,7 +23,8 @@ threshold, *, until)` (a failed send's retry); `warning_deliveries(credential_id
 `record_warning_delivery(credential_id, threshold, person_id, *, sent_at)` (who a send has reached, so a retry mails
 only the rest; #1450 review). Reconciliation's keep-set read:
 `oauth_credentials_to_keep(*, now) -> set[credential id]` (OAuth rows `live` with `expires_at > now`, or `pending` with
-`pending_deadline > now`; never keys, never revoked). Rows carry the design's fields (`state`, `kind`, `key_hash`,
+`pending_deadline > now`; never keys, never revoked). The claim and the keep-set count only a credential whose program is
+in standing (`program_standing`; #1450 review). Rows carry the design's fields (`state`, `kind`, `key_hash`,
 `service_account_id`, `pending_deadline`, `last_used_at`, `revoked_at`, `revoked_by`, ...).
 """
 from __future__ import annotations
@@ -731,6 +732,28 @@ async def test_the_keep_set_is_the_oauth_credentials_that_are_usable_or_pending_
     await seeded.go_live(gone.id, service_account_id=SA, now=NOW)
     await seeded.remove_program(removed.id, removed_by=admin.id, now=NOW)
     assert gone.id not in await seeded.oauth_credentials_to_keep(now=NOW)
+
+
+async def test_a_credential_of_a_tenant_not_active_is_neither_warned_about_nor_kept(seeded, backend, tenants):
+    """One rule decides whether a credential is in use: authentication's (`program_standing`). A live, unrevoked
+    credential whose program's tenant is not `active` (a creation racing offboarding leaves one behind, its row never
+    revoked) has no warning to claim and no client to keep (#1450 review)."""
+    admin = await _user(seeded)
+    elsewhere = TenantId(fixture_uuid("tenant:leaving"))
+    await _seed_tenant(backend, tenants, elsewhere, state="creating")
+    stranded = await _program(seeded, admin, tenant=elsewhere, name="Stranded")
+    control = await _program(seeded, admin, name="Control")
+    rows = {}
+    for program, n in ((stranded, 1), (control, 3)):
+        key = await _timed_key(seeded, program, admin, n, 30 * DAY)
+        oauth = await _add_oauth(seeded, program, admin, n + 1, expires_at=NOW + 30 * DAY)
+        await seeded.go_live(oauth.id, service_account_id=SA, now=NOW)
+        rows[program.id] = (key, oauth)
+    assert await seeded.oauth_credentials_to_keep(now=NOW) == {rows[control.id][1].id}
+    at = NOW + 30 * DAY - FOURTEEN
+    claimed = {(await _claim_warning(seeded, at)).credential_id, (await _claim_warning(seeded, at)).credential_id}
+    assert claimed == {r.id for r in rows[control.id]}
+    assert await _claim_warning(seeded, at) is None  # the stranded program's are never claimed
 
 
 # --- PostgreSQL only: two processes on one warning --------------------------------------------------------

@@ -22,6 +22,7 @@ from .errors import (
     BootstrapRefused,
     CallbackRefused,
     Conflict,
+    CredentialCapReached,
     DataRuleViolation,
     Forbidden,
     Invalid,
@@ -641,7 +642,7 @@ class IdentityService:
             row = await self._repo.add_credential(
                 program_id, kind=kind, name=name, created_by=auth.user.id, expires_at=expires_at, now=now,
                 key_hash=None if key is None else secret_hash(key), credential_id=credential_id)
-        except DataRuleViolation as e:  # the name and the program were checked above: only the cap is left
+        except CredentialCapReached as e:
             raise Conflict("the program holds two credentials already") from e
         if row is None:  # removed since it was looked up
             raise NotFound("no such program")
@@ -650,13 +651,29 @@ class IdentityService:
         if key is not None:
             audit.emit("program_credential.create", actor=auth.user.id, tenant_id=tenant_id, target=row.id)
             return row, key
-        service_account_id, secret = await self._programs.create_client(row.id)
+        service_account_id, secret = await self._create_client(row.id, tenant_id)
         if not await self._repo.go_live(row.id, service_account_id=service_account_id, now=self._clock()):
             raise Conflict("the program was removed, or the client took too long")
         audit.emit("program_credential.create", actor=auth.user.id, tenant_id=tenant_id, target=row.id)
         live = await self._repo.credential_by_id(row.id)
         assert live is not None
         return live, secret
+
+    async def _create_client(self, credential_id: CredentialId, tenant_id: TenantId) -> tuple[str, str]:
+        """The realm client of a `pending` credential: its service-account id and secret. A failure seen here
+        revokes the row, freeing its slot at once; `pending` and its deadline are for a crash in between (B1). A
+        client the realm made anyway is deleted by the reconciliation, as the row no longer keeps it."""
+        try:
+            return await self._programs.create_client(credential_id)
+        except Exception:
+            # If this revoke fails too, the deadline still frees the slot; the realm's failure is the one raised.
+            try:
+                if await self._repo.revoke_credential(credential_id, revoked_by=None, now=self._clock()):
+                    audit.emit("program_credential.revoke", actor=audit.SYSTEM, tenant_id=tenant_id,
+                               target=credential_id)
+            except Exception:
+                _logger.exception("revoking the pending credential %s failed", credential_id)
+            raise
 
     async def revoke_credential(
         self, auth: Authenticated, tenant_id: TenantId, program_id: UserId, credential_id: CredentialId,
@@ -684,12 +701,14 @@ class IdentityService:
         for client_id in sorted(existing - keep):
             try:
                 tenant_id = await self._tenant_of_credential(client_id)
-                await self._programs.delete_client(client_id)
+                deleted = await self._programs.delete_client(client_id)
             except Exception as e:  # the others are still deleted; the loop logs this pass as failed
                 _logger.exception("deleting the program client %s failed", client_id)
                 failure = failure or e
                 continue
-            audit.emit("program_client.delete", actor=audit.SYSTEM, tenant_id=tenant_id, target=client_id)
+            # One already gone (another replica's pass deleted it) is not a deletion of ours: nothing to audit.
+            if deleted:
+                audit.emit("program_client.delete", actor=audit.SYSTEM, tenant_id=tenant_id, target=client_id)
         if failure is not None:
             raise failure
 

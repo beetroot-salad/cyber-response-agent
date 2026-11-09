@@ -67,6 +67,7 @@ from defender.tests.support.api._identity1306 import (
     World,
     _WorldClient,
     BASE_URL,
+    user_id,
 )
 
 DAY = _dt.timedelta(days=1)
@@ -156,9 +157,9 @@ class FaultingRealm:
         self._plan.check("realm", "create_client", (credential_id,))
         return await self._inner.create_client(credential_id)  # type: ignore[no-any-return]
 
-    async def delete_client(self, client_id: str) -> None:
+    async def delete_client(self, client_id: str) -> bool:
         self._plan.check("realm", "delete_client", (client_id,))
-        await self._inner.delete_client(client_id)
+        return await self._inner.delete_client(client_id)  # type: ignore[no-any-return]
 
     async def client_ids(self) -> set[str]:
         self._plan.check("realm", "client_ids", ())
@@ -229,7 +230,7 @@ class FakeProgramsRealm:
                 raise SignInUnavailable("the response was lost")
             return client.service_account_id, client.secret
 
-    async def delete_client(self, client_id: str) -> None:
+    async def delete_client(self, client_id: str) -> bool:
         with self._lock:
             self.journal.append(("realm", "delete_client"))
             if str(client_id) in self.fail_deletes:
@@ -237,7 +238,7 @@ class FakeProgramsRealm:
                 self.failed_deletes.append(fault)
                 raise fault
             self.deleted.append(str(client_id))
-            self.clients.pop(str(client_id), None)
+            return self.clients.pop(str(client_id), None) is not None
 
     async def client_ids(self) -> set[str]:
         with self._lock:
@@ -289,7 +290,7 @@ class RaisingProgramsRealm:
     async def create_client(self, credential_id: str) -> tuple[str, str]:
         raise self._refuse(f"create_client({credential_id})")
 
-    async def delete_client(self, client_id: str) -> None:
+    async def delete_client(self, client_id: str) -> bool:
         raise self._refuse(f"delete_client({client_id})")
 
     async def client_ids(self) -> set[str]:
@@ -310,7 +311,7 @@ class NoProgramsRealm:
     async def create_client(self, credential_id: str) -> tuple[str, str]:
         raise AssertionError(f"a people-only world created a program client: {credential_id}")
 
-    async def delete_client(self, client_id: str) -> None:
+    async def delete_client(self, client_id: str) -> bool:
         raise AssertionError(f"a people-only world deleted a program client: {client_id}")
 
     async def client_ids(self) -> set[str]:
@@ -419,6 +420,16 @@ class ProgramsWorld(World):
         return IdentityService(
             self.raw_repo, signin=self.signin, mail=self.mail, clock=self.clock,
             bootstrap=Bootstrap(administrators=()), programs=RaisingProgramsRealm())
+
+    def crashed_oauth_create(self, admin: Any, program_id: str) -> str:
+        """The API process died between recording an OAuth credential `pending` and Keycloak's answer: the row
+        stays `pending` and the realm holds its client. The only way a row stays `pending` (a failure the
+        request sees revokes it, B1); the credential's id."""
+        row = self.call(
+            self.raw_repo.add_credential, program_id, kind="oauth_client", name="crashed",
+            created_by=user_id(admin), expires_at=self.clock() + _dt.timedelta(days=30), now=self.clock())
+        self.call(self.realm.create_client, row.id)
+        return str(row.id)
 
     def credentials(self, program_id: str) -> list[Any]:
         """The program's credential rows, read from the repository (FC-7)."""
