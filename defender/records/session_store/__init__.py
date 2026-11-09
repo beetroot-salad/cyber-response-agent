@@ -32,7 +32,6 @@ from ._ledger import (  # noqa: F401
     UNSEEN as UNSEEN,
     LedgerRead as LedgerRead,
     SpendRow as SpendRow,
-    NoLedgerTable as NoLedgerTable,
     read_ledger as read_ledger,
     record_spend as record_spend,
     run_spend as run_spend,

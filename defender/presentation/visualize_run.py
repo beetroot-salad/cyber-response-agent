@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import logging
-import math
 import re
 import sys
 from pathlib import Path
@@ -74,12 +73,9 @@ if TYPE_CHECKING:
 @dataclasses.dataclass(frozen=True)
 class LedgerCost:
     """The run's cost as the page shows it: the ledger's one read (`None` when there is none to read).
-    Its total is "at least" exactly when the read is not complete (#1377 r7.3 T1). `before_ledger`: the
-    run's database has no ledger table at all, a run from before #1377 (r7.3 Q1), not one whose ledger
-    cannot be read."""
+    Its total is "at least" exactly when the read is not complete (#1377 r7.3 T1)."""
 
     read: LedgerRead | None
-    before_ledger: bool = False
 
     @property
     def total(self) -> float | None:
@@ -112,15 +108,13 @@ def render_page(run: Run, *, update_ticket: bool = False) -> str:
 def _ledger_cost(run: Run) -> LedgerCost:
     """The run's spend from its ledger, through the read the worker and the run file use (#1377 r7 S5).
     The store must resolve (a run dir copied without its store pointer fails before a page exists); a
-    ledger that cannot be read (a row of an unknown agent id included) leaves the cost unknown; a
-    database with no ledger table is a run from before the ledger (r7.3 Q1)."""
+    ledger that cannot be read (a row of an unknown agent id, or no ledger table, included) leaves the
+    cost unknown (r7.4 R1)."""
     from defender.records import session_store as ss
 
     with ss.open_store_for_read(ss.resolve_store_path(run)) as store:
         try:
             read = ss.read_ledger(store, str(run.id))
-        except ss.NoLedgerTable:
-            return LedgerCost(None, before_ledger=True)
         except Exception:  # noqa: BLE001 — an unreadable ledger is an unknown cost, never a failed page
             _logger.warning("the spend ledger of %s could not be read; the page's cost is unknown", run.run_dir, exc_info=True)
             return LedgerCost(None)
@@ -484,27 +478,13 @@ def _display_facts(run_dir: Path) -> list[str]:
     return parts
 
 
-def _headline_cost(cost: LedgerCost, events: list[dict]) -> str:
+def _headline_cost(cost: LedgerCost) -> str:
     """The headline's cost. The spend ledger's total (#1377 r6 S5), "at least" when its read is not
-    complete (r7.3 T1), never the run file's result line, which the box can rewrite. A run from
-    before the ledger shows the total its run file saved, labelled as such (r7.3 Q1); a ledger that
-    cannot be read, or an old run file with no usable total, reads "unknown"."""
+    complete (r7.3 T1), never the run file's result line, which the box can rewrite; a ledger that
+    cannot be read reads "unknown" (r7.2 P1, r7.4 R1)."""
     if cost.total is not None:
         return f'{"at least " if cost.lower_limit else ""}${cost.total:.4f}'
-    if cost.before_ledger:
-        recorded = _run_file_total(events)
-        if recorded is not None:
-            return f"${recorded:.4f} (recorded before the spend ledger)"
     return "unknown"
-
-
-def _run_file_total(events: list[dict]) -> float | None:
-    """The total the run file's last result line saved, when it is a finite, non-negative number."""
-    results = [e for e in events if e.get("type") == "result"]
-    value = results[-1].get("total_cost_usd") if results else None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
-        return None
-    return float(value)
 
 
 def render_runtime_page(run_dir: Path, *, cost: LedgerCost, update_ticket: bool = False) -> str:
@@ -593,7 +573,7 @@ def render_runtime_page(run_dir: Path, *, cost: LedgerCost, update_ticket: bool 
     review_html, n_reviewed = render_review_gate(run_dir, report, review_by_lens)
 
     stats_html = (
-        f'<span class="ts-cost">{_headline_cost(cost, events)}</span>'
+        f'<span class="ts-cost">{_headline_cost(cost)}</span>'
         f'<span class="ts-sep">·</span>'
         f'<span class="ts-wall">{fmt_duration(wall_ms)}</span>'
     )

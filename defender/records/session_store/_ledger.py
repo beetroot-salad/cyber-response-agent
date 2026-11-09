@@ -21,8 +21,6 @@ from typing import Any
 from defender._agent_role import agent_kind
 from defender.configuration import is_priced, usage_cost
 
-from defender.records._store_errors import StoreError
-
 from ._read import _check_schema_version
 
 #: The four billed counts a row holds, in column order (`configuration.billed_usage`'s keys).
@@ -37,11 +35,6 @@ OUTCOMES = (RESPONSE, REFUSED, UNSEEN)
 #: How long one ledger write (a row or the seal) waits for another connection's write lock (r7.3 Q2),
 #: instead of the store's own busy timeout: a longer wait is a failed write, never a stalled run.
 LEDGER_BUSY_TIMEOUT_MS = 1_000
-
-
-class NoLedgerTable(StoreError):
-    """The database has no spend ledger table: a run from before #1377 (r7.3 Q1). Not the same as a
-    ledger that exists and cannot be read."""
 
 
 @dataclass(frozen=True)
@@ -143,11 +136,10 @@ def _seal_matches(store: Any, run_id: str) -> bool:
 
 
 def run_spend(store: Any, run_id: str) -> list[SpendRow]:
-    """Every row of `run_id`, in write order, and no other run's. A database without the table raises
-    `NoLedgerTable` (r7.3 Q1); one at another schema version `UnknownSchemaVersion`."""
+    """Every row of `run_id`, in write order, and no other run's. A database at another schema version
+    raises `UnknownSchemaVersion`; one without the table raises sqlite's own error, an unreadable
+    ledger like any other (#1377 r7.4 R1)."""
     _check_schema_version(store)
-    if not _has_table(store.connection, "spend_ledger"):
-        raise NoLedgerTable("this session database has no spend ledger (a run from before #1377)")
     rows = store.connection.execute(
         f"SELECT agent_id, requested_model, outcome, {', '.join(COUNTS)} FROM spend_ledger "  # noqa: S608
         "WHERE run_id = ? ORDER BY id", (run_id,)).fetchall()
