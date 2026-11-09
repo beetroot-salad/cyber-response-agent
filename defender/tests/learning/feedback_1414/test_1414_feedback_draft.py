@@ -444,6 +444,28 @@ def test_1414_every_drafted_entry_reads_back_as_the_lookup_and_the_rest_are_name
         assert drafted.get(0), "positive control: the plain lookup was not drafted over a plain registry"
 
 
+@pytest.mark.parametrize("main", ["document end", "multi-document"])
+def test_1414_a_file_level_read_back_failure_refuses_the_draft_and_settles_nothing(fb, main, caplog):
+    """A main the reader cannot read back even a plain entry into refuses the draft every tick, with no branch, PR or reply and a warning; once a person fixes main the same entry is drafted. A7/A8, ruling 2."""
+    number, comment, decider = _approved(fb, "case-file-level", approve=(0,))
+    fb.t.merge({S.REGISTRY: _mains(number, comment["id"])[main]})
+
+    for tick in range(3):
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            assert fb.tick(decider) == 0
+        assert _drafts(fb) == {}, f"tick {tick}: a branch was made"
+        assert fb.forge.prs == [], f"tick {tick}: a PR was made"
+        assert fb.replies(number, comment["id"]) == [], f"tick {tick}: the entry was settled and answered"
+        assert any(r.levelno >= logging.WARNING for r in caplog.records), f"tick {tick}: the refusal is not logged"
+
+    fb.t.merge({S.REGISTRY: f"# header\nentries:\n{_ENTRY}"})
+    assert fb.tick(decider) == 0
+    [(_, tip)] = _drafts(fb).items()
+    assert touched(fb.t.remote, "main", tip) == [S.REGISTRY]
+    assert [e["id"] for e in _entries_at(fb, tip)][-1] == S.entry_id(number, comment["id"])
+
+
 _GLOBS = ["*", "?", "[", "]", "[!x]", "[a-c]", "[!]x]"]
 
 
