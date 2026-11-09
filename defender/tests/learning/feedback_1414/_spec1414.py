@@ -11,7 +11,7 @@ import datetime as dt
 import importlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 FEEDBACK_LABEL = "defender-feedback"
 #: The tenant's feedback setting, under `settings/` (FC: file name and shape).
 SETTING_FILE = "feedback.yaml"
-#: Run end's open-issue requests, one file per case, beside `author-queue/` (FC).
+#: Run end's open-issue requests, one file per request, beside `author-queue/` (FC; one issue per run, ruling 2026-11-09).
 REQUEST_QUEUE = "feedback-issue-queue"
 #: The registry lane's branch prefix, the third value of the lane-prefix choice (FC).
 FEEDBACK_PREFIX = "feedback/"
@@ -44,11 +44,6 @@ def marker(comment_id: int) -> str:
 def entry_id(issue: int, comment: int, n: int = 1) -> str:
     """The design's entry id `fb-<issue>-<comment>-<n>` (O6). Whether `n` starts at 1 is FC."""
     return f"fb-{issue}-{comment}-{n}"
-
-
-def run_marker(run_id: str) -> str:
-    """The marker a run's summary comment (and the issue body, for the first run) carries (A6; FC: its spelling)."""
-    return f"<!-- defender-feedback-run:{run_id} -->"
 
 
 def answer(*, approve: tuple[int, ...] = (), review_by: str | None = None,
@@ -157,8 +152,8 @@ def lessons_queue_file(paths: Any) -> Path:
 
 class Decider:
     """The tick's `decide` seam (FC: `decide(item, *, box=None) -> answer`). The item carries (FC):
-    `comment_id`, `issue`, `author`, `body`, `case_id`, `run_id` and `outcome` (the framing run's, A6/A3),
-    and `lookups` (that run's captured lookups, indexed by position). It answers each comment from `script`
+    `comment_id`, `issue`, `author`, `body`, `case_id`, `run_id` and `outcome` (of the run whose issue the comment is
+    on, A3; ruling 2026-11-09), and `lookups` (that run's captured lookups, indexed by position). It answers each comment from `script`
     by comment id: a dict every time, or a list consumed one per attempt (the last repeats); an `Exception`
     value is raised. It records the items it was handed."""
 
@@ -202,6 +197,8 @@ class Feedback:
     bot: str
     tmp: Path
     runs_made: int = 0
+    #: case id -> the run ids its requests carried, in order (what the host may write on an issue's head).
+    run_ids: dict = field(default_factory=dict)
 
     def eligible(self, *logins: str, age: dt.timedelta = dt.timedelta(0)) -> None:
         """What the lifecycle service wrote to the tenant's row (D13): `logins` read `age` ago.
@@ -238,29 +235,39 @@ class Feedback:
 
         self.runs_made += 1
         run_dir = self.run(label or f"{case_id}-{self.runs_made}")
+        run_id = str(run_of(run_dir).id)
+        self.run_ids.setdefault(case_id, []).append(run_id)
         queue_open_issue(self.paths, case_id=case_id, tenant_id=self.t.tenant_id,
-                         run_id=str(run_of(run_dir).id), outcome="inconclusive", lookups=[LOOKUP] if lookups is None else lookups)
+                         run_id=run_id, outcome="inconclusive", lookups=[LOOKUP] if lookups is None else lookups)
         return run_dir
 
     def tick(self, decide: Any, **seams: Any) -> int:
         return feedback_drain(self.t, self.paths, decide=decide, **seams)
 
     def issues(self, case_id: str) -> list[dict]:
-        """The feedback issues whose host-written first line names exactly `case_id` (`case-1` is not `case-10`)."""
-        named = re.compile(rf"(?<![\w-]){re.escape(case_id)}(?![\w-])")
+        """The feedback issues whose host-written head (the body's first two lines) names exactly `case_id` or one of
+        the run ids its requests carried (`case-1` is not `case-10`). Which of the two the head names is the
+        implementation's; the tests that pin the head (one issue per run, recovery) assert it themselves."""
+        names = [case_id, *self.run_ids.get(case_id, [])]
+        named = re.compile("|".join(rf"(?<![\w-]){re.escape(n)}(?![\w-])" for n in names))
         return [i for i in self.forge.issues
                 if FEEDBACK_LABEL in {label["name"] for label in i["labels"]}
-                and named.search((i["body"].splitlines() or [""])[0])]
+                and named.search("\n".join(i["body"].splitlines()[:2]))]
 
     def opened(self, case_id: str, decide: Any = None) -> int:
-        """Queue a request for `case_id`, tick once, and return its issue's number."""
+        """Queue a request for `case_id`, tick once, and return the number of the one issue that tick created (read
+        from the forge's own record, not from any text the host wrote)."""
+        before = {i["number"] for i in self.forge.issues}
         self.request(case_id)
         assert self.tick(decide or Decider()) == 0
-        [issue] = self.issues(case_id)
-        return issue["number"]
+        [number] = [i["number"] for i in self.forge.issues if i["number"] not in before]
+        return number
 
     def replies(self, number: int, comment_id: int) -> list[dict]:
-        return [c for c in self.forge.comments_on(number, by=self.bot) if marker(comment_id) in c["body"]]
+        """The bot's replies to `comment_id`: bot comments whose first line carries its marker (ruling 2026-11-09: a
+        marker is read only from the first line of a comment a tenant bot wrote)."""
+        return [c for c in self.forge.comments_on(number, by=self.bot)
+                if marker(comment_id) in (c["body"].splitlines() or [""])[0]]
 
 
 def run_id_of(run_dir: Path) -> str:

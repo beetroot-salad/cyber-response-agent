@@ -84,11 +84,13 @@ def test_the_history_is_the_baseline_and_five_revisions_on_it_in_a_line():
 
     script = ScriptDirectory.from_config(_config())
     chain = [(r.revision, r.down_revision) for r in script.walk_revisions()]  # newest first
-    assert len(chain) == 7
-    assert [revision for revision, _ in chain] == [
+    assert len(chain) == 8  # #1414 D13: the merge-eligibility record's revision sits on #1345's
+    [(head, _)] = chain[:1]
+    assert [revision for revision, _ in chain][1:] == [
         "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE]
-    assert [down for _, down in chain] == ["0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE, None]
-    assert script.get_heads() == ["0007_alert_mapping"], "the history branches"
+    assert [down for _, down in chain] == [
+        "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE, None]
+    assert script.get_heads() == [head], "the history branches"
 
 @pytest.mark.postgres
 def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_database):
@@ -113,7 +115,8 @@ def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_datab
 def test_the_revision_moves_tenants_and_adds_the_lifecycle_tables(migrated_database):
     """At head `tenancy` holds tenants and the new tables, `identity` no tenants, and memberships reference `tenancy.tenants` (O11)."""
     assert _tables(migrated_database, "tenancy") == {"tenants", "forge_wiring", "generations", "publish_status",
-                                                     "alert_mappings"}  # #1345 r5: the mapping is a tenant record
+                                                     "alert_mappings",  # #1345 r5: the mapping is a tenant record
+                                                     "merge_eligibility"}  # #1414 D13: the service's eligibility record
     assert "tenants" not in _tables(migrated_database, "identity")
     assert [target for _, target in _fk_to_tenants(migrated_database)] == ["tenancy.tenants"]
 
@@ -248,7 +251,8 @@ def test_the_upgrade_keeps_every_row_of_every_tenancy_table_and_only_adds_the_si
                      bot_login=f"bot-{tenant}-{status}", role_id=f"role-{status}")
 
     def rows() -> dict[str, list[dict[str, object]]]:
-        tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version", "alert_mappings"})  # #1345: a table the head adds
+        tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version", "alert_mappings",  # #1345: a table the head adds
+                                                              "merge_eligibility"})  # #1414 D13: so is this
         return {t: sorted((r[0] for r in execute(empty_database, f"SELECT to_jsonb(x) FROM tenancy.{t} x")),  # noqa: S608
                           key=lambda row: json.dumps(row, sort_keys=True)) for t in tables}
     before = rows()

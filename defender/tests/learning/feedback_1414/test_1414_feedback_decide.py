@@ -7,12 +7,14 @@ import contextlib
 import datetime as dt
 import json
 import logging
+from pathlib import Path
 
 import httpx
 import pytest
 
 from defender.tests.learning.feedback_1414 import _spec1414 as S
 from defender.tests.learning.feedback_1414._spec1414 import LOOKUP, LOOKUP_2, NAMED, OWNER, today
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_p4._drain_support import remote_branches
 
 CEILING = 3
@@ -37,32 +39,78 @@ def _scene(fb, case, *, lookups=None, by=OWNER, body="expected: the nightly back
 
 # ---------------------------------------------------------------- A3: the answer schema
 
+_GOOD = {"approve": [0], "review_by": None, "instruction": "check the VPN log first", "reason": None}
+_UNMADE = {"actor": "svc-backup", "host": "db-07.prod", "pattern": "drop table users"}  # a lookup the run never made
+
+
+def _wrong(**fields):
+    """A valid answer (an approval and an instruction) with `fields` replaced: only the replaced part is wrong."""
+    return {**_GOOD, **fields}
+
+
 _ANSWERS = {
     "index past the lookups": S.answer(approve=(0, 2)),
     "negative index": S.answer(approve=(-1,)),
-    "approve not a list": {"approve": "0", "review_by": None, "instruction": None, "reason": None},
-    "unparsable date": S.answer(approve=(0,), review_by="after the next audit"),
-    "date before the comment": S.answer(
-        approve=(0,), review_by=(today() - dt.timedelta(days=1)).isoformat()),
+    "approve not a list": _wrong(approve="0"),
+    "approve null": _wrong(approve=None),
+    "a key missing": {k: v for k, v in _GOOD.items() if k != "reason"},
+    "approve key missing": {k: v for k, v in _GOOD.items() if k != "approve"},
+    "an extra key": _wrong(note="and also this"),
+    "approve a bare int": _wrong(approve=1),
+    "approve a dict": _wrong(approve={"0": True}),
+    "bool True as an index": _wrong(approve=[True]),
+    "bool False as an index": _wrong(approve=[False]),
+    "valid index then a bool": _wrong(approve=[0, True]),
+    "float index": _wrong(approve=[0.0]),
+    "fractional float index": _wrong(approve=[1.5]),
+    "string index": _wrong(approve=["0"]),
+    "nested list index": _wrong(approve=[[0]]),
+    "none as an index": _wrong(approve=[None]),
+    "unmade lookup by value": _wrong(approve=[_UNMADE]),
+    "valid index then an unmade lookup": _wrong(approve=[0, _UNMADE]),
+    "made lookup by value": _wrong(approve=[dict(LOOKUP)]),
+    "lookup with extra key": _wrong(approve=[{**_UNMADE, "index": 0}]),
+    "unparsable date": _wrong(review_by="after the next audit"),
+    "date before the comment": _wrong(review_by=(today() - dt.timedelta(days=1)).isoformat()),
+    "date as a compact int": _wrong(review_by=int((today() + dt.timedelta(days=9)).strftime("%Y%m%d"))),
+    "date as a date object": _wrong(review_by=today() + dt.timedelta(days=9)),
+    "date as a list": _wrong(review_by=[(today() + dt.timedelta(days=9)).isoformat()]),
+    "date as a dict": _wrong(review_by={"date": (today() + dt.timedelta(days=9)).isoformat()}),
+    "date as a bool": _wrong(review_by=True),
+    "instruction an int": _wrong(instruction=5),
+    "instruction a list": _wrong(instruction=["check the VPN log first"]),
+    "instruction a dict": _wrong(instruction={"text": "check the VPN log first"}),
+    "instruction True": _wrong(instruction=True),
+    "instruction False": _wrong(instruction=False),
+    "reason an int": _wrong(reason=7),
+    "reason a list": _wrong(reason=["no"]),
+    "reason a dict": _wrong(reason={"why": "no"}),
+    "reason a bool": _wrong(reason=True),
     "not an object": ["approve", 0],
+    "text": "approve 0",
+    "null": None,
 }
 
 
 @pytest.mark.parametrize("name", sorted(_ANSWERS))
-def test_1414_an_invalid_answer_is_refused_whole_and_the_comment_asked_again(fb, name):
-    """An invalid answer records no decision, no draft, no lesson and no reply, even for its valid part; the next tick asks again. A3."""
+def test_1414_an_invalid_answer_is_refused_whole_and_counted_to_the_ceiling(fb, name):
+    """Any answer off A3's exact shape is refused whole: its valid part (an approval, an instruction) is kept nowhere, the comment is asked again, and the 3rd refusal ends it as a replied 'could not be processed'. A3/A4."""
     number, comment = _scene(fb, "case-bad", lookups=[LOOKUP, LOOKUP_2])
-    bad = _ANSWERS[name]
-    if isinstance(bad, dict):  # an instruction rides along: the valid part must not be kept either
-        bad = {**bad, "instruction": "check the VPN log first"}
-    decider = S.Decider({comment["id"]: [bad]})
+    decider = S.Decider({comment["id"]: [_ANSWERS[name]]})
 
+    for tick in range(CEILING):
+        assert fb.tick(decider) == 0
+        assert decider.decided == [comment["id"]] * (tick + 1), "the refused comment was not asked again"
+        if tick < CEILING - 1:
+            assert fb.replies(number, comment["id"]) == [], "the ceiling came early"
+        assert _drafts(fb) == {}, "an entry was drafted from a refused answer"
+        assert S.lessons_rows(fb.paths) == [], "a lessons row was written from a refused answer"
+    [reply] = fb.replies(number, comment["id"])
+    assert "could not be processed" in reply["body"]
     assert fb.tick(decider) == 0
-    assert fb.tick(decider) == 0
-    assert decider.decided == [comment["id"]] * 2, "the refused comment was not asked again"
+    assert decider.decided == [comment["id"]] * CEILING, "an exhausted comment was asked again"
     assert _drafts(fb) == {}
     assert S.lessons_rows(fb.paths) == []
-    assert fb.replies(number, comment["id"]) == []
 
 
 @pytest.mark.parametrize(("given", "expect"), [
@@ -194,25 +242,114 @@ def test_1414_a_failing_comment_stops_its_issues_later_comments_but_not_other_is
     assert len(fb.replies(number, second["id"])) == 1
 
 
-def test_1414_an_unreachable_forge_is_never_counted_against_a_request(fb):
-    """Transport faults and 5xx on the open, many ticks over, leave the request to succeed later; a refusal (422) three times quarantines it. A4/O9."""
-    fb.request("case-down")
-    fb.forge.fault = lambda r: (httpx.ConnectError("down", request=r)
-                                if r.method == "POST" and r.url.path.endswith("/issues") else None)
-    for _ in range(CEILING + 1):
-        fb.tick(S.Decider())
-    fb.forge.fault = None
-    fb.forge.respond = lambda r: httpx.Response(503, json={}) if r.method == "POST" and r.url.path.endswith("/issues") else None
-    for _ in range(CEILING + 1):
-        fb.tick(S.Decider())
-    assert fb.issues("case-down") == []
-    fb.forge.respond = None
-    assert fb.tick(S.Decider()) == 0
-    assert len(fb.issues("case-down")) == 1, "unreachable ticks were counted and the request quarantined"
-    assert S.quarantined_requests(fb.paths, "case-down") == []
+_REFUSED = range(400, 500)
+_UNREACHABLE = range(500, 600)
 
+
+def _request_case(request) -> str | None:
+    """The case an issue-open POST is for (read from the title the host wrote), else None."""
+    if request.method == "POST" and request.url.path.endswith("/issues"):
+        return json.loads(request.content)["title"].split()[3]
+    return None
+
+
+def _live_cases(fb) -> set[str]:
+    return {r["case_id"] for r in S.open_issue_requests(fb.paths).values()}
+
+
+def _set_aside_cases(fb) -> set[str]:
+    root = Path(location_path(fb.paths.state_root))
+    live = root / S.REQUEST_QUEUE
+    kept = set()
+    for p in root.rglob("*.json"):
+        name = str(p.relative_to(root)).lower()
+        if p.parent != live and ("fail" in name or "quarantin" in name):
+            with contextlib.suppress(ValueError, AttributeError):
+                kept.add(json.loads(p.read_text(encoding="utf-8"))["case_id"])
+    return kept
+
+
+def test_1414_every_4xx_on_a_request_is_counted_to_the_3rd_tick_and_no_5xx_or_fault_ever_is(fb):
+    """For each status 400-599 and a transport fault on the issue open: a 4xx sets the request aside at exactly the 3rd tick, a 5xx or fault never, and once the forge answers the kept ones open their issue. A4/O9."""
+    cases = {f"s{status}": status for status in (*_REFUSED, *_UNREACHABLE)}
+    for case in (*cases, "fault", "healthy"):
+        fb.request(case)
+    fb.forge.respond = lambda r: (httpx.Response(cases[c], json={"message": "no"})
+                                  if (c := _request_case(r)) in cases else None)
+    fb.forge.fault = lambda r: httpx.ConnectError("down", request=r) if _request_case(r) == "fault" else None
+    refused = {c for c, status in cases.items() if status < 500}
+    kept = set(cases) - refused | {"fault"}
+
+    assert fb.tick(S.Decider()) == 0
+    assert len(fb.issues("healthy")) == 1, "a failing request held back the one after it"
+    for _ in range(CEILING - 2):
+        fb.tick(S.Decider())
+    assert _live_cases(fb) == set(cases) | {"fault"}, "a request was set aside before the ceiling"
+    assert _set_aside_cases(fb) == set()
+    fb.tick(S.Decider())
+    assert _set_aside_cases(fb) == refused, "the 4xx requests were not set aside at exactly the 3rd refusal"
+    assert _live_cases(fb) == kept
+    for _ in range(CEILING + 3):
+        fb.tick(S.Decider())
+    assert _live_cases(fb) == kept, "an unreachable forge was counted against a request"
+    assert _set_aside_cases(fb) == refused
+
+    fb.forge.respond = fb.forge.fault = None
+    assert fb.tick(S.Decider()) == 0
+    assert _live_cases(fb) == set()
+    assert {c for c in (*cases, "fault") if fb.issues(c)} == kept, "a kept request lost its issue, or a refused one got one"
+    assert len(fb.issues("healthy")) == 1
+
+
+def _sweep(fb, *, step):
+    """One issue with a comment per status of a spread of 5xx classes (the request test sweeps them all) and a transport fault."""
+    cases = {f"c{status}": status for status in (500, 501, 502, 503, 504, 507, 511, 599)} | {"cfault": None}
+    for case in cases:
+        fb.request(case)
+    assert fb.tick(S.Decider()) == 0
+    numbers = {case: fb.issues(case)[0]["number"] for case in cases}
+    comments = {case: fb.forge.add_comment(number, user=OWNER, body="a note") for case, number in numbers.items()}
+    status_of = {number: cases[case] for case, number in numbers.items()}
+
+    def trouble(r):
+        parts = r.url.path.split("/")
+        if "issues" in parts and r.method == step[0] and r.url.path.endswith(step[1]):
+            number = int(parts[parts.index("issues") + 1])
+            if number in status_of:
+                return status_of[number]
+        return False
+
+    fb.forge.respond = lambda r: (httpx.Response(t, json={}) if (t := trouble(r)) else None)
+    fb.forge.fault = lambda r: httpx.ConnectError("down", request=r) if trouble(r) is None else None
+    return numbers, comments
+
+
+@pytest.mark.parametrize("step", [("POST", "/comments"), ("GET", "/comments")], ids=["reply", "listing"])
+def test_1414_no_5xx_or_fault_on_a_comment_step_is_counted_and_nothing_past_it_is_lost(fb, step):
+    """For a spread of 5xx statuses and a transport fault on a comment's reply POST or its issue's comment listing: after many ticks the comment is still live and never ended 'could not be processed', and once the forge answers it and a comment added meanwhile are each decided and replied to once. A4/O9."""
+    numbers, comments = _sweep(fb, step=step)
+    decider = S.Decider({c["id"]: S.answer(reason="a thanks") for c in comments.values()})
+    for _ in range(CEILING + 3):
+        fb.tick(decider)
+    later = {case: fb.forge.add_comment(numbers[case], user=NAMED, body="and then") for case in numbers}
+    decider.script |= {c["id"]: S.answer(reason="a thanks") for c in later.values()}
+    for _ in range(CEILING + 2):
+        fb.tick(decider)
+    assert not any("could not be processed" in c["body"] for n in numbers.values() for c in fb.forge.comments_on(n, by=fb.bot))
+
+    fb.forge.respond = fb.forge.fault = None
+    for _ in range(2):
+        assert fb.tick(decider) == 0
+    for case, number in numbers.items():
+        for c in (comments[case], later[case]):
+            assert len(fb.replies(number, c["id"])) == 1, f"{case}: a comment was lost or answered twice"
+            assert decider.decided.count(c["id"]) == 1, f"{case}: a failed forge call spent a decision"
+
+
+def test_1414_a_request_the_forge_refuses_is_set_aside_with_its_reason_in_a_kept_file(fb):
+    """A request refused three times (422) is kept in a quarantine folder with a non-empty reason and never retried. A4/A8."""
     fb.request("case-refused")
-    fb.forge.respond = lambda r: httpx.Response(422, json={"message": "refused"}) if r.method == "POST" and r.url.path.endswith("/issues") else None
+    fb.forge.respond = lambda r: httpx.Response(422, json={"message": "refused"}) if _request_case(r) else None
     for _ in range(CEILING + 1):
         fb.tick(S.Decider())
     fb.forge.respond = None
@@ -226,19 +363,20 @@ def test_1414_an_unreachable_forge_is_never_counted_against_a_request(fb):
     assert reason.strip(), "the quarantined request's reason is empty (A8)"
 
 
-def test_1414_an_unreachable_forge_is_never_counted_against_a_comment_decision(fb):
-    """A reply the forge refuses for many ticks does not spend the comment's attempts: the decision stands and its own reply is posted once the forge answers. A4."""
-    number, comment = _scene(fb, "case-down-comment")
-    decider = S.Decider({comment["id"]: S.answer(reason="a thanks, nothing to learn")})
-    fb.forge.respond = lambda r: (httpx.Response(502, json={}) if r.method == "POST" and r.url.path.endswith(f"/issues/{number}/comments") else None)
-    for _ in range(CEILING + 2):
-        fb.tick(decider)
-    assert fb.replies(number, comment["id"]) == [], "premise: the forge refused the reply"
-    assert decider.decided == [comment["id"]], "the recorded decision was taken again"
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 409, 422, 429, 499])
+def test_1414_a_4xx_on_a_comment_reply_is_counted_and_given_up_at_the_3rd_tick(fb, status, caplog):
+    """A reply POST the forge refuses (4xx) is attempted on ticks 1-3 and never after, and the give-up is logged naming the comment; another issue's reply is unaffected. A4/O9."""
+    number, comment = _scene(fb, "case-4xx")
+    other_number, other = _scene(fb, "case-4xx-other")
+    decider = S.Decider({comment["id"]: S.answer(reason="a thanks"), other["id"]: S.answer(reason="a thanks")})
+    fb.forge.respond = lambda r: (httpx.Response(status, json={"message": "no"}) if r.method == "POST"
+                                  and r.url.path.endswith(f"/issues/{number}/comments") else None)
 
-    fb.forge.respond = None
-    assert fb.tick(decider) == 0
-    [reply] = fb.replies(number, comment["id"])
-    assert "a thanks, nothing to learn" in reply["body"]
-    assert "could not be processed" not in reply["body"], "refused replies were counted as failed attempts"
-    assert decider.decided == [comment["id"]]
+    with caplog.at_level(logging.INFO):
+        for _ in range(CEILING + 3):
+            assert fb.tick(decider) == 0
+    posts = [r for r in fb.forge.requests if r.method == "POST" and r.url.path.endswith(f"/issues/{number}/comments")]
+    assert len(posts) == CEILING, "a refused reply was not attempted exactly three times"
+    assert len(fb.replies(other_number, other["id"])) == 1, "control: a healthy issue's reply was held back"
+    assert any(r.levelno >= logging.WARNING and str(comment["id"]) in r.getMessage() for r in caplog.records
+               if r.name != "httpx"), "the given-up reply is not logged with its comment id"

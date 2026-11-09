@@ -328,45 +328,216 @@ def test_1414_a_closed_issues_approval_is_drafted_and_replied_to(fb):
     assert _pr_of(fb, branch)["html_url"] in reply["body"]
 
 
-# ---------------------------------------------------------------- A7: the format contract
+# ---------------------------------------------------------------- A7 / ruling 2: the read-back
 
 _ENTRY = ("  - id: tk-old\n    pattern: other pattern text\n    actor_scope: svc-other\n    host_scope: web-01.prod\n"
           "    added_by: ops@example.invalid\n    added_at: 2026-10-01\n    review_by: 2026-12-01\n    justification: kept\n")
-_SHAPES = {
-    "empty flow list": ("# header\nentries: []\n", True),
-    "block list last": (f"# header\nentries:\n{_ENTRY}", True),
-    "block list dash at column 0": ("# header\nentries:\n" + "".join(
-        ln[2:] + "\n" if ln.startswith("  - ") else ln[2:] + "\n" for ln in _ENTRY.splitlines()), True),
-    "non-empty flow list": ("entries: [{id: tk-old}]\n", False),
-    "entries not last": (f"entries:\n{_ENTRY}owner: ops\n", False),
-    "spaced empty list": ("entries: [ ]\n", False),
-    "no entries key": ("# nothing\n", False),
-}
+def _reading(text: str, tmp: Path, name: str):
+    """The shared reader's whole reading of `text` (entries, refusals, fatal), not asserted on."""
+    from defender.systems import tacit_registry
+
+    path = tmp / "reading" / name / "registry.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
+    return tacit_registry.read_registry(path)
 
 
-@pytest.mark.parametrize("shape", sorted(_SHAPES))
-def test_1414_the_registry_is_appended_to_only_in_the_two_shapes_the_contract_names(fb, shape, caplog):
-    """A block list as the last key is appended to (earlier lines kept byte for byte) and `entries: []` rewritten once; any other shape refuses the draft loudly. A7/O9."""
-    text, ok = _SHAPES[shape]
+def _crlf(text: str) -> str:
+    return text.replace("\n", "\r\n")
+
+
+def _mains(number: int, cid: int) -> dict[str, str]:
+    """Registry texts a person may have merged to main. `dup id` already holds the id the first approved lookup
+    will be given."""
+    taken = _ENTRY.replace("tk-old", f"fb-{number}-{cid}-1").replace("other pattern text", "an earlier text")
+    bad = "  - id: tk-bad\n    pattern: x\n"
+    return {
+        "block list": f"# header\nentries:\n{_ENTRY}",
+        "empty flow list": "# header\nentries: []\n",
+        "entries null": "# header\nentries:\n",
+        "comment-only entries": "entries:\n  # none yet\n  # still none\n",
+        "document start": f"---\nentries:\n{_ENTRY}",
+        "multi-document": "---\nentries: []\n---\nentries: []\n",
+        "document end": f"entries:\n{_ENTRY}...\n",
+        "crlf block list": _crlf(f"# header\nentries:\n{_ENTRY}"),
+        "crlf empty flow list": _crlf("# header\nentries: []\n"),
+        "duplicate id on main": f"entries:\n{_ENTRY}{taken}",
+        "refused entry on main": f"entries:\n{_ENTRY}{bad}",
+    }
+
+
+_SPECIALS = ["\u0085", " ", " ", " ", " ", "\t", "'", '"', ": ", " #", "#", "\\", "é", "日本"]
+
+
+def _lookups(seed: int, n: int = 8) -> list[dict]:
+    """`n` lookups: the first plain, the rest with arbitrary Unicode at the start, middle or end of the actor, host
+    and pattern (no glob character: F3 owns those). Every pattern is distinct, so none covers another."""
+    import random
+
+    rng = random.Random(seed)
+    out = [{"actor": "svc-backup", "host": "db-07.prod", "pattern": "pg_dump --all as root 0"}]
+    for i in range(1, n):
+        fields = {"actor": ["svc-backup"], "host": ["db-07.prod"], "pattern": ["pg_dump --all as root ", str(i)]}
+        for _ in range(rng.randint(1, 3)):
+            parts = fields[rng.choice(sorted(fields))]
+            parts.insert(rng.choice([0, len(parts) // 2, len(parts)]), rng.choice(_SPECIALS))
+        out.append({k: "".join(v) for k, v in fields.items()})
+    return out
+
+
+def _entry_ids(number: int, cid: int, count: int) -> list[str]:
+    return [S.entry_id(number, cid, n) for n in range(1, count + 1)]
+
+
+def _assert_drafted_or_named(fb, mains_text: str, lookups: list[dict], number: int, comment: dict,
+                             *, tick_logged: bool) -> dict[int, bool]:
+    """The oracle for one approval of `lookups` over main text `mains_text`, from the shared reader's output on main
+    and on the PR head. Returns which lookup indices were drafted."""
+    ids = _entry_ids(number, comment["id"], len(lookups))
+    drafts = _drafts(fb)
+    reply_bodies = [r["body"] for r in fb.replies(number, comment["id"])]
+    reply = reply_bodies[0] if reply_bodies else ""
+    if not drafts:
+        assert fb.forge.prs == [], "a PR was opened with nothing drafted"
+        named = all(f"Entry {i} cannot be written" in reply for i in ids)
+        assert named or tick_logged, "nothing was drafted and the refusal is neither named in the reply nor logged"
+        return {}
+    [(branch, tip)] = drafts.items()
+    assert touched(fb.t.remote, "main", tip) == [S.REGISTRY], "the feedback PR changes more than the registry"
+    before, after = _reading(mains_text, fb.tmp, "main"), _reading(_registry_at(fb, tip), fb.tmp, "pr")
+    assert after.fatal is None, f"the reader refuses the drafted registry: {after.fatal}"
+    assert after.refusals == before.refusals, "the draft changes what the reader refuses"
+    assert after.entries[:len(before.entries)] == before.entries, "the draft changes main's entries"
+    extra = {e["id"]: e for e in after.entries[len(before.entries):]}
+    assert len(extra) == len(after.entries) - len(before.entries)
+    assert set(extra) <= set(ids), f"entries nobody approved were drafted: {sorted(set(extra) - set(ids))}"
+    assert extra, "a PR was opened that drafts nothing"
+    drafted = {}
+    for k, (eid, lookup) in enumerate(zip(ids, lookups, strict=True)):
+        drafted[k] = eid in extra
+        if eid in extra:
+            got = extra[eid]
+            assert (got["actor_scope"], got["host_scope"], got["pattern"]) == \
+                (lookup["actor"], lookup["host"], lookup["pattern"]), \
+                f"{eid} was drafted as {got!r}, not as the lookup {lookup!r}"
+        else:
+            assert f"Entry {eid} cannot be written" in reply, f"{eid} is neither on the PR nor named as not writable"
+    assert _pr_of(fb, branch)["html_url"] in reply
+    return drafted
+
+
+@pytest.mark.parametrize("seed", [11, 12])
+@pytest.mark.parametrize("main", sorted(_mains(0, 0)))
+def test_1414_every_drafted_entry_reads_back_as_the_lookup_and_the_rest_are_named(fb, main, seed, caplog):
+    """Over any registry text on main and lookups holding arbitrary Unicode, the reader sees on the PR main's entries
+    and refusals unchanged plus only entries equal to their lookup, and every other approval is named or logged. O6/A7."""
+    lookups = _lookups(seed)
+    number, comment, decider = _approved(fb, "case-readback", lookups=lookups, approve=tuple(range(len(lookups))))
+    text = _mains(number, comment["id"])[main]
     fb.t.merge({S.REGISTRY: text})
-    number, comment, decider = _approved(fb, "case-shape", approve=(0,))
 
     with caplog.at_level(logging.INFO):
         assert fb.tick(decider) == 0
-    if not ok:
-        assert _drafts(fb) == {}
-        assert fb.forge.prs == []
-        assert fb.replies(number, comment["id"]) == []
-        assert any(r.levelno >= logging.WARNING for r in caplog.records), "the refused draft is not logged"
-        return
+    logged = any(r.levelno >= logging.WARNING and r.name != "httpx" for r in caplog.records)
+    drafted = _assert_drafted_or_named(fb, text, lookups, number, comment, tick_logged=logged)
+    if main in ("block list", "empty flow list"):
+        assert drafted.get(0), "positive control: the plain lookup was not drafted over a plain registry"
+
+
+@pytest.mark.parametrize("main", ["document end", "multi-document"])
+def test_1414_a_file_level_read_back_failure_refuses_the_draft_and_settles_nothing(fb, main, caplog):
+    """A main the reader cannot read back even a plain entry into refuses the draft every tick, with no branch, PR or reply and a warning; once a person fixes main the same entry is drafted. A7/A8, ruling 2."""
+    number, comment, decider = _approved(fb, "case-file-level", approve=(0,))
+    fb.t.merge({S.REGISTRY: _mains(number, comment["id"])[main]})
+
+    for tick in range(3):
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            assert fb.tick(decider) == 0
+        assert _drafts(fb) == {}, f"tick {tick}: a branch was made"
+        assert fb.forge.prs == [], f"tick {tick}: a PR was made"
+        assert fb.replies(number, comment["id"]) == [], f"tick {tick}: the entry was settled and answered"
+        assert any(r.levelno >= logging.WARNING for r in caplog.records), f"tick {tick}: the refusal is not logged"
+
+    fb.t.merge({S.REGISTRY: f"# header\nentries:\n{_ENTRY}"})
+    assert fb.tick(decider) == 0
     [(_, tip)] = _drafts(fb).items()
-    drafted = _registry_at(fb, tip)
-    kept = text.removesuffix("entries: []\n")
-    assert drafted.startswith(kept), "lines before the append changed"
-    ids = [e["id"] for e in _read(drafted, fb.tmp)]
-    assert ids[-1] == S.entry_id(number, comment["id"])
-    assert len(ids) == 1 + (shape != "empty flow list")
-    assert "entries: []" not in drafted
+    assert touched(fb.t.remote, "main", tip) == [S.REGISTRY]
+    assert [e["id"] for e in _entries_at(fb, tip)][-1] == S.entry_id(number, comment["id"])
+
+
+_GLOBS = ["*", "?", "[", "]", "[!x]", "[a-c]", "[!]x]"]
+
+
+@pytest.mark.parametrize("glob", _GLOBS)
+def test_1414_a_glob_character_in_either_scope_is_not_drafted_and_is_named(fb, glob):
+    """A lookup whose actor or host holds a glob character at the start, middle or end is never drafted and the reply
+    names it; a plain lookup beside them is. P3."""
+    plain = {"actor": "svc-backup", "host": "db-07.prod", "pattern": "pg_dump --all as root 0"}
+    lookups = [plain]
+    for field, base in (("actor", "svc-backup"), ("host", "db-07.prod")):
+        for value in (glob + base, base[:4] + glob + base[4:], base + glob):
+            lookups.append({**plain, field: value, "pattern": f"pg_dump --all as root {len(lookups)}"})
+    number, comment, decider = _approved(fb, "case-glob", lookups=lookups, approve=tuple(range(len(lookups))))
+
+    assert fb.tick(decider) == 0
+    [(branch, tip)] = _drafts(fb).items()
+    assert touched(fb.t.remote, "main", tip) == [S.REGISTRY]
+    assert [(e["actor_scope"], e["host_scope"], e["pattern"]) for e in _entries_at(fb, tip)[-1:]] == \
+        [(plain["actor"], plain["host"], plain["pattern"])], "positive control: the plain lookup was not the one drafted"
+    assert [e["id"] for e in _entries_at(fb, tip)] == [S.entry_id(number, comment["id"], 1)], "a globbed lookup was drafted"
+    [reply] = fb.replies(number, comment["id"])
+    for n in range(2, len(lookups) + 1):
+        assert f"Entry {S.entry_id(number, comment['id'], n)} cannot be written" in reply["body"], lookups[n - 1]
+
+
+# ---------------------------------------------------------------- A1: covered means the shared reader's find_entry hits today
+
+def _window(added: int, review: int) -> dict:
+    return {"added_at": (today() + dt.timedelta(days=added)).isoformat(),
+            "review_by": (today() + dt.timedelta(days=review)).isoformat()}
+
+
+_WINDOWS = {
+    "both before today": _window(-60, -10),
+    "both after today": _window(10, 40),
+    "spanning today": _window(-5, 60),
+    "ending today": _window(-30, 0),
+    "starting today": _window(0, 30),
+}
+
+
+@pytest.mark.parametrize("window", sorted(_WINDOWS))
+def test_1414_an_approval_is_covered_exactly_when_find_entry_hits_main_today(fb, window):
+    """An approved lookup is "already covered by" the entry on main iff the shared find_entry hits it today; otherwise it is drafted. O6/A1."""
+    from defender.systems import tacit_registry
+
+    _main_with(fb, [_covering(**_WINDOWS[window])])
+    read = _reading(_registry_at(fb, "main"), fb.tmp, "main")
+    hit = tacit_registry.find_entry(list(read.entries), actor=LOOKUP["actor"], host=LOOKUP["host"],
+                                    pattern=LOOKUP["pattern"], now=today())
+    number, comment, decider = _approved(fb, "case-window", approve=(0,))
+
+    assert fb.tick(decider) == 0
+    [reply] = fb.replies(number, comment["id"])
+    if hit is not None:
+        assert _drafts(fb) == {}
+        assert f"already covered by entry {hit['id']}" in reply["body"]
+    else:
+        [(_, tip)] = _drafts(fb).items()
+        assert touched(fb.t.remote, "main", tip) == [S.REGISTRY]
+        assert [e["id"] for e in _entries_at(fb, tip)][-1] == S.entry_id(number, comment["id"])
+        assert "already covered" not in reply["body"]
+
+
+def test_1414_the_covering_windows_hold_both_outcomes():
+    """The window table has a covering and a non-covering case, so the covered test cannot pass by one answer. A1."""
+    from defender.systems import tacit_registry
+
+    hits = {w: tacit_registry.find_entry([_covering(**_WINDOWS[w])], actor=LOOKUP["actor"], host=LOOKUP["host"],
+                                         pattern=LOOKUP["pattern"], now=today()) is not None for w in _WINDOWS}
+    assert hits == {"both before today": False, "both after today": False, "spanning today": True,
+                    "ending today": True, "starting today": True}
 
 
 def test_1414_a_refused_registry_shape_is_uncounted_unquarantined_and_logged_each_tick(fb, caplog):
