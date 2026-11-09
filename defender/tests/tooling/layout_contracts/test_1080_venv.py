@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from defender.tests.tooling.layout_contracts import _spec1080 as S
-from defender.tests.sandbox import test_1096_entrypoint_closure as T1096
+from defender.tests.sandbox import test_entrypoint_closure as T1096
 
 GOLDEN = "venv"
 

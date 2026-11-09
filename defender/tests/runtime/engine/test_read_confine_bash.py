@@ -352,7 +352,7 @@ def test_relative_after_cd_still_denied(env):
     assert not _bash(env, f"cd {env.run} && cat gather_raw/l-001/1.json", "gather").allow
 
 
-# H. Symlinks: links cannot be created (resolving one is test_grant_gate_575's a5-a8)
+# H. Symlinks: links cannot be created (resolving one is test_grant_gate's a5-a8)
 
 def test_ln_symlink_creation_denied(env):
     """`ln -s` is denied on both lanes: `ln` is in no grant, so the agent cannot create a symlink

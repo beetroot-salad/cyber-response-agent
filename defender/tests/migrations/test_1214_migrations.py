@@ -13,7 +13,7 @@ import pytest
 
 from defender.tests.migrations.test_1339_migrations import catalog
 from defender.tests.support.shared._postgres1339 import execute
-from defender.tests.tenancy.lifecycle_1214.test_1214_repository_contract import fill_row
+from defender.tests.tenancy.lifecycle_1214.test_repository_contract import fill_row
 
 BASELINE = "0001_baseline"
 TENANCY = "0002_tenancy"

@@ -1,0 +1,154 @@
+"""#611 — a verb's annotations are part of its param contract."""
+from __future__ import annotations
+
+import pytest
+
+pytest.importorskip("pydantic_ai")
+
+from defender.systems.verb_grant import DENY_ALL  # noqa: E402
+from defender.systems.verbs import ModuleVerbRegistry, VerbContext, validate_params  # noqa: E402
+from defender.kit.verbs import model_facing_params
+from defender.tests.e2e._replay_harness import (  # noqa: E402
+    DEFENDER,
+    FakeVerbs,
+    VerbRecorder,
+)
+from defender.tests.e2e.test_query_tool import (  # noqa: E402
+    DONE,
+    PAYLOAD,
+    q,
+    run_gather,
+)
+from defender.systems.verbs import read_roster  # noqa: E402
+
+pytestmark = pytest.mark.e2e
+
+ADAPTERS_DIR = DEFENDER / "integrations"
+
+
+def clamping(rec: VerbRecorder) -> FakeVerbs:
+    """A verb using its `int` param as the real `elastic.query` does (`min(limit, cap)`): an
+    unchecked `"20"` would raise `TypeError`, which the capture files as exit 2 (infra)."""
+
+    def query(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]:
+        rec.record("query", ctx, {"native_query": native_query, "limit": limit})
+        return PAYLOAD[: min(limit, 20)]
+
+    return FakeVerbs({"elastic": {"query": query}})
+
+
+def typed(rec: VerbRecorder) -> FakeVerbs:
+    """A registry whose verb declares one param of each kind the checker must tell apart."""
+
+    def probe(
+        ctx: VerbContext, *, native_query: str, limit: int = 10,
+        enabled: bool | None = None, index: str | None = None,
+        filters: dict[str, str] | None = None,
+    ) -> list[dict]:
+        rec.record("probe", ctx, {
+            "native_query": native_query, "limit": limit,
+            "enabled": enabled, "index": index, "filters": filters,
+        })
+        return PAYLOAD
+
+    return FakeVerbs({"elastic": {"probe": probe}})
+
+
+def test_a_mistyped_param_is_a_usage_error_not_an_infra_failure(tmp_path):
+    rec = VerbRecorder()
+    r = run_gather(tmp_path, verbs=clamping(rec), turns=[
+        q("elastic", "query", {"native_query": "FROM logs", "limit": "20"}), DONE,
+    ], run_id="q611-mistyped")
+
+    assert rec.calls == [], "a mistyped param reached the verb — the type check is not at the boundary"
+    row = r.row()
+    assert row["exit_code"] == 64, "a model type slip was not filed as a usage error"
+    assert row["error_class"] == "agent-fixable"
+    assert r.breaker.get("systems", {}) == {}, "a usage error counted against the circuit breaker"
+    assert "limit" in r.gather_saw, "the rejection did not name the offending param"
+
+
+def test_mistyped_params_cannot_trip_a_healthy_system(tmp_path):
+    """`PER_SYSTEM_FAIL_LIMIT` is 2, yet two mistyped calls must not mark a live system down: the
+    well-formed third call still reaches the verb."""
+    rec = VerbRecorder()
+    r = run_gather(tmp_path, verbs=clamping(rec), turns=[
+        q("elastic", "query", {"native_query": "FROM logs", "limit": "20"}),
+        q("elastic", "query", {"native_query": "FROM logs", "limit": "50"}),
+        q("elastic", "query", {"native_query": "FROM logs", "limit": 5}),
+        DONE,
+    ], run_id="q611-nottripped")
+
+    assert len(rec.calls) == 1, "the well-formed query never ran — the breaker tripped on typos"
+    assert [row["exit_code"] for row in r.own_rows] == [64, 64, 0]
+    assert not r.breaker.get("systems", {}).get("elastic", {}).get("tripped_at"), \
+        "two of the agent's own type slips tripped the breaker on a healthy system"
+    assert r.rows[-1]["payload_status"] == "ok", "the live system did not answer after the typos"
+
+
+@pytest.mark.parametrize(("param", "run_id", "why"), [
+    # The silent-wrong half, and the one with no crash to notice: `"false"` is TRUTHY, so an
+    # unchecked bool param inverts the filter and the agent gets a confident wrong answer.
+    ({"enabled": "false"}, "q611-strbool", "a string reached a bool param — the filter would have inverted"),
+    # `bool` subclasses `int`, so an unguarded isinstance admits `limit=True` — which reaches the
+    # arithmetic clamp as a 1.
+    ({"limit": True}, "q611-boolint", "a bool was admitted as an int"),
+], ids=["truthy_string_as_bool", "bool_as_int"])
+def test_a_value_of_the_wrong_type_cannot_pose_as_the_declared_one(tmp_path, param, run_id, why):
+    rec = VerbRecorder()
+    r = run_gather(tmp_path, verbs=typed(rec), turns=[
+        q("elastic", "probe", {"native_query": "FROM logs", **param}), DONE,
+    ], run_id=run_id)
+
+    assert rec.calls == [], why
+    assert r.row()["exit_code"] == 64
+
+
+def test_well_typed_params_including_optionals_and_containers_are_admitted(tmp_path):
+    rec = VerbRecorder()
+    r = run_gather(tmp_path, verbs=typed(rec), turns=[
+        q("elastic", "probe", {
+            "native_query": "FROM logs", "limit": 5, "enabled": True,
+            "index": None, "filters": {"host": "web-1"},
+        }), DONE,
+    ], run_id="q611-welltyped")
+
+    assert len(rec.calls) == 1, "a well-typed call was rejected"
+    assert rec.calls[0].params["filters"] == {"host": "web-1"}
+    assert r.row()["exit_code"] == 0
+
+
+@pytest.mark.parametrize(("system", "verb", "params", "why"), [
+    ("elastic", "query", {"native_query": "FROM logs", "limit": "20"}, "limit"),
+    ("identity", "list-users", {"enabled": "false"}, "enabled"),
+])
+def test_the_real_registry_rejects_a_mistyped_param(system, verb, params, why):
+    """The shipped adapters, not a fake: each signature has a non-`str` param a model can bind
+    and plausibly send as a string."""
+    fn = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL).verbs(system)[verb]
+    assert why in model_facing_params(fn), (
+        f"{why} is not a param a model may bind on {system}.{verb} — this row cannot reach the "
+        "type check it exists to measure"
+    )
+    reason = validate_params(fn, params)
+    assert reason is not None, f"{system}.{verb} admitted a mistyped {why}"
+    assert why in reason, f"the rejection does not name the offending param: {reason}"
+
+
+def test_the_real_registry_admits_its_own_declared_types():
+    """Positive control on the real signatures."""
+    reg = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL)
+    assert validate_params(
+        reg.verbs("elastic")["query"], {"native_query": "FROM logs", "limit": 20},
+    ) is None
+    assert validate_params(
+        reg.verbs("identity")["list-users"], {"enabled": False, "role": "admin"},
+    ) is None
+
+
+def test_an_unresolvable_annotation_is_unconstrained_not_denied():
+
+    def broken(ctx, *, thing: NotAType) -> None:  # noqa: F821 — deliberately unresolvable
+        ...
+
+    assert validate_params(broken, {"thing": "anything"}) is None

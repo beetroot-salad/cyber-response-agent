@@ -48,9 +48,13 @@ def test_a_clean_adapter_and_tests_reading_the_cut_have_no_findings(tmp_path):
     "    at = ctx.as_of",
     "    at = getattr(ctx, 'run_state', None)",
     "    at = ctx.run_state.now()",
+    "    from defender.systems.verbs import CALL_RUN_STATE",
+    "    at = CALL_RUN_STATE.get()",
+    "    at = verbs.CALL_RUN_STATE.get().clock",
 ])
 def test_an_adapter_reading_the_branch_point_or_run_state_is_found(tmp_path, line):
-    """Each spelling #1385 removed from the adapters is a finding at its line (L1)."""
+    """Each spelling #1385 removed from the adapters, and any reference to `CALL_RUN_STATE`
+    under integrations/, is a finding at its line (L1, A5)."""
     src = f"def query(ctx, *, q):\n{line}\n    return {{'q': q}}\n"
     found = _GATE.scan(_tree(tmp_path, {"integrations/x_adapter.py": src}))
     assert found, found
@@ -63,19 +67,6 @@ def test_the_kit_interface_offering_a_replay_input_is_found(tmp_path, name):
     kit = f"{_KIT}    @property\n    def {name}(self): ...\n"
     found = _GATE.scan(_tree(tmp_path, {"kit/verbs.py": kit}))
     assert len(found) == 1 and "kit/verbs.py" in found[0] and name in found[0], found
-
-
-@pytest.mark.parametrize("line", [
-    "    from defender.systems.verbs import CALL_RUN_STATE",
-    "    at = CALL_RUN_STATE.get()",
-    "    at = verbs.CALL_RUN_STATE.get().clock",
-])
-def test_an_adapter_reaching_the_call_scoped_run_state_carrier_is_found(tmp_path, line):
-    """Any reference to `CALL_RUN_STATE` under integrations/ is a finding at its line (L1, A5)."""
-    src = f"def query(ctx, *, q):\n{line}\n    return {{'q': q}}\n"
-    found = _GATE.scan(_tree(tmp_path, {"integrations/x_adapter.py": src}))
-    assert found, found
-    assert all("integrations/x_adapter.py:2" in f for f in found), found
 
 
 def test_the_platform_and_tests_may_reference_the_run_state_carrier(tmp_path):

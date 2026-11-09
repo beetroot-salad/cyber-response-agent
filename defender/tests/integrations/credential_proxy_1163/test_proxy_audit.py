@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import threading
 import time
-from typing import Any
 
 import pytest
 
@@ -15,6 +14,7 @@ from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import AUDIT_KEYS, proxy
+from defender.tests.integrations.credential_proxy_1163._endings1412r import HeldAudit as _HeldAudit
 
 BASE = T.BASE_PATH
 
@@ -204,20 +204,6 @@ def test_o4_a_departed_reader_still_leaves_exactly_one_record(tmp_path, data_roo
         time.sleep(0.3)
 
     assert [record["outcome"] for record in audit.records] == ["sent 200"]
-
-
-class _HeldAudit(H.AuditRecorder):
-    """An audit port that holds each `record` until released, so a reader can look at what has
-    arrived while the record is being written."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.entered, self.release = threading.Event(), threading.Event()
-
-    def record(self, entry: Any) -> None:
-        self.entered.set()
-        self.release.wait(10)
-        super().record(entry)
 
 
 def test_o4_the_body_arrives_before_the_record_and_the_final_frame_after_it(tmp_path, data_root):

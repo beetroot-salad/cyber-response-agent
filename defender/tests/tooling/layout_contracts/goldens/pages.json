@@ -613,7 +613,7 @@
     }
    }
   },
-  "queues_view_how": "test_903_queue_view's four seeders over a tmp LoopPaths, through serialize_queues.build_view; the tmp root respelled /srv/fixture-1080",
+  "queues_view_how": "test_queue_view's four seeders over a tmp LoopPaths, through serialize_queues.build_view; the tmp root respelled /srv/fixture-1080",
   "queues_page_file": "pages/frontend-queues.html",
   "queues_page_sha256": "c25bb9fa4cf8b3ab67351fa332e7864c327582d22d9ff3938a906813b3d18536",
   "lessons_view": {
@@ -723,7 +723,7 @@
    "assert wire_log.is_file(), 'the wire log is not where this belt is looking — a missing file reads as zero live records, so the assertion below would pass without measuring anything'",
    "assert {p.name for p in run_dir.parent.iterdir()} == before | host_sidecars, \"the append created something outside the run dir and the host's own sidecars\""
   ],
-  "defender/tests/sandbox/test_1096_entrypoint_closure.py": [
+  "defender/tests/sandbox/test_entrypoint_closure.py": [
    "assert 'hunter2' not in done.stdout.decode('utf-8', 'replace')",
    "assert box.BOX_ENV_ALLOWLIST is box_codec.BOX_ENV_ALLOWLIST",
    "assert box.BOX_MARK_ENV is box_codec.BOX_MARK_ENV",
