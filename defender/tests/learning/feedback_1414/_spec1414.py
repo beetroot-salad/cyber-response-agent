@@ -198,3 +198,32 @@ class Feedback:
 
 def today() -> dt.date:
     return dt.datetime.now(dt.UTC).date()
+
+
+# ---------------------------------------------------------------- r5 shared names (orchestrator-owned)
+# Fixed by the orchestrator before the thorough pass so the four slices agree. A slice that needs a
+# change asks the orchestrator; it does not edit this block.
+
+#: D13: the tenant row's eligibility record, written by the lifecycle service on every pass and read
+#: by the feedback tick. FC names:
+#:   `await TenantRepository.record_merge_eligibility(tenant_id, *, logins: frozenset[str], read_at: datetime)`
+#:   `await TenantRepository.merge_eligibility(tenant_id) -> MergeEligibility | None`
+#:   `TenantDirectory.merge_eligibility(tenant_id) -> MergeEligibility | None`
+#: with `MergeEligibility(logins: frozenset[str], read_at: datetime)` exported from `defender.tenancy`.
+#: Bot logins are the tenant's generations' `bot_login` (already on the row).
+ELIGIBILITY_RECORD = "merge_eligibility"
+
+#: D13: the tick's staleness bound. FC: `feedback_drain(..., eligibility_max_age=timedelta)`; default
+#: from env `LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE` (seconds), default 300.
+ELIGIBILITY_MAX_AGE_ENV = "LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE"
+
+#: D11: the lessons author's feedback channel. FC: `defender.learning.core.state.FEEDBACK_LESSONS`
+#: (a `Channel`), one row per comment keyed by `comment_id`:
+#:   {"comment_id": int, "issue": int, "author": str, "case_id": str, "instruction": str}
+FEEDBACK_LESSONS_CHANNEL = "FEEDBACK_LESSONS"
+
+
+def feedback_lesson_row(*, comment_id: int, issue: int, author: str, case_id: str, instruction: str) -> dict:
+    """One D11 feedback-channel row, as the tick writes it and the lessons author reads it."""
+    return {"comment_id": comment_id, "issue": issue, "author": author, "case_id": case_id,
+            "instruction": instruction}
