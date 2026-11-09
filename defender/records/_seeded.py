@@ -14,7 +14,16 @@ from defender.records._layout import RUN_LAYOUT, RunPaths
 
 class BranchError(Exception):
     """A branch point that cannot carry a sibling world, or a sibling run folder that cannot
-    receive one."""
+    receive one.
+
+    `kind`, when the raise site gives one, is the refusal's fixed name in our own words (the
+    branch admission's vocabulary, `investigation.branch`), which a reader can name where the
+    message, which may carry host paths and run text, must not be shown; `None` is a refusal
+    no one named. The message is the operator's whole explanation and is unchanged by it."""
+
+    def __init__(self, *args: object, kind: str | None = None) -> None:
+        super().__init__(*args)
+        self.kind = kind
 
 
 #: The per-lead evidence directories, shared by the census, the evidence copy and its refusal.

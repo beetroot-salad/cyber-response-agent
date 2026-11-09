@@ -33,6 +33,8 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "world_record": ("create",),
     "outcome": ("create",),
     "not_comparable": ("write",),
+    "job_findings": ("append",),
+    "job_questioner_findings": ("append",),
 }
 
 #: Every folder the handle hands out, keyed the same way.
@@ -234,6 +236,17 @@ class Episode:
     def knowledge_pin(self) -> CreateRecord:
         """The family's knowledge commit (`records._knowledge_pin`): created once, at launch."""
         return CreateRecord(*self._at(LAYOUT.knowledge_pin))
+
+    @property
+    def job_findings(self) -> AppendRecord:
+        """A learning job's defender findings (#1344), held here until the post-step publishes
+        them."""
+        return AppendRecord(*self._at(LAYOUT.job_findings))
+
+    @property
+    def job_questioner_findings(self) -> AppendRecord:
+        """A learning job's questioner (world) findings (#1344), likewise."""
+        return AppendRecord(*self._at(LAYOUT.job_questioner_findings))
 
     @property
     def learning_html(self) -> WriteRecord:

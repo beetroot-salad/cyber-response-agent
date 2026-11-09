@@ -135,7 +135,8 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
 ) -> tuple[int, dict[int, dict[str, Any]], int, str | None]:
     """Call the judge `draws` times over `prompt`, writing one `worlds/<X>/judge/<n>.yaml` per
     draw. Returns `(completed_draws, draw documents by index, malformed replies, the last
-    refusal's reason)`."""
+    refusal's reason)`. A judge call that raises costs only its draw, in either lane: a
+    learning job's pass fails only when every call it made raised (`_Pass._refuse_graded_nothing`)."""
     from defender.learning.core.config import StageWiring
     from defender._agent_role import AgentRole
 
@@ -304,14 +305,24 @@ def _default_judge_seam(episode_dir: Path) -> Any:
 
 def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration surface
     runs: RunsRepository[Tenant], episode_id: str, *, judge: Any = None,
-    state: LearningState, draws: int | None = None, git_show: Any = None,
+    state: LearningState | None = None, draws: int | None = None, git_show: Any = None,
+    job_lane: bool = False,
 ) -> EpisodeGrade:
     """Grade episode `episode_id` of `runs`'s tenant (#1105 PR 2: the judge takes the
     repository and an id). Its door is `runs.episode_files(episode_id)`, held for the whole
     pass: a bad id, an unusable episodes root, a missing episode, a file at its name, or a
     container whose record names another tenant (or none) is `JudgeRefused`, and nothing is
-    created. Every queue append goes through `state`."""
+    created. Every queue append goes through `state` — the operator lane's.
+
+    `job_lane` (#1344, "Judge modes"): a learning job's pass reaches no queue. Its findings go
+    to the episode's own findings records through the job lane's sink
+    (`enqueue.EpisodeFindings`), which the job's post-step publishes once the job's row has
+    ended; `state` is never touched, and no drain is called. The fence is here, in code."""
     import yaml
+
+    if state is None and not job_lane:
+        raise JudgeRefused("an operator's judge pass appends through the tenant's learning "
+                           "state, and none was given")
 
     configured = draws if draws is not None else _judge_draws()
     if configured < 1:
@@ -326,8 +337,10 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
     try:
         with _open_episode(runs, episode_id) as episode:
             resolved_judge = judge if judge is not None else _default_judge_seam(episode.dir)
+            sink: Any = enqueue_mod.EpisodeFindings(episode) if job_lane else state
             return _grade_episode(episode, judge=resolved_judge, draws=configured,
-                                  git_show=git_show, state=state, tenant=runs.tenant)
+                                  git_show=git_show, state=sink, tenant=runs.tenant,
+                                  job_lane=job_lane)
     except JudgeRefused:
         raise
     # Every input-driven failure arrives as `JudgeRefused`, which is what the launcher catches.
@@ -367,16 +380,16 @@ def _refuse_queueing(prior: EpisodeGrade) -> None:
             f"{STATE_KEY} to {QUEUED!r} or remove it; the re-run is refused")
 
 
-def _grade_episode(
+def _grade_episode(  # noqa: PLR0913 — the pass's whole configuration, one keyword each
     episode: Episode, *, judge: Any, draws: int, git_show: Any, state: LearningState,
-    tenant: Any = None,
+    tenant: Any = None, job_lane: bool = False,
 ) -> EpisodeGrade:
     # A not-graded stamp never short-circuits, so a repaired episode can still be graded. A
     # recorded grade — a stamp's included, which carries the committed rows it met — is carried
     # row by row: `queued` rows are final, a `queueing` row refuses the grade (after the gates,
     # so a stamp pass still writes its stamp), every other row is re-graded (A6).
     return _Pass(episode, judge=judge, draws=draws, git_show=git_show, state=state,
-                 prior=read_grade(episode), tenant=tenant).grade()
+                 prior=read_grade(episode), tenant=tenant, job_lane=job_lane).grade()
 
 
 def _label_of(finding_id: str) -> str | None:
@@ -428,13 +441,23 @@ def _refuse_undeclared_records(manifest: dict[str, Any],
             "so the pass is refused")
 
 
+class JudgeCrashed(RuntimeError):
+    """A learning job's judge pass in which every judge call raised (`_Pass._refuse_graded_nothing`)."""
+
+
 class _Pass:
     """One grading pass's state: the rows, the ledger and the user record it writes, and the
     queue counts. Each commit (A6) writes the whole record as it stands."""
 
-    def __init__(self, episode: Episode, *, judge: Any, draws: int, git_show: Any,
-                 state: LearningState, prior: EpisodeGrade | None, tenant: Any = None) -> None:
+    def __init__(self, episode: Episode, *, judge: Any, draws: int, git_show: Any,  # noqa: PLR0913 — the pass's whole configuration
+                 state: LearningState, prior: EpisodeGrade | None, tenant: Any = None,
+                 job_lane: bool = False) -> None:
         self.episode = episode
+        #: A learning job's pass (#1344): a pass whose every judge call raised is its failure.
+        self.job_lane = job_lane
+        #: Judge calls of this pass that completed a draw, and that raised (`_count_draws`).
+        self.draws_completed = 0
+        self.calls_raised = 0
         #: The runs repository's tenant: whose exports a post-move lesson body is read from (O6).
         self.tenant = tenant
         self.bound = episode.view()
@@ -575,7 +598,21 @@ class _Pass:
         # A usable control with no usable planted world grades nothing (A3): no family call.
         if FAMILY_LABEL not in kept and runs.planted:
             self._judge_family()
+        self._refuse_graded_nothing(carried=bool(kept))
         return self._write()
+
+    def _count_draws(self, completed: int, failures: list[str]) -> None:
+        self.draws_completed += completed
+        self.calls_raised += len(failures)
+
+    def _refuse_graded_nothing(self, *, carried: bool) -> None:
+        """A learning job's pass in which judge calls raised and none completed a draw, with
+        nothing carried from an earlier pass, is the job's failure (`judge_failed`, #1344): the
+        judge crashed, and a pass that graded nothing must not read as one that found nothing.
+        One call that raised among others that completed costs only its draw, as in the
+        operator lane."""
+        if self.job_lane and self.calls_raised and not self.draws_completed and not carried:
+            raise JudgeCrashed(f"every judge call of the pass raised ({self.calls_raised} call(s))")
 
     def _alert_key(self) -> str | None:
         """The copied source record's signature, or its explicit unkeyed fallback (#1222)."""
@@ -619,6 +656,7 @@ class _Pass:
                    draws_disagree=verdict.disagree,
                    **{enqueue_mod.WORLD_LABEL_DOUBTED: verdict.doubted})
         failures = [d["failure_reason"] for d in documents.values() if "failure_reason" in d]
+        self._count_draws(completed, failures)
         if failures:
             row["draws_failed_reason"] = failures[0]
         if not completed:
@@ -748,6 +786,9 @@ class _Pass:
                 model=self.model, effort=self.effort, prompt=prompt, scope="family",
                 reachable_systems=self.reachable_systems)
         except Exception as family_failed:  # noqa: BLE001 — the family call's own fault costs only itself, never the already-committed worlds
+            # In either lane: a call that raised, counted as one, so a pass in which nothing
+            # completed is still the job's failure (`_refuse_graded_nothing`).
+            self.calls_raised += 1
             family["draws_failed_reason"] = f"{type(family_failed).__name__}: {family_failed}"
             return
         # The draws this commit records, as a world row's `draws` does: the readers show these
@@ -756,6 +797,7 @@ class _Pass:
                       draws=[{"draw": n} for n in sorted(documents)
                              if "failure_reason" not in documents[n]])
         failures = [d["failure_reason"] for d in documents.values() if "failure_reason" in d]
+        self._count_draws(completed, failures)
         if failures:
             family["draws_failed_reason"] = failures[0]
         if not completed:
@@ -869,5 +911,5 @@ def recorded_draws(grade: EpisodeGrade | None, label: str) -> frozenset[int]:
         if isinstance(draws, list) else frozenset()
 
 
-__all__ = ["EpisodeGrade", "JudgeRefused", "NotGradedStamp", "grade_episode", "read_grade",
+__all__ = ["EpisodeGrade", "JudgeCrashed", "JudgeRefused", "NotGradedStamp", "grade_episode", "read_grade",
            "recorded_draws"]

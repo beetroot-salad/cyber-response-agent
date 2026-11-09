@@ -722,7 +722,7 @@ def test_the_production_oracle_box_carries_its_tenant_label(tmp_path, monkeypatc
     daemon.install(monkeypatch)
     started = serving(tenant).box()
     try:
-        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "create"]]  # #1344 amendment 2
         labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
         assert f"defender.tenant={tenant}" in labels, labels
     finally:
@@ -828,7 +828,7 @@ def test_every_oracle_box_entry_labels_a_non_empty_tenant_id_without_judging_its
     if entry == "oracle_box_request":  # builds the request only: the label is read off the box that request starts
         runner, scratch = oracle_tree
         box_mod.start_box(_oracle.oracle_box_request(scratch, runner, env=env, tenant_id=bad), docker=daemon)
-        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "create"]]  # #1344 amendment 2
         labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
         assert f"defender.tenant={bad}" in labels, labels
         return
@@ -841,7 +841,7 @@ def test_every_oracle_box_entry_labels_a_non_empty_tenant_id_without_judging_its
     }
     started = starts[entry]()
     try:
-        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "create"]]  # #1344 amendment 2
         labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
         assert f"defender.tenant={bad}" in labels, labels
     finally:

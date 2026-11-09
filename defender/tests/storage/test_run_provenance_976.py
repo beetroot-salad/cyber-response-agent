@@ -392,3 +392,58 @@ def test_nothing_can_construct_a_record_no_capture_could_produce(why):
     kwargs, refusal = IMPOSSIBLE[why]
     with pytest.raises(ValueError, match=refusal):
         RunProvenance(**kwargs)
+
+
+# a code copy carries its build commit in a marker (#1344 r5, "Stamps from the copy")
+
+MARKER = ".defender-code-copy.json"
+
+
+def _marked_copy(root: Path, commit: str) -> Path:
+    copy = root / "code-copy"
+    (copy / _provenance.CODE_SCOPE).mkdir(parents=True)
+    (copy / MARKER).write_text(json.dumps({"commit": commit}), encoding="utf-8")
+    return copy
+
+
+@pytest.mark.parametrize("commit", ["c" * 40, "abc1234"])
+def test_a_copy_with_a_marker_stamps_the_markers_commit_clean_and_says_it_is_a_copy(tmp_path, commit):
+    """Marker commit, dirty False and origin code_copy, whatever the environment says. (Stamps from the copy)"""
+    prov = _provenance.capture_tree(_marked_copy(tmp_path, commit),
+                                    environ={_provenance.BUILD_COMMIT_ENV: "d" * 40})
+    assert (prov.commit, prov.dirty, prov.origin) == (commit, False, "code_copy")
+
+
+def test_the_marker_is_read_before_git_is_asked(tmp_path, monkeypatch):
+    """With no git on the path the marker still answers; the same tree without it records unknown. (Stamps from the copy)"""
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    copy = _marked_copy(tmp_path, "c" * 40)
+    prov = _provenance.capture_tree(copy, environ={})
+    assert (prov.commit, prov.dirty, prov.origin) == ("c" * 40, False, "code_copy")
+
+    (copy / MARKER).unlink()
+    bare = _provenance.capture_tree(copy, environ={})
+    assert (bare.commit, bare.dirty) == (None, None)
+    assert bare.origin != "code_copy"
+
+
+def test_a_failed_git_status_with_no_marker_is_unknown_not_clean_and_not_a_copy(tmp_path):
+    """The record a failed `git status` gives is never taken for a build stamp. (Stamps from the copy)"""
+    repo = _repo(tmp_path)
+    head = _git.git_head_sha(repo)
+    (repo / ".git" / "index").write_bytes(b"\x00 not an index \xff" * 8)
+    prov = _provenance.capture_tree(repo, environ={_provenance.BUILD_COMMIT_ENV: "d" * 40})
+    assert (prov.commit, prov.dirty) == (head, None)
+    assert prov.origin != "code_copy"
+
+
+def test_a_git_tree_keeps_gits_answer_and_is_not_a_copy(tmp_path):
+    """Operators' trees are stamped as before, dirt included, and are not copies. (Stamps from the copy)"""
+    repo = _repo(tmp_path)
+    clean = _provenance.capture_tree(repo, environ={})
+    assert (clean.commit, clean.dirty) == (_git.git_head_sha(repo), False)
+    (repo / SEED).write_text("edited\n")
+    dirty = _provenance.capture_tree(repo, environ={})
+    assert (dirty.dirty, dirty.dirty_paths) == (True, (SEED,))
+    assert clean.origin != "code_copy"
+    assert dirty.origin != "code_copy"

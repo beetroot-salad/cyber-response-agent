@@ -22,6 +22,22 @@ from defender.records import Run, RunPaths
 from defender.records import session_store
 from defender.records.formats import BranchError
 
+#: The branch admission's refusals by kind (`BranchError.kind`), each set where it is raised: a
+#: fixed name in our own words that a reader may show where the refusal's own text, which
+#: carries host paths and run text, must not go (a learning job's `no_fork_point` message, #1344).
+REFUSED_NOT_A_MESSAGE = "not a real message"
+REFUSED_OFF_MAIN_PATH = "not on the main path"
+REFUSED_FOLDED_SESSION = "a folded session"
+REFUSED_NO_TOOL_CALL = "no tool call"
+REFUSED_RETRY_STREAK = "inside a retry streak"
+REFUSED_NO_FORK_SNAPSHOT = "no fork snapshot"
+REFUSED_UNREADABLE_FORK_SNAPSHOT = "an unreadable fork snapshot"
+REFUSED_SOURCE_CHANGED = "the source changed since the branch point"
+REFUSED_NO_CAPTURE = "no query captured"
+REFUSED_NOTHING_OPEN = "nothing open in the frontier"
+REFUSED_NO_SOURCE_RUN = "no source run"
+REFUSED_UNOPENED = "the resume could not be opened"
+
 
 @model(frozen=True)
 class BranchSpec:
