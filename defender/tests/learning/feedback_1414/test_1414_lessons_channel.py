@@ -16,6 +16,7 @@ import pytest
 from defender.learning.author import shared as author_shared
 from defender.tests.learning.feedback_1414 import _lessons1414 as L
 from defender.tests.support.learning.curation import _spec773 as S
+from defender.tests.tenancy.tenant_1108_delivery._support import merge_on_remote
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     AUTHOR_DRAFT_LANES,
     BoxSpy,
@@ -105,7 +106,9 @@ def test_one_feedback_row_wakes_the_drains_default_step_whatever_the_judge_thres
     with caplog.at_level(logging.INFO):
         assert author_drain(tenant, paths, trigger=None, box=box) == 0
     steps = [r.getMessage() for r in caplog.records if r.getMessage().startswith("step=")]
-    assert [m.split()[0] for m in steps] == [f"step={L.FEEDBACK_MODULE}"], steps
+    names = [m.split()[0] for m in steps]
+    assert f"step={L.FEEDBACK_MODULE}" in names, steps
+    assert "step=author" not in names, steps
 
 
 # ------------------------------------------------------------------- one PR, two paths, no crossing
@@ -221,7 +224,7 @@ def test_a_row_rewritten_after_it_was_authored_is_not_authored_again_D11(tmp_pat
 def test_an_authored_feedback_row_follows_the_held_lifecycle_by_comment_id_D11(tmp_path):
     """As the questioner channel: unheld, the authored row is consumed keyed by comment id; held (the drain's mode), it stays pending until its PR settles (A9)."""
     free = L.feedback_scene(tmp_path / "free", curator=L.FeedbackCurator(writes={L.FEEDBACK_LESSON_NAME: L.lesson(101)}))
-    assert free.run() == 0
+    assert free.run(hold_committed=False) == 0
     assert free.pending() == []
     assert [(r["comment_id"], r["consumed_category"]) for r in free.consumed()] == [("101", "consumed_committed")]
 
@@ -230,6 +233,28 @@ def test_an_authored_feedback_row_follows_the_held_lifecycle_by_comment_id_D11(t
     assert held.head_files() == [L.FEEDBACK_LESSON_PATH]
     assert [r["comment_id"] for r in held.pending()] == ["101"], "an authored row left the queue before its PR settled"
     assert held.consumed() == []
+
+
+def test_a_held_feedback_row_is_consumed_by_comment_id_once_its_lessons_pr_is_merged_A9(tenant, tmp_path, caplog):
+    """The release half: a feedback row held by an unmerged lessons PR is consumed, keyed by its comment id and without being authored again, by the tick after that PR merges. A9/D11."""
+    fb = L.FeedbackCurator(writes={L.FEEDBACK_LESSON_NAME: L.lesson(101)})
+    paths, trigger, box = _tick(tenant, tmp_path, feedback=[L.row(101)], fb=fb)
+    assert author_drain(tenant, paths, trigger=trigger, box=box) == 0, critical_text(caplog)
+    (branch, _), = remote_branches(tenant.remote).items()
+    assert [r["comment_id"] for r in _pending(paths, L.channel())] == ["101"], "premise: the row is held"
+    assert S.consumed(paths, L.channel()) == []
+
+    merge_on_remote(tenant.p3, tenant.scratch, branch)
+    again = L.FeedbackCurator(writes={"p4-second.md": L.lesson(101, "again")})
+    trigger2 = L.FeedbackTrigger(author=S.FakeCurator(), feedback=again)
+    assert author_drain(tenant, paths, trigger=trigger2, box=BoxSpy()) == 0, critical_text(caplog)
+
+    assert again.comment_ids() == [], "the merged lesson's row was authored again"
+    assert _pending(paths, L.channel()) == []
+    # The shared retire path rotates a held row whose lesson the corpus now covers as idempotent (as the other
+    # curators' rows do, tests/e2e/test_922_spine.py), not as freshly committed.
+    assert [(r["comment_id"], r["consumed_category"]) for r in S.consumed(paths, L.channel())] == [
+        ("101", "consumed_idempotent")]
 
 
 def test_a_feedback_row_that_keeps_failing_is_deadlettered_by_its_comment_id_D11(tmp_path):

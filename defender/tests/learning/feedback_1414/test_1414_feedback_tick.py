@@ -63,27 +63,29 @@ def test_1414_an_open_whose_reply_was_lost_is_recovered_not_repeated(fb):
 
 def test_1414_recovery_ignores_an_issue_not_created_by_the_bot(fb):
     """A labelled issue naming the case on its first line but created by a person is not the case's issue. O2/F2.1."""
-    fb.forge.add_label(S.FEEDBACK_LABEL)
-    fb.forge.add_issue(title="case-decoy", body="case-decoy\n\nplanted", user=OUTSIDER,
-                       labels=[S.FEEDBACK_LABEL])
+    fb.forge.lose_reply = lambda r: r.method == "POST" and r.url.path.endswith("/issues")
     fb.request("case-decoy")
+    fb.tick(S.Decider())
+    fb.forge.lose_reply = None
+    [made] = fb.issues("case-decoy")  # a real create the forge applied: its first line is the host's own
+    made["user"]["login"] = OUTSIDER  # ... now shown as a person's, and the host never recorded it
+    assert len(fb.forge.issue_creates()) == 1, "premise: one create so far"
 
     assert fb.tick(S.Decider()) == 0
-    assert len(fb.forge.issue_creates()) == 1
+    assert len(fb.forge.issue_creates()) == 2, "the person's issue was taken for the case's"
     assert {i["user"]["login"] for i in fb.issues("case-decoy")} == {OUTSIDER, fb.bot}
 
 
 def test_1414_recovery_matches_the_case_id_exactly_not_as_a_substring(fb):
     """Bot-made labelled issues whose first line holds `case-1` only inside a longer id are not case-1's issue; a new one is made. O2/F2.1."""
-    fb.forge.add_label(S.FEEDBACK_LABEL)
-    decoys = [fb.forge.add_issue(title=name, body=f"{name}\n\nplanted", user=fb.bot, labels=[S.FEEDBACK_LABEL])
-              for name in ("case-10", "my-case-1")]
+    decoys = [fb.opened(name) for name in ("case-10", "my-case-1")]
+    assert len(fb.forge.issue_creates()) == 2, "premise: the decoys were made by real ticks"
     fb.request("case-1")
 
     assert fb.tick(S.Decider()) == 0
-    assert len(fb.forge.issue_creates()) == 1, "a decoy naming a longer id was taken for the case's issue"
+    assert len(fb.forge.issue_creates()) == 3, "a decoy naming a longer id was taken for the case's issue"
     [issue] = fb.issues("case-1")
-    assert issue["number"] not in {d["number"] for d in decoys}
+    assert issue["number"] not in decoys
     assert issue["user"]["login"] == fb.bot
 
 
@@ -176,14 +178,21 @@ def test_1414_a_login_dropped_from_the_record_stops_counting_at_the_next_tick(fb
     assert decider.decided == [kept["id"]]
 
 
-@pytest.mark.parametrize(("age", "bound", "fresh"), [
-    (dt.timedelta(seconds=50), None, True),       # inside the default bound (60 s, D13 ruling)
-    (dt.timedelta(seconds=70), None, False),      # past it
-    (dt.timedelta(seconds=30), dt.timedelta(seconds=60), True),
-    (dt.timedelta(seconds=120), dt.timedelta(seconds=60), False),
+@pytest.mark.parametrize(("age", "bound", "env", "fresh"), [
+    (dt.timedelta(seconds=50), None, None, True),       # inside the default bound (60 s, D15), env unset
+    (dt.timedelta(seconds=70), None, None, False),      # past it
+    (dt.timedelta(seconds=50), None, "30", False),      # the env bound (30 s) governs when no seam is given
+    (dt.timedelta(seconds=50), None, "100", True),      # and a larger env bound admits it
+    (dt.timedelta(seconds=30), dt.timedelta(seconds=60), None, True),
+    (dt.timedelta(seconds=120), dt.timedelta(seconds=60), None, False),
+    (dt.timedelta(seconds=30), dt.timedelta(seconds=60), "10", True),   # the seam wins over the env
 ])
-def test_1414_a_stale_record_reads_no_comments_and_a_fresh_one_reads_them(fb, caplog, age, bound, fresh):
-    """A record older than the bound makes the tick read nothing and log why; the comment is read once it is fresh. D13."""
+def test_1414_a_stale_record_reads_no_comments_and_a_fresh_one_reads_them(fb, caplog, monkeypatch, age, bound, env, fresh):
+    """A record older than the bound (the seam, else `LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE`, else 60 s) makes the tick read nothing and log why; the comment is read once it is fresh. D13/D15."""
+    if env is None:
+        monkeypatch.delenv(S.ELIGIBILITY_MAX_AGE_ENV, raising=False)
+    else:
+        monkeypatch.setenv(S.ELIGIBILITY_MAX_AGE_ENV, env)
     number = fb.opened("case-stale")
     comment = fb.forge.add_comment(number, user=OWNER, body="expected")
     fb.eligible(OWNER, NAMED, age=age)
@@ -364,24 +373,38 @@ def test_1414_what_the_old_generations_bot_made_is_still_the_bots(fb):
     """After a rotation the old bot's issue is recovered, its run summaries and replies are seen, and its comments are never decided. D13/O2/O3/A6."""
     directory, old_bot = _rotated(fb)
     case = "case-rotated"
-    first, second = fb.request(case), fb.run("case-rotated-2")
-    fb.forge.add_label(S.FEEDBACK_LABEL)
-    issue = fb.forge.add_issue(title=case, body=f"{case}\n\n{S.run_marker(S.run_id_of(first))}", user=old_bot,
-                               labels=[S.FEEDBACK_LABEL])
+    # What the old generation's bot made is made by real ticks while the forge authenticates as that bot; the
+    # first create's reply is lost, so the host never records the issue and the next tick must recover it.
+    fb.forge.login = old_bot
+    fb.forge.lose_reply = lambda r: r.method == "POST" and r.url.path.endswith("/issues")
+    fb.request(case)
+    fb.tick(S.Decider(), directory=directory)
+    fb.forge.lose_reply = None
+    [issue] = fb.issues(case)
     number = issue["number"]
-    fb.forge.add_comment(number, user=old_bot, body=f"a later run {S.run_marker(S.run_id_of(second))}")
+    assert issue["user"]["login"] == old_bot, "premise: the old bot made the issue"
+    creates = len(fb.forge.issue_creates())
     spoken = fb.forge.add_comment(number, user=OWNER, body="nothing to change")
-    fb.forge.add_comment(number, user=old_bot, body=f"no change {S.marker(spoken['id'])}")
-    chatter = fb.forge.add_comment(number, user=old_bot, body="a note the old bot left")
     decider = S.Decider({spoken["id"]: S.answer(reason="nothing to learn")})
+    assert fb.tick(decider, directory=directory) == 0  # recovers the old bot's issue; replies as the old bot
+    second = fb.run("case-rotated-2")
+    S.queue_open_issue(fb.paths, case_id=case, tenant_id=fb.t.tenant_id, run_id=S.run_id_of(second),
+                       outcome="inconclusive", lookups=[S.LOOKUP])
+    assert fb.tick(decider, directory=directory) == 0  # the old bot's later run summary
+    assert [c["user"]["login"] for c in fb.forge.comments_on(number)
+            if S.run_marker(S.run_id_of(second)) in c["body"]] == [old_bot], "premise: the old bot made the summary"
+    assert [c["user"]["login"] for c in fb.forge.comments_on(number) if S.marker(spoken["id"]) in c["body"]] == [old_bot], \
+        "premise: the old bot replied"
+    fb.forge.login = fb.bot  # the live generation's bot from here on
+    chatter = fb.forge.add_comment(number, user=old_bot, body="a note the old bot left")
     posted = len(fb.forge.comments_on(number))
 
-    assert fb.tick(decider, directory=directory) == 0
     S.queue_open_issue(fb.paths, case_id=case, tenant_id=fb.t.tenant_id, run_id=S.run_id_of(second),
                        outcome="inconclusive", lookups=[S.LOOKUP])
     assert fb.tick(decider, directory=directory) == 0
+    assert fb.tick(decider, directory=directory) == 0
 
-    assert fb.forge.issue_creates() == [], "the old bot's issue was not recognised and a second was made"
+    assert len(fb.forge.issue_creates()) == creates, "the old bot's issue was not recognised and a second was made"
     assert [i["number"] for i in fb.issues(case)] == [number]
     assert S.open_issue_requests(fb.paths) == {}
     assert len(fb.forge.comments_on(number)) == posted, "a summary or reply the old bot already made was posted again"

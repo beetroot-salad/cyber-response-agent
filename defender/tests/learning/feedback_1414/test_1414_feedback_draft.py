@@ -209,18 +209,26 @@ def test_1414_a_draft_lost_before_its_pr_is_drafted_again_once(fb):
 def test_1414_a_person_pr_naming_an_id_settles_nothing(fb):
     """A closed PR not opened by the bot under feedback/ that names an entry id does not settle it, while the bot's own does. P6/A2."""
     number, first, decider = _approved(fb, "case-impostor", lookups=[LOOKUP, LOOKUP_2], approve=(0,))
+    assert fb.tick(decider) == 0
+    [(branch, _)] = _drafts(fb).items()
+    real = _pr_of(fb, branch)
+    set_pull_state(fb.t.remote, branch, merged=False)  # the bot's own PR, closed: its entry is settled
+    settled = S.entry_id(number, first["id"])
+    assert settled in real["body"], "premise: the bot's real PR body names its entry"
     second = fb.forge.add_comment(number, user=NAMED, body="and this")
     decider.script[second["id"]] = S.answer(approve=(1,))
-    unsettled, settled = S.entry_id(number, first["id"]), S.entry_id(number, second["id"])
-    for head, user, names in (("feedback/fake", S.OUTSIDER, unsettled), ("someone/fix", fb.bot, unsettled),
-                              ("feedback/own", fb.bot, settled)):
+    unsettled = S.entry_id(number, second["id"])
+    # The impostors carry the real body's own format; only the id they name is the other entry's.
+    for head, user in (("feedback/fake", S.OUTSIDER), ("someone/fix", fb.bot)):
         row = pr_row(40 + len(fb.forge.prs), head, state="closed")
-        row["body"] = f"settles {names}"
+        row["body"] = real["body"].replace(settled, unsettled)
         row["user"] = {"login": user}
         fb.forge.add_pr(row)
+    before = set(_drafts(fb))
 
     assert fb.tick(decider) == 0
-    [(branch, tip)] = _drafts(fb).items()
+    fresh = {b: t for b, t in _drafts(fb).items() if b not in before}
+    [(_, tip)] = fresh.items()
     assert [e["id"] for e in _entries_at(fb, tip)] == [unsettled], \
         "a PR that was not the bot's feedback PR settled the entry, or the bot's own did not"
 

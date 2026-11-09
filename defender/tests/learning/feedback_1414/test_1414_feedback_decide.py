@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import json
 import logging
 
 import httpx
@@ -220,6 +221,9 @@ def test_1414_an_unreachable_forge_is_never_counted_against_a_request(fb):
     assert S.open_issue_requests(fb.paths) == {}
     [kept] = S.quarantined_requests(fb.paths, "case-refused")
     assert kept.is_file(), "the quarantined request is not kept in a quarantine folder (A8)"
+    reason = json.loads(kept.read_text(encoding="utf-8")).get("failed")  # as the lead-author lane's `failed/` records
+    assert isinstance(reason, str), "the quarantined request carries no reason it failed (A8)"
+    assert reason.strip(), "the quarantined request's reason is empty (A8)"
 
 
 def test_1414_an_unreachable_forge_is_never_counted_against_a_comment_decision(fb):
