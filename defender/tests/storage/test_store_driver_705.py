@@ -918,13 +918,20 @@ def test_q2_r7_3_every_ledger_write_waits_about_a_second_at_most_and_leaves_the_
         def attempt() -> None:
             record(store) if write == "row" else ss.seal_ledger(store, run_id)
 
+        began = time.monotonic()
         if outcome == "lands":
             attempt()
+            conn = store.connection
+            rows = conn.execute("SELECT count(*), max(id) FROM spend_ledger WHERE run_id = ?", (run_id,)).fetchone()
+            sealed = conn.execute("SELECT last_row_id FROM spend_ledger_seal WHERE run_id = ?", (run_id,)).fetchone()
+            assert (rows[0], sealed) == ((2, None) if write == "row" else (1, (rows[1],))), ("the write did not land", rows, sealed)
         else:
             with pytest.raises(sqlite3.Error):
                 attempt()
         if outcome == "times-out":
+            waited = time.monotonic() - began
             assert time.monotonic() < until, "the write waited out the other connection's lock instead of failing at the cap"
+            assert waited < 2.0, f"the held-up write waited {waited:.2f}s, not about a second"
         assert store.connection.execute("PRAGMA busy_timeout").fetchone()[0] == ss.STORE_BUSY_TIMEOUT_MS, (
             "the ledger write left the store connection's busy timeout changed")
         if outcome == "times-out":
