@@ -3028,14 +3028,14 @@ _SPEND = [(SONNET, {"input_tokens": 1_000_000})]  # priced SONNET_IN = 3.0 USD
 
 
 def _spending(world: dict, steps: list[tuple[str, dict]], *, released: bool = False, marks_name: str = "marks",
-              **kw) -> tuple[ScriptedChild, Path]:
-    """A child that holds its session database open and appends one priced response per step, then waits for `marks/go-<n>` (`released`: they exist already)."""
+              seal: bool = True, **kw) -> tuple[ScriptedChild, Path]:
+    """A child that holds its session database open and appends one priced response per step, then waits for `marks/go-<n>` (`released`: they exist already); `seal=False`: the child never seals its ledger (a run killed before its seal, r7.3 T2)."""
     marks = world["tmp"] / marks_name
     if released:
         marks.mkdir(exist_ok=True)
         for n in range(len(steps)):
             (marks / f"go-{n}").touch()
-    return _child(world, sessions={"case": CASE, "per_run": True, "steps": steps, "marks": str(marks)}, **kw), marks
+    return _child(world, sessions={"case": CASE, "per_run": True, "steps": steps, "marks": str(marks), "seal": seal}, **kw), marks
 
 
 def _term_mark(world: dict) -> str:
@@ -3623,7 +3623,7 @@ async def test_b5_b2_a_transient_fault_is_waited_out_and_the_worker_ends_as_it_w
 async def test_b_p3_b6_b3_a_worker_never_takes_over_a_row_it_holds_another_does_and_the_holder_ends_its_child_and_records_its_spend(world):
     """Holder A (0.5 s lease, renewing every 2 s, one slot) never takes its own lapsed row over while it takes over a stranger's; worker B does, A then ends its child and writes its spend to the old row, B's retry starts at 0. (B-P3, B7, B6, B3, B4)"""
     release = world["tmp"] / "release"
-    child, marks = _spending(world, _SPEND, files=_committed(), released=True, wait_for=release,
+    child, marks = _spending(world, _SPEND, files=_committed(), released=True, wait_for=release, seal=False,
                              term="mark", term_mark=_term_mark(world))
     dsn = world["dsn"]
     async with job_store(dsn, lease=0.5) as store_a, job_store(dsn) as store_b:
@@ -3655,6 +3655,7 @@ async def test_b_p3_b6_b3_a_worker_never_takes_over_a_row_it_holds_another_does_
     old = row(dsn, held)
     assert old["stage"] == "failed", "the holder's final accounting changed the stage"
     assert old["cost_usd"] == pytest.approx(SONNET_IN), "the cut-off holder's spend was not recorded on its own row"
+    assert not (marks / "sealed").exists(), "premise: the child must be killed before it seals its ledger"
     assert lower_limit(dsn, held) is True  # taken over, then a child killed before sealing its ledger (r7.3 T2)
     assert attempts == [(1,), (2,)]
 
