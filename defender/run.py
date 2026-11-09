@@ -279,21 +279,12 @@ class _JobEndFacts:
 
     `cut_short` is the summary's `truncated_by` (#1421), set by the lifecycle when the driver
     returns, before the teardown, so a teardown or scrub that raises cannot lose it; `None` for a
-    run nothing cut short or one whose driver never returned.
-
-    `spend_write_failed` is set when a spend write failed (#1377): the run's cost is then a lower
-    limit."""
+    run nothing cut short or one whose driver never returned."""
 
     review_state: dict[str, Any] = dataclasses.field(default_factory=dict)
     scrub_verified: bool = False
     box: str = job_facts.BOX_NOT_STARTED
     cut_short: str | None = None
-    spend_write_failed: bool = False
-
-    def note_spend_write_failed(self) -> None:
-        """The run's spend-failure sink (#1377): set at the failed write, so a raise out of the run
-        cannot discard it."""
-        self.spend_write_failed = True
 
     @property
     def report_committed(self) -> bool:
@@ -380,8 +371,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     # The roster `main` judged, handed down to the registry and `run_investigation` with its
     # verdict; read here only for a direct caller, whose run the driver judges.
     roster = systems.roster if systems is not None else read_roster(adapters_under(defender_dir))
-    held: dict[str, Any] = {} if job_facts is None else {
-        "review_state": job_facts.review_state, "on_spend_failure": job_facts.note_spend_write_failed}
+    held: dict[str, Any] = {} if job_facts is None else {"review_state": job_facts.review_state}
     if world is not None:
         if episode is None:
             # The world's ledger is written through the episode `main` holds; there is no path
@@ -1325,10 +1315,7 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
         operator_steps()
 
     try:
-        # The host's own fact that a spend write failed reaches the page in-process; a seam that predates it is
-        # called as before when none failed.
-        extra = {"spend_write_failed": True} if summary.get("spend_write_failed") is True else {}
-        visualize(run, tenant=started.accepted, update_ticket=update_ticket, **extra)
+        visualize(run, tenant=started.accepted, update_ticket=update_ticket)
     except _run.VisualizeFailed:
         _logger.warning("the run page was not saved", exc_info=True)
 
@@ -1526,8 +1513,7 @@ class _JobFacts:
         end = job_lane.JobEnd(setup=self.setup, box=self.held.box,
                              report_committed=self.held.report_committed,
                              scrub_verified=self.held.scrub_verified,
-                             cut_short=self.held.cut_short,
-                             spend_write_failed=self.held.spend_write_failed)
+                             cut_short=self.held.cut_short)
         try:
             self._lane.write_job_end(self._job, end)
         except FileExistsError:

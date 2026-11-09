@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import logging
+import math
 import re
 import sys
 from pathlib import Path
@@ -72,53 +73,61 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True)
 class LedgerCost:
-    """The run's cost as the page shows it: the ledger's one read (`None` when it cannot be read), and
-    whether its total is "at least" (`session_store.lower_limit`: the ledger is incomplete, or the host
-    knows a spend write failed)."""
+    """The run's cost as the page shows it: the ledger's one read (`None` when there is none to read).
+    Its total is "at least" exactly when the read is not complete (#1377 r7.3 T1). `before_ledger`: the
+    run's database has no ledger table at all, a run from before #1377 (r7.3 Q1), not one whose ledger
+    cannot be read."""
 
     read: LedgerRead | None
-    lower_limit: bool
+    before_ledger: bool = False
 
     @property
     def total(self) -> float | None:
         return None if self.read is None else self.read.total
+
+    @property
+    def lower_limit(self) -> bool:
+        return self.read is not None and not self.read.complete
 
 
 #: What the dev-only copy did: landed, was not attempted (not a `dev` deployment), or failed.
 CopyOutcome = Literal["copied", "skipped", "failed"]
 
 
-def render_page(run: Run, *, update_ticket: bool = False, spend_write_failed: bool = False) -> str:
+def render_page(run: Run, *, update_ticket: bool = False) -> str:
     """This run's page, generated and returned — nothing is written, and nothing here knows
     where the page goes: the post-run step saves it as the run's record (#1110).
     `update_ticket` is `run.py`'s own `--update-ticket` (#1107 O6), handed through to the page.
     The page's cost is the run's spend ledger, never the run file's result line, which the box can
-    rewrite (#1377 r6 S5); `spend_write_failed` is the host's own fact that a spend write failed,
-    so the headline reads "at least".
+    rewrite (#1377 r6 S5), and reads "at least" when the ledger is not complete (r7.3 T1): the page
+    is handed nothing else, so a re-render reads what the run's first render read.
 
     The store must resolve: a run dir copied without its store pointer would otherwise render a
     complete-looking page for a run whose record cannot be found. It fails before a page exists.
     """
-    cost = _ledger_cost(run, spend_write_failed=spend_write_failed)
+    cost = _ledger_cost(run)
     return render_runtime_page(run.run_dir, update_ticket=update_ticket, cost=cost)
 
 
-def _ledger_cost(run: Run, *, spend_write_failed: bool) -> LedgerCost:
+def _ledger_cost(run: Run) -> LedgerCost:
     """The run's spend from its ledger, through the read the worker and the run file use (#1377 r7 S5).
     The store must resolve (a run dir copied without its store pointer fails before a page exists); a
-    ledger that cannot be read (a row of an unknown agent id included) leaves the cost unknown."""
+    ledger that cannot be read (a row of an unknown agent id included) leaves the cost unknown; a
+    database with no ledger table is a run from before the ledger (r7.3 Q1)."""
     from defender.records import session_store as ss
 
     with ss.open_store_for_read(ss.resolve_store_path(run)) as store:
         try:
             read = ss.read_ledger(store, str(run.id))
+        except ss.NoLedgerTable:
+            return LedgerCost(None, before_ledger=True)
         except Exception:  # noqa: BLE001 — an unreadable ledger is an unknown cost, never a failed page
             _logger.warning("the spend ledger of %s could not be read; the page's cost is unknown", run.run_dir, exc_info=True)
-            return LedgerCost(None, False)
-    return LedgerCost(read, ss.lower_limit(complete=read.complete, spend_write_failed=spend_write_failed))
+            return LedgerCost(None)
+    return LedgerCost(read)
 
 
-def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False, spend_write_failed: bool = False) -> CopyOutcome:
+def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False) -> CopyOutcome:
     """The post-run step: render the run's page, save it as the run's `runtime_html` record
     through `run` — so whatever backend the handle sits on receives it like every other record —
     then hand it to the dev-only copy, and answer what the copy did (#1110).
@@ -128,7 +137,7 @@ def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False, spend
     the cause chained: the caller's single "no record" signal. The copy never raises.
     """
     try:
-        page = render_page(run, update_ticket=update_ticket, spend_write_failed=spend_write_failed)
+        page = render_page(run, update_ticket=update_ticket)
     except Exception as e:
         raise VisualizeFailed(f"the page for {run.run_dir} could not be rendered") from e
     record = run.observability.runtime_html
@@ -475,6 +484,29 @@ def _display_facts(run_dir: Path) -> list[str]:
     return parts
 
 
+def _headline_cost(cost: LedgerCost, events: list[dict]) -> str:
+    """The headline's cost. The spend ledger's total (#1377 r6 S5), "at least" when its read is not
+    complete (r7.3 T1), never the run file's result line, which the box can rewrite. A run from
+    before the ledger shows the total its run file saved, labelled as such (r7.3 Q1); a ledger that
+    cannot be read, or an old run file with no usable total, reads "unknown"."""
+    if cost.total is not None:
+        return f'{"at least " if cost.lower_limit else ""}${cost.total:.4f}'
+    if cost.before_ledger:
+        recorded = _run_file_total(events)
+        if recorded is not None:
+            return f"${recorded:.4f} (recorded before the spend ledger)"
+    return "unknown"
+
+
+def _run_file_total(events: list[dict]) -> float | None:
+    """The total the run file's last result line saved, when it is a finite, non-negative number."""
+    results = [e for e in events if e.get("type") == "result"]
+    value = results[-1].get("total_cost_usd") if results else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+        return None
+    return float(value)
+
+
 def render_runtime_page(run_dir: Path, *, cost: LedgerCost, update_ticket: bool = False) -> str:
     """The run's page. `update_ticket` is run.py's own `--update-ticket`, handed in as an argument
     and read from no file in the run dir (the box can write every one of them): only a run that
@@ -513,7 +545,6 @@ def render_runtime_page(run_dir: Path, *, cost: LedgerCost, update_ticket: bool 
     # Review spend is totalled but not attributed to a phase: the investigator is never in the
     # gate.
     review_by_lens = review_cost_by_lens(run_dir, messages, ledger)
-    review_total = sum(review_by_lens.values())
     wall_times = phase_wall_times(events, tags, phase_order)
     g_wall_to, g_wall_from = gather_wall_by_phase(
         run_dir, events, tags, phase_order, messages
@@ -543,14 +574,9 @@ def render_runtime_page(run_dir: Path, *, cost: LedgerCost, update_ticket: bool 
         ):
             for model, spent in by_model_costs.items():
                 by_model[model] = by_model.get(model, 0.0) + spent
-    # The headline is the spend ledger's total (#1377 r6 S5), never the run file's result line (the box can rewrite
-    # it), and the bar is that ledger by agent kind (r7 S6). An unreadable ledger reads "unknown" with no bar.
+    # The bar is the ledger by agent kind (r7 S6); none without a readable ledger.
     totals = {
-        "cost": cost.total or 0.0,
-        "cost_unknown": ledger is None,
-        "lower_limit": ledger is not None and cost.lower_limit,
         "by_kind": {} if ledger is None else ledger.by_kind(),
-        "review_cost": review_total,
         "wall_ms": wall_ms,
         "by_model": by_model,
         "tool_calls": n_tool_calls,
@@ -566,11 +592,8 @@ def render_runtime_page(run_dir: Path, *, cost: LedgerCost, update_ticket: bool 
     leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
     review_html, n_reviewed = render_review_gate(run_dir, report, review_by_lens)
 
-    headline_cost = ("unknown" if totals["cost_unknown"]
-                     else f'{"at least " if totals.get("lower_limit") else ""}${totals.get("cost", 0.0):.4f}')
     stats_html = (
-        f'<span class="ts-cost">{headline_cost}</span>'
-
+        f'<span class="ts-cost">{_headline_cost(cost, events)}</span>'
         f'<span class="ts-sep">·</span>'
         f'<span class="ts-wall">{fmt_duration(wall_ms)}</span>'
     )

@@ -135,6 +135,12 @@ class SpendLedger:
         ss.record_spend(self.store, self.run_id, agent_id=end.agent_id, requested_model=end.requested_model,
                         outcome=end.outcome, reported_model=end.reported_model, usage=end.usage)
 
+    def seal(self) -> None:
+        """Seal the run's ledger at its last row. Raises whatever the store raises."""
+        from defender.records import session_store as ss
+
+        ss.seal_ledger(self.store, self.run_id)
+
 
 class RequestLogger:
 
@@ -164,20 +170,19 @@ class RequestLogger:
     def _init_spend(self) -> None:
         #: `None`: unbound. A `SpendLedger` once the run's store is open, or `NO_LEDGER`.
         self.ledger: SpendLedger | _NoLedger | None = None
-        #: Set when a spend write failed (or none was bound): the run's cost is then a lower limit.
+        #: Set when a spend write failed (or none was bound). The logger alone holds it: it decides
+        #: whether the run's ledger is sealed (#1377 r7.3 T1), and no other code is handed it.
         self.spend_write_failed = False
-        self._on_spend_failure: Any = None
 
-    def bind_ledger(self, ledger: SpendLedger | _NoLedger, *, on_failure: Any = None) -> None:
-        """Bind the run's ledger (or `NO_LEDGER`); `on_failure()` is called once per failed write."""
+    def bind_ledger(self, ledger: SpendLedger | _NoLedger) -> None:
+        """Bind the run's ledger (or `NO_LEDGER`)."""
         self.ledger = ledger
-        self._on_spend_failure = on_failure
 
     def record_spend(self, end: RequestEnd) -> None:
         """The ledger write for one request, the first step after it ends, whatever its outcome.
-        It never raises: a failure (or a missing binding) logs at ERROR, sets `spend_write_failed` and tells the
-        failure sink, and the agent runs on. A raise here would change a verdict (the review
-        gate forces `inconclusive` on any exception from a stage)."""
+        It never raises: a failure (or a missing binding) logs at ERROR and sets `spend_write_failed`,
+        so the run is never sealed, and the agent runs on. A raise here would change a verdict (the
+        review gate forces `inconclusive` on any exception from a stage)."""
         ledger = self.ledger
         if ledger is NO_LEDGER:
             return
@@ -188,11 +193,19 @@ class RequestLogger:
         except Exception as fault:  # noqa: BLE001 — bookkeeping never stops the run (#1377 S3)
             self.spend_write_failed = True
             _logger.error(f"spend write failed ({fault!r}); this run's cost is a lower limit")
-            try:
-                if self._on_spend_failure is not None:
-                    self._on_spend_failure()
-            except Exception:  # noqa: BLE001 — the sink is best effort too
-                _logger.exception("the spend-failure sink raised")
+
+    def seal_spend(self) -> None:
+        """Seal the run's ledger when none of its spend writes failed (#1377 r7.3 T1): the ledger then
+        says for itself that it holds every request. A run with a failed write is left unsealed, so
+        its total reads "at least"; a failed seal is logged and leaves it so too. Never raises. A
+        logger with no ledger (`NO_LEDGER`, unbound) seals nothing."""
+        ledger = self.ledger
+        if not isinstance(ledger, SpendLedger) or self.spend_write_failed:
+            return
+        try:
+            ledger.seal()
+        except Exception as fault:  # noqa: BLE001 — a failed seal reads "at least", never a failed run
+            _logger.error(f"sealing the spend ledger failed ({fault!r}); this run's cost is a lower limit")
 
     @classmethod
     def from_record(cls, record: Any, *, continuing: bool = False, no_ledger: bool = False) -> RequestLogger:
@@ -453,17 +466,16 @@ def _user_event(message: Any) -> dict | None:
     return ev
 
 
-def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, run_id: str,
-                spend_write_failed: bool) -> None:
+def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, run_id: str) -> None:
     """`{run_dir}/tool_trace.jsonl`: the events this run produced, and its own cost.
 
     The events are sliced at the branch point: a resumed run hydrates the source run's prefix too,
     which would otherwise be reported once per sibling. The result line's cost and usage are the
     spend ledger's rows for `run_id` (#1377 S5): every response the run received (main, every
     lead's last one, the review), never the saved conversation. `num_turns` stays MAIN's turns,
-    which run health reads. The total is marked a lower limit when the ledger is incomplete or a spend
-    write failed (`session_store.lower_limit`, the page's rule too); `spend_write_failed` is the run's request
-    logger's fact, required so no exit can forget it (#1377 r7.2 P2). A ledger
+    which run health reads. The total is marked a lower limit when the ledger read is not complete (no
+    seal naming the run's last row, an unseen request or an unpriced model; #1377 r7.3 T1), the page's
+    and the worker's rule too; the driver seals before it writes this file. A ledger
     that cannot be read leaves the events whole with a null total and usage (the job's cost is unknown then too).
     """
     from defender.records import session_store as ss  # local import — avoids a cycle at module load
@@ -494,7 +506,7 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, r
     try:
         read = ss.read_ledger(store, run_id)
         total_cost, totals = read.total, dict(read.usage)
-        lower = ss.lower_limit(complete=read.complete, spend_write_failed=spend_write_failed)
+        lower = not read.complete
     except Exception as e:  # noqa: BLE001 — an unreadable ledger leaves the events whole and the total unknown
         _logger.error(f"the spend ledger could not be read for the run file ({e!r}); its total is left null")
         total_cost = totals = None

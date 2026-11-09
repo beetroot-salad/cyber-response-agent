@@ -22,8 +22,8 @@ class Held:
     signalled: bool = False
     cost_so_far: float | None = None
     #: Set only by the final read after the child ended: that read found the run's cost exact (its
-    #: job-end record says no spend write failed, or the run never opened its store). Everything
-    #: else a child leaves behind is "at least" (#1377 S2); `Held.lower_limit` is the one rule.
+    #: ledger read complete, or the run never opened its store; #1377 r7.3 T2). Everything else a
+    #: child leaves behind is "at least" (#1377 S2); `Held.lower_limit` is the one rule.
     read_exact: bool = False
     group_left: bool = False
     #: The fence's ender tasks, held so the event loop's weak reference is not their only one.

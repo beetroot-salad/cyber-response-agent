@@ -85,6 +85,12 @@ def branch_point(store: Any, session_id: str) -> int | None:
 
 
 
+def has_session(store: Any, session_id: str) -> bool:
+    """Whether the store holds a session with this id."""
+    return store.connection.execute(
+        "SELECT 1 FROM session WHERE session_id = ?", (session_id,)).fetchone() is not None
+
+
 def main_session_id(store: Any, *, agent_id: str = "main") -> str:
     """The root-of-lineage session for `agent_id`. Forks inherit `agent_id`, so ordering
     cannot pick the right one; raises unless exactly one root matches."""

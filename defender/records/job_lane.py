@@ -87,32 +87,29 @@ class Launched:
         return RunId.parse(self.record.investigation_id)
 
 
-_JOB_END_KEYS_BEFORE_1377 = frozenset({"setup", "box", "report_committed", "scrub_verified", "cut_short"})
-_JOB_END_KEYS = _JOB_END_KEYS_BEFORE_1377 | {"spend_write_failed"}
+_JOB_END_KEYS = frozenset({"setup", "box", "report_committed", "scrub_verified", "cut_short"})
 
 
 @dataclass(frozen=True)
 class JobEnd:
-    """The job-end record (`<runs>/<id>.job-end.json`): six facts, each set by the job entry at
+    """The job-end record (`<runs>/<id>.job-end.json`): five facts, each set by the job entry at
     the point it became true. `cut_short` is the run's exit class (`run_end.TRUNCATED_BY_VALUES`,
     the whole vocabulary) as the driver returned it, or `None`: a run nothing cut short, or one
     that never returned from its driver (setup refused or crashed, a group that propagated)
-    (#1421). `spend_write_failed` is true when a spend write failed in the run, so its cost may be
-    missing recorded spend (#1377)."""
+    (#1421). No spend fact rides on it: the run's ledger says for itself whether it is complete
+    (#1377 r7.3 T1)."""
 
     setup: str
     box: str
     report_committed: bool
     scrub_verified: bool
     cut_short: str | None
-    spend_write_failed: bool
 
     def text(self) -> str:
         return json.dumps({"setup": self.setup, "box": self.box,
                            "report_committed": self.report_committed,
                            "scrub_verified": self.scrub_verified,
-                           "cut_short": self.cut_short,
-                           "spend_write_failed": self.spend_write_failed})
+                           "cut_short": self.cut_short})
 
     @classmethod
     def parse(cls, text: str) -> JobEnd | None:
@@ -120,30 +117,26 @@ class JobEnd:
         `cut_short` must be JSON null or a vocabulary word exactly, so no child's text can reach
         the fixed job message that names it."""
         obj, unreadable = _io.load_json_artifact(text)
-        if unreadable is not None or not isinstance(obj, dict) or set(obj) not in (_JOB_END_KEYS, _JOB_END_KEYS_BEFORE_1377):
+        if unreadable is not None or not isinstance(obj, dict) or set(obj) != _JOB_END_KEYS:
             return None
-        obj = {"spend_write_failed": False, **obj}  # a record from before #1377 names no spend fact: none failed
         setup, box = obj["setup"], obj["box"]
         committed, verified, cut_short = obj["report_committed"], obj["scrub_verified"], obj["cut_short"]
-        spend_failed = obj["spend_write_failed"]
         if not (isinstance(setup, str) and setup in _SETUPS and isinstance(box, str) and box in _BOXES
                 and isinstance(committed, bool) and isinstance(verified, bool)
-                and isinstance(spend_failed, bool)
                 and (cut_short is None or normalized_truncated_by(cut_short) is not None)):
             return None
         return cls(setup=setup, box=box, report_committed=committed, scrub_verified=verified,
-                   cut_short=cut_short, spend_write_failed=spend_failed)
+                   cut_short=cut_short)
 
 
 @dataclass(frozen=True)
 class RunCost:
-    """A run's spend read from its ledger, whether the run ever opened its store (a pointer
-    exists), and whether the ledger is complete (no unseen request, no unpriced model; r7 S2):
-    the worker applies the lower-limit rule from this one read (#1377)."""
+    """A run's spend read from its ledger, and whether the ledger is complete (sealed at its last row,
+    no unseen request, no unpriced model; #1377 r7.3 T1): the worker's whole lower-limit rule. A run
+    that never opened its store is exactly 0, complete."""
 
     usd: float
-    store_opened: bool
-    complete: bool = True
+    complete: bool
 
 
 def _run_id(raw: object) -> RunId:
@@ -337,23 +330,24 @@ class JobLane:
         its pointer names (#1377), each priced from the pricing table. Rows of another run in the
         same database (a branch arm's source, a sibling) are not counted; no conversation is read.
         It is `session_store.read_ledger`, the one read the run file and the page use too.
-        No pointer: 0, `store_opened` false (the store was never opened, so no model request was
-        made). `CostUnreadable` for a pointer or database that cannot be read, a database without
-        the ledger, or a pointer naming a session the database lacks."""
+        No pointer: exactly 0 (the store was never opened, so no model request was made), a different
+        case from a ledger that exists and is not sealed. `CostUnreadable` for a pointer or database
+        that cannot be read, a database without the ledger, or a pointer naming a session the
+        database lacks."""
         run_id = _run_id(run_id)
         located = self.session_database(run_id)
         if located is None:
-            return RunCost(0.0, store_opened=False)
+            return RunCost(0.0, complete=True)
         database, session_id = located
         from defender.records import session_store
 
         try:
             with session_store.open_store_for_read(database) as store:
                 main = session_id if session_id is not None else session_store.main_session_id(store)
-                if store.connection.execute("SELECT 1 FROM session WHERE session_id = ?", (main,)).fetchone() is None:
+                if not session_store.has_session(store, main):
                     raise CostUnreadable(f"run {run_id}: its main session {main} is not in {database}")
                 read = session_store.read_ledger(store, str(run_id))
-                return RunCost(read.total, store_opened=True, complete=read.complete)
+                return RunCost(read.total, complete=read.complete)
         except CostUnreadable:
             raise
         except (OSError, sqlite3.Error, StoreError, ValueError) as fault:

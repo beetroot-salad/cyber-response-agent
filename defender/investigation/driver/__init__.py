@@ -182,21 +182,19 @@ def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None, *, s
 
 def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named once
     *, output: Any, model_name: str | None, requests: int, end: run_end.RunEnd,
-    exit_reason: str | None, case_id: str, store_path: Any, spend_write_failed: bool,
+    exit_reason: str | None, case_id: str, store_path: Any,
 ) -> dict:
     """The one shape `run_investigation` returns on every exit, so exits cannot drift apart.
 
     `end` (exit class, and whether the model had already closed) is flattened on so `run.py`'s
     post-steps read it in-process rather than off disk. The run's live state is not on it
     (#1235): a caller that wants it hands it in (`run_investigation(run_state=…)`) and keeps its
-    own reference. `spend_write_failed` is the host's own fact that a spend write failed (#1377):
-    the run page reads "at least" on it, from this in-process summary, never from a file. Required, the
-    run's request logger's fact, so no exit can forget it (r7.2 P2)."""
+    own reference. Nothing about spend rides on it: the run's ledger says for itself whether it is
+    complete (#1377 r7.3 T1)."""
     return {
         "output": output, "model": model_name, "requests": requests,
         "truncated_by": end.truncated_by, "closed_before_cut": end.closed_before_cut,
         "exit_reason": exit_reason, "case_id": case_id, "store_path": store_path,
-        "spend_write_failed": spend_write_failed,
     }
 
 
@@ -550,19 +548,10 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
         run_end.write_sidecar(run, end)
     except OSError as e:
         _logger.warning(f"run-end record write skipped: {e!r}")
-    try:
-        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms,
-                            run_id=str(run.id), spend_write_failed=logger.spend_write_failed)
-    except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
-        _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
-        try:
-            write_guarded(RunPaths(run_dir).tool_trace, "")
-        except OSError as fallback_err:
-            _logger.error(f"the empty-trace fallback also failed ({fallback_err!r})")  # lint-run-records: ok — an operator diagnostic naming the missing record
+    _write_trace_or_empty(run_dir, store, session_id, wall_ms, run_id=str(run.id), logger=logger)
     return _run_summary(
         output=None, model_name=model_name, requests=logger.n_requests, end=end,
-        exit_reason=exit_reason, case_id=case_id, store_path=store.path,
-        spend_write_failed=logger.spend_write_failed)
+        exit_reason=exit_reason, case_id=case_id, store_path=store.path)
 
 
 async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the run's identity for an early stop
@@ -671,11 +660,13 @@ def _snapshot_writer(  # noqa: PLR0913 — the run's identity plus the caps its 
 
 def _write_trace_or_empty(run_dir: Path, store: Any, session_id: str, wall_ms: float, *,
                           run_id: str, logger: observe.RequestLogger) -> None:
-    """Write the run's tool trace, or an empty one when the store cannot produce it; never
-    fails the run (the trace is observability)."""
+    """Seal the run's ledger (its request logger does, unless a spend write failed), then write the
+    run's tool trace, or an empty one when the store cannot produce it; never fails the run (the
+    trace is observability). The one place a run file is written, so every exit that writes one
+    seals first and the file reads the sealed ledger (#1377 r7.3 T1)."""
+    logger.seal_spend()
     try:
-        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms,
-                            run_id=run_id, spend_write_failed=logger.spend_write_failed)
+        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms, run_id=run_id)
     except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
         _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
         try:
@@ -720,9 +711,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     #: The credential proxy's address and the run's read token (#1163); `None` when the run has
     #: no `http-proxy` system.
     access: RequestAccess | None = None,
-    #: Called when a spend write fails (#1377 S2): the job entry's facts holder hears of it here, on
-    #: an object that outlives a raise out of the run. `None` for a hand-started run.
-    on_spend_failure: Callable[[], None] | None = None,
 ) -> dict:
     # `tenant` is resolved once at the entry point (settings folder, permissions, item 3's
     # dispatch identity). Required: there is no process-level fallback.
@@ -798,7 +786,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             # The ledger every agent of the run writes its spend to, bound to the run's one logger
             # now that the store is open (the logger and the review stages exist before it, so a
             # store-setup failure still leaves a wire log).
-            logger.bind_ledger(observe.SpendLedger(store, run_id), on_failure=on_spend_failure)
+            logger.bind_ledger(observe.SpendLedger(store, run_id))
             # A resume joins the source run's case, so the case pointer comes from the store,
             # not the uuid minted above (they match on a fresh run). `run_dir` is passed because
             # a resumed MAIN inherits the investigation document as well as the message history.
@@ -817,7 +805,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
                 output=None, model_name=model_name, requests=logger.n_requests,
                 end=run_end.RunEnd(session_store.TRUNCATED_BY_STORE, closed_before_cut=False),
                 exit_reason=type(e).__name__, case_id=case_id, store_path=None,
-                spend_write_failed=logger.spend_write_failed,
             )
 
         # One execution clock covers correlation and MAIN, including a stop before MAIN.
@@ -887,7 +874,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         return _run_summary(
             output=output, model_name=model_name, requests=logger.n_requests,
             end=end, exit_reason=exit_reason, case_id=case_id, store_path=store.path,
-            spend_write_failed=logger.spend_write_failed,
         )
 
 

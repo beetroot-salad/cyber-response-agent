@@ -32,10 +32,11 @@ from ._ledger import (  # noqa: F401
     UNSEEN as UNSEEN,
     LedgerRead as LedgerRead,
     SpendRow as SpendRow,
-    lower_limit as lower_limit,
+    NoLedgerTable as NoLedgerTable,
     read_ledger as read_ledger,
     record_spend as record_spend,
     run_spend as run_spend,
+    seal_ledger as seal_ledger,
 )
 from ._schema import (
     CyclicParentChain as CyclicParentChain,
@@ -112,6 +113,7 @@ from ._read import (
     displaced_tip as displaced_tip,
     ends_on_complete_pair as ends_on_complete_pair,
     fold_history as fold_history,
+    has_session as has_session,
     hydrate as hydrate,
     main_session_id as main_session_id,
     path_row_ids as path_row_ids,

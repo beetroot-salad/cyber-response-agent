@@ -49,6 +49,7 @@ from defender.records import RUN_LAYOUT, RunPaths
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS
 from ._prompts import DEFAULT_GATHER_MODEL, DEFAULT_MODEL, DEFAULT_TOOL_RETRIES, GATHER_REQUEST_LIMIT, _main_instructions, enforcement_enabled
 from ._budget import _make_hooks
+from ._spend import SpendRecordingModel
 from defender._io import read_text_utf8
 
 _logger = logging.getLogger(__name__)
@@ -112,7 +113,7 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
         if reused_gate is None else reused_gate
     )
     capabilities: list[Any] = [
-        _make_hooks(logger, agent_id, enforce=defn.budget_enforced, requested_model=model_name, limits=limits,
+        _make_hooks(logger, agent_id, enforce=defn.budget_enforced, limits=limits,
                     session_id=session_id, store=store, toon_gate=toon_gate),
         *extra_capabilities,
     ]
@@ -138,7 +139,9 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
             capabilities.append(QueryCapture(
                 verbs, defn.role.value, known_ids=verbs.branch_identities()))
     agent: Agent[Any, str] = Agent(
-        built.model,
+        # Spend is recorded at the model, outside the retrier `make_model` applies, at the name the
+        # agent asked for (#1377 r7.3 T3).
+        SpendRecordingModel(built.model, logger=logger, agent_id=agent_id, requested_model=model_name),
         deps_type=deps_type,
         instructions=instructions,
         capabilities=capabilities,

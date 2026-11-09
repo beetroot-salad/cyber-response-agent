@@ -50,9 +50,11 @@ The tenant's alert mapping lives in the database; nothing reads `settings/alert-
 A run's cost is now the sum of a spend ledger (a table in the run's session database, one row per model
 response any agent of the run received, review calls included), so `cost_usd` and the run file's
 `total_cost_usd` count what the run really paid. Old run files keep their main-only totals: totals before
-and after this change are not comparable. Run migrations (revision `0008_cost_lower_limit`): the API's
-investigations gain `cost_is_lower_limit`, true when `cost_usd` is "at least" that much (a spend write
-failed, or the run was killed before it reported). The mark is worked out when a record is read: a row that
+and after this change are not comparable. Stop the API and workers before running the migration: it adds a
+required column with no default, so an older process fails on every insert until it is upgraded. Run
+migrations (revision `0008_cost_lower_limit`): the API's investigations gain `cost_is_lower_limit`, true
+when `cost_usd` is "at least" that much (a spend write failed, or the run was killed before it sealed its
+ledger). The mark is worked out when a record is read: a row that
 ended after it started, with a cost and no final figure from its worker, reads "at least" (this includes such rows
 already in the database); every other existing row reads exact.
 

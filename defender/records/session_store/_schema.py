@@ -185,6 +185,15 @@ CREATE TABLE IF NOT EXISTS spend_ledger (
 
 CREATE INDEX IF NOT EXISTS spend_ledger_run ON spend_ledger(run_id);
 
+-- spend_ledger_seal (#1377 r7.3 T1): one row per run whose request logger ended it with no failed
+-- ledger write. `last_row_id` is the id of the run's last ledger row when it was sealed (NULL for a
+-- run with no rows). A run's ledger reads complete only when its seal names its current last row:
+-- no seal (a failed write, a kill, a failed seal) or a row written after it reads "at least".
+CREATE TABLE IF NOT EXISTS spend_ledger_seal (
+    run_id TEXT PRIMARY KEY,
+    last_row_id INTEGER
+) STRICT;
+
 -- gather_boundary — the danger-lens surface, scoped to each session's PATH from its
 -- recorded head (#753 / FK16). `session_id` names the session whose conversation the row
 -- is on, NOT the session that happens to own the row: a fork therefore sees the prefix it
