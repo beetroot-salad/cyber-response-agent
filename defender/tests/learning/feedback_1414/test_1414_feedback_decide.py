@@ -52,6 +52,10 @@ _ANSWERS = {
     "index past the lookups": S.answer(approve=(0, 2)),
     "negative index": S.answer(approve=(-1,)),
     "approve not a list": _wrong(approve="0"),
+    "approve null": _wrong(approve=None),
+    "a key missing": {k: v for k, v in _GOOD.items() if k != "reason"},
+    "approve key missing": {k: v for k, v in _GOOD.items() if k != "approve"},
+    "an extra key": _wrong(note="and also this"),
     "approve a bare int": _wrong(approve=1),
     "approve a dict": _wrong(approve={"0": True}),
     "bool True as an index": _wrong(approve=[True]),
@@ -357,3 +361,22 @@ def test_1414_a_request_the_forge_refuses_is_set_aside_with_its_reason_in_a_kept
     reason = json.loads(kept.read_text(encoding="utf-8")).get("failed")  # as the lead-author lane's `failed/` records
     assert isinstance(reason, str), "the quarantined request carries no reason it failed (A8)"
     assert reason.strip(), "the quarantined request's reason is empty (A8)"
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 409, 422, 429, 499])
+def test_1414_a_4xx_on_a_comment_reply_is_counted_and_given_up_at_the_3rd_tick(fb, status, caplog):
+    """A reply POST the forge refuses (4xx) is attempted on ticks 1-3 and never after, and the give-up is logged naming the comment; another issue's reply is unaffected. A4/O9."""
+    number, comment = _scene(fb, "case-4xx")
+    other_number, other = _scene(fb, "case-4xx-other")
+    decider = S.Decider({comment["id"]: S.answer(reason="a thanks"), other["id"]: S.answer(reason="a thanks")})
+    fb.forge.respond = lambda r: (httpx.Response(status, json={"message": "no"}) if r.method == "POST"
+                                  and r.url.path.endswith(f"/issues/{number}/comments") else None)
+
+    with caplog.at_level(logging.INFO):
+        for _ in range(CEILING + 3):
+            assert fb.tick(decider) == 0
+    posts = [r for r in fb.forge.requests if r.method == "POST" and r.url.path.endswith(f"/issues/{number}/comments")]
+    assert len(posts) == CEILING, "a refused reply was not attempted exactly three times"
+    assert len(fb.replies(other_number, other["id"])) == 1, "control: a healthy issue's reply was held back"
+    assert any(r.levelno >= logging.WARNING and str(comment["id"]) in r.getMessage() for r in caplog.records
+               if r.name != "httpx"), "the given-up reply is not logged with its comment id"
