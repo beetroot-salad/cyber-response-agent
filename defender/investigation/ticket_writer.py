@@ -68,7 +68,7 @@ def _comment_body(
         rec = case_ticket.read_case_record(run)
     except case_ticket.ReportNotParsable:
         if truncated_by in run_end.FORCED_CLOSE_EXITS:
-            return case_ticket.escalation_comment_body(truncated_by), RECEIPT_ESCALATED
+            return case_ticket.escalation_comment_body(str(truncated_by)), RECEIPT_ESCALATED
         return case_ticket.unreadable_comment_body(), RECEIPT_COMMENTED
     return case_ticket.case_record_to_comment(rec, settings=settings), RECEIPT_COMMENTED
 
@@ -145,7 +145,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
             return
         try:
             if escalated(truncated_by, closed_before_cut):
-                body, word = case_ticket.escalation_comment_body(truncated_by), RECEIPT_ESCALATED
+                body, word = case_ticket.escalation_comment_body(str(truncated_by)), RECEIPT_ESCALATED
             else:
                 body, word = _comment_body(run, truncated_by, target.template)
         except case_ticket.CaseTicketError as e:

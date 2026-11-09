@@ -396,9 +396,10 @@ def enqueue_feedback_issue(
     from defender.tenancy import feedback_setting
 
     accepted = tenant.tenant
-    if str(accepted.id) != str(run.tenant_id):
-        _logger.error(f"NOT enqueuing a feedback issue: the request names tenant {accepted.id}, but "
-                      f"the run is tenant {run.tenant_id}'s")
+    owner = getattr(run, "tenant_id", None)  # a `Run.at` handle carries no address, so no tenant
+    if owner is None or str(accepted.id) != str(owner):
+        whose = "addressed to no tenant" if owner is None else f"tenant {owner}'s"
+        _logger.error(f"NOT enqueuing a feedback issue: the request names tenant {accepted.id}, but the run is {whose}")
         return False
     truncated_by = run_end.normalized_truncated_by(truncated_by)
     if not ticket_writer.comments_on(truncated_by, closed_before_cut):

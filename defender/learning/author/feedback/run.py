@@ -88,7 +88,7 @@ def build_feedback_config(
         invoke_agent=invoke_agent,
         gate=_gate_feedback,
         buckets=FEEDBACK_BUCKETS,
-        post_rotate=_write_skip_report_after_rotate,
+        post_rotate=_write_feedback_skip_report,
         noun="feedback instructions",
         max_attempts=author_max_attempts(),
         manifest_seed=manifest_seed,
@@ -154,7 +154,7 @@ def invoke_agent(rows: list[dict], batch_id: str, cfg: FeedbackAuthorConfig) -> 
     )
 
 
-def _write_skip_report_after_rotate(outcome, cfg: FeedbackAuthorConfig) -> None:
+def _write_feedback_skip_report(outcome, cfg: FeedbackAuthorConfig) -> None:
     """The tick's closing edge: a `consumed_skip` is terminal, so this line is the only trace the
     instruction was seen and declined."""
     _shared.write_disposition_report(

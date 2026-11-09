@@ -76,7 +76,7 @@ _LANES: dict[DrainLabel, tuple[str, ...]] = {
     DrainLabel.AUTHOR: (LESSONS, LESSONS_QUESTIONER),
     DrainLabel.LEAD_AUTHOR: (SKILLS,),
     # The registry's folder alone: a lane is a folder, so "exactly registry.yaml" is not expressible.
-    DrainLabel.FEEDBACK: (f"{SKILLS}/tacit-knowledge",),
+    DrainLabel.FEEDBACK: (SKILLS + "/tacit-knowledge",),
 }
 #: Each lane's writable trees, by the `LoopPaths` attribute that spells each, in order.
 _WRITABLE_TREE_ATTRS: dict[DrainLabel, tuple[str, ...]] = {

@@ -16,6 +16,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from defender._clock import parse_iso_utc
 from defender.learning.author.version_control.forgejo import ForgeError
 from defender.learning.core import feedback_decide, feedback_registry
 from defender.learning.core.config import FEEDBACK_DRAIN_LABEL, LoopPaths
@@ -58,8 +59,11 @@ def _summary(request: dict) -> str:
             + _fence(f"run {request['run_id']} ended {request['outcome']}\n{lookups}"))
 
 
-def _when(text: str) -> dt.datetime:
-    return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+def _forge_time(text: str) -> dt.datetime:
+    parsed = parse_iso_utc(text)
+    if parsed is None:
+        raise ValueError(f"the forge sent a timestamp that is no ISO date: {text!r}")
+    return parsed
 
 
 @dataclasses.dataclass
@@ -107,14 +111,15 @@ def tick(paths: LoopPaths, state: LearningState, open_delivery: Callable[[], Any
     from defender.learning.core import drains
 
     tenant = paths.tenant
+    assert tenant is not None, "the feedback tick runs for one selected tenant"
     bots = frozenset(g.bot_login for g in records.generations(tenant.id))
     with open_delivery() as opened:
         delivery = dataclasses.replace(opened, branch_prefix=drains._branch_prefix(FEEDBACK_DRAIN_LABEL))
         ctx = Tick(state, delivery.repository.forge, bots, str(tenant.id))
         ctx.eligible = _eligible_logins(records, tenant.id, eligibility_bound(eligibility_max_age), bots)
-        _open(ctx)
+        _open_requests(ctx)
         if ctx.eligible is not None:
-            _read(ctx)
+            _read_comments(ctx)
             feedback_decide.decide_items(ctx.state, decide)
         feedback_registry.draft(ctx.state, delivery, bots, drains)
         feedback_registry.reply(ctx.state, ctx.forge, bots)
@@ -146,7 +151,7 @@ def _record_run(ctx: Tick, case_id: str, number: int, request: dict) -> None:
     ctx.state.put_record(FEEDBACK_CASES, case_id, case)
 
 
-def _serve(ctx: Tick, case_id: str, request: dict) -> None:
+def _serve_request(ctx: Tick, case_id: str, request: dict) -> None:
     case = ctx.state.get_record(FEEDBACK_CASES, case_id)
     number = case["issue"] if case else _recover(ctx, case_id)
     if number is None:
@@ -189,13 +194,13 @@ def _fail_request(ctx: Tick, case_id: str, request: dict, failure: ForgeError) -
     ctx.state.put_record(FEEDBACK_REQUESTS, case_id, {**request, "attempts": attempts})
 
 
-def _open(ctx: Tick) -> None:
+def _open_requests(ctx: Tick) -> None:
     for case_id, request in sorted(ctx.state.records(FEEDBACK_REQUESTS).items()):
         if request.get("tenant_id") != ctx.tenant_id:
             _logger.error(f"feedback: request {case_id} names another tenant; left")
             continue
         try:
-            _serve(ctx, case_id, request)
+            _serve_request(ctx, case_id, request)
         except ForgeError as e:
             _fail_request(ctx, case_id, request, e)
 
@@ -223,7 +228,7 @@ def _readable(issue: dict, new: list[dict]) -> list[dict]:
     closed_at = issue.get("closed_at")
     if not closed_at:
         return []
-    return [c for c in new if _when(c["created_at"]) < _when(closed_at)]
+    return [c for c in new if _forge_time(c["created_at"]) < _forge_time(closed_at)]
 
 
 def _queue_comment(ctx: Tick, case_id: str, case: dict, issue: dict, comments: list[dict], c: dict) -> None:
@@ -259,6 +264,6 @@ def _read_issue(ctx: Tick, case_id: str, case: dict) -> None:
     ctx.state.put_record(FEEDBACK_POSITIONS, str(number), {"last": new[-1]["id"]})
 
 
-def _read(ctx: Tick) -> None:
+def _read_comments(ctx: Tick) -> None:
     for case_id, case in sorted(ctx.state.records(FEEDBACK_CASES).items()):
         _read_issue(ctx, case_id, case)

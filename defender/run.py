@@ -531,8 +531,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     # has one: a seam that predates either is not handed a keyword it has no use for.
     keywords: dict[str, Any] = {} if job_facts is None else {"job_facts": job_facts}
     keywords |= _access_kwargs(access)
-    if run_state is not None:
-        keywords["run_state"] = run_state
+    keywords |= {} if run_state is None else {"run_state": run_state}
     investigation_ok = False
     # A run its box ended (#1421) returns normally, but its failure is in flight all the same: a
     # teardown fault on it is logged, never raised over the ending.

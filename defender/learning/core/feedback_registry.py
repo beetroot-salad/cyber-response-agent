@@ -15,8 +15,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from defender import _yaml
+from defender._io import read_text_utf8, write_guarded
 from defender.learning.author.version_control import DeliveryRefused
 from defender.learning.author.version_control.forgejo import ForgeError
 from defender.learning.core import feedback_decide
@@ -68,10 +68,10 @@ def unwritable(entry: dict[str, str]) -> str | None:
 
 # ------------------------------------------------------------------ the registry file
 
-def _read(text: str) -> tacit_registry.RegistryRead:
+def _parse_registry(text: str) -> tacit_registry.RegistryRead:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "registry.yaml"
-        path.write_text(text, encoding="utf-8")
+        write_guarded(path, text, encoding="utf-8")
         return tacit_registry.read_registry(path)
 
 
@@ -101,7 +101,7 @@ def append_entries(text: str, entries: list[dict[str, str]]) -> str:
         raise ShapeRefused(f"`{head.strip()}` is neither a block list nor exactly `entries: []`")
     grown = "".join(lines)
     grown += "" if grown.endswith("\n") else "\n"
-    dumped = yaml.safe_dump([dict(e) for e in entries], sort_keys=False, default_flow_style=False,
+    dumped = _yaml.safe_dump([dict(e) for e in entries], sort_keys=False, default_flow_style=False,
                             allow_unicode=True, width=10_000)
     grown += "".join(indent + ln + "\n" for ln in dumped.splitlines())
     _verify(text, grown, entries)
@@ -110,7 +110,7 @@ def append_entries(text: str, entries: list[dict[str, str]]) -> str:
 
 def _verify(before: str, after: str, entries: list[dict[str, str]]) -> None:
     """The shared reader accepts every appended entry and drops nothing it did not already drop (O6)."""
-    old, new = _read(before), _read(after)
+    old, new = _parse_registry(before), _parse_registry(after)
     appended = {e["id"] for e in entries}
     if (new.fatal is not None or not appended <= {e["id"] for e in new.entries}
             or len(new.refusals) != len(old.refusals)):
@@ -123,7 +123,7 @@ def main_registry(delivery: Any) -> tuple[str, list[dict[str, str]]]:
     repo.fetch()
     oid = repo.regular_blob_on("refs/remotes/origin/main", REGISTRY)
     text = repo.blobs([oid])[oid].decode("utf-8") if oid else ""
-    return text, list(_read(text).entries) if text else []
+    return text, list(_parse_registry(text).entries) if text else []
 
 
 # ------------------------------------------------------------------ settlement
@@ -177,12 +177,12 @@ def _judge(state: LearningState, main_entries: list[dict[str, str]]) -> tuple[li
     within: list[tuple[dict, dict, str]] = []
     for decision, approved in _unsettled(state):
         entry = entry_for(decision, approved)
-        key = {"actor": entry["actor_scope"], "host": entry["host_scope"], "pattern": entry["pattern"], "now": today}
+        actor, host, pattern = entry["actor_scope"], entry["host_scope"], entry["pattern"]
         if (why := unwritable(entry)) is not None:
             _settle(state, decision, approved, {"how": "not-draftable", "why": why})
-        elif (hit := tacit_registry.find_entry(main_entries, **key)) is not None:
+        elif (hit := tacit_registry.find_entry(main_entries, actor=actor, host=host, pattern=pattern, now=today)) is not None:
             _settle(state, decision, approved, {"how": "covered", "by": hit["id"]})
-        elif (earlier := tacit_registry.find_entry([e for _, _, e in drafts], **key)) is not None:
+        elif (earlier := tacit_registry.find_entry([e for _, _, e in drafts], actor=actor, host=host, pattern=pattern, now=today)) is not None:
             within.append((decision, approved, earlier["id"]))
         else:
             drafts.append((decision, approved, entry))
@@ -226,7 +226,7 @@ def _start_and_land(state: LearningState, delivery: Any, drains: Any, text: str,
     batch = delivery.start_batch(uuid.uuid4().hex[:12], lanes=FEEDBACK_DRAIN_LABEL.lanes)
     try:
         path = Path(batch.draft_root) / REGISTRY
-        path.write_text(append_entries(path.read_text(encoding="utf-8"), entries), encoding="utf-8")
+        write_guarded(path, append_entries(read_text_utf8(path), entries), encoding="utf-8")
         batch.commit(batch.change_set(), _pr_body(drafts, within))
         drains._land_batch(state, delivery, batch, FEEDBACK_DRAIN_LABEL, body_from_commit=True)
     finally:
@@ -235,7 +235,7 @@ def _start_and_land(state: LearningState, delivery: Any, drains: Any, text: str,
 
 # ------------------------------------------------------------------ replies
 
-def _describe(entry_id: str, approved: dict, decision: dict) -> str:
+def _describe_settlement(entry_id: str, approved: dict, decision: dict) -> str:
     how = approved["settled"]
     if how["how"] == "drafted":
         return f"Entry {entry_id} is on a registry PR for a person to merge or close: {how['pr']}"
@@ -247,7 +247,7 @@ def _describe(entry_id: str, approved: dict, decision: dict) -> str:
 
 
 def reply_text(decision: dict) -> str:
-    lines = [_describe(a["id"], a, decision) for a in decision["approved"]]
+    lines = [_describe_settlement(a["id"], a, decision) for a in decision["approved"]]
     if decision.get("instruction"):
         lines.append("Your instruction was handed to the lessons author.")
     if decision.get("no_change"):
@@ -255,12 +255,12 @@ def reply_text(decision: dict) -> str:
     return "\n".join(lines) + "\n\n" + marker(decision["comment_id"])
 
 
-def _settled(state: LearningState, decision: dict) -> None:
+def _mark_replied(state: LearningState, decision: dict) -> None:
     decision["settled"] = True
     state.put_record(FEEDBACK_DECISIONS, str(decision["comment_id"]), decision)
 
 
-def _answer(forge: Any, seen: dict[int, str], bots: frozenset[str], decision: dict) -> bool:
+def _reply_is_on_issue(forge: Any, seen: dict[int, str], bots: frozenset[str], decision: dict) -> bool:
     """Make sure `decision`'s reply is on its issue; False while its outcome does not exist yet."""
     number = decision["issue"]
     if number not in seen:
@@ -280,7 +280,7 @@ def reply(state: LearningState, forge: Any, bots: frozenset[str]) -> None:
     seen: dict[int, str] = {}
     for decision in _decisions(state, open_only=True):
         try:
-            done = _answer(forge, seen, bots, decision)
+            done = _reply_is_on_issue(forge, seen, bots, decision)
         except ForgeError as e:
             if e.status != 404:
                 _logger.error(f"feedback: the reply to comment {decision['comment_id']} failed, retried next tick: {e}")
@@ -289,4 +289,4 @@ def reply(state: LearningState, forge: Any, bots: frozenset[str]) -> None:
                             f"{decision['comment_id']} is dropped")
             done = True
         if done:
-            _settled(state, decision)
+            _mark_replied(state, decision)

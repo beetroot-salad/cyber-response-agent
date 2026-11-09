@@ -182,7 +182,7 @@ def _pull_request(row: dict) -> PullRequest:
         url=row["html_url"],
         head_sha=sha if isinstance(sha, str) and sha else None,
         status=status,
-        body=row.get("body") if isinstance(row.get("body"), str) else "",
+        body=str(row.get("body") or ""),
         branch=row["head"].get("ref") if isinstance(row["head"].get("ref"), str) else "",
         author=(row.get("user") or {}).get("login", "") if isinstance(row.get("user"), dict) else "",
     )

@@ -11,6 +11,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from defender._clock import parse_iso_utc
 from defender.learning.core.state import (
     FEEDBACK_DECISIONS,
     FEEDBACK_ITEMS,
@@ -32,7 +33,10 @@ class InvalidAnswer(Exception):
 
 
 def comment_day(item: dict) -> dt.date:
-    return dt.datetime.fromisoformat(item["date"].replace("Z", "+00:00")).astimezone(dt.UTC).date()
+    parsed = parse_iso_utc(item["date"])
+    if parsed is None:
+        raise ValueError(f"the comment's date is no ISO date: {item['date']!r}")
+    return parsed.date()
 
 
 def _indexes(answer: dict, lookups: list[dict]) -> list[int]:
@@ -67,21 +71,21 @@ def _review_by(answer: dict, added: dt.date) -> str | None:
     return min(parsed, added + dt.timedelta(days=REVIEW_DAYS)).isoformat()
 
 
-def _text(answer: dict, field: str) -> str | None:
+def _answer_text(answer: dict, field: str) -> str | None:
     value = answer.get(field)
     if value is not None and not isinstance(value, str):
         raise InvalidAnswer(f"`{field}` is not text")
     return value.strip() or None if value else None
 
 
-def validate(answer: Any, item: dict) -> dict:
+def validate_answer(answer: Any, item: dict) -> dict:
     """The decision the answer means, or `InvalidAnswer`."""
     if not isinstance(answer, dict):
         raise InvalidAnswer("the answer is not an object")
     lookups = item["lookups"]
     approved = _indexes(answer, lookups)
     review_by = _review_by(answer, comment_day(item))
-    instruction, reason = _text(answer, "instruction"), _text(answer, "reason")
+    instruction, reason = _answer_text(answer, "instruction"), _answer_text(answer, "reason")
     asked_without_lookups = isinstance(answer.get("approve"), list) and answer["approve"] and not lookups
     no_change = None
     if asked_without_lookups:
@@ -94,7 +98,7 @@ def validate(answer: Any, item: dict) -> dict:
             "review_by": review_by, "instruction": instruction, "no_change": no_change}
 
 
-def _record(state: LearningState, item: dict, made: dict) -> dict:
+def _record_decision(state: LearningState, item: dict, made: dict) -> dict:
     decision = {"comment_id": item["comment_id"], "issue": item["issue"], "issue_url": item["issue_url"],
                 "author": item["author"], "date": item["date"], "body": item["body"],
                 "case_id": item["case_id"], "settled": False, **made}
@@ -118,7 +122,7 @@ def _failed(state: LearningState, item: dict, why: str) -> bool:
         return False
     _logger.warning(f"feedback: comment {item['comment_id']} on issue {item['issue']} could not be processed "
                     f"after {attempts} attempts ({why}); recorded as no change")
-    _record(state, item, {"approved": [], "review_by": None, "instruction": None,
+    _record_decision(state, item, {"approved": [], "review_by": None, "instruction": None,
                           "no_change": f"could not be processed ({why})"})
     return True
 
@@ -126,13 +130,13 @@ def _failed(state: LearningState, item: dict, why: str) -> bool:
 def _ask(state: LearningState, item: dict, decide: Callable[..., Any]) -> dict | None:
     """The comment's decision, recorded, or None when this attempt failed (counted)."""
     try:
-        made = validate(decide(dict(item)), item)
+        made = validate_answer(decide(dict(item)), item)
     except InvalidAnswer as bad:
         why = str(bad)
     except Exception as e:  # noqa: BLE001 — a model or box fault is a failed attempt, never a crashed tick
         why = f"{type(e).__name__}: {e}"
     else:
-        return _record(state, item, made)
+        return _record_decision(state, item, made)
     closed = _failed(state, item, why)
     return state.get_record(FEEDBACK_DECISIONS, str(item["comment_id"])) if closed else None
 
