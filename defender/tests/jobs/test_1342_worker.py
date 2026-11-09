@@ -3457,7 +3457,7 @@ async def test_b9_b3_b4_a_cancelled_or_deleted_running_row_has_its_child_ended_w
         return
     assert (final["stage"], final["failure_reason"], final["finished_at"]) == ("aborted", "cancelled", NOW)
     assert final["cost_usd"] == pytest.approx(SONNET_IN), "the holder's final cost was not written after the cancel"
-    assert lower_limit(dsn, inv) is True  # a killed child left no job-end (S2)
+    assert lower_limit(dsn, inv) is True  # the child was killed before sealing its ledger (r7.3 T2)
     assert accounting_written(dsn, inv) is not None
 
 
@@ -3655,7 +3655,7 @@ async def test_b_p3_b6_b3_a_worker_never_takes_over_a_row_it_holds_another_does_
     old = row(dsn, held)
     assert old["stage"] == "failed", "the holder's final accounting changed the stage"
     assert old["cost_usd"] == pytest.approx(SONNET_IN), "the cut-off holder's spend was not recorded on its own row"
-    assert lower_limit(dsn, held) is True  # taken over, then a killed child with no job-end (S2)
+    assert lower_limit(dsn, held) is True  # taken over, then a child killed before sealing its ledger (r7.3 T2)
     assert attempts == [(1,), (2,)]
 
 
@@ -3702,7 +3702,7 @@ async def test_b11_a_deliberate_stop_hands_a_running_row_back_with_its_final_cos
             (marks / "go-0").touch()
             await _stop_all(serving)
 
-        _handed_back(dsn, inv, cost=SONNET_IN, at_least=True)  # killed run: no job-end (S2)
+        _handed_back(dsn, inv, cost=SONNET_IN, at_least=True)  # killed run: its ledger never sealed (r7.3 T2)
         assert await store.claim() is None, "a handed-back row was claimed again"
         await store.take_over(held=frozenset())
         retry = await store.claim()

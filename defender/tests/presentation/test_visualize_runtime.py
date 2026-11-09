@@ -389,11 +389,10 @@ def _page(run: Path, *, sealed: bool = True) -> str:
     """The run's page through the post-run step's own entry: it holds the `Run` (the host's handle on the run's store), and
     nothing else is handed in. r7.3 T1: the ledger is sealed first (once per run, as a run that ended without a failed write
     leaves it); `sealed=False` is a run whose seal never landed (a failed write, a kill)."""
-    from defender.records import session_store as ss
-
     if sealed and run not in _SEALED:
         _SEALED.add(run)
-        seal_at(ss.resolve_store_path(_run_handle_1165(run)), run.name)
+        pointer = _run_handle_1165(run).observability.session_pointer.read_result().text
+        seal_at(fixture_runs_base(run.parent), json.loads(pointer)["case_id"], run.name)
     return render_page(_run_handle_1165(run))
 
 

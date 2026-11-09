@@ -378,7 +378,7 @@ def test_f1_r7_2_a_request_s_ending_reaches_the_agent_unchanged_whatever_the_led
     assert not changed, f"{len(changed)} endings reached the agent changed, e.g. {changed[:5]}"
 
 
-def _ledger_rows_of(tmp_path, label: str, capabilities=()):
+def _ledger_rows_of(tmp_path, label: str, capabilities=(), model=None, rows_out: list | None = None):
     """One agent (MAIN) driven through `build_agent_core` on a scripted model, its request logger bound to the ledger of a real
     session store, as the driver binds it; returns the model, the ledger's rows (agent, outcome) and the capabilities' notes."""
     from defender.records import SessionPaths
@@ -387,9 +387,13 @@ def _ledger_rows_of(tmp_path, label: str, capabilities=()):
 
     run_dir = _run_dir(tmp_path, label)
     with ss.open_store(case_id=f"t3-{label}", sessions=SessionPaths(fixture_runs_base(tmp_path / "runs"))) as store:
-        _, model = drive_agent(MAIN_DEF, run_dir, [], limits=DEFAULT_LIMITS, state=_state(run_dir), enforce=False,
-                               extra_capabilities=list(capabilities),
-                               bind_ledger=lambda logger: logger.bind_ledger(observe.SpendLedger(store, run_dir.name)))
+        try:
+            _, model = drive_agent(MAIN_DEF, run_dir, [], limits=DEFAULT_LIMITS, state=_state(run_dir), enforce=False,
+                                   extra_capabilities=list(capabilities), model=model,
+                                   bind_ledger=lambda logger: logger.bind_ledger(observe.SpendLedger(store, run_dir.name)))
+        finally:
+            if rows_out is not None:
+                rows_out.extend((r.agent_id, r.outcome) for r in ss.run_spend(store, run_dir.name))
         return model, [(r.agent_id, r.outcome) for r in ss.run_spend(store, run_dir.name)]
 
 
@@ -441,13 +445,17 @@ def test_t3_r7_3_a_capability_that_skips_a_model_request_writes_no_ledger_row(tm
 
 
 def test_t3_r7_3_an_error_raised_after_the_model_answered_leaves_the_response_row_in_place(tmp_path):
-    """The model answers and a capability then rejects the answer (a retry asked for, as output validation does): the answer
-    keeps its `response` row, and the retry's answer has its own. (r7.3 T3: "an output-validation retry after a response keeps
-    the response row")"""
-    model, rows = _ledger_rows_of(tmp_path, "retry-after", [_capability("retry-after")])
+    """The model answers and a capability then rejects the answer (a retry asked for, as output validation does). The built
+    agent allows no output retries, so the run raises; the answer the model gave keeps its one `response` row, and no second
+    request is made. (r7.3 T3: "an error raised after a response keeps the response row")"""
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
 
-    assert model.calls == 2, "premise: the model was asked twice, the first answer rejected"
-    assert rows == [("main", "response"), ("main", "response")], rows
+    model, rows = ScriptedModel([]), []
+    with pytest.raises(UnexpectedModelBehavior, match="output retries"):
+        _ledger_rows_of(tmp_path, "retry-after", [_capability("retry-after")], model=model, rows_out=rows)
+
+    assert model.calls == 1, "premise: the model was asked once; the rejected answer was not retried"
+    assert rows == [("main", "response")], rows
 
 
 def test_s3_a_run_side_hook_with_no_ledger_bound_counts_each_response_as_a_failed_spend_write(tmp_path, caplog):
