@@ -208,10 +208,13 @@ def write_secrets(folder: Path, entries: str | bytes | Mapping[str, str]) -> Pat
 
 def resolve(root: Path, tenant_id: str = PLAYGROUND_ID, *, dispatches_lead_zero: bool = False,
             **kw: Any) -> Any:
-    """`run_tenant.resolve_tenant` over a planted root — the one acceptance frame. A test about
-    the resolver itself calls `run_tenant.resolve_tenant` in its own body; this is for the ones
-    that need a record to drive something else."""
-    return run_tenant_mod().resolve_tenant(
+    """The resolver over a planted root — the one acceptance frame — with the run's tenant built from RECORDS (#1366:
+    `resolve_tenant` reads the tenant's current records, not its folder), `records=` as `R.resolve_tenant` (omitted =
+    DERIVED over the planted `settings/`). A test about the resolver itself is on #1366's stale census; this is for the
+    ones that need a record to drive something else."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    return R.resolve_tenant(
         fixture_data_root(Path(root)), tenant_id, defender_dir=DEFENDER,
         dispatches_lead_zero=dispatches_lead_zero, **kw)
 

@@ -9,9 +9,9 @@ tenant ids normalised, so wording is pinned only where the design words it.
 from __future__ import annotations
 
 import contextlib
-import json
 
 import pytest
+import yaml
 
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — the fixture
@@ -61,22 +61,49 @@ class _Lines(list):
     rc: int = 0
 
 
-def _findings(op) -> _Lines:
+def _fields_for(access: str) -> dict[str, str]:
+    """A credential set shaped for the declaration's scheme (basic: username and password; the rest: an api key).
+    The access text is YAML (the fixture's files are commented YAML, not JSON); an empty or unreadable text takes the
+    default shape."""
+    try:
+        scheme = ((yaml.safe_load(access) or {}).get("auth") or {}).get("scheme")
+    except yaml.YAMLError:
+        scheme = None
+    return {"username": "u", "password": "p"} if scheme == "basic" else {"api_key": "k"}
+
+
+def _credentialed(op) -> None:
+    """Credentials at the current generation (1) for every fixture system, through the operator's own door."""
+    for system, (_, access) in R.FIXTURE_FOLDERS.items():
+        assert op.set_credentials(system, _fields_for(access), for_version=1)[0] == 0, system
+
+
+def _stocked(op) -> None:
+    """A credential set at the CURRENT generation of every system the tenant has a record for (disabled ones too), put
+    in the operator's KV stand-in under the path the design names (`<tenant>/<system>/g<N>`), so that "no credentials at
+    the current generation" cannot be the reason a `check` exits nonzero. A seeding step, like the records: it does not
+    go through `set-credentials`, whose own refusals are not this file's subject."""
+    for system, record in op.current().items():
+        path = f"{op.tid}/{system}/g{record.credential_generation}"
+        if path not in op.kv.held:
+            op.kv.held[path] = [R.credential_set(_fields_for(record.access))]
+
+
+def _findings(op, *, credentials: bool = True) -> _Lines:
+    """`check`'s lines. Credentials are stocked first (`_stocked`) unless `credentials=False`: a test about another
+    finding must not owe its nonzero exit to the credentials finding (`_exits_for_its_own_finding` asserts it did not)."""
+    if credentials:
+        _stocked(op)
     rc, out = op.check()
     lines = _Lines(line.replace(op.tid, "<tenant>") for line in out.splitlines())
     lines.rc = rc
     return lines
 
 
-def _fields_for(access: str) -> dict[str, str]:
-    """A credential set shaped for the declaration's scheme (basic: username and password; the rest: an api key)."""
-    return ({"username": "u", "password": "p"} if json.loads(access)["auth"]["scheme"] == "basic" else {"api_key": "k"})
-
-
-def _credentialed(op) -> None:
-    """Credentials at the current generation (1) for every fixture system."""
-    for system, (_, access) in R.FIXTURE_FOLDERS.items():
-        assert op.set_credentials(system, _fields_for(access), for_version=1)[0] == 0, system
+def _exits_for_its_own_finding(found: _Lines) -> None:
+    """The exit is nonzero and the credentials finding is not the cause (each test asserts its own finding's words)."""
+    assert found.rc != 0, "any finding exits nonzero"
+    assert not R.lines_naming("\n".join(found), "no credentials"), found
 
 
 def _only_in(found: list[str], control: list[str], *words: str) -> list[str]:
@@ -111,7 +138,7 @@ def test_1366_r12_a_grant_on_a_system_that_was_never_recorded_is_reported_as_orp
     found = _findings(tenants(R.without(R.fixture_records(), "cmdb")))
 
     assert _only_in(found, sound, "cmdb", "orphan"), found
-    assert found.rc != 0, "an orphaned grant is a finding, and any finding exits nonzero"
+    _exits_for_its_own_finding(found)
 
 
 def test_1366_r12_a_deleted_system_the_grants_still_name_is_orphaned_after_the_operator_deleted_it(tenants):
@@ -123,7 +150,7 @@ def test_1366_r12_a_deleted_system_the_grants_still_name_is_orphaned_after_the_o
 
     found = _findings(op)
     assert _only_in(found, before, "cmdb", "orphan")
-    assert found.rc != 0
+    _exits_for_its_own_finding(found)
 
 
 def test_1366_r12_a_disabled_system_that_is_granted_is_reported_as_granted_but_disabled(tenants):
@@ -138,7 +165,7 @@ def test_1366_r12_a_disabled_system_that_is_granted_is_reported_as_granted_but_d
 
     assert _only_in(found, before, "cmdb", "disabled"), found
     assert not _only_in(found, before, "cmdb", "orphan"), found
-    assert found.rc != 0, "granted-but-disabled is a finding, and any finding exits nonzero"
+    _exits_for_its_own_finding(found)
 
 
 def test_1366_o1_check_judges_only_the_systems_the_tenant_has_records_for(tenants):
@@ -164,7 +191,7 @@ def test_1366_r12_check_reports_a_record_an_upgrade_made_unusable(tenants):
 
     found = _findings(tenants(spec))
     assert _only_in(found, sound, "cmdb")
-    assert found.rc != 0, "a record an upgrade made unusable is a finding, and any finding exits nonzero"
+    _exits_for_its_own_finding(found)
 
 
 def test_1366_r12_check_reports_each_system_without_credentials_at_its_current_generation(tenants):
@@ -174,28 +201,48 @@ def test_1366_r12_check_reports_each_system_without_credentials_at_its_current_g
     config, access = R.FIXTURE_FOLDERS["cmdb"]
     words = ("no credentials at the current generation",)
 
-    first = _findings(op)
+    first = _findings(op, credentials=False)
     assert first.rc != 0, "no credentials at the current generation is a finding, and any finding exits nonzero"
     assert {s for s in R.FIXTURE_SYSTEMS if R.lines_naming("\n".join(first), s, *words)} == R.FIXTURE_SYSTEMS
 
     assert op.set_credentials("cmdb", {"api_key": "k1"}, for_version=1)[0] == 0
-    second = _findings(op)
+    second = _findings(op, credentials=False)
     assert not R.lines_naming("\n".join(second), "cmdb", *words), second
     assert R.lines_naming("\n".join(second), "identity", *words), second
 
     assert op.set_system("cmdb", replaces=1, config=config, access=R.declaration("http://moved.test"))[0] == 0
-    assert R.lines_naming("\n".join(_findings(op)), "cmdb", *words)
+    assert R.lines_naming("\n".join(_findings(op, credentials=False)), "cmdb", *words)
+
+
+def test_1366_b6_no_credentials_at_the_current_generation_is_the_only_finding_that_fails_a_sound_tenant(tenants):
+    """The one test where "no credentials" is the whole reason for the exit: the sound tenant exits nonzero with a
+    "no credentials at the current generation" line for each system and no other kind of finding; the same tenant with
+    a set at each system's generation exits zero. (#1366 B6, R12 'no credentials', orchestrator bullet)"""
+    op = tenants()
+    bare = _findings(op, credentials=False)
+
+    assert bare.rc != 0, bare
+    assert {s for s in R.FIXTURE_SYSTEMS if R.lines_naming("\n".join(bare), s, "no credentials at the current generation")} \
+        == R.FIXTURE_SYSTEMS, bare
+    others = ("orphan", "disabled", "retired", "import", "not among", "cover")
+    assert not [line for line in bare if any(w in line for w in others)], bare
+
+    assert _findings(op).rc == 0
 
 
 def test_1366_o9_check_reports_a_tenant_repos_leftover_system_folders_and_case_file_as_retired_and_ignored(tenants):
-    """A repo that still holds `settings/systems/` and `settings/case-record.yaml` is told they are retired and ignored; a
-    repo without them is not (the control relies on O9 dropping them from the committed fixture). (#1366 DC8)"""
-    clean = "\n".join(_findings(tenants()))
-    left = "\n".join(_findings(tenants(files=R.import_files())))
+    """A repo that still holds `settings/systems/` and `settings/case-record.yaml` is told they are retired and ignored,
+    and `check` exits nonzero until they are removed (design: a leftover reported by `check`, either form, is a
+    finding); a repo without them is told nothing of it and, with credentials, exits zero (the control relies on O9
+    dropping them from the committed fixture). (#1366 DC8, P1, X5)"""
+    clean = _findings(tenants())
+    left = _findings(tenants(files=R.import_files()))
 
-    assert R.lines_naming(left, "retired", "settings/systems"), left
-    assert R.lines_naming(left, "retired", "case-record"), left
-    assert not R.lines_naming(clean, "retired"), clean
+    assert R.lines_naming("\n".join(left), "retired", "settings/systems"), left
+    assert R.lines_naming("\n".join(left), "retired", "case-record"), left
+    assert not R.lines_naming("\n".join(clean), "retired"), clean
+    _exits_for_its_own_finding(left)
+    assert clean.rc == 0, clean
 
 
 @pytest.mark.parametrize(("reads", "writes"), [
@@ -214,7 +261,7 @@ def test_1366_c5_check_reports_a_case_record_whose_system_no_longer_covers_its_c
     found = _findings(tenants(lost))
 
     assert _only_in(found, sound, "ticket"), "the case system's lost cover was not reported"
-    assert found.rc != 0
+    _exits_for_its_own_finding(found)
 
 
 def test_1366_o1_the_case_systems_lookup_uses_the_tenants_records_not_the_checkouts_adapters(tenants):
@@ -226,7 +273,7 @@ def test_1366_o1_the_case_systems_lookup_uses_the_tenants_records_not_the_checko
     found = _only_in(report, sound, "ticket")
 
     assert any("case" in line.lower() for line in found), found
-    assert report.rc != 0
+    _exits_for_its_own_finding(report)
 
 
 def test_1366_check_with_no_database_is_a_fault_naming_the_variable_and_never_a_look_at_the_folders(
@@ -247,15 +294,15 @@ def test_1366_check_with_no_database_is_a_fault_naming_the_variable_and_never_a_
 
 
 def test_1366_r12_check_reports_a_record_naming_an_adapter_an_upgrade_removed(tenants):
-    """cmdb's stored record names an adapter the catalog no longer has (`SysSpec.adapter`, stored as it was): `check`
-    reports cmdb, exits nonzero, and the sound tenant gets no such line; no pruned checkout is needed. (#1366 R12 row
-    'adapter removed by an upgrade', B3)"""
+    """The tenant holds a record for `legacy-widget`, a catalog-backed record (system id == adapter id) for an adapter the
+    catalog no longer has (stored as it was): `check` reports it naming `legacy-widget`, exits nonzero, and the sound
+    tenant gets no such line; no pruned checkout is needed. (#1366 R12 row 'adapter removed by an upgrade', B3)"""
     sound = _findings(tenants())
 
-    found = _findings(tenants(R.edited(R.fixture_records(), "cmdb", adapter=RETIRED)))
+    found = _findings(tenants(R.added(R.fixture_records(), RETIRED)))
 
-    assert _only_in(found, sound, "cmdb"), found
-    assert found.rc != 0
+    assert _only_in(found, sound, RETIRED), found
+    _exits_for_its_own_finding(found)
 
 
 def test_1366_r8_a_tenant_imported_with_no_records_is_not_told_to_import(tenants):
@@ -268,7 +315,7 @@ def test_1366_r8_a_tenant_imported_with_no_records_is_not_told_to_import(tenants
     for report in (granted, tacit):
         assert not R.lines_naming("\n".join(report), R.AUTHOR[R.IMPORT]), report
     assert {s for s in ("cmdb", "elastic") if R.lines_naming("\n".join(granted), s, "orphan")} == {"cmdb", "elastic"}, granted
-    assert granted.rc != 0
+    _exits_for_its_own_finding(granted)
     assert not R.lines_naming("\n".join(tacit), "orphan"), tacit
 
 

@@ -101,8 +101,8 @@ class Rig:
     tap: RequestTap
     tmp: Path
     #: The `R.RecordsSpec` this rig's tenant holds (#1366: the run's record and the proxy's port are built from it, not
-    #: from the published folders); None = what the published `settings/` stands for (`R.derive`).
-    records: Any = None
+    #: from the published folders); `R.DERIVED` = what the published `settings/` stands for (`R.derive`); None = NOT imported.
+    records: Any = R.DERIVED
 
     def token(self, mode: str = "rw") -> str:
         return T.token(self.t.tenant_id, {(self.vendor.system, mode)})

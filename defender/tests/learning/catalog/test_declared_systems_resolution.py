@@ -648,8 +648,10 @@ def test_1366_o1_the_pitfalls_curator_is_offered_the_systems_of_the_tenants_reco
 
 
 def test_1366_o1_a_tenant_whose_records_hold_no_system_has_no_pitfalls_lane(tmp_path, monkeypatch):
-    """A tenant imported with no system records is refused as an empty declared set, though the checkout declares adapters;
-    the curator is never spawned. (#1366 O1 pitfalls curator)"""
+    """BASE BEHAVIOUR for an empty declared set, kept (design r7 orchestrator bullet): the pitfalls curator over a tenant
+    with no recorded systems is refused as an empty declared set (`LeadAuthorError`, the guard at
+    `pitfalls_curator.py` for a broken checkout) and nothing is spawned, though the checkout declares adapters. The design
+    pins the empty set, not the new behaviour of a legitimate imported-empty tenant (R8, R11). (#1366 O1 pitfalls curator)"""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
     from defender.tests.support.tenancy import _systems1366 as R
 

@@ -7,14 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from defender.systems import run_tenant
 from defender.kit import transport
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 
 def _resolve(root: Path, tenant_id: str = S.PLAYGROUND_ID) -> object:
-    """The real acceptance frame over a planted root."""
-    return run_tenant.resolve_tenant(
+    """The real acceptance frame over a planted root, the run's tenant built from records (#1366)."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    return R.resolve_tenant(
         fixture_data_root(Path(root)), tenant_id, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
 

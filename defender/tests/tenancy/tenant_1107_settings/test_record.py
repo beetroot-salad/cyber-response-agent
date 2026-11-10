@@ -28,7 +28,9 @@ RECORD_TYPES = ("SystemConfig",)  # CaseMapping retired with the mapping file (#
 
 def _resolve(root: Path, tenant_id: str = TID) -> object:
     """The real acceptance frame over a planted root (the one frame every entry uses)."""
-    return run_tenant.resolve_tenant(
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    return R.resolve_tenant(
         fixture_data_root(Path(root)), tenant_id, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
 

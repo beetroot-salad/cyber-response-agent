@@ -254,18 +254,19 @@ def test_1366_r12_a_record_naming_an_adapter_an_upgrade_removed_refuses_the_run_
     assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
 
 
-@pytest.mark.parametrize("table", [S.TABLE_ELASTIC, S.TABLE_WITHHELD], ids=["granted", "withheld"])
-def test_1366_r12_a_record_whose_adapter_is_no_longer_a_catalog_adapter_refuses_the_run_naming_the_system(tmp_path, table):
-    """cmdb's stored record names an adapter the catalog no longer has (`SysSpec.adapter`, stored as it was): the run is
-    refused at start naming cmdb whatever the grants say; the same tenant with the record naming its own adapter runs
-    (control). The seeding is the record's, not a pruned checkout. (#1366 R12 row 'adapter removed by an upgrade', B3)"""
-    planted = S.plant_tenant(fixture_uuid("tenant:acme"), table=table)
+def test_1366_r12_a_record_whose_adapter_is_no_longer_a_catalog_adapter_refuses_the_run_naming_the_system(tmp_path):
+    """The tenant holds a record for `legacy-widget`, a catalog-backed record (the store makes its system id its adapter
+    id) for an adapter the checkout's catalog no longer has (an upgrade removed it; the seeders store what they are
+    given): the run is refused at start naming `legacy-widget`; the same tenant without that record runs (control). The
+    seeding is a state the store can produce, not a record naming another adapter than its own id. (#1366 R12 row
+    'adapter removed by an upgrade', B3)"""
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"))
     spec = R.records_from_settings(planted.settings)
 
-    refused = _run(tmp_path / "removed", planted, records=R.edited(spec, "cmdb", adapter=RETIRED))
+    refused = _run(tmp_path / "removed", planted, records=R.added(spec, RETIRED))
     ran = _run(tmp_path / "whole", planted, records=spec)
 
-    assert "cmdb" in (refused.refusal or ""), (refused.raised, refused.refusal)
+    assert RETIRED in (refused.refusal or ""), (refused.raised, refused.refusal)
     assert (refused.run_dir, refused.main.requests) == (None, 0)
     assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
 
@@ -305,12 +306,13 @@ _UNCOVERED = {
 
 @pytest.mark.parametrize("label", list(_UNCOVERED))
 def test_1366_c5_a_run_whose_stored_case_record_does_not_cover_the_comment_route_posts_nothing_and_names_the_fault(
-        tmp_path, label):
+        tmp_path, label, caplog):
     """The case system's stored declaration lacks the comment route (no write, another write, or a read route matching
     it): the run still ends, no request reaches the case store, and the run's receipt is an error naming ticket as a
     case-settings fault rather than the proxy's refusal. The tenant is the records' alone: its folder covers the route.
     (#1366 C5 run side, C3 caller 3, r5 read-route ruling, A1)"""
     reads, writes = _UNCOVERED[label]
+    caplog.set_level(logging.INFO)
 
     ran, sink = _comment_run(tmp_path, reads, writes)
 
@@ -321,6 +323,10 @@ def test_1366_c5_a_run_whose_stored_case_record_does_not_cover_the_comment_route
     assert (receipt["ok"], receipt["status"]) == (False, "error"), (label, receipt)
     assert "ticket" in receipt["reason"], (label, receipt)
     assert "the credential proxy refused" not in receipt["reason"].lower(), (label, receipt)
+    # Carried over from the retired file-fault test (test_ticket_writer o6): the fault is logged, and its reason names
+    # no host path.
+    assert any(r.levelno >= logging.WARNING for r in caplog.records), (label, "no warning logged")
+    assert str(tmp_path) not in receipt["reason"], (label, receipt)
 
 
 def test_1366_c5_a_run_whose_stored_case_record_covers_the_comment_route_posts_the_comment(tmp_path):

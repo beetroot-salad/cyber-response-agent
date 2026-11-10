@@ -12,7 +12,9 @@ LOCATOR = "<locator>"
 FILES = {"settings": "config.env", "access": "access.yaml"}
 #: A file name anywhere in the sentence (today's settings sentence says "its base is its access.yaml's"): the same text
 #: on both sides, so it is normalised on both, whatever else the locator rewrite does.
-_ANY_FILE = re.compile(r"\S*(?:config\.env|access\.yaml)\S*")
+#: Only the path before the name is part of the locator (folder prefix); what follows the name (`:`, `'s`, a quote, a
+#: full stop) is the sentence and stays, so a line that ends or continues right after the file keeps its punctuation.
+_ANY_FILE = re.compile(r"[\w./~-]*(?:config\.env|access\.yaml)")
 
 
 def _same_words(line: str) -> str:

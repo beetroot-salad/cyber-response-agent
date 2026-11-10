@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy import _tenants1106 as tenants
@@ -115,3 +117,22 @@ def test_publish_placed_exports_a_hand_planted_tenant_and_republishes_its_edits(
     assert current_commit(second.tenant) == second.commit
     assert files_under(export_dir(second.tenant, second.commit) / "agent") == {
         **planted, "lessons/edit.md": b"edited\n"}
+
+
+@pytest.mark.parametrize(("sentence", "part", "key"), [
+    pytest.param("missing required config keys in {loc}: CMDB_TIMEOUT_SEC", "settings", "CMDB_TIMEOUT_SEC",
+                 id="locator-then-colon"),
+    pytest.param("{loc}: CMDB_COLOUR is not a setting of cmdb (it reads CMDB_TIMEOUT_SEC; its base is its access.yaml's)",
+                 "settings", "CMDB_COLOUR", id="file-first-format-and-possessive"),
+    pytest.param("{loc} carries key(s) ['colour'] that nothing reads.", "access", "colour", id="full-stop-after"),
+])
+def test_1366_the_handoff_locator_helper_keeps_the_punctuation_around_the_file(sentence, part, key):
+    """Test machinery (`_handoff1366`): the store's line and the handoff's line compare equal once each side's locator is
+    replaced, whatever punctuation follows the file name (`:`, a full stop, `'s`) and whatever folder prefix precedes it.
+    The helper must not eat the sentence along with the file name."""
+    from defender.tests.support.tenancy import _handoff1366 as H
+
+    store = H.store_sentence(sentence.format(loc=f"system cmdb {part}"), "cmdb", part)
+    handoff = H.handoff_lines("  x " + sentence.format(loc=f"/tmp/h/cmdb/{H.FILES[part]}"), key, "cmdb", part)
+
+    assert any(store in line for line in handoff), (store, handoff)

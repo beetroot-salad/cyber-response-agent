@@ -165,6 +165,12 @@ def edited(spec: RecordsSpec, system: str, **changes: Any) -> RecordsSpec:
     return replace(spec, systems={**spec.systems, system: replace(spec.systems[system], **changes)})
 
 
+def added(spec: RecordsSpec, system: str, record: SysSpec | None = None) -> RecordsSpec:
+    """`spec` plus a record for `system` (default: enabled version 1, no settings and no access text; the system id is its
+    adapter id, as the store makes every catalog-backed record). For a record whose adapter the catalog does not have."""
+    return replace(spec, systems={**spec.systems, system: record if record is not None else SysSpec({}, "")})
+
+
 def without(spec: RecordsSpec, *systems: str) -> RecordsSpec:
     return replace(spec, systems={s: v for s, v in spec.systems.items() if s not in systems})
 
@@ -179,6 +185,12 @@ def fixture_records() -> RecordsSpec:
 #: down"). `plant_tenant(omit_systems=)` plants it; a system with no folder at all is NEVER RECORDED (R12: not in the
 #: roster, a grant on it ignored with one warning), which is a different relation.
 UNCONFIGURED = ".unconfigured"
+
+
+#: A file a planter drops in `settings/` to say "this tenant deliberately has NO case record" (`plant_tenant(case_system=
+#: None)`): DERIVED then seeds no case record, instead of falling back to the fixture's. A test that deletes
+#: `case-record.yaml` by hand leaves no marker and gets the fallback; it passes `records=` for a deliberate absence.
+NO_CASE = ".no-case-record"
 
 
 def records_from_settings(settings: Path) -> RecordsSpec:
@@ -230,7 +242,8 @@ def derive(settings: Path | str | None) -> RecordsSpec:
     """The records DERIVED stands for over one `settings/` folder (None: no folder).
 
     - The folder holds `systems/<s>/` folders: those systems (see `records_from_settings`), and the case record the test
-      planted, else the fixture's when its system is among them.
+      planted, else the fixture's when its system is among them, unless the planter left the `NO_CASE` marker (a
+      deliberate absence: no case record).
     - The folder has a `systems/` directory with no system in it (`plant_tenant(configs={})`): the test planted NOTHING,
       so the tenant is imported with no systems (R8: imported-empty is not not-imported). The case record is the
       planted one, as planted.
@@ -239,6 +252,8 @@ def derive(settings: Path | str | None) -> RecordsSpec:
     if settings is None or not (Path(settings) / "systems").is_dir():
         return fixture_records()
     planted = records_from_settings(Path(settings))
+    if (Path(settings) / NO_CASE).is_file():
+        return replace(planted, case=None)
     if planted.systems and planted.case is None and FIXTURE_CASE_SYSTEM in planted.systems:
         return replace(planted, case=fixture_records().case)
     return planted
@@ -469,10 +484,11 @@ class RecordsPort:
 
 class ExportRecords(RecordsPort):
     """`RecordsPort` for the EXISTING proxy tests (`credential_proxy_1163/_tenant.deps` defaults to it): the records are
-    computed, per call, from what the tenant's published export's `settings/systems/<s>/` was PLANTED with
-    (`records_from_settings`: version 1, generation 1), the legacy data the old proxy read. The port itself holds and
-    answers records; only this builder reads planted files, once per call because tests republish. A test about the
-    records themselves passes `records=` (a `{tenant: RecordsSpec}` mapping) instead."""
+    computed, per call, from what the tenant's published export's `settings/` was PLANTED with, by the same `derive`
+    rule the run side uses (so a bare published fixture, which planted no systems, has the retired fixture's records on
+    both sides; version 1, generation 1), the legacy data the old proxy read. A tenant with no published export has no
+    records. The port itself holds and answers records; only this builder reads planted files, once per call because
+    tests republish. A test about the records themselves passes `records=` (a `{tenant: RecordsSpec}` mapping) instead."""
 
     def __init__(self, data_root: Path | str) -> None:
         self.data_root = Path(data_root)
@@ -480,7 +496,7 @@ class ExportRecords(RecordsPort):
 
     def _planted(self, tenant_id: str) -> RecordsSpec | None:
         folder = settings_of(self.data_root, tenant_id)
-        return None if folder is None else records_from_settings(folder)
+        return None if folder is None else derive(folder)
 
 
 def run_tenant_for(tenant: Any, *, records: Any = DERIVED, settings_root: Path | str | None = None, **kwargs: Any) -> Any:
@@ -494,6 +510,20 @@ def run_tenant_for(tenant: Any, *, records: Any = DERIVED, settings_root: Path |
     if settings_root is not None:
         kwargs["settings_root"] = Path(settings_root)
     return production(tenant, records=value_of(records), **kwargs)
+
+
+def resolve_tenant(data_root: Any, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool,
+                   box_mounted: tuple[Any, ...] = (), records: Any = DERIVED) -> Any:
+    """What `systems.run_tenant.resolve_tenant` becomes under #1366 (design r7 orchestrator bullet): the tenant accepted
+    over its folder (`accept_tenant`, the one frame every entry shares), then its `RunTenant` built from RECORDS through
+    `run_tenant_for(..., records=)`, no folder read for systems, access or case. `records` as `run_tenant_for` (DERIVED
+    over the accepted tenant's own `settings/`, `None` = not imported, a `RecordsSpec` = exactly that). The tests' route
+    for the ~45 sites that reach the resolver (`_spec1107.resolve` and the local `_resolve` helpers go through it); the
+    production signature of `resolve_tenant` is the code stage's (it reads the tenant directory), the premise is not."""
+    from defender.tenancy import accept_tenant
+
+    tenant = accept_tenant(data_root, tenant_id, defender_dir=defender_dir, box_mounted=box_mounted)
+    return run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero, records=records)
 
 
 class GenerationBlind:

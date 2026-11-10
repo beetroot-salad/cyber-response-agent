@@ -71,8 +71,10 @@ def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseExce
 
 
 def _resolve(root: Path) -> Any:
-    """The real acceptance frame over a planted root."""
-    return run_tenant.resolve_tenant(
+    """The real acceptance frame over a planted root, the run's tenant built from records (#1366)."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    return R.resolve_tenant(
         fixture_data_root(Path(root)), TID, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
 

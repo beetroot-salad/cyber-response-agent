@@ -39,6 +39,7 @@ REQUIRED_FILES: tuple[str, ...] = (
 #: The tenant's optional case-record file under `settings/` (#1359 r4 Data): `system:` names the
 #: system that records cases, `comment.body:` is the comment template.
 CASE_RECORD_REL = "case-record.yaml"
+NO_CASE_REL = ".no-case-record"  # == _systems1366.NO_CASE
 #: The folder a tenant repo from before #1359 still holds (`tenant check` finds it).
 RETIRED_CASE_FOLDER = "systems/case-history"
 
@@ -363,6 +364,8 @@ def plant_tenant(  # noqa: PLR0913, C901 — one tenant folder's whole content, 
     }
     if case_system is not None:
         files[CASE_RECORD_REL] = case_record_text(case_system, body=case_body)
+    else:
+        files[NO_CASE_REL] = ""  # #1366: a deliberate absence; the seeders must not fall back to the fixture's case record
     system_configs = configs if configs is not None else config_texts(marker or tenant_id)
     for system, text in system_configs.items():
         files[f"systems/{system}/config.env"] = text

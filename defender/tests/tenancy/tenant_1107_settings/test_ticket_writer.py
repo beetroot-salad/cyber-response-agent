@@ -160,53 +160,11 @@ def test_o6_bad_config_receipt(tmp_path, monkeypatch, caplog):
         assert _warnings(caplog), f"{arm}: no warning logged"
 
 
-def test_o6_case_record_fault_receipt(tmp_path, monkeypatch, caplog):
-    """A case-record file the run cannot use: no call, an error receipt naming `case-record.yaml`
-    (no link), the exit code unchanged. O5, run-start flow."""
-    caplog.set_level(logging.INFO)
-    root_ok, _f, alert_ok = _world(tmp_path, name="tenants-ok")
-    shim_ok = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-ok")
-    rc_ok, _refused, ok_dir, _rec = _run(tmp_path, root_ok, alert_ok, run_id="r-ok")
-    assert _post_calls(shim_ok), "the control posted nothing"
-    assert (S.receipt(ok_dir) or {}).get("ok") is True, "the control failed"
-
-    for arm, text in CASE_RECORD_FAULTS.items():
-        shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name=f"proxy-{arm}")
-        root, folder, alert = _world(tmp_path, name=f"tenants-{arm}")
-        S.case_record_path(folder).write_bytes(text)
-        caplog.clear()
-        rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=f"r-{arm}")
-        assert refused is None, f"{arm}: rc={rc} refused={refused}"
-        assert rc == rc_ok, f"{arm}: the exit code changed: {rc} vs {rc_ok}"
-        assert not _post_calls(shim), f"{arm}: a bad case-record file still reached a POST"
-        got = S.receipt(run_dir)
-        assert got is not None, f"{arm}: no ticket_write.json"
-        assert (got.get("status"), got.get("ok"), got.get("url")) == ("error", False, None), got
-        assert CASE_RECORD in (got.get("reason") or ""), f"{arm}: the reason does not name the file: {got}"
-        for host in _host_paths(folder, root):
-            assert host not in got["reason"], f"{arm}: the reason carries {host}: {got['reason']!r}"
-        assert _warnings(caplog), f"{arm}: no warning logged"
-
-
-#: Case-record files that cannot stand, as bytes: unparsable, not a mapping, a missing or wrong
-#: member, a system the roster lacks, a roster system with no `add_case_comment` (D-7), non-UTF-8.
-CASE_RECORD_FAULTS: dict[str, bytes] = {
-    "unparsable": b"system: [unclosed\ncomment: {\n",
-    "not-a-mapping": b"- system\n- ticket\n",
-    "empty": b"",
-    "no-system": b'comment:\n  body: "{narrative}"\n',
-    "system-not-text": b'system: [ticket]\ncomment:\n  body: "{narrative}"\n',
-    "system-not-on-roster": b'system: "no-such-system"\ncomment:\n  body: "{narrative}"\n',
-    "system-without-the-comment-action": b'system: "cmdb"\ncomment:\n  body: "{narrative}"\n',
-    "no-body": b'system: "ticket"\n',
-    "body-not-text": b'system: "ticket"\ncomment:\n  body: 7\n',
-    "non-utf8": b'system: "ticket"\ncomment:\n  body: "\xff\xfe"\n',
-}
-
-
 def test_o5_no_case_record_file_leaves_a_receipt_naming_it(tmp_path, monkeypatch):
-    """A tenant with no case-record file (or still holding `systems/case-history/`) run with
-    `--update-ticket`: no call, an error receipt naming `case-record.yaml`, no silent ignore. O2, O5."""
+    """A tenant with no case record (the planter's `case_system=None` seeds none: `R.NO_CASE`; or one still holding
+    `systems/case-history/`, which nothing reads) run with `--update-ticket`: no call, an error receipt saying there is
+    no case record, no silent ignore. The retired file is not named (#1366 O9, DC6: the case record is a database row,
+    nothing reads `case-record.yaml`). O2, O5."""
     shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok())
     for arm in ("none", "legacy-folder"):
         root, folder, alert = _world(tmp_path, name=arm, case_system=None)
@@ -221,7 +179,7 @@ def test_o5_no_case_record_file_leaves_a_receipt_naming_it(tmp_path, monkeypatch
         got = S.receipt(run_dir)
         assert got is not None, f"{arm}: no receipt for --update-ticket with no case-record file"
         assert (got["status"], got["ok"]) == ("error", False), got
-        assert CASE_RECORD in (got.get("reason") or ""), got
+        assert "case record" in (got.get("reason") or "").replace("-", " ").lower(), got
         for host in _host_paths(folder, root):
             assert host not in got["reason"], f"{arm}: the reason carries {host}: {got['reason']!r}"
     assert not _post_calls(shim), "a call was made for a tenant with no case system"

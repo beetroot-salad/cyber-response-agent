@@ -397,6 +397,32 @@ def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
     assert fixture_uuid("tenant:newco") in text, text
 
 
+def test_1366_p4_the_policy_cli_builds_the_tenant_from_its_records_not_its_folder(tmp_path, capsys, monkeypatch):
+    """The policy CLI's tenant comes from the tenant's records (design r7 orchestrator bullets: `policy_cli` passes the
+    current records to `run_tenant_for`). The planted folder grants gather cmdb and elastic: with the fixture's records
+    `show gather` answers; the SAME folder with a tenant imported with no records (so neither granted system is
+    recorded: unrecorded systems are not in the tenant, R12) leaves gather nothing to query and the CLI refuses naming
+    both grants, as a run does, not the import (the tenant is imported). A CLI reading the folder would answer in both.
+    (#1366 P4, R10, R12)"""
+    policy_cli = T.mod("cli.policy_cli")
+    root = tmp_path / "tenants"
+    T.place_tenant(root, fixture_uuid("tenant:acme"), table=T.TABLE_A)
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    argv = ["show", "gather", "--run-dir", str(run_dir), "--tenant", fixture_uuid("tenant:acme")]
+
+    assert policy_cli.main(argv, directory=directory_for_argv(argv, records=R.fixture_records())) == 0
+    assert "agent: gather" in capsys.readouterr().out
+
+    with pytest.raises(SystemExit) as caught:
+        policy_cli.main(argv, directory=directory_for_argv(argv, records=R.RecordsSpec()))
+    text = str(caught.value.code)
+    assert text.startswith("defender-policy:"), text
+    assert all(system in text for system in ("cmdb", "elastic")), text
+    assert R.AUTHOR[R.IMPORT] not in text, text
+
+
 @pytest.mark.parametrize("inside", ["code tree", "runs base"])
 def test_a_tenant_folder_inside_a_tree_a_box_mounts_is_refused(tmp_path, inside):
     rt = T.mod("systems.run_tenant")
