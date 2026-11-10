@@ -30,7 +30,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from _lab_fakes import ALERTS, CMDB_STALE, EVENTS, NGINX, REPO, SNAP, T, ALERTS_PATTERN, LabRig, instant
+from _lab_fakes import (ALERTS, ALERTS_PATTERN, AUTH, CMDB_STALE, DATA_DROP, EVENTS, REPO, SCHEMA_DRIFT, SNAP, SYSLOG, T,
+                        LabRig, instant)
 from _periphery_fakes import FakeDocker
 
 LAB_OPS = Path(__file__).resolve().parents[1] / "lab_ops.py"
@@ -188,27 +189,32 @@ def test_teardown_leaves_no_container_running_that_the_operations_started(tmp_pa
     for name in started:
         do[name]()
     assert not docker.unmodelled, f"the fake docker does not model: {docker.unmodelled}"
-    if "start_proxy" in started or "restart_node" in started:
-        assert docker.started & docker.running(), "nothing was brought up: the fixture did not reach the claim"
+    assert docker.started & docker.running(), "nothing was brought up: the fixture did not reach the claim"
 
     lab.ops.teardown()
 
     assert not docker.started & docker.running(), sorted(docker.started & docker.running())
 
 
+TOUCHED = [DATA_DROP, SCHEMA_DRIFT]      # the overlays whose indices the digest covers: syslog events, auth events, their alerts
+
+
 def _digest_lab(tmp_path, *, body=b"stub-dump-bytes", mutations=None):
-    """A real LabOps over a restored copy of the world, its stubs loaded; returns (lab, rig)."""
+    """A real LabOps over a restored copy of the world, its stubs loaded with the overlays' resolved
+    mutations (`TOUCHED` unless given); returns (lab, rig)."""
     rig = LabRig(tmp_path)
     rig.cluster.es_request("PUT", f"/_snapshot/{REPO}", {"type": "fs", "settings": {"readonly": True}})
     rig.cluster.es_request("POST", f"/_snapshot/{REPO}/{SNAP}/_restore", {})
     lab = _ops(tmp_path, run=FakeDocker(), es=rig.cluster)
-    lab.ops.load_stubs(_stub_parts(tmp_path, body), T, mutations)
+    lab.ops.load_stubs(_stub_parts(tmp_path, body), T, TOUCHED if mutations is None else mutations)
     return lab, rig
 
 
-def test_the_content_digest_follows_every_document_and_every_stub_byte(tmp_path):
-    """C8/A1: the same copy and stubs give the same digest; any one document altered, added, removed
-    or re-versioned, one stub byte, or the stub mutations, give another."""
+def test_the_content_digest_follows_every_document_of_a_touched_index_and_every_stub_byte(tmp_path):
+    """C8/A1 (design: "a content digest covers the touched indices and every stub store"): the same copy
+    and stubs give the same digest; one document of a touched index (a syslog or auth event, an alert)
+    altered, added, removed or re-versioned, one stub byte, or the stub mutations, give another. What an
+    untouched index (nginx) holds is not pinned either way."""
     patterns = [EVENTS, ALERTS_PATTERN]
     lab, rig = _digest_lab(tmp_path / "base")
     digest = lab.ops.content_digest(patterns)
@@ -217,13 +223,17 @@ def test_the_content_digest_follows_every_document_and_every_stub_byte(tmp_path)
     assert _digest_lab(tmp_path / "again")[0].ops.content_digest(patterns) == digest
 
     def edits(r):
-        doc = r.cluster.indices[NGINX]["docs"]["nginx-03"]
+        docs = r.cluster.indices
         return {
-            "altered": lambda: doc["_source"].__setitem__("message", "GET /changed"),
-            "re-versioned": lambda: doc.__setitem__("_version", 2),
-            "removed": lambda: r.cluster.indices[NGINX]["docs"].pop("nginx-03"),
-            "added": lambda: r.cluster.put(NGINX, "nginx-99", {"@timestamp": "2026-10-20T05:00:00Z", "message": "new"}),
-            "alert altered": lambda: r.cluster.indices[ALERTS]["docs"]["id-young"]["_source"].__setitem__("host.name", "web-2"),
+            "syslog altered": lambda: docs[SYSLOG]["docs"]["syslog-20"]["_source"].__setitem__("message", "changed"),
+            "syslog re-versioned": lambda: docs[SYSLOG]["docs"]["syslog-20"].__setitem__("_version", 2),
+            "syslog removed": lambda: docs[SYSLOG]["docs"].pop("syslog-20"),
+            "syslog added": lambda: r.cluster.put(SYSLOG, "syslog-99", {"@timestamp": "2026-10-20T05:00:00Z", "message": "new"}),
+            "auth altered": lambda: docs[AUTH]["docs"]["auth-25"]["_source"].__setitem__("source.port", 1),
+            "auth re-versioned": lambda: docs[AUTH]["docs"]["auth-25"].__setitem__("_version", 7),
+            "auth removed": lambda: docs[AUTH]["docs"].pop("auth-25"),
+            "alert altered": lambda: docs[ALERTS]["docs"]["id-young"]["_source"].__setitem__("host.name", "web-2"),
+            "alert re-versioned": lambda: docs[ALERTS]["docs"]["id-young"].__setitem__("_version", 9),
         }
 
     for name in edits(rig):
@@ -232,7 +242,7 @@ def test_the_content_digest_follows_every_document_and_every_stub_byte(tmp_path)
         assert lab2.ops.content_digest(patterns) != digest, name
 
     assert _digest_lab(tmp_path / "byte", body=b"stub-dump-bytez")[0].ops.content_digest(patterns) != digest
-    assert _digest_lab(tmp_path / "flip", mutations=[CMDB_STALE])[0].ops.content_digest(patterns) != digest
+    assert _digest_lab(tmp_path / "flip", mutations=[*TOUCHED, CMDB_STALE])[0].ops.content_digest(patterns) != digest
 
 
 # -- B2: an exclusion source that is not configured refuses, it never reads as "none excluded" ------------
