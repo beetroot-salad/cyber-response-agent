@@ -26,6 +26,7 @@ from defender.tests.support.jobs._job_helper_learning import (
     clear_publish_status,
     learning_end,
     listing,
+    plant_decoy,
     plant_siblings,
     publish_status,
     run_kind,
@@ -164,8 +165,8 @@ def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_o
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
     from defender.tests.tenancy.tenant_1108_p4._drain_support import owner_record
 
-    job_id = str(uuid.uuid4())
     planted = plant_siblings(scene)
+    job_id = planted.job_id
     labels = ("b", "c")
     signer, got = make_signer(), {}
     knowledge = scene.root / scene.tenant / "run-knowledge"
@@ -181,7 +182,7 @@ def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_o
         return 0
 
     docker = ContainerStandIn(job)
-    run_kind(scene, "learning", None, job_id=job_id, source=planted.source, signer=signer, docker=docker)
+    run_kind(scene, "learning", None, job_id=planted.job_id, source=planted.source, signer=signer, docker=docker)
 
     assert [x["run"] for x in got["copies"]] == [planted.run_id(w) for w in labels], "not the worlds' roster ids"
     assert job_id not in [x["run"] for x in got["copies"]]
@@ -225,7 +226,7 @@ def test_a6_a_sibling_that_names_a_run_id_is_answered_its_worlds_roster_id_all_t
         got["control"] = c.request("copy.make", world=planted.worlds["c"])
         return 0
 
-    run_kind(scene, "learning", job, source=planted.source)
+    run_kind(scene, "learning", job, job_id=planted.job_id, source=planted.source)
 
     assert got["control"]["run"] == planted.run_id("c"), "control: the world's roster id was not answered"
     if got["answer"] is not None:
@@ -256,7 +257,7 @@ def test_a6_h10_a_sibling_for_a_world_outside_the_episode_or_a_bad_or_linked_ros
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     planted = plant_siblings(scene)
-    other = plant_siblings(scene)
+    other = plant_decoy(scene, planted)
     tenant = scene.root / scene.tenant
     decoy = tenant / "decoy-folder"
     decoy.mkdir()
@@ -292,13 +293,46 @@ def test_a6_h10_a_sibling_for_a_world_outside_the_episode_or_a_bad_or_linked_ros
         return 0
 
     signer, docker = make_signer(), ContainerStandIn(job)
-    run_kind(scene, "learning", None, source=planted.source, signer=signer, docker=docker)
+    run_kind(scene, "learning", None, job_id=planted.job_id, source=planted.source, signer=signer, docker=docker)
 
     assert got["control"]["run"] == planted.run_id("c"), "control: a world of the episode was refused"
     assert len(got["refusals"]) == 3 * len(asks)
     assert got["after"] == got["before"], "a refused sibling signed, created, copied or made a folder"
     assert listing(decoy) == [], "the helper wrote through a link"
     assert not (scene.runs / good).exists()
+
+
+def test_a6_a_decoy_episode_sharing_the_jobs_source_has_its_worlds_refused_and_the_jobs_own_answered(scene):
+    """The episode is found from the claim (job id = episode id), not from `--source`: a second episode of the tenant made
+    from the same source has every world refused for `copy.make`, `pass` and `box.start`, and gets no folder or copy;
+    the job's own world on the same channel is answered. (A6, r4.1)"""
+    planted = plant_siblings(scene)
+    decoy = plant_decoy(scene, planted)
+    tenant = scene.root / scene.tenant
+    assert decoy.source == planted.source
+    assert decoy.job_id != planted.job_id
+    got: dict = {"refusals": []}
+
+    def state():
+        return (len(signer.payloads), len(docker.creates()), listing(tenant / "run-knowledge"),
+                listing(decoy.dir / "runs"), listing(planted.dir / "runs"), listing(scene.runs))
+
+    def job(c) -> int:
+        got["before"] = state()
+        for label in ("b", "c"):
+            got["refusals"].append(c.refused("copy.make", world=decoy.worlds[label]))
+            got["refusals"] += [c.refused(r, kind="shell", id=decoy.run_id(label)) for r in ("pass", "box.start")]
+        got["after"] = state()
+        got["control"] = c.request("copy.make", world=planted.worlds["b"])
+        return 0
+
+    signer, docker = make_signer(), ContainerStandIn(job)
+    run_kind(scene, "learning", None, job_id=planted.job_id, source=planted.source, signer=signer, docker=docker)
+
+    assert got["control"]["run"] == planted.run_id("b"), "control: the job's own world was refused"
+    assert len(got["refusals"]) == 6
+    assert got["after"] == got["before"], "a decoy episode's world was copied, passed or boxed"
+    assert listing(decoy.dir / "runs") == []
 
 
 def test_p_c_a_learning_jobs_siblings_add_no_holder_and_run_no_admission_inside_the_container(scene):
@@ -327,7 +361,7 @@ def test_p_c_a_learning_jobs_siblings_add_no_holder_and_run_no_admission_inside_
 
     with counting_calls(host_tenant=run_tenant.host_tenant, acquire=host_lock.acquire,
                         hold_shared=host_lock.hold_shared) as calls:
-        run_kind(scene, "learning", job, source=planted.source)
+        run_kind(scene, "learning", job, job_id=planted.job_id, source=planted.source)
 
     assert got["start"]["acquire"] + got["start"]["hold_shared"] >= 1, "premise: the helper took the lock before the container"
     assert got["end"] == got["start"], "a sibling's requests took a lock or ran an admission"
@@ -457,6 +491,27 @@ def test_o4_forge_tokens_are_minted_afresh_for_the_post_steps_tenant_alone_and_v
     assert OTHER_TENANT not in "".join(forge.built)
 
 
+@pytest.mark.parametrize("asked", [150.5, 151, 3600, 1e9])
+def test_o4_a_forge_token_valid_for_more_than_150_seconds_is_refused_and_none_is_minted(scene, asked):
+    """`forge.token(min_validity)` above 150 s is refused (fail closed) and asks the credential for nothing; 150 s on the
+    same channel is answered (control). (O4, r4.1)"""
+    forge = ForgeCredentialRecorder()
+    got: dict = {}
+
+    def job(c) -> int:
+        got["control"] = c.request("forge.token", min_validity=150)
+        got["before"] = list(forge.asked)
+        got["refusal"] = c.refused("forge.token", min_validity=asked)
+        got["after"] = list(forge.asked)
+        return 0
+
+    run_kind(scene, "post-step", job, forge=forge, family_less=True)
+
+    assert got["control"]["token"], "control: 150 s was refused"
+    assert got["before"] == [150]
+    assert got["after"] == got["before"], "the credential was asked for a token valid longer than 150 s"
+
+
 @POST_STEPS
 def test_o4_the_post_steps_publish_outcomes_are_written_by_the_helper_and_the_container_holds_no_database_login(
         scene, family_less):
@@ -564,6 +619,37 @@ def test_a6_the_drains_batch_box_is_started_only_for_a_draft_the_helper_made(sce
         "the batch box does not bind the draft"
 
 
+# --- box kinds per job kind (r4.1) ---------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize(("kind", "refused_kinds", "own_kind"), [
+    ("investigation", ("oracle", "batch"), "shell"),
+    ("post-step", ("shell", "oracle"), "batch"),
+    ("learning", ("batch",), "oracle"),
+])
+def test_r41_a_job_may_start_only_the_box_kinds_of_its_job_kind(scene, kind, refused_kinds, own_kind):
+    """The job's own box kind is started; the kinds that belong to another job kind are refused for an id the helper holds,
+    and create nothing: `shell` investigation and siblings, `oracle` learning job, `batch` post-step. (r4.1, O9)"""
+    job_id = str(uuid.uuid4())
+    got: dict = {}
+
+    def job(c) -> int:
+        ident = c.request("batch.start", lanes=["lessons"])["batch"] if kind == "post-step" else job_id
+        got["control"] = c.request("box.start", kind=own_kind, id=ident)
+        got["before"] = len(docker.creates())
+        got["refusals"] = [c.refused("box.start", kind=other, id=ident) for other in refused_kinds]
+        got["after"] = len(docker.creates())
+        return 0
+
+    docker = ContainerStandIn(job)
+    run_kind(scene, kind, None, job_id=None if kind == "post-step" else job_id, docker=docker,
+             family_less=kind == "post-step")
+
+    assert got["control"], f"control: a {kind} job was refused its own box kind"
+    assert got["before"] == 1
+    assert len(got["refusals"]) == len(refused_kinds)
+    assert got["after"] == got["before"], "a box of another job kind's kind was created"
+
+
 # --- after the signal (A1) -----------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize(("kind", "request_name", "fields"), [
@@ -603,7 +689,7 @@ def test_a1_once_a_learning_helper_is_signalled_it_refuses_a_siblings_copy_and_m
         got["after"] = state()
         return 143
 
-    run_kind(scene, "learning", job, source=planted.source)
+    run_kind(scene, "learning", job, job_id=planted.job_id, source=planted.source)
 
     assert got["control"]["run"] == planted.run_id("b"), "control: the request was answered before the signal"
     assert got["refusal"] is not None
@@ -614,8 +700,10 @@ def test_a1_once_a_learning_helper_is_signalled_it_refuses_a_siblings_copy_and_m
 
 @pytest.mark.parametrize("kind", ["learning", "post-step"])
 def test_a3_o11_a_learning_kind_whose_container_cannot_start_runs_nowhere_else_and_claims_no_success(scene, kind):
-    """docker refuses the start (image missing, rc 125): the job runs nowhere else, the helper makes no completed or
-    skipped record, and no post-step record. (A3, O11, A7)"""
+    """docker refuses the start (image missing, rc 125): the job runs nowhere else; a learning job's end record is the
+    learning entry's own failure word for it (`failed: entry_error`), and a post-step writes no record. (A3, O11, A7, r4.1)"""
+    from defender.records.job_lane import ENTRY_ERROR, LEARNING_FAILED
+
     job_id = str(uuid.uuid4())
     docker = ContainerStandIn(lambda c: 0, run_fault=(125, "Unable to find image 'defender-job:latest' locally\n"))
     run_kind(scene, kind, None, job_id=job_id, docker=docker, family_less=kind == "post-step")
@@ -623,6 +711,66 @@ def test_a3_o11_a_learning_kind_whose_container_cannot_start_runs_nowhere_else_a
     assert len(docker.boxes) == 1, "premise: the container start was asked for"
     assert not docker.job_ran
     assert len(docker.creates()) == 0
-    end = learning_end(scene, job_id) if kind == "learning" else None
-    assert end is None or end.status == "failed", end
+    if kind == "learning":
+        end = learning_end(scene, job_id)
+        assert end is not None, "the helper wrote no end record for a learning job that could not start"
+        assert (end.status, end.reason) == (LEARNING_FAILED, ENTRY_ERROR), end
+        assert end.message, "a failed end names why"
     assert list(scene.runs.glob("*.post-step.json")) == [], "the helper wrote the post-step's record"
+
+
+@pytest.mark.parametrize("cause", ["admission", "sign"])
+def test_a3_a_learning_setup_the_helper_refuses_is_written_in_the_learning_entrys_refused_word(scene, cause):
+    """The tenant offboarding, or the first pass failing to sign, refuses a learning job before its container: none is
+    started and the end record is `failed: launch_refused`, not a `JobEnd` word. (A3, r4.1; control: the start-failure
+    word above differs)"""
+    from defender.records.job_lane import LAUNCH_REFUSED, LEARNING_FAILED
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.support.jobs._jobs1342 import restate_tenant
+
+    job_id = str(uuid.uuid4())
+    signer = make_signer()
+    if cause == "admission":
+        restate_tenant(scene.dsn, scene.tenant, state="offboarding", data_root=scene.root)
+    else:
+        signer = A.RaisingSigner(RuntimeError("openbao is sealed"))
+    docker = ContainerStandIn(lambda c: 0)
+    run_kind(scene, "learning", None, job_id=job_id, signer=signer, docker=docker)
+
+    assert docker.boxes == [], "a container was started for a job that setup refused"
+    end = learning_end(scene, job_id)
+    assert end is not None, "no end record for a refused learning job"
+    assert (end.status, end.reason) == (LEARNING_FAILED, LAUNCH_REFUSED), end
+    assert end.message
+    assert not list(scene.runs.glob(f"{job_id}.job-end.json")), "a JobEnd record was written for a learning job"
+
+
+
+def test_a1_a_learning_helper_signalled_before_it_starts_the_container_starts_none_and_writes_the_learning_start_failure(
+        scene):
+    """SIGTERM lands before the container is started (during the first signing, or the launch-time publish): no `docker
+    run`, and the end record is the learning entry's start-failure word. (A1, A3, r4.1; control: the claim flow starts one)"""
+    import signal
+
+    from defender.records.job_lane import ENTRY_ERROR, LEARNING_FAILED
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    job_id = str(uuid.uuid4())
+    signer = J.SignalingSigner(make_signer())
+    sent: list[bool] = []
+
+    def publish(*_a, **_k) -> str:
+        if not signer.sent and not sent:
+            sent.append(True)
+            os.kill(os.getpid(), signal.SIGTERM)
+        return B.fresh(scene.t.commit)
+
+    docker = ContainerStandIn(lambda c: 0)
+    run_kind(scene, "learning", None, job_id=job_id, signer=signer, docker=docker, publish=publish)
+
+    assert signer.sent or sent, "premise: the signal was sent"
+    assert docker.boxes == [], "a container was started after the signal"
+    assert docker.creates() == []
+    end = learning_end(scene, job_id)
+    assert end is not None, "no end record for a learning job signalled before its container"
+    assert (end.status, end.reason) == (LEARNING_FAILED, ENTRY_ERROR), end

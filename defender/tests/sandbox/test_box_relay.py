@@ -231,3 +231,18 @@ def test_a4_the_scrub_gate_over_a_relay_box_walks_the_tree_only_when_the_helper_
                               scrub_tree=walked.append, in_flight=True, read_verdict=lambda: None, write_verdict=lambda _v: None)
     assert down is (stop["result"] == "stopped")
     assert bool(walked) is down
+
+
+def test_o11_a_box_exec_the_helper_refuses_is_a_lost_box_with_todays_class_and_the_box_is_stopped_once():
+    """The helper's refusal (`job_host.Refused`) of a command is no result: the box ends `box-lost`, stopped through the relay once, and later commands are refused unasked. (O11, A4, #1421)"""
+    from defender import job_host
+
+    helper = ScriptedHelper(job_host.Refused("no such handle"), ok(0, b"must not run\n"))
+    executor = relay_executor(helper)
+    with pytest.raises(box.BoxLost) as first:
+        _ask(executor)
+    assert first.value.exit_class == TRUNCATED_BY_BOX_LOST
+    assert helper.asked("box.stop") == [{"handle": HANDLE}]
+    with pytest.raises(box.BoxLost):
+        _ask(executor)
+    assert len(helper.asked("box.exec")) == 1

@@ -1,8 +1,7 @@
 """#1170 (r4, integration I2): machinery for the learning entries inside the job container: the learning job entry
 (`job_entry.main`, command `python -m defender.cli.learning.job --job --tenant --source`), the post-step and the family-less
 check (`post_step.main`, command `python -m defender.learning.branch.post_step [--job] --tenant`) and the sibling
-(`run.main`, command `run.py --tenant --episode --world`, in a container when the job socket variable is set). None takes
-`--parent-pid`.
+(`run.main`, command `run.py --tenant --episode --world`, in a container when the job socket variable is set).
 
 Picked names (not settled by the design; same family as slice D's `run.job_main`): each in-process entry takes
 `environ=<the container's environment>` and finds the job socket in `environ[job_host.SOCKET_ENV]`; the sibling is in a

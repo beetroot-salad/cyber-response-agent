@@ -40,9 +40,10 @@ class Entered:
 
 
 def enter(scene: HelperScene, inv: str, *, signer: Any = None, entry: Callable[..., int] | None = None,
-          kind: str = "investigation", **seams: Any) -> Entered:
+          kind: str = "investigation", docker: ContainerStandIn | None = None, **seams: Any) -> Entered:
     """Run the helper for `inv` over a container whose process is `run.job_main` with `seams` (`entry(container)` instead:
-    a custom container process). Stdout and stderr are captured across the whole run."""
+    a custom container process). `docker` is a prebuilt stand-in (a `RelayDocker`, say) to run the job on. Stdout and stderr
+    are captured across the whole run."""
     from defender import run as run_py
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 
@@ -61,7 +62,8 @@ def enter(scene: HelperScene, inv: str, *, signer: Any = None, entry: Callable[.
             done.raised = e
             return 99
 
-    done.docker = ContainerStandIn(job)
+    done.docker = docker if docker is not None else ContainerStandIn()
+    done.docker.job = job
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         done.helper = drive_helper(scene, scene.argv(kind, inv), docker=done.docker,

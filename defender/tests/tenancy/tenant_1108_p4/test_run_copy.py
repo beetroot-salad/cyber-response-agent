@@ -456,7 +456,7 @@ def test_a6_a_job_run_copy_is_owned_by_its_host_helper_and_a_killed_helpers_copy
     with helper_scene(tmp_path, monkeypatch, migrated_database) as scene:
         inv = str(uuid.uuid4())
         scene.plant(inv)
-        helper = ProcessHelper(scene, scene.root, scene.argv("investigation", inv))
+        helper = ProcessHelper(scene, scene.root, scene.argv("investigation", inv, parent=os.getpid()))
         try:
             helper.container_pid()  # the helper got as far as its container: step 4 (the copy) is behind it
             copies = until(lambda: list(B.run_copies(scene.t).glob("*/owner")), "the helper's run copy")

@@ -145,6 +145,19 @@ def descendants(pid: int) -> set[int]:
     return found
 
 
+def closed_port_dsn(dsn: str) -> str:
+    """`dsn` with its address moved to a port nothing listens on: the driver's own connection refusal, a real outage."""
+    import socket
+    from urllib.parse import urlsplit
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]  # closed again with the probe
+    parts = urlsplit(dsn)
+    userinfo = parts.netloc.rpartition("@")[0]
+    return parts._replace(netloc=f"{userinfo + '@' if userinfo else ''}127.0.0.1:{port}").geturl()
+
+
 def host_path(mounts: list[dict[str, Any]], inside: str) -> Path:
     """Where an in-container path lives on the host, through the bind table (nested mounts win)."""
     p = Path(inside)
@@ -164,6 +177,7 @@ class Container:
     mounts: list[dict[str, Any]]
     labels: dict[str, str]
     stopping: threading.Event = field(default_factory=threading.Event)
+    removed: threading.Event = field(default_factory=threading.Event)  # set by `docker rm -f`
     queue: Path | None = None  # the init process' command folder (`init=True` only)
 
     def client(self, code: str, *args: str, timeout: float = 20.0) -> str:
@@ -245,13 +259,16 @@ class ContainerStandIn(RecordingDocker):
     container: `job(container) -> rc` runs on a thread. `docker stop`/`kill` of it set `container.stopping`;
     `ps -aq --filter label=K=V` and `rm -f` answer from the containers it has seen created. `run_fault`
     (rc, stderr) makes the `docker run` end at once, nothing run (an image missing: docker's rc 125).
-    `exec_writer`, when set, is the host command a `docker exec` runs instead (a real writer)."""
+    `exec_writer`, when set, is the host command a `docker exec` runs instead (a real writer). `stubborn`: the job ignores
+    the graceful stop, so `docker stop --time N` blocks (as docker's does) until `rm -f` removes the container or N seconds
+    pass; the job waits on `container.removed`."""
 
     def __init__(self, job: Callable[[Container], int] | None = None, *,
                  run_fault: tuple[int, str] | None = None, exec_writer: list[str] | None = None,
-                 init: bool = False, queue: Path | None = None) -> None:
+                 init: bool = False, queue: Path | None = None, stubborn: bool = False) -> None:
         super().__init__()
         self.job = job
+        self.stubborn = stubborn
         self.init = init
         self._queue = queue  # where an `init=True` container's init finds its commands
         self.init_proc: subprocess.Popen | None = None
@@ -329,12 +346,16 @@ class ContainerStandIn(RecordingDocker):
                 for box in self.boxes:
                     if box.name == n:
                         box.stopping.set()  # `rm -f` kills a running container, as docker does
+                        box.removed.set()
         return got
 
     def _stop(self, argv: list[str]) -> subprocess.CompletedProcess:
         for box in self.boxes:
             if box.name in argv:
                 box.stopping.set()
+                if self.stubborn and argv[1] == "stop":
+                    grace = flag_values(argv, "--time", "-t", "--timeout")
+                    box.removed.wait(float(grace[0]) if grace else 10.0)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     def _ps(self, argv: list[str]) -> subprocess.CompletedProcess:
@@ -412,12 +433,13 @@ class HelperScene:
 
 @contextlib.contextmanager
 def helper_scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[str, ...] = ("identity",),
-                 files: dict[str, Any] | None = None, alert_mapping: Any = FIXTURE_ALERT_MAPPING
+                 files: dict[str, Any] | None = None, alert_mapping: Any = FIXTURE_ALERT_MAPPING, root_pad: int = 0
                  ) -> Iterator[HelperScene]:
     """The fixture tenant published with `proxied` (default `identity`) its only `http-proxy` systems (none: an empty
     grant) and `files` written over it (a `None` value deletes the file), registered active in `dsn` with `alert_mapping`
     saved (`None`: none, for a test of absence) and a live generation whose sign login and forge secret files exist under
-    `tmp_path/secrets`, the worker's claim in the environment, and a second tenant's folder beside it holding a canary."""
+    `tmp_path/secrets`, the worker's claim in the environment, and a second tenant's folder beside it holding a canary.
+    `root_pad`: the data root sits that many characters deeper (a job socket's path that cannot fit)."""
     from defender.box import CLAIM_ENV
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
     from defender.tests.support.tenancy._active1214 import insert_generation
@@ -425,7 +447,9 @@ def helper_scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[s
 
     # A short data root: the job socket lives under it and a unix socket's path holds about 100 bytes, which pytest's
     # nested temporary folders overrun.
-    root = Path(tempfile.mkdtemp(prefix="j", dir="/tmp"))
+    outer = Path(tempfile.mkdtemp(prefix="j", dir="/tmp"))
+    root = outer / ("d" * root_pad) if root_pad else outer
+    root.mkdir(exist_ok=True)
     claim = uuid.uuid4().hex
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)  # the helper holds the database login (N7)
@@ -435,7 +459,7 @@ def helper_scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[s
                             for s in (*_UNDECLARED, "identity") if s not in proxied}
     over.update(files or {})
     with contextlib.ExitStack() as cleanup:
-        cleanup.callback(shutil.rmtree, root, ignore_errors=True)
+        cleanup.callback(shutil.rmtree, outer, ignore_errors=True)
         t = cleanup.enter_context(B.run_tenant(tmp_path, root, files=over))
         register_tenant(dsn, t.tenant_id, data_root=root, generations=(), alert_mapping=alert_mapping)
         fields = A.generation(t.tenant_id, tmp_path / "secrets", sign_role_id="role-1170-sign",
@@ -661,13 +685,25 @@ _DRIVER = textwrap.dedent("""\
 """)
 
 
+_PARENT = textwrap.dedent("""\
+    import json, os, subprocess, sys
+    cfg = json.loads(sys.argv[1])
+    cfg["argv"] = [str(os.getpid()) if a == "@worker" else a for a in cfg["argv"]]
+    child = subprocess.Popen([sys.executable, "-c", sys.argv[2], json.dumps(cfg)])
+    print(child.pid, flush=True)
+    child.wait()
+""")
+
+
 class ProcessHelper:
     """`job_host.main` as a real process (`python -c driver`, its signer and publish answered as `drive_helper`'s) over a
     `docker` executable first on PATH, whose `run` is a stand-in container: it records itself (labels, argv) under
     `state/containers/<name>`, reads its stdin until EOF and then writes `state/eof` and exits; `ps --filter label=`, `rm`,
-    `stop` and `kill` act on those records. `state/started` holds the stand-in container's pid once it runs."""
+    `stop` and `kill` act on those records. `state/started` holds the stand-in container's pid once it runs.
+    `worker=True`: the helper is started by a process of its own (the worker's stand-in: a plain parent, as the worker
+    spawns the helper) and an argv value `"@worker"` is that process' pid; `worker_pid`/`helper_pid` name them."""
 
-    def __init__(self, scene: HelperScene, root: Path, argv: list[str]) -> None:
+    def __init__(self, scene: HelperScene, root: Path, argv: list[str], *, worker: bool = False) -> None:
         self.state = root / "shim-state"
         bin_dir = root / "shim-bin"
         self.state.mkdir(parents=True)
@@ -676,8 +712,12 @@ class ProcessHelper:
         shim.write_text(_SHIM.replace("PYTHON", sys.executable).replace("STATE", str(self.state)), encoding="utf-8")
         shim.chmod(0o755)
         env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"}
-        self.proc = subprocess.Popen([sys.executable, "-c", _DRIVER, json.dumps({"argv": argv, "commit": scene.t.commit})],
-                                     env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        cfg = json.dumps({"argv": argv, "commit": scene.t.commit})
+        command = [sys.executable, "-c", _PARENT, cfg, _DRIVER] if worker else [sys.executable, "-c", _DRIVER, cfg]
+        self.proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE)
+        self.worker_pid = self.proc.pid
+        self.helper_pid = int(self.proc.stdout.readline()) if worker else self.proc.pid
 
     def container_pid(self, timeout: float = 30.0) -> int:
         return int(until(lambda: (self.state / "started").exists() and (self.state / "started").read_text(),
@@ -691,7 +731,7 @@ class ProcessHelper:
         return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
 
     def close(self) -> None:
-        for pid in [self.proc.pid, *(r["pid"] for r in self.records().values())]:
+        for pid in [self.proc.pid, self.helper_pid, *(r["pid"] for r in self.records().values())]:
             with contextlib.suppress(OSError):
                 os.kill(pid, signal.SIGKILL)
         self.proc.wait(timeout=10)

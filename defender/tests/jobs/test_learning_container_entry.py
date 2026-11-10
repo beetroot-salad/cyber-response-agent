@@ -1,7 +1,7 @@
 """#1170 r4 (A3, A5, A6): the learning entries inside the job container: the learning job entry (`job_entry.main`), the
 post-step and the family-less check (`post_step.main`), and the sibling (`run.main` with `--episode --world`). Inside the
 container none takes a host lock, runs an admission, opens the tenant database, makes a run copy, publish or draft, or
-builds a signer (the helper does, and answers over the job socket); none takes `--parent-pid`; EOF on stdin ends each as
+builds a signer (the helper does, and answers over the job socket); EOF on stdin ends each as
 SIGTERM does. The operator sibling, run from a host shell, is unchanged (positive control). Driven through the real helper
 (`job_host.main`) over a container stand-in whose process is the entry; the process cases run each entry's real command
 line. Slice D's counterpart for the investigation is `test_job_container_entry.py`."""
@@ -100,10 +100,8 @@ def test_a6_the_learning_job_entry_takes_no_lock_runs_no_admission_and_opens_no_
     _no_database_login(seen, scene)
 
 
-@pytest.mark.parametrize("case", ["no-job-socket", "parent-pid"])
-def test_a5_a6_the_learning_job_entry_is_container_only_it_does_nothing_from_a_host_shell_and_takes_no_parent_pid(
-        scene, monkeypatch, case):
-    """Run with no job socket in its environment (a host shell that has the database login), or given `--parent-pid`, the entry exits non-zero having written no end record, taken no lock and started no family step. (A5, A6)"""
+def test_a5_a6_the_learning_job_entry_is_container_only_it_does_nothing_from_a_host_shell(scene):
+    """Run with no job socket in its environment (a host shell that has the database login), the entry exits non-zero having written no end record, taken no lock and started no family step. (A5, A6)"""
     from defender import job_host
     from defender.learning.branch import cli, job_entry
     from defender.tenancy import host_lock
@@ -112,23 +110,13 @@ def test_a5_a6_the_learning_job_entry_is_container_only_it_does_nothing_from_a_h
     plant_episode(scene, job_id, source)
     argv = ["--job", job_id, "--tenant", scene.tenant, "--source", source]
 
-    def entry(c, seen):
-        return job_entry.main([*argv, "--parent-pid", str(os.getppid())], environ=c.env, preflight=lambda *a, **k: 0)
-
     with counting_calls(launch_job=cli.launch_job) as launches:
-        if case == "parent-pid":
-            seen = seen_in_container(scene, "learning", entry, job_id=job_id, source=source)
-            assert seen.ran, "the container never ran the entry"
-            assert seen.raised is None, seen.raised
-            code = seen.rc
-        else:
-            assert job_host.SOCKET_ENV not in os.environ, "premise: a host shell has no job socket"
-            with pytest.raises(SystemExit) as stop:
-                job_entry.main(argv, preflight=lambda *a, **k: 0)
-            code = stop.value.code
-            assert host_lock.holders(scene.root, scene.tenant) == [], "the container-less entry took the tenant lock"
+        assert job_host.SOCKET_ENV not in os.environ, "premise: a host shell has no job socket"
+        with pytest.raises(SystemExit) as stop:
+            job_entry.main(argv, preflight=lambda *a, **k: 0)
 
-    assert code not in (0, None), "the container-less entry ran as if it were a job"
+    assert stop.value.code not in (0, None), "the container-less entry ran as if it were a job"
+    assert host_lock.holders(scene.root, scene.tenant) == [], "the container-less entry took the tenant lock"
     assert launches["launch_job"] == 0, "a family step started"
     assert learning_end(scene, job_id) is None, "an end record was written by an entry that must not run"
 
@@ -189,9 +177,8 @@ def test_a6_the_post_step_takes_no_lock_runs_no_admission_opens_no_database_and_
     _no_database_login(seen, scene)
 
 
-@pytest.mark.parametrize("case", ["no-job-socket", "parent-pid"])
-def test_a5_a6_the_post_step_is_container_only_it_does_nothing_from_a_host_shell_and_takes_no_parent_pid(scene, case):
-    """Run with no job socket in its environment, or given `--parent-pid`, the post-step exits non-zero having written no record and run no gate. (A5, A6)"""
+def test_a5_a6_the_post_step_is_container_only_it_does_nothing_from_a_host_shell(scene):
+    """Run with no job socket in its environment, the post-step exits non-zero having written no record and run no gate. (A5, A6)"""
     from defender import job_host
     from defender.learning.branch import post_step
 
@@ -199,22 +186,11 @@ def test_a5_a6_the_post_step_is_container_only_it_does_nothing_from_a_host_shell
     ticks: list[int] = []
     argv = ["--job", job_id, "--tenant", scene.tenant]
 
-    def entry(c, seen):
-        return post_step.main([*argv, "--parent-pid", str(os.getppid())], environ=c.env,
-                              author_tick=lambda *a, **k: ticks.append(1) or 0)
+    assert job_host.SOCKET_ENV not in os.environ, "premise: a host shell has no job socket"
+    with pytest.raises(SystemExit) as stop:
+        post_step.main(argv, author_tick=lambda *a, **k: ticks.append(1) or 0)
 
-    if case == "parent-pid":
-        seen = seen_in_container(scene, "post-step", entry, job_id=job_id)
-        assert seen.ran, "the container never ran the entry"
-        assert seen.raised is None, seen.raised
-        code = seen.rc
-    else:
-        assert job_host.SOCKET_ENV not in os.environ, "premise: a host shell has no job socket"
-        with pytest.raises(SystemExit) as stop:
-            post_step.main(argv, author_tick=lambda *a, **k: ticks.append(1) or 0)
-        code = stop.value.code
-
-    assert code not in (0, None), "the container-less post-step ran as if it were a job"
+    assert stop.value.code not in (0, None), "the container-less post-step ran as if it were a job"
     assert ticks == []
     assert not (scene.runs / f"{job_id}.post-step.json").exists()
 

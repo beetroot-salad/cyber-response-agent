@@ -6,6 +6,7 @@ EOF on stdin ends the entry as SIGTERM does. Driven through the real helper (`jo
 whose process is the entry (`_container_entry1170.enter`); the process cases run `run.serve_job` for real."""
 from __future__ import annotations
 
+import functools
 import os
 import signal
 import subprocess
@@ -21,7 +22,8 @@ from defender.tests.support.jobs._container_entry1170 import (
     ThreadCalls,
     enter,
 )
-from defender.tests.support.jobs._job_helper import claims_of, helper_scene, until
+from defender.tests.support.jobs import _box_relay as R
+from defender.tests.support.jobs._job_helper import OTHER_TENANT, claims_of, helper_scene, listing, until
 from defender.tests.support.jobs._jobs1342 import DEFENDER, WORKTREE
 
 pytestmark = [pytest.mark.postgres, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
@@ -86,18 +88,23 @@ def test_a6_the_entry_takes_its_pass_from_the_socket_and_its_launch_facts_from_t
 
 
 def test_a6_the_entry_opens_no_database_makes_no_copy_runs_no_publish_and_takes_no_lock(scene):
-    """On the container's side: no tenant-records repository, no admission, no run copy, no publish child, no host lock; the helper's side made each once. (A6, O3, P-C)"""
+    """On the container's side: no tenant-records repository, no admission, no run copy, no publish child, no host lock, no request signer or token mint; the helper's side made each once and signed the pass. (A6, O3, O4, P-B, P-C)"""
+    from defender.credential_proxy import _launcher, _tokens
     from defender.investigation import publish_launch
     from defender.systems import run_tenant
     from defender.tenancy import host_lock, postgres, run_knowledge
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 
     inv = str(uuid.uuid4())
     scene.plant(inv)
     watched = {"repository": postgres.PostgresTenantRepository.__init__, "admission": run_tenant.host_tenant,
                "hold_shared": host_lock.hold_shared, "acquire": host_lock.acquire,
-               "copy": run_knowledge.copy_for_run, "publish": publish_launch.launch_publish}
+               "copy": run_knowledge.copy_for_run, "publish": publish_launch.launch_publish,
+               "request_signer": _launcher.request_signer, "signing_access": _launcher.signing_access,
+               "mint": _tokens.mint_request_token}
+    signer = A.MarkedSigner()
     with ThreadCalls(watched) as calls:
-        got = enter(scene, inv, lifecycle=_investigation(), preflight=lambda *a, **k: 0,
+        got = enter(scene, inv, signer=signer, lifecycle=_investigation(), preflight=lambda *a, **k: 0,
                     visualize=lambda *a, **k: None)
 
     _clean(got)
@@ -107,6 +114,7 @@ def test_a6_the_entry_opens_no_database_makes_no_copy_runs_no_publish_and_takes_
     assert calls.helper("admission") == 1, "control: the helper admitted once"
     assert calls.helper("copy") == 1, "control: the helper made the run copy once"
     assert calls.helper("hold_shared") + calls.helper("acquire") >= 1, "control: the helper holds the tenant lock"
+    assert signer.payloads, "control: the helper signed the investigation's pass"
     assert {k: calls.container(k) for k in watched} == dict.fromkeys(watched, 0)
 
 
@@ -218,7 +226,7 @@ def test_a5_eof_on_stdin_is_sigterm_to_the_entry_and_sigterm_is_one_keyboard_int
 
 
 def test_a6_the_host_mode_job_entry_is_retired_run_py_job_without_a_container_does_nothing(scene):
-    """`run.py --job <id> --tenant <T> --parent-pid <pid>` from a host shell with the database login and a valid launch pair: no run is made, no run folder, no holder recorded, a non-zero exit. (A6)"""
+    """`run.py --job <id> --tenant <T>` (no `--parent-pid`, no job socket) from a host shell with the database login and a valid launch pair: no run is made, no run folder, no holder recorded, a non-zero exit. (A6)"""
     from defender.tenancy import host_lock
 
     inv = str(uuid.uuid4())
@@ -226,11 +234,97 @@ def test_a6_the_host_mode_job_entry_is_retired_run_py_job_without_a_container_do
     env = {**os.environ, "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
 
     proc = subprocess.run(  # noqa: S603
-        [sys.executable, str(DEFENDER / "run.py"), "--job", inv, "--tenant", scene.tenant,
-         "--parent-pid", str(os.getpid())],
+        [sys.executable, str(DEFENDER / "run.py"), "--job", inv, "--tenant", scene.tenant],
         env=env, cwd=str(WORKTREE), capture_output=True, text=True, timeout=180, check=False, stdin=subprocess.DEVNULL)
 
     assert proc.returncode != 0, proc.stdout[-1000:] + proc.stderr[-1000:]
     assert not (scene.runs / inv).exists(), "a host-mode job made its run folder"
     assert host_lock.holders(scene.root, scene.tenant) == [], "a host-mode job took the tenant lock"
     assert (scene.runs / f"{inv}.launch.json").exists(), "control: the launch pair was there to be run"
+
+
+# --- the box over the socket: the real lifecycle ---------------------------------------------------------------------
+
+def _real_lifecycle(investigate: Any, **seams: Any):
+    """The entry's own lifecycle, `run._run_investigation_lifecycle` for real, with only the model-driven investigation
+    replaced by `investigate(box=, **kw)`; `seams` are the lifecycle's other keywords (its box start, say)."""
+    from defender import run as run_py
+
+    return functools.partial(run_py._run_investigation_lifecycle, investigate=investigate, **seams)
+
+
+def _summary() -> dict[str, Any]:
+    return {"output": "x", "requests": 0, "truncated_by": None, "closed_before_cut": False, "exit_reason": None}
+
+
+def test_g3_the_real_lifecycle_starts_its_shell_box_and_runs_a_command_over_the_socket_with_no_docker_call_in_the_container(scene):
+    """The container makes no docker call, no box start and no box exec of its own; the helper starts the box and runs the command, whose output reaches the job. (A4, O2, G3)"""
+    from defender.box import _docker, _lifecycle, _output
+
+    inv, ran = str(uuid.uuid4()), {}
+    scene.plant(inv)
+    docker = R.RelayDocker()
+    docker.exec_with = R.printing(R.OK_FRAME)
+    docker.put("running")
+
+    def investigate(*, box: Any, **_kw: Any) -> dict[str, Any]:
+        from defender.execution import bash_exec
+
+        ran["result"] = box.run_parsed(bash_exec.parse("echo hello"), command="echo hello", cwd=Path("/runs/current"),
+                                       timeout=5)
+        ran["sandboxed"] = box.sandboxed
+        return _summary()
+
+    watched = {"docker_call": _docker._RealDocker.__call__, "docker_popen": _docker._RealDocker.popen,
+               "exec": _output.capture_bounded, "box_start": _lifecycle._start_boxed}
+    with ThreadCalls(watched) as calls:
+        got = enter(scene, inv, docker=docker, lifecycle=_real_lifecycle(investigate), preflight=lambda *a, **k: 0,
+                    visualize=lambda *a, **k: None)
+
+    _clean(got)
+    assert ran["result"].out == b"hello\n", "the command's output did not reach the job"
+    assert ran["sandboxed"] is True, "the job's box is not counted as confined"
+    assert len(docker.creates()) >= 1, "control: the helper's side never created the box"
+    assert any(c[1] == "exec" for c in docker.calls), "control: the helper's side never ran the command in the box"
+    assert calls.helper("box_start") >= 1, "control: the helper's side never started a box through the box package"
+    assert calls.helper("exec") >= 1, "control: the helper's side never ran a docker exec"
+    assert {k: calls.container(k) for k in watched} == dict.fromkeys(watched, 0)
+    assert scene.end(inv).box == "started"
+
+
+@pytest.mark.parametrize("refused", [False, True], ids=["control-accepted", "refused"])
+def test_o11_a_box_start_the_helper_refuses_is_a_start_fault_in_the_job_and_no_box_is_created(scene, refused):
+    """The run folder is swapped for a link into another tenant before the box start: the helper's refusal reaches the lifecycle as `BoxStartFault`, the job-end record says `box: start_failed`, no box is created and the investigation never runs. Control: untouched, the same start succeeds. (O11, H10, #1342 M3)"""
+    from defender import box as box_mod
+
+    inv, ran = str(uuid.uuid4()), []
+    scene.plant(inv)
+    other = scene.root / OTHER_TENANT / "runs"
+    docker = R.RelayDocker()
+
+    def start_box(*a: Any, **kw: Any) -> Any:
+        if refused:
+            folder = scene.runs / inv
+            folder.rename(folder.with_name(folder.name + ".moved"))
+            folder.symlink_to(other, target_is_directory=True)
+        return box_mod.start_box(*a, **kw)
+
+    def investigate(**_kw: Any) -> dict[str, Any]:
+        ran.append(1)
+        return _summary()
+
+    before = listing(other)
+    got = enter(scene, inv, docker=docker, lifecycle=_real_lifecycle(investigate, start_box=start_box),
+                preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None)
+
+    assert got.helper.raised is None, got.helper.raised
+    assert listing(other) == before, "the other tenant's folder changed"
+    if not refused:
+        assert got.raised is None, got.raised
+        assert ran == [1], "control: the untouched folder did not run the investigation"
+        assert len(docker.creates()) >= 1, "control: the untouched folder did not start a box"
+        return
+    assert isinstance(got.raised, box_mod.BoxStartFault), got.raised
+    assert ran == [], "the investigation ran with no box"
+    assert docker.creates() == [], "the helper created a box for a refused start"
+    assert scene.end(inv).box == "start_failed"

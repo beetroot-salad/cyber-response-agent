@@ -30,7 +30,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.box, pytest.mark.postgres, requires_b
 #: Runs inside the job container (product code mounted read-only, so `defender` imports). Writes probe.json.
 PROBE = r'''
 import json, os, shutil, subprocess, sys
-out, other, own, viz, secrets = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
+out, other, own, viz, inv, secrets = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6:]
 seen = {"env": dict(os.environ)}
 def reads(p):
     try:
@@ -70,11 +70,11 @@ except Exception as e:
 from defender import job_host
 sock = os.environ[job_host.SOCKET_ENV]
 try:
-    h = job_host.ask(sock, "box.start", kind="shell")["handle"]
+    h = job_host.ask(sock, "box.start", kind="shell", id=inv)["handle"]
     from defender.execution import bash_exec, box_codec
     frame = box_codec.encode_request(bash_exec.parse("echo box-ok"))
     answer = job_host.ask(sock, "box.exec", handle=h, frame=frame)
-    seen["shell"] = [answer.get("result"), box_codec.decode_response(answer["raw"]).out.decode()]
+    seen["shell"] = [answer.get("result"), box_codec.decode_response(answer["frame"]).out.decode()]
 except Exception as e:
     seen["shell"] = f"<{type(e).__name__}: {e}>"
 json.dump(seen, open(out, "w"))
@@ -101,7 +101,7 @@ def probed(tmp_path, monkeypatch, migrated_database):
         monkeypatch.setenv("DEFENDER_RUN_VISUALIZATIONS_DIR", str(viz))
         monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
         command = ["python3", "-c", PROBE, str(out),
-                   str(scene.root / OTHER_TENANT / "canary"), str(own), str(viz), *map(str, scene.secrets)]
+                   str(scene.root / OTHER_TENANT / "canary"), str(own), str(viz), inv, *map(str, scene.secrets)]
         ran = drive_helper(scene, scene.argv("investigation", inv), docker=run_docker, signer=A.MarkedSigner(),
                            command=command)
         assert ran.raised is None, ran.raised

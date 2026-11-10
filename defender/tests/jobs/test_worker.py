@@ -4613,6 +4613,55 @@ async def test_1170_the_worker_starts_each_investigation_as_its_tenants_host_hel
     assert row(world["dsn"], inv)["stage"] == "completed"
 
 
+async def test_1170_the_worker_starts_a_learning_job_and_its_post_step_as_their_kinds_host_helper(world):
+    """The worker's learning and post-step commands start the per-job host helper: `-m defender.job_host --kind learning`
+    with the job, tenant, source run and the worker's pid; `--kind post-step` with the job it follows (none when
+    family-less), the tenant and the pid. One spawn each; the rows end as the scripted children's records say. (#1170 H7)
+
+    The flag order is a pick (the exact argv); the `spawn` door records it and starts the scripted child instead."""
+    from defender.tests.jobs.test_1344_learning_jobs import (
+        END,
+        investigation_of,
+        job_child,
+        job_row,
+        learning_end,
+        learning_worker,
+        post_child,
+        queued_job,
+    )
+    from defender.worker import LearningLaunch, PostStepLaunch, job_entry_argv, post_step_argv
+
+    jobs = job_child(world, files={END: learning_end("completed")})
+    post = post_child(world)
+    real_spawn = asyncio.create_subprocess_exec
+    asked: list[list[str]] = []
+    pid = os.getpid()
+
+    async def as_scripted(*argv, **kw):
+        asked.append(list(argv))
+        rest = list(argv[3:])
+        flags = dict(zip(rest[::2], rest[1::2], strict=False))
+        kind, job = flags["--kind"], flags["--job"]
+        launch = (LearningLaunch(job, T1, pid, flags["--source"]) if kind == "learning"
+                  else PostStepLaunch(job, T1, pid, (job,)))
+        return await real_spawn(*(jobs if kind == "learning" else post)(launch), **kw)
+
+    async with job_store(world["dsn"]) as store:
+        job = await queued_job(world, store, ticket="T-1")
+        source = investigation_of(world["dsn"], job)
+        await learning_worker(world, store, job=job_entry_argv, post=post_step_argv, spawn=as_scripted).drain()
+
+    base = [sys.executable, "-m", "defender.job_host"]
+    assert asked == [
+        [*base, "--kind", "learning", "--job", job, "--tenant", T1, "--source", source, "--parent-pid", str(pid)],
+        [*base, "--kind", "post-step", "--job", job, "--tenant", T1, "--parent-pid", str(pid)]]
+    assert job_row(world["dsn"], job)["status"] == "completed"
+    assert post_step_argv(PostStepLaunch(None, T1, pid, ())) == [*base, "--kind", "post-step", "--tenant", T1,
+                                                                 "--parent-pid", str(pid)]
+    assert job_entry_argv(LearningLaunch(job, T1, pid, "src-1")) == [*base, "--kind", "learning", "--job", job, "--tenant", T1,
+                                                                       "--source", "src-1", "--parent-pid", str(pid)]
+
+
 @pytest.mark.parametrize("copied", [True, False], ids=["code-copy", "control-no-copy"])
 async def test_1170_the_worker_spawns_the_helper_in_its_code_copy_and_only_there(world, copied):
     """The helper is started with `cwd` set to the worker's code copy (the `child_cwd` it was given), so it imports the copy and the container mounts it; a worker given no copy sets no `cwd` (control). (#1170 A7, G-D3)"""

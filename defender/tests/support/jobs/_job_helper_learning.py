@@ -60,10 +60,11 @@ def run_kind(  # noqa: PLR0913 — one keyword per thing a case may replace
 @dataclass
 class PlantedEpisode:
     """A learning job's episode as its pre-flight leaves it: `dir` under `<T>/episodes/`, the `source` run it was made from,
-    each manifest label's world id (`worlds`) and the canonical arm run id the roster minted for it (`roster`, by world id)."""
+    the learning job's id (`job_id`: the episode's id, `job_entry.py:83`), each manifest label's world id (`worlds`) and the canonical arm run id the roster minted for it (`roster`, by world id)."""
 
     dir: Path
     source: str
+    job_id: str
     worlds: dict[str, str]
     roster: dict[str, str]
 
@@ -72,16 +73,24 @@ class PlantedEpisode:
 
 
 def plant_siblings(scene: HelperScene, source: str | None = None) -> PlantedEpisode:
-    """A real episode (`plant_episode`) of the learning job whose `--source` is `source`, with its arm roster."""
+    """A real episode (`plant_episode`) at the learning job's own id (job id = episode id), whose `--source` is `source`,
+    with its arm roster. Run the job with `job_id=planted.job_id`."""
     from defender.tests.storage.ids_1187 import _spec1187 as S
     from defender.tests.support.jobs._learning_container1170 import plant_episode
     from defender.tests.support.learning.branch import _triplet_947 as T
 
     source = source or str(uuid.uuid4())
-    ep, _ = plant_episode(scene, str(uuid.uuid4()), source)
+    job_id = str(uuid.uuid4())
+    ep, _ = plant_episode(scene, job_id, source)
     worlds = {w: T.world_id(ep, w) for w in T.WORLDS}
     roster = dict(S.read_roster(ep))
-    return PlantedEpisode(ep, source, worlds, roster)
+    return PlantedEpisode(ep, source, job_id, worlds, roster)
+
+
+def plant_decoy(scene: HelperScene, planted: PlantedEpisode) -> PlantedEpisode:
+    """Another episode of the tenant, at an id that is not the job's, made from the job's own `--source`: the one a helper
+    that finds the episode by `--source` would pick."""
+    return plant_siblings(scene, planted.source)
 
 
 def learning_end(scene: HelperScene, job_id: str) -> Any:

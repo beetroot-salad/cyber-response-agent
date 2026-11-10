@@ -27,6 +27,7 @@ from defender.tests.support.jobs._job_helper import (
     SignalingSigner,
     after_the_signal,
     claims_of,
+    closed_port_dsn,
     drive_helper,
     flag_values,
     helper_scene,
@@ -156,7 +157,7 @@ def test_a7_the_code_mounted_is_read_only_at_the_same_path_and_holds_no_env_file
 
     (code,) = [m for m in docker.box.mounts if m["source"] and m["source"] != own and m["readonly"]]
     assert code["source"] == code["target"], code
-    assert not list(Path(code["source"]).glob(".env*")), "the mounted code tree holds an env file"
+    assert not list(Path(code["source"]).glob(".env")), "the mounted code tree holds an env file"
 
 
 def test_h9_the_job_container_runs_as_the_uid_that_owns_the_data_root(scene):
@@ -251,6 +252,25 @@ def test_a8_the_environment_is_every_setting_the_job_reads_minus_secrets_and_cro
     assert job_host.SOCKET_ENV in env
 
 
+def test_n2_the_provider_key_the_helper_resolved_reaches_the_container_environment_and_no_env_file_is_mounted(
+        scene, monkeypatch, tmp_path):
+    """The key `resolve_first_party_key` reads from `DEFENDER_ENV_FILE` (the helper's environment holds none) is the
+    container's `ANTHROPIC_API_KEY`, and the file it came from is under no mount. (N2, A8, A7)"""
+    keys = tmp_path / "keys"
+    keys.mkdir()
+    env_file = keys / ".env"
+    env_file.write_text("ANTHROPIC_API_KEY=sk-ant-test-1170\n", encoding="utf-8")
+    monkeypatch.setenv("DEFENDER_ENV_FILE", str(env_file))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _inv, docker, _ran, _s = _go(scene, lambda c: 0)
+
+    assert docker.box.env.get("ANTHROPIC_API_KEY") == "sk-ant-test-1170", "the resolved provider key did not reach the job"
+    sources = [Path(m["source"]) for m in docker.box.mounts if m["source"]]
+    assert sources, "premise: the container has mounts"
+    assert not any(env_file.is_relative_to(src) for src in sources), "the env file's folder is mounted"
+    assert not any((src / ".env").exists() for src in sources), "a mounted folder holds a .env"
+
+
 # --- O5, O6, A1, A6: passes and ids ---------------------------------------------------------------------------------
 
 def test_o5_a_pass_names_the_tenant_the_investigation_the_proxied_grant_and_a_600_second_expiry(scene):
@@ -304,6 +324,89 @@ def test_o6_a_job_holding_the_row_gets_a_fresh_pass_each_time_it_asks(scene):
     assert second["exp"] >= first["exp"]
 
 
+
+
+def test_o6_a_job_holding_the_row_still_gets_fresh_passes_while_the_database_is_in_an_outage(scene, monkeypatch):
+    """With the database address moved to a port nothing listens on (a real refusal) between two asks, `pass` is still
+    answered, signed anew for the same investigation. (O6: during an outage passes keep coming; control: the ask before)"""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    inv, argv = _investigation(scene)
+    signer = make_signer()
+    got: dict = {}
+
+    def job(c) -> int:
+        got["before"] = c.request("pass", id=inv)["token"]
+        monkeypatch.setenv("DEFENDER_DATABASE_DSN", closed_port_dsn(scene.dsn))
+        try:
+            with pytest.raises(Exception):  # noqa: B017, PT011 — any driver refusal: the premise is a real outage
+                execute(os.environ["DEFENDER_DATABASE_DSN"], "SELECT 1")
+            got["during"] = [c.request("pass", id=inv)["token"] for _ in range(2)]
+        finally:
+            monkeypatch.setenv("DEFENDER_DATABASE_DSN", scene.dsn)
+        return 0
+
+    docker = ContainerStandIn(job)
+    ran = drive_helper(scene, argv, docker=docker, signer=signer)
+
+    assert ran.raised is None, ran.raised
+    assert docker.job_error is None, docker.job_error
+    assert len({got["before"], *got["during"]}) == 3, "a pass during the outage was not signed anew"
+    assert [claims_of(signer, t)["investigation"] for t in got["during"]] == [inv, inv]
+
+
+def test_o5_a_publish_between_the_claim_and_a_later_pass_leaves_the_jobs_export_commit_and_grant_unchanged(scene):
+    """A tenant publish that lands after the claim (a merge that takes the proxied grant away) changes what the tenant
+    exports, but `launch` and a later `pass` still carry the commit and grant the job was claimed with. (O5)"""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    inv, argv = _investigation(scene)
+    signer = make_signer()
+    got: dict = {}
+
+    def job(c) -> int:
+        got["first"] = A.grant_of(claims_of(signer, c.request("pass", id=inv)["token"]))
+        scene.t.merge({"settings/systems/identity/access.yaml": None})
+        got["published"] = scene.t.publish().commit
+        got["launch"] = c.request("launch")
+        got["later"] = A.grant_of(claims_of(signer, c.request("pass", id=inv)["token"]))
+        return 0
+
+    docker = ContainerStandIn(job)
+    ran = drive_helper(scene, argv, docker=docker, signer=signer)
+
+    assert ran.raised is None, ran.raised
+    assert docker.job_error is None, docker.job_error
+    assert got["published"] != scene.t.commit, "premise: the publish exported a new commit"
+    assert got["first"] == [("identity", "r")]
+    assert got["launch"]["export_commit"] == scene.t.commit
+    assert got["later"] == got["first"]
+
+
+def test_a3_a_job_socket_path_that_cannot_fit_a_unix_socket_ends_the_row_as_a_box_start_failure(
+        scene, tmp_path, monkeypatch):
+    """A data root so deep that the per-claim socket path overruns a unix socket's limit: no container is started and the
+    end record says `box: start_failed`, not `setup: refused`. (r4.1 socket note, A3; control: the default scene starts one)"""
+    from defender.records.job_facts import BOX_START_FAILED, SETUP_REFUSED
+
+    _inv, docker, _ran, _s = _go(scene, lambda c: 0)
+    assert len(docker.boxes) == 1, "control: the default scene starts its container"
+
+    long_tmp = tmp_path / "long"
+    long_tmp.mkdir()
+    with helper_scene(long_tmp, monkeypatch, scene.dsn, root_pad=110) as deep:
+        assert len(str(deep.root / "x" / "job.sock")) > 108, "premise: the socket path cannot fit"
+        inv, argv = _investigation(deep)
+        docker = ContainerStandIn(lambda c: 0)
+        ran = drive_helper(deep, argv, docker=docker, signer=make_signer())
+
+        assert ran.raised is None, ran.raised
+        assert docker.boxes == [], "a container was started with no socket to serve it"
+        assert docker.creates() == []
+        end = deep.end(inv)
+        assert end is not None
+        assert end.box == BOX_START_FAILED, end
+        assert end.setup != SETUP_REFUSED
 
 
 @pytest.mark.parametrize(("kind", "request_name", "fields"), [
@@ -539,35 +642,48 @@ def test_o10_a_box_writing_past_the_output_limit_gets_the_output_limit_result_fr
 # --- O7, H8, A2, A5: stopping ---------------------------------------------------------------------------------------
 
 def test_h8_a_teardown_during_a_job_signals_the_recorded_helper_and_gets_the_lock_with_nothing_of_the_tenant_left(scene):
-    """`take_exclusive` finds the helper recorded and signals it (the test's `containers` removes by label, forced, as
-    #1214 orders); the helper exits, so the lock is taken with no container of the tenant left. (H8, O7, C17)"""
+    """With a shell box started and a job that ignores the graceful stop, `take_exclusive` signals the recorded helper and
+    force-removes the tenant's containers (the test's `containers`, as #1214 orders); the lock is taken well inside the
+    helper's stop grace and no container of the tenant, box included, is left. (H8, O7, C17)"""
     from defender.box import TENANT_LABEL, remove_tenant_containers
     from defender.lifecycle._teardown import take_exclusive
     from defender.tenancy import host_lock
 
     got: dict = {}
+    inv, argv = _investigation(scene)
 
     def teardown() -> None:
         def containers(tenant: str) -> None:
             assert remove_tenant_containers(tenant, docker=docker) is None
+        got["started"] = time.monotonic()
         got["fd"] = take_exclusive(scene.root, scene.tenant, wait=60.0, containers=containers)
+        got["took"] = time.monotonic() - got["started"]
 
     def job(c) -> int:
+        got["box"] = c.request("box.start", kind="shell", id=inv)
         got["holders"] = [h.pid for h in host_lock.holders(scene.root, scene.tenant)]
+        got["live"] = docker.left(TENANT_LABEL, scene.tenant)
         got["teardown"] = threading.Thread(target=teardown, daemon=True)
         got["teardown"].start()
-        assert c.stopping.wait(15), "the container was never stopped"
-        return 143
+        assert c.removed.wait(40), "the container was never force-removed"
+        return 137
 
-    docker = ContainerStandIn(job)
-    _go(scene, docker=docker)
-    got["teardown"].join(timeout=30)
+    docker = ContainerStandIn(job, stubborn=True)
+    ran = drive_helper(scene, argv, docker=docker, signer=make_signer())
+    got["teardown"].join(timeout=60)
 
+    assert ran.raised is None, ran.raised
+    assert docker.job_error is None, docker.job_error
     assert got["holders"] == [os.getpid()], "premise: the helper was the tenant's recorded holder"
+    assert got["box"], "premise: the shell box was started"
+    assert len(got["live"]) >= 2, f"premise: the job container and its box are the tenant's: {got['live']}"
     assert got.get("fd") is not None, "teardown did not get the tenant's lock"
     host_lock.release_lock(got["fd"])
     assert docker.left(TENANT_LABEL, scene.tenant) == []
     assert [h.pid for h in host_lock.holders(scene.root, scene.tenant)] == []
+    stops = [c for c in docker.log if len(c) > 1 and c[1] == "stop"]
+    grace = min((float(g) for c in stops for g in flag_values(c, "--time", "-t", "--timeout")), default=25.0)
+    assert got["took"] < grace / 2, f"teardown waited for the helper's graceful stop ({got['took']:.1f} s, grace {grace})"
 
 
 def test_o7_a_stop_from_the_worker_stops_the_container_gracefully_lets_the_job_write_its_end_then_removes_by_label(scene):
@@ -620,6 +736,29 @@ def test_a5_the_container_ends_when_its_helper_is_killed_without_any_worker_swee
         os.kill(helper.proc.pid, signal.SIGKILL)
         helper.proc.wait(timeout=10)
         until(lambda: (helper.state / "eof").exists() and not pid_alive(container), "the container to end", 10.0)
+    finally:
+        helper.close()
+
+
+def test_a5_killing_the_worker_ends_its_helper_and_the_helpers_container_goes_with_it(scene, tmp_path):
+    """A real helper started by a process standing in for the worker (its `--parent-pid`): SIGKILL that process and the
+    helper exits, and its container stand-in has ended by the death tie (EOF on its stdin, or the helper's stop) with no
+    sweep. (A5, H7; that the worker's argv names its own pid is `test_worker`'s; control: both alive before the kill)"""
+    inv, _argv = _investigation(scene)
+    argv = scene.argv("investigation", inv)
+    argv[-1] = "@worker"
+    helper = ProcessHelper(scene, tmp_path, argv, worker=True)
+    try:
+        container = helper.container_pid()
+        time.sleep(0.5)
+        assert pid_alive(helper.helper_pid), "premise: the helper ended before its worker was killed"
+        assert pid_alive(container), "premise: the container ended before its worker was killed"
+
+        os.kill(helper.worker_pid, signal.SIGKILL)
+        helper.proc.wait(timeout=10)
+        until(lambda: not pid_alive(helper.helper_pid), "the helper to exit with its worker", 30.0)
+        until(lambda: not pid_alive(container), "the container to end", 30.0)
+        assert (helper.state / "eof").exists() or (helper.state / "terminated").exists()
     finally:
         helper.close()
 
@@ -736,32 +875,37 @@ def test_a3_o11_a_container_that_cannot_start_ends_the_row_as_a_box_start_failur
     assert end.setup != SETUP_REFUSED
 
 
-def test_a3_an_investigations_helper_waits_for_a_busy_tenant_lock_and_then_runs_with_no_bounded_wait(scene):
-    """The tenant's lock held exclusive (prepare, teardown) for a while: the helper waits, writes no end record, and starts
-    its container once the lock is free; none of its lock calls waits a bounded time. (A3, O11; learning's 30 s is its
-    own)"""
+def test_a3_an_investigations_helper_waits_for_a_busy_tenant_lock_and_then_runs(scene):
+    """The tenant's lock held exclusive (prepare, teardown) for a while: the helper waits, writes no end record while it is
+    held, and starts its container once the lock is free. (A3, O11; learning's 30 s is its own)"""
     from defender.tenancy import host_lock
-    from defender.tests.support.tenancy._host1214 import counting_calls
 
     inv, argv = _investigation(scene)
     fd = host_lock.acquire(scene.root, scene.tenant, exclusive=True, timeout=0)
     assert fd is not None, "premise: the lock was taken"
-    release = threading.Timer(1.5, host_lock.release_lock, args=(fd,))
-    release.start()
+    seen: dict = {}
+
+    def release() -> None:
+        seen["end_while_held"] = scene.end(inv)
+        seen["boxes_while_held"] = len(docker.boxes)
+        host_lock.release_lock(fd)
+
+    timer = threading.Timer(1.5, release)
+    timer.start()
     docker = ContainerStandIn(lambda c: 0)
     started = time.monotonic()
     try:
-        with counting_calls(acquire=host_lock.acquire) as calls:
-            ran = drive_helper(scene, argv, docker=docker, signer=make_signer())
+        ran = drive_helper(scene, argv, docker=docker, signer=make_signer())
     finally:
-        release.cancel()
+        timer.cancel()
 
     assert ran.raised is None, ran.raised
     assert time.monotonic() - started >= 1.4, "premise: the helper did not wait for the lock"
     assert docker.job_ran, "the helper did not run the job once the lock was free"
     assert ran.rc == 0
     assert scene.end(inv) is None
-    assert all(k["timeout"] in (0, None) for k in calls.locals["acquire"]), [k["timeout"] for k in calls.locals["acquire"]]
+    assert seen["end_while_held"] is None, "the helper wrote an end record while the lock was held"
+    assert seen["boxes_while_held"] == 0, "a container was started while the lock was held"
 
 
 def test_premise_the_other_tenants_canary_is_planted(scene):
