@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests.support.presentation import _episode_1025 as E
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 
@@ -129,11 +130,10 @@ _SALT = re.compile(r"run-[0-9a-f]{16}-")
 
 def _judge_prompts(ep: Path) -> dict[str, str]:
     """Grade one published family afresh; normalize only each call's fresh frame salt."""
-    from defender.tests.support.learning.core._state1135 import env_state
 
     (ep / "judge.yaml").unlink(missing_ok=True)
     judge = P.quiet_judge()
-    P.J.grade_at(ep, judge=judge, state=env_state())
+    P.J.grade_at(ep, judge=judge, store=MemoryStore())
     assert len(judge.agent_ids) == len(judge.prompts)
     assert len(set(judge.agent_ids)) == len(judge.agent_ids)
     return {agent: _SALT.sub("run-SALT-", prompt)

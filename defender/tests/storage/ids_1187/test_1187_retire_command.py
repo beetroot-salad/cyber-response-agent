@@ -293,22 +293,27 @@ def test_retirement_moves_intact_entries_and_is_restartable(phase, data_root, tm
     assert served.out.splitlines() == [LESSON_ROW]
 
 
+@pytest.mark.postgres
 def test_1187_r3_a_queued_curation_row_naming_an_old_run_does_not_stop_the_command(
-        data_root, tmp_path, monkeypatch):
-    from defender.tests.support.learning.core import _state1135
+        data_root, tmp_path, migrated_database):  # noqa: F811
+    """A curation request waiting in the learning store (#1278: rows, not an `author-queue` folder) that names an old run
+    neither stops the command nor is touched by it."""
+    from defender.tests.support.jobs._jobs1342 import register_tenant
+    from defender.tests.support.learning.core import _store1278 as ST
 
     sc = _scene(data_root, tmp_path)
-    state_root = _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-    _state1135.env_state().enqueue_curation(
-        "case-old", {"case_id": "case-old", "tenant_id": T, "run_id": S.OLD_PINNED_ID})
-    queued = S.tree(state_root)
-    assert any(rel.endswith("case-old.json") for rel in queued), queued
+    register_tenant(migrated_database, T)
+    ST.call(migrated_database, "enqueue_request", T, S.OLD_PINNED_ID, "case-old",
+            {"case_id": "case-old", "tenant_id": T, "run_id": S.OLD_PINNED_ID})
+    queued = sorted((k, i.status) for k, i in ST.work(migrated_database, T).items())
+    assert any(k == S.OLD_PINNED_ID for k, _ in queued), queued
 
     got = _retire(*_full(sc))
     assert _ok(got), _shown(got)
     assert S.OLD_PINNED_ID in _names(location_path(sc.runs_legacy))
     assert _names(location_path(sc.runs_legacy)) == sc.old
-    assert S.tree(state_root) == queued, "the command touched the curation queue"
+    after = sorted((k, i.status) for k, i in ST.work(migrated_database, T).items())
+    assert after == queued, "the command touched the curation queue"
 
 
 def test_1187_n13_old_episodes_go_to_the_tenant_named_and_no_other_tenant_is_touched(

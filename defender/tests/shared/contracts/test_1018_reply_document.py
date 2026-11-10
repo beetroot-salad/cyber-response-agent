@@ -15,13 +15,12 @@ from defender.learning.judge import JudgeRefused
 from defender.learning.judge import run as judge_run
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 DOCUMENT = (
@@ -358,7 +357,7 @@ def _episode(tmp_path, **kw):
 def _grade(tmp_path, ep, judge, **kw):
     """The real pass; returns the grade so the caller can assert the pass RETURNED."""
     return J.grade_at(
-        ep, judge=judge, state=_state1135.env_state(), **kw)
+        ep, judge=judge, store=MemoryStore(), **kw)
 
 
 def _wire_row(ep: Path, label: str, draw: int) -> dict:

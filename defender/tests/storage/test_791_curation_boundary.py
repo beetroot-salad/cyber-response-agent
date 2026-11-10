@@ -2,10 +2,11 @@
 """
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+from defender.tests.support.shared._locations_1210 import fixture_data_root
 
 import inspect
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,15 +21,17 @@ from defender import run_common
 from defender.records import _alert_input  # noqa: E402
 from defender.learning.core import drains  # noqa: E402
 from defender.box import _scrub as scrub_mod  # noqa: E402
-from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of, set_state_dir  # noqa: E402
+from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of  # noqa: E402
+from defender.tests.support.sandbox._curation_store1278 import reach_store  # noqa: E402
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: E402, F401 — fixture
 from defender.tests.support.sandbox._spec791 import (  # noqa: E402
     TAIL_SEAM,
     SpecTail,
     author_markers,
+    curation_requests,
     drive_tail,
     loop_paths,
     make_run_dir,
-    marker_body,
     noop_start_box,
     noop_stop_box,
     plant_alert,
@@ -39,17 +42,21 @@ from defender.tests.support.sandbox._spec791 import (  # noqa: E402
 from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo  # noqa: E402
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant  # noqa: E402
 
+pytestmark = pytest.mark.postgres
+
 HELD_OUT_ALERT = json.dumps({"rule": {"id": "9999"}, "held": "out"}).encode("utf-8")
 
 
 @pytest.fixture
-def state(tmp_path, monkeypatch):
-    """Run end uses its tenant's queue, despite an ambient legacy state root."""
-    set_state_dir(monkeypatch, tmp_path / "legacy-state")
+def state(tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
+    """The tenant's learning paths over a scratch repo, with the learning store (#1278: the queue is rows) holding the
+    tenant active where run end files its curation request."""
+    from defender.learning.core.config import LoopPaths
+
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     tenant = set_up_tenant(current_data_root())
-    location_path(tenant.learning).mkdir(exist_ok=True)
-    return replace(loop_paths(tmp_path), state_dir=location_path(tenant.learning))
+    reach_store(migrated_database, monkeypatch, tenant)
+    return replace(LoopPaths.for_tenant(tenant), repo_root=loop_paths(tmp_path).repo_root)
 
 
 @pytest.fixture
@@ -68,6 +75,31 @@ def _lead_drain(t, paths, **steps) -> int:
     return drains.lead_author_drain(
         paths, client=t.forge.client, identity=t.vault.identity(), directory=t.directory,
         start_box=noop_start_box, stop_box=noop_stop_box, **steps)
+
+
+def _waiting_runs(paths) -> list[str]:
+    """The run ids of the curation requests waiting in the store for `paths`' tenant (a retry of one case supersedes
+    the earlier request, so a case id alone cannot show a new request was filed)."""
+    return sorted(str(body["run_id"]) for body in curation_requests(paths).values())
+
+
+def _served(sink: list[Path]):
+    """A lead-author work step that records the run it was handed and reports it served."""
+    def serve(_paths, _state, run, *, box=None, on_done=None, items=(), outcomes=None, **_kw):
+        sink.append(run.run_dir)
+        _decide_served(items, outcomes)
+        if on_done is not None:
+            on_done(None)
+    return serve
+
+
+def _decide_served(items, outcomes) -> None:
+    """The fate a served request takes (the real step decides one per item): skipped, so the store leaves it no longer
+    waiting. A step that served and decided nothing leaves its item waiting again (r8 Lead-author lane)."""
+    from defender.learning.store import Outcome
+
+    for kind, key, _payload in items:
+        outcomes[(kind, key)] = Outcome.skipped("served by the test's lane")
 
 
 def _certified_run(*, name="case-791", alert_bytes=None, tenant_id=None) -> Path:
@@ -154,7 +186,7 @@ def test_791_finished_investigation_drives_catalog_curation(published, tmp_path,
     served: list[Path] = []
     rc = _lead_drain(
         published, drain_paths(published, product_repo(tmp_path)),
-        run_lead_author=lambda _paths, _state, run, *, box=None, **_kw: served.append(run.run_dir),
+        run_lead_author=_served(served),
         run_pitfalls=lambda *_a, **_kw: 0,
     )
     assert rc == 0
@@ -163,7 +195,7 @@ def test_791_finished_investigation_drives_catalog_curation(published, tmp_path,
     assert author_markers(state) == [], "the served request was left on the queue"
 
 
-def test_the_curation_request_of_another_tenant_than_the_runs_is_not_enqueued(tmp_path, state, caplog):
+def test_the_curation_request_of_another_tenant_than_the_runs_is_not_enqueued(tmp_path, state, caplog, monkeypatch):
     """Run end hands the curation request the run's accepted tenant; one whose id differs from the run's is refused
     through the "NOT enqueuing" channel and nothing is queued, while the matching tenant queues (r10.1 C7, fail closed)."""
     import logging
@@ -177,11 +209,10 @@ def test_the_curation_request_of_another_tenant_than_the_runs_is_not_enqueued(tm
     with caplog.at_level(logging.INFO):
         assert run_common.enqueue_curation(run, run_dir / "alert.json", **{ENQUEUE_TENANT: accepted}) is True
     assert len(author_markers(state)) == 1, "control: the matching tenant's request was queued"
-    for marker in (location_path(state.state_root) / "author-queue").glob("*.json"):
-        marker.unlink()
+    waiting = _waiting_runs(state)
     other = set_up_tenant(current_data_root(), fixture_uuid("curation-other-tenant"))
     assert str(other.id) != run.tenant_id
-    location_path(other.learning).mkdir(exist_ok=True)  # the handed tenant's queue could be written, were it reached
+    reach_store(os.environ["DEFENDER_DATABASE_DSN"], monkeypatch, other)  # the handed tenant's queue could be written, were it reached
     caplog.clear()
     with caplog.at_level(logging.INFO):
         queued = run_common.enqueue_curation(run, run_dir / "alert.json", **{ENQUEUE_TENANT: other})
@@ -189,7 +220,7 @@ def test_the_curation_request_of_another_tenant_than_the_runs_is_not_enqueued(tm
     refusals = [r.getMessage() for r in caplog.records if "NOT enqueuing" in r.getMessage()]
     assert refusals, "the mismatch was refused without the NOT-enqueuing line"
     assert str(other.id) in " ".join(refusals) or run.tenant_id in " ".join(refusals), refusals
-    assert author_markers(state) == [], "a request for another tenant than the run's was queued"
+    assert _waiting_runs(state) == waiting, "a request for another tenant than the run's was queued"
     from defender.learning.core.config import LoopPaths
 
     assert author_markers(LoopPaths.for_tenant(other)) == [], "the refused request was written to the handed tenant's queue"
@@ -201,9 +232,9 @@ def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state)
     run_dir = _certified_run()
     _enqueue(run_dir, run_dir / "alert.json")
 
-    markers = sorted((location_path(state.state_root) / "author-queue").glob("*.json"))
-    assert len(markers) == 1
-    body = marker_body(markers[0])
+    requests = curation_requests(state)
+    assert len(requests) == 1
+    body = next(iter(requests.values()))
 
     assert body.get("case_id"), f"the curation request names no case: {body}"
     # The request carries the run's address; "resolvable" is the drain's own rehydration of it.
@@ -214,11 +245,11 @@ def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state)
 
 
 def test_1186_run_end_keeps_identical_cases_in_their_runs_tenant_queues(tmp_path, state, monkeypatch):
-    """Run identity selects state: equal case digests cannot coalesce across tenants."""
+    """Run identity selects the tenant's queue: equal case digests cannot coalesce across tenants."""
     first_root = current_data_root()
     other_root = tmp_path / "other-data"
     other = set_up_tenant(other_root, fixture_uuid("tenant:other-1186"))
-    location_path(other.learning).mkdir(exist_ok=True)
+    reach_store(os.environ["DEFENDER_DATABASE_DSN"], monkeypatch, other)
     alert = b'{"rule":{"id":"1186"},"case":"same-alert"}'
     first = _certified_run(name="tenant-a", alert_bytes=alert)
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(other_root))
@@ -226,14 +257,14 @@ def test_1186_run_end_keeps_identical_cases_in_their_runs_tenant_queues(tmp_path
     for root, run_dir in ((first_root, first), (other_root, second)):
         monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
         assert _enqueue(run_dir, run_dir / "alert.json") is True
-    queues = [location_path(state.state_root) / "author-queue", location_path(other.learning) / "author-queue"]
-    markers = [list(queue.glob("*.json")) for queue in queues]
-    assert [len(items) for items in markers] == [1, 1]
-    bodies = [marker_body(items[0]) for items in markers]
+    from defender.learning.core.config import LoopPaths
+
+    queues = [curation_requests(state), curation_requests(LoopPaths.for_tenant(other))]
+    assert [len(items) for items in queues] == [1, 1]
+    bodies = [next(iter(items.values())) for items in queues]
     assert bodies[0]["case_id"] == bodies[1]["case_id"]
     assert [(body["tenant_id"], body["run_id"]) for body in bodies] == [
         (run_dir.parent.parent.name, run_dir.name) for run_dir in (first, second)]
-    assert not (tmp_path / "legacy-state" / "author-queue").exists()
 
 
 def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_path, state):
@@ -246,17 +277,17 @@ def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_pat
     _enqueue(first, first / "alert.json")
     _enqueue(second, second / "alert.json")
 
-    markers = sorted((location_path(state.state_root) / "author-queue").glob("*.json"))
-    assert len(markers) == 1, \
-        f"a retry added a second curation request instead of coalescing: {[m.name for m in markers]}"
-    body = marker_body(markers[0])
+    requests = curation_requests(state)
+    assert len(requests) == 1, \
+        f"a retry added a second curation request instead of coalescing: {sorted(requests)}"
+    body = next(iter(requests.values()))
     assert _opened(body).resolve() == second.resolve(), \
         "the coalesced request still points at the run the retry replaced"
 
 
 def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(published, tmp_path, state):
     """A curation request that arrives while the lane is already curating that case survives
-    (claim and serve are atomic)."""
+    (the claim holds the request it took; a later one for the case is a new waiting request)."""
     alert = json.dumps({"rule": {"id": "5710"}, "case": "one-and-the-same"}).encode("utf-8")
     first = _certified_run(name="run-a", alert_bytes=alert)
     second = _certified_run(name="run-b", alert_bytes=alert)
@@ -264,11 +295,14 @@ def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(published, tmp_
 
     served: list[Path] = []
 
-    def serve_and_re_ask(_paths, _state, run, *, box=None, **_kw):
+    def serve_and_re_ask(_paths, _state, run, *, box=None, on_done=None, items=(), outcomes=None, **_kw):
         served.append(run.run_dir)
+        _decide_served(items, outcomes)
         if len(served) == 1:
             # The operator re-investigates the case while the lane is curating it.
             _enqueue(second, second / "alert.json")
+        if on_done is not None:
+            on_done(None)
 
     paths = drain_paths(published, product_repo(tmp_path))
 
@@ -286,22 +320,22 @@ def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(published, tmp_
     assert author_markers(state) == [], "the served re-ask was left on the queue"
 
 
-def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, state):
+def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, state, monkeypatch):
     run_dir = _certified_run()
-    (location_path(state.state_root) / "author-queue").parent.mkdir(parents=True, exist_ok=True)
-    (location_path(state.state_root) / "author-queue").write_text("not a directory\n", encoding="utf-8")
+    dsn = os.environ["DEFENDER_DATABASE_DSN"]
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", "postgresql://postgres:postgres@127.0.0.1:1/postgres")  # a closed local port
 
     assert _enqueue(run_dir, run_dir / "alert.json") is False, \
         "a failed curation write did not report itself"
 
-    broken = SpecTail(state)
+    broken = SpecTail(state, observe_queue=False)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "broken"), broken) == 0, \
         "a curation request that could not be written changed the investigation's exit status"
     assert "visualize" in broken.names, \
         "the failed curation write took the render step with it — the investigation lost its " \
         "human-facing output to an optimisation over a corpus"
 
-    (location_path(state.state_root) / "author-queue").unlink()
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)
     working = SpecTail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "working"), working) == 0
     assert working.step("visualize").curation_requests, \
@@ -337,13 +371,12 @@ def test_791_no_learn_suppresses_curation_too(tmp_path, state):
     assert author_markers(state), \
         "the boundary never fires at all — the suppressed arm above proves nothing"
 
-    for marker in (location_path(state.state_root) / "author-queue").glob("*.json"):
-        marker.unlink()
+    before = _waiting_runs(state)
     scoring = SpecTail(state)
     assert drive_tail(
         run_py.main, plant_alert(tmp_path / "scored", alert_bytes=HELD_OUT_ALERT), scoring, "--no-learn"
     ) == 0
-    assert author_markers(state) == [], \
+    assert _waiting_runs(state) == before, \
         "the held-out eval's own documented invocation started feeding the committed catalog"
 
 
@@ -378,9 +411,8 @@ def test_791_the_curation_trigger_joins_the_scrub_ordering_property(tmp_path, st
     assert author_markers(state), \
         "no curation request was written at all, so the refusal below proves nothing"
 
-    for marker in (location_path(state.state_root) / "author-queue").glob("*.json"):
-        marker.unlink()
+    before = _waiting_runs(state)
     uncertified = SpecTail(state, certify=False)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "uncertified"), uncertified) == 0
-    assert author_markers(state) == [], \
+    assert _waiting_runs(state) == before, \
         "a run whose tree carries no scan verdict was handed to the curation lane anyway"

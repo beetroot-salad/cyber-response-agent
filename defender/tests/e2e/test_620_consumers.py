@@ -1,7 +1,6 @@
 """#620 — consumers of the frozen `executed_queries.jsonl` row (draft synthesis, lead extraction, repository projections, pitfalls lane, visualizers, workspace map) and the `validate_scaffold` gate. Rows come from a real driver run; offline readers are driven over rows on disk."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
 
 import ast
 import importlib
@@ -22,8 +21,6 @@ from defender.knowledge import _corpus  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads.draft_synthesis import _draft_basename  # noqa: E402
-from defender.learning.core import persist as _persist  # noqa: E402
-from defender.learning.core.state import LearningState  # noqa: E402
 from defender.learning.leads import (  # noqa: E402
     draft_synthesis,
     lead_author,
@@ -420,18 +417,14 @@ def test_canonical_record_value_cannot_forge_a_draft_section(tmp_path):
         "the exact body value did not round-trip as data inside the recording fence"
 
 
-def _seed_pitfalls(paths, *, system: str, digest: str, n: int = 2) -> None:
-    """``n`` queued pitfalls, each a distinct mistake: the digest is suffixed per row because
-    #840 collapses rows sharing one into a single record, and the threshold counts records."""
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
-    with LearningState.open(paths) as state:
-        _persist.append_pitfalls(
-            [{"schema_version": 1, "pitfall_id": f"r:l-{i:03d}:0", "source_run": "r",
-              "system": system, "query_id": f"{system}.esql", "goal": "g",
-              "executed_query": "FROM bad", "stderr_digest": f"{digest} #{i}",
-              "error_class": "agent-fixable"} for i in range(n)],
-            state=state,
-        )
+def _claimed_pitfalls(*, system: str, digest: str, n: int = 2) -> list[tuple[str, str, dict]]:
+    """``n`` claimed pitfalls (the items a store claim hands the curator, #1278 D1), each a distinct mistake: the digest
+    is suffixed per row because #840 collapses rows sharing one into a single record."""
+    rows = [{"schema_version": 1, "pitfall_id": f"r:l-{i:03d}:0", "source_run": "r",
+             "system": system, "query_id": f"{system}.esql", "goal": "g",
+             "executed_query": "FROM bad", "stderr_digest": f"{digest} #{i}",
+             "error_class": "agent-fixable"} for i in range(n)]
+    return [("pitfall", r["pitfall_id"], r) for r in rows]
 
 
 def test_attacker_digest_cannot_forge_execution_md_sections(tmp_path):
@@ -553,7 +546,7 @@ def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, m
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     lane = _seed_lane_no_execution_md(tmp_path)
     paths = lane.paths
-    _seed_pitfalls(paths, system="host-state", digest="exit=64; unknown param 'proc'", n=2)
+    items = _claimed_pitfalls(system="host-state", digest="exit=64; unknown param 'proc'", n=2)
 
     rel = "agent/skills/host-state/execution.md"
     exec_md = lane.root / rel
@@ -570,7 +563,7 @@ def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, m
 
     with C.draft_trees(lane) as trees:
         rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=synthesizing_curator,
-                                           trees=trees, batch=lane.batch)
+                                           trees=trees, batch=lane.batch, items=items)
     assert rc == 0
     text = lane.text_at_tip(rel)
     assert text is not None, "the curator's created execution.md was rejected — dead-end"
