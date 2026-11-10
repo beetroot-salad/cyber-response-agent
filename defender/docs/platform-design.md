@@ -264,7 +264,7 @@ learning_jobs(
 - **`reason` + `message`, not `status_detail`.** The reasons are fixed words from the outcome table
   (`no_fork_point`, `history_unreadable`, `expired`, `family_unusable`, `control_failed`,
   `launch_refused`, `verify_refused`, `source_unavailable`, `judge_failed`, `entry_error`,
-  `exited_without_result`, `worker_error`, `lease_lapsed`, `retry_cap`); the message is our own code's,
+  `exited_without_result`, `worker_error`, `lease_lapsed`, `retry_cap`, `tenant_offboarded`); the message is our own code's,
   never launcher or run text. A `completed` job with no findings carries the judge's verdict word.
 - **Publish state.** Findings wait in the episode folder until the row ends; `completed` sets `pending`,
   and the worker writes `done` or `refused` from the post-step's record (§4.3).

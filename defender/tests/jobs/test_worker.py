@@ -117,9 +117,12 @@ async def _queued(store, ticket: str = "T-1", key: str = "k1") -> str:
     return inv.investigation_id
 
 
-async def _run_one(world: dict, child: ScriptedChild, **kw) -> tuple[str, dict]:
+async def _run_one(world: dict, child: ScriptedChild, *, then_state: str | None = None, **kw) -> tuple[str, dict]:
+    """Queue one row, run the worker. `then_state` moves the tenant there after the row is queued (a claim overlapping a lifecycle step)."""
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
+        if then_state:
+            move_tenant(world["dsn"], T1, state=then_state)
         await _worker(world, store, child, **kw).drain()
     return inv, row(world["dsn"], inv)
 
@@ -2301,9 +2304,11 @@ def _nothing_left_for_a_refused_claim(world: dict, child: ScriptedChild, inv: st
 @pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
 async def test_r7_1_a_tenant_that_is_not_active_fails_the_row_as_a_worker_error_before_any_file_or_child(world, state):
     """A claim whose tenant (a real `tenancy.tenants` row) is not `active` ends `failed`/`worker_error` naming the state; no launch file, no child. (R7-1)"""
-    restate_tenant(world["dsn"], T1, state=state)
+    # offboarding/offboarded take no new job (#1360 O4): the row is queued while active, then the tenant leaves it.
+    if state == "creating":
+        restate_tenant(world["dsn"], T1, state=state)
     child = _child(world, files=_committed())
-    inv, stored = await _run_one(world, child)
+    inv, stored = await _run_one(world, child, then_state=None if state == "creating" else state)
 
     _nothing_left_for_a_refused_claim(world, child, inv)
     assert state in stored["failure_message"]
@@ -2321,11 +2326,14 @@ async def test_r7_1_control_an_active_tenants_row_runs_to_completion(world):
 @pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
 async def test_r7_1_a_tenant_that_is_not_active_is_refused_before_the_alert_is_read(world, state):
     """For a non-active tenant `get_alert` is never called: the state is required before the alert is read. (R7-1)"""
-    restate_tenant(world["dsn"], T1, state=state)
+    if state == "creating":
+        restate_tenant(world["dsn"], T1, state=state)
     events: list = []
     child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
+        if state != "creating":  # a new job is refused for these (#1360 O4): the tenant leaves active after the row is queued
+            move_tenant(world["dsn"], T1, state=state)
         await _worker(world, _OrderRecordingStore(store, events), child).drain()
 
     assert events == [], f"the alert was read for a tenant that is {state}: {events}"

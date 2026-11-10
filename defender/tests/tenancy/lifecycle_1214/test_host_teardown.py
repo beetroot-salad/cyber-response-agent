@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import stat
+import subprocess
+import sys
 import threading
 import time
 from typing import Any
@@ -148,6 +151,269 @@ def test_removing_the_old_secret_file_waits_for_the_exclusive_lock_too(world):
     assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert not old.exists() and world.item(tenant)["pending_action"] is None
+
+
+# --- #1360 ------------------------------------------------------------------------------------------
+
+_LATE_WRITER = """
+import os, sys, time
+folder, before, seconds = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
+deadline = time.monotonic() + 30
+while time.monotonic() < deadline:
+    try:
+        if os.stat(folder).st_mtime_ns != before:
+            break
+    except FileNotFoundError:
+        sys.exit(1)
+else:
+    sys.exit(1)
+try:
+    if not seconds:
+        open(os.path.join(folder, 'late-launch.json'), 'w').write('{}')
+        sys.exit(0)
+    until, n = time.monotonic() + seconds, 0
+    while time.monotonic() < until:
+        os.mkdir(os.path.join(folder, 'late-dir-%d' % n))
+        n += 1
+except FileNotFoundError:
+    sys.exit(0 if n else 1)
+"""
+
+
+def _late_writer(folder, *, keep_adding_for=0.0):
+    """A process (so no interpreter lock to share with the test) that, the moment the folder's removal has begun unlinking
+    its entries (its listing is complete by then), creates one file in `folder`, like a job writing its launch files
+    mid-teardown; or, for `keep_adding_for` seconds, empty directories in a tight loop: removing one costs more than
+    making one, so the backlog grows and no removal pass can empty the folder meanwhile. Exits 0 once it has landed."""
+    return subprocess.Popen([sys.executable, "-I", "-c", _LATE_WRITER, str(folder), str(folder.stat().st_mtime_ns),
+                             str(keep_adding_for)])
+
+
+def _plant_runs(folder, count=8000):
+    """A `runs` directory of many files in `folder`, so its removal is long enough for a late writer to land mid-way."""
+    runs = folder / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    for n in range(count):
+        (runs / f"entry-{n}").write_text("x")
+    return runs
+
+
+@pytest.mark.parametrize("target", ["data", "secrets", "publish"])
+def test_teardown_removes_what_a_late_writer_adds_to_the_folder_while_it_is_being_removed(
+        world, tmp_path, data_root, monkeypatch, target):
+    """A file created in one of T's three folders (data, secrets, dev output) after teardown has listed it makes one
+    removal pass fail 'directory not empty'; the offboarding goes on to `offboarded` with all three folders, and nothing
+    of the late file, gone (#1360 O1). The wait is shorter than the first pass: it runs from the first failed pass, not
+    from the start of the removal."""
+    from defender.configuration import _env, publish_root
+
+    published = tmp_path / "published"
+    published.mkdir()
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
+    monkeypatch.setenv(publish_root.PUBLISH_DIR_ENV, str(published))
+    world.host_actor = world.new_host(world.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=0.02),
+                                      containers=lambda _tenant: None)
+    tenant = world.active_tenant()
+    folders = {"data": world.data_root / tenant, "secrets": world.config.secrets_dir / tenant, "publish": published / tenant}
+    folders["publish"].mkdir()
+    assert folders["secrets"].is_dir(), "premise: the tenant has a secrets folder"
+    runs = _plant_runs(folders[target])
+    writer = _late_writer(runs)
+    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    world.drive()
+    assert writer.wait(timeout=35) == 0, "the late write never happened, so this run did not race the removal"
+    item = world.item(tenant)
+    assert (item["state"], item["failure"]) == ("offboarded", None), item
+    assert not any(folder.exists() for folder in folders.values()), {k: f.exists() for k, f in folders.items()}
+
+
+_PASS_WRITER = """
+import os, sys, time
+folder, ballast, entries = sys.argv[1], sys.argv[2], int(sys.argv[3])
+for k in range(entries):
+    landed = os.path.join(folder, 'late-%d' % k)
+    try:
+        os.rename(os.path.join(ballast, str(k)), landed)
+    except FileNotFoundError:
+        sys.exit(1)
+    if k == entries - 1:
+        sys.exit(0)
+    children = len(os.listdir(landed))
+    deadline = time.monotonic() + 20
+    while True:
+        try:
+            if len(os.listdir(landed)) < children:
+                break
+        except FileNotFoundError:
+            break
+        if time.monotonic() > deadline:
+            sys.exit(2)
+"""
+
+
+def _pass_writer(folder, ballast, entries):
+    """A process that moves `entries` prepared directories (`ballast/0`, `ballast/1`, ...) into `folder` as `late-0`,
+    `late-1`, ..., each one only once a removal pass has begun deleting the previous one's children. That pass listed
+    `folder` before the next entry landed, so it ends "directory not empty"; the next entry is deleted only by a later
+    pass. It never removes anything. Exits 0 once every entry landed: then at least `entries - 1` passes in a row failed
+    because something appeared, and after the last one nothing more is added."""
+    return subprocess.Popen([sys.executable, "-I", "-c", _PASS_WRITER, str(folder), str(ballast), str(entries)])
+
+
+def test_teardown_keeps_removing_for_its_wait_however_many_passes_a_writer_that_then_stops_makes_fail(
+        world, tmp_path, data_root):
+    """A writer adds an entry to T's folder during each of 30 removal passes in a row, then stops. Late writes per pass
+    are not bounded by any fixed number, so the bound is the wait (`teardown_wait`, here far longer than the whole
+    race), not a pass count: the offboarding goes on to `offboarded` with the folder gone. (#1360 O1, Flow 4)"""
+    entries, children = 30, 400
+    ballast = tmp_path / "ballast"
+    for k in range(entries):
+        for n in range(children):
+            (ballast / str(k) / f"c-{n}").mkdir(parents=True)
+    assert ballast.stat().st_dev == world.data_root.stat().st_dev, "premise: the entries can be moved into the folder"
+    world.host_actor = world.new_host(world.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=60.0),
+                                      containers=lambda _tenant: None)
+    tenant = world.active_tenant()
+    folder = world.data_root / tenant
+    writer = _pass_writer(folder, ballast, entries)
+    try:
+        deadline = time.monotonic() + 10
+        while not (folder / "late-0").exists():
+            assert time.monotonic() < deadline and writer.poll() is None, "the writer never placed its first entry"
+            time.sleep(0.01)
+        assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        world.drive()
+        item = world.item(tenant)
+        assert (item["state"], item["failure"]) == ("offboarded", None), item
+        assert not folder.exists()
+        assert writer.wait(timeout=30) == 0, "not every entry landed, so fewer passes than intended failed"
+    finally:
+        if writer.poll() is None:
+            writer.kill()
+            writer.wait()
+
+
+_LATE_REMOVER = """
+import os, sys, time
+folder = sys.argv[1]
+names = os.listdir(folder)
+deadline = time.monotonic() + 30
+while True:
+    try:
+        if len(os.listdir(folder)) < len(names):
+            break
+    except FileNotFoundError:
+        sys.exit(1)
+    if time.monotonic() > deadline:
+        sys.exit(1)
+removed = 0
+for name in reversed(names):
+    try:
+        os.unlink(os.path.join(folder, name))
+        removed += 1
+    except FileNotFoundError:
+        pass
+sys.exit(0 if removed else 1)
+"""
+
+
+def _late_remover(folder):
+    """A process that, the moment a removal pass has begun deleting `folder`'s entries (so it has listed all of them),
+    deletes the rest itself, as a late job removes its database's journal files. Exits 0 once it deleted at least one
+    entry before the pass reached it: that pass then met an entry it had listed and found it gone ("no such file")."""
+    return subprocess.Popen([sys.executable, "-I", "-c", _LATE_REMOVER, str(folder)])
+
+
+@pytest.mark.parametrize("target", ["data", "secrets", "publish"])
+def test_teardown_removes_a_folder_whose_entries_a_late_job_removes_while_it_is_being_removed(
+        world, tmp_path, data_root, monkeypatch, target):
+    """An entry of one of T's three folders that the removal had listed is removed by someone else before the removal
+    reaches it, so that pass fails "no such file"; like an entry that appeared, it is removed again under the same wait,
+    and the offboarding goes on to `offboarded` with all three folders gone (#1360 O1, O2 as amended by D1)."""
+    from defender.configuration import _env, publish_root
+
+    published = tmp_path / "published"
+    published.mkdir()
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
+    monkeypatch.setenv(publish_root.PUBLISH_DIR_ENV, str(published))
+    world.host_actor = world.new_host(world.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=30.0),
+                                      containers=lambda _tenant: None)
+    tenant = world.active_tenant()
+    folders = {"data": world.data_root / tenant, "secrets": world.config.secrets_dir / tenant, "publish": published / tenant}
+    folders["publish"].mkdir()
+    assert folders["secrets"].is_dir(), "premise: the tenant has a secrets folder"
+    remover = _late_remover(_plant_runs(folders[target]))
+    try:
+        assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        world.drive()
+        item = world.item(tenant)
+        assert (item["state"], item["failure"]) == ("offboarded", None), item
+        assert not any(folder.exists() for folder in folders.values()), {k: f.exists() for k, f in folders.items()}
+        assert remover.wait(timeout=35) == 0, "the late removal never beat the pass to an entry, so no pass met one gone"
+    finally:
+        if remover.poll() is None:
+            remover.kill()
+            remover.wait()
+
+
+def test_teardown_that_keeps_finding_new_files_fails_naming_the_folder_and_resume_finishes_it(world):
+    """A writer that adds entries to the folder itself after every removal pass never lets the folder empty: after the
+    wait teardown gives its holders the step fails (restart at teardown) naming the folder and an entry left in it,
+    and once the writer stops a resume finishes the offboarding (#1360 O2). Its wording is not pinned (it may carry the
+    underlying error, which names only the folder): it names the folder path and the name of an entry the writer added."""
+    tenant = world.active_tenant()
+    folder = world.data_root / tenant
+    for n in range(4000):  # a first pass long enough for the writer to land mid-way, whichever entry it removes first
+        (folder / f"entry-{n}").write_text("x")
+    writer = _late_writer(folder, keep_adding_for=3.0)
+    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    world.drive()
+    item = world.item(tenant)
+    assert (item["state"], item["step"]) == ("offboarding", "teardown"), item
+    failure = item["failure"]
+    assert str(folder) in failure, failure
+    assert re.search(r"late-dir-\d+", failure), f"the failure does not name an entry left in the folder: {failure}"
+    assert writer.wait(timeout=35) == 0, "the late writes never happened, so this run did not race the removal"
+    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    world.drive()
+    assert world.item(tenant)["state"] == "offboarded"
+    assert not (world.data_root / tenant).exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses mode bits; CI runs unprivileged")
+def test_a_removal_that_fails_for_any_other_reason_fails_the_step_at_once(tmp_path, data_root):
+    """Only 'directory not empty' is waited out: a folder that cannot be removed for another reason (here a subdirectory
+    that grants no write, holding an entry) fails the step promptly, far inside the configured wait, with no claim that
+    the folder was still being added to; once the mode is restored a resume finishes (#1360 O2)."""
+    wait = 30.0
+    w = LifecycleWorld(tmp_path, data_root)
+    w.host_actor = w.new_host(w.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=wait),
+                              containers=lambda _tenant: None)
+    try:
+        tenant = w.active_tenant()
+        locked = w.data_root / tenant / "locked"
+        locked.mkdir()
+        (locked / "entry").write_text("x")
+        locked.chmod(0o500)
+        try:
+            assert w.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+            started = time.monotonic()
+            w.drive()
+            elapsed = time.monotonic() - started
+            item = w.item(tenant)
+            assert (item["state"], item["step"]) == ("offboarding", "teardown"), item
+            assert item["failure"], item
+            assert "still being added to" not in item["failure"], item["failure"]
+            assert elapsed < wait / 2, f"the step waited {elapsed:.1f}s of a {wait:g}s wait for a failure that cannot clear"
+            assert (locked / "entry").is_file()
+        finally:
+            locked.chmod(0o700)
+        assert w.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+        w.drive()
+        assert w.item(tenant)["state"] == "offboarded"
+        assert not (w.data_root / tenant).exists()
+    finally:
+        w.close()
 
 
 # --- H-12 --------------------------------------------------------------------------------------------

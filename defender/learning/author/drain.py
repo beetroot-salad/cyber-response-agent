@@ -681,7 +681,8 @@ def _cited_ids_in(text: str, field: str) -> set[str]:
     cited = fm.get(field)
     if not isinstance(cited, list):
         return set()
-    return {c for c in cited if isinstance(c, str)}
+    # A numeric id (a feedback comment id, #1414) is read by YAML as an int, however its lesson spells it.
+    return {str(c) for c in cited if isinstance(c, (str, int)) and not isinstance(c, bool)}
 
 
 def _retire_unkeyable(
