@@ -121,7 +121,7 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
     spawn = LeadAuthorSpawn()
     deps = dataclasses.replace(
         lead_author.build_lead_author_deps(
-            paths, state=C.open_state(paths), trees=C.draft_trees(lane), batch=lane.batch),
+            paths, trees=C.draft_trees(lane), batch=lane.batch),
         invoke_agent=spawn, extract=lambda _rd: ([], []),
     )
     assert deps.systems == frozenset({"tacit-knowledge"})

@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from defender import _git
-from defender.learning.core import persist
 from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.tests.support.learning.core._declared870 import (
@@ -102,9 +101,7 @@ def _curate(lane: C.DraftLane, text: str, monkeypatch) -> int | BaseException:
     """One REAL pitfalls tick at threshold 2 (two distinct reducer mistakes queued), the spawn
     faked as writing `text` over the add-on in the draft. Returns rc, or the refusal raised."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    state = C.open_state(lane.paths)
-    persist.append_pitfalls([shim_row("r:l-003:0"),
-                             shim_row("r:l-004:0", digest="exit=1; Parser Error: x")], state=state)
+    rows = [shim_row("r:l-003:0"), shim_row("r:l-004:0", digest="exit=1; Parser Error: x")]
 
     def agent(handoffs, **_kw):
         assert [h.get("surface") for h in handoffs] == ["reducer"]
@@ -112,9 +109,9 @@ def _curate(lane: C.DraftLane, text: str, monkeypatch) -> int | BaseException:
         return 0
 
     try:
-        return pitfalls_curator.run_pitfalls(paths=lane.paths, state=state,
-                                             trees=C.draft_trees(lane), batch=lane.batch,
-                                             invoke=agent)
+        return pitfalls_curator.run_pitfalls(paths=lane.paths, trees=C.draft_trees(lane), batch=lane.batch, invoke=agent,
+                                             items=[("pitfall", r["pitfall_id"], r) for r in rows], outcomes={},
+                                             on_curated=lambda _d: None)
     except LeadAuthorError as refused:
         return refused
 
