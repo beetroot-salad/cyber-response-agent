@@ -44,7 +44,7 @@ from types import SimpleNamespace
 
 import pytest
 from _lab_fakes import (ALERTS, AUTH, CMDB_STALE, DATA_DROP, NGINX, REPO, SCHEMA_DRIFT, SNAP, SYSLOG, T,
-                        LabRig, instant, searched_indices)
+                        LabRig, instant, hit_indices)
 from _periphery_fakes import FakeDocker
 
 LAB_OPS = Path(__file__).resolve().parents[1] / "lab_ops.py"
@@ -277,16 +277,16 @@ def test_the_content_digest_follows_every_document_of_a_touched_index_and_every_
 
 def test_the_content_digest_reads_only_the_indices_it_is_named_and_an_untouched_one_is_not_followed(tmp_path):
     """C8/A1 (design: "a content digest covers the touched indices"; live, digesting every index the freeze's
-    patterns match took ~18 h): the indices named are the ones digested. No document read reaches an untouched
+    patterns match took ~18 h): the indices named are the ones digested. No document returned comes from an untouched
     index (nginx) while the digest is taken, and nginx changed, added to or emptied of a document leaves the
     digest as it was (naming it does put it in)."""
     touched = [AUTH, SYSLOG, ALERTS]
     lab, rig = _digest_lab(tmp_path / "base")
     seen = len(rig.cluster.requests)
     digest = lab.ops.content_digest(touched)
-    reached = searched_indices(rig.cluster, seen)
-    assert reached, "the digest read no document of the indices it was given: the claim was never exercised"
-    assert reached <= set(touched), f"the digest read indices it was not named: {sorted(reached - set(touched))}"
+    reached = hit_indices(rig.cluster, seen)
+    assert reached, "the digest returned no document of the indices it was given: the claim was never exercised"
+    assert reached <= set(touched), f"the digest was given documents of indices it was not named: {sorted(reached - set(touched))}"
 
     with_nginx = lab.ops.content_digest([*touched, NGINX])
     for name in ("altered", "added", "removed"):

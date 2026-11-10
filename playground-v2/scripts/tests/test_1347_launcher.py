@@ -52,7 +52,7 @@ from _lab_fakes import (AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, ALERTS_PATTERN
                         LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SCHEMA_DRIFT,
                         SLUG, SNAP, SNAP_UUID, SPAN_START, STREAMS, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T,
                         FakeCluster, FaultJournal, Journal, LabRig, alert_doc, canonical_digest, expected_copy,
-                        expected_touched, expected_variant, instant, is_clean_marker, nested_alert, searched_indices)
+                        expected_touched, expected_variant, instant, is_clean_marker, nested_alert, hit_indices)
 
 LAUNCH = Path(__file__).resolve().parents[1] / "launch_frozen.py"
 KINDS = ["none", "drop", "drift", "cmdb"]
@@ -573,7 +573,7 @@ def test_a_clean_marker_does_not_hide_a_touched_copy_altered_behind_its_back(tmp
 def test_a_change_to_an_untouched_index_is_not_stale_on_content_but_its_count_still_is(tmp_path):
     """A1/A2 (design: "a content digest covers the touched indices"; counts cover every index): nginx, which
     no overlay touches, changed in place after a valid launch leaves the next launch valid, and no document
-    read reaches it; a removed nginx document is stale, naming the index, by count."""
+    of it is returned to a search (its count is still read); a removed nginx document is stale, naming the index, by count."""
     rig = LabRig(tmp_path)
     rig.write_expected_case("none")
     rig.launch()
@@ -583,7 +583,7 @@ def test_a_change_to_an_untouched_index_is_not_stale_on_content_but_its_count_st
     rig.launch()
 
     assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"], rig.rows()
-    assert NGINX not in searched_indices(rig.cluster, seen), "the launch read an untouched index"
+    assert NGINX not in hit_indices(rig.cluster, seen), "a document of an untouched index was returned to the launch"
 
     del rig.cluster.indices[NGINX]["docs"]["nginx-04"]
     rig.launch()
@@ -595,7 +595,7 @@ def test_a_change_to_an_untouched_index_is_not_stale_on_content_but_its_count_st
 def test_the_clean_marker_names_the_touched_indices_and_a_reused_copy_digests_the_same_ones(tmp_path):
     """A1/A4 (design: "a content digest covers the touched indices"): the clean marker carries `touched`, the
     sorted indices the overlays touched (derived from the expected end state); a launch that reuses the copy
-    reads exactly the documents of those and no other index's."""
+    is returned exactly the documents of those and no other index's."""
     rig = LabRig(tmp_path)
     rig.write_expected_case("drift")
     rig.launch()
@@ -606,7 +606,7 @@ def test_the_clean_marker_names_the_touched_indices_and_a_reused_copy_digests_th
     rig.launch()
 
     assert rig.cluster.restores == restores and [r["verdict"] for r in rig.rows()] == ["valid", "valid"]
-    assert searched_indices(rig.cluster, seen) == set(touched)
+    assert hit_indices(rig.cluster, seen) == set(touched)
     assert rig.marker()["touched"] == touched, rig.marker()
 
 
