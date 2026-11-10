@@ -70,14 +70,21 @@ def _from_records(tree: ast.AST) -> set[str]:
             and n.level == 0 and (n.module or "").startswith(_RECORDS_OWNER) for a in n.names if a.name in _RECORDS_NAMES}
 
 
-def _is_reach(node: ast.AST, records: frozenset[str]) -> bool:
-    """`records`: the `_RECORDS_NAMES` that name the location type in this module."""
+def _records_modules(tree: ast.AST) -> frozenset[str]:
+    """The names this module reaches `defender.records` or its modules by (`_RECORDS_MODULES` plus any alias)."""
+    aliases = {a.asname for n in ast.walk(tree) if isinstance(n, ast.Import)
+               for a in n.names if a.name.startswith(_RECORDS_OWNER) and a.asname}
+    return _RECORDS_MODULES | aliases
+
+
+def _is_reach(node: ast.AST, records: frozenset[str], modules: frozenset[str] = _RECORDS_MODULES) -> bool:
+    """`records`: the `_RECORDS_NAMES` that name the location type in this module; `modules`: what names its owner."""
     names = (REACH_NAMES - _RECORDS_NAMES) | records
     if isinstance(node, ast.Name):
         return node.id in names
     if isinstance(node, ast.Attribute):
         return (node.attr in names | REACH_ATTRS or (node.attr in {"learning", "commit_record"} and _owner(node.value) in _OWNERS)
-                or (node.attr in _RECORDS_NAMES and _owner(node.value) in _RECORDS_MODULES))
+                or (node.attr in _RECORDS_NAMES and _owner(node.value) in modules))
     if isinstance(node, ast.alias):
         return node.name in names
     return isinstance(node, ast.FunctionDef | ast.ClassDef) and node.name in names | {"stage_dir", "learning_state_exists"}
@@ -89,7 +96,8 @@ def reaches(source: str, rel: str = "") -> list[str]:
     lines = source.splitlines()
     tree = ast.parse(source)
     records = _RECORDS_NAMES if rel.startswith(_RECORDS_OWNER.replace(".", "/") + "/") else frozenset(_from_records(tree))
-    found = {n.lineno for n in ast.walk(tree) if _is_reach(n, records) and getattr(n, "lineno", 0)}
+    modules = _records_modules(tree)
+    found = {n.lineno for n in ast.walk(tree) if _is_reach(n, records, modules) and getattr(n, "lineno", 0)}
     return [lines[n - 1] for n in sorted(found) if EXEMPT not in lines[n - 1]]
 
 
@@ -115,7 +123,9 @@ def test_o10_the_census_finds_each_old_reach_and_skips_prose_and_exempted_lines(
     assert reaches(f"root = paths.state_root  {EXEMPT} — the cutover import reads the old files") == []
     # `CommitRecord` is the records location type only where it comes from `defender.records`: the store's row is not.
     for line in ("from defender.records.formats import CommitRecord\nx = CommitRecord(p)",
-                 "from defender.records import formats\nx = formats.CommitRecord(p)"):
+                 "from defender.records import formats\nx = formats.CommitRecord(p)",
+                 "import defender.records.formats as f\nx = f.CommitRecord(p)",
+                 "import defender.records\nx = defender.records.CommitRecord(p)"):
         assert reaches(line), line
     assert reaches("class CommitRecord(_Location):\n    pass", "defender/records/_locations.py")
     for line in ("from defender.learning.store import CommitRecord\nrows: list[CommitRecord] = []",
