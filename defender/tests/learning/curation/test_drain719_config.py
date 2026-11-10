@@ -1,382 +1,64 @@
-"""Drain config: queue, lock and graveyard paths under the state root, the ceiling bound at config
-build, pitfalls retirement, and tenant-scoped state (#1186)."""
+"""Drain config: the attempt ceiling is bound before any item is claimed, and no tenant-free learning paths remain (#1186).
+
+Retired with the file queue (#1278 A1/D1, design r8 Locks and Items: a tenant's work is rows in the learning store,
+keyed by tenant id; there is no state root, queue, lock, graveyard or `LearningState`):
+- the queue, consumed, append-lock, drain-lock and graveyard paths resolving under `state_root` and not the worktree,
+  and those state files not aborting the next batch: there are no such files;
+- the ceiling read once at config build, not in the failure handler (`cfg.max_attempts`): the config has no ceiling,
+  the store carries it (`store_knobs`, `tests/learning/store_1278/test_items_1278.py` pins the ceiling itself);
+- the pitfalls leg bumping attempts and retiring at the ceiling, retiring only the batch's ids and not the whole queue
+  (a row appended mid-tick surviving), and its retire through the locked rotation (`drains._drain_pitfalls`,
+  `drain.retire`, `persist.append_pitfalls`): the claim's items and the store's ceiling,
+  `tests/learning/store_1278/test_items_1278.py::test_crashes_to_the_ceiling_hold_the_item_for_a_person`;
+- a tenant's state refusing a linked learning root (`LearningState.open` over a link), and queues, locks and the
+  delivery record belonging to a tenant whichever worktree opens them: the learning folder is not made or read
+  any more (`tests/learning/store_1278`: tenant isolation of items; `test_1278_census.py` forbids the file state).
+"""
 from __future__ import annotations
-
-import dataclasses
-
-from defender.tests.support.shared._locations_1210 import location_path
-
-from pathlib import Path
 
 import pytest
 
-from defender.tests.support.learning.curation import _curator1134 as C
-from defender.tests.support.learning.curation import _drain719 as h
-from defender.learning.author import drain
-from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
-from defender.learning.core import drains, persist  # type: ignore[import-not-found]
 from defender.learning.core import config as learning_config
-from defender.learning.core.config import FatalConfigError, LoopPaths
-from defender.learning.core.state import (
-    AUTHOR_DRAIN_LOCK, LEAD_AUTHOR_DRAIN_LOCK, LEAD_QUEUE_LOCK, REPO_LOCK, TRY_ONCE,
-    FINDINGS, PITFALLS, QUESTIONER_FINDINGS, LearningState,
-)  # type: ignore[import-not-found]
-from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
-from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.curation._lead_author_1134 import lead_trees
+from defender.learning.core.config import FatalConfigError
+from defender.tests.support.learning.core._store1278 import call, finding, migrated_database, world  # noqa: F401 — fixtures
+from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
 
 
-def _graveyard_file(paths, ch) -> Path:
-    return location_path(paths.state_root) / ch.deadletter
+@pytest.mark.postgres
+def test_a_non_integer_ceiling_aborts_the_tick_before_any_item_is_claimed(world, monkeypatch, caplog):  # noqa: F811 — the imported fixture
+    """A malformed ceiling refuses the tick (rc 2, `FatalConfigError` logged) before any item is claimed or a curator
+    spawned; the control tick with a sane ceiling claims and runs."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain
+
+    w = world
+    call(w.dsn, "publish_findings", w.t.tenant_id, "run-1", [finding("f1")], kind="finding")
+    reached: list[str] = []
+
+    def trigger(*_a, **_kw):
+        reached.append("curator")
+
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "abc")
+    assert author_drain(w.t, w.paths, trigger=trigger, box=BoxSpy()) == 2
+    assert reached == [], "a curator ran under a malformed ceiling"
+    assert "LEARNING_AUTHOR_MAX_ATTEMPTS" in caplog.text
+    assert {i.key: i.status for i in call(w.dsn, "work", w.t.tenant_id)} == {"f1": "waiting"}
+    assert call(w.dsn, "batches", w.t.tenant_id) == []
+
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
+    assert author_drain(w.t, w.paths, trigger=trigger, box=BoxSpy()) == 0
+    assert reached, "the control tick (a sane ceiling) never reached the curator"
 
 
-def _stuck_file(paths, ch) -> Path:
-    return location_path(paths.state_root) / ch.stuck
-
-
-def _pitfalls_rows(n: int) -> list[dict]:
-    return [h.row_for("pitfalls", f"r:l-{i:03d}:0") for i in range(n)]
-
-
-# Where the state paths live
-
-
-def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Path):
-    state = tmp_path / "elsewhere"
-    paths = h.make_paths(tmp_path, state_dir=state)
-    assert location_path(paths.state_root) == state
-
-    for name in h.ALL_CHANNELS:
-        ch = h.channel_of(name)
-        targets = [location_path(paths.state_root) / rel for rel in (ch.queue, ch.consumed, ch.append_lock)]
-        targets.append(_graveyard_file(paths, ch))
-        if ch.drain_role is not None:
-            targets.append(location_path(paths.state_root) / ch.drain_role.file)
-        for p in targets:
-            assert state in p.parents, f"{name}: {p} is not under the state root"
-            assert paths.repo_root not in p.parents
-
-    ch = h.channel_of("findings")
-    h.seed(paths, ch, [h.row_for("findings", "a/0")])
-    fault = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.raising(author_shared.AuthorError("so the graveyard is written")),
-    )
-    assert drain.run_batch(cfg=fault) == 2
-    assert _graveyard_file(paths, ch).is_file()
-    assert not (paths.repo_root / "defender" / "learning" / "_pending").exists()
-
-
-def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path):
-    # The real lessons tick over a batch's git-free draft.
-    lane = C.draft_lane(tmp_path)
-    paths = lane.paths
-    ch = h.channel_of("findings")
-
-    for p in (
-        location_path(paths.state_root) / ch.append_lock, location_path(paths.state_root) / ch.drain_role.file,
-        _graveyard_file(paths, ch), _stuck_file(paths, ch),
-    ):
-        assert p.is_relative_to((location_path(paths.state_root) / FINDINGS.queue).parent), f"{p} is outside the ignored prefix"
-
-    h.seed(paths, ch, [h.row_for("findings", "a/0")])
-    fault = C.draft_author_cfg(lane, max_attempts=1,
-        invoke_agent=h.raising(author_shared.AuthorError("writes the graveyard")),
-    )
-    assert drain.run_batch(cfg=fault) == 2
-    assert _graveyard_file(paths, ch).is_file()
-    assert (location_path(paths.state_root) / ch.drain_role.file).exists()
-
-    h.seed(paths, ch, [h.row_for("findings", "a/1")])
-    clean = C.draft_author_cfg(lane, max_attempts=1, invoke_agent=h.committing("ok"))
-    assert drain.run_batch(cfg=clean) == 0, "the new state files aborted the next batch"
-    assert [p.rsplit("/", 1)[0] for p in lane.landed()] == ["agent/lessons"], lane.landed()
-
-
-# When the ceiling is bound
-
-
-def test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed(tmp_path: Path):
-    """A malformed ceiling fails the config build (`FatalConfigError`) before any row is touched."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of("findings")
-    rows = [h.row_for("findings", "a/0")]
-    h.seed(paths, ch, rows)
-
-    import os
-
-    previous = os.environ.get("LEARNING_AUTHOR_MAX_ATTEMPTS")
-    os.environ["LEARNING_AUTHOR_MAX_ATTEMPTS"] = "abc"
-    try:
-        with pytest.raises(FatalConfigError):
-            h.cfg_for(paths, "findings", invoke_agent=h.committing("never"))
-    finally:
-        if previous is None:
-            del os.environ["LEARNING_AUTHOR_MAX_ATTEMPTS"]
-        else:
-            os.environ["LEARNING_AUTHOR_MAX_ATTEMPTS"] = previous
-
-    assert h.pending(paths, ch) == rows, "no row was processed"
-    assert h.graveyard(paths, ch) == []
-    assert h.consumed(paths, ch) == []
-
-
-def test_the_ceiling_is_read_once_per_batch_at_config_build(tmp_path: Path):
-    """The ceiling is bound once, at config build, not re-read inside the failure handler."""
-    import os
-
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of("findings")
-    h.seed(paths, ch, [h.row_for("findings", "a/0")])
-
-    def lower_then_fail(rows, batch_id, cfg):
-        os.environ["LEARNING_AUTHOR_MAX_ATTEMPTS"] = "1"
-        raise author_shared.AuthorError("fails after moving the environment")
-
-    cfg = h.cfg_for(paths, "findings", max_attempts=3, invoke_agent=lower_then_fail)
-    assert cfg.max_attempts == 3
-    try:
-        assert drain.run_batch(cfg=cfg) == 2
-    finally:
-        os.environ.pop("LEARNING_AUTHOR_MAX_ATTEMPTS", None)
-
-    assert h.attempts_of(paths, ch, "a/0") == 1, "the row retired under a ceiling read mid-batch"
-    assert h.graveyard(paths, ch) == []
-
-
-# The pitfalls channel
-
-
-def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
-    tmp_path: Path, monkeypatch
-):
-    """A failing pitfalls agent (rc 7) surfaces as a `RETIRE_SET` member, so each tick bumps both
-    rows and the ceiling retires them."""
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "2")
-    # The pitfalls lane over a batch's git-free draft (lane `skills`); the product checkout
-    # declares `elastic` through its adapter.
-    product = tmp_path / "product"
-    C.put(product / "defender" / "integrations" / "elastic_adapter.py", "VERBS = {}\n")
-    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product)
-    paths = lane.paths
-    h.seed(paths, PITFALLS, _pitfalls_rows(2))
-
-    with pytest.raises(Exception) as raised:  # noqa: PT011 - the raised class is the subject under test, asserted below
-        pitfalls_curator.run_pitfalls(paths=paths, state=_state1135.state_for_paths(paths),
-                                      invoke=lambda *a, **k: 7, trees=C.draft_trees(lane),
-                                      batch=lane.batch)
-    assert type(raised.value) in tuple(drain.RETIRE_SET), (
-        f"the converted rc raises {type(raised.value).__name__}, which is not in the retire set"
-    )
-
-    def leg(_paths, _state, box=None, **_kw):
-        with C.draft_trees(lane) as trees:
-            return pitfalls_curator.run_pitfalls(paths=_paths, state=_state,
-                                                 invoke=lambda *a, **k: 7, trees=trees,
-                                                 batch=lane.batch)
-
-    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
-    assert [r.get("attempts") for r in h.pending(paths, PITFALLS)] == [1, 1], (
-        "the converted rc did not bump both rows"
-    )
-    assert h.graveyard(paths, PITFALLS) == []
-
-    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
-    assert h.pending(paths, PITFALLS) == []
-    grave = h.graveyard(paths, PITFALLS)
-    assert sorted(r["pitfall_id"] for r in grave) == ["r:l-000:0", "r:l-001:0"]
-    assert [r.get("attempts") for r in grave] == [2, 2]
-
-
-def test_pitfalls_batch_retires_at_the_ceiling(tmp_path: Path, monkeypatch):
-    """A pitfalls leg that keeps raising is bumped each tick and retired at the default ceiling
-    (3); the graveyard reason keeps the fault's class and message."""
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    paths = h.make_paths(tmp_path)
-    h.seed(paths, PITFALLS, _pitfalls_rows(2))
-
-    def leg(_paths, _state, box=None, **_kw):
-        raise author_shared.AuthorError("pitfalls curation failed")
-
-    for expected in (1, 2):
-        drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
-        assert [r.get("attempts") for r in h.pending(paths, PITFALLS)] == [expected, expected], (
-            f"attempts did not reach {expected} on tick {expected}"
-        )
-        assert h.graveyard(paths, PITFALLS) == []
-
-    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
-    grave = h.graveyard(paths, PITFALLS)
-    assert h.pending(paths, PITFALLS) == []
-    assert [r.get("attempts") for r in grave] == [3, 3]
-    reason = grave[0]["deadletter_reason"]
-    assert reason.startswith("batch-error:AuthorError"), reason
-    assert "pitfalls curation failed" in reason, (
-        "the graveyard kept the class and lost the diagnosis"
-    )
-
-
-def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Path, monkeypatch):
-    """"The batch" is the ids fixed at the drain's read: a row appended mid-tick survives
-    untouched."""
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "1")
-    paths = h.make_paths(tmp_path)
-    h.seed(paths, PITFALLS, _pitfalls_rows(2))
-    late = h.row_for("pitfalls", "r:l-999:0")
-
-    def leg(_paths, _state, box=None, **_kw):
-        rc = pitfalls_curator.run_pitfalls(paths=_paths, state=_state, invoke=lambda *a, **k: 7,
-                                           trees=lead_trees(_paths))
-        return rc
-
-    def failing_then_append(_paths, _state, box=None, **_kw):
-        persist.append_pitfalls([late], state=_state)
-        return leg(_paths, _state, box=box)
-
-    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), failing_then_append)
-
-    survivors = h.pending(paths, PITFALLS)
-    assert [r["pitfall_id"] for r in survivors] == ["r:l-999:0"]
-    assert survivors[0] == late, "the late row was not bumped or rewritten"
-    assert sorted(r["pitfall_id"] for r in h.graveyard(paths, PITFALLS)) == [
-        "r:l-000:0",
-        "r:l-001:0",
-    ]
-
-
-def test_pitfalls_retire_goes_through_the_locked_rotation(tmp_path: Path):
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of("pitfalls")
-    assert (location_path(paths.state_root) / ch.append_lock).name == ".pitfalls.lock"
-    assert ch.drain_role is None
-    h.seed(paths, ch, _pitfalls_rows(2))
-
-    worker = h.Background(
-        lambda: drain.retire(
-            _state1135.state_for_paths(paths), channel=PITFALLS, batch_ids=["r:l-000:0"], reason="pitfalls retire", max_attempts=1
-        )
-    )
-    with h.Holder(location_path(paths.state_root) / ch.append_lock):
-        worker._thread.start()
-        assert not worker.finished_within(1.0), "the pitfalls retire took no lock"
-        assert h.graveyard(paths, ch) == []
-    assert worker.finished_within(20)
-    assert [r["pitfall_id"] for r in h.pending(paths, ch)] == ["r:l-001:0"]
-    assert [r["pitfall_id"] for r in h.graveyard(paths, ch)] == ["r:l-000:0"]
-
-
-# #1186: production paths require an accepted tenant, whatever the code checkout.
+def test_the_ceiling_setting_is_a_validated_integer(monkeypatch):
+    """The ceiling setting itself refuses a non-integer (the tick test above shows the tick honours that)."""
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "abc")
+    with pytest.raises(FatalConfigError):
+        learning_config.author_max_attempts()
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "4")
+    assert learning_config.author_max_attempts() == 4
 
 
 def test_1186_no_global_learning_paths_or_ambient_factory_remain():
     """The removed tenant-free defaults stay removed, so none can become a production entry."""
     for name in ("DEFAULT_PATHS", "LEARNING_DIR", "loop_paths"):
         assert not hasattr(learning_config, name), f"{name} still supplies tenant-free paths"
-
-
-@pytest.mark.parametrize("shape", ["plain", "directory-link", "dangling-link"])
-@pytest.mark.parametrize("selection", ["at-open", "stored", "author-checkout"])
-def test_1186_tenant_state_requires_a_real_learning_directory(
-    data_root, tmp_path, shape, selection,
-):
-    """Opening tenant state refuses a linked learning root, including through stored paths."""
-    from defender.learning.core.state import StateRefused
-    from defender.records._tenant_id import TenantRefused
-    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
-    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
-
-    tenant = set_up_tenant(data_root)
-    target = location_path(tenant.learning) if shape == "plain" else tmp_path / "outside-state"
-    if shape != "dangling-link":
-        queue = target / FINDINGS.queue
-        queue.parent.mkdir(parents=True)
-        queue.write_text('{"finding_id":"boundary/0","run_id":"boundary"}\n', encoding="utf-8")
-    location_path(tenant.learning).mkdir(exist_ok=True)
-    selected = None
-    if selection != "at-open":
-        selected = LoopPaths.for_tenant(tenant)
-        if selection == "author-checkout":
-            selected = dataclasses.replace(selected, repo_root=tmp_path / "other-author-checkout")
-    if shape != "plain":
-        location_path(tenant.learning).rmdir()
-        location_path(tenant.learning).symlink_to(target, target_is_directory=True)
-    before_root, before_target = H.tree_census(data_root), H.tree_census(target)
-
-    def read_selected():
-        paths = LoopPaths.for_tenant(tenant) if selected is None else selected
-        with LearningState.open(paths) as state:
-            return state.rows(FINDINGS)
-
-    if shape == "plain":
-        assert read_selected() == [{"finding_id": "boundary/0", "run_id": "boundary"}]
-    else:
-        with pytest.raises((TenantRefused, FatalConfigError, StateRefused)) as refused:
-            read_selected()
-        assert str(location_path(tenant.learning)) in str(refused.value)
-        assert location_path(tenant.learning).is_symlink()
-    if shape == "dangling-link":
-        assert not target.exists()
-        assert not target.is_symlink()
-    assert H.tree_census(data_root) == before_root
-    assert H.tree_census(target) == before_target
-
-
-def test_1186_tenant_paths_keep_state_and_locks_across_author_checkouts(
-    data_root: Path, tmp_path: Path, monkeypatch,
-):
-    """Queues, record children and locks belong to a tenant, whichever worktree opens them."""
-    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
-    from defender.tests.support.shared._fixture_uuid import fixture_uuid
-
-    a = set_up_tenant(data_root, fixture_uuid("tenant:learning-a"))
-    # Creation admits one tenant per data root; each accepted tenant has its own root.
-    b = set_up_tenant(tmp_path / "other-data-root", fixture_uuid("tenant:learning-b"))
-    poison = tmp_path / "ambient-state"
-    poison.mkdir()
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(poison))
-    first = LoopPaths.for_tenant(a)
-    second = LoopPaths.for_tenant(b)
-    assert location_path(first.state_root) == location_path(a.learning)
-    assert location_path(second.state_root) == location_path(b.learning)
-    worktree = tmp_path / "different-author-checkout"
-    moved = dataclasses.replace(first, repo_root=worktree)
-    assert moved.repo_root == worktree
-    assert location_path(moved.state_root) == location_path(a.learning)
-
-    # A real read/write through each handle rejects roots that only look tenant scoped.
-    for root in (location_path(a.learning), location_path(b.learning)):
-        root.mkdir(parents=True, exist_ok=True)
-    with LearningState.open(first) as sa, LearningState.open(second) as sb, \
-            LearningState.open(moved) as same_a:
-        for ch in (FINDINGS, QUESTIONER_FINDINGS, PITFALLS):
-            row_a = {ch.id_key: "same-id", "run_id": "a", "owner": "a"}
-            row_b = {ch.id_key: "same-id", "run_id": "b", "owner": "b"}
-            assert sa.append(ch, [row_a]) == (1, 0)
-            assert sb.append(ch, [row_b]) == (1, 0)
-            assert same_a.rows(ch) == [row_a]
-            assert sb.rows(ch) == [row_b]
-            assert (location_path(a.learning) / ch.queue).is_file()
-            assert (location_path(b.learning) / ch.queue).is_file()
-            assert (location_path(a.learning) / ch.append_lock).is_file()
-            assert (location_path(b.learning) / ch.append_lock).is_file()
-
-        sa.record_delivery("same-batch", {"batch_id": "same-batch", "owner": "a"})
-        sb.record_delivery("same-batch", {"batch_id": "same-batch", "owner": "b"})
-        assert same_a.delivery_rows() == ([("same-batch", {"batch_id": "same-batch", "owner": "a"})], 0)
-        assert sb.delivery_rows() == ([("same-batch", {"batch_id": "same-batch", "owner": "b"})], 0)
-
-        # Same-tenant contention is the positive control for cross-tenant independence.
-        for role in (AUTHOR_DRAIN_LOCK, LEAD_AUTHOR_DRAIN_LOCK, REPO_LOCK,
-                     FINDINGS.drain_role, LEAD_QUEUE_LOCK):
-            assert role is not None
-            with sa.lock(role, wait=TRY_ONCE) as acquired:
-                assert acquired
-                with same_a.lock(role, wait=TRY_ONCE) as duplicate:
-                    assert not duplicate, f"worktree redirected {role.name} away from tenant A"
-                with sb.lock(role, wait=TRY_ONCE) as independent:
-                    assert independent, f"tenant A blocked tenant B's {role.name}"
-    assert not list(poison.iterdir()), "the ambient state override was used"

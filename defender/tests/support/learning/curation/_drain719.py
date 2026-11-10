@@ -33,11 +33,9 @@ ALL_CHANNELS = AUTHOR_CHANNELS + ("pitfalls",)
 #: channel name -> the channel's real config builder.
 def _findings_cfg(paths: LoopPaths):
     """The real findings config over `paths`."""
-    from defender.learning.core.state import LearningState
     from defender.tests.support.learning.curation._curator1134 import author_trees
 
-    return lessons_run.build_author_config(
-        paths, state=LearningState.open(paths), trees=author_trees(paths))
+    return lessons_run.build_author_config(paths, trees=author_trees(paths))
 
 
 BUILDERS = {
@@ -103,12 +101,9 @@ def _make_repo(tmp_path: Path) -> Path:
 
 
 def make_paths(tmp_path: Path, *, state_dir: Path | None = None) -> LoopPaths:
-    """`LoopPaths` over a fresh repo. `state_dir` relocates every queue, lock and
-    graveyard away from the worktree without moving the corpus."""
-    repo = make_repo(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=state_dir if state_dir is not None else repo / "defender" / "learning")
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
-    return paths
+    """`LoopPaths` over a fresh repo. `state_dir` is retired (#1278 A1: a claim's work lives in the learning
+    store, there is no state folder) and ignored; a caller still passing it is stale."""
+    return LoopPaths(repo_root=make_repo(tmp_path))
 
 
 def channel_of(name: str) -> Channel:
