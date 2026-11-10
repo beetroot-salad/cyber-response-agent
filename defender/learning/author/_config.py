@@ -35,7 +35,7 @@ class BucketSpec:
 class CorpusAuthorConfig:
     """What every corpus-authoring drain needs, in one shape.
 
-    Where channels differ (pre-author gate, buckets, id field, locks, commit trailers, held
+    Where channels differ (pre-author gate, buckets, id field, commit trailers, held
     report) is a field here rather than a second copy of the batch driver (#719); these fields
     are the driver's contract with whatever authors a corpus.
 

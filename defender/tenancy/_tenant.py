@@ -16,13 +16,12 @@ from defender.records.formats import (
     RunsBase,
     SessionsRoot,
     EpisodesRoot,
-    LearningRoot,
+    LearningRoot,  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
     WorktreesRoot,
     ScratchRoot,
     ExportsRoot,
     DraftsRoot,
     KnowledgeLock,
-    CommitRecord,
     LegacyRunsRoot,
     LegacyEpisodesRoot,
     unwrap_data_root,
@@ -133,10 +132,6 @@ class _TenantLayout:
     @property
     def knowledge_lock(self) -> Path:
         return self.tenant_root / "knowledge.lock"
-
-    @property
-    def commit_record(self) -> Path:
-        return self.learning / "commit-maker.jsonl"
 
     @property
     def settings(self) -> Path:
@@ -265,8 +260,10 @@ class Tenant(RecordTenant):
         return LegacyEpisodesRoot(self._layout.episodes_legacy)
 
     @property
-    def learning(self) -> LearningRoot:
-        return LearningRoot(self._layout.learning)
+    def learning(self) -> LearningRoot:  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
+        """The tenant's old learning folder, which the cutover import reads and removes: no
+        product code writes under it (#1278 O10)."""
+        return LearningRoot(self._layout.learning)  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
 
     @property
     def scratch(self) -> ScratchRoot:
@@ -318,12 +315,6 @@ class Tenant(RecordTenant):
         return KnowledgeLock(self._layout.knowledge_lock)
 
     @property
-    def commit_record(self) -> CommitRecord:
-        """The commit-maker's record of every tenant commit it made, which outlives the
-        process that made them: push routes send only commits it lists."""
-        return CommitRecord(self._layout.commit_record)
-
-    @property
     def settings(self) -> Path:
         return self._layout.settings
 
@@ -350,14 +341,9 @@ class Tenant(RecordTenant):
 
         return RunsRepository(self)
 
-    def learning_state_exists(self) -> bool:
-        """Whether the tenant's learning state root is there (any entry, a link included):
-        without one no drain has run or can run (the host's prepare step creates it, #1214)."""
-        return self._layout.learning.is_symlink() or self._layout.learning.exists()
-
     def learning_paths(self, paths_type: Callable[..., _P], *, repo_root: Path) -> _P:
         """Build learning configuration where the tenant's record root is owned."""
-        return paths_type(repo_root=repo_root, state_dir=self.learning, tenant=self)
+        return paths_type(repo_root=repo_root, tenant=self)
 
 
 def clone_halves(tenant: Tenant) -> tuple[Path, Path]:

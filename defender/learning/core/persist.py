@@ -4,7 +4,6 @@ import re
 import threading
 
 from defender._text import is_content_less
-from defender.learning.core.state import PITFALLS, LearningState
 # The reducer lane's routing key, imported from its owner so every seam asking "is this the
 # reducer's row" compares the same literal.
 from defender.knowledge import BASH_SHIM_QUERY_ID
@@ -124,52 +123,3 @@ def merge_pitfalls(rows: list[dict]) -> list[dict]:
         by_key[key] = rec
         out.append(rec)
     return out
-
-
-def pitfalls_lane_is_open(records: list[dict], threshold: int) -> bool:
-    """The one arrival condition, shared by `pitfalls_curator.run_pitfalls`' tick gate and
-    `drains._has_lead_author_work`' wake gate.
-
-    True when the distinct count of merged records reaches the threshold, or when some reducer
-    record (`is_reducer_row`, so routing and gating agree) has `occurrences >= threshold` on
-    its own.
-
-    The second disjunct exists because the count alone is anti-correlated with evidence on the
-    reducer lane: one unchanging error across many attempts is one merged record, while N
-    diagnosis-less failures are N records. Those key per row (`(owner, "\\x00" + pitfall_id)`),
-    so they can never satisfy the disjunct.
-    """
-    if len(records) >= threshold:
-        return True
-    return any(is_reducer_row(r) and _occurrences(r) >= threshold for r in records)
-
-
-def append_pitfalls(rows: list[dict], *, state: LearningState) -> int:
-    """Append the failing rows verbatim, one line per failure; `merge_pitfalls` collapses them
-    at the consuming seams.
-
-    Not deduplicated here: bumping a count on a row already on disk would be a second
-    wholesale queue rewriter, racing the drain's read-modify-write window.
-    """
-    if not rows:
-        return 0
-    return state.append(PITFALLS, rows)[0]
-
-
-def read_pitfalls(state: LearningState) -> list[dict]:
-    return state.rows(PITFALLS)
-
-
-def rotate_pitfalls(
-    batch_ids: list[str], commit_sha: str | None, *, state: LearningState,
-    category: str = "consumed_committed", timeout_seconds: int | None = None,
-) -> None:
-    """`timeout_seconds` is the append lock's deadline: the drain passes its configured wait,
-    since it holds the tick's locks meanwhile; a by-hand caller passes none."""
-    ids = set(batch_ids)
-    consumed = [
-        {**r, "consumed_category": category}
-        for r in state.rows(PITFALLS)
-        if r.get("pitfall_id") in ids
-    ]
-    state.rotate(PITFALLS, [], consumed, commit_sha, timeout=timeout_seconds)

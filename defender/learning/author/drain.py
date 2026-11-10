@@ -1,7 +1,6 @@
-"""The corpus-author drain body and its retire seam."""
+"""The corpus-author drain body over a learning store claim, and the faults that fail its claim."""
 from __future__ import annotations
 
-import hashlib
 import logging
 import uuid
 from dataclasses import replace
@@ -11,7 +10,6 @@ from typing import Any
 
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._clock import now_iso
 from defender._git import GitError
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._text import one_line
@@ -20,12 +18,6 @@ from defender.learning.author._config import CorpusAuthorConfig
 from defender.learning.core.config import (
     FatalConfigError,
     provenance_field,
-)
-from defender.learning.core.state import (
-    Channel,
-    LearningState,
-    canonical_row,
-    retirement_stamp,
 )
 from defender import box as box_mod
 from defender.learning.author.version_control import AgentChange, ChangeSet, DeliveryRefused
@@ -40,96 +32,6 @@ _logger = logging.getLogger(__name__)
 #: git failure would wedge the channel, and without `ModelRetry` an externally killed boxed
 #: command would report success.
 RETIRE_SET: tuple[type[BaseException], ...] = (AuthorError, GitError, ModelRetry)
-
-#: Lock acquisition order. Drain lock first, so a contended tick skips before taking the
-#: globally serialising repo lock; append lock last and briefly, so an appender never waits on
-#: the agent call.
-LOCK_ORDER: tuple[str, ...] = ("drain_lock", "repo_lock", "append_lock")
-
-
-@model(frozen=True)
-class RetireOutcome:
-    #: id -> the attempt count the row now carries, for every row in the batch.
-    bumped: dict[str, int]
-    #: the ids that crossed the ceiling on this observation and left the queue.
-    retired: tuple[str, ...]
-
-
-def retire(
-    state: LearningState,
-    *,
-    channel: Channel,
-    batch_ids: list[str],
-    reason: str,
-    max_attempts: int,
-    counter_key: str = "attempts",
-    timeout_seconds: int | None = None,
-) -> RetireOutcome:
-    """Bump every named row by one; retire the rows now at or over the ceiling."""
-    key = channel.id_key
-
-    bumped = state.retire_rows(
-        channel, batch_ids,
-        lambda named: _bump_rows(
-            state, channel, named, counter_key=counter_key, max_attempts=max_attempts,
-            reason=reason,
-        ),
-        timeout=timeout_seconds,
-    )
-    survivors, retired = bumped.survivors, bumped.retired
-
-    state.rotate(
-        channel, survivors,
-        [{**rec, "consumed_category": "consumed_retired"} for rec in retired],
-        None, timeout=timeout_seconds,
-    )
-    return RetireOutcome(
-        bumped={rec[key]: rec[counter_key] for rec in [*survivors, *retired]},
-        retired=tuple(rec[key] for rec in retired),
-    )
-
-
-@model(frozen=True)
-class _Bumped:
-    #: the bumped rows still under the ceiling, each carrying its new count.
-    survivors: list[dict]
-    #: the bumped rows at or over the ceiling, already written to the graveyard.
-    retired: list[dict]
-
-
-def _bump_rows(
-    state: LearningState, channel: Channel, rows: list[dict], *, counter_key: str, max_attempts: int, reason: str,
-) -> _Bumped:
-    """Bump `counter_key` on every row and partition at the ceiling, graveyarding the rows that
-    crossed it. Shared by fault retirement (`attempts`) and the deferral fold (`deferrals`)."""
-    key = channel.id_key
-    survivors: list[dict] = []
-    retired: list[dict] = []
-    for row in rows:
-        count = int(row.get(counter_key) or 0) + 1
-        rec = {**row, counter_key: count}
-        (retired if count >= max_attempts else survivors).append(rec)
-    if retired:
-        state.deadletter(
-            channel,
-            [
-                {
-                    key: rec[key],
-                    # Whichever count reached its ceiling, under the slot every reader knows;
-                    # the other counter stays inside `row` as provenance.
-                    "attempts": rec[counter_key],
-                    "deadletter_reason": reason,
-                    **retirement_stamp(),
-                    # Nested rather than spread, so a `_bump_rows` entry has one shape on every
-                    # channel and is readable without knowing its queue (older unkeyable-row records
-                    # spread their row flat; the queue page reads both shapes).
-                    "row": {k: v for k, v in rec.items() if k != counter_key},
-                }
-                for rec in retired
-            ],
-        )
-    return _Bumped(survivors=survivors, retired=retired)
-
 
 
 def channel_logger(cfg: CorpusAuthorConfig) -> logging.Logger:
@@ -554,59 +456,6 @@ def _cited_ids_in(text: str, field: str) -> set[str]:
 
 
 def _row_id(row: dict, key: str) -> str | None:
-    """This row's id under its channel's key, or `None` where it has none.
-
-    Shared by `_tick` (to split the batch) and `_stuck_row_ids` (to name rows): if they
-    disagreed, a truthy non-string id filed as unkeyable would be named as a real id."""
+    """This row's id under its channel's key, or `None` where it has none."""
     rid = row.get(key)
     return rid if isinstance(rid, str) and rid else None
-
-
-def _stuck_row_ids(channel: Channel, rows: list[dict]) -> list[str]:
-    """@owns row_ids — how a stuck record names the rows a tick is stuck on.
-
-    A row's own id where it has one; otherwise a prefixed fingerprint of its canonical JSON,
-    stable across ticks and processes. Naming nothing would make `_record_stuck` fold
-    unrelated keyless ticks into one rising count and hide which rows are stuck."""
-    named: list[str] = []
-    for row in rows:
-        rid = _row_id(row, channel.id_key)
-        if rid is not None:
-            named.append(rid)
-            continue
-        digest = hashlib.sha256(canonical_row(row).encode("utf-8")).hexdigest()
-        named.append(f"unkeyed:{digest[:16]}")
-    return sorted(named)
-
-
-def record_stuck(
-    state: LearningState, channel: Channel, exc: BaseException, rows: list[dict],
-) -> None:
-    """Record this fault on the channel's stuck report (the public entry point, used by
-    `drains._drain_one_curator`)."""
-    _record_stuck(state, channel, exc, rows)
-
-
-def _record_stuck(
-    state: LearningState, channel: Channel, exc: BaseException, rows: list[dict],
-) -> None:
-    """@owns recorded_at — the operator signal for a stuck tick, and when it was written."""
-    fault_class = type(exc).__name__
-    ids = _stuck_row_ids(channel, rows)
-    previous = state.stuck_rows(channel)
-    consecutive = 1
-    # An empty id list is a row set too: the faulting phase had no rows in flight (e.g. the
-    # gate held the whole batch). Consecutive such ticks with one fault class are the same
-    # problem recurring, so they fold.
-    if previous:
-        last = previous[-1]
-        same_ids = sorted(str(i) for i in (last.get("row_ids") or [])) == ids
-        if last.get("fault_class") == fault_class and same_ids:
-            consecutive = int(last.get("consecutive_ticks") or 0) + 1
-    state.stuck_append(channel, {
-        "fault_class": fault_class,
-        "row_ids": ids,
-        "consecutive_ticks": consecutive,
-        "reason": str(exc),
-        "recorded_at": now_iso(),
-    })

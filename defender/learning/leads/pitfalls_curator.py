@@ -482,11 +482,7 @@ def _deadletter_reason(row: dict) -> str:
     return f"undeclared-system:{system}"
 
 
-#: Re-exported from `core/pitfalls_disposition`, which holds the success-path consumption and
-#: the held rows' offer ceiling beside the drain that carries them. The ceiling's helper is not
-#: re-exported: `apply` binds it in `core/`, so patching a name here would not reach it.
-HELD_CEILING_REASON = _disposition.HELD_CEILING_REASON
-OFFERS_DECLINED_KEY = _disposition.OFFERS_DECLINED_KEY
+#: Re-exported from `core/pitfalls_disposition`, which holds it beside the drain that reads it.
 PitfallsDisposition = _disposition.PitfallsDisposition
 
 

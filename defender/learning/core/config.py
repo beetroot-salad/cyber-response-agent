@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from defender.records.formats import LearningRoot
-
 import dataclasses
 import enum
 import logging
@@ -87,13 +85,12 @@ QUARANTINE_DIRNAME = "quarantine"
 
 @model(frozen=True)
 class LoopPaths(DefenderPaths):
-    """The loop's paths: every checked-in tree `DefenderPaths` locates, plus the mutable
-    learning state (queues, locks, run artifacts) rooted at `state_root`.
+    """The loop's paths: every checked-in tree `DefenderPaths` locates, and the accepted tenant
+    the learning store's work is for.
 
     Inherits the repo-tree paths rather than forwarding them, so `getattr(paths, name)` answers
     for the whole set and directory names stay owned by `_paths.py`."""
 
-    state_dir: Path | LearningRoot | None = None
     tenant: Tenant | None = field(default=None, kw_only=True)
 
     # A checkout-shaped tree's corpora (`<repo_root>/defender/<corpus>`): what a learning scene
@@ -119,15 +116,9 @@ class LoopPaths(DefenderPaths):
     def lessons_questioner_dir(self) -> Path:
         return self.knowledge.lessons_questioner_dir
 
-    def __post_init__(self) -> None:
-        if self.tenant is not None and not isinstance(self.state_dir, LearningRoot):
-            raise FatalConfigError("tenant learning state requires LearningRoot")
-        if self.tenant is None and isinstance(self.state_dir, LearningRoot):
-            raise FatalConfigError("scratch learning state requires an explicit Path")
-
     @classmethod
     def for_tenant(cls, tenant: Tenant) -> LoopPaths:
-        """@owns tenant learning root — accepted identity selects mutable state, never env."""
+        """@owns tenant learning paths — accepted identity selects the tenant's learning work, never env."""
         from defender.tenancy import Tenant
 
         if not isinstance(tenant, Tenant):
@@ -136,16 +127,10 @@ class LoopPaths(DefenderPaths):
         return tenant.learning_paths(cls, repo_root=REPO_ROOT)
 
     @property
-    def state_root(self) -> Path | LearningRoot:
-        if self.state_dir is None:
-            raise FatalConfigError("learning state requires an explicit tenant or scratch state_dir")
-        return self.state_dir
-
-    @property
     def quarantine_dir(self) -> Path:
         """Where the legacy worktree drain archived a tainted worktree, which the queue page
-        still counts (#1108 P4 retired the writer). Follows `worktree_base`, not `state_root`:
-        a copied state dir carries none of this host's tainted trees."""
+        still counts (#1108 P4 retired the writer). Follows `worktree_base`: a copy
+        of a tenant's folder carries none of this host's tainted trees."""
         return self.worktree_base / QUARANTINE_DIRNAME
 
 

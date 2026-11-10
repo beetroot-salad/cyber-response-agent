@@ -1,4 +1,4 @@
-"""The queue lock, what a handoff contains, and dispatching the agent that acts on it."""
+"""What a handoff contains, and dispatching the agent that acts on it."""
 #!/usr/bin/env python3
 from __future__ import annotations
 
@@ -60,10 +60,6 @@ from defender.learning.leads._lead_spine import _spawn_author_agent, draft_view
 _logger = logging.getLogger(__name__)
 
 
-#: What `run` returns when it did not serve because another tick holds the queue lock. Not 0,
-#: or the drain would delete the claimed request as served; not 2, since it isn't a fault and
-#: the next tick serves it.
-QUEUE_LOCK_SKIP_RC = 3
 LEAD_AUTHOR_PROMPT = LEARNING_DIR / "leads" / "lead_author.md"  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
 
 

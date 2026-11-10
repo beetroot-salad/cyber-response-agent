@@ -47,8 +47,8 @@ def _agent_source(tmp: Path) -> Path:
 
 
 def _state_dir(tmp: Path) -> Path:
-    """The learning state the scenario's queue sits in: where a checkout keeps it
-    (`defender/learning/`), so the scenario tree reads as before; it holds no corpus."""
+    """The folder the scenario's findings and runs are copied into (`defender/learning/` under the
+    scratch tree, so the scenario reads as before); it holds no corpus and is no state of the product's."""
     return tmp / "defender" / "learning"
 
 
@@ -99,7 +99,7 @@ def run_author(tmp: Path, *, invoke_agent: Any = None) -> tuple[AuthorRun, float
     from defender.learning.core.lane_trees import open_drain_trees
 
     tenant = LocalTenant(tmp, _agent_source(tmp))
-    paths = LoopPaths(repo_root=tmp, state_dir=_state_dir(tmp))
+    paths = LoopPaths(repo_root=tmp)
     out, err = io.StringIO(), io.StringIO()
     t0 = time.monotonic()
     try:

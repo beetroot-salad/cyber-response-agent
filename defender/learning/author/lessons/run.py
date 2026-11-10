@@ -44,9 +44,7 @@ _LOG_PREFIX = "author"
 @model(frozen=True, kw_only=True)
 class AuthorConfig(CorpusAuthorConfig):
     """The lessons curator's drain config: the shared corpus-author core plus the held report,
-    the manifest seed the lessons prompt takes, and the env-backed model knobs.
-
-    Lock topology lives on `Channel`, not here (#719)."""
+    the manifest seed the lessons prompt takes, and the env-backed model knobs."""
 
     manifest_seed: str | None = None
     # default_factory, not a plain default: these are env-backed knobs and a plain default

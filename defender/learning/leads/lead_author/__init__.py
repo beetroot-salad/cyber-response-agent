@@ -1,9 +1,9 @@
 """The lead-author: offline curation of the gather query catalog and the system skills.
 
-  * `_handoff` — the queue lock, what a handoff contains, and dispatching the agent.
+  * `_handoff` — what a handoff contains, and dispatching the agent.
   * `_rules`   — the verification rules a produced edit has to survive before it lands.
 
-This module is the drain itself: acquire the lock, build the handoffs, run, verify, commit.
+This module serves one claimed run: build the handoffs, run, verify, commit.
 """
 #!/usr/bin/env python3
 from __future__ import annotations
@@ -29,7 +29,6 @@ from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core.lane_trees import DrainTrees, TreeFor, open_drain_trees
 from defender.learning.core import persist as _loop_persist
-from defender.learning.core.state import LearningState
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
 from defender.learning.author._config import GIT_TIMEOUT_SECONDS
@@ -73,7 +72,6 @@ from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exporte
 )
 from ._handoff import (
     LEAD_AUTHOR_PROMPT,
-    QUEUE_LOCK_SKIP_RC,
     _DRAFT_README_NAMES,
     _draft_contradicts_skill,
     _lift_threshold,
@@ -154,12 +152,9 @@ DoneSink = Callable[[str | None], None]
 
 @model(frozen=True)
 class LeadAuthorDeps:
-    #: The product checkout (`repo_root`: its adapters, #1172) and the learning state's
-    #: spelling; never the lane's corpus, which is `root`'s (#1108 P4 OD16).
+    #: The product checkout (`repo_root`: its adapters, #1172); never the lane's corpus,
+    #: which is `root`'s (#1108 P4 OD16).
     paths: _loop_config.LoopPaths
-    #: The learning state handle: the queue lock and the pitfalls queue are reached through it.
-    #: `None` over the learning store (#1278), whose claim is the lane's lock.
-    state: LearningState | None
     #: The declared systems (adapter glob ∪ committed marker), resolved once before the agent
     #: is spawned and never re-derived by a consumer.
     systems: frozenset[str]
@@ -186,13 +181,13 @@ class LeadAuthorDeps:
     batch: Any = None
     #: Kept for the drain's call shape; the lane runs no git (#1108 P4 O7).
     git_timeout: float = GIT_TIMEOUT_SECONDS
-    #: Where the run files the pitfalls it collects over the learning store (#1278 O10): the store's
-    #: pitfall items. `None`: the file queue `state` holds.
+    #: Where the run files the pitfalls it collects: the learning store's pitfall items (#1278).
+    #: `None`: the deps name nowhere to file them, and a run that collects some is refused.
     file_pitfalls: Callable[[list[dict]], int] | None = None
 
 
 def build_lead_author_deps(  # noqa: PLR0913 — the lane's seams, plus where its pitfalls go
-    paths: _loop_config.LoopPaths, *, state: LearningState | None, trees: DrainTrees,
+    paths: _loop_config.LoopPaths, *, trees: DrainTrees,
     batch: Any = None, git_timeout: float = GIT_TIMEOUT_SECONDS,
     file_pitfalls: Callable[[list[dict]], int] | None = None,
     make_model: Callable[..., Any] | None = None,
@@ -217,7 +212,6 @@ def build_lead_author_deps(  # noqa: PLR0913 — the lane's seams, plus where it
         invoke_kw["spawn"] = functools.partial(_spawn_author_agent, make_model=make_model)
     return LeadAuthorDeps(
         paths=paths,
-        state=state,
         systems=systems,
         invoke_agent=functools.partial(invoke_agent, **invoke_kw),
         extract=extract,
@@ -271,29 +265,28 @@ def run(  # noqa: PLR0913 — the run, its lane, and each seam a caller may hand
     assert paths is not None  # the guard above
     with open_drain_trees(paths, label, batch=batch) as trees:
         deps = build_lead_author_deps(
-            paths, state=None, trees=trees, batch=batch,
+            paths, trees=trees, batch=batch,
             file_pitfalls=file_pitfalls if file_pitfalls is not None else _store_pitfalls(paths))
         return _run_locked(run_dir, deps, box=box, on_done=sink)
 
 
 def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the run, its held lock and trees, and its seams
-    run: Run, *, paths: _loop_config.LoopPaths, state: LearningState | None, trees: DrainTrees,
+    run: Run, *, paths: _loop_config.LoopPaths, trees: DrainTrees,
     box: Any = None, on_done: DoneSink, git_timeout: float = GIT_TIMEOUT_SECONDS,
     batch: Any = None, deps: LeadAuthorDeps | None = None,
     items: Any = None, feedback: str | None = None,  # noqa: ARG001 — the drain's store seam; the run names its own leads
     outcomes: dict[tuple[str, str], Any] | None = None,  # noqa: ARG001 — the drain decides a served request's fate
     make_model: Callable[..., Any] | None = None,
 ) -> int:
-    """`run` for a caller that already holds the lane (the drain: its store claim, #1278; or the
-    per-author queue lock of a file-state caller) and the lane's held mounts, `trees` (the drain's
-    work step opens them over `batch`'s draft). Never skips. `run` is the run the drain opened from
-    the claim's address; `deps` given are used as built, else they are built over `batch`, the
-    run's pitfalls filed in the learning store when no learning state is handed (O10), and
-    `make_model` the spawn's model seam."""
+    """`run` for a caller that already holds the lane (the drain: its store claim, #1278) and the
+    lane's held mounts, `trees` (the drain's work step opens them over `batch`'s draft). Never skips.
+    `run` is the run the drain opened from the claim's address; `deps` given are used as built, else
+    they are built over `batch`, the run's pitfalls filed in the learning store, and `make_model` the
+    spawn's model seam."""
     if deps is None:
         deps = build_lead_author_deps(
-            paths, state=state, trees=trees, batch=batch, git_timeout=git_timeout,
-            file_pitfalls=_store_pitfalls(paths) if state is None else None, make_model=make_model)
+            paths, trees=trees, batch=batch, git_timeout=git_timeout,
+            file_pitfalls=_store_pitfalls(paths), make_model=make_model)
     return _run_locked(Path(run.run_dir), deps, box=box, on_done=on_done)
 
 
@@ -358,8 +351,6 @@ def _run_locked(  # noqa: C901 — one served run, its pitfalls filed where the 
         if failures:
             if deps.file_pitfalls is not None:
                 deps.file_pitfalls(failures)
-            elif deps.state is not None:
-                _loop_persist.append_pitfalls(failures, state=deps.state)
             else:
                 raise LeadAuthorError("lead-author refused: these deps name nowhere to file the run's pitfalls")
             # Both numbers: a large gap between failures and this run's distinct mistakes
@@ -529,7 +520,6 @@ __all__ = [
     "Mapping",
     "MappingProxyType",
     "Path",
-    "QUEUE_LOCK_SKIP_RC",
     "REPO_ROOT",
     "SKILLS_PREFIX",
     "_DRAFT_README_NAMES",

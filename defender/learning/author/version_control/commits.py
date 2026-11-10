@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field
 
 from defender.tenancy import Tenant
 
 from .model import AgentChange, ChangeSet, DeliveryRefused, _refusals, _require_in_lanes
-from .record import _BatchKey, _Made, _record_made
+from .record import _BatchKey, _Made
 from .repository import GitRepository
 
 
@@ -29,8 +29,8 @@ class _Line:
 
 
 #: Where the commit-maker records a commit before its branch moves: the learning store's verb for a
-#: batch's commit (#1278 D5, its holder's token checked in the same transaction), or, with none
-#: given, the legacy record file (a `propose`, which has no learning batch).
+#: batch's commit (#1278 D5, its holder's token checked in the same transaction). A batch with none
+#: (a `propose`, which has no learning batch) keeps only `CommitMaker.made`.
 Recorder = Callable[[_Made], None]
 
 
@@ -39,6 +39,8 @@ class CommitMaker:
     tenant: Tenant
     repository: GitRepository
     recorder: Recorder | None = None
+    #: Every commit this maker made, oldest first: what `finish` checks a branch's commits against.
+    made: list[_Made] = field(default_factory=list)
 
     def commit(
         self,
@@ -110,8 +112,7 @@ class CommitMaker:
                 # Recorded before the branch moves (P2'): a recorder that refuses (a holder whose
                 # lease is gone, `LeaseLost`) leaves a commit object no branch holds.
                 self.recorder(made)
-            else:
-                _record_made(self.tenant, replace(made, changes=() if reverts is not None else made.changes))
+            self.made.append(made)
             self.repository.move_branch(branch, commit, tip)
             line.tip = commit
             return commit

@@ -1,4 +1,4 @@
-"""Tenant knowledge delivery: publish, batch, deliver and revert.
+"""Tenant knowledge delivery: publish, batch and deliver.
 
 GitRepository owns git and Forgejo operations. The orchestrator supplies a tenant-bound
 Vault identity; boxes receive only host-made copies. Production drain/run wiring is P4.
@@ -35,22 +35,18 @@ from .exports import (
     publish_locked,
     tenant_lock,
 )
-from .forgejo import PullRequest
 from .credential import forge_credential
 from .model import (
     _PRECEDENCE,
-    AgentChange,
-    ChangeSet,
     Delivered,
     DeliveryRefused,
     DeliveryStatus,
-    _agent_path,
     _answer,
     _lanes,
     _one_word,
     _refusals,
 )
-from .record import _BatchKey, _NetChange, _Record
+from .record import _BatchKey
 from .repository import NETWORK_TIMEOUT, GitRepository
 from .status import record_published, recording
 
@@ -159,7 +155,7 @@ class TenantDelivery:
 
         `branch` is the learning store's (#1278 D5: set at claim, never re-derived; else the
         prefix and the id), and `recorder` where each commit is recorded before its branch
-        moves (else the legacy record file)."""
+        moves (else the commit-maker keeps its commits in memory for `finish`)."""
         with _refusals():
             batch_id = _one_word(batch_id, "batch id")
             declared = _lanes(lanes)
@@ -196,13 +192,6 @@ class TenantDelivery:
                 _line=line,
             )
 
-    def open_pr_exists(self) -> bool:
-        """The lane's writer lease (amendment 3 C1, OD8): whether the tenant repository has an
-        open PR of its own whose branch starts with `branch_prefix`. A fork's PR, or a row
-        with no head repository (D-fork), holds nothing."""
-        with _refusals():
-            return bool(self.repository.forge.list_open_prs(self.branch_prefix))
-
     def _refuse_taken(self, batch_id: str, branch: str) -> None:
         if os.path.lexists(draft_path(self.tenant, batch_id)):
             raise DeliveryRefused(
@@ -234,16 +223,15 @@ class TenantDelivery:
         return box.start_box(replace(request, require_sandbox=True), docker=docker)
 
     def _deliver(
-        self, batch: _BatchKey, tip: str, *, title: str, body: str
+        self, batch: _BatchKey, tip: str, *, mine: frozenset[str], title: str, body: str
     ) -> Delivered:
-        """Every push route's one path. Each commit between the batch's base and `tip` must be
-        one the commit-maker made for this batch (checked before anything else, so a branch
+        """The push route. Each commit between the batch's base and `tip` must be one the
+        commit-maker made for this batch (`mine`, checked before anything else, so a branch
         holding only a foreign commit refuses rather than having nothing to deliver). Then the
         batch's PR is looked up, before any push: one found (open, merged or closed) is
         answered and nothing is pushed or opened (D-closed). With none, a branch at its base
         has nothing to deliver; otherwise `tip` (by id, so a branch moved meanwhile sends
         nothing new) is pushed to the remote branch alone and a PR opened against `main`."""
-        mine = _Record.read(self.tenant).commits_of(batch)
         if tip != batch.base:
             sent = self.repository.commits_since(batch.base, tip)
             foreign = [commit for commit in sent if commit not in mine]
@@ -284,130 +272,10 @@ class TenantDelivery:
             return self._deliver(
                 line.batch,
                 tip,
+                mine=frozenset(m.commit for m in batch.committer.made if m.batch == line.batch),
                 title=_batch_title(batch.id),
                 body=_batch_body(line.batch.branch, line.batch.base),
             )
-
-    def deliver(self, batch_id: str) -> Delivered:
-        """Deliver a batch's branch from any later delivery (its draft discarded, its push or
-        PR request failed before): the batch is the one the commit-maker's record says made
-        the branch's tip. `nothing to deliver` when the clone holds no such branch; refused
-        when the record knows no batch of it, or any commit on it past its base is not that
-        batch's."""
-        with _refusals():
-            branch = f"{self.branch_prefix}{_one_word(batch_id, 'batch id')}"
-            tip = self.repository.branch_tip(branch)
-            if tip is None:
-                return Delivered(status=DeliveryStatus.NOTHING)
-            batch = _Record.read(self.tenant).batch_holding(branch, tip)
-            if batch is None:
-                raise DeliveryRefused(
-                    f"the branch {branch} holds no commit the commit-maker "
-                    "made: nothing is pushed"
-                )
-            return self._deliver(
-                batch,
-                tip,
-                title=_batch_title(batch_id),
-                body=_batch_body(branch, batch.base),
-            )
-
-    def revert(self, lesson_path: str, lesson_name: str) -> Delivered:
-        """Flow 4, D-peel: undo the newest batch's net change to `lesson_path` whose result
-        `origin/main` still holds exactly there (absence included) and which has no merged
-        revert, restoring the bytes from before it (or deleting the lesson it created), as one
-        commit-maker commit on `main` pushed to a branch of its own with its PR (`opened`).
-        That change's last revert decides first: its PR open answers `open` with it; closed is
-        a rejection, refused; never a PR (its push or PR request failed) makes the revert
-        again. Refused when no change is eligible: a lesson the commit-maker never wrote, one
-        a human changed since, one already peeled back to human-written content."""
-        with _refusals():
-            path = _agent_path(lesson_path)
-            name = _one_word(lesson_name, "lesson name")
-            self.repository.fetch()
-            main = self.repository.revision("refs/remotes/origin/main")
-            record = _Record.read(self.tenant)
-            change, pending = self._peel(
-                record, path, self.repository.regular_blob_on(main, path)
-            )
-            if pending is not None:
-                if pending.status == "open":
-                    return _answer(pending)
-                raise DeliveryRefused(
-                    f"the revert of {path} the commit-maker last made was closed unmerged "
-                    f"({pending.url}): a rejection, so it is not made again"
-                )
-            content = (
-                None
-                if change.before is None
-                else self.repository.blobs([change.before])[change.before]
-            )
-            line = _Line(
-                batch=_BatchKey(
-                    branch=f"{self.branch_prefix}revert-{name}-{secrets.token_hex(4)}",
-                    base=main,
-                    start=secrets.token_hex(8),
-                ),
-                lanes=record.lanes_of(change.batch),
-            )
-            commit = CommitMaker(self.tenant, self.repository).commit(
-                line,
-                ChangeSet((AgentChange(path, content),)),
-                f"revert lesson: {name}",
-                reverts=(change.batch, path),
-            )
-            tip = self.repository.branch_tip(line.batch.branch)
-            if tip != commit:
-                raise DeliveryRefused(
-                    f"the revert branch {line.batch.branch} moved from the "
-                    f"commit-maker's commit {commit} (now {tip}): nothing is "
-                    "pushed"
-                )
-            return self._deliver(
-                line.batch,
-                tip,
-                title=f"revert lesson: {name}",
-                body=(
-                    f"Reverts `{path}` to what it held before the commit-maker's change in batch "
-                    f"`{change.batch.branch}`, which `main` still holds exactly."
-                ),
-            )
-
-    def _peel(
-        self, record: _Record, path: str, current: str | None
-    ) -> tuple[_NetChange, PullRequest | None]:
-        """D-peel: the newest batch's net change to `path` whose result is `current` and which
-        has no merged revert (merged by the forge's word on the revert commit's PR, whatever
-        the merge style), with its last revert's unmerged PR (`None`: it has no revert, or its
-        last revert never had a PR). Refused when there is none."""
-        prs: list[PullRequest] | None = None
-        for change in record.net_changes(path):
-            if change.after != current or change.before == change.after:
-                continue
-            reverts = record.reverts_of(change)
-            if not reverts:
-                return change, None
-            if prs is None:
-                prs = self.repository.pull_requests(
-                    m.commit for m in record.made if m.reverts is not None
-                )
-            statuses = {
-                m.commit: sorted(
-                    (pr for pr in prs if pr.head_sha == m.commit),
-                    key=lambda pr: (_PRECEDENCE[pr.status], -pr.number),
-                )
-                for m in reverts
-            }
-            if any(
-                pr.status == "merged" for found in statuses.values() for pr in found
-            ):
-                continue
-            last = statuses[reverts[-1].commit]
-            return change, (last[0] if last else None)
-        raise DeliveryRefused(
-            f"no change the commit-maker made to {path} is what main holds "
-            "there now, with no merged revert: nothing to revert"
-        )
 
 
 def _batch_title(batch_id: str) -> str:

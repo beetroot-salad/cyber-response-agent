@@ -99,15 +99,10 @@ def unwrap_episodes_root(location: EpisodesRoot) -> Path:
     return location._record_location_path
 
 
-class LearningRoot(_Location):
-    """The opaque learning root location."""
+class LearningRoot(_Location):  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
+    """The opaque location of the tenant's old learning folder: only the cutover import reads it
+    (#1278)."""
     __slots__ = ()
-
-
-def unwrap_learning_root(location: LearningRoot) -> Path:
-    if not isinstance(location, LearningRoot):
-        raise TypeError("expected LearningRoot")
-    return location._record_location_path
 
 
 class WorktreesRoot(_Location):
@@ -163,17 +158,6 @@ class KnowledgeLock(_Location):
 def unwrap_knowledge_lock(location: KnowledgeLock) -> Path:
     if not isinstance(location, KnowledgeLock):
         raise TypeError("expected KnowledgeLock")
-    return location._record_location_path
-
-
-class CommitRecord(_Location):
-    """The opaque commit record location."""
-    __slots__ = ()
-
-
-def unwrap_commit_record(location: CommitRecord) -> Path:
-    if not isinstance(location, CommitRecord):
-        raise TypeError("expected CommitRecord")
     return location._record_location_path
 
 
