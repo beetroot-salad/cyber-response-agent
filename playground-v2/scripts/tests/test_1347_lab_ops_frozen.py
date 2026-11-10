@@ -281,10 +281,11 @@ def test_a_live_run_or_ticket_source_that_is_not_configured_refuses_instead_of_e
 
 
 def _node_cluster_names(tmp_path, monkeypatch, env):
-    """The `cluster.name` each frozen node container is created with (its environment, from `-e`, `--env` or an
-    `--env-file`, or an `-Ecluster.name=` argument to Elasticsearch), by a `LabOps.from_environment()` under
-    `env`."""
-    from _lab_fakes import Journal, FakeClock, LabRig
+    """The cluster name each frozen node is started with, by a `LabOps.from_environment()` under `env`: read
+    from every node the rig saw start (its `node-start` events, whatever the image is called), as Elasticsearch
+    takes it: the `cluster.name` setting from the environment (`-e`, `--env` or an `--env-file`), its
+    `ES_SETTING_CLUSTER_NAME` form, or an `-Ecluster.name=` argument."""
+    from _lab_fakes import STREAMS, SNAP_UUID, FakeClock, FakeCluster, Journal, LabRig
     from _rig_docker import RigDocker
 
     for name in ("CLUSTER_NAME", "V2_FROZEN_CLUSTER_NAME"):
@@ -293,7 +294,8 @@ def _node_cluster_names(tmp_path, monkeypatch, env):
         monkeypatch.setenv(name, value)
     monkeypatch.setenv("V2_FROZEN_TENANT_DIR", str(tmp_path / "tenant"))
     journal = Journal()
-    docker = RigDocker(journal=journal, clock=FakeClock(journal, instant(T)))
+    cluster = FakeCluster(journal, repo=REPO, snapshot=SNAP, snapshot_uuid=SNAP_UUID, content={}, streams=STREAMS)
+    docker = RigDocker(journal=journal, clock=FakeClock(journal, instant(T)), cluster=cluster)
     LabRig._deployed(docker)
     monkeypatch.setattr(subprocess, "run", docker)      # from_environment takes the default `run`
     spec = importlib.util.spec_from_file_location("lab_ops_1347_env", LAB_OPS)
@@ -304,12 +306,10 @@ def _node_cluster_names(tmp_path, monkeypatch, env):
         ops.ensure_node()
     except Exception:  # noqa: BLE001 - only the node's start command is read
         pass
-    names = []      # read from each started node container, however its env was given (-e, --env, --env-file)
-    for c in [*docker.containers.values(), *docker.removed]:
-        if "/" not in c.scope or "elasticsearch" not in c.image:
-            continue
-        if "cluster.name" in c.env:
-            names.append(c.env["cluster.name"])
+    names = []      # read from each node start, however its env was given (-e, --env, --env-file)
+    for start in docker.of_kind("node-start"):
+        c = start["container"]
+        names += [c.env[k] for k in ("cluster.name", "ES_SETTING_CLUSTER_NAME") if k in c.env]
         names += [a.split("=", 1)[1] for a in c.command if a.startswith("-Ecluster.name=")]
     return names
 
