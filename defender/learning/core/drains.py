@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import functools
 import importlib
 import logging
 import subprocess
-import uuid
 from defender._model import model
 from typing import TYPE_CHECKING, Any
 from collections.abc import Callable, Iterator
@@ -20,7 +18,6 @@ from defender.learning.core.config import (
     author_max_attempts,
     env_int,
     merge_mode,
-    now_iso,
     pitfalls_threshold,
     repo_lock_wait_seconds,
 )
@@ -40,18 +37,13 @@ from defender.learning.core.pitfalls_disposition import PitfallsDisposition
 # A runtime import, not a `TYPE_CHECKING` one: `ServedMarker` (a model) names it as a field.
 from defender.records import Run
 from defender.learning.core.state import (
-    AUTHOR_DRAIN_LOCK,
     FINDINGS,
     PITFALLS,
-    LEAD_AUTHOR_DRAIN_LOCK,
-    LEAD_QUEUE_LOCK,
     QUESTIONER_FINDINGS,
-    TRY_ONCE,
     Channel,
     Claimed,
     LearningState,
     PendingDelivery,  # noqa: F401 — re-export: the delivery record the drains and the pin name
-    StateRefused,
 )
 from defender.records.formats import TenantRefused
 from defender.learning.core.store_tick import (
@@ -770,7 +762,7 @@ _AUTHOR_CURATORS = (
 )
 
 
-def _store_lead_work(  # noqa: PLR0913 — the lane's two steps, its claim and what the curators decide
+def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim and what the curators decide, kept as one pass over the claim
     paths: LoopPaths, run_lead_author: Callable[..., None], run_pitfalls: Callable[..., int], *,
     box: Any, batch: Batch, held: Any, feedback: str | None, outcomes: dict[tuple[str, str], Any],
 ) -> None:
@@ -863,7 +855,7 @@ def _refusing(entry: Callable[[], int]) -> int:
 
 
 
-def _tick(paths: LoopPaths, *, lane: str, label: DrainLabel, open_delivery: Callable[..., Any],
+def _store_tick(paths: LoopPaths, *, lane: str, label: DrainLabel, open_delivery: Callable[..., Any],
           author_work: Callable[..., None], start_box: Callable[..., Any] | None, stop_box: Callable[..., None],
           reconcile_lanes: tuple[str, ...]) -> int:
     if paths.tenant is None:
@@ -907,7 +899,7 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
         return _open_delivery(paths, directory=records, client=client, identity=identity,
                               credential_config=credential_config, issuer_transport=issuer_transport)
 
-    return _tick(paths, lane=AUTHOR_LANE, label=AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
+    return _store_tick(paths, lane=AUTHOR_LANE, label=AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
                  author_work=lambda work_paths, **kw: _store_curators(work_paths, seam, **kw),
                  start_box=start_box, stop_box=stop_box, reconcile_lanes=(AUTHOR_LANE, LEAD_LANE))
 
@@ -951,6 +943,6 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
         return _open_delivery(paths, directory=records, client=client, identity=identity,
                               credential_config=credential_config, issuer_transport=issuer_transport)
 
-    return _tick(paths, lane=LEAD_LANE, label=LEAD_AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
+    return _store_tick(paths, lane=LEAD_LANE, label=LEAD_AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
                  author_work=lambda work_paths, **kw: _store_lead_work(work_paths, lead_step, pitfalls_step, **kw),
                  start_box=start_box, stop_box=stop_box, reconcile_lanes=(LEAD_LANE,))

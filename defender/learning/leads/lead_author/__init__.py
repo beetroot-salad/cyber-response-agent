@@ -273,6 +273,9 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
             raise LeadAuthorError(
                 f"refused: the {str(label)!r} lane does not mount {skills_dir}"
             )
+        if deps.state is None:
+            # Over the learning store the caller's claim holds the lane (`store_tick.by_hand_claim`).
+            return _run_locked(run_dir, deps, box=box, on_done=sink)
         with deps.state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as locked:
             if not locked:
                 return QUEUE_LOCK_SKIP_RC
@@ -310,7 +313,7 @@ def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the 
     return _run_locked(Path(run.run_dir), deps, box=box, on_done=on_done)
 
 
-def _run_locked(
+def _run_locked(  # noqa: C901 — one served run, its pitfalls filed where the deps say
     run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None, on_done: DoneSink,
 ) -> int:
     if _done_sentinel(run_dir).is_file():

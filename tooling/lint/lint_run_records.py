@@ -249,6 +249,10 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("exports_root", _EXPORT_READER): frozenset({"current_export"}),
     ("knowledge_lock", _EXPORT_READER): frozenset({"knowledge_lock_holder"}),
     ("commit_record", _RECORD_OWNER): frozenset({"_record_made", "_Record.read"}),
+    # #1278: the learning store's `commit_record` verb (its commit-maker rows), read where a tick or a
+    # revert reads what the commit-maker made — the store's record, not the tenant's file record.
+    ("commit_record", "learning/author/version_control/store_delivery.py"): frozenset({"revert_lesson"}),
+    ("commit_record", "learning/core/store_tick.py"): frozenset({"Tick._opened", "Tick._author"}),
     # #1214: the lifecycle's own setting, read once each where it makes or removes a tenant's folder.
     ("data_root", "lifecycle/config.py"): frozenset({"LifecycleConfig.__post_init__"}),
     ("data_root", "lifecycle/_host.py"): frozenset({"HostActor.__init__"}),

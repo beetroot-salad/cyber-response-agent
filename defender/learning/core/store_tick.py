@@ -48,7 +48,7 @@ RENEW_ENV = "DEFENDER_LEARNING_RENEW_SECONDS"
 STOP_PUSH_SECONDS = 15.0
 
 AUTHOR_LANE = "author"
-LEAD_LANE = "lead_author"
+LEAD_LANE = "lead_author"  # lint-run-records: ok — the learning store's lane name, not the `lead_author/` record dir
 #: Each author-lane kind's corpus folder in the tenant repository: what "cited" reads (A2 D7).
 CORPUS_OF = {"finding": "agent/lessons", "questioner_finding": "agent/lessons-questioner"}
 #: The provenance field both corpora cite their findings under.
@@ -133,30 +133,25 @@ def thresholds() -> dict[str, int]:
 # --- forge faults: a refusal counts, an unknown waits (H15, D7) -------------------------------------------
 
 
-def _chain(error: BaseException) -> list[BaseException]:
-    seen: list[BaseException] = []
-    at: BaseException | None = error
-    while at is not None and all(at is not s for s in seen):
-        seen.append(at)
-        at = at.__cause__ or at.__context__
-    return seen
-
-
 def http_status(error: BaseException) -> int | None:
     """The HTTP status a forge fault carries (`ForgeError.status`, else the response it wraps), or `None`
     for a fault with none (a lost connection, a git failure)."""
     import httpx
 
-    for fault in _chain(error):
+    seen: list[BaseException] = []
+    fault: BaseException | None = error
+    while fault is not None and all(fault is not s for s in seen):
+        seen.append(fault)
         status = getattr(fault, "status", None)
         if isinstance(status, int) and not isinstance(status, bool):
             return status
         if isinstance(fault, httpx.HTTPStatusError) and fault.response is not None:
             return fault.response.status_code
+        fault = fault.__cause__ or fault.__context__
     return None
 
 
-def is_refusal(error: BaseException) -> bool:
+def forge_refuses(error: BaseException) -> bool:
     """A non-transient refusal: 401, 403 or another 4xx but a timeout or a rate limit."""
     status = http_status(error)
     return status is not None and 400 <= status < 500 and status not in (408, 429)
@@ -406,7 +401,7 @@ class Tick:
 
     def _fault(self, b: Any, fault: BaseException, doing: str) -> None:
         """A forge or git fault met while `doing` something for batch `b`: a refusal counts, an unknown waits."""
-        if is_refusal(fault):
+        if forge_refuses(fault):
             self._refusal(b, fault)
             return
         _logger.warning(f"{self.label}: {doing} for batch {b.id} could not be done now ({one_line(str(fault))}): "
@@ -461,7 +456,8 @@ class Tick:
                               reason=f"PR #{number} of batch {b.id} was closed with no feedback: held for a person")
         _logger.info(f"{self.label}: PR #{number} of batch {b.id} was closed with no words: its items are held")
 
-    def _merged(self, delivery: TenantDelivery, b: Any, pr: Any, record: Any, members: list[Any]) -> None:
+    def _merged(  # noqa: C901 — one rule per lane and per citation source, kept in the one merge reading (H16, D7, D9)
+            self, delivery: TenantDelivery, b: Any, pr: Any, record: Any, members: list[Any]) -> None:
         """Merged: the cited are published; cited at the branch tip but absent from the merge commit's tree
         (a reviewer removed the citation) are held; the rest wait again (H16). The lead lane has no citation
         field: every item its curator committed is published (D9)."""
@@ -494,7 +490,7 @@ class Tick:
                         published.append((i.kind, i.key))
                     elif tip is not None and i.key in cited_in_paths(repository, tip, changed, folder, CITE_FIELD):
                         held.append((i.kind, i.key))
-            except (*_forge_faults(), RuntimeError) as fault:
+            except _forge_faults() + (RuntimeError,) as fault:
                 self._fault(b, fault, "reading the merge commit")
                 return
         self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome="merged",
@@ -518,7 +514,8 @@ class Tick:
 
     # -- crash recovery (O1, O5, R2-1) ----------------------------------------------------------------------
 
-    def _recover(self, delivery: TenantDelivery, b: Any, record: Any) -> None:
+    def _recover(  # noqa: C901 — the takeover's lookups in the order D6 settles them, kept whole
+            self, delivery: TenantDelivery, b: Any, record: Any) -> None:
         from defender.learning.author.version_control.store_delivery import remote_tip, tip_commits_recorded
         from defender.learning.store import LeaseLost, NotLapsed
 
@@ -687,7 +684,8 @@ class Tick:
 
     # -- authoring and delivery ------------------------------------------------------------------------
 
-    def _author(self, delivery: TenantDelivery, held: Any, feedback: str | None) -> int:
+    def _author(  # noqa: C901, PLR0912, PLR0915 — the claim's whole life (author, push, open, review) and each stop path, kept in one place so no path skips its store verb
+            self, delivery: TenantDelivery, held: Any, feedback: str | None) -> int:
         from defender.learning.author.version_control import DeliveryRefused
         from defender.learning.store import LeaseLost, Outcome, Stop
 
@@ -872,5 +870,5 @@ def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapp
 
 __all__ = ["AUTHOR_LANE", "CORPUS_OF", "by_hand_claim", "DSN_ENV", "GRACE_ENV", "Holding", "LEAD_LANE", "LEASE_ENV", "RENEW_ENV",
            "Refused", "STOP_PUSH_SECONDS", "Tick", "TickStopped", "classified_refusal", "closed_with_feedback",
-           "framed_feedback", "http_status", "is_refusal", "lane_waiting", "live_changes_requested", "opened_store",
+           "framed_feedback", "forge_refuses", "http_status", "lane_waiting", "live_changes_requested", "opened_store",
            "owner_name", "store_knobs", "thresholds"]
