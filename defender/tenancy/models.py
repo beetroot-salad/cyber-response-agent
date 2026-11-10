@@ -9,11 +9,14 @@ Identity's memberships refer to `tenants`; nothing here refers to identity."""
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as _dt
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, get_args
 
-from sqlalchemy import ARRAY, CheckConstraint, DateTime, ForeignKey, Index, Text, text
+from sqlalchemy import ARRAY, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -189,3 +192,103 @@ class AlertMappingRow(Base, kw_only=True):
     def of(cls, tenant_id: TenantId, mapping: AlertMapping) -> AlertMappingRow:
         """The row for `mapping` (entries it does not map are null)."""
         return cls(tenant_id=tenant_id, **{k: mapping.path_of(k) for k in MAPPING_KEYS})
+
+
+# --- system and case records (#1366) -------------------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class SystemRecord:
+    """One tenant system as a version of it stands: the adapter it names (a catalog id, or, until #1172 allows it,
+    `custom_ref=(path, revision)` with an empty `adapter_id`), its prefixed settings, its access declaration's text and the
+    credential generation its version carries."""
+
+    system_id: str
+    version: int
+    adapter_id: str = ""
+    enabled: bool = True
+    settings: Mapping[str, str] = dataclasses.field(default_factory=dict)
+    access: str = ""
+    credential_generation: int = 1
+    custom_ref: tuple[str, str] | None = None
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class CaseRecord:
+    """The tenant's case write-back record as a version of it stands."""
+
+    version: int
+    system_id: str
+    comment_body: str
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class TenantRecords:
+    """What the tenant's records say now: whether its systems come from records at all (the mark), its current systems
+    (a deleted one is absent, a disabled one present) and its current case record."""
+
+    imported: bool = False
+    systems: Mapping[str, SystemRecord] = dataclasses.field(default_factory=dict)
+    case: CaseRecord | None = None
+
+
+class SystemVersionRow(Base, kw_only=True):
+    """One version of one system: append-only, the highest version is current, a delete is a version with `deleted`."""
+
+    __tablename__ = "system_versions"
+    __table_args__ = {"schema": SCHEMA}
+
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
+    system_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    adapter_id: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean)
+    settings: Mapped[dict[str, str]] = mapped_column(JSONB)
+    access: Mapped[str] = mapped_column(Text)
+    credential_generation: Mapped[int] = mapped_column(Integer)
+    deleted: Mapped[bool] = mapped_column(Boolean)
+    author: Mapped[str] = mapped_column(Text)
+    written_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+
+    def as_record(self) -> SystemRecord:
+        ref = None
+        adapter = self.adapter_id
+        if adapter.startswith(CUSTOM_PREFIX):
+            path, _sep, revision = adapter[len(CUSTOM_PREFIX):].partition("@")
+            ref, adapter = (path, revision), ""
+        return SystemRecord(system_id=self.system_id, version=self.version, adapter_id=adapter, enabled=self.enabled,
+                            settings=dict(self.settings), access=self.access,
+                            credential_generation=self.credential_generation, custom_ref=ref)
+
+
+#: A custom adapter reference is stored in `adapter_id` as `custom:<path>@<revision>`.
+CUSTOM_PREFIX = "custom:"
+
+
+def adapter_column(record: SystemRecord) -> str:
+    """The `adapter_id` column's text for `record`."""
+    return record.adapter_id if record.custom_ref is None else f"{CUSTOM_PREFIX}{record.custom_ref[0]}@{record.custom_ref[1]}"
+
+
+class CaseVersionRow(Base, kw_only=True):
+    """One version of the tenant's case record: append-only, the highest is current, a delete is a version."""
+
+    __tablename__ = "case_versions"
+    __table_args__ = {"schema": SCHEMA}
+
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    system_id: Mapped[str] = mapped_column(Text)
+    comment_body: Mapped[str] = mapped_column(Text)
+    deleted: Mapped[bool] = mapped_column(Boolean)
+    author: Mapped[str] = mapped_column(Text)
+    written_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+
+
+class RecordsMark(Base, kw_only=True):
+    """Present for a tenant whose systems come from records (R8, R11). Also the row a writer locks to serialize a tenant."""
+
+    __tablename__ = "records_mark"
+    __table_args__ = {"schema": SCHEMA}
+
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)

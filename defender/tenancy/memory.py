@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator, Collection, Mapping
 from typing import Any, Literal, TypeVar, cast, overload
 
 from defender.records.formats import AlertMapping, TenantId
-from defender.tenancy.models import ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, PublishStatus, TenantRecord
+from defender.tenancy.models import (ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, PublishStatus, TenantRecord,
+                                     TenantRecords)
 from defender.tenancy.repository import (
     KEEP,
     SERVICE,
@@ -56,12 +57,21 @@ class InMemoryTenantRepository:
         self._wiring: dict[str, ForgeWiring] = {}
         self._publish: dict[str, PublishStatus] = {}
         self._mappings: dict[str, AlertMappingRow] = {}
+        self._records: dict[str, TenantRecords] = {}
         self._locked: set[str] = set()
 
     async def close(self) -> None:
         """Nothing is held outside this object; the store outlives it."""
 
     # --- seeders (test support and the demo; not part of the port) ----------------------------
+    async def add_records(self, tenant_id: str, records: TenantRecords) -> None:
+        """Seeder: the tenant's records as given (unjudged), replacing any; the tenant must exist. A tenant without
+        a seeded set reads as not imported."""
+        with self._mutex:
+            if tenant_id not in self._tenants:
+                raise KeyError(f"no tenant {tenant_id}")
+            self._records[tenant_id] = records
+
     async def add_tenant(  # noqa: PLR0913 — the pinned seeder signature
         self, tenant_id: str, *, created_at: _dt.datetime, state: str = "active", repo: str | None = None,
         origin: str | None = None, pending_action: str | None = None, step: str | None = None,
@@ -144,12 +154,17 @@ class InMemoryTenantRepository:
             row = self._mappings.get(tenant_id)
             return None if row is None else row.as_mapping()
 
+    async def current_records(self, tenant_id: TenantId) -> TenantRecords:
+        with self._mutex:
+            return self._records.get(tenant_id, TenantRecords())
+
     # --- requests (the API) ----------------------------------------------------------------------
     async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
         row = TenantRecord(id=TenantId.mint(), created_at=now, state="creating", pending_action="create",
                            step="names", step_actor=SERVICE)
         with self._mutex:
             self._tenants[row.id] = row
+            self._records[row.id] = TenantRecords(imported=True)
             return _detached(row)
 
     def _request(self, tenant_id: TenantId, allowed: bool, refusal: str, **changes: Any) -> TenantRecord:
@@ -275,6 +290,7 @@ class _Held:
         update_generations: Mapping[str, Mapping[str, Any]] | None = None,
         go_live: str | None = None, destroy: Collection[str] | Literal["all"] = (),
         wiring: ForgeWiring | None = None, drop_wiring: bool = False, drop_publish_status: bool = False,
+        drop_records: bool = False,
     ) -> TenantRecord:
         store = self._store
         columns: dict[str, Any] = {k: v for k, v in dict(state=state, pending_action=pending_action, repo_url=repo_url,
@@ -293,6 +309,8 @@ class _Held:
                 store._wiring.pop(self.tenant_id, None)
             if drop_publish_status:
                 store._publish.pop(self.tenant_id, None)
+            if drop_records:
+                store._records.pop(self.tenant_id, None)
             self.record = _detached(after)
             return _detached(after)
 

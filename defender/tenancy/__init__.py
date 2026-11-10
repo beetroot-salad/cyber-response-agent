@@ -137,7 +137,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("ISSUER_ROLE", "Tenant", "TenantId", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "clone_halves", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "parse_tenant_id_bytes", "refuse_unplaceable_data_root", "requested_tenant", "requested_tenant_id", "resolve_data_root", "tenant_exports", "tenant_id_file_text",), "_tenant"),
     **dict.fromkeys(("AGENT_HALF", "SETTINGS_HALF", "TENANT_ID_FILE", "add_tenant_arguments", "template_dir",), "_tenants"),
     **dict.fromkeys(("InMemoryTenantRepository",), "memory"),
-    **dict.fromkeys(("ForgeWiring", "Generation", "PublishStatus", "TenantRecord",), "models"),
+    **dict.fromkeys(("ForgeWiring", "Generation", "PublishStatus", "TenantRecord", "SystemRecord", "CaseRecord", "TenantRecords"), "models"),
     **dict.fromkeys(("ALL", "Conflict", "FenceMissed", "HeldTenant", "KEEP", "NotFound", "TenantRepository", "claimable_now",), "repository"),
 }
 

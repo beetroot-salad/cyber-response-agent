@@ -26,7 +26,7 @@ import logging
 from collections.abc import AsyncIterator, Collection, Mapping
 from typing import Any, Literal
 
-from sqlalchemy import ARRAY, ColumnElement, Text, Table, bindparam, select, text, update
+from sqlalchemy import ARRAY, ColumnElement, Table, Text, and_, bindparam, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError, IntegrityError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
@@ -34,7 +34,8 @@ from sqlalchemy.pool import NullPool
 
 from defender.database import async_engine, url
 from defender.records.formats import AlertMapping, TenantId
-from defender.tenancy.models import SCHEMA, AlertMappingRow, ForgeWiring, Generation, PublishStatus, TenantRecord
+from defender.tenancy.models import (SCHEMA, AlertMappingRow, CaseRecord, CaseVersionRow, ForgeWiring, Generation,
+                                     PublishStatus, RecordsMark, SystemVersionRow, TenantRecord, TenantRecords)
 from defender.tenancy.repository import (
     ALL,
     KEEP,
@@ -53,6 +54,9 @@ _G: Table = Generation.__table__  # type: ignore[assignment]
 _W: Table = ForgeWiring.__table__  # type: ignore[assignment]
 _P: Table = PublishStatus.__table__  # type: ignore[assignment]
 _M: Table = AlertMappingRow.__table__  # type: ignore[assignment]
+_SV: Table = SystemVersionRow.__table__  # type: ignore[assignment]
+_CV: Table = CaseVersionRow.__table__  # type: ignore[assignment]
+_RM: Table = RecordsMark.__table__  # type: ignore[assignment]
 
 #: The lock connection's keepalive bound, in seconds, when the caller states none.
 LOCK_KEEPALIVE = 30
@@ -127,12 +131,30 @@ class PostgresTenantRepository:
         rows = await self._rows(select(_M).where(_M.c.tenant_id == tenant_id))
         return AlertMappingRow(**rows[0]._mapping).as_mapping() if rows else None
 
+    async def current_records(self, tenant_id: TenantId) -> TenantRecords:
+        if not await self._rows(select(_RM.c.tenant_id).where(_RM.c.tenant_id == tenant_id)):
+            return TenantRecords()
+        latest = (select(_SV.c.system_id, func.max(_SV.c.version).label("v")).where(_SV.c.tenant_id == tenant_id)
+                  .group_by(_SV.c.system_id).subquery())
+        rows = await self._rows(select(_SV).join(latest, and_(_SV.c.system_id == latest.c.system_id,
+                                                              _SV.c.version == latest.c.v))
+                                .where(_SV.c.tenant_id == tenant_id, _SV.c.deleted.is_(False)).order_by(_SV.c.system_id))
+        systems = {r.system_id: SystemVersionRow(**r._mapping).as_record() for r in rows}
+        case_rows = await self._rows(select(_CV).where(_CV.c.tenant_id == tenant_id).order_by(_CV.c.version.desc()).limit(1))
+        case = None
+        if case_rows and not case_rows[0].deleted:
+            c = case_rows[0]
+            case = CaseRecord(version=c.version, system_id=c.system_id, comment_body=c.comment_body)
+        return TenantRecords(imported=True, systems=systems, case=case)
+
     # --- requests (the API) ----------------------------------------------------------------------
     async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
         values = dict(id=TenantId.mint(), created_at=now, state="creating", pending_action="create",
                       step="names", step_actor=SERVICE)
         async with self._engine.begin() as conn:
-            return _record((await conn.execute(insert(_T).values(**values).returning(*_T.c))).one())
+            row = _record((await conn.execute(insert(_T).values(**values).returning(*_T.c))).one())
+            await conn.execute(insert(_RM).values(tenant_id=row.id))
+            return row
 
     async def _request(self, tenant_id: TenantId, precondition: ColumnElement[bool], refusal: str,
                        **values: Any) -> TenantRecord:
@@ -268,6 +290,7 @@ class _Held:
         update_generations: Mapping[str, Mapping[str, Any]] | None = None,
         go_live: str | None = None, destroy: Collection[str] | Literal["all"] = (),
         wiring: ForgeWiring | None = None, drop_wiring: bool = False, drop_publish_status: bool = False,
+        drop_records: bool = False,
     ) -> TenantRecord:
         columns = {k: v for k, v in dict(state=state, pending_action=pending_action, repo_url=repo_url,
                                          offboarded_at=offboarded_at, repo_delete_after=repo_delete_after).items()
@@ -285,6 +308,10 @@ class _Held:
         if drop_publish_status:
             statement.cte("drop_status", f"DELETE FROM {SCHEMA}.publish_status"
                           " WHERE tenant_id IN (SELECT id FROM fence) RETURNING tenant_id")
+        if drop_records:
+            statement.cte("drop_sv", f"DELETE FROM {SCHEMA}.system_versions WHERE tenant_id IN (SELECT id FROM fence) RETURNING tenant_id")
+            statement.cte("drop_cv", f"DELETE FROM {SCHEMA}.case_versions WHERE tenant_id IN (SELECT id FROM fence) RETURNING tenant_id")
+            statement.cte("drop_rm", f"DELETE FROM {SCHEMA}.records_mark WHERE tenant_id IN (SELECT id FROM fence) RETURNING tenant_id")
         return await self._land(statement)
 
     async def fail(self, failure: str, *, step: str, actor: str) -> TenantRecord:
