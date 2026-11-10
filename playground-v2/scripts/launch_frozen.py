@@ -4,11 +4,14 @@
 Every scored held-out run is started here, under the frozen engine's lab-server lock:
 
     verify case, freeze and parts (refuse: no cluster request, no row) -> take the lock ->
-    ready the variant (restore + overlays, or trust a clean marker) -> load the stubs pinned at T
-    -> mount the node cert -> restart the node with the clock offset -> wait for health ->
-    create the read-only user -> compare counts, content digest and alert with case.yaml ->
-    start the frozen proxy -> run the agent with `--as-of T` -> append the row -> tear down ->
-    release the lock
+    ready the variant (a fresh node, restore + overlays; or trust a clean marker) -> load the
+    stubs pinned at T -> wait for health -> create the read-only user -> compare counts, content
+    digest and alert with case.yaml -> start the frozen proxy -> rewrite the node's clock offset
+    to T - now -> run the agent with `--as-of T` -> append the row -> tear down -> release the lock
+
+The node's clock (D15 revised) reads T whenever the node starts, and the offset rewrite is the
+last lab step before the agent runs, so the node's clock and the agent's `--as-of T` start
+together. The node is never restarted for its clock.
 
 A copy that cannot be made (restore, overlay, marker, services, health) is a launch failure: it
 raises, writes no row and leaves no clean marker. A copy that differs from what the case recorded
@@ -101,8 +104,8 @@ def alert_uuid_of(alert_file: Path) -> str:
         doc = json.loads(alert_file.read_text())
     except (OSError, ValueError) as exc:
         raise LaunchRefused(f"{alert_file} is not a readable alert document: {exc}") from exc
-    uuid = frozen_copy.dug(doc, "kibana.alert.uuid") if isinstance(doc, dict) else None
-    if not isinstance(uuid, str) or not uuid:
+    uuid = frozen_copy.alert_uuid(doc)
+    if uuid is None:
         raise LaunchRefused(f"{alert_file} carries no kibana.alert.uuid")
     return uuid
 
@@ -182,10 +185,7 @@ def _serve_copy(es: Any, ops: Any, clock: Any, *, case: dict, freeze: dict, free
     frozen_copy.ready(es, ops=ops, clock=clock, freeze=freeze, freeze_id=freeze_id,
                       overlay=overlay, location=location)
     ops.load_stubs(parts_dir / freeze_id, T, (overlay or {}).get("mutations") or None)
-    ops.mount_node_cert()
-    offset = round((frozen_copy.utc(T) - clock.now()).total_seconds())
-    ops.restart_node(offset)
-    frozen_copy.wait_for_cluster(es, clock, "the node restart")
+    frozen_copy.wait_for_cluster(es, clock, "the copy")
     ops.create_readonly_user(ops.current_password())
     observed = frozen_copy.observed_counts(es, list(freeze["elastic"]["indices"]))
     uuid = alert_uuid_of(alert_file)
@@ -240,6 +240,7 @@ def launch(case_dir: Path, *, freezes_dir: Path, tenant_settings: Path, index: P
                     "--tenant", tenant, "--no-learn", "--as-of", frozen_copy.stamp(freeze["T"])]
             if knowledge:
                 argv += ["--knowledge-commit", knowledge]
+            ops.set_clock(freeze["T"], clock)   # the last lab step: the node's clock starts with the agent's
             rc, stdout, _ = run_fn(argv, {**(os.environ if env is None else env),
                                           "DEFENDER_CREDENTIAL_PROXY_URL": proxy_url})
             run_id = _run_id(stdout)

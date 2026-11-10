@@ -77,10 +77,6 @@ class WallClock:
             time.sleep(min(left, 60.0))
 
 
-def stamp(moment: datetime) -> str:
-    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _fire_times(T: datetime, count: int) -> list[datetime]:
     """`count` moments spread evenly over [T - MAX_AGE, T - LEAD], the first at the window's start."""
     start, end = T - MAX_AGE, T - LEAD
@@ -189,7 +185,7 @@ def _publish(freeze_dir: Path, parts_root: Path, staging: Path, doc: dict) -> No
 def _check_moment(T: datetime, scenarios: list[str], now: datetime) -> None:
     """T is not before this capture's start; with scenarios it leaves MAX_AGE to fire them in."""
     if T < now:
-        raise CaptureRefused(f"T {stamp(T)} is already past ({stamp(now)}): pick a later T")
+        raise CaptureRefused(f"T {frozen_copy.stamp(T)} is already past ({frozen_copy.stamp(now)}): pick a later T")
     if scenarios and T - now < MAX_AGE:
         raise CaptureRefused(f"T leaves less than {MAX_AGE} for the scenario batch: pick a later T")
 
@@ -238,7 +234,7 @@ def capture(freeze_dir: Path, *, T: datetime, scenarios: list[str], repository: 
 
     try:
         counts = ops.verify_restore(repository, snap["snapshot"])
-        doc = {"T": stamp(T),
+        doc = {"T": frozen_copy.stamp(T),
                "elastic": {"repository": repository, "snapshot": snap["snapshot"],
                            "uuid": snap["uuid"], "indices": dict(counts)},
                "patterns": list(patterns), "parts": parts, "captured_by": captured_by}
@@ -267,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.parts_dir:
         parser.error("--parts-dir is required (or $V2_FROZEN_PARTS_DIR)")
-    moment = (datetime.fromisoformat(args.T.replace("Z", "+00:00")).astimezone(UTC) if args.T
+    moment = (frozen_copy.utc(args.T) if args.T
               else datetime.now(UTC) + (MAX_AGE + LEAD if args.scenarios else MARGIN))
     from chaos.ctl import DockerExecSeam
     from lab_ops import LabOps

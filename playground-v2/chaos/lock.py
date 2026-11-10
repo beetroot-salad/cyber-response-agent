@@ -13,7 +13,9 @@ A lock never expires. A dead holder's lock is cleared by the operator, explicitl
     python3 chaos/lock.py clear capture
 
 `store=` is injectable so tests never need the live stack. A store offers
-`create_exclusive(name, record) -> bool`, `read(name) -> str | None` and `delete(name)`.
+`create_exclusive(name, record) -> bool`, `read(name) -> str | None`, `delete(name)` and
+`delete_if_held_by(name, token) -> bool`: the holder check and the delete in one step on the lab
+server, so a lock cleared and retaken meanwhile keeps its new holder (`release` frees through it).
 """
 from __future__ import annotations
 
@@ -38,6 +40,7 @@ LOCK_CONTAINER = "elasticsearch"
 LOCK_DIR = "/tmp/lab-locks"
 
 _NAME = re.compile(r"^[a-z][a-z0-9-]*$")
+_TOKEN = re.compile(r"[0-9a-f]{8,64}")
 
 
 class LockError(RuntimeError):
@@ -79,13 +82,12 @@ def take(store: Any, name: str, *, clock: Callable[[], float] = time.time) -> st
 
 
 def release(store: Any, name: str, token: str) -> None:
-    """Free `name` if `token` is the holder's; a wrong token raises WrongToken and keeps it."""
-    record = store.read(name)
-    if record is None:
+    """Free `name` if `token` is the holder's; a wrong token raises WrongToken and keeps it.
+    One check-and-delete on the store: there is no gap between reading the holder and deleting."""
+    if store.delete_if_held_by(name, token):
         return
-    if _token_of(record) != token:
+    if store.read(name) is not None:
         raise WrongToken(f"lock {name!r}: the token passed is not the holder's")
-    store.delete(name)
 
 
 def require(store: Any, name: str, token: Optional[str] = None) -> None:
@@ -120,6 +122,10 @@ class DockerLockStore:
     The exclusive create is the shell's noclobber redirect (O_EXCL). Exit 3 means "already
     there" (create) or "absent" (read); any other non-zero exit is a transport failure and
     raises, so an unreachable lab never reads as a free lock. `run=` replaces subprocess.run.
+
+    Next to each record, `<record>.d/<token>` names its holder, so the holder check of a release
+    is a file test in the same exec as the delete (no read of the record, no second exec). A
+    clear removes the whole `<record>.d`, so no stale holder name outlives its record.
     """
 
     def __init__(self, run: Any = subprocess.run, *, context: str = DOCKER_CONTEXT,
@@ -140,10 +146,16 @@ class DockerLockStore:
         return LockError(f"lock store {what}: rc={proc.returncode} {(proc.stderr or '').strip()}")
 
     def create_exclusive(self, name: str, record: str) -> bool:
+        token = _token_of(record)
+        if isinstance(token, str) and _TOKEN.fullmatch(token):
+            holder, args = ('mkdir -p "$1.d" && printf "" > "$1.d/$3" && exit 0; rm -f "$1"; exit 4; ',
+                            (token,))
+        else:   # a record with no usable token: no release can match it, only a clear
+            holder, args = "exit 0; ", ()
         script = ('mkdir -p "$(dirname "$1")" || exit 4; set -C; '
-                  'if printf "%s" "$2" > "$1" 2>/dev/null; then exit 0; fi; '
+                  f'if printf "%s" "$2" > "$1" 2>/dev/null; then {holder}fi; '
                   '[ -e "$1" ] && exit 3; exit 4')
-        proc = self._sh(script, self._path(name), record)
+        proc = self._sh(script, self._path(name), record, *args)
         if proc.returncode == 0:
             return True
         if proc.returncode == 3:
@@ -159,9 +171,22 @@ class DockerLockStore:
         return proc.stdout
 
     def delete(self, name: str) -> None:
-        proc = self._sh('rm -f "$1"', self._path(name))
+        proc = self._sh('rm -rf "$1.d" "$1"', self._path(name))
         if proc.returncode != 0:
             raise self._fail(f"delete {name}", proc)
+
+    def delete_if_held_by(self, name: str, token: str) -> bool:
+        """Delete the record only if `token` holds it, in one exec on the lab server. Exit 3 means
+        "absent, or another holder's": nothing deleted."""
+        if not _TOKEN.fullmatch(token or ""):
+            return False      # `take` makes hex tokens; anything else holds nothing
+        script = '[ -e "$1" ] && [ -e "$1.d/$2" ] || exit 3; rm -f "$1.d/$2" "$1" || exit 4'
+        proc = self._sh(script, self._path(name), token)
+        if proc.returncode == 0:
+            return True
+        if proc.returncode == 3:
+            return False
+        raise self._fail(f"release {name}", proc)
 
 
 def main(argv: Optional[list[str]] = None) -> int:

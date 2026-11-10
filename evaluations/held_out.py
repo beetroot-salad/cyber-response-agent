@@ -103,7 +103,8 @@ def __getattr__(name: str) -> Any:
 
 
 class FixturesRefused(Exception):  # noqa: N818 — named for its refusal, as `IndexRefused` is
-    """A held-out fixture carries a label outside `LABELS`, or a case without a usable freeze.
+    """A held-out fixture carries a label outside `LABELS`, has its alert but no case, or has a case
+    without a usable freeze.
     Scoring refuses the whole set rather than let a typo or a broken case shrink the
     denominator; the message names every such fixture."""
 
@@ -200,8 +201,9 @@ def _labelled(child: Path) -> dict | None:
 
 
 def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
-    """The cases under `fixtures_dir`: labelled fixtures with a `case.yaml` (one without is not
-    a case). Raises `FixturesRefused` for a stray label or a case that cannot be bound."""
+    """The cases under `fixtures_dir`: labelled fixtures, each with its `case.yaml`. A labelled
+    fixture with no alert is excluded loudly (checked first); one with its alert but no
+    `case.yaml`, a stray label, or a case that cannot be bound raises `FixturesRefused`."""
     from defender.records import RUN_LAYOUT
     out: list[HeldOutAlert] = []
     faults: list[str] = []
@@ -211,6 +213,8 @@ def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
             continue
         case_file = child / CASE_FILE
         if not case_file.is_file():
+            # Labelled held-out, with its alert, but no case: skipping it would shrink the set silently.
+            faults.append(f"{child.name} (labelled held_out: true but has no {CASE_FILE})")
             continue
         try:
             bound, age = _bind_case(fixtures_dir, case_file, freezes)

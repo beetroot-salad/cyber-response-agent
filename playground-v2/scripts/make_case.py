@@ -62,7 +62,7 @@ def candidates(freeze_dir: Path, *, ops: Any, max_age: timedelta = MAX_AGE) -> l
     skip = set(ops.live_run_alerts()) | set(ops.ticketed_alerts())
     found = []
     for alert in ops.snapshot_alerts(freeze_dir):
-        uuid = frozen_copy.dug(alert, "kibana.alert.uuid")
+        uuid = frozen_copy.alert_uuid(alert)
         stamped = frozen_copy.dug(alert, "@timestamp")
         if (not uuid or uuid in skip or not stamped
                 or frozen_copy.dug(alert, "kibana.alert.workflow_status") != "open"):
@@ -123,7 +123,8 @@ def _record(*, freeze: dict, freeze_id: str, overlay: dict | None, alert: dict, 
     T = frozen_copy.utc(freeze["T"])
     return {"freeze": freeze_id, "alert": frozen_copy.digest_of(alert),
             "age": int((T - frozen_copy.utc(frozen_copy.dug(alert, "@timestamp"))).total_seconds()),
-            "overlay": overlay, "counts": copy.counts, "content": ops.content_digest(), "confirmed": None}
+            "overlay": overlay, "counts": copy.counts, "content": ops.content_digest(list(freeze["patterns"])),
+            "confirmed": None}
 
 
 def _remember(case_dir: Path) -> Any:

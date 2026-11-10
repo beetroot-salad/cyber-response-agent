@@ -1,10 +1,12 @@
 """Readying one variant's frozen copy (#1347 A1), shared by make-a-case and the launcher.
 
-A variant is a freeze plus the overlay's Elasticsearch part. Readying it means: register the
-snapshot repository read-only and check the snapshot's UUID; unless a clean marker already says the
-copy is this variant, restore the whole snapshot and apply the base overlay (delete everything
-stamped after T) and then each fault overlay; record a clean marker. A durable marker is written
-dirty before the first change and clean after the last, so a crash leaves a copy nobody trusts.
+A variant is a freeze plus the overlay's Elasticsearch part. Readying it means: unless a clean
+marker already says the copy is this variant, discard the node and its data and start a fresh one
+(D25), register the snapshot repository read-only and check the snapshot's UUID, restore the whole
+snapshot and apply the base overlay (delete everything stamped after T) and then each fault
+overlay; record a clean marker. The marker (`{variant, dirty, tallies}`, on the engine's state
+volume, outside the node's data) is written dirty before the node is discarded and clean after the
+last change, so a crash leaves a copy nobody trusts; a dirty or unknown marker means a fresh node.
 
 The index patterns come from the freeze (`patterns`, D24); `check_patterns` refuses a freeze whose
 patterns differ from the lab tenant's current ones.
@@ -60,6 +62,13 @@ def utc(value: Any) -> datetime:
     """A moment however it is spelled (datetime or ISO text, `Z` or an offset), as aware UTC."""
     dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     return (dt if dt.tzinfo else dt.replace(tzinfo=UTC)).astimezone(UTC)
+
+
+def alert_uuid(doc: Any) -> str | None:
+    """An alert document's `kibana.alert.uuid`, stored flat or nested; None when it carries none.
+    The one reader of an alert's uuid in the lab."""
+    uuid = dug(doc, "kibana.alert.uuid") if isinstance(doc, dict) else None
+    return uuid if isinstance(uuid, str) and uuid else None
 
 
 def stamp(value: Any) -> str:
@@ -246,16 +255,6 @@ def register_repository(es: Any, freeze: dict, location: str) -> None:
         raise CopyRefused(f"snapshot {repo}:{snap} is {snapshots[0].get('state')}, not SUCCESS")
 
 
-def _clear(es: Any, current: dict[str, dict], keep: set[str]) -> None:
-    """Make room for a restore: close what the snapshot will replace, delete what it will not."""
-    for name, info in sorted(current.items()):
-        if name in keep:
-            if info["status"] != "close":
-                es.es_request("POST", f"/{name}/_close")
-        else:
-            es.es_request("DELETE", f"/{name}")
-
-
 def _check_bulk(result: dict, what: str) -> dict:
     if result.get("failures") or result.get("version_conflicts"):
         raise CopyFault(f"{what}: {result.get('version_conflicts', 0)} conflicts, "
@@ -368,27 +367,21 @@ class Copy:
     restored: bool              # False: a clean marker for this variant was trusted
 
 
-def _is_clean(marker: Any, freeze_id: str, vid: str, current: dict[str, dict], names: set[str]) -> bool:
-    return bool(marker) and marker.get("dirty") is False and marker.get("freeze") == freeze_id \
-        and marker.get("variant") == vid and isinstance(marker.get("tallies"), dict) \
-        and set(current) == names \
-        and all(i["status"] != "close" for i in current.values()) \
-        and marker.get("index_uuids") == {n: i["uuid"] for n, i in current.items()}
+def _is_clean(marker: Any, vid: str) -> bool:
+    return isinstance(marker, dict) and marker.get("dirty") is False and marker.get("variant") == vid \
+        and isinstance(marker.get("tallies"), dict)
 
 
 def mark_dirty(ops: Any, freeze_id: str, overlay: dict | None) -> None:
     """Record that the copy cannot be trusted (a stale launch): the next launch restores whole."""
-    ops.write_marker({"freeze": freeze_id, "variant": variant_id(freeze_id, overlay),
-                      "dirty": True, "index_uuids": {}})
+    ops.write_marker({"variant": variant_id(freeze_id, overlay), "dirty": True})
 
 
-def _build(es: Any, ops: Any, clock: Any, freeze: dict, freeze_id: str, overlay: dict | None,
-           current: dict[str, dict]) -> dict[str, int]:
+def _build(es: Any, clock: Any, freeze: dict, overlay: dict | None) -> dict[str, int]:
+    """Restore the whole snapshot into the fresh, empty node and apply the overlays; the tallies."""
     names, patterns = list(freeze["elastic"]["indices"]), list(freeze["patterns"])
     T = stamp(freeze["T"])
-    mark_dirty(ops, freeze_id, overlay)
     es.es_request("POST", "/_ilm/stop")
-    _clear(es, current, set(names))
     elastic = freeze["elastic"]
     es.es_request("POST", f"/_snapshot/{elastic['repository']}/{elastic['snapshot']}/_restore",
                   {"include_global_state": False})
@@ -406,26 +399,36 @@ def _build(es: Any, ops: Any, clock: Any, freeze: dict, freeze_id: str, overlay:
     return tallies
 
 
+def _reusable(es: Any, ops: Any, clock: Any, freeze: dict, location: str) -> bool:
+    """With a clean marker for the variant: bring the node up on the data it has and check that it
+    holds exactly the freeze's indices, all open (the snapshot's UUID is checked every time)."""
+    ops.ensure_node(freeze["T"], clock)
+    wait_for_cluster(es, clock, "the node start")
+    register_repository(es, freeze, location)
+    current = list_indices(es, list(freeze["patterns"]))
+    return set(current) == set(freeze["elastic"]["indices"]) \
+        and all(i["status"] != "close" for i in current.values())
+
+
 def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overlay: dict | None,
           whole: bool = False, location: str = REPO_LOCATION) -> Copy:
     """Make the frozen cluster hold exactly this variant. A clean marker for the variant is
-    trusted unless `whole` (make-a-case always restores whole, D23). The snapshot's UUID is
-    checked every time."""
+    trusted unless `whole` (make-a-case always restores, D23); anything else discards the node and
+    its data and restores the whole snapshot into a fresh node (D25). The node's clock reads T
+    whenever it starts (D15 revised)."""
     check_freeze(freeze, freeze_id)
-    names, patterns = list(freeze["elastic"]["indices"]), list(freeze["patterns"])
     vid = variant_id(freeze_id, overlay)
-    # The first operation: a teardown stops the node, so it is brought up before any cluster request.
-    ops.ensure_node()
-    marker = ops.read_marker()
-    wait_for_cluster(es, clock, "the node start")
-    register_repository(es, freeze, location)
-    current = list_indices(es, patterns)
-    restored = whole or not _is_clean(marker, freeze_id, vid, current, set(names))
-    if restored:
-        tallies = _build(es, ops, clock, freeze, freeze_id, overlay, current)
-        ops.write_marker({"freeze": freeze_id, "variant": vid, "dirty": False, "tallies": tallies,
-                          "index_uuids": {n: i["uuid"] for n, i in list_indices(es, patterns).items()}})
+    marker = None if whole else ops.read_marker()
+    if _is_clean(marker, vid) and _reusable(es, ops, clock, freeze, location):
+        tallies = {n: int(t) for n, t in marker["tallies"].items()}   # type: ignore[index]
+        restored = False
     else:
-        tallies = {n: int(t) for n, t in marker["tallies"].items()}
+        mark_dirty(ops, freeze_id, overlay)   # before the wipe: a crash from here leaves no trusted copy
+        ops.fresh_node(freeze["T"], clock)
+        wait_for_cluster(es, clock, "the node start")
+        register_repository(es, freeze, location)
+        tallies = _build(es, clock, freeze, overlay)
+        ops.write_marker({"variant": vid, "dirty": False, "tallies": tallies})
+        restored = True
     counts = {n: int(c) - tallies.get(n, 0) for n, c in freeze["elastic"]["indices"].items()}
     return Copy(counts=counts, tallies=tallies, restored=restored)

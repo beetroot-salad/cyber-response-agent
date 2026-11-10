@@ -3,20 +3,26 @@
 make-a-case lists, and what the launcher drives to serve a run from a frozen copy.
 
 `capture_case.py`, `make_case.py` and `launch_frozen.py` drive these through one `LabOps`; their
-tests replace it with fakes. `test_1347_lab_ops_frozen.py` checks the content of the commands sent
-through the `run=` seam (stub env and mutations, the proxy program and its resolver, the clock
-offset). Everything that moves images, volumes and containers is checked by the operator on the
-lab (runbook, deferred verification).
+tests drive this class too, faking only docker (`run=`) and the clusters behind it. What needs the
+real lab (images, the shim under TLS, restore timings) is checked by the operator (runbook,
+deferred verification).
 
 Topology. The *frozen engine* is a Docker-in-Docker container (`lab-engine`) on the lab server,
 reached with `docker --context <context> exec lab-engine docker ...`; its daemon listens on a unix
 socket only. Inside it (network `lab`): the frozen Elasticsearch (`elasticsearch`, the live image,
 the live node's certificate mounted from the lab's certs volume, `LD_PRELOAD` of the D15 wall-clock
-shim), the five stubs loaded from the freeze's dump and pinned at T, and per-port frontends the
+shim reading its offset from a file on the engine's state volume), the five stubs loaded from the freeze's dump and pinned at T, and per-port frontends the
 engine publishes on loopback. The *frozen proxy* is a second container on the deployment network
 (next to the live credential proxy), the product's proxy program unmodified, with its own audit
 file and a resolver (`--add-host`) mapping the tenant's declared host names to the ssh-forwarded
 endpoint of those frontends. Host state is staged out (D20): hosts are captured, not served.
+
+Every restore goes into a fresh node (D25): the node container and its data volume
+(`frozen-es-data`) are discarded and a new node starts empty; the copy-state marker lives on the
+engine's state volume, so it outlives the wipe. The node's clock offset (D15 revised) is a fixed
+24-byte record (a signed decimal number of seconds, space-padded, newline-ended) in
+`CLOCK_FILE`: created before the node starts and only ever rewritten in place at byte 0, never
+truncated or replaced, because the shim maps that file once and reads it on every clock call.
 """
 from __future__ import annotations
 
@@ -67,6 +73,11 @@ ENGINE_IMAGE = "docker:27-dind"
 ENGINE_NETWORK = "lab"
 STATE_DIR = "/lab/state"                  # inside the engine, on a volume that outlives it
 MARKER_FILE = f"{STATE_DIR}/copy-state.json"
+CLOCK_DIR = f"{STATE_DIR}/clock"          # the node's clock offset, shared with the node read-only
+CLOCK_FILE = f"{CLOCK_DIR}/offset"
+NODE_CLOCK_DIR = "/lab/clock"             # where the node sees CLOCK_DIR
+OFFSET_RECORD = 24                        # bytes: the shim maps exactly this record
+ES_DATA_VOLUME = "frozen-es-data"
 ES_ENV_FILE = f"{STATE_DIR}/es.env"       # the frozen cluster's own elastic password, never a freeze part
 SHIM_DIR, SHIM_FILE = "/lab/shim", "clockshim.so"
 CERTS_DIR, REPO_DIR = "/lab/certs", "/lab/repo"
@@ -127,15 +138,20 @@ class FrozenEs:
             kw["input"] = json.dumps(body)
         proc = self._ops._inner("exec", *(["-i"] if body is not None else []), ES_CONTAINER,
                                 "bash", "-c", self.SCRIPT, "curl", *args,
-                                f"https://localhost:{ES_PORT}{path}", text=True, **kw)
+                                f"https://localhost:{ES_PORT}{path}", text=True, check=False, **kw)
         text, _, status = _text(proc.stdout).rstrip().rpartition("\n")
         try:
             code = int(status.strip())
         except ValueError:
-            raise LabOpsError(f"frozen elasticsearch {method} {path}: no HTTP status in "
-                              f"{_text(proc.stdout)[-200:]!r}") from None
-        if code in (0, 502, 503, 504):   # 0: curl could not connect
-            raise frozen_copy.NodeNotReady(f"frozen elasticsearch {method} {path}: HTTP {code}")
+            # No status line at all: docker could not run curl (the node is stopped or missing).
+            raise LabOpsError(f"frozen elasticsearch {method} {path}: rc={proc.returncode} "
+                              f"{_text(proc.stderr).strip()[:300]} {_text(proc.stdout)[-200:]!r}") from None
+        if code in (0, 502, 503, 504):   # 0 (`000`): curl could not connect (exit 7), the node is booting
+            raise frozen_copy.NodeNotReady(f"frozen elasticsearch {method} {path}: HTTP {code} "
+                                           f"(curl exit {proc.returncode})")
+        if proc.returncode != 0:
+            raise LabOpsError(f"frozen elasticsearch {method} {path}: curl exit {proc.returncode} "
+                              f"{_text(proc.stderr).strip()[:300]}")
         payload = json.loads(text) if text.strip() else {}
         if not 200 <= code < 300:
             raise LabOpsError(f"frozen elasticsearch {method} {path}: HTTP {code}: {str(payload)[:500]}")
@@ -182,7 +198,7 @@ class LabOps:
             frozen_endpoint=env.get("V2_FROZEN_ENDPOINT"), audit_path=env.get("V2_FROZEN_PROXY_AUDIT"),
             live_audit_path=env.get("V2_LIVE_PROXY_AUDIT"), proxy_context=env.get("V2_FROZEN_PROXY_CONTEXT"),
             es_image=env.get("V2_FROZEN_ES_IMAGE", DEFAULT_ES_IMAGE),
-            cluster_name=env.get("CLUSTER_NAME", "soc-playground"),
+            cluster_name=env.get("V2_FROZEN_CLUSTER_NAME", "soc-playground"),
             certs_volume=env.get("V2_FROZEN_CERTS_VOLUME", "soc-playground_certs"),
             repo_dir=env.get("V2_FROZEN_REPO_DIR", "/srv/lab/frozen-cases"))
 
@@ -234,17 +250,23 @@ class LabOps:
         self._inner("load", input=saved)
 
     def ensure_engine(self) -> None:
-        """The engine container, up, with the lab's certs, the repository, the shim and its state."""
-        if self._outer("inspect", "-f", "{{.State.Running}}", ENGINE, check=False).returncode == 0:
+        """The engine container, running, with the lab's certs, the repository, the shim and its
+        state. A stopped engine (`inspect` prints `false`, rc 0: a reboot, a `docker stop`) is
+        started again with its volumes, which hold the marker and the node's data."""
+        state = self._outer("inspect", "-f", "{{.State.Running}}", ENGINE, check=False)
+        if state.returncode == 0 and _text(state.stdout).strip() != "false":
             return
-        self._ensure_shim()
-        self._outer("rm", "-f", ENGINE, check=False)
-        ports = [a for p in FRONTEND_PORTS for a in ("-p", f"127.0.0.1:{FRONTEND_BASE + p}:{p}")]
-        self._outer("run", "-d", "--privileged", "--name", ENGINE,
-                    "-v", "lab-engine-docker:/var/lib/docker", "-v", f"lab-engine-state:{STATE_DIR}",
-                    "-v", f"{self.certs_volume}:{CERTS_DIR}:ro", "-v", f"{self.repo_dir}:{REPO_DIR}:ro",
-                    "-v", f"lab-clockshim:{SHIM_DIR}:ro", *ports,
-                    ENGINE_IMAGE, "dockerd", "--host=unix:///var/run/docker.sock")
+        if state.returncode == 0:
+            self._outer("start", ENGINE)
+        else:
+            self._ensure_shim()
+            self._outer("rm", "-f", ENGINE, check=False)
+            ports = [a for p in FRONTEND_PORTS for a in ("-p", f"127.0.0.1:{FRONTEND_BASE + p}:{p}")]
+            self._outer("run", "-d", "--privileged", "--name", ENGINE,
+                        "-v", "lab-engine-docker:/var/lib/docker", "-v", f"lab-engine-state:{STATE_DIR}",
+                        "-v", f"{self.certs_volume}:{CERTS_DIR}:ro", "-v", f"{self.repo_dir}:{REPO_DIR}:ro",
+                        "-v", f"lab-clockshim:{SHIM_DIR}:ro", *ports,
+                        ENGINE_IMAGE, "dockerd", "--host=unix:///var/run/docker.sock")
         deadline = time.monotonic() + 120
         while self._inner("version", check=False).returncode != 0:
             if time.monotonic() > deadline:
@@ -262,9 +284,33 @@ class LabOps:
         self._engine("test", "-f", f"{CERTS_DIR}/elasticsearch/elasticsearch.crt")
         self._engine("test", "-f", f"{CERTS_DIR}/ca/ca.crt")
 
-    def _start_node(self, offset: int) -> None:
+    def set_clock(self, as_of: Any, clock: Any = None) -> int:
+        """Rewrite the node's clock offset to `as_of - now` in place (D15 revised): the running
+        shim maps the file, so its next reading moves; a new file would never be read. Returns the
+        offset written. The launcher's last lab step before the agent runs."""
+        now = (clock or _WALL).now()
+        offset = round((frozen_copy.utc(as_of) - frozen_copy.utc(now)).total_seconds())
+        self._write_offset(offset)
+        return offset
+
+    def _write_offset(self, offset: int | None) -> None:
+        """The fixed record at byte 0 of CLOCK_FILE, opened without truncation (`1<>`, which also
+        creates it). `None` creates the file at zero only if it is missing."""
+        record = "%23s\\n"
+        if offset is None:
+            self._engine("sh", "-c", f'mkdir -p {CLOCK_DIR}; [ -f {CLOCK_FILE} ] || '
+                                     f'printf "{record}" 0 1<> {CLOCK_FILE}')
+            return
+        text = str(int(offset))
+        if len(text) >= OFFSET_RECORD:
+            raise LabOpsError(f"clock offset {text} does not fit the {OFFSET_RECORD}-byte record")
+        self._engine("sh", "-c", f'mkdir -p {CLOCK_DIR} && printf "{record}" "$1" 1<> {CLOCK_FILE}', "sh", text)
+
+    def _start_node(self, as_of: Any = None, clock: Any = None) -> None:
+        """A new node container on the `frozen-es-data` volume (as it is: a fresh restore removed it
+        first). Its offset file holds `as_of - now` when the node starts."""
         self._ensure_image(self.es_image)
-        self._inner("rm", "-f", "-v", ES_CONTAINER, check=False)
+        self._inner("rm", "-f", ES_CONTAINER, check=False)
         certs = "certs/elasticsearch/elasticsearch"
         env = {"node.name": "es01", "cluster.name": self.cluster_name, "discovery.type": "single-node",
                "bootstrap.memory_lock": "false", "xpack.security.enabled": "true",
@@ -277,33 +323,44 @@ class LabOps:
                "xpack.security.transport.ssl.certificate_authorities": "certs/ca/ca.crt",
                "xpack.security.transport.ssl.verification_mode": "certificate",
                "path.repo": REPO_DIR, "ES_JAVA_OPTS": "-Xms2g -Xmx2g",
-               "LD_PRELOAD": f"{SHIM_DIR}/{SHIM_FILE}", "V2_CLOCK_OFFSET_S": str(int(offset))}
+               "LD_PRELOAD": f"{SHIM_DIR}/{SHIM_FILE}",
+               "V2_CLOCK_OFFSET_FILE": f"{NODE_CLOCK_DIR}/{Path(CLOCK_FILE).name}"}
         flags = [a for k, v in env.items() for a in ("-e", f"{k}={v}")]
+        if as_of is None:
+            self._write_offset(None)
+        else:
+            self.set_clock(as_of, clock)
         self._inner("run", "-d", "--name", ES_CONTAINER, "--hostname", ES_CONTAINER,
                     "--network", ENGINE_NETWORK, "--env-file", ES_ENV_FILE, *flags,
-                    "-v", "frozen-es-data:/usr/share/elasticsearch/data",
+                    "-v", f"{ES_DATA_VOLUME}:/usr/share/elasticsearch/data",
                     "-v", f"{CERTS_DIR}:/usr/share/elasticsearch/config/certs:ro",
                     "-v", f"{REPO_DIR}:{REPO_DIR}:ro", "-v", f"{SHIM_DIR}:{SHIM_DIR}:ro",
+                    "-v", f"{CLOCK_DIR}:{NODE_CLOCK_DIR}:ro",
                     "--memory", "3g", self.es_image)
 
-    def ensure_node(self) -> None:
-        """The engine, and a frozen node running (clock not yet shifted; `restart_node` shifts it
-        once the copy is made). Idempotent: a running node is left alone. A teardown stops the node,
-        so this comes before the first request to the cluster."""
+    def ensure_node(self, as_of: Any = None, clock: Any = None) -> None:
+        """The engine, and a frozen node running on the data it has. Idempotent: a running node is
+        left alone; a stopped or missing one is started anew, its clock reading `as_of` at its start
+        (without `as_of` the offset file keeps what it holds). A teardown stops the node, so this
+        comes before the first request to the cluster."""
         self.mount_node_cert()
         running = self._inner("inspect", "-f", "{{.State.Running}}", ES_CONTAINER, check=False)
-        if running.returncode != 0 or "true" not in _text(running.stdout):
-            self._start_node(0)
+        if running.returncode != 0 or _text(running.stdout).strip() != "true":
+            self._start_node(as_of, clock)
 
-    def restart_node(self, clock_offset: Any) -> None:
-        """Restart the frozen node with its wall clock shifted by `clock_offset` seconds (D15)."""
-        self.ensure_engine()
-        self._start_node(int(clock_offset))
+    def fresh_node(self, as_of: Any, clock: Any = None) -> None:
+        """D25: discard the node container and its data volume and start a new, empty node whose
+        clock reads `as_of` at its start. The marker, on the engine's state volume, is kept."""
+        self.mount_node_cert()
+        self._inner("rm", "-f", ES_CONTAINER, check=False)
+        self._inner("volume", "rm", "-f", ES_DATA_VOLUME)
+        self._start_node(as_of, clock)
 
     # -- the copy-state marker (A4) ---------------------------------------------------------------
 
     def read_marker(self) -> dict | None:
         """The copy-state marker, or None (absent or unreadable: unknown is restored whole)."""
+        self.ensure_engine()
         proc = self._engine("sh", "-c", f"cat {MARKER_FILE} 2>/dev/null; true", text=True)
         text = _text(proc.stdout).strip()
         try:
@@ -312,6 +369,7 @@ class LabOps:
             return None   # unreadable is unknown, and unknown is restored whole
 
     def write_marker(self, marker: dict) -> None:
+        self.ensure_engine()
         self._engine("sh", "-c", f"cat > {MARKER_FILE}.tmp && mv {MARKER_FILE}.tmp {MARKER_FILE}",
                      input=json.dumps(marker))
 
@@ -322,7 +380,7 @@ class LabOps:
         CMDB mutations applied at load."""
         parts = Path(parts)
         self.ensure_engine()
-        stamp = _stamp(as_of)
+        stamp = frozen_copy.stamp(as_of)
         dump = (parts / STUBS_PART).read_bytes()
         self._stubs_loaded = hashlib.sha256(dump + json.dumps(mutations or [], sort_keys=True).encode()).hexdigest()
         self._engine("sh", "-c", f"rm -rf {SEED_DIR} && mkdir -p {SEED_DIR} && tar -x -C {SEED_DIR}",
@@ -639,7 +697,7 @@ class LabOps:
         while True:
             body: dict[str, Any] = {"size": 1000, "_source": fields,
                                     "sort": [{"@timestamp": "asc"}, {"kibana.alert.uuid": "asc"}],
-                                    "query": {"range": {"@timestamp": {"lte": _stamp(freeze["T"])}}}}
+                                    "query": {"range": {"@timestamp": {"lte": frozen_copy.stamp(freeze["T"])}}}}
             if after:
                 body["search_after"] = after
             hits = self._live_es("POST", f"/{alerts_pattern}/_search?expand_wildcards=open,hidden", body)["hits"]["hits"]
@@ -658,8 +716,7 @@ class LabOps:
                 doc = json.loads(path.read_text())
             except (OSError, ValueError):
                 continue
-            uuid = doc.get("kibana.alert.uuid") if isinstance(doc, dict) else None
-            if isinstance(uuid, str):
+            if (uuid := frozen_copy.alert_uuid(doc)) is not None:
                 found.add(uuid)
         return found
 
@@ -704,9 +761,12 @@ class LabOps:
         return path.name
 
 
-def _stamp(value: Any) -> str:
-    dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    return (dt if dt.tzinfo else dt.replace(tzinfo=UTC)).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+class _WallClock:
+    def now(self) -> datetime:
+        return datetime.now(UTC)
+
+
+_WALL = _WallClock()
 
 
 def _dump_overlays(proc: Any) -> list[tuple[str, dict]]:
