@@ -809,6 +809,23 @@ def test_fire_writes_the_attack_runs_into_the_configured_runs_dir_not_the_reposi
     assert not [r for r in rig.run_ids if (REPO_RUNS / r).exists()], "a run record was written into the repository"
 
 
+def test_capture_with_no_attack_runs_dir_configured_is_refused_before_it_fires_anything(tmp_path, monkeypatch):
+    """r6.4.3 settlement (design: LabOps.fire's run records): with `V2_ATTACK_RUNS_DIR` unset, capture refuses
+    before it fires anything; it never falls back to the repository's `attacks/runs/`. Nothing is fired,
+    written or snapshotted, the lock is free and the watcher runs again."""
+    rig = Rig(tmp_path)
+    monkeypatch.delenv("V2_ATTACK_RUNS_DIR", raising=False)
+    in_repo = sorted(p.name for p in REPO_RUNS.iterdir()) if REPO_RUNS.is_dir() else []
+    with pytest.raises(_FAILED) as caught:
+        rig.capture()
+
+    assert not isinstance(caught.value, _NOT_A_REFUSAL), repr(caught.value)
+    assert not rig.fired and not rig.run_ids and not rig.docker.of_kind("host-command"), "an attack was fired"
+    assert (sorted(p.name for p in REPO_RUNS.iterdir()) if REPO_RUNS.is_dir() else []) == in_repo
+    assert not (rig.freeze_dir / "freeze.yaml").exists() and rig.snapshots == {} and not rig.lock_held()
+    assert rig.watcher_running()
+
+
 def _point_defaults(monkeypatch, fn, fake) -> None:
     """Replace a `run=subprocess.run` default (bound when its module was imported) by the rig docker."""
     real = _EDGES["real_run"]

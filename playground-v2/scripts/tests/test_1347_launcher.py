@@ -607,15 +607,22 @@ def test_a_snapshot_with_another_uuid_is_refused_before_the_copy_is_touched(tmp_
     assert "run" not in rig.journal.ops() and rig.rows() == [] and "frozen-engine" not in rig.store.records
 
 
-def test_a_snapshot_with_another_uuid_leaves_the_existing_copy_untouched_when_a_restore_is_due(tmp_path):
+@pytest.mark.parametrize("node_state", ["exited", "running"])
+def test_a_snapshot_with_another_uuid_leaves_the_existing_copy_untouched_when_a_restore_is_due(tmp_path, node_state):
     """A2 under D25: a copy is up (a valid `drop` launch); the next case wants another variant, so a restore is
     due, but the repository's snapshot now carries another UUID. The refusal comes before the copy is touched:
     no restore, no overlay, and the old node container and its data volume still exist (D25's discard of the old
-    node waits until the snapshot is known to be the freeze's)."""
+    node waits until the snapshot is known to be the freeze's). Both ways the old node can be found: stopped
+    (`exited`, as the first launch's teardown leaves it) and still up (`running`, an operator's node left
+    running, or a teardown that did not finish). The refused launch's own teardown may stop it afterwards:
+    stopping keeps the copy; removing the container or its volume does not."""
     rig = LabRig(tmp_path)
     rig.write_expected_case("drop")
     rig.launch()
     node = rig.docker.of_kind("node-start")[-1]
+    assert node["container"].state == "exited", "the rig's teardown no longer stops the node: fix this test"
+    if node_state == "running":
+        node["container"].state = "running"
     mutations, restores = len(rig.cluster.mutations), rig.cluster.restores
     rig.cluster.snapshot_uuid = "another-uuid"
     rig.write_expected_case("drift")
