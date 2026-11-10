@@ -399,6 +399,7 @@ class FakeCluster(FakeES):
         # whatever restores the index.
         self.nested: dict[str, int] = {}
         self.mutations: list[dict] = []
+        self.returned: list[tuple[int, str]] = []     # (request number, index) of every document a search returned
         self.restores = 0
         self.unsupported: list[str] = []
         self.clock, self.latency, self.up = clock, dict(latency or {}), up
@@ -622,6 +623,7 @@ class FakeCluster(FakeES):
             self._order.shuffle(hits)
         tracked = body.get("track_total_hits", self.MAX_RESULT_WINDOW)
         page = [{**h, "_source": copy.deepcopy(h["_source"])} for h in hits[start:start + size]]
+        self.returned += [(len(self.requests) - 1, h["_index"]) for h in page]
         if tracked is False:
             return {"hits": {"hits": page}}      # ES leaves the total out
         limit = None if tracked is True else int(tracked)
@@ -826,18 +828,10 @@ def expected_touched(state: dict, mutations: Any) -> list[str]:
     return sorted(out)
 
 
-READS = ("_search", "_count", "_msearch", "_mget", "_pit", "_async_search", "_scroll")
-
-
-def searched_indices(cluster: Any, since: int = 0) -> set[str]:
-    """The indices a document read (`_search`, `_count`, `_mget`, ...) at the cluster edge reached in the
-    requests after number `since`, each target expanded as the cluster does (`_search` with no target: all)."""
-    out: set[str] = set()
-    for _method, path, _body in cluster.requests[since:]:
-        head = path.split("?")[0].strip("/").split("/")
-        if head[-1] in READS:
-            out |= set(cluster._expand(head[0], closed=True)) if len(head) > 1 else set(cluster.indices)
-    return out
+def hit_indices(cluster: Any, since: int = 0) -> set[str]:
+    """The indices whose documents a search returned to the caller in the requests after number `since`
+    (observed at the cluster edge: a `_count`, or a search that matched nothing in an index, reads none)."""
+    return {index for n, index in cluster.returned if n >= since}
 
 
 def counts_of(state: dict) -> dict[str, int]:
