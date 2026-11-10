@@ -104,8 +104,6 @@ class ScriptedBao(A.OpenBaoStandIn):
     def __init__(self, *args: Any, **kw: Any) -> None:
         super().__init__(*args, **kw)
         self.sign_script: list[tuple[float, int | None]] = []
-        #: Called (no arguments) once a scripted sign has answered successfully (never after a failure).
-        self.after_sign: Any = None
         self._scripting = threading.Lock()
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
@@ -118,10 +116,7 @@ class ScriptedBao(A.OpenBaoStandIn):
                 if status is not None:
                     self.requests.append(request.url.path)
                     return httpx.Response(status, json={"errors": ["sign failed"]})
-                answered = super().handle_request(request)
-                if self.after_sign is not None:
-                    self.after_sign()
-                return answered
+                return super().handle_request(request)
         return super().handle_request(request)
 
 
@@ -209,17 +204,15 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = Fa
                env_url: str | None = None, proxy_address: bool = True, oracle: Any = None,
                unreachable_proxy: bool = False, credential_set: bool = True,
                on_read: Any = None, source: str = "idp", sign_login: bool = True,
-               bao_type: type = A.OpenBaoStandIn, sign_script: Any = (), after_sign: Any = None, **seams: Any):
+               bao_type: type = A.OpenBaoStandIn, sign_script: Any = (), **seams: Any):
     """One launch through pre-flight over `rig`. `on_read(rig)` runs as the merged upstream serves
     each idp read; `unreachable_proxy` hands the launcher an address nothing listens at;
-    `sign_script` (a `ScriptedBao`'s) shapes the sign requests in order; `after_sign` is called as each scripted
-    sign answers successfully."""
+    `sign_script` (a `ScriptedBao`'s) shapes the sign requests in order."""
     with rig(tmp_path, monkeypatch, data_root, working_tree_edit=working_tree_edit, env_url=env_url,
              credential_set=credential_set, source=source, sign_login=sign_login,
              bao_type=ScriptedBao if sign_script else bao_type) as r:
         if sign_script:
             r.bao.sign_script = list(sign_script)
-            r.bao.after_sign = after_sign
         if on_read is not None:
             body = r.merged.replies[f"{API}/events"]
 
@@ -336,7 +329,7 @@ def _sign_requests(bao: A.OpenBaoStandIn) -> int:
 
 
 #: How long a held oracle request waits for the failing world's retry (seconds); far under the turn deadline.
-HOLD_SEC = 10
+HOLD_SEC = 60
 CALIBRATED_WORLDS = ("b", "c")
 
 

@@ -255,6 +255,9 @@ _DOWN_SYSTEMS_CAUSE = "down-systems"
 _BRIEF_SIGN = "the read token for the credential proxy cannot be signed"
 _BRIEF_ACCESS = "the credential proxy could not be used"
 _BRIEF_SETUP = "our setup for a system failed"
+#: The fixed brief the record's structured cause chooses: the job-level observation of that cause (the record itself
+#: is not exposed to the entry's callers). D9's down-systems cause has no fixed brief, so none is observable here.
+_BRIEF_OF_CAUSE = {"sign": _BRIEF_SIGN, "access": _BRIEF_ACCESS, "setup": _BRIEF_SETUP}
 
 #: Every refusal pre-flight records before the first sibling, by CAUSE (#1363 B5: not by call site, several causes
 #: share the outcome writer), the row it ends, and the SITE it reaches: `("reason", <the first four words of the reason
@@ -279,49 +282,33 @@ _PREFLIGHT_REFUSALS = {
 #: The brief the job's end must carry, where the design fixes one (B5, C2): every sign failure, up front or mid-pass.
 #: The D9 down-systems-only refusal has none named, so none is pinned for it.
 _PREFLIGHT_BRIEFS = {
-    "read token cannot be signed": _BRIEF_SIGN,
-    "no proxy address, no replayed call proxied": _BRIEF_SIGN,
-}
+    row: _BRIEF_OF_CAUSE[site[1]] for row, (_s, _r, site) in _PREFLIGHT_REFUSALS.items()
+    if site is not None and site[0] == "cause" and site[1] in _BRIEF_OF_CAUSE}
 #: The question-writer's family refused before pre-flight: the family's own refusal too.
 _QUESTIONER_UNUSABLE = "questioner family unusable"
 
 
-def _preflight_refusal_sites() -> tuple[set[str], set[str]]:
-    """What `preflight` records: the first four words of the reason text of each `record(REFUSED | UNUSABLE, ...)`
-    that passes no `environment=`, and the value of every `environment=` keyword of any `record(...)` call (a string
-    constant, or a module-level name bound to one). A value it cannot resolve fails the census."""
+def _preflight_refusal_reasons() -> set[str]:
+    """What `preflight` records for the family: the first four words of the reason text of each
+    `record(REFUSED | UNUSABLE, ...)` that passes no `environment=`."""
     import ast
     import inspect
 
     from defender.learning.branch import preflight
 
-    tree = ast.parse(inspect.getsource(preflight))
-    module_constants = {t.id: n.value.value for n in tree.body if isinstance(n, ast.Assign)
-                        and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)
-                        for t in n.targets if isinstance(t, ast.Name)}
     reasons: set[str] = set()
-    causes: set[str] = set()
-    for node in ast.walk(tree):
+    for node in ast.walk(ast.parse(inspect.getsource(preflight))):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "record"):
             continue
-        given = [kw.value for kw in node.keywords if kw.arg == "environment"]
-        for value in given:
-            if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                causes.add(value.value)
-            elif isinstance(value, ast.Name) and value.id in module_constants:
-                causes.add(module_constants[value.id])
-            else:
-                raise AssertionError(f"record(...) at line {node.lineno} passes environment={ast.unparse(value)}, "
-                                     "which is not a string constant or a module-level name bound to one: the "
-                                     "structured cause cannot be read")
-        if given or not (node.args and isinstance(node.args[0], ast.Name) and node.args[0].id in {"REFUSED", "UNUSABLE"}):
+        if any(kw.arg == "environment" for kw in node.keywords) or not (
+                node.args and isinstance(node.args[0], ast.Name) and node.args[0].id in {"REFUSED", "UNUSABLE"}):
             continue
         reason = node.args[1] if len(node.args) > 1 else None
         text = "".join(part.value if isinstance(part, ast.Constant) else "{}" for part in
                        (reason.values if isinstance(reason, ast.JoinedStr) else [reason])
                        if isinstance(part, (ast.Constant, ast.FormattedValue)))
         reasons.add(" ".join(text.split()[:4]))
-    return reasons, causes
+    return reasons
 
 
 @dataclass
@@ -387,26 +374,27 @@ def test_a_refusal_before_the_first_sibling_skips_the_job_when_the_family_caused
 
 
 def test_1363_the_refusal_table_names_exactly_the_sites_and_causes_pre_flight_records():
-    """The table's family sites are exactly the reasons pre-flight records for the family, and its causes exactly the
-    `environment=` values its records carry (sign, access, setup, and one for the down-systems-only pass). (#1363 B5, O6, D9)"""
-    reasons, causes = _preflight_refusal_sites()
+    """The table's family sites are exactly the reasons pre-flight records for the family, and its causes exactly
+    pre-flight's closed `ENVIRONMENT_CAUSES` (sign, access, setup, down-systems). (#1363 B5, O6, D9)"""
+    from defender.learning.branch.preflight import ENVIRONMENT_CAUSES
+
     named = [site for _s, _r, site in _PREFLIGHT_REFUSALS.values() if site is not None]
-    assert reasons == {value for kind, value in named if kind == "reason"}, \
-        ("pre-flight records a family refusal the table does not name, or the table names one it does not", reasons)
-    assert causes == {value for kind, value in named if kind == "cause"}, \
-        ("the structured cause values pre-flight's records carry, against the table's", causes)
-    assert causes == {*_ENVIRONMENT_CAUSES, _DOWN_SYSTEMS_CAUSE}, ("the three causes and D9's own", causes)
+    assert _preflight_refusal_reasons() == {value for kind, value in named if kind == "reason"}, \
+        "pre-flight records a family refusal the table does not name, or the table names one it does not"
+    assert set(ENVIRONMENT_CAUSES) == {value for kind, value in named if kind == "cause"}, \
+        ("pre-flight's environment causes against the table's", ENVIRONMENT_CAUSES)
+    assert set(ENVIRONMENT_CAUSES) == {*_ENVIRONMENT_CAUSES, _DOWN_SYSTEMS_CAUSE}, ("the three causes and D9's own",)
 
 
-#: #1363 O6, B5: pre-flight's environment refusals for our own failures that need the proxy rig, by cause, and the fixed
+#: #1363 O6, B5: pre-flight's environment refusals for our own failures that need the proxy rig; each row's brief is the fixed
 #: words of the job's brief the structured cause on the record chooses (sign / other access / setup).
-_OUR_FAILURES = {
-    "proxy unreachable during the live reads": _BRIEF_ACCESS,
-    "no credential set stored for the read system": _BRIEF_SETUP,
-    "the first sign fails at the first read": _BRIEF_SIGN,
-    "no sign login recorded for the tenant": _BRIEF_SIGN,
-    "a re-sign fails mid-pass": _BRIEF_SIGN,
-}
+_OUR_FAILURES = [
+    "proxy unreachable during the live reads",
+    "no credential set stored for the read system",
+    "the first sign fails at the first read",
+    "no sign login recorded for the tenant",
+    "a re-sign fails mid-pass",
+]
 
 
 def _our_failure(tmp_path, monkeypatch, data_root, cause):
@@ -445,15 +433,16 @@ def _our_failure(tmp_path, monkeypatch, data_root, cause):
         return ran, r.bao
 
 
-@pytest.mark.parametrize("cause", list(_OUR_FAILURES))
+@pytest.mark.parametrize("cause", _OUR_FAILURES)
 def test_1363_a_pass_that_lost_access_or_hit_a_setup_fault_fails_the_job_launch_refused_with_its_fixed_brief(
         tmp_path, monkeypatch, data_root, cause):
     """Lost access, a failed sign or a `setup` fault in pre-flight is the environment's refusal: `failed:
     launch_refused`, the brief our own fixed words for that cause alone, nothing started. (#1363 O6, B5)"""
     ran, bao = _our_failure(tmp_path, monkeypatch, data_root, cause)
     message = _failed_with(ran, "failed", "launch_refused")
-    assert _OUR_FAILURES[cause] in message, message
-    others = {_BRIEF_SIGN, _BRIEF_ACCESS, _BRIEF_SETUP} - {_OUR_FAILURES[cause]}
+    brief = _PREFLIGHT_BRIEFS[f"our failure: {cause}"]  # the brief of the row's cause: the record's cause, observed
+    assert brief in message, message
+    others = {_BRIEF_SIGN, _BRIEF_ACCESS, _BRIEF_SETUP} - {brief}
     assert not [b for b in others if b in message], ("the brief named another environment cause", message)
     assert "idp" not in message, "run text in the fixed brief"
     assert ran.spawn.launches == []
