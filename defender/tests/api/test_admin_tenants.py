@@ -277,6 +277,122 @@ def test_a_request_whose_write_fails_logs_nothing_and_the_retry_logs_one(
     assert [e[0] for e in _events(audit, mark)] == [action]
 
 
+# --- #1360: the offboard request ends the tenant's jobs through the offboarding port (D6, O3) ----------------
+
+#: (kind, status, failure_reason / reason) of the jobs each tenant is seeded with; the first four are live.
+INVESTIGATIONS = [("queued", None), ("running", None), ("completed", None), ("failed", "worker_error"),
+                  ("aborted", "cancelled"), ("unparseable", None)]
+LEARNING_JOBS = [("queued", None), ("running", None), ("completed", None), ("failed", "worker_error"),
+                 ("skipped", "expired")]
+LIVE = {"queued", "running"}
+
+
+def _uid(kind: str, tenant_n: int, i: int) -> str:
+    return f"{kind}{tenant_n:07d}-0000-4000-8000-{i:012d}"
+
+
+def _seed_jobs(world: World, tenant: str, n: int) -> dict[str, Any]:
+    """`tenant` with one job of each status, each ended one with its own `finished_at`; returns the stored rows by name."""
+    from defender.api.models import Investigation, LearningJob
+
+    at = world.clock()
+    ended_at = at - _dt.timedelta(days=1)
+    rows: dict[str, Any] = {}
+    for i, (status, reason) in enumerate(INVESTIGATIONS):
+        rows[f"inv-{status}"] = world.store.add_investigation(tenant, Investigation(
+            investigation_id=_uid("b", n, i), alert_id=_uid("a", n, i), status=status, created_at=at, cost_usd=0.0,
+            cost_is_lower_limit=False, request_key=f"k{i}", attempt=1, failure_reason=reason,
+            finished_at=None if status in LIVE else ended_at))
+    for i, (status, reason) in enumerate(LEARNING_JOBS):
+        rows[f"job-{status}"] = world.store.add_learning_job(tenant, LearningJob(
+            learning_job_id=_uid("c", n, i), investigation_id=_uid("b", n, 2), alert_id=_uid("a", n, 2), status=status,
+            trigger="explicit", created_at=at, reason=reason, finished_at=None if status in LIVE else ended_at))
+    return rows
+
+
+def _stored(world: World, tenant: str, seeded: dict[str, Any]) -> dict[str, Any]:
+    """Every seeded row as the store holds it now."""
+    return {name: world.call(world.store.get_investigation if name.startswith("inv") else world.store.get_learning_job,
+                             tenant, row.investigation_id if name.startswith("inv") else row.learning_job_id)
+            for name, row in seeded.items()}
+
+
+@pytest.mark.parametrize("state", ["active", "creating"])
+def test_1360_d6_the_offboard_request_ends_the_tenants_live_jobs_before_it_answers(state: str) -> None:
+    """202 and, by then, every queued/running job of the tenant ended with `tenant_offboarded`; ended jobs and other tenants' jobs untouched; a second request (409) re-ends nothing. (#1360 D6, O3)"""
+    world, ops = _admin_world()
+    world.register(T1, state=state)
+    world.register(T2)
+    mine, theirs = _seed_jobs(world, T1, 1), _seed_jobs(world, T2, 2)
+    world.clock.advance(_dt.timedelta(hours=1))
+    now = world.clock()
+
+    assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == 202
+    ended = _stored(world, T1, mine)
+    for name, row in ended.items():
+        if name.split("-")[1] in LIVE:
+            assert row.status in ("aborted", "skipped"), name
+            assert (row.failure_reason if name.startswith("inv") else row.reason) == "tenant_offboarded", name
+            assert row.finished_at == now, name
+            assert "offboard" in ((row.failure_message if name.startswith("inv") else row.message) or "").lower(), name
+        else:
+            assert row == mine[name], f"{name}: a job that was not live was changed"
+    assert _stored(world, T2, theirs) == theirs, "another tenant's jobs were touched"
+
+    world.clock.advance(_dt.timedelta(hours=1))
+    assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == 409
+    assert _stored(world, T1, mine) == ended, "an ended job was ended again"
+
+
+@pytest.mark.parametrize(("tenant_state", "code"), [("offboarding", 409), ("offboarded", 409), (None, 404)])
+def test_1360_d6_a_refused_offboard_request_ends_no_job(tenant_state: str | None, code: int) -> None:
+    """409 for a tenant already offboarding/offboarded and 404 for an unknown one leave every job as it was; the same flow on an active tenant ends them. (#1360 D6, O3)"""
+    world, ops = _admin_world()
+    world.register(T2)
+    if tenant_state is not None:
+        world.register(T1, state=tenant_state)
+    refused, control = _seed_jobs(world, T1, 1), _seed_jobs(world, T2, 2)
+
+    assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == code
+    assert _stored(world, T1, refused) == refused, "a refused request ended a job"
+    assert ops.post(f"/admin/tenants/{T2}/offboard").status_code == 202
+    assert _stored(world, T2, control)["inv-queued"].status == "aborted", "control: an accepted request ends them"
+
+
+def test_1360_d6_the_route_reaches_the_tenant_and_its_jobs_only_through_the_offboarding_port(audit: AuditLog) -> None:
+    """One port call with the tenant and the administrator; a port that fails leaves tenant and jobs as they were and logs nothing, the retry does all three. (#1360 D6)"""
+    world, ops = _admin_world()
+    world.register(T1)
+    seeded = _seed_jobs(world, T1, 1)
+    failing_ops = world.client_with_cookie(ops.cookies[SESSION_COOKIE], raise_errors=False)
+    before = items(ops.get("/admin/tenants"))
+    world.offboarding.failing = True
+    mark = audit.mark()
+
+    assert failing_ops.post(f"/admin/tenants/{T1}/offboard").status_code >= 500
+    assert world.offboarding.calls == [(T1, user_id(ops))]
+    assert items(ops.get("/admin/tenants")) == before, "the tenant moved though the port failed"
+    assert _stored(world, T1, seeded) == seeded
+    assert _events(audit, mark) == []
+
+    world.offboarding.failing = False
+    assert failing_ops.post(f"/admin/tenants/{T1}/offboard").status_code == 202
+    assert world.offboarding.calls == [(T1, user_id(ops))] * 2
+    assert _item(ops, T1)["state"] == "offboarding"
+    assert _stored(world, T1, seeded)["inv-queued"].status == "aborted"
+    assert [e[0] for e in _events(audit, mark)] == [OFFBOARD]
+
+
+def test_1360_d6_a_malformed_tenant_id_never_reaches_the_offboarding_port() -> None:
+    """422 before the port is called; a real tenant's request calls it once. (#1360 D6)"""
+    world, ops = _admin_world()
+    world.register(T1)
+    assert ops.post(f"/admin/tenants/{MALFORMED}/offboard").status_code == 422
+    assert world.offboarding.calls == []
+    assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == 202
+    assert [t for t, _ in world.offboarding.calls] == [T1]
+
+
 # --- the lifecycle world: failures and running steps ------------------------------------------------
 
 @pytest.fixture

@@ -26,7 +26,7 @@ from defender.tests.jobs.test_1344_learning_jobs import (
     queued_job,
 )
 from defender.tests.jobs.test_worker import _FAST, _until
-from defender.tests.support.jobs._jobs1342 import T1, job_store, register_tenant
+from defender.tests.support.jobs._jobs1342 import T1, T2, job_store, move_tenant, register_tenant
 from defender.tests.support.shared._postgres1339 import execute
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
@@ -121,6 +121,59 @@ async def test_a3_an_end_that_finds_a_pending_job_it_was_not_handed_makes_the_te
         assert await store.claim_learning_check(HOUR, "h2") == T1, "not due at once"
         assert await store.end_learning_check(T1, "h2", idle=True, handed=(job,)) is True
         assert _clock(dsn)["idle"] is True, "control: a job it was handed does not hold the clock open"
+
+
+def _clock_row(dsn: str, tenant: str = T1) -> tuple | None:
+    """The tenant's whole clock row, or None."""
+    rows = execute(dsn, "SELECT checked_at, idle, checking_until, holder FROM jobs.learning_checks WHERE tenant_id = %s",
+                   (tenant,))
+    return rows[0] if rows else None
+
+
+@pytest.mark.parametrize("state", ["offboarding", "offboarded"])
+async def test_1360_o6_a_tenant_being_removed_is_refused_the_hold_and_its_idle_clock_is_left_as_it_is(world, state):
+    """Refused for `offboarding`/`offboarded`; an idle clock stays idle, unheld, same time; an active tenant's is granted. (#1360 O6)"""
+    dsn = world["dsn"]
+    register_tenant(dsn, T2)
+    async with job_store(dsn) as store:
+        for tenant in (T1, T2):
+            await queued_job(world, store, ticket=f"J-{tenant[:4]}", tenant=tenant)
+            _age(dsn, 2 * HOUR, tenant)
+            execute(dsn, "UPDATE jobs.learning_checks SET idle = TRUE WHERE tenant_id = %s", (tenant,))
+        move_tenant(dsn, T1, state=state)
+        before, other_before = _clock_row(dsn), _clock_row(dsn, T2)
+        assert before[1] is True, "premise: the clock is idle"
+
+        assert await store.hold_learning_check(T1, "h1") is False, "a post-step was let start for a removed tenant"
+        assert _clock_row(dsn) == before, "a refused hold armed or extended the clock"
+        assert await store.hold_learning_check(T2, "h2") is True
+        after = _clock_row(dsn, T2)
+        assert (after[1], after[3]) == (False, "h2")
+        assert after[2] is not None
+        assert after[0] == other_before[0], "control: a hold leaves the clock's time as it was"
+
+
+@pytest.mark.parametrize("state", ["offboarding", "offboarded"])
+async def test_1360_o6_a_refused_hold_creates_no_clock_for_a_tenant_that_has_none(world, state):
+    """A tenant being removed with no clock row is refused and still has none. (#1360 O6)"""
+    dsn = world["dsn"]
+    register_tenant(dsn, T2)
+    move_tenant(dsn, T2, state=state)
+    async with job_store(dsn) as store:
+        assert await store.hold_learning_check(T2, "h1") is False
+        assert _clock_row(dsn, T2) is None, "a refused hold created the tenant's clock"
+        assert await store.hold_learning_check(T1, "h2") is True
+        assert _clock_row(dsn)[3] == "h2", "control: an active tenant's hold creates and holds its clock"
+
+
+async def test_1360_o6_a_tenant_still_being_created_holds_the_clock_as_before(world):
+    """`creating` is not refused (D7): the hold is granted and the clock armed. (#1360 O6, D7)"""
+    dsn = world["dsn"]
+    register_tenant(dsn, T2, state="active")
+    move_tenant(dsn, T2, state="creating")
+    async with job_store(dsn) as store:
+        assert await store.hold_learning_check(T2, "h1") is True
+        assert _clock(dsn, T2) == {"idle": False, "held": True, "holder": "h1"}
 
 
 async def test_a3_only_the_holder_renews_or_lets_go_and_a_late_renewal_nobody_overtook_succeeds(world):
@@ -252,3 +305,37 @@ async def test_a3_the_worker_renews_a_running_check_s_hold_so_no_second_check_st
             release.touch()
             _stop_serving(serving)
             await asyncio.wait_for(serving, timeout=15)
+
+
+# -- the worker: a job the offboarding ended (#1360 O6) -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("offboarded", [True, False], ids=["offboarded", "control-active"])
+async def test_1360_o6_a_running_job_ended_by_the_offboarding_is_followed_by_no_post_step(world, offboarded):
+    """No post-step child, no hand-off record in the tenant's runs after the offboard commit; the control tenant stays active and gets both. (#1360 O6)"""
+    dsn, release, mark = world["dsn"], world["tmp"] / "release", world["tmp"] / "term-{id}"
+    jobs = job_child(world, files={END: learning_end("completed", findings=1)}, wait_for=release, term="finish",
+                     term_mark=str(mark))
+    post = post_child(world)
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="J-1")
+        draining = asyncio.create_task(learning_worker(world, store, job=jobs, post=post, **_FAST).drain())
+        try:
+            await _until(lambda: jobs.seen(job), "the job's child to start")
+            execute(dsn, "UPDATE jobs.learning_jobs SET status = 'skipped', reason = 'tenant_offboarded', message = 'tenant offboarded', "
+                         "finished_at = now(), lease_expires_at = NULL WHERE id = %s", (job,))
+            if offboarded:
+                move_tenant(dsn, T1, state="offboarding")
+            await _until(lambda: Path(str(mark).replace("{id}", job)).exists(), "the ended job's child to be ended", timeout=10)
+        finally:
+            release.touch()
+            await asyncio.wait_for(draining, timeout=60)
+
+    assert (job_row(dsn, job)["status"], job_row(dsn, job)["reason"]) == ("skipped", "tenant_offboarded")
+    handoffs = [p.name for p in world["runs"].iterdir() if "post-step" in p.name]
+    if offboarded:
+        assert post.handed == [], "a post-step was started for a tenant being removed"
+        assert handoffs == [], "the post-step hand-off wrote into the removed tenant's runs"
+    else:
+        assert [h[0] for h in post.handed] == [job], "control: the same flow launches its post-step"
+        assert handoffs != []

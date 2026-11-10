@@ -559,6 +559,25 @@ class _LifespanClient(_WorldClient):
         return self
 
 
+class DevOffboarding:
+    """#1360 D6: the offboarding port as the development setup composes it: the tenant twin's offboard transition,
+    then the in-memory store ending that tenant's live jobs. Records each call as `(tenant, actor)` in `calls`;
+    with `failing` set it raises before doing either."""
+
+    def __init__(self, tenants: Any, store: InMemoryStore, now: Callable[[], _dt.datetime]) -> None:
+        self._tenants, self._store, self._now = tenants, store, now
+        self.calls: list[tuple[str, str]] = []
+        self.failing = False
+
+    async def offboard_tenant(self, tenant_id: str, *, actor: Any) -> Any:
+        self.calls.append((str(tenant_id), str(actor)))
+        if self.failing:
+            raise InjectedFailure("offboard_tenant failed")
+        record = await self._tenants.request_offboard(tenant_id, now=self._now())
+        await self._store.end_live_jobs(tenant_id, actor=actor)
+        return record
+
+
 class World:
     """App + identity service over an in-memory repository, fakes, one clock and a bootstrap file.
     `restart` builds a fresh service and app over the same repository and fakes; browsers follow it.
@@ -580,6 +599,8 @@ class World:
         self.tenants: Any = tenant_repo if tenant_repo is not None else InMemoryTenantRepository()
         self.raw_repo: Any = InMemoryIdentityRepository(tenants=self.tenants)
         self.repo: Any = FailingRepository(self.raw_repo) if failing_writes else self.raw_repo
+        #: #1360 D6: the one port the admin offboard route reaches the tenant transition and the jobs through.
+        self.offboarding = DevOffboarding(self.tenants, self.store, self.clock)
         self._loop = _AppLoop()
         weakref.finalize(self, self._loop.stop)
         self.signin = FakeSignIn()
@@ -628,12 +649,17 @@ class World:
             programs=NoProgramsRealm(),
             **extra,
         )
+        # #1360 D6: handed over only once `ApiDeps` has the member, so the worlds of other cases build until then;
+        # the code stage makes it unconditional.
+        offboarding = ({"offboarding": self.offboarding}
+                       if "offboarding" in {f.name for f in dataclasses.fields(ApiDeps)} else {})
         self.app = create_app(ApiDeps(
             alerts=self.store, investigations=self.store, learning_jobs=self.store,
             lessons=self.store, systems=self.store, writes=self.store,
             secrets=InMemorySecrets(), checker=StubSystemChecker(),
             artifact_links=StubArtifactLinks(),
             identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants,
+            **offboarding,
         ))
 
     def restart(self, *, administrators: Sequence[str] = (),

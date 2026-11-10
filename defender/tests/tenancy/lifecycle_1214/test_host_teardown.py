@@ -8,6 +8,8 @@ from __future__ import annotations
 import contextlib
 import os
 import stat
+import subprocess
+import sys
 import threading
 import time
 from typing import Any
@@ -148,6 +150,84 @@ def test_removing_the_old_secret_file_waits_for_the_exclusive_lock_too(world):
     assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert not old.exists() and world.item(tenant)["pending_action"] is None
+
+
+# --- #1360 ------------------------------------------------------------------------------------------
+
+_LATE_WRITER = """
+import os, sys, time
+folder, before, seconds = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
+deadline = time.monotonic() + 30
+while time.monotonic() < deadline:
+    try:
+        if os.stat(folder).st_mtime_ns != before:
+            break
+    except FileNotFoundError:
+        sys.exit(1)
+else:
+    sys.exit(1)
+try:
+    if not seconds:
+        open(os.path.join(folder, 'late-launch.json'), 'w').write('{}')
+        sys.exit(0)
+    until, n = time.monotonic() + seconds, 0
+    while time.monotonic() < until:
+        os.mkdir(os.path.join(folder, 'late-dir-%d' % n))
+        n += 1
+except FileNotFoundError:
+    sys.exit(0 if n else 1)
+"""
+
+
+def _late_writer(folder, *, keep_adding_for=0.0):
+    """A process (so no interpreter lock to share with the test) that, the moment the folder's removal has begun unlinking
+    its entries (its listing is complete by then), creates one file in `folder`, like a job writing its launch files
+    mid-teardown; or, for `keep_adding_for` seconds, empty directories in a tight loop: removing one costs more than
+    making one, so the backlog grows and no removal pass can empty the folder meanwhile. Exits 0 once it has landed."""
+    return subprocess.Popen([sys.executable, "-I", "-c", _LATE_WRITER, str(folder), str(folder.stat().st_mtime_ns),
+                             str(keep_adding_for)])
+
+
+def test_teardown_removes_what_a_late_writer_adds_to_the_folder_while_it_is_being_removed(world, tmp_path, data_root):
+    """A file created in T's folder after teardown has listed it makes one removal pass fail 'directory not empty'; the
+    offboarding goes on to `offboarded` with the folder, and nothing of the late file, gone (#1360 O1). The wait is
+    shorter than the first pass: it runs from the first failed pass, not from the start of the removal."""
+    world.host_actor = world.new_host(world.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=0.02),
+                                      containers=lambda _tenant: None)
+    tenant = world.active_tenant()
+    runs = world.data_root / tenant / "runs"
+    runs.mkdir(exist_ok=True)
+    for n in range(8000):
+        (runs / f"entry-{n}").write_text("x")
+    writer = _late_writer(runs)
+    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    world.drive()
+    assert writer.wait(timeout=35) == 0, "the late write never happened, so this run did not race the removal"
+    item = world.item(tenant)
+    assert (item["state"], item["failure"]) == ("offboarded", None), item
+    assert not (world.data_root / tenant).exists()
+
+
+def test_teardown_that_keeps_finding_new_files_fails_naming_the_folder_and_resume_finishes_it(world):
+    """A writer that adds a file after every removal pass never lets the folder empty: after the wait teardown gives
+    its holders the step fails (restart at teardown) saying the folder was still being added to and what was in it, and
+    once the writer stops a resume finishes the offboarding (#1360 O2)."""
+    tenant = world.active_tenant()
+    runs = world.data_root / tenant / "runs"
+    runs.mkdir(exist_ok=True)
+    for n in range(8000):
+        (runs / f"entry-{n}").write_text("x")
+    writer = _late_writer(runs, keep_adding_for=1.0)
+    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    world.drive()
+    item = world.item(tenant)
+    assert (item["state"], item["step"]) == ("offboarding", "teardown"), item
+    assert "still being added to" in item["failure"] and str(runs.parent) in item["failure"], item["failure"]
+    assert writer.wait(timeout=35) == 0, "the late writes never happened, so this run did not race the removal"
+    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    world.drive()
+    assert world.item(tenant)["state"] == "offboarded"
+    assert not (world.data_root / tenant).exists()
 
 
 # --- H-12 --------------------------------------------------------------------------------------------
