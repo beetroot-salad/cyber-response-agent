@@ -588,12 +588,12 @@ class _MissingOffboarding:
         raise AssertionError("defender.api.fakes.InMemoryOffboarding does not exist yet (#1360 D6)")
 
 
-def _offboarding_spy(tenants: Any, store: Any) -> Any:
+def _offboarding_spy(tenants: Any, store: Any, clock: Any) -> Any:
     try:
         from defender.api.fakes import InMemoryOffboarding
     except ImportError:
         return _MissingOffboarding()
-    return OffboardingSpy(InMemoryOffboarding(tenants, store))
+    return OffboardingSpy(InMemoryOffboarding(tenants, store, clock))
 
 
 class World:
@@ -618,7 +618,7 @@ class World:
         self.raw_repo: Any = InMemoryIdentityRepository(tenants=self.tenants)
         self.repo: Any = FailingRepository(self.raw_repo) if failing_writes else self.raw_repo
         #: #1360 D6: the one port the admin offboard route reaches the tenant transition and the jobs through.
-        self.offboarding = _offboarding_spy(self.tenants, self.store)
+        self.offboarding = _offboarding_spy(self.tenants, self.store, self.clock)
         self._loop = _AppLoop()
         weakref.finalize(self, self._loop.stop)
         self.signin = FakeSignIn()

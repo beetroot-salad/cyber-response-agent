@@ -3210,6 +3210,90 @@ async def test_1360_flow1_an_offboard_and_a_renewal_of_several_of_the_tenants_ru
         assert _count(dsn, "learning_jobs", "status = 'skipped' AND reason = 'tenant_offboarded'") == 6
 
 
+async def _lock_in_id_order(conn: Any, table: str, row_ids: list[str]) -> None:
+    """Lock the rows one after another, lowest id first, in the connection's open transaction."""
+    for row_id in row_ids:
+        await conn.execute(f"SELECT 1 FROM {table} WHERE id = %s FOR UPDATE", (row_id,))  # noqa: S608
+
+
+@pytest.mark.parametrize("target", ["renew", "offboard"])
+@pytest.mark.parametrize("kind", ["investigations", "learning_jobs"])
+async def test_1360_flow1_each_side_locks_rows_in_id_order_against_a_counterpart_that_does(dsn, kind, target):
+    """Anchor for D9, one side at a time: a raw connection that locks the tenant's rows strictly in id order (the low
+    half now, the high half once the real operation has started and waited) against the real `renew` or the real
+    `offboard_tenant`, the table holding the rows in the opposite physical order. An operation that takes its rows in
+    id order waits on the first low row holding nothing, so the counterpart finishes and nothing deadlocks; one that
+    scans in table order takes the high rows first and the two wait on each other. (#1360 Flow 1 lock order, D9)"""
+    import psycopg
+
+    ids = sorted(str(uuid.uuid4()) for _ in range(6))
+    table = f"jobs.{kind}"
+    _plant_running_pair(dsn, ids[::-1] if kind == "investigations" else [], ids[::-1] if kind == "learning_jobs" else [])
+    heap = [row[0] for row in execute(dsn, f"SELECT id::text FROM {table} WHERE id = ANY(%s::uuid[]) ORDER BY ctid", (ids,))]  # noqa: S608
+    assert heap == ids[::-1]  # the setup: a scan in table order meets the high ids first, against id order
+
+    async with job_store(dsn) as store, await psycopg.AsyncConnection.connect(dsn) as counterpart:
+        await _lock_in_id_order(counterpart, table, ids[:3])
+        operation = asyncio.ensure_future(store.renew(set(ids)) if target == "renew" else _offboard(store, T1, actor="admin-1"))
+        rest = None
+        try:
+            await until_blocked(dsn, 1)  # the operation has taken what it will before the rows the counterpart holds
+            rest = asyncio.ensure_future(_lock_in_id_order(counterpart, table, ids[3:]))
+            await asyncio.wait({operation, rest}, timeout=20, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait({rest}, timeout=20)  # whichever was chosen the victim, the other goes on
+            assert rest.done(), "the counterpart is stuck, and neither side was ended by the server"
+            counterpart_out = rest.exception()
+            await (counterpart.rollback() if counterpart_out else counterpart.commit())
+            outcome = (await asyncio.wait_for(asyncio.gather(operation, return_exceptions=True), 20))[0]
+        finally:
+            for pending in (operation, rest):
+                if pending is not None:
+                    pending.cancel()
+
+    assert counterpart_out is None, f"the id-ordered counterpart failed: {counterpart_out!r}"
+    assert not isinstance(outcome, BaseException), f"{target} failed: {outcome!r}"
+    if target == "renew":
+        assert sorted(outcome) == ids
+    else:
+        assert _live_of(dsn, T1) == 0
+
+
+async def test_1360_flow1_an_offboard_and_a_renewal_over_both_tables_take_investigations_before_learning_jobs(dsn):
+    """One renewal of running investigations and running learning jobs of a tenant, the held row a middle investigation:
+    the renewal holds the investigations below it and waits, then needs the learning jobs. An offboard that took the
+    learning jobs first would hold what the renewal needs next while waiting for what the renewal holds; the table order
+    (investigations, then learning jobs) is part of D9, so neither side fails with a deadlock and the offboard ends
+    every live row of both kinds. (#1360 Flow 1 lock order, D9 as amended by r3.2)"""
+    import psycopg
+
+    inv_ids = sorted(str(uuid.uuid4()) for _ in range(6))
+    job_ids = sorted(str(uuid.uuid4()) for _ in range(6))
+    _plant_running_pair(dsn, inv_ids[::-1], job_ids[::-1])
+
+    async with job_store(dsn) as store, await psycopg.AsyncConnection.connect(dsn) as holder:
+        await holder.execute("SELECT 1 FROM jobs.investigations WHERE id = %s FOR UPDATE", (inv_ids[3],))
+        renewal = asyncio.ensure_future(store.renew({*inv_ids, *job_ids}))
+        offboard = None
+        try:
+            await until_blocked(dsn, 1)  # the renewal waits for the held middle investigation
+            offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+            await until_blocked(dsn, 2)  # and the offboard waits behind what the renewal holds
+            await holder.commit()
+            outcomes = await asyncio.wait_for(asyncio.gather(renewal, offboard, return_exceptions=True), 20)
+        finally:
+            for pending in (renewal, offboard):
+                if pending is not None:
+                    pending.cancel()
+
+    renewed, offboarded = outcomes
+    assert not isinstance(renewed, BaseException), f"renew failed: {renewed!r}"
+    assert not isinstance(offboarded, BaseException), f"offboard failed: {offboarded!r}"
+    assert sorted(renewed) == sorted([*inv_ids, *job_ids])
+    assert _live_of(dsn, T1) == 0
+    assert _count(dsn, "investigations", "stage = 'aborted' AND failure_reason = 'tenant_offboarded'") == 6
+    assert _count(dsn, "learning_jobs", "status = 'skipped' AND reason = 'tenant_offboarded'") == 6
+
+
 # --- O4: no job is created for an offboarding or offboarded tenant -----------------------------------------------
 
 @pytest.mark.parametrize("state", ["offboarding", "offboarded"])
