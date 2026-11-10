@@ -418,8 +418,8 @@ class ForgeHTTP:
 
     def _paged_reviews(self, request, rows):
         """Forgejo 17 (probe, 70 reviews, #1278 C30): a review listing sent with neither `page` nor `limit` answers
-        every review; sent with either, it pages (30 by default, `limit` honoured up to the forge's 50, as the
-        PR listing clamps it) and never sends a `Link`. `X-Total-Count` is always the total."""
+        every review; sent with either, it pages (30 by default, `limit` clamped to Forgejo's `[api] MAX_RESPONSE_ITEMS`,
+        default 50, as the PR listing is) and never sends a `Link`. `X-Total-Count` is always the total."""
         params = request.url.params
         if "page" in params or "limit" in params:
             size, page = min(int(params.get("limit") or 30), 50), int(params.get("page") or 1)

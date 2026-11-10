@@ -285,7 +285,6 @@ def test_1186_lead_author_cli_files_the_runs_pitfall_for_the_runs_tenant_in_the_
 
     w = world
     root = Path(location_path(w.t.tenant.tenant_root))
-    (root / "learning").mkdir(exist_ok=True)  # the host's prepare step makes it when the tenant is created
     run_dir = root / "runs" / str(uuid.uuid4())
     run_dir.mkdir(parents=True)
     _write_lead_meta(run_dir, "l-001", "failed query")
@@ -296,7 +295,8 @@ def test_1186_lead_author_cli_files_the_runs_pitfall_for_the_runs_tenant_in_the_
     assert rc == 0
     pitfalls = [i for i in call(w.dsn, "work", w.t.tenant_id) if i.kind == "pitfall"]
     assert [i.key.split(":")[0] for i in pitfalls] == [run_dir.name], pitfalls
-    assert not (root / "learning" / PITFALLS.queue).exists()
+    assert all(i.payload.get("query_id") for i in pitfalls), pitfalls
+    assert not (root / "learning").exists()  # D10/O10: no learning folder is made for the store
 
 
 def test_run_done_sentinel_short_circuits(run_dir: Path, tmp_path: Path):

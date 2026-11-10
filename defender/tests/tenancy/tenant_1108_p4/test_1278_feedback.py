@@ -277,12 +277,12 @@ def test_feedback_words_only_on_the_last_page_of_reviews_start_the_replacement(w
     writer = FeedbackCurator(_files("f1"))
     old_id, old_branch, number = opened(w, writer, caplog)
     w.t.forge.reviews[number] = [review_row(800 + i, f"approver-{i}", "APPROVED") for i in range(69)] + [
-        review_row(900, "late-reviewer", "COMMENT", body="the only words, on page two")]
+        review_row(900, "late-reviewer", "COMMENT", body="the only words, past the first 50 of 70 reviews")]
     close_on_remote(w.t.p3, old_branch)
     tick(w, writer)
 
     assert len(_replacements(w, old_id)) == 1, "the words on the last page were not read"
-    assert framed(writer.seen_text(), "the only words, on page two")
+    assert framed(writer.seen_text(), "the only words, past the first 50 of 70 reviews")
 
 
 def test_feedback_the_replacement_is_made_once_whatever_follows(world, caplog):
