@@ -512,15 +512,20 @@ class LabOps:
                         "alpine/socat:latest", f"TCP-LISTEN:{port},fork,reuseaddr",
                         f"TCP:{target}:{ES_PORT if target == ES_CONTAINER else 8080}")
 
-    def content_digest(self, patterns: list[str]) -> str:
-        """sha256 over every document of the freeze's `patterns` in the frozen cluster (index, id,
-        version, source) and over the stubs: what they were loaded with and what each now holds. A
-        residue of an earlier variant, an in-place edit or a stale stub changes it (A1)."""
+    def content_digest(self, indices: list[str]) -> str:
+        """sha256 over every document of the named `indices` (the ones the overlays touched) in the
+        frozen cluster (index, id, version, source) and over the stubs: what they were loaded with and
+        what each now holds. An in-place edit of a touched index or a stale stub changes it (A1); an
+        untouched index is never read, its count is compared instead (live: reading all of them took
+        ~18 h). A named index the cluster does not hold is refused."""
         if self._stubs_loaded is None:
             raise LabOpsError("content_digest asked before the stubs were loaded")
         es = self.frozen_es()
-        names = sorted(r["index"] for r in es.es_request(
-            "GET", f"/_cat/indices/{','.join(patterns)}?format=json&h=index&expand_wildcards=all") or [])
+        names = sorted(set(indices))
+        held = {r["index"] for r in es.es_request(
+            "GET", "/_cat/indices?format=json&h=index&expand_wildcards=all") or []}
+        if missing := [n for n in names if n not in held]:
+            raise LabOpsError(f"content_digest: the frozen cluster holds no index {missing}")
         digest = hashlib.sha256()
         for name in names:
             docs = sorted(self._document_digests(es, name))

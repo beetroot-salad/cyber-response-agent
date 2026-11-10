@@ -172,7 +172,7 @@ def _serve_copy(es: Any, ops: Any, clock: Any, *, case: dict, freeze: dict, free
     reasons. A stale copy is marked dirty so the next launch restores it whole."""
     overlay, patterns = case.get("overlay"), list(freeze["patterns"])
     T = frozen_copy.stamp(freeze["T"])
-    frozen_copy.ready(es, ops=ops, clock=clock, freeze=freeze, freeze_id=freeze_id,
+    copy = frozen_copy.ready(es, ops=ops, clock=clock, freeze=freeze, freeze_id=freeze_id,
                       overlay=overlay, location=location)
     ops.load_stubs(parts_dir / freeze_id, T, (overlay or {}).get("mutations") or None)
     frozen_copy.wait_for_cluster(es, clock, "the copy")
@@ -181,7 +181,7 @@ def _serve_copy(es: Any, ops: Any, clock: Any, *, case: dict, freeze: dict, free
     uuid = alert_uuid_of(alert_file)
     alert = frozen_copy.find_alert(es, patterns, uuid)
     file_digest = frozen_copy.digest_of(json.loads(alert_file.read_text()))
-    reasons = _stale(case, observed, ops.content_digest(patterns), alert, file_digest)
+    reasons = _stale(case, observed, ops.content_digest(copy.touched), alert, file_digest)
     if reasons:
         frozen_copy.mark_dirty(ops, freeze_id, overlay)
     return reasons

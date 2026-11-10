@@ -278,13 +278,16 @@ def _check_bulk(result: dict, what: str) -> dict:
     return result
 
 
-def base_overlay(es: Any, names: list[str], T: str, tallies: dict[str, int]) -> None:
-    """Delete every document stamped after T, index by index (so each index's tally is known)."""
+def base_overlay(es: Any, names: list[str], T: str, tallies: dict[str, int], touched: set[str]) -> None:
+    """Delete every document stamped after T, index by index (so each index's tally is known); an
+    index it deleted from is `touched`."""
     for name in names:
         done = _check_bulk(es.es_request("POST", f"/{name}/_delete_by_query",
                                          {"query": {"range": {"@timestamp": {"gt": T}}}}),
                            f"base overlay on {name}")
         tallies[name] = tallies.get(name, 0) + int(done["deleted"])
+        if int(done["deleted"]):
+            touched.add(name)
         es.es_request("POST", f"/{name}/_refresh")
 
 
@@ -361,9 +364,10 @@ def _alerts_derived_from(es: Any, patterns: list[str], targets: list[str],
 
 
 def fault_overlay(es: Any, mutation: dict, names: list[str], patterns: list[str], span: dict,
-                  tallies: dict[str, int]) -> None:
+                  tallies: dict[str, int], touched: set[str]) -> None:
     """One fault overlay: the mutation's processor, verbatim, over the span of its stream's
-    indices; a schema-drift also rewrites the alerts built from in-span events of those indices."""
+    indices; a schema-drift also rewrites the alerts built from in-span events of those indices.
+    Every index it runs a rewrite on is `touched`."""
     targets = [n for n in names if (s := _stream_of(n)) and fnmatch.fnmatchcase(s, mutation["stream"])]
     es.es_request("PUT", f"/_ingest/pipeline/{PIPELINE}", {"processors": [mutation["processor"]]})
     try:
@@ -372,6 +376,7 @@ def fault_overlay(es: Any, mutation: dict, names: list[str], patterns: list[str]
             derived = _alerts_derived_from(es, patterns, targets, span)
             jobs += [(index, {"ids": {"values": ids}}) for index, ids in sorted(derived.items())]
         for index, query in jobs:
+            touched.add(index)
             tallies[index] = tallies.get(index, 0) + _rewrite(es, index, query)
     except BaseException:
         try:
@@ -389,12 +394,13 @@ def fault_overlay(es: Any, mutation: dict, names: list[str], patterns: list[str]
 class Copy:
     counts: dict[str, int]      # the freeze's counts minus the overlays' own tallies
     tallies: dict[str, int]
+    touched: list[str]          # the indices the overlays changed: what the content digest covers
     restored: bool              # False: a clean marker for this variant was trusted
 
 
 def _is_clean(marker: Any, vid: str) -> bool:
     return isinstance(marker, dict) and marker.get("dirty") is False and marker.get("variant") == vid \
-        and isinstance(marker.get("tallies"), dict)
+        and isinstance(marker.get("tallies"), dict) and isinstance(marker.get("touched"), list)
 
 
 def mark_dirty(ops: Any, freeze_id: str, overlay: dict | None) -> None:
@@ -402,8 +408,9 @@ def mark_dirty(ops: Any, freeze_id: str, overlay: dict | None) -> None:
     ops.write_marker({"variant": variant_id(freeze_id, overlay), "dirty": True})
 
 
-def _build(es: Any, clock: Any, freeze: dict, overlay: dict | None) -> dict[str, int]:
-    """Restore the whole snapshot into the fresh, empty node and apply the overlays; the tallies."""
+def _build(es: Any, clock: Any, freeze: dict, overlay: dict | None) -> tuple[dict[str, int], list[str]]:
+    """Restore the whole snapshot into the fresh, empty node and apply the overlays; the tallies and
+    the indices the overlays touched."""
     names, patterns = list(freeze["elastic"]["indices"]), list(freeze["patterns"])
     T = stamp(freeze["T"])
     es.es_request("POST", "/_ilm/stop")
@@ -414,14 +421,15 @@ def _build(es: Any, clock: Any, freeze: dict, overlay: dict | None) -> dict[str,
     for stream in sorted({s for n in names if (s := _stream_of(n))}):
         es.es_request("DELETE", f"/_data_stream/{stream}/_lifecycle")
     tallies: dict[str, int] = {}
-    base_overlay(es, names, T, tallies)
+    touched: set[str] = set()
+    base_overlay(es, names, T, tallies, touched)
     mutations = es_mutations(overlay)
     if mutations:
         span = {"range": {"@timestamp": {"gte": stamp(overlay["span_start"]), "lte": T}}}  # type: ignore[index]
         for mutation in mutations:
-            fault_overlay(es, mutation, names, patterns, span, tallies)
+            fault_overlay(es, mutation, names, patterns, span, tallies, touched)
     es.es_request("POST", f"/{_expr(patterns)}/_refresh?expand_wildcards=open,hidden")
-    return tallies
+    return tallies, sorted(touched)
 
 
 def _holds_the_freeze(es: Any, freeze: dict, location: str) -> bool:
@@ -464,6 +472,7 @@ def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overla
     up = ops.node_exists() and _came_up(es, ops, clock, freeze)
     if up and _is_clean(marker, vid) and _holds_the_freeze(es, freeze, location):
         tallies = {n: int(t) for n, t in marker["tallies"].items()}   # type: ignore[index]
+        touched = [str(n) for n in marker["touched"]]                  # type: ignore[index]
         restored = False
     else:
         if up:
@@ -473,8 +482,8 @@ def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overla
         ops.fresh_node(freeze["T"], clock)
         wait_for_cluster(es, clock, "the node start")
         register_repository(es, freeze, location)
-        tallies = _build(es, clock, freeze, overlay)
-        ops.write_marker({"variant": vid, "dirty": False, "tallies": tallies})
+        tallies, touched = _build(es, clock, freeze, overlay)
+        ops.write_marker({"variant": vid, "dirty": False, "tallies": tallies, "touched": touched})
         restored = True
     counts = {n: int(c) - tallies.get(n, 0) for n, c in freeze["elastic"]["indices"].items()}
-    return Copy(counts=counts, tallies=tallies, restored=restored)
+    return Copy(counts=counts, tallies=tallies, touched=touched, restored=restored)
