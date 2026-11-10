@@ -133,7 +133,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
         ),
         corpus_dir=cfg.corpus_dir,
         log=_logger,
-        run_author=curator_engine.run_author_for(cfg.make_model),
+        run_author=curator_engine.curator_runner(cfg.make_model),
     )
 
 

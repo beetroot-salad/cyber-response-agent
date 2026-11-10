@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import functools
-
 import logging
 import re
 from collections.abc import Callable
@@ -15,6 +13,7 @@ from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
 from defender.learning.leads.declared_systems import adapter_systems_under, with_platform_systems
 from defender.learning._pydantic_stage import run_stage as _run_stage_fn
+from defender.learning._pydantic_stage import with_make_model
 from defender import providers
 from defender.investigation.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from defender._agent_role import AgentRole
@@ -214,11 +213,9 @@ def _run_lead_author_pydantic(
     )
 
 
-def run_author_for(make_model: MakeModel | None) -> Callable[..., str]:
+def lead_author_runner(make_model: MakeModel | None) -> Callable[..., str]:
     """The lead-lane stage's runner over `make_model` (`None`: the stage's own default model)."""
-    if make_model is None:
-        return _run_lead_author_pydantic
-    return functools.partial(_run_lead_author_pydantic, make_model=make_model)
+    return with_make_model(_run_lead_author_pydantic, make_model)
 
 
 def run_author_stage(

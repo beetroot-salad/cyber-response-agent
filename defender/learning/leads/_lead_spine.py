@@ -58,7 +58,7 @@ def _spawn_author_agent(  # noqa: PLR0913 — one spawn's prompt, tree, folder, 
         ),
         log_label=log_label,
         log=_logger,
-        run_author=lead_author_engine.run_author_for(make_model),
+        run_author=lead_author_engine.lead_author_runner(make_model),
     )
 
 

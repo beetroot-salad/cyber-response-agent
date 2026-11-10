@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import json
 import logging
 import re
@@ -18,7 +17,7 @@ from defender.knowledge import LESSON_CORPORA as _LESSON_CORPORA, KnowledgePaths
 from defender.learning.author import shared as _shared
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
-from defender.learning._pydantic_stage import run_stage
+from defender.learning._pydantic_stage import run_stage, with_make_model
 from defender.learning._prompt import stage_user_message
 from defender import providers
 from defender.investigation.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
@@ -232,11 +231,9 @@ def call_folder_of(cfg: Any, stage: str) -> Path:
     return call_folder(batch.tenant, str(batch.id), stage, 1, make=True)
 
 
-def run_author_for(make_model: MakeModel | None) -> Callable[..., str]:
+def curator_runner(make_model: MakeModel | None) -> Callable[..., str]:
     """The curator stage's runner over `make_model` (`None`: the stage's own default model)."""
-    if make_model is None:
-        return _run_curator_pydantic
-    return functools.partial(_run_curator_pydantic, make_model=make_model)
+    return with_make_model(_run_curator_pydantic, make_model)
 
 
 def run_curator_stage(
