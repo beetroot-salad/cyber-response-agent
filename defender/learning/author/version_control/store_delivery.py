@@ -95,7 +95,7 @@ class StoreRecord:
         """The revert rows made of `change`, oldest first (a pair names the batch by id, or by branch for
         imported history)."""
         names = {change.batch, change.branch}
-        return [r for r in self.rows if any(target in names and p == change.path for target, p in r.reverts)]
+        return [r for r in self.rows if any(target in names and p == change.path for target, p in (r.reverts or ()))]
 
 
 def pr_number(url: str) -> int | None:
