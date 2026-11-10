@@ -92,3 +92,10 @@ class InvestigationId(UuidId):
 class LearningJobId(UuidId):
     __slots__ = ()
     domain = "learning job"
+
+
+class BatchId(UuidId):
+    """A learning batch's id (#1278 D5): the batch row's key, minted first; its branch is a column of its own."""
+
+    __slots__ = ()
+    domain = "learning batch"
