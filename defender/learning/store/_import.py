@@ -39,7 +39,7 @@ from ._store import (
     _text,
     lanes_of_branch,
 )
-from .models import AUTHOR_LANE, LEAD_LANE, BatchRow, CommitChangeRow, CommitRow
+from defender.jobs.learning_models import AUTHOR_LANE, LEAD_LANE, BatchRow, CommitChangeRow, CommitRow
 
 if TYPE_CHECKING:
     from defender.learning.author.version_control import TenantDelivery

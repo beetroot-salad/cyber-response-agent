@@ -4,7 +4,7 @@ queue view). A portal thread owns the loop and the store's connections; each cal
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -38,4 +38,4 @@ def blocking(dsn: str, **knobs: Any) -> Iterator[BlockingStore]:
             portal.call(store.close)
 
 
-__all__: list[Callable[..., Any] | str] = ["BlockingStore", "blocking"]
+__all__ = ["BlockingStore", "blocking"]

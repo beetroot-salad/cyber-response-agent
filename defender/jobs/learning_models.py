@@ -17,14 +17,13 @@ from sqlalchemy import (
     Index,
     Integer,
     Text,
-    Uuid,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from defender.database import Base, IdColumn
-from defender.records.formats import BatchId, TenantId
+from defender.records.formats import BatchId, CommitId, TenantId
 from defender.tenancy.models import SCHEMA as TENANCY_SCHEMA
 
 SCHEMA = "learning"
@@ -32,7 +31,7 @@ SCHEMA = "learning"
 KINDS = ("finding", "questioner_finding", "pitfall", "curation_request")
 #: The lane each kind belongs to (r8: lane follows from kind).
 AUTHOR_LANE = "author"
-LEAD_LANE = "lead_author"
+LEAD_LANE = "lead_author"  # lint-run-records: ok — the lane's database value, not a run record
 LANE_OF = {"finding": AUTHOR_LANE, "questioner_finding": AUTHOR_LANE, "pitfall": LEAD_LANE, "curation_request": LEAD_LANE}
 LANES = (AUTHOR_LANE, LEAD_LANE)
 STATUSES = ("waiting", "in_batch", "held", "published", "skipped", "dead")
@@ -142,7 +141,7 @@ class CommitRow(Base, kw_only=True):
         {"schema": SCHEMA},
     )
 
-    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    id: Mapped[CommitId] = mapped_column(IdColumn(CommitId), primary_key=True)
     tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId))
     batch_id: Mapped[BatchId | None] = mapped_column(IdColumn(BatchId), default=None)
     commit: Mapped[str] = mapped_column(Text)
@@ -162,7 +161,7 @@ class CommitChangeRow(Base, kw_only=True):
         {"schema": SCHEMA},
     )
 
-    commit_row: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    commit_row: Mapped[CommitId] = mapped_column(IdColumn(CommitId), primary_key=True)
     ordinal: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId))
     path: Mapped[str] = mapped_column(Text)

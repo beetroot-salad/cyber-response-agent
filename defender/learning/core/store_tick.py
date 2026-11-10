@@ -338,7 +338,7 @@ class Tick:
                 and (b.last_checked is None or (b.ended_at is not None and b.last_checked < b.ended_at)))
 
     def _claimable(self, views: Sequence[Any], items: Sequence[Any]) -> bool:
-        from defender.learning.store.models import LANE_OF
+        from defender.jobs.learning_models import LANE_OF
 
         kinds = {k for k, ln in LANE_OF.items() if ln == self.lane}
         ended_closed = {b.id for b in views if b.phase == "ended" and b.outcome == "closed"}
@@ -634,7 +634,7 @@ class Tick:
 
     def _due(self, views: Sequence[Any], items: Sequence[Any]) -> Any | None:
         """The batch a replacement claim would replace (the store's order: latest ended first), or `None`."""
-        from defender.learning.store.models import LANE_OF
+        from defender.jobs.learning_models import LANE_OF
 
         closed = {b.id: b for b in views if b.phase == "ended" and b.outcome == "closed"}
         due = {i.batch_id for i in items if i.status == "in_batch" and i.batch_id in closed
@@ -853,7 +853,7 @@ def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapp
     views = store.batches(tenant_id)
     if any(b.phase != "ended" for b in views):
         return True
-    from defender.learning.store.models import LANE_OF
+    from defender.jobs.learning_models import LANE_OF
 
     limits = dict(tick_thresholds or thresholds())
     closed = {b.id for b in views if b.phase == "ended" and b.outcome == "closed"}

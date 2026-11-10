@@ -157,6 +157,7 @@ if TYPE_CHECKING:
         UUID_PATTERN as UUID_PATTERN,
         AlertId as AlertId,
         BatchId as BatchId,
+        CommitId as CommitId,
         CredentialId as CredentialId,
         IdRefused as IdRefused,
         InvestigationId as InvestigationId,
@@ -192,7 +193,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("BranchError", "holds_content", "inherited_artifact_names", "lead_dirs", "refuse_seeded_run_dir",), "_seeded"),
     **dict.fromkeys(("parse_mapping",), "_alert_mapping_file"),
     **dict.fromkeys(("TenantId", "TenantRefused",), "_tenant_id"),
-    **dict.fromkeys(("UUID_PATTERN", "AlertId", "BatchId", "CredentialId", "IdRefused", "InvestigationId", "LearningJobId", "MembershipId", "UserId",
+    **dict.fromkeys(("UUID_PATTERN", "AlertId", "BatchId", "CommitId", "CredentialId", "IdRefused", "InvestigationId", "LearningJobId", "MembershipId", "UserId",
                      "UuidId",), "_record_ids"),
     **dict.fromkeys(("wire_digest",), "_wire"),
 }

@@ -16,18 +16,18 @@ import hashlib
 import json
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import Text, and_, case, delete, exists, func, literal, or_, select, update
+from sqlalchemy import Table, Text, and_, case, delete, exists, false, func, literal, or_, select, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender.database import async_engine, sessions
-from defender.records.formats import BatchId, TenantId
+from defender.records.formats import BatchId, CommitId, TenantId
 from defender.tenancy.models import TenantRecord
 
-from .models import (
+from defender.jobs.learning_models import (
     AUTHOR_LANE,
     LANE_OF,
     LANES,
@@ -50,10 +50,10 @@ DEFAULT_REFUSAL_CEILING = 3
 BRANCH_PREFIX = {AUTHOR_LANE: "lessons/", LEAD_LANE: "lead-author/"}
 REVERT_PREFIX = "lessons/revert-"
 
-_I = WorkItemRow.__table__
-_B = BatchRow.__table__
-_C = CommitRow.__table__
-_CC = CommitChangeRow.__table__
+_I = cast(Table, WorkItemRow.__table__)
+_B = cast(Table, BatchRow.__table__)
+_C = cast(Table, CommitRow.__table__)
+_CC = cast(Table, CommitChangeRow.__table__)
 
 
 class Stop(Exception):
@@ -325,7 +325,8 @@ class LearningStore:
             return bool(await self._insert_item(s, tenant, "curation_request", run_id, dict(spec), source_run=run_id,
                                                 coalesce_key=case_id))
 
-    async def _insert_item(self, s: AsyncSession, tenant: str, kind: str, key: str, payload: dict[str, Any], *,
+    async def _insert_item(  # noqa: PLR0913
+            self, s: AsyncSession, tenant: str, kind: str, key: str, payload: dict[str, Any], *,
                            status: str = "waiting", source_run: str | None = None, coalesce_key: str | None = None,
                            mistake_key: str | None = None, reason: str | None = None, attempts: int = 0,
                            deferrals: int = 0, offers_declined: int = 0, batch_id: str | None = None) -> int:
@@ -400,7 +401,7 @@ class LearningStore:
         busy = (await s.execute(select(_B.c.id).where(
             _B.c.tenant_id == TenantId(tenant), _B.c.lane == lane,
             or_(_B.c.phase == "working", and_(_B.c.kind == "author", _B.c.phase != "ended"),
-                and_(lane == AUTHOR_LANE, _B.c.kind == "revert", _B.c.phase == "in_review"))).limit(1))).first()
+                and_(true() if lane == AUTHOR_LANE else false(), _B.c.kind == "revert", _B.c.phase == "in_review"))).limit(1))).first()
         if busy is not None:
             raise LaneBusy(lane)
 
@@ -425,7 +426,7 @@ class LearningStore:
 
     async def _claim_due(self, s: AsyncSession, tenant: str, lane: str, kinds: list[str], owner: str,
                          thresholds: Mapping[str, int]) -> Held | None:
-        counts = dict((await s.execute(
+        counts: dict[str, int] = dict((await s.execute(
             select(_I.c.kind, func.count()).where(_I.c.tenant_id == TenantId(tenant), _I.c.kind.in_(kinds),
                                                   _I.c.status == "waiting").group_by(_I.c.kind))).all())
         due = [k for k in kinds if counts.get(k, 0) > 0 and counts[k] >= max(1, thresholds.get(k, 1))]
@@ -434,7 +435,8 @@ class LearningStore:
         return await self._new_batch(s, tenant, lane, "author", owner, due, generation=0, replaces=None,
                                      feedback_pr=None, only_batch=None)
 
-    async def _new_batch(self, s: AsyncSession, tenant: str, lane: str, kind: str, owner: str, kinds: list[str], *,
+    async def _new_batch(  # noqa: PLR0913
+            self, s: AsyncSession, tenant: str, lane: str, kind: str, owner: str, kinds: list[str], *,
                          generation: int, replaces: Any, feedback_pr: int | None, only_batch: Any,
                          branch: str | None = None) -> Held:
         batch_id = BatchId.mint()
@@ -516,7 +518,7 @@ class LearningStore:
             row = await self._guard(s, held)
             if row.base is None:
                 await s.execute(update(_B).where(_B.c.id == held.batch_id).values(base=base, start=start))
-            row_id = str(uuid.uuid4())
+            row_id = CommitId.mint()
             await s.execute(_C.insert().values(
                 id=row_id, tenant_id=held.tenant_id, batch_id=held.batch_id, commit=commit, branch=row.branch,
                 base=base, start=start, reverts=pairs, created_at=func.clock_timestamp()))

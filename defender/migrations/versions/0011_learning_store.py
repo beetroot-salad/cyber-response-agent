@@ -53,7 +53,8 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], tenant, name=op.f("fk_batches_tenant_id_tenants")),
         sa.ForeignKeyConstraint(["replaces"], [f"{SCHEMA}.batches.id"], name=op.f("fk_batches_replaces_batches")),
         sa.CheckConstraint("kind IN ('author', 'revert')", name=op.f("ck_batches_kind")),
-        sa.CheckConstraint("lane IN ('author', 'lead_author')", name=op.f("ck_batches_lane")),
+        sa.CheckConstraint("lane IN ('author', 'lead_author')",  # lint-run-records: ok — the lane's database value
+                           name=op.f("ck_batches_lane")),
         sa.CheckConstraint("phase IN ('working', 'in_review', 'needs_person', 'ended')", name=op.f("ck_batches_phase")),
         sa.CheckConstraint("outcome IS NULL OR outcome IN ('merged', 'closed', 'abandoned')",
                            name=op.f("ck_batches_outcome")),
