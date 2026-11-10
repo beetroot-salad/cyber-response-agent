@@ -362,10 +362,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     Passes `verbs=` explicitly: `run_investigation`'s fallback registry deliberately does not
     enable lead-0, which hermetic tests rely on.
 
-    On the resume path the production registry is never constructed: a sibling's queries must
-    be answered from the primed recording and staged corpus, and a module registry beside them
-    would route uncaptured keys to real adapters. The two registries are built in separate
-    arms of one `if` so both can never exist.
+    On the resume path the production registry is never constructed: a sibling's queries are
+    served by its world registry (the primed recording, else one live read through the run's
+    proxy access, #1449), and a module registry beside it would route keys around the oracle.
+    The two registries are built in separate arms of one `if` so both can never exist.
     """
     # The roster `main` judged, handed down to the registry and `run_investigation` with its
     # verdict; read here only for a direct caller, whose run the driver judges.
@@ -416,6 +416,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
                 defender_dir=defender_dir, model_name=model_name,
                 model_override=model_override, box=box, verbs=verbs, roster=roster,
                 systems=systems, resume=resume, tenant=tenant, source_run=source, **held,
+                **_access_kwargs(access),
             )
         finally:
             verbs.close()
@@ -609,10 +610,12 @@ class _TokenMint:
         (`credential_proxy.request_signer`, r8.5) unless one is injected."""
         proxied = {name for name, found in tenant.access.items()
                    if isinstance(found, AccessDeclaration) and name not in systems.down}
-        reads = () if world is not None else tuple(sorted(
-            system_status.granted_systems(tenant.grants) & proxied))
+        # A branched run is a run (#1449): a world reads its granted systems on a run's terms.
+        reads = tuple(sorted(system_status.granted_systems(tenant.grants) & proxied))
         # The write-back token is for a case system run start judged sound (`case`), reached
         # through the proxy; a case system with bad settings is told so by the record step.
+        # A world never gets one: `--update-ticket` with `--episode` is refused before this
+        # (`_resume_target`); `world is None` is the mint's own guard behind that refusal (#1449).
         named = case.system if isinstance(case, case_system.CaseTarget) else None
         written = named if (world is None and ns.update_ticket
                                 and isinstance(tenant.access.get(named or ""), AccessDeclaration)) else None
