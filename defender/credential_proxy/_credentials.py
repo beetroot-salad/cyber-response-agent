@@ -117,7 +117,7 @@ def _declaration_digest(declaration: AccessDeclaration) -> str:
 
 
 class AccessTokens:
-    """OAuth access tokens held in memory per (tenant, system), each under the set version and
+    """OAuth access tokens held in memory per (tenant, system, credential generation: a re-created system never reuses the old one's, K3), each under the set version and
     the whole declaration it was issued for (A8, #1364 O2). A changed version or declaration, or a
     token within `REFRESH_MARGIN_SEC` of expiry, means a fresh exchange; one at a time per system,
     a request waiting its turn no longer than its own deadline (#1364 O1). Each exchange verifies
@@ -126,21 +126,21 @@ class AccessTokens:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._gates: dict[tuple[str, str], threading.Lock] = {}
-        self._held: dict[tuple[str, str], _Held] = {}
+        self._gates: dict[tuple[str, str, int], threading.Lock] = {}
+        self._held: dict[tuple[str, str, int], _Held] = {}
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({len(self._held)} held)"
 
-    def _gate(self, key: tuple[str, str]) -> threading.Lock:
+    def _gate(self, key: tuple[str, str, int]) -> threading.Lock:
         with self._lock:
             return self._gates.setdefault(key, threading.Lock())
 
-    def token(self, tenant_id: str, system: str, declaration: AccessDeclaration,
+    def token(self, tenant_id: str, system: str, generation: int, declaration: AccessDeclaration,
               creds: CredentialSet, deadline: Deadline, trust: ssl.SSLContext) -> str:
         """An access token for `creds` under `declaration`'s auth: the held one if still good,
         else a new exchange (whose failure is `Refused`, never retried)."""
-        key, digest = (tenant_id, system), _declaration_digest(declaration)
+        key, digest = (tenant_id, system, generation), _declaration_digest(declaration)
         what = f"the token exchange of {system}"
         gate = self._gate(key)
         if not gate.acquire(timeout=deadline.left(what)):
@@ -160,9 +160,9 @@ class AccessTokens:
         finally:
             gate.release()
 
-    def evict(self, tenant_id: str, system: str, token: str) -> None:
-        """Drop the held token for (tenant, system) if it is `token` (the upstream refused it)."""
-        key = (tenant_id, system)
+    def evict(self, tenant_id: str, system: str, generation: int, token: str) -> None:
+        """Drop the held token for (tenant, system, generation) if it is `token` (the upstream refused it)."""
+        key = (tenant_id, system, generation)
         with self._gate(key):
             held = self._held.get(key)
             if held is not None and held.token == token:
