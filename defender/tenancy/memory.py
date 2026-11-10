@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator, Collection, Mapping
 from typing import Any, Literal, TypeVar, cast, overload
 
 from defender.records.formats import AlertMapping, TenantId
-from defender.tenancy.models import ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, PublishStatus, TenantRecord
+from defender.tenancy.models import ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, MergeEligibility, PublishStatus, TenantRecord
 from defender.tenancy.repository import (
     KEEP,
     SERVICE,
@@ -56,6 +56,7 @@ class InMemoryTenantRepository:
         self._wiring: dict[str, ForgeWiring] = {}
         self._publish: dict[str, PublishStatus] = {}
         self._mappings: dict[str, AlertMappingRow] = {}
+        self._eligibility: dict[str, MergeEligibility] = {}
         self._locked: set[str] = set()
 
     async def close(self) -> None:
@@ -144,6 +145,10 @@ class InMemoryTenantRepository:
             row = self._mappings.get(tenant_id)
             return None if row is None else row.as_mapping()
 
+    async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
+        with self._mutex:
+            return self._eligibility.get(tenant_id)
+
     # --- requests (the API) ----------------------------------------------------------------------
     async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
         row = TenantRecord(id=TenantId.mint(), created_at=now, state="creating", pending_action="create",
@@ -189,6 +194,12 @@ class InMemoryTenantRepository:
                 pending_action="rotate", step="names", step_actor=SERVICE)
 
     # --- host processes --------------------------------------------------------------------------
+    async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:
+        with self._mutex:
+            if tenant_id not in self._tenants:
+                raise ValueError(f"no tenant {tenant_id}")
+            self._eligibility[tenant_id] = MergeEligibility(logins=frozenset(logins), read_at=read_at.astimezone(_dt.UTC))
+
     async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
         published, refused, kind = publish_outcome(line)
         with self._mutex:

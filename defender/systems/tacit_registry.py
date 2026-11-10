@@ -159,6 +159,13 @@ def _read_entry(raw: Any) -> tuple[dict[str, str] | None, str]:
     return entry, ""
 
 
+def entry_problem(raw: Any) -> str | None:
+    """Why `raw` would not load as an entry, or `None` when it would: the reader's own verdict on
+    one row, public so a drafter checks an entry before it is written (#1414 A7)."""
+    entry, why = _read_entry(raw)
+    return None if entry is not None else why
+
+
 class RegistryRead(NamedTuple):
     """One reading of the registry file: the entries that answer, in file order, and every
     reason something does not.

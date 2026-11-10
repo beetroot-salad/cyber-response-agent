@@ -34,7 +34,7 @@ from sqlalchemy.pool import NullPool
 
 from defender.database import async_engine, url
 from defender.records.formats import AlertMapping, TenantId
-from defender.tenancy.models import SCHEMA, AlertMappingRow, ForgeWiring, Generation, PublishStatus, TenantRecord
+from defender.tenancy.models import SCHEMA, AlertMappingRow, ForgeWiring, Generation, MergeEligibility, MergeEligibilityRow, PublishStatus, TenantRecord
 from defender.tenancy.repository import (
     ALL,
     KEEP,
@@ -53,6 +53,7 @@ _G: Table = Generation.__table__  # type: ignore[assignment]
 _W: Table = ForgeWiring.__table__  # type: ignore[assignment]
 _P: Table = PublishStatus.__table__  # type: ignore[assignment]
 _M: Table = AlertMappingRow.__table__  # type: ignore[assignment]
+_E: Table = MergeEligibilityRow.__table__  # type: ignore[assignment]
 
 #: The lock connection's keepalive bound, in seconds, when the caller states none.
 LOCK_KEEPALIVE = 30
@@ -127,6 +128,10 @@ class PostgresTenantRepository:
         rows = await self._rows(select(_M).where(_M.c.tenant_id == tenant_id))
         return AlertMappingRow(**rows[0]._mapping).as_mapping() if rows else None
 
+    async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
+        rows = await self._rows(select(_E).where(_E.c.tenant_id == tenant_id))
+        return MergeEligibilityRow(**rows[0]._mapping).as_record() if rows else None
+
     # --- requests (the API) ----------------------------------------------------------------------
     async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
         values = dict(id=TenantId.mint(), created_at=now, state="creating", pending_action="create",
@@ -163,6 +168,15 @@ class PostgresTenantRepository:
             pending_action="rotate", step="names", step_actor=SERVICE)
 
     # --- host processes --------------------------------------------------------------------------
+    async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:
+        values = dict(logins=sorted(logins), read_at=read_at)
+        try:
+            async with self._engine.begin() as conn:
+                await conn.execute(insert(_E).values(tenant_id=tenant_id, **values)
+                                   .on_conflict_do_update(index_elements=[_E.c.tenant_id], set_=values))
+        except IntegrityError as e:
+            raise ValueError(f"no tenant {tenant_id}") from e
+
     async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
         published, refused, kind = publish_outcome(line)
         values = dict(recorded_by=by, published=published, refused=refused, kind=kind)
