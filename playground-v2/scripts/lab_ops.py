@@ -645,18 +645,24 @@ class LabOps:
 
     def copy_volumes(self, dest: Path) -> list[str]:
         """/var/log and /var/lib/elastic-agent of each role host, through a throwaway container that
-        mounts the host's volumes read-only. Certs and tokens live elsewhere and are not copied."""
+        mounts the host's volumes read-only, with the host paused for its copy (a running agent
+        rewrites its state as tar reads it: live check, 2026-11-10). Certs and tokens live elsewhere
+        and are not copied."""
         Path(dest).mkdir(parents=True, exist_ok=True)
         names = []
         for host in self.hosts():
             image = self._outer("inspect", "--format", "{{.Config.Image}}", host, text=True).stdout.strip()
-            for mount in HOST_VOLUMES:
-                name = f"volume-{host}{mount.replace('/', '-')}.tar"
-                with open(Path(dest) / name, "wb") as fh:
-                    self._outer("run", "--rm", "--volumes-from", f"{host}:ro", "--entrypoint", "tar",
-                                "--network", "none", image, "-C", mount, "-cf", "-", ".",
-                                capture_output=False, stdout=fh, stderr=subprocess.PIPE)
-                names.append(name)
+            self._outer("pause", host)
+            try:
+                for mount in HOST_VOLUMES:
+                    name = f"volume-{host}{mount.replace('/', '-')}.tar"
+                    with open(Path(dest) / name, "wb") as fh:
+                        self._outer("run", "--rm", "--volumes-from", f"{host}:ro", "--entrypoint", "tar",
+                                    "--network", "none", image, "-C", mount, "-cf", "-", ".",
+                                    capture_output=False, stdout=fh, stderr=subprocess.PIPE)
+                    names.append(name)
+            finally:
+                self._outer("unpause", host, check=False)
         return names
 
     def verify_restore(self, repository: str, snapshot: str) -> dict[str, int]:
