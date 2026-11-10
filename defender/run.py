@@ -867,10 +867,8 @@ def _write_record_versions(run_dir: Path, records: TenantRecords) -> None:
     O6, P3; audit only), beside the knowledge-source record: every current version, disabled ones
     too. A run that cannot write it does not start, as for the knowledge record."""
     path = RunPaths(run_dir).record_versions
-    used = {"systems": {system: record.version for system, record in sorted(records.systems.items())},
-            "case": None if records.case is None else records.case.version}
     try:
-        path.write_text(json.dumps(used, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        run_knowledge.write_record_versions(path, records)
     except OSError as e:
         sys.exit(f"[run.py] could not write the run's record of versions {path}: {e}")
 
