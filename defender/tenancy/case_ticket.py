@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import re
 import logging
-from pathlib import Path
 
 from defender.records import formats
 from defender._model import model
 from defender.records.formats import ReportUnreadable, require_report
 from defender.records import Run
-from defender.tenancy.tenant_settings import read_regular_bytes
 
 _logger = logging.getLogger(__name__)
 
@@ -115,26 +113,6 @@ def parse_case_record(text: str) -> CaseRecordSettings:
     except CaseTicketError as bad:
         raise _fault(f"is unusable: {bad}") from None
     return CaseRecordSettings(system=system.strip(), body=body)
-
-
-def load_case_record(settings: Path) -> CaseRecordSettings | None:
-    """The tenant's case-record file under `settings`, or `None` when it has none (a tenant with
-    no case system), or `CaseTicketError` naming the file when it cannot be read or stand.
-    Since #1366 no run reads it (a run's case record is a record): only the retired folder reader
-    `run_tenant.folder_settings` calls it, for `tenant.py`'s folder-based case finding, which
-    `check`'s record findings replace."""
-    path = Path(settings) / CASE_RECORD_REL
-    try:
-        raw = read_regular_bytes(path)
-    except FileNotFoundError:
-        return None
-    except OSError as e:
-        raise _fault(f"cannot be read: {e.strerror or type(e).__name__}") from None
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        raise _fault("is not UTF-8 text") from None
-    return parse_case_record(text)
 
 
 def _format(template: str, ctx: dict[str, str], where: str) -> str:

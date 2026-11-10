@@ -16,7 +16,6 @@ from defender.records.formats import DataRoot, RunsBase, EpisodesRoot
 
 import contextlib
 import logging
-import os
 import dataclasses
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -32,9 +31,8 @@ from defender.tenancy import RecordsUnreachable
 from defender.systems.verb_dispositions import DispositionError, RunGrants, require_gather_query, run_grants
 from defender.systems.verb_grant import GrantError, VerbGrant
 from defender import tenancy
-from defender.tenancy import tenant_settings
 from defender.tenancy.case_ticket import (
-    CASE_RECORD_REL, CaseRecordSettings, CaseTicketError, load_case_record, parse_case_record)
+    CASE_RECORD_REL, CaseRecordSettings, CaseTicketError, parse_case_record)
 from defender.tenancy.models import CaseRecord, TenantRecords
 from defender.kit.access import AccessDeclaration
 from defender.kit.settings import SystemConfig
@@ -460,7 +458,6 @@ def host_tenant(  # noqa: PLR0913 — the request (root, id), the records seam a
     `directory` is the tenant records a test or a launcher hands in; a production process passes
     none and reads them from `DEFENDER_DATABASE_DSN`. Refused in the lifecycle's own process
     (r10.1 C6, A4): prepare holds the lock exclusive there, so a shared hold would wait on itself."""
-    from defender import tenancy
     from defender._paths import process_defender_dir
     from defender.tenancy import host_lock
 
@@ -496,7 +493,6 @@ def entry_directory(given: TenantDirectory | None) -> TenantDirectory:
     run once at process start and never a migration). No directory and no address, or a database
     at another revision (named with this code's), is `TenantRefused`; a database that cannot be
     reached is its `RecordsUnreachable`, which a caller may treat as transient."""
-    from defender import tenancy
 
     return tenancy.host_directory(given, check_version=_check_version)
 
@@ -512,43 +508,6 @@ def _check_version(dsn: str) -> None:
         raise RecordsUnreachable(str(down)) from down
 
 
-def folder_settings(settings: Path) -> dict[str, Any]:
-    """The retired settings folder's parts (`settings/systems/<s>/` and `case-record.yaml`), as
-    the keyword arguments `RunTenant` once took them. No run reads them since #1366 (O9): the
-    run's tenant is built from records (`record_settings`). Kept for the readers of the retired
-    folder (the import's candidate, connect's handoff) until they move off it."""
-    systems = tenant_settings.read_systems(settings)
-    case_record: CaseRecordSettings | CaseTicketError | None
-    try:
-        case_record = load_case_record(settings)
-    except CaseTicketError as error:
-        # The text only: the caught error's traceback and cause (the OSError, with its host
-        # path) must not ride the record.
-        case_record = CaseTicketError(str(error))
-    return {
-        "systems": systems,
-        "case_record": case_record,
-        "access": _read_access(settings, systems),
-    }
-
-
-def _read_access(
-    settings: Path, systems: Mapping[str, SystemConfig | ConfigFault],
-) -> Mapping[str, AccessDeclaration | ConfigFault]:
-    """The declaration of every system whose folder holds an `access.yaml` (#1391 P1: holding
-    one is what being reached through the proxy is). A system with none gets no entry; whether
-    it needs one is its adapter's settings check to say."""
-    out: dict[str, AccessDeclaration | ConfigFault] = {}
-    for name in systems:
-        if not os.path.lexists(settings / "systems" / name / tenancy.ACCESS_FILE):
-            continue
-        try:
-            out[name] = tenancy.read_access(settings, name)
-        except ConfigFault as fault:
-            out[name] = ConfigFault(str(fault))  # the text only, as the other parts do
-    return MappingProxyType(out)
-
-
 __all__ = [
     "CaseRecordSettings",
     "RecordsUnreachable",
@@ -559,7 +518,6 @@ __all__ = [
     "resolve_tenant",
     "catalog_templates",
     "correlation_dispatch",
-    "folder_settings",
     "Admitted",
     "entry_directory",
     "host_tenant",
