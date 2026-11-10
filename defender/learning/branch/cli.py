@@ -961,14 +961,12 @@ def _grade_job(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any, lan
     in the episode and whose pass touches no queue. A pass that fails is the job's
     `judge_failed`, never swallowed; its message names only the failure's type. Its return is
     the job's ending, decided: `lane.judged` is told at once."""
-    from defender.learning.core.state import StateRefused
-
     from defender.learning.judge import grade_episode
 
     grade = grade_episode if lane.grade is None else lane.grade
     try:
         graded = grade(runs, episode_id, judge=judge, job_lane=True)
-    except (Exception, StateRefused) as judge_failed:  # noqa: BLE001 — every failure of the pass is the job's judge_failed
+    except Exception as judge_failed:  # noqa: BLE001 — every failure of the pass is the job's judge_failed
         raise ending(f"[branch] episode {episode_id}: the judge pass failed ({judge_failed!r})",
                      reason=JUDGE_FAILED,
                      brief=f"the judge's pass failed ({type(judge_failed).__name__})",
