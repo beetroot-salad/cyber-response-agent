@@ -827,6 +827,8 @@ def _perturbations(base_name, mutation):
     for path, value in [*_leaves(mutation), (("span_start",), SPAN_START)]:
         if path in (("kind",),):
             continue     # not a value of the overlay but which overlay it is
+        if path == ("dataset",) and mutation.get("kind") == "schema-drift":
+            continue     # the resolver pins schema-drift's dataset to the auth dataset (_resolve_schema_drift)
         for site, candidates in _sites(value) if path != ("span_start",) else [
                 ("", [_later(SPAN_START, timedelta(seconds=d)) for d in (1, -1, 60, -60, 3600, 7200)])]:
             for candidate in candidates:
@@ -835,6 +837,11 @@ def _perturbations(base_name, mutation):
                     # The resolver derives a dataset's stream and pipeline (chaos.mutations): never one alone.
                     other = ({**other[0], "stream": f"logs-{candidate}-*", "pipeline": f"logs-{candidate}@custom"},
                              SPAN_START)
+                if mutation.get("kind") == "schema-drift" and path in (("processor", "rename", "field"),
+                                                                       ("processor", "rename", "target_field")):
+                    # The resolver sets `fields = [from, to]` from the rename: never one alone.
+                    rename = other[0]["processor"]["rename"]
+                    other = ({**other[0], "fields": [rename["field"], rename["target_field"]]}, other[1])
                 state = _expected_or_none(*other)
                 if state is not None and state != base:
                     found[f"{base_name}/{'.'.join(map(str, path))}{site}"] = other
@@ -852,10 +859,10 @@ PAIRS = [("none", "drop")] + [(a, b) for name in _DROP_VARIANTS for a, b in (("d
 
 def test_the_walk_over_every_leaf_reaches_the_leaves_the_oracle_distinguishes():
     """C4: the generated variants cover the threshold, the salt, the rename target and span_start (and the
-    dataset, field and rename source, which also change the copy), so the walk cannot go vacuous."""
+    dataset of data-drop, field and rename source, which also change the copy), so the walk cannot go vacuous."""
     for needle in ("drop/processor.drop.if#num", "drop/processor.drop.if#quoted", "drop/span_start", "drop/dataset"):
         assert any(name.startswith(needle) for name in _DROP_VARIANTS), (needle, sorted(_DROP_VARIANTS))
-    for needle in ("drift/processor.rename.target_field", "drift/span_start", "drift/dataset"):
+    for needle in ("drift/processor.rename.target_field", "drift/span_start"):
         assert any(name.startswith(needle) for name in _DRIFT_VARIANTS), (needle, sorted(_DRIFT_VARIANTS))
 
 
