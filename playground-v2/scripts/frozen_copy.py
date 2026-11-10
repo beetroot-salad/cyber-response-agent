@@ -399,7 +399,7 @@ def unverifiable_ancestry(es: Any, freeze: dict, overlay: dict | None) -> list[s
     the drift targets. Derived alerts reached through them cannot be found by ancestry (live: the
     2026-10-29 `dedup-` consolidation gave the older events new ids). A pattern or `''` (threshold and
     ES|QL rules) does not count."""
-    held = set(freeze["elastic"]["indices"])
+    held = {r["index"] for r in es.es_request("GET", "/_cat/indices?format=json&h=index&expand_wildcards=all") or []}
     found: set[str] = set()
     for mutation in es_mutations(overlay):
         if mutation["kind"] != "schema-drift":
@@ -479,6 +479,9 @@ def _build(es: Any, clock: Any, freeze: dict, overlay: dict | None) -> tuple[dic
     streams = {n: s for n, s in streams_of(es).items() if n in names}
     for stream in sorted(set(streams.values())):
         es.es_request("DELETE", f"/_data_stream/{stream}/_lifecycle")
+    if dangling := unverifiable_ancestry(es, freeze, overlay):   # r6.4.5: before any overlay writes
+        raise CopyRefused(f"the schema-drift's span holds alerts built from events of {dangling}, which the "
+                          f"copy does not hold: their derived alerts cannot be found (pick a later span)")
     tallies: dict[str, int] = {}
     touched: set[str] = set()
     base_overlay(es, names, T, tallies, touched)
