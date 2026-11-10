@@ -21,7 +21,7 @@ from defender.learning.leads.path_validation import SKILLS_PREFIX
 _logger = logging.getLogger(__name__)
 
 
-def _spawn_author_agent(
+def _spawn_author_agent(  # noqa: PLR0913 — one spawn's whole context, the tenant's systems among it
     *,
     system_prompt_file: Path,
     batch_id: str,
@@ -31,6 +31,7 @@ def _spawn_author_agent(
     log_label: str,
     salt: str,
     box=None,
+    systems: tuple[str, ...] | None = None,
 ) -> int:
     """Spawn one lead-lane curator over the lane's tree at `repo_root` (a batch draft's root):
     the stage writes the `agent/` root it holds (#1108 P4 O7)."""
@@ -51,6 +52,7 @@ def _spawn_author_agent(
             repo_root=repo_root / AGENT_REL,
             box=box,
             salt=salt,
+            systems=systems,
         ),
         log_label=log_label,
         log=_logger,

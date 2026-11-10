@@ -67,6 +67,7 @@ class ResolvedRoots:
     corpus_dir: Path | None = None
     tenant_agent: Path | None = None
     model_roots: RootPairs = ()
+    systems: tuple[str, ...] | None = None
 
 
 @model(frozen=True)
@@ -104,6 +105,9 @@ class RunScope:
     tenant_agent: Path | None = None
     #: Names external roots; grants remain in add_dirs/read_confine, never inferred here.
     model_roots: RootPairs = ()
+    #: The systems a lane's per-system write and `rm` shapes are drawn over: the tenant's (#1366
+    #: O1, its records' over the catalog). `None`: the bound tree's adapters (no tenant).
+    systems: tuple[str, ...] | None = None
 
 
 _DEFAULT_SCOPE = RunScope()
@@ -143,6 +147,7 @@ def resolve_roots(
         scripts=tuple(scope.scripts),
         corpus_dir=corpus_dir,
         model_roots=scope.model_roots,
+        systems=scope.systems,
     )
 
 
