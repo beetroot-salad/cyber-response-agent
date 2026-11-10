@@ -12,7 +12,10 @@ The table's order is the precedence: the first row that holds wins. A row holds 
 that is, or (inside a group, however deep) carries, its failure, unless the group also carries
 something with a meaning of its own for the run: an interrupt or cancellation, or one of the
 row's `overridden_by`. Such a group is not decided by this row, so it propagates as itself and the
-next row is asked. Each site names the rows it takes part in; it never reorders them.
+next row is asked. Each site names the rows it takes part in; it never reorders them. Those lists (the `*_ENDINGS`
+and `*_PROPAGATES` tuples below) are the one place a new ending is not automatic: the sites that
+take every row but one derive theirs by exclusion, the others opt in, so a new row must be added
+to an opt-in list on purpose.
 """
 from __future__ import annotations
 

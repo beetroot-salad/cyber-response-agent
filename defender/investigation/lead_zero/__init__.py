@@ -339,7 +339,9 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
         raise
     except Exception as e:  # noqa: BLE001 — the lead's own dispatch must never break the run
         if carries_box_ending(e) or ending_in(e, LEAD_ZERO_PROPAGATES) is not None:
-            raise  # the box, a provider that stayed down or a model with a broken setup, inside a group: the run ends by name
+            # The box, a provider that stayed down or a model with a broken setup, inside a group:
+            # the run ends by name.
+            raise
         _logger.warning(f"correlation lead dispatch failed ({type(e).__name__}); naming it")
         return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
     if not ends:
