@@ -1005,22 +1005,29 @@ def http_repo(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------------------
-# A later drain: a delivery opened in a fresh process
+# A delivery opened in a freshly started process
 # ---------------------------------------------------------------------------------------
+# (`in_a_later_process(repo, "deliver"/"revert", ...)` is retired: a later process picking a batch up by the
+# on-disk commit record is a takeover over the store's record, #1278 D11, A2 D1; the commit-maker's record is
+# in memory now (`batch.committer.made`), so a fresh process can only finish the batch it makes itself.)
 
-_LATER_SCRIPT = """
+_FRESH_SCRIPT = """
 import json, sys
 from pathlib import Path
 from defender.tests.support.tenancy import _tenants1106 as tenants
-from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, configured_origin, target, fixture_identity
-root, tenant_id, remote, verb, args = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
+from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, LANES, ForgeHTTP, configured_origin, target, fixture_identity
+root, tenant_id, remote, batch_id = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
 mod = target()
 tenant = tenants.accept(root, tenant_id)
 http = ForgeHTTP(remote=remote, origin=configured_origin(tenant.knowledge))
 out = {}
 try:
-    later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
-    result = getattr(later, verb)(*args)
+    d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
+    batch = d.start_batch(batch_id, lanes=LANES)
+    (batch.draft_root / "agent/lessons" / (batch_id + ".md")).write_bytes(b"a lesson\\n")
+    out["commit"] = batch.commit(batch.change_set(), "claim")
+    out["branch"] = batch.branch
+    result = d.finish(batch)
     status = result.status
     out["status"] = status if isinstance(status, str) else repr(status)
     out["url"] = getattr(result, "url", None)
@@ -1047,19 +1054,17 @@ def fresh_process_env(tenant, scratch: Path):
     return env
 
 
-def in_a_later_process(repo, verb, *args, python_prelude=""):
-    """`verb(*args)` (`deliver` or `revert`) on a `TenantDelivery` opened for `repo`'s tenant in
-    another, freshly started process with its own forge double (backed by the same remote,
-    as the real forge is) and a fresh environment, as a later drain would: nothing of this
-    process's objects, memory or environment reaches it. Returns `{"status": ..., "url": ...}`
-    (`url` `None` when the result has none) or `{"refused": ...}`, with `"creates"`, the PR
-    requests it sent."""
+def in_a_fresh_process_finishing(repo, batch_id, *, python_prelude=""):
+    """A batch started, committed with one lesson and finished on a `TenantDelivery` opened for `repo`'s tenant in
+    another, freshly started process with its own forge double (backed by the same remote, as the real forge is) and
+    a fresh environment: nothing of this process's objects, memory or environment reaches it. Returns
+    `{"status", "url", "commit", "branch"}` or `{"refused": ...}`, with `"creates"`, the PR requests it sent."""
     tenant, remote = repo[0], repo[1]
     scratch = Path(location_path(tenant.data_root)).parent / f"later-{len(list(Path(location_path(tenant.data_root)).parent.glob('later-*')))}"
-    proc = subprocess.run([sys.executable, "-c", python_prelude + "\n" + _LATER_SCRIPT, str(location_path(tenant.data_root)), str(tenant.id),
-                           str(remote), verb, *map(str, args)], capture_output=True, text=True,
+    proc = subprocess.run([sys.executable, "-c", python_prelude + "\n" + _FRESH_SCRIPT, str(location_path(tenant.data_root)), str(tenant.id),
+                           str(remote), batch_id], capture_output=True, text=True,
                           env=fresh_process_env(tenant, scratch), timeout=300, check=False)
-    assert proc.returncode == 0, f"the later process crashed: {proc.stderr}"
+    assert proc.returncode == 0, f"the fresh process crashed: {proc.stderr}"
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
