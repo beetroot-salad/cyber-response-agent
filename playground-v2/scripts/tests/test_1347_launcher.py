@@ -52,7 +52,7 @@ from _lab_fakes import (AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, ALERTS_PATTERN
                         LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SCHEMA_DRIFT,
                         SLUG, SNAP, SNAP_UUID, SPAN_START, STREAMS, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T,
                         FakeCluster, FaultJournal, Journal, LabRig, alert_doc, canonical_digest, expected_copy,
-                        expected_variant, instant, is_clean_marker, nested_alert)
+                        expected_touched, expected_variant, instant, is_clean_marker, nested_alert, searched_indices)
 
 LAUNCH = Path(__file__).resolve().parents[1] / "launch_frozen.py"
 KINDS = ["none", "drop", "drift", "cmdb"]
@@ -556,18 +556,75 @@ def test_a_copy_with_no_marker_is_restored_whole_over_whatever_it_holds(tmp_path
     assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"]
 
 
-def test_a_clean_marker_does_not_hide_a_copy_altered_behind_its_back(tmp_path):
-    """A1/A4: the content digest catches what the marker cannot: a document changed in place after
-    a valid launch makes the next launch of the same variant `stale`, naming the content."""
+def test_a_clean_marker_does_not_hide_a_touched_copy_altered_behind_its_back(tmp_path):
+    """A1/A4: the content digest catches what the marker cannot: a document of a touched index changed in
+    place after a valid launch makes the next launch of the same variant `stale`, naming the content."""
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("none")
+    rig.launch()
+    rig.cluster.put(SYSLOG, "syslog-03", {"@timestamp": "2026-10-20T04:36:00Z", "message": "changed",
+                                          "event.dataset": "system.syslog"})
+    rig.launch()
+
+    assert [r["verdict"] for r in rig.rows()] == ["valid", "stale"]
+    assert "content" in rig.rows()[1]["reason"]
+
+
+def test_a_change_to_an_untouched_index_is_not_stale_on_content_but_its_count_still_is(tmp_path):
+    """A1/A2 (design: "a content digest covers the touched indices"; counts cover every index): nginx, which
+    no overlay touches, changed in place after a valid launch leaves the next launch valid, and no document
+    read reaches it; a removed nginx document is stale, naming the index, by count."""
     rig = LabRig(tmp_path)
     rig.write_expected_case("none")
     rig.launch()
     rig.cluster.put(NGINX, "nginx-03", {"@timestamp": "2026-10-20T05:30:00Z", "message": "GET /changed",
                                         "event.dataset": "nginx.access"})
+    seen = len(rig.cluster.requests)
     rig.launch()
 
-    assert [r["verdict"] for r in rig.rows()] == ["valid", "stale"]
-    assert "content" in rig.rows()[1]["reason"]
+    assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"], rig.rows()
+    assert NGINX not in searched_indices(rig.cluster, seen), "the launch read an untouched index"
+
+    del rig.cluster.indices[NGINX]["docs"]["nginx-04"]
+    rig.launch()
+
+    row = rig.rows()[-1]
+    assert row["verdict"] == "stale" and NGINX in row["reason"], row
+
+
+def test_the_clean_marker_names_the_touched_indices_and_a_reused_copy_digests_the_same_ones(tmp_path):
+    """A1/A4 (design: "a content digest covers the touched indices"): the clean marker carries `touched`, the
+    sorted indices the overlays touched (derived from the expected end state); a launch that reuses the copy
+    reads exactly the documents of those and no other index's."""
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("drift")
+    rig.launch()
+    touched = expected_touched(expected_copy("drift"), [SCHEMA_DRIFT])
+    assert NGINX not in touched and len(touched) == 3
+    assert is_clean_marker(rig.marker()) and rig.marker()["touched"] == touched, rig.marker()
+    seen, restores = len(rig.cluster.requests), rig.cluster.restores
+    rig.launch()
+
+    assert rig.cluster.restores == restores and [r["verdict"] for r in rig.rows()] == ["valid", "valid"]
+    assert searched_indices(rig.cluster, seen) == set(touched)
+    assert rig.marker()["touched"] == touched, rig.marker()
+
+
+def test_a_clean_marker_without_touched_is_not_trusted_and_the_copy_is_restored_whole(tmp_path):
+    """A4: a marker that does not say which indices were touched cannot say what to digest: it is not clean,
+    so the next launch restores the whole snapshot (and is valid)."""
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("drop")
+    rig.launch()
+    marker = rig.marker()
+    assert marker["dirty"] is False
+    rig.drop_marker()
+    rig.ops.write_marker({k: v for k, v in marker.items() if k != "touched"})
+    restores = rig.cluster.restores
+    rig.launch()
+
+    assert rig.cluster.restores == restores + 1 and rig.cluster.state() == expected_copy("drop")
+    assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"]
 
 
 # -- stale (A2) ---------------------------------------------------------------------------------------

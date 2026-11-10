@@ -7,7 +7,7 @@ tenant_dir, tenant_hosts, frozen_endpoint, audit_path, live_audit_path, es=None)
 drive this class itself, through `_lab_fakes.LabRig`, never a stand-in): `load_stubs(parts, as_of,
 mutations=None)`, `start_proxy() -> url`, `ensure_node()`, `frozen_es()` (the frozen cluster through the
 chaos seam's `es_request`, by curl inside the frozen node's container unless `es=` is given),
-`content_digest(patterns)`, `read_marker()`/`write_marker(marker)`, `create_readonly_user(password)`,
+`content_digest(indices)`, `read_marker()`/`write_marker(marker)`, `create_readonly_user(password)`,
 `current_password()`, `mount_node_cert()`, `teardown()`, `snapshot_alerts(freeze_dir)`, `live_run_alerts()`,
 `ticketed_alerts()`, `freeze_rules(freeze_dir)`. `restart_node(clock_offset)` is withdrawn (D15 revised: the
 node's offset is a file the launcher rewrites, never a restart). `run` is called like `subprocess.run`
@@ -23,8 +23,8 @@ and make-a-case tests);
 its cluster name comes from `V2_FROZEN_CLUSTER_NAME` (an unprefixed `CLUSTER_NAME` has no effect).
 
 r6.4.2 (attack batch 1), also bound here: the real `LabOps` takes `es=` (the frozen cluster through the
-chaos seam's `es_request(method, path, body=None)`) and answers `content_digest(patterns)` from the
-documents it reads there for the freeze's patterns and from the stub stores it loaded;
+chaos seam's `es_request(method, path, body=None)`) and answers `content_digest(indices)` from the
+documents it reads there for the indices named and from the stub stores it loaded;
 `ensure_node()` starts the frozen node if it is stopped; `teardown()` leaves no container running
 that the other operations started. `live_run_alerts()` and `ticketed_alerts()` read `V2_RUNS_DIR` and
 `V2_FROZEN_PARTS_DIR` from the environment and raise when one is unset.
@@ -43,8 +43,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from _lab_fakes import (ALERTS, ALERTS_PATTERN, AUTH, CMDB_STALE, DATA_DROP, EVENTS, REPO, SCHEMA_DRIFT, SNAP, SYSLOG, T,
-                        LabRig, instant)
+from _lab_fakes import (ALERTS, AUTH, CMDB_STALE, DATA_DROP, NGINX, REPO, SCHEMA_DRIFT, SNAP, SYSLOG, T,
+                        LabRig, instant, searched_indices)
 from _periphery_fakes import FakeDocker
 
 LAB_OPS = Path(__file__).resolve().parents[1] / "lab_ops.py"
@@ -242,14 +242,15 @@ def _digest_lab(tmp_path, *, body=b"stub-dump-bytes", mutations=None):
 def test_the_content_digest_follows_every_document_of_a_touched_index_and_every_stub_byte(tmp_path):
     """C8/A1 (design: "a content digest covers the touched indices and every stub store"): the same copy
     and stubs give the same digest; one document of a touched index (a syslog or auth event, an alert)
-    altered, added, removed or re-versioned, one stub byte, or the stub mutations, give another. What an
-    untouched index (nginx) holds is not pinned either way."""
-    patterns = [EVENTS, ALERTS_PATTERN]
+    altered, added, removed or re-versioned, one stub byte, or the stub mutations, give another. The order
+    the indices are named in does not matter."""
+    touched = [AUTH, SYSLOG, ALERTS]
     lab, rig = _digest_lab(tmp_path / "base")
-    digest = lab.ops.content_digest(patterns)
+    digest = lab.ops.content_digest(touched)
     assert isinstance(digest, str) and digest
-    assert lab.ops.content_digest(patterns) == digest
-    assert _digest_lab(tmp_path / "again")[0].ops.content_digest(patterns) == digest
+    assert lab.ops.content_digest(touched) == digest
+    assert lab.ops.content_digest(list(reversed(touched))) == digest
+    assert _digest_lab(tmp_path / "again")[0].ops.content_digest(touched) == digest
 
     def edits(r):
         docs = r.cluster.indices
@@ -268,10 +269,42 @@ def test_the_content_digest_follows_every_document_of_a_touched_index_and_every_
     for name in edits(rig):
         lab2, rig2 = _digest_lab(tmp_path / name.replace(" ", "-"))
         edits(rig2)[name]()
-        assert lab2.ops.content_digest(patterns) != digest, name
+        assert lab2.ops.content_digest(touched) != digest, name
 
-    assert _digest_lab(tmp_path / "byte", body=b"stub-dump-bytez")[0].ops.content_digest(patterns) != digest
-    assert _digest_lab(tmp_path / "flip", mutations=[*TOUCHED, CMDB_STALE])[0].ops.content_digest(patterns) != digest
+    assert _digest_lab(tmp_path / "byte", body=b"stub-dump-bytez")[0].ops.content_digest(touched) != digest
+    assert _digest_lab(tmp_path / "flip", mutations=[*TOUCHED, CMDB_STALE])[0].ops.content_digest(touched) != digest
+
+
+def test_the_content_digest_reads_only_the_indices_it_is_named_and_an_untouched_one_is_not_followed(tmp_path):
+    """C8/A1 (design: "a content digest covers the touched indices"; live, digesting every index the freeze's
+    patterns match took ~18 h): the indices named are the ones digested. No document read reaches an untouched
+    index (nginx) while the digest is taken, and nginx changed, added to or emptied of a document leaves the
+    digest as it was (naming it does put it in)."""
+    touched = [AUTH, SYSLOG, ALERTS]
+    lab, rig = _digest_lab(tmp_path / "base")
+    seen = len(rig.cluster.requests)
+    digest = lab.ops.content_digest(touched)
+    reached = searched_indices(rig.cluster, seen)
+    assert reached, "the digest read no document of the indices it was given: the claim was never exercised"
+    assert reached <= set(touched), f"the digest read indices it was not named: {sorted(reached - set(touched))}"
+
+    with_nginx = lab.ops.content_digest([*touched, NGINX])
+    for name in ("altered", "added", "removed"):
+        lab2, rig2 = _digest_lab(tmp_path / name)
+        docs = rig2.cluster.indices[NGINX]["docs"]
+        {"altered": lambda: docs["nginx-03"]["_source"].__setitem__("message", "changed"),
+         "added": lambda: rig2.cluster.put(NGINX, "nginx-99", {"@timestamp": "2026-10-20T05:00:00Z", "message": "new"}),
+         "removed": lambda: docs.pop("nginx-03")}[name]()
+        assert lab2.ops.content_digest(touched) == digest, name
+        assert lab2.ops.content_digest([*touched, NGINX]) != with_nginx, name
+
+
+def test_the_content_digest_of_an_index_that_does_not_exist_is_refused(tmp_path):
+    """C8/A1: a named index the cluster does not hold is a `LabOpsError`, not a digest of nothing."""
+    lab, _rig = _digest_lab(tmp_path)
+    with pytest.raises(Exception) as caught:
+        lab.ops.content_digest([AUTH, ".ds-logs-system.ghost-default-2026.10.01-000009"])
+    assert type(caught.value).__name__ == "LabOpsError", repr(caught.value)
 
 
 # -- B2: an exclusion source that is not configured refuses, it never reads as "none excluded" ------------

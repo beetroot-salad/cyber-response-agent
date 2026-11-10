@@ -808,6 +808,38 @@ def expected_copy(kind: str) -> dict[str, dict[str, tuple[int, dict]]]:
     return state
 
 
+def expected_touched(state: dict, mutations: Any) -> list[str]:
+    """The indices a copy holding `state` (with the fault `mutations`) has touched, written out from the
+    explicit state and the design, not from running the code under test: every index whose documents differ
+    from the restored freeze (the base overlay deleted from it, or a rewrite changed it), plus every index a
+    fault overlay runs a rewrite job on (the stream's backing indices; for a schema-drift, the alert index)."""
+    frozen, out = world_content(), set()
+    for name, docs in state.items():
+        held = {i: (d["_version"], d["_source"]) for i, d in frozen.get(name, {}).items()}
+        if dict(docs) != held:
+            out.add(name)
+    for m in mutations or ():
+        if m["kind"] in ("data-drop", "schema-drift"):
+            out |= {n for n in state if STREAMS.get(n) and fnmatch.fnmatchcase(STREAMS[n], m["stream"])}
+        if m["kind"] == "schema-drift":
+            out.add(ALERTS)
+    return sorted(out)
+
+
+READS = ("_search", "_count", "_msearch", "_mget", "_pit", "_async_search", "_scroll")
+
+
+def searched_indices(cluster: Any, since: int = 0) -> set[str]:
+    """The indices a document read (`_search`, `_count`, `_mget`, ...) at the cluster edge reached in the
+    requests after number `since`, each target expanded as the cluster does (`_search` with no target: all)."""
+    out: set[str] = set()
+    for _method, path, _body in cluster.requests[since:]:
+        head = path.split("?")[0].strip("/").split("/")
+        if head[-1] in READS:
+            out |= set(cluster._expand(head[0], closed=True)) if len(head) > 1 else set(cluster.indices)
+    return out
+
+
 def counts_of(state: dict) -> dict[str, int]:
     return {n: len(docs) for n, docs in state.items()}
 
@@ -1215,7 +1247,7 @@ class LabRig:
         self._deployed(docker)
         ops = self.lab_module.LabOps(run=docker, es=cluster, **self._ops_kw())
         ops.load_stubs(self.parts / FREEZE_ID, T, mutations or None)
-        return ops.content_digest(list(self.patterns))
+        return ops.content_digest(expected_touched(state, mutations))
 
     def write_expected_case(self, kind: str, *, alert_uuid: str = "young", confirmed: bool = True,
                             **over: Any) -> dict:
