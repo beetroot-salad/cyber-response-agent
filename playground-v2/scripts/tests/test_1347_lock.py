@@ -28,6 +28,7 @@ import contextlib
 import importlib.util
 import json
 import os
+import re
 import threading
 from types import SimpleNamespace
 from pathlib import Path
@@ -329,6 +330,53 @@ def test_the_runner_refuses_a_wrong_token_and_fires_with_the_right_one(runner, l
     assert rec2.execs, "a free lock still refused"
 
 
+STEPS = ["echo step-a", "echo step-b", "echo step-c"]
+MULTI = {**SCENARIO, "id": "multi-step", "steps": [{"cmd": c} for c in STEPS]}
+
+
+def _run_multi(runner, tmp_path, store, exec_fn, token=None):
+    return runner.run_scenario(MULTI, 42, {}, False, "none", runs_dir=tmp_path / "runs", chaos="none",
+                               exec_fn=exec_fn, post_cr=lambda body: (0, {}), lock_store=store, lock_token=token)
+
+
+@pytest.mark.parametrize("k", [1, 2])
+def test_a_capture_taking_the_lock_between_two_steps_stops_the_runner_before_the_next_step(runner, lock, tmp_path, k):
+    """O10 tightened (r6.4.4): the lock is free when the run starts; a capture takes it between step k and step
+    k+1 (k >= 1). The runner re-checks before every step, so step k+1 never runs; the error names that step (the
+    runner's own convention, `step <index>` from 0, as its failure message says); steps 1..k are not undone (no
+    other command runs, and the run record lists them); the capture still holds the lock."""
+    store, ran, capture = _store(), [], {}
+
+    def exec_fn(host, cmd, user, dry_run):
+        ran.append(cmd)
+        if len(ran) == k:
+            capture["token"] = lock.take(store, lock.CAPTURE)     # between step k and step k+1
+        return 0, "", ""
+
+    with pytest.raises((SystemExit, lock.LockError)) as refused:
+        _run_multi(runner, tmp_path, store, exec_fn)
+
+    assert ran == STEPS[:k], ran
+    assert re.search(rf"\bstep {k}\b", str(refused.value)), refused.value
+    metas = list((tmp_path / "runs").glob("*/meta.json"))
+    assert len(metas) == 1 and [s["cmd"] for s in json.loads(metas[0].read_text())["steps"]] == STEPS[:k]
+    assert json.loads(store.records[lock.CAPTURE])["token"] == capture["token"]
+
+
+def test_with_the_captures_token_every_step_runs_while_the_lock_is_held(runner, lock, tmp_path):
+    """O10 tightened control: a capture holds the lock throughout and fires with its own token; the check before
+    every step passes and every step runs."""
+    store, ran = _store(), []
+    token = lock.take(store, lock.CAPTURE)
+
+    def exec_fn(host, cmd, user, dry_run):
+        ran.append(cmd)
+        return 0, "", ""
+
+    _run_multi(runner, tmp_path, store, exec_fn, token=token)
+    assert ran == STEPS and lock.CAPTURE in store.records
+
+
 def test_the_runner_cli_takes_a_lock_token_flag_and_forwards_it(runner):
     """O10: `run --lock-token T` reaches run_scenario as lock_token with the store."""
     captured: dict = {}
@@ -419,6 +467,70 @@ def test_chaos_activate_refuses_a_wrong_token_without_touching_the_lab(lock, tmp
         ctl.activate("cmdb-stale-owner", seed=1, execer=execer, ledger_dir=tmp_path,
                      lock_store=store, lock_token="not-the-token")
     assert execer.calls == [] and list(tmp_path.iterdir()) == []
+
+
+def _chaos_fakes():
+    """`chaos/tests/_fakes.py`: the chaos suite's exec-seam fake and profile writer."""
+    spec = importlib.util.spec_from_file_location("chaos_fakes_1347", PLAYGROUND / "chaos" / "tests" / "_fakes.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _two_host_flip(tmp_path):
+    fakes = _chaos_fakes()
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    fakes.write_profile(profiles, "flip2", "cmdb-stale", {"variant": "field-flip", "field": "owner", "hosts": 2})
+    return fakes, profiles
+
+
+def _overlay_pushes(seam):
+    return [c["path"] for c in seam.calls if c["target"] == "cmdb" and c["method"] == "POST"
+            and c["path"].startswith("/admin/overlay/")]
+
+
+def test_chaos_activate_stops_before_the_next_change_when_the_lock_is_taken_between_two(lock, tmp_path):
+    """O10 tightened (r6.4.4): `activate` re-checks the capture lock right before it applies each change. A
+    two-host profile; the lock is free at the start and a capture takes it right after the first host's overlay
+    is pushed. The second host's overlay is never pushed, and the refusal is the lock's."""
+    from chaos import ctl
+    fakes, profiles = _two_host_flip(tmp_path)
+    store = _store()
+
+    class Seam(fakes.FakeExecSeam):
+        def cmdb_request(self, method, path, body=None):
+            answer = super().cmdb_request(method, path, body)
+            if method.upper() == "POST" and path.startswith("/admin/overlay/") and lock.CAPTURE not in store.records:
+                lock.take(store, lock.CAPTURE)      # between the first change and the second
+            return answer
+
+    seam = Seam()
+    with pytest.raises(Exception) as refused:
+        ctl.activate("flip2", seed=42, execer=seam, profiles_dir=profiles, rules_dir=PLAYGROUND / "detection-rules",
+                     ledger_dir=tmp_path / "ledger", lock_store=store)
+
+    assert len(_overlay_pushes(seam)) == 1, _overlay_pushes(seam)
+    chain, e = [], refused.value
+    while e is not None:
+        chain.append(e)
+        e = e.__cause__ or e.__context__
+    assert any(isinstance(x, lock.LockError) for x in chain), repr(refused.value)
+
+
+def test_chaos_activate_with_the_captures_token_applies_every_change(lock, tmp_path):
+    """O10 tightened control: the capture holds the lock throughout and activates with its token; both hosts'
+    overlays are pushed."""
+    from chaos import ctl
+    fakes, profiles = _two_host_flip(tmp_path)
+    store = _store()
+    token = lock.take(store, lock.CAPTURE)
+    seam = fakes.FakeExecSeam()
+    record = ctl.activate("flip2", seed=42, execer=seam, profiles_dir=profiles,
+                          rules_dir=PLAYGROUND / "detection-rules", ledger_dir=tmp_path / "ledger",
+                          lock_store=store, lock_token=token)
+    assert record["status"] == "active" and len(set(_overlay_pushes(seam))) == 2, _overlay_pushes(seam)
 
 
 def test_chaos_activate_cli_takes_a_lock_token_flag():

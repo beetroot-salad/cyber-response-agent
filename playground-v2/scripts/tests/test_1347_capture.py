@@ -182,7 +182,9 @@ def _lab_edges(monkeypatch, tmp_path):
 
 class ScratchCluster:
     """The verification restore's scratch cluster: it restores from what the repository holds (`rig.snapshots`,
-    with `rig.contents` as each snapshot's indices and counts) and answers `_cat/indices` from what it restored."""
+    with `rig.contents` as each snapshot's indices and their top-level document counts) and answers `_cat/indices`
+    and `/<index>/_count` from what it restored. As Elasticsearch does, `_cat/indices` `docs.count` also counts the
+    hidden nested documents an index holds (`rig.nested`, r6.4.4) and `_count` counts top-level documents only."""
 
     def __init__(self, rig: "Rig") -> None:
         self.rig, self.repos, self.indices, self.down_requests = rig, {}, {}, []
@@ -208,7 +210,12 @@ class ScratchCluster:
         if p in ("/_refresh", "/_all/_refresh", "/*/_refresh"):
             return {"_shards": {"failed": 0}}
         if p == "/_cat/indices" and method == "GET":
-            return [{"index": i, "docs.count": str(n)} for i, n in sorted(self.indices.items())]
+            return [{"index": i, "docs.count": str(n + self.rig.nested.get(i, 0))} for i, n in sorted(self.indices.items())]
+        m = re.fullmatch(r"/([^/_][^/]*)/_count", p)
+        if m and method in ("GET", "POST") and not body:
+            if m[1] not in self.indices:
+                raise RuntimeError(f"index_not_found_exception: no such index [{m[1]}]")
+            return {"count": self.indices[m[1]], "_shards": {"failed": 0}}
         raise AssertionError(f"the scratch cluster does not model {method} {path}")
 
 
@@ -272,6 +279,7 @@ class Rig:
         self.contents: dict[str, dict] = {}   # each snapshot's indices and their counts
         self.preexisting: dict[str, dict] = {}   # what it held before capture touched it
         self.restores: list[tuple[str, str]] = []
+        self.nested: dict[str, int] = {}      # hidden nested documents per index (r6.4.4), counted by docs.count only
         self.occupied = occupied
         if occupied == "other-name":
             self._seed("older")
@@ -537,6 +545,21 @@ def test_a_capture_writes_one_freeze_of_every_part_with_the_verification_counts(
     assert rig.fired and rig.journal.ops().count("verify_restore") == 1
     assert rig.at["verify_restore"] and rig.restores == [(REPO, elastic["snapshot"])]
     assert (CONTEXT, VERIFY) not in rig.docker.containers, "the scratch cluster was left behind"
+    rig.edges_modelled()
+
+
+def test_the_freeze_records_each_indexs_top_level_count_when_it_holds_nested_documents(tmp_path):
+    """r6.4.4 (counts, finding 4): an alert index whose mapping has a nested field holding values (e.g.
+    `threat.enrichments`) has more Lucene documents (`_cat/indices` `docs.count`) than top-level ones (`_count`).
+    Every count a freeze records is a top-level count, so make-a-case's and the launcher's `_count` checks agree
+    with it."""
+    rig = Rig(tmp_path)
+    alerts = ".internal.alerts-security.alerts-default-000001"
+    rig.nested = {alerts: 200}
+    rig.capture()
+
+    doc = yaml.safe_load((rig.freeze_dir / "freeze.yaml").read_text())
+    assert doc["elastic"]["indices"] == COUNTS, doc["elastic"]["indices"]
     rig.edges_modelled()
 
 
