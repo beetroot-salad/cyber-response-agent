@@ -41,7 +41,7 @@ from defender.records.formats import (
     derive_display,
 )
 
-from defender.records.job_facts import EXPIRED, LEASE_LAPSED, RETRY_CAP
+from defender.records.job_facts import EXPIRED, LEASE_LAPSED, OFFBOARD_MESSAGE, RETRY_CAP, TENANT_OFFBOARDED
 
 from .audit import SYSTEM, announce
 from .errors import Conflict, NotFound, OffboardNotSettled, UnknownReference, UnstorableText
@@ -80,9 +80,6 @@ AUTO_REQUEST_KEY_PREFIX = "auto:"
 #: Passes of the offboard's ending of the tenant's live rows before it gives up (#1360 D8): one pass ends them all,
 #: a second when a take-over or a finish inserted a row while the first waited; more means rows keep appearing.
 OFFBOARD_MAX_PASSES = 5
-#: Why an offboard ended a job (#1360 O5): a reason of its own, unlike a user's cancel or a worker fault.
-TENANT_OFFBOARDED = "tenant_offboarded"
-_OFFBOARD_MESSAGE = "its tenant was offboarded"
 _LEARNING_LIVE = ("queued", "running")
 #: The tenant states that take no new job and start nothing new (#1360 D7).
 _BEING_REMOVED = ("offboarding", "offboarded")
@@ -386,9 +383,9 @@ class JobStore:
         learning: list[str] = []
         phases = (
             (InvestigationRow, InvestigationRow.stage.in_(LIVE), investigations,
-             {"stage": "aborted", "failure_reason": TENANT_OFFBOARDED, "failure_message": _OFFBOARD_MESSAGE}),
+             {"stage": "aborted", "failure_reason": TENANT_OFFBOARDED, "failure_message": OFFBOARD_MESSAGE}),
             (LearningJobRow, LearningJobRow.status.in_(_LEARNING_LIVE), learning,
-             {"status": "skipped", "reason": TENANT_OFFBOARDED, "message": _OFFBOARD_MESSAGE}),
+             {"status": "skipped", "reason": TENANT_OFFBOARDED, "message": OFFBOARD_MESSAGE}),
         )
         async with self._tx() as s:
             record = await _tenancy_offboard(s, tenant_id)
@@ -521,30 +518,24 @@ class JobStore:
         async with self._tx() as s:
             # Rows are locked in id order before they are updated (#1360 D9): one UPDATE locks in plan order, which
             # could cross another transaction that takes several of them in id order, the offboard.
-            held_inv = (await s.execute(
-                select(InvestigationRow.id).where(
-                    InvestigationRow.id.in_(ids), InvestigationRow.stage == "running",
-                    InvestigationRow.accounting_written_at.is_(None))
-                .order_by(InvestigationRow.id).with_for_update())).scalars().all() if ids else []
             covered = (await s.execute(
                 update(InvestigationRow).where(
-                    InvestigationRow.id.in_(held_inv), InvestigationRow.stage == "running",
-                    InvestigationRow.accounting_written_at.is_(None))
+                    InvestigationRow.id.in_(_locked_in_id_order(InvestigationRow.id, InvestigationRow.id.in_(ids),
+                                                                InvestigationRow.stage == "running",
+                                                                InvestigationRow.accounting_written_at.is_(None))),
+                    InvestigationRow.stage == "running", InvestigationRow.accounting_written_at.is_(None))
                 .values(lease_expires_at=self._lease_end(), cost_usd=cost)
                 .returning(InvestigationRow.id).execution_options(synchronize_session=False))).scalars().all() \
-                if held_inv else []
+                if ids else []
             found = [str(i) for i in covered]
             rest = ids - set(found)
-            held_jobs = (await s.execute(
-                select(LearningJobRow.id).where(
-                    LearningJobRow.id.in_(rest), LearningJobRow.status == "running",
-                    LearningJobRow.finished_at.is_(None))
-                .order_by(LearningJobRow.id).with_for_update())).scalars().all() if rest else []
-            if held_jobs:
+            if rest:
                 found += [str(i) for i in (await s.execute(
                     update(LearningJobRow).where(
-                        LearningJobRow.id.in_(held_jobs), LearningJobRow.status == "running",
-                        LearningJobRow.finished_at.is_(None))
+                        LearningJobRow.id.in_(_locked_in_id_order(
+                            LearningJobRow.id, LearningJobRow.id.in_(rest), LearningJobRow.status == "running",
+                            LearningJobRow.finished_at.is_(None))),
+                        LearningJobRow.status == "running", LearningJobRow.finished_at.is_(None))
                     .values(lease_expires_at=self._lease_end(),
                             **_progress_values({i: p for i, p in (progress or {}).items() if i in rest}))
                     .returning(LearningJobRow.id).execution_options(synchronize_session=False))).scalars().all()]
@@ -919,6 +910,12 @@ class JobStore:
                     .execution_options(synchronize_session=False))).scalars().all()
                 counts.append(len(moved))
         return counts[0], counts[1]
+
+
+def _locked_in_id_order(column: Any, *where: Any) -> Any:
+    """A subquery of the ids matching `where`, each row locked, in id order (#1360 D9): one UPDATE would lock in plan
+    order, which could cross another transaction that takes several of these rows in id order, the offboard."""
+    return select(column).where(*where).order_by(column).with_for_update().scalar_subquery()
 
 
 def _refuse_removed(state: str | None, tenant_id: str) -> None:

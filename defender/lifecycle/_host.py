@@ -298,6 +298,10 @@ class HostActor(Actor):
             _remove_tree(target, wait=self._config.teardown_wait)
 
 
+#: Seconds between removal passes of a folder that keeps filling (#1360 O1).
+_PASS_PAUSE = 0.05
+
+
 def _remove_tree(target: Path, *, wait: float) -> None:
     """Remove `target` without following it: a link is unlinked, a directory removed whole.
 
@@ -320,6 +324,7 @@ def _remove_tree(target: Path, *, wait: float) -> None:
             if time.monotonic() >= deadline:
                 raise StepFailed(f"{target} was still being added to after {wait:g}s of removing it; "
                                  f"left in it: {_left_in(target)}") from fault
+            time.sleep(_PASS_PAUSE)  # not a tight loop against the writer it is waiting out
 
 
 def _left_in(folder: Path) -> str:

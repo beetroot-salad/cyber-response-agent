@@ -12,6 +12,7 @@ from pydantic import AwareDatetime
 from defender._model import model
 from defender.records import formats
 from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId, UuidId
+from defender.records.job_facts import OFFBOARD_MESSAGE, TENANT_OFFBOARDED
 
 from defender.tenancy import TenantRecord, TenantRepository
 
@@ -210,13 +211,13 @@ class InMemoryStore:
         for key, investigation in list(self._investigations.items()):
             if key[0] == tenant_id and investigation.status in ("queued", "running"):
                 self._investigations[key] = investigation.model_copy(update={
-                    "status": "aborted", "failure_reason": "tenant_offboarded", "finished_at": now,
-                    "failure_message": "its tenant was offboarded"})
+                    "status": "aborted", "failure_reason": TENANT_OFFBOARDED, "finished_at": now,
+                    "failure_message": OFFBOARD_MESSAGE})
         for key, job in list(self._learning_jobs.items()):
             if key[0] == tenant_id and job.status in ("queued", "running"):
                 self._learning_jobs[key] = job.model_copy(update={
-                    "status": "skipped", "reason": "tenant_offboarded", "finished_at": now,
-                    "message": "its tenant was offboarded"})
+                    "status": "skipped", "reason": TENANT_OFFBOARDED, "finished_at": now,
+                    "message": OFFBOARD_MESSAGE})
 
     async def delete_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId) -> None:
         existing = await self._existing(tenant_id, investigation_id)
