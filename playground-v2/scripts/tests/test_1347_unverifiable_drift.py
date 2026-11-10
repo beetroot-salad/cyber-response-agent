@@ -11,7 +11,7 @@ the lock free, the marker dirty.
 from __future__ import annotations
 
 import pytest
-from _lab_fakes import AUTH, LabRig, alert_doc
+from _lab_fakes import AUTH, SCHEMA_DRIFT, LabRig, alert_doc, expected_variant
 from test_1347_make_case import _NOT_A_REFUSAL, _drift_profiles, _overlay
 
 MISSING_AUTH = ".ds-logs-system.auth-default-2026.09.30-000013"      # a backing index of the auth stream the copy lacks
@@ -49,6 +49,21 @@ def test_a_launch_of_a_case_whose_drift_is_unverifiable_on_the_copy_is_refused_w
     assert not isinstance(caught.value, _NOT_A_REFUSAL + (AssertionError, NotImplementedError)), repr(caught.value)
     assert rig.rows() == [] and "run" not in rig.journal.ops()
     _only_the_restore_and_dirty(rig)
+    assert "frozen-engine" not in rig.store.records, "the engine lock is still held after the refusal"
+
+
+@pytest.mark.parametrize("extra", [
+    pytest.param(_alert(BEFORE_SPAN, (("auth-77", MISSING_AUTH),)), id="outside-span"),
+    pytest.param(_alert(IN_SPAN, (("auth-25", AUTH),)), id="held-index"),
+])
+def test_a_launch_whose_alert_is_not_unverifiable_still_gives_a_valid_row(tmp_path, extra):
+    rig = LabRig(tmp_path, extra_alerts=extra)
+    rig.write_variant_case(SCHEMA_DRIFT, state=expected_variant(SCHEMA_DRIFT, extra_alerts=extra))
+
+    rig.launch()
+
+    assert [r["verdict"] for r in rig.rows()] == ["valid"], rig.rows()
+    assert "frozen-engine" not in rig.store.records
 
 
 @pytest.mark.parametrize("ancestor", [

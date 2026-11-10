@@ -486,8 +486,9 @@ class FakeCluster(FakeES):
             if path == "/_ilm/status":
                 return {"operation_mode": self.ilm}
             if seg[0] == "_data_stream" and seg[-1] == "_lifecycle" and method == "DELETE":
-                self.lifecycle_off.add(seg[1])
-                self.lifecycle_deletes.append(seg[1])
+                for stream in self._stream_names(seg[1]):      # a comma list or wildcards, as `_data_stream/<expr>`
+                    self.lifecycle_off.add(stream)
+                    self.lifecycle_deletes.append(stream)
                 return ack
             if seg[0] == "_data_stream" and method == "GET" and len(seg) <= 2:
                 return self._data_streams(seg[1] if len(seg) == 2 else "*")
@@ -537,6 +538,17 @@ class FakeCluster(FakeES):
             raise
         self.unsupported.append(f"{method} {path}")
         raise FakeGap(f"{method} {path}")
+
+    def _stream_names(self, expr: str) -> list[str]:
+        """The existing data streams `expr` (comma list, wildcards) names; a literal that names none is a 404."""
+        found = {s for n, s in self.stream_of.items() if n in self.indices}
+        out: list[str] = []
+        for part in expr.split(","):
+            hits = [s for s in dict.fromkeys(self.stream_of.values()) if s in found and fnmatch.fnmatchcase(s, part)]
+            if not hits and not any(c in part for c in "*?"):
+                raise RuntimeError(f"resource_not_found_exception: no such data stream [{part}]")
+            out += [s for s in hits if s not in out]
+        return out
 
     def _data_streams(self, expr: str) -> Any:
         """`GET /_data_stream/<expr>` as Elasticsearch answers (r6.4.5): a comma list of names and globs; each stream
@@ -639,9 +651,14 @@ class FakeCluster(FakeES):
                     if body.get("version"):
                         hit["_version"] = d["_version"]
                     hits.append(hit)
+        if body.get("search_after") is not None and any(f == "_doc" for f, _ in keys) and len(
+                {h["_index"] for h in hits} | set(self._expand(expr))) > 1 and "pit" not in body:
+            raise FakeGap("search_after sorted by _doc over more than one index without a point-in-time "
+                          "(_doc order is per shard)")
         if keys:
-            for position, hit in enumerate(hits):    # `_doc` is index order (insertion), not id order
-                hit["sort"] = [position if f == "_doc" else hit["_source"].get(f) for f, _ in keys]
+            for hit in hits:      # `_doc` is a document's position in its index (a per-index sequence), not id order
+                hit["sort"] = [self._seq(hit["_index"], hit["_id"]) if f == "_doc" else hit["_source"].get(f)
+                               for f, _ in keys]
 
             def compare(a, b):
                 for (f, desc), x, y in zip(keys, a, b):
@@ -666,6 +683,17 @@ class FakeCluster(FakeES):
         capped = limit is not None and len(hits) > limit
         total = {"value": limit if capped else len(hits), "relation": "gte" if capped else "eq"}
         return {"hits": {"total": total, "hits": page}}
+
+    def _seq(self, index: str, doc_id: str) -> int:
+        """A document's `_doc` position in its index: assigned in insertion order the first time it is needed;
+        an in-place update moves it to a new maximum (a reindexed document lands in a newer segment)."""
+        ix = self.indices[index]
+        order = ix.setdefault("order", {})
+        for key in ix["docs"]:
+            if key not in order:
+                ix["next"] = ix.get("next", 0) + 1
+                order[key] = ix["next"]
+        return order[doc_id]
 
     def _delete_by_query(self, expr: str, body: dict) -> Any:
         self._note("delete_by_query", expr)
@@ -767,6 +795,9 @@ class FakeCluster(FakeES):
         sources = source["index"] if isinstance(source["index"], str) else ",".join(source["index"])
         pipeline = dest.get("pipeline")
         target_name = dest["index"]
+        self._must_wait()
+        if fnmatch.fnmatchcase(target_name, "logs-*-*") and target_name not in self.indices:
+            raise FakeGap(f"reindex creating [{target_name}], which the logs-*-* template makes a data stream")
         if target_name in set(self.stream_of.values()):
             raise FakeGap(f"reindex into the data stream [{target_name}]")
         self._note("reindex", f"{sources}->{target_name}")
@@ -808,6 +839,10 @@ class FakeCluster(FakeES):
         return {"total": total, "created": created, "updated": 0, "deleted": 0,
                 "version_conflicts": 0, "failures": failures}
 
+    def _must_wait(self) -> None:
+        if (self.query.get("wait_for_completion") or ["true"])[-1] != "true":
+            raise FakeGap("wait_for_completion=false (a task id answer) is not modelled")
+
     def _update_by_query(self, expr: str, body: dict) -> Any:
         """The query's documents go through the request's `pipeline` (else the index's default), then the index's
         final pipeline, IN PLACE: `_id` and `_index` kept, `_version` + 1; a document a pipeline drops is a noop
@@ -816,6 +851,7 @@ class FakeCluster(FakeES):
         if extra:
             raise FakeGap(f"_update_by_query parameter {sorted(extra)}")
         pipeline = (self.query.get("pipeline") or [None])[-1]
+        self._must_wait()
         if body.get("script"):
             raise FakeGap("_update_by_query script")
         self._note("update_by_query", expr)
@@ -833,7 +869,10 @@ class FakeCluster(FakeES):
                 if out is None:
                     noops += 1
                     continue
+                self._seq(n, i)
                 docs[i] = {"_source": out, "_version": docs[i]["_version"] + 1}
+                self.indices[n]["next"] = self.indices[n].get("next", 0) + 1
+                self.indices[n]["order"][i] = self.indices[n]["next"]
                 updated += 1
             if failures:
                 break
@@ -953,7 +992,12 @@ WORLD_SETTINGS = {
 
 
 def world_content() -> dict[str, dict[str, dict]]:
-    """What the snapshot holds: `{index: {id: {"_source", "_version"}}}`, flat dotted keys."""
+    """What the snapshot holds: `{index: {id: {"_source", "_version"}}}`, flat dotted keys.
+
+    `DECOY` is a look-alike of a backing index (a `.ds-` name of the auth stream) that is NOT a member of it. The
+    snapshot restores it whole, but the freeze's patterns (`logs-*`) do not reach it, so `counts_of` leaves it out
+    of the freeze's counts; `derived-decoy` is an in-span alert whose ancestor names it, the control that an
+    overlay does not rewrite what only looks like a member."""
     def event(i, minute, dataset, message, **extra):
         return {"@timestamp": _at(minute), "message": message, "event.dataset": dataset, **extra}
 
@@ -1208,7 +1252,8 @@ class LabRig:
                  rules: dict | None = None, run_rc: int = 0, run_out: str | None = None,
                  patterns: tuple[str, str] = (EVENTS, ALERTS_PATTERN), extra_alerts: dict | None = None,
                  journal: Journal | None = None, latency: dict | None = None, clock_step: float = 1,
-                 boot_requests: int = 0, docker_fail: set | None = None) -> None:
+                 boot_requests: int = 0, docker_fail: set | None = None,
+                 extra_indices: dict | None = None) -> None:
         from _rig_docker import RigDocker
 
         self.tmp_path = tmp_path
@@ -1218,6 +1263,7 @@ class LabRig:
         content = world_content()
         for uuid, doc in (extra_alerts or {}).items():
             content[ALERTS][f"id-{uuid}"] = {"_source": copy.deepcopy(doc), "_version": 1}
+        content.update(copy.deepcopy(extra_indices or {}))      # whole indices (e.g. a second alert index)
         self.cluster = FakeCluster(self.journal, repo=REPO, snapshot=SNAP, snapshot_uuid=snapshot_uuid,
                                    content=content, streams=STREAMS, fail=fail,
                                    observe=lambda: copy.deepcopy(self.marker()),

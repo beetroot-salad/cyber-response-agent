@@ -17,6 +17,7 @@ import pytest
 from _lab_fakes import (ALERTS, AUTH, DATA_DROP, DEDUP, DEDUP_IN_SPAN, DEDUP_OLD, FLEET_FINAL, NGINX, REPO, SCHEMA_DRIFT,
                         SNAP, SNAP_UUID, STREAMS, SYSLOG, SYSLOG_IN_SPAN, WORLD_SETTINGS, FakeCluster, FakeGap, Journal,
                         LabRig, expected_copy, run_processors, world_content)
+from _lab_fakes import ALERTS_PATTERN
 from test_1347_make_case import _drift_profiles, _overlay
 
 RENAME = {"rename": {"field": "source.port", "target_field": "source.port_no", "ignore_missing": True}}
@@ -126,6 +127,64 @@ def test_the_world_carries_pipelines_the_frozen_cluster_does_not_have_on_its_bac
     assert set(WORLD_SETTINGS[DEDUP_OLD].values()) == {"_none"}
 
 
+def test_the_fake_expands_the_lifecycle_delete_over_existing_streams():
+    cluster = _cluster()
+
+    cluster.es_request("DELETE", "/_data_stream/logs-system.*/_lifecycle")
+    cluster.es_request("DELETE", "/_data_stream/logs-nginx.access-default,logs-system.auth-default/_lifecycle")
+    assert sorted(cluster.lifecycle_deletes) == ["logs-nginx.access-default", "logs-system.auth-default",
+                                                 "logs-system.auth-default", "logs-system.syslog-default"]
+    with pytest.raises(RuntimeError, match="resource_not_found"):
+        cluster.es_request("DELETE", "/_data_stream/logs-none-here/_lifecycle")
+
+
+def _walk(cluster, expr, size):
+    seen, after = [], None
+    while True:
+        body = {"size": size, "sort": [{"_doc": "asc"}], "query": {"match_all": {}}}
+        if after is not None:
+            body["search_after"] = after
+        hits = cluster.es_request("POST", f"/{expr}/_search", body)["hits"]["hits"]
+        seen += [h["_id"] for h in hits]
+        if len(hits) < size:
+            return seen
+        after = hits[-1]["sort"]
+
+
+def test_the_fake_pages_by_doc_one_index_at_a_time_and_refuses_it_across_indices_without_a_pit():
+    cluster = _cluster()
+
+    assert sorted(_walk(cluster, AUTH, 7)) == sorted(world_content()[AUTH]) and len(_walk(cluster, AUTH, 7)) == 36
+    with pytest.raises(FakeGap, match="_doc"):
+        _walk(cluster, f"{AUTH},{DEDUP}", 7)
+    first = cluster.es_request("POST", f"/{AUTH},{DEDUP}/_search", {"size": 3, "sort": [{"_doc": "asc"}]})
+    assert len(first["hits"]["hits"]) == 3, "the first page, with no search_after, is allowed"
+
+
+def test_an_update_in_place_moves_a_document_to_the_end_of_its_indexs_doc_order():
+    cluster = _cluster({})
+    _put(cluster, "p", RENAME)
+    cluster.es_request("POST", f"/{AUTH}/_update_by_query?pipeline=p", {"query": {"ids": {"values": ["auth-00"]}}})
+
+    walk = _walk(cluster, AUTH, 5)
+    assert walk[-1] == "auth-00" and walk.count("auth-00") == 1 and len(walk) == 36
+
+
+def test_the_fake_leaves_task_answers_and_template_created_data_streams_loud():
+    cluster = _cluster()
+    _put(cluster, "p", RENAME)
+    for path, body in ((f"/{AUTH}/_update_by_query?wait_for_completion=false", {}),
+                       ("/_reindex?wait_for_completion=false", {"source": {"index": AUTH}, "dest": {"index": "x"}})):
+        with pytest.raises(FakeGap, match="wait_for_completion"):
+            cluster.es_request("POST", path, body)
+    with pytest.raises(FakeGap, match="data stream"):
+        cluster.es_request("POST", "/_reindex", {"source": {"index": AUTH}, "dest": {"index": "logs-scratch-tmp"}})
+    ok = cluster.es_request("POST", "/_reindex?wait_for_completion=true",
+                            {"source": {"index": AUTH, "query": {"ids": {"values": ["auth-01"]}}},
+                             "dest": {"index": "scratch-tmp"}})
+    assert ok["created"] == 1
+
+
 # -- the overlays, through the real entry points ------------------------------------------------------------------
 
 
@@ -222,3 +281,36 @@ def test_no_request_runs_an_ingest_pipeline_other_than_the_overlays(tmp_path, en
     finally:
         if held is not None:
             held.release()
+
+
+# -- the derived-alert lookup pages per index (r6.4.5, "Paging by _doc is per index") -----------------------------
+
+ALERTS_2 = ".internal.alerts-security.alerts-default-000002"
+_PAGE = 1000
+
+
+def _many_alerts(prefix: str, n: int) -> dict:
+    """`n` alerts at or before T, each derived (by the rule's pattern) from an in-span auth event."""
+    return {f"{prefix}-{k:05d}": {"@timestamp": "2026-10-20T06:00:00Z", "kibana.alert.uuid": f"{prefix}-{k:05d}",
+                                  "kibana.alert.workflow_status": "closed", "source.port": 50000,
+                                  "kibana.alert.ancestors": [{"id": f"auth-{20 + k % 5}", "type": "event",
+                                                              "index": "logs-system.auth-*", "depth": 0}]}
+            for k in range(n)}
+
+
+def test_a_drift_whose_derived_alerts_span_two_alert_indices_and_more_than_one_page_builds(tmp_path):
+    """The lookup of the alerts derived from the in-span events pages with `search_after` sorted by `_doc`, which
+    Elasticsearch orders per shard: over two alert indices (both reached by the alerts pattern) with more than one
+    page of hits it must walk each index in turn (or hold a point-in-time). The fake refuses the cross-index walk
+    loudly, so a lookup that pages across the pattern fails here."""
+    n = _PAGE + 150
+    second = {f"id-{u}": {"_source": doc, "_version": 1} for u, doc in _many_alerts("two", n).items()}
+    rig = LabRig(tmp_path, extra_alerts=_many_alerts("one", n), extra_indices={ALERTS_2: second})
+    assert rig.freeze["elastic"]["indices"][ALERTS_2] == n and ALERTS_PATTERN.endswith("-*")
+
+    with rig.write_case("young", _overlay("drift-test"), profiles_dir=_drift_profiles(tmp_path)):
+        state = rig.cluster.state()
+        for index, prefix in ((ALERTS, "one"), (ALERTS_2, "two")):
+            rewritten = [i for i, (_v, src) in state[index].items() if i.startswith(f"id-{prefix}-")]
+            assert len(rewritten) == n and all(
+                "source.port_no" in state[index][i][1] and state[index][i][0] == 2 for i in rewritten), index

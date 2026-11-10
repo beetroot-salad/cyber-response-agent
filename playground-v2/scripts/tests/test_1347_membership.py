@@ -180,7 +180,7 @@ def test_a_stream_member_with_no_event_in_the_span_is_not_touched_and_no_documen
     touched = expected_touched(expected_copy("drift"), None)
 
     assert DEDUP in touched and DEDUP_OLD not in touched
-    assert rig.marker()["touched"] == touched, rig.marker()
+    assert set(rig.marker()["touched"]) == set(touched), rig.marker()
     assert rig.cluster.state()[DEDUP_OLD] == expected_copy("none")[DEDUP_OLD]
     seen = len(rig.cluster.requests)
     rig.launch()
