@@ -23,7 +23,7 @@ from defender.records import (  # noqa: E402
     RUN_LAYOUT, Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, artifact_file, case_ref_of_digest, sidecar_names,
 )
 from defender.presentation import VisualizeFailed  # noqa: E402
-from defender.records.formats import TenantId, TenantRefused
+from defender.records.formats import TenantId
 
 _logger = logging.getLogger(__name__)
 
@@ -346,31 +346,34 @@ def enqueue_curation(
     if reason is not None:
         _logger.info(f"NOT enqueuing for curation: {reason}")
         return False
-    from defender.configuration import FatalConfigError
-    from defender.learning.core.config import LoopPaths
-    from defender.learning.core.state import LearningState, StateRefused
+    import os
+
+    from defender.learning.store import blocking
 
     address = RunAddress(tenant_id=TenantId(run.tenant_id), run_id=run.id)
-    # Reading the alert is inside the guard too: a moved alert must not fail the run. So is the
-    # state tree: a refused entry or a missing root costs this request, never the investigation.
+    # Reading the alert is guarded: a moved alert must not fail the run. So is the learning store
+    # (#1278): one it cannot reach, or that refuses the request (the tenant is not active, the
+    # request holds what it can never hold), costs this request, never the investigation.
     try:
         record = formats.read_record(RunPaths(run_dir).alert_record)
         if record is None:
             raise OSError("the run's record vanished")
         case_id = case_ref_of_digest(record.digest)
-        with LearningState.open(LoopPaths.for_tenant(tenant)) as state:
-            state.enqueue_curation(
-                case_id, {"case_id": case_id, "tenant_id": str(address.tenant_id),
-                          "run_id": str(address.run_id)})
-    except OSError as e:
-        _logger.error(f"NOT enqueuing for curation: could not write the request: {e}")
+    except (OSError, ValueError) as e:
+        _logger.error(f"NOT enqueuing for curation: could not read the run's record: {e}")
         return False
-    except StateRefused as refused:
-        _logger.error(f"NOT enqueuing for curation: could not enqueue the request, refused "
-                      f"{refused.record}: {refused.reason}")
+    variable = tenancy.database_address_variable()
+    dsn = os.environ.get(variable, "")
+    if not dsn:
+        _logger.error(f"NOT enqueuing for curation: {variable} is not set, so the learning store "
+                      "cannot be reached")
         return False
-    except (FatalConfigError, TenantRefused) as config_error:
-        _logger.error(f"NOT enqueuing for curation: could not enqueue the request: "
-                      f"{config_error}")
+    try:
+        with blocking(dsn) as store:
+            store.enqueue_request(
+                str(address.tenant_id), str(address.run_id), case_id,
+                {"case_id": case_id, "tenant_id": str(address.tenant_id), "run_id": str(address.run_id)})
+    except Exception as failed:  # noqa: BLE001 — a request that cannot be filed costs only itself
+        _logger.error(f"NOT enqueuing for curation: the learning store did not take the request: {failed!r}")
         return False
     return True
