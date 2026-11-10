@@ -616,6 +616,7 @@ def test_d9_a_lead_batch_closed_with_words_stays_due_and_the_author_tick_authors
     call(w.dsn, "end_review", w.t.tenant_id, claim.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[])
     assert _work(w)[("pitfall", "p4-run:1")].status == "in_batch", "premise: the rejected batch's item is due a replacement"
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+    branches = remote_branches(w.t.remote, prefix="")  # every branch, `main` included
 
     _tick(w, writer)
 
@@ -623,4 +624,4 @@ def test_d9_a_lead_batch_closed_with_words_stays_due_and_the_author_tick_authors
     assert list(_batches(w)) == [claim.batch_id], "the tick claimed a replacement for a lead batch"
     assert _work(w)[("pitfall", "p4-run:1")].status == "in_batch"
     assert w.t.forge.creates == []
-    assert remote_branches(w.t.remote, prefix="") == {}
+    assert remote_branches(w.t.remote, prefix="") == branches, "the tick pushed a branch"

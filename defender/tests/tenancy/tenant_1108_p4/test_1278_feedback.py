@@ -152,7 +152,7 @@ def test_reconcile_cited_means_the_kinds_own_corpus_directory(world, caplog, mon
     w = world
     w.seed("f1")
     w.seed("q1", "q2", kind="questioner_finding")
-    wake_at(monkeypatch, 3)
+    wake_at(monkeypatch, 1)  # thresholds are per kind (D8): both kinds are due, so one batch takes all three
     files = {f"lessons/{LESSON_NAME}": lesson_citing("f1", "q2"),
              f"lessons-questioner/{LESSON_NAME}": lesson_citing("q1")}
     batch_id, branch, _n = opened(w, FeedbackCurator(files), caplog)

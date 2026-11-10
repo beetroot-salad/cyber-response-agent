@@ -12,6 +12,7 @@ scratch location `tenant.scratch` (interface request, a registered location type
 from __future__ import annotations
 
 import importlib
+import json
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -120,11 +121,28 @@ def _run(w: Any, wire: WireModel, *, tag: str = "a") -> list[BoxSpy]:
     return [author, lead]
 
 
+def _shown_file(conversation: Conversation) -> str:
+    """A file the call's own prompt points the model at, spelled as the prompt spells it: the pitfalls curator's first
+    handed-off surface under the `draft_root` it is shown; a lessons curator's first manifest lesson under the
+    `lessons_dir` it is shown."""
+    messages = json.loads(conversation.first_user)
+    text = "\n".join(str(block.get("text", "")) for message in messages
+                     for block in (message["content"] if isinstance(message["content"], list) else [{"text": message["content"]}]))
+    draft = re.search(r"^draft_root: (\S+)$", text, re.M)
+    if draft:
+        surface = re.search(r'"path": "([^"]+)"', text)
+        return f"{draft.group(1).rstrip('/')}/{surface.group(1)}" if surface else "NO-SURFACE-IN-THE-PROMPT"
+    corpus = re.search(r"^lessons_dir: (\S+)$", text, re.M)
+    lesson = re.search(r"corpus_manifest>\n([\w.-]+)\n", text)
+    return f"{corpus.group(1).rstrip('/')}/{lesson.group(1)}.md" if corpus and lesson else "NO-LESSON-IN-THE-PROMPT"
+
+
 class Probe:
-    """The model's side of O8. Each call reads a lesson or skill file it is shown (the control), then tries to reach the
-    old learning root's files and another call's folder as it would if one of its own workspace roots were that place
-    (`<root>/findings.jsonl`, `<root>/<other call folder>/canary.txt`, ...), and by host path. It snapshots the batch rows
-    as they stand while the call is in flight. `labels[i]` says what the i-th path tries to reach."""
+    """The model's side of O8. Each call reads a lesson or skill file its prompt points it at (the control,
+    `_shown_file`), then tries to reach the old learning root's files and another call's folder as it would if one of
+    its own workspace roots were that place (`<root>/findings.jsonl`, `<root>/<other call folder>/canary.txt`, ...),
+    and by host path. It snapshots the batch rows as they stand while the call is in flight. `labels[i]` says what the
+    i-th path tries to reach."""
 
     def __init__(self, w: Any) -> None:
         self.w = w
@@ -140,8 +158,7 @@ class Probe:
         index = self.conversations.index(conversation)
         self.rows[index] = [(b.id, b.lane, b.phase) for b in batches(w.dsn, w.t.tenant_id)]
         other = _folders().call_folder(w.t.tenant, PREVIOUS_DRAIN, "lessons", 1, make=False)
-        shown = re.search(r"[\w./-]+\.md\b", conversation.first_user)
-        asked, labels = [shown.group(0) if shown else "NO-MD-PATH-IN-THE-PROMPT"], ["control"]
+        asked, labels = [_shown_file(conversation)], ["control"]
         roots = conversation.roots_line().removeprefix("Workspace roots:").split(",")
         for root in (r.strip() for r in roots if r.strip()):
             for rel in ("findings.jsonl", "pitfalls.jsonl", "_pending/findings.jsonl", "_pending_leads/pitfalls.jsonl"):

@@ -634,6 +634,7 @@ def store_dsn(migrated_database):  # noqa: F811 — the imported fixture
 
 
 def _graded_episode(tmp_path, dsn, *, job_lane: bool, episode_id: str = S.EPISODE_ID):
+    S.estate(tmp_path).place(tenant_id=S.FIXTURE_TENANT)  # the episode is the fixture tenant's, as `store_dsn` registers
     ep = S.judged_episode(tmp_path, doc=S.family_v2(episode_id=episode_id), outcome=None, episode_id=episode_id)
     S.outcome_record(ep, "accepted", family_stamp=False)
     J.comparable_family_stamp(ep)

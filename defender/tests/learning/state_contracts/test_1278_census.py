@@ -23,6 +23,13 @@ HANDLE = "LearningState"
 #: Names whose use as code is a reach into the old root: the handle, the root's location type and its unwrap, the
 #: commit record file's location type and its unwrap.
 REACH_NAMES = frozenset({HANDLE, "LearningRoot", "unwrap_learning_root", "CommitRecord", "unwrap_commit_record"})
+#: Names that are a reach only as the location type of `defender.records`: the learning store has a row type of its
+#: own called `CommitRecord` (a database row, D10's new home for the record), so the bare name is matched only in a
+#: file under `defender/records/` (the owner) or one that imports it from there.
+_RECORDS_NAMES = frozenset({"CommitRecord"})
+_RECORDS_OWNER = "defender.records"
+#: `<module>.CommitRecord` through the records package or its modules.
+_RECORDS_MODULES = frozenset({"records", "formats", "_locations"})
 #: Attributes that name the root or the record file: the loop paths' root accessors, the handle's raw-path verb, the
 #: existence check. (`commit_record` is one only on the old owners below: the store's verb of that name is not.)
 REACH_ATTRS = frozenset({"state_root", "state_dir", "stage_dir", "learning_state_exists"})
@@ -57,20 +64,32 @@ def _owner(value: ast.expr) -> str | None:
     return value.id if isinstance(value, ast.Name) else value.attr if isinstance(value, ast.Attribute) else None
 
 
-def _is_reach(node: ast.AST) -> bool:
+def _from_records(tree: ast.AST) -> set[str]:
+    """The `_RECORDS_NAMES` this module imports from `defender.records`."""
+    return {a.asname or a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+            and n.level == 0 and (n.module or "").startswith(_RECORDS_OWNER) for a in n.names if a.name in _RECORDS_NAMES}
+
+
+def _is_reach(node: ast.AST, records: frozenset[str]) -> bool:
+    """`records`: the `_RECORDS_NAMES` that name the location type in this module."""
+    names = (REACH_NAMES - _RECORDS_NAMES) | records
     if isinstance(node, ast.Name):
-        return node.id in REACH_NAMES
+        return node.id in names
     if isinstance(node, ast.Attribute):
-        return node.attr in REACH_NAMES | REACH_ATTRS or (node.attr in {"learning", "commit_record"} and _owner(node.value) in _OWNERS)
+        return (node.attr in names | REACH_ATTRS or (node.attr in {"learning", "commit_record"} and _owner(node.value) in _OWNERS)
+                or (node.attr in _RECORDS_NAMES and _owner(node.value) in _RECORDS_MODULES))
     if isinstance(node, ast.alias):
-        return node.name in REACH_NAMES
-    return isinstance(node, ast.FunctionDef | ast.ClassDef) and node.name in REACH_NAMES | {"stage_dir", "learning_state_exists"}
+        return node.name in names
+    return isinstance(node, ast.FunctionDef | ast.ClassDef) and node.name in names | {"stage_dir", "learning_state_exists"}
 
 
-def reaches(source: str) -> list[str]:
-    """Each line of `source` that uses a name of the old state as code (not in a comment, docstring or string), unless exempted."""
+def reaches(source: str, rel: str = "") -> list[str]:
+    """Each line of `source` (the product file `rel`) that uses a name of the old state as code (not in a comment,
+    docstring or string), unless exempted."""
     lines = source.splitlines()
-    found = {n.lineno for n in ast.walk(ast.parse(source)) if _is_reach(n) and getattr(n, "lineno", 0)}
+    tree = ast.parse(source)
+    records = _RECORDS_NAMES if rel.startswith(_RECORDS_OWNER.replace(".", "/") + "/") else frozenset(_from_records(tree))
+    found = {n.lineno for n in ast.walk(tree) if _is_reach(n, records) and getattr(n, "lineno", 0)}
     return [lines[n - 1] for n in sorted(found) if EXEMPT not in lines[n - 1]]
 
 
@@ -94,6 +113,14 @@ def test_o10_the_census_finds_each_old_reach_and_skips_prose_and_exempted_lines(
     for line in prose:
         assert reaches(line) == [], line
     assert reaches(f"root = paths.state_root  {EXEMPT} — the cutover import reads the old files") == []
+    # `CommitRecord` is the records location type only where it comes from `defender.records`: the store's row is not.
+    for line in ("from defender.records.formats import CommitRecord\nx = CommitRecord(p)",
+                 "from defender.records import formats\nx = formats.CommitRecord(p)"):
+        assert reaches(line), line
+    assert reaches("class CommitRecord(_Location):\n    pass", "defender/records/_locations.py")
+    for line in ("from defender.learning.store import CommitRecord\nrows: list[CommitRecord] = []",
+                 "from ._store import CommitRecord", "class CommitRecord:\n    commit: str"):
+        assert reaches(line, "defender/learning/store/_store.py") == [], line
     assert _definitions("class LearningState:\n    pass\n") == ["ClassDef LearningState"]
     assert _definitions("def stage_dir(self, lane): ...") == ["FunctionDef stage_dir"]
     assert _definitions("class Other:\n    def f(self): ...") == []
@@ -103,7 +130,7 @@ def test_o10_no_product_code_reaches_the_learning_state_root_or_its_handle():
     """No product file uses the handle, `stage_dir`, the root's location type or accessors, or the commit record file as code. (O10, A1)"""
     files = _product_files()
     assert len(files) >= _PRODUCT_FLOOR, f"the walk found only {len(files)} product files"
-    found = {rel: hits for rel in files if (hits := reaches((REPO / rel).read_text(encoding="utf-8")))}
+    found = {rel: hits for rel in files if (hits := reaches((REPO / rel).read_text(encoding="utf-8"), rel))}
     assert found == {}, f"{len(found)} product file(s) still reach the learning state: {sorted(found)}"
 
 

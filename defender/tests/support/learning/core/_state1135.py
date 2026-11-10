@@ -4,6 +4,10 @@ The handle's root must already exist (nothing creates it lazily), so a fixture t
 `DEFENDER_LEARNING_STATE_DIR` at a path under `tmp_path` has to create the folder too. This is
 an explicit test scratch setting used by helpers that inject `state=`; production launchers
 ignore the retired variable and select their accepted tenant's learning root.
+
+#1278 A1/O10 delete the handle at cutover, so it is imported only inside the openers that use it: a test that needs
+only a run's address (`curation_run_dir`, `run_of`, `curation_tenant`) keeps importing, and a test that still opens
+the handle fails at that call, where the stale-test census sees it.
 """
 
 from __future__ import annotations
@@ -11,9 +15,12 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from defender.learning.core.config import LoopPaths
-from defender.learning.core.state import LearningState
+
+if TYPE_CHECKING:
+    from defender.learning.core.state import LearningState
 
 STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
@@ -30,6 +37,8 @@ def env_state() -> LearningState:
     """An explicit scratch handle over the test setting; production launchers ignore it."""
     import os
 
+    from defender.learning.core.state import LearningState
+
     root = Path(os.environ[STATE_DIR_ENV])
     return LearningState.open(LoopPaths(repo_root=root, state_dir=root))
 
@@ -37,7 +46,7 @@ def env_state() -> LearningState:
 def state_over(root: Path) -> LearningState:
     """Create `root` and open a handle over it, whatever the environment names (a test that
     wants one queue folder of its own, apart from the env-named root)."""
-    from defender.learning.core.config import LoopPaths
+    from defender.learning.core.state import LearningState
 
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
@@ -47,6 +56,8 @@ def state_over(root: Path) -> LearningState:
 def state_for_paths(paths) -> LearningState:
     """Create the root `paths` names (if absent) and open a handle over exactly it — the test
     side of a fixture whose `LoopPaths` points `state_dir` at a not-yet-made tmp folder."""
+    from defender.learning.core.state import LearningState
+
     location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
     return LearningState.open(paths)
 

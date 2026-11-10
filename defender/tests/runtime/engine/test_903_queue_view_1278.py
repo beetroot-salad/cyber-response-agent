@@ -106,7 +106,7 @@ def test_o2_the_view_builds_with_no_learning_folder_and_writes_none(seen):
     dsn, paths, _batch = seen
     from defender.learning.frontend import serialize_queues
 
-    folder = location_path(paths.tenant.learning)
+    folder = location_path(paths.tenant.tenant_root) / "learning"  # the old root's place: the handle to it is deleted (O10)
     if folder.exists():
         import shutil
 

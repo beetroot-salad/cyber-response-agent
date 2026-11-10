@@ -229,8 +229,7 @@ def test_offboarding_a_lapsed_batch_is_ended_and_the_tenants_rows_are_purged(lif
     register_tenant(dsn, tenant)
     claim = _seed_working(dsn, tenant)
     lapse_lease(dsn, claim.batch_id)
-    register_tenant(dsn, GREEN)
-    _seed_working(dsn, GREEN)
+    _seed_working(dsn, GREEN)  # GREEN is registered by the `dsn` fixture
     green_before = _learning_rows_of(dsn, GREEN)
 
     _offboard(world, dsn, tenant)

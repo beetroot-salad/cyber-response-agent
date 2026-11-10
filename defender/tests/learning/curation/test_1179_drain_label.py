@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -12,7 +11,9 @@ from defender.learning.core.config import (
 )
 from defender.learning.leads import lead_author
 from defender.learning.leads.lead_author import LeadAuthorError
-from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of, state_for_paths
+from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of
+from defender.tests.support.learning.core._store1278 import migrated_database, world  # noqa: F401 — fixtures
+from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
 from defender.tests.learning.curation.test_1134_mount_list import UNKNOWN_LABELS
 
 VALUES = {AUTHOR_DRAIN_LABEL: "author_drain", LEAD_AUTHOR_DRAIN_LABEL: "lead_author_drain"}
@@ -37,16 +38,33 @@ def _assert_shows_value(text: str, label: DrainLabel) -> None:
         assert leak not in text, (leak, text)
 
 
+class _PastTheGrant:
+    """Lead-author deps that answer only what the lane's grant check reads (`paths`, no `batch`, no `skills_dir` of
+    their own); reading anything else means the run got past the grant check, and raises `past`."""
+
+    def __init__(self, paths: LoopPaths, past: type[Exception]) -> None:
+        self.paths, self.batch, self.skills_dir, self._past = paths, None, None, past
+
+    def __getattr__(self, name: str) -> object:
+        raise self._past(name)
+
+
+@pytest.mark.postgres
 @pytest.mark.parametrize("label", MEMBERS, ids=lambda m: m.value)
-def test_the_claim_log_shows_the_labels_value(
-        tmp_path: Path, label: DrainLabel, caplog: pytest.LogCaptureFixture):
-    state = state_for_paths(_paths(tmp_path))
+def test_the_claim_log_shows_the_labels_value(world, label: DrainLabel, caplog: pytest.LogCaptureFixture):  # noqa: F811 — the imported fixture
+    """UPDATED (#1278 C15, A2: the file queue's claim is replaced by the store's): the drain tick over an empty store
+    logs its lane by the label's value."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain, lead_author_drain
+
     with caplog.at_level(logging.INFO):
-        assert list(state.claim(
-            "run_id", label=label, noun="authoring")) == []  # type: ignore[arg-type]
-    [line] = [r.getMessage() for r in caplog.records if "queued for authoring" in r.getMessage()]
-    _assert_shows_value(line, label)
-    assert line.startswith(f"{VALUES[label]}: ")
+        if label is AUTHOR_DRAIN_LABEL:
+            author_drain(world.t, world.paths, trigger=None, box=BoxSpy())
+        else:
+            lead_author_drain(world.t, world.paths, box=BoxSpy())
+    lines = [r.getMessage() for r in caplog.records if VALUES[label] in r.getMessage()]
+    assert any(line.startswith(f"{VALUES[label]}: ") for line in lines), [r.getMessage() for r in caplog.records]
+    for line in lines:
+        _assert_shows_value(line, label)
 
 
 def test_the_lead_author_refusal_names_the_labels_value(tmp_path: Path):
@@ -56,10 +74,7 @@ def test_the_lead_author_refusal_names_the_labels_value(tmp_path: Path):
     class Reached(Exception):
         pass
 
-    def lock(_role: object, *, wait: object) -> None:
-        raise Reached
-
-    deps = SimpleNamespace(paths=paths, state=SimpleNamespace(lock=lock))
+    deps = _PastTheGrant(paths, Reached)  # #1278 r8 Locks: no queue lock is the next step; whatever is, is past the grant
     with pytest.raises(LeadAuthorError) as e:
         lead_author.run(run, label=AUTHOR_DRAIN_LABEL, deps=deps)  # type: ignore[arg-type]
     msg = str(e.value)
@@ -76,10 +91,10 @@ def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
     run = run_of(curation_run_dir("run"))  # the opened run the lane is handed
     paths = _paths(tmp_path)
 
-    def lock(_role: object, *, wait: object) -> None:
-        raise AssertionError("a non-member got past the grant check to the queue lock")
+    class GotPast(AssertionError):
+        pass
 
-    deps = SimpleNamespace(paths=paths, state=SimpleNamespace(lock=lock))
+    deps = _PastTheGrant(paths, GotPast)  # a non-member reading anything past the grant check fails the test
     with pytest.raises(AttributeError):
         lead_author.run(run, label=value, deps=deps)  # type: ignore[arg-type]
 
