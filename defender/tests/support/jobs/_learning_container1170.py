@@ -110,7 +110,7 @@ def hold_how(proc: subprocess.Popen, marks: Path, how: str, done: Seen) -> int:
         until(lambda: (marks / "held").exists() or proc.poll() is not None, "the entry to reach its hold", 120)
         done.extra["reached"] = (marks / "held").exists()
         if not done.extra["reached"]:
-            done.extra["stderr"] = proc.stderr.read().decode(errors="replace")[-2500:]
+            done.extra["stderr"] = proc.stderr.read().decode(errors="replace")[-20000:]
             return 1
         if how == "control-no-signal":
             time.sleep(1.5)

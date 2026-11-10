@@ -50,8 +50,8 @@ try:
         except OSError:
             return False
     from defender import job_host
-    # `defender` is a namespace package (no `__file__`); a module of it names the tree: <root>/defender/job_host.py
-    code = os.path.dirname(os.path.dirname(os.path.abspath(job_host.__file__)))
+    # `defender` is a namespace package (no `__file__`); a module of it names the tree: <root>/defender/job_host/__init__.py (job_host is a package)
+    code = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(job_host.__file__))))
     seen["code_root"] = code
     seen["code_env_files"] = [n for n in os.listdir(code) + os.listdir(os.path.join(code, "defender")) if n.startswith(".env")]
     seen["code_writable"] = writes(os.path.join(code, "defender", "written-by-job"))
