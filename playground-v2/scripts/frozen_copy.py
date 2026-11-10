@@ -367,6 +367,13 @@ def _page_ids(es: Any, index: str, query: dict) -> list[dict]:
             raise CopyFault(f"{index}: a full page came back without a sort value to continue from")
 
 
+def _page_ids_each(es: Any, patterns: list[str], query: dict) -> list[dict]:
+    """`_page_ids` over every index the patterns match, one index at a time: `_doc` order is per shard,
+    so paging it by `search_after` across several indices without a point-in-time skips documents."""
+    rows = es.es_request("GET", f"/_cat/indices/{_expr(patterns)}?format=json&h=index&expand_wildcards=open,hidden")
+    return [hit for name in sorted(r["index"] for r in rows or []) for hit in _page_ids(es, name, query)]
+
+
 def _names(ancestor_index: str, target: str, stream: str | None) -> bool:
     """An ancestor names `target` (a backing index of `stream`) by its concrete index or by a pattern
     the rule searched, which matches the backing index or its data stream (real ancestors carry the
@@ -386,7 +393,7 @@ def _alerts_derived_from(es: Any, patterns: list[str], targets: dict[str, str],
         events = [h["_id"] for h in _page_ids(es, target, {"bool": {"filter": [span]}})]
         for i in range(0, len(events), PAGE):
             batch = set(events[i:i + PAGE])
-            for hit in _page_ids(es, _expr(patterns), {"terms": {f"{ANCESTORS}.id": sorted(batch)}}):
+            for hit in _page_ids_each(es, patterns, {"terms": {f"{ANCESTORS}.id": sorted(batch)}}):
                 ancestors = dug(hit.get("_source") or {}, ANCESTORS) or []
                 if any(a.get("id") in batch and _names(str(a.get("index", "")), target, stream) for a in ancestors):
                     derived.setdefault(hit["_index"], set()).add(hit["_id"])
@@ -406,7 +413,7 @@ def unverifiable_ancestry(es: Any, freeze: dict, overlay: dict | None) -> list[s
             continue
         span = {"range": {"@timestamp": {"gte": stamp(overlay["span_start"]), "lte": stamp(freeze["T"])}}}  # type: ignore[index]
         query = {"bool": {"filter": [span, {"exists": {"field": f"{ANCESTORS}.index"}}]}}
-        for hit in _page_ids(es, _expr(list(freeze["patterns"])), query):
+        for hit in _page_ids_each(es, list(freeze["patterns"]), query):
             for a in dug(hit.get("_source") or {}, ANCESTORS) or []:
                 name = str(a.get("index") or "")
                 m = BACKING.match(name)

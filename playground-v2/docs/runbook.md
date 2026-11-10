@@ -736,15 +736,16 @@ python3 playground-v2/scripts/launch_frozen.py <held_out>/<slug> --tenant "$TENA
   4. The frozen proxy: `docker logs frozen-credential-proxy` starts clean; `curl` from a run container to each declared host name reaches the frontend; the frozen audit file grows and the live one does not; the proxy can reach OpenBao and the read-only data root through `--volumes-from`; `V2_FROZEN_PROXY_AUDIT`'s directory is writable.
   5. The engine can bind the repository (`GET _snapshot/frozen-cases/_verify` from the frozen node).
   6. The lab tenant's access.yaml names hosts, not IPs.
-  7. Overlay documents keep `_id`, `_index`, `_version`: after a drift launch, compare `GET <index>/_doc/<id>` with the live one. The in-place rewrite (copy through `<index>-overlay`, delete, copy back with external versioning and `index.gc_deletes: 0ms`) may need `external_gte`, a rollover of the write index, or a named gap.
+  7. Overlay documents keep `_id` and `_index`: after a drift launch, compare `GET <index>/_doc/<id>` with the live one. The rewrite is in place (`_update_by_query`; Elasticsearch takes no other write into a backing index), so `_version` reads one higher than live (named gap, r6.4.5).
   8. Tie ordering on truncated queries after a fresh restore versus a re-restore.
-  9. Reindex with external versioning keeps `_version` (see 7).
+  9. Withdrawn by r6.4.5 (no external-versioning copy-back); see 7.
   10. Lab alerts carry `kibana.alert.ancestors` / `original_time` (the schema-drift overlay selects derived alerts by them; none carrying them means no alert is rewritten).
   11. The stubs honour `V2_STUB_AS_OF`: `GET /changes/active` on the frozen change-mgmt answers as of T.
   12. The cert mount works from the certs volume (`mount_node_cert` tests both files exist).
   14. Whole restore into a fresh data volume (D25): after a variant switch, `docker volume ls` inside the engine shows a new `frozen-es-data`, the restore succeeds on real data streams and the alerts index, and its time is about C35's rate (~6 min for ~14 GB).
   15. The file-fed shim under TLS (D15 revised): after a launch, `GET /` and `ROW t = NOW()` read T plus seconds; the backward wall-clock jump at the offset rewrite leaves the node healthy (no timeouts, no shard failures in the log).
   16. The lock store's container has `flock` and `grep`: `docker --context soc-playground exec unbound sh -c 'command -v flock grep'` prints both. (Checked 2026-11-10: `elasticsearch` lacks flock, so the store moved to `unbound`.)
+- **Live results, 2026-11-10 (freeze `live-20261110`: T 2026-11-10T15:05:53Z, 114 indices, 60.5M documents, 46 parts, capture 30 min):** 1, 3, 5, 10, 11, 12, 15 pass. 14 passes (base 595 s; drift variant switch 627 s). 7 passes with the r6.4.5 gap (same `_id`/`_index`, `source.client_port` = live `source.port`, `_version` 2 against 1). 16 failed and was fixed (lock store on `unbound`). 6 passes on the tenant fixture only. Not checked: 4 and every agent launch (no live credential proxy was running), the production tenant's `access.yaml`, 8 and 13 (reasoned only: nothing writes to the copy during a digest), and the derived-alert rewrite (no auth alert since 2026-10-29 has a resolvable ancestor). Found and fixed on the way: `path.repo` missing in compose; tar of a running host's volume (capture now pauses each host); the drift overlay's ancestry match and paging; the content digest reading every index (~18 h; now the touched ones); stream membership by name (`dedup-` backing indices); the copy-back running ingest and being refused by data streams (now in place).
 
 ### Shuffle SOAR (batch 12)
 
