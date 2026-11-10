@@ -660,6 +660,62 @@ def test_a_config_fault_at_call_time_marks_its_system_not_configured_uncharged(t
         f"{CONFIGURED}: {[(r.levelname, r.getMessage()) for r in caplog.records]}")
 
 
+def _setup_fault(cls: type, detail: str) -> Callable[[], BaseException]:
+    """A fault as the proxy client raises it for one system's setup (#1363 O4: origin `setup`)."""
+    def make() -> BaseException:
+        fault = cls(detail)
+        fault.origin = "setup"
+        return fault
+    return make
+
+
+#: The credential proxy's detail for one system's setup, and its distinctive token.
+SETUP_TOKEN = "SETUP-1363"
+
+
+def test_1363_a_setup_config_fault_marks_only_its_system_down_naming_the_proxys_setup(tmp_path, caplog):
+    """A `setup` ConfigFault (no credential set stored for threat-intel) marks threat-intel down, its
+    reason naming the credential proxy's setup for it, uncharged, not logged as an adapter defect; the
+    run goes on and cmdb still runs. #1363 O7."""
+    caplog.set_level(logging.INFO)
+    root = _plant(tmp_path, "s63c")
+    run = _drive(tmp_path, root, main=[dispatch("l-001", CONFIGURED), dispatch("l-002", "cmdb"), R.text(R.DONE)],
+                 leads={"l-001": [R.query(CONFIGURED, "lookup", {"value": "203.0.113.9"}),
+                                  R.query(CONFIGURED, "health-check"), SUMMARY],
+                        "l-002": [R.query("cmdb", "health-check"), SUMMARY]},
+                 behaviour={"cmdb": OK, "identity": OK, "change-mgmt": OK, CONFIGURED: _setup_fault(
+                     ConfigFault, f"{SETUP_TOKEN}: no credential set is stored for threat-intel")})
+
+    assert run.calls_to(CONFIGURED) == [f"{CONFIGURED}.lookup"], "a later call ran on a system marked down"
+    refused = run.lead_answer("l-001", 1)
+    _assert_not_configured_refusal(refused, SETUP_TOKEN, "the lead's next call after the setup fault")
+    assert "credential proxy" in refused.lower(), f"the reason does not name the proxy's setup: {refused!r}"
+    assert run.total_failures == 0, run.breaker
+    assert [r.get("exit_code") for r in run.rows_for("cmdb")] == [0], "control: the run went on"
+    assert run.summary.get("truncated_by") is None, run.summary
+    defects = [r for r in caplog.records if "adapter defect" in r.getMessage()]
+    assert defects == [], "our setup fault was logged as the adapter's defect"
+
+
+def test_1363_a_setup_transport_fault_is_a_charged_failed_call_naming_our_setup(tmp_path):
+    """A `setup` TransportFault (the OAuth token endpoint unreachable) is an ordinary failed call,
+    charged to the system, with a detail naming our setup; the system is not marked down. #1363 O7."""
+    root = _plant(tmp_path, "s63t")
+    run = _drive(tmp_path, root, main=[dispatch("l-001", CONFIGURED), R.text(R.DONE)],
+                 leads={"l-001": [R.query(CONFIGURED, "lookup", {"value": "203.0.113.9"}),
+                                  R.query(CONFIGURED, "health-check"), SUMMARY]},
+                 behaviour={"cmdb": OK, "identity": OK, "change-mgmt": OK, CONFIGURED: OK,
+                            f"{CONFIGURED}.lookup": _setup_fault(
+                                TransportFault, f"{SETUP_TOKEN}: the token endpoint could not be reached")})
+
+    assert run.failures(CONFIGURED) == {CONFIGURED: 1}, run.breaker
+    assert run.calls_to(CONFIGURED) == [f"{CONFIGURED}.lookup", f"{CONFIGURED}.health-check"], (
+        "a setup transport fault marked the system down")
+    told = run.lead_answer("l-001", 0)
+    assert SETUP_TOKEN in told and "credential proxy" in told.lower(), told
+    assert [r.get("exit_code") for r in run.rows_for(CONFIGURED)] == [2, 0], run.rows
+
+
 class _AtFirstRequest:
     """MAIN's double, noting how many log records existed when MAIN was first asked for a turn
     — everything logged before that is the run's start (the correlation lead is withheld)."""

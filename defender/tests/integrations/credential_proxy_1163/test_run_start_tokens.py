@@ -168,7 +168,7 @@ def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_for
     assert "run_dir=" in caplog.text, "positive control: the log channel is read"
 
 
-@pytest.mark.parametrize("truncated_by", ["budget", "store", "provider-down"])
+@pytest.mark.parametrize("truncated_by", ["budget", "store", "provider-down", "proxy-access"])  # #1363 O7
 def test_r1_a_run_that_will_not_comment_signs_no_write_back_token(tmp_path, data_root, truncated_by):
     """A run cut short before a verdict leaves the case alone: no write-back token is signed for
     it, and the record step is handed none. The case system was judged once, at run start, and

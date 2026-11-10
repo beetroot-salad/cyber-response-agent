@@ -242,6 +242,65 @@ def test_x7_a_fault_is_the_proxys_own_only_when_the_system_neither_answered_nor_
     assert isinstance(seen["no-token-minted"], TransportFault), seen["no-token-minted"]
 
 
+#: #1363 O4: the cause each case plants, and the one origin the raised fault must carry. The origin
+#: values are the design's words; the fault attribute `origin` is this contract's name for them.
+ORIGIN_CASES = {
+    "system-answered-401": "system",
+    "token-does-not-grant-the-system": "request",
+    "write-without-a-grant": "request",
+    "no-credential-set-stored": "setup",
+    "expired-token": "access",
+    "no-token-minted": "access",
+    "proxy-unreachable": "access",
+    "refusal-the-proxy-left-unlabelled": "access",
+}
+
+
+def _origin_of(tmp_path, data_root, case: str) -> AdapterFault:  # noqa: C901, PLR0911 — one arm per cause
+    """The fault the real identity adapter raises for `case`, through the real client and (but for an
+    unreachable or unlabelling proxy) the real proxy over a published tenant."""
+    from defender.kit import transport
+
+    def cannot_mint() -> str:
+        raise TransportFault("the token source could not mint a request token")
+
+    with H.upstream() as up, Q._published(tmp_path, data_root, up) as t:
+        up.replies[f"{Q.API}/users/dev.dana"] = (401, {}, b'{"detail": "who are you"}')
+        if case == "refusal-the-proxy-left-unlabelled":
+            # An older proxy: a status-less CONFIG refusal with no origin label in its final record.
+            reply = W.fmt().encode_final(W.final_record(None, fault="ConfigFault", detail="refused, unlabelled"))
+            with W.fake_proxy(reply, ended=True) as url, pytest.raises(AdapterFault) as raised:
+                identity_adapter.get_user(A.ctx_for(tmp_path, T.run_record(t), url, "tok"), user="dev.dana")
+            return raised.value
+        if case == "proxy-unreachable":
+            ctx = A.ctx_for(tmp_path, T.run_record(t), f"http://127.0.0.1:{H.free_port()}",
+                            T.token(t.tenant_id, GRANT))
+            with pytest.raises(AdapterFault) as raised:
+                identity_adapter.get_user(ctx, user="dev.dana")
+            return raised.value
+        grant = {("cmdb", "r")} if case == "token-does-not-grant-the-system" else GRANT
+        token = T.token(t.tenant_id, grant, expires_in=EXPIRED if case == "expired-token" else timedelta(hours=1))
+        with A.proxy_for(t, Q._store(t, empty=case == "no-credential-set-stored")) as (url, _tap):
+            ctx = (A.ctx_for(tmp_path, T.run_record(t), url, None, token_source=cannot_mint)
+                   if case == "no-token-minted" else A.ctx_for(tmp_path, T.run_record(t), url, token))
+            with pytest.raises(AdapterFault) as raised:
+                if case == "write-without-a-grant":  # CONFINEMENT at check_route
+                    transport._proxy_request(ctx, f"{up.url}{Q.API}/users/dev.dana", system="identity",
+                                             method="POST", body={}, timeout_sec=10)
+                else:
+                    identity_adapter.get_user(ctx, user="dev.dana")
+            return raised.value
+
+
+@pytest.mark.parametrize(("case", "origin"), list(ORIGIN_CASES.items()), ids=list(ORIGIN_CASES))
+def test_1363_o4_every_proxy_path_fault_carries_exactly_the_origin_of_its_cause(tmp_path, data_root, case, origin):
+    """A system's answer is `system`, this call out of bounds `request`, one system's setup `setup`, the
+    process's access (and any refusal the proxy did not label) `access`; `proxy_own` follows. #1363 O4."""
+    fault = _origin_of(tmp_path, data_root, case)
+    assert getattr(fault, "origin", None) == origin, (case, type(fault).__name__, fault.detail)
+    assert fault.proxy_own is (origin != "system"), "proxy_own is derived from the origin"
+
+
 def test_x8_a_system_answer_the_proxy_could_not_hand_on_keeps_the_proxys_reason(
         tmp_path, data_root):
     """#1404 follow-up, read path: a status that arrived with no body to hand on (the reply broke

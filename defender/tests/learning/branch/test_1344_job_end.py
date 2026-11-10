@@ -323,6 +323,39 @@ def test_a_refusal_before_the_first_sibling_skips_the_job_when_the_family_caused
     assert ran.spawn.launches == []
 
 
+#: #1363 O6: pre-flight's environment refusals for our own failures, by cause, and the fixed words of the
+#: job's brief the structured cause on the record chooses.
+_OUR_FAILURES = {
+    "proxy unreachable during the live reads": "the credential proxy could not be used",
+    "no credential set stored for the read system": "our setup for a system failed",
+}
+
+
+@pytest.mark.parametrize("cause", list(_OUR_FAILURES))
+def test_1363_a_pass_that_lost_access_or_hit_a_setup_fault_fails_the_job_launch_refused_with_its_fixed_brief(
+        tmp_path, monkeypatch, data_root, cause):
+    """Lost access or a `setup` fault in pre-flight is the environment's refusal: `failed: launch_refused`,
+    the brief our own fixed words for that cause, nothing started. (#1363 O6)"""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.integrations.credential_proxy_1163 import _harness as H
+    from defender.tests.learning.oracle.live_contracts import test_preflight_proxy as P
+
+    setup = cause == "no credential set stored for the read system"
+    with P.rig(tmp_path, monkeypatch, data_root, credential_set=not setup) as r, \
+            A.proxy_for(r.t, r.store) as (url, _tap):
+        ran = run_entry(tmp_path, estate=lambda _root: r.est, calls=r.calls, after_source=r.after_source,
+                        oracle=S.oracle(then=S.submit(r.idp.payload, S.EMPTY_CLAIM)),
+                        issuer_transport=r.bao, directory=r.records,
+                        proxy_url=url if setup else f"http://127.0.0.1:{H.free_port()}")
+    message = _failed_with(ran, "failed", "launch_refused")
+    assert _OUR_FAILURES[cause] in message, message
+    others = [b for c, b in _OUR_FAILURES.items() if c != cause] + ["the read token could not be signed"]
+    assert not [b for b in others if b in message], ("the brief named another environment cause", message)
+    assert "idp" not in message, "run text in the fixed brief"
+    assert ran.spawn.launches == []
+    assert r.bao.signs, "positive control: the read token was signed; the proxy or our setup failed"
+
+
 # --- failed -------------------------------------------------------------------------------------------
 
 

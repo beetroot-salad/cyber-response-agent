@@ -108,9 +108,10 @@ def _unexpected_sigterm(_signum, _frame):
 def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         tmp_path, *, candidates=None, spawn=None, judge=None, questioner=None, live_tree=None,
         oracle=None, fix_source=None, job=JOB, grade=None, preflight=None, after_source=None,
-        estate=None, calls=None) -> Ran:
+        estate=None, calls=None, **extra) -> Ran:
     """The job entry in-process over `_spec1224`'s fixture tenant (or `estate`, made at `tmp_path`), the source run
-    holding `calls` (default: `_calls()`); every paid seam a recording double."""
+    holding `calls` (default: `_calls()`); every paid seam a recording double. `extra` seams (the launcher's
+    `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults."""
     est = estate(tmp_path) if estate is not None else S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls, after_source=after_source)
     if fix_source is not None:
@@ -133,6 +134,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         candidates=candidates if candidates is not None else choose(T.BRANCH_MESSAGE_ID))
     if grade is not None:
         seams["grade"] = grade
+    seams.update(extra)
     argv = ["--job", job, "--tenant", tenant, "--source", src.name, "--parent-pid", str(os.getppid())]
     from defender.learning.branch import job_entry
 

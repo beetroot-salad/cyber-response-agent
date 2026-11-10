@@ -114,6 +114,34 @@ def test_f2_a_system_outside_the_token_grant_is_a_config_fault_unsent(tmp_path, 
     assert (refused["fault"], r.up.seen, r.store.reads) == ("ConfigFault", [], [])
 
 
+#: #1363 O4: the proxy's label in its final record. Wire name `origin` (left to the contract); values
+#: `request`, `setup`, `access`, and none for a system's answer.
+LABEL_FIELD = "origin"
+
+
+def _label_of(response) -> object:
+    from defender.kit.proxy_client import decode_reply
+
+    return getattr(decode_reply(response.content).final, LABEL_FIELD, "<no such field>")
+
+
+def test_1363_o4_the_proxy_labels_each_refusal_where_it_raises_it(tmp_path, data_root):
+    """No credential set is `setup`, a token that does not grant the system is `request`, an expired
+    token `access`; a system's own answer carries no label. #1363 O4."""
+    from datetime import timedelta
+
+    with T.rig(tmp_path / "forge", data_root, creds=None) as r:
+        no_set = r.post()
+        r.store.sets[(r.t.tenant_id, "identity")] = T.static_set()
+        ungranted = r.post(grant={("cmdb", "r")})
+        expired = r.post(tok=r.tok(expires_in=timedelta(minutes=-1)))
+        r.up.replies[PATH] = (404, {}, b"{}")
+        answered = r.post()
+
+    assert [_label_of(x) for x in (no_set, ungranted, expired, answered)] == [
+        "setup", "request", "access", None]
+
+
 def _oauth_rig(tmp_path, data_root, token_url, **deps_kw):
     return T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
         u + BASE, scheme=H.oauth_scheme(token_url)), creds=T.oauth_set(), **deps_kw)
