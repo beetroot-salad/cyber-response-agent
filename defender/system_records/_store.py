@@ -34,6 +34,18 @@ _SV, _CV, _RM = SystemVersionRow.__table__, CaseVersionRow.__table__, RecordsMar
 _TENANTS = "tenancy.tenants"
 
 
+def _takes_before(judge: Judge) -> bool:
+    """Whether `judge` accepts the replaced state as a second argument (the real judgement does; a stand-in judging the
+    after-state alone does not, and is called with that alone)."""
+    import inspect
+    try:
+        params = list(inspect.signature(judge).parameters.values())
+    except (TypeError, ValueError):
+        return False
+    positional = [p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    return len(positional) >= 2 or any(p.kind == p.VAR_POSITIONAL for p in params)
+
+
 class RecordStore:
     def __init__(self, dsn: str, *, clock: Callable[[], _dt.datetime], judge: Judge) -> None:
         self._engine = async_engine(dsn, max_connections=4)
@@ -79,8 +91,10 @@ class RecordStore:
         row = history[-1]
         return CaseRecord(version=row.version, system_id=row.system_id, comment_body=row.comment_body)
 
-    def _refuse_if_faulty(self, after: TenantRecords) -> None:
-        faults = self._judge(after)
+    def _refuse_if_faulty(self, after: TenantRecords, before: TenantRecords | None = None) -> None:
+        """The judge sees the after-state and, for a write (not the import), the state it replaces: it judges what the
+        write changes and names the part whose change broke cover (C4)."""
+        faults = self._judge(after, before) if before is not None and _takes_before(self._judge) else self._judge(after)
         if faults:
             raise RecordRefused(faults)
 
@@ -120,7 +134,8 @@ class RecordStore:
             candidate = SystemRecord(**{**candidate.__dict__, "credential_generation": generation})
             after = self._current(history) | {system: candidate}
             case = self._current_case(await self._case_history(conn, tenant))
-            self._refuse_if_faulty(TenantRecords(imported=True, systems=after, case=case))
+            self._refuse_if_faulty(TenantRecords(imported=True, systems=after, case=case),
+                                   TenantRecords(imported=True, systems=self._current(history), case=case))
             await conn.execute(insert(_SV).values(
                 tenant_id=tenant, system_id=system, version=candidate.version, adapter_id=adapter_column(candidate),
                 enabled=enabled, settings=dict(settings), access=access, credential_generation=generation, deleted=False,
@@ -146,7 +161,8 @@ class RecordStore:
             last = rows[-1]
             after = {k: v for k, v in self._current(history).items() if k != system}
             case = self._current_case(await self._case_history(conn, tenant))
-            self._refuse_if_faulty(TenantRecords(imported=True, systems=after, case=case))
+            self._refuse_if_faulty(TenantRecords(imported=True, systems=after, case=case),
+                                   TenantRecords(imported=True, systems=self._current(history), case=case))
             await conn.execute(insert(_SV).values(
                 tenant_id=tenant, system_id=system, version=last.version + 1, adapter_id=last.adapter_id,
                 enabled=last.enabled, settings=last.settings, access=last.access,
@@ -162,7 +178,8 @@ class RecordStore:
                 raise RecordRefused([f"case record: the write replaces version {replaces}, but the current version is {current}"])
             case = CaseRecord(version=current + 1, system_id=system_id, comment_body=comment_body)
             systems = self._current(await self._history(conn, tenant))
-            self._refuse_if_faulty(TenantRecords(imported=True, systems=systems, case=case))
+            self._refuse_if_faulty(TenantRecords(imported=True, systems=systems, case=case),
+                                   TenantRecords(imported=True, systems=systems, case=self._current_case(history)))
             await conn.execute(insert(_CV).values(tenant_id=tenant, version=case.version, system_id=system_id,
                                                   comment_body=comment_body, deleted=False, author=author,
                                                   written_at=self._clock()))
