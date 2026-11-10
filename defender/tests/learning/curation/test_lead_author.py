@@ -19,7 +19,6 @@ from defender.learning.leads import lead_author  # type: ignore[import-not-found
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-from defender.learning.core.state import PITFALLS
 from defender.tests.support.learning.core._store1278 import call, migrated_database, world  # noqa: F401 — fixtures the store arm needs
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
 from defender.tests.support.learning.curation import _curator1134 as C
@@ -934,6 +933,8 @@ def test_run_collects_general_failure_before_early_return(tmp_path: Path):
     (run_dir / "gather_raw").mkdir(parents=True)
     _write_lead_meta(run_dir, "l-001", "probe")
     _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")
+
+    from defender.learning.core.state import PITFALLS  # the file queue: #1278 deletes it (stale-test census)
 
     assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     queue = location_path(deps.paths.state_root) / PITFALLS.queue

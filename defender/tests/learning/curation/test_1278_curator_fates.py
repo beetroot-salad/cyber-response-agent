@@ -260,7 +260,12 @@ def lead(world, monkeypatch):  # noqa: F811 — the imported fixture
 
 
 def _reducer_note() -> str:
-    return "# reducer pitfalls\n\n- **Name the unnested column.**\n"
+    """The fixture tenant's committed reducer page plus one bullet under its pitfalls section: a valid pitfalls edit
+    (the content gate refuses a rewritten page, frontmatter included)."""
+    from defender.tests.tenancy.tenant_1108_p4._support import FIXTURE
+
+    page = (FIXTURE / _reducer_path()).read_text(encoding="utf-8")
+    return page.rstrip("\n") + "\n- **Name the unnested column.**\n"
 
 
 def _pitfall(pid: str):
@@ -300,6 +305,7 @@ def test_d9_a_rejected_pr_no_longer_loses_the_pitfalls_it_carried(lead, caplog):
     call(w.dsn, "add_pitfall", w.t.tenant_id, _pitfall("p4-run:1"))
     _lead_tick(w, ScriptedModel(pitfalls=Reply({_reducer_path(): _reducer_note()})))
     batch = _only_batch(w)
+    w.t.forge.scopes = {"write:repository", "read:issue"}  # the reconcile reads the PR's comments too (H2)
     close_on_remote(w.t.p3, batch.branch)
 
     author = ScriptedModel()
