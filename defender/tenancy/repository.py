@@ -4,10 +4,11 @@ from the tenancy tables. `InMemoryTenantRepository` (`tenancy/memory.py`) and
 code, so the refusals below can be caught by code that never builds a repository.
 
 Writers (P2, DC-4):
-- The API: `request_create(now=)`, `request_resume(T)`, `request_offboard(T, now=)`,
-  `request_rotate(T)`. Each is one conditional update on an ordinary connection that never takes
+- The API: `request_create(now=)`, `request_resume(T)`, `request_rotate(T)`. Each is one conditional update on an ordinary connection that never takes
   the tenant lock; it returns the record it left, or raises `NotFound` (no such tenant) or
-  `Conflict` (the tenant's state refuses the request).
+  `Conflict` (the tenant's state refuses the request). `request_offboard(T, now=)` is no longer
+  the API's (#1360): the job store runs tenancy's `offboard` together with the ending of the
+  tenant's jobs, in one transaction; `request_offboard` stays for the lifecycle and tests.
 - Host processes: `record_publish_status(T, line, by=)`, a launch-time publish report line.
 - The worker holding a tenant's lock (management service or host actor), through `HeldTenant`.
 

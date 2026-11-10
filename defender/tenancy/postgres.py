@@ -34,7 +34,7 @@ from sqlalchemy.pool import NullPool
 
 from defender.database import async_engine, url
 from defender.records.formats import AlertMapping, TenantId
-from defender.tenancy.models import SCHEMA, AlertMappingRow, ForgeWiring, Generation, PublishStatus, TenantRecord
+from defender.tenancy.models import SCHEMA, AlertMappingRow, ForgeWiring, Generation, PublishStatus, TenantRecord, offboard
 from defender.tenancy.repository import (
     ALL,
     KEEP,
@@ -152,9 +152,8 @@ class PostgresTenantRepository:
             tenant_id, _T.c.failure.is_not(None), "nothing to resume", failure=None)
 
     async def request_offboard(self, tenant_id: TenantId, *, now: _dt.datetime) -> TenantRecord:
-        return await self._request(
-            tenant_id, _T.c.state.in_(("creating", "active")), "only a creating or active tenant can be offboarded",
-            state="offboarding", pending_action="offboard", step="offboard", step_actor=SERVICE, failure=None)
+        async with self._engine.begin() as conn:
+            return await offboard(conn, tenant_id)
 
     async def request_rotate(self, tenant_id: TenantId) -> TenantRecord:
         return await self._request(

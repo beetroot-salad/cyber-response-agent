@@ -136,7 +136,7 @@ class Investigation(BaseModel):
     failure_reason: str | None = Field(
         default=None,
         description="Set when the investigation failed or was aborted: a fixed reason such as "
-                    "`setup_refused`, `no_report`, `worker_error`, `cancelled`, `lease_lapsed` (its worker "
+                    "`setup_refused`, `no_report`, `worker_error`, `cancelled`, `tenant_offboarded` (its tenant was offboarded), `lease_lapsed` (its worker "
                     "was lost; a retry follows) or `retry_cap` (lost on the last of its attempts).")
     failure_message: str | None = Field(
         default=None, description="Our own words on why it failed; never model or run output.")
@@ -176,7 +176,7 @@ class LearningJob(BaseModel):
         "Why a `skipped` or `failed` job ended, one fixed word: `no_fork_point`, `history_unreadable`, "
         "`expired`, `family_unusable`, `control_failed`, `launch_refused`, `verify_refused`, "
         "`source_unavailable`, `judge_failed`, `entry_error`, `exited_without_result`, `worker_error`, "
-        "`lease_lapsed` or `retry_cap`; null otherwise."))
+        "`lease_lapsed`, `retry_cap` or `tenant_offboarded` (its tenant was offboarded); null otherwise."))
     message: str | None = Field(default=None, description=(
         "A sentence of our own code's about the ending (never run or launcher text); a `completed` job "
         "with no findings carries the judge's verdict word here."))

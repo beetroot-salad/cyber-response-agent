@@ -576,23 +576,9 @@ class OffboardingSpy:
         return await self._inner.offboard_tenant(tenant_id, actor=actor)
 
 
-class _MissingOffboarding:
-    """Stands in for the spy while `defender.api.fakes.InMemoryOffboarding` does not exist: worlds of other cases
-    build, a case that touches the port fails here, naming the missing production class (the code stage makes the
-    class unconditional)."""
-
-    def __getattr__(self, name: str) -> Any:
-        raise AssertionError("defender.api.fakes.InMemoryOffboarding does not exist yet (#1360 D6)")
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        raise AssertionError("defender.api.fakes.InMemoryOffboarding does not exist yet (#1360 D6)")
-
-
 def _offboarding_spy(tenants: Any, store: Any, clock: Any) -> Any:
-    try:
-        from defender.api.fakes import InMemoryOffboarding
-    except ImportError:
-        return _MissingOffboarding()
+    from defender.api.fakes import InMemoryOffboarding
+
     return OffboardingSpy(InMemoryOffboarding(tenants, store, clock))
 
 
@@ -667,18 +653,13 @@ class World:
             programs=NoProgramsRealm(),
             **extra,
         )
-        # #1360 D6: handed over only once `ApiDeps` has the member, so the worlds of other cases build until then;
-        # the code stage makes it unconditional.
-        offboarding = ({"offboarding": self.offboarding}
-                       if "offboarding" in {f.name for f in dataclasses.fields(ApiDeps)}
-                       and not isinstance(self.offboarding, _MissingOffboarding) else {})
         self.app = create_app(ApiDeps(
             alerts=self.store, investigations=self.store, learning_jobs=self.store,
             lessons=self.store, systems=self.store, writes=self.store,
             secrets=InMemorySecrets(), checker=StubSystemChecker(),
             artifact_links=StubArtifactLinks(),
             identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants,
-            **offboarding,
+            offboarding=self.offboarding,
         ))
 
     def restart(self, *, administrators: Sequence[str] = (),

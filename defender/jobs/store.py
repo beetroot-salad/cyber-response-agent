@@ -16,7 +16,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as _dt
 import logging
-from collections.abc import AsyncIterator, Callable, Collection, Mapping
+from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -44,8 +44,9 @@ from defender.records.formats import (
 from defender.records.job_facts import EXPIRED, LEASE_LAPSED, RETRY_CAP
 
 from .audit import SYSTEM, announce
-from .errors import Conflict, NotFound, UnknownReference, UnstorableText
+from .errors import Conflict, NotFound, OffboardNotSettled, UnknownReference, UnstorableText
 from defender.tenancy.models import AlertMappingRow, TenantRecord
+from defender.tenancy.models import offboard as _tenancy_offboard
 
 from .models import (
     LEARNING_TERMINAL,
@@ -75,6 +76,15 @@ MAX_ATTEMPTS = 3
 LEARNING_MAX_AGE_SECONDS = 24 * 3600.0
 #: The reserved prefix of an auto job's request key, which no client request id may carry (#1344).
 AUTO_REQUEST_KEY_PREFIX = "auto:"
+
+#: Passes of the offboard's ending of the tenant's live rows before it gives up (#1360 D8): one pass ends them all,
+#: a second when a take-over or a finish inserted a row while the first waited; more means rows keep appearing.
+OFFBOARD_MAX_PASSES = 5
+#: Why an offboard ended a job (#1360 O5): a reason of its own, unlike a user's cancel or a worker fault.
+TENANT_OFFBOARDED = "tenant_offboarded"
+_OFFBOARD_MESSAGE = "its tenant was offboarded"
+#: The tenant states that take no new job and start nothing new (#1360 D7).
+_BEING_REMOVED = ("offboarding", "offboarded")
 
 _logger = logging.getLogger(__name__)
 
@@ -261,10 +271,12 @@ class JobStore:
         """Start an investigation of the alert, or answer the one this request already has (#1081
         §4.1): the latest attempt under the key; else the alert's live investigation, without
         recording this key; else a new attempt 1. `created` only when this call inserted the row.
-        `UnknownReference` for an alert this tenant lacks; `Conflict` naming the missing mapping when a new attempt is
-        due and the tenant has saved no alert mapping (#1345 O4)."""
+        `UnknownReference` for an alert this tenant lacks; `Conflict` naming the tenant's state when a new attempt is
+        due and the tenant is offboarding or offboarded (#1360 O4), and naming the missing mapping when it has saved
+        no alert mapping (#1345 O4)."""
         _refuse_unstorable_text(request_key=request_key)
         async with self._tx() as s:
+            state = await self._share_tenant(s, tenant_id)
             locked = (await s.execute(select(AlertRow.id).where(
                 AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id).with_for_update())).first()
             if locked is None:
@@ -280,6 +292,7 @@ class JobStore:
                 InvestigationRow.stage.in_(LIVE)))).scalars().first()
             if live is not None:
                 return investigation_record(live), False
+            _refuse_removed(state, tenant_id)
             if await self._mapping_in(s, tenant_id) is None:  # never deleted, so no lock (#1345 O4)
                 raise Conflict(ALERT_MAPPING_MISSING)
             row = InvestigationRow(
@@ -289,6 +302,14 @@ class JobStore:
             record = investigation_record(row)
         announce("investigation.start", actor=actor, tenant_id=tenant_id, target=record.investigation_id)
         return record, True
+
+    @staticmethod
+    async def _share_tenant(s: AsyncSession, tenant_id: TenantId) -> str | None:
+        """The tenant's state, read with a share lock on its row before any other lock (#1360 Flow 2): a create that
+        locks first makes the offboard wait and end the row it inserts; an offboard that locks first makes the create
+        wait and read the new state. `None` for an absent tenant."""
+        return (await s.execute(select(TenantRecord.state).where(TenantRecord.id == tenant_id)
+                                .with_for_update(read=True))).scalar()
 
     # --- claim --------------------------------------------------------------------------
 
@@ -348,6 +369,61 @@ class JobStore:
             record = investigation_record(row)
         announce("investigation.cancel", actor=actor, tenant_id=tenant_id, target=investigation_id)
         return record
+
+    # --- offboard (#1360) ---------------------------------------------------------------
+
+    async def offboard_tenant(self, tenant_id: TenantId, *, actor: str) -> TenantRecord:
+        """Move the tenant to `offboarding` and end every queued or running job of it, in one transaction (O3).
+        Tenancy's own transition runs first (`NotFound`, `Conflict`: its refusals, nothing changed); then the tenant's
+        live investigations end `aborted` and its live learning jobs `skipped`, both with the reason
+        `tenant_offboarded`, until a fresh read finds none: a take-over or a finish that the first pass waited on may
+        have inserted a retry or an auto job it could not see. Rows are locked in id order, investigations before
+        learning jobs (D9). `OffboardNotSettled`, with nothing changed, when rows keep appearing past the cap (D8).
+        Each ended job is audited after the commit, by `actor`."""
+        investigations: list[str] = []
+        learning: list[str] = []
+        async with self._tx() as s:
+            record = await _tenancy_offboard(s, tenant_id)
+            for _ in range(OFFBOARD_MAX_PASSES):
+                investigations += await self._end_live(s, InvestigationRow, tenant_id, stage="aborted",
+                                                       failure_reason=TENANT_OFFBOARDED,
+                                                       failure_message=_OFFBOARD_MESSAGE, live=InvestigationRow.stage.in_(LIVE))
+                learning += await self._end_live(s, LearningJobRow, tenant_id, status="skipped", reason=TENANT_OFFBOARDED,
+                                                 message=_OFFBOARD_MESSAGE, live=LearningJobRow.status.in_(("queued", "running")))
+                if not await self._any_live(s, tenant_id):
+                    break
+            else:
+                raise OffboardNotSettled(
+                    f"tenant {tenant_id} still had live jobs after {OFFBOARD_MAX_PASSES} passes of ending them; "
+                    f"the offboard was rolled back")
+        for job_id in sorted(investigations):
+            announce("investigation.cancel", actor=actor, tenant_id=tenant_id, target=job_id,
+                     detail=f"reason={TENANT_OFFBOARDED}")
+        for job_id in sorted(learning):
+            announce("learning_job.finish", actor=actor, tenant_id=tenant_id, target=job_id,
+                     detail=f"status=skipped reason={TENANT_OFFBOARDED}")
+        return record
+
+    async def _end_live(self, s: AsyncSession, row: Any, tenant_id: TenantId, *, live: Any, **ending: Any) -> list[str]:
+        """End the tenant's live rows of one table: lock them in id order, then update exactly those. Returns their ids."""
+        locked: Sequence[Any] = (await s.execute(select(row.id).where(row.tenant_id == tenant_id, live)
+                                  .order_by(row.id).with_for_update())).scalars().all()
+        if not locked:
+            return []
+        ended = (await s.execute(
+            update(row).where(row.id.in_(locked), live)
+            .values(finished_at=self._clock(), lease_expires_at=None, **ending)
+            .returning(row.id).execution_options(synchronize_session=False))).scalars().all()
+        return [str(i) for i in ended]
+
+    @staticmethod
+    async def _any_live(s: AsyncSession, tenant_id: TenantId) -> bool:
+        """A fresh read: whether the tenant has a queued or running job of either kind."""
+        for row, live in ((InvestigationRow, InvestigationRow.stage.in_(LIVE)),
+                          (LearningJobRow, LearningJobRow.status.in_(("queued", "running")))):
+            if (await s.execute(select(row.id).where(row.tenant_id == tenant_id, live).limit(1))).first() is not None:
+                return True
+        return False
 
     # --- delete -------------------------------------------------------------------------
 
@@ -445,19 +521,31 @@ class JobStore:
         cost = (case(*((InvestigationRow.id == i, c) for i, c in figures.items()), else_=InvestigationRow.cost_usd)
                 if figures else InvestigationRow.cost_usd)
         async with self._tx() as s:
+            # Rows are locked in id order before they are updated (#1360 D9): one UPDATE locks in plan order, which
+            # could cross another transaction that takes several of them in id order, the offboard.
+            held_inv = (await s.execute(
+                select(InvestigationRow.id).where(
+                    InvestigationRow.id.in_(ids), InvestigationRow.stage == "running",
+                    InvestigationRow.accounting_written_at.is_(None))
+                .order_by(InvestigationRow.id).with_for_update())).scalars().all() if ids else []
             covered = (await s.execute(
                 update(InvestigationRow).where(
-                    InvestigationRow.id.in_(ids), InvestigationRow.stage == "running",
+                    InvestigationRow.id.in_(held_inv), InvestigationRow.stage == "running",
                     InvestigationRow.accounting_written_at.is_(None))
                 .values(lease_expires_at=self._lease_end(), cost_usd=cost)
                 .returning(InvestigationRow.id).execution_options(synchronize_session=False))).scalars().all() \
-                if ids else []
+                if held_inv else []
             found = [str(i) for i in covered]
             rest = ids - set(found)
-            if rest:
+            held_jobs = (await s.execute(
+                select(LearningJobRow.id).where(
+                    LearningJobRow.id.in_(rest), LearningJobRow.status == "running",
+                    LearningJobRow.finished_at.is_(None))
+                .order_by(LearningJobRow.id).with_for_update())).scalars().all() if rest else []
+            if held_jobs:
                 found += [str(i) for i in (await s.execute(
                     update(LearningJobRow).where(
-                        LearningJobRow.id.in_(rest), LearningJobRow.status == "running",
+                        LearningJobRow.id.in_(held_jobs), LearningJobRow.status == "running",
                         LearningJobRow.finished_at.is_(None))
                     .values(lease_expires_at=self._lease_end(),
                             **_progress_values({i: p for i, p in (progress or {}).items() if i in rest}))
@@ -610,11 +698,13 @@ class JobStore:
         request already has: the latest attempt under `(investigation, client request id)` (O11).
         `created` only when this call inserted the row. `UnknownReference` for an investigation
         this tenant lacks; `Conflict` for one that did not end `completed`, and for a request id
-        carrying the auto jobs' reserved prefix."""
+        carrying the auto jobs' reserved prefix; and, when a new job is due, for a tenant that is offboarding or
+        offboarded (#1360 O4)."""
         _refuse_unstorable_text(client_request_id=client_request_id)
         if client_request_id.startswith(AUTO_REQUEST_KEY_PREFIX):
             raise Conflict(f"a client request id may not start with {AUTO_REQUEST_KEY_PREFIX!r}, the auto jobs' prefix")
         async with self._tx() as s:
+            state = await self._share_tenant(s, tenant_id)  # the tenant row first, as every outside create (#1360 Flow 2)
             named = await self._row(s, tenant_id, investigation_id)
             if named is None:
                 raise UnknownReference(f"no investigation {investigation_id!r}")
@@ -632,6 +722,7 @@ class JobStore:
                 return learning_job_record(replay), False
             if named.stage != "completed":
                 raise Conflict(f"only a completed investigation can be learned from; this one is {named.stage}")
+            _refuse_removed(state, tenant_id)
             row = LearningJobRow(
                 id=LearningJobId.mint(), tenant_id=tenant_id, alert_id=named.alert_id, investigation_id=named.id,
                 request_key=client_request_id, attempt=1, trigger="explicit", status="queued",
@@ -779,8 +870,12 @@ class JobStore:
     async def hold_learning_check(self, tenant_id: str, holder: str) -> bool:
         """Hold the tenant's check clock, as `holder`, for a job's own post-step; False when
         another post-step holds it. The clock is armed either way: the holder's end then finds
-        the job's findings not handed to it and makes the tenant due at once."""
+        the job's findings not handed to it and makes the tenant due at once. Refused (False, the clock not armed) for a
+        tenant that is offboarding or offboarded: nothing new starts for a tenant being removed (#1360 O6)."""
         async with self._tx() as s:
+            state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == tenant_id))).scalar()
+            if state in _BEING_REMOVED:
+                return False
             await self._arm_check(s, tenant_id)
             held = (await s.execute(
                 update(LearningCheckRow).where(LearningCheckRow.tenant_id == tenant_id, _unheld())
@@ -826,6 +921,12 @@ class JobStore:
                     .execution_options(synchronize_session=False))).scalars().all()
                 counts.append(len(moved))
         return counts[0], counts[1]
+
+
+def _refuse_removed(state: str | None, tenant_id: str) -> None:
+    """`Conflict` naming the state, for a tenant that is offboarding or offboarded (#1360 O4, D7)."""
+    if state in _BEING_REMOVED:
+        raise Conflict(f"tenant {tenant_id} is {state}; it takes no new job")
 
 
 def _progress_values(progress: Mapping[str, LearningProgress]) -> dict[str, Any]:
