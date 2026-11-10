@@ -817,36 +817,6 @@ def _stop_after_work(stop_box: Callable[..., None], box: Any, *, work_ok: bool, 
         _logger.error(f"{label}: the batch's box could not be torn down after a failed batch: {e!r}")
 
 
-@contextlib.contextmanager
-def by_hand_claim(tenant_id: str, lane: str, *, purpose: str) -> Iterator[Callable[[list[dict]], int]]:
-    """A by-hand run's hold on `lane` (r8 Locks, R1-F13): the store's own claim, so a drain's working batch
-    refuses the run (`LaneBusy`, before anything moves) and the run's batch refuses a drain's claim while
-    it lasts. The run serves its own folder, not the claim's items: when it ends, however it ends, the
-    batch is abandoned clean and its items go back as they were, the attempt forgiven (a replacement's to
-    the batch it replaces). With nothing due no batch is minted. Yields where the run files the pitfalls
-    it collects (the store's pitfall items, O10)."""
-    from defender.learning.store import Stop
-
-    with opened_store() as store:
-        held = store.claim(tenant_id, lane, owner=owner_name(purpose), thresholds=thresholds())
-
-        def file_pitfalls(rows: list[dict]) -> int:
-            return sum(1 for row in rows if store.add_pitfall(tenant_id, row))
-
-        if held is None:
-            yield file_pitfalls
-            return
-        try:
-            with Holding(store, held):
-                yield file_pitfalls
-        finally:
-            try:
-                store.abandon_clean(held)
-            except Stop as lost:
-                _logger.warning(f"the by-hand run's batch {held.batch_id} was not ended ({type(lost).__name__}): "
-                                "it lapses, and the next tick recovers it")
-
-
 def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapping[str, int] | None = None) -> bool:
     """Whether a tick of `lane` could find work: a batch not ended (in review to check, working to recover,
     or a person's) or something it could claim (G-T1)."""
@@ -868,7 +838,7 @@ def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapp
     return any(n >= max(1, int(limits.get(k, 1))) for k, n in waiting.items())
 
 
-__all__ = ["AUTHOR_LANE", "CORPUS_OF", "by_hand_claim", "DSN_ENV", "GRACE_ENV", "Holding", "LEAD_LANE", "LEASE_ENV", "RENEW_ENV",
+__all__ = ["AUTHOR_LANE", "CORPUS_OF", "DSN_ENV", "GRACE_ENV", "Holding", "LEAD_LANE", "LEASE_ENV", "RENEW_ENV",
            "Refused", "STOP_PUSH_SECONDS", "Tick", "TickStopped", "classified_refusal", "closed_with_feedback",
            "framed_feedback", "forge_refuses", "http_status", "lane_waiting", "live_changes_requested", "opened_store",
            "owner_name", "store_knobs", "thresholds"]

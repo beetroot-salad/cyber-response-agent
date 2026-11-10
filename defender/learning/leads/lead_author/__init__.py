@@ -9,10 +9,8 @@ This module is the drain itself: acquire the lock, build the handoffs, run, veri
 from __future__ import annotations
 
 import argparse
-import contextlib
 import functools
 import logging
-import string
 import sys
 from collections.abc import Callable, Mapping
 from defender._model import model
@@ -31,7 +29,7 @@ from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core.lane_trees import DrainTrees, TreeFor, open_drain_trees
 from defender.learning.core import persist as _loop_persist
-from defender.learning.core.state import LEAD_QUEUE_LOCK, TRY_ONCE, LearningState
+from defender.learning.core.state import LearningState
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
 from defender.learning.author._config import GIT_TIMEOUT_SECONDS
@@ -240,26 +238,24 @@ def build_lead_author_deps(  # noqa: PLR0913 — the lane's seams, plus where it
     )
 
 
-def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each seam it may be handed
+def run(  # noqa: PLR0913 — the run, its lane, and each seam a caller may hand it
     run: Run,
     *,
     label: _loop_config.DrainLabel,
     paths: _loop_config.LoopPaths | None = None,
-    state: LearningState | None = None,
     batch: Any = None,
     deps: LeadAuthorDeps | None = None,
     box: Any = None,
     on_done: DoneSink | None = None,
     file_pitfalls: Callable[[list[dict]], int] | None = None,
 ) -> int:
-    """Serve one run under the per-author queue lock, over `batch`'s draft (`deps.batch` when
-    deps are given). With `file_pitfalls` (#1278) the caller holds the lane through the learning
-    store's claim (`store_tick.by_hand_claim`): no learning state is opened and no file lock is
-    taken, and the run's pitfalls are filed there."""
+    """Serve one run over `batch`'s draft (`deps.batch` when deps are given), for a caller that
+    already holds the lane (the drain, through its store claim). #1278 A3: there is no by-hand
+    entry and no file queue lock. The lane's grant is read first: a label whose lane does not
+    mount the skills tree is refused before anything is built. Without `file_pitfalls` the run's
+    pitfalls are filed in the learning store."""
     if deps is None and paths is None:
         raise TypeError("run takes paths= (or deps=)")
-    # The lane's grant is read before anything else: a non-member label never reaches the
-    # queue lock (#1179).
     lane_batch = getattr(deps, "batch", None) if deps is not None else batch
     writable = (
         label.draft_trees(lane_batch) if lane_batch is not None
@@ -267,38 +263,17 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
     )
     run_dir = Path(run.run_dir)
     sink = on_done if on_done is not None else functools.partial(write_done_sentinel, run_dir)
-
-    # Take the lock before building `deps`: resolving membership is subprocess work, and a
-    # tick about to skip on a contended lock should neither pay for it nor fail on a tree the
-    # resolver can't read yet.
     if deps is not None:
         skills_dir = getattr(deps, "skills_dir", None) or deps.paths.skills_dir
         if skills_dir not in writable:
-            raise LeadAuthorError(
-                f"refused: the {str(label)!r} lane does not mount {skills_dir}"
-            )
-        if deps.state is None:
-            # Over the learning store the caller's claim holds the lane (`store_tick.by_hand_claim`).
-            return _run_locked(run_dir, deps, box=box, on_done=sink)
-        with deps.state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as locked:
-            if not locked:
-                return QUEUE_LOCK_SKIP_RC
-            return _run_locked(run_dir, deps, box=box, on_done=sink)
-
-    assert paths is not None  # the guard above: without `deps`, `paths` is required
-    if file_pitfalls is not None:
-        with open_drain_trees(paths, label, batch=batch) as trees:
-            deps = build_lead_author_deps(paths, state=None, trees=trees, batch=batch, file_pitfalls=file_pitfalls)
-            return _run_locked(run_dir, deps, box=box, on_done=sink)
-    with contextlib.ExitStack() as owned:
-        if state is None:
-            state = owned.enter_context(LearningState.open(paths))
-        with state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as locked:
-            if not locked:
-                return QUEUE_LOCK_SKIP_RC
-            with open_drain_trees(paths, label, batch=batch) as trees:
-                deps = build_lead_author_deps(paths, state=state, trees=trees, batch=batch)
-                return _run_locked(run_dir, deps, box=box, on_done=sink)
+            raise LeadAuthorError(f"refused: the {str(label)!r} lane does not mount {skills_dir}")
+        return _run_locked(run_dir, deps, box=box, on_done=sink)
+    assert paths is not None  # the guard above
+    with open_drain_trees(paths, label, batch=batch) as trees:
+        deps = build_lead_author_deps(
+            paths, state=None, trees=trees, batch=batch,
+            file_pitfalls=file_pitfalls if file_pitfalls is not None else _store_pitfalls(paths))
+        return _run_locked(run_dir, deps, box=box, on_done=sink)
 
 
 def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the run, its held lock and trees, and its seams
@@ -539,112 +514,6 @@ def _prepare_handoffs(
 
 
 
-#: Substituted at the parser with the owner's record names — a template rather than a
-#: module-level f-string, so the prompt-frame lint doesn't read it as a prompt boundary.
-#:
-#: `string.Template`, not `str.format`: path placeholders like `{system}` in this prose would
-#: raise `KeyError` at `--help`, while `safe_substitute` leaves an unknown `$x` as written.
-_HELP_EPILOG = string.Template("""\
-The agent runs no git; the loop commits. Invoked directly this commits onto the
-current branch/worktree's HEAD — in production the lead-author drain
-(``loop.py --lead-author-drain``) runs it inside a fresh ``lead-author/<id>``
-worktree and opens the PR.
-
-Preconditions
-  * No other lead-author tick may be running (per-author queue lock at
-    _pending_leads/.lock under the learning state root, held by the drain for its whole tick —
-    serve, pitfalls curation, scrub, push, PR). Violating it is not silent: this
-    returns rc=3 without serving, and a drain tick that finds the lock held skips
-    before claiming any request rather than counting the skip as a serve.
-  * ``<run_dir>/$EXECUTED_QUERIES`` and ``<run_dir>/$RAW_MARKER/``
-    (the two tables) must exist — written live during the run by
-    record_query.py + record_lead.py.
-
-State files written under ``<run_dir>/$LEAD_AUTHOR_DIRNAME/``
-  done           sentinel on successful completion; makes the run a no-op. Written
-                 here at once when invoked by hand; under the drain, only once the
-                 batch's tree has passed the scrub (its commit is then on a local
-                 branch the drain delivers, retrying the push and PR on later ticks
-                 without re-serving anything).
-
-On a per-run fault this returns rc=2 and the lead-author drain quarantines the run's
-marker to the author-queue's ``failed/`` dir (surfaced for a human, not dropped); the
-per-spawn RequestLogger trace under the run dir is the diagnostic. (A systemic config
-fault — no key / unroutable model / bad effort — propagates from the in-process engine
-as exit 2 instead, halting the drain rather than quarantining every marker.)
-
-Environment
-  LEAD_AUTHOR_MODEL                          in-process model id (default glm-5.3; any
-                                             provider providers.provider_for routes)
-  LEAD_AUTHOR_EFFORT                          reasoning effort (default medium)
-  LEAD_AUTHOR_TIMEOUT_SECONDS                per-spawn wall-clock ceiling (default 1800)
-  LEAD_AUTHOR_REQUEST_LIMIT                   tool-loop request cap (default 250)
-  LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD        min pending-draft count to fire the
-                                             system-skill lift queue (default 5)
-""")
-
-
-def _record_names() -> dict[str, str]:
-    """The record names this help text shows, asked of `RunPaths` at call time so a rename
-    there reaches the help text with nothing to update here."""
-    names = RunPaths(Path("<run_dir>"))
-    return {
-        "EXECUTED_QUERIES": names.executed_queries.name,
-        "RAW_MARKER": names.gather_raw.name,
-        "LEAD_AUTHOR_DIRNAME": names.lead_author.name,
-    }
-
-
-def main(argv: list[str], *, directory: Any = None) -> int:
-    """`lead_author --tenant T <run_id>`. `directory` is the tenant records a test hands in; a
-    production process passes none and reads them from `DEFENDER_DATABASE_DSN`."""
-    names = _record_names()
-    p = argparse.ArgumentParser(
-        prog="lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-        description="Fold lessons from one defender run into the executed-side "
-                    "query template catalog.",
-        epilog=_HELP_EPILOG.safe_substitute(names),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p.add_argument("--tenant", required=True,
-                   help="the tenant whose run is served; required, with no default")
-    p.add_argument("run_id",
-                   help=f"the defender run, by its id — its folder holds "
-                        f"{names['EXECUTED_QUERIES']} + {names['RAW_MARKER']}/")
-    args = p.parse_args(argv)
-    from defender import tenancy
-    from defender.records.formats import TenantRefused
-    from defender.systems.run_tenant import host_tenant
-
-    # The request's tenant through the one host acceptance (r10 A1), held while the run is
-    # served, and its run opened by id through that tenant's repository (a link at the run's name
-    # is never followed). A refusal is printed, not logged: a log level must never hide it.
-    try:
-        admitted = host_tenant(tenancy.resolve_data_root(), args.tenant, directory=directory)
-    except TenantRefused as refused:
-        print(f"lead_author: {refused}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-        return 2
-    with admitted:
-        opened = tenancy.open_command_line_run(admitted.tenant, args.run_id)
-        if isinstance(opened, str):
-            print(f"lead_author: {opened}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-            return 2
-        # By hand this serves the lead-author lane, so it names that lane, and it claims the lane
-        # through the learning store as the drain does (#1278 r8 Locks, R1-F13): a working lead batch
-        # refuses it before anything moves, and its own claim refuses the drain while it runs.
-        from defender.learning.core.store_tick import LEAD_LANE, by_hand_claim
-        from defender.learning.store import LaneBusy
-
-        try:
-            with by_hand_claim(str(admitted.tenant.id), LEAD_LANE, purpose="lead-author-by-hand") as file_pitfalls:
-                return run(opened, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL,
-                           paths=_loop_config.LoopPaths.for_tenant(admitted.tenant), file_pitfalls=file_pitfalls)
-        except LaneBusy:
-            print("lead_author: the lead-author lane has a working batch (the lead drain's, or another "  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-                  "by-hand run's): try again when it ends", file=sys.stderr)
-            return QUEUE_LOCK_SKIP_RC
-
-
 #: Re-exports: callers import these names from here; their real homes are the source
 #: modules.
 __all__ = [
@@ -728,7 +597,6 @@ __all__ = [
     "invoke_agent",
     "lead_neighbors",
     "lead_render",
-    "main",
     "write_done_sentinel",
     "run",
     "run_under_held_queue_lock",
