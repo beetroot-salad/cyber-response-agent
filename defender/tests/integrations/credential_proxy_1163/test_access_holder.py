@@ -246,15 +246,17 @@ def test_h9_a_fault_that_is_not_process_wide_access_does_not_lose_it(tmp_path, d
 
 
 def test_h9b_a_setup_fault_is_not_lost_access_but_reaches_the_owner(tmp_path, data_root, clock):
-    """A reported `setup` fault leaves the holder serving and calls its owner's callback once with the fault.
+    """A reported `setup` fault leaves the holder serving and calls its owner's callback once with the fault, which names its system.
     Controls: h8, h9. #1363 O5, B1"""
     signer, told = A.MarkedSigner(), []
     access = _access(tmp_path, data_root, signer, clock, on_fault=told.append)
     first = access.token()
     fault = TransportFault("no credential set is stored for identity")
     fault.origin = "setup"
+    fault.system = "identity"
     access.report(fault)
     assert told == [fault], "the owner's callback was not called once with the setup fault"
+    assert [(f.origin, f.system) for f in told] == [("setup", "identity")], "the setup fault was not recorded against its system"
     assert access.token() == first
     clock.now += TOKEN_SEC
     assert access.token() != first, "a setup fault stopped the holder signing"

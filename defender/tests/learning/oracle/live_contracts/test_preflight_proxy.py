@@ -104,7 +104,7 @@ class ScriptedBao(A.OpenBaoStandIn):
     def __init__(self, *args: Any, **kw: Any) -> None:
         super().__init__(*args, **kw)
         self.sign_script: list[tuple[float, int | None]] = []
-        #: Called (no arguments) once a scripted sign has answered, success or failure.
+        #: Called (no arguments) once a scripted sign has answered successfully (never after a failure).
         self.after_sign: Any = None
         self._scripting = threading.Lock()
 
@@ -335,6 +335,73 @@ def _sign_requests(bao: A.OpenBaoStandIn) -> int:
     return sum(1 for path in bao.requests if "/sign/" in path)
 
 
+#: How long a held oracle request waits for the failing world's retry (seconds); far under the turn deadline.
+HOLD_SEC = 10
+CALIBRATED_WORLDS = ("b", "c")
+
+
+class HeldOracle(S.ScriptedModel):
+    """An oracle double that answers its first request (the scripted lookup) at once and holds every other request
+    until one carrying a failed attempt's note arrives: the failing world's retry, which follows the fault and so the
+    latch. No other world is then ahead of the latch, whatever the thread timing."""
+
+    def __init__(self, *moves: S.Move, then: S.Move | None = None) -> None:
+        super().__init__(*moves, then=then, name="oracle")
+        self._order = threading.Lock()
+        self._begun = False
+        self.retried = threading.Event()
+
+    def __call__(self, messages: list[Any], info: Any) -> Any:
+        noted = "Attempt failed" in str(messages)
+        with self._order:
+            first, self._begun = not self._begun, True
+        if noted:
+            self.retried.set()
+        elif not first:
+            self.retried.wait(HOLD_SEC)
+        return super().__call__(messages, info)
+
+
+def _one_failing_lookup() -> HeldOracle:
+    """Exactly one lookup, answered first; every later request submits."""
+    return HeldOracle(S.run_query("idp", "query", S.query_params("user:bob")),
+                      then=S.submit(S.default_calls()[0].payload, S.EMPTY_CLAIM))
+
+
+def _calls_per_world(ep: Any) -> dict[str, int]:
+    """The calls each calibrated world began, from its own oracle ledger's pre-flight rows."""
+    return {w: sum(1 for r in S.oracle_rows(ep, w, "ledger") if r.get("actor") == "preflight")
+            for w in CALIBRATED_WORLDS}
+
+
+def _healthy_pass(tmp_path, monkeypatch, data_root, **kw: Any) -> tuple[int, dict[str, int]]:
+    """The same pass with the same retry cap and one lookup, nothing failing: `(oracle turns, calls per world)`.
+    Every world runs every call (a positive control for the bound the failing passes are held to)."""
+    oracle = _side_lookups("user:bob")
+    (tmp_path / "healthy").mkdir()
+    run, outcome, *_rest = _preflight(tmp_path / "healthy", monkeypatch, data_root, oracle=oracle, **kw)
+    assert outcome is not None and outcome["outcome"] == "accepted", ("positive control: the healthy pass", run.message)
+    calls = _calls_per_world(run.ep)
+    assert len(set(calls.values())) == 1 and min(calls.values()) >= 2, ("positive control: every world ran every call", calls)
+    assert oracle.requests == len(calls) * min(calls.values()) + 1, "positive control: one turn per call, one more for the lookup"
+    return oracle.requests, calls
+
+
+def _no_world_went_on(run: Any, oracle: HeldOracle, healthy: tuple[int, dict[str, int]]) -> None:
+    """After the one failed lookup (retry cap 2, so a failed world's retry would succeed and, without a stop, every
+    world would run every call): no world began a second call, and the oracle took no more turns than the failing
+    world's retry plus one first call for each other world. The retry itself is the design's accepted limit."""
+    healthy_turns, healthy_calls = healthy
+    calls = _calls_per_world(run.ep)
+    assert max(calls.values()) <= 1, ("a world started another call after access was lost or setup failed (O6)",
+                                       calls, healthy_calls)
+    assert oracle.requests <= len(calls) + 1, ("a world went on asking the oracle after the latch (O6)",
+                                               oracle.requests, healthy_turns)
+    asked = oracle.requests
+    time.sleep(0.5)
+    assert oracle.requests == asked, "the oracle was asked again after the outcome"
+
+
 def test_p1c_a_pass_longer_than_a_token_s_life_signs_again_on_demand_and_reuses_otherwise(
         tmp_path, monkeypatch, data_root):
     """The live read signs at T; the holder clock then moves to T+541 (59 s left, under the 60 s
@@ -365,12 +432,9 @@ def test_p1c_a_pass_longer_than_a_token_s_life_signs_again_on_demand_and_reuses_
 def test_p4_a_re_sign_that_fails_mid_calibration_refuses_the_pass_as_the_environments(
         tmp_path, monkeypatch, data_root):
     """A failed mid-pass re-sign loses access: `refused` naming the proxy, no unservable world, nothing signs again,
-    fewer oracle turns than a healthy pass. #1363 O5, O6, D8"""
-    monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
-    healthy = _side_lookups("user:bob", "user:carol")
-    (tmp_path / "healthy").mkdir()
-    _run, healthy_outcome, *_rest = _preflight(tmp_path / "healthy", monkeypatch, data_root, oracle=healthy)
-    assert healthy_outcome["outcome"] == "accepted", "positive control: the same pass, healthy, calibrates every world"
+    and no world begins a second call. #1363 O5, O6, D8"""
+    monkeypatch.setenv(S.KNOB_RETRY_CAP, "2")
+    healthy = _healthy_pass(tmp_path, monkeypatch, data_root)
     clock = Clock()
     start = clock.now
 
@@ -378,7 +442,7 @@ def test_p4_a_re_sign_that_fails_mid_calibration_refuses_the_pass_as_the_environ
         if clock.now == start:
             clock.now = start + TOKEN_SEC  # the held token has no life left
 
-    lost = _side_lookups("user:bob", "user:carol")
+    lost = _one_failing_lookup()
     run, outcome, bao, tap, merged, _wt = _preflight(
         tmp_path, monkeypatch, data_root, oracle=lost,
         on_read=first_read_leaves_no_life, clock=clock, sign_script=[(0, None), (0, 503)])
@@ -388,11 +452,9 @@ def test_p4_a_re_sign_that_fails_mid_calibration_refuses_the_pass_as_the_environ
     assert outcome["unservable_worlds"] == [], "our own failure made a world unservable"
     assert len(bao.signs) == 1, "positive control: the first token was signed; OpenBao healed and nothing signed again"
     assert _sign_requests(bao) == 2, "the failed re-sign was retried, or a later request signed again (D8)"
-    assert lost.requests < healthy.requests, ("a world went on asking the oracle after access was lost (O6)",
-                                              lost.requests, healthy.requests)
-    asked = lost.requests
-    time.sleep(0.5)
-    assert lost.requests == asked, "the oracle was asked again after the outcome"
+    assert len(tap.tokens) == 1, "a token was sent after the failed re-sign: the live read's was the only one"
+    assert len(merged.seen) == 1, "the system was read after the failed re-sign: the live read was the only read"
+    _no_world_went_on(run, lost, healthy)
 
 
 def test_p5_a_proxy_unreachable_during_the_live_reads_refuses_the_pass_before_calibration(
@@ -487,24 +549,15 @@ def test_p1d_the_holder_serves_oracle_lookups_when_no_replayed_call_is_proxied(
     assert len(tap.tokens) == 1
 
 
-def _healthy_lookup_turns(tmp_path, monkeypatch, data_root) -> int:
-    """How many oracle turns the pass over `source="unproxied"` takes when its one lookup succeeds."""
-    oracle = _side_lookups("user:bob")
-    (tmp_path / "healthy").mkdir()
-    run, outcome, *_rest = _preflight(tmp_path / "healthy", monkeypatch, data_root, source="unproxied", oracle=oracle)
-    assert outcome is not None and outcome["outcome"] == "accepted", ("positive control: the healthy pass", run.message)
-    return oracle.requests
-
-
 def test_p8_a_lookup_refused_by_the_proxy_as_lost_access_refuses_the_pass_naming_the_proxy(
         tmp_path, monkeypatch, data_root):
     """A calibration lookup whose token the proxy finds expired is `access`: `refused` naming the proxy, no unservable
-    world, fewer oracle turns than p1d's healthy pass. #1363 O5, O6, O8, B1"""
-    monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
-    healthy_turns = _healthy_lookup_turns(tmp_path, monkeypatch, data_root)
+    world, and no world begins a second call. #1363 O5, O6, O8, B1"""
+    monkeypatch.setenv(S.KNOB_RETRY_CAP, "2")
+    healthy = _healthy_pass(tmp_path, monkeypatch, data_root, source="unproxied")
     clock = Clock()
     clock.now -= 2 * 3600
-    oracle = _side_lookups("user:bob")
+    oracle = _one_failing_lookup()
     run, outcome, bao, tap, merged, _wt = _preflight(
         tmp_path, monkeypatch, data_root, source="unproxied", oracle=oracle, clock=clock)
     assert outcome is not None, run.message
@@ -513,17 +566,16 @@ def test_p8_a_lookup_refused_by_the_proxy_as_lost_access_refuses_the_pass_naming
     assert outcome["unservable_worlds"] == []
     assert len(bao.signs) == 1 and len(tap.tokens) == 1, "positive control: a token was signed and the proxy refused it"
     assert merged.seen == [], "the system was reached with a refused token"
-    assert oracle.requests < healthy_turns, ("worlds went on after access was lost", oracle.requests, healthy_turns)
-    assert _sign_requests(bao) == 1, "something signed again after access was lost (D8)"
+    _no_world_went_on(run, oracle, healthy)
 
 
 def test_p8b_a_lookup_met_by_a_setup_refusal_refuses_the_pass_naming_our_setup_for_the_system(
         tmp_path, monkeypatch, data_root):
     """A calibration lookup of idp with no credential set stored is `setup`: `refused` naming our setup for idp, no
-    unservable world, fewer oracle turns than p1d's healthy pass. #1363 O5, O6, O8, B1"""
-    monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
-    healthy_turns = _healthy_lookup_turns(tmp_path, monkeypatch, data_root)
-    oracle = _side_lookups("user:bob")
+    unservable world, and no world begins a second call. #1363 O5, O6, O8, B1"""
+    monkeypatch.setenv(S.KNOB_RETRY_CAP, "2")
+    healthy = _healthy_pass(tmp_path, monkeypatch, data_root, source="unproxied")
+    oracle = _one_failing_lookup()
     run, outcome, _bao, tap, merged, _wt = _preflight(
         tmp_path, monkeypatch, data_root, source="unproxied", oracle=oracle, credential_set=False)
     assert outcome is not None, run.message
@@ -532,7 +584,7 @@ def test_p8b_a_lookup_met_by_a_setup_refusal_refuses_the_pass_naming_our_setup_f
     assert outcome["unservable_worlds"] == []
     assert len(tap.tokens) >= 1, "positive control: the lookup reached the proxy"
     assert merged.seen == []
-    assert oracle.requests < healthy_turns, ("worlds went on after our setup failed", oracle.requests, healthy_turns)
+    _no_world_went_on(run, oracle, healthy)
 
 
 # --- #1363: a token request in flight on a thread the oracle abandoned (O6, O1, D8) -------------------------
@@ -557,18 +609,8 @@ def test_p7_a_slow_sign_in_flight_when_the_outcome_is_decided_is_counted_and_not
         if clock.now == start:
             clock.now = start + TOKEN_SEC
 
-    signed = []
-
-    def token_stale_again() -> None:
-        # The slow (second) sign has answered: its token is dated before this jump, so the abandoned thread's next
-        # ask (its world's further lookups) could only be served by signing again, were the holder open.
-        signed.append(1)
-        if len(signed) == 2:
-            clock.now += TOKEN_SEC
-
-    oracle = _side_lookups("user:bob", "user:carol", "user:dan")
     run, outcome, bao, _tap, _merged, _wt = _preflight(
-        tmp_path, monkeypatch, data_root, oracle=oracle, after_sign=token_stale_again,
+        tmp_path, monkeypatch, data_root, oracle=_side_lookups("user:bob"),
         on_read=first_read_leaves_no_life, clock=clock, sign_script=[(0, None), (1.0, sign_answer)])
     assert outcome is not None, run.message
     if sign_answer is None:
@@ -578,7 +620,5 @@ def test_p7_a_slow_sign_in_flight_when_the_outcome_is_decided_is_counted_and_not
         assert outcome["outcome"] == "refused", ("the sign in flight was not counted", outcome)
         assert "credential proxy" in outcome["reason"], outcome["reason"]
         assert outcome["unservable_worlds"] == []
-    asked = oracle.requests
     time.sleep(0.5)
     assert _sign_requests(bao) == 2, "something signed after the outcome was decided"
-    assert oracle.requests == asked, "the abandoned world went on asking the oracle after the outcome"

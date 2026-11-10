@@ -250,6 +250,8 @@ def test_too_many_unservable_worlds_end_skipped_family_unusable_with_nothing_sta
 #: The environment's structured causes on the pre-flight record (the value of `ENVIRONMENT_REFUSED`, #1363 O6, B5): the
 #: sign / access / setup that choose the job's fixed brief. Each has a row below, and the module names each.
 _ENVIRONMENT_CAUSES = ("sign", "access", "setup")
+#: The cause value the test pins for D9's down-systems-only refusal (the design names none; the agent's choice, B1).
+_DOWN_SYSTEMS_CAUSE = "down-systems"
 _BRIEF_SIGN = "the read token for the credential proxy cannot be signed"
 _BRIEF_ACCESS = "the credential proxy could not be used"
 _BRIEF_SETUP = "our setup for a system failed"
@@ -257,9 +259,8 @@ _BRIEF_SETUP = "our setup for a system failed"
 #: Every refusal pre-flight records before the first sibling, by CAUSE (#1363 B5: not by call site, several causes
 #: share the outcome writer), the row it ends, and the SITE it reaches: `("reason", <the first four words of the reason
 #: text of the `record(REFUSED | UNUSABLE, ...)` that writes it>)` for the family's own refusals, `("cause", <the
-#: structured environment cause>)` for the environment's, `("cause", None)` for the environment refusal the design
-#: gives no structured cause (D9: only down systems). A refusal caused by the family or its source skips the job for
-#: good; the environment's (no signable read token, no usable credential proxy, our setup for a system, a pass left
+#: structured environment cause>)` for the environment's, `("cause", _DOWN_SYSTEMS_CAUSE)` for D9's down-systems-only refusal.
+#: A refusal caused by the family or its source skips the job for good; the environment's (no signable read token, no usable credential proxy, our setup for a system, a pass left
 #: with only down systems) fails it. A cause with no row here has no job ending.
 _PREFLIGHT_REFUSALS = {
     "no fact world": ("skipped", "family_unusable", ("reason", "no world of the")),
@@ -268,7 +269,7 @@ _PREFLIGHT_REFUSALS = {
     "too many unservable worlds": ("skipped", "family_unusable", ("reason", "{} worlds failed calibration")),
     "read token cannot be signed": ("failed", "launch_refused", ("cause", "sign")),
     "no proxy address, no replayed call proxied": ("failed", "launch_refused", ("cause", "sign")),
-    "only down systems": ("failed", "launch_refused", ("cause", None)),
+    "only down systems": ("failed", "launch_refused", ("cause", _DOWN_SYSTEMS_CAUSE)),
     "our failure: proxy unreachable during the live reads": ("failed", "launch_refused", ("cause", "access")),
     "our failure: no credential set stored for the read system": ("failed", "launch_refused", ("cause", "setup")),
     "our failure: the first sign fails at the first read": ("failed", "launch_refused", ("cause", "sign")),
@@ -287,28 +288,40 @@ _QUESTIONER_UNUSABLE = "questioner family unusable"
 
 def _preflight_refusal_sites() -> tuple[set[str], set[str]]:
     """What `preflight` records: the first four words of the reason text of each `record(REFUSED | UNUSABLE, ...)`
-    that carries no environment cause, and the `_ENVIRONMENT_CAUSES` the module names as string constants (the
-    structured cause values of `ENVIRONMENT_REFUSED`; none today)."""
+    that passes no `environment=`, and the value of every `environment=` keyword of any `record(...)` call (a string
+    constant, or a module-level name bound to one). A value it cannot resolve fails the census."""
     import ast
     import inspect
 
     from defender.learning.branch import preflight
 
     tree = ast.parse(inspect.getsource(preflight))
+    module_constants = {t.id: n.value.value for n in tree.body if isinstance(n, ast.Assign)
+                        and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)
+                        for t in n.targets if isinstance(t, ast.Name)}
     reasons: set[str] = set()
+    causes: set[str] = set()
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "record"
-                and node.args and isinstance(node.args[0], ast.Name) and node.args[0].id in {"REFUSED", "UNUSABLE"}):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "record"):
             continue
-        if any(kw.arg == "environment" for kw in node.keywords):
+        given = [kw.value for kw in node.keywords if kw.arg == "environment"]
+        for value in given:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                causes.add(value.value)
+            elif isinstance(value, ast.Name) and value.id in module_constants:
+                causes.add(module_constants[value.id])
+            else:
+                raise AssertionError(f"record(...) at line {node.lineno} passes environment={ast.unparse(value)}, "
+                                     "which is not a string constant or a module-level name bound to one: the "
+                                     "structured cause cannot be read")
+        if given or not (node.args and isinstance(node.args[0], ast.Name) and node.args[0].id in {"REFUSED", "UNUSABLE"}):
             continue
         reason = node.args[1] if len(node.args) > 1 else None
         text = "".join(part.value if isinstance(part, ast.Constant) else "{}" for part in
                        (reason.values if isinstance(reason, ast.JoinedStr) else [reason])
                        if isinstance(part, (ast.Constant, ast.FormattedValue)))
         reasons.add(" ".join(text.split()[:4]))
-    constants = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
-    return reasons, {cause for cause in _ENVIRONMENT_CAUSES if cause in constants}
+    return reasons, causes
 
 
 @dataclass
@@ -371,21 +384,18 @@ def test_a_refusal_before_the_first_sibling_skips_the_job_when_the_family_caused
     assert ran.spawn.launches == []
     if cause in _PREFLIGHT_BRIEFS:
         assert _PREFLIGHT_BRIEFS[cause] in message, message
-    if cause == "only down systems":  # D9 names no brief: nothing pinned but the ending; a system named is the down one
-        named = [name for name in (*S.SYSTEMS, "hr") if name in message]
-        assert named in ([], ["hr"]), ("the message names a system that is not down", message)
 
 
 def test_1363_the_refusal_table_names_exactly_the_sites_and_causes_pre_flight_records():
-    """The table's family sites are exactly the reasons pre-flight records for the family, and its environment
-    causes exactly the structured causes (sign, access, setup) the record carries, each with a row. (#1363 B5, O6)"""
+    """The table's family sites are exactly the reasons pre-flight records for the family, and its causes exactly the
+    `environment=` values its records carry (sign, access, setup, and one for the down-systems-only pass). (#1363 B5, O6, D9)"""
     reasons, causes = _preflight_refusal_sites()
     named = [site for _s, _r, site in _PREFLIGHT_REFUSALS.values() if site is not None]
     assert reasons == {value for kind, value in named if kind == "reason"}, \
         ("pre-flight records a family refusal the table does not name, or the table names one it does not", reasons)
-    assert {value for kind, value in named if kind == "cause" and value is not None} == set(_ENVIRONMENT_CAUSES), \
-        "a structured environment cause has no row"
-    assert causes == set(_ENVIRONMENT_CAUSES), ("the structured cause values pre-flight's record carries", causes)
+    assert causes == {value for kind, value in named if kind == "cause"}, \
+        ("the structured cause values pre-flight's records carry, against the table's", causes)
+    assert causes == {*_ENVIRONMENT_CAUSES, _DOWN_SYSTEMS_CAUSE}, ("the three causes and D9's own", causes)
 
 
 #: #1363 O6, B5: pre-flight's environment refusals for our own failures that need the proxy rig, by cause, and the fixed
