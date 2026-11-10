@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
@@ -151,7 +151,7 @@ def _total_count(response: httpx.Response) -> int | None:
 @dataclass(frozen=True)
 class PullRequest:
     """One PR of our repository as Forgejo lists it: its number and URL, its head commit
-    (`None` when the row carries none; the head branch plays no part in which PR is whose),
+    (`None` when the row carries none) and head branch (`head_ref`), the two ways a batch's PR is found,
     and its `status`: `open`, `merged` or `closed` (closed unmerged). `merge_commit_sha` is, once it is merged,
     `main`'s new head for a merge, a squash and a rebase alike (`None` when the row names none)."""
 
@@ -160,6 +160,8 @@ class PullRequest:
     head_sha: str | None
     status: str
     merge_commit_sha: str | None = None
+    #: The head branch's name (`None` when the row names none). Not part of what makes two PRs equal.
+    head_ref: str | None = field(default=None, compare=False)
 
 
 def _pull_request(row: dict) -> PullRequest:
@@ -182,6 +184,7 @@ def _pull_request(row: dict) -> PullRequest:
         merge_commit_sha=(
             merge_sha if status == "merged" and isinstance(merge_sha, str) and merge_sha else None
         ),
+        head_ref=row["head"].get("ref") if isinstance(row["head"].get("ref"), str) else None,
     )
 
 

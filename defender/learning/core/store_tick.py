@@ -303,6 +303,34 @@ def framed_feedback(number: int, reviews: Sequence[Mapping[str, Any]], comments:
             + wrap_fresh("\n".join(lines), "review-feedback"))
 
 
+# --- finding and describing a batch's PR (D6, O5) -------------------------------------------------------
+
+
+def find_pr(forge: Any, branch: str, commits: frozenset[str]) -> Any | None:
+    """The PR of a batch in any state, found by its head branch or by a head commit the record holds for it. An open
+    one is preferred, then the newest: a batch has at most one PR (O5)."""
+    found = [pr for pr in forge.pull_requests()
+             if pr.head_ref == branch or (pr.head_sha is not None and pr.head_sha in commits)]
+    return min(found, key=lambda pr: (pr.status != "open", -pr.number), default=None)
+
+
+def without_kept(outcomes: Mapping[tuple[str, str], Any]) -> dict[tuple[str, str], Any]:
+    """`outcomes` less the items a curator named `kept` (they stay in the batch, which is what naming no outcome does)."""
+    return {item: fate for item, fate in outcomes.items() if fate.name != "kept"}
+
+
+def pr_text(held: Any) -> tuple[str, str]:
+    """The title and body of a batch's PR, built from its row: a revert or an authoring batch, and for a
+    replacement the link to the PR it replaces."""
+    title = (f"revert: batch {held.batch_id}" if held.kind == "revert"
+             else f"learning: tenant knowledge batch {held.batch_id}")
+    body = (f"Tenant agent knowledge batch `{held.branch}`. Changes `agent/` only, every commit made by the "
+            "host's commit-maker.")
+    if held.replaces is not None and held.feedback_pr is not None:
+        body += f"\n\nReplaces #{held.feedback_pr}, re-authored from its reviewers' feedback."
+    return title, body
+
+
 # --- one tick ---------------------------------------------------------------------------------------------
 
 
@@ -417,7 +445,9 @@ class Tick:
         _logger.warning(f"{self.label}: {doing} for batch {b.id} could not be done now ({one_line(str(fault))}): "
                         "unknown, so the batch waits")
         with contextlib.suppress(Exception):
-            if b.phase != "working":
+            # An ended batch is selected again while its PR is open and unchecked since it ended
+            # (`_open_pr_of_ended`): a fault is not a check, so it must not stamp one.
+            if b.phase not in ("working", "ended"):
                 self.store.note_check(self.tenant_id, str(b.id), reset_refusals=False)
 
     def _fetch(self, delivery: TenantDelivery) -> None:
@@ -533,11 +563,8 @@ class Tick:
         forge = repository.forge
         mine = record.commits_of(str(b.id))
         try:
-            ours = [r for r in forge.list_open_prs(b.branch) if r["headRefName"] == b.branch]
-            number = int(ours[0]["number"]) if ours else None
-            if number is None and mine:
-                found = [pr for pr in forge.pull_requests() if pr.head_sha in mine]
-                number = found[0].number if found else None
+            pr = find_pr(forge, b.branch, mine)
+            number = pr.number if pr is not None else None
             self._fetch(delivery)
             remote = remote_tip(repository, b.branch)
             local = repository.branch_tip(b.branch)
@@ -575,12 +602,10 @@ class Tick:
         try:
             if push is not None:
                 repository.push(push, b.branch)
+            number = self._find_or_open_pr(delivery, held, record)
             if number is None:
-                number = self._open_pr(delivery, held, b.kind)
-                if number is None:
-                    return
-            outcomes = self._citation_rule(delivery, held, record)
-            self.store.in_review(held, number, outcomes)
+                return
+            self.store.in_review(held, number, self._fates(delivery, held, record, {}))
             _logger.info(f"{self.label}: took over batch {b.id} and recorded its PR #{number}")
         except LeaseLost:
             return
@@ -591,10 +616,13 @@ class Tick:
 
     def _citation_rule(self, delivery: TenantDelivery, held: Any, record: Any) -> dict[tuple[str, str], Any]:
         """A takeover has no outcomes in memory (D1): items cited by the batch's own commits stay, the rest
-        of the author lane's wait again; the lead lane's stay."""
+        of the author lane's wait again. The lead lane has no citation to read, so nothing proves one of its items
+        was committed: they all wait again (P3), and a merge publishes none of them unseen."""
         from defender.learning.author.version_control.store_delivery import cited_in_paths
         from defender.learning.store import Outcome
 
+        if held.lane == LEAD_LANE:
+            return {(kind, key): Outcome.waiting() for kind, key, _payload in held.items}
         tip = delivery.repository.branch_tip(held.branch)
         if tip is None:
             from defender.learning.author.version_control.store_delivery import remote_tip
@@ -610,32 +638,51 @@ class Tick:
                 out[(kind, key)] = Outcome.waiting()
         return out
 
+    def _fates(self, delivery: TenantDelivery, held: Any, record: Any,
+               outcomes: Mapping[tuple[str, str], Any]) -> dict[tuple[str, str], Any]:
+        """What the batch's items become when it enters review. The author lane: the curators' outcomes over the
+        citation rule; an item with none stays, because its lesson cites it. The lead lane has nothing to cite, so
+        it takes a positive set: an item stays only when its curator named it `kept`, and every other item goes
+        back to waiting (P3), whatever it lacks an outcome for."""
+        from defender.learning.store import Outcome
+
+        if held.lane != LEAD_LANE:
+            return without_kept({**self._citation_rule(delivery, held, record), **outcomes})
+        fates: dict[tuple[str, str], Any] = {}
+        for kind, key, _payload in held.items:
+            fate = outcomes.get((kind, key))
+            if fate is None:
+                fates[(kind, key)] = Outcome.waiting()
+            elif fate.name != "kept":
+                fates[(kind, key)] = fate
+        return fates
+
     # -- opening a PR (D6, O5) -------------------------------------------------------------------------------
 
-    def _open_pr(self, delivery: TenantDelivery, held: Any, kind: str, *, body_extra: str = "") -> int | None:
-        """The batch's one PR: a PR already open on its branch is recorded; an open PR on the lane's prefix
-        that no batch of the store made sends an author batch to a person (D6); else one is opened."""
+    def _find_or_open_pr(self, delivery: TenantDelivery, held: Any, record: Any) -> int | None:
+        """The batch's one PR, for a fresh tick and a takeover alike: the PR the forge already has for it, in any
+        state (found by its head branch or by a commit the record holds for the batch), is recorded and never opened
+        again, a merged or closed one included: the reconcile reads its state next. Else, an open PR on the lane's
+        prefix that no batch of the store made sends an author batch to a person (D6); else one is opened, its title
+        and body built from the batch's row. `None`: the batch was sent to a person."""
         from defender.learning.author.version_control.store_delivery import open_pr_on
 
         repository = delivery.repository
-        prefix = PREFIX_OF[held.lane]
-        open_rows = repository.forge.list_open_prs(prefix)
-        ours = [r for r in open_rows if r["headRefName"] == held.branch]
-        if ours:
-            return int(ours[0]["number"])
-        if kind == "author":
+        found = find_pr(repository.forge, held.branch, record.commits_of(str(held.batch_id)))
+        if found is not None:
+            _logger.info(f"{self.label}: batch {held.batch_id}: PR #{found.number} ({found.status}) is already its own")
+            return int(found.number)
+        if held.kind == "author":
+            prefix = PREFIX_OF[held.lane]
             known = {b.branch for b in self.store.batches(self.tenant_id)}
-            foreign = [r for r in open_rows if r["headRefName"] not in known]
+            foreign = [r for r in repository.forge.list_open_prs(prefix) if r["headRefName"] not in known]
             if foreign:
                 names = ", ".join(f"#{r['number']} ({r['headRefName']})" for r in foreign)
                 self.store.needs_person(self.tenant_id, str(held.batch_id),
                                         f"an open PR on {prefix} that no batch made holds the lane: {names}")
                 _logger.error(f"{self.label}: batch {held.batch_id} opens no PR beside {names}: a person must look")
                 return None
-        title = (f"revert: batch {held.batch_id}" if kind == "revert"
-                 else f"learning: tenant knowledge batch {held.batch_id}")
-        body = (f"Tenant agent knowledge batch `{held.branch}`. Changes `agent/` only, every commit made by the "
-                f"host's commit-maker.{body_extra}")
+        title, body = pr_text(held)
         number, url = open_pr_on(repository, branch=held.branch, title=title, body=body)
         _logger.info(f"{self.label}: batch {held.batch_id}: PR opened {url}")
         return number
@@ -701,7 +748,7 @@ class Tick:
     def _author(  # noqa: C901, PLR0912, PLR0915 — the claim's whole life (author, push, open, review) and each stop path, kept in one place so no path skips its store verb
             self, delivery: TenantDelivery, held: Any, feedback: str | None) -> int:
         from defender.learning.author.version_control import DeliveryRefused
-        from defender.learning.store import LeaseLost, Outcome, Stop
+        from defender.learning.store import LeaseLost, Stop
 
         repository = delivery.repository
         outcomes: dict[tuple[str, str], Any] = {}
@@ -727,24 +774,20 @@ class Tick:
                 hold.check()
                 tip = repository.branch_tip(held.branch)
                 if tip is None:
-                    self.store.end_no_commits(held, outcomes)
+                    self.store.end_no_commits(held, without_kept(outcomes))
                     _logger.info(f"{self.label}: batch {held.batch_id} produced no commits — no PR opened")
                     return 0
                 try:
                     self.store.renew(held)
                     repository.push(tip, held.branch)
                     self.store.renew(held)
-                    extra = ""
-                    if held.replaces is not None and held.feedback_pr is not None:
-                        extra = f"\n\nReplaces #{held.feedback_pr}, re-authored from its reviewers' feedback."
-                    number = self._open_pr(delivery, held, "author", body_extra=extra)
-                    if number is None:
-                        return 0
                     from defender.learning.author.version_control.store_delivery import StoreRecord
 
                     record = StoreRecord.of(self.store.commit_record(self.tenant_id))
-                    applied = {**self._citation_rule(delivery, held, record), **outcomes}
-                    self.store.in_review(held, number, applied)
+                    number = self._find_or_open_pr(delivery, held, record)
+                    if number is None:
+                        return 0
+                    self.store.in_review(held, number, self._fates(delivery, held, record, outcomes))
                     _logger.info(f"{self.label}: batch {held.batch_id} is in review as PR #{number}")
                 except LeaseLost:
                     _logger.warning(f"{self.label}: batch {held.batch_id}'s lease was lost before its delivery: "
@@ -767,15 +810,13 @@ class Tick:
             except Refused:
                 raise
             except BaseException:
-                # A fault the tick does not contain: no commits, the claim ends with what the curators decided
-                # (an item at its attempt ceiling dies); with commits, the batch is left for a takeover.
+                # A fault the tick does not contain is a crash of the holder. With commits on the branch the batch is
+                # left for a takeover (its own lease expired, so it need not wait), which delivers them and never runs
+                # the curator again. With none, its items go back as a recovery abandon returns them: the attempt
+                # charged, and held for a person at the ceiling, never dead.
                 with contextlib.suppress(Exception):
                     if repository.branch_tip(held.branch) is None:
-                        dead = {(i.kind, i.key): Outcome.dead("authoring faulted at the attempt ceiling")
-                                for i in self.store.work(self.tenant_id)
-                                if i.batch_id == held.batch_id and i.status == "in_batch"
-                                and i.attempts >= int(self.store.max_attempts)}
-                        self.store.end_no_commits(held, {**dead, **outcomes})
+                        self.store.abandon_crashed(held)
                     else:
                         self.store.expire_own(held)
                 raise
