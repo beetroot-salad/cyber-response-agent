@@ -19,6 +19,21 @@ FakeClock, FakeES, sha, canonical_digest, instant, seconds. Added (r6.4.1):
 * `World`: the documents a snapshot holds (auth, syslog, nginx events; alerts with ancestry).
 * `LabOps`: the lab operations seam both make-a-case and the launcher drive.
 * `LabRig`: a freeze + parts + case dir + cluster + ops wired together on a tmp path.
+
+Added (r6.4.2, repairs after attack batch 1):
+
+* `FaultJournal`: a journal that raises from `append` at the k-th STEP entry (every entry but the
+  lock store's and the clock's), after recording it, so one mechanism faults ES requests, lab
+  operations and the agent run alike. `step_log` lists the steps of a run that was not faulted.
+* `FakeCluster`: a node that can be DOWN (`up`; a request while down raises as docker exec into a
+  stopped container does and is listed in `down_requests`) and per-operation `latency` that moves
+  the rig clock (a restore takes minutes).
+* `LabOps.ensure_node()` (pinned seam): starts the frozen node if it is stopped. `teardown()`
+  stops it (the real teardown does), `restart_node` starts it.
+* `LabRig(patterns=, extra_alerts=, journal=, latency=, node_up=, clock_step=)`, `tenant_settings`
+  (the lab tenant's `settings/` dir with `systems/elastic/config.env`, D24), `freeze["patterns"]`.
+* `expected_variant(mutation, span_start)` and `LabRig.write_variant_case(...)`: the end state of a
+  variant and its case.yaml, from the world constants and the verbatim-processor oracle.
 """
 from __future__ import annotations
 
@@ -49,6 +64,27 @@ class Journal(list):
         return len(self) - 1 - self.ops()[::-1].index(op)
 
 
+class FaultJournal(Journal):
+    """A `Journal` that raises `RuntimeError` when the `trip_at`-th step is appended (1-based), after
+    recording it. A step is every entry except the lock store's (`lock.*`) and the clock's (`clock.*`)
+    and those whose op is in `skip`. `step_log` is every step seen, so a run that is not faulted shows
+    the steps a faulted run can be cut at."""
+
+    def __init__(self, trip_at: int | None = None, skip: tuple[str, ...] = ()) -> None:
+        super().__init__()
+        self.trip_at, self.skip, self.step_log, self.tripped = trip_at, set(skip), [], None
+
+    def append(self, entry) -> None:
+        super().append(entry)
+        op = entry[0]
+        if op.startswith(("lock.", "clock.")) or op in self.skip:
+            return
+        self.step_log.append(entry)
+        if self.trip_at is not None and len(self.step_log) == self.trip_at:
+            self.tripped = entry
+            raise RuntimeError(f"injected failure at step {self.trip_at}: {op}")
+
+
 class FakeLockStore:
     """The lab-side record store `chaos.lock` drives: three primitives, nothing more."""
 
@@ -75,15 +111,20 @@ class FakeLockStore:
 
 
 class FakeClock:
-    """`now()` advances one second per call; `sleep_until` jumps to the moment it is given.
+    """`now()` advances `step` seconds per call (default one; 0 = a clock that only moves when it is
+    slept or `advance`d, for exact-boundary tests); `sleep_until` jumps to the moment it is given.
     `last` is the latest reading handed out."""
 
-    def __init__(self, journal: Journal, start: datetime) -> None:
-        self.journal, self.last = journal, start
+    def __init__(self, journal: Journal, start: datetime, step: float = 1) -> None:
+        self.journal, self.last, self.step = journal, start, step
 
     def now(self) -> datetime:
-        self.last = self.last + timedelta(seconds=1)
+        self.last = self.last + timedelta(seconds=self.step)
         return self.last
+
+    def advance(self, delta: timedelta) -> None:
+        """Time passing while something works (not a sleep the code under test asked for)."""
+        self.last = self.last + delta
 
     def sleep(self, seconds: float) -> None:
         self.journal.append(("clock.sleep", seconds))
@@ -251,12 +292,17 @@ class FakeCluster(FakeES):
     `streams` maps a backing index to its data stream's name (membership by name only).
     `observe()` is called at every mutating request and its result kept in `mutations`, so a test
     reads, e.g., what the copy-state marker said at that moment. `health_status` is what
-    `_cluster/health` answers."""
+    `_cluster/health` answers. `up` is whether the node's container runs: a request while it does
+    not raises (as `docker exec` into a stopped container does) and is listed in `down_requests`.
+    `latency` maps `restore` / `delete_by_query` / `reindex` to the time that request takes, moved
+    onto `clock` once the request has done its work."""
 
     def __init__(self, journal: Journal, *, repo: str, snapshot: str, snapshot_uuid: str,
                  content: dict, streams: dict[str, str],
                  fail: Callable[[str, str, Any], bool] | None = None,
-                 observe: Callable[[], Any] | None = None) -> None:
+                 observe: Callable[[], Any] | None = None,
+                 clock: "FakeClock | None" = None, latency: dict[str, timedelta] | None = None,
+                 up: bool = True) -> None:
         super().__init__(journal, fail=fail, route=self._dispatch)
         self.repo, self.snapshot, self.snapshot_uuid = repo, snapshot, snapshot_uuid
         self.content, self.stream_of, self.observe = content, dict(streams), observe
@@ -267,7 +313,13 @@ class FakeCluster(FakeES):
         self.mutations: list[dict] = []
         self.restores = 0
         self.unsupported: list[str] = []
+        self.clock, self.latency, self.up = clock, dict(latency or {}), up
+        self.down_requests: list[str] = []
         self._uuids = 0
+
+    def _took(self, kind: str) -> None:
+        if self.clock is not None and kind in self.latency:
+            self.clock.advance(self.latency[kind])
 
     # -- state helpers a test reads -----------------------------------------------------------
 
@@ -306,6 +358,9 @@ class FakeCluster(FakeES):
     # -- routing -----------------------------------------------------------------------------------
 
     def _dispatch(self, method: str, path: str, body: Any) -> Any:
+        if not self.up:
+            self.down_requests.append(f"{method} {path}")
+            raise RuntimeError(f"{method} {path}: the node's container is not running")
         seg = path.strip("/").split("/")
         ack = {"acknowledged": True}
         try:
@@ -387,7 +442,9 @@ class FakeCluster(FakeES):
         names = list(self.content)
         if wanted:
             parts = wanted.split(",") if isinstance(wanted, str) else list(wanted)
-            names = [n for n in names if any(fnmatch.fnmatchcase(n, p) for p in parts)]
+            names = [n for n in names if any(
+                fnmatch.fnmatchcase(n, p) or (n in self.stream_of and fnmatch.fnmatchcase(self.stream_of[n], p))
+                for p in parts)]
         self._note("restore", ",".join(names))
         for n in names:
             if n in self.indices and not self.indices[n]["closed"]:
@@ -397,6 +454,7 @@ class FakeCluster(FakeES):
             self.indices.pop(n, None)
             self._index(n)["docs"] = copy.deepcopy(self.content[n])
         self.restores += 1
+        self._took("restore")
         return {"snapshot": {"snapshot": self.snapshot, "indices": names,
                              "shards": {"total": len(names), "failed": 0, "successful": len(names)}}}
 
@@ -419,6 +477,7 @@ class FakeCluster(FakeES):
             for i in [i for i, d in docs.items() if _matches(body.get("query"), d["_source"], i)]:
                 del docs[i]
                 deleted += 1
+        self._took("delete_by_query")
         return {"deleted": deleted, "total": deleted, "version_conflicts": 0, "failures": []}
 
     def _pipeline(self, method: str, name: str | None, body: Any) -> Any:
@@ -466,6 +525,7 @@ class FakeCluster(FakeES):
                 version = d["_version"] if external else (existing["_version"] + 1 if existing else 1)
                 target[i] = {"_source": copy.deepcopy(out), "_version": version}
                 created += 1
+        self._took("reindex")
         return {"total": total, "created": created, "updated": 0, "deleted": 0,
                 "version_conflicts": 0, "failures": []}
 
@@ -589,6 +649,41 @@ def counts_of(state: dict) -> dict[str, int]:
     return {n: len(docs) for n, docs in state.items()}
 
 
+def expected_variant(mutation: dict | None, span_start: str = SPAN_START) -> dict:
+    """The end state of the variant "base overlay + one stored-state mutation over [span_start, T]",
+    for any span and any processor (`expected_copy` fixes the two committed ones). In-span documents
+    of the mutation's dataset are exactly what the verbatim processor outputs (`run_processors`);
+    a schema-drift also rewrites the alerts whose ancestry reaches such a document."""
+    state = expected_copy("none")
+    if mutation is None or mutation["kind"] not in ("data-drop", "schema-drift"):
+        return state
+    start, end, hit = instant(span_start), instant(T), set()
+    for index, docs in state.items():
+        if index == ALERTS:
+            continue
+        for doc_id, (version, source) in list(docs.items()):
+            if source.get("event.dataset") == mutation["dataset"] and start <= instant(source["@timestamp"]) <= end:
+                hit.add((index, doc_id))
+                out = run_processors([mutation["processor"]], source)
+                if out is None:
+                    del docs[doc_id]
+                else:
+                    docs[doc_id] = (version, out)
+    if mutation["kind"] == "schema-drift":
+        for doc_id, (version, source) in list(state[ALERTS].items()):
+            if any((a["index"], a["id"]) in hit for a in source["kibana.alert.ancestors"]):
+                state[ALERTS][doc_id] = (version, run_processors([mutation["processor"]], source))
+    return state
+
+
+def config_env(events: str, alerts: str) -> str:
+    """The lab tenant's `settings/systems/elastic/config.env`, in the shape the tenant fixture has
+    (comments, double-quoted values)."""
+    return ('# Elastic Stack deployment configuration (non-secret values only).\n\n'
+            '# Default index patterns for the two surfaces the adapter exposes.\n'
+            f'ELASTIC_EVENTS_INDEX="{events}"\nELASTIC_ALERTS_INDEX="{alerts}"\n')
+
+
 # -- the lab operations seam -------------------------------------------------------------------------
 
 FROZEN_PROXY_URL = "http://frozen-proxy.internal:8443"
@@ -612,8 +707,9 @@ class LabOps:
 
     read_marker() -> dict | None; write_marker(marker); load_stubs(parts_dir_of_the_freeze, as_of, mutations);
     restart_node(clock_offset); start_proxy() -> url; current_password(); create_readonly_user(password);
-    mount_node_cert(); content_digest() -> hex (needs stubs loaded
-    since the last teardown); teardown(); and for make-a-case: snapshot_alerts(freeze_dir),
+    mount_node_cert(); content_digest(patterns) -> hex (patterns = the freeze's; needs stubs loaded
+    since the last teardown); ensure_node() (the frozen node runs; idempotent); teardown() (stops
+    the proxy, the stubs and the node; the ES data stays); and for make-a-case: snapshot_alerts(freeze_dir),
     live_run_alerts(), ticketed_alerts(), freeze_rules(freeze_dir) -> dir of rule JSON."""
 
     def __init__(self, rig: "LabRig") -> None:
@@ -623,12 +719,16 @@ class LabOps:
         self.stubs: tuple | None = None
         self.stub_digest: str | None = None
         self.offset = self.offset_reading = None
+        self.digest_patterns: list = []      # the patterns handed to each content_digest (the freeze's, D24)
+        self.restarts: list[tuple] = []      # (offset, clock reading) at each restart_node
         self.loads: list[tuple] = []
         self.proxy_up = False
         self.fail_at: str | None = None      # an op name that raises when called
         self.password = "pw-0"               # the lab's current read-only password (changes over time)
         self.users: list[tuple] = []         # (password, proxy_up) at each create_readonly_user
         self.cert_mounts: list[bool] = []    # proxy_up at each mount_node_cert
+        self.live_runs: set[str] | None = {"live-run"}   # what the lab says has a live run / a ticket;
+        self.tickets: set[str] | None = {"ticketed"}     # None = that source is not configured (lookup raises)
 
     def _j(self, name: str, detail: Any = None) -> None:
         self.rig.journal.append((name, detail))
@@ -654,7 +754,13 @@ class LabOps:
 
     def restart_node(self, clock_offset):
         self.offset, self.offset_reading = clock_offset, self.rig.clock.last
+        self.restarts.append((clock_offset, self.rig.clock.last))
+        self.rig.cluster.up = True
         self._j("restart_node", clock_offset)
+
+    def ensure_node(self):
+        self.rig.cluster.up = True
+        self._j("ensure_node")
 
     def current_password(self):
         self._j("current_password")
@@ -673,25 +779,33 @@ class LabOps:
         self._j("start_proxy")
         return FROZEN_PROXY_URL
 
-    def content_digest(self):
+    def content_digest(self, patterns=None):
         assert self.stub_digest is not None, "content digest asked before the stub stores were loaded"
+        self.digest_patterns.append(patterns)
         self._j("content_digest")
         return content_of(self.rig.cluster.state(), self.stub_digest)
 
     def teardown(self):
-        self.rig.index_at_teardown = self.rig.index.read_text() if self.rig.index.exists() else ""
+        self.rig.index_at_teardown = self.rig.index.read_text() if self.rig.index.is_file() else ""
         self.rig.cluster_at_teardown = self.rig.cluster.state()
         self.stub_digest, self.proxy_up = None, False
+        self.rig.cluster.up = False      # the real teardown stops the node; its data stays on disk
         self._j("teardown")
 
     def snapshot_alerts(self, freeze_dir):
-        return [copy.deepcopy(a) for a in ALERT_DOCS.values()]
+        return [copy.deepcopy(d["_source"]) for d in self.rig.cluster.content[ALERTS].values()]
 
     def live_run_alerts(self):
-        return {"live-run"}
+        self._j("live_run_alerts")
+        if self.live_runs is None:       # the lab's source of live runs is not configured: the real lookup raises
+            raise RuntimeError("V2_RUNS_DIR is not set")
+        return set(self.live_runs)
 
     def ticketed_alerts(self):
-        return {"ticketed"}
+        self._j("ticketed_alerts")
+        if self.tickets is None:
+            raise RuntimeError("V2_FROZEN_PARTS_DIR is not set")
+        return set(self.tickets)
 
     def freeze_rules(self, freeze_dir):
         return self.rig.rules_dir
@@ -718,23 +832,41 @@ def load_script(name: str, path: Path):
 class LabRig:
     """A freeze, its parts, a case dir, an empty frozen cluster that can restore the freeze's
     snapshot, the lab ops and a lock store, on `tmp_path`. `overlay`/`kind` pick the variant for
-    `write_expected_case`; `fail(method, path, body)` faults a cluster request."""
+    `write_expected_case`; `fail(method, path, body)` faults a cluster request.
+
+    `patterns` are the freeze's and the lab tenant's (D24): the rig writes them into
+    `freeze.yaml["patterns"]` as a list `[events, alerts]` and into `tenant_settings`
+    (`<tmp>/tenant/settings/systems/elastic/config.env`). `extra_alerts` adds alert documents to the
+    snapshot (the freeze counts them). `journal` is shared by every fake (a `FaultJournal` cuts a
+    step); `latency` is per-request time on the clock (see `FakeCluster`); `node_up=False` starts
+    with the frozen node stopped; `clock_step` is the clock's seconds per `now()`."""
 
     def __init__(self, tmp_path: Path, *, fail: Callable | None = None, snapshot_uuid: str = SNAP_UUID,
-                 rules: dict | None = None, run_rc: int = 0, run_out: str | None = None) -> None:
+                 rules: dict | None = None, run_rc: int = 0, run_out: str | None = None,
+                 patterns: tuple[str, str] = (EVENTS, ALERTS_PATTERN), extra_alerts: dict | None = None,
+                 journal: Journal | None = None, latency: dict | None = None, node_up: bool = True,
+                 clock_step: float = 1) -> None:
         self.tmp_path = tmp_path
-        self.journal = Journal()
+        self.journal = Journal() if journal is None else journal
         self.store = FakeLockStore(self.journal)
-        self.clock = FakeClock(self.journal, instant("2026-11-08T12:00:00Z"))
+        self.clock = FakeClock(self.journal, instant("2026-11-08T12:00:00Z"), clock_step)
         self.ops = LabOps(self)
+        content = world_content()
+        for uuid, doc in (extra_alerts or {}).items():
+            content[ALERTS][f"id-{uuid}"] = {"_source": copy.deepcopy(doc), "_version": 1}
         self.cluster = FakeCluster(self.journal, repo=REPO, snapshot=SNAP, snapshot_uuid=snapshot_uuid,
-                                   content=world_content(), streams=STREAMS, fail=fail,
-                                   observe=lambda: copy.deepcopy(self.ops.marker))
+                                   content=content, streams=STREAMS, fail=fail,
+                                   observe=lambda: copy.deepcopy(self.ops.marker),
+                                   clock=self.clock, latency=latency, up=node_up)
+        self.patterns = list(patterns)
+        self.tenant_settings = tmp_path / "tenant" / "settings"
+        self.set_tenant_patterns(*patterns)
         self.freezes = tmp_path / "held_out" / "freezes"
         self.freeze_dir = self.freezes / FREEZE_ID
         self.freeze_dir.mkdir(parents=True)
-        self.freeze = {"T": T, "elastic": {"repository": REPO, "snapshot": SNAP, "uuid": SNAP_UUID,
-                                           "indices": counts_of(world_content())},
+        self.freeze = {"T": T, "patterns": list(patterns),
+                       "elastic": {"repository": REPO, "snapshot": SNAP, "uuid": SNAP_UUID,
+                                   "indices": counts_of(content)},
                        "parts": {n: sha(b) for n, b in PARTS.items()}, "captured_by": "op"}
         (self.freeze_dir / "freeze.yaml").write_text(yaml.safe_dump(self.freeze))
         self.parts = tmp_path / "parts"
@@ -757,6 +889,12 @@ class LabRig:
         self.cluster_at_teardown: dict | None = None
         self.run_hook: Callable[[], None] | None = None
         self.lock_in_run: bool | None = None
+
+    def set_tenant_patterns(self, events: str, alerts: str) -> None:
+        """What the lab tenant's settings say the agent's patterns are now (D24)."""
+        path = self.tenant_settings / "systems" / "elastic" / "config.env"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(config_env(events, alerts))
 
     @property
     def launch_module(self):
@@ -785,6 +923,25 @@ class LabRig:
         (self.case_dir / "case.yaml").write_text(yaml.safe_dump(case))
         return case
 
+    def write_variant_case(self, mutation: dict | None, span_start: str = SPAN_START, *,
+                           alert_uuid: str = "young", state: dict | None = None,
+                           alert_json: dict | None = None, confirmed: bool = True, **over: Any) -> dict:
+        """case.yaml and alert.json for the variant (one mutation over `span_start`..T, or none), every
+        recorded value derived from `expected_variant` (or from `state`, when a test gives the copy
+        it expects). `alert_json` is what alert.json holds when that is not the copy's alert."""
+        mutations = None if mutation is None else [mutation]
+        overlay = None if mutations is None else {"mutations": mutations, "span_start": span_start}
+        state = expected_variant(mutation, span_start) if state is None else state
+        doc = state[ALERTS][f"id-{alert_uuid}"][1]
+        (self.case_dir / "alert.json").write_text(json.dumps(doc if alert_json is None else alert_json))
+        stubs = stub_state({n: b for n, b in PARTS.items() if n != RULES_PART}, mutations)
+        case = {"freeze": FREEZE_ID, "alert": canonical_digest(doc), "age": 3000, "overlay": overlay,
+                "counts": counts_of(state), "content": content_of(state, stubs),
+                "confirmed": ({"by": "op", "at": "2026-10-21T10:00:00Z", "reference_run": "r0"}
+                              if confirmed else None), **over}
+        (self.case_dir / "case.yaml").write_text(yaml.safe_dump(case))
+        return case
+
     def case(self) -> dict:
         return yaml.safe_load((self.case_dir / "case.yaml").read_text())
 
@@ -802,7 +959,7 @@ class LabRig:
         kw = {"knowledge": "abc1234", **kw}
         try:
             return self.launch_module.launch(
-                self.case_dir, freezes_dir=self.freezes, patterns=[EVENTS, ALERTS_PATTERN],
+                self.case_dir, freezes_dir=self.freezes, tenant_settings=self.tenant_settings,
                 index=self.index, parts_dir=self.parts, lock_store=self.store, es=self.cluster,
                 ops=self.ops, run_fn=self.run_fn, clock=self.clock,
                 env={"PATH": "/usr/bin", "DEFENDER_CREDENTIAL_PROXY_URL": LIVE_PROXY_URL},
@@ -814,7 +971,7 @@ class LabRig:
         try:
             return self.make_module.write_case(
                 self.case_dir, freeze_dir=self.freeze_dir, alert_uuid=alert_uuid, overlay=overlay,
-                patterns=[EVENTS, ALERTS_PATTERN], parts_dir=self.parts, lock_store=self.store,
+                tenant_settings=self.tenant_settings, parts_dir=self.parts, lock_store=self.store,
                 es=self.cluster, ops=self.ops, clock=self.clock,
                 profiles_dir=kw.pop("profiles_dir", None) or Path(__file__).resolve().parents[2] / "chaos" / "profiles",
                 inventory=kw.pop("inventory", None) or yaml.safe_load(
