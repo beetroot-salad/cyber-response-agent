@@ -1,239 +1,59 @@
-"""A non-numeric loop threshold env var fails loud as exit 2 (FatalConfigError), and the drain's quarantine/requeue/dead-letter behavior."""
+"""A non-numeric loop threshold env var fails loud as exit 2 (FatalConfigError); the stage runner's exit mapping; the wake gate.
+
+#1278 moved the drain's queues, markers, quarantine and wake counts into the learning store (design r8 Flows, Schema), so the
+obligations survive over it: a bad threshold stops either drain with exit 2 naming the variable (the first block of tests), a
+lead-lane fault of the systemic family is not quarantined per request (the second), and the wake gate counts what a tick could
+take (the last). The stage runner's exit mapping needs no store and is unchanged.
+
+Retired from this file:
+- `test_run_or_dead_letter_*` (4 tests): `faults.run_or_dead_letter` and the per-marker dead-letter are gone (design r8 Schema
+  "Retired files": dead-letter, stuck and failed files become statuses). What they pinned survives in the drains: a plain
+  failure is contained to its request, a systemic one is not (`test_lead_author_drain_*` below, `test_1135_drain_halt.py`).
+- `test_lead_author_drain_unlinks_marker_on_success`, `..._quarantines_a_plain_failure`, `..._requeues_a_transient_with_bumped_attempts`,
+  `test_drain_pitfalls_*`: the marker, its quarantine and its attempts counter are the item's status, attempts and ceiling
+  (the same flows are ported in `test_loop.py`, whose lead-author tests drive the real tick over the store).
+- `test_881_pending_queue_count_measures_rows_the_drain_could_author`: the file lines, blank and unreadable lines, and
+  `held_reason` stamps it counted are gone; its surviving obligation (held rows are no work, deferred rows are) is the last test.
+"""
 from __future__ import annotations
-
-from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
-from defender.tests.support.shared._locations_1210 import location_path
-
-import json
 
 import pytest
 
 from defender import _git  # type: ignore[import-not-found]
 from defender.learning.core import cli  # type: ignore[import-not-found]
-from defender.learning.core import drains  # type: ignore[import-not-found]
-from defender.learning.core import faults  # type: ignore[import-not-found]
-from defender.learning.core.state import FINDINGS
-from defender.tests.support.learning.core import _state1135
 from defender.learning.core.config import (  # type: ignore[import-not-found]
     FatalConfigError,
     RunUnprocessable,
     StageAbort,
-    LoopPaths,
 )
-from defender.learning.leads import lead_author  # type: ignore[import-not-found]
+from defender.tests.support.learning.core._store1278 import call, execute, migrated_database, world  # noqa: F401 — fixtures
+from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain, lead_author_drain
+from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
 
 
-def _paths(tmp_path) -> LoopPaths:
-    """`LoopPaths` over `tmp_path` with its learning state root made (never created lazily)."""
-    paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
-    return paths
+@pytest.mark.postgres
+@pytest.mark.parametrize(("variable", "lane"), [
+    ("LEARNING_AUTHOR_THRESHOLD", "author"), ("LEARNING_QUESTIONER_THRESHOLD", "author"),
+    ("LEARNING_PITFALLS_THRESHOLD", "lead")], ids=["author", "questioner", "pitfalls"])
+def test_a_non_numeric_threshold_stops_the_drain_with_exit_two_naming_the_variable(world, caplog, variable, lane):  # noqa: F811 — the imported fixture
+    """The stage maps a bad threshold to exit 2 with the variable named, before any batch starts (a queued request or finding
+    must not let it slip past the gate). (FatalConfigError, store claim thresholds)"""
+    w = world
+    if lane == "author":
+        from defender.tests.support.learning.curation._drain719 import finding_row
 
+        call(w.dsn, "publish_findings", w.t.tenant_id, "run-1", [finding_row("f1/b/0/0", run_id="run-1")], kind="finding")
+    else:
+        call(w.dsn, "enqueue_request", w.t.tenant_id, "run-1", "case-1",
+             {"case_id": "case-1", "tenant_id": w.t.tenant_id, "run_id": "run-1"})
+        call(w.dsn, "add_pitfall", w.t.tenant_id, {"pitfall_id": "p1", "system": "elastic"})
+    w.monkeypatch.setenv(variable, "high")
+    drain = author_drain if lane == "author" else lead_author_drain
+    kw = {"trigger": None} if lane == "author" else {}
 
-def test_has_curator_work_raises_on_bad_threshold(tmp_path, monkeypatch):
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
-    with pytest.raises(FatalConfigError):
-        drains._has_curator_work(_state1135.state_for_paths(LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")))
-
-
-def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queued(
-    tmp_path, monkeypatch
-):
-    """The markers-present path: a queued run marker must NOT let a non-numeric LEARNING_PITFALLS_THRESHOLD slip past the gate."""
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
-    paths = _paths(tmp_path)
-    run_dir = _state1135.curation_run_dir("run-x")
-    paths = _state1135.drained_for(paths, run_dir)
-    state = _state1135.state_for_paths(paths)
-    _state1135.enqueue_run(state, run_dir)
-    with pytest.raises(FatalConfigError, match="LEARNING_PITFALLS_THRESHOLD"):
-        drains._has_lead_author_work(state)
-
-
-def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeypatch):
-    """LEAD_AUTHOR_MAX_RETRIES is read inside the lead-author drain (past the wake gate, before the per-marker loop)."""
-    monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "high")
-    paths = _paths(tmp_path)
-    run_dir = _state1135.curation_run_dir("run-x")
-    paths = _state1135.drained_for(paths, run_dir)
-    state = _state1135.state_for_paths(paths)
-    _state1135.enqueue_run(state, run_dir)
-    with pytest.raises(FatalConfigError, match="LEAD_AUTHOR_MAX_RETRIES"):
-        drains._drain_lead_author_markers(
-            paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None,
-            directory=directory_for_root())
-
-
-def test_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch, caplog):
-    """The drain is handed its tenant records (#1214 Flow 4), so the exit 2 is the threshold's, which it names."""
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
-    paths = _paths(tmp_path)
-    directory = directory_for_root(tmp_path)
-    assert cli._run_stage(lambda: drains.author_drain(paths=paths, directory=directory)) == 2
-    assert "LEARNING_AUTHOR_THRESHOLD" in caplog.text, caplog.text
-
-
-def test_lead_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch, caplog):
-    """As above, for the lead-author drain's pitfalls threshold."""
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
-    paths = _paths(tmp_path)
-    directory = directory_for_root(tmp_path)
-    assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths, directory=directory)) == 2
-    assert "LEARNING_PITFALLS_THRESHOLD" in caplog.text, caplog.text
-
-
-def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkeypatch):
-    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
-    paths = _paths(tmp_path)
-    run_dir = _state1135.curation_run_dir("run-x")
-    paths = _state1135.drained_for(paths, run_dir)
-    state = _state1135.state_for_paths(paths)
-    _state1135.enqueue_run(state, run_dir)
-
-    def _run_lead_author(_paths, _state, _run_dir, *, box=None, **_kw):
-        lead_author._lift_threshold()
-
-    with pytest.raises(FatalConfigError):
-        drains._drain_lead_author_markers(
-            paths, state, _run_lead_author, directory=directory_for_root())
-
-    failed_dir = location_path(paths.state_root) / "author-queue" / "failed"
-    assert not (failed_dir / f"{run_dir.name}.json").exists()
-    assert (location_path(paths.state_root) / "author-queue" / "inflight" / f"{run_dir.name}.json").exists()
-
-
-def test_drain_pitfalls_reraises_fatal_config_error(tmp_path):
-    """Defense-in-depth (no current trigger): _drain_pitfalls' broad guard swallows a
-    curation hiccup, but a FatalConfigError must propagate to exit 2, not be swallowed."""
-    paths = _paths(tmp_path)
-
-    def _run_pitfalls(_paths, _state, *, box=None, **_kw):
-        raise FatalConfigError("systemic")
-
-    with pytest.raises(FatalConfigError):
-        drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _run_pitfalls)
-
-
-def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
-    """A clean lead-author run drains the marker: success makes `if drained:` unlink it, so
-    it is neither left queued (re-authored every tick) nor quarantined."""
-    monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
-    paths = _paths(tmp_path)
-    run_dir = _state1135.curation_run_dir("run-ok")
-    paths = _state1135.drained_for(paths, run_dir)
-    state = _state1135.state_for_paths(paths)
-    _state1135.enqueue_run(state, run_dir)
-
-    drains._drain_lead_author_markers(
-        paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None,
-        directory=directory_for_root())
-
-    assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
-    assert not (location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
-
-
-def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
-    """A plain (non-systemic) failure is dead-lettered: the marker moves to failed/ with a
-    lead-author-error reason and is NOT unlinked as if it had succeeded."""
-    monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
-    paths = _paths(tmp_path)
-    run_dir = _state1135.curation_run_dir("run-boom")
-    paths = _state1135.drained_for(paths, run_dir)
-    state = _state1135.state_for_paths(paths)
-    _state1135.enqueue_run(state, run_dir)
-
-    def _run_lead_author(_paths, _state, _run_dir, *, box=None, **_kw):
-        raise RuntimeError("poison run dir")
-
-    drains._drain_lead_author_markers(
-        paths, state, _run_lead_author, directory=directory_for_root())
-
-    assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
-    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
-    assert failed.exists()
-    assert "lead-author-error" in json.loads(failed.read_text())["failed"]
-
-
-def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, monkeypatch):
-    """A `_LeadAuthorRetry` reaches the drain's retry handler (via `propagate=`), not the
-    dead-letter path: the marker is requeued with `attempts` bumped."""
-    monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
-    paths = _paths(tmp_path)
-    run_dir = _state1135.curation_run_dir("run-transient")
-    paths = _state1135.drained_for(paths, run_dir)
-    state = _state1135.state_for_paths(paths)
-    _state1135.enqueue_run(state, run_dir)
-
-    def _run_lead_author(_paths, _state, _run_dir, *, box=None, **_kw):
-        raise drains._LeadAuthorRetry("rc=None transient")
-
-    drains._drain_lead_author_markers(
-        paths, state, _run_lead_author, directory=directory_for_root())
-
-    marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
-    assert marker.exists()
-    assert not (location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
-    assert json.loads(marker.read_text())["attempts"] == 1
-
-
-def test_drain_pitfalls_swallows_a_plain_curation_error(tmp_path):
-    paths = _paths(tmp_path)
-
-    def _run_pitfalls(_paths, _state, *, box=None, **_kw):
-        raise RuntimeError("curation hiccup")
-
-    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _run_pitfalls)
-
-
-@pytest.mark.parametrize("exc", [
-    RuntimeError("poison item"),
-    # A per-run *data* failure (the validate.py sites) dead-letters like any other Exception;
-    # only the StageAbort family is special.
-    RunUnprocessable("malformed report.md"),
-], ids=["plain", "run-unprocessable"])
-def test_run_or_dead_letter_dead_letters_a_plain_exception(exc):
-    """A per-item failure is dead-lettered: the callback fires with the exception and the
-    helper reports failure (no re-raise) so the serial drain keeps going."""
-    calls: list[Exception] = []
-
-    def _boom():
-        raise exc
-
-    ok = faults.run_or_dead_letter(_boom, calls.append)
-    assert ok is False
-    assert len(calls) == 1
-    assert isinstance(calls[0], type(exc))
-
-
-@pytest.mark.parametrize("exc", [
-    StageAbort("systemic fault"),
-    FatalConfigError("non-numeric threshold"),
-    # A broken local-state git op dooms the whole batch: never quarantined per marker.
-    _git.GitError(["status"], 128, "not a git repository"),
-], ids=["stage-abort", "fatal-config", "git-error"])
-def test_run_or_dead_letter_reraises_systemic_faults(exc):
-    """The systemic family is NEVER dead-lettered — it re-raises past the guard so it reaches _run_stage as the contracted exit 2."""
-    calls: list[Exception] = []
-
-    def _boom():
-        raise exc
-
-    with pytest.raises(type(exc)):
-        faults.run_or_dead_letter(_boom, calls.append)
-    assert calls == []
-
-
-def test_run_or_dead_letter_propagates_declared_control_flow():
-    calls: list[Exception] = []
-
-    def _boom():
-        raise drains._LeadAuthorRetry("transient")
-
-    with pytest.raises(drains._LeadAuthorRetry):
-        faults.run_or_dead_letter(
-            _boom, calls.append, propagate=(drains._LeadAuthorRetry,)
-        )
-    assert calls == []
+    assert drain(w.t, w.paths, box=BoxSpy(), **kw) == 2
+    assert variable in caplog.text, caplog.text
+    assert call(w.dsn, "batches", w.t.tenant_id) == [], "a batch was started under a malformed threshold"
 
 
 def _raise(exc):
@@ -276,123 +96,37 @@ def test_run_stage_maps_giterror_to_exit_2():
     assert cli._run_stage(stage) == 2
 
 
-def _seed_queue(paths: LoopPaths, lines: list[str]) -> None:
-    (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
-    (location_path(paths.state_root) / FINDINGS.queue).write_text("".join(line + "\n" for line in lines), encoding="utf-8")
+# --- the wake gate -------------------------------------------------------------------------------------------------------
 
 
-def _row(fid: str, **extra) -> str:
-    return json.dumps({"finding_id": fid, "run_id": fid.split("/")[0], **extra})
+def _set_status(dsn, tenant_id, prefix, status, *, deferrals=0):
+    execute(dsn, "UPDATE learning.work_items SET status = %s, deferrals = %s WHERE tenant_id = %s AND item_key LIKE %s",
+            (status, deferrals, tenant_id, f"{prefix}/%"))
 
 
-#: The two spellings the gates actually stamp, plus the bucket's. The count keys on the FIELD,
-#: never on one of these strings — a reader matching a prefix would miss the other writers.
-_HELD_REASONS = (
-    "no_ground_truth(direction='adversarial', disposition=None)",
-    "no_family_ground_truth(judge_outcome=None)",
-    "held_by_something_that_does_not_exist_yet",
-)
+@pytest.mark.postgres
+def test_881_the_wake_gate_counts_what_a_tick_could_take(world, monkeypatch):  # noqa: F811 — the imported fixture
+    """The author wake gate fires for five waiting findings, not for rows a tick would only hold again; a deferred row (it
+    may land on the next tick) is still work. (design r8 Schema statuses: held is not waiting; G-T1)"""
+    from defender.learning.core import drains
+    from defender.tests.support.learning.curation._drain719 import finding_row
 
-#: One held row whose reason no gate in the tree spells — see `_HELD_REASONS`.
-_UNRECOGNISED_HOLD = _HELD_REASONS[-1]
-
-
-def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
-    """`_pending_queue_counts` counts what a tick could take, not file lines."""
-    paths = _paths(tmp_path)
-    held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]
-
-    _seed_queue(paths, held)
-    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 0, (
-        "five rows the gate has already held were counted as pending work"
-    )
-
-    _seed_queue(paths, [_row(f"h/{i}") for i in range(5)])
-    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 5, (
-        "the same five rows without `held_reason` are authorable and must be counted"
-    )
-
-    _seed_queue(paths, [_row("legacy/0", held_reason=_UNRECOGNISED_HOLD)])
-    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 0, (
-        f"a row held for {_UNRECOGNISED_HOLD!r} was counted as pending work"
-    )
-
-    for wordless in ("", None):
-        _seed_queue(paths, [_row(f"legacy/{i}", held_reason=wordless) for i in range(5)])
-        assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS) == (0, 5), (
-            f"five rows stamped held_reason={wordless!r} were counted as pending work"
-        )
-
-    _seed_queue(paths, ["", _row("h/0"), "   ", ""])
-    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 1, "a blank line is not a row"
-
-    # One held row (0) + five lines that are not rows (5) + one authorable row (1). The four
-    # JSON-but-not-an-object lines are the ones a `json.loads`-only reader lets through.
-    _seed_queue(paths, [
-        _row("legacy/0", held_reason=_UNRECOGNISED_HOLD),
-        "[1,2]", "null", '"x"', "3", "{not json at all",
-        _row("c/0"),
-    ])
-    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 6, (
-        "a line that is not a row (unparseable, or a list, null, string or number) was not "
-        "counted as work for the unkeyable retirement"
-    )
-
-
-def test_881_a_deferred_row_still_counts_as_work(tmp_path, monkeypatch):
-    """A deferred row may land on the next tick, so it still counts as work; a permanent hold
-    does not."""
+    w = world
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
-    paths = _paths(tmp_path)
+    tid = w.t.tenant_id
 
-    _seed_queue(paths, [_row(f"fb/{i}", deferrals=1) for i in range(5)])
-    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 5, (
-        "a deferred row was subtracted from the wake gate; the next tick may still land it, "
-        "so it is work and the drain must still wake for it"
-    )
-    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is True, (
-        "five deferred rows left the wake gate shut, so they are never retried — queued and "
-        "invisible"
-    )
+    def seed(prefix: str, n: int) -> None:
+        call(w.dsn, "publish_findings", tid, "run-1", [finding_row(f"{prefix}/b/0/{i}", run_id=f"run-{prefix}") for i in range(n)], kind="finding")
 
-    # The control: the permanent hold on the same address still counts for nothing.
-    _seed_queue(paths, [_row(f"h/{i}", held_reason=_HELD_REASONS[0]) for i in range(5)])
-    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 0, (
-        "a permanent hold counted as work, so the count now subtracts nothing at all"
-    )
-    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is False
+    seed("held", 5)
+    _set_status(w.dsn, tid, "held", "held")
+    assert drains.author_work_waiting(w.paths) is False, "the wake gate fired for five rows already held for a person"
 
+    seed("one", 1)
+    assert drains.author_work_waiting(w.paths) is False, "one waiting row beside five held ones is one row of work, not six"
 
-def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_again(
-    tmp_path, monkeypatch
-):
-    """`_has_curator_work` answers for rows that can be AUTHORED."""
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
-    paths = _paths(tmp_path)
-    held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]
+    seed("five", 5)
+    assert drains.author_work_waiting(w.paths) is True, "five waiting rows must wake the drain, however many held ones sit beside them"
 
-    _seed_queue(paths, held)
-    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is False, (
-        "the wake gate fired for five rows the gate has already held; the drain will take "
-        "the repo lock, hold them again and write nothing, on every tick, forever"
-    )
-
-    _seed_queue(paths, [_row(f"c/{i}") for i in range(5)])
-    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is True, (
-        "five authorable rows must still wake the drain"
-    )
-
-    _seed_queue(paths, [*held, _row("c/0")])
-    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is False, (
-        "one authorable row beside five held ones is one row of work, not six"
-    )
-
-    _seed_queue(paths, [*held, *(_row(f"c/{i}") for i in range(5))])
-    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is True, (
-        "five authorable rows are five rows of work however many held ones sit beside them"
-    )
-
-    _seed_queue(paths, [_row(f"legacy/{i}", held_reason=_UNRECOGNISED_HOLD) for i in range(5)])
-    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is False, (
-        f"the wake gate fired for five rows held for {_UNRECOGNISED_HOLD!r}"
-    )
+    _set_status(w.dsn, tid, "five", "waiting", deferrals=1)
+    assert drains.author_work_waiting(w.paths) is True, "deferred rows were subtracted from the wake gate"
