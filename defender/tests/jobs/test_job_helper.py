@@ -27,7 +27,6 @@ from defender.tests.support.jobs._job_helper import (
     SignalingSigner,
     after_the_signal,
     claims_of,
-    closed_port_dsn,
     drive_helper,
     flag_values,
     helper_scene,
@@ -326,31 +325,39 @@ def test_o6_a_job_holding_the_row_gets_a_fresh_pass_each_time_it_asks(scene):
 
 
 
-def test_o6_a_job_holding_the_row_still_gets_fresh_passes_while_the_database_is_in_an_outage(scene, monkeypatch):
-    """With the database address moved to a port nothing listens on (a real refusal) between two asks, `pass` is still
-    answered, signed anew for the same investigation. (O6: during an outage passes keep coming; control: the ask before)"""
+def test_o6_a_job_holding_the_row_still_gets_fresh_passes_while_the_database_is_in_an_outage(
+        tmp_path, monkeypatch, migrated_database):
+    """The scene's database login goes through a relay the test owns; cut mid-job, the login's own address refuses, and
+    `pass` is still answered, signed anew for the same investigation. (O6: during an outage passes keep coming; control: the ask before)"""
     from defender.tests.support.shared._postgres1339 import execute
 
-    inv, argv = _investigation(scene)
-    signer = make_signer()
-    got: dict = {}
+    relay = J.TcpRelay(migrated_database)
+    try:
+        with helper_scene(tmp_path, monkeypatch, relay.dsn) as scene:
+            inv, argv = _investigation(scene)
+            signer = make_signer()
+            got: dict = {}
 
-    def job(c) -> int:
-        got["before"] = c.request("pass", id=inv)["token"]
-        monkeypatch.setenv("DEFENDER_DATABASE_DSN", closed_port_dsn(scene.dsn))
-        try:
-            with pytest.raises(Exception):  # noqa: B017, PT011 — any driver refusal: the premise is a real outage
-                execute(os.environ["DEFENDER_DATABASE_DSN"], "SELECT 1")
-            got["during"] = [c.request("pass", id=inv)["token"] for _ in range(2)]
-        finally:
-            monkeypatch.setenv("DEFENDER_DATABASE_DSN", scene.dsn)
-        return 0
+            def job(c) -> int:
+                got["before"] = c.request("pass", id=inv)["token"]
+                got["reached_before"] = execute(scene.dsn, "SELECT 1")
+                relay.cut()
+                try:
+                    execute(scene.dsn, "SELECT 1")
+                except Exception as refused:  # noqa: BLE001 — any driver refusal: the premise is a real outage
+                    got["refused"] = refused
+                got["during"] = [c.request("pass", id=inv)["token"] for _ in range(2)]
+                return 0
 
-    docker = ContainerStandIn(job)
-    ran = drive_helper(scene, argv, docker=docker, signer=signer)
+            docker = ContainerStandIn(job)
+            ran = drive_helper(scene, argv, docker=docker, signer=signer)
+    finally:
+        relay.cut()
 
     assert ran.raised is None, ran.raised
     assert docker.job_error is None, docker.job_error
+    assert "reached_before" in got, "control: the login reached the database through the relay before the cut"
+    assert "refused" in got, "premise: the scene's own database address refuses once the relay is cut"
     assert len({got["before"], *got["during"]}) == 3, "a pass during the outage was not signed anew"
     assert [claims_of(signer, t)["investigation"] for t in got["during"]] == [inv, inv]
 

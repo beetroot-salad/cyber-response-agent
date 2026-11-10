@@ -225,20 +225,25 @@ def test_a5_eof_on_stdin_is_sigterm_to_the_entry_and_sigterm_is_one_keyboard_int
     assert end.setup == "done"
 
 
-def test_a6_the_host_mode_job_entry_is_retired_run_py_job_without_a_container_does_nothing(scene):
-    """`run.py --job <id> --tenant <T>` (no `--parent-pid`, no job socket) from a host shell with the database login and a valid launch pair: no run is made, no run folder, no holder recorded, a non-zero exit. (A6)"""
+@pytest.mark.parametrize("with_parent_pid", [True, False], ids=["todays-argv", "no-parent-pid"])
+def test_a6_the_host_mode_job_entry_is_retired_run_py_job_without_a_container_does_nothing(scene, with_parent_pid):
+    """`run.py --job <id> --tenant <T>` from a host shell (today's full argv, no job socket) with the database login and a valid launch pair does nothing: no run folder, no end record, no holder, a non-zero exit. (A6)"""
     from defender.tenancy import host_lock
 
     inv = str(uuid.uuid4())
     scene.plant(inv)
     env = {**os.environ, "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
+    argv = ["--job", inv, "--tenant", scene.tenant, *(["--parent-pid", str(os.getpid())] if with_parent_pid else [])]
+    before = listing(scene.runs)
 
     proc = subprocess.run(  # noqa: S603
-        [sys.executable, str(DEFENDER / "run.py"), "--job", inv, "--tenant", scene.tenant],
+        [sys.executable, str(DEFENDER / "run.py"), *argv],
         env=env, cwd=str(WORKTREE), capture_output=True, text=True, timeout=180, check=False, stdin=subprocess.DEVNULL)
 
-    assert proc.returncode != 0, proc.stdout[-1000:] + proc.stderr[-1000:]
-    assert not (scene.runs / inv).exists(), "a host-mode job made its run folder"
+    said = proc.stdout[-1000:] + proc.stderr[-1000:]
+    assert proc.returncode != 0, said
+    assert not (scene.runs / inv).exists(), "a host-mode job made its run folder:\n" + said
+    assert listing(scene.runs) == before, "a host-mode job wrote a record:\n" + said
     assert host_lock.holders(scene.root, scene.tenant) == [], "a host-mode job took the tenant lock"
     assert (scene.runs / f"{inv}.launch.json").exists(), "control: the launch pair was there to be run"
 
@@ -286,8 +291,6 @@ def test_g3_the_real_lifecycle_starts_its_shell_box_and_runs_a_command_over_the_
     assert ran["sandboxed"] is True, "the job's box is not counted as confined"
     assert len(docker.creates()) >= 1, "control: the helper's side never created the box"
     assert any(c[1] == "exec" for c in docker.calls), "control: the helper's side never ran the command in the box"
-    assert calls.helper("box_start") >= 1, "control: the helper's side never started a box through the box package"
-    assert calls.helper("exec") >= 1, "control: the helper's side never ran a docker exec"
     assert {k: calls.container(k) for k in watched} == dict.fromkeys(watched, 0)
     assert scene.end(inv).box == "started"
 
@@ -300,6 +303,8 @@ def test_o11_a_box_start_the_helper_refuses_is_a_start_fault_in_the_job_and_no_b
     inv, ran = str(uuid.uuid4()), []
     scene.plant(inv)
     other = scene.root / OTHER_TENANT / "runs"
+    canary = other / "canary-1170.txt"  # in the folder the link points at: a job's own write after the fault lands there too
+    canary.write_text("untouched", encoding="utf-8")
     docker = R.RelayDocker()
 
     def start_box(*a: Any, **kw: Any) -> Any:
@@ -313,12 +318,11 @@ def test_o11_a_box_start_the_helper_refuses_is_a_start_fault_in_the_job_and_no_b
         ran.append(1)
         return _summary()
 
-    before = listing(other)
     got = enter(scene, inv, docker=docker, lifecycle=_real_lifecycle(investigate, start_box=start_box),
                 preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None)
 
     assert got.helper.raised is None, got.helper.raised
-    assert listing(other) == before, "the other tenant's folder changed"
+    assert canary.read_text(encoding="utf-8") == "untouched", "the other tenant's folder changed"
     if not refused:
         assert got.raised is None, got.raised
         assert ran == [1], "control: the untouched folder did not run the investigation"

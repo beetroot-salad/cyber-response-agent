@@ -70,6 +70,13 @@ def _clean(seen: Any) -> None:
     assert seen.exit is None, seen.exit
 
 
+def _host_shell_premise() -> None:
+    """Checked after the act, so a missing `job_host` is not what turns the arm red."""
+    from defender import job_host
+
+    assert job_host.SOCKET_ENV not in os.environ, "premise: a host shell has no job socket"
+
+
 # --- the learning job entry ----------------------------------------------------------------------------------------
 
 def test_a6_the_learning_job_entry_takes_no_lock_runs_no_admission_and_opens_no_database(scene):
@@ -100,25 +107,31 @@ def test_a6_the_learning_job_entry_takes_no_lock_runs_no_admission_and_opens_no_
     _no_database_login(seen, scene)
 
 
-def test_a5_a6_the_learning_job_entry_is_container_only_it_does_nothing_from_a_host_shell(scene):
-    """Run with no job socket in its environment (a host shell that has the database login), the entry exits non-zero having written no end record, taken no lock and started no family step. (A5, A6)"""
-    from defender import job_host
+@pytest.mark.parametrize("with_parent_pid", [True, False], ids=["todays-argv", "no-parent-pid"])
+def test_a5_a6_the_learning_job_entry_is_container_only_it_does_nothing_from_a_host_shell(scene, with_parent_pid):
+    """Run with no job socket in its environment (a host shell that has the database login), with today's full argv, the entry exits non-zero having written no end record or progress, taken no lock and started no family step. (A5, A6)"""
     from defender.learning.branch import cli, job_entry
     from defender.tenancy import host_lock
 
     job_id, source = str(uuid.uuid4()), str(uuid.uuid4())
     plant_episode(scene, job_id, source)
-    argv = ["--job", job_id, "--tenant", scene.tenant, "--source", source]
+    argv = ["--job", job_id, "--tenant", scene.tenant, "--source", source,
+            *(["--parent-pid", str(os.getppid())] if with_parent_pid else [])]
+    before = listing(scene.runs)
 
-    with counting_calls(launch_job=cli.launch_job) as launches:
-        assert job_host.SOCKET_ENV not in os.environ, "premise: a host shell has no job socket"
-        with pytest.raises(SystemExit) as stop:
-            job_entry.main(argv, preflight=lambda *a, **k: 0)
+    with counting_calls(launch_job=cli.launch_job, acquire=host_lock.acquire) as calls:
+        try:
+            code = job_entry.main(argv, preflight=lambda *a, **k: 0)
+        except SystemExit as stop:
+            code = stop.code
 
-    assert stop.value.code not in (0, None), "the container-less entry ran as if it were a job"
+    assert calls["acquire"] == 0, "the container-less entry asked for the tenant lock"
     assert host_lock.holders(scene.root, scene.tenant) == [], "the container-less entry took the tenant lock"
-    assert launches["launch_job"] == 0, "a family step started"
+    assert calls["launch_job"] == 0, "a family step started"
     assert learning_end(scene, job_id) is None, "an end record was written by an entry that must not run"
+    assert listing(scene.runs) == before, "the container-less entry wrote a record"
+    assert code not in (0, None), "the container-less entry ran as if it were a job"
+    _host_shell_premise()
 
 
 @pytest.mark.parametrize("how", HOW)
@@ -177,22 +190,26 @@ def test_a6_the_post_step_takes_no_lock_runs_no_admission_opens_no_database_and_
     _no_database_login(seen, scene)
 
 
-def test_a5_a6_the_post_step_is_container_only_it_does_nothing_from_a_host_shell(scene):
-    """Run with no job socket in its environment, the post-step exits non-zero having written no record and run no gate. (A5, A6)"""
-    from defender import job_host
+@pytest.mark.parametrize("with_parent_pid", [True, False], ids=["todays-argv", "no-parent-pid"])
+def test_a5_a6_the_post_step_is_container_only_it_does_nothing_from_a_host_shell(scene, with_parent_pid):
+    """Run with no job socket in its environment, with today's full argv, the post-step exits non-zero having written no record and run no gate. (A5, A6)"""
     from defender.learning.branch import post_step
 
     job_id = str(uuid.uuid4())
     ticks: list[int] = []
-    argv = ["--job", job_id, "--tenant", scene.tenant]
+    argv = ["--job", job_id, "--tenant", scene.tenant, *(["--parent-pid", str(os.getppid())] if with_parent_pid else [])]
+    before = listing(scene.runs)
 
-    assert job_host.SOCKET_ENV not in os.environ, "premise: a host shell has no job socket"
-    with pytest.raises(SystemExit) as stop:
-        post_step.main(argv, author_tick=lambda *a, **k: ticks.append(1) or 0)
+    try:
+        code = post_step.main(argv, author_tick=lambda *a, **k: ticks.append(1) or 0)
+    except SystemExit as stop:
+        code = stop.code
 
-    assert stop.value.code not in (0, None), "the container-less post-step ran as if it were a job"
-    assert ticks == []
+    assert ticks == [], "the container-less post-step ran the gate"
     assert not (scene.runs / f"{job_id}.post-step.json").exists()
+    assert listing(scene.runs) == before, "the container-less post-step wrote a record"
+    assert code not in (0, None), "the container-less post-step ran as if it were a job"
+    _host_shell_premise()
 
 
 @pytest.mark.parametrize("how", HOW)

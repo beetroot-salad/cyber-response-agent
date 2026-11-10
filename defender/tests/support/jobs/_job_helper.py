@@ -158,6 +158,71 @@ def closed_port_dsn(dsn: str) -> str:
     return parts._replace(netloc=f"{userinfo + '@' if userinfo else ''}127.0.0.1:{port}").geturl()
 
 
+class TcpRelay:
+    """A TCP relay the test owns, from a loopback port to `dsn`'s server; `dsn` is the same login through the relay. `cut()`
+    closes the listener and every open connection, so the relayed address then refuses: a real outage the test chooses
+    the moment of."""
+
+    def __init__(self, target_dsn: str) -> None:
+        import socket
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(target_dsn)
+        self._target = (parts.hostname or "127.0.0.1", parts.port or 5432)
+        self._socket = socket.create_server(("127.0.0.1", 0))
+        self._socket.settimeout(0.2)
+        self._open: list[Any] = []
+        self._lock = threading.Lock()
+        self._cut = threading.Event()
+        userinfo = parts.netloc.rpartition("@")[0]
+        self.dsn = parts._replace(
+            netloc=f"{userinfo + '@' if userinfo else ''}127.0.0.1:{self._socket.getsockname()[1]}").geturl()
+        self._accepting = threading.Thread(target=self._accept, daemon=True)
+        self._accepting.start()
+
+    def _accept(self) -> None:
+        import socket
+
+        while not self._cut.is_set():
+            try:
+                client, _ = self._socket.accept()
+            except OSError:
+                continue
+            try:
+                server = socket.create_connection(self._target)
+            except OSError:
+                client.close()
+                continue
+            with self._lock:
+                self._open += [client, server]
+            for src, dst in ((client, server), (server, client)):
+                threading.Thread(target=self._pipe, args=(src, dst), daemon=True).start()
+
+    @staticmethod
+    def _pipe(src: Any, dst: Any) -> None:
+        import socket
+
+        try:
+            while data := src.recv(65536):
+                dst.sendall(data)
+        except OSError:
+            pass
+        finally:
+            for end in (src, dst):
+                with contextlib.suppress(OSError):
+                    end.shutdown(socket.SHUT_RDWR)
+
+    def cut(self) -> None:
+        self._cut.set()
+        self._accepting.join(timeout=5)
+        self._socket.close()
+        with self._lock:
+            for end in self._open:
+                with contextlib.suppress(OSError):
+                    end.close()
+            self._open.clear()
+
+
 def host_path(mounts: list[dict[str, Any]], inside: str) -> Path:
     """Where an in-container path lives on the host, through the bind table (nested mounts win)."""
     p = Path(inside)

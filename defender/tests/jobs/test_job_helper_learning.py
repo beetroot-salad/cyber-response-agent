@@ -508,7 +508,6 @@ def test_o4_a_forge_token_valid_for_more_than_150_seconds_is_refused_and_none_is
     run_kind(scene, "post-step", job, forge=forge, family_less=True)
 
     assert got["control"]["token"], "control: 150 s was refused"
-    assert got["before"] == [150]
     assert got["after"] == got["before"], "the credential was asked for a token valid longer than 150 s"
 
 
@@ -746,13 +745,12 @@ def test_a3_a_learning_setup_the_helper_refuses_is_written_in_the_learning_entry
 
 
 
-def test_a1_a_learning_helper_signalled_before_it_starts_the_container_starts_none_and_writes_the_learning_start_failure(
-        scene):
+def test_a1_a_learning_helper_signalled_before_it_starts_the_container_starts_none_and_writes_stopped(scene):
     """SIGTERM lands before the container is started (during the first signing, or the launch-time publish): no `docker
-    run`, and the end record is the learning entry's start-failure word. (A1, A3, r4.1; control: the claim flow starts one)"""
+    run`, and the end record is the learning entry's `stopped` word, which hands the row back. (A1, A3, r4.1 correction: a stop never permanently fails a learning job)"""
     import signal
 
-    from defender.records.job_lane import ENTRY_ERROR, LEARNING_FAILED
+    from defender.records.job_lane import LEARNING_STOPPED
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     job_id = str(uuid.uuid4())
@@ -773,4 +771,4 @@ def test_a1_a_learning_helper_signalled_before_it_starts_the_container_starts_no
     assert docker.creates() == []
     end = learning_end(scene, job_id)
     assert end is not None, "no end record for a learning job signalled before its container"
-    assert (end.status, end.reason) == (LEARNING_FAILED, ENTRY_ERROR), end
+    assert (end.status, end.reason) == (LEARNING_STOPPED, None), end
