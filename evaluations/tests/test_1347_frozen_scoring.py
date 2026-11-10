@@ -305,7 +305,8 @@ def test_a_fixture_labelled_held_out_without_a_case_file_refuses_the_whole_set(t
 
     assert rc == 2, said
     assert verdicts == {}, said
-    assert "z-legacy" in said and "refused" in said, said
+    assert "z-legacy" in said, said
+    assert "refused" in said, said
 
 
 @pytest.mark.parametrize("with_case", [False, True], ids=["no-case-file", "with-a-case-file"])
@@ -323,9 +324,11 @@ def test_a_labelled_fixture_with_no_alert_is_excluded_loudly_not_refused_whateve
 
     rc, verdicts, said = scored(tmp_path, runs, root, *rows)
 
-    assert rc != 2 and "refused" not in said, said
+    assert rc != 2, said
+    assert "refused" not in said, said
     assert verdicts == {GOOD: "OK", OTHER: "OK"}, said
-    assert "z-no-alert" in said and "alert.json" in said, said
+    assert "z-no-alert" in said, said
+    assert "alert.json" in said, said
 
 
 def test_a_fixture_not_labelled_held_out_needs_no_case_file(tmp_path):

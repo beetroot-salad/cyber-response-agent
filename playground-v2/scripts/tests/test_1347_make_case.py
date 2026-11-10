@@ -34,7 +34,7 @@ import pytest
 import yaml
 from _lab_fakes import (ALERT_DOCS, ALERTS, ALERTS_PATTERN, AUTH, EVENTS, FREEZE_ID, SCHEMA_DRIFT, NGINX, RUN_ID, SPAN_START, SYSLOG,
                         SYSLOG_AFTER_T, T, FaultJournal, LabRig, alert_doc, canonical_digest, counts_of,
-                        expected_copy, instant, is_clean_marker)
+                        expected_copy, instant, is_clean_marker, nested_alert)
 
 from chaos.guard import GuardRefused, check_mutations
 from chaos.mutations import resolve_mutations
@@ -586,6 +586,44 @@ def test_make_a_case_creates_the_offset_file_as_the_fixed_record_and_never_trunc
     with rig.write_case("young", None):
         pass
     _assert_the_offset_file_is_a_fixed_record_rewritten_in_place(rig, "make-a-case")
+
+
+def test_an_alert_stored_nested_in_the_snapshot_is_a_candidate_like_a_flat_one(tmp_path):
+    """r6.4.3 C-parse/O13: an alert whose `kibana.alert.*` fields the snapshot holds nested
+    (`{"kibana": {"alert": {"uuid": U, ...}}}`) is listed by its uuid, as a flat one is."""
+    nested = nested_alert(alert_doc("nested-young", "2026-10-20T08:15:00Z"))
+    rig = LabRig(tmp_path, extra_alerts={"nested-young": nested})
+    got = rig.make_module.candidates(rig.freeze_dir, ops=rig.ops)
+
+    assert "nested-young" in got and "young" in got, got
+
+
+def test_make_a_case_reads_a_span_start_given_without_an_offset_as_UTC_whatever_the_local_zone(tmp_path):
+    """r6.4.3 C-parse (`frozen_copy.utc`): `make_case.py write ... --span-start 2026-10-20T07:00:00` means 07:00Z
+    even where local time is two hours ahead (TZ=Etc/GMT-2); case.yaml records that instant with its zone."""
+    import os
+    import time
+    from datetime import datetime
+
+    rig = LabRig(tmp_path)
+    naive = SPAN_START.removesuffix("Z")
+    saved = os.environ.get("TZ")
+    os.environ["TZ"] = "Etc/GMT-2"
+    time.tzset()
+    try:
+        with rig.write_case("young", {"profile": "data-drop-syslog", "seed": 7, "span_start": naive}):
+            pass
+    finally:
+        if saved is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = saved
+        time.tzset()
+
+    recorded = rig.case()["overlay"]["span_start"]
+    dt = recorded if isinstance(recorded, datetime) else datetime.fromisoformat(str(recorded).replace("Z", "+00:00"))
+    assert dt.tzinfo is not None, f"case.yaml records a naive span start: {recorded!r}"
+    assert dt == instant(SPAN_START), recorded
 
 
 @pytest.mark.parametrize("shape", ["flat", "nested"])

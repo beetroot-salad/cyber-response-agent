@@ -281,7 +281,9 @@ def test_a_live_run_or_ticket_source_that_is_not_configured_refuses_instead_of_e
 
 
 def _node_cluster_names(tmp_path, monkeypatch, env):
-    """The `cluster.name` the frozen node is started with, by a `LabOps.from_environment()` under `env`."""
+    """The `cluster.name` each frozen node container is created with (its environment, from `-e`, `--env` or an
+    `--env-file`, or an `-Ecluster.name=` argument to Elasticsearch), by a `LabOps.from_environment()` under
+    `env`."""
     from _lab_fakes import Journal, FakeClock, LabRig
     from _rig_docker import RigDocker
 
@@ -302,9 +304,13 @@ def _node_cluster_names(tmp_path, monkeypatch, env):
         ops.ensure_node()
     except Exception:  # noqa: BLE001 - only the node's start command is read
         pass
-    names = []
-    for argv, _kw in docker.calls:
-        names += [a.split("=", 1)[1] for a in argv if a.startswith("cluster.name=")]
+    names = []      # read from each started node container, however its env was given (-e, --env, --env-file)
+    for c in [*docker.containers.values(), *docker.removed]:
+        if "/" not in c.scope or "elasticsearch" not in c.image:
+            continue
+        if "cluster.name" in c.env:
+            names.append(c.env["cluster.name"])
+        names += [a.split("=", 1)[1] for a in c.command if a.startswith("-Ecluster.name=")]
     return names
 
 

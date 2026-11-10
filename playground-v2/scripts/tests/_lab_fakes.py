@@ -817,6 +817,22 @@ def expected_variant(mutation: dict | None, span_start: str = SPAN_START) -> dic
     return state
 
 
+def nested_alert(doc: dict) -> dict:
+    """The same alert with its `kibana.alert.*` fields nested (`{"kibana": {"alert": {...}}}`), as Kibana's own
+    exports and some run records carry it (C-parse: every reader accepts both shapes)."""
+    out: dict = {}
+    for key, value in doc.items():
+        if key.startswith("kibana.alert."):
+            node = out.setdefault("kibana", {}).setdefault("alert", {})
+            *parents, leaf = key[len("kibana.alert."):].split(".")
+            for p in parents:
+                node = node.setdefault(p, {})
+            node[leaf] = copy.deepcopy(value)
+        else:
+            out[key] = copy.deepcopy(value)
+    return out
+
+
 def config_env(events: str, alerts: str) -> str:
     """The lab tenant's `settings/systems/elastic/config.env`, in the shape the tenant fixture has
     (comments, double-quoted values)."""
@@ -1190,6 +1206,8 @@ class LabRig:
         return self.run_rc, self.run_out, ""
 
     def _edges_modelled(self) -> None:
+        """A request the fakes do not model fails the test as a gap IN THE FAKE (repair the fake: model it), not
+        as a contract demand on how the lab does what the design leaves open."""
         assert not self.cluster.unsupported, f"the fake cluster does not model: {self.cluster.unsupported}"
         assert not self.docker.unmodelled, f"the rig docker does not model: {self.docker.unmodelled}"
 
