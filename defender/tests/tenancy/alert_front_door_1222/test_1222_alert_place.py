@@ -29,6 +29,7 @@ from defender.tests.support.runtime.state._1255_snapshot import calls_of, messag
 from defender.tests.support.learning.branch._branch_947 import spec_at
 from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
+from defender.tests.tenancy.alert_front_door_1222._requests1222 import a_store_that_records_requests  # noqa: F401 — autouse fixture
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.e2e import _replay_harness as H
 
