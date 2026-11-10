@@ -831,6 +831,10 @@ def _perturbations(base_name, mutation):
                 ("", [_later(SPAN_START, timedelta(seconds=d)) for d in (1, -1, 60, -60, 3600, 7200)])]:
             for candidate in candidates:
                 other = (_set(mutation, path, candidate), SPAN_START) if path != ("span_start",) else (mutation, candidate)
+                if path == ("dataset",) and isinstance(candidate, str):
+                    # The resolver derives a dataset's stream and pipeline (chaos.mutations): never one alone.
+                    other = ({**other[0], "stream": f"logs-{candidate}-*", "pipeline": f"logs-{candidate}@custom"},
+                             SPAN_START)
                 state = _expected_or_none(*other)
                 if state is not None and state != base:
                     found[f"{base_name}/{'.'.join(map(str, path))}{site}"] = other
