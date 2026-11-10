@@ -279,11 +279,12 @@ def test_teardown_unlinks_a_link_at_the_tenant_folder_or_secrets_folder_and_leav
         assert not link.is_symlink() and not link.exists()
 
 
-# --- F-6: exactly the repository write scope ----------------------------------------------------------
+# --- F-6: exactly the repository write scope, plus reading issues ------------------------------------
 
-def test_each_integration_is_created_with_exactly_the_write_repository_scope(world):
-    """The recorded `--scope` is `write:repository` and nothing else, so no organization or admin scope rides along (F-6, O8)."""
+def test_each_integration_is_created_with_exactly_the_write_repository_and_read_issue_scopes(world):
+    """The recorded `--scope` is `write:repository` and `read:issue` and nothing else: no `write:issue`, organization or admin scope rides along (F-6, O8, #1278 Feedback)."""
     tenant = world.active_tenant()
     gen = world.live(tenant)
     [made] = [c for c in world.integration.created if c["user"] == gen.bot_login]
-    assert made["scopes"] == ["write:repository"]
+    scopes = [part for value in made["scopes"] for part in value.split(",")]  # repeated flags or one comma list
+    assert sorted(scopes) == ["read:issue", "write:repository"]

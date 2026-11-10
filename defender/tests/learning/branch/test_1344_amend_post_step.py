@@ -2,18 +2,27 @@
 
 Without `--job` the post-step is the worker's family-less check of a tenant: it does the same work (publish the
 handed `pending` jobs, then the drain's gate), and its record is kept under the tenant's own id,
-`<runs>/<tenant id>.post-step.json`, one per tenant, named by `job_lane.post_step_key`. No database."""
+`<runs>/<tenant id>.post-step.json`, one per tenant, named by `job_lane.post_step_key`. What it publishes and what it
+leaves waiting are the learning store's (#1278): a real PostgreSQL."""
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from defender.learning.branch import post_step
 from defender.records.job_lane import post_step_key
-from defender.tests.learning.branch.test_1344_post_step import _job_episode, _queue, hand_pending
+from defender.tests.learning.branch.test_1344_post_step import (  # noqa: F401 — store_dsn is the module's autouse fixture
+    _job_episode, _learning_paths, _queue, hand_pending, store_dsn)
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, call, finding, lapse_lease
 from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
+
+pytestmark = pytest.mark.postgres
 
 
 def _record_at(ep: Path, key: str) -> dict:
@@ -67,3 +76,91 @@ def test_a1_a_family_less_post_step_with_nothing_pending_still_runs_the_gate(tmp
 
     assert ticks == [1]
     assert _record_at(ep, tenant_id) == {"published": [], "refused": [], "waiting": False}  # nothing queued (amendment 3)
+
+
+# --- Wake (#1278 amendment): the record's `waiting` counts the store's state ----------------------------------------
+
+
+_ONE = {"finding": 1, "questioner_finding": 1}
+
+
+def _queued(dsn: str, tenant: str, *ids: str) -> None:
+    call(dsn, "publish_findings", tenant, "run-1", [finding(i) for i in ids], kind="finding")
+
+
+def _claimed(dsn: str, tenant: str) -> Any:
+    _queued(dsn, tenant, "f1")
+    return call(dsn, "claim", tenant, AUTHOR_LANE, owner="host-a", thresholds=_ONE)
+
+
+def _reviewed(dsn: str, tenant: str) -> Any:
+    claim = _claimed(dsn, tenant)
+    call(dsn, "in_review", claim, 7, {})
+    return claim
+
+
+def _pitfalls(dsn: str, tenant: str) -> None:
+    for n in range(3):
+        call(dsn, "add_pitfall", tenant, {"schema_version": 1, "pitfall_id": f"p{n}", "source_run": "r", "system": "elastic",
+                                          "query_id": "elastic.esql", "goal": "g", "executed_query": "x",
+                                          "stderr_digest": f"exit=1; digest {n}", "error_class": "agent-fixable"})
+
+
+def _overdue(dsn: str, tenant: str) -> None:
+    claim = _reviewed(dsn, tenant)
+    execute(dsn, "UPDATE learning.batches SET last_checked = now() - interval '1 hour' WHERE id = %s", (claim.batch_id,))
+
+
+def _checked(dsn: str, tenant: str) -> None:
+    call(dsn, "note_check", tenant, _reviewed(dsn, tenant).batch_id)
+
+
+def _closed_with_feedback(dsn: str, tenant: str) -> None:
+    # no item is held, so the closed batch's items stay in_batch, due a replacement
+    call(dsn, "end_review", tenant, _reviewed(dsn, tenant).batch_id, expect_phase="in_review", outcome="closed",
+         published=[], held=[])
+
+
+def _merged(dsn: str, tenant: str) -> None:
+    call(dsn, "end_review", tenant, _reviewed(dsn, tenant).batch_id, expect_phase="in_review", outcome="merged",
+         published=[("finding", "f1")], held=[])
+
+
+#: Store state a family-less post-step finds, built with the store's own verbs.
+_SCENARIOS = {
+    "items_at_threshold": lambda dsn, t: _queued(dsn, t, "f1", "f2"),
+    "below_threshold": lambda dsn, t: _queued(dsn, t, "f1"),
+    "lapsed_lease": lambda dsn, t: lapse_lease(dsn, _claimed(dsn, t).batch_id),
+    "live_working_batch": _claimed,
+    "overdue_check": _overdue,
+    "fresh_check_in_review": _checked,
+    "due_replacement": _closed_with_feedback,
+    "merged_and_nothing_else": _merged,
+    "pitfalls_at_threshold": _pitfalls,  # the lead lane is operator-only: nothing a post-step can act on (D9)
+}
+
+
+@pytest.mark.parametrize(("scenario", "waiting"), [
+    ("items_at_threshold", True), ("lapsed_lease", True), ("overdue_check", True), ("due_replacement", True),
+    ("fresh_check_in_review", True), ("live_working_batch", True),
+    ("below_threshold", False), ("merged_and_nothing_else", False), ("pitfalls_at_threshold", False)])
+def test_wake_the_post_step_says_work_waits_exactly_when_the_stores_state_gives_it_something_to_do(
+        tmp_path, monkeypatch, scenario, waiting):
+    """Items at threshold, a lapsed lease, a batch overdue for a check, a due replacement, or any batch still to be
+    reconciled (its lease may lapse and its PR change later, so the tenant's checks must go on) leave the record without
+    `waiting: false`; items below threshold, a merged batch with nothing else, or lead-lane items alone leave it.
+    (Wake, D9, amendment 3)"""
+    from defender.tests.support.learning.core._store1278 import DSN_ENV
+
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "2" if scenario == "items_at_threshold" else "1")
+    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "5")
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
+    ep, _ = _job_episode(tmp_path, f"wake-{scenario}", findings=False)
+    data_root, tenant_id = J.episode_location(ep)
+    _SCENARIOS[scenario](os.environ[DSN_ENV], tenant_id)
+
+    hand_pending(data_root, tenant_id, None, [])
+    post_step.main(["--tenant", tenant_id, "--parent-pid", str(os.getppid())],
+                   author_tick=lambda *_a, **_k: 0, directory=T.launcher_directory(tenant_id))
+
+    assert _record_at(ep, tenant_id) == {"published": [], "refused": [], **({} if waiting else {"waiting": False})}

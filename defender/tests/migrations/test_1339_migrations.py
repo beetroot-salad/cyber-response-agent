@@ -19,6 +19,7 @@ from defender.tests.support.shared._postgres1339 import VERSION_TABLE, database,
 #: The schemas PostgreSQL itself owns; everything else in a database is ours to compare.
 _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
 IDENTITY_TABLES = {"users", "memberships", "sessions", "program_credentials", "warning_deliveries"}  # #1214: `tenants` moved to `tenancy`; #1307 adds credentials and their warning deliveries
+LEARNING_TABLES = {"work_items", "batches", "commits", "commit_changes"}  # #1278: learning's work tracking (design: Schema)
 JOBS_TABLES = {"alerts", "investigations", "learning_jobs", "learning_checks"}  # #1342, #1344 (amendment 3: learning_checks) (#1345 r5: the mapping table is a tenant record, in `tenancy`)
 UNKNOWN_REVISION = "f00dfeedbeef"
 #: #1345 r5 Upgrade: the migration after `0006_job_leases`. r5 names no id: this one is DESIGN-IMPLIED for the code stage.
@@ -98,6 +99,7 @@ def test_upgrading_an_empty_database_records_head_and_creates_identitys_tables(e
     assert _recorded_revision(empty_database) == [head()]
     assert _tables(empty_database, "identity") == IDENTITY_TABLES
     assert _tables(empty_database, "jobs") == JOBS_TABLES
+    assert _tables(empty_database, "learning") == LEARNING_TABLES
     assert _tables(empty_database, "public") == {"alembic_version"}
 
 
@@ -165,7 +167,7 @@ def test_the_migrated_schema_is_the_schema_the_models_declare(migrated_database)
 
     # The comparison sees what O3 is about: CHECKs, the partial unique index, and no server defaults (P4).
     migrated = catalog(migrated_database)
-    assert [s for (s,) in migrated["schemas"] if s != "public"] == ["identity", "jobs", "tenancy"]  # #1342 adds `jobs`
+    assert [s for (s,) in migrated["schemas"] if s != "public"] == ["identity", "jobs", "learning", "tenancy"]  # #1342 adds `jobs`, #1278 `learning`
     assert any(c[:2] == ("identity", "users") and c[3] == "c" for c in migrated["constraints"])
     assert any(i[:2] == ("identity", "memberships") and "WHERE" in i[3] and "invited" in i[3]
                for i in migrated["indexes"])
@@ -316,6 +318,7 @@ def test_the_dev_command_upgrades_the_database_named_by_the_environment(empty_da
         assert done.returncode == 0, done.stderr
         assert _recorded_revision(empty_database) == [head()]
     assert _tables(empty_database, "identity") == IDENTITY_TABLES
+    assert _tables(empty_database, "learning") == LEARNING_TABLES
 
 
 def test_the_dev_command_without_a_database_refuses_loudly():

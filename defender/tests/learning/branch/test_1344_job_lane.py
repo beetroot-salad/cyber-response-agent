@@ -20,16 +20,16 @@ from typing import Any
 
 import pytest
 
-from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender.records._episode_handle import Episode
 from defender.records.formats import BASE_ROLE, load_family
 from defender.tests.learning.branch.test_947_triplet_launcher import _BASE, _calls, _launch
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.core._state1135 import env_state
+from defender.tests.support.jobs._jobs1342 import register_tenant
+from defender.tests.support.learning.core._store1278 import call
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 
 JOB = fixture_uuid("1344-job")
 
@@ -612,8 +612,28 @@ def test_o13_the_entry_carries_the_siblings_cost_and_its_stage_to_the_progress_a
 # --- judge modes, publishing, dedup -------------------------------------------------------------------
 
 
-def _graded_episode(tmp_path, monkeypatch, *, job_lane: bool, episode_id: str = S.EPISODE_ID):
-    _state1135.set_state_dir(monkeypatch, tmp_path / f"learning-state-{job_lane}")
+def blocking(dsn: str):
+    """The store's sync facade (interface `blocking`), imported where used so a missing store is a per-test red."""
+    from defender.learning.store import blocking as open_blocking
+
+    return open_blocking(dsn)
+
+
+def _skipped(reason: str):
+    from defender.learning.store import Outcome
+
+    return Outcome.skipped(reason)
+
+
+@pytest.fixture
+def store_dsn(migrated_database):  # noqa: F811 — the imported fixture
+    """The fixture tenant, active in a database of the test's own: the learning store an operator-lane judge and a
+    post-step publish into (#1278)."""
+    register_tenant(migrated_database, S.FIXTURE_TENANT)
+    return migrated_database
+
+
+def _graded_episode(tmp_path, dsn, *, job_lane: bool, episode_id: str = S.EPISODE_ID):
     ep = S.judged_episode(tmp_path, doc=S.family_v2(episode_id=episode_id), outcome=None, episode_id=episode_id)
     S.outcome_record(ep, "accepted", family_stamp=False)
     J.comparable_family_stamp(ep)
@@ -622,7 +642,8 @@ def _graded_episode(tmp_path, monkeypatch, *, job_lane: bool, episode_id: str = 
     world.update(bucket="lead-quality", systems=["idp"])
     judge = J.scripted_judge(default=S.as_reply_text(world), family_default=S.as_reply_text(J.family_reply()))
     before = {p for p in ep.rglob("*") if p.is_file()}
-    J.grade(ep, judge=judge, state=env_state(), job_lane=job_lane)
+    with blocking(dsn) as store:  # interface request: `grade_episode(..., store=)` replaces `state=`
+        J.grade_at(ep, judge=judge, store=store, job_lane=job_lane)
     return ep, {p for p in ep.rglob("*") if p.is_file()} - before
 
 
@@ -640,57 +661,67 @@ def sink_files(new) -> list[Path]:
     return found
 
 
-def _queue() -> list[dict]:
-    state = env_state()
-    return state.rows(FINDINGS) + state.rows(QUESTIONER_FINDINGS)
+def _queue(dsn: str) -> list[dict]:
+    """The payloads of the fixture tenant's queued findings of both kinds."""
+    return [i.payload for i in call(dsn, "work", S.FIXTURE_TENANT)]
 
 
-def test_judge_modes_the_job_lane_writes_the_episode_and_the_operator_lane_the_queue(tmp_path, monkeypatch):
-    """Same reply, two lanes: the operator's findings reach the queue now; the job's wait in the episode. (Judge modes)"""
-    _graded_episode(tmp_path, monkeypatch, job_lane=False)
-    assert _queue(), "control: the operator lane appended nothing"
+def test_judge_modes_the_job_lane_writes_the_episode_and_the_operator_lane_the_store(tmp_path, store_dsn):
+    """Same reply, two lanes: the operator's findings reach the store now; the job's wait in the episode. (Judge modes)"""
+    _graded_episode(tmp_path, store_dsn, job_lane=False)
+    assert _queue(store_dsn), "control: the operator lane inserted nothing"
 
-    _ep, new = _graded_episode(tmp_path, monkeypatch, job_lane=True, episode_id=JOB)
-    assert _queue() == [], "a job's judge reached the queue"
+    _ep, new = _graded_episode(tmp_path, store_dsn, job_lane=True, episode_id=JOB)
+    assert len(_queue(store_dsn)) == 1, "a job's judge reached the store"
     sunk = sink_files(new)
     assert sunk, f"the job's findings are in no file the judge added to the episode: {sorted(new)}"
     assert any(json.loads(line)["subject_topic"] == "the lead was never revisited"
                for p in sunk for line in p.read_text(encoding="utf-8").splitlines() if line.strip())
 
 
-def test_d5_a_jobs_findings_publish_once_even_after_an_author_consumed_them(tmp_path, monkeypatch):
-    """Publishing fills the queue; a second publish adds nothing, nor does one after rotation. (D5, O14, L-C19)"""
-    ep, _new = _graded_episode(tmp_path, monkeypatch, job_lane=True)
+def test_d5_a_jobs_findings_publish_once_even_after_an_author_consumed_them(tmp_path, store_dsn):
+    """Publishing fills the store; a second publish adds nothing, nor does one after the finding is published
+    by a merge. (D5, O14, L-C19; the store's finding id is unique for good)"""
+    ep, _new = _graded_episode(tmp_path, store_dsn, job_lane=True)
     from defender.learning.judge.enqueue import publish_episode_findings
 
-    def publish() -> None:
+    def publish(store) -> None:
         # The episode reached as the post-step reaches it: by id, through its tenant's runs repository.
         with J.episode_runs_for(ep).episode_files(ep.name) as episode:
-            publish_episode_findings(episode, state=state)
+            publish_episode_findings(episode, store=store, tenant_id=S.FIXTURE_TENANT)
 
-    state = env_state()
-    publish()
-    rows = state.rows(FINDINGS)
-    assert rows, "the episode's findings never reached the queue"
-    publish()
-    assert state.rows(FINDINGS) == rows, "a crash's republish doubled the queue"
+    with blocking(store_dsn) as store:
+        publish(store)
+        rows = _queue(store_dsn)
+        assert rows, "the episode's findings never reached the store"
+        publish(store)
+        assert _queue(store_dsn) == rows, "a crash's republish doubled the queue"
 
-    state.rotate(FINDINGS, [], rows, None)
-    publish()
-    assert state.rows(FINDINGS) == [], "a consumed finding came back"
+        claim = store.claim(S.FIXTURE_TENANT, "author", owner="host-a", thresholds={"finding": 1, "questioner_finding": 1})
+        store.in_review(claim, 7, {})
+        store.end_review(S.FIXTURE_TENANT, claim.batch_id, expect_phase="in_review", outcome="merged",
+                         published=[(kind, key) for kind, key, _payload in claim.items], held=[])
+        publish(store)
+        assert _queue(store_dsn) == rows, "a published finding came back"
+        assert {i.status for i in store.work(S.FIXTURE_TENANT)} == {"published"}
 
 
-def test_d5_dedup_reads_the_consumed_ledger_on_both_lanes_channels(tmp_path, monkeypatch):
-    """Append, consume, append the same id: nothing comes back; a new id does. Both findings channels. (L-C19)"""
-    _state1135.set_state_dir(monkeypatch, tmp_path / "state")
-    state = env_state()
-    for channel in (FINDINGS, QUESTIONER_FINDINGS):
-        row, fresh = {"finding_id": f"{channel.name}-1", "topic": "t"}, {"finding_id": f"{channel.name}-2", "topic": "t"}
-        assert state.append(channel, [row], dedup_key="finding_id") == (1, 0)
-        state.rotate(channel, [], [row], None)
-        assert state.append(channel, [row], dedup_key="finding_id") == (0, 0)
-        assert state.rows(channel) == []
-        assert state.append(channel, [fresh], dedup_key="finding_id") == (1, 0), "control: the channel still appends"
+def test_d5_dedup_is_by_the_store_on_both_kinds_and_holds_past_every_end(tmp_path, store_dsn):
+    """Publish, end the item as skipped, publish the same id: nothing comes back; a new id does. Both findings kinds.
+    (L-C19; replaces the consumed-ledger dedup)"""
+    from defender.tests.support.learning.core._store1278 import finding, world_finding
+
+    with blocking(store_dsn) as store:
+        for kind in ("finding", "questioner_finding"):
+            make = finding if kind == "finding" else world_finding
+            row, fresh = make(f"{kind}-1"), make(f"{kind}-2")
+            assert tuple(store.publish_findings(S.FIXTURE_TENANT, "run-1", [row], kind=kind)) == (1, 0)
+            claim = store.claim(S.FIXTURE_TENANT, "author", owner="host-a", thresholds={kind: 1})
+            store.end_no_commits(claim, {(kind, f"{kind}-1"): _skipped("duplicate")})
+            assert tuple(store.publish_findings(S.FIXTURE_TENANT, "run-2", [row], kind=kind)) == (0, 1)
+            assert {i.key for i in store.work(S.FIXTURE_TENANT) if i.kind == kind and i.status == "waiting"} == set()
+            assert tuple(store.publish_findings(S.FIXTURE_TENANT, "run-2", [fresh], kind=kind)) == (1, 0), \
+                "control: the kind still takes a new id"
 
 
 # --- O9: nothing outlives its worker ------------------------------------------------------------------

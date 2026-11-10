@@ -21,7 +21,6 @@ from defender import run as run_py
 from defender import run_common
 from defender.records import case_ref
 from defender.learning.branch import cli as branch_cli
-from defender.learning.core import config
 from defender.learning.core.config import FatalConfigError, LoopPaths
 from defender.presentation import lessons_page as frontend_build
 from defender.learning.frontend import serialize_queues
@@ -399,15 +398,10 @@ def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default
             default.rmdir()  # what an import-frozen spawn made in the checkout
 
     assert len(spawned) == 1, f"the pitfalls stage was spawned {len(spawned)} times (escaped {escaped!r})"
-    stage_dir = Path(spawned[0]["learning_run_dir"])
-    assert stage_dir.resolve() == (location_path(paths.state_root) / LEAD_QUEUE_LOCK.file).parent.resolve(), \
-        f"the pitfalls stage's learning_run_dir is {stage_dir}, not the held root's _pending_leads"
+    # #1278 A1/O10: the stage's run folder is no longer the lane's `_pending_leads` under the state root (the root and
+    # `stage_dir` go at cutover); where a call's folder lives is observed in tests/learning/curation/test_1278_call_folders.py.
     assert isinstance(escaped, FatalConfigError), \
         f"the stage did not stop at the model, the one thing out of reach: {escaped!r}"
     assert "no-such-model-1135" in str(escaped), f"the stage stopped on another config fault: {escaped}"
     assert default_after == (default_kind, default_before), \
         f"a folder, trace or budget.json appeared under {default}: {default_after}"
-    held = S.LearningState.open(paths).stage_dir(config.LEAD_AUTHOR_DRAIN_LABEL)
-    assert isinstance(held, Path), f"stage_dir(LEAD_AUTHOR_DRAIN_LABEL) answered {held!r}, not a Path"
-    assert held.resolve() == stage_dir.resolve(), \
-        f"stage_dir(LEAD_AUTHOR_DRAIN_LABEL) is {held}, not the folder the stage was handed"

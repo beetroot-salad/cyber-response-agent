@@ -21,10 +21,7 @@ from typing import Any
 import pytest
 
 from defender.tests.support.storage._alert_plant import plant_alert
-from defender.learning.core.cli import _run_stage
 from defender.learning.core.config import (
-    AUTHOR_DRAIN_LABEL,
-    LEAD_AUTHOR_DRAIN_LABEL,
     LoopPaths,
     StageAbort,
 )
@@ -492,37 +489,10 @@ def test_1135_a_deadline_lock_name_is_a_planted_entry_when_run_batch_takes_the_r
     assert _handle_rows(paths) == [row], "the queue read back through the handle is not the seeded queue"
 
 
-@pytest.mark.parametrize("shape", ["symlink", "file"])
-@pytest.mark.parametrize(("lane", "folder"), [(AUTHOR_DRAIN_LABEL, "_pending"),
-                                            (LEAD_AUTHOR_DRAIN_LABEL, "_pending_leads")])
-def test_1135_the_stage_dir_lane_folder_is_a_planted_entry(
-        tmp_path, caplog, lane, folder, shape):
-    caplog.set_level(logging.INFO)
-    paths = S.built_paths(tmp_path)
-    root = tmp_path / "learning-state"
-    outside_dir = tmp_path / "outside-stage"
-    outside_dir.mkdir()
-    at = root / folder
-    if shape == "symlink":
-        S.plant(at, "symlink", target=outside_dir)
-    else:
-        at.write_text("not a folder\n", encoding="utf-8")
-    before = S.tree_snapshot(root)
-    state = S.LearningState.open(paths)
-    harness_ran: list[Any] = []
-
-    def stage() -> int:
-        harness_ran.append(state.stage_dir(lane))
-        return 0
-
-    rc = _run_stage(stage)
-
-    assert rc == 2, f"a planted {shape} at {folder} did not halt the stage: exit {rc}"
-    assert harness_ran == [], "the stage harness ran past the refused stage folder"
-    assert any(folder in m for m in _lines(caplog, logging.CRITICAL)), \
-        f"no CRITICAL line names the lane folder {folder}"
-    assert S.tree_snapshot(outside_dir) == {}, "something was created through the link"
-    assert S.tree_snapshot(root) == before, "a stage record was written below the root"
+# #1278 A1/O10: the former `stage_dir` lane-folder case retires with the verb (the lane folders `_pending` and
+# `_pending_leads` go with the state root). Its surviving guard, a planted entry where a call folder goes is refused and
+# nothing is created through it, is `test_a_planted_entry_where_a_call_folder_goes_is_refused` in
+# tests/learning/curation/test_1278_call_folders.py.
 
 
 _VERB_CHILD = r'''

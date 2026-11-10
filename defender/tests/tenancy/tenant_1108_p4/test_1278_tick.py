@@ -1,72 +1,58 @@
-"""#1278 sketch: the author tick over the learning store, through the real drain entry.
+"""#1278 the author tick over the learning store, through the real drain entry.
 
 Every case drives `author_drain` through the CLI's stage runner over `p4_tenant` (a real clone, a
-loopback origin, P3's forge fake extended with reviews, comments and PR close), with the store at
-`DEFENDER_DATABASE_DSN` on a migrated database holding the tenant's row. Work is seeded and observed
-through the store's verbs; the curator is `LessonWriter`, which commits through the batch's own
-commit-maker. Forge state is changed as a person would: merge, close, a review, a comment.
+loopback origin, P3's forge fake), with the store at `DEFENDER_DATABASE_DSN` on a migrated database
+holding the tenant's row. Work is seeded and observed through the store's verbs; the curator is
+`LessonWriter`, which commits through the batch's own commit-maker. Forge state is changed as a person
+would. A stop is delivered to a forked child running the post-step, never to the pytest worker.
+Reconcile and feedback are in the feedback slice's files.
 """
 from __future__ import annotations
 
-import time
+import os
+import signal
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE,
-    DSN_ENV,
+        ONE,
+    RENEW_ENV,
     LessonWriter,
+    TickChild,
+    await_file,
     batches,
+    blocked_in_subprocess,
     call,
     files_under,
     finding,
+    foreign_commit_on,
+    forget_local_branch,
+    kill_if_alive,
     lapse_lease,
+    lease_seconds_left,
     lesson_citing,
-    work,
+    migrated_database,  # noqa: F401 — fixture the world needs
+    world,  # noqa: F401 — fixture
 )
 from defender.tests.support.shared._locations_1210 import location_path
-from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
-from defender.tests.tenancy.tenant_1108_delivery._support import (
-    close_on_remote,
-    comment_row,
-    merge_on_remote,
-    review_row,
-)
+from defender.tests.tenancy.tenant_1108_delivery._support import pr_row
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     LESSON_NAME,
     BoxSpy,
     author_drain,
     critical_text,
-    drain_paths,
-    product_repo,
+    drafts_dir,
     remote_branches,
 )
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, git
+from defender.tests.tenancy.tenant_1108_p4._support import git
 
 pytestmark = pytest.mark.postgres
 
-READ_ISSUE = {"write:repository", "read:issue"}
-
-
-@pytest.fixture
-def world(p4_tenant, migrated_database, monkeypatch, tmp_path):  # noqa: F811 — the imported fixture
-    """The tenant bound to its forge, active in the database the tick's store reads, both curators
-    waking at one item."""
-    t = p4_tenant
-    bind_forge(t)
-    register_tenant(migrated_database, t.tenant_id)
-    monkeypatch.setenv(DSN_ENV, migrated_database)
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
-    return SimpleNamespace(t=t, dsn=migrated_database, paths=drain_paths(t, product_repo(tmp_path)),
-                           scratch=tmp_path)
-
 
 def _seed(w, *fids):
-    call(w.dsn, "publish_findings", w.t.tenant_id, "run-1", [finding(f) for f in fids])
+    call(w.dsn, "publish_findings", w.t.tenant_id, "run-1", [finding(f) for f in fids], kind="finding")
 
 
 def _tick(w, writer):
@@ -74,11 +60,16 @@ def _tick(w, writer):
 
 
 def _work(w):
-    return work(w.dsn, w.t.tenant_id)
+    """The tenant's items by `(kind, key)`: a key alone is not an item's identity."""
+    return {(i.kind, i.key): i for i in call(w.dsn, "work", w.t.tenant_id)}
 
 
 def _batches(w):
     return {b.id: b for b in batches(w.dsn, w.t.tenant_id)}
+
+
+def _record(w):
+    return call(w.dsn, "commit_record", w.t.tenant_id)
 
 
 def _opened(w, writer, caplog):
@@ -90,10 +81,25 @@ def _opened(w, writer, caplog):
     return writer.served[-1], branch, pr["number"]
 
 
-# --- P2', O3: the row before the commit; a lapsed holder commits nothing --------------------------
+def _stranded(w, caplog):
+    """A tick whose push succeeded and whose PR open failed: `(writer, batch id, branch)`, the batch working
+    and its lease still live."""
+    _seed(w, "f1")
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+    w.t.forge.fail_create = True
+    _tick(w, writer)
+    assert writer.served, critical_text(caplog)
+    [(branch, _tip)] = remote_branches(w.t.remote).items()
+    w.t.forge.fail_create = False
+    assert [r for r in w.t.forge.prs if r["state"] == "open"] == []
+    [batch_id] = _batches(w)
+    return writer, batch_id, branch
 
 
-def test_p2_the_batch_row_and_its_items_exist_before_the_first_commit_and_its_pr_puts_it_in_review(world, caplog):
+# --- P2', O3, D5: the row before the commit; a lapsed holder commits nothing ----------------------------------
+
+
+def test_p2_the_batch_row_and_its_items_exist_before_the_first_commit_and_its_pr_puts_it_in_review(world, caplog):  # noqa: F811 — the imported fixture
     """At the curator's commit the batch is a working row holding f1, nothing pushed; after, in_review with its PR. (P2', O3, O10)"""
     w = world
     _seed(w, "f1")
@@ -109,16 +115,45 @@ def test_p2_the_batch_row_and_its_items_exist_before_the_first_commit_and_its_pr
     batch_id, _branch, number = _opened(w, writer, caplog)
 
     assert [(b.id, b.phase) for b in seen["batches"].values()] == [(batch_id, "working")]
-    assert (seen["work"]["f1"].status, seen["work"]["f1"].batch_id) == ("in_batch", batch_id)
+    assert (seen["work"][("finding", "f1")].status, seen["work"][("finding", "f1")].batch_id) == ("in_batch", batch_id)
     assert (seen["branches"], seen["creates"]) == ({}, [])
     after = _batches(w)[batch_id]
     assert (after.phase, after.pr_number) == ("in_review", number)
-    assert _work(w)["f1"].status == "in_batch", "a finding stays in its batch until its lesson merges"
+    assert _work(w)[("finding", "f1")].status == "in_batch", "a finding stays in its batch until its lesson merges"
     # O10: a tick that claimed, committed and delivered wrote nothing under the learning state root.
     assert files_under(learning) == before
 
 
-def test_o3_a_holder_whose_lease_lapsed_makes_no_commit_and_changes_no_item(world, caplog):
+def test_d5_the_branch_is_set_at_claim_base_and_start_with_the_first_commit_and_the_record_is_in_the_database(world, caplog):  # noqa: F811 — the imported fixture
+    """Branch set before the commit and the one pushed; base and start appear with the first commit row; the rows are in the database. (D5, P2')"""
+    w = world
+    _seed(w, "f1")
+    base = w.t.origin_main()
+    seen = {}
+
+    def before(_batch):
+        [b] = _batches(w).values()
+        seen["before"] = (b.branch, b.base, _record(w))
+
+    def after(_batch):
+        [b] = _batches(w).values()
+        seen["after"] = (b.branch, b.base, _record(w))
+
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, before_commit=before, after_commit=after)
+    batch_id, branch, _number = _opened(w, writer, caplog)
+
+    assert seen["before"][0] == branch
+    assert seen["before"][1:] == (None, [])
+    assert seen["after"][:2] == (branch, base)
+    [row] = _record(w)
+    assert (row.commit, row.branch, row.base, str(row.batch_id)) == (writer.commits[0], branch, base, str(batch_id))
+    assert row.start
+    assert not row.reverts
+    assert [c[0] for c in row.changes] == [f"agent/lessons/{LESSON_NAME}"]
+    assert dict(remote_branches(w.t.remote))[branch] == writer.commits[0]
+
+
+def test_o3_a_holder_whose_lease_lapsed_makes_no_commit_and_changes_no_item(world, caplog):  # noqa: F811 — the imported fixture
     """The lease lapses between the curator's write and its commit: no commit, no branch, the row unchanged. (O3, P6)"""
     w = world
     _seed(w, "f1")
@@ -130,27 +165,97 @@ def test_o3_a_holder_whose_lease_lapsed_makes_no_commit_and_changes_no_item(worl
     assert writer.commits == []
     assert remote_branches(w.t.remote) == {}
     assert git(w.t.clone, "for-each-ref", "refs/heads/lessons/") == ""
+    assert _record(w) == []
     [batch] = _batches(w).values()
     assert batch.phase == "working", "a holder past its lease cannot end its own batch"
-    assert (_work(w)["f1"].status, _work(w)["f1"].batch_id) == ("in_batch", batch.id)
+    assert (_work(w)[("finding", "f1")].status, _work(w)[("finding", "f1")].batch_id) == ("in_batch", batch.id)
 
 
-# --- O1, O5: crash recovery -----------------------------------------------------------------------
-
-
-def test_o1_a_pushed_branch_with_no_pr_is_taken_over_and_gets_its_one_pr(world, caplog):
-    """The PR open fails after the push; once the lease lapses, the next tick opens that branch's PR, no rerun. (O1, O5, Crash recovery)"""
+def test_o3_a_holder_that_lost_its_lease_after_committing_pushes_nothing_and_opens_no_pr(world, caplog):  # noqa: F811 — the imported fixture
+    """The lease lapses past grace after the commit: no push, no PR; the next tick takes over and delivers, no rerun. (O3, P6, Renewal and stop)"""
     w = world
     _seed(w, "f1")
-    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
-    w.t.forge.fail_create = True
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, after_commit=lambda batch: lapse_lease(w.dsn, batch.id))
     _tick(w, writer)
-    assert writer.served, critical_text(caplog)
-    [(branch, _tip)] = remote_branches(w.t.remote).items()
-    assert [r for r in w.t.forge.prs if r["state"] == "open"] == []
-    [batch_id] = _batches(w)
 
-    w.t.forge.fail_create = False
+    assert writer.served, critical_text(caplog)
+    assert len(writer.commits) == 1
+    assert remote_branches(w.t.remote) == {}, "a holder past its lease pushed"
+    assert w.t.forge.creates == [], "a holder past its lease opened a PR"
+    [batch_id] = _batches(w)
+    assert _batches(w)[batch_id].phase == "working"
+    assert [r.commit for r in _record(w)] == writer.commits, "the commit was recorded before the lease went"
+
+    _tick(w, writer)
+
+    assert writer.served == [batch_id], "a takeover only finishes delivery: no new authoring run"
+    [(branch, tip)] = remote_branches(w.t.remote).items()
+    assert tip == writer.commits[0]
+    [pr] = [r for r in w.t.forge.prs if r["state"] == "open"]
+    assert pr["head"]["ref"] == branch
+    assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].pr_number) == ("in_review", pr["number"])
+
+
+# --- Locks: the working-batch rule replaces the author-drain lock ------------------------------------------------
+
+
+def test_locks_a_tick_finding_a_live_batch_of_another_holder_authors_nothing_and_exits_quietly(world, caplog):  # noqa: F811 — the imported fixture
+    """Another holder's live working batch stands in for the drain lock: this tick returns 0, serves no curator, claims nothing. (O3, Locks)"""
+    w = world
+    _seed(w, "f1")
+    other = call(w.dsn, "claim", w.t.tenant_id, AUTHOR_LANE, owner="other-host", thresholds=ONE)
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+
+    rc = _tick(w, writer)
+
+    assert (rc, writer.served) == (0, []), critical_text(caplog)
+    assert list(_batches(w)) == [other.batch_id]
+    assert w.t.forge.creates == []
+
+
+@pytest.mark.parametrize("revert_state", ["working", "in_review"])
+def test_reverts_a_revert_that_is_running_or_open_blocks_authoring(world, caplog, revert_state):  # noqa: F811 — the imported fixture
+    """A running revert, and an open revert PR, each stop a tick from authoring: the item waits, nothing is claimed. (Reverts, O3)"""
+    w = world
+    _seed(w, "f1")
+    revert = call(w.dsn, "claim_revert", w.t.tenant_id, owner="cli")
+    if revert_state == "in_review":
+        call(w.dsn, "in_review", revert, pr_number=40, outcomes={})
+        w.t.forge.add_pr(pr_row(40, revert.branch))
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+
+    _tick(w, writer)
+
+    assert writer.served == [], critical_text(caplog)
+    assert list(_batches(w)) == [revert.batch_id]
+    assert _work(w)[("finding", "f1")].status == "waiting"
+    assert w.t.forge.creates == []
+
+
+def test_d6_a_hand_made_pr_on_the_lessons_prefix_sends_the_batch_to_needs_person_and_opens_none(world, caplog):  # noqa: F811 — the imported fixture
+    """A foreign open PR on the prefix: the tick opens no PR of its own, its batch is needs_person, its item stays in the batch. (D6, O5)"""
+    w = world
+    _seed(w, "f1")
+    w.t.forge.add_pr(pr_row(77, "lessons/hand-made"))
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+
+    _tick(w, writer)
+
+    assert w.t.forge.creates == [], critical_text(caplog)
+    [batch] = _batches(w).values()
+    assert batch.phase == "needs_person", (batch.phase, critical_text(caplog))
+    assert _work(w)[("finding", "f1")].status == "in_batch", "the item is not lost"
+    assert [r["number"] for r in w.t.forge.prs if r["state"] == "open"] == [77]
+
+
+# --- O1, O5: crash recovery -----------------------------------------------------------------------------------
+
+
+def test_o1_a_pushed_branch_with_no_pr_is_taken_over_and_gets_its_one_pr(world, caplog):  # noqa: F811 — the imported fixture
+    """The PR open fails after the push; once the lease lapses, the next tick opens that branch's PR, no rerun. (O1, O5, Crash recovery)"""
+    w = world
+    writer, batch_id, branch = _stranded(w, caplog)
+
     lapse_lease(w.dsn, batch_id)
     _tick(w, writer)
 
@@ -160,13 +265,68 @@ def test_o1_a_pushed_branch_with_no_pr_is_taken_over_and_gets_its_one_pr(world, 
     assert pr["head"]["ref"] == branch
     [batch] = _batches(w).values()
     assert (batch.id, batch.phase, batch.pr_number) == (batch_id, "in_review", pr["number"])
+    _tick(w, writer)
+    assert len([r for r in w.t.forge.prs if r["state"] == "open"]) == 1, "a second tick opened a second PR"
 
 
-def test_o1_a_lapsed_batch_with_nothing_anywhere_is_abandoned_and_its_item_authored_again(world, caplog):
-    """A lost host's batch with no branch and no PR ends abandoned; its item returns and a new batch authors it. (O1, P3, Crash recovery)"""
+def test_o1_a_lease_lapsed_within_grace_is_not_taken_over_and_one_past_it_is(world, caplog):  # noqa: F811 — the imported fixture
+    """Within grace the next tick leaves the stranded batch alone (no PR, same batch, still working); past grace it opens the PR. (O1, P6, Crash recovery)"""
+    w = world
+    writer, batch_id, branch = _stranded(w, caplog)
+
+    lapse_lease(w.dsn, batch_id, past_grace=False)
+    _tick(w, writer)
+
+    assert [r for r in w.t.forge.prs if r["state"] == "open"] == [], "taken over within grace"
+    assert list(_batches(w)) == [batch_id]
+    assert _batches(w)[batch_id].phase == "working"
+    assert writer.served == [batch_id]
+    assert lease_seconds_left(w.dsn, batch_id) < 0, "the tick revived the lapsed lease"
+
+    lapse_lease(w.dsn, batch_id)
+    _tick(w, writer)
+
+    [pr] = [r for r in w.t.forge.prs if r["state"] == "open"]
+    assert (pr["head"]["ref"], _batches(w)[batch_id].phase) == (branch, "in_review")
+
+
+def test_o1_a_branch_only_on_the_forge_is_verified_against_the_record_and_gets_its_pr_from_a_fresh_clone(world, caplog):  # noqa: F811 — the imported fixture
+    """The replacement host's clone has no local branch: the takeover fetches the tip, finds it is the recorded commit, opens the PR. (O1, D11b)"""
+    w = world
+    writer, batch_id, branch = _stranded(w, caplog)
+    forget_local_branch(w.t.clone, branch, drafts=drafts_dir(w.t))
+    assert git(w.t.clone, "for-each-ref", f"refs/heads/{branch}") == ""
+
+    lapse_lease(w.dsn, batch_id)
+    _tick(w, writer)
+
+    assert writer.served == [batch_id]
+    [pr] = [r for r in w.t.forge.prs if r["state"] == "open"]
+    assert pr["head"]["ref"] == branch
+    assert dict(remote_branches(w.t.remote))[branch] == writer.commits[0]
+    assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].pr_number) == ("in_review", pr["number"])
+
+
+def test_o5_a_forge_tip_beyond_the_record_is_not_opened_and_goes_to_a_person(world, caplog):  # noqa: F811 — the imported fixture
+    """A commit nobody of ours made sits on the batch's branch: no PR is opened, the batch is needs_person. (O5, Crash recovery)"""
+    w = world
+    writer, batch_id, branch = _stranded(w, caplog)
+    foreign_commit_on(w.t.remote, branch, w.scratch)
+    forget_local_branch(w.t.clone, branch, drafts=drafts_dir(w.t))
+
+    lapse_lease(w.dsn, batch_id)
+    _tick(w, writer)
+
+    assert [r for r in w.t.forge.prs if r["state"] == "open"] == [], critical_text(caplog)
+    assert _batches(w)[batch_id].phase == "needs_person"
+    assert _work(w)[("finding", "f1")].status == "in_batch"
+
+
+def test_o1_a_lapsed_batch_with_nothing_anywhere_is_abandoned_and_its_item_authored_again(world, caplog):  # noqa: F811 — the imported fixture
+    """A lost host's batch with no branch and no PR ends abandoned, its attempt kept; a new batch authors the item. (O1, P3, Crash recovery)"""
     w = world
     _seed(w, "f1")
-    lost = call(w.dsn, "claim", w.t.tenant_id, AUTHOR_LANE, owner="lost-host")
+    lost = call(w.dsn, "claim", w.t.tenant_id, AUTHOR_LANE, owner="lost-host", thresholds=ONE)
     lapse_lease(w.dsn, lost.batch_id)
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
     _tick(w, writer)
@@ -177,128 +337,106 @@ def test_o1_a_lapsed_batch_with_nothing_anywhere_is_abandoned_and_its_item_autho
     assert lost.batch_id not in writer.served
     [fresh] = [b for b in rows.values() if b.id != lost.batch_id]
     assert fresh.phase == "in_review"
-    assert (_work(w)["f1"].status, _work(w)["f1"].batch_id) == ("in_batch", fresh.id)
+    item = _work(w)[("finding", "f1")]
+    assert (item.status, item.batch_id, item.attempts) == ("in_batch", fresh.id, 2), "the lost host's attempt is kept (crash abandon)"
 
 
-# --- Reconcile and Feedback (O4, H2, H3, H7) ---------------------------------------------------------
+# --- Renewal and stop (O3, P6): a stop reaches a step blocked in a subprocess ---------------------------------------
 
 
-def test_reconcile_a_merged_pr_publishes_cited_items_and_holds_the_uncited(world, caplog):
-    """Merged: f1, cited by the merged lesson, is published; f2, in the batch but uncited, is held. (Reconcile, P1)"""
-    w = world
-    _seed(w, "f1", "f2")
-    batch_id, branch, _number = _opened(w, LessonWriter({LESSON_NAME: lesson_citing("f1")}), caplog)
-    merge_on_remote(w.t.p3, w.scratch, branch)
-    _tick(w, LessonWriter({}))
-
-    items = _work(w)
-    assert {k: i.status for k, i in items.items()} == {"f1": "published", "f2": "held"}
-    assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].outcome) == ("ended", "merged")
+STOP_BOUND = 30.0
 
 
-def test_feedback_a_pr_closed_without_feedback_holds_its_items_visibly(world, caplog):
-    """Closed with no review or comment, after both were read: the item is held, named with its batch and PR. (H2, O2)"""
-    w = world
-    w.t.forge.scopes = set(READ_ISSUE)
-    _seed(w, "f1")
-    batch_id, branch, number = _opened(w, LessonWriter({LESSON_NAME: lesson_citing("f1")}), caplog)
-    close_on_remote(w.t.p3, branch)
-    _tick(w, LessonWriter({}))
+def _post_step_child(w, writer, *, how):
+    """A forked child running the real post-step (a family-less one) whose tick is `author_drain` over `writer`.
+    `how` is how the stop will be delivered: `cancel` sets the store's flag, `sigterm` signals the child."""
+    from defender.learning.branch import post_step
 
-    f1 = _work(w)["f1"]
-    assert (f1.status, f1.batch_id, f1.pr_number) == ("held", batch_id, number)
-    assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].outcome) == ("ended", "closed")
-    read = {r.url.path.split("/", 5)[-1] for r in w.t.forge.requests if r.method == "GET"}
-    assert {f"pulls/{number}/reviews", f"issues/{number}/comments"} <= read, read
+    w.monkeypatch.setenv(RENEW_ENV, "0.2")
+
+    def body():
+        return post_step.main(["--tenant", w.t.tenant_id, "--parent-pid", str(os.getppid())],
+                              author_tick=lambda _paths: author_drain(w.t, w.paths, trigger=writer, box=BoxSpy()),
+                              still_waiting=lambda _paths: False, directory=w.t.directory)
+    return TickChild(body, w.scratch / f"child-{how}.json")
 
 
-def test_feedback_a_pr_closed_with_a_comment_is_replaced_by_a_new_batch_whose_pr_links_it(world, caplog):
-    """A plain comment on the closed PR: its batch ends closed, a replacement batch `replaces` it, its new PR links the old. (H3, H7, Feedback)"""
-    w = world
-    w.t.forge.scopes = set(READ_ISSUE)
-    _seed(w, "f1")
-    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
-    old_id, old_branch, old_number = _opened(w, writer, caplog)
-    w.t.forge.comments[old_number] = [comment_row(501, "analyst", "cite the alert rule, not the host")]
-    close_on_remote(w.t.p3, old_branch)
-    _tick(w, writer)
-    _tick(w, writer)
-
-    rows = _batches(w)
-    assert (rows[old_id].phase, rows[old_id].outcome) == ("ended", "closed")
-    [new] = [b for b in rows.values() if b.id != old_id]
-    assert (new.replaces, new.phase) == (old_id, "in_review")
-    assert (_work(w)["f1"].status, _work(w)["f1"].batch_id) == ("in_batch", new.id)
-    [_first, second] = w.t.forge.creates
-    assert second["head"] != old_branch
-    [old_url] = [r["html_url"] for r in w.t.forge.prs if r["number"] == old_number]
-    assert f"#{old_number}" in second.get("body", "") or old_url in second.get("body", ""), second
-
-
-def test_feedback_changes_requested_on_an_open_pr_closes_it_and_a_plain_comment_does_not(world, caplog):
-    """A plain comment leaves the open PR alone; a live changes-requested review gets it closed by the reconciler. (H7, Feedback)"""
-    w = world
-    w.t.forge.scopes = set(READ_ISSUE)
-    _seed(w, "f1")
-    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
-    batch_id, _branch, number = _opened(w, writer, caplog)
-    w.t.forge.comments[number] = [comment_row(502, "analyst", "interesting")]
-    _tick(w, writer)
-    assert w.t.forge.patches == [], "control: a plain comment on an open PR does not close it"
-
-    w.t.forge.reviews[number] = [review_row(601, "owner", "REQUEST_CHANGES", body="wrong lane")]
-    _tick(w, writer)
-
-    assert w.t.forge.patches == [(number, {"state": "closed"})]
-    assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].outcome) == ("ended", "closed")
-
-
-def test_feedback_a_refused_comment_read_is_unknown_not_no_feedback(world, caplog):
-    """Without read:issue the comment read is 403: the closed PR's batch stays unresolved, its item not held; with it, held. (C23, Feedback)"""
-    w = world
-    _seed(w, "f1")
-    batch_id, branch, number = _opened(w, LessonWriter({LESSON_NAME: lesson_citing("f1")}), caplog)
-    close_on_remote(w.t.p3, branch)
-    _tick(w, LessonWriter({}))
-
-    refused = [r for r in w.t.forge.requests if r.url.path.endswith(f"/issues/{number}/comments")]
-    assert refused, "the reconciler never asked for the closed PR's comments"
-    assert _batches(w)[batch_id].phase == "in_review"
-    assert _work(w)["f1"].status == "in_batch"
-
-    w.t.forge.scopes.add("read:issue")
-    _tick(w, LessonWriter({}))
-    assert _work(w)["f1"].status == "held", "control: the same close, read in full, holds the item"
-
-
-# --- Renewal and stop (O3, P6) -------------------------------------------------------------------------
-
-
-#: How long the cancelled curator step waits for its stop before giving up (sketch bound).
-STOP_WAIT_SECONDS = 45.0
-
-
-def test_stop_a_cancel_mid_authoring_stops_the_step_and_a_batch_with_no_commits_is_abandoned(world, caplog):
-    """Cancel set while the curator works: the step is stopped before committing, the batch ends abandoned, f1 waits, the lane is free. (Renewal and stop)"""
-    w = world
-    _seed(w, "f1")
-    outcome = {}
-
-    def cancel_then_wait(_batch):
+def _stop(w, child, how):
+    if how == "cancel":
         call(w.dsn, "request_cancel", w.t.tenant_id)
-        deadline = time.monotonic() + STOP_WAIT_SECONDS
-        while time.monotonic() < deadline:
-            time.sleep(0.05)
-        outcome["waited_out"] = True
+    else:
+        child.terminate()
 
-    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, before_commit=cancel_then_wait)
-    _tick(w, writer)
 
-    assert writer.served, critical_text(caplog)
-    assert "waited_out" not in outcome, "the stop never reached the curator step"
-    assert writer.commits == []
+def test_control_a_sigterm_reaches_the_post_step_blocked_in_a_subprocess(world):  # noqa: F811 — the imported fixture
+    """Harness control, no store: the post-step's tick blocked in `sleep` ends on SIGTERM as a KeyboardInterrupt. (Renewal and stop)"""
+    from defender.learning.branch import post_step
+
+    w = world
+    marker = w.scratch / "sleeper"
+    block = blocked_in_subprocess(marker)
+
+    def body():
+        return post_step.main(["--tenant", w.t.tenant_id, "--parent-pid", str(os.getppid())],
+                              author_tick=lambda _paths: block(None) or 0,
+                              still_waiting=lambda _paths: False, directory=w.t.directory)
+    child = TickChild(body, w.scratch / "child-control.json")
+    sleeper = int(await_file(marker))
+    try:
+        child.signal(signal.SIGTERM)
+        assert child.wait(seconds=STOP_BOUND) == {"raised": "KeyboardInterrupt"}
+    finally:
+        kill_if_alive(sleeper)
+
+
+@pytest.mark.parametrize("how", ["cancel", "sigterm"])
+def test_stop_a_stop_while_the_curator_is_blocked_in_a_subprocess_ends_the_tick_and_abandons_a_batch_with_no_commits(world, how):  # noqa: F811 — the imported fixture
+    """Cancel flag or SIGTERM while the step waits on a child process: the tick ends in time, the batch is abandoned cleanly, f1 waits, attempt forgiven, lane free. (Renewal and stop, D4, D8)"""
+    w = world
+    _seed(w, "f1")
+    marker = w.scratch / "sleeper"
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, before_commit=blocked_in_subprocess(marker))
+    child = _post_step_child(w, writer, how=how)
+    sleeper = int(await_file(marker))
+    try:
+        _stop(w, child, how)
+        child.wait(seconds=STOP_BOUND)
+    finally:
+        kill_if_alive(sleeper)
+
     assert remote_branches(w.t.remote) == {}
+    assert [r for r in w.t.forge.prs if r["state"] == "open"] == [], "a stopped tick with no commits opened a PR"
     [batch] = _batches(w).values()
     assert (batch.phase, batch.outcome) == ("ended", "abandoned")
-    assert _work(w)["f1"].status == "waiting"
-    assert call(w.dsn, "claim", w.t.tenant_id, AUTHOR_LANE, owner="next-host") is not None
+    item = _work(w)[("finding", "f1")]
+    assert (item.status, item.attempts) == ("waiting", 0), "a stop cost the item an attempt"
+    assert _record(w) == []
+    assert call(w.dsn, "claim", w.t.tenant_id, AUTHOR_LANE, owner="next-host", thresholds=ONE) is not None
+
+
+@pytest.mark.parametrize("how", ["cancel", "sigterm"])
+def test_stop_a_stop_after_the_commit_leaves_the_batch_for_takeover_at_once_and_one_pr(world, caplog, how):  # noqa: F811 — the imported fixture
+    """Stopped while blocked after committing: the batch is not abandoned and its own lease is expired, so the next tick delivers it at once, within grace, with no rerun. (Renewal and stop, D4)"""
+    w = world
+    _seed(w, "f1")
+    marker = w.scratch / "sleeper"
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, after_commit=blocked_in_subprocess(marker))
+    child = _post_step_child(w, writer, how=how)
+    sleeper = int(await_file(marker))
+    try:
+        _stop(w, child, how)
+        child.wait(seconds=STOP_BOUND)
+    finally:
+        kill_if_alive(sleeper)
+    [batch_id] = _batches(w)
+    assert _batches(w)[batch_id].phase == "working"
+    assert lease_seconds_left(w.dsn, batch_id) <= 0, "a cleanly stopped holder with commits kept its lease"
+    assert len(_record(w)) == 1
+
+    w.monkeypatch.setenv(RENEW_ENV, "600")
+    again = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+    _tick(w, again)
+
+    assert again.served == [], "the takeover authored again"
+    [pr] = [r for r in w.t.forge.prs if r["state"] == "open"]
+    assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].pr_number) == ("in_review", pr["number"])

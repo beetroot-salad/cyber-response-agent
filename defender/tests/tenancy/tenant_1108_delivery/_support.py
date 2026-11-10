@@ -135,13 +135,14 @@ def pr_row(number, head, *, repo=OURS, state="open", sha=None, merged=False):
             "html_url": f"http://forge.invalid:3000/tenants/blue/pulls/{number}"}
 
 
-def review_row(review_id, login, state, *, body="", dismissed=False, official=True):
+def review_row(review_id, login, state, *, body="", dismissed=False, official=True, inline=0):
     """A Forgejo `PullReview` (C9, C24, C25): `state` one of `APPROVED`, `REQUEST_CHANGES`,
     `COMMENT`; `dismissed` as the forge reports it (a later approval by the same reviewer
-    dismisses their changes-requested review); `official` false for a read-only reviewer."""
+    dismisses their changes-requested review); `official` false for a read-only reviewer;
+    `inline` the review's inline comments (`comments_count`), which carry words with no body (D7)."""
     return {"id": review_id, "user": {"login": login}, "state": state, "body": body,
             "dismissed": dismissed, "official": official, "stale": False, "commit_id": None,
-            "submitted_at": "2026-11-09T10:00:00Z", "comments_count": 0}
+            "submitted_at": "2026-11-09T10:00:00Z", "comments_count": inline}
 
 
 def comment_row(comment_id, login, body):
@@ -266,7 +267,31 @@ class ForgeHTTP:
         #: plants `dismissed` as the forge would report it.
         self.reviews = {}
         self.comments = {}
+        #: #1278 (D7): scripted status answers, see `refuse`.
+        self.refusals = []
         self.client = httpx.Client(transport=httpx.MockTransport(self.reply))
+
+    def refuse(self, suffix, status, *, after=0, times=None):
+        """#1278 (D7, H15): answer `status` to the requests whose path ends `suffix`, skipping the
+        first `after` of them, for `times` requests (always when `None`). `clear_refusals` ends it."""
+        self.refusals.append({"suffix": suffix, "status": status, "skip": after, "left": times})
+
+    def clear_refusals(self):
+        self.refusals.clear()
+
+    def _refused(self, path):
+        for rule in self.refusals:
+            if not path.rstrip("/").endswith(rule["suffix"]):
+                continue
+            if rule["skip"] > 0:
+                rule["skip"] -= 1
+                continue
+            if rule["left"] is not None:
+                if rule["left"] <= 0:
+                    continue
+                rule["left"] -= 1
+            return httpx.Response(rule["status"], json={"message": f"scripted {rule['status']}"})
+        return None
 
     @property
     def prs(self):
@@ -309,6 +334,9 @@ class ForgeHTTP:
         if not self._ours(request) or not (path == api or path.startswith(api + "/")):
             self.foreign.append(request)
             return httpx.Response(404, json={"message": "not this forge's repository"})
+        refused = self._refused(path)
+        if refused is not None:
+            return refused
         if self.remote is None:
             return self._answer(request, path[len(api):])
         # One request is one update: a create's number and its row land under the same lock.
@@ -492,15 +520,23 @@ MERGE_STYLES = ("merge", "squash", "rebase")
 _FORGE_COMMITTER = {"GIT_COMMITTER_NAME": "Forgejo", "GIT_COMMITTER_EMAIL": "forgejo@test.invalid"}
 
 
-def merge_on_remote(repo, tmp_path, branch, style="merge", *, delete_branch=False):
+def merge_on_remote(repo, tmp_path, branch, style="merge", *, delete_branch=False, edit=None):
     """A human merging a PR into the remote's `main`: `merge` makes a merge commit (Forgejo's
     default), `squash` one new commit holding the branch's changes, `rebase` re-commits each
     of the branch's commits on `main` under the forge's committer (new shas). The forge marks
     the branch's open PR merged (there must be one), and `delete_branch` deletes the branch
-    as Forgejo's merge option does. Returns the new `main`."""
+    as Forgejo's merge option does. `edit(checkout)` (merge style only) changes the merge result
+    before it is committed, as a reviewer's edit in the merge dialog would: the branch tip keeps
+    what the merge commit's tree drops (#1278 H16). Returns the new `main`."""
     writer = tmp_path / f"merger-{len(list(tmp_path.glob('merger-*')))}"
     git(tmp_path, "clone", repo[1], writer)
-    if style == "merge":
+    assert edit is None or style == "merge", "an edited merge is a merge commit"
+    if style == "merge" and edit is not None:
+        git(writer, "merge", "--no-ff", "--no-commit", f"origin/{branch}")
+        edit(writer)
+        git(writer, "add", "-A")
+        git(writer, "commit", "-m", f"Merge {branch} (edited)", env=_FORGE_COMMITTER)
+    elif style == "merge":
         git(writer, "merge", "--no-ff", "-m", f"Merge {branch}", f"origin/{branch}")
     elif style == "squash":
         git(writer, "merge", "--squash", f"origin/{branch}")
