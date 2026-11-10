@@ -205,8 +205,18 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:32]
 
 
+def _has_nul(value: Any) -> bool:
+    if isinstance(value, str):
+        return "\x00" in value
+    if isinstance(value, Mapping):
+        return any(_has_nul(k) or _has_nul(v) for k, v in value.items())
+    if isinstance(value, list | tuple):
+        return any(_has_nul(v) for v in value)
+    return False
+
+
 def _refuse_nul(value: Any) -> None:
-    if "\x00" in json.dumps(value, default=str, ensure_ascii=False):
+    if _has_nul(value):
         raise ItemRefused("a NUL character cannot be stored")
 
 
