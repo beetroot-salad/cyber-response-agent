@@ -47,7 +47,7 @@ _logger = logging.getLogger(__name__)
 
 #: Where an install that failed restarts: its wrapped secret may be spent (DC-4).
 _REWRAP = ("wrap", SERVICE)
-_KNOWLEDGE, _LEARNING = "knowledge", "learning"
+_KNOWLEDGE = "knowledge"
 #: The sign secret file's name is its accessor after this prefix, beside the delivery file.
 _SIGN_FILE = "sign-"
 #: What install signs to prove the sign pair (A24', r8.4): a fixed payload, never a request token.
@@ -198,7 +198,7 @@ class HostActor(Actor):
 
     async def _prepare(self, held: HeldTenant) -> None:
         """The host folder: `<data root>/<T>/` with the tenant's clone (an existing clone of the
-        recorded repo is kept, any other refuses) and an empty real `learning/`; then the first
+        recorded repo is kept, any other refuses); then the first
         publish, which must answer `fresh <commit>` (Flow 1.9, RC-7, GAP-Re-4)."""
         gens = await held.generations()
         gen = only(gens, "live")
@@ -213,7 +213,6 @@ class HostActor(Actor):
                 secret_id = self.secret(await asyncio.to_thread(_read_secret, Path(gen.host_secret_file)))
                 credential = Minted(tenant, await self._bot_jwt(gen, secret_id))
                 await asyncio.to_thread(self._clone, tenant, wiring.origin, credential)
-            await asyncio.to_thread(self._learning, tenant)
             line = (await asyncio.to_thread(self._publish, tenant, data_root=self._root)).strip()
             head, _sep, commit = line.partition(" ")
             if head != "fresh" or not commit or " " in commit:
@@ -257,12 +256,6 @@ class HostActor(Actor):
         done = self._git(["clone", "-q", origin, str(target)], cwd=folder, origin=origin, identity=credential)
         if done.returncode != 0:
             raise StepFailed(f"git clone failed: {done.stderr.strip()}")
-
-    def _learning(self, tenant: str) -> None:
-        learning = self._folder(tenant) / _LEARNING
-        if learning.is_symlink():
-            raise StepFailed(f"{learning} is a link; the learning root must be a real directory")
-        _io.guarded_mkdir(learning, base=self._root)
 
     # --- rotate's end, offboard -------------------------------------------------------------------
 
