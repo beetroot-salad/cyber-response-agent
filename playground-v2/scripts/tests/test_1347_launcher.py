@@ -639,18 +639,21 @@ def test_a_snapshot_with_another_uuid_leaves_the_existing_copy_untouched_when_a_
 
 # -- r6.4.4: a leftover node that never becomes healthy, or will not start, is replaced after a bounded wait ------
 
-#: The design's bound on the A2 pre-check's wait for an existing node (r6.4.4 `PRECHECK_WAIT_S`, 10 min), plus the
-#: launch's or make-a-case's own steps before it (each rig clock reading moves it a second).
-PRECHECK_BOUND = timedelta(minutes=10) + timedelta(minutes=2)
+#: The design's bound on the A2 pre-check's wait for an existing node (r6.4.4 `PRECHECK_WAIT_S`, 10 min), plus a
+#: few health polls (`HEALTH_POLL_S`, 10 s, each with its clock reading), measured on the rig clock from the leftover
+#: node's first health poll (or, for a node that will not start, from the call's start) to the fresh node's start.
+PRECHECK_BOUND = timedelta(minutes=10) + timedelta(seconds=3 * 11)
 
 
-def _leftover(rig, leftover: str) -> dict:
-    """A valid `drop` launch left a node; then a restore crashed partway: the marker says dirty, and the node's
-    data never recovers (`never-healthy`) or the node will not start again (`will-not-start`)."""
+def _leftover(rig, leftover: str, *, marker: str = "dirty") -> dict:
+    """A valid `drop` launch left a node; then the node's data never recovers (`never-healthy`) or the node will
+    not start again (`will-not-start`). `marker="dirty"`: a restore crashed partway, so the marker says dirty;
+    `"clean"`: the marker is the launch's own clean one for the variant."""
     rig.write_expected_case("drop")
     rig.launch()
     old = rig.docker.of_kind("node-start")[-1]
-    rig.dirty_marker()
+    if marker == "dirty":
+        rig.dirty_marker()
     if leftover == "never-healthy":
         rig.cluster.wedged = True
     elif leftover == "will-not-start":
@@ -679,11 +682,33 @@ def test_a_leftover_node_that_never_becomes_healthy_or_will_not_start_is_replace
         with rig.write_case("young", None):
             assert rig.cluster.state() == expected_copy("none")
 
+    _replaced_within_the_bound(rig, old, begun)
+    assert ("node-restart" in rig.docker.injected) == (leftover == "will-not-start")
+
+
+def _replaced_within_the_bound(rig, old: dict, begun) -> None:
     fresh = [e for e in rig.docker.of_kind("node-start") if e["clock"] > begun and e["data"] != old["data"]]
     assert fresh, "the restore did not go into a fresh node"
-    assert fresh[0]["clock"] - begun <= PRECHECK_BOUND, f"waited {fresh[0]['clock'] - begun} for the leftover node"
+    polls = [e for e in rig.docker.of_kind("curl") if e["clock"] > begun and e["data"] == old["data"]
+             and e["path"].split("?")[0] == "/_cluster/health"]
+    since = polls[0]["clock"] if polls else begun
+    assert fresh[0]["clock"] - since <= PRECHECK_BOUND, f"waited {fresh[0]['clock'] - since} for the leftover node"
     assert [w for w in rig.docker.of_kind("volume-rm") if w["volume"] == old["data"]], "the old data was kept"
-    assert ("node-restart" in rig.docker.injected) == (leftover == "will-not-start")
+
+
+def test_a_clean_marker_on_a_node_that_does_not_come_up_in_time_is_not_reused(tmp_path):
+    """r6.4.4 settlement: a clean marker for the variant, but the node's data never recovers: the copy is not
+    reused once `PRECHECK_WAIT_S` has passed; the launch restores into a fresh node and completes, bounded like the
+    leftover node."""
+    rig = LabRig(tmp_path)
+    old = _leftover(rig, "never-healthy", marker="clean")
+    assert is_clean_marker(rig.marker()), rig.marker()
+    begun = rig.clock.last
+    rig.write_expected_case("drop")
+    rig.launch()
+
+    assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"], rig.rows()
+    _replaced_within_the_bound(rig, old, begun)
 
 
 def test_a_leftover_node_that_comes_up_with_another_snapshot_uuid_still_refuses_and_stays_untouched(tmp_path):
