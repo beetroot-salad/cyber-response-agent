@@ -10,6 +10,7 @@ The test-side oracle is `_frozen_cases`. Entry point:
 from __future__ import annotations
 
 import io
+import random
 import re
 import json
 from contextlib import redirect_stderr, redirect_stdout
@@ -398,3 +399,32 @@ def test_the_report_gives_each_cases_age_band_at_t(tmp_path):
         for other, (_, wrong) in slugs.items():
             if other != slug:
                 assert not any(re.search(wrong, ln) for ln in lines), f"{slug} shows {other}'s band:\n{said}"
+
+
+HOUR = 3600
+BANDS = {"under 1 h": r"(under|<)\s*1\s*h", "1-3 h": r"1\s*[-\u2013]\s*3\s*h", "3-6 h": r"3\s*[-\u2013]\s*6\s*h"}
+
+
+def test_every_age_from_zero_to_six_hours_is_reported_in_exactly_one_age_band(tmp_path):
+    """A2 note (G1): any age in [0, 6 h], both ends and each band edge included, shows one band
+    (6 h itself in 3-6 h), never "over 6 h"."""
+    rng = random.Random(1347)
+    edges = [0, 1, HOUR - 1, HOUR, HOUR + 1, 3 * HOUR - 1, 3 * HOUR, 3 * HOUR + 1, 6 * HOUR - 1, 6 * HOUR]
+    ages = sorted({*edges, *(rng.randint(0, 6 * HOUR) for _ in range(14))})
+    slugs = {f"age-{a:05d}": a for a in ages}
+    root = _fixture_set(tmp_path / "held_out", {s: "benign" for s in slugs})
+    runs = tmp_path / "runs"
+    for slug, age in slugs.items():
+        case_file(root, slug).write_text(yaml.safe_dump(case_doc(slug, age=age)))
+
+    _rc, _verdicts, said = scored(tmp_path, runs, root,
+                                  *[row(root, s, _run(runs, says="benign").name) for s in slugs])
+
+    for slug, age in slugs.items():
+        line = " ".join(ln.lower() for ln in said.splitlines() if slug in ln)
+        shown = {band for band, pattern in BANDS.items() if re.search(pattern, line)}
+        assert len(shown) == 1, f"age {age} s shows {sorted(shown)}:\n{said}"
+        assert not re.search(r"over\s*6|>\s*6", line), f"age {age} s is called over 6 h:\n{said}"
+        if age not in (HOUR, 3 * HOUR):  # which band owns exactly 1 h and 3 h is not settled
+            want = "under 1 h" if age < HOUR else "1-3 h" if age < 3 * HOUR else "3-6 h"
+            assert shown == {want}, f"age {age} s shows {sorted(shown)}, not {want}:\n{said}"

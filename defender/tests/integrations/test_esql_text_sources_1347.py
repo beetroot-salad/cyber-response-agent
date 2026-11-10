@@ -2,6 +2,8 @@
 guard): index expressions, `[]` if none, `None` if unreadable so callers fail closed."""
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from defender.integrations import esql_text
@@ -75,3 +77,101 @@ def test_a_source_is_never_hidden_from_the_reader(query):
     got = esql_text.sources(query)
 
     assert got is None or any(".security-7" in s for s in got), got
+
+
+#: Spellings of a source: bare or double-quoted. `logs|weird` can only be quoted.
+BARE = ["logs-a", ".security-7", "alerts-*", "idx_1.x", "hosts", "logs-*"]
+QUOTED_ONLY = ["logs|weird"]
+#: Remote-cluster spellings: any source holding `:` is unreadable, quoted or not.
+COLONED = ["remote:logs-*", "*:logs-*", "c1:idx", "a:b:c"]
+#: Text that tempts a reader to see a comment, a source or a separator where there is only data.
+HOSTILE = ["/*", "*/", "//", "|", ":", '\\"', "FROM zz", "LOOKUP JOIN zz", " ", "x", "-- ", "\\\\"]
+
+
+def _words(rng: random.Random, pool: list[str], n: int) -> str:
+    return "".join(rng.choice(pool) for _ in range(n))
+
+
+def _block(rng: random.Random, depth: int = 0) -> str:
+    """A balanced (possibly nested) block comment whose body is hostile text."""
+    quiet = [h for h in HOSTILE if h not in ("/*", "*/")]
+    parts = [_words(rng, quiet, rng.randint(0, 4))
+             for _ in range(rng.randint(1, 3))]
+    if depth < 2 and rng.random() < 0.4:
+        parts.insert(rng.randint(0, len(parts)), _block(rng, depth + 1))
+    return "/* " + " ".join(parts) + " */"
+
+
+def _gap(rng: random.Random) -> str:
+    """What sits between two tokens: blanks, block comments (nested too), or a line comment."""
+    kind = rng.random()
+    if kind < 0.35:
+        return rng.choice([" ", "  ", "\t", "\n", ""]) or " "
+    if kind < 0.7:
+        return f" {_block(rng)} "
+    if kind < 0.85:
+        between = rng.choice(["", " ", "\n"])
+        return f" {_block(rng)}{between}{_block(rng)} "
+    return " //" + _words(rng, HOSTILE + ["\""], rng.randint(0, 5)) + "\n"
+
+
+def _spell(rng: random.Random, name: str) -> str:
+    return f'"{name}"' if "|" in name or ":" in name or rng.random() < 0.4 else name
+
+
+def _commands(rng: random.Random, joins: list[str]) -> list[str]:
+    """Piped commands: filters with hostile string literals, and every join in `joins` in order."""
+    toks: list[str] = []
+    pending = list(joins)
+    for _ in range(rng.randint(1, 4)):
+        toks.append("|")
+        kind = rng.choice(["where", "eval", "limit"] + (["join"] if pending else []))
+        if kind == "join":
+            toks.append(rng.choice(["LOOKUP JOIN", "lookup  join"]))
+            toks.append(_spell(rng, pending.pop(0)))
+            toks.append("ON k")
+        elif kind == "where":
+            toks.append(f'WHERE m == "{_words(rng, HOSTILE, rng.randint(1, 5))}"')
+        elif kind == "eval":
+            toks.append("EVAL a = 1")
+        else:
+            toks.append("LIMIT 5")
+    for name in pending:
+        toks += ["|", "LOOKUP JOIN", _spell(rng, name), "ON k"]
+    return toks
+
+
+def _query(rng: random.Random, remote: bool) -> tuple[str, list[str] | None]:
+    """A query built around a known source set; the expected reading is that set, or `None`
+    when one source holds `:`. Strings and comments carry `/*`, `*/`, `//`, `|`, `:`, `"`, and
+    text that looks like another source."""
+    names = [rng.choice(BARE + QUOTED_ONLY) for _ in range(rng.randint(1, 3))]
+    joins = [rng.choice(BARE) for _ in range(rng.randint(0, 2))]
+    if remote:
+        slot = rng.randrange(len(names) + len(joins))
+        if slot < len(names):
+            names[slot] = rng.choice(COLONED)
+        else:
+            joins[slot - len(names)] = rng.choice(COLONED)
+    toks: list[str] = []
+    if rng.random() < 0.5:
+        toks.append(_block(rng))
+    toks.append(rng.choice(["FROM", "from", "FrOm"]))
+    for i, name in enumerate(names):
+        toks.append(_spell(rng, name) + ("," if i < len(names) - 1 else ""))
+    if rng.random() < 0.4:
+        toks.append("METADATA _id, _index")
+    toks += _commands(rng, joins)
+    if rng.random() < 0.3:
+        toks.append("//" + _words(rng, HOSTILE + ['"'], rng.randint(0, 5)))
+    text = "".join(t + _gap(rng) for t in toks).rstrip(" ")
+    return text, (None if remote else names + joins)
+
+
+def test_sources_reads_every_generated_query_as_its_source_set_or_as_unreadable():
+    """A5/A6: queries built around a known source set, with comments (nested too) and hostile
+    string literals everywhere, read as exactly that set; any source holding `:` reads `None`."""
+    rng = random.Random(1347)
+    for case in range(400):
+        query, want = _query(rng, remote=case % 4 == 3)
+        assert esql_text.sources(query) == want, f"case {case}: {query!r}"
