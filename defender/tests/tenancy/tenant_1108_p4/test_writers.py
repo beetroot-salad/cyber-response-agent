@@ -1,6 +1,7 @@
 """#1108 P4 O7: every corpus write goes through `TenantDelivery`. One row per writer, each observed
 where it lands: a commit-maker branch and PR on the tenant forge, never the product repo, plus its
-rows in the delivery record `<T>/learning/commit-maker.jsonl` (O7-PATH).
+rows in the tenant's commit record in the learning store (O7-PATH; #1278 moved the record from
+`<T>/learning/commit-maker.jsonl` to the store). Work is queued in the store (`world` fixture).
 
 The two lesson authors and the curators' corpus repair run through the real `author_drain`, the
 lead author, draft synthesis and pitfalls through the real `lead_author_drain`, each with only the
@@ -23,12 +24,14 @@ from typing import Any
 import pytest
 
 from defender._git import REPO_ROOT
+from defender.tests.support.learning.core._store1278 import (
+    migrated_database,  # noqa: F401 — fixture the world needs
+    world,  # noqa: F401 — the tick's world: tenant, forge and learning store
+)
 from defender.tests.support.learning.curation import _spec773 as S
-from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_delivery._support import forge_pulls, merge_on_remote
 from defender.tests.tenancy.tenant_1108_p4._support import (
     DEFENDER,
-    bind_forge,
     current_commit,
     export_dir,
     git,
@@ -39,10 +42,12 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     LeadStep,
     PitfallsStep,
     executed_lead,
+    items_of,
     lead_author_drain,
     queued_run,
     CuratorTrigger,
     author_drain,
+    commit_rows,
     critical_text,
     drafts_dir,
     drain_paths,
@@ -54,6 +59,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
 )
 
 EVALUATIONS = REPO_ROOT / "evaluations"
+postgres = pytest.mark.postgres
 
 
 # ---------------------------------------------------------------------------------------------
@@ -61,39 +67,31 @@ EVALUATIONS = REPO_ROOT / "evaluations"
 # ---------------------------------------------------------------------------------------------
 
 
-def _record_rows(t: Any) -> list[dict]:
-    """The commit-maker's delivery record, `<T>/learning/commit-maker.jsonl`, read as plain JSON
-    lines: P3 writes one row per commit it made, `{commit, batch:
-    {branch, base, start}, lanes, changes: [{path, before, after}]}`. `[]` when absent."""
-    record = Path(location_path(t.tenant.learning)) / "commit-maker.jsonl"
-    if not record.is_file():
-        return []
-    return [json.loads(line) for line in record.read_text(encoding="utf-8").splitlines() if line]
+def _record_rows(paths: Any) -> list[Any]:
+    """The commit-maker's delivery record for the tenant, as the learning store keeps it (#1278: the
+    commit record moved from `<T>/learning/commit-maker.jsonl` to the store): one row per commit it
+    made, `.commit`, `.branch`, `.base` and `.changes` (`(path, blob at base, blob left)`), oldest
+    first. `[]` when none."""
+    return commit_rows(paths)
 
 
-def _assert_recorded(t: Any, before: list[dict], branch: str, tip: str, paths: list[str]) -> None:
+def _assert_recorded(paths: Any, before: list[Any], branch: str, tip: str, expected: list[str]) -> None:
     """Every commit the tick made on `branch` is a new row of the tenant's delivery
     record (rows recorded before the tick are `before`), its tip among them, and the rows name
-    exactly `paths` — the same paths the branch carries."""
-    rows = _record_rows(t)
+    exactly `expected` paths — the same paths the branch carries."""
+    rows = _record_rows(paths)
     assert rows[:len(before)] == before, "the delivery record was rewritten, not appended"
     new = rows[len(before):]
     assert new, "the tick's commit is not in the tenant's delivery record"
-    assert {r["batch"]["branch"] for r in new} == {branch}, new
-    assert tip in {r["commit"] for r in new}, (tip, new)
-    assert sorted({c["path"] for r in new for c in r["changes"]}) == sorted(paths), new
+    assert {r.branch for r in new} == {branch}, new
+    assert tip in {r.commit for r in new}, (tip, new)
+    assert sorted({c[0] for r in new for c in r.changes}) == sorted(expected), new
 
 
-def _queue_dir(paths: Any) -> Path:
-    """The lead lane's curation queue (`enqueue_curation`'s rows): top level is queued,
-    `inflight/` is claimed and not yet consumed."""
-    return Path(location_path(paths.state_root)) / "author-queue"
-
-
-def _queued(paths: Any, case_id: str) -> tuple[bool, bool]:
-    """`(at the queue's top, in flight)` for `case_id`'s row."""
-    q = _queue_dir(paths)
-    return (q / f"{case_id}.json").is_file(), (q / "inflight" / f"{case_id}.json").is_file()
+def _queued(paths: Any, run: str) -> str:
+    """The status of the curation request filed for run `run` (the store's view of the lead lane's queue):
+    `waiting` is queued, `in_batch` is claimed by a batch and not yet ended."""
+    return items_of(paths)[("curation_request", run)].status
 
 
 def _shared_inodes(root: Path, other: Path) -> list[str]:
@@ -130,26 +128,23 @@ _ROWS = {
 }
 
 
+@postgres
 @pytest.mark.parametrize("writer", sorted(_ROWS))
 def test_o7_each_author_lane_writer_lands_in_the_tenant_repo_and_nowhere_in_the_product_repo(
-        p4_tenant, tmp_path, monkeypatch, caplog, writer):
+        world, caplog, writer):  # noqa: F811 — the imported fixture
     """The lesson is one commit on a tenant `lessons/` branch touching only its corpus, with a
     PR; the product checkout is unchanged (positive control: test_drains' flow-4 case)."""
     from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
     module, channel, row, corpus = _ROWS[writer]
-    t = p4_tenant
-    bind_forge(t)
-    product = product_repo(tmp_path)
-    paths = drain_paths(t, product)
+    t, paths = world.t, world.paths
+    product = Path(paths.repo_root)
     queue(paths, [row], channel={"findings": FINDINGS, "questioner_findings": QUESTIONER_FINDINGS}[channel])
     before = product_state(product)
     curator = S.FakeCurator(writes={"p4-writer.md": S.lesson(row["finding_id"])})
     trigger, box = CuratorTrigger(**{module: curator}), BoxSpy()
     main = t.origin_main()
-    recorded = _record_rows(t)
+    recorded = _record_rows(paths)
 
     rc = author_drain(t, paths, trigger=trigger, box=box)
 
@@ -158,7 +153,7 @@ def test_o7_each_author_lane_writer_lands_in_the_tenant_repo_and_nowhere_in_the_
     (branch, tip), = remote_branches(t.remote).items()
     assert touched(t.remote, main, tip) == [f"agent/{corpus}/p4-writer.md"]
     assert [c["head"] for c in t.forge.creates] == [branch]
-    _assert_recorded(t, recorded, branch, tip, [f"agent/{corpus}/p4-writer.md"])
+    _assert_recorded(paths, recorded, branch, tip, [f"agent/{corpus}/p4-writer.md"])
     assert product_state(product) == before
 
 
@@ -169,20 +164,18 @@ def test_o7_each_author_lane_writer_lands_in_the_tenant_repo_and_nowhere_in_the_
 FIXTURE_LESSON = "fixture-owner-before-close.md"
 
 
+@postgres
 def test_o7_corpus_repair_restores_an_unapproved_edit_from_the_batch_base_and_commits_none_of_it(
-        p4_tenant, tmp_path, monkeypatch, caplog):
+        world, caplog):  # noqa: F811 — the imported fixture
     """The model writes an approved lesson (citing the queued row) and also rewrites a
     human-written fixture lesson citing nothing from the batch: only the approved lesson is
     committed, and the fixture keeps its base bytes at the branch tip."""
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    t = p4_tenant
-    bind_forge(t)
-    paths = drain_paths(t, product_repo(tmp_path))
+    t, paths = world.t, world.paths
     queue(paths, [S.finding_row("f1", run_id="f1")])
     curator = S.FakeCurator(writes={"p4-approved.md": S.lesson("f1"),
                                     FIXTURE_LESSON: "tampered by the model\n"})
     main = t.origin_main()
-    recorded = _record_rows(t)
+    recorded = _record_rows(paths)
 
     rc = author_drain(t, paths, trigger=CuratorTrigger(author=curator), box=BoxSpy())
 
@@ -193,7 +186,7 @@ def test_o7_corpus_repair_restores_an_unapproved_edit_from_the_batch_base_and_co
         t.remote, "rev-parse", f"{main}:agent/lessons/{FIXTURE_LESSON}")
     assert [c["head"] for c in t.forge.creates] == [branch]
     # The repaired fixture is in no recorded change: the record names the approved lesson only.
-    _assert_recorded(t, recorded, branch, tip, ["agent/lessons/p4-approved.md"])
+    _assert_recorded(paths, recorded, branch, tip, ["agent/lessons/p4-approved.md"])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -213,8 +206,10 @@ def lead_lane(monkeypatch):
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
 
 
-def _lead_paths(t, tmp_path):
-    return drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
+def _lead_paths(w):
+    """The tenant's learning paths over a product checkout carrying the cmdb adapter (the lane declares
+    its systems from it); the lane's requests are filed in the world's store."""
+    return drain_paths(w.t, product_repo(w.scratch / "lead", adapters=("cmdb",)))
 
 
 def _commits(remote, base, tip):
@@ -224,14 +219,14 @@ def _commits(remote, base, tip):
                                         "--format=", sha).splitlines() if p)) for sha in shas]
 
 
+@postgres
 def test_o7_flead_the_lead_author_and_draft_synthesis_land_on_a_lead_author_branch_of_the_tenant(
-        p4_tenant, tmp_path, lead_lane, caplog):
+        world, lead_lane, caplog):  # noqa: F811 — the imported fixture
     """Serving one queued run, the real lead author mints a catalog draft for its uncatalogued
     query and commits it with the model's template edit on a tenant `lead-author/` branch with
     its PR; the product checkout is unchanged."""
-    t = p4_tenant
-    bind_forge(t)
-    paths = _lead_paths(t, tmp_path)
+    t = world.t
+    paths = _lead_paths(world)
     product = paths.repo_root
     before = product_state(product)
     run_dir = queued_run(t, paths, "p4-lead-one")
@@ -239,8 +234,8 @@ def test_o7_flead_the_lead_author_and_draft_synthesis_land_on_a_lead_author_bran
     step = LeadStep(executed={run: [executed_lead("cmdb.owner-by-tag")]},
                     edits={run: {TEMPLATE: "\nAlso check the asset tag.\n"}})
     main = t.origin_main()
-    recorded = _record_rows(t)
-    assert _queued(paths, "case-p4-lead-one") == (True, False), "control: the row is seen queued"
+    recorded = _record_rows(paths)
+    assert _queued(paths, run) == "waiting", "control: the request is seen queued"
 
     rc = lead_author_drain(t, paths, box=BoxSpy(), run_lead_author=step,
                            run_pitfalls=lambda *_a, **_k: 0)
@@ -256,29 +251,28 @@ def test_o7_flead_the_lead_author_and_draft_synthesis_land_on_a_lead_author_bran
     assert sorted(paths_touched) == sorted([f"agent/skills/{TEMPLATE}", *drafts])
     assert "Also check the asset tag." in git(t.remote, "show", f"{tip}:agent/skills/{TEMPLATE}")
     assert [c["head"] for c in t.forge.creates] == [branch]
-    _assert_recorded(t, recorded, branch, tip, paths_touched)
-    # The claim is consumed once its commit is real (#952): the row is neither queued nor in
-    # flight, and the run is recorded done at that commit.
-    assert _queued(paths, "case-p4-lead-one") == (False, False)
-    done = run_dir / "lead_author" / "done"
-    assert done.is_file(), "the served run was not recorded done"
-    assert f"commit: {tip}\n" in done.read_text(encoding="utf-8"), done.read_text(encoding="utf-8")
+    _assert_recorded(paths, recorded, branch, tip, paths_touched)
+    # The request is claimed once its commit is real (#952): no longer waiting, and kept in the batch
+    # until the batch ends (design r8 Lead-author lane: items are kept until the batch ends). The file
+    # queue's `done` sentinel in the run folder is retired with the file queue: the commit record in
+    # the store (`_assert_recorded`) is the proof the run was served at that commit.
+    assert _queued(paths, run) == "in_batch"
     assert product_state(product) == before
 
 
+@postgres
 def test_o7_flead_a_lead_batch_whose_pr_failed_after_its_commit_is_delivered_next_tick_once(
-        p4_tenant, tmp_path, lead_lane, caplog):
+        world, lead_lane, caplog):  # noqa: F811 — the imported fixture
     """The claim's commit is pushed but the forge refuses the PR: the failure is logged and the
     claim is consumed with its commit (#952). The next tick delivers the retained batch as one
     PR for the same branch and tip, without re-serving the run or committing twice."""
-    t = p4_tenant
-    bind_forge(t)
-    paths = _lead_paths(t, tmp_path)
+    t = world.t
+    paths = _lead_paths(world)
     run = queued_run(t, paths, "p4-lead-retained").name
     step = LeadStep(executed={run: [executed_lead("cmdb.owner-by-tag")]},
                     edits={run: {TEMPLATE: "\nRetained, then delivered.\n"}})
     main = t.origin_main()
-    recorded = _record_rows(t)
+    recorded = _record_rows(paths)
     t.forge.fail_create = True
 
     with caplog.at_level(logging.INFO):
@@ -291,7 +285,7 @@ def test_o7_flead_a_lead_batch_whose_pr_failed_after_its_commit_is_delivered_nex
     assert [c["head"] for c in t.forge.creates] == [branch], "control: the create was refused"
     assert t.forge.prs == []
     assert len(_commits(t.remote, main, tip)) == 1
-    assert _queued(paths, "case-p4-lead-retained") == (False, False)
+    assert _queued(paths, run) == "in_batch"
 
     t.forge.fail_create = False
     caplog.clear()
@@ -304,20 +298,20 @@ def test_o7_flead_a_lead_batch_whose_pr_failed_after_its_commit_is_delivered_nex
     assert remote_branches(t.remote, LEAD_PREFIX) == {branch: tip}, "committed or branched again"
     assert [c["head"] for c in t.forge.creates] == [branch, branch]
     assert [row["head"]["ref"] for row in t.forge.prs if row["state"] == "open"] == [branch]
-    _assert_recorded(t, recorded, branch, tip, [p for _sha, f in _commits(t.remote, main, tip)
-                                               for p in f])
-    assert len(_record_rows(t)) == len(recorded) + 1, "the commit-maker committed twice"
-    assert _queued(paths, "case-p4-lead-retained") == (False, False)
+    _assert_recorded(paths, recorded, branch, tip, [p for _sha, f in _commits(t.remote, main, tip)
+                                                    for p in f])
+    assert len(_record_rows(paths)) == len(recorded) + 1, "the commit-maker committed twice"
+    assert _queued(paths, run) == "in_batch"
 
 
+@postgres
 def test_o7_flead_a_failed_claim_is_reset_out_of_the_draft_and_never_reaches_a_commit(
-        p4_tenant, tmp_path, lead_lane, caplog):
+        world, lead_lane, caplog):  # noqa: F811 — the imported fixture
     """Two runs in one tick: the first claim's edit is one commit; the second claim's model
     writes and then fails, so its write is reset out of the draft and the system skill at the
     tip is `main`'s."""
-    t = p4_tenant
-    bind_forge(t)
-    paths = _lead_paths(t, tmp_path)
+    t = world.t
+    paths = _lead_paths(world)
     good = queued_run(t, paths, "p4-lead-a").name
     bad = queued_run(t, paths, "p4-lead-b").name
     step = LeadStep(executed={good: [executed_lead("cmdb.host-owner")],
@@ -337,25 +331,27 @@ def test_o7_flead_a_failed_claim_is_reset_out_of_the_draft_and_never_reaches_a_c
     assert git(t.remote, "rev-parse", f"{tip}:agent/skills/{EXECUTION}") == git(
         t.remote, "rev-parse", f"{main}:agent/skills/{EXECUTION}")
     assert [c["head"] for c in t.forge.creates] == [branch]
+    # The failed claim's request is not lost: it waits again, its attempt counted (the claim stamped it).
+    assert (_queued(paths, good), _queued(paths, bad)) == ("in_batch", "waiting")
 
 
+@postgres
 def test_o7_flead_pitfalls_curation_lands_on_the_tenant_add_on_page_only(
-        p4_tenant, tmp_path, lead_lane, caplog):
+        world, lead_lane, caplog):  # noqa: F811 — the imported fixture
     """A pitfalls-only tick curates the queued reducer mistake into the tenant's add-on page as
     one commit on a `lead-author/` branch with its PR, and never touches the product checkout."""
     from defender.learning.core.state import PITFALLS
     from defender.tests.support.learning.core._declared870 import shim_row
 
-    t = p4_tenant
-    bind_forge(t)
-    paths = _lead_paths(t, tmp_path)
+    t = world.t
+    paths = _lead_paths(world)
     product = paths.repo_root
     before = product_state(product)
     queue(paths, [shim_row("p4-run:1")], channel=PITFALLS)
     bullet = "- **Name the unnested column.** An anonymous unnest cannot be grouped."
     step = PitfallsStep(bullet)
     main = t.origin_main()
-    recorded = _record_rows(t)
+    recorded = _record_rows(paths)
 
     rc = lead_author_drain(t, paths, box=BoxSpy(), run_pitfalls=step,
                            run_lead_author=lambda *_a, **_k: None)
@@ -366,7 +362,7 @@ def test_o7_flead_pitfalls_curation_lands_on_the_tenant_add_on_page_only(
     assert touched(t.remote, main, tip) == [PITFALLS_ADDON]
     assert bullet in git(t.remote, "show", f"{tip}:{PITFALLS_ADDON}")
     assert [c["head"] for c in t.forge.creates] == [branch]
-    _assert_recorded(t, recorded, branch, tip, [PITFALLS_ADDON])
+    _assert_recorded(paths, recorded, branch, tip, [PITFALLS_ADDON])
     assert product_state(product) == before
 
 
@@ -375,22 +371,20 @@ def test_o7_flead_pitfalls_curation_lands_on_the_tenant_add_on_page_only(
 # ---------------------------------------------------------------------------------------------
 
 
+@postgres
 def test_o7_path_a_drained_lesson_a_human_merged_is_reverted_by_the_cli_on_the_tenant(
-        p4_tenant, tmp_path, monkeypatch, caplog, capsys):
+        world, caplog, capsys):  # noqa: F811 — the imported fixture
     """`revert_lesson.main` reverts the drain's recorded commit once a human merged it: one new
     branch off the merged `main` deleting only the lesson, with its PR. The revert reads the
     delivery record the drain left, so this is the path a writer's record row must serve.
     Control: before the merge the same revert refuses."""
     import importlib
 
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    t = p4_tenant
-    bind_forge(t)
-    paths = drain_paths(t, product_repo(tmp_path))
+    t, paths = world.t, world.paths
     queue(paths, [S.finding_row("f1", run_id="f1")])
     lesson_path = "agent/lessons/p4-composed.md"
     curator = S.FakeCurator(writes={"p4-composed.md": S.lesson("f1")})
-    recorded = _record_rows(t)
+    recorded = _record_rows(paths)
     revert = importlib.import_module("defender.cli.learning.revert_lesson")
 
     def cli() -> int:
@@ -400,7 +394,7 @@ def test_o7_path_a_drained_lesson_a_human_merged_is_reverted_by_the_cli_on_the_t
     assert author_drain(t, paths, trigger=CuratorTrigger(author=curator), box=BoxSpy()) == 0, \
         critical_text(caplog)
     (branch, tip), = remote_branches(t.remote).items()
-    _assert_recorded(t, recorded, branch, tip, [lesson_path])
+    _assert_recorded(paths, recorded, branch, tip, [lesson_path])
     assert cli() != 0, "control: an unmerged lesson was reverted"
     merged = merge_on_remote(t.p3, t.scratch, branch)
     before = set(remote_branches(t.remote, prefix=""))
@@ -437,15 +431,13 @@ def test_f_hardlink_the_comparison_sees_a_hard_linked_pair_and_not_a_copy(tmp_pa
     assert _shared_inodes(a, b) == ["lessons/linked.md"]
 
 
+@postgres
 def test_f_hardlink_a_drafts_files_share_no_inode_with_the_export_while_the_box_runs(
-        p4_tenant, tmp_path, monkeypatch, caplog):
+        world, caplog):  # noqa: F811 — the imported fixture
     """While the model step runs (the draft mounted writable), no file under the draft's
     `agent/` is the export's own file (device and inode), so a write through the box never
     reaches the export the next run copies. At least one pair is compared."""
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    t = p4_tenant
-    bind_forge(t)
-    paths = drain_paths(t, product_repo(tmp_path))
+    t, paths = world.t, world.paths
     queue(paths, [S.finding_row("f1", run_id="f1")])
     seen: list[tuple[str, list[str], list[str]]] = []
 
