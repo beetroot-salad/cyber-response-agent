@@ -785,13 +785,13 @@ def register_query_tool(agent, registry) -> None:
 
 
 def _proxy_access(run_state: Any) -> dict[str, Any]:
-    """The proxy address and read-token source the run holds (#1163), as the context's keywords;
-    none when the run has no `http-proxy` system. The token is asked for inside the verb's call
-    (r7 A20)."""
+    """The proxy address and access holder the run holds (#1163, #1363 B1), as the context's
+    keywords; none when the run has no `http-proxy` system. The token is asked of the holder inside
+    the verb's call (r7 A20), and the client reports its `setup` and `access` faults to it."""
     access = getattr(run_state, "access", None)
     if access is None:
         return {}
-    return {"proxy_url": access.proxy_url, "token_source": access.token}
+    return {"proxy_url": access.proxy_url, "access": access}
 
 
 def _raw_args(args: Any) -> dict:

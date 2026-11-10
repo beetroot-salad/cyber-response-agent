@@ -22,6 +22,7 @@ from defender.kit.access import caller_wait_sec
 from defender.kit.faults import (
     ORIGIN_ACCESS,
     ORIGIN_REQUEST,
+    ORIGIN_SETUP,
     ORIGIN_SYSTEM,
     PROXY_LABELS,
     AdapterFault,
@@ -291,10 +292,11 @@ def proxy_exchange(
 
 
 def report_fault(ctx: VerbContext, fault: AdapterFault) -> None:
-    """Tell the call's access holder, if it has one, of a fault the client raised (#1363 B1). The
-    holder keeps only what concerns it: a `setup` or `access` fault."""
+    """Tell the call's access holder, if it has one, of a fault the client raised (#1363 B1): only
+    what concerns the process's access, a `setup` or `access` fault. Another origin is the
+    system's or this call's own, and the holder is told nothing of it."""
     holder = getattr(ctx, "access", None)
-    if holder is not None:
+    if holder is not None and fault.origin in (ORIGIN_SETUP, ORIGIN_ACCESS):
         holder.report(fault)
 
 

@@ -77,8 +77,8 @@ from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa
 from defender.systems.system_status import RunSystems  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
-from defender.credential_proxy import mint_request_token, signing_access  # noqa: E402
-from defender.kit.access import AccessDeclaration, RequestAccess  # noqa: E402
+from defender.credential_proxy import mint_request_token, read_access, signing_access  # noqa: E402
+from defender.kit.access import TOKEN_SEC, AccessDeclaration, RequestAccess  # noqa: E402
 from defender.kit.faults import AdapterFault, ConfigFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
 from defender.systems.verbs import (  # noqa: E402
@@ -573,22 +573,17 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     return summary
 
 
-#: Seconds a request token lives from when it is signed, read or write-back (r7 A20), and the
-#: life a held read token must have left to be handed out again.
-TOKEN_SEC = 600
-TOKEN_REUSE_MARGIN_SEC = 60
-
-
 class _TokenMint:
     """Signs this run's request tokens in the run process (#1163 A1): a read token over the
-    granted `http-proxy` systems when a call first needs one, reused while it has life left (r7
-    A20), and a write-back token (`rw` on the case system only) at the record step (#1359 D-9).
+    granted `http-proxy` systems when a call first needs one, held by the process's one access
+    holder (#1363 O1, `RequestAccess`), and a write-back token (`rw` on the case system only) at the record step (#1359 D-9).
     Building one checks configuration only; nothing contacts OpenBao until a token is asked for,
     and a run with no `http-proxy` system to reach never does (A7)."""
 
-    def __init__(self, signer: Any, proxy_url: str | None, *, tenant_id: str, run_id: str,
+    def __init__(self, signer: Any, proxy_url: str | None, *, tenant_id: str, run_id: str,  # noqa: PLR0913 — the run's identity plus the holder's two seams
                  reads: tuple[str, ...], case_system: str | None,
-                 unsigned: str | None = None) -> None:
+                 unsigned: str | None = None, clock: Callable[[], float] = time.time,
+                 on_fault: Callable[[AdapterFault], None] | None = None) -> None:
         self._signer = signer
         self._proxy_url = proxy_url
         self._tenant_id = tenant_id
@@ -598,8 +593,11 @@ class _TokenMint:
         #: Why a write-back token cannot be signed (R4), when it cannot: the run goes on, and the
         #: record step says so.
         self._unsigned = unsigned
-        self._held: tuple[str, float] | None = None
-        self._holding = threading.Lock()
+        #: The process's access holder: built here, signs nothing until a call first needs a
+        #: token. `clock` is the holder's own; `on_fault` is its owner's callback (#1363 B1).
+        self._access: RequestAccess | None = (
+            read_access(signer, proxy_url or "", tenant_id=tenant_id, investigation=run_id,
+                        reads=reads, clock=clock, on_fault=on_fault) if reads else None)
 
     @classmethod
     def for_run(  # noqa: PLR0913 — the run's identity plus the operator's three seams
@@ -607,7 +605,8 @@ class _TokenMint:
                 world: Any, case: case_system.CaseTarget | case_system.CaseSettingsFault | None,
                 run_id: str, accepted: tenancy.Tenant,
                 records: tenancy.TenantDirectory, signer: Any, proxy_url: str | None,
-                issuer_transport: Any) -> _TokenMint:
+                issuer_transport: Any, clock: Callable[[], float] = time.time,
+                on_fault: Callable[[AdapterFault], None] | None = None) -> _TokenMint:
         """The mint for a run, or a mint that signs nothing when no `http-proxy` system is in
         reach. A configuration that cannot sign (no proxy address; a tenant whose live generation
         in `records` records no sign login, A24', whether or not a `signer` is injected, r8.6)
@@ -640,26 +639,15 @@ class _TokenMint:
             return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
                        case_system=written, unsigned=refused.detail)
         return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
-                   reads=reads, case_system=written)
+                   reads=reads, case_system=written, clock=clock, on_fault=on_fault)
 
     def _mint(self, grant: set[tuple[str, str]], expires_at: float) -> str:
         return mint_request_token(
             self._signer, tenant_id=self._tenant_id, investigation=self._run_id, grant=grant,
             expires_at=datetime.fromtimestamp(expires_at, UTC))
 
-    def _read_token(self) -> str:
-        """The run's read token: the held one while it has life left, else a new one. A mint
-        that fails raises its fault to the call that asked (r7 A20, A18)."""
-        with self._holding:
-            now = time.time()
-            if self._held is None or self._held[1] - TOKEN_REUSE_MARGIN_SEC <= now:
-                expires_at = now + TOKEN_SEC
-                self._held = (self._mint({(s, "r") for s in self._reads}, expires_at), expires_at)
-            return self._held[0]
-
     def access_kwargs(self) -> dict[str, RequestAccess]:
-        return _access_kwargs(RequestAccess(self._proxy_url or "", self._read_token)
-                              if self._reads else None)
+        return _access_kwargs(self._access)
 
     def write_back(self) -> dict[str, str]:
         """The record step's keywords: a fresh write-back token (`rw` on the case system only) and
