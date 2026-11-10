@@ -14,8 +14,6 @@ from defender.learning.core.state import (  # noqa: E402
     FINDINGS,
     QUESTIONER_FINDINGS,
     Channel,
-    LearningState,
-    StateRefused,
 )
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
@@ -305,24 +303,30 @@ def _default_judge_seam(episode_dir: Path) -> Any:
 
 def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration surface
     runs: RunsRepository[Tenant], episode_id: str, *, judge: Any = None,
-    state: LearningState | None = None, draws: int | None = None, git_show: Any = None,
+    store: Any = None, state: object = None, draws: int | None = None, git_show: Any = None,
     job_lane: bool = False,
 ) -> EpisodeGrade:
     """Grade episode `episode_id` of `runs`'s tenant (#1105 PR 2: the judge takes the
     repository and an id). Its door is `runs.episode_files(episode_id)`, held for the whole
     pass: a bad id, an unusable episodes root, a missing episode, a file at its name, or a
     container whose record names another tenant (or none) is `JudgeRefused`, and nothing is
-    created. Every queue append goes through `state` — the operator lane's.
+    created. An operator's pass inserts its findings into the learning store `store` (its
+    synchronous face, `learning.store.blocking`) for `runs`'s tenant (#1278, "Findings arrive":
+    the judge inserts directly; `enqueue.StoreFindings`).
 
-    `job_lane` (#1344, "Judge modes"): a learning job's pass reaches no queue. Its findings go
+    `job_lane` (#1344, "Judge modes"): a learning job's pass reaches no store. Its findings go
     to the episode's own findings records through the job lane's sink
     (`enqueue.EpisodeFindings`), which the job's post-step publishes once the job's row has
-    ended; `state` is never touched, and no drain is called. The fence is here, in code."""
+    ended; `store` is never touched, and no drain is called. The fence is here, in code.
+
+    `state` is the retired file queue's handle (#1278 replaced it with `store`): accepted so an
+    older caller's keyword is not a `TypeError`, and never read or written."""
     import yaml
 
-    if state is None and not job_lane:
-        raise JudgeRefused("an operator's judge pass appends through the tenant's learning "
-                           "state, and none was given")
+    del state
+    if store is None and not job_lane:
+        raise JudgeRefused("an operator's judge pass inserts its findings into the learning "
+                           "store, and none was given")
 
     configured = draws if draws is not None else _judge_draws()
     if configured < 1:
@@ -337,7 +341,9 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
     try:
         with _open_episode(runs, episode_id) as episode:
             resolved_judge = judge if judge is not None else _default_judge_seam(episode.dir)
-            sink: Any = enqueue_mod.EpisodeFindings(episode) if job_lane else state
+            sink: enqueue_mod.FindingsSink = (
+                enqueue_mod.EpisodeFindings(episode) if job_lane
+                else enqueue_mod.StoreFindings(store, str(runs.tenant.id), Path(episode.dir).name))
             return _grade_episode(episode, judge=resolved_judge, draws=configured,
                                   git_show=git_show, state=sink, tenant=runs.tenant,
                                   job_lane=job_lane)
@@ -381,7 +387,7 @@ def _refuse_queueing(prior: EpisodeGrade) -> None:
 
 
 def _grade_episode(  # noqa: PLR0913 — the pass's whole configuration, one keyword each
-    episode: Episode, *, judge: Any, draws: int, git_show: Any, state: LearningState,
+    episode: Episode, *, judge: Any, draws: int, git_show: Any, state: enqueue_mod.FindingsSink,
     tenant: Any = None, job_lane: bool = False,
 ) -> EpisodeGrade:
     # A not-graded stamp never short-circuits, so a repaired episode can still be graded. A
@@ -450,7 +456,7 @@ class _Pass:
     queue counts. Each commit (A6) writes the whole record as it stands."""
 
     def __init__(self, episode: Episode, *, judge: Any, draws: int, git_show: Any,  # noqa: PLR0913 — the pass's whole configuration
-                 state: LearningState, prior: EpisodeGrade | None, tenant: Any = None,
+                 state: enqueue_mod.FindingsSink, prior: EpisodeGrade | None, tenant: Any = None,
                  job_lane: bool = False) -> None:
         self.episode = episode
         #: A learning job's pass (#1344): a pass whose every judge call raised is its failure.
@@ -737,12 +743,12 @@ class _Pass:
         return lane, why
 
     def _queued_ids(self, channel: Channel) -> frozenset[str]:
-        """The finding ids on a queue, read once per pass: every id this pass mints is its
+        """The finding ids the sink holds, read once per pass: every id this pass mints is its
         own, so only a row an earlier pass queued can hold one."""
         if channel.name not in self.queued_ids:
             try:
                 rows = self.state.rows(channel)
-            except (StateRefused, OSError):
+            except Exception:  # noqa: BLE001 — an unreadable sink (episode record or store) is met again by the append
                 # The append meets the same read refusal and stops the pass loudly with
                 # this world's row left `queueing` (A6); no row is silently deduplicated.
                 return frozenset()
