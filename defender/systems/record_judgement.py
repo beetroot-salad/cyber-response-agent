@@ -25,7 +25,7 @@ from defender.kit.access import AccessDeclaration, Route
 from defender.kit.faults import ConfigFault
 from defender.kit.settings import RECORDS, Locator, Part, SystemConfig
 from defender.systems.catalog import Catalog, route_of
-from defender.systems.verbs import PLATFORM_SERVED
+from defender.systems.verbs import is_platform_served
 from defender.tenancy import access_pointer, parse_access
 from defender.tenancy.case_ticket import CASE_RECORD_REL, CaseTicketError, parse_case_record
 from defender.tenancy.models import CaseRecord, SystemRecord, TenantRecords
@@ -139,7 +139,7 @@ def system_faults(record: SystemRecord, *, catalog: Catalog, locator: Locator = 
     settings check over a tenant record holding it (its access first, then its settings)."""
     system = record.system_id
     where = locator.system(system)
-    if system in PLATFORM_SERVED:
+    if is_platform_served(system):
         return [f"{where}: `{system}` is a platform-served system, run by the platform itself: no record may take its "
                 "name"]
     if record.custom_ref is not None:

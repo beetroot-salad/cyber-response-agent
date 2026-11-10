@@ -24,7 +24,7 @@ from defender._io import read_bytes_capped
 from defender._paths import adapters_under, process_defender_dir
 from defender.kit.transport import REQUIRED_CONFIG_KEYS_TEMPLATE
 from defender.kit.verbs import COMMENT_ACTION
-from defender.systems.verbs import PLATFORM_SERVED, RosterRead, fresh_adapter_module, read_roster
+from defender.systems.verbs import PLATFORM_SERVED, RosterRead, fresh_adapter_module, is_platform_served, read_roster
 from defender.tenancy.models import SystemRecord, TenantRecords
 
 #: The module constants every catalog adapter declares, read cold (K2).
@@ -170,7 +170,7 @@ class TenantSystems:
         disabled: dict[str, SystemRecord] = {}
         missing: dict[str, SystemRecord] = {}
         for system, record in sorted(records.systems.items()):
-            if system in PLATFORM_SERVED:
+            if is_platform_served(system):
                 continue  # never a record (R3); the store refuses one
             if not record.enabled:
                 disabled[system] = record
