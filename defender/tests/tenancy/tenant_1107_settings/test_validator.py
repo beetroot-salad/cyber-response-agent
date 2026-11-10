@@ -13,6 +13,7 @@ import pytest
 
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — the fixture
+from defender.tests.support.tenancy import _handoff1366 as H
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
@@ -64,10 +65,9 @@ def test_o11_the_handoffs_access_is_judged_too(tmp_path, access):
 
 
 @pytest.mark.postgres
-def test_o11_the_handoffs_access_fault_is_the_stores_sentence(migrated_database, tmp_path, data_root, capsys,  # noqa: F811
-                                                              monkeypatch):
-    """The sentence the store gives for an access declaration it refuses appears verbatim in the validator's report of
-    the same folder. (#1366 O11, K1)"""
+def test_o11_the_handoffs_access_fault_is_the_stores_sentence_located_by_the_file(
+        migrated_database, tmp_path, data_root, capsys, monkeypatch):  # noqa: F811
+    """The store's access fault sentence appears in the validator's report, located by the file. (#1366 O11, DC6)"""
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     with published_tenant(tmp_path / "forge", root=data_root, files=R.import_files()) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=t.data_root, records=None)
@@ -77,4 +77,6 @@ def test_o11_the_handoffs_access_fault_is_the_stores_sentence(migrated_database,
         rc, said = op.set_system("cmdb", replaces=1, config=CMDB_CONFIG, access=BAD_ACCESS)
     assert rc != 0, said
     (fault,) = [line.removeprefix("[tenant.py] ").strip() for line in R.lines_naming(said, "colour")]
-    assert fault in _validated(_folder(tmp_path / "handoff", access=BAD_ACCESS))
+    sentence = H.store_sentence(fault, "cmdb", "access")
+    report = _validated(_folder(tmp_path / "handoff", access=BAD_ACCESS))
+    assert any(sentence in line for line in H.handoff_lines(report, "colour", "cmdb", "access")), (sentence, report)

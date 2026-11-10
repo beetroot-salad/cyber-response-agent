@@ -602,7 +602,9 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     `case_body` is the comment template of the tenant's `settings/case-record.yaml` (`SIGNED_COMMENT_BODY`
     also renders the signature). The tenant's ticket system accepts keys of `TICKET_KEY_PATTERN`. `lead_zero`
     defaults to the template the table's correlation holder needs. `omit_systems` drops those
-    systems' `config.env` (an unconfigured system). `lessons` plants files (name -> text) in the
+    systems' `config.env` and `access.yaml`: each is planted as configured-but-broken (#1366: a record with empty settings
+    and access, judged down at start, as the folder world judged an unconfigured system; NOT left unrecorded, which
+    would drop it from the roster and ignore its grant). `lessons` plants files (name -> text) in the
     tenant's own `agent/lessons/` (the checkout holds no corpus)."""
     root = Path(root) if root is not None else D.current_data_root()
     if lead_zero is None:
@@ -611,10 +613,11 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     if configs is None:  # the ticket system's key grammar: the suite's `TICKET_KEY` fits it
         texts["ticket"] = re.sub(r'(?m)^TICKET_KEY_PATTERN=.*$',
                                  f'TICKET_KEY_PATTERN="{TICKET_KEY_PATTERN}"', texts["ticket"])
-    for system in omit_systems:
+    omitted = tuple(omit_systems)
+    for system in omitted:
         texts.pop(system, None)
     knowledge = T6.place_tenant(root, tenant_id, table=table, lead_zero=lead_zero,
-                                configs=texts, case_body=case_body)
+                                configs=texts, case_body=case_body, unconfigured=omitted)
     planted = Planted(root=root, tenant_id=tenant_id, knowledge=knowledge)
     (root / tenant_id / "learning").mkdir(exist_ok=True)  # setup provisions mutable state
     _MAPPINGS[(str(root), tenant_id)] = None if isinstance(alert_mapping, str) else alert_mapping

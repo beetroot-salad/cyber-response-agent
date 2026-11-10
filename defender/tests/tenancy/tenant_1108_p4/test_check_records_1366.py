@@ -9,6 +9,7 @@ tenant ids normalised, so wording is pinned only where the design words it.
 from __future__ import annotations
 
 import contextlib
+import json
 
 import pytest
 
@@ -18,6 +19,12 @@ from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant, second_tenant
 
 pytestmark = pytest.mark.postgres
+
+#: A catalog adapter an upgrade removed (a record can still name it: the accept-all seeder stores what it is given).
+RETIRED = "legacy-widget"
+COMMENT_ROUTE = ("POST", "/tickets/*/comments")
+#: A grants table whose gather grant is on the platform-served registry alone (nothing for a record to be missing).
+TABLE_TACIT_ONLY = "dispositions:\n  tacit-knowledge:\n    health-check: {roles: [gather]}\n    lookup: {roles: [gather]}\n"
 
 
 @pytest.fixture
@@ -48,10 +55,28 @@ def tenants(tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noq
         yield make
 
 
-def _findings(op) -> list[str]:
-    """`check`'s lines with the tenant's id masked, so two tenants' outputs compare."""
-    _, out = op.check()
-    return [line.replace(op.tid, "<tenant>") for line in out.splitlines()]
+class _Lines(list):
+    """`check`'s lines with the tenant's id masked (so two tenants' outputs compare); `.rc` is its exit status."""
+
+    rc: int = 0
+
+
+def _findings(op) -> _Lines:
+    rc, out = op.check()
+    lines = _Lines(line.replace(op.tid, "<tenant>") for line in out.splitlines())
+    lines.rc = rc
+    return lines
+
+
+def _fields_for(access: str) -> dict[str, str]:
+    """A credential set shaped for the declaration's scheme (basic: username and password; the rest: an api key)."""
+    return ({"username": "u", "password": "p"} if json.loads(access)["auth"]["scheme"] == "basic" else {"api_key": "k"})
+
+
+def _credentialed(op) -> None:
+    """Credentials at the current generation (1) for every fixture system."""
+    for system, (_, access) in R.FIXTURE_FOLDERS.items():
+        assert op.set_credentials(system, _fields_for(access), for_version=1)[0] == 0, system
 
 
 def _only_in(found: list[str], control: list[str], *words: str) -> list[str]:
@@ -86,6 +111,7 @@ def test_1366_r12_a_grant_on_a_system_that_was_never_recorded_is_reported_as_orp
     found = _findings(tenants(R.without(R.fixture_records(), "cmdb")))
 
     assert _only_in(found, sound, "cmdb", "orphan"), found
+    assert found.rc != 0, "an orphaned grant is a finding, and any finding exits nonzero"
 
 
 def test_1366_r12_a_deleted_system_the_grants_still_name_is_orphaned_after_the_operator_deleted_it(tenants):
@@ -95,7 +121,9 @@ def test_1366_r12_a_deleted_system_the_grants_still_name_is_orphaned_after_the_o
     before = _findings(op)
     assert op.delete_system("cmdb", replaces=1)[0] == 0
 
-    assert _only_in(_findings(op), before, "cmdb", "orphan")
+    found = _findings(op)
+    assert _only_in(found, before, "cmdb", "orphan")
+    assert found.rc != 0
 
 
 def test_1366_r12_a_disabled_system_that_is_granted_is_reported_as_granted_but_disabled(tenants):
@@ -110,6 +138,7 @@ def test_1366_r12_a_disabled_system_that_is_granted_is_reported_as_granted_but_d
 
     assert _only_in(found, before, "cmdb", "disabled"), found
     assert not _only_in(found, before, "cmdb", "orphan"), found
+    assert found.rc != 0, "granted-but-disabled is a finding, and any finding exits nonzero"
 
 
 def test_1366_o1_check_judges_only_the_systems_the_tenant_has_records_for(tenants):
@@ -133,7 +162,9 @@ def test_1366_r12_check_reports_a_record_an_upgrade_made_unusable(tenants):
     sound = _findings(tenants())
     spec = R.edited(R.fixture_records(), "cmdb", settings={"CMDB_TIMEOUT_SEC": "CHANGE-ME"})
 
-    assert _only_in(_findings(tenants(spec)), sound, "cmdb")
+    found = _findings(tenants(spec))
+    assert _only_in(found, sound, "cmdb")
+    assert found.rc != 0, "a record an upgrade made unusable is a finding, and any finding exits nonzero"
 
 
 def test_1366_r12_check_reports_each_system_without_credentials_at_its_current_generation(tenants):
@@ -144,6 +175,7 @@ def test_1366_r12_check_reports_each_system_without_credentials_at_its_current_g
     words = ("no credentials at the current generation",)
 
     first = _findings(op)
+    assert first.rc != 0, "no credentials at the current generation is a finding, and any finding exits nonzero"
     assert {s for s in R.FIXTURE_SYSTEMS if R.lines_naming("\n".join(first), s, *words)} == R.FIXTURE_SYSTEMS
 
     assert op.set_credentials("cmdb", {"api_key": "k1"}, for_version=1)[0] == 0
@@ -166,17 +198,23 @@ def test_1366_o9_check_reports_a_tenant_repos_leftover_system_folders_and_case_f
     assert not R.lines_naming(clean, "retired"), clean
 
 
-def test_1366_c5_check_reports_a_case_record_whose_system_no_longer_covers_its_comment_route(tenants):
-    """The ticket system's stored declaration writes only `POST /tickets/*/transitions`, not the comment route the
-    adapter now declares: `check` reports the case record's lost cover naming ticket; the tenant whose declaration covers
-    it gets no such line. (#1366 C5, C2)"""
+@pytest.mark.parametrize(("reads", "writes"), [
+    pytest.param((), (("POST", "/tickets/*/transitions"),), id="write-route-missing"),
+    pytest.param((COMMENT_ROUTE,), (COMMENT_ROUTE,), id="read-route-matches-the-comment-route"),
+    pytest.param((("POST", "/tickets/ABC-1/comments"),), (COMMENT_ROUTE,), id="read-route-literal-matches-the-comment-route"),
+])
+def test_1366_c5_check_reports_a_case_record_whose_system_no_longer_covers_its_comment_route(tenants, reads, writes):
+    """The ticket system's stored declaration writes only `POST /tickets/*/transitions`, or lists a read route that
+    matches the comment route (the r5 ruling: refused even with a covering write): `check` reports the case record's lost
+    cover naming ticket and exits nonzero; the tenant whose declaration covers it gets no such line. (#1366 C5, C2, B2)"""
     sound = _findings(tenants())
     lost = R.edited(R.fixture_records(), "ticket",
-                    access=R.declaration("http://soc-playground:8004", writes=(("POST", "/tickets/*/transitions"),)))
+                    access=R.declaration("http://soc-playground:8004", reads=reads, writes=writes))
 
-    found = _only_in(_findings(tenants(lost)), sound, "ticket")
+    found = _findings(tenants(lost))
 
-    assert found, "the case system's lost cover was not reported"
+    assert _only_in(found, sound, "ticket"), "the case system's lost cover was not reported"
+    assert found.rc != 0
 
 
 def test_1366_o1_the_case_systems_lookup_uses_the_tenants_records_not_the_checkouts_adapters(tenants):
@@ -184,9 +222,11 @@ def test_1366_o1_the_case_systems_lookup_uses_the_tenants_records_not_the_checko
     systems, though the checkout carries a ticket adapter. (#1366 O1 case-system lookup, O4)"""
     sound = _findings(tenants())
 
-    found = _only_in(_findings(tenants(R.without(R.fixture_records(), "ticket"))), sound, "ticket")
+    report = _findings(tenants(R.without(R.fixture_records(), "ticket")))
+    found = _only_in(report, sound, "ticket")
 
     assert any("case" in line.lower() for line in found), found
+    assert report.rc != 0
 
 
 def test_1366_check_with_no_database_is_a_fault_naming_the_variable_and_never_a_look_at_the_folders(
@@ -204,3 +244,57 @@ def test_1366_check_with_no_database_is_a_fault_naming_the_variable_and_never_a_
     assert "DEFENDER_DATABASE_DSN" in said.out + said.err
     assert not R.lines_naming(said.out + said.err, "no credentials")
     assert not R.lines_naming(said.out + said.err, "orphan")
+
+
+def test_1366_r12_check_reports_a_record_naming_an_adapter_an_upgrade_removed(tenants):
+    """cmdb's stored record names an adapter the catalog no longer has (`SysSpec.adapter`, stored as it was): `check`
+    reports cmdb, exits nonzero, and the sound tenant gets no such line; no pruned checkout is needed. (#1366 R12 row
+    'adapter removed by an upgrade', B3)"""
+    sound = _findings(tenants())
+
+    found = _findings(tenants(R.edited(R.fixture_records(), "cmdb", adapter=RETIRED)))
+
+    assert _only_in(found, sound, "cmdb"), found
+    assert found.rc != 0
+
+
+def test_1366_r8_a_tenant_imported_with_no_records_is_not_told_to_import(tenants):
+    """Imported with zero records is not `not imported`: `check` never names the import for it. Granting the catalog
+    systems it has no record for, it reports each orphaned grant (proof the records were read, not skipped); granting the
+    platform-served registry alone it reports no orphan at all. (#1366 R8 second half, R11, R12)"""
+    granted = _findings(tenants(R.RecordsSpec()))
+    tacit = _findings(tenants(R.RecordsSpec(), files={"settings/verb-grants.yaml": TABLE_TACIT_ONLY}))
+
+    for report in (granted, tacit):
+        assert not R.lines_naming("\n".join(report), R.AUTHOR[R.IMPORT]), report
+    assert {s for s in ("cmdb", "elastic") if R.lines_naming("\n".join(granted), s, "orphan")} == {"cmdb", "elastic"}, granted
+    assert granted.rc != 0
+    assert not R.lines_naming("\n".join(tacit), "orphan"), tacit
+
+
+def test_1366_r13_a_fresh_import_fails_check_for_want_of_credentials_until_each_system_has_them(op):
+    """After `import` (which touches no secret) every system has no credentials at the current generation: `check`
+    reports each and exits nonzero; once every system has its credentials at that generation the line is gone. (This
+    tenant's repo still holds the retired folders, so its exit stays nonzero for that reason; the zero exit is the next
+    test's.) (#1366 R13, R12, B6)"""
+    assert op.import_()[0] == 0
+    rc, out = op.check()
+
+    assert rc != 0, out
+    assert {s for s in R.FIXTURE_SYSTEMS if R.lines_naming(out, s, "no credentials at the current generation")} == R.FIXTURE_SYSTEMS, out
+
+    _credentialed(op)
+    _, out = op.check()
+    assert not R.lines_naming(out, "no credentials"), out
+
+
+def test_1366_b6_check_exits_zero_over_a_sound_tenant_with_credentials_and_nonzero_once_a_finding_exists(tenants):
+    """The sound tenant (every system recorded and credentialed at its generation) exits zero; the operator's
+    `delete-system cmdb` (the grants then name an orphan) turns the same tenant's exit nonzero. (#1366 B6, R12)"""
+    op = tenants()
+    _credentialed(op)
+
+    assert _findings(op).rc == 0
+
+    assert op.delete_system("cmdb", replaces=1)[0] == 0
+    assert _findings(op).rc != 0

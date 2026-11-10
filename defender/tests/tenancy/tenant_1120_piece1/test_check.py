@@ -185,14 +185,18 @@ def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import
     folder = _folder(tmp_path, "tenant")
     script = _copy_script(checkout)
     H.assert_clean(H.run_script(script, "check", "--folder", str(folder), root=None))
+    # #1366 O9/DC8: a leftover case-record.yaml is retired and ignored, not parsed. The design does not settle whether
+    # that report is a finding (exit status), so this pins what is said, not the exit status.
+    _unparseable_mapping(folder)
+    left = H.output(H.run_script(script, "check", "--folder", str(folder), root=None))
+    mentions = [ln for ln in left.splitlines() if "case-record.yaml" in ln]
+    assert mentions, f"`check --folder` did not report the leftover case-record.yaml:\n{left}"
+    assert all("retired" in ln and "ignored" in ln for ln in mentions), left
+    assert "is not valid YAML" not in left, f"a leftover case-record.yaml was still parsed:\n{left}"
     H.add_adapter(checkout, BROKEN_SYSTEM, BROKEN_ADAPTER)
     blind = {"folder": folder, "cause": ADAPTER_CAUSE,
              "names": (BROKEN_SYSTEM, str(checkout.resolve()))}
     _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None), **blind)
-    _unparseable_mapping(folder)
-    # #1366 O9: the case record is a database row; a leftover case-record.yaml is not read, so it is no folder finding.
-    text, _line = _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None), **blind)
-    assert "settings/case-record.yaml" not in text, text
 
 
 def test_1120_s6_defender_dir_env_names_another_tree(

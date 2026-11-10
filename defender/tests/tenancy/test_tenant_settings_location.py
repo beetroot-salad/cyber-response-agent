@@ -14,6 +14,7 @@ import pytest
 
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.support.runtime.engine._spec767 import write_report
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
@@ -113,10 +114,16 @@ def _reader_policies(run_dir: Path):
     }
 
 
-def _settings_files() -> list[Path]:
+def _settings_files(leftover_tenant: Path) -> list[Path]:
+    """Every settings file the model's read surfaces must not reach: the committed fixture's and the
+    template's, plus a tenant repo that still holds the retired `systems/<s>/config.env` /
+    `access.yaml` and `case-record.yaml` (#1366 O9 / DC8: `import` and `check` still meet those files
+    in a tenant's repo and published export, though nothing reads them afterwards; the committed
+    fixture no longer carries them, so a planted tenant stands for them)."""
     files = [p for d in _committed_tenant_dirs() for p in (d / "settings").rglob("*")
              if p.is_file()]
     files += [p for p in T.TEMPLATE_SETTINGS.rglob("*") if p.is_file()]
+    files += [p for p in (leftover_tenant / "settings").rglob("*") if p.is_file()]
     return sorted(files)
 
 
@@ -126,10 +133,11 @@ def test_every_settings_file_is_denied_by_both_read_surfaces_and_a_corpus_file_i
 
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    files = _settings_files()
+    leftover = S.plant(tmp_path / "leftover-root", T.PLAYGROUND_ID, marker="leftover")
+    files = _settings_files(leftover)
     names = {p.name for p in files}
     # The census is non-vacuous: every kind is present to be denied.
-    assert {"verb-grants.yaml", "lead-zero.yaml", "case-record.yaml", "config.env"} <= names, names
+    assert {"verb-grants.yaml", "lead-zero.yaml", "case-record.yaml", "config.env", "access.yaml"} <= names, names
     control = T.DEFENDER / "skills" / "gather" / "SKILL.md"
     for role, policy in _reader_policies(run_dir).items():
         allowed = [
@@ -193,24 +201,33 @@ def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path
         "the fixture no longer discriminates"
 
 
-def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
+def test_a_system_with_no_settings_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
+    """A record with no settings is a fault naming the system and its required keys, with no folder path and no
+    fallback to the fixture's record (retires the folder-file wording). (#1366 O9, DC6)"""
     faults = T.mod("kit.faults")
     transport = T.mod("kit.transport")
+    cmdb = T.mod("integrations.cmdb_adapter")
     root = tmp_path / "injected-root"
     T.place_tenant(root, T.PLAYGROUND_ID, configs={})
     settings = T.accept(root, T.PLAYGROUND_ID).settings
-    # cmdb is declared, so its missing config.env is the one fault left (the declaration is
-    # judged first, #1391 r5 S1).
+    # cmdb is declared, so its missing settings are the one fault left (the declaration is judged first,
+    # #1391 r5 S1): an access file with no config.env plants a recorded cmdb with empty settings.
     (settings / "systems" / "cmdb").mkdir(parents=True, exist_ok=True)
     (settings / "systems" / "cmdb" / "access.yaml").write_text(
         T.access_text("noconf", "cmdb"), encoding="utf-8")
     with pytest.raises(faults.ConfigFault) as caught:
-        transport.load_config(_ctx(settings, tmp_path), "cmdb", "CMDB")
-    assert "the tenant's settings/systems/cmdb/config.env" in str(caught.value)
-    assert str(settings) not in str(caught.value)
-    # Control: the checkout's fixture does carry a cmdb config, so the refusal above is
-    # the absence of a fallback, not the absence of a file anywhere.
-    assert (T.FIXTURE_SETTINGS / "systems" / "cmdb" / "config.env").is_file()
+        transport.load_config(_ctx(settings, tmp_path), "cmdb", cmdb.PREFIX)
+    text = str(caught.value)
+    assert "cmdb" in text, text
+    for key in cmdb.REQUIRED_CONFIG_KEYS:
+        assert f"{cmdb.PREFIX}_{key}" in text, f"the fault does not name {cmdb.PREFIX}_{key}: {text}"
+    for retired in ("config.env", "settings/systems"):
+        assert retired not in text, f"a record's fault points at a retired folder file: {text}"
+    assert str(settings) not in text
+    # Control: the fixture tenant's cmdb record does carry settings, so the refusal above is the absence of
+    # a fallback, not the absence of a record anywhere.
+    assert R.fixture_records().systems["cmdb"].settings
+    assert transport.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path), "cmdb", cmdb.PREFIX)
 
 
 # ---- the case-record settings ----------------------------------------------------------------
@@ -220,7 +237,7 @@ def test_the_record_leg_comments_to_the_injected_tenants_store_with_its_case_rec
         injected, tmp_path):
     """The `--update-ticket` lane: the real record leg, handed the run's record, addresses the
     injected tenant's case store (`ticket/config.env`) and renders the injected tenant's
-    `case-record.yaml` body, not the checkout's. Replaces the retired `case-history` mapping
+    case record body (#1366: seeded from its planted `case-record.yaml`), not the fixture's. Replaces the retired `case-history` mapping
     reader tests (#1359 O2: the open leg and `load_case_mapping` are gone)."""
     from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 
@@ -237,8 +254,7 @@ def test_the_record_leg_comments_to_the_injected_tenants_store_with_its_case_rec
     (post,) = posts
     assert post["url"] == f"http://ticket-{MARK}:8080/tickets/{C.TICKET_KEY}/comments", post
     assert "injected-tenant-body" in post["body"]["body"], "the injected case-record body was not sent"
-    checkout_text = (T.FIXTURE_SETTINGS / "case-record.yaml").read_text(encoding="utf-8")
-    assert "injected-tenant-body" not in checkout_text, "the fixture no longer discriminates"
+    assert "injected-tenant-body" not in R.FIXTURE_CASE_BODY, "the fixture no longer discriminates"
 
 
 # ---- lead-zero ---------------------------------------------------------------------------------

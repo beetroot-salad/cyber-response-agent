@@ -7,6 +7,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
 
 import contextlib
+import dataclasses
 import functools
 import json
 from pathlib import Path
@@ -175,16 +176,22 @@ def _published_without(world: dict, tenant_id: str, rel: str) -> Any:
     return t
 
 
-def test_a_tenant_with_no_case_record_file_is_not_refused_and_reaches_the_box(world):
-    """#1359 O2: the case-record file is optional (the retired `systems/case-history/mapping.yaml`
-    was required): a published tenant whose export lacks it starts and reaches the box.
+def test_a_tenant_with_no_case_record_is_not_refused_and_reaches_the_box(world):
+    """#1359 O2: the case record is optional (the retired `systems/case-history/mapping.yaml` was
+    required): an imported tenant whose records hold no case record starts and reaches the box.
+    #1366 O9: the case record is a database record now (the fixture's `case-record.yaml` file is
+    gone), so the tenant is seeded with the fixture's systems and no case.
     Control: the sibling test below, where a missing required file refuses."""
-    own = _published_without(world, T.PLAYGROUND_ID, "case-record.yaml")
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    own = world["publish_tenant"](T.PLAYGROUND_ID, {})
+    no_case = dataclasses.replace(R.fixture_records(), case=None)
+    directory = own.directory_with(records=no_case)
     world["runs_base"](T.PLAYGROUND_ID)
     start = StartBoxRecorder(stop=True)
     argv = [str(world["alert"]), "--tenant", T.PLAYGROUND_ID, "--no-learn"]
     with pytest.raises(_StartBoxReached):
-        _run().main(argv, directory=own.directory, lifecycle=_lifecycle(start),
+        _run().main(argv, directory=directory, lifecycle=_lifecycle(start),
                     visualize=lambda p, **kw: None, preflight=lambda m: 0,
                     publish=lambda *a, own=own, **k: f"fresh {own.commit}")
     assert len(start.calls) == 1, start.calls

@@ -529,10 +529,9 @@ def compose_control_episode(tenant_id: str, natural: Recording) -> tuple[str, in
 
 
 def _resolve(tenant: Any) -> Any:
-    from defender.systems import run_tenant as run_tenant_mod
+    from defender.tests.support.tenancy import _systems1366 as R
 
-    return run_tenant_mod.run_tenant_for(tenant, defender_dir=DEFENDER,
-                                         dispatches_lead_zero=False)
+    return R.run_tenant_for(tenant, defender_dir=DEFENDER, dispatches_lead_zero=False)  # #1366: built from records
 
 
 def plant_alert(path: Path) -> Path:

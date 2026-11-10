@@ -90,24 +90,27 @@ def accept(root: Path, tenant_id: str, **kw: Any) -> Any:
 
 def run_tenant(tenant: Any, *, defender_dir: Path | None = None,
                dispatches_lead_zero: bool = False, agent_root: Path | None = None,
-               settings_root: Path | None = None) -> Any:
-    """The driver's `RunTenant` for an accepted `tenant`, built from the real pieces only: run
-    start's `resolve_run_tenant` (same grants and refusals; the lead-zero template is checked
-    against the agent root's catalog only when `dispatches_lead_zero`), then `resolved_settings`.
+               settings_root: Path | None = None, records: Any = ...) -> Any:
+    """The driver's `RunTenant` for an accepted `tenant`, built as run start builds it (#1366 R10): production's
+    `run_tenant_for(..., records=)`, so the grants come from `settings_root`'s table and the systems, access and case
+    record from RECORDS (no folder read for them). `records` is a `_systems1366.RecordsSpec` (exactly that), `None` (the
+    tenant is not imported) or omitted (DERIVED: what `settings_root` was planted with, the retired fixture's when it
+    planted no systems; `_systems1366.derive`). A refusal surfaces as the readiness function's own error, as before.
     A scenario that wants other grants plants a tenant whose `verb-grants.yaml` says so.
 
     `agent_root`/`settings_root` default to the tenant's own `agent/`/`settings/`; the replay
     harness hands one export's halves. `defender_dir` is ignored (kept for callers' call shape):
     the catalog never comes from the checkout."""
     del defender_dir
-    rt = mod("systems.run_tenant")
+    from defender.tests.support.tenancy import _systems1366 as R
+
     root = Path(agent_root) if agent_root is not None else Path(tenant.agent)
     settings = Path(settings_root) if settings_root is not None else Path(tenant.settings)
-    ready = rt.resolve_run_tenant(
-        settings, agent_root=root, dispatches_lead_zero=dispatches_lead_zero)
-    return rt.RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,
-                        agent_root=root, settings_root=settings,
-                        **rt.resolved_settings(tenant, settings_root=settings))
+    try:
+        return R.run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero, agent_root=root,
+                                settings_root=settings, records=R.DERIVED if records is ... else records)
+    except mod("records.formats").TenantRefused as refused:
+        raise (refused.__cause__ or refused) from None
 
 
 def fixture_run_tenant(**kw: Any) -> Any:
@@ -328,7 +331,7 @@ verb: list-hosts
 }
 
 
-def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each part overridable
+def plant_tenant(  # noqa: PLR0913, C901 — one tenant folder's whole content, each part overridable
     root: Path, tenant_id: str, *,
     table: str = TABLE_A,
     lead_zero: str | None = None,
@@ -339,12 +342,18 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     omit: tuple[str, ...] = (),
     agent_files: dict[str, str] | None = None,
     catalog: bool = True,
+    unconfigured: tuple[str, ...] = (),
 ) -> Path:
     """Write a plain knowledge folder `root/<tenant_id>/{settings,agent}/` and return it: the
     committed template's shape (no `.tenant-id`, no row). `omit` names settings-relative files
     not to write (e.g. one of `REQUIRED_FILES`), for refusal tests. `case_system` names the
     system the case-record file points at; `None` plants a tenant with no case file (#1359). `agent/` always holds one
-    marker file, so a mount of it is observably this tenant's."""
+    marker file, so a mount of it is observably this tenant's.
+
+    #1366 (what the seeders read, `_systems1366.derive`): `configs={}` leaves an empty `settings/systems/`, which says
+    "this test planted no systems" (imported, empty) rather than "use the retired fixture's"; `unconfigured` names
+    systems planted as configured-but-broken (a marker file: seeded with empty settings and access, judged down at
+    start), as opposed to a system left out, which is never recorded."""
     tenant = Path(root) / tenant_id
     settings = tenant / "settings"
     agent = tenant / "agent"
@@ -366,6 +375,12 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     settings.mkdir(parents=True, exist_ok=True)
+    if not system_configs:
+        (settings / "systems").mkdir(exist_ok=True)
+    for system in unconfigured:
+        marked = settings / "systems" / system / ".unconfigured"
+        marked.parent.mkdir(parents=True, exist_ok=True)
+        marked.write_text("", encoding="utf-8")
     agent.mkdir(parents=True, exist_ok=True)
     for name, text in (agent_files if agent_files is not None
                        else {"AGENT.md": f"agent half of {tenant_id}\n"}).items():

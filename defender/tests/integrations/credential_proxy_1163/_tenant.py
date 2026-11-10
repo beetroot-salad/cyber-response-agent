@@ -38,12 +38,14 @@ def exports_of(t: PublishedTenant) -> Path:
     return export_dir(t.tenant, t.commit).parent
 
 
-def run_record(t: PublishedTenant) -> Any:
-    """The run's record over the first export's settings, as run start resolves it."""
-    from defender.systems.run_tenant import run_tenant_for
+def run_record(t: PublishedTenant, records: Any = None) -> Any:
+    """The run's record as run start resolves it, built from RECORDS (#1366 R10: `run_tenant_for(..., records=)`, no folder
+    read for systems, access or case). `records` is a `R.RecordsSpec` (exactly that) or omitted (what the first export's
+    planted `settings/` stands for, `R.derive`). Grants still come from the first export's settings."""
+    from defender.tests.support.tenancy import _systems1366 as R
 
-    return run_tenant_for(t.tenant, dispatches_lead_zero=False,
-                          settings_root=export_dir(t.tenant, t.commit) / "settings")
+    return R.run_tenant_for(t.tenant, dispatches_lead_zero=False, records=R.DERIVED if records is None else records,
+                            settings_root=export_dir(t.tenant, t.commit) / "settings")
 
 
 def static_set(key: str = H.CANARY_KEY, version: int = 1) -> Any:
@@ -80,14 +82,16 @@ def deps(tenants: Mapping[str, Path] | Path, store: Any, *, verifier: Any = None
          audit: Any = None, **extra: Any) -> Any:
     """`ProxyDeps` for tenants under a data root: `tenants` is the root itself or the `{id: exports}` mapping
     of tenants under it; `extra` keywords (e.g. `max_response_bytes`) pass through. #1366: the proxy reads its systems
-    through the records port, so `records=` (default `R.ExportRecords(root)`: the legacy export folders, handed through
-    the port as version 1 / generation 1) is the port, and a `store` whose `read` takes no generation is wrapped
+    through the records port, so `records=` (a port, or a `{tenant id: RecordsSpec}` mapping handed to `R.RecordsPort`; default `R.ExportRecords(root)`:
+    records computed from the planted export folders, version 1 / generation 1) is the port, and a `store` whose `read` takes no generation is wrapped
     (`R.GenerationBlind`); pass `records=` and an already generation-aware `store=` (`generation_aware=True`) for a
     test of the new behaviour."""
     from defender.tests.support.tenancy import _systems1366 as R
 
     root = tenants if isinstance(tenants, Path) else data_root_of(tenants)
     records = extra.pop("records", None)
+    if records is not None and not hasattr(records, "current_system"):  # {tenant id: RecordsSpec}: records, not folders
+        records = R.RecordsPort(records)
     if not extra.pop("generation_aware", False):
         store = R.GenerationBlind(store)
     return proxy().ProxyDeps(records=records if records is not None else R.ExportRecords(root), store=store,

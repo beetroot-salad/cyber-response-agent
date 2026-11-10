@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import importlib
 import inspect
 import json
 import os
@@ -31,8 +32,9 @@ import pytest
 
 from defender.tests.support.jobs._jobs1342 import fixed_clock, register_tenant
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — the fixture
+from defender.tests.support.tenancy import _handoff1366 as H
 from defender.tests.support.tenancy import _systems1366 as R
-from defender.tests.tenancy.tenant_1108_p4._support import FIXTURE_SETTINGS, published_tenant
+from defender.tests.tenancy.tenant_1108_p4._support import FIXTURE_SETTINGS, published_tenant, second_tenant
 
 REPO = Path(__file__).resolve().parents[4]
 CMDB_CONFIG, CMDB_ACCESS = R.FIXTURE_FOLDERS["cmdb"]  # the imported version 1: rewrites differ in one thing only
@@ -147,9 +149,18 @@ CATALOG_KEYS: Mapping[str, tuple[tuple[str, ...], str | None]] = {
 }
 
 
-def test_1366_o2_the_catalog_lists_every_adapter_with_its_exact_settings_keys_and_whether_it_is_an_example(capsys):
-    """`catalog` lists each checkout adapter, its exact declared keys, a tool and the example mark; tacit-knowledge
-    is not an entry. (#1366 O2)"""
+_UPPER_KEY = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")  # a settings key as stored: PREFIX_NAME
+
+
+def _declared(adapter: str) -> Any:
+    """The adapter's module: its `PREFIX`, `REQUIRED_CONFIG_KEYS`, `DISPLAY_NAME` and `EXAMPLE` are the cold-readable
+    constants the K2 lint guarantees (O2), so the listing is judged against them, not against a second copy."""
+    return importlib.import_module(f"defender.integrations.{adapter.replace('-', '_')}_adapter")
+
+
+def test_1366_o2_the_catalog_lists_every_adapter_with_its_display_name_exact_required_keys_and_example_mark(capsys):
+    """`catalog` lists each adapter with its display name, exact required keys and example mark (all from its K2
+    constants); tacit-knowledge is no entry. (#1366 O2, K2)"""
     from defender.cli import tenant
 
     on_disk = {p.stem.removesuffix("_adapter").replace("_", "-") for p in (REPO / "defender/integrations").glob("*_adapter.py")}
@@ -159,15 +170,20 @@ def test_1366_o2_the_catalog_lists_every_adapter_with_its_exact_settings_keys_an
     out = capsys.readouterr().out
     assert rc == 0, out
     for adapter, (keys, tool) in CATALOG_KEYS.items():
+        module = _declared(adapter)
+        declared = tuple(f"{module.PREFIX}_{k}" for k in module.REQUIRED_CONFIG_KEYS)
+        assert set(declared) == set(keys), f"premise: {adapter}'s declared constants are the design's keys"
+        assert bool(module.EXAMPLE) == (adapter in R.EXAMPLES), f"premise: {adapter}'s EXAMPLE flag"
         block = _block(out, adapter, tuple(a for a in CATALOG_KEYS if a != adapter))
         assert block, (adapter, out)
-        assert all(k in block for k in keys), (adapter, keys, block)
+        assert module.DISPLAY_NAME in block, (adapter, module.DISPLAY_NAME, block)
         assert tool is None or tool in block, (adapter, tool, block)
-        assert ("example" in block) == (adapter in R.EXAMPLES), (adapter, block)
+        assert ("example" in block) == bool(module.EXAMPLE), (adapter, block)
+        # exactly the declared keys: none missing, none extra (any KEY_LIKE token in the block is declared)
+        assert set(_UPPER_KEY.findall(block)) == set(declared), (adapter, declared, block)
+        for key in declared:  # each is marked required, on the line that names it
+            assert [ln for ln in block.splitlines() if key in ln and "required" in ln.lower()], (adapter, key, block)
     assert "tacit-knowledge" not in out
-    # the listing declares no key the adapter does not (one adapter's keys never appear under another)
-    assert "CMDB_COLOUR" not in out
-    assert "JIRA_TABLE" not in out
 
 
 # --- O9 / R13 -------------------------------------------------------------------------------------------------------
@@ -241,6 +257,13 @@ IMPORT_FAILURES = [
     ("case-system-cannot-comment", {_CASE_FILE: R.case_record_text("cmdb")}, (_CASE_FILE,), (_CASE_FILE,), "cmdb"),
     ("case-template", {_CASE_FILE: R.case_record_text(body="{nosuch}")}, (_CASE_FILE,), (_CASE_FILE,), None),
     ("cover-broken", {_ACC("ticket"): R.bearer_access(TICKET_BASE, writes=(("POST", "/tickets/*/transitions"),))},
+     (_TICKET_ACCESS_FILE, _CASE_FILE), ("settings/systems/ticket", _CASE_FILE), None),
+    # r5: a READ route that matches the comment route is refused even beside a covering write (C2's read-route rule).
+    ("cover-read-route-matches", {_ACC("ticket"): R.declaration(TICKET_BASE, reads=(("POST", "/tickets/*/comments"),),
+                                                                   writes=(("POST", "/tickets/*/comments"),))},
+     (_TICKET_ACCESS_FILE, _CASE_FILE), ("settings/systems/ticket", _CASE_FILE), None),
+    ("cover-read-route-literal-matches", {_ACC("ticket"): R.declaration(TICKET_BASE, reads=(("POST", "/tickets/ABC-1/comments"),),
+                                                                           writes=(("POST", "/tickets/*/comments"),))},
      (_TICKET_ACCESS_FILE, _CASE_FILE), ("settings/systems/ticket", _CASE_FILE), None),
 ]
 
@@ -357,7 +380,7 @@ def test_1366_o9_an_already_imported_tenant_is_refused_naming_the_import_and_not
     rc, said = imported_op.import_()
 
     assert rc != 0, said
-    assert R.lines_naming(said, "import"), said
+    assert R.lines_naming(said, R.AUTHOR[R.IMPORT]), said
     assert _state(imported_op) == before
     assert dict(imported_op.current()["cmdb"].settings) == CMDB_NEW
 
@@ -375,7 +398,7 @@ def test_1366_r8_a_write_to_a_tenant_not_imported_is_refused_naming_the_import(o
     rc, said = call()
 
     assert rc != 0, said
-    assert R.lines_naming(said, "import"), said
+    assert R.lines_naming(said, R.AUTHOR[R.IMPORT]), said
     assert not R.imported(op.dsn, op.tid)
     assert op.numbers("cmdb") == []
     assert _case_versions(op) == []
@@ -395,6 +418,8 @@ class Refusal(NamedTuple):
     replaces: int = 1
     good: tuple[Mapping[str, str], str] | None = None
     file_ok: bool = False
+    #: The control's system when the refusal is about the system's NAME (the good variant is a catalog id instead).
+    good_system: str | None = None
 
 
 _GOOD_CMDB = (CMDB_NEW, CMDB_ACCESS)
@@ -415,8 +440,10 @@ _BAD_ACCESS = {
     "access-placeholder": R.declaration("http://CHANGE-ME:8001"),
 }
 REFUSALS = [
-    Refusal("unknown-catalog-id", "frobnicator", {}, CMDB_ACCESS, (("frobnicator",),), replaces=0),
-    Refusal("platform-served-name", "tacit-knowledge", {}, CMDB_ACCESS, (("tacit-knowledge", "platform"),), replaces=0),
+    Refusal("unknown-catalog-id", "frobnicator", {}, CMDB_ACCESS, (("frobnicator",),), replaces=0,
+            good=(JIRA_CONFIG, _jira_access(JIRA_API)), good_system="jira"),
+    Refusal("platform-served-name", "tacit-knowledge", {}, CMDB_ACCESS, (("tacit-knowledge", "platform"),), replaces=0,
+            good=(JIRA_CONFIG, _jira_access(JIRA_API)), good_system="jira"),
     *(Refusal(f"undeclared-key-{n}", "cmdb", {**CMDB_CONFIG, key: "x"}, CMDB_ACCESS, (("cmdb", key),), good=_GOOD_CMDB)
       for n, key in enumerate(UNDECLARED)),
     Refusal("undeclared-key-on-an-adapter-with-none", "host-state", {"HOST_STATE_COLOUR": "x"},
@@ -453,9 +480,10 @@ def test_1366_o4_an_unusable_system_record_is_refused_naming_system_and_key_not_
 
     _refused(imported_op, before, rc, said, row.needles, file_ok=row.file_ok)
     if row.good is not None:
-        rc, said = imported_op.set_system(row.system, replaces=row.replaces, config=row.good[0], access=row.good[1])
+        control = row.good_system or row.system
+        rc, said = imported_op.set_system(control, replaces=row.replaces, config=row.good[0], access=row.good[1])
         assert rc == 0, said
-        assert imported_op.current()[row.system].version == row.replaces + 1
+        assert imported_op.current()[control].version == row.replaces + 1
 
 
 async def _door(op: R.Operator, call: Any) -> Any:
@@ -515,7 +543,7 @@ def test_1366_o4_a_case_system_whose_adapter_offers_no_comment_action_is_refused
 
     rc, said = imported_op.set_case(replaces=1, system=system)
 
-    _refused(imported_op, before, rc, said, ((system,),), file_ok=True)
+    _refused(imported_op, before, rc, said, ((system, "case"),), file_ok=True)
 
 
 @pytest.mark.postgres
@@ -532,7 +560,7 @@ def test_1366_o4_a_case_system_that_is_not_a_current_enabled_record_is_refused(i
 
     rc, said = op.set_case(replaces=1, system="jira")
 
-    _refused(op, before, rc, said, (("jira",),), file_ok=True)
+    _refused(op, before, rc, said, (("jira", "case"),), file_ok=True)
     version = {"absent": 0, "disabled": 1, "deleted": 2}[how]
     assert op.set_system("jira", replaces=version, config=JIRA_CONFIG, access=_jira_access(JIRA_API))[0] == 0
     assert op.set_case(replaces=1, system="jira")[0] == 0
@@ -548,7 +576,7 @@ def test_1366_o4_a_case_template_failing_the_case_record_rules_is_refused(import
 
     rc, said = imported_op.set_case(replaces=1, body=body)
 
-    _refused(imported_op, before, rc, said, (("case",),), file_ok=True)
+    _refused(imported_op, before, rc, said, (("comment.body",),), file_ok=True)  # #1359's judgement names the field
     assert imported_op.set_case(replaces=1, body="{disposition}: {cause}")[0] == 0
     assert _case_versions(imported_op) == [(1, "ticket", False), (2, "ticket", False)]
 
@@ -1226,23 +1254,87 @@ def test_1366_dc8_set_case_stores_the_body_exactly_and_delete_case_removes_the_r
 # --- O11 ------------------------------------------------------------------------------------------------------------
 
 @pytest.mark.postgres
-def test_1366_o11_connects_handoff_is_judged_with_the_stores_own_words(imported_op, tmp_path):
-    """The folder connect hands over is refused by the store and by connect's validator with the same fault sentence;
-    a clean folder raises no settings fault in the validator. (#1366 O11, K1)"""
-    bad = {**CMDB_CONFIG, "CMDB_COLOUR": "red"}
-    rc, said = imported_op.set_system("cmdb", replaces=1, config=bad, access=CMDB_ACCESS)
+@pytest.mark.parametrize("part", ["settings", "access"])
+def test_1366_o11_connects_handoff_is_judged_with_the_stores_own_sentence_located_by_the_file(imported_op, tmp_path, part):
+    """The store and connect's validator give the same fault sentence, located by record and by file. (#1366 O11, DC6)"""
+    key = "CMDB_COLOUR" if part == "settings" else "colour"
+    config = {**CMDB_CONFIG, "CMDB_COLOUR": "red"} if part == "settings" else CMDB_CONFIG
+    access = CMDB_ACCESS if part == "settings" else CMDB_ACCESS.rstrip("\n") + "\ncolour: red\n"  # an unknown top-level key
+    rc, said = imported_op.set_system("cmdb", replaces=1, config=config, access=access)
     assert rc != 0, said
-    (fault,) = [line.removeprefix("[tenant.py] ").strip() for line in R.lines_naming(said, "CMDB_COLOUR")]
+    (fault,) = [line.removeprefix("[tenant.py] ").strip() for line in R.lines_naming(said, key)]
+    sentence = H.store_sentence(fault, "cmdb", part)
 
-    def validated(config: dict[str, str]) -> str:
-        folder = R.system_folder(tmp_path / f"handoff-{len(config)}", "cmdb", config=config, access=CMDB_ACCESS)
+    def validated(config: dict[str, str], access: str, label: str) -> str:
+        folder = R.system_folder(tmp_path / f"handoff-{label}", "cmdb", config=config, access=access)
         env = {**os.environ, "PYTHONPATH": str(REPO)}
         done = subprocess.run([sys.executable, "-m", "defender.skills.connect.validate_scaffold", "cmdb",
                                "--handoff", str(folder)], cwd=REPO, env=env, capture_output=True, text=True,
                               timeout=120, check=False)
         return done.stdout + done.stderr
 
-    assert fault in validated(bad)
-    clean = validated(CMDB_CONFIG)  # control: same channel, a folder the store accepts
+    report = validated(config, access, "bad")
+    assert any(sentence in line for line in H.handoff_lines(report, key, "cmdb", part)), (sentence, report)
+    clean = validated(CMDB_CONFIG, CMDB_ACCESS, "clean")  # control: same channel, a folder the store accepts
     assert "validate_scaffold: cmdb" in clean, clean  # printed only once the arguments were accepted
-    assert "CMDB_COLOUR" not in clean
+    assert key not in clean
+
+
+#: (id, extra config.env text, the secret value it carries): lines a config parser may ignore or override.
+IGNORED_LINE_SECRETS = [
+    ("export-line", 'export CMDB_API_TOKEN="sk-live-9f8e7d6c5b4a3f2e1d0c"\n', "sk-live-9f8e7d6c5b4a3f2e1d0c"),
+    ("overridden-duplicate", 'CMDB_PASSWORD="hunter2-live"\nCMDB_PASSWORD=""\n', "hunter2-live"),
+    ("overridden-reference", 'CMDB_TOKEN_SECRET_REF="ghp-AbC!d3f@xyz"\nCMDB_TOKEN_SECRET_REF=""\n', "ghp-AbC!d3f@xyz"),
+]
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("row", IGNORED_LINE_SECRETS, ids=[r[0] for r in IGNORED_LINE_SECRETS])
+def test_1366_h2_a_secret_on_a_line_a_parser_ignores_never_enters_a_stored_record(imported_op, tmp_path, row):
+    """Guard: a secret on an ignored `export`/duplicate line is refused or left out, never stored (successor of the
+    retired `test_validator_finds_secrets_on_lines_the_run_ignores`). (#1366 H2, P2)"""
+    _, extra, secret = row
+    folder = tmp_path / "raw" / "cmdb"
+    folder.mkdir(parents=True)
+    (folder / "access.yaml").write_text(CMDB_ACCESS, encoding="utf-8")
+    base = 'CMDB_TIMEOUT_SEC="20"\n'
+    (folder / "config.env").write_text(base, encoding="utf-8")
+    rc, said = imported_op.run(R.SET_SYSTEM, imported_op.tid, "cmdb", str(folder), R.REPLACES, "1")
+    assert rc == 0, said  # control: the declared key alone is stored as version 2
+    (folder / "config.env").write_text(base + extra, encoding="utf-8")
+
+    rc, said = imported_op.run(R.SET_SYSTEM, imported_op.tid, "cmdb", str(folder), R.REPLACES, "2")
+
+    stored = [v for v in imported_op.versions("cmdb")]
+    assert secret not in repr(stored), f"a secret value was stored:\n{stored}"
+    current = imported_op.current()["cmdb"]
+    assert set(current.settings) <= {"CMDB_TIMEOUT_SEC"}, dict(current.settings)
+    assert current.version == (2 if rc != 0 else 3), (rc, said)
+
+
+@pytest.mark.postgres
+def test_1366_r7_two_tenants_may_point_at_one_base_each_keeping_its_own_record_and_credentials(
+        fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch):  # noqa: F811
+    """Two tenants set cmdb to one base: both accepted, each with its own history and credential path. (#1366 R7)"""
+    shared = R.bearer_access("http://shared-cmdb.internal:8001")
+    kv = R.KvStandIn()
+    with second_tenant(fixture_tenant, files=R.import_files()) as other:
+        a = _operator(fixture_tenant, migrated_database, tmp_path / "a", capsys, monkeypatch, kv=kv)
+        b = _operator(other, migrated_database, tmp_path / "b", capsys, monkeypatch, kv=kv)
+        assert a.tid != b.tid
+        for op in (a, b):
+            rc, said = op.import_()
+            assert rc == 0, said
+        for op in (a, b):
+            rc, said = op.set_system("cmdb", replaces=1, config=CMDB_CONFIG, access=shared)
+            assert rc == 0, said
+        assert a.current()["cmdb"].access == b.current()["cmdb"].access == shared
+        assert a.numbers("cmdb") == b.numbers("cmdb"), "one tenant's write moved the other's history"
+        assert [n[0] for n in a.numbers("cmdb")] == [1, 2]
+        for op, key in ((a, "key-of-a"), (b, "key-of-b")):
+            rc, said = op.set_credentials("cmdb", {"api_key": key}, for_version=2)
+            assert rc == 0, said
+    generation = a.current()["cmdb"].credential_generation
+    assert kv.written() == [f"{a.tid}/cmdb/g{generation}", f"{b.tid}/cmdb/g{generation}"]
+    assert kv.held == {f"{a.tid}/cmdb/g{generation}": [R.credential_set({"api_key": "key-of-a"})],
+                       f"{b.tid}/cmdb/g{generation}": [R.credential_set({"api_key": "key-of-b"})]}

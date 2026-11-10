@@ -160,3 +160,60 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
         elastic_adapter.query(S.verb_context(record, run_dir, shim.env(), proxy_url=proxy_url,
                                              request_token="tok"), native_query="*")
     assert reached == [], f"a faulted Elastic call reached the proxy: {reached}"  # elastic never uses docker (O3)
+
+
+# #1366 H9: a sibling's own start reads the tenant's current records, not the source run's settings folders
+
+
+def _sibling_of_records(tmp_path, data_root, monkeypatch, change):
+    """A sibling `run.main --episode` over a tenant whose source run's knowledge still plants every system folder; `change(spec)`
+    gives the records it is current with. Returns the sibling's recorder and the planted spec."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "docker").path_value())
+    for name in S.BRANCH_CONFIG_VARS:
+        monkeypatch.delenv(name, raising=False)
+    _base, src = H.tenant_source(data_root, TID)
+    folder = S.plant(data_root, TID, marker="h9")
+    planted = R.records_from_settings(S.settings_of(folder))
+    assert {"cmdb", "elastic"} <= set(planted.systems), "premise: the source run's knowledge plants both systems"
+    argv = H.sibling_argv(H.family_for(src), "b", "--tenant", TID)
+    rec = S.RunRecorder(tmp_path / "sibling-run")
+    directory = directory_for_argv(argv, records=change(planted))
+    rc, refused = S.drive_run(argv, rec, visualize=rec.visualize, directory=directory)
+    assert refused is None, f"the sibling was refused: {H.refusal_text(refused)!r}"
+    assert rc == 0, f"the sibling exited {rc} ({rec.order})"
+    assert len(rec.lifecycle_calls) == 1, f"lifecycle ran {len(rec.lifecycle_calls)} times"
+    return rec, planted
+
+
+@pytest.mark.parametrize("current", ["records-keep-cmdb", "cmdb-no-longer-recorded"])
+def test_1366_h9_a_sibling_serves_the_systems_of_the_current_records_not_those_its_source_run_planted(
+        tmp_path, data_root, monkeypatch, current):
+    """The source run's knowledge plants and grants cmdb; the sibling's roster holds cmdb only while the tenant's current records
+    name it (the grant is then ignored), elastic being the control. (#1366 H9, O6)"""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    rec, _ = _sibling_of_records(tmp_path, data_root, monkeypatch,
+                                 lambda spec: spec if current == "records-keep-cmdb" else R.without(spec, "cmdb"))
+
+    roster = set(rec.lifecycle_calls[0]["systems"].roster.systems)
+    assert "elastic" in roster, sorted(roster)
+    assert ("cmdb" in roster) is (current == "records-keep-cmdb"), sorted(roster)
+
+
+def test_1366_h9_a_record_changed_after_the_source_run_is_the_one_the_sibling_runs_with(tmp_path, data_root, monkeypatch):
+    """Elastic's events index differs between what the source run's knowledge plants and the current record: the sibling's
+    tenant carries the record's. (#1366 H9, O6)"""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    now = "h9-now-events-*"
+
+    def moved_on(spec):
+        elastic = spec.systems["elastic"]
+        assert elastic.settings["ELASTIC_EVENTS_INDEX"] != now, "premise: the planted index is another"
+        return R.edited(spec, "elastic", version=2, settings={**elastic.settings, "ELASTIC_EVENTS_INDEX": now})
+
+    rec, planted = _sibling_of_records(tmp_path, data_root, monkeypatch, moved_on)
+
+    assert rec.lifecycle_calls[0]["tenant"].systems["elastic"]["ELASTIC_EVENTS_INDEX"] == now

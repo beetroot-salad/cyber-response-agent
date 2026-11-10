@@ -558,3 +558,108 @@ def test_1366_o1_the_lead_lanes_declared_systems_are_the_tenants_records_not_the
     assert {"elastic", PLATFORM_SERVED} <= declared["a"], declared["a"]
     assert "cmdb" not in declared["a"], declared["a"]
     assert {"cmdb", "elastic", PLATFORM_SERVED} <= declared["b"], declared["b"]
+
+
+# #1366 O1 (learning): the lanes' systems are the tenant's records', handed down from the drain's directory.
+
+
+def _record_tenants(tmp_path: Path, *, marker: bool):
+    """The product checkout (cmdb + elastic adapters), a lead lane over the curation tenant's draft, and the directory of
+    each of two tenants: A's records lack cmdb, B's hold it. `marker` commits `skills/cmdb/execution.md` in the draft's base."""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
+    from defender.tests.support.shared.contracts._repo import seed_adapter_stubs
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    product = tmp_path / "product"
+    (product / "defender" / "integrations").mkdir(parents=True)
+    seed_adapter_stubs(product / "defender", ("elastic", "cmdb"))
+    tenant = _state1135.curation_tenant()
+    files = {"skills/gather/SKILL.md": _skill("gather"), "skills/cmdb/_draft/old.md": "---\nid: cmdb.old\nstatus: draft\n---\n\nx\n",
+             "skills/elastic/_draft/old.md": "---\nid: elastic.old\nstatus: draft\n---\n\nx\n"}
+    if marker:
+        files["skills/cmdb/execution.md"] = "# execution\n"
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, tenant=tenant, files=files)
+    whole = R.fixture_records()
+    assert {"cmdb", "elastic"} <= set(whole.systems), "fixture premise: the records can hold both systems"
+    directories = {name: tenant_directory(current_data_root(), tenant.id, records=spec)
+                   for name, spec in (("a", R.without(whole, "cmdb")), ("b", whole))}
+    return lane, directories
+
+
+@pytest.mark.parametrize(("name", "marker", "cmdb_lane"), [("a", True, False), ("b", False, True)])
+def test_1366_o1_the_lead_authors_write_and_rm_lanes_are_the_tenants_records_whatever_a_marker_says(
+        tmp_path, monkeypatch, name, marker, cmdb_lane):
+    """Through the deps the drain builds, the spawned lead author may write and rm a cmdb draft only for the tenant with a cmdb
+    record: A's committed cmdb marker declares nothing, B's record declares it with no marker; elastic is the control. (#1366 O1)"""
+    import functools
+
+    from pydantic_ai.messages import ModelResponse, RetryPromptPart, TextPart, ToolCallPart, ToolReturnPart
+    from pydantic_ai.models import override_allow_model_requests
+
+    from defender.learning.leads import lead_author_engine
+    from defender.tests.support.runtime.engine._engine_helpers import fake_model
+
+    lane, directories = _record_tenants(tmp_path, marker=marker)
+    deps = lead_author.build_lead_author_deps(
+        lane.paths, state=C.open_state(lane.paths), trees=C.draft_trees(lane), batch=lane.batch, directory=directories[name])
+    assert ("cmdb" in deps.systems) is cmdb_lane, deps.systems
+    attempts = [("write_file", {"path": f"skills/{s}/_draft/new.md", "content": "---\nid: x.new\nstatus: draft\n---\n\nx\n"})
+                for s in ("cmdb", "elastic")] + [("bash", {"command": f"rm skills/{s}/_draft/old.md"}) for s in ("cmdb", "elastic")]
+    answers: dict[str, str] = {}
+
+    def model(messages, _info):
+        back = [p for m in messages for p in getattr(m, "parts", []) if isinstance(p, ToolReturnPart | RetryPromptPart)]
+        if back:
+            answers.update({p.tool_call_id: str(p.content) for p in back})
+            return ModelResponse(parts=[TextPart(content="done")])
+        return ModelResponse(parts=[ToolCallPart(tool_name=n, args=a, tool_call_id=f"c{i}") for i, (n, a) in enumerate(attempts)])
+
+    real = lead_author_engine.run_author_stage
+    monkeypatch.setattr(lead_author_engine, "run_author_stage", lambda **kw: real(**{
+        **kw, "source_key": lambda *_a, **_k: None,
+        "run_author": functools.partial(lead_author_engine._run_lead_author_pydantic, make_model=fake_model(model))}))
+    run_dir = tmp_path / "run-x"
+    run_dir.mkdir()
+    with override_allow_model_requests(False):
+        assert deps.invoke_agent(run_dir, [], [], box=None) == 0
+
+    drafts = lane.agent / "skills"
+    assert (drafts / "elastic" / "_draft" / "new.md").is_file(), "control: the elastic write lane is open"
+    assert (drafts / "cmdb" / "_draft" / "new.md").is_file() is cmdb_lane
+    assert "Blocked" not in answers["c3"], f"control: the elastic rm lane is open: {answers}"
+    assert ("Blocked" not in answers["c2"]) is cmdb_lane, answers
+
+
+@pytest.mark.parametrize(("name", "offered"), [("a", ["elastic"]), ("b", ["cmdb", "elastic"])])
+def test_1366_o1_the_pitfalls_curator_is_offered_the_systems_of_the_tenants_records_not_the_checkouts(
+        tmp_path, monkeypatch, name, offered):
+    """Queued pitfalls on cmdb and elastic: the curator is spawned for the systems the drain's tenant has records for (A: elastic
+    only, B: both), the checkout declaring both adapters either way. (#1366 O1 pitfalls curator)"""
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    lane, directories = _record_tenants(tmp_path, marker=False)
+    state = open_state(lane.paths)
+    persist.append_pitfalls([pitfall_row(f"r:l-00{i}:0", s) for i, s in enumerate(("cmdb", "cmdb", "elastic", "elastic"))], state=state)
+    spawn = Spawn(root=lane.root)
+    with C.draft_trees(lane) as trees:
+        assert pitfalls_curator.run_pitfalls(
+            paths=lane.paths, state=state, trees=trees, batch=lane.batch, invoke=spawn, directory=directories[name]) == 0
+
+    assert sorted(spawn.systems_seen) == offered
+
+
+def test_1366_o1_a_tenant_whose_records_hold_no_system_has_no_pitfalls_lane(tmp_path, monkeypatch):
+    """A tenant imported with no system records is refused as an empty declared set, though the checkout declares adapters;
+    the curator is never spawned. (#1366 O1 pitfalls curator)"""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    lane, _ = _record_tenants(tmp_path, marker=True)
+    none = R.without(R.fixture_records(), *R.fixture_records().systems)
+    directory = tenant_directory(current_data_root(), _state1135.curation_tenant().id, records=none)
+    state = open_state(lane.paths)
+    persist.append_pitfalls([pitfall_row(f"r:l-00{i}:0", "elastic") for i in range(2)], state=state)
+    spawn = Spawn(root=lane.root)
+    with C.draft_trees(lane) as trees, pytest.raises(LeadAuthorError):
+        pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, trees=trees, batch=lane.batch, invoke=spawn, directory=directory)
+    assert spawn.calls == []

@@ -7,6 +7,8 @@ twin is born NOT imported (R8): `planted.directory` seeds the records the plante
 """
 from __future__ import annotations
 
+import asyncio
+import datetime
 import json
 import logging
 import shutil
@@ -19,6 +21,17 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
+
+#: A catalog adapter an upgrade removed: a record can still name it (the accept-all seeder stores what it is given).
+RETIRED = "legacy-widget"
+#: A grants table whose gather grant is on the platform-served registry alone (no adapter system, so no record needed).
+TABLE_TACIT_ONLY = """\
+dispositions:
+  tacit-knowledge:
+    health-check: {roles: [gather]}
+    lookup: {roles: [gather]}
+"""
 
 
 def _directory(planted: S.Planted, records: Any) -> Any:
@@ -171,17 +184,53 @@ def test_1366_r12_a_grant_on_a_system_the_catalog_does_not_have_still_refuses_th
     assert (refused.run_dir, refused.main.requests) == (None, 0)
 
 
-def test_1366_r12_filtering_that_empties_gather_refuses_the_run_naming_the_grants_without_a_record(tmp_path):
-    """Both systems gather is granted (cmdb, elastic) have no record: after the ignore nothing is left, so the run is
-    refused under the empty-gather rule naming both. (#1366 R12 ordering)"""
+@pytest.mark.parametrize("recorded", ["others-recorded", "no-records-at-all"])
+def test_1366_r12_filtering_that_empties_gather_refuses_the_run_naming_the_grants_without_a_record(tmp_path, recorded):
+    """Both systems gather is granted (cmdb, elastic) have no record, whether the tenant records other systems or none at
+    all (imported with zero records): after the ignore nothing is left, so the run is refused under the empty-gather rule
+    naming both grants, and not naming the import (the tenant IS imported). (#1366 R12 ordering, R8)"""
     planted = _planted()
-    spec = R.without(R.records_from_settings(planted.settings), "cmdb", "elastic")
+    spec = (R.without(R.records_from_settings(planted.settings), "cmdb", "elastic") if recorded == "others-recorded"
+            else R.RecordsSpec())
 
     refused = _run(tmp_path / "r", planted, records=spec)
 
     assert refused.raised is None, refused.raised
     assert all(system in (refused.refusal or "") for system in ("cmdb", "elastic")), refused.refusal
+    assert R.AUTHOR[R.IMPORT] not in (refused.refusal or ""), refused.refusal
     assert (refused.run_dir, refused.main.requests) == (None, 0)
+
+
+def test_1366_r8_an_imported_tenant_with_no_records_runs_with_only_the_platform_served_system(tmp_path):
+    """Imported with zero records is not `not imported`: a tenant whose gather grant is on `tacit-knowledge` alone runs,
+    its roster is just `tacit-knowledge`, and nothing names the import. The same tenant NOT imported is refused naming it
+    (control). (#1366 R8 second half, R11)"""
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), table=TABLE_TACIT_ONLY, configs={})
+
+    ran = _run(tmp_path / "imported", planted, records=R.RecordsSpec())
+    refused = _run(tmp_path / "not-imported", planted, records=None)
+
+    assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
+    assert set(ran.lifecycle_calls[0]["systems"].roster.systems) == {"tacit-knowledge"}
+    assert R.AUTHOR[R.IMPORT] in (refused.refusal or ""), refused.refusal
+
+
+def test_1366_r11_a_tenant_made_by_the_create_request_is_read_as_imported_with_no_systems_through_the_directory():
+    """Run start reads records through `TenantDirectory.current_records`: a tenant made by `request_create` reads imported,
+    empty (so it runs with no import, per the row above), and a tenant row that was only added (pre-#1366) reads not
+    imported. (#1366 R11, R8, R10)"""
+    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+
+    twin = InMemoryTenantRepository()
+    made = asyncio.run(twin.request_create(now=datetime.datetime(2026, 11, 10, tzinfo=datetime.UTC)))
+    old = fixture_uuid("tenant:before-1366")
+    asyncio.run(twin.add_tenant(old, created_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC), state="active"))
+    directory = TenantDirectory(lambda: twin)
+
+    created, existing = directory.current_records(made.id), directory.current_records(old)
+
+    assert (created.imported, dict(created.systems), created.case) == (True, {}, None)
+    assert not existing.imported
 
 
 @pytest.mark.parametrize("table", [S.TABLE_ELASTIC, S.TABLE_WITHHELD], ids=["granted", "withheld"])
@@ -203,3 +252,131 @@ def test_1366_r12_a_record_naming_an_adapter_an_upgrade_removed_refuses_the_run_
     assert "cmdb" in (refused.refusal or ""), (refused.raised, refused.refusal)
     assert (refused.run_dir, refused.main.requests) == (None, 0)
     assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
+
+
+@pytest.mark.parametrize("table", [S.TABLE_ELASTIC, S.TABLE_WITHHELD], ids=["granted", "withheld"])
+def test_1366_r12_a_record_whose_adapter_is_no_longer_a_catalog_adapter_refuses_the_run_naming_the_system(tmp_path, table):
+    """cmdb's stored record names an adapter the catalog no longer has (`SysSpec.adapter`, stored as it was): the run is
+    refused at start naming cmdb whatever the grants say; the same tenant with the record naming its own adapter runs
+    (control). The seeding is the record's, not a pruned checkout. (#1366 R12 row 'adapter removed by an upgrade', B3)"""
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), table=table)
+    spec = R.records_from_settings(planted.settings)
+
+    refused = _run(tmp_path / "removed", planted, records=R.edited(spec, "cmdb", adapter=RETIRED))
+    ran = _run(tmp_path / "whole", planted, records=spec)
+
+    assert "cmdb" in (refused.refusal or ""), (refused.raised, refused.refusal)
+    assert (refused.run_dir, refused.main.requests) == (None, 0)
+    assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
+
+
+# --- C5 at run start, over RECORDS (A1) -----------------------------------------------------------------------------
+
+COMMENT_ROUTE = ("POST", "/tickets/*/comments")
+
+
+def _with_routes(spec: R.RecordsSpec, reads: tuple, writes: tuple) -> R.RecordsSpec:
+    """`spec` with the ticket record's access declaring exactly `reads` and `writes` (its base and auth kept)."""
+    doc = json.loads(spec.systems["ticket"].access)
+    doc["reads"] = [{"method": m, "path": p} for m, p in reads]
+    doc["writes"] = [{"method": m, "path": p} for m, p in writes]
+    return R.edited(spec, "ticket", access=json.dumps(doc, indent=2) + "\n")
+
+
+def _comment_run(tmp_path: Path, reads: tuple, writes: tuple) -> tuple[S.Drive, S.TicketStore]:
+    """One `run.main --update-ticket` run, the REAL ticket writer over a recording store, of a tenant whose ticket RECORD
+    (the case system) declares exactly `reads` and `writes`. The tenant's published folder is irrelevant: the run's tenant
+    is built from the records the directory holds."""
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=S.ticketed_mapping())
+    spec = _with_routes(R.records_from_settings(planted.settings), reads, writes)
+    sink = S.TicketStore(tmp_path)
+    ran = S.run_alert(tmp_path, alert=S.ticketed_alert(), tenant=planted, tickets=S.ticket_writer(sink), update_ticket=True,
+                      main=S.closing_main_turns(), directory=_directory(planted, spec))
+    return ran, sink
+
+
+_UNCOVERED = {
+    "no-write-route": ((), ()),
+    "another-write-route": ((), (("POST", "/tickets/*/transitions"),)),
+    "read-route-matching-the-comment-route": ((COMMENT_ROUTE,), (COMMENT_ROUTE,)),
+    "read-route-literal-matching-the-comment-route": ((("POST", "/tickets/ABC-1/comments"),), (COMMENT_ROUTE,)),
+}
+
+
+@pytest.mark.parametrize("label", list(_UNCOVERED))
+def test_1366_c5_a_run_whose_stored_case_record_does_not_cover_the_comment_route_posts_nothing_and_names_the_fault(
+        tmp_path, label):
+    """The case system's stored declaration lacks the comment route (no write, another write, or a read route matching
+    it): the run still ends, no request reaches the case store, and the run's receipt is an error naming ticket as a
+    case-settings fault rather than the proxy's refusal. The tenant is the records' alone: its folder covers the route.
+    (#1366 C5 run side, C3 caller 3, r5 read-route ruling, A1)"""
+    reads, writes = _UNCOVERED[label]
+
+    ran, sink = _comment_run(tmp_path, reads, writes)
+
+    assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0), (label, ran.raised, ran.refusal)
+    assert sink.calls == [], (label, sink.calls)
+    receipt = S1107.receipt(ran.run_dir)
+    assert receipt is not None, label
+    assert (receipt["ok"], receipt["status"]) == (False, "error"), (label, receipt)
+    assert "ticket" in receipt["reason"], (label, receipt)
+    assert "the credential proxy refused" not in receipt["reason"].lower(), (label, receipt)
+
+
+def test_1366_c5_a_run_whose_stored_case_record_covers_the_comment_route_posts_the_comment(tmp_path):
+    """Control of the rows above on the same channel: the comment route among unrelated reads and writes is covered, and
+    the comment reaches the case store. (#1366 C5, C2)"""
+    ran, sink = _comment_run(tmp_path, (("POST", "/tickets/*/comments/x"),),
+                             (("PUT", "/elsewhere/*"), COMMENT_ROUTE))
+
+    assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
+    assert sink.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], sink.calls
+    receipt = S1107.receipt(ran.run_dir)
+    assert receipt is not None
+    assert (receipt["ok"], receipt["status"]) == (True, "commented"), receipt
+
+
+# --- where the run's record of versions lives, and what the box is never given (C1, C2) -----------------------------
+
+def test_1366_c1_the_record_of_versions_sits_beside_the_knowledge_record_outside_the_run_folder(tmp_path):
+    """The run's record of the versions it used is a sidecar in the same container as the knowledge source record
+    (host-only: beside the run folder, so the box, which mounts the run folder, can neither read it nor forge it), never a
+    file inside the run folder. (#1366 O6 'beside its knowledge record', C1)"""
+    from defender.records._layout import RunPaths
+
+    planted = _planted()
+
+    ran = _run(tmp_path / "r", planted)
+
+    assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
+    paths = RunPaths(ran.run_dir)
+    used = paths.record_versions
+    assert used.is_file(), used
+    assert used.parent == paths.knowledge_source().parent == ran.run_dir.parent
+    assert ran.run_dir not in used.parents, f"{used} is inside the run folder the box mounts"
+    assert not [p for p in ran.run_dir.rglob("*") if p.name == used.name], "a copy of it sits in the run folder"
+
+
+def test_1366_c2_no_record_content_reaches_the_model_or_the_run_folder_the_box_mounts(tmp_path):
+    """cmdb's record carries sentinel values in its settings and its access (base and a route); after the run no sentinel is
+    in anything MAIN was told, nor in any file of the run folder (the tree the box mounts). The sentinels are real
+    settings, so the control is that the run used them: cmdb is up. (#1366 O6 'no record content reaches the box', C2)"""
+    from defender.records._layout import RunPaths
+
+    planted = _planted()
+    spec = R.records_from_settings(planted.settings)
+    settings = {**spec.systems["cmdb"].settings, "CMDB_TIMEOUT_SEC": "7"}
+    access = R.declaration("http://sentinel-base-1366.test", reads=(("GET", "/sentinel-route-1366"),))
+    sentinels = ("sentinel-base-1366", "sentinel-route-1366")
+
+    ran = _run(tmp_path / "r", planted, records=R.edited(spec, "cmdb", settings=settings, access=access))
+
+    assert (ran.raised, ran.refusal, ran.rc) == (None, None, 0)
+    judged = ran.lifecycle_calls[0]["systems"]
+    assert "cmdb" in judged.roster.systems
+    assert "cmdb" not in judged.down
+    told = ran.opening_message + ran.main_instructions
+    leaked = [(s, "MAIN") for s in sentinels if s in told]
+    leaked += [(s, str(f.relative_to(ran.run_dir))) for f in ran.run_dir.rglob("*") if f.is_file()
+               for s in sentinels if s.encode() in f.read_bytes() and f != RunPaths(ran.run_dir).record_versions]
+    assert not leaked, leaked

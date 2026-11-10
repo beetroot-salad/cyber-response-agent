@@ -26,7 +26,6 @@ from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _ready_made1359 as RM
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
-from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
@@ -195,19 +194,20 @@ def _not_covering(r: tuple[str, str]) -> dict[str, tuple[tuple, tuple]]:
 
 @contextlib.contextmanager
 def _stored(tmp: Path, data_root: Path, vendor: RM.Vendor, reads: tuple, writes: tuple) -> Iterator[RM.Rig]:
-    """The case-record tenant of `vendor` whose stored access holds exactly `reads` and `writes`."""
+    """The case-record tenant of `vendor` whose STORED record's access holds exactly `reads` and `writes`: the run's record
+    and the proxy's port are built from that record (#1366 R10: `run_tenant_for(..., records=)`). The published folder
+    still carries the vendor's covering declaration, so a leg that judged the folder would pass where the record fails."""
     from defender.tests.integrations.credential_proxy_1163._target import proxy
 
     with H.upstream() as up:
         base = vendor.declared_base(up)
-        files = RM.files_for(vendor, base, leg=True)
-        files[ACCESS_FILE.format(system=vendor.system)] = H.declaration(
-            base, scheme=H.basic_scheme(), reads=reads, writes=writes)
-        with published_tenant(tmp / "forge", root=data_root, files=files) as t:
+        spec = RM.records_of(vendor, base, leg=True, reads=reads, writes=writes)
+        with published_tenant(tmp / "forge", root=data_root, files=RM.files_for(vendor, base, leg=True)) as t:
             store = H.FakeStore({(t.tenant_id, vendor.system): T.basic_set(RM.USER, RM.PASSWORD)})
-            tap = RM.RequestTap(proxy().create_app(T.deps({t.tenant_id: T.exports_of(t)}, store)))
+            tap = RM.RequestTap(proxy().create_app(T.deps({t.tenant_id: T.exports_of(t)}, store,
+                                                          records={t.tenant_id: spec})))
             with H.serve_asgi(tap) as url:
-                yield RM.Rig(vendor, up, t, url, tap, tmp)
+                yield RM.Rig(vendor, up, t, url, tap, tmp, spec)
 
 
 _LEG = [(i, v, r) for i, v, r in VARIANTS if i in ("jira-service-desk", "servicenow", "ticket")]
