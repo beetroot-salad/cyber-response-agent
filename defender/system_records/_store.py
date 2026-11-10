@@ -7,7 +7,8 @@ from __future__ import annotations
 import datetime as _dt
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any
+from collections.abc import AsyncIterator
 
 from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -222,7 +223,7 @@ class RecordStore:
             await conn.execute(insert(_RM).values(tenant_id=tenant))
 
 
-def open_store(dsn: str, *, clock: Callable[[], _dt.datetime]) -> RecordStore:
+def open_store(dsn: str, *, clock: Callable[[], _dt.datetime]) -> RecordStore:  # lint-dup: ok — the system-records store with its judgement (#1366 W); session_store.open_store opens one case's session store, an unrelated record
     """The store with the real judgement injected (the operator command's)."""
     from defender.systems.record_judgement import judge_records
     return RecordStore(dsn, clock=clock, judge=judge_records)

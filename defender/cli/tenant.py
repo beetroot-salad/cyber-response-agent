@@ -76,8 +76,6 @@ the checks that need no census still run. Every refusal is printed as `[tenant.p
 from __future__ import annotations
 
 import argparse
-import dataclasses
-from collections.abc import Mapping
 import os
 import subprocess
 import sys
@@ -124,7 +122,6 @@ from defender.systems.verb_dispositions import (  # noqa: E402
     dispositions_path,
     run_grants,
 )
-from defender.systems import case_system  # noqa: E402
 from defender.records.formats import TenantRefused  # noqa: E402
 from defender.cli import _tenant_records  # noqa: E402
 
