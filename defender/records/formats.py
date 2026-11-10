@@ -116,6 +116,7 @@ if TYPE_CHECKING:
         unwrap_learning_root as unwrap_learning_root,
         unwrap_runs_base as unwrap_runs_base,
         unwrap_tenant_root as unwrap_tenant_root,
+        unwrap_worktrees_root as unwrap_worktrees_root,
     )
     from defender.records._provenance import (
         CODE_COPY_MARKER as CODE_COPY_MARKER,
@@ -182,7 +183,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("BASE_ROLE", "Family", "FamilyError", "ManifestPredatesOracle", "ResumeWorld", "accept_family", "family_identities", "label_for_world_id", "load_family", "load_manifest_document", "parse_family", "resume_world_from", "runnable_worlds", "world_id_for", "write_family",), "_family"),
     **dict.fromkeys(("PinUnreadable", "pin_text", "read_pin",), "_knowledge_pin"),
     **dict.fromkeys(("FRESH", "OPERATOR", "TRANSIENT", "api_knowledge", "knowledge_status", "read_knowledge_status",), "_knowledge_status"),
-    **dict.fromkeys(("CommitRecord", "DataRoot", "DraftsRoot", "EpisodesRoot", "ExportsRoot", "KnowledgeLock", "LearningRoot", "LegacyEpisodesRoot", "LegacyRunsRoot", "RunsBase", "SessionsRoot", "TenantRecord", "TenantRoot", "WorktreesRoot", "unwrap_commit_record", "unwrap_data_root", "unwrap_drafts_root", "unwrap_episodes_root", "unwrap_exports_root", "unwrap_knowledge_lock", "unwrap_learning_root", "unwrap_runs_base", "unwrap_tenant_root",), "_locations"),
+    **dict.fromkeys(("CommitRecord", "DataRoot", "DraftsRoot", "EpisodesRoot", "ExportsRoot", "KnowledgeLock", "LearningRoot", "LegacyEpisodesRoot", "LegacyRunsRoot", "RunsBase", "SessionsRoot", "TenantRecord", "TenantRoot", "WorktreesRoot", "unwrap_commit_record", "unwrap_data_root", "unwrap_drafts_root", "unwrap_episodes_root", "unwrap_exports_root", "unwrap_knowledge_lock", "unwrap_learning_root", "unwrap_runs_base", "unwrap_tenant_root", "unwrap_worktrees_root",), "_locations"),
     **dict.fromkeys(("BUILD_COMMIT_ENV", "CODE_COPY_MARKER", "KnowledgeRevision", "ORIGIN_CODE_COPY", "RunProvenance", "capture_tree", "is_build_commit", "read_provenance",), "_provenance"),
     **dict.fromkeys(("ReportRead", "ReportUnreadable", "UNKNOWN_DISPOSITION", "parse_report_text", "read_report", "repeats_disposition", "require_report",), "_report"),
     **dict.fromkeys(("OID", "RUN_ID_ALLOWED", "is_valid_run_id", "run_id_fault", "uuid_id_fault",), "_run_id"),
