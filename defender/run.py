@@ -1400,7 +1400,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                 _logger.info(f"run_dir={run_dir} model={started.model}")
                 _announce_provenance(run_dir)
 
-                run_state = RunState(run_dir, str(run.id))
+                run_state = RunState(run_dir, run_dir.name)
                 try:
                     summary = lifecycle(**started.lifecycle_kwargs(ns), run_state=run_state)
                 except (ServingAbort, BaseExceptionGroup) as escaped:
