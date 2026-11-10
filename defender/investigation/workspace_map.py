@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -93,7 +93,7 @@ def _map_roots(run_dir: Path, view: ModelView | None, agent_root: Path | None):
 
 def workspace_map(
     run_dir: Path, *, systems: Sequence[str], down: Mapping[str, str] = NONE_DOWN, view: ModelView | None = None,
-    agent_root: Path | None = None,
+    agent_root: Path | None = None, skills_of: Collection[str] | None = None,
 ) -> str:
     """The model's directory view of the run. `systems` (the Adapters section) is the run's
     roster (`read_roster(...).systems`), never a directory listing, so the map cannot name a
@@ -106,7 +106,9 @@ def workspace_map(
 
     The system skills and the query templates are the run's own tenant knowledge (#1108 P4):
     the view's agent tree (the run copy), or `agent_root` on the command line (the export the
-    run was stamped with). With neither, the map says it has none to show."""
+    run was stamped with). With neither, the map says it has none to show. `skills_of`, when
+    given, narrows the skills listed to those systems (the operator's map of a tenant's run lists
+    the skills of the tenant's systems only, #1366 O1)."""
     defender_dir, knowledge, shown, roots = _map_roots(run_dir, view, agent_root)
     lines: list[str] = []
     lines.append("# Workspace map")
@@ -131,7 +133,7 @@ def workspace_map(
         lines.append("- (not yet materialized)")
     lines.append("")
 
-    lines.extend(_skills_section(knowledge, shown))
+    lines.extend(_skills_section(knowledge, shown, skills_of))
     lines.append("")
 
     lines.append(f"## Adapters — `{shown(adapters_under(defender_dir))}/`")
@@ -159,14 +161,17 @@ def workspace_map(
     return "\n".join(lines) + "\n"
 
 
-def _skills_section(knowledge: KnowledgePaths | None, shown: Callable[[Path], str]) -> list[str]:
+def _skills_section(knowledge: KnowledgePaths | None, shown: Callable[[Path], str],
+                    only: Collection[str] | None = None) -> list[str]:
     """The system skills of the run's agent root, by folder, each marked when it has a
-    `SKILL.md`."""
+    `SKILL.md`; with `only`, the folders of those systems alone."""
     if knowledge is None:
         return ["## System skills", _NO_KNOWLEDGE]
     skills_dir = knowledge.skills_dir
     lines = [f"## System skills — `{shown(skills_dir)}/`"]
     for name in _list_dir(skills_dir):
+        if only is not None and name not in only:
+            continue
         marker = " (SKILL.md)" if (skills_dir / name / "SKILL.md").is_file() else ""
         lines.append(f"- {name}{marker}")
     return lines
