@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import datetime as _dt
 import io
+import json
 import logging
 import os
 import shutil
@@ -77,40 +78,55 @@ def materialize(scenario: Path, tmp: Path) -> None:
             shutil.copy(path, agent / "lessons" / path.name)
 
 
+def _scenario_items(tmp: Path) -> list[tuple[str, str, dict[str, Any]]]:
+    """The scenario's findings as a learning store claim's items (`(kind, key, payload)`, #1278
+    D1), in queue order; a row with no `finding_id` is handed under a key of its own so the
+    author's own rule judges it."""
+    rows = [json.loads(line) for line in
+            (_state_dir(tmp) / "_pending" / "findings.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()]
+    return [("finding", str(row.get("finding_id") or f"row-{i}"), row) for i, row in enumerate(rows)]
+
+
 def run_author(tmp: Path, *, invoke_agent: Any = None) -> tuple[AuthorRun, float]:
     """One lessons-author batch over a tenant draft (#1108 P4 O7): the materialized agent root
     as a local tenant's one commit, a batch started on it, the REAL author run into the batch's
-    draft (`invoke_agent` replaces only the model spawn), and the batch delivered to the fake
-    forge. The authored lessons and the tenant clone stay under `tmp` for `capture_results`."""
+    draft over the scenario's findings as the claim's items (`invoke_agent` replaces only the
+    model spawn), and the batch delivered to the fake forge. The authored lessons, the tenant
+    clone and the items' fates (`fates.json`) stay under `tmp` for `capture_results`."""
     from defender.learning.author.lessons import run as author
     from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
     from defender.learning.core.lane_trees import open_drain_trees
-    from defender.learning.core.state import LearningState, StateRefused
 
     tenant = LocalTenant(tmp, _agent_source(tmp))
     paths = LoopPaths(repo_root=tmp, state_dir=_state_dir(tmp))
     out, err = io.StringIO(), io.StringIO()
     t0 = time.monotonic()
     try:
+        items = _scenario_items(tmp)
+        outcomes: dict[tuple[str, str], Any] = {}
         delivery = tenant.delivery(AUTHOR_BRANCH_PREFIX)
         batch = delivery.start_batch(f"evals-{uuid.uuid4().hex[:12]}",
                                      lanes=AUTHOR_DRAIN_LABEL.lanes)
         try:
-            with LearningState.open(paths) as state, \
-                    open_drain_trees(paths, AUTHOR_DRAIN_LABEL, batch=batch) as trees:
+            with open_drain_trees(paths, AUTHOR_DRAIN_LABEL, batch=batch) as trees:
                 cfg = author.build_author_config(
-                    paths, state=state, trees=trees, manifest_seed=MANIFEST_SEED, batch=batch)
+                    paths, trees=trees, manifest_seed=MANIFEST_SEED, batch=batch)
                 if invoke_agent is not None:
                     cfg = dataclasses.replace(cfg, invoke_agent=invoke_agent)
                 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                    rc = author.run_batch(paths=paths, state=state, cfg=cfg, batch=batch)
+                    rc = author.run_batch(paths=paths, cfg=cfg, batch=batch,
+                                          items=items, outcomes=outcomes)
             shutil.copytree(Path(batch.draft_root) / "agent" / "lessons", tmp / "authored-lessons")
+            (tmp / "fates.json").write_text(json.dumps(  # lint-unguarded-tree-write: ok — eval scratch dir
+                {f"{kind}:{key}": {"fate": fate.name, "reason": fate.reason}
+                 for (kind, key), fate in outcomes.items()}, indent=2),
+                encoding="utf-8")
             delivered = delivery.finish(batch)
             out.write(f"\ndelivery: {delivered.status}\n")
         finally:
             batch.discard()
-    # `StateRefused` is named: it is not an `Exception`, and the harness reports it too.
-    except (Exception, StateRefused) as e:  # noqa: BLE001 — an eval harness reports the fault, never re-raises
+    except Exception as e:  # noqa: BLE001 — an eval harness reports the fault, never re-raises
         rc = 1
         err.write(f"\n{type(e).__name__}: {e}\n")
     return AuthorRun(rc, out.getvalue(), err.getvalue()), time.monotonic() - t0
@@ -132,6 +148,8 @@ def capture_results(tmp: Path, scenario_name: str, proc: AuthorRun,
     for path in (_state_dir(tmp) / "_pending").iterdir():
         if path.is_file():
             shutil.copy(path, pending_out / path.name)
+    if (tmp / "fates.json").is_file():
+        shutil.copy(tmp / "fates.json", out / "fates.json")
 
     clone = tmp / "data"
     clones = [p.parent for p in clone.glob("*/knowledge/.git")]
