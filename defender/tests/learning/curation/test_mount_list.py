@@ -16,6 +16,8 @@ from defender.learning.core.config import (
     DrainLabel, LoopPaths,
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
+from defender.tests.support.learning.core._store1278 import migrated_database, world  # noqa: F401 — fixtures
+from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
 from defender.tests.support.learning.curation._drain_trees_1134 import PAYLOAD
 from defender.tests.shared.filesystem.test_rooted_io import HOST_BYTES, census
 from defender.tests.support.learning.curation._tree_listing_1134 import descriptors_under, put_plain
@@ -99,8 +101,7 @@ class Leaf:
 
 
 def _leaf(tmp_path: Path) -> Leaf:
-    paths = LoopPaths(repo_root=tmp_path / MAIN, state_dir=tmp_path / "learning-state")
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the handle never creates its root (#1135)
+    paths = LoopPaths(repo_root=tmp_path / MAIN)
     return Leaf(paths=paths, wt=tmp_path / "wt-leaf")
 
 
@@ -229,20 +230,17 @@ DRAFT_LANES: dict[DrainLabel, tuple[str, ...]] = {
 ALL_DRAFT_LANES = ("agent/lessons", "agent/lessons-questioner", "agent/skills")
 
 
-def _drain_tick_over_draft(tmp_path: Path, data_root: Path, monkeypatch: pytest.MonkeyPatch,
-                           label: DrainLabel, step: Callable[[Any, Any, Any], None]) -> tuple[int, Any]:
-    """One real drain tick of `label`'s lane over the fixture tenant, its work step replaced by
-    `step(step_paths, batch, box_spy)`, run once, inside the batch, after the box started:
-    through `trigger_author` (author lane, a queued finding wakes it) or `run_pitfalls` (lead
-    lane, a queued pitfall wakes it). The drain hands each lane entry its tick's batch as
-    `batch=`; `step_paths` stays the product-rooted `LoopPaths`. Returns `(exit status, the
-    BoxSpy)`."""
-    from defender.learning.core.state import FINDINGS, PITFALLS
+def _drain_tick_over_draft(w: Any, label: DrainLabel,
+                           step: Callable[[Any, Any, Any], None]) -> tuple[int, Any]:
+    """One real drain tick of `label`'s lane over the store `world`'s tenant, its work step replaced by
+    `step(step_paths, batch, box_spy)`, run once, inside the batch, after the box started: through
+    `trigger_author` (author lane, a waiting finding in the store wakes it) or `run_pitfalls` (lead lane, a
+    waiting pitfall wakes it). The drain hands each lane entry its tick's batch as `batch=`; `step_paths` stays
+    the product-rooted `LoopPaths`. Returns `(exit status, the BoxSpy)`. (#1278: the claim's items come from the
+    learning store; this was seeded into the file queues.)"""
     from defender.tests.support.learning.core._declared870 import shim_row
-    from defender.tests.support.learning.curation._drain719 import finding_row, seed
-    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
-        BoxSpy, author_drain, drain_paths, lead_author_drain, product_repo)
-    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
+    from defender.tests.support.learning.core._store1278 import call, finding
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain, lead_author_drain
 
     box = BoxSpy()
     ran: list[str] = []
@@ -252,20 +250,16 @@ def _drain_tick_over_draft(tmp_path: Path, data_root: Path, monkeypatch: pytest.
             ran.append("ran")
             step(step_paths, batch, box)
 
-    with published_tenant(tmp_path / "forge", root=data_root) as t:
-        bind_forge(t)
-        paths = drain_paths(t, product_repo(tmp_path))
-        if label is AUTHOR:
-            monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-            seed(paths, FINDINGS, [finding_row("f1", run_id="f1")])
-            rc = author_drain(t, paths, trigger=lambda step_paths, *_a, batch, **_kw: once(step_paths, batch),
-                              box=box)
-        else:
-            monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-            seed(paths, PITFALLS, [shim_row("p1:1")])
-            rc = lead_author_drain(
-                t, paths, box=box, run_lead_author=lambda *_a, **_kw: None,
-                run_pitfalls=lambda step_paths, *_a, batch, **_kw: once(step_paths, batch) or 0)
+    if label is AUTHOR:
+        call(w.dsn, "publish_findings", w.t.tenant_id, "run-1", [finding("f1")], kind="finding")
+        rc = author_drain(w.t, w.paths, trigger=lambda step_paths, *_a, batch, **_kw: once(step_paths, batch),
+                          box=box)
+    else:
+        w.monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+        call(w.dsn, "add_pitfall", w.t.tenant_id, shim_row("p1:1"))
+        rc = lead_author_drain(
+            w.t, w.paths, box=box, run_lead_author=lambda *_a, **_kw: None,
+            run_pitfalls=lambda step_paths, *_a, batch, **_kw: once(step_paths, batch) or 0)
     assert ran, "the lane's work step never ran inside a batch"
     return rc, box
 
@@ -349,11 +343,11 @@ def _o4_step(label: DrainLabel, swap: str, outside: Path, seen: dict[str, Any]):
     return step
 
 
+@pytest.mark.postgres
 @pytest.mark.parametrize("swap", ["fresh_folder", "link_to_outside"])
 @pytest.mark.parametrize("label", KNOWN)
 def test_the_box_rw_mounts_are_the_roots_open_drain_trees_holds_and_a_swap_moves_none(
-        tmp_path: Path, data_root: Path, monkeypatch: pytest.MonkeyPatch, label: DrainLabel,
-        swap: str):
+        world, tmp_path: Path, label: DrainLabel, swap: str):  # noqa: F811 — the imported fixture
     """For a known label, the drain box's rw mounts are the draft's lanes for that label, they
     equal the roots `open_drain_trees` holds over the paths the drain hands the lane's work step,
     and each is held by behaviour: a write through a held root stays in it when the mount path is
@@ -363,7 +357,7 @@ def test_the_box_rw_mounts_are_the_roots_open_drain_trees_holds_and_a_swap_moves
     seen: dict[str, Any] = {}
     step = _o4_step(label, swap, outside, seen)
 
-    _rc, _box = _drain_tick_over_draft(tmp_path, data_root, monkeypatch, label, step)
+    _rc, _box = _drain_tick_over_draft(world, label, step)
 
     staged, rw = seen["staged"], seen["rw"]
     assert [m.relative_to(staged).as_posix() for m in rw] == list(DRAFT_LANES[label])
@@ -433,7 +427,7 @@ def test_the_held_trees_follow_whatever_trees_paths_names(
         tmp_path: Path, label: DrainLabel):
     asked: list[tuple[Path, str]] = []
     paths = relocated_paths(asked)(repo_root=tmp_path / MAIN,
-                                   state_dir=tmp_path / "learning-state")
+                                   )
     lf = Leaf(paths, tmp_path / "wt-leaf")
     wt = lf.wt
     lf.build(*ALL_TREES, *DECOY_TREES, *all_relocated(wt), *all_relocated(paths.repo_root))
@@ -455,10 +449,9 @@ def test_the_held_trees_follow_whatever_trees_paths_names(
 def relative_paths(how: str, root: Path, tmp_path: Path) -> LoopPaths:
     """A `LoopPaths` whose `repo_root` is the relative `root`: `constructed` directly, or
     `rebased` from the main checkout's paths (`dataclasses.replace`)."""
-    state = tmp_path / "learning-state"
     if how == "constructed":
-        return LoopPaths(repo_root=root, state_dir=state)
-    return dataclasses.replace(LoopPaths(repo_root=tmp_path / MAIN, state_dir=state), repo_root=root)
+        return LoopPaths(repo_root=root)
+    return dataclasses.replace(LoopPaths(repo_root=tmp_path / MAIN), repo_root=root)
 
 
 @pytest.mark.parametrize("how", ["constructed", "rebased"])
@@ -484,7 +477,7 @@ def test_a_relative_repo_root_is_refused_before_anything_is_held_never_joined_to
         open_drain_trees(relative, label)
     assert held_roots(tmp_path) == [], "a relative mount was held"
 
-    absolute = LoopPaths(repo_root=abs_root, state_dir=tmp_path / "learning-state")
+    absolute = LoopPaths(repo_root=abs_root)
     if at_cwd == "the_trees":
         expected = tuple(abs_root / rel for rel in EXPECTED_MOUNTS[label])
         with open_drain_trees(absolute, label) as trees:

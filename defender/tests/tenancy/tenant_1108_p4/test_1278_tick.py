@@ -560,7 +560,7 @@ def test_d7_a_reconcile_of_an_open_pr_stamps_the_batchs_last_checked(world, capl
     assert _batches(w)[batch_id].phase == "in_review"
 
 
-# --- The lead lane: operator-only, and its by-hand run claims through the store (Locks, D9) ----------------------------
+# --- The lead lane: operator-only (D9) ----------------------------
 
 
 def _pitfall_row(pid: str):
@@ -569,42 +569,11 @@ def _pitfall_row(pid: str):
     return shim_row(pid)
 
 
-def _by_hand_lead_run(w) -> int:
-    """`lead_author --tenant T <run>` as an operator types it, over an (empty) run folder of the tenant."""
-    import uuid
-
-    from defender.learning.leads import lead_author
-
-    run = Path(location_path(w.t.tenant.tenant_root)) / "runs" / str(uuid.uuid4())
-    run.mkdir(parents=True)
-    return lead_author.main(["--tenant", w.t.tenant_id, run.name], directory=w.t.directory)
-
-
-def test_locks_a_by_hand_lead_author_run_is_refused_while_the_lead_drain_holds_a_working_batch(world):  # noqa: F811 — the imported fixture
-    """The lead-queue lock is replaced by the store's claim: a by-hand run beside a live working lead batch exits non-zero, mints no batch of its own and moves no item; with no such batch the same scene exits 0. (Locks r8: by-hand run uses the same claim)"""
-    w = world
-    w.monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    call(w.dsn, "add_pitfall", w.t.tenant_id, _pitfall_row("p4-run:1"))
-    drain = call(w.dsn, "claim", w.t.tenant_id, LEAD_LANE, owner="lead-drain", thresholds=ONE)
-    assert drain is not None, "premise: the lead drain holds a working batch"
-    call(w.dsn, "add_pitfall", w.t.tenant_id, _pitfall_row("p4-run:2"))  # waiting, so only the busy lane can refuse
-    before = ([(b.id, b.phase) for b in batches(w.dsn, w.t.tenant_id)], _work(w))
-
-    rc = _by_hand_lead_run(w)
-
-    assert rc != 0, "a by-hand run went ahead beside the lead drain's working batch"
-    assert ([(b.id, b.phase) for b in batches(w.dsn, w.t.tenant_id)], _work(w)) == before
-    assert w.t.forge.creates == []
-
-
-def test_locks_a_by_hand_lead_author_run_with_no_lead_drain_batch_is_not_refused(world):  # noqa: F811 — the imported fixture
-    """Control for the refusal: the same scene with no working lead batch exits 0, so the refusal above is the busy lane's. (Locks r8, R2-2)"""
-    w = world
-    w.monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    call(w.dsn, "add_pitfall", w.t.tenant_id, _pitfall_row("p4-run:1"))
-
-    assert _by_hand_lead_run(w) == 0
-    assert w.t.forge.creates == []
+# Retired by amendment A3 (the lead lane is served by the drain alone; there is no by-hand lead-author entry, so no
+# by-hand claim): `test_locks_a_by_hand_lead_author_run_is_refused_while_the_lead_drain_holds_a_working_batch` and its
+# control `test_locks_a_by_hand_lead_author_run_with_no_lead_drain_batch_is_not_refused`. Their obligation (the lead
+# lane has one holder) survives in the store's `test_o3_a_second_claim_on_a_lane_with_a_not_ended_author_batch_is_refused` and
+# `test_o3_two_claims_at_once_make_one_batch`.
 
 
 def test_d9_a_lead_batch_closed_with_words_stays_due_and_the_author_tick_authors_nothing_for_it(world, caplog):  # noqa: F811 — the imported fixture

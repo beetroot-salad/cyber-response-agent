@@ -1,8 +1,9 @@
 """#1108 P4 flow 4: the drains deliver through `TenantDelivery` (O7) and refuse what cannot be
 delivered (O9); a retained batch whose PR was closed; the writer lease; O-SWEEP's draft half.
 
-Every case drives the real drain entry through the CLI's stage runner over `p4_tenant` (a real
-clone, a loopback origin, P3's forge and issuer fakes), injecting the forge `client`, an
+Every case drives the real drain entry through the CLI's stage runner over the `world` (`p4_tenant`
+bound to its forge, a learning store in PostgreSQL: a real clone, a loopback origin, P3's forge and
+issuer fakes; work is queued in the store, #1278), injecting the forge `client`, an
 `identity` (so the AppRole login is skipped) and `start_box`/`stop_box`. The curator inside the
 tick is the real one with only its model spawn replaced by `_spec773.FakeCurator`; everything
 from the draft to the PR is the code under test's. `paths.repo_root` is a scratch product
@@ -20,6 +21,12 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.learning.core._store1278 import (
+    batches,
+    migrated_database,  # noqa: F401 — fixture the world needs
+    world,  # noqa: F401 — the tick's world: tenant, forge and learning store
+)
+from defender.learning.core.state import QUESTIONER_FINDINGS
 from defender.tests.support.learning.curation import _spec773 as S
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_delivery._scenarios import _AnswerLost
@@ -50,6 +57,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     drafts_dir,
     drain_paths,
     drains,
+    items_of,
     executed_lead,
     lead_author_drain,
     owner_record,
@@ -72,6 +80,9 @@ from defender.tests.tenancy.tenant_1108_p4._support import (
 )
 
 
+postgres = pytest.mark.postgres
+
+
 @pytest.fixture
 def thresholds(monkeypatch):
     """Both curators wake at one authorable row (env-backed knobs, read at call time)."""
@@ -79,10 +90,10 @@ def thresholds(monkeypatch):
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
 
 
-def _author_tick(t: Any, product: Path) -> tuple[Any, CuratorTrigger, BoxSpy]:
-    """`(paths, trigger, box)` for an author tick over `product`: one authorable row queued, its
-    fake curator writing that row's lesson."""
-    paths = drain_paths(t, product)
+def _author_tick(w: Any) -> tuple[Any, CuratorTrigger, BoxSpy]:
+    """`(paths, trigger, box)` for an author tick in world `w`: one authorable row queued in the
+    learning store, its fake curator writing that row's lesson."""
+    paths = w.paths
     queue(paths, [S.finding_row("f1", run_id="f1")])
     return paths, CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})), BoxSpy()
 
@@ -92,16 +103,18 @@ def _author_tick(t: Any, product: Path) -> tuple[Any, CuratorTrigger, BoxSpy]:
 # ---------------------------------------------------------------------------------------------
 
 
+@postgres
 def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_forge_O7(
-        p4_tenant, tmp_path, thresholds, caplog):
+        world, caplog):  # noqa: F811 — the imported fixture
     """A tick publishes first (a pending human merge becomes `current` and the batch's base), then
     delivers the lesson as one commit on a tenant `lessons/` branch with its PR, moving no
     checkout of the clone and nothing in the product repo."""
-    t = p4_tenant
-    bind_forge(t)
+    w = world
+    t = w.t
     merged = t.merge({"agent/lessons/human-merged.md": "a human-reviewed lesson\n"})
-    product = product_repo(tmp_path)
-    paths = drain_paths(t, product)
+    paths = w.paths
+    product = Path(paths.repo_root)
+    queue(paths, [S.world_row("w1", systems=["cmdb"])], channel=QUESTIONER_FINDINGS)
     queue(paths, [S.finding_row("f1", run_id="f1")])
     before = product_state(product)
     curator = S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})
@@ -112,7 +125,8 @@ def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_fo
 
     assert rc == 0, critical_text(caplog)
     assert curator.calls, "the curator's model step never ran"
-    # One tick serves both curators of the lane into its one batch.
+    # One tick serves both curators of the lane into its one batch (each handed its own kind's
+    # items, A2 D1; a kind with no item is not run).
     assert trigger.calls == ["author", "questioner_curator"], trigger.calls
     # Publish ran first: the merge is `current`, the clone fast-forwarded to it.
     assert current_commit(t.tenant) == merged
@@ -145,8 +159,8 @@ def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_fo
     writable = sorted(Path(m.source).relative_to(staged[0].source).as_posix()
                       for m in mounts if m.writable)
     assert writable == ["agent/lessons", "agent/lessons-questioner"], writable
-    # The row is held until its lesson reaches `main` (#952); the product checkout never moved.
-    assert [r["finding_id"] for r in S.pending(paths, S.channel_of("findings"))] == ["f1"]
+    # The row stays in the batch until its lesson reaches `main` (#952); the product checkout never moved.
+    assert items_of(paths)[("finding", "f1")].status == "in_batch"
     assert product_state(product) == before
     # Positive control: the same observation shows a product commit.
     (product / "defender" / "lessons" / "x.md").write_text("x\n", encoding="utf-8")
@@ -160,14 +174,15 @@ def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_fo
 # ---------------------------------------------------------------------------------------------
 
 
+@postgres
 def test_o9_a_tenant_with_no_forge_binding_refuses_the_drain_before_any_model_call(
-        p4_tenant, tmp_path, thresholds, caplog):
+        world, caplog):  # noqa: F811 — the imported fixture
     """No forge binding is decidable locally: the drain refuses (exit 2, naming the binding)
     before touching the issuer, the forge, a draft, a box or the curator. Positive control: once
     bound, the same tick reaches them."""
-    t = p4_tenant
+    t = world.t
     unbind_forge(t)  # the fixture's directory wires every tenant; this case is the unwired one
-    paths, trigger, box = _author_tick(t, product_repo(tmp_path))
+    paths, trigger, box = _author_tick(world)
     # The fixture's own publish already asked the issuer and the forge; only the drain counts.
     t.vault.calls.clear()
     t.forge.requests.clear()
@@ -191,14 +206,14 @@ def test_o9_a_tenant_with_no_forge_binding_refuses_the_drain_before_any_model_ca
     assert t.vault.calls
 
 
+@postgres
 def test_o9_an_unprotected_tenant_main_surfaces_as_a_drain_refusal_naming_it(
-        p4_tenant, tmp_path, thresholds, caplog):
+        world, caplog):  # noqa: F811 — the imported fixture
     """A refusal at open (the forge says `main` is unprotected) is the drain's refusal: exit 2,
     naming the protection, and no curator, box, draft or branch."""
-    t = p4_tenant
-    bind_forge(t)
+    t = world.t
     t.forge.protection = {"name": "main", "protected": False, "user_can_push": True}
-    paths, trigger, box = _author_tick(t, product_repo(tmp_path))
+    paths, trigger, box = _author_tick(world)
 
     with caplog.at_level(logging.INFO):
         rc = author_drain(t, paths, trigger=trigger, box=box)
@@ -216,14 +231,16 @@ def test_o9_an_unprotected_tenant_main_surfaces_as_a_drain_refusal_naming_it(
 # ---------------------------------------------------------------------------------------------
 
 
+@postgres
 def test_flow4_a_retained_batch_whose_pr_was_closed_is_delivered_as_closed_and_never_reopened(
-        p4_tenant, tmp_path, thresholds, caplog):
+        world, caplog):  # noqa: F811 — the imported fixture
     """A tick whose PR answer was lost retains its batch (and logs the failure). After a human
-    closes that PR, the next tick delivers the retained batch first, sees `closed`, pushes
-    nothing, opens no PR and logs the status."""
-    t = p4_tenant
-    bind_forge(t)
-    paths, trigger, box = _author_tick(t, product_repo(tmp_path))
+    closes that PR, the next tick takes the retained batch over (recording its PR), serves no new
+    work and pushes and opens nothing; the tick after reconciles it as `closed`, still pushing and
+    opening nothing, and logs the status. (#1278: the closed status is read by the reconcile step,
+    not by the retained delivery.)"""
+    t = world.t
+    paths, trigger, box = _author_tick(world)
     lost = _AnswerLost(remote=t.remote, origin=t.origin)
 
     with caplog.at_level(logging.INFO):
@@ -234,19 +251,35 @@ def test_flow4_a_retained_batch_whose_pr_was_closed_is_delivered_as_closed_and_n
     close_on_remote(t.p3, branch)
     refs_before = git(t.remote, "for-each-ref", "--format=%(refname) %(objectname)")
     caplog.clear()
-    # Tick 2's curator writes nothing (the held row is still queued, #952), so any PR or push it
-    # makes could only be the closed batch's.
+    # Tick 2's curator writes nothing (the item is still in the retained batch), so any PR or push
+    # it makes could only be the closed batch's.
     quiet = CuratorTrigger()
 
     with caplog.at_level(logging.INFO):
         rc = author_drain(t, paths, trigger=quiet, box=box)
 
     assert rc == 0, critical_text(caplog)
+    assert quiet.calls == [], "new work was served over the retained batch"
+    assert t.forge.creates == [], "a closed batch's PR was opened again"
+    assert git(t.remote, "for-each-ref", "--format=%(refname) %(objectname)") == refs_before
+    # Tick 3 reconciles the takeover's record against the forge: with no words left on the closed PR
+    # the batch ends `closed`, its item held for a person (H2), and still nothing is pushed or opened.
+    [recorded] = batches(world.dsn, t.tenant_id)
+    t.forge.scopes = {"write:repository", "read:issue"}  # the bot's token reads the PR's words (H7)
+    t.forge.reviews[recorded.pr_number], t.forge.comments[recorded.pr_number] = [], []
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        rc = author_drain(t, paths, trigger=quiet, box=box)
+
+    assert rc == 0, critical_text(caplog)
+    [batch] = batches(world.dsn, t.tenant_id)
+    assert (batch.branch, batch.phase, batch.outcome) == (branch, "ended", "closed"), batch
+    assert items_of(paths)[("finding", "f1")].status == "held"
     assert t.forge.creates == [], "a closed batch's PR was opened again"
     assert git(t.remote, "for-each-ref", "--format=%(refname) %(objectname)") == refs_before
     said = "\n".join(r.getMessage() for r in caplog.records)
     assert "closed" in said, said
-    assert branch in said, said
+    assert str(batch.id) in said and f"#{batch.pr_number}" in said, said  # names the batch and its PR
 
 
 # ---------------------------------------------------------------------------------------------
@@ -270,36 +303,36 @@ _LEASE_ROWS = {
 _LEAD_TEMPLATE = "gather/queries/cmdb/host-owner.md"
 
 
-def _lead_tick(t: Any, tmp_path: Path, monkeypatch: Any, label: str) -> tuple[Any, Any, LeadStep]:
-    """The lead lane awake on one queued run, the real lead author editing one template:
-    `(paths, run name, step)`. The pitfalls and lift knobs stay shut."""
+def _lead_tick(w: Any, monkeypatch: Any, label: str) -> tuple[Any, Any, LeadStep]:
+    """The lead lane awake on one queued run (a curation request in the learning store), the real
+    lead author editing one template: `(paths, run name, step)`. The pitfalls and lift knobs stay
+    shut. The product checkout carries the cmdb adapter the lane declares its systems from."""
+    t = w.t
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
-    paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
+    paths = drain_paths(t, product_repo(w.scratch / label, adapters=("cmdb",)))
     run = queued_run(t, paths, label).name
     step = LeadStep(executed={run: [executed_lead("cmdb.owner-by-tag")]},
                     edits={run: {_LEAD_TEMPLATE: "\nAlso check the asset tag.\n"}})
     return paths, run, step
 
 
-def _queue_file(paths: Any, case: str) -> Path:
-    return Path(location_path(paths.state_root)) / "author-queue" / f"{case}.json"
-
-
+@postgres
 @pytest.mark.parametrize("holder", sorted(_LEASE_ROWS))
 @pytest.mark.parametrize("drain", ["author", "lead"])
 def test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_else_does(
-        p4_tenant, tmp_path, thresholds, monkeypatch, caplog, drain, holder):
-    """Only an open PR of our own tenant repository on this lane's prefix holds the writer lease:
-    the tick then starts no batch and leaves its row queued. A fork's, a namesake's or a headless
-    PR on the prefix, or our own PR on the other lane's, holds nothing: the tick opens its PR."""
-    t = p4_tenant
-    bind_forge(t)
+        world, monkeypatch, caplog, drain, holder):  # noqa: F811 — the imported fixture
+    """Only an open PR of our own tenant repository on this lane's prefix that no batch made is a
+    foreign PR holding the lane: the tick opens no PR and its batch goes to a person (D6; was: no
+    batch started, #1278 retired the forge-side lease check at batch start). A fork's, a namesake's
+    or a headless PR on the prefix, or our own PR on the other lane's, holds nothing: the tick
+    opens its PR and the batch is in review."""
+    t = world.t
     own, other = (LESSONS_PREFIX, LEAD_PREFIX) if drain == "author" else (LEAD_PREFIX, LESSONS_PREFIX)
     t.forge.add_pr(_LEASE_ROWS[holder](own, other))
     box = BoxSpy()
     if drain == "author":
-        paths = drain_paths(t, product_repo(tmp_path))
+        paths = world.paths
         queue(paths, [S.finding_row("f1", run_id="f1")])
         curator = S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")})
         trigger = CuratorTrigger(author=curator)
@@ -308,29 +341,32 @@ def test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_el
         ran = trigger.calls
 
         def still_queued() -> bool:
-            return [r["finding_id"] for r in S.pending(paths, S.channel_of("findings"))] == ["f1"]
+            return items_of(paths)[("finding", "f1")].status == "waiting"
     else:
-        paths, _run, step = _lead_tick(t, tmp_path, monkeypatch, "p4-lease")
+        paths, run, step = _lead_tick(world, monkeypatch, "p4-lease")
         with caplog.at_level(logging.INFO):
             rc = lead_author_drain(t, paths, box=box, run_lead_author=step,
                                    run_pitfalls=lambda *_a, **_k: 0)
         ran = step.served
 
         def still_queued() -> bool:
-            return _queue_file(paths, "case-p4-lease").is_file()
+            return items_of(paths)[("curation_request", run)].status == "waiting"
 
     assert rc == 0, critical_text(caplog)
+    [batch] = batches(world.dsn, t.tenant_id)
     if holder == "ours-on-this-lane":
-        assert ran == []
-        assert box.requests == []
-        assert draft_entries(t) == []
-        assert remote_branches(t.remote, own) == {}
+        # Design D6 (#1278): the writer lease is the store's lane gate; an open PR of our repository
+        # on the prefix that no batch of the store made is met when the batch would open its PR (after
+        # authoring): it opens none and goes to a person, its item kept in the batch.
+        assert ran
         assert t.forge.creates == []
-        assert still_queued()
+        assert batch.phase == "needs_person", (batch.phase, critical_text(caplog))
+        assert not still_queued(), "the item went back to waiting instead of staying in the batch"
     else:
         (branch, _tip), = remote_branches(t.remote, own).items()
         assert [c["head"] for c in t.forge.creates] == [branch]
         assert ran
+        assert batch.phase == "in_review", batch.phase
 
 
 # ---------------------------------------------------------------------------------------------
@@ -512,21 +548,24 @@ def _one_batch(batches: list[Any]) -> Any:
     return batches[0]
 
 
+@postgres
 def test_od16_the_author_drain_hands_its_curators_the_ticks_batch_and_product_rooted_paths(
-        p4_tenant, tmp_path, thresholds, caplog):
+        world, caplog):  # noqa: F811 — the imported fixture
     """Every `trigger_author` call of one tick gets this tick's `batch=` (its draft under
     `<T>/drafts/`, mounted as `staged`; the branch pushed) and the drain's own product-rooted
     `paths`, never a draft-rooted `LoopPaths`."""
-    t = p4_tenant
-    bind_forge(t)
-    product = product_repo(tmp_path)
-    paths, trigger, box = _author_tick(t, product)
+    t = world.t
+    paths, trigger, box = _author_tick(world)
+    queue(paths, [S.world_row("w1", systems=["cmdb"])], channel=QUESTIONER_FINDINGS)
+    product = Path(paths.repo_root)
 
     with caplog.at_level(logging.INFO):
         rc = author_drain(t, paths, trigger=trigger, box=box)
 
     assert rc == 0, critical_text(caplog)
     assert trigger.calls == ["author", "questioner_curator"], trigger.calls
+    assert [{kind for kind, _key, _payload in items} for items in trigger.items_seen] == [
+        {"finding"}, {"questioner_finding"}], "a curator was handed items of another kind (A2 D1)"
     batch = _one_batch(trigger.batches)
     draft = Path(batch.draft_root)
     # `draft_root` is `<T>/drafts/<id>/stage`, the folder beside `owner`.
@@ -540,17 +579,17 @@ def test_od16_the_author_drain_hands_its_curators_the_ticks_batch_and_product_ro
     assert not draft.is_relative_to(product)
 
 
+@postgres
 def test_od16_the_lead_drain_hands_both_steps_the_ticks_batch_and_product_rooted_paths(
-        p4_tenant, tmp_path, monkeypatch, caplog):
+        world, monkeypatch, caplog):  # noqa: F811 — the imported fixture
     """A lead tick serving a run and curating a pitfall hands both steps the same tick's
     `batch=` and the product-rooted `paths`; the pitfalls curator hands its spawn that batch's
     draft root."""
     from defender.learning.core.state import PITFALLS
     from defender.tests.support.learning.core._declared870 import shim_row
 
-    t = p4_tenant
-    bind_forge(t)
-    paths, run, step = _lead_tick(t, tmp_path, monkeypatch, "p4-od16")
+    t = world.t
+    paths, run, step = _lead_tick(world, monkeypatch, "p4-od16")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     queue(paths, [shim_row("p4-run:1")], channel=PITFALLS)
     pitfalls, box = PitfallsStep("- **Name the unnested column.**"), BoxSpy()
@@ -604,14 +643,14 @@ def _fault(kind: str) -> BaseException:
         else LeadAuthorError("p4: the curator failed")
 
 
+@postgres
 @pytest.mark.parametrize("fault", ["box-start-fault", "mid-batch-box-fault", "curator-fault"])
 @pytest.mark.parametrize("drain", ["author", "lead"])
 def test_r_l4_a_faulted_tick_leaves_no_draft_behind(
-        p4_tenant, tmp_path, thresholds, monkeypatch, caplog, drain, fault):
+        world, monkeypatch, caplog, drain, fault):  # noqa: F811 — the imported fixture
     """Whatever faults (the box start, the box mid-batch, the curator or lead step), the tick
     leaves nothing under `<T>/drafts/`; the draft was there while the tick ran (control)."""
-    t = p4_tenant
-    bind_forge(t)
+    t = world.t
     seen: list[list[str]] = []
     box: BoxSpy = _FaultingStart(t) if fault == "box-start-fault" else BoxSpy()
 
@@ -620,13 +659,13 @@ def test_r_l4_a_faulted_tick_leaves_no_draft_behind(
         raise _fault(fault)
 
     if drain == "author":
-        paths = drain_paths(t, product_repo(tmp_path))
+        paths = world.paths
         queue(paths, [S.finding_row("f1", run_id="f1")])
         curator = S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")}, also=failing)
         with caplog.at_level(logging.INFO):
             author_drain(t, paths, trigger=CuratorTrigger(author=curator), box=box)
     else:
-        paths, _run, _step = _lead_tick(t, tmp_path, monkeypatch, "p4-fault")
+        paths, _run, _step = _lead_tick(world, monkeypatch, "p4-fault")
         with caplog.at_level(logging.INFO):
             lead_author_drain(t, paths, box=box, run_lead_author=failing,
                               run_pitfalls=lambda *_a, **_k: 0)
@@ -646,20 +685,21 @@ def test_r_l4_a_faulted_tick_leaves_no_draft_behind(
 # ---------------------------------------------------------------------------------------------
 
 
-def _default_box_tick(t: Any, tmp_path: Path, monkeypatch: Any, drain: str) -> tuple[int, list]:
+def _default_box_tick(w: Any, monkeypatch: Any, drain: str, label: str) -> tuple[int, list]:
     """One tick through the real drain entry with no `start_box`/`stop_box` seam (production's
     default box start): `(rc, the lane calls made)`."""
+    t = w.t
     ran: list[str] = []
     seams = {"client": t.forge.client, "identity": t.vault.identity(), "directory": t.directory}
     if drain == "author":
-        paths = drain_paths(t, product_repo(tmp_path))
+        paths = w.paths
         queue(paths, [S.finding_row("f1", run_id="f1")])
 
         def trigger(*_a: Any, **_k: Any) -> None:
             ran.append("curator")
 
         return run_stage(lambda: drains().author_drain(paths, trigger_author=trigger, **seams)), ran
-    paths, _run, _step = _lead_tick(t, tmp_path, monkeypatch, "p4-sandbox")
+    paths, _run, _step = _lead_tick(w, monkeypatch, label)
 
     def lead(*_a: Any, **_k: Any) -> None:
         ran.append("lead")
@@ -672,22 +712,22 @@ def _default_box_tick(t: Any, tmp_path: Path, monkeypatch: Any, drain: str) -> t
         paths, run_lead_author=lead, run_pitfalls=pitfalls, **seams)), ran
 
 
+@postgres
 @pytest.mark.parametrize("drain", ["author", "lead"])
 def test_r_i3_a_drain_with_no_daemon_refuses_even_under_the_unsandboxed_opt_out(
-        p4_tenant, tmp_path, thresholds, monkeypatch, caplog, drain):
+        world, tmp_path, monkeypatch, caplog, drain):  # noqa: F811 — the imported fixture
     """With the default box start, the operator opt-out set and no reachable daemon, the drain
     refuses (exit 2, no lane step, no draft) rather than run on a host executor. Control: over a
     fake daemon (`_box1195.FakeDaemon` on `PATH`) the same tick runs its lane."""
     from defender.tests.support.sandbox._box1195 import FakeDaemon
 
-    t = p4_tenant
-    bind_forge(t)
+    t = world.t
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
     monkeypatch.setenv("DOCKER_HOST", f"unix://{tmp_path / 'no-daemon.sock'}")
 
     with caplog.at_level(logging.INFO):
-        rc, ran = _default_box_tick(t, tmp_path / "down", monkeypatch, drain)
+        rc, ran = _default_box_tick(world, monkeypatch, drain, "p4-sandbox-down")
 
     assert rc == 2, critical_text(caplog)
     assert ran == [], ran
@@ -698,7 +738,7 @@ def test_r_i3_a_drain_with_no_daemon_refuses_even_under_the_unsandboxed_opt_out(
     daemon.install(monkeypatch)
     caplog.clear()
     with caplog.at_level(logging.INFO):
-        rc, ran = _default_box_tick(t, tmp_path / "up", monkeypatch, drain)
+        rc, ran = _default_box_tick(world, monkeypatch, drain, "p4-sandbox-up")
     assert rc == 0, critical_text(caplog)
     assert ran, "the control never got past the box start"
     assert draft_entries(t) == []

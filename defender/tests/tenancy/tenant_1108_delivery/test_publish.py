@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from ._revert_store import claimed_batch, reviewed, revert_with
 from ._support import (
     DEFENDER,
     LANES,
@@ -291,7 +292,8 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
         assert d.publish().commit == newer
 
 
-def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tmp_path):
+@pytest.mark.postgres
+def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, http_store, tmp_path):
     from defender import box
     from defender.tests.support.sandbox._box1195 import FakeDaemon
 
@@ -319,7 +321,7 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
         "a later human merge\n", encoding="utf-8"))
     phase[0] = "batch"
     server.rearm()
-    batch = d.start_batch("io", lanes=LANES)
+    batch, held = claimed_batch(http_repo, http_store, d, "io")
     probes["batch", "after-start-batch"] = lock_probe(tenant)
 
     daemon = FakeDaemon(tmp_path)
@@ -344,21 +346,23 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
         d.finish(batch)
     http.fail_create = False
 
-    phase[0] = "deliver"
+    phase[0] = "refinish"
     server.rearm()
-    opened(d.deliver("io"))
+    again = d.finish(batch)
+    opened(again)
+    reviewed(http_store, held, again)
 
     merge_on_remote(http_repo, tmp_path, batch.branch)
     phase[0] = "revert"
     server.rearm()
-    assert opened(d.revert("agent/lessons/io.md", "io"), None) == forge_pulls(http_repo[1])[-1]["html_url"]
+    assert opened(revert_with(d, http_store, "agent/lessons/io.md", "io"), None) == forge_pulls(http_repo[1])[-1]["html_url"]
 
     required = {("open", "repository"), ("open", "protection"), ("publish", "git-upload-pack"),
                 ("batch", "git-upload-pack"), ("batch", "after-start-batch"), ("batch", "box-create"),
                 ("batch", "box-window"), ("finish", "git-receive-pack"), ("finish", "pr-post"),
-                ("deliver", "pr-post"), ("revert", "git-receive-pack"), ("revert", "pr-post")}
+                ("refinish", "pr-post"), ("revert", "git-receive-pack"), ("revert", "pr-post")}
     assert required <= set(probes), sorted(required - set(probes))
-    for route in ("finish", "deliver"):
+    for route in ("finish", "refinish"):
         # The PR lookup asks the forge, by git (`refs/pull/*`) or by its API; either is probed.
         assert {(route, "git-upload-pack"), (route, "pr-get")} & set(probes), f"{route}'s PR lookup was not probed"
     held = {moment: result for moment, result in probes.items() if not result.get("free")}
@@ -769,7 +773,8 @@ def _operator_attributes(clone, line):
         out.write(line)
 
 
-def test_no_tenant_named_filter_runs_on_the_host(repo, tmp_path):
+@pytest.mark.postgres
+def test_no_tenant_named_filter_runs_on_the_host(repo, store, tmp_path):
     tenant, remote = repo[0], repo[1]
     clone = tenant.knowledge
     log = _install_spy_filter(clone, tmp_path)
@@ -794,13 +799,15 @@ def test_no_tenant_named_filter_runs_on_the_host(repo, tmp_path):
     push_to_remote(repo, tmp_path, lambda c: (c / "agent/lessons/later.md").write_bytes(b"a later lesson\n"))
     second = d.publish()
     assert files_under(second.path / "agent") == agent_blobs(clone, second.commit)
-    batch = d.start_batch("filtered", lanes=LANES)
+    batch, held = claimed_batch(repo, store, d, "filtered")
     (batch.draft_root / "agent/lessons/claimed.md").write_bytes(b"a claim\n")
     batch.commit(batch.change_set(), "claim")
     batch.reset()
-    opened(d.finish(batch))
+    finished = d.finish(batch)
+    opened(finished)
+    reviewed(store, held, finished)
     merge_on_remote(repo, tmp_path, batch.branch)
-    d.revert("agent/lessons/claimed.md", "claimed")
+    revert_with(d, store, "agent/lessons/claimed.md", "claimed")
     assert not log.exists(), f"a tenant-named filter ran on the host: {log.read_text(encoding='utf-8')}"
     assert git(clone, "status", "--porcelain") == ""
 

@@ -10,7 +10,7 @@ import pytest
 
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.core import _state1135
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
@@ -20,9 +20,8 @@ from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
-    """The runs base and the learning state root, both per test."""
+    """The runs base, per test."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _render(ep: Path) -> E.Page:
@@ -61,7 +60,7 @@ def _family_reply() -> str:
 def _grade(ep: Path, tmp_path: Path, judge: J.FakeJudge) -> None:
     """The REAL judge over the episode (`J.grade_at`), driven by `judge`; it writes
     `judge.yaml`."""
-    J.grade_at(ep, judge=judge, draws=1, state=_state1135.env_state())
+    J.grade_at(ep, judge=judge, draws=1, store=MemoryStore())
 
 
 def _oracle_row(label: str = "b", *, q: str = "user:alice", payload: object = None) -> dict:

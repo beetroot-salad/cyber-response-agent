@@ -7,8 +7,6 @@ policy.
 """
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
-
 import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,7 +30,7 @@ from defender.tests.support.learning.curation._drain719 import (  # noqa: F401 �
 from defender.learning.author import drain
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.core.config import LoopPaths
-from defender.learning.core.state import QUESTIONER_FINDINGS, Channel, LearningState
+from defender.learning.core.state import QUESTIONER_FINDINGS, Channel
 from defender.tests.support.learning.curation._curator1134 import author_trees
 
 
@@ -77,6 +75,9 @@ class Scene:
     corpus: Path
     rows: list[dict]
     curator: FakeCurator
+    #: The fates the last claims wrote, keyed `(kind, key)` as the drain's `outcomes=` map is (#1278 D1): an
+    #: item named nowhere here is not decided by the claim (it stays in the batch, or returns to waiting).
+    outcomes: dict = field(default_factory=dict)
     #: The channel module's own `run_batch` (the lessons channel's unless a sibling scene sets
     #: it), so `Scene.run` always drives a production front door.
     runner: Callable[..., int] | None = None
@@ -89,7 +90,19 @@ class Scene:
         """Drive the real entry point (`run_batch` -> `drain.run_batch` -> `_tick` -> ...):
         the whole tick, not a re-implementation of it."""
         runner = self.runner if self.runner is not None else lessons_run.run_batch
-        return runner(cfg=self.cfg, **kw)
+        return runner(cfg=self.cfg, items=self.items(), outcomes=self.outcomes, **kw)
+
+    @property
+    def kind(self) -> str:
+        """The store's item kind of this scene's channel (`finding`, `questioner_finding`)."""
+        return self.channel.name.removesuffix("s")
+
+    def items(self, rows: list[dict] | None = None) -> list[tuple[str, str, dict]]:
+        """The claim's items, `(kind, key, payload)`, as the store hands a curator its rows. A row with no id
+        under the channel's key keeps a positional key (the store keys it by something else)."""
+        id_key = self.channel.id_key
+        return [(self.kind, str(r.get(id_key, f"unkeyed-{i}")), r)
+                for i, r in enumerate(self.rows if rows is None else rows)]
 
     def head_files(self) -> list[str]:
         """The paths this tick committed, asked of git, never of the drain's own record."""
@@ -118,37 +131,26 @@ class Scene:
             if p.is_file() and p.name != ".gitkeep"
         )
 
-    def report_lines(self) -> list[str]:
-        """The channel's disposition report: `held_report` on the lessons channel,
-        `skip_report` on the questioner's, both written by `shared.write_disposition_report`."""
-        path = location_path(self.paths.state_root) / self.cfg.channel.report
-        return path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    def fate(self, fid: str) -> tuple[str, str | None] | None:
+        """`(outcome name, reason)` the claim wrote for item `fid`, or `None` if it named none."""
+        out = self.outcomes.get((self.kind, fid))
+        return None if out is None else (out.name, out.reason)
 
-    def pending(self) -> list[dict]:
-        return pending(self.paths, self.channel)
+    def named(self, name: str) -> dict[str, str | None]:
+        """Item key -> reason, for every item the claim gave the outcome `name`
+        (`skipped`/`held`/`dead`/`published`/`deferred`)."""
+        return {k: o.reason for (_kind, k), o in self.outcomes.items() if o.name == name}
 
-    def pending_by_id(self) -> dict[str, dict]:
-        return pending_by_id(self.paths, self.channel)
-
-    def consumed(self) -> list[dict]:
-        return consumed(self.paths, self.channel)
-
-    def consumed_by_id(self) -> dict[str, dict]:
-        return {r["finding_id"]: r for r in self.consumed() if "finding_id" in r}
-
-    def graveyard(self) -> list[dict]:
-        return graveyard(self.paths, self.channel)
-
-    def category_of(self, fid: str) -> str | None:
-        row = self.consumed_by_id().get(fid)
-        return None if row is None else row.get("consumed_category")
+    def unnamed(self) -> list[str]:
+        """The ids of the claim's items whose fate it did not name: committed (cited) ones stay in the batch, and
+        any in no bucket return to waiting by the tick's citation rule."""
+        return [k for _kind, k, _row in self.items() if (_kind, k) not in self.outcomes]
 
 
 def build_scene(  # noqa: PLR0913 — one tick's whole world, threaded rather than global
     tmp_path: Path,
     *,
     rows: list[dict] | None = None,
-    state_dir: Path | None = None,
     curator: FakeCurator | None = None,
     seed_corpus: dict[str, str] | None = None,
     channel_name: str = "findings",
@@ -156,7 +158,7 @@ def build_scene(  # noqa: PLR0913 — one tick's whole world, threaded rather th
 ) -> Scene:
     """A lessons-channel tick: the curator spawn enters by `dataclasses.replace` on the real
     config builder's output, so nothing is patched onto a module."""
-    paths = make_paths(tmp_path, state_dir=state_dir)
+    paths = make_paths(tmp_path)
     repo = paths.repo_root
     corpus = paths.lessons_dir
     rows = list(rows if rows is not None else [finding_row("f1", run_id="f1")])
@@ -170,12 +172,11 @@ def build_scene(  # noqa: PLR0913 — one tick's whole world, threaded rather th
         git(repo, "commit", "-q", "-m", "seed corpus")
 
     channel = channel_of(channel_name)
-    seed(paths, channel, rows)
 
     curator = curator if curator is not None else FakeCurator()
 
     base = lessons_run.build_author_config(
-        paths, state=LearningState.open(paths), trees=author_trees(paths))
+        paths, trees=author_trees(paths))
     wiring: dict[str, Any] = {"invoke_agent": curator}
     wiring.update(cfg_overrides)
     cfg = dataclasses.replace(base, **wiring)
@@ -227,12 +228,11 @@ def build_questioner_scene(
 
     rows = list(rows if rows is not None else [world_row("w1")])
     channel = QUESTIONER_FINDINGS
-    seed(paths, channel, rows)
 
     curator = curator if curator is not None else FakeCurator()
 
     base = questioner_run.build_questioner_config(
-        paths, state=LearningState.open(paths), trees=author_trees(paths))
+        paths, trees=author_trees(paths))
     wiring: dict[str, Any] = {"invoke_agent": curator}
     wiring.update(cfg_overrides)
     cfg = dataclasses.replace(base, **wiring)
@@ -296,10 +296,9 @@ def _draft_scene(  # noqa: PLR0913 — one draft tick's whole world, threaded ra
     files = {**(agent_files or {}),
              **{f"{corpus_name}/{rel}": text for rel, text in (seed_corpus or {}).items()}}
     lane = C.draft_lane(tmp_path, files=files)
-    seed(lane.paths, channel, rows)
     # A fresh fake per scene (it records its calls), so it cannot be a signature default.
     fake = curator if curator is not None else FakeCurator()
-    base = build(lane, state=LearningState.open(lane.paths))
+    base = build(lane)
     wiring: dict[str, Any] = {"invoke_agent": fake}
     wiring.update(cfg_overrides)
     cfg = dataclasses.replace(base, **wiring)

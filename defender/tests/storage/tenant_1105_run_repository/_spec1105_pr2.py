@@ -87,7 +87,6 @@ def roots(tmp_path: Path, monkeypatch: Any) -> None:
     """Every configured root inside `tmp_path`: the operator runs base pre-flight exports and
     the learning state root. No episodes base: an episode lives under its tenant."""
     monkeypatch.setenv(RUNS_BASE_ENV, str(Path(tmp_path) / "defender-runs"))
-    _state1135.set_state_dir(monkeypatch, Path(tmp_path) / "learning-state")
 
 
 def data_root() -> Path:
@@ -217,7 +216,7 @@ def grade(episode_dir: Path, tenant_id: str) -> Any:
     episode_id)`, `runs` being the tenant's repository under the configured data root. A final
     `judge.yaml` short-circuits a second pass, so it is removed first."""
     from defender.tenancy import _tenant
-    from defender.tests.support.learning.core._state1135 import env_state
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1
 
     (Path(episode_dir) / "judge.yaml").unlink(missing_ok=True)
@@ -225,7 +224,7 @@ def grade(episode_dir: Path, tenant_id: str) -> Any:
     runs = _tenant.accept_tenant(
         fixture_data_root(data_root()), tenant_id, defender_dir=H1.DEFENDER).runs_repository()
     return T.mod("learning.judge").grade_episode(
-        runs, Path(episode_dir).name, judge=J.scripted_judge(), state=env_state())
+        runs, Path(episode_dir).name, judge=J.scripted_judge(), store=MemoryStore())
 
 
 def sibling_scene(tmp_path: Path, *, roster: bool = True) -> tuple[Path, Path]:

@@ -1,21 +1,27 @@
-"""#1108 P4 U10: a claim the commit-maker refuses, at drain level.
+"""#1108 P4 U10: a claim the commit-maker refuses, at drain level, over the learning store (#1278).
 
-The refused claim's draft is reset, the refusal counts one attempt on its row, and the row stays
-queued and is retried until #952's attempt ceiling quarantines it; the batch's other claims
-commit and deliver. A claim is one curator's work in the lessons lane (`author`, then
-`questioner_curator`, in one batch) or one queued run in the lead lane. A ChangeSet carries only
-plain regular files under `agent/`, so a symlink or FIFO the model left in the draft refuses it.
+The refused claim's draft is reset, the refusal costs its items an attempt (stamped when the batch
+claimed them, not forgiven) and returns them to waiting, and the batch's other claims commit and
+deliver. A claim is one curator's work in the lessons lane (`author`, then `questioner_curator`, in
+one batch) or one queued run in the lead lane. A ChangeSet carries only plain regular files under
+`agent/`, so a symlink or FIFO the model left in the draft refuses it.
 
 "Reset" is observed by the batch's next claim (the sibling) looking at the draft when its model
-runs; each control shows it does see a committed edit there. Attempts and quarantine are the
-lane's own queue state. Between ticks a human merges the sibling's PR, so the lane's writer lease
-(our open PR holds the lane) does not hold the retry tick. The lessons lane's `hold_committed`
-keeps the committed sibling's row pending until its lesson reaches `main`, so its re-serving is
-not asserted, only that it is never committed twice.
+runs; each control shows it does see a committed edit there. Attempts and fates are the store's
+(`items_of`: status, attempts). Between ticks a human merges the sibling's PR, so the lane has no
+open PR of its own and the retry tick may claim. A committed item stays in its batch until the batch
+ends, so its re-serving is not asserted, only that it is never committed twice.
+
+Retired with the file queues (design r8 Items arrive / Lead-author lane; the store replaced the
+`author-queue/` rows and their `inflight/` and `failed/` folders, the `_pending/` rows and the graveyard):
+the cases' file-queue arms (a row's `attempts` field, the `failed/` quarantine record, the graveyard
+entry naming `DeliveryRefused`). What survives is observed over the store: the draft reset, the
+sibling's commit and delivery, nothing committed twice, the item back to waiting with its attempt
+counted and retried by the next tick. The attempt ceiling's store half is the store's own
+(`store_1278/test_items_1278.py::test_crashes_to_the_ceiling_hold_the_item_for_a_person`).
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
@@ -24,8 +30,10 @@ from typing import Any
 import pytest
 
 from defender.tests.support.learning.curation import _spec773 as S
-from defender.tests.support.learning.curation._drain719 import graveyard, pending_by_id
-from defender.tests.support.shared._locations_1210 import location_path
+from defender.tests.support.learning.core._store1278 import (
+    migrated_database,  # noqa: F401 — fixture the world needs
+    world,  # noqa: F401 — the tick's world: tenant, forge and learning store
+)
 from defender.tests.tenancy.tenant_1108_delivery._support import merge_on_remote
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     LEAD_DRAFT_LANES,
@@ -42,6 +50,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     draft_root_of,
     drain_paths,
     executed_lead,
+    items_of,
     lead_author_drain,
     product_repo,
     queue,
@@ -49,7 +58,9 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     remote_branches,
     touched,
 )
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, git
+from defender.tests.tenancy.tenant_1108_p4._support import git
+
+pytestmark = pytest.mark.postgres
 
 SIBLING_NAME = "p4-sibling.md"
 PLANTED_NAME = "p4-planted.md"
@@ -95,15 +106,14 @@ class _LessonsScene:
     (the sibling, whose model writes a plain lesson and records what it sees of the author's
     claim in the draft)."""
 
-    def __init__(self, t: Any, tmp_path: Path, *, plant: bool) -> None:
-        from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
+    def __init__(self, w: Any, *, plant: bool) -> None:
+        from defender.learning.core.state import QUESTIONER_FINDINGS
 
-        self.t, self.tmp_path = t, tmp_path
-        self.findings, self.questioner = FINDINGS, QUESTIONER_FINDINGS
-        self.paths = drain_paths(t, product_repo(tmp_path))
+        self.t, self.tmp_path = w.t, w.scratch
+        self.paths = w.paths
         queue(self.paths, [S.finding_row("f-bad", run_id="f-bad")])
         queue(self.paths, [S.world_row("w1", systems=["cmdb"])], channel=QUESTIONER_FINDINGS)
-        outside = _outside(tmp_path)
+        outside = _outside(w.scratch)
         self.sibling_saw: list[dict] = []
 
         def plant_link(_rows: Any, _batch_id: str, cfg: Any) -> None:
@@ -125,8 +135,11 @@ class _LessonsScene:
         with caplog.at_level(logging.INFO):
             return author_drain(self.t, self.paths, trigger=self.trigger, box=BoxSpy())
 
-    def bad_row(self) -> dict | None:
-        return pending_by_id(self.paths, self.findings).get("f-bad")
+    def bad(self) -> Any:
+        return items_of(self.paths)[("finding", "f-bad")]
+
+    def sibling_item(self) -> Any:
+        return items_of(self.paths)[("questioner_finding", "w1")]
 
     def served_bad(self) -> int:
         return sum(1 for c in self.author.calls
@@ -135,18 +148,14 @@ class _LessonsScene:
 
 @pytest.fixture
 def lessons_lane(monkeypatch):
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "2")
 
 
-def test_u10_control_an_unrefused_lessons_batch_commits_both_claims(
-        p4_tenant, tmp_path, lessons_lane, caplog):
+def test_u10_control_an_unrefused_lessons_batch_commits_both_claims(world, lessons_lane, caplog):  # noqa: F811 — the imported fixture
     """Positive control, same scene with no plant: both claims commit on one branch with one PR,
     and the sibling sees the author's committed lesson in the draft."""
-    t = p4_tenant
-    bind_forge(t)
-    s = _LessonsScene(t, tmp_path, plant=False)
+    t = world.t
+    s = _LessonsScene(world, plant=False)
     main = t.origin_main()
 
     rc = s.tick(caplog)
@@ -156,21 +165,19 @@ def test_u10_control_an_unrefused_lessons_batch_commits_both_claims(
     (branch, tip), = remote_branches(t.remote, LESSONS_PREFIX).items()
     assert sorted(touched(t.remote, main, tip)) == sorted([LESSON_REL, SIBLING_REL])
     assert [c["head"] for c in t.forge.creates] == [branch]
-    row = s.bad_row()
-    assert row is not None, "the committed row is held until its lesson reaches main"
-    assert int(row.get("attempts") or 0) == 0, row
+    assert (s.bad().status, s.sibling_item().status) == ("in_batch", "in_batch"), (
+        "a committed item stays in its batch until the batch ends")
     assert draft_entries(t) == []
 
 
 def test_u10_a_refused_lessons_claim_is_reset_counted_and_left_queued_while_its_sibling_delivers(
-        p4_tenant, tmp_path, lessons_lane, caplog):
+        world, lessons_lane, caplog):  # noqa: F811 — the imported fixture
     """The author's model leaves a symlink beside its lesson, so its claim is refused: reset
-    before the sibling runs, absent from the branch, one attempt counted with the row still
-    queued; the questioner claim delivers. The tick completes (rc 0): a refused claim is the
+    before the sibling runs, absent from the branch, one attempt counted with the item waiting
+    again; the questioner claim delivers. The tick completes (rc 0): a refused claim is the
     claim's outcome, not the tick's."""
-    t = p4_tenant
-    bind_forge(t)
-    s = _LessonsScene(t, tmp_path, plant=True)
+    t = world.t
+    s = _LessonsScene(world, plant=True)
     main = t.origin_main()
 
     rc = s.tick(caplog)
@@ -182,37 +189,31 @@ def test_u10_a_refused_lessons_claim_is_reset_counted_and_left_queued_while_its_
     assert touched(t.remote, main, tip) == [SIBLING_REL]
     assert git(t.remote, "show", f"{tip}:{SIBLING_REL}") + "\n" == S.lesson("w1")
     assert [c["head"] for c in t.forge.creates] == [branch]
-    row = s.bad_row()
-    assert row is not None, "the refused claim's row left the queue"
-    assert row.get("attempts") == 1, row
-    assert [g for g in graveyard(s.paths, s.findings) if g.get("finding_id") == "f-bad"] == []
+    bad = s.bad()
+    assert (bad.status, bad.attempts) == ("waiting", 1), (bad.status, bad.attempts, bad.reason)
+    assert s.sibling_item().status == "in_batch"
     assert draft_entries(t) == []
 
 
-def test_u10_a_refused_lessons_row_is_retried_next_tick_and_quarantined_at_the_ceiling(
-        p4_tenant, tmp_path, lessons_lane, caplog):
-    """Ceiling 2: after the sibling's PR merges, the next tick retries `f-bad`, is refused again
-    and retires it to the graveyard; a third tick never serves it, and no later branch
-    re-commits the sibling's lesson."""
-    t = p4_tenant
-    bind_forge(t)
-    s = _LessonsScene(t, tmp_path, plant=True)
+def test_u10_a_refused_lessons_item_is_retried_next_tick_and_its_sibling_never_committed_twice(
+        world, lessons_lane, caplog):  # noqa: F811 — the imported fixture
+    """After the sibling's PR merges, the next tick claims the waiting `f-bad` again (a second
+    attempt), is refused again, and the item waits with both attempts counted; no later branch
+    re-commits the sibling's lesson. (The attempt ceiling is the store's: see the module note.)"""
+    t = world.t
+    s = _LessonsScene(world, plant=True)
 
     assert s.tick(caplog) == 0, critical_text(caplog)
     (branch, _tip), = remote_branches(t.remote, LESSONS_PREFIX).items()
-    assert s.bad_row()["attempts"] == 1
+    assert s.bad().attempts == 1
     merge_on_remote(t.p3, t.scratch, branch)
     merged = t.origin_main()
     known = set(remote_branches(t.remote, LESSONS_PREFIX))
 
     assert s.tick(caplog) == 0, critical_text(caplog)
-    assert s.served_bad() == 2, "the refused row was not retried"
-    assert s.bad_row() is None, "the row at the ceiling stayed queued"
-    (dead,) = [g for g in graveyard(s.paths, s.findings) if g.get("finding_id") == "f-bad"]
-    assert dead["attempts"] == 2, dead
-
-    assert s.tick(caplog) == 0, critical_text(caplog)
-    assert s.served_bad() == 2, "a quarantined row was served again"
+    assert s.served_bad() == 2, "the refused item was not retried"
+    assert s.bad().attempts == 2, "the second refusal was not counted"
+    assert s.sibling_item().status == "published", "the merged sibling is published, not claimed again"
     later = {b: tip for b, tip in remote_branches(t.remote, LESSONS_PREFIX).items() if b not in known}
     assert [b for b, tip in later.items() if SIBLING_REL in touched(t.remote, merged, tip)] == []
     assert draft_entries(t) == []
@@ -249,9 +250,10 @@ class _Planting:
 
 
 class _LeadScene:
-    def __init__(self, t: Any, tmp_path: Path, *, plant: str | None) -> None:
+    def __init__(self, w: Any, *, plant: str | None) -> None:
+        t, tmp_path = w.t, w.scratch
         self.t = t
-        self.paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
+        self.paths = drain_paths(t, product_repo(tmp_path / "lead", adapters=("cmdb",)))
         self.bad = queued_run(t, self.paths, "p4-refused-a").name
         self.good = queued_run(t, self.paths, "p4-refused-b").name
         # `a` runs an uncatalogued query, so the real draft synthesis mints a `_draft/` entry
@@ -263,16 +265,15 @@ class _LeadScene:
             edits={self.bad: {TEMPLATE: REFUSED_EDIT}, self.good: {TEMPLATE: SIBLING_EDIT}})
         self.step = _Planting(self.inner, plants={self.bad: plant} if plant else {},
                               outside=_outside(tmp_path), sibling=self.good)
-        self.queue_dir = Path(location_path(self.paths.state_root)) / "author-queue"
 
     def tick(self, caplog: Any) -> int:
         with caplog.at_level(logging.INFO):
             return lead_author_drain(self.t, self.paths, box=BoxSpy(), run_lead_author=self.step,
                                      run_pitfalls=lambda *_a, **_k: 0)
 
-    def record(self, label: str, folder: str = "") -> dict | None:
-        path = self.queue_dir / folder / f"case-{label}.json"
-        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    def request(self, run: str) -> Any:
+        """The store's item for the curation request filed for `run`."""
+        return items_of(self.paths)[("curation_request", run)]
 
     def served(self, run: str) -> int:
         return self.inner.served.count(run)
@@ -282,18 +283,16 @@ class _LeadScene:
 def lead_lane(monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
-    monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "2")
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "2")
 
 
-def test_u10_control_an_unrefused_lead_batch_commits_both_claims(
-        p4_tenant, tmp_path, lead_lane, caplog):
+def test_u10_control_an_unrefused_lead_batch_commits_both_claims(world, lead_lane, caplog):  # noqa: F811 — the imported fixture
     """Positive control, same scene with no plant: both runs' edits land on one `lead-author/`
-    branch with one PR, the sibling sees the first claim's committed edit, and both rows leave
-    the queue."""
-    t = p4_tenant
-    bind_forge(t)
-    s = _LeadScene(t, tmp_path, plant=None)
-    assert s.record("p4-refused-a") is not None, "control: the queue is read where it was filed"
+    branch with one PR, the sibling sees the first claim's committed edit, and both requests are
+    claimed by the batch (no longer waiting)."""
+    t = world.t
+    s = _LeadScene(world, plant=None)
+    assert s.request(s.bad).status == "waiting", "control: the requests are read where they were filed"
     main = t.origin_main()
 
     rc = s.tick(caplog)
@@ -309,20 +308,18 @@ def test_u10_control_an_unrefused_lead_batch_commits_both_claims(
     assert REFUSED_EDIT.strip() in text
     assert SIBLING_EDIT.strip() in text
     assert [c["head"] for c in t.forge.creates] == [branch]
-    for label in ("p4-refused-a", "p4-refused-b"):
-        assert [s.record(label, f) for f in ("", "inflight", "failed")] == [None, None, None]
+    assert (s.request(s.bad).status, s.request(s.good).status) == ("in_batch", "in_batch")
     assert draft_entries(t) == []
 
 
 @pytest.mark.parametrize("plant", ["link", "fifo", "out-of-lane"])
 def test_u10_a_refused_lead_claim_is_reset_counted_and_left_queued_while_its_sibling_delivers(
-        p4_tenant, tmp_path, lead_lane, caplog, plant):
+        world, lead_lane, caplog, plant):  # noqa: F811 — the imported fixture
     """Run `a`'s claim leaves a link or FIFO in the skills lane, or a plain file outside it, so
-    it is refused: reset before `b` runs, absent from the branch, and back in the queue with one
-    attempt; `b`'s claim delivers and leaves the queue."""
-    t = p4_tenant
-    bind_forge(t)
-    s = _LeadScene(t, tmp_path, plant=plant)
+    it is refused: reset before `b` runs, absent from the branch, and its request waiting again
+    with one attempt counted; `b`'s claim delivers and its request stays in the batch."""
+    t = world.t
+    s = _LeadScene(world, plant=plant)
     main = t.origin_main()
 
     rc = s.tick(caplog)
@@ -336,40 +333,31 @@ def test_u10_a_refused_lead_claim_is_reset_counted_and_left_queued_while_its_sib
     assert SIBLING_EDIT.strip() in text
     assert REFUSED_EDIT.strip() not in text
     assert [c["head"] for c in t.forge.creates] == [branch]
-    queued = s.record("p4-refused-a")
-    assert queued is not None, "the refused claim's row left the queue"
-    assert queued.get("attempts") == 1, queued
-    assert s.record("p4-refused-a", "inflight") is None
-    assert s.record("p4-refused-a", "failed") is None
-    assert [s.record("p4-refused-b", f) for f in ("", "inflight", "failed")] == [None, None, None]
+    queued = s.request(s.bad)
+    assert (queued.status, queued.attempts) == ("waiting", 1), (queued.status, queued.attempts, queued.reason)
+    assert s.request(s.good).status == "in_batch"
     assert draft_entries(t) == []
 
 
-def test_u10_a_refused_lead_row_is_retried_next_tick_and_quarantined_at_the_ceiling(
-        p4_tenant, tmp_path, lead_lane, caplog):
-    """Ceiling 2: after `b`'s PR merges, the next tick retries only `a`, which, refused again, is
-    quarantined in `failed/`; a third tick serves nothing and opens no branch."""
-    t = p4_tenant
-    bind_forge(t)
-    s = _LeadScene(t, tmp_path, plant="link")
+def test_u10_a_refused_lead_request_is_retried_next_tick_and_its_sibling_never_served_twice(
+        world, lead_lane, caplog):  # noqa: F811 — the imported fixture
+    """After `b`'s PR merges, the next tick claims only the waiting request `a`, which is refused
+    again and waits with both attempts counted; `b` is not served again and no new branch is
+    opened. (The attempt ceiling is the store's: see the module note.)"""
+    t = world.t
+    s = _LeadScene(world, plant="link")
 
     assert s.tick(caplog) == 0, critical_text(caplog)
     (branch, _tip), = remote_branches(t.remote, LEAD_PREFIX).items()
-    assert s.record("p4-refused-a")["attempts"] == 1
+    assert s.request(s.bad).attempts == 1
     merge_on_remote(t.p3, t.scratch, branch)
     known = set(remote_branches(t.remote, LEAD_PREFIX))
 
     assert s.tick(caplog) == 0, critical_text(caplog)
     assert (s.served(s.bad), s.served(s.good)) == (2, 1)
-    assert s.record("p4-refused-a") is None, "the row at the ceiling stayed queued"
-    assert s.record("p4-refused-a", "inflight") is None
-    failed = s.record("p4-refused-a", "failed")
-    assert failed is not None, "the row at the ceiling was not quarantined"
-    assert failed.get("failed"), failed
-
-    assert s.tick(caplog) == 0, critical_text(caplog)
-    assert (s.served(s.bad), s.served(s.good)) == (2, 1)
-    assert set(remote_branches(t.remote, LEAD_PREFIX)) == known
+    assert s.request(s.bad).attempts == 2, "the second refusal was not counted"
+    assert s.request(s.good).status == "published", "the merged sibling is published, not claimed again"
+    assert set(remote_branches(t.remote, LEAD_PREFIX)) == known, "a refused claim opened a branch"
     assert draft_entries(t) == []
 
 
@@ -394,12 +382,13 @@ class _PlantingPitfalls:
 
 
 class _PitfallsScene:
-    def __init__(self, t: Any, tmp_path: Path, *, plant: bool) -> None:
+    def __init__(self, w: Any, *, plant: bool) -> None:
         from defender.learning.core.state import PITFALLS
         from defender.tests.support.learning.core._declared870 import shim_row
 
+        t, tmp_path = w.t, w.scratch
         self.t, self.channel = t, PITFALLS
-        self.paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
+        self.paths = drain_paths(t, product_repo(tmp_path / "lead", adapters=("cmdb",)))
         queue(self.paths, [shim_row(PITFALL_ID)], channel=PITFALLS)
         self.inner = PitfallsStep(PITFALL_BULLET)
         self.step = _PlantingPitfalls(self.inner, plant=plant, outside=_outside(tmp_path))
@@ -409,12 +398,8 @@ class _PitfallsScene:
             return lead_author_drain(self.t, self.paths, box=BoxSpy(), run_pitfalls=self.step,
                                      run_lead_author=lambda *_a, **_k: None)
 
-    def row(self) -> dict | None:
-        return pending_by_id(self.paths, self.channel).get(PITFALL_ID)
-
-    def dead(self) -> list[dict]:
-        return [g for g in graveyard(self.paths, self.channel)
-                if g.get("pitfall_id") == PITFALL_ID]
+    def item(self) -> Any:
+        return items_of(self.paths)[("pitfall", PITFALL_ID)]
 
 
 PITFALL_ID = "p4-run:1"
@@ -429,14 +414,13 @@ def pitfalls_lane(monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "2")
 
 
-def test_u10_control_an_unrefused_pitfalls_claim_delivers_and_leaves_the_queue(
-        p4_tenant, tmp_path, pitfalls_lane, caplog):
+def test_u10_control_an_unrefused_pitfalls_claim_delivers_and_stays_in_its_batch(
+        world, pitfalls_lane, caplog):  # noqa: F811 — the imported fixture
     """Positive control, same scene with no plant: the curated bullet lands on the tenant add-on
-    page on one `lead-author/` branch with its PR, and the row carries no attempt."""
-    t = p4_tenant
-    bind_forge(t)
-    s = _PitfallsScene(t, tmp_path, plant=False)
-    assert s.row() is not None, "control: the pitfall is queued where the drain reads it"
+    page on one `lead-author/` branch with its PR, and the pitfall stays in the batch."""
+    t = world.t
+    s = _PitfallsScene(world, plant=False)
+    assert s.item().status == "waiting", "control: the pitfall is queued where the drain reads it"
     main = t.origin_main()
 
     rc = s.tick(caplog)
@@ -446,21 +430,18 @@ def test_u10_control_an_unrefused_pitfalls_claim_delivers_and_leaves_the_queue(
     (branch, tip), = remote_branches(t.remote, LEAD_PREFIX).items()
     assert touched(t.remote, main, tip) == [PITFALLS_ADDON]
     assert [c["head"] for c in t.forge.creates] == [branch]
-    row = s.row()
-    assert row is None or int(row.get("attempts") or 0) == 0, row
-    assert s.dead() == []
+    assert s.item().status == "in_batch"
     assert draft_entries(t) == []
 
 
-def test_u10_a_refused_pitfalls_claim_is_dead_lettered_as_refused_not_propagated(
-        p4_tenant, tmp_path, pitfalls_lane, caplog):
+def test_u10_a_refused_pitfalls_claim_is_counted_and_left_waiting_not_propagated(
+        world, pitfalls_lane, caplog):  # noqa: F811 — the imported fixture
     """The pitfalls claim leaves a link in the skills lane and is refused as the claim's outcome,
     not the tick's: rc 0, nothing reaches the origin or forge, one attempt is counted with the
-    row queued, and at the ceiling (2) the next refusal dead-letters it, naming the refusal. A
-    refusal propagated out of the step would end the tick instead."""
-    t = p4_tenant
-    bind_forge(t)
-    s = _PitfallsScene(t, tmp_path, plant=True)
+    pitfall waiting again, and the next tick retries it. A refusal propagated out of the step
+    would end the tick instead. (The attempt ceiling is the store's: see the module note.)"""
+    t = world.t
+    s = _PitfallsScene(world, plant=True)
 
     rc = s.tick(caplog)
 
@@ -468,18 +449,12 @@ def test_u10_a_refused_pitfalls_claim_is_dead_lettered_as_refused_not_propagated
     assert s.inner.handoffs, "the pitfalls curation never spawned, so nothing was refused"
     assert remote_branches(t.remote, LEAD_PREFIX) == {}
     assert t.forge.creates == []
-    row = s.row()
-    assert row is not None, "the refused pitfall left the queue on its first refusal"
-    assert row.get("attempts") == 1, row
-    assert s.dead() == []
+    item = s.item()
+    assert (item.status, item.attempts) == ("waiting", 1), (item.status, item.attempts, item.reason)
     assert draft_entries(t) == []
 
     assert s.tick(caplog) == 0, critical_text(caplog)
     assert s.step.calls == 2, "the refused pitfall was not retried"
-    assert s.row() is None, "the pitfall at the ceiling stayed queued"
-    (dead,) = s.dead()
-    assert dead.get("attempts") == 2, dead
-    assert "DeliveryRefused" in json.dumps(dead), (
-        f"the dead letter does not name the commit-maker's refusal: {dead}")
+    assert s.item().attempts == 2, "the second refusal was not counted"
     assert remote_branches(t.remote, LEAD_PREFIX) == {}
     assert draft_entries(t) == []

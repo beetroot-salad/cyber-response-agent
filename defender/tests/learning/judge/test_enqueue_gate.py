@@ -1,28 +1,16 @@
 """#921 — the queue row, the appender that writes it, and the family partition inside the gate."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
-
 from defender.tests.support.learning.branch import _triplet_947 as T
 
-import json
-import threading
 from pathlib import Path
 
 import pytest
 
-from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as D
+from defender.tests.support.learning.judge import _gate_1278 as G
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.learning.core.config import LoopPaths
-from defender.learning.core.state import LearningState
-from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.core._state1135 import env_state
-
-
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 
 
 def _enqueue():
@@ -46,91 +34,92 @@ def _family_row(fid: str = "ep-1/b/0/0", **over) -> dict:
     return row
 
 
-def _graded(tmp_path, **kw):
-    """An accepted episode, graded end to end, as `(episode_dir, family record)`."""
+def _graded(tmp_path, store=None, **kw):
+    """An accepted episode, graded end to end into `store` (a fresh one by default), as `(episode_dir, family record)`."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
                             **kw)
     (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        draws=1, state=env_state())
+        draws=1, store=store if store is not None else MemoryStore())
     return ep, J.judge_record(ep)
 
 
-# The gate tests drive the real lessons tick over a git-free draft lane
-# (`_curator1134.draft_lane` / `draft_author_cfg`) and assert on the queue.
+# The gate tests drive the real lessons claim (`drain.run_batch` over a git-free draft lane, #1278 D1) and read each
+# row's fate off the claim's `outcomes`; only the curator's model spawn is a double.
+
+
+def _claim(tmp_path, rows, agent):
+    """One real lessons claim of `rows` (queued as `finding` items): `(rc, fates by finding id)`."""
+    lane = G.gate_lane(tmp_path)
+    rc, outcomes = G.claim(G.lessons_cfg(lane, invoke_agent=agent), rows)
+    return rc, G.fates(outcomes)
 
 
 def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings(tmp_path):
-    lane = C.draft_lane(tmp_path)
-    paths = lane.paths
-    channel = D.channel_of("findings")
-    D.seed(paths, channel, [
+    agent = D.recording(D.committing("mixed"))
+
+    rc, fates = _claim(tmp_path, [
         D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial"),
         _family_row("ep-1/b/0/0"),
         D.finding_row("run-held/0", run_id="run-held", direction="adversarial"),
-    ])
-    agent = D.recording(D.committing("mixed"))
-    cfg = C.draft_author_cfg(lane, invoke_agent=agent)
+    ], agent)
 
-    assert J.mod("learning.author.drain").run_batch(cfg=cfg) == 0
+    assert rc == 0
     authored = {r["finding_id"] for r in agent.calls[0]["rows"]}
     assert authored == {"ep-1/b/0/0"}, (
         f"the two populations did not route independently: {sorted(authored)}")
-    still_held = {r["finding_id"]: r["held_reason"] for r in D.pending(paths, channel)}
-    assert still_held == {"run-adv/0": "retired_direction('adversarial')",
-                          "run-held/0": "retired_direction('adversarial')"}, (
+    assert fates == {"run-adv/0": ("held", "retired_direction('adversarial')"),
+                     "run-held/0": ("held", "retired_direction('adversarial')")}, (
         "an adversarial row stopped being held, or the family row was held with it")
 
 
 def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
-    lane = C.draft_lane(tmp_path)
-    paths = lane.paths
-    channel = D.channel_of("findings")
     missing = _family_row("ep-1/c/0/1")
     del missing["world_label_doubted"]
-    D.seed(paths, channel, [
+    agent = D.recording(D.committing("hold-vs-author"))
+
+    rc, fates = _claim(tmp_path, [
         _family_row("ep-1/b/0/0", judge_outcome="caught"),
         _family_row("ep-1/c/0/0", judge_outcome="undecidable"),
         missing,
         _family_row("ep-1/b/0/1"),
-    ])
-    agent = D.recording(D.committing("hold-vs-author"))
+    ], agent)
 
-    assert J.mod("learning.author.drain").run_batch(
-        cfg=C.draft_author_cfg(lane, invoke_agent=agent)) == 0
+    assert rc == 0
     assert agent.calls, "the positive control failed: the new-shape row authored nothing"
     assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/1"]
-    held = {r["finding_id"] for r in D.pending(paths, channel)}
+    held = {fid for fid, (fate, _reason) in fates.items() if fate == "held"}
     assert held == {"ep-1/b/0/0", "ep-1/c/0/0", "ep-1/c/0/1"}, (
-        f"a retired-word or incomplete row was consumed or authored instead of held: {held}")
-    assert {r["finding_id"] for r in D.consumed(paths, channel)} == {"ep-1/b/0/1"}
+        f"a retired-word or incomplete row was consumed or authored instead of held: {fates}")
+    assert "ep-1/b/0/1" not in fates, "the authored row was named a fate; it must stay in its batch (cited)"
 
 
 def test_921_gate_family_is_idempotent_over_a_replayed_batch(tmp_path):
-    lane = C.draft_lane(tmp_path)
-    paths = lane.paths
-    channel = D.channel_of("findings")
-    drain = J.mod("learning.author.drain")
-
-    D.seed(paths, channel, [_family_row("ep-1/b/0/0")])
+    lane = G.gate_lane(tmp_path)
     first = D.recording(D.committing("once"))
-    assert drain.run_batch(cfg=C.draft_author_cfg(lane, invoke_agent=first)) == 0
+    rc, _ = G.claim(G.lessons_cfg(lane, invoke_agent=first), [_family_row("ep-1/b/0/0")])
+    assert rc == 0 and first.calls, "the positive control failed: the first row authored nothing"
 
-    D.seed(paths, channel, [_family_row("ep-1/b/0/0"), _family_row("ep-1/b/0/1")])
     second = D.recording(D.committing("twice"))
-    assert drain.run_batch(cfg=C.draft_author_cfg(lane, invoke_agent=second)) == 0
+    rc, outcomes = G.claim(G.lessons_cfg(lane, invoke_agent=second),
+                           [_family_row("ep-1/b/0/0"), _family_row("ep-1/b/0/1")])
+
+    assert rc == 0
     assert second.calls, "the positive control failed: the NEW row authored nothing either"
     assert [r["finding_id"] for r in second.calls[0]["rows"]] == ["ep-1/b/0/1"], (
         "the replayed row authored a second lesson, or the new row stopped authoring")
+    assert G.fates(outcomes)["ep-1/b/0/0"] == ("published", None), (
+        "the row the corpus already cites was not recognised as published")
 
 
 def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_and_index(
         tmp_path):
-    ep, record = _graded(tmp_path)
+    first_store = MemoryStore()
+    ep, record = _graded(tmp_path, first_store)
 
-    first = J.enqueued_rows(record)
+    first = J.enqueued_rows(record, first_store)
     ids = [row["finding_id"] for row in first]
     assert ids, "the graded episode enqueued nothing, so there is no id to compare"
     assert len(ids) == len(set(ids)), f"colliding finding ids inside one pass: {ids}"
@@ -144,27 +133,32 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     (ep_retry / "judge.yaml").unlink()
     shutil.rmtree(ep_retry / "worlds" / T.world_id(ep_retry, "b") / "judge")
     shutil.rmtree(ep_retry / "worlds" / T.world_id(ep_retry, "c") / "judge")
-    retry_root = retry / "queue"
-    retry_root.mkdir()
-    retry_state = LearningState.open(LoopPaths(repo_root=retry, state_dir=retry_root))
+    retry_store = MemoryStore()
     J.grade_at(ep_retry, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-               draws=1, state=retry_state)
-    again = [row["finding_id"] for row in J.enqueued_rows(J.judge_record(ep_retry))]
+               draws=1, store=retry_store)
+    again = [row["finding_id"] for row in J.enqueued_rows(J.judge_record(ep_retry), retry_store)]
     assert again == ids, (
         "a retried pass minted new ids; the guard keys on the id alone, so a fresh id per "
         "retry defeats it entirely")
+    # And the guard itself: a retry into the store that already holds those ids adds nothing (the store's rule,
+    # a finding id is unique for good per tenant and kind). The retry is a real one: no record, no draws.
+    (ep_retry / "judge.yaml").unlink()
+    shutil.rmtree(ep_retry / "worlds" / T.world_id(ep_retry, "b") / "judge")
+    shutil.rmtree(ep_retry / "worlds" / T.world_id(ep_retry, "c") / "judge")
+    J.grade_at(ep_retry, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
+               draws=1, store=first_store)
+    assert [r["finding_id"] for r in J.enqueued_rows(J.judge_record(ep_retry), first_store)] == ids, (
+        "a retried pass queued a second row under an id the store already held")
 
     two = J.as_reply_text(J.reply_doc(findings=[
         J.finding_doc(topic="first"), J.finding_doc(topic="second", anchor="l-002")]))
     ep2 = J.accepted_episode(tmp_path / "two", ledgers={"b": [J.staged_row("b")], "c": []},
                              dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep2 / "worlds" / T.world_id(ep2, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    own_root = tmp_path / "two" / "queue"
-    own_root.mkdir(parents=True)
-    own = LearningState.open(LoopPaths(repo_root=tmp_path / "two", state_dir=own_root))
+    own = MemoryStore()
     J.grade_at(
-        ep2, judge=J.scripted_judge(default=two), draws=2, state=own)
-    fresh = [row["finding_id"] for row in J.enqueued_rows(J.judge_record(ep2))]
+        ep2, judge=J.scripted_judge(default=two), draws=2, store=own)
+    fresh = [row["finding_id"] for row in J.enqueued_rows(J.judge_record(ep2), own)]
     assert len(fresh) == len(set(fresh)) == 8, (
         f"two worlds x two draws x two findings did not mint eight distinct ids: {fresh}")
 
@@ -174,14 +168,15 @@ def test_921_a_world_filing_unreachable_or_incoherent_is_not_measured_and_enqueu
         ep = J.accepted_episode(tmp_path / word, ledgers={"b": [J.staged_row("b")], "c": []})
         reply = J.reply_doc(findings=[J.finding_doc(),
                                       J.finding_doc(subject="world", bucket=word)])
+        store = MemoryStore()
         J.grade_at(ep, judge=J.FakeJudge(default=J.as_reply_text(reply)),
-                   draws=1, state=env_state())
+                   draws=1, store=store)
         record = J.judge_record(ep)
         rows = J.world_rows(record)
         assert rows["b"]["measured"] is False
         assert word in rows["b"]["not_measured_reason"]
         assert record["enqueued_rows"] == 0
-        assert J.enqueued_rows(record) == [], f"a world filing {word} appended defender rows"
+        assert J.enqueued_rows(record, store) == [], f"a world filing {word} appended defender rows"
         lanes = {e["lane"] for e in record["dispositions"]
                  if e["finding_id"].endswith("/b/0/0")}
         assert lanes == {"not_measured"}, f"the investigator finding took {lanes}"
@@ -191,30 +186,27 @@ def test_921_a_world_filing_unreachable_or_incoherent_is_not_measured_and_enqueu
 
 def test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate(tmp_path):
     enqueue = _enqueue()
-    ep, record = _graded(tmp_path)
-    before = len(J.enqueued_rows(record))
+    store = MemoryStore()
+    ep, record = _graded(tmp_path, store)
+    before = len(J.enqueued_rows(record, store))
 
     for missing in ("run_id", "direction"):
         broken = _family_row()
         broken.pop(missing)
         with pytest.raises(J.refusals()) as raised:
-            enqueue.append_rows(ep, [broken], state=env_state())
+            enqueue.append_rows(ep, [broken], state=J.findings_sink(store))
         assert missing in str(raised.value)
-    assert len(J.enqueued_rows(record)) == before, "a refused row was appended anyway"
+    assert len(J.enqueued_rows(record, store)) == before, "a refused row was appended anyway"
 
-    # The blast radius the refusal exists to prevent, on the real channel.
-    paths = D.make_paths(tmp_path / "blast")
-    channel = D.channel_of("findings")
+    # The blast radius the refusal exists to prevent: the shared gate reads `run_id` / `direction` of every row of the
+    # claim unguarded, so one row without them raises out of the whole claim (the claim's items are then retried,
+    # none authored; the file queue's stuck.jsonl record is retired with the file queue, design D1/Locks).
     unkeyable = _family_row("ep-1/b/0/9")
     unkeyable.pop("run_id")
-    D.seed(paths, channel, [D.finding_row("run-adv/0", run_id="run-adv"), unkeyable])
+    agent = D.recording(D.committing("blast"))
     with pytest.raises(KeyError):
-        J.mod("learning.author.drain").run_batch(
-            cfg=D.cfg_for(paths, "findings", invoke_agent=D.committing("blast")))
-    stuck = D.stuck_records(paths, channel)
-    assert stuck, "the tick recorded nothing stuck at all"
-    assert set(stuck[-1]["row_ids"]) >= {"run-adv/0"}, (
-        "the well-formed adversarial row did not ride the malformed one into stuck.jsonl")
+        _claim(tmp_path / "blast", [D.finding_row("run-adv/0", run_id="run-adv"), unkeyable], agent)
+    assert not agent.calls, "the curator was handed a batch containing a row the gate cannot key"
 
 
 def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
@@ -251,80 +243,33 @@ def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
     assert not real, f"the judge's own appender trips the write lint: {sorted(real)}"
 
 
-def test_921_rows_are_appended_under_the_queue_lock_one_row_per_finding(tmp_path):
-    enqueue = _enqueue()
-    ep, record = _graded(tmp_path)
-    before = len(J.enqueued_rows(record))
-    big = "x" * 200_000
-
-    errors: list[BaseException] = []
-
-    def append(tag: str) -> None:
-        try:
-            enqueue.append_rows(ep, [
-                _family_row(f"ep-1/{tag}/{n}", finding=f"{tag}-{n}-{big}") for n in range(20)], state=env_state())
-        except BaseException as exc:  # noqa: BLE001 — recorded and re-raised by the assertion
-            errors.append(exc)
-
-    threads = [threading.Thread(target=append, args=(tag,)) for tag in ("p", "q")]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    assert not errors, f"an appender raised: {errors}"
-    rows = J.enqueued_rows(record)
-    assert len(rows) == before + 40, (
-        f"{len(rows) - before} rows landed of 40")
-    assert len({r["finding_id"] for r in rows}) == len(rows)
+# Retired: test_921_rows_are_appended_under_the_queue_lock_one_row_per_finding. It pinned the file queue's append lock
+# (two threads' 20 rows of 200 kB each, one line per finding). The queue file and its lock are replaced by the store's
+# insert (design r8 "Locks": the store's transaction is the only writer); that one row per finding id lands and a
+# repeated id is a duplicate is the store's contract (tests/learning/store_1278/test_items_1278.py
+# ::test_a_finding_id_is_unique_for_good_past_published_skipped_and_dead).
 
 
-def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tmp_path):
-    from defender._io import read_jsonl_rows_report
-
-    lane = C.draft_lane(tmp_path)
-    paths = lane.paths
-    channel = D.channel_of("findings")
-    D.seed(paths, channel, [_family_row("ep-0/b/0/0")])
-    queue = location_path(paths.state_root) / channel.queue
-    with queue.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(_family_row("ep-1/b/9/9"))[:120])   # NO newline: the tail is TORN
+def test_921_a_store_already_holding_a_finding_does_not_change_what_a_pass_queues(tmp_path):
+    """Surviving obligation of the torn-tail test: rows already queued stay, and the pass queues exactly its own, counted
+    on the record (a torn queue tail is file mechanics, retired with the file queue: the store has no malformed lines)."""
+    store = MemoryStore()
+    store.publish_findings("tenant", "ep-0", [_family_row("ep-0/b/0/0")], kind="finding")
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        draws=1, state=LearningState.open(paths))
+        draws=1, store=store)
 
     record = J.judge_record(ep)
-    assert Path(record["enqueued_to"]) == queue, (
-        "the pass wrote somewhere other than the queue it was pointed at, so nothing below is "
-        "about the torn tail")
-    assert record["queue_malformed_rows"] == 1, "the torn trailing line was dropped without a count"
-
-    rows, unreadable = read_jsonl_rows_report(queue)
-    assert unreadable == 1, (
-        f"{unreadable} unreadable line(s) on the queue: an appended row was concatenated onto "
-        "the torn tail")
-    ids = [r["finding_id"] for r in rows]
-    assert "ep-0/b/0/0" in ids, (
-        "the family row that was already queued went with the torn tail")
-    family_ids = [r["finding_id"] for r in rows
-                  if r.get("direction") == "family" and r["finding_id"] != "ep-0/b/0/0"]
-    assert len(family_ids) == record["enqueued_rows"], (
-        f"the record claims {record['enqueued_rows']} enqueued rows and {len(family_ids)} are "
-        "readable; a row of this pass's own was swallowed by the fragment")
-
-    # On the real channel the tick drains the queue rather than stuck-recording the whole batch
-    # behind one torn line.
-    agent = D.recording(D.committing("torn-tail"))
-    assert J.mod("learning.author.drain").run_batch(
-        cfg=C.draft_author_cfg(lane, invoke_agent=agent)) == 0
-    assert D.stuck_records(paths, channel) == [], "a torn trailing row stuck-recorded the batch"
-    authored = {r["finding_id"] for call in agent.calls for r in call["rows"]}
-    assert "ep-0/b/0/0" in authored, (
-        "the row already queued stopped draining because of a torn line written after it")
+    assert record["queue_malformed_rows"] == 0, "the store reported a malformed line, but it holds none"
+    ids = [r["finding_id"] for r in store.rows(D.channel_of("findings"))]
+    assert "ep-0/b/0/0" in ids, "the row that was already queued went missing"
+    own = [i for i in ids if i != "ep-0/b/0/0"]
+    assert own and len(own) == record["enqueued_rows"], (
+        f"the record claims {record['enqueued_rows']} enqueued rows and the store holds {len(own)} of this pass's own")
 
 
 def test_921_archived_drift_reaches_the_judge_and_a_family_incoherent_finding_keeps_the_defender_lane_open(
@@ -349,7 +294,8 @@ def test_921_archived_drift_reaches_the_judge_and_a_family_incoherent_finding_ke
 
     judge = J.scripted_judge(family_default=J.as_reply_text(J.family_reply(
         findings=[J.finding_doc(subject="world", bucket="incoherent")])))
-    J.grade_at(ep, judge=judge, draws=1, state=env_state())
+    store = MemoryStore()
+    J.grade_at(ep, judge=judge, draws=1, store=store)
 
     assert any("DRIFT-MARKER-921" in p for p in judge.prompts), (
         "pre-flight's recorded drift never reached the judge")
@@ -357,7 +303,7 @@ def test_921_archived_drift_reaches_the_judge_and_a_family_incoherent_finding_ke
     family_lanes = [e["lane"] for e in record["dispositions"]
                     if "/family/" in e["finding_id"]]
     assert family_lanes == ["world"], f"the family's world finding took {family_lanes}"
-    assert J.enqueued_rows(record), (
+    assert J.enqueued_rows(record, store), (
         "the family call's world finding closed the worlds' defender lane")
     assert J.world_rows(record)["b"]["bucket"], "the family record lost its per-world grading"
 
@@ -368,8 +314,9 @@ def test_921_a_world_whose_facts_a_gap_kept_back_is_not_measured_and_enqueues_no
     kept = J.as_reply_text(J.reply_doc(gaps=[gap]))
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             labels=("a", "b"))
+    store = MemoryStore()
     J.grade_at(ep, judge=J.FakeJudge(default=kept, family_default=J.as_reply_text(
-        J.family_reply())), draws=2, state=env_state())
+        J.family_reply())), draws=2, store=store)
 
     record = J.judge_record(ep)
     row = J.world_rows(record)["b"]
@@ -378,14 +325,15 @@ def test_921_a_world_whose_facts_a_gap_kept_back_is_not_measured_and_enqueues_no
     lanes = {e["finding_id"].rsplit("/", 1)[1]: e["lane"] for e in record["dispositions"]
              if "/b/0/" in e["finding_id"]}
     assert lanes == {"0": "not_measured", "1": "user_record"}, lanes
-    assert J.enqueued_rows(record) == [], "a world the gap kept facts from was authored"
+    assert J.enqueued_rows(record, store) == [], "a world the gap kept facts from was authored"
 
     ok = J.accepted_episode(tmp_path / "ok", ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
+    ok_store = MemoryStore()
     J.grade_at(
         ok, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        draws=2, state=env_state())
-    assert J.enqueued_rows(J.judge_record(ok)), "the positive control enqueued nothing"
+        draws=2, store=ok_store)
+    assert J.enqueued_rows(J.judge_record(ok), ok_store), "the positive control enqueued nothing"
 
 
 def test_921_taking_a_world_out_of_measurement_needs_unanimous_draws(tmp_path):
@@ -396,13 +344,14 @@ def test_921_taking_a_world_out_of_measurement_needs_unanimous_draws(tmp_path):
     plain = J.as_reply_text(J.reply_doc())
     minority = J.FakeJudge(replies=[incoherent, plain, plain], default=plain,
                            family_default=J.as_reply_text(J.family_reply()))
-    J.grade_at(ep, judge=minority, draws=3, state=env_state())
+    store = MemoryStore()
+    J.grade_at(ep, judge=minority, draws=3, store=store)
 
     record = J.judge_record(ep)
     row = J.world_rows(record)["b"]
     assert row["draws_disagree"] is True, row
     assert row["measured"] is None, row
-    assert J.enqueued_rows(record) == [], "a world whose draws disagree queued defender rows"
+    assert J.enqueued_rows(record, store) == [], "a world whose draws disagree queued defender rows"
     assert {e["lane"] for e in record["dispositions"]
             if e["finding_id"].rsplit("/", 1)[1] == "0"} == {"draws_disagree"}
 
@@ -410,7 +359,7 @@ def test_921_taking_a_world_out_of_measurement_needs_unanimous_draws(tmp_path):
                                    ledgers={"b": [J.staged_row("b")], "c": []},
                                    labels=("a", "b"))
     J.grade_at(unanimous, judge=J.FakeJudge(default=incoherent, family_default=J.as_reply_text(
-        J.family_reply())), draws=3, state=env_state())
+        J.family_reply())), draws=3, store=MemoryStore())
     row = J.world_rows(J.judge_record(unanimous))["b"]
     assert row["draws_disagree"] is False, row
     assert row["measured"] is False, (

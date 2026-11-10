@@ -1,7 +1,6 @@
 """Shared machinery for #1007's grade-the-world spec — NO test scripts."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
 
 import json
 from pathlib import Path
@@ -130,29 +129,40 @@ def contrast_family(tmp_path: Path, monkeypatch, worlds: Any = None, **kw: Any) 
 
 
 def loop_paths(tmp_path: Path, *, repo_root: Path | None = None):
-    """A `LoopPaths` rooted in `tmp_path`. `state_dir` is kept apart from `repo_root` (queues are
-    mutable state, corpora checked-in trees) so a scenario can move one without the other.
-    """
+    """A `LoopPaths` rooted in `tmp_path` (a checkout-shaped tree whose corpora a scenario may fill). #1278: the
+    paths carry no queue state; a scenario's findings go to a store (`learning_state` / `queue_rows`)."""
     cfg = mod("learning.core.config")
     root = repo_root if repo_root is not None else tmp_path / "repo"
     (root / "defender").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "learning-state").mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
-    return cfg.LoopPaths(repo_root=root, state_dir=tmp_path / "learning-state")
+    return cfg.LoopPaths(repo_root=root)
+
+
+#: The in-memory findings store of each scenario, keyed by its paths' checkout (a scenario's `tmp_path` is its own).
+_STORES: dict[str, Any] = {}
+
+
+def _store_of(paths: Any) -> Any:
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
+
+    return _STORES.setdefault(str(paths.repo_root), MemoryStore())
+
+
+def findings_store(paths: Any) -> Any:
+    """`paths`' scenario findings store itself, for a grade (`grade_episode(..., store=)`)."""
+    return _store_of(paths)
 
 
 def learning_state(paths: Any):
-    """A `LearningState` handle over `paths`' state root (#1135) — what every verb taking `state=` wants."""
-    return mod("learning.core.state").LearningState.open(paths)
+    """The findings sink (`enqueue.StoreFindings`) over `paths`' scenario store (#1278: the learning store replaced the
+    file-state handle): what every appender taking `state=` wants. Rows land in the store `queue_rows` reads."""
+    from defender.tests.support.learning.judge import _judge_921 as J
+
+    return J.findings_sink(_store_of(paths))
 
 
 def queue_rows(paths: Any, channel: Any) -> list[dict]:
-    """Every row on a state `Channel`'s queue under `paths`' state root, in written order; a
-    missing file reads as no rows."""
-    path = location_path(paths.state_root) / channel.queue
-    if not path.is_file():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()]
+    """Every row of `channel`'s kind in `paths`' scenario store, in insertion order."""
+    return _store_of(paths).rows(channel)
 
 
 def questioner_lesson(paths: Any, name: str = "q-lesson", *, body: str = "Ask the corpus.",

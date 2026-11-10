@@ -19,16 +19,24 @@ from defender import _yaml
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.core._state1135 import env_state
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 
+#: The findings store the default of `_grade` and `_queue` (#1278: an operator's pass inserts into the learning
+#: store); one per test.
+_DEFAULT_STORE: list[MemoryStore] = []
+
+
 @pytest.fixture(autouse=True)
-def _roots(tmp_path, monkeypatch):
-    """`env_state()` (the default state of `_grade` and `_queue`) opens this test's own
-    learning-state root."""
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+def _roots():
+    _DEFAULT_STORE.clear()
+
+
+def env_state() -> MemoryStore:
+    if not _DEFAULT_STORE:
+        _DEFAULT_STORE.append(MemoryStore())
+    return _DEFAULT_STORE[0]
 
 
 @dataclass
@@ -108,12 +116,12 @@ def _judge(worlds: dict[str, Any] | None = None, *, fault: Any = S.CLEAN) -> _Ju
 
 def _grade(tmp_path: Path, ep: Path, judge: Any, **kw: Any) -> Any:
     """`grade_episode` through its own seams (`J.grade_at`): one draw, a recording `git show`,
-    this test's state handle. The judge reads only the episode it is handed, so `tmp_path`
+    this test's findings store. The judge reads only the episode it is handed, so `tmp_path`
     threads nothing in."""
     del tmp_path
     kw.setdefault("draws", 1)
     kw.setdefault("git_show", J.FakeGitShow())
-    kw.setdefault("state", env_state())
+    kw.setdefault("store", env_state())
     return J.grade_at(ep, judge=judge, **kw)
 
 
@@ -136,7 +144,7 @@ def _row(ep: Path, label: str) -> dict:
 
 
 def _queue(state: Any = None, channel: Any = FINDINGS) -> list[dict]:
-    """A queue's rows, read through the state handle's own reader."""
+    """A kind's queued rows, read through the store's reader."""
     return (state if state is not None else env_state()).rows(channel)
 
 
@@ -273,7 +281,7 @@ def test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_find
     S.outcome_record(ep1, "accepted", unservable=[
         {"world": "b", "reason": S.REASON_UNSERVABLE, "call": _call("user:alice")}])
     judge1 = _judge({"c": _world_reply("decision-discipline", ("edr",))})
-    _grade(one, ep1, judge1, state=_state1135.state_over(one / "state"))
+    _grade(one, ep1, judge1, store=MemoryStore())
     assert S.judge_called_for(judge1, T.fixture_world_id("c")), "the positive control: a one-unservable family was not graded"
     assert _record(ep1).get("validity") == "usable"
 
@@ -284,10 +292,10 @@ def test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_find
     S.outcome_record(ep, "accepted", unservable=[
         {"world": "b", "reason": S.REASON_UNSERVABLE, "call": _call("user:alice")}])
     S.world_record(ep, "c", S.REASON_DID_NOT_FINISH, detail="the sibling exited 1")
-    state = _state1135.state_over(two / "state")
+    state = MemoryStore()
     judge = _judge({"b": _world_reply("lead-set", ("idp",)),
                     "c": _world_reply("lead-quality", ("idp",))})
-    _grade(two, ep, judge, state=state)
+    _grade(two, ep, judge, store=state)
 
     rec = _record(ep)
     assert judge.calls == 0, f"an unusable family bought model calls: {judge.agent_ids}"
@@ -313,9 +321,9 @@ def test_1224_world_bucket_is_the_judge_models_output(tmp_path):
         assert getattr(_validate(_text(reply)), "bucket", None) == bucket, (
             f"validate_reply did not admit the bucket {bucket!r} as the reply's own")
 
-        state = _state1135.state_over(root / "state")
+        state = MemoryStore()
         judge = _judge({"b": reply})
-        _grade(root, ep, judge, state=state)
+        _grade(root, ep, judge, store=state)
         assert _row(ep, "b").get("bucket") == bucket, (
             f"the model answered {bucket!r} and the record holds "
             f"{_row(ep, 'b').get('bucket')!r} — a bucket that did not come from the reply")
@@ -398,8 +406,8 @@ def test_1224_drift_on_the_discriminating_call_discards_nothing_mechanically(tmp
 
     kept_root = tmp_path / "gradable"
     ep = episode(kept_root)
-    state = _state1135.state_over(kept_root / "state")
-    _grade(kept_root, ep, _judge({"b": _world_reply(findings=[_finding("kept")])}), state=state)
+    state = MemoryStore()
+    _grade(kept_root, ep, _judge({"b": _world_reply(findings=[_finding("kept")])}), store=state)
     rec = _record(ep)
     for key in ("episode_outcome", "verdict_word"):
         assert key not in rec, f"the record carries the retired {key!r}: {rec!r}"
@@ -411,11 +419,11 @@ def test_1224_drift_on_the_discriminating_call_discards_nothing_mechanically(tmp
 
     dropped_root = tmp_path / "discard"
     ep = episode(dropped_root)
-    state = _state1135.state_over(dropped_root / "state")
+    state = MemoryStore()
     incoherent = _finding("drift spoils the world", subject="world", bucket="incoherent")
     _grade(dropped_root, ep, _judge(
         {"b": _world_reply(findings=[_finding("dropped"), incoherent]),
-         "c": _world_reply(findings=[incoherent])}), state=state)
+         "c": _world_reply(findings=[incoherent])}), store=state)
     assert _row(ep, "b").get("measured") is False, (
         f"the positive control: the model's incoherent finding was not honoured: "
         f"{_row(ep, 'b')!r}")
@@ -431,7 +439,7 @@ def _gate_case(root: Path, word: str | None, *, raw: str | None = None) -> tuple
     elif word is not None:
         S.outcome_record(ep, word, reason=f"MARKER-REASON-{word}")
     judge = _judge({"b": _world_reply(findings=[_finding("gate-finding")])})
-    _grade(root, ep, judge, state=_state1135.state_over(root / "state"))
+    _grade(root, ep, judge, store=MemoryStore())
     return ep, judge
 
 
@@ -461,7 +469,7 @@ def test_1224_judge_grades_only_an_accepted_outcome(tmp_path):
         assert (stamp.get("outcome"), stamp.get("reason")) == (word, f"MARKER-REASON-{word}"), (
             f"{word}: the stamp reads {stamp!r}")
         assert judge.calls == 0, f"{word}: the gate let a model call through"
-        assert _all_queued(_state1135.state_over(root / "state")) == []
+        assert _all_queued(MemoryStore()) == []
 
     no_record: dict[str, str] = {}
     for case, raw in (("absent", None), ("empty", ""),
@@ -663,10 +671,10 @@ def test_input_judge_gives_an_unservable_world_a_bucket(tmp_path):
     S.outcome_record(ep, "accepted", unservable=[
         {"world": "c", "reason": S.REASON_UNSERVABLE, "call": _call("user:carol")}])
     plant(ep, "c")
-    state = _state1135.state_over(one / "state")
+    state = MemoryStore()
     judge = _judge({"b": _world_reply(findings=[_finding("b-graded")]),
                     "c": _world_reply("lead-set", ("idp",), findings=[_finding("c-said")])})
-    _grade(one, ep, judge, state=state)
+    _grade(one, ep, judge, store=state)
     assert _row(ep, "b").get("bucket") == "lead-quality", "the positive control: b was not graded"
     for key in ("bucket", "findings"):
         assert not _row(ep, "c").get(key), (
@@ -680,8 +688,8 @@ def test_input_judge_gives_an_unservable_world_a_bucket(tmp_path):
     S.world_record(ep, "b", S.REASON_UNSERVABLE, call=_call("user:alice"))
     plant(ep, "b")
     plant(ep, "c")
-    state = _state1135.state_over(two / "state")
-    _grade(two, ep, _judge({"b": _world_reply(), "c": _world_reply()}), state=state)
+    state = MemoryStore()
+    _grade(two, ep, _judge({"b": _world_reply(), "c": _world_reply()}), store=state)
     assert _record(ep).get("validity") == "unusable"
     assert all(not r.get("findings") and not r.get("bucket") for r in _rows(ep).values()), (
         "an unusable family carries findings")
@@ -879,7 +887,7 @@ def test_1224_judge_prompt_over_a_world_with_hundreds_of_verified_claims(tmp_pat
         judge = _judge({"b": _world_reply("lead-quality", ("idp",)),
                         "c": _world_reply("lead-set", ("idp",),
                                           findings=[_finding("unchanged", bucket="lead-set")])})
-        _grade(root, ep, judge, state=_state1135.state_over(root / "state"))
+        _grade(root, ep, judge, store=MemoryStore())
         return ep, judge
 
     monkeypatch.setenv(J.CAP_KNOB, str(cap))
@@ -931,10 +939,10 @@ def test_judge_is_run_again_on_an_episode_it_already_graded(tmp_path):
         "verdict_word": "survived", "episode_outcome": "gradable",
         "worlds": [{"world": "b", "bucket": "lead-set", "withheld_reason": None,
                     "doctored_answer_served": True}]}), encoding="utf-8")
-    state = _state1135.state_over(tmp_path / "old" / "state")
+    state = MemoryStore()
     third = _judge({"b": _world_reply()})
     try:
-        _grade(tmp_path / "old", old, third, state=state)
+        _grade(tmp_path / "old", old, third, store=state)
     except S.judge_refused_cls():
         pass  # a named refusal is "not graded"; any other exception is a crash and propagates
     assert third.calls == 0, "an old-manifest episode bought model calls"
@@ -958,9 +966,9 @@ def test_1224_enqueue_admits_a_finding_citing_a_systems_samples_section(tmp_path
     assert "cites-siemx" not in topics, "a finding citing an unavailable section was enqueued"
     assert _lanes(ep, "b").get("cites-siemx") == "unqueueable", _lanes(ep, "b")
 
-    fresh = _state1135.state_over(tmp_path / "re-enqueue")
+    fresh = MemoryStore()
     with pytest.raises(S.judge_refused_cls()) as refused:
-        S.sym(S.JUDGE_ENQUEUE, "enqueue_report")(ep, _row(ep, "b"), state=fresh, drawn=None)
+        S.sym(S.JUDGE_ENQUEUE, "enqueue_report")(ep, _row(ep, "b"), state=J.findings_sink(fresh), drawn=None)
     assert "drawn" in str(refused.value), f"the refusal does not name drawn=: {refused.value}"
     assert _queue(fresh, QUESTIONER_FINDINGS) == [], "a bare re-enqueue appended rows"
 
@@ -969,9 +977,9 @@ def test_1224_curator_gate_authors_a_row_built_from_the_judge_models_output(tmp_
     gate = S.sym(S.LESSONS_RUN, "_gate_family")
     validate_row = S.sym(S.JUDGE_ENQUEUE, "_validate_row")
     ep = S.judged_episode(tmp_path)
-    state = _state1135.state_over(tmp_path / "state")
+    state = MemoryStore()
     _grade(tmp_path, ep, _judge({"b": _world_reply(findings=[_finding("authored-row")])}),
-           state=state)
+           store=state)
     rows = _queue(state)
     assert rows, "the pass put no row on the defender queue"
     for row in rows:

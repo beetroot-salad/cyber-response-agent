@@ -16,16 +16,15 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-import json
 import dataclasses
 
 import pytest
 
-from defender.tests.support.shared._locations_1210 import location_path
 from defender.learning.author.version_control import DeliveryRefused
-from defender.learning.core import drains, persist
-from defender.learning.core.config import LoopPaths
+from defender.learning.core import drains
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.leads.lead_extraction import LeadAuthorError
+from defender.learning.store import Outcome
 from defender.systems import verbs
 from defender.tests.support.runtime.engine._declared869 import (
     ADAPTERS_REL,
@@ -43,10 +42,7 @@ from defender.tests.support.runtime.engine._declared869 import (
 )
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._lead_author_1134 import draft_lead_deps, lead_lane
-from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-from defender.tests.support.learning.core import _state1135
-from defender.learning.core.state import PITFALLS
-from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
+from defender.tests.support.learning.core._declared870 import Claim, Spawn as Spawn870, tick
 from defender import _git
 from defender.learning.leads import lead_author
 from defender.tests.support.runtime.engine._declared869 import (
@@ -58,7 +54,6 @@ from defender.tests.support.runtime.engine._declared869 import (
     head_sha,
     write,
 )
-from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.learning.curation._lead_author_1134 import (
     run_pitfalls,
 )
@@ -238,19 +233,15 @@ def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypat
     repo = seed_tree(tmp_path, adapters=(), markers=("elastic",), skills=("elastic",),
                      catalog=())
     (repo / ADAPTERS_REL).rmdir()
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")],
-        state=_state1135.state_for_paths(paths),
-    )
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=repo)
+    claim = Claim()
+    claim.add(pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys"))
     capsys.readouterr()
 
     with pytest.raises(LeadAuthorError):
-        drains._invoke_pitfalls(
-            paths, _state1135.state_for_paths(paths), on_curated=lambda _d: None, label=LEAD_AUTHOR_DRAIN_LABEL)
+        tick(lane, Spawn870(None), claim)
 
-    assert len(persist.read_pitfalls(_state1135.state_for_paths(paths))) == 2
-    assert not (location_path(paths.state_root) / PITFALLS.consumed).exists()
+    assert claim.outcomes == {} and claim.committed == set(), "a resolver failure decided the claim's rows"
     assert "(continuing)" not in loop_log(capsys)
 
 
@@ -276,13 +267,8 @@ def test_run_pitfalls_resolves_systems_before_the_curator_is_spawned(tmp_path, m
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic", "mcpsys"),
                               skills=("elastic",), catalog=())
-    state = open_state(lane.paths)
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "elastic"),
-         pitfall_row("r:l-001:0", "late"),
-         pitfall_row("r:l-002:0", "mcpsys")],
-        state=state,
-    )
+    claim = Claim()
+    claim.add(pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "late"), pitfall_row("r:l-002:0", "mcpsys"))
 
     def edit(root: Path) -> None:
         commit_paths(product, write_adapter(product, "late"), message="an adapter lands mid-tick")
@@ -290,7 +276,7 @@ def test_run_pitfalls_resolves_systems_before_the_curator_is_spawned(tmp_path, m
 
     spawn = Spawn(edit, root=lane.root)
     capsys.readouterr()
-    assert run_pitfalls(lane, state, spawn) == 0
+    assert tick(lane, spawn, claim) == 0
 
     assert spawn.systems_seen == ["elastic"]
     assert "late" in adapter_declared_systems(product)   # the tree DOES declare it, by the end
@@ -310,18 +296,16 @@ def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, capsy
                                catalog=(), name="worktree")
     assert "wtonly" not in declared_systems(_git.REPO_ROOT)
 
-    state = open_state(lane.paths)
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "wtonly"), pitfall_row("r:l-001:0", "wtonly")], state=state,
-    )
+    claim = Claim()
+    claim.add(pitfall_row("r:l-000:0", "wtonly"), pitfall_row("r:l-001:0", "wtonly"))
     spawn = Spawn(lambda root: write(agent_marker_file(root, "wtonly"), "# pitfalls\n- x\n"),
                   root=lane.root)
     capsys.readouterr()
 
-    assert run_pitfalls(lane, state, spawn) == 0
+    assert tick(lane, spawn, claim) == 0
     assert spawn.systems_seen == ["wtonly"]
     assert spawn.handoffs[0]["path"] == "agent/skills/wtonly/execution.md"
-    assert persist.read_pitfalls(state) == []
+    assert claim.committed == {"r:l-000:0", "r:l-001:0"} and claim.outcomes == {}
     assert lane.text_at_tip("agent/skills/wtonly/execution.md") == "# pitfalls\n- x\n"
 
 
@@ -331,10 +315,8 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
 
     product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic",),
                               skills=("elastic",), catalog=("elastic",))
-    state = open_state(lane.paths)
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")], state=state,
-    )
+    claim = Claim()
+    claim.add(pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic"))
 
     def land_an_adapter_then_plant(root: Path) -> None:
         commit_paths(product, write_adapter(product, "mcpsys"),
@@ -343,10 +325,10 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
 
     before = head_sha(product)
     with pytest.raises(LeadAuthorError, match="mcpsys"):
-        run_pitfalls(lane, state, Spawn(land_an_adapter_then_plant, root=lane.root))
+        tick(lane, Spawn(land_an_adapter_then_plant, root=lane.root), claim)
     # By the end of the tick the tree declares mcpsys; the tick's resolved value still does not.
     assert "mcpsys" in adapter_declared_systems(product)
-    assert persist.read_pitfalls(state), "the batch must survive a refused tick"
+    assert claim.outcomes == {} and claim.committed == set(), "a refused tick decided the claim's rows"
     assert before != head_sha(product), "the plant's own commit is the mid-tick change"
     assert lane.commits() == [], "the refused tick committed into the batch"
 
@@ -373,17 +355,17 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
 def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys):
     """Lane 1 (lead author) leaves residue in the draft and refuses; lane 2 (pitfalls) then
     commits into the same batch. The residue never lands: the drain re-syncs the draft per claim."""
+    from types import SimpleNamespace
+
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     _product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic",),
                                skills=("elastic",), catalog=("elastic",), tenant=curation_tenant())
     paths = lane.paths
-    state = open_state(paths)
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")], state=state,
-    )
-    # The drain's own input: one queued lead-author request, which lane 1 will refuse.
-    write(location_path(paths.state_root) / "author-queue" / "case-1.json",
-          json.dumps(curation_row("case-1", _run_dir())) + "\n")
+    run_dir = _run_dir()
+    rows = [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")]
+    # The claim the store hands the drain: one queued lead-author request (which lane 1 will refuse) and two pitfalls.
+    held = SimpleNamespace(items=[("curation_request", "case-1", curation_row("case-1", run_dir)),
+                                  *[("pitfall", r["pitfall_id"], r) for r in rows]])
 
     residue = "residue that lane 1 left behind\n"
     lane1_calls: list[Path] = []
@@ -394,19 +376,19 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
         agent_skill_md(lane.root, "elastic").write_text(residue, encoding="utf-8")
         raise LeadAuthorError("lane 1 refuses this marker")
 
-    def lane2(_paths, _state, *, box=None, **_kw):
-        return run_pitfalls(lane, _state, Spawn(
+    def lane2(_paths, _state, *, items, outcomes, on_curated, **_kw):
+        return run_pitfalls(lane, None, Spawn(
             lambda root: write(agent_marker_file(root, "elastic"), "# e\n## Common pitfalls\n- x\n"),
-            root=lane.root))
+            root=lane.root), items=items, outcomes=outcomes, on_curated=on_curated)
 
     capsys.readouterr()
-    drains._drain_lead_author(paths, state, lane1, lane2, batch=lane.batch,
-                              claims=state.has_requests(), directory=directory_for_root())
+    outcomes: dict = {}
+    drains._store_lead_work(paths, lane1, lane2, box=None, batch=lane.batch, held=held, feedback=None, outcomes=outcomes)
 
     # Both lanes actually ran, and lane 1 actually refused: without this the residue claim
     # would be green over a drain that never reached either lane.
     assert lane1_calls, "lane 1 was never served, so it left no residue to carry"
-    assert (location_path(paths.state_root) / "author-queue" / "failed" / "case-1.json").is_file()
+    assert outcomes.get(("curation_request", "case-1")) == Outcome.waiting(), "lane 1 refusal was not answered with a wait"
 
     assert lane.commits(), "lane 2 never committed, so the residue claim is vacuous"
     committed = lane.git("log", lane.tip(), "-p", "--", skill_rel).stdout
@@ -517,7 +499,7 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
     spawn = LeadAuthorSpawn()
     deps = dataclasses.replace(
         lead_author.build_lead_author_deps(
-            paths, state=C.open_state(paths), trees=C.draft_trees(lane), batch=lane.batch),
+            paths, trees=C.draft_trees(lane), batch=lane.batch),
         invoke_agent=spawn, extract=lambda _rd: ([], []),
     )
     assert deps.systems == frozenset({"tacit-knowledge"})

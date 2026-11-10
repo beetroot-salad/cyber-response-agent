@@ -142,6 +142,26 @@ def test_d4_launch_location_check(tmp_path, data_root):
     assert spawn.launches, f"a tenant-location source started no sibling: {_result!r}"
 
 
+def _a_findings_store(monkeypatch) -> None:
+    """The launcher's judge inserts its findings into the learning store at the host's database address (#1278): the
+    in-memory stand-in for the store's two findings verbs, reached through that address. What is graded and where the
+    episode record lands is this file's; the store's rows and rules are `tests/learning/store_1278`'s."""
+    import contextlib
+
+    from defender.learning import store
+    from defender.tenancy import database_address_variable
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
+
+    sink = MemoryStore()
+
+    @contextlib.contextmanager
+    def blocking(_dsn, **_knobs):
+        yield sink
+
+    monkeypatch.setenv(database_address_variable(), "postgresql://a-store-that-records/findings")
+    monkeypatch.setattr(store, "blocking", blocking)
+
+
 def _graded_launch(tmp_path: Path, monkeypatch, root: Path, *, collide: bool):
     """ONE whole episode through the real launcher, judge included (`J.FakeSibling` leaves
     finished, archivable siblings, so the family is accepted and the JUDGE step runs). With
@@ -149,6 +169,7 @@ def _graded_launch(tmp_path: Path, monkeypatch, root: Path, *, collide: bool):
     Returns (status, episode dir)."""
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)  # the retired knob: nothing may read it
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+    _a_findings_store(monkeypatch)
     _base, src = H.tenant_source(root, TID, published=True)  # a branch launch pins a published commit
     if collide:
         (H.runs_dir(root, TID) / "b").mkdir()

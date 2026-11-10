@@ -176,7 +176,7 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     from defender.learning.judge import JudgeRefused, grade_episode
     from defender.records import RunRefused
     from defender.tests.support.learning.judge import _judge_921 as J
-    from defender.tests.support.learning.core._state1135 import env_state
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     est, src = P.launch_source(tmp_path)
@@ -190,16 +190,15 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     ep = episodes / episode_id
     (ep / "judge.yaml").unlink(missing_ok=True)
     other = P.second_tenant(location_path(P.data_root)(), H.U_ID)
-    state_dir = tmp_path / "learning-state"
-    before = P.tree(state_dir)
+    refused_store = MemoryStore()
 
     judge = J.scripted_judge()
     err = H.raised(grade_episode, other.runs_repository(), episode_id, judge=judge,
-                   state=env_state())
+                   store=refused_store)
     assert isinstance(err, (JudgeRefused, RunRefused, TenantRefused,
                             FileNotFoundError)), f"another tenant graded the episode: {err!r}"
     assert not (ep / "judge.yaml").exists(), "a grade was written for another tenant"
-    assert P.tree(state_dir) == before, "the refused grade touched the learning state"
+    assert not refused_store.items, "the refused grade queued findings"
     assert not os.path.lexists(S.episodes_dir(location_path(P.data_root)(), H.U_ID) / episode_id)
 
     own = _tenant.accept_tenant(fixture_data_root(location_path(P.data_root)()), P.LAUNCH_TENANT,
@@ -211,7 +210,7 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     handle.close()
     moved.rename(ep / "runs")
 
-    graded = grade_episode(own, episode_id, judge=J.scripted_judge(), state=env_state())
+    graded = grade_episode(own, episode_id, judge=J.scripted_judge(), store=MemoryStore())
     assert graded is not None
     assert (ep / "judge.yaml").is_file(), "control: the own tenant did not grade"
 

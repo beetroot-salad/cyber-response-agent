@@ -2,12 +2,9 @@
 atomicity suites."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from defender.learning.core.state import FINDINGS
 from defender.tests.support.learning.curation import _curator1134 as C
-from defender.tests.support.shared._locations_1210 import location_path
 
 
 class DraftRepo:
@@ -21,8 +18,10 @@ class DraftRepo:
         self.author = author_mod
         self.paths = lane.paths
         self.lessons_dir = lane.lessons_dir
-        self.state = C.open_state(lane.paths)
         self._cfg = None
+        self.rows: list[dict] = []
+        #: The fates the claims wrote, keyed `(kind, key)` (the drain's `outcomes=` map).
+        self.outcomes: dict = {}
 
     @classmethod
     def over(cls, tmp_path: Path, *, files: dict[str, str | bytes] | None = None) -> DraftRepo:
@@ -33,20 +32,29 @@ class DraftRepo:
     @property
     def cfg(self):
         if self._cfg is None:
-            self._cfg = C.draft_author_cfg(self.lane, state=self.state)
+            self._cfg = C.draft_author_cfg(self.lane)
         return self._cfg
 
-    @property
-    def queue(self) -> Path:
-        return location_path(self.paths.state_root) / FINDINGS.queue
+    def add(self, finding_id: str, *, run_id: str | None = None) -> dict:
+        """Claim a finding row `finding_id` (the lessons gate admits it): the claim's items are these rows."""
+        from defender.tests.support.learning.curation._drain719 import finding_row
 
-    @property
-    def consumed(self) -> Path:
-        return location_path(self.paths.state_root) / FINDINGS.consumed
+        row = finding_row(finding_id, run_id=run_id or finding_id.split("/")[0])
+        self.rows.append(row)
+        return row
 
-    @property
-    def deadletter(self) -> Path:
-        return location_path(self.paths.state_root) / FINDINGS.deadletter
+    def items(self) -> list[tuple[str, str, dict]]:
+        """The claim's items, `(kind, key, payload)`, as the store hands the curator its rows (#1278 D1)."""
+        return [("finding", r["finding_id"], r) for r in self.rows]
+
+    def run(self, cfg=None, **kw) -> int:
+        """`run_batch` over the claim's items (`cfg`, else this draft's), the fates written to `outcomes`."""
+        return self.author.run_batch(cfg=cfg or self.cfg, items=self.items(), outcomes=self.outcomes, **kw)
+
+    def fate(self, finding_id: str):
+        """`(outcome name, reason)` the claim wrote for `finding_id`, or `None` if it named none."""
+        out = self.outcomes.get(("finding", finding_id))
+        return None if out is None else (out.name, out.reason)
 
     def write_lesson(self, name: str, finding_id: str) -> None:
         """Write a lesson citing `finding_id` into the draft's corpus; no git (the loop commits)."""
@@ -59,15 +67,3 @@ class DraftRepo:
             "created_at: 2026-05-09T00:00:00+00:00\n"
             "---\n\nbody\n"
         )
-
-
-def rows_without_attempts(text: str) -> list[dict]:
-    """The queue's rows with the retirement counter dropped."""
-    return [
-        {k: v for k, v in json.loads(line).items() if k != "attempts"}
-        for line in text.splitlines() if line.strip()
-    ]
-
-
-def attempts(text: str) -> list[int]:
-    return [json.loads(line).get("attempts") for line in text.splitlines() if line.strip()]

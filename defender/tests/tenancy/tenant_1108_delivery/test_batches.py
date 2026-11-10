@@ -144,7 +144,7 @@ def test_start_batch_refuses_an_id_whose_draft_or_branch_exists(repo, left):
         assert files_under(batch.draft_root) == draft
 
 
-def test_discard_removes_the_draft_and_deliver_picks_up_the_branch(repo):
+def test_discard_removes_the_draft_and_finish_still_delivers_the_branch(repo):
     tenant = repo[0]
     http = ForgeHTTP()
     d = delivery(repo, http)
@@ -155,7 +155,9 @@ def test_discard_removes_the_draft_and_deliver_picks_up_the_branch(repo):
     assert not os.path.lexists(batch.draft_root)
     assert _drafts(tenant) == []
     assert branch_tip(tenant.knowledge, batch.branch) == sha
-    opened(delivery(repo, http).deliver("discarded"))
+    opened(d.finish(batch))
+    # retired here: a fresh delivery picking the branch up by the on-disk record; that is a takeover over the store's
+    # record (design D11, A2 D1): tenant_1108_p4/test_1278_tick.py::test_o1_a_pushed_branch_with_no_pr_is_taken_over_and_gets_its_one_pr
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
 
 

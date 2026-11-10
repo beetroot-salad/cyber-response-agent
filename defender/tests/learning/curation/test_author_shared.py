@@ -1,16 +1,13 @@
-"""Unit tests for the author's shared result gates and the state lock (``_author_shared``)."""
-from __future__ import annotations
+"""Unit tests for the author's shared result gates (``_author_shared``).
 
-import errno
-from pathlib import Path
+Retired with the file queue (design r8 Locks): the `state.lock` / `flock_or_skip` tests (acquire then release, False when
+held, a non-contention `OSError` propagating, the lock-file handle closed when it does): the handle's lock is deleted;
+the claim's exclusion is the store's (`tests/tenancy/tenant_1108_p4/test_1278_tick.py`)."""
+from __future__ import annotations
 
 import pytest
 
-from defender import _flock
 from defender.learning.author import shared as shared  # type: ignore[import-not-found]
-from defender.learning.core import state as state_mod
-from defender.learning.core.state import TRY_ONCE, LockRole
-from defender.tests.support.learning.core import _state1135
 
 
 @pytest.mark.parametrize("noun", ["findings", "observations"])
@@ -27,67 +24,6 @@ def test_result_list_normalizes_and_validates():
     assert shared.result_list({"committed": ["a"]}, "committed") == ["a"]
     with pytest.raises(shared.AuthorError, match="must be a list"):
         shared.result_list({"committed": "x"}, "committed")
-
-
-def _role(name: str = ".lock") -> LockRole:
-    return LockRole("test-role", name, _flock.FAST_POLL)
-
-
-def test_flock_or_skip_acquires_then_releases(tmp_path: Path):
-    """Yields True when uncontended, makes the holding folder, and releases on exit."""
-    state = _state1135.state_over(tmp_path / "root")
-    role = _role("sub/.lock")
-    with state.lock(role, wait=TRY_ONCE) as locked:
-        assert locked is True
-        assert (tmp_path / "root" / "sub").is_dir()
-    with state.lock(role, wait=TRY_ONCE) as again:
-        assert again is True
-
-
-def test_flock_or_skip_yields_false_when_held(tmp_path: Path):
-    """A second entrant on a held lock yields False (skip) rather than blocking."""
-    state = _state1135.state_over(tmp_path / "root")
-    role = _role()
-    with state.lock(role, wait=TRY_ONCE) as holder:
-        assert holder is True
-        with state.lock(role, wait=TRY_ONCE) as locked:
-            assert locked is False
-
-
-def test_flock_or_skip_propagates_non_contention_oserror(tmp_path: Path, monkeypatch):
-    """A genuine lock-subsystem failure (ENOLCK) propagates instead of reading as contention."""
-    state = _state1135.state_over(tmp_path / "root")
-
-    def _no_locks(_fd, _op):
-        raise OSError(errno.ENOLCK, "No locks available")
-
-    monkeypatch.setattr(_flock.fcntl, "flock", _no_locks)
-    with pytest.raises(OSError, match="No locks available") as excinfo, \
-            state.lock(_role(), wait=TRY_ONCE):
-        pass
-    assert excinfo.value.errno == errno.ENOLCK
-
-
-def test_acquire_flock_closes_handle_when_error_propagates(tmp_path: Path, monkeypatch):
-    """When ENOLCK propagates, the lock-file handle is still closed: no fd leaks."""
-    state = _state1135.state_over(tmp_path / "root")
-    opened: list = []
-    real_open = state_mod.open_lock_at
-
-    def _tracking_open(held, name):
-        fh = real_open(held, name)
-        opened.append(fh)
-        return fh
-
-    def _no_locks(_fd, _op):
-        raise OSError(errno.ENOLCK, "No locks available")
-
-    monkeypatch.setattr(state_mod, "open_lock_at", _tracking_open)  # lint-monkeypatch: ok — an fd-leak spy on the module-level lock opener; the handle has no seam for it
-    monkeypatch.setattr(_flock.fcntl, "flock", _no_locks)
-    with pytest.raises(OSError, match="No locks available"), state.lock(_role(), wait=TRY_ONCE):
-        pass
-    assert opened, "the handle never opened the lock file"
-    assert all(fh.closed for fh in opened), "the handle leaked the lock-file handle"
 
 
 # content-less gates (#722) on the author's own result fields

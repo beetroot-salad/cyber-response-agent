@@ -10,8 +10,6 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.learning.core import persist  # noqa: E402
-from defender.learning.core.config import LoopPaths  # noqa: E402
-from defender.learning.leads import pitfalls_curator  # noqa: E402
 from defender.learning.leads.lead_extraction import collect_general_failures  # noqa: E402
 from defender.investigation import permission  # noqa: E402
 from defender.investigation.agent_definition import RunScope, compile_policy_for  # noqa: E402
@@ -21,14 +19,13 @@ from defender.tests.support.learning.core._declared870 import (  # noqa: E402
     PITFALLS_SECTION,
     Spawn,
     by_surface,
-    consumed_by_id,
-    queue_ids,
+    Claim,
+    tick,
 )
 from defender.tests.e2e._replay_harness import GOLDEN_AB3, materialize  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input import _reduce, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool import DONE, q  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
-from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.curation import _curator1134 as C  # noqa: E402
 from defender.tests.support.runtime.engine._declared869 import write_adapter  # noqa: E402
 from defender._git import REPO_ROOT  # noqa: E402
@@ -89,16 +86,14 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
         "skills/elastic/execution.md": "# execution\n",
         "skills/gather/defender-sql.pitfalls.md": ADDON.read_text(encoding="utf-8"),
     })
-    paths = LoopPaths(repo_root=product, state_dir=tmp_path / "state")
-    persist.append_pitfalls(collected, state=_state1135.state_for_paths(paths))
-
-    records = persist.merge_pitfalls(persist.read_pitfalls(_state1135.state_for_paths(paths)))
+    claim = Claim()
+    claim.add(*collected)
+    records = persist.merge_pitfalls(claim.rows)
     assert [r["occurrences"] for r in records] == [3]
 
     # the curation tick: the handoff names the surface, and the commit carries it
     spawn = Spawn(_curate_addon("keep the unnest argument a LIST"))
-    assert pitfalls_curator.run_pitfalls(
-        paths=paths, invoke=spawn, trees=C.draft_trees(lane), batch=lane.batch) == 0
+    assert tick(lane, spawn, claim) == 0
 
     reducer = by_surface(spawn.handoffs)["reducer"]
     assert len(reducer) == 1
@@ -109,10 +104,8 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
     assert lane.commits(), "the taught lesson never reached a commit of its own"
     assert lane.landed() == [ADDON_REL], "the tick committed, but not the reducer surface"
     assert "keep the unnest argument a LIST" in (lane.text_at_tip(ADDON_REL) or "")
-    assert queue_ids(paths) == []
-    assert all(
-        r["consumed_category"] == "consumed_committed" for r in consumed_by_id(paths).values()
-    )
+    assert claim.committed == {r["pitfall_id"] for r in collected}, "the taught rows were not reported committed"
+    assert claim.outcomes == {}, "a taught row took a fate of its own before the merge"
 
     # The next run reads it from its copy's agent root: the batch's committed tree, which the
     # draft holds after the claim (re-synced to the branch tip).

@@ -4,19 +4,25 @@ from __future__ import annotations
 import dataclasses
 
 from defender.tests.support.shared._locations_1210 import location_path
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 
 import errno
 import logging
 from pathlib import Path
 from typing import Any
 
+import os
+
+import pytest
+
 from defender import run as run_py
 from defender import run_common
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+from defender.tests.support.sandbox._curation_store1278 import reach_store
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
-    author_markers,
+    curation_requests,
     plant_alert,
     require_tail_seam,
     satisfy_entrypoint_keys,
@@ -26,6 +32,15 @@ CROSS_CHECK = "cross_check"
 TICKET = "record_case_ticket"
 ENQUEUE = "enqueue"
 PAGE = "visualize"
+
+
+pytestmark = pytest.mark.postgres
+
+
+@pytest.fixture(autouse=True)
+def _learning_store(migrated_database, monkeypatch):  # noqa: F811 — the imported fixture
+    """The learning store a run end files its curation request into (#1278: rows, not a queue folder)."""
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
 
 
 class _Order(logging.Handler):
@@ -81,6 +96,12 @@ class _Tail(SpecTail):
         return run_common.enqueue_curation(run, alert, **kw)
 
 
+def _waiting_runs(paths: Any) -> list[str]:
+    """The run ids of the curation requests waiting in the store for `paths`' tenant (arms share one database, so a
+    drive reports only what it added)."""
+    return sorted(str(body["run_id"]) for body in curation_requests(paths).values())
+
+
 def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None, directory: Any = None, during: Any = None,
            tails: list[Any] | None = None, sample: Any = None, signer: Any = None):
     """The REAL `run.main` over one alert under `--update-ticket`, with the tail's seams
@@ -93,10 +114,11 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None, directory: An
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     satisfy_entrypoint_keys(monkeypatch, arm)
     tenant = set_up_tenant(root)
-    location_path(tenant.learning).mkdir(exist_ok=True)
+    reach_store(os.environ["DEFENDER_DATABASE_DSN"], monkeypatch, tenant)
     repo = arm / "repo"
     (repo / "defender").mkdir(parents=True)
     paths = dataclasses.replace(LoopPaths.for_tenant(tenant), repo_root=repo)
+    before = set(_waiting_runs(paths))
     order: list[str] = []
     tail = _Tail(paths, order, fail=fail, sample=sample)
     if tails is not None:
@@ -124,7 +146,7 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None, directory: An
             outcome = exc
     finally:
         logger.removeHandler(handler)
-    return order, outcome, author_markers(paths)
+    return order, outcome, sorted(set(_waiting_runs(paths)) - before)
 
 
 def test_1105_run_end_keeps_todays_order_cross_check_ticket_curation_page(tmp_path, monkeypatch):

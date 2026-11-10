@@ -14,8 +14,8 @@ import yaml
 from defender._io import bind
 from defender.records import RunPaths
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.core import _state1135
 from defender.tests.support.presentation import _episode_1025 as E
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -50,7 +50,7 @@ def _refused():
 def _grade(ep: Path, tmp_path: Path):
     """The real grading pass over `ep`, through its own seams — never a live provider."""
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    return J.grade_at(ep, judge=judge, state=_state1135.env_state())
+    return J.grade_at(ep, judge=judge, store=MemoryStore())
 
 
 def _write_issued(world_dir: Path, rows: list[dict]) -> Path:

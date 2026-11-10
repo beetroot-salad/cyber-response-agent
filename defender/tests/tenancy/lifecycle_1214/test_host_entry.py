@@ -8,7 +8,6 @@ two are GAP-C-1 additions of the same shape). Each negative has an active positi
 from __future__ import annotations
 
 import ast
-import asyncio
 import contextlib
 import io
 import logging
@@ -17,9 +16,7 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.tenancy._active1214 import (
-    CREATED,
     DSN_ENV,
     active_directory,
     database_env,
@@ -129,6 +126,32 @@ def _tenant_placed(data_root) -> Path:
     """FR-1: `TENANT`'s folder is complete for every case, so a control's admission is not refused for a missing
     folder (Flow 4); a case that needs another folder places it itself."""
     return place_complete(data_root, TENANT)
+
+
+class StoreReached(Exception):
+    """What the stand-in learning store raises when an admitted command first asks it for anything."""
+
+
+@pytest.fixture(autouse=True)
+def _the_learning_store_is_reached_not_used(monkeypatch) -> None:
+    """The boundary cases judge what a command does up to and including its host acceptance. Past it, a drain, the
+    revert and the queue page read the learning store (#1278), which these cases do not stand up: every store a command
+    opens is one whose first use raises `StoreReached`, so an admitted command ends in a fault of its own that is
+    none of the refusals a control must not show, and a refused one never gets as far."""
+    import contextlib
+
+    from defender.learning.core import drains, store_tick
+
+    class Unreached:
+        def __getattr__(self, name: str) -> Any:
+            raise StoreReached(f"the learning store was reached ({name}); this case stands none up")
+
+    @contextlib.contextmanager
+    def opened_store():
+        yield Unreached()
+
+    monkeypatch.setattr(store_tick, "opened_store", opened_store)
+    monkeypatch.setattr(drains, "opened_store", opened_store)
 
 
 # --- run start -------------------------------------------------------------------------------------
@@ -510,92 +533,16 @@ def test_the_episode_launcher_refuses_a_folderless_tenant_for_its_state_and_make
     assert not (data_root / OTHER).exists(), "the refusal made the folderless tenant's folder"
 
 
-# --- each lead-drain claim -------------------------------------------------------------------------
-
-def _twin_directory(tenant: str, origin: str) -> tuple[Any, dict[str, Any]]:
-    """A directory over a one-tenant twin, and the ways to change that tenant's row afterwards, by the state it moves
-    to: `offboarding` (through the service), `creating`, `offboarded` (rows as written) and `removed` (no row)."""
-    import dataclasses
-
-    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
-
-    twin: Any = InMemoryTenantRepository()
-    asyncio.run(twin.add_tenant(tenant, created_at=CREATED, state="active", repo=f"tenants/{tenant}",
-                                origin=origin))
-    directory = TenantDirectory(lambda: twin)
-
-    def move(**changes: Any) -> Any:
-        def flip() -> None:  # the twin is a test double: its rows are rewritten as a database would be
-            twin._tenants[tenant] = dataclasses.replace(twin._tenants[tenant], **changes)
-        return flip
-
-    def remove() -> None:
-        del twin._tenants[tenant]
-    flips = {
-        "offboarding": lambda: asyncio.run(twin.request_offboard(tenant, now=CREATED)),
-        "creating": move(state="creating", pending_action="create", step="names", step_actor="service"),
-        "offboarded": move(state="offboarded", pending_action=None, step=None, step_actor=None),
-        "removed": remove,
-    }
-    return directory, flips
-
-
-class _FlipOnFirst:
-    """A lead-author step (`LeadStep` shape) that, on its first claim, has the tenant offboarded."""
-
-    def __init__(self, inner: Any, flip: Any) -> None:
-        self.inner, self.flip, self.served = inner, flip, []
-
-    def __call__(self, paths: Any, state: Any, run: Any, **kw: Any) -> Any:
-        self.served.append(Path(run.run_dir).name)
-        if len(self.served) == 1 and self.flip is not None:
-            self.flip()
-        return self.inner(paths, state, run, **kw)
-
-
-@pytest.mark.parametrize("flip_to", [None, "offboarding", "creating", "offboarded", "removed"])
-def test_the_lead_drain_rechecks_the_tenant_state_at_each_claim(p4_tenant, tmp_path, monkeypatch, flip_to):  # noqa: F811
-    """Two queued runs of one tenant: both are served while active; once the tenant stops being active after the first
-    claim (any other state, or no row) the second is not served and its row stays as queued, uncounted, with no
-    failed letter, through a second tick (Flow 4: re-checked per claim; O-A5)."""
-    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
-        BoxSpy,
-        LeadStep,
-        drain_paths,
-        executed_lead,
-        lead_author_drain,
-        product_repo,
-        queued_run,
-    )
-
-    t = p4_tenant
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
-    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
-    directory, flips = _twin_directory(t.tenant_id, t.origin)  # the origin the tenant's forge fake serves
-    paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
-    labels = ("claim-1", "claim-2")
-    runs = {queued_run(t, paths, label).name: label for label in labels}
-    inner = LeadStep(executed={r: [executed_lead("cmdb.owner-by-tag")] for r in runs}, edits={})
-    step = _FlipOnFirst(inner, flips[flip_to] if flip_to else None)
-    queue = Path(location_path(paths.state_root)) / "author-queue"
-    queued = {label: (queue / f"case-{label}.json").read_bytes() for label in labels}
-
-    def tick() -> int:
-        return lead_author_drain(t, paths, box=BoxSpy(), run_lead_author=step, run_pitfalls=lambda *_a, **_k: 0,
-                                 directory=directory)
-    assert tick() == 0
-    if flip_to is None:
-        assert sorted(step.served) == sorted(runs)  # control: both claims are served while active
-        return
-    [served] = step.served
-    unserved = next(label for run, label in runs.items() if run != served)
-    for attempt in ("first tick", "second tick"):
-        assert (queue / f"case-{unserved}.json").read_bytes() == queued[unserved], (
-            f"{attempt}: the claim of a tenant no longer active must stay exactly as queued (no attempt counted)")
-        assert list((queue / "failed").glob("*")) == [], f"{attempt}: a failed letter was written"
-        assert not list((queue / "inflight").glob("*")), f"{attempt}: the claim was left in flight"
-        assert tick() == 0
-        assert step.served == [served], f"{attempt}: the unserved claim was served after the tenant stopped being active"
+# --- each lead-drain claim: retired -----------------------------------------------------------------
+# Retired (#1278 r8 Schema, "Insert is conditional on the tenant being active, in the same transaction"; r8 Offboarding):
+# the lead drain re-read the tenant's state at each file-queue claim, and a claim of a tenant that stopped being active
+# stayed queued uncounted (`test_the_lead_drain_rechecks_the_tenant_state_at_each_claim` here, and the whole of the
+# former `test_1214_atk3_drain_recheck.py`: a tenant that stops being active after the first claim, a directory that
+# fails at the second claim, a database blip mid-tick). The queue, its per-claim loop, `attempts` on queue rows and the
+# failed/inflight letters are replaced by one store claim per tick. A tenant off `active` gets no batch and a working
+# batch of it is told to stop; the surviving obligation is enforced by
+# learning/store_1278/test_store_1278.py::test_o6_a_tenant_off_active_gets_no_batch_and_its_working_batch_is_told_to_stop,
+# learning/store_1278/test_offboarding_1278.py and tests/migrations/test_1278_learning_schema.py (TenantInactive).
 
 
 # --- the census and layering (RC-9) ----------------------------------------------------------------
@@ -933,7 +880,7 @@ def test_nothing_under_a_scope_accepts_again_the_drains_separate_acceptor_is_gon
 
 def test_the_hold_has_one_owner_and_the_admission_helpers_stay_with_the_host_module():
     """C5: `hold_tenant` is gone; `admit_tenant` and `host_directory` are used outside `tenancy/` by the host module
-    alone; `still_active` stays for the drain's per-claim check."""
+    alone. (The drain's per-claim `still_active` check is retired with the claim loop: see "each lead-drain claim: retired".)"""
     from defender import tenancy
 
     assert _referencing("hold_tenant") == set()
@@ -941,7 +888,6 @@ def test_the_hold_has_one_owner_and_the_admission_helpers_stay_with_the_host_mod
     outside = lambda name: {rel for rel in _referencing(name) if not rel.startswith("tenancy/")}  # noqa: E731
     assert outside("admit_tenant") == {H.HOST_MODULE_PATH}
     assert outside("host_directory") == {H.HOST_MODULE_PATH}
-    assert outside("still_active") == {"learning/core/drains.py"}
 
 
 def _dotted(rel: str) -> str:

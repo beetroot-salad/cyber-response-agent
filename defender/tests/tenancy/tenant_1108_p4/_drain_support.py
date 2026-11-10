@@ -2,7 +2,9 @@
 
 Nothing here implements P4 policy: it builds a scratch product checkout, seeds queues, records
 box requests, wraps the real drain entry in the CLI's stage runner, runs the real curator modules
-with only their model spawn replaced, and reads git state back. `AppRoleVault` is P3's issuer
+with only their model spawn replaced, and reads git state back. Work is queued in, and read back
+from, the learning store (#1278: the drains claim from `DEFENDER_DATABASE_DSN`, which the `world`
+fixture of `support/learning/core/_store1278.py` sets; a case using `queue`/`queued_run` takes it). `AppRoleVault` is P3's issuer
 fake (`VaultHTTP`) plus OpenBao's AppRole login. A drain hands each lane step its tick's `batch=`;
 `paths` stays the product-rooted `LoopPaths`, and the lane's corpus is the batch's draft.
 """
@@ -12,6 +14,7 @@ import dataclasses
 import importlib
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -25,7 +28,6 @@ import httpx
 
 from defender import box as box_mod
 from defender._git import REPO_ROOT
-from defender.tests.support.learning.curation._drain719 import seed
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_delivery._identity import ISSUER, VaultHTTP
 from defender.tests.tenancy.tenant_1108_delivery._identity import token as issuer_token
@@ -91,10 +93,44 @@ def drain_paths(t: Any, product: Path) -> Any:
     return t.tenant.learning_paths(LoopPaths, repo_root=product)
 
 
-def queue(paths: Any, rows: list[dict], *, channel: Any = None) -> None:
-    from defender.learning.core.state import FINDINGS
+def store_dsn() -> str:
+    """The learning store's address as the drain reads it (the `world` fixture sets it)."""
+    dsn = os.environ.get("DEFENDER_DATABASE_DSN", "")
+    assert dsn, "no learning store: the case needs the `world` fixture"
+    return dsn
 
-    seed(paths, channel if channel is not None else FINDINGS, rows)
+
+def queue(paths: Any, rows: list[dict], *, channel: Any = None) -> None:
+    """Queue `rows` for the tenant of `paths` in the learning store, as the kind of `channel`'s items
+    (findings by default; `QUESTIONER_FINDINGS`; `PITFALLS` rows are filed one by one, as a lead run
+    files them)."""
+    from defender.learning.core.state import FINDINGS, PITFALLS, QUESTIONER_FINDINGS
+    from defender.tests.support.learning.core._store1278 import call
+
+    tenant = str(paths.tenant.id)
+    channel = channel if channel is not None else FINDINGS
+    if channel == PITFALLS:
+        for row in rows:
+            call(store_dsn(), "add_pitfall", tenant, row)
+        return
+    kind = {FINDINGS: "finding", QUESTIONER_FINDINGS: "questioner_finding"}[channel]
+    call(store_dsn(), "publish_findings", tenant, f"run-{rows[0]['finding_id']}", rows, kind=kind)
+
+
+def items_of(paths: Any) -> dict[tuple[str, str], Any]:
+    """The tenant's work items by `(kind, key)` (the store's view, O2): status, reason, attempts,
+    deferrals."""
+    from defender.tests.support.learning.core._store1278 import call
+
+    return {(i.kind, i.key): i for i in call(store_dsn(), "work", str(paths.tenant.id))}
+
+
+def commit_rows(paths: Any) -> list[Any]:
+    """The tenant's commit record in the store (what the commit-maker recorded, oldest first): each
+    row's `commit`, `branch`, `changes` (`(path, blob at base, blob left)`)."""
+    from defender.tests.support.learning.core._store1278 import call
+
+    return list(call(store_dsn(), "commit_record", str(paths.tenant.id)))
 
 
 _BUILDERS = {
@@ -125,9 +161,9 @@ def draft_lane_trees(batch: Any, lanes: tuple[str, ...]) -> Any:
 class CuratorTrigger:
     """The drain's `trigger_author` seam: runs the real curator module asked for as the default
     step does (held trees over the batch's draft lanes, the real config builder with `batch=`,
-    the module's `run_batch`), with only the model spawn (`cfg.invoke_agent`) replaced by
-    `curators[module]`. A module with no fake is recorded and not run. Records each call's
-    module, keywords, batch and paths."""
+    the module's `run_batch(cfg=, items=, outcomes=, box=)`), with only the model spawn
+    (`cfg.invoke_agent`) replaced by `curators[module]`. A module with no fake is recorded and not
+    run. Records each call's module, keywords, batch, paths and the claim's items of its kind."""
 
     def __init__(self, **curators: Any) -> None:
         self.curators = curators
@@ -135,6 +171,7 @@ class CuratorTrigger:
         self.handed: list[dict] = []
         self.batches: list[Any] = []
         self.paths_seen: list[Any] = []
+        self.items_seen: list[list[Any]] = []
 
     def __call__(self, paths: Any, state: Any, channel: Any, threshold_env: str,
                  module_name: str, pending_label: str, *, batch: Any, **kw: Any) -> None:
@@ -142,17 +179,18 @@ class CuratorTrigger:
         self.handed.append(dict(kw))
         self.batches.append(batch)
         self.paths_seen.append(paths)
+        self.items_seen.append(list(kw.get("items") or ()))
         curator = self.curators.get(module_name)
         if curator is None:
             return
         module, builder = _BUILDERS[module_name]
         mod = importlib.import_module(module)
-        box = kw.pop("box", None)
+        box = kw.get("box")
         with draft_lane_trees(batch, AUTHOR_DRAFT_LANES) as trees:
-            cfg = getattr(mod, builder)(paths, state=state, trees=trees, box=box, batch=batch,
-                                        **kw)
+            cfg = getattr(mod, builder)(paths, trees=trees, box=box, batch=batch,
+                                        feedback=kw.get("feedback"))
             cfg = dataclasses.replace(cfg, invoke_agent=curator)
-            mod.run_batch(hold_committed=True, cfg=cfg, box=box)
+            mod.run_batch(cfg=cfg, items=kw.get("items") or (), outcomes=kw.get("outcomes"), box=box)
 
 
 class BoxSpy:
@@ -377,7 +415,7 @@ class LeadStep:
         self.paths_seen.append(paths)
         skills_dir = draft_root_of(batch) / LEAD_DRAFT_LANES[0]
         with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
-            deps = la.build_lead_author_deps(paths, state=state, trees=trees, batch=batch)
+            deps = la.build_lead_author_deps(paths, trees=trees, batch=batch)
 
             def spawn(_run_dir: Any, _handoffs: Any, _drafts: Any, *, box: Any = None) -> int:
                 for rel, text in self.edits.get(name, {}).items():
@@ -391,7 +429,7 @@ class LeadStep:
                 deps, extract=lambda _rd: ([], list(self.executed.get(name, []))),
                 build_handoff=lambda *_a, **_k: [{"path": rel} for rel in self.edits.get(name, {})],
                 discover_system_drafts=lambda: [], invoke_agent=spawn)
-            rc = la.run_under_held_queue_lock(run, paths=paths, state=state, trees=trees,
+            rc = la.run_under_held_queue_lock(run, paths=paths, trees=trees, batch=batch,
                                               box=box, on_done=on_done, deps=deps, **kw)
         if rc not in (0, None):
             raise LeadAuthorError(f"lead-author for {name} returned rc={rc}")
@@ -428,9 +466,9 @@ class PitfallsStep:
             return 0
 
         with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
-            return pitfalls_curator.run_pitfalls(paths=paths, state=state, trees=trees,
-                                                 batch=batch, invoke=invoke, box=box,
-                                                 on_curated=on_curated, **kw)
+            return pitfalls_curator.run_pitfalls(paths=paths, trees=trees, batch=batch,
+                                                 invoke=invoke, box=box, on_curated=on_curated,
+                                                 **kw)
 
 
 def executed_lead(query_id: str, *, lead_id: str = "l-001") -> Any:
@@ -445,18 +483,18 @@ def executed_lead(query_id: str, *, lead_id: str = "l-001") -> Any:
 
 
 def queued_run(t: Any, paths: Any, label: str) -> Path:
-    """A finished run of `t` under its runs folder, with its curation request queued as run end
-    files it (`enqueue_curation`'s row: the run's address)."""
-    from defender.learning.core.state import LearningState
-    from defender.tests.support.learning.core._state1135 import enqueue_case
+    """A finished run of `t` under its runs folder, with its curation request filed in the learning
+    store as run end files it (`enqueue_request`: the run's address, keyed by the run, coalescing
+    on the case). Needs the `world` fixture's store."""
+    from defender.tests.support.learning.core._state1135 import curation_row
+    from defender.tests.support.learning.core._store1278 import call
     from defender.tests.support.sandbox._spec791 import make_run_dir
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-    # The learning root exists as `tenant.py setup` provisions it (the queue opens over it).
-    Path(location_path(t.tenant.learning)).mkdir(exist_ok=True)
     runs = Path(location_path(t.tenant.tenant_root)) / "runs"
     runs.mkdir(exist_ok=True)
     run_dir = make_run_dir(runs, name=fixture_uuid(label), disposition="benign")
-    with LearningState.open(paths) as state:
-        enqueue_case(state, f"case-{label}", run_dir)
+    case = f"case-{label}"
+    call(store_dsn(), "enqueue_request", str(paths.tenant.id), run_dir.name, case,
+         curation_row(case, run_dir))
     return run_dir

@@ -1,6 +1,7 @@
 """What reaches the oracle and the verifier (framed, fact side only, static-to-volatile conversation order) and where oracle Python runs (sandboxed box of its own)."""
 from __future__ import annotations
 
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.shared._locations_1210 import location_path
 
 import gc
@@ -18,7 +19,6 @@ from typing import Any
 import pytest
 
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.core import _state1135
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
@@ -520,7 +520,7 @@ def _grade(ep: Path, judge: S.FakeJudge, where: Path) -> BaseException | None:
     grade = J.grade_at
     try:
         grade(ep, judge=judge, git_show=J.FakeGitShow(),
-              state=_state1135.state_over(Path(where) / "learning-state"))
+              store=MemoryStore())
     except Exception as exc:  # noqa: BLE001 — re-raised unless the prompts were captured
         if not judge.prompts:
             raise
