@@ -34,7 +34,6 @@ from defender.tests.learning.core.test_1017_row_schema import (  # noqa: E402
     _row,
     _table,
 )
-from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.e2e
 
@@ -106,7 +105,6 @@ def test_records_off_the_surface_are_byte_for_byte_what_the_guard_reads_live(tmp
 def judge_roots(tmp_path, monkeypatch):
     """The runs base and learning-state dir, inside `tmp_path` as the judge suite sets them."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _world_row(seq: int, **overrides) -> dict:

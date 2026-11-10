@@ -54,7 +54,7 @@ from defender.tests.learning.core.test_1017_row_schema import (  # noqa: E402
 )
 from defender.tests.runtime.engine.test_denial_gather_632 import DENIED_PAIR, _registry  # noqa: E402
 from defender.tests.support.learning.curation._lead_author_1134 import repo_skills  # noqa: E402
-from defender.tests.support.learning.core import _state1135
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 
 pytestmark = pytest.mark.e2e
 
@@ -75,7 +75,6 @@ def judge_roots(tmp_path, monkeypatch):
     """Mirrors `test_1017_query_row_surface.judge_roots`: the runs base and learning state dir
     point inside `tmp_path`, so nothing here touches the checkout's."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 DENIED_LEAD = "l-002"
@@ -531,7 +530,7 @@ def _prompt_for_world_b(ep: Path, base: Path) -> str:
     for world `b`'s first draw."""
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.grade_at(
-        ep, judge=judge, state=_state1135.env_state())
+        ep, judge=judge, store=MemoryStore())
     return judge.prompts[judge.agent_ids.index(f"judge:{J.world_id(ep, 'b')}:0")]
 
 

@@ -2,17 +2,14 @@
 from __future__ import annotations
 
 import ast
-import dataclasses
 from dataclasses import asdict
 from os import fspath
 import subprocess
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from defender.records import _locations as L
-from defender.learning.core.config import LoopPaths
 from defender.tests.support.shared.contracts._by_path import load_lint_gate
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
@@ -76,20 +73,22 @@ def test_type_annotations_and_safe_forwarding_remain_legal():
 
 
 def test_conversion_permissions_are_function_and_role_specific():
-    source = "from defender.records._locations import unwrap_learning_root as raw\nclass LearningState:\n    def open(self, value):\n        return raw(value)\n    def unrelated(self, value):\n        return raw(value)\n"
-    found = findings("learning/core/state.py", source)
+    """(#1278 O10: the learning folder's one converter, `LearningState.open`, is gone with the handle; the same rule is shown
+    on the curators' call-folder owner, a converter that stays.)"""
+    source = "from defender.records._locations import unwrap_scratch_root as raw\ndef call_folder(value):\n    return raw(value)\ndef unrelated(value):\n    return raw(value)\n"
+    found = findings("learning/call_folders.py", source)
     assert len(found) == 1
-    assert "LearningState.unrelated" in found[0]
-    wrong_role = source.replace("unwrap_learning_root", "unwrap_data_root")
-    assert len(findings("learning/core/state.py", wrong_role)) == 2
+    assert "unrelated()" in found[0]
+    wrong_role = source.replace("unwrap_scratch_root", "unwrap_data_root")
+    assert len(findings("learning/call_folders.py", wrong_role)) == 2
     assert findings("tenancy/_tenant.py", "def f(value):\n    return value._record_location_path\n")
 
 
 def test_conversion_defaults_do_not_inherit_body_permissions():
-    source = "from defender.records._locations import unwrap_learning_root as raw\nclass LearningState:\n    def open(self, value=raw(outside)):\n        return raw(value)\n"
-    found = findings("learning/core/state.py", source)
+    source = "from defender.records._locations import unwrap_scratch_root as raw\ndef call_folder(value=raw(outside)):\n    return raw(value)\n"
+    found = findings("learning/call_folders.py", source)
     assert len(found) == 1
-    assert ":3 " in found[0]
+    assert ":2 " in found[0]
 
 
 def test_all_declared_storage_boundaries_have_narrow_permissions():
@@ -113,9 +112,9 @@ def test_tenant_and_hidden_carriers_preserve_location_roles(tmp_path):
     expected = {
         "data_root": L.DataRoot, "tenant_root": L.TenantRoot,
         "runs": L.RunsBase, "sessions": L.SessionsRoot, "episodes": L.EpisodesRoot,
-        "learning": L.LearningRoot, "worktrees": L.WorktreesRoot, "exports": L.ExportsRoot,
+        "learning": L.LearningRoot, "worktrees": L.WorktreesRoot, "scratch": L.ScratchRoot, "exports": L.ExportsRoot,
         "drafts": L.DraftsRoot, "knowledge_lock": L.KnowledgeLock,
-        "commit_record": L.CommitRecord, "runs_legacy": L.LegacyRunsRoot,
+        "runs_legacy": L.LegacyRunsRoot,
         "episodes_legacy": L.LegacyEpisodesRoot,
     }
     for name, kind in expected.items():
@@ -135,20 +134,9 @@ def test_tenant_and_hidden_carriers_preserve_location_roles(tmp_path):
         assert isinstance(plan.lanes[1].destination, L.LegacyEpisodesRoot)
 
 
-def test_tenant_and_scratch_state_cannot_exchange_location_kinds(tmp_path):
-    tenant = set_up_tenant(tmp_path / "data")
-    selected = LoopPaths.for_tenant(tenant)
-    assert isinstance(selected.state_root, L.LearningRoot)
-    copied = dataclasses.replace(selected, repo_root=tmp_path / "checkout")
-    assert copied.state_root is selected.state_root
-    assert copied.tenant is tenant
-    for value in (tmp_path / "raw", None):
-        with pytest.raises(ValidationError, match="tenant learning state requires LearningRoot"):
-            LoopPaths(repo_root=tmp_path, state_dir=value, tenant=tenant)
-    with pytest.raises(ValidationError, match="scratch learning state requires an explicit Path"):
-        LoopPaths(repo_root=tmp_path, state_dir=selected.state_root)
-    scratch = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "scratch")
-    assert isinstance(scratch.state_root, Path)
+# retired: test_tenant_and_scratch_state_cannot_exchange_location_kinds pinned `LoopPaths`' two spellings of the learning
+# state root (a tenant's `LearningRoot`, a scratch `Path`). The handle and the root are gone (#1278 A1/O10, design D10): a
+# `LoopPaths` names no state root; the tenant's `learning` stays a `LearningRoot` (asserted above) for the cutover import only.
 
 
 def test_mypy_reports_the_actual_forbidden_operations(tmp_path):
