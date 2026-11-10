@@ -168,6 +168,16 @@ def _forge_faults() -> tuple[type[BaseException], ...]:
     return (ForgeError, ForgejoAuthError, DeliveryRefused, httpx.HTTPError, _git.GitError, _git.GitTimeout, OSError)
 
 
+def arrived(kind: str, waiting: Sequence[Any], threshold: int) -> bool:
+    """Whether a kind's waiting items clear its threshold: rows, but a pitfall counts its distinct mistakes (the
+    store's claim applies the same rule)."""
+    if kind != "pitfall":
+        return len(waiting) >= max(1, threshold)
+    from defender.learning.core.persist import merge_pitfalls, pitfalls_lane_is_open
+
+    return pitfalls_lane_is_open(merge_pitfalls([dict(i.payload) for i in waiting]), max(1, threshold))
+
+
 # --- the renewer and the one stop (D4) ------------------------------------------------------------------
 
 
@@ -342,15 +352,15 @@ class Tick:
 
         kinds = {k for k, ln in LANE_OF.items() if ln == self.lane}
         ended_closed = {b.id for b in views if b.phase == "ended" and b.outcome == "closed"}
-        waiting: dict[str, int] = {}
+        waiting: dict[str, list[Any]] = {}
         for i in items:
             if i.kind not in kinds:
                 continue
             if i.status == "in_batch" and i.batch_id in ended_closed:
                 return True
             if i.status == "waiting":
-                waiting[i.kind] = waiting.get(i.kind, 0) + 1
-        return any(n >= max(1, int(self.thresholds.get(k, 1))) for k, n in waiting.items())
+                waiting.setdefault(i.kind, []).append(i)
+        return any(arrived(k, rows, int(self.thresholds.get(k, 1))) for k, rows in waiting.items())
 
     def run(self) -> int:
         views = self.store.batches(self.tenant_id)
@@ -648,7 +658,7 @@ class Tick:
         return framed_feedback(number, forge.reviews(number), forge.comments(number))
 
     def _claim(self, delivery: TenantDelivery) -> int:
-        from defender.learning.store import LaneBusy
+        from defender.learning.store import LaneBusy, TenantInactive
 
         views = self.store.batches(self.tenant_id)
         if any(b.lane == self.lane and (b.phase == "working" or (b.kind == "author" and b.phase != "ended")
@@ -668,6 +678,10 @@ class Tick:
             held = self.store.claim(self.tenant_id, self.lane, owner=self.owner, thresholds=self.thresholds)
         except LaneBusy:
             _logger.info(f"{self.label}: the lane is busy — no new batch")
+            return 0
+        except TenantInactive:
+            # Offboarding began: the claim inserted nothing, so its items stay queued and no attempt is counted.
+            _logger.info(f"{self.label}: the tenant is not active — no new batch")
             return 0
         if held is None:
             _logger.info(f"{self.label}: nothing at threshold — no new batch")
@@ -827,15 +841,15 @@ def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapp
 
     limits = dict(tick_thresholds or thresholds())
     closed = {b.id for b in views if b.phase == "ended" and b.outcome == "closed"}
-    waiting: dict[str, int] = {}
+    waiting: dict[str, list[Any]] = {}
     for i in store.work(tenant_id):
         if LANE_OF.get(i.kind) != lane:
             continue
         if i.status == "in_batch" and i.batch_id in closed:
             return True
         if i.status == "waiting":
-            waiting[i.kind] = waiting.get(i.kind, 0) + 1
-    return any(n >= max(1, int(limits.get(k, 1))) for k, n in waiting.items())
+            waiting.setdefault(i.kind, []).append(i)
+    return any(arrived(k, rows, int(limits.get(k, 1))) for k, rows in waiting.items())
 
 
 __all__ = ["AUTHOR_LANE", "CORPUS_OF", "DSN_ENV", "GRACE_ENV", "Holding", "LEAD_LANE", "LEASE_ENV", "RENEW_ENV",

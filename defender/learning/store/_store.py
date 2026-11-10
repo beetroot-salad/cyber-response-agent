@@ -115,6 +115,12 @@ class Outcome:
     def deferred(cls) -> Outcome:
         return cls("deferred")
 
+    @classmethod
+    def declined(cls) -> Outcome:
+        """The curator was offered the item and declined it: it waits again, the offer counted on its own (the
+        attempt forgiven), and at the ceiling it is dead."""
+        return cls("declined")
+
 
 Outcomes = Mapping[tuple[str, str], Outcome]
 
@@ -380,7 +386,8 @@ class LearningStore:
         """Start a working batch on `lane` over what is due, in one transaction (P2'); `None` when nothing is due.
 
         A replacement due (items still in a batch that closed with feedback) goes first and takes only those items;
-        otherwise every waiting item of each kind at or over its threshold."""
+        otherwise every waiting item of each kind at or over its threshold (pitfalls: `pitfalls_lane_is_open`, which counts
+        mistakes, not rows)."""
         if lane not in LANES:
             raise ValueError(f"not a lane: {lane}")
         kinds = [k for k, ln in LANE_OF.items() if ln == lane]
@@ -430,6 +437,13 @@ class LearningStore:
             select(_I.c.kind, func.count()).where(_I.c.tenant_id == TenantId(tenant), _I.c.kind.in_(kinds),
                                                   _I.c.status == "waiting").group_by(_I.c.kind))).all())
         due = [k for k in kinds if counts.get(k, 0) > 0 and counts[k] >= max(1, thresholds.get(k, 1))]
+        if "pitfall" in due:  # rows repeat a mistake: the pitfalls arrival rule counts mistakes, not rows
+            from defender.learning.core.persist import merge_pitfalls, pitfalls_lane_is_open
+
+            payloads = [r.payload for r in (await s.execute(select(_I.c.payload).where(
+                _I.c.tenant_id == TenantId(tenant), _I.c.kind == "pitfall", _I.c.status == "waiting"))).all()]
+            if not pitfalls_lane_is_open(merge_pitfalls(payloads), max(1, thresholds.get("pitfall", 1))):
+                due.remove("pitfall")
         if not due:
             return None
         return await self._new_batch(s, tenant, lane, "author", owner, due, generation=0, replaces=None,
@@ -450,10 +464,11 @@ class LearningStore:
             where += [_I.c.status == "in_batch", _I.c.batch_id == only_batch] if only_batch else [_I.c.status == "waiting"]
             rows = (await s.execute(update(_I).where(*where).values(
                 status="in_batch", batch_id=batch_id, attempts=_I.c.attempts + 1, updated_at=func.now())
-                .returning(_I.c.kind, _I.c.item_key, _I.c.payload))).all()
+                .returning(_I.c.kind, _I.c.item_key, _I.c.payload, _I.c.enqueued_at))).all()
         else:
             rows = []
-        items = tuple(sorted(((r.kind, r.item_key, r.payload) for r in rows), key=lambda t: (t[0], t[1])))
+        items = tuple((r.kind, r.item_key, r.payload)  # oldest first within a kind, so a lane serves its queue in order
+                      for r in sorted(rows, key=lambda r: (r.kind, r.enqueued_at, r.item_key)))
         return Held(tenant_id=TenantId(tenant), batch_id=batch_id, lane=lane, kind=kind, branch=branch, token=1,
                     owner=owner, items=items, replaces=replaces, feedback_pr=feedback_pr)
 
@@ -666,9 +681,11 @@ class LearningStore:
         for (kind, key), out in named.items():
             where = [*mine, _I.c.kind == kind, _I.c.item_key == key]
             if out.name == "waiting":
-                values: dict[str, Any] = _to_waiting()
+                values: dict[str, Any] = self._waiting()
             elif out.name == "deferred":
                 values = self._deferral()
+            elif out.name == "declined":
+                values = self._decline()
             elif out.name in {"skipped", "held", "dead", "published"}:
                 values = {"status": out.name, "reason": out.reason if out.reason is not None else (
                     "dead" if out.name == "dead" else None)}
@@ -678,10 +695,29 @@ class LearningStore:
         if default is not None:
             rest = [*mine, *[or_(_I.c.kind != k, _I.c.item_key != i) for k, i in named]]
             if default.name == "waiting":
-                values = _to_waiting()
+                values = self._waiting()
             else:
                 values = {"status": default.name, "reason": default.reason}
             await s.execute(update(_I).where(*rest).values(**values, updated_at=func.now()))
+
+    def _waiting(self) -> dict[str, Any]:
+        """Values returning an item to waiting after its claim: an item whose attempts have reached the ceiling is
+        held for a person instead, so a refused claim or a failing request is not retried without bound (D8)."""
+        waiting = _to_waiting()
+        ceiling = _I.c.attempts >= self.max_attempts
+        sup = _superseded(_I)
+        return {"status": case((sup, "skipped"), (ceiling, "held"), else_="waiting"),
+                "reason": case((sup, "superseded by a later run"),
+                               (ceiling, f"reached the attempt ceiling ({self.max_attempts})"),
+                               else_=waiting["reason"])}
+
+    def _decline(self) -> dict[str, Any]:
+        """An offer the curator declined is no fault of the attempt (forgiven), counted on its own; at the ceiling the
+        item is dead, as the file queue retired it."""
+        over = _I.c.offers_declined + 1 >= self.max_attempts
+        return {"offers_declined": _I.c.offers_declined + 1, "attempts": func.greatest(_I.c.attempts - 1, 0),
+                "status": case((over, "dead"), else_="waiting"),
+                "reason": case((over, f"declined by the curator {self.max_attempts} times"), else_=_I.c.reason)}
 
     def _deferral(self) -> dict[str, Any]:
         """A deferral is no attempt (the claim's is forgiven), counted on its own; at the ceiling the item is dead."""
