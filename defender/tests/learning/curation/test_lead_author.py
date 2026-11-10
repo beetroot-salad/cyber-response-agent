@@ -295,7 +295,7 @@ def test_1186_lead_author_cli_files_the_runs_pitfall_for_the_runs_tenant_in_the_
     assert rc == 0
     pitfalls = [i for i in call(w.dsn, "work", w.t.tenant_id) if i.kind == "pitfall"]
     assert [i.key.split(":")[0] for i in pitfalls] == [run_dir.name], pitfalls
-    assert all(i.payload.get("query_id") for i in pitfalls), pitfalls
+    assert [i.payload.get("query_id") for i in pitfalls] == ["idp.query"], pitfalls
     assert not (root / "learning").exists()  # D10/O10: no learning folder is made for the store
 
 

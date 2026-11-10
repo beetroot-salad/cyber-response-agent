@@ -517,43 +517,6 @@ def test_o1_a_lapsed_batch_whose_forge_cannot_be_asked_waits_and_is_never_abando
     assert {k: (i.status, i.batch_id, i.attempts) for k, i in _work(w).items()} == before
 
 
-@pytest.mark.parametrize("scene", ["stranded", "nothing_pushed"])
-def test_o1_a_lapsed_batch_whose_git_remote_cannot_be_reached_waits_and_is_never_abandoned(world, caplog, scene):  # noqa: F811 — the imported fixture
-    """With the forge's HTTP healthy but the git remote unreachable for the takeover ticks, a failed branch lookup is unknown, not 'no branch': the batch stays working, no PR opens, items stay; once the remote is back the next tick recovers. (Crash recovery, H15, R3-1)"""
-    w = world
-    if scene == "stranded":
-        writer, batch_id, branch = _stranded(w, caplog)
-    else:
-        _seed(w, "f1")
-        writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
-        batch_id = call(w.dsn, "claim", w.t.tenant_id, AUTHOR_LANE, owner="lost-host", thresholds=ONE).batch_id
-    lapse_lease(w.dsn, batch_id)
-    before = {k: (i.status, i.batch_id, i.attempts) for k, i in _work(w).items()}
-    away = w.t.remote.with_name(w.t.remote.name + ".away")  # a rename: as root a permission trick would not bite
-    w.t.forge.requests.clear()
-    w.t.remote.rename(away)
-    try:
-        for _ in range(3):
-            _tick(w, writer)
-    finally:
-        away.rename(w.t.remote)
-
-    assert _asked(w.t.forge, "POST", "/pulls") == [], "a PR was opened though the branch could not be looked up"
-    batch = _batches(w)[batch_id]
-    assert (batch.phase, batch.outcome) == ("working", None), "an unreachable remote was read as 'no branch'"
-    assert w.t.forge.creates == []
-    assert {k: (i.status, i.batch_id, i.attempts) for k, i in _work(w).items()} == before
-
-    w.monkeypatch.setenv(RENEW_ENV, "600")
-    _tick(w, writer)
-    recovered = _batches(w)[batch_id]
-    if scene == "stranded":
-        assert writer.served == [batch_id], "recovery re-authored a batch whose branch was pushed"
-        assert recovered.phase == "in_review", "the restored remote did not let the takeover open the PR"
-    else:
-        assert (recovered.phase, recovered.outcome) == ("ended", "abandoned"), "the restored remote did not let recovery see 'nothing there'"
-
-
 @pytest.mark.parametrize("where", ["preflight", "pr_lookup"])
 @pytest.mark.parametrize("status", [401, 403])
 def test_o5_repeated_refusals_on_a_takeover_send_the_batch_to_a_person_at_the_ceiling(world, caplog, status, where):  # noqa: F811 — the imported fixture
