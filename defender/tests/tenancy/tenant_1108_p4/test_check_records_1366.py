@@ -482,37 +482,42 @@ sys.exit(tenant.main(sys.argv[2:], secrets=R.operator_secrets(kv)))
 """
 
 
-def _casesys_check(tenants, data_root, tmp_path, adapter: str) -> subprocess.CompletedProcess:
-    """`check <id>` of a tmp checkout whose adapters also hold `helpdesk` (`adapter`), over a tenant with a `helpdesk`
-    record and the case record naming it, every system credentialed at its generation (`_stocked`), so neither a
-    missing secret store nor "no credentials" can decide the outcome; the database from `DEFENDER_DATABASE_DSN`."""
-    checkout = H.tmp_checkout(tmp_path / "checkout")
-    H.add_adapter(checkout, CASESYS, adapter)
+def _casesys_check(tenants, data_root, checkout, case: R.CaseSpec) -> tuple[subprocess.CompletedProcess, list[str]]:
+    """`check <id>` of the tmp checkout `checkout` (its adapters also hold `helpdesk`), over a new tenant with a
+    `helpdesk` record and the case record `case`, every system credentialed at its generation (`_stocked`), so neither a
+    missing secret store nor "no credentials" can decide the outcome; the database from `DEFENDER_DATABASE_DSN`.
+    Returns the process and its lines with the tenant id masked (two tenants' outputs compare)."""
     systems = {**R.fixture_records().systems,
                CASESYS: R.SysSpec({"HELPDESK_TIMEOUT_SEC": "5"}, R.declaration("https://cases.example.test", writes=(CASE_ROUTE,)))}
-    op = tenants(R.RecordsSpec(systems, R.CaseSpec(CASESYS)), files={"settings/verb-grants.yaml": _grants_with_casesys()})
+    op = tenants(R.RecordsSpec(systems, case), files={"settings/verb-grants.yaml": _grants_with_casesys()})
     _stocked(op)
     env = H.tenant_env(data_root)
     env["PYTHONPATH"] = os.pathsep.join((str(checkout), str(H.REPO_ROOT)))
-    return subprocess.run(  # noqa: S603 -- fixed argv, the test's own interpreter
+    done = subprocess.run(  # noqa: S603 -- fixed argv, the test's own interpreter
         [sys.executable, "-c", _CHECK_DRIVER, json.dumps(op.kv.held), "check", op.tid], env=env, cwd=str(checkout),
         capture_output=True, text=True, timeout=180, check=False)
+    return done, [line.replace(op.tid, "<tenant>") for line in (done.stdout + done.stderr).splitlines()]
 
 
-def _case_lines(done: subprocess.CompletedProcess) -> list[str]:
-    """Lines naming the case system and, as a word, the case."""
-    return [line for line in (done.stdout + done.stderr).splitlines()
-            if CASESYS in line and re.search(r"\bcase\b", line, re.IGNORECASE)]
+def _case_finding(tenants, data_root, tmp_path, adapter: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    """The same checkout (`helpdesk` adapter `adapter`) checked twice: once with the case record naming `helpdesk`, once
+    naming ticket. The case finding is the lines naming `helpdesk` and, as a word, the case that only the first run
+    prints: what the adapter alone draws (a census line about it, a grant row) shows in both runs and cancels."""
+    checkout = H.tmp_checkout(tmp_path / "checkout")
+    H.add_adapter(checkout, CASESYS, adapter)
+    done, lines = _casesys_check(tenants, data_root, checkout, R.CaseSpec(CASESYS))
+    _, control = _casesys_check(tenants, data_root, checkout, R.CaseSpec())
+    return done, [line for line in _only_in(lines, control, CASESYS) if re.search(r"\bcase\b", line, re.IGNORECASE)]
 
 
 def test_1366_c3_check_over_a_sound_case_adapter_judges_the_case_system_clean(tenants, data_root, tmp_path):
-    """Positive control for the two tests below: the sound `helpdesk` adapter (the cold constants, a settings check, the
-    comment action declared as a route, not held in `VERBS`) draws no line naming the case system and the case, and no
+    """Positive control for the test below: the sound `helpdesk` adapter (the cold constants, a settings check, the
+    comment action declared as a route, not held in `VERBS`) as the case system draws no case finding, and no
     traceback. (#1366 C3: one case judgement, `check` its caller; O1)"""
-    done = _casesys_check(tenants, data_root, tmp_path, CASE_ADAPTER)
+    done, finding = _case_finding(tenants, data_root, tmp_path, CASE_ADAPTER)
 
     assert "Traceback" not in done.stdout + done.stderr, done.stderr
-    assert _case_lines(done) == [], done.stdout + done.stderr
+    assert finding == [], done.stdout + done.stderr
 
 
 @pytest.mark.parametrize("variant", ["verbs-hold-the-comment-action", "check-crashes", "no-check"])
@@ -523,9 +528,9 @@ def test_1366_c3_check_judges_a_case_adapter_the_cold_read_refuses_or_whose_chec
     case system and the case, exit nonzero, no traceback -- as run start judges the same adapter. Moved from the
     retired `case_comment_1359/test_case_comment_tenant_check.py::test_r1_a_case_adapter_the_cold_read_refused...`
     and `..._whose_check_cannot_judge_is_a_finding_not_a_crash` (#1366 C3 one case judgement, three callers; O1)."""
-    done = _casesys_check(tenants, data_root, tmp_path, CASE_ADAPTER_VARIANTS[variant])
+    done, finding = _case_finding(tenants, data_root, tmp_path, CASE_ADAPTER_VARIANTS[variant])
 
     said = done.stdout + done.stderr
     assert done.returncode != 0, said
     assert "Traceback" not in said, said
-    assert _case_lines(done), said
+    assert finding, said
