@@ -283,10 +283,11 @@ class HostActor(Actor):
 
     async def _offboard_learning(self, tenant: str) -> None:
         """The tenant's learning rows (#1278 O6): holders told to stop, lapsed batches ended, rows purged. A live holder
-        past the wait fails the step, which is retried. No database address: nothing of learning is stored here."""
+        past the wait fails the step, which is retried. With no database address the step refuses: a tenant's learning rows
+        are never left behind by skipping the purge."""
         dsn = os.environ.get("DEFENDER_DATABASE_DSN")
         if not dsn:
-            return
+            raise StepFailed("the tenant's learning rows cannot be purged: DEFENDER_DATABASE_DSN is not set")
         from defender.learning.store import LaneBusy, LearningStore
 
         store = LearningStore(dsn)
