@@ -8,8 +8,8 @@ and records them in `freeze.yaml` as `patterns: [events, alerts]`; there is no `
 `freeze_dir` is `held_out/freezes/<freeze-id>/` (the freeze id is its name); parts go under
 `parts_dir/<freeze-id>/`; writes `freeze_dir/freeze.yaml`. `es` is the LIVE cluster through
 the chaos seam's `es_request(method, path, body=None)`. `ops` offers:
-active_faults() -> list; hold_pickups(); release_pickups() (the alert-ticket watcher and every
-live defender pickup); fire(scenario, lock_token); proc_tree(dest), stub_dumps(dest),
+active_faults() -> list; hold_pickups(); release_pickups() (AT2: the alert-ticket
+watcher only, not every live defender pickup); fire(scenario, lock_token); proc_tree(dest), stub_dumps(dest),
 commit_hosts(dest), copy_volumes(dest), detection_rules(dest) (the rules installed at T) ->
 part names written under dest; verify_restore(repository, snapshot) -> {index: count} (a scratch
 cluster). The lock is `chaos.lock` (`take/release`, `CAPTURE = "capture"`) on `lock_store`.
@@ -18,6 +18,7 @@ POST `/_snapshot/<repo>/_verify`) and never registers it.
 """
 from __future__ import annotations
 
+import copy
 import importlib.util
 import inspect
 import re
@@ -113,9 +114,10 @@ class Ops:
 
 
 class Rig:
-    """`occupied` models a repository that already holds a snapshot: "same-name" under whatever name
-    capture asks for first (a reused freeze id), "other-name" under `older`. Creating a snapshot
-    under a taken name fails as Elasticsearch fails it. `clock_step=0` makes `now()` stand still
+    """`occupied` models a repository that already holds a snapshot before capture starts: "freeze-id"
+    under the freeze's own id (a reused freeze id), "other-name" under `older`, "asked-name" under whatever
+    name capture asks for first (seeded at that request, for a capture that names its snapshot otherwise).
+    Creating a snapshot under a taken name fails as Elasticsearch fails it. `clock_step=0` makes `now()` stand still
     until slept, for exact-boundary tests."""
 
     def __init__(self, tmp_path: Path, fail_at: str | None = None, faults: list | None = None,
@@ -138,11 +140,13 @@ class Rig:
         self.occupied = occupied
         if occupied == "other-name":
             self._seed("older")
+        if occupied == "freeze-id":
+            self._seed(FREEZE_ID)
         self.ops = Ops(self, fail_at, faults or [])
 
         def route(method, path, body):
             m = SNAP_URL.match(path)
-            if m and occupied == "same-name" and not self.preexisting:
+            if m and occupied == "asked-name" and not self.preexisting:
                 self._seed(m["name"])
             if method in ("PUT", "POST") and m:
                 self.held_at.setdefault("snapshot", []).append("capture" in self.store.records)
@@ -176,7 +180,7 @@ class Rig:
     def _seed(self, name: str) -> None:
         self.snapshots[name] = {"snapshot": name, "uuid": "AN-EARLIER-FREEZES-UUID", "state": "SUCCESS",
                                 "indices": ["earlier-index"]}
-        self.preexisting[name] = dict(self.snapshots[name])
+        self.preexisting[name] = copy.deepcopy(self.snapshots[name])
 
     def capture(self):
         return self.module.capture(
@@ -413,12 +417,15 @@ _BEFORE_THE_SNAPSHOT = ["hold_pickups", "fire", "proc_tree", "stub_dumps", "comm
 
 
 @pytest.mark.parametrize("occupied, fail_at, state", [
-    ("same-name", None, "SUCCESS"), ("same-name", "snapshot", "SUCCESS"),
+    *[("freeze-id", s, "SUCCESS") for s in [*_BEFORE_THE_SNAPSHOT, "snapshot", "verify_restore"]],
+    ("freeze-id", None, "PARTIAL"),
+    ("asked-name", "snapshot", "SUCCESS"), ("asked-name", None, "PARTIAL"),
     *[("other-name", s, "SUCCESS") for s in [*_BEFORE_THE_SNAPSHOT, "snapshot", "verify_restore"]],
     ("other-name", None, "PARTIAL")])
 def test_a_failed_capture_leaves_the_repositorys_snapshots_exactly_as_it_found_them(tmp_path, occupied, fail_at, state):
-    """O1/A9: whatever step fails, a snapshot that was in the repository before (under the name
-    capture asked for, or another) is still there, unchanged; capture deletes only what it created."""
+    """O1/A9: whatever step fails, a snapshot that was in the repository before capture started (under the
+    freeze's id, under the name capture asks for, or another) is still there, unchanged; capture deletes
+    only what it created."""
     rig = Rig(tmp_path, fail_at=fail_at, state=state, occupied=occupied)
     with pytest.raises(Exception) as caught:
         rig.capture()
@@ -427,3 +434,27 @@ def test_a_failed_capture_leaves_the_repositorys_snapshots_exactly_as_it_found_t
     assert rig.preexisting, "the repository held nothing: the fixture did not reach the snapshot step"
     assert rig.snapshots == rig.preexisting
     assert not (rig.freeze_dir / "freeze.yaml").exists() and "capture" not in rig.store.records
+
+
+@pytest.mark.parametrize("occupied", ["freeze-id", "asked-name"])
+def test_a_capture_whose_snapshot_name_is_taken_fails_or_takes_a_fresh_name_and_leaves_the_old_snapshot_alone(tmp_path, occupied):
+    """O1/A9: the design fixes only that a pre-existing same-name snapshot is left exactly as it was. Capture
+    may fail (nothing written, nothing left) or snapshot under a fresh name (a whole freeze that names it)."""
+    rig = Rig(tmp_path, occupied=occupied)
+    try:
+        rig.capture()
+        failed = None
+    except Exception as exc:  # noqa: BLE001 - either outcome is allowed; the old snapshot is what is checked
+        failed = exc
+
+    assert not isinstance(failed, _NOT_A_REFUSAL), repr(failed)
+    assert rig.preexisting, "the repository held nothing: the fixture did not reach the snapshot step"
+    assert all(rig.snapshots.get(name) == old for name, old in rig.preexisting.items()), "the old snapshot changed"
+    assert "capture" not in rig.store.records
+    if failed is not None:
+        assert rig.snapshots == rig.preexisting and not (rig.freeze_dir / "freeze.yaml").exists()
+        return
+    elastic = yaml.safe_load((rig.freeze_dir / "freeze.yaml").read_text())["elastic"]
+    assert elastic["snapshot"] not in rig.preexisting and elastic["uuid"] == SNAP_UUID
+    assert set(rig.snapshots) == set(rig.preexisting) | {elastic["snapshot"]}
+    assert (REPO, elastic["snapshot"]) in [d for op, d in rig.journal if op == "verify_restore"]

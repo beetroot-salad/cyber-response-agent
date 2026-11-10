@@ -30,6 +30,7 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -37,7 +38,7 @@ import pytest
 import yaml
 from _lab_fakes import (AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, ALERTS_PATTERN, DATA_DROP, EVENTS, FREEZE_ID,
                         FROZEN_PROXY_URL, LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SCHEMA_DRIFT,
-                        SLUG, SNAP, SPAN_START, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T, FaultJournal, LabRig,
+                        SLUG, SPAN_START, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T, FaultJournal, LabRig,
                         canonical_digest, expected_copy, expected_variant, instant, seconds)
 
 LAUNCH = Path(__file__).resolve().parents[1] / "launch_frozen.py"
@@ -665,11 +666,18 @@ def test_a_launch_handed_a_token_that_is_not_the_holders_is_refused_and_leaves_t
     assert not isinstance(caught.value, (AttributeError, TypeError, NameError, ImportError, OSError))
     assert not rig.cluster.requests and rig.rows() == [] and rig.lock_in_run is None
     assert rig.store.records["frozen-engine"] == record
+    _only_lock_traffic(rig.journal, "wrong token")
 
 
 # =====================================================================================================
 # r6.4.2 repairs (attack batch 1): one test per family, whose input is the whole class
 # =====================================================================================================
+
+
+def _only_lock_traffic(journal, where):
+    """A refused launch made no ops call, cluster request or run: the journal holds lock and clock entries only."""
+    other = [(op, d) for op, d in journal if not op.startswith(("lock.", "clock."))]
+    assert not other, (where, other)
 
 
 def _launch_cases(tmp_path, joined):
@@ -684,6 +692,12 @@ def _launch_cases(tmp_path, joined):
     return build
 
 
+def _teardown_ran_under_the_lock(rig, joined, where):
+    """The engine lock record still existed when teardown ran, owned or joined: an owned lock is released
+    after teardown's last call, never before it (C3/O9)."""
+    assert rig.ops.locks_at_teardown == [{"frozen-engine"}], (where, rig.ops.locks_at_teardown)
+
+
 def test_a_launch_cut_at_any_step_after_verify_tears_down_once_and_frees_only_a_lock_it_took(tmp_path):
     """C3/A1/O9/O10: for every step after the UUID check (cluster request, lab op, agent run) and the row
     write, owned or joined lock: one teardown; an owned lock is released once, after it; a joined one is untouched."""
@@ -692,11 +706,11 @@ def test_a_launch_cut_at_any_step_after_verify_tears_down_once_and_frees_only_a_
         clean = FaultJournal(skip=("teardown",))
         rig, token = build(clean)
         rig.launch(**({"reference": True, "lock_token": token} if joined else {}))
-        uuid_check = next((i for i, (op, d) in enumerate(clean.step_log) if op == "es" and d[0] == "GET"
-                           and d[1].split("?")[0] == f"/_snapshot/{REPO}/{SNAP}"), None)
-        assert uuid_check is not None, "the launch never read the snapshot to check its UUID"
-        steps = list(range(uuid_check + 2, len(clean.step_log) + 1))
+        # the step at which the cluster served the snapshot's UUID: the fake has no other route that does
+        assert rig.cluster.uuid_served_step is not None, "the launch never read the snapshot to check its UUID"
+        steps = list(range(rig.cluster.uuid_served_step + 1, len(clean.step_log) + 1))
         assert len(steps) >= 10, "the clean run shows too few steps to be cut anywhere"
+        _teardown_ran_under_the_lock(rig, joined, "uncut, " + ("joined" if joined else "owned"))
 
         for n in steps + ["row"]:
             if n == "row" and joined:
@@ -719,6 +733,7 @@ def test_a_launch_cut_at_any_step_after_verify_tears_down_once_and_frees_only_a_
             if n == "row" or (clean.step_log[n - 1][0] != "run"):
                 assert caught is not None, f"{where}: the launch went on as if nothing failed"
             assert ops.count("teardown") == 1, where
+            _teardown_ran_under_the_lock(rig, joined, where)
             if joined:
                 assert rig.store.records == record and "lock.delete" not in ops[started:], where
                 assert "lock.create" not in ops[started:], where
@@ -751,40 +766,101 @@ def test_a_token_handed_to_a_launch_while_no_one_holds_the_lock_is_refused_befor
     assert not rig.cluster.requests and rig.ops.stubs is None and rig.ops.marker is None
     assert "run" not in rig.journal.ops() and rig.rows() == [] and not rig.store.records
     assert "lock.create" not in rig.journal.ops()[before:]
+    _only_lock_traffic(rig.journal, "refused")
 
 
 # -- C4: a copy left by an earlier launch is never trusted beyond what a restore would give ---------------
 
 
-def _drop(threshold=25, salt="7"):
-    m = copy.deepcopy(DATA_DROP)
-    m["processor"]["drop"]["if"] = m["processor"]["drop"]["if"].replace("'7'", f"'{salt}'").replace("< 25", f"< {threshold}")
-    return m
+def _sites(value):
+    """Every way a scalar can be nudged, as `(site, candidates)`: the value as a whole, and each number and
+    each quoted string inside a string (a Painless condition holds a threshold and a salt)."""
+    if isinstance(value, bool):
+        yield "", [not value]
+    elif isinstance(value, (int, float)):
+        yield "", [value + 1, value - 1, value + 35]
+    elif isinstance(value, str):
+        yield "", [value + "_x"]
+        for k, m in enumerate(re.finditer(r"\d+", value)):
+            n = int(m.group())
+            yield f"#num{k}", [value[:m.start()] + str(c) + value[m.end():] for c in (n + 1, n - 1, n + 35) if c >= 0]
+        for k, m in enumerate(re.finditer(r"'([^']*)'", value)):
+            yield f"#quoted{k}", [value[:m.start(1)] + c + value[m.end(1):] for c in (m.group(1) + "a", "a")]
 
 
-def _drift(target="source.port_no"):
-    m = copy.deepcopy(SCHEMA_DRIFT)
-    m["processor"]["rename"]["target_field"] = target
-    return m
+def _leaves(node, path=()):
+    if isinstance(node, dict):
+        for key, child in node.items():
+            yield from _leaves(child, path + (key,))
+    elif isinstance(node, list):
+        for i, child in enumerate(node):
+            yield from _leaves(child, path + (i,))
+    else:
+        yield path, node
 
 
-_LATER = "2026-10-20T08:00:00Z"
-VARIANTS = {   # one leaf of the resolved overlay differs from its neighbour: threshold, salt, rename target, span_start
-    "none": (None, SPAN_START), "drop": (DATA_DROP, SPAN_START), "drop/threshold": (_drop(60), SPAN_START),
-    "drop/salt": (_drop(salt="a"), SPAN_START), "drop/span_start": (DATA_DROP, _LATER),
-    "drift": (SCHEMA_DRIFT, SPAN_START), "drift/target": (_drift("source.port_alt"), SPAN_START),
-    "drift/span_start": (SCHEMA_DRIFT, _LATER)}
-NEIGHBOUR = {"none": "drop", "drop": "drop/threshold", "drop/threshold": "drop", "drop/salt": "drop",
-             "drop/span_start": "drop", "drift": "drift/target", "drift/target": "drift", "drift/span_start": "drift"}
+def _set(node, path, value):
+    node = copy.deepcopy(node)
+    here = node
+    for step in path[:-1]:
+        here = here[step]
+    here[path[-1]] = value
+    return node
+
+
+def _later(span_start, delta):
+    return (instant(span_start) + delta).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _expected_or_none(mutation, span_start):
+    try:
+        return expected_variant(mutation, span_start)
+    except Exception:  # noqa: BLE001 - a nudge the oracle cannot evaluate (e.g. a mangled condition) is not a variant
+        return None
+
+
+def _perturbations(base_name, mutation):
+    """One variant per scalar leaf of the resolved mutation (and of span_start) whose nudge changes the
+    expected end state; a leaf no nudge of which changes it (`stream`, `pipeline`, `ignore_failure`) is not a variant."""
+    base = expected_variant(mutation, SPAN_START)
+    found = {}
+    for path, value in [*_leaves(mutation), (("span_start",), SPAN_START)]:
+        if path in (("kind",),):
+            continue     # not a value of the overlay but which overlay it is
+        for site, candidates in _sites(value) if path != ("span_start",) else [
+                ("", [_later(SPAN_START, timedelta(seconds=d)) for d in (1, -1, 60, -60, 3600, 7200)])]:
+            for candidate in candidates:
+                other = (_set(mutation, path, candidate), SPAN_START) if path != ("span_start",) else (mutation, candidate)
+                state = _expected_or_none(*other)
+                if state is not None and state != base:
+                    found[f"{base_name}/{'.'.join(map(str, path))}{site}"] = other
+                    break
+    return found
+
+
+_DROP_VARIANTS = _perturbations("drop", DATA_DROP)
+_DRIFT_VARIANTS = _perturbations("drift", SCHEMA_DRIFT)
+VARIANTS = {"none": (None, SPAN_START), "drop": (DATA_DROP, SPAN_START), "drift": (SCHEMA_DRIFT, SPAN_START),
+            **_DROP_VARIANTS, **_DRIFT_VARIANTS}
+PAIRS = [("none", "drop")] + [(a, b) for name in _DROP_VARIANTS for a, b in (("drop", name), (name, "drop"))] + [
+    (a, b) for name in _DRIFT_VARIANTS for a, b in (("drift", name), (name, "drift"))]
+
+
+def test_the_walk_over_every_leaf_reaches_the_leaves_the_oracle_distinguishes():
+    """C4: the generated variants cover the threshold, the salt, the rename target and span_start (and the
+    dataset, field and rename source, which also change the copy), so the walk cannot go vacuous."""
+    for needle in ("drop/processor.drop.if#num", "drop/processor.drop.if#quoted", "drop/span_start", "drop/dataset"):
+        assert any(name.startswith(needle) for name in _DROP_VARIANTS), (needle, sorted(_DROP_VARIANTS))
+    for needle in ("drift/processor.rename.target_field", "drift/span_start", "drift/dataset"):
+        assert any(name.startswith(needle) for name in _DRIFT_VARIANTS), (needle, sorted(_DRIFT_VARIANTS))
 
 
 @pytest.mark.parametrize("uuid_ok", [True, False], ids=["uuid-ok", "uuid-changed"])
 @pytest.mark.parametrize("prior", ["empty", "same", "neighbour", "dirty"])
-@pytest.mark.parametrize("target", list(VARIANTS))
-def test_a_launch_after_any_earlier_copy_ends_as_it_would_from_an_empty_cluster(tmp_path, target, prior, uuid_ok):
+@pytest.mark.parametrize("target, other", PAIRS, ids=[f"{a}<-{b}" for a, b in PAIRS])
+def test_a_launch_after_any_earlier_copy_ends_as_it_would_from_an_empty_cluster(tmp_path, target, other, prior, uuid_ok):
     """C4/O6/A4: whatever copy an earlier launch left (same variant, one leaf different, half-made), the
     launch is refused on a changed snapshot UUID, else leaves the variant's own end state and a valid row."""
-    other = NEIGHBOUR[target]
     assert expected_variant(*VARIANTS[target]) != expected_variant(*VARIANTS[other]), "the leaf must change the copy"
     rig = LabRig(tmp_path, fail=_once(lambda m, p, b: p.endswith("/_delete_by_query")) if prior == "dirty" else None)
     if prior != "empty":
@@ -940,7 +1016,8 @@ def test_a_launch_works_on_the_patterns_of_its_freeze_not_on_a_built_in_default(
     rig.launch()
 
     assert [r["verdict"] for r in rig.rows()] == ["valid"] and rig.cluster.state() == expected_copy("drop")
-    assert [list(p) for p in rig.ops.digest_patterns] == [[EVENTS, ALERTS_ALT]], rig.ops.digest_patterns
+    assert rig.ops.digest_patterns, "the launch never compared the copy's content digest"
+    assert all(list(p) == [EVENTS, ALERTS_ALT] for p in rig.ops.digest_patterns), rig.ops.digest_patterns
     asked = json.dumps([[m, p, b] for m, p, b in rig.cluster.requests], default=str)
     assert ALERTS_PATTERN not in asked
 

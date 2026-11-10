@@ -26,6 +26,10 @@ from defender.integrations import esql_text
                  id="a-string-literal-is-data"),
     pytest.param('FROM logs-* | WHERE m == "LOOKUP JOIN .security-7"', ["logs-*"],
                  id="a-string-literal-holding-a-join-is-data"),
+    pytest.param('FROM logs-* | WHERE m == """a " | LOOKUP JOIN .security-7 FROM .security-7 """ | LIMIT 1', ["logs-*"],
+                 id="a-triple-quoted-string-holding-a-bare-quote-is-data"),
+    pytest.param('FROM logs-* | WHERE m == """x""" | LOOKUP JOIN hosts ON k', ["logs-*", "hosts"],
+                 id="a-triple-quoted-string-then-a-join"),
     pytest.param("ROW a = 1 | EVAL b = a + 1", [], id="row-reads-nothing"),
     pytest.param("SHOW INFO", [], id="show-reads-nothing"),
 ])
@@ -116,7 +120,18 @@ def _gap(rng: random.Random) -> str:
 
 
 def _spell(rng: random.Random, name: str) -> str:
-    return f'"{name}"' if "|" in name or ":" in name or rng.random() < 0.4 else name
+    """Quoted or bare, as the writer likes; only a name holding `|` must be quoted (a coloned one may be either)."""
+    return f'"{name}"' if "|" in name or rng.random() < 0.4 else name
+
+
+def _literal(rng: random.Random) -> str:
+    """A string literal of hostile text: double-quoted, or triple-quoted (where a bare `"` is allowed)."""
+    if rng.random() < 0.5:
+        return f'"{_words(rng, HOSTILE, rng.randint(1, 5))}"'
+    body = _words(rng, HOSTILE + ['"', '""', "|", "FROM zz", '" | LOOKUP JOIN zz "'], rng.randint(1, 5))
+    while '"""' in body:
+        body = body.replace('"""', '" "')
+    return f'"""{"x" if body.startswith(chr(34)) else ""}{body}{"x" if body.endswith(chr(34)) else ""}"""'
 
 
 def _commands(rng: random.Random, joins: list[str]) -> list[str]:
@@ -131,7 +146,7 @@ def _commands(rng: random.Random, joins: list[str]) -> list[str]:
             toks.append(_spell(rng, pending.pop(0)))
             toks.append("ON k")
         elif kind == "where":
-            toks.append(f'WHERE m == "{_words(rng, HOSTILE, rng.randint(1, 5))}"')
+            toks.append(f"WHERE m == {_literal(rng)}")
         elif kind == "eval":
             toks.append("EVAL a = 1")
         else:
@@ -169,9 +184,12 @@ def _query(rng: random.Random, remote: bool) -> tuple[str, list[str] | None]:
 
 
 def test_sources_reads_every_generated_query_as_its_source_set_or_as_unreadable():
-    """A5/A6: queries built around a known source set, with comments (nested too) and hostile
-    string literals everywhere, read as exactly that set; any source holding `:` reads `None`."""
+    """A5/A6: queries built around a known source set, with comments (nested too), hostile string
+    literals (double- and triple-quoted) everywhere, and sources spelled bare or quoted, read as exactly
+    that set (as a set: the design fixes no multiplicity); any source holding `:` reads `None`, bare or quoted."""
     rng = random.Random(1347)
     for case in range(400):
         query, want = _query(rng, remote=case % 4 == 3)
-        assert esql_text.sources(query) == want, f"case {case}: {query!r}"
+        got = esql_text.sources(query)
+        assert (got is None) if want is None else (got is not None and set(got) == set(want)), \
+            f"case {case}: {query!r} -> {got!r}"

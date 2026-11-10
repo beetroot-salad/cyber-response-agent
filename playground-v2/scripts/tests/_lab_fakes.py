@@ -11,7 +11,9 @@ FakeClock, FakeES, sha, canonical_digest, instant, seconds. Added (r6.4.1):
 * `FakeCluster(FakeES)`: a frozen Elasticsearch that HOLDS documents, so a test reads the end
   state (`cluster.indices`, `.pipelines`, `.repos`, `.ilm`, `.lifecycle_off`, `.mutations`).
   Supported: snapshot GET/PUT/restore, `_ilm/stop`, per-stream lifecycle DELETE, index DELETE and
-  `_close`, `_count`, `_search` (match_all/term/terms/range/exists/ids/bool; size/from only),
+  `_close`, `_count`, `_search` (match_all/term/terms/range/exists/ids/bool; size/from/sort/version;
+  unsorted = a seeded shuffle that differs between calls; from+size <= 10 000; `_version` only with
+  `"version": true`; the total stops at 10 000 unless `track_total_hits`),
   `_delete_by_query`, `_reindex` (pipeline, version_type external, op_type create), ingest
   pipelines (`drop` with the data-drop Painless condition, `rename`, `remove`), `_cat/indices`,
   `_cluster/health`. Anything else raises NotImplementedError so a gap is loud, not silent.
@@ -41,6 +43,7 @@ import copy
 import fnmatch
 import hashlib
 import json
+import random
 import re
 import threading
 from collections.abc import Callable
@@ -316,6 +319,8 @@ class FakeCluster(FakeES):
         self.clock, self.latency, self.up = clock, dict(latency or {}), up
         self.down_requests: list[str] = []
         self._uuids = 0
+        self.uuid_served_step: int | None = None   # step number (FaultJournal.step_log) of the first snapshot read that served the UUID
+        self._order = random.Random(1347)   # the order an unsorted search answers in
 
     def _took(self, kind: str) -> None:
         if self.clock is not None and kind in self.latency:
@@ -427,6 +432,8 @@ class FakeCluster(FakeES):
         if len(seg) == 3 and method == "GET":
             if (repo, snap) != (self.repo, self.snapshot):
                 raise RuntimeError(f"snapshot_missing_exception [{repo}:{snap}]")
+            if self.uuid_served_step is None:     # the only route that serves the UUID; the fake has no other
+                self.uuid_served_step = len(getattr(self.journal, "step_log", ()))
             return {"snapshots": [{"snapshot": snap, "uuid": self.snapshot_uuid, "state": "SUCCESS",
                                    "indices": list(self.content)}]}
         if len(seg) == 3 and method in ("PUT", "POST"):
@@ -458,16 +465,42 @@ class FakeCluster(FakeES):
         return {"snapshot": {"snapshot": self.snapshot, "indices": names,
                              "shards": {"total": len(names), "failed": 0, "successful": len(names)}}}
 
+    MAX_RESULT_WINDOW = 10_000      # index.max_result_window: from + size may not exceed it
+
     def _search(self, expr: str, body: dict) -> Any:
+        """As Elasticsearch: no order without a `sort` (here a seeded shuffle that differs between
+        calls), `from + size` capped at the result window, `_version` only with `"version": true`,
+        and a total that stops counting at 10 000 unless `track_total_hits` asks for it."""
+        start, size = int(body.get("from", 0)), int(body.get("size", 10))
+        if start + size > self.MAX_RESULT_WINDOW:
+            raise RuntimeError(
+                "illegal_argument_exception: Result window is too large, from + size must be less than or "
+                f"equal to: [{self.MAX_RESULT_WINDOW}] but was [{start + size}]. See the scroll api for a "
+                "more efficient way to request large data sets.")
         hits = []
         for n in self._expand(expr):
             for i, d in sorted(self.indices[n]["docs"].items()):
                 if _matches(body.get("query"), d["_source"], i):
-                    hits.append({"_index": n, "_id": i, "_version": d["_version"],
-                                 "_source": copy.deepcopy(d["_source"])})
-        start = int(body.get("from", 0))
-        page = hits[start:start + int(body.get("size", 10))]
-        return {"hits": {"total": {"value": len(hits), "relation": "eq"}, "hits": page}}
+                    hit = {"_index": n, "_id": i, "_source": copy.deepcopy(d["_source"])}
+                    if body.get("version"):
+                        hit["_version"] = d["_version"]
+                    hits.append(hit)
+        if body.get("sort"):
+            for key in reversed(body["sort"] if isinstance(body["sort"], list) else [body["sort"]]):
+                field, spec = next(iter(key.items())) if isinstance(key, dict) else (key, "asc")
+                desc = (spec.get("order") if isinstance(spec, dict) else spec) == "desc"
+                def sort_key(h, f=field):
+                    return h["_id"] if f in ("_id", "_doc") else h["_source"].get(f)
+
+                have = sorted((h for h in hits if sort_key(h) is not None), key=sort_key, reverse=desc)
+                hits = have + [h for h in hits if sort_key(h) is None]
+        else:
+            self._order.shuffle(hits)
+        tracked = body.get("track_total_hits", self.MAX_RESULT_WINDOW)
+        limit = None if tracked is True else int(tracked)
+        capped = limit is not None and len(hits) > limit
+        total = {"value": limit if capped else len(hits), "relation": "gte" if capped else "eq"}
+        return {"hits": {"total": total, "hits": hits[start:start + size]}}
 
     def _delete_by_query(self, expr: str, body: dict) -> Any:
         self._note("delete_by_query", expr)
@@ -727,6 +760,7 @@ class LabOps:
         self.password = "pw-0"               # the lab's current read-only password (changes over time)
         self.users: list[tuple] = []         # (password, proxy_up) at each create_readonly_user
         self.cert_mounts: list[bool] = []    # proxy_up at each mount_node_cert
+        self.locks_at_teardown: list[set] = []   # the lock records that existed when each teardown ran
         self.live_runs: set[str] | None = {"live-run"}   # what the lab says has a live run / a ticket;
         self.tickets: set[str] | None = {"ticketed"}     # None = that source is not configured (lookup raises)
 
@@ -788,6 +822,7 @@ class LabOps:
     def teardown(self):
         self.rig.index_at_teardown = self.rig.index.read_text() if self.rig.index.is_file() else ""
         self.rig.cluster_at_teardown = self.rig.cluster.state()
+        self.locks_at_teardown.append(set(self.rig.store.records))
         self.stub_digest, self.proxy_up = None, False
         self.rig.cluster.up = False      # the real teardown stops the node; its data stays on disk
         self._j("teardown")
