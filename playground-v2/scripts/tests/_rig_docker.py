@@ -20,7 +20,9 @@ what a marker, an offset or a variant is. What it models:
   shell) runs `[ ]`/`test`, `cat`, `printf`, `echo`, `mkdir`, `mv`, `cp`, `rm`, `tar -x -C`, redirections and
   `;`/`&&`/`||` over those files, `NAME=value` (put in when a later command runs), a subshell `( ... )
   [N>file]` (its fds, `exit` and locks end with it), a whole script `{ ...; } N>file`, `exec N>file` /
-  `N>>` / `N<` / `N<>`, `flock` (exclusive; `-u N` drops it; `-s` is not modelled), `grep` with a fixed
+  `N>>` / `N<` / `N<>`, `flock` (exclusive; `-u N` drops it; `-s` is not modelled; in a container whose image
+  names `elasticsearch` there is none, as in the real image: `sh: line 1: flock: command not found`, exit 127),
+  `grep` with a fixed
   pattern (a non-`-F` pattern with regex metacharacters is not modelled), `head -c N /dev/urandom | base64`
   (a fixed secret). `$(...)` runs its command and yields its output; if that command is not modelled, it
   stays in `unmodelled` and yields a fixed word. Anything else is listed in `unmodelled`.
@@ -1138,6 +1140,10 @@ class RigDocker(FakeDocker):
             self._unmodelled(words)
             return 127
         if words and words[0] == "flock":
+            if "elasticsearch" in c.image:
+                # the Elasticsearch image (RHEL 9 minimal, `sh` is bash) ships no flock (#1347 live check 16)
+                st["err"] += b"sh: line 1: flock: command not found\n"
+                return 127
             return self._flock(c, words, stdin, env, st)
         if words and words[0] == "exit":
             raise _Exit(int(words[1]) if len(words) > 1 else st["rc"])

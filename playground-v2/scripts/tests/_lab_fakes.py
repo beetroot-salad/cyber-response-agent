@@ -866,6 +866,29 @@ TENANT_HOSTS = ["elasticsearch", "soc-playground"]
 FROZEN_ENDPOINT = "10.99.0.1:19200"
 FROZEN_AUDIT, LIVE_AUDIT = "/audit/frozen-proxy.jsonl", "/audit/proxy.jsonl"
 LAB_OPS = Path(__file__).resolve().parents[1] / "lab_ops.py"
+# The live lab's always-on services a rig deploys, by container name, with the images compose.yml gives them: the
+# live Elasticsearch (RHEL minimal: no `flock`) and the lab's DNS resolver (alpine/busybox: `flock` and `grep`).
+# `chaos.lock`'s store lives in whichever one `chaos.lock.LOCK_CONTAINER` names (`lock_box`): a rig deploys the lab,
+# never a container made to suit the lock store.
+LIVE_ES_IMAGE = "docker.elastic.co/elasticsearch/elasticsearch:9.3.3"
+LAB_IMAGES = {"elasticsearch": LIVE_ES_IMAGE, "unbound": "soc-playground/unbound:local"}
+
+
+def deploy_lab_services(docker, *, cluster: Any = None, env: dict | None = None):
+    """The live lab's services on the rig docker, running: the live Elasticsearch (answering from `cluster`, with
+    `env`) and the DNS resolver. Returns the live Elasticsearch container."""
+    es = docker.existing(CONTEXT, "elasticsearch", LAB_IMAGES["elasticsearch"], cluster=cluster, env=env)
+    for name, image in LAB_IMAGES.items():
+        if name != "elasticsearch":
+            docker.existing(CONTEXT, name, image)
+    return es
+
+
+def lock_box(docker, lock_container: str):
+    """The deployed lab container `chaos.lock.LOCK_CONTAINER` names, which holds the lock records."""
+    box = docker.containers.get((CONTEXT, lock_container))
+    assert box is not None, f"the lab deploys no container {lock_container!r} (chaos.lock.LOCK_CONTAINER)"
+    return box
 
 
 def tar_bytes(members: dict[str, bytes]) -> bytes:
@@ -1010,8 +1033,7 @@ class LabRig:
         certs = docker.volume(CONTEXT, CERTS_VOLUME)
         certs.update({"elasticsearch/elasticsearch.crt": b"crt", "elasticsearch/elasticsearch.key": b"key",
                       "ca/ca.crt": b"ca"})
-        docker.existing(CONTEXT, "elasticsearch", "docker.elastic.co/elasticsearch/elasticsearch:9.3.3",
-                        cluster=docker.live_cluster, env={"ELASTIC_PASSWORD": "live-elastic"})
+        deploy_lab_services(docker, cluster=docker.live_cluster, env={"ELASTIC_PASSWORD": "live-elastic"})
         docker.existing(DEPLOY, "response-credential-proxy", "credential-proxy",
                         mounts=[("/proxy", "store", ("vol", DEPLOY, "proxy-config", 0), True)])
         docker.stores[("vol", DEPLOY, "proxy-config", 0)] = {"config.json": b"{}"}

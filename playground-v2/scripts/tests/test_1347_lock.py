@@ -705,14 +705,47 @@ def test_a_release_racing_a_clear_and_a_retake_never_removes_the_new_holders_rec
 
 
 def _rig_lab_store(lock):
-    """`DockerLockStore` over the rig docker: the lab server's lock container, its files and its shell."""
-    from _lab_fakes import CONTEXT, FakeClock, Journal
+    """`DockerLockStore` over the rig docker with the lab's services deployed: the store reaches the container
+    `chaos.lock.LOCK_CONTAINER` names, with that container's files and its image's shell."""
+    from _lab_fakes import FakeClock, Journal, deploy_lab_services, lock_box
     from _rig_docker import RigDocker
 
     journal = Journal()
     docker = RigDocker(journal=journal, clock=FakeClock(journal, instant("2026-11-10T09:00:00Z")))
-    box = docker.existing(CONTEXT, lock.LOCK_CONTAINER, "docker.elastic.co/elasticsearch/elasticsearch:9.3.3")
-    return lock.DockerLockStore(run=docker), docker, box
+    deploy_lab_services(docker)
+    return lock.DockerLockStore(run=docker), docker, lock_box(docker, lock.LOCK_CONTAINER)
+
+
+def test_a_lab_store_in_the_elasticsearch_container_cannot_take_a_lock(lock):
+    """#1347 live check 16: the live `elasticsearch` image has `grep` but no `flock`, and every take runs under
+    flock, so a store pointed there fails the take (a transport failure naming the missing flock), never reports
+    it taken, and leaves no record. Pins the rig's model of that image; the lab stores above, over the default
+    `LOCK_CONTAINER`, go red if the constant names that container."""
+    from _lab_fakes import FakeClock, Journal, deploy_lab_services
+    from _rig_docker import RigDocker
+
+    journal = Journal()
+    docker = RigDocker(journal=journal, clock=FakeClock(journal, instant("2026-11-10T09:00:00Z")))
+    deploy_lab_services(docker)
+    store = lock.DockerLockStore(run=docker, container="elasticsearch")
+
+    with pytest.raises(lock.LockError) as failed:
+        lock.take(store, lock.CAPTURE)
+    assert not isinstance(failed.value, (lock.Held, lock.WrongToken)), failed.value
+    assert "flock: command not found" in str(failed.value), failed.value
+    assert store.read(lock.CAPTURE) is None
+    assert not docker.unmodelled, docker.unmodelled
+
+
+def test_the_lab_store_takes_and_frees_a_lock_in_the_container_the_lab_deploys_for_it(lock):
+    """#1347 live check 16: the default store, over the lab as deployed, takes a lock in `LOCK_CONTAINER` (which
+    must carry `flock` and `grep`) and frees it."""
+    store, docker, box = _rig_lab_store(lock)
+    token = lock.take(store, lock.CAPTURE)
+    assert docker.read_file(box, f"{lock.LOCK_DIR}/{lock.CAPTURE}") is not None
+    lock.release(store, lock.CAPTURE, token)
+    assert store.read(lock.CAPTURE) is None
+    assert not docker.unmodelled, docker.unmodelled
 
 
 @pytest.mark.parametrize("name", ["capture", "frozen-engine"])

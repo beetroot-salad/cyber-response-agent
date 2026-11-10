@@ -53,6 +53,28 @@ def test_a_fixed_grep_matches_literally():
     assert docker.unmodelled == []
 
 
+@pytest.mark.parametrize("script", ['exec 9>>"$1.lock"; flock -x 9 || exit 4; printf ok', 'flock "$1.lock" printf ok'])
+def test_the_elasticsearch_image_has_no_flock_and_other_images_do(script):
+    """#1347 live check 16: the live Elasticsearch image (RHEL 9 minimal) has no `flock`: `sh -c` answers
+    `sh: line 1: flock: command not found`, exit 127, and runs nothing under it; an image that has it (the
+    alpine/busybox resolver here) runs the command under the lock. A failure the image really gives, modelled:
+    not a gap."""
+    journal = Journal()
+    docker = RigDocker(journal=journal, clock=FakeClock(journal, instant(T)))
+    docker.existing("deploy", "es", "docker.elastic.co/elasticsearch/elasticsearch:9.3.3")
+    docker.existing("deploy", "resolver", "soc-playground/unbound:local")
+
+    def run(name):
+        done = docker(["docker", "exec", name, "sh", "-c", script, "sh", "/r"], capture_output=True, text=True)
+        return done.returncode, done.stdout, done.stderr
+
+    rc, out, err = run("es")
+    assert rc in (4, 127) and out == "", (rc, out, err)
+    assert "sh: line 1: flock: command not found" in err, err
+    assert run("resolver") == (0, "ok", "")
+    assert docker.unmodelled == []
+
+
 def test_a_shared_flock_is_not_modelled():
     docker, _box = _rig()
     _sh(docker, 'flock -s "$1.lock" true', "/r")
