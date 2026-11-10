@@ -3094,23 +3094,25 @@ async def _into_shape(dsn: str, store: Any, kind: str, shape: str, row_id: str) 
 @pytest.mark.parametrize(("kind", "shape"), _LIVE_SHAPES, ids=[f"{kind}-{shape}" for kind, shape in _LIVE_SHAPES])
 async def test_1360_o3_every_live_shape_of_either_kind_ends_whether_there_at_the_start_or_arriving_while_the_offboard_waits(
         dsn, kind, shape, arrives):
-    """The tenant's one other live job is a running learning job a raw connection holds, so the offboard waits on it. A
-    row of each live shape is there before the offboard starts, or is committed (queued, then claimed, lapsed or handed
-    back as the system does it) while the offboard waits, after its statements for that pass were taken: either way the
-    commit leaves the tenant no queued or running row, that row ends with the offboarding's reason, and the take-over
-    and both claims that run next find nothing of the tenant to fail, retry or start. A lapsed running row is live until
-    it ends; leaving it to the take-over queues a retry for a tenant being removed. (#1360 O3, O4 invariant, Flow 1
-    step 3 fresh read)"""
+    """The tenant's one other live job is a running job of the same kind a raw connection holds, so the offboard waits on
+    it. A row of each live shape is there before the offboard starts, or is committed (queued, then claimed, lapsed or
+    handed back as the system does it) while the offboard waits, after its statement for that kind was taken, as a
+    derived row arrives (a retry or an auto job, which only a live row of its own kind's parent chain can insert, so
+    it arrives while that kind is being ended): either way the commit leaves the tenant no queued or running row, that
+    row ends with the offboarding's reason, and the take-over and both claims that run next find nothing of the
+    tenant to fail, retry or start. A lapsed running row is live until it ends; leaving it to the take-over queues a
+    retry for a tenant being removed. (#1360 O3, O4 invariant, Flow 1 step 3 fresh read, as amended by D3)"""
     held = str(uuid.uuid4())
-    _plant_running_pair(dsn, [], [held])
+    _plant_running_pair(dsn, [held] if kind == "investigation" else [], [held] if kind == "learning" else [])
+    table = "investigations" if kind == "investigation" else "learning_jobs"
     async with job_store(dsn) as store:
         if arrives == "at_start":
             late = _plant_queued(dsn, kind)
             await _into_shape(dsn, store, kind, shape, late)
-        async with _holding_row(dsn, "learning_jobs", held):
+        async with _holding_row(dsn, table, held):
             offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
             try:
-                await until_blocked(dsn, 1)  # the offboard waits for the held learning job
+                await until_blocked(dsn, 1)  # the offboard waits for the held row
                 if arrives == "behind_a_held_row":
                     late = _plant_queued(dsn, kind)
                     await _into_shape(dsn, store, kind, shape, late)
@@ -3120,11 +3122,11 @@ async def test_1360_o3_every_live_shape_of_either_kind_ends_whether_there_at_the
         await asyncio.wait_for(offboard, 20)
 
         assert _live_of(dsn, T1) == 0, f"a {shape} {kind} row of the offboarding tenant is still live"
-        if kind == "investigation":
-            assert (row(dsn, late)["stage"], row(dsn, late)["failure_reason"]) == ("aborted", OFFBOARDED)
-        else:
-            assert (_learning(dsn, late)["status"], _learning(dsn, late)["reason"]) == ("skipped", OFFBOARDED)
-        assert (_learning(dsn, held)["status"], _learning(dsn, held)["reason"]) == ("skipped", OFFBOARDED)
+        for ended in (late, held):
+            if kind == "investigation":
+                assert (row(dsn, ended)["stage"], row(dsn, ended)["failure_reason"]) == ("aborted", OFFBOARDED)
+            else:
+                assert (_learning(dsn, ended)["status"], _learning(dsn, ended)["reason"]) == ("skipped", OFFBOARDED)
         taken = await store.take_over()
         claimed, learning_claimed = await store.claim(), await store.claim_learning_job()
     assert taken == [], "the take-over found a running row of the offboarding tenant to fail and retry"
@@ -3452,6 +3454,66 @@ async def test_1360_flow1_flow2_a_locker_held_up_at_any_point_holds_what_comes_b
     assert free_earlier == [], f"{locker}, waiting at the {at}, does not hold what comes before it in the order"
     assert held_later == [], f"{locker}, waiting at the {at}, already holds what comes after it in the order"
     assert key_share, f"{locker}, waiting at the {at}, blocks a foreign key's key-share lock on the tenant row"
+
+
+async def test_1360_d3_a_retry_committed_while_the_offboard_waits_is_ended_before_any_learning_job_is_locked(dsn):
+    """A take-over is failing T's lapsed running investigation and inserting its retry when the offboard starts; the
+    offboard waits for it, the retry commits behind the offboard's statement, and T's two running learning jobs come
+    next, the higher one held by a raw connection. While the offboard waits at that learning job (it already holds the
+    lower one), the retry, still live as committed, is already locked by it: investigations are ended until a fresh read
+    finds none, and only then learning jobs, so no investigation is locked after a learning job is held. A worker then
+    claims what it can and renews it with the lower learning job, as one renewal does, investigations first; the two
+    finish without a deadlock and the offboard ends everything. An offboard that went back to investigations after
+    holding learning jobs would find the retry free here, and then wait for the renewal that waits for it. (#1360 D3,
+    Flow 1 step 3, D9)"""
+    import psycopg
+
+    low, high = sorted(str(uuid.uuid4()) for _ in range(2))
+    _plant_running_pair(dsn, [], [low, high])
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1, ticket="S-1")
+        lapsed, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        assert (await store.claim()).record.investigation_id == lapsed.investigation_id
+        lapse_lease(dsn, lapsed.investigation_id)
+        _stall_inserts(dsn, "investigations", "NEW.attempt > 1")
+        offboard = renewal = None
+        async with await psycopg.AsyncConnection.connect(dsn) as holder, \
+                await psycopg.AsyncConnection.connect(dsn, autocommit=True) as probe:
+            await holder.execute("SELECT 1 FROM jobs.learning_jobs WHERE id = %s FOR UPDATE", (high,))
+
+            async def waits_at_high() -> bool:
+                found = await probe.execute("SELECT count(*) FROM pg_stat_activity WHERE %s = ANY(pg_blocking_pids(pid))",
+                                            (holder.info.backend_pid,))
+                return (await found.fetchone())[0] == 1
+            try:
+                async with _holding_advisory(dsn):
+                    take_over = asyncio.ensure_future(store.take_over())
+                    await until_blocked(dsn, 1)  # the take-over holds the lapsed row and waits to insert its retry
+                    offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+                    await until_blocked(dsn, 2)  # the offboard waits for the lapsed row
+                await asyncio.wait_for(take_over, 10)
+                [(retry,)] = execute(dsn, "SELECT id::text FROM jobs.investigations WHERE attempt = 2")
+                await until(waits_at_high)  # the offboard has reached the learning jobs and waits at the held one
+                retry_free = await _got_at_once(probe, "jobs.investigations", retry, "UPDATE")
+                low_free = await _got_at_once(probe, "jobs.learning_jobs", low, "UPDATE")
+                claimed = await store.claim()
+                held = {low} | ({claimed.record.investigation_id} if claimed is not None else set())
+                renewal = asyncio.ensure_future(store.renew(held))
+                await until_blocked(dsn, 2)  # the renewal waits for the learning job the offboard holds
+                await holder.commit()
+                outcomes = await asyncio.wait_for(asyncio.gather(offboard, renewal, return_exceptions=True), 30)
+            finally:
+                for pending in (offboard, renewal):
+                    if pending is not None:
+                        pending.cancel()
+
+    offboarded, renewed = outcomes
+    assert not isinstance(offboarded, BaseException), f"offboard failed: {offboarded!r}"
+    assert not isinstance(renewed, BaseException), f"renew failed: {renewed!r}"
+    assert not low_free, "premise: the offboard holds the lower learning job while it waits at the higher one"
+    assert not retry_free, "the offboard holds a learning job and has yet to lock a live investigation: it takes it after"
+    assert _live_of(dsn, T1) == 0
+    assert (row(dsn, retry)["stage"], row(dsn, retry)["failure_reason"]) == ("aborted", OFFBOARDED)
 
 
 # --- O4: no job is created for an offboarding or offboarded tenant -----------------------------------------------

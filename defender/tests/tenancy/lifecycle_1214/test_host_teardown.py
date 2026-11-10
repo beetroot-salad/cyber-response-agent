@@ -293,6 +293,69 @@ def test_teardown_keeps_removing_for_its_wait_however_many_passes_a_writer_that_
             writer.wait()
 
 
+_LATE_REMOVER = """
+import os, sys, time
+folder = sys.argv[1]
+names = os.listdir(folder)
+deadline = time.monotonic() + 30
+while True:
+    try:
+        if len(os.listdir(folder)) < len(names):
+            break
+    except FileNotFoundError:
+        sys.exit(1)
+    if time.monotonic() > deadline:
+        sys.exit(1)
+removed = 0
+for name in reversed(names):
+    try:
+        os.unlink(os.path.join(folder, name))
+        removed += 1
+    except FileNotFoundError:
+        pass
+sys.exit(0 if removed else 1)
+"""
+
+
+def _late_remover(folder):
+    """A process that, the moment a removal pass has begun deleting `folder`'s entries (so it has listed all of them),
+    deletes the rest itself, as a late job removes its database's journal files. Exits 0 once it deleted at least one
+    entry before the pass reached it: that pass then met an entry it had listed and found it gone ("no such file")."""
+    return subprocess.Popen([sys.executable, "-I", "-c", _LATE_REMOVER, str(folder)])
+
+
+@pytest.mark.parametrize("target", ["data", "secrets", "publish"])
+def test_teardown_removes_a_folder_whose_entries_a_late_job_removes_while_it_is_being_removed(
+        world, tmp_path, data_root, monkeypatch, target):
+    """An entry of one of T's three folders that the removal had listed is removed by someone else before the removal
+    reaches it, so that pass fails "no such file"; like an entry that appeared, it is removed again under the same wait,
+    and the offboarding goes on to `offboarded` with all three folders gone (#1360 O1, O2 as amended by D1)."""
+    from defender.configuration import _env, publish_root
+
+    published = tmp_path / "published"
+    published.mkdir()
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
+    monkeypatch.setenv(publish_root.PUBLISH_DIR_ENV, str(published))
+    world.host_actor = world.new_host(world.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=30.0),
+                                      containers=lambda _tenant: None)
+    tenant = world.active_tenant()
+    folders = {"data": world.data_root / tenant, "secrets": world.config.secrets_dir / tenant, "publish": published / tenant}
+    folders["publish"].mkdir()
+    assert folders["secrets"].is_dir(), "premise: the tenant has a secrets folder"
+    remover = _late_remover(_plant_runs(folders[target]))
+    try:
+        assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        world.drive()
+        item = world.item(tenant)
+        assert (item["state"], item["failure"]) == ("offboarded", None), item
+        assert not any(folder.exists() for folder in folders.values()), {k: f.exists() for k, f in folders.items()}
+        assert remover.wait(timeout=35) == 0, "the late removal never beat the pass to an entry, so no pass met one gone"
+    finally:
+        if remover.poll() is None:
+            remover.kill()
+            remover.wait()
+
+
 def test_teardown_that_keeps_finding_new_files_fails_naming_the_folder_and_resume_finishes_it(world):
     """A writer that adds entries to the folder itself after every removal pass never lets the folder empty: after the
     wait teardown gives its holders the step fails (restart at teardown) naming the folder and an entry left in it,
