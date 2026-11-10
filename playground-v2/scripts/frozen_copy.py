@@ -211,11 +211,14 @@ def _expr(patterns: list[str]) -> str:
     return ",".join(patterns)
 
 
-def list_indices(es: Any, patterns: list[str]) -> dict[str, dict]:
-    """`{name: {"uuid", "status"}}` of every index the patterns (and any scratch index) match."""
-    rows = es.es_request("GET", f"/_cat/indices/{_expr([*patterns, '*' + SCRATCH])}"
-                                "?format=json&h=index,uuid,status&expand_wildcards=all")
-    return {r["index"]: {"uuid": r["uuid"], "status": r.get("status", "open")} for r in rows or []}
+def held_indices(es: Any) -> dict[str, dict]:
+    """`{name: {"uuid", "status"}}` of every index the cluster holds, from its metadata. Not
+    `_cat/indices`: live (9.3), it leaves out failure-store indices (`.fs-…`) even when named,
+    so a copy holding the freeze's would read as missing them."""
+    found = es.es_request("GET", "/_cluster/state/metadata?filter_path=metadata.indices.*.state,"
+                                 "metadata.indices.*.settings.index.uuid") or {}
+    return {name: {"uuid": dug(meta, "settings.index.uuid"), "status": meta.get("state", "open")}
+            for name, meta in (found.get("metadata") or {}).get("indices", {}).items()}
 
 
 def observed_counts(es: Any, names: list[str]) -> dict[str, int]:
@@ -406,7 +409,7 @@ def unverifiable_ancestry(es: Any, freeze: dict, overlay: dict | None) -> list[s
     the drift targets. Derived alerts reached through them cannot be found by ancestry (live: the
     2026-10-29 `dedup-` consolidation gave the older events new ids). A pattern or `''` (threshold and
     ES|QL rules) does not count."""
-    held = {r["index"] for r in es.es_request("GET", "/_cat/indices?format=json&h=index&expand_wildcards=all") or []}
+    held = set(held_indices(es))
     found: set[str] = set()
     for mutation in es_mutations(overlay):
         if mutation["kind"] != "schema-drift":
@@ -503,11 +506,14 @@ def _build(es: Any, clock: Any, freeze: dict, overlay: dict | None) -> tuple[dic
 
 def _holds_the_freeze(es: Any, freeze: dict, location: str) -> bool:
     """On a node that came up: the snapshot is the freeze's (refuses otherwise), and the node holds
-    exactly the freeze's indices, all open."""
+    exactly the freeze's indices, all open: each of them, and no other the patterns (or a scratch
+    index) match. The node's own system indices are not the copy's."""
     register_repository(es, freeze, location)
-    current = list_indices(es, list(freeze["patterns"]))
-    return set(current) == set(freeze["elastic"]["indices"]) \
-        and all(i["status"] != "close" for i in current.values())
+    names = set(freeze["elastic"]["indices"])
+    held = held_indices(es)
+    globs = [*freeze["patterns"], "*" + SCRATCH]
+    extra = {n for n in held if n not in names and any(fnmatch.fnmatchcase(n, g) for g in globs)}
+    return names <= set(held) and not extra and all(held[n]["status"] != "close" for n in names)
 
 
 def _came_up(es: Any, ops: Any, clock: Any, freeze: dict) -> bool:

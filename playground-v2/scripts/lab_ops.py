@@ -522,8 +522,7 @@ class LabOps:
             raise LabOpsError("content_digest asked before the stubs were loaded")
         es = self.frozen_es()
         names = sorted(set(indices))
-        held = {r["index"] for r in es.es_request(
-            "GET", "/_cat/indices?format=json&h=index&expand_wildcards=all") or []}
+        held = set(frozen_copy.held_indices(es))
         if missing := [n for n in names if n not in held]:
             raise LabOpsError(f"content_digest: the frozen cluster holds no index {missing}")
         digest = hashlib.sha256()
