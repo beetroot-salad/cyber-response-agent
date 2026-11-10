@@ -1,5 +1,6 @@
-"""The judge's appenders: finding rows onto the defender and questioner queues, and the one
-builder of those rows."""
+"""The judge's appenders: finding rows into the learning store as the defender and questioner kinds
+(#1278), and the one builder of those rows. A pass appends through a findings sink: the store (an
+operator's pass, `StoreFindings`) or the episode's own records (a learning job's, `EpisodeFindings`)."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from collections.abc import Sequence
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import yaml
 
@@ -22,7 +23,6 @@ from defender.learning.core.retired import retired_keys
 from defender.learning.core.state import (
     FINDINGS,
     QUESTIONER_FINDINGS,
-    LearningState,
     names_systems,
 )
 from defender.learning.judge._errors import JudgeRefused
@@ -67,6 +67,49 @@ def no_record_reason() -> str:
 
 def _refusal_prefix(episode_dir: Path | None) -> str:
     return f"episode {Path(episode_dir).name}: " if episode_dir is not None else ""
+
+
+class FindingsSink(Protocol):
+    """Where a pass's rows go, one channel at a time: the learning store (`StoreFindings`) or a
+    job's episode (`EpisodeFindings`)."""
+
+    def rows(self, channel: Any) -> list[dict[str, Any]]: ...
+
+    def append(self, channel: Any, rows: list[dict[str, Any]], *,
+               dedup_key: str | None = None) -> tuple[int, int]: ...
+
+    def describe(self, channel: Any) -> str: ...
+
+
+#: The learning store's item kind of each findings channel (#1278: lane follows from kind).
+_STORE_KINDS: dict[str, str] = {FINDINGS.name: "finding", QUESTIONER_FINDINGS.name: "questioner_finding"}
+
+
+def _store_kind(channel: Any) -> str:
+    kind = _STORE_KINDS.get(getattr(channel, "name", None) or "")
+    if kind is None:
+        raise JudgeRefused(f"the learning store takes only findings here, not channel {channel!r}")
+    return kind
+
+
+def _holds_nul(value: Any) -> bool:
+    if isinstance(value, str):
+        return "\x00" in value
+    if isinstance(value, dict):
+        return any(_holds_nul(k) or _holds_nul(v) for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(_holds_nul(v) for v in value)
+    return False
+
+
+def _refuse_nul(row: dict[str, Any], where: str, channel: str) -> None:
+    """A NUL character anywhere in the row: the store's jsonb can never hold it, so a row bound
+    for the store that carries one fails validation, screened before anything is inserted
+    (#1278). An episode's own record holds it; its publish refuses it. Keys and string values
+    are walked, since JSON text escapes the character."""
+    if _holds_nul(row):
+        raise JudgeRefused(f"{where}a {channel} finding row holds a NUL character, which the "
+                           "learning store can never hold")
 
 
 def _require_keys(row: dict[str, Any], where: str, channel: str) -> None:
@@ -145,19 +188,19 @@ def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None)
 
 
 def append_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
-                state: LearningState) -> int:
+                state: FindingsSink) -> int:
     """Append `rows` to the defender findings channel through `state`; how many were appended
     (`append_rows_report` without its malformed count)."""
     return append_rows_report(episode_dir, rows, state=state)[0]
 
 
 def append_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
-                       state: LearningState) -> tuple[int, int]:
+                       state: FindingsSink) -> tuple[int, int]:
     """Append `rows` to the defender findings channel through `state`; return `(appended,
-    malformed lines seen)` — the unreadable lines `state.append` counted on the queue under its
-    append lock (a torn trailing row is one, closed rather than concatenated onto). Every row
-    is screened first, so one bad row refuses the whole append before any write. `episode_dir`
-    is only for refusal text; the queue is never derived from it."""
+    malformed lines seen)` — the unreadable lines the sink counted where it appends (an episode
+    record's torn trailing row is one; the store has none). Every row is screened first, so one
+    bad row refuses the whole append before any write. `episode_dir` is only for refusal text;
+    the sink is never derived from it."""
     rows = list(rows)
     for row in rows:
         _validate_row(row, episode_dir=episode_dir)
@@ -165,17 +208,17 @@ def append_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
 
 
 def append_world_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
-                      state: LearningState) -> int:
+                      state: FindingsSink) -> int:
     """Append `rows` to the questioner findings channel through `state`; how many were
     appended (`append_world_rows_report` without its malformed count)."""
     return append_world_rows_report(episode_dir, rows, state=state)[0]
 
 
 def append_world_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
-                             state: LearningState) -> tuple[int, int]:
+                             state: FindingsSink) -> tuple[int, int]:
     """Append `rows` to the questioner findings channel through `state`; return `(appended,
     malformed lines seen)` on that queue, as `append_rows_report` does. A row whose
-    `finding_id` the queue already holds is not appended again."""
+    `finding_id` the sink already holds is not appended again."""
     rows = list(rows)
     for row in rows:
         _validate_world_row(row, episode_dir=episode_dir)
@@ -205,7 +248,15 @@ class EnqueueReport:
     world_malformed: int | None = None
 
 
-def enqueue_report(episode_dir: Path, record: dict[str, Any], *, state: LearningState,
+def _screen_for_store(drawn: DrawnRows, where: str) -> None:
+    """Both kinds' rows screened for what the store can never hold before either is inserted:
+    the store refuses a NUL only per insert, after an earlier kind's rows went in."""
+    for channel, rows in ((FINDINGS, drawn.defender), (QUESTIONER_FINDINGS, drawn.world)):
+        for row in rows:
+            _refuse_nul(row, where, channel.name)
+
+
+def enqueue_report(episode_dir: Path, record: dict[str, Any], *, state: FindingsSink,
                    drawn: DrawnRows) -> EnqueueReport:
     """Append one commit's rows: `drawn`, the rows the pass built from the replies it drew for
     `record` — the world row (or the family row) being committed `queueing` -> `queued` (A6)."""
@@ -226,6 +277,8 @@ def enqueue_report(episode_dir: Path, record: dict[str, Any], *, state: Learning
         _validate_row(row, episode_dir=episode_dir)
     for row in drawn.world:
         _validate_world_row(row, episode_dir=episode_dir)
+    if isinstance(state, StoreFindings):
+        _screen_for_store(drawn, where)
     report = EnqueueReport()
     if drawn.defender:
         report.appended, report.malformed = append_rows_report(
@@ -373,11 +426,52 @@ def check_disposition_entry(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
-    "DrawnRows", "DrawsSkipReport", "EnqueueReport", "LANE_DEFENDER", "LANE_UNQUEUEABLE",
-    "LANE_WORLD", "LEDGER_LANES", "WORLD_LABEL_DOUBTED", "append_rows", "append_rows_report",
+    "DrawnRows", "DrawsSkipReport", "EnqueueReport", "FindingsSink", "LANE_DEFENDER", "LANE_UNQUEUEABLE",
+    "LANE_WORLD", "LEDGER_LANES", "StoreFindings", "WORLD_LABEL_DOUBTED", "append_rows", "append_rows_report",
     "append_world_rows", "append_world_rows_report", "build_finding_row", "check_disposition_entry", "defender_lane_blocked",
     "disposition_entry", "draws_on_disk", "draws_on_disk_report", "enqueue_report",
 ]
+
+
+class StoreFindings:
+    """The operator lane's sink (#1278, "Findings arrive"): the judge inserts its rows into the
+    learning store directly, as `run_id`'s, for `tenant_id`. `store` is the store's synchronous
+    face (`learning.store.blocking`). A finding id is unique for good, so a row the store already
+    holds, whatever became of it, is not inserted again. The insert is conditional on the tenant
+    being active (`TenantInactive`); a row the store can never hold (`ItemRefused`) is a
+    `JudgeRefused`, though the screen refuses a NUL before any insert."""
+
+    def __init__(self, store: Any, tenant_id: str, run_id: str) -> None:
+        self._store, self._tenant, self._run = store, str(tenant_id), str(run_id)
+
+    def rows(self, channel: Any) -> list[dict[str, Any]]:
+        """The payloads of every item of `channel`'s kind the store holds for the tenant."""
+        kind = _store_kind(channel)
+        return [item.payload for item in self._store.work(self._tenant) if item.kind == kind]
+
+    def append(self, channel: Any, rows: list[dict[str, Any]], *,
+               dedup_key: str | None = None) -> tuple[int, int]:
+        """Insert `rows` as `channel`'s kind: `(inserted, 0)`. Dedup is the store's, by finding id
+        (`dedup_key` is always that). An empty append calls nothing."""
+        del dedup_key
+        if not rows:
+            return 0, 0
+        return _insert(self._store, self._tenant, self._run, rows, kind=_store_kind(channel)), 0
+
+    def describe(self, channel: Any) -> str:
+        return f"the learning store ({_store_kind(channel)})"
+
+
+def _insert(store: Any, tenant_id: str, run_id: str, rows: list[dict[str, Any]], *, kind: str) -> int:
+    """`store.publish_findings`, its refusal of an item it can never hold made a `FindingsRefused`;
+    how many rows were new."""
+    from defender.learning.store import ItemRefused
+
+    try:
+        added, _duplicates = store.publish_findings(tenant_id, run_id, rows, kind=kind)
+    except ItemRefused as refused:
+        raise FindingsRefused(f"the learning store refuses a {kind} row of run {run_id}: {refused}") from None
+    return int(added)
 
 
 # -- the job lane (#1344): findings held in the episode, published once the job's row has ended ---
@@ -394,9 +488,10 @@ _SINK_RECORDS: dict[str, str] = {FINDINGS.name: "job_findings",
 
 
 class EpisodeFindings:
-    """The judge's job-lane sink (#1344, "Judge modes"): stands where the learning state stands
-    in an operator's pass, but appends each channel's rows to the episode's own findings record
-    and reaches no queue, so a job's findings wait in its episode until its row has ended. No
+    """The judge's job-lane sink (#1344, "Judge modes"): stands where the store stands in an
+    operator's pass (`StoreFindings`), but appends each channel's rows to the episode's own
+    findings record and reaches no store, so a job's findings wait in its episode until its row
+    has ended. No
     drain is called. Only the two findings channels are held; anything else is refused."""
 
     def __init__(self, episode: formats.Episode) -> None:
@@ -445,9 +540,9 @@ class EpisodeFindings:
 
 @model
 class PublishReport:
-    """What one `publish_episode_findings` call put on the queues: rows newly appended to the
-    defender and questioner channels (a row either already held, or already consumed, is not
-    counted)."""
+    """What one `publish_episode_findings` call put into the store: rows newly inserted as the
+    defender and questioner kinds (a row whose finding id the store already holds, whatever
+    became of it, is not counted)."""
 
     appended: int = 0
     world_appended: int = 0
@@ -459,21 +554,24 @@ def held_findings_count(episode: formats.Episode) -> int:
     return len(sink.rows(FINDINGS)) + len(sink.rows(QUESTIONER_FINDINGS))
 
 
-def publish_episode_findings(episode: formats.Episode, *, state: LearningState) -> PublishReport:
-    """Publish a job episode's held findings to the tenant's queues through `state` (#1344,
-    "Publishing"). Every row is screened by its channel's own rule first, so a held row that
-    fails it is `FindingsRefused` with nothing appended; then each channel is appended with
-    `finding_id` dedup, which reads the queue and the consumed ledger under the append lock, so a
-    republish after a crash, a concurrent post-step or an author's rotation adds nothing. An
-    episode with no findings held publishes nothing. Anything else that fails (the episode or the
-    queue cannot be read or written) is raised as it is: the job stays pending.
+def publish_episode_findings(episode: formats.Episode, *, store: Any, tenant_id: str) -> PublishReport:
+    """Publish a job episode's held findings into the learning store `store` (its synchronous
+    face) for `tenant_id` (#1344 "Publishing", #1278 "Findings arrive"). Every row of both
+    channels is screened by its channel's own rule first, a NUL character included, so a held row
+    that fails it is `FindingsRefused` with nothing of the job's inserted in either kind; then
+    each kind is inserted, the store deduplicating by finding id for good, so a republish after a
+    crash, a concurrent post-step or an author's merge adds nothing. A row the store itself
+    refuses for good (`ItemRefused`) is `FindingsRefused` too. An episode with no findings held
+    publishes nothing. Anything else that fails (the episode cannot be read, the store cannot be
+    reached, the tenant is not active: `TenantInactive`) is raised as it is: the job stays
+    pending.
 
     `episode` is the handle from the tenant's runs repository (`episode_files`): a library
     function never makes a tenant out of a path."""
-    return _publish_held(episode, state=state)
+    return _publish_held(episode, store=store, tenant_id=str(tenant_id))
 
 
-def _publish_held(episode: formats.Episode, *, state: LearningState) -> PublishReport:
+def _publish_held(episode: formats.Episode, *, store: Any, tenant_id: str) -> PublishReport:
     sink = EpisodeFindings(episode)
     where = _refusal_prefix(episode.dir)
     held: dict[str, list[dict[str, Any]]] = {}
@@ -485,15 +583,17 @@ def _publish_held(episode: formats.Episode, *, state: LearningState) -> PublishR
         for row in rows:
             try:
                 validate(row, episode_dir=episode.dir)
+                _refuse_nul(row, where, channel.name)
             except JudgeRefused as bad:
                 raise FindingsRefused(f"a held row fails the {channel.name} rule, so the job's "
                                       f"findings are not published: {bad}") from None
         held[channel.name] = rows
     report = PublishReport()
+    run_id = Path(episode.dir).name
     if held[FINDINGS.name]:
-        report.appended = state.append(FINDINGS, held[FINDINGS.name], dedup_key="finding_id")[0]
+        report.appended = _insert(store, tenant_id, run_id, held[FINDINGS.name], kind=_store_kind(FINDINGS))
     if held[QUESTIONER_FINDINGS.name]:
-        report.world_appended = state.append(
-            QUESTIONER_FINDINGS, held[QUESTIONER_FINDINGS.name], dedup_key="finding_id")[0]
+        report.world_appended = _insert(store, tenant_id, run_id, held[QUESTIONER_FINDINGS.name],
+                                        kind=_store_kind(QUESTIONER_FINDINGS))
     return report
 
