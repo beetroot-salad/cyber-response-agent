@@ -20,14 +20,12 @@ from defender.tests.support.shared.contracts._frontend_outputs import frontend_o
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — shared pytest fixture
 from defender.tests.support.tenancy._active1214 import database_env, insert_active_tenant
 
-from defender.tenancy import _tenant
 from defender import run as run_py
 from defender.cli.learning import branch as branch_entry
 from defender import box as box_mod
 from defender.execution import box_codec
 from defender.cli import policy_cli
 from defender.cli import tenant as tenant_py
-from defender.skills.connect import validate_scaffold
 from defender.tests.support.storage._alert_plant import plant_alert as plant_alert_with_record
 from defender.tests.support.learning.branch import _triplet_947 as T947
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H78
@@ -41,20 +39,6 @@ HEALTH_CHECK_ONLY_TABLE = "dispositions:\n  cmdb:\n    health-check: {roles: [ga
 
 #: A `verb-grants.yaml` that is not YAML (an unclosed flow mapping) — the unloadable table.
 UNPARSEABLE_TABLE = "dispositions:\n  cmdb:\n    health-check: {roles: [gather]\n"
-
-
-#: The WARN / FAIL glyphs `validate_scaffold.Report` prints each row with.
-WARN_ROW, FAIL_ROW = "[!]", "[✗]"
-
-
-def _validate_scaffold(root: Path | None, tenant_id: str, **kw: Any) -> Any:
-    """`validate_scaffold.py ticket --tenant <id>`, as the operator runs it."""
-    return H.run_script(H.script_of(validate_scaffold), "ticket", "--tenant", tenant_id,
-                        root=root, **kw)
-
-
-def _rows(text: str, glyph: str) -> list[str]:
-    return [ln.strip() for ln in text.splitlines() if ln.strip().startswith(glyph)]
 
 
 def _policy_gather(tmp_path: Path, tenant_id: str) -> tuple[int | None, str]:
@@ -103,23 +87,11 @@ def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_witho
     link = H.knowledge_dir(data_root)
     link.parent.mkdir(parents=True)
     link.symlink_to(elsewhere, target_is_directory=True)
-    owner = H.accept_refusal(_tenant, data_root, H.TID)
-
-    scaffold = _validate_scaffold(data_root, H.TID)
-    H.assert_ran(scaffold)
-    warned = _rows(H.output(scaffold), WARN_ROW)
-    assert any(owner in row for row in warned), (
-        f"validate_scaffold did not print accept_tenant's refusal as a WARN:\n"
-        f"{H.output(scaffold)}")
-    assert not any(owner in row for row in _rows(H.output(scaffold), FAIL_ROW))
-
-    # The positive control: the same folder, placed for real, is not told it is refused. (#1366 O9/O11: the retired
-    # config-token assertions are gone with validate_scaffold's data-root `config.env` check.)
+    # (#1366 O1/O11: connect's `validate_scaffold` is a no-tenant surface judging the handoff; its `--tenant` halves of
+    # this test -- the acceptance refusal as a WARN and its positive control -- are retired. The guard of the other
+    # surfaces stays: the placed-for-real folder is accepted, and the census lint below refuses a fixture with a link.)
     link.unlink()
     shutil.move(str(elsewhere), str(link))
-    scaffold = _validate_scaffold(data_root, H.TID)
-    H.assert_ran(scaffold)
-    assert not any(owner in row for row in _rows(H.output(scaffold), WARN_ROW)), H.output(scaffold)
 
     # The census lint over a tmp repo whose fixture folder acceptance's folder rules refuse.
     repo = H.tmp_checkout(tmp_path / "repo")
@@ -140,26 +112,17 @@ def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_witho
 
 def test_1120_s6_operator_tools_in_a_shell_without_the_data_root(
         data_root: Path, tmp_path: Path, monkeypatch) -> None:
-    """With DEFENDER_DATA_ROOT unset, validate_scaffold --tenant and policy_cli gather --tenant each
-    report resolve_data_root's refusal naming the variable."""
+    """With DEFENDER_DATA_ROOT unset, policy_cli gather --tenant reports resolve_data_root's refusal naming
+    the variable. (#1366 O1/O11: validate_scaffold --tenant is retired; connect's validator judges the handoff.)"""
     tid = fixture_uuid("tenant:playground")
     H.adopted(data_root, tid)
 
-    scaffold = _validate_scaffold(None, tid)
-    H.assert_ran(scaffold)
-    out = H.output(scaffold)
-    assert any(H.DATA_ROOT_ENV in row for row in _rows(out, WARN_ROW)), (
-        f"validate_scaffold did not WARN naming {H.DATA_ROOT_ENV}:\n{out}")
-    assert not any(H.DATA_ROOT_ENV in row for row in _rows(out, FAIL_ROW)), out
     monkeypatch.delenv(H.DATA_ROOT_ENV, raising=False)
     rc, text = _policy_gather(tmp_path, tid)
     assert rc is None, f"policy_cli gather built a policy without a data root: {rc}"
     assert H.DATA_ROOT_ENV in text, (
         f"policy_cli gather did not refuse naming {H.DATA_ROOT_ENV}: {text!r}")
 
-    scaffold = _validate_scaffold(data_root, tid)
-    H.assert_ran(scaffold)
-    assert not any(H.DATA_ROOT_ENV in row for row in _rows(H.output(scaffold), WARN_ROW)), H.output(scaffold)
     monkeypatch.setenv(H.DATA_ROOT_ENV, str(data_root))
     rc, text = _policy_gather(tmp_path, tid)
     assert rc == 0, f"policy_cli refused a tenant under a set data root: {text}"
@@ -200,7 +163,7 @@ def _launch(source: Path) -> BaseException | int:
 def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_table(
         data_root: Path, tmp_path: Path, capsys) -> None:
     """An unparseable verb-grants.yaml is a named refusal from check, run.main, the launcher,
-    and policy_cli; validate_scaffold, which never loads the table, accepts the tenant."""
+    and policy_cli."""
     H.adopted(data_root)
     table = H.settings_dir(data_root) / "verb-grants.yaml"
     table.write_text(UNPARSEABLE_TABLE, encoding="utf-8")
@@ -229,12 +192,6 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     rc, text = _policy_gather(tmp_path, H.TID)
     assert rc is None, f"policy_cli built gather's policy over an unloadable table: {rc}"
     assert str(table) in text, f"policy_cli did not refuse naming the table: {text!r}"
-
-    # The consumer that never loads the table accepts the tenant.
-    capsys.readouterr()
-    out = H.output(_validate_scaffold(data_root, H.TID))
-    H.assert_ran(_validate_scaffold(data_root, H.TID))  # #1366 O11: no config token to read any more
-    assert "verb-grants.yaml" not in out, out
 
 
 def _mount_specs(argv: list[str]) -> list[dict[str, str]]:

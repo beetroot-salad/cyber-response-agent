@@ -9,13 +9,17 @@ tenant ids normalised, so wording is pinned only where the design words it.
 from __future__ import annotations
 
 import contextlib
+import os
+import subprocess
 
 import pytest
 import yaml
 
+from defender.cli import tenant as tenant_py
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — the fixture
 from defender.tests.support.tenancy import _systems1366 as R
+from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 from defender.tests.tenancy.tenant_1108_p4._support import FIXTURE, published_tenant, second_tenant
 
 pytestmark = pytest.mark.postgres
@@ -245,6 +249,27 @@ def test_1366_o9_check_reports_a_tenant_repos_leftover_system_folders_and_case_f
     assert clean.rc == 0, clean
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 file anyway; CI runs unprivileged")
+def test_1366_o9_check_reports_an_unreadable_leftover_case_file_as_retired_with_no_traceback(tenants, data_root):
+    """A leftover `settings/case-record.yaml` at mode 000 is retired, ignored and never parsed: `check` reports it as
+    retired, names it, exits nonzero and prints no traceback; the same tenant with the file readable is told the same.
+    Replaces `test_tenant_py_cli.py::test_an_unreadable_case_record_is_named_by_check`. (#1366 O9, DC8)"""
+    op = tenants(files=R.import_files())
+    locked = [p for p in data_root.rglob("case-record.yaml") if p.parent.name == "settings"]
+    assert locked, "the tenant's leftover case-record.yaml was not found under the data root"
+    for p in locked:
+        p.chmod(0)
+    try:
+        found = _findings(op)
+    finally:
+        for p in locked:
+            p.chmod(0o644)
+
+    assert R.lines_naming("\n".join(found), "retired", "case-record"), found
+    assert "Traceback" not in "\n".join(found), found
+    _exits_for_its_own_finding(found)
+
+
 @pytest.mark.parametrize(("reads", "writes"), [
     pytest.param((), (("POST", "/tickets/*/transitions"),), id="write-route-missing"),
     pytest.param((COMMENT_ROUTE,), (COMMENT_ROUTE,), id="read-route-matches-the-comment-route"),
@@ -384,7 +409,7 @@ def test_1366_c5_check_reports_a_case_record_naming_a_system_whose_adapter_offer
 
 def test_1366_r1_a_settings_fault_that_tells_the_operator_the_base_is_in_the_access_is_located_at_the_settings(tenants):
     """ticket's stored settings carry a `TICKET_URL_BASE` key (its text says the base lives in the access declaration):
-    the finding is located `system ticket settings`, never `system ticket access`. Moved from
+    the finding is located `system ticket settings`, and none of its lines is located at `system ticket access`. Moved from
     `test_case_comment_tenant_check.py::test_r1_a_config_env_fault_that_mentions_access_yaml_names_config_env`
     (#1366 DC6)."""
     sound = _findings(tenants())
@@ -394,10 +419,10 @@ def test_1366_r1_a_settings_fault_that_tells_the_operator_the_base_is_in_the_acc
 
     mine = _only_in(found, sound, "system ticket settings", "TICKET_URL_BASE")
     assert mine, found
-    # the sentence may mention the access declaration in its body; its LOCATOR (what comes first) is the settings
-    for line in mine:
-        access = line.find("system ticket access")
-        assert access == -1 or line.index("system ticket settings") < access, line
+    # the sentence may mention the access declaration in its body, in any order; no line of the finding is LOCATED at
+    # the access record (the locator form `system ticket access:` is absent)
+    assert not [line for line in found if line not in sound and "system ticket access:" in line], found
+    assert any("system ticket settings" in line for line in mine), mine
     _exits_for_its_own_finding(found)
 
 
@@ -409,3 +434,76 @@ def test_1366_o2_a_tenant_with_no_case_record_passes_check(tenants):
 
     assert found.rc == 0, found
     assert not R.lines_naming("\n".join(found), "case"), found
+
+
+# --- C3: one case judgement, three callers -- `check`'s caller, over a case adapter the checkout carries ---------------
+
+CASESYS = "casesys"
+CASE_ROUTE = ("POST", "/rest/*/comment")
+#: A sound case adapter: the cold K2 constants, a settings check, the comment action and its declared route (C1).
+CASE_ADAPTER = (
+    "from defender.kit import transport\n\n"
+    "PREFIX = 'CASESYS'\nREQUIRED_CONFIG_KEYS = ('TIMEOUT_SEC',)\nPATH_KEYS = ()\n"
+    "DISPLAY_NAME = 'Case system'\nEXAMPLE = {}\n\n\n"
+    "def check_settings(tenant):\n"
+    "    transport.check_settings_of(tenant, 'casesys', 'CASESYS')\n\n\n"
+    "def comment_route(settings):\n    return ('POST', '/rest/*/comment')\n\n\n"
+    "def health_check(ctx):\n    return {}\n\n\n"
+    "def add_case_comment(ctx, *, key, body):\n    return None\n\n\n"
+    "VERBS = {'health-check': health_check}\n")
+CASE_ADAPTER_VARIANTS = {
+    "verbs-hold-the-comment-action": CASE_ADAPTER.replace(
+        "VERBS = {'health-check': health_check}", "VERBS = {'health-check': health_check, 'add_case_comment': health_check}"),
+    "check-crashes": CASE_ADAPTER.replace(
+        "    transport.check_settings_of(tenant, 'casesys', 'CASESYS')\n", "    return tenant.grants.missing\n"),
+    "no-check": CASE_ADAPTER.replace("def check_settings(tenant):", "def _unused(tenant):"),
+}
+
+
+def _grants_with_casesys() -> str:
+    doc = yaml.safe_load((FIXTURE / "settings" / "verb-grants.yaml").read_text(encoding="utf-8"))
+    doc["dispositions"][CASESYS] = {"health-check": {"roles": [], "reason": "a case system; no agent reads it"}}
+    return yaml.safe_dump(doc, sort_keys=False)
+
+
+def _casesys_check(tenants, data_root, tmp_path, adapter: str) -> subprocess.CompletedProcess:
+    """`tenant.py check <id>` as a process from a tmp checkout whose adapters also hold `casesys` (`adapter`), over a
+    tenant with a `casesys` record and the case record naming it; the database from `DEFENDER_DATABASE_DSN`."""
+    checkout = H.tmp_checkout(tmp_path / "checkout")
+    H.add_adapter(checkout, CASESYS, adapter)
+    script = checkout / H.script_of(tenant_py).resolve().relative_to(H.REPO_ROOT)
+    systems = {**R.fixture_records().systems,
+               CASESYS: R.SysSpec({"CASESYS_TIMEOUT_SEC": "5"}, R.declaration("https://cases.example.test", writes=(CASE_ROUTE,)))}
+    op = tenants(R.RecordsSpec(systems, R.CaseSpec(CASESYS)), files={"settings/verb-grants.yaml": _grants_with_casesys()})
+    return H.run_script(script, "check", op.tid, root=data_root)
+
+
+def _case_lines(done: subprocess.CompletedProcess) -> list[str]:
+    return [line for line in (done.stdout + done.stderr).splitlines()
+            if CASESYS in line and "case" in line.lower() and "credential" not in line]
+
+
+def test_1366_c3_check_over_a_sound_case_adapter_judges_the_case_system_clean(tenants, data_root, tmp_path):
+    """Positive control for the two tests below: the sound `casesys` adapter (the cold constants, a settings check, the
+    comment action declared as a route, not held in `VERBS`) draws no line naming the case system and the case, and no
+    traceback. (#1366 C3: one case judgement, `check` its caller; O1)"""
+    done = _casesys_check(tenants, data_root, tmp_path, CASE_ADAPTER)
+
+    assert "Traceback" not in done.stdout + done.stderr, done.stderr
+    assert _case_lines(done) == [], done.stdout + done.stderr
+
+
+@pytest.mark.parametrize("variant", ["verbs-hold-the-comment-action", "check-crashes", "no-check"])
+def test_1366_c3_check_judges_a_case_adapter_the_cold_read_refuses_or_whose_check_cannot_judge_as_a_finding(
+        tenants, data_root, tmp_path, variant):
+    """A case record naming a catalog case adapter whose `VERBS` hold the comment action (#1359 D-17: the cold read
+    refuses it), whose settings check crashes, or that has none (#1392: judged broken) is a `check` finding naming the
+    case system and the case, exit nonzero, no traceback -- as run start judges the same adapter. Moved from the
+    retired `case_comment_1359/test_case_comment_tenant_check.py::test_r1_a_case_adapter_the_cold_read_refused...`
+    and `..._whose_check_cannot_judge_is_a_finding_not_a_crash` (#1366 C3 one case judgement, three callers; O1)."""
+    done = _casesys_check(tenants, data_root, tmp_path, CASE_ADAPTER_VARIANTS[variant])
+
+    said = done.stdout + done.stderr
+    assert done.returncode != 0, said
+    assert "Traceback" not in said, said
+    assert _case_lines(done), said

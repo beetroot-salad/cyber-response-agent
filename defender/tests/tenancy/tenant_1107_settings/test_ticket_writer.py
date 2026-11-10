@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -207,39 +208,74 @@ def _with_report(run_dir: Path) -> None:
     write_report(run_dir)
 
 
-def test_o8_edits_to_the_case_settings_after_run_start_change_nothing_the_comment_carries(
-        tmp_path, monkeypatch):
-    """Editing the tenant's case-record.yaml or the system's config.env under the data root during
-    a run changes nothing the comment carries; control: the body planted before start is sent. D-18.
-    (#1366 O6/O9: a run reads records frozen at start and no folder at all, so the edit is inert twice over; the
-    record-world guard that a record written during a run changes nothing is `alert_front_door_1222/test_run_records_1366.py`.)"""
+def _directory_with_twin(root: Path, tenant: str) -> tuple[Any, Any]:
+    """`(directory, twin)`: the in-process directory `with_publish` would build for `tenant` (active, forge wiring,
+    mapping and records derived from its planted settings), with its memory twin kept so a test can write records
+    through the twin's public seeder (`add_records`) while a run is under way."""
+    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+    from defender.tests.support.tenancy import _active1214
+
+    twin: Any = InMemoryTenantRepository()
+    added = twin.add_tenant(tenant, created_at=_active1214.CREATED, state="active", repo=f"tenants/{tenant}",
+                            origin=_active1214._origin_of(root, tenant, None))
+    if inspect.isawaitable(added):
+        _active1214.run_sync(_active1214._await(added))
+    _active1214.seed_twin(twin, tenant, _active1214.PLANTED_ALERT_MAPPING)
+    _active1214.seed_twin_records(twin, root, tenant)
+    return TenantDirectory(lambda: twin), twin
+
+
+def test_o8_a_case_version_written_after_run_start_changes_nothing_the_comment_carries(tmp_path, monkeypatch):
+    """A new case version (a different comment body) written to the tenant's records while the run is under way is not
+    the body the comment carries: the run read the records at start and sends that body; control: the same version
+    written BEFORE the run starts is the body sent. D-18; #1366 O6/H9 (a run's case record is pinned at start; the
+    run records the version it used)."""
+    from defender.tests.support.tenancy import _active1214
+    from defender.tests.support.tenancy import _systems1366 as R
+
     edited_body = "EDITED-BODY {disposition}"
+
+    def newer_case(folder: Path) -> Any:
+        sound = R.derive(S.settings_of(folder))
+        return R.value_of(R.RecordsSpec(sound.systems, R.CaseSpec(sound.case.system_id, edited_body, version=2)))
+
+    def write(twin: Any, folder: Path) -> None:
+        _active1214.run_sync(_active1214._await(twin.add_records(S.PLAYGROUND_ID, newer_case(folder))))
+
     control_shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-control")
-    root, _folder, alert = _world(tmp_path, name="control", case_body=edited_body)
-    _run(tmp_path, root, alert, run_id="r-control", before=_with_report)
-    assert "EDITED-BODY" in _sent_body(_comment_argv(control_shim)), "control: the body is read"
+    root, folder, alert = _world(tmp_path, name="control")
+    directory, twin = _directory_with_twin(root, S.PLAYGROUND_ID)
+    write(twin, folder)
+    rec = S.RunRecorder(tmp_path / "runs" / "r-control", before_lifecycle=_with_report)
+    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, directory=directory, signer=_signer(),
+                              visualize=rec.visualize)
+    assert (rc, refused) == (0, None), f"rc={rc} refused={refused}"
+    assert "EDITED-BODY" in _sent_body(_comment_argv(control_shim)), "control: a version written before start is read"
 
     shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-edited")
     root, folder, alert = _world(tmp_path, name="edited")
+    directory, twin = _directory_with_twin(root, S.PLAYGROUND_ID)
 
-    def edit_during_the_run(run_dir: Path) -> None:
+    def write_during_the_run(run_dir: Path) -> None:
         _with_report(run_dir)
-        S.case_record_path(folder).write_text(
-            f'system: "cmdb"\ncomment:\n  body: "{edited_body}"\n', encoding="utf-8")
-        (S.settings_of(folder) / "systems" / CASE / "access.yaml").write_text(
-            S.T1106.access_text(MARKER, CASE, base="http://edited-host.invalid:9"),
-            encoding="utf-8")
+        write(twin, folder)
 
-    rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-edited",
-                                      before=edit_during_the_run)
-    assert refused is None, f"rc={rc} refused={refused}"
-    assert rc == 0, f"rc={rc} refused={refused}"
+    rec = S.RunRecorder(tmp_path / "runs" / "r-edited", before_lifecycle=write_during_the_run)
+    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, directory=directory, signer=_signer(),
+                              visualize=rec.visualize)
+    assert (rc, refused) == (0, None), f"rc={rc} refused={refused}"
     argv = _comment_argv(shim)
     assert argv["url"] == f"http://ticket-{MARKER}:8080/tickets/{KEY}/comments", argv
-    assert "EDITED-BODY" not in _sent_body(argv), "an edit made during the run reached the comment"
-    got = S.receipt(run_dir)
+    assert "EDITED-BODY" not in _sent_body(argv), "a case version written during the run reached the comment"
+    got = S.receipt(rec.run_dir_at)
     assert got is not None
     assert (got["status"], got["ok"]) == ("commented", True), got
+
+
+def _signer() -> Any:
+    from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
+
+    return FakeSigner()
 
 
 def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):

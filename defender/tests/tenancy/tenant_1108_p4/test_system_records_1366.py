@@ -586,11 +586,15 @@ def test_1366_o4_a_case_record_naming_a_file_that_is_not_a_record_is_refused(imp
     """A case-record file that is not a mapping with a `system` and a `comment.body` is refused and stored nowhere.
     (#1366 O4, DC8)"""
     before = _state(imported_op)
-    for n, text in enumerate(["- just\n- a list\n", "system: ticket\n", "comment: {body: x}\n", "system: [\n"]):
+    shapes = ["- just\n- a list\n", "system: ticket\n", "comment: {body: x}\n", "system: [\n",
+              "system: 42\ncomment: {body: x}\n", "system: ''\ncomment: {body: x}\n",
+              "system: ticket\ncomment: [x]\n", "system: ticket\ncomment: {}\n", "system: ticket\ncomment:\n  body: 7\n"]
+    for n, text in enumerate(shapes):
         file = tmp_path / f"bad-case-{n}.yaml"
         file.write_text(text, encoding="utf-8")
         rc, said = imported_op.run(R.SET_CASE, imported_op.tid, str(file), R.REPLACES, "1")
         assert rc != 0, (text, said)
+        assert "Traceback" not in said, (text, said)
         assert _state(imported_op) == before, text
 
 
