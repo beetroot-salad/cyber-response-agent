@@ -1,9 +1,12 @@
 """#1363 O7: a run that loses its access to the credential proxy ends `proxy-access`, its own non-zero
-exit class, silent, with no system marked down; a fault with no origin is unchanged. Driven through
-`run.main` with the real investigation (`_spec1222.run_alert`), the ProviderDown suite's door."""
+exit class, silent, with no system marked down; a fault with no origin is unchanged. A fault with origin
+`request` is an uncharged failed call of its own exit class (r8.4, O7a). Driven through `run.main` with
+the real investigation (`_spec1222.run_alert`), the ProviderDown suite's door."""
 from __future__ import annotations
 
 import json
+import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,12 +14,14 @@ import pytest
 
 from defender import run as run_mod
 from defender.investigation import ticket_writer
-from defender.kit.faults import AdapterFault, ConfigFault, TransportFault, UpstreamFault
+from defender.kit.faults import AdapterFault, ConfigFault, ConfinementFault, TransportFault, UpstreamFault
+from defender.knowledge import REPEAT_TRIP_QUERY_ID
 from defender.records import run_end
 from defender.run_common import learning_refusal_gate
-from defender.systems import system_status
+from defender.systems import circuit_breaker, system_status
 from defender.tests.runtime.providers import _spec1243 as P
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.shared import _request_cut1363 as RC
 from defender.tests.support.shared.filesystem import _spec1047 as T47
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
@@ -30,23 +35,25 @@ DETAIL = "PROXY-ACCESS-1363: the request token has expired"
 KINDS = {"config": ConfigFault, "transport": TransportFault, "upstream": UpstreamFault}
 
 
-def _proxied_fault(origin: str | None, kind: type[AdapterFault] = ConfigFault) -> Any:
+def _proxied_fault(origin: str | None, kind: type[AdapterFault] = ConfigFault, detail: str = DETAIL) -> Any:
     """The fault the proxy client raises for a call it could not make: `kind` carrying `origin`
     (`None` is the same fault from before origins, the control)."""
     def make() -> BaseException:
-        fault = kind(DETAIL)
+        fault = kind(detail)
         if origin is not None:
             fault.origin = origin
         return fault
     return make
 
 
-def _drive(tmp_path: Path, origin: str | None, kind: type[AdapterFault] = ConfigFault, **kw: Any) -> S.Drive:
+def _drive(tmp_path: Path, origin: str | None, kind: type[AdapterFault] = ConfigFault, *,
+           detail: str = DETAIL, **kw: Any) -> S.Drive:
     return S.run_alert(
         tmp_path, main=[S.gather(LEAD, "cmdb"), S.text(S.DONE)],
         leads={S.L3: [S.text(CORR)],
                LEAD: [S.query("cmdb", "get-host", {"host": "web-1"}), S.text("Summary: unreached.")]},
-        backend=S.Backend(fault=T.Fault(fail_on=("cmdb.get-host",)), exc=_proxied_fault(origin, kind)), **kw)
+        backend=S.Backend(fault=T.Fault(fail_on=("cmdb.get-host",)), exc=_proxied_fault(origin, kind, detail)),
+        **kw)
 
 
 def _cmdb_rows(d: S.Drive) -> list[dict]:
@@ -72,15 +79,15 @@ def test_1363_o7_an_access_fault_mid_run_ends_it_proxy_access_silent_and_non_zer
     assert ended.get(P.gather_agent(LEAD)) == PROXY_ACCESS, ended
 
 
-CONTROLS = [(ConfigFault, None), (ConfigFault, "system"), (ConfigFault, "request"),
-            (TransportFault, None), (TransportFault, "system"), (TransportFault, "request")]
+CONTROLS = [(ConfigFault, None), (ConfigFault, "system"), (TransportFault, None), (TransportFault, "system")]
 
 
 @pytest.mark.parametrize(("kind", "origin"), CONTROLS, ids=[f"{k.__name__}-{o}" for k, o in CONTROLS])
 def test_1363_o7_control_a_fault_not_ours_keeps_its_old_handling_and_the_run_goes_on(
         tmp_path: Path, kind: type[AdapterFault], origin: str | None) -> None:
-    """Positive control on the same channels: the same fault with no origin, the system's or one call's
-    (`request`) keeps its row; a config fault marks cmdb down uncharged, a transport fault is charged. #1363 O7, N1."""
+    """Positive control on the same channels: the same fault with no origin or the system's keeps its row; a
+    config fault marks cmdb down uncharged, a transport fault is charged. (`request` no longer belongs
+    here: it is an uncharged failed call of its own class, below.) #1363 O7."""
     d = _drive(tmp_path, origin, kind)
     assert d.raised is None, d.raised
     assert (d.summary or {}).get("truncated_by") != PROXY_ACCESS, d.summary
@@ -258,3 +265,135 @@ def test_1363_b6_a_job_whose_run_was_cut_short_by_proxy_access_ends_failed_no_re
     assert "cut short (proxy-access)" in got.failure_message, got.failure_message
     assert got.decided_by_run is False
     assert "cut short (provider-down)" in ending("provider-down").failure_message, "control"
+
+
+# --- r8.4, O7a: a `request`-origin fault is an uncharged failed call of its own exit class ----------------
+#
+# The exit code of such a row is `RC.REQUEST_CUT_EXIT`: the code stage must use that value, or the constant
+# must be re-pointed (the design leaves the number to the contract).
+
+#: Names no proxy, no system and no "not configured", so an agent text that holds them said it itself.
+CUT = "REQCUT-1363: this one call was cut"
+#: The proxy's own words for the request it could not read (oversize, did not arrive, caller left), then
+#: synthetic ones for the kinds the proxy words differently.
+REQUEST_CASES = [pytest.param(kind, detail, id=name) for name, (kind, detail) in RC.real_proxy_request_faults().items()] + [
+    pytest.param(ConfigFault, "REQCUT-1363: the path is not under the system's base", id="config-locate"),
+    pytest.param(TransportFault, CUT, id="transport"),
+    pytest.param(ConfinementFault, "REQCUT-1363: GET /x is not a declared route", id="confinement"),
+]
+#: What an agent must never be told about a request that was only cut or malformed.
+WRONG_STORY = re.compile(r"unreachable|not configured|credential proxy", re.IGNORECASE)
+
+
+@pytest.mark.parametrize(("kind", "detail"), REQUEST_CASES)
+def test_1363_o7a_a_request_fault_is_an_uncharged_failed_call_of_its_own_exit_class_and_the_run_goes_on(
+        tmp_path: Path, kind: type[AdapterFault], detail: str) -> None:
+    """A fault with origin `request`, of any kind, writes the call's row with the dedicated exit class, charges
+    neither the system nor the run, marks no system down and does not end the run: the lead is asked again.
+    The code stage must use `RC.REQUEST_CUT_EXIT` (or the constant is re-pointed). #1363 O7a, D12."""
+    d = _drive(tmp_path, "request", kind, detail=detail)
+    assert d.raised is None, d.raised
+    assert (d.summary or {}).get("truncated_by") is None, d.summary
+    assert [r.get("exit_code") for r in _cmdb_rows(d)] == [RC.REQUEST_CUT_EXIT], \
+        f"{kind.__name__} request fault: the call's row is not the dedicated class: {_cmdb_rows(d)}"
+    assert system_status.down_cause(d.run_state, "cmdb") is None, "a request fault marked cmdb down"
+    assert d.run_state.breaker_failures("cmdb") == 0, f"charged to the system: {d.breaker}"
+    assert d.breaker.get("total_failures", 0) == 0, f"charged to the run: {d.breaker}"
+    assert d.router.requests(LEAD) == 2, "the lead was not asked again after the cut call"
+    assert d.rc == 0, d.rc
+
+
+@pytest.mark.parametrize(("kind", "detail"), REQUEST_CASES)
+def test_1363_o7a_the_agent_is_told_the_faults_own_detail_not_that_the_system_is_down_or_the_proxy_failed(
+        tmp_path: Path, kind: type[AdapterFault], detail: str) -> None:
+    """The failed call's result to the agent carries the fault's own detail, on the proxy's real strings
+    for the oversize, late and abandoned request too, and says neither that the system is unreachable or
+    not configured nor names the credential proxy. #1363 O7a, D12."""
+    d = _drive(tmp_path, "request", kind, detail=detail)
+    seen = d.router.seen(LEAD)
+    assert len(seen) >= 2, "the lead was never answered"
+    told = "\n".join(seen[1].tool_returns)
+    assert detail in told, f"the fault's own detail is missing from the agent's result: {told!r}"
+    assert WRONG_STORY.search(told) is None, f"the agent was told the wrong story: {told!r}"
+
+
+def test_1363_o7a_a_second_distinct_call_to_the_same_system_reaches_the_backend(tmp_path: Path) -> None:
+    """After a request fault on cmdb the system is still callable: a different verb's call reaches the backend and
+    answers. Control: the call that was cut did reach it (so the backend is the one that failed). #1363 O7a."""
+    d = S.run_alert(
+        tmp_path, main=[S.gather(LEAD, "cmdb"), S.text(S.DONE)],
+        leads={S.L3: [S.text(CORR)],
+               LEAD: [S.query("cmdb", "get-host", {"host": "web-1"}), S.query("cmdb", "health-check"),
+                      S.text("Summary: carried on.")]},
+        backend=S.Backend(fault=T.Fault(fail_on=("cmdb.get-host",)), exc=_proxied_fault("request", TransportFault, CUT)))
+    assert d.raised is None, d.raised
+    assert d.backend.rec.verbs == ["cmdb.get-host", "cmdb.health-check"], d.backend.rec.verbs
+    assert [r.get("exit_code") for r in _cmdb_rows(d)] == [RC.REQUEST_CUT_EXIT, 0], _cmdb_rows(d)
+    assert d.rc == 0, d.rc
+
+
+@pytest.mark.parametrize("kind", [ConfigFault, TransportFault, ConfinementFault])
+def test_1363_o7a_request_faults_beyond_the_run_failure_limit_do_not_abort_the_run(
+        tmp_path: Path, kind: type[AdapterFault]) -> None:
+    """More request-origin failures than the run's failure limit (distinct calls, so the repeat guard stays out of
+    it) write their rows uncharged: no `RunAborted`, no ending, the system never trips. #1363 O7a."""
+    n = circuit_breaker.RUN_FAIL_KILL_LIMIT + 2
+    d = S.run_alert(
+        tmp_path, main=[S.gather(LEAD, "cmdb"), S.text(S.DONE)],
+        leads={S.L3: [S.text(CORR)],
+               LEAD: [*[S.query("cmdb", "get-host", {"host": f"web-{i}"}) for i in range(n)], S.text("Summary: went on.")]},
+        backend=S.Backend(fault=T.Fault(fail_on=("cmdb.get-host",)), exc=_proxied_fault("request", kind, CUT)))
+    assert d.raised is None, d.raised
+    assert (d.summary or {}).get("truncated_by") is None, d.summary
+    assert [r.get("exit_code") for r in _cmdb_rows(d)] == [RC.REQUEST_CUT_EXIT] * n, _cmdb_rows(d)
+    assert d.breaker.get("total_failures", 0) == 0, d.breaker
+    assert d.run_state.breaker_failures("cmdb") == 0, d.breaker
+    assert d.rc == 0, d.rc
+
+
+@pytest.mark.parametrize("kind", [ConfigFault, TransportFault, ConfinementFault])
+def test_1363_o7a_each_request_fault_is_one_warning_naming_system_origin_and_detail_never_an_adapter_defect_error(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture, kind: type[AdapterFault]) -> None:
+    """One record at WARNING or above per fault naming the system, the origin and the detail; for a configuration
+    fault its wording suspects an adapter or settings defect; no ERROR record calls it an adapter defect.
+    #1363 O7a."""
+    caplog.set_level(logging.INFO)
+    d = _drive(tmp_path, "request", kind, detail=CUT)
+    assert d.raised is None, d.raised
+    lines = [r for r in caplog.records if r.levelno >= logging.WARNING and "REQCUT-1363" in r.getMessage()]
+    shown = [(r.levelname, r.getMessage()) for r in lines]
+    assert len(lines) == 1, f"expected one WARNING-or-above record for the fault, found {shown}"
+    text = lines[0].getMessage()
+    assert re.search(r"(?<![\w-])cmdb(?![\w-])", text), f"the record does not name the system: {text!r}"
+    assert re.search(r"request", text, re.IGNORECASE), f"the record does not name the origin: {text!r}"
+    if kind is ConfigFault:
+        assert re.search(r"adapter|settings", text, re.IGNORECASE), f"a configuration fault is not suspected as a defect: {text!r}"
+    defects = [r for r in caplog.records if r.levelno >= logging.ERROR and "adapter defect" in r.getMessage().lower()]
+    assert defects == [], f"a request fault was logged as the adapter's defect: {[r.getMessage() for r in defects]}"
+
+
+def _repeat_observed(tmp_path: Path, origin: str, kind: type[AdapterFault]) -> tuple[int, int, int, list[int]]:
+    """Four identical failing calls: (backend calls, repeat-trip rows, the lead's requests, the exit codes of
+    its cmdb rows)."""
+    same = S.query("cmdb", "get-host", {"host": "web-1"})
+    d = S.run_alert(
+        tmp_path, main=[S.gather(LEAD, "cmdb"), S.text(S.DONE)],
+        leads={S.L3: [S.text(CORR)], LEAD: [same, same, same, same, S.text("Summary: stopped.")]},
+        backend=S.Backend(fault=T.Fault(fail_on=("cmdb.get-host",)), exc=_proxied_fault(origin, kind, CUT)))
+    assert d.raised is None, d.raised
+    trips = [r for r in d.rows if r.get("query_id") == REPEAT_TRIP_QUERY_ID]
+    return (len(d.backend.rec.calls), len(trips), d.router.requests(LEAD),
+            [r.get("exit_code") for r in _cmdb_rows(d)])
+
+
+def test_1363_o7a_the_repeat_guard_is_unchanged_the_third_identical_request_fault_dead_ends_the_lead(
+        tmp_path: Path) -> None:
+    """Two identical request-fault calls reach the backend; the third is stopped by the repeat guard exactly as the
+    third identical exit-1 failure is (the control, a system-origin UpstreamFault): same backend calls, same
+    trip, same lead conversation. #1363 O7a, D13."""
+    control = _repeat_observed(tmp_path / "control", "system", UpstreamFault)
+    assert control[:2] == (2, 1), f"control: the guard did not stop the third identical failure: {control}"
+    cut = _repeat_observed(tmp_path / "cut", "request", TransportFault)
+    assert cut[:3] == control[:3], f"request faults are counted by the guard differently: {cut} vs control {control}"
+    assert cut[3][:2] == [RC.REQUEST_CUT_EXIT] * 2, cut
+    assert cut[3][2:] == control[3][2:], f"the trip row differs from the control's: {cut} vs {control}"

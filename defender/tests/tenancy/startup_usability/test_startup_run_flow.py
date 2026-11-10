@@ -23,7 +23,8 @@ from defender.integrations import (  # noqa: E402
     identity_adapter,
     threat_intel_adapter,
 )
-from defender.kit.faults import ConfigFault, TransportFault  # noqa: E402
+from defender.kit.faults import ConfigFault, ConfinementFault, TransportFault  # noqa: E402
+from defender.tests.support.shared import _request_cut1363 as RC  # noqa: E402
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as R  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
@@ -717,11 +718,12 @@ def test_1363_a_setup_transport_fault_is_a_charged_failed_call_naming_our_setup(
     assert [r.get("exit_code") for r in run.rows_for(CONFIGURED)] == [2, 0], run.rows
 
 
-@pytest.mark.parametrize("origin", [None, "system", "request"])
+@pytest.mark.parametrize("origin", [None, "system"])
 def test_1363_control_a_config_fault_not_ours_still_marks_the_system_down_and_is_logged_as_a_defect(
         tmp_path, caplog, origin):
-    """Positive control on the setup tests' channels: the same ConfigFault with no origin, the system's or one
-    call's still marks the system down, uncharged, and is logged as an adapter defect. #1363 O7, N1."""
+    """Positive control on the setup tests' channels: the same ConfigFault with no origin or the system's still
+    marks the system down, uncharged, and is logged as an adapter defect. (A `request` origin no longer does:
+    see the request-cut tests below.) #1363 O7."""
     caplog.set_level(logging.INFO)
     root = _plant(tmp_path, f"s63n{origin}")
 
@@ -742,10 +744,10 @@ def test_1363_control_a_config_fault_not_ours_still_marks_the_system_down_and_is
     assert [r for r in caplog.records if "adapter defect" in r.getMessage()], "the escape was not logged as a defect"
 
 
-@pytest.mark.parametrize("origin", [None, "system", "request"])
+@pytest.mark.parametrize("origin", [None, "system"])
 def test_1363_control_a_transport_fault_not_ours_is_still_a_charged_failed_call(tmp_path, origin):
-    """Positive control: a TransportFault with no origin, the system's or one call's is charged and marks nothing
-    down, and its detail does not claim our setup. #1363 O7, N1."""
+    """Positive control: a TransportFault with no origin or the system's is charged and marks nothing
+    down, and its detail does not claim our setup. (A `request` origin is no longer charged: see below.) #1363 O7."""
     root = _plant(tmp_path, f"s63x{origin}")
 
     def fault() -> BaseException:
@@ -765,6 +767,41 @@ def test_1363_control_a_transport_fault_not_ours_is_still_a_charged_failed_call(
     told = run.lead_answer("l-001", 0).lower()
     assert "our setup" not in told
     assert "credential proxy" not in told, "the positive cases' needle appeared for a fault that is not ours"
+
+
+@pytest.mark.parametrize("kind", [ConfigFault, TransportFault, ConfinementFault])
+def test_1363_a_request_fault_is_an_uncharged_failed_call_of_its_own_exit_class_not_a_down_system(
+        tmp_path, caplog, kind):
+    """A fault with origin `request` (the run cut or malformed one call), of any kind, is an uncharged failed
+    call: the row has the dedicated exit class (`RC.REQUEST_CUT_EXIT`; the code stage must use it, or the constant
+    is re-pointed), neither the system nor the run is charged, the system is not marked down and the lead's next
+    call reaches it. The agent is told the fault's detail and neither that the system is not configured nor that
+    the credential proxy failed; the log is one WARNING naming the system and the detail, no adapter-defect ERROR.
+    #1363 O7a, D12."""
+    caplog.set_level(logging.INFO)
+    root = _plant(tmp_path, f"s63r{kind.__name__}")
+    detail = f"{SETUP_TOKEN}: this one call was cut"
+    run = _drive(tmp_path, root, main=[dispatch("l-001", CONFIGURED), R.text(R.DONE)],
+                 leads={"l-001": [R.query(CONFIGURED, "lookup", {"value": "203.0.113.9"}),
+                                  R.query(CONFIGURED, "health-check"), SUMMARY]},
+                 behaviour={"cmdb": OK, "identity": OK, "change-mgmt": OK, CONFIGURED: OK,
+                            f"{CONFIGURED}.lookup": RC.request_fault(kind, detail)})
+
+    assert run.calls_to(CONFIGURED) == [f"{CONFIGURED}.lookup", f"{CONFIGURED}.health-check"], \
+        "the lead's next call did not reach the system after a request fault"
+    assert [r.get("exit_code") for r in run.rows_for(CONFIGURED)] == [RC.REQUEST_CUT_EXIT, 0], run.rows
+    assert run.failures(CONFIGURED) == {CONFIGURED: 0}, f"charged to the system: {run.breaker}"
+    assert run.total_failures == 0, f"charged to the run: {run.breaker}"
+    assert run.summary.get("truncated_by") is None, run.summary
+    told = run.lead_answer("l-001", 0)
+    assert detail in told, f"the fault's own detail is missing from the agent's result: {told!r}"
+    assert _shown_down(told, CONFIGURED) == [], f"the agent was told the system is not configured: {told!r}"
+    assert "credential proxy" not in told.lower(), told
+    lines = [r for r in caplog.records if r.levelno >= logging.WARNING and SETUP_TOKEN in r.getMessage()]
+    assert len(lines) == 1, f"expected one WARNING-or-above record for the fault: {[(r.levelname, r.getMessage()) for r in lines]}"
+    assert _names(lines[0].getMessage(), CONFIGURED), lines[0].getMessage()
+    defects = [r for r in caplog.records if r.levelno >= logging.ERROR and "adapter defect" in r.getMessage().lower()]
+    assert defects == [], "a request fault was logged as the adapter's defect"
 
 
 class _AtFirstRequest:
