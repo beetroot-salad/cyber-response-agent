@@ -30,12 +30,10 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import hashlib
 import os
 import shutil
 import sys
 import tempfile
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -63,18 +61,6 @@ class CaptureRefused(RuntimeError):
 
 class SnapshotFailed(RuntimeError):
     """The snapshot did not end in SUCCESS."""
-
-
-class WallClock:
-    def now(self) -> datetime:
-        return datetime.now(UTC)
-
-    def sleep(self, seconds: float) -> None:
-        time.sleep(seconds)
-
-    def sleep_until(self, moment: datetime) -> None:
-        while (left := (moment - self.now()).total_seconds()) > 0:
-            time.sleep(min(left, 60.0))
 
 
 def _fire_times(T: datetime, count: int) -> list[datetime]:
@@ -116,12 +102,6 @@ def _await_snapshot(es: Any, clock: Any, repository: str, name: str) -> dict:
     return record
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _take_parts(ops: Any, staging: Path) -> dict[str, str]:
@@ -132,7 +112,7 @@ def _take_parts(ops: Any, staging: Path) -> dict[str, str]:
         names += take(staging)
     if len(set(names)) != len(names):
         raise RuntimeError(f"two parts share a name: {sorted(names)}")
-    return {name: _sha256(staging / name) for name in names}
+    return {name: frozen_copy.sha256_file(staging / name) for name in names}
 
 
 def _under_lock(ops: Any, es: Any, clock: Any, token: str, *, T: datetime, scenarios: list[str],
@@ -271,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
         capture(args.freeze_dir, T=moment, scenarios=args.scenarios, repository=args.repository,
                 tenant_settings=frozen_copy.tenant_settings_dir(), ops=LabOps.from_environment(),
                 es=DockerExecSeam(), lock_store=lock.DockerLockStore(), parts_dir=args.parts_dir,
-                clock=WallClock(), captured_by=args.captured_by)
+                clock=frozen_copy.WallClock(), captured_by=args.captured_by)
     except (lock.LockError, CaptureRefused, frozen_copy.CopyRefused) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 4

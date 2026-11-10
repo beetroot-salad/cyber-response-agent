@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,6 +39,8 @@ ANCESTORS = "kibana.alert.ancestors"
 PAGE = 1000
 MAX_WINDOW = 10000            # Elasticsearch's from+size ceiling
 RESTORE_WAIT_S, HEALTH_POLL_S = 3600.0, 10.0
+#: The A2 pre-check's bound on bringing an existing node up (its start and its health wait, r6.4.4).
+PRECHECK_WAIT_S = 600
 BACKING = re.compile(r"^\.ds-(.+)-\d{4}\.\d{2}\.\d{2}-\d{6}$")
 
 
@@ -90,6 +93,20 @@ def dug(source: dict, dotted: str) -> Any:
             return None
         node = node[part]
     return node
+
+
+class WallClock:
+    """The real clock, the one every lab script uses outside tests (which pass their own)."""
+
+    def now(self) -> datetime:
+        return datetime.now(UTC)
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(seconds)
+
+    def sleep_until(self, moment: datetime) -> None:
+        while (left := (moment - self.now()).total_seconds()) > 0:
+            time.sleep(min(left, 60.0))
 
 
 def sha256_file(path: Path) -> str:
@@ -410,13 +427,29 @@ def _reusable(es: Any, ops: Any, clock: Any, freeze: dict, location: str) -> boo
         and all(i["status"] != "close" for i in current.values())
 
 
+def _came_up(es: Any, ops: Any, clock: Any, freeze: dict) -> bool:
+    """Start the existing node and wait for it, within `PRECHECK_WAIT_S` for both. A node that does
+    not start, or is not healthy in that time, holds no good copy to protect (r6.4.4): False, and
+    the restore goes on into a fresh node. A refusal (the lab not configured) still refuses."""
+    deadline = clock.now().timestamp() + PRECHECK_WAIT_S
+    try:
+        ops.ensure_node(freeze["T"], clock)
+        wait_for_cluster(es, clock, "the node start", timeout_s=max(0.0, deadline - clock.now().timestamp()))
+    except CopyRefused:
+        raise
+    except Exception as exc:   # noqa: BLE001 — any failure to come up means there is nothing to keep
+        print(f"the existing frozen node did not come up ({exc}); restoring into a fresh node", file=sys.stderr)
+        return False
+    return True
+
+
 def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overlay: dict | None,
           whole: bool = False, location: str = REPO_LOCATION) -> Copy:
     """Make the frozen cluster hold exactly this variant. A clean marker for the variant is
     trusted unless `whole` (make-a-case always restores, D23); anything else discards the node and
     its data and restores the whole snapshot into a fresh node (D25), once the snapshot's UUID has
-    been checked on the node that is there (A2: a refusal leaves the old copy untouched). The node's clock reads T
-    whenever it starts (D15 revised)."""
+    been checked on the node that is there (A2: a refusal leaves the old copy untouched; a node that does not come
+    up within `PRECHECK_WAIT_S` holds nothing to keep). The node's clock reads T whenever it starts (D15 revised)."""
     check_freeze(freeze, freeze_id)
     vid = variant_id(freeze_id, overlay)
     marker = None if whole else ops.read_marker()
@@ -424,10 +457,8 @@ def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overla
         tallies = {n: int(t) for n, t in marker["tallies"].items()}   # type: ignore[index]
         restored = False
     else:
-        if ops.node_exists():
+        if ops.node_exists() and _came_up(es, ops, clock, freeze):
             # A2 under D25: the snapshot must be the freeze's before the copy there is discarded.
-            ops.ensure_node(freeze["T"], clock)
-            wait_for_cluster(es, clock, "the node start")
             register_repository(es, freeze, location)
         mark_dirty(ops, freeze_id, overlay)   # before the wipe: a crash from here leaves no trusted copy
         ops.fresh_node(freeze["T"], clock)

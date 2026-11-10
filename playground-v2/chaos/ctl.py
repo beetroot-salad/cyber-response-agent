@@ -26,7 +26,8 @@ touched it:
 `activate` is plan + apply in one call. `attacks/runner.py --chaos` calls
 them separately so nothing that can fail runs after the synthetic CR is posted.
 While a capture holds the lab-server lock (`chaos/lock.py`), `activate` and the
-runner both refuse unless handed the capture's `--lock-token`.
+runner both refuse unless handed the capture's `--lock-token`, re-checking it before
+each change and each step.
 
 `execer=`, `profiles_dir=`, `rules_dir=` and `ledger_dir=` are injectable so tests
 never need the live stack.
@@ -347,8 +348,14 @@ def apply(
     *,
     execer: Any = None,
     ledger_dir: Optional[Path] = None,
+    lock_store: Any = None,
+    lock_token: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Push a plan to the stack, recording every step in the ledger first."""
+    """Push a plan to the stack, recording every step in the ledger first.
+
+    With a lock store, the capture lock is re-checked right before each change (#1347 O10): a
+    capture that takes it mid-apply refuses the next change, and the changes already pushed are
+    rolled back like any other failed apply (a failed injection is not an injection)."""
     execer = execer if execer is not None else DockerExecSeam()
     ledger_dir = Path(ledger_dir) if ledger_dir is not None else DEFAULT_LEDGER_DIR
 
@@ -381,6 +388,12 @@ def apply(
     ledger_mod.write_record(ledger_dir, record)
 
     for index, res in enumerate(resources):
+        if lock_store is not None:
+            try:
+                lock_mod.require(lock_store, lock_mod.CAPTURE, lock_token)
+            except lock_mod.LockError as exc:
+                # Refused before this change reached the stack: only the ones before it are restored.
+                raise _roll_back(record, index - 1, ledger_dir, execer, exc) from exc
         # The whole step is the transaction — push, mark, write. A ledger
         # write that fails after the push landed is as much a reason to roll
         # back as a push that failed: either way the record would not say
@@ -445,14 +458,15 @@ def activate(
     lock_token: Optional[str] = None,
 ) -> dict[str, Any]:
     # While a capture holds the lab (#1347 O10), only the holder's token activates; checked
-    # before the first read of the stack. `None` store = no check (library callers, tests).
+    # before the first read of the stack, and again before each change (`apply`). `None` store =
+    # no check (library callers, tests).
     if lock_store is not None:
         lock_mod.require(lock_store, lock_mod.CAPTURE, lock_token)
     execer = execer if execer is not None else DockerExecSeam()
     planned = plan(
         profile_id, seed=seed, execer=execer, profiles_dir=profiles_dir, rules_dir=rules_dir, ledger_dir=ledger_dir
     )
-    return apply(planned, execer=execer, ledger_dir=ledger_dir)
+    return apply(planned, execer=execer, ledger_dir=ledger_dir, lock_store=lock_store, lock_token=lock_token)
 
 
 # -- revert ---------------------------------------------------------------------
@@ -884,6 +898,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 3
     except lock_mod.LockError as exc:
         print(f"refused: {exc}", file=sys.stderr)
+        return 4
+    except ChaosApplyError as exc:
+        if not isinstance(exc.__cause__, lock_mod.LockError):
+            raise
+        print(f"refused mid-apply: {exc}", file=sys.stderr)    # the capture took the lock (#1347 O10)
         return 4
 
 

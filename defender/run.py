@@ -383,11 +383,11 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     #: A job's facts holder (#1342 r5 C2): the driver keeps its review state in the holder's
     #: dict, so the job entry reads the close however the run ends. `None` off the job lane.
     job_facts: _JobEndFacts | None = None,
-    #: The credential proxy's address and the run's read token (#1163); `None` when the run has
-    #: no `http-proxy` system.
     #: The run clock's start when it is not the source's own (`--as-of`, #1347 O5); `None`
     #: on an ordinary run and on a world, whose clock is its branch point's.
     clock_origin: datetime | None = None,
+    #: The credential proxy's address and the run's read token (#1163); `None` when the run has
+    #: no `http-proxy` system.
     access: RequestAccess | None = None,
 ) -> dict[str, Any]:
     """The production investigation call, as a synchronous callable (injected by the

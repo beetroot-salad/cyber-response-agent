@@ -348,12 +348,12 @@ def score(fixtures: list[HeldOutAlert], runs_dir: Path, rows: list[IndexRow] | t
     failures: list[tuple[str, str]] = []
     not_run: list[str] = []
     stale: list[tuple[str, str]] = []
+    newest_of = {(r.slug, r.binding): r for r in rows}   # in index order, so the newest row wins
     for fx in fixtures:
-        bound = [r for r in rows if r.slug == fx.slug and r.binding == fx.binding]
-        if not bound:
+        newest = newest_of.get((fx.slug, fx.binding))
+        if newest is None:
             not_run.append(fx.slug)
             continue
-        newest = bound[-1]
         if newest.verdict == "stale":
             stale.append((fx.slug, newest.reason or "the post-run check found it stale"))
             continue

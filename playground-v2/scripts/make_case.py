@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -174,7 +175,11 @@ def write_case(case_dir: Path, *, freeze_dir: Path, alert_uuid: str, overlay: di
     recorded = _overlay_of(overlay, frozen_copy.utc(freeze["T"]), profiles_dir=profiles_dir,
                            inventory=inventory)
     if recorded:   # the guard, against the rules as of T, before the copy is touched
-        check_mutations(recorded["mutations"], rules_dir=Path(ops.freeze_rules(freeze_dir)))
+        rules = Path(ops.freeze_rules(freeze_dir))
+        try:
+            check_mutations(recorded["mutations"], rules_dir=rules)
+        finally:   # needed only by the guard: removed on every exit, a refusal included
+            shutil.rmtree(rules, ignore_errors=True)
     token = lock.take(lock_store, lock.FROZEN_ENGINE)
     restore = None
     try:
@@ -227,14 +232,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not args.parts_dir or bool(args.profile) != bool(args.span_start):
         parser.error("--parts-dir (or $V2_FROZEN_PARTS_DIR) is required; --profile needs --span-start")
-    from launch_frozen import WallClock
     try:
         held = write_case(
             args.case_dir, freeze_dir=args.freeze_dir, alert_uuid=args.alert,
             overlay={"profile": args.profile, "seed": args.seed, "span_start": args.span_start}
             if args.profile else None,
             tenant_settings=frozen_copy.tenant_settings_dir(), parts_dir=args.parts_dir,
-            lock_store=lock.DockerLockStore(), es=ops.frozen_es(), ops=ops, clock=WallClock(),
+            lock_store=lock.DockerLockStore(), es=ops.frozen_es(), ops=ops, clock=frozen_copy.WallClock(),
             profiles_dir=PLAYGROUND / "chaos" / "profiles",
             inventory=yaml.safe_load((PLAYGROUND / "hosts" / "inventory.yaml").read_text()))
     except (CaseRefused, frozen_copy.CopyRefused, lock.LockError, NotConfigured) as exc:

@@ -54,7 +54,6 @@ def split_first_command(query: str) -> tuple[str, str]:
 _TOKEN = re.compile(r'''
     (?P<ws>\s+)
   | (?P<line>//[^\r\n]*)
-  | (?P<triple>""".*?""")
   | (?P<string>"(?:[^"\\]|\\.)*")
   | (?P<tick>`(?:[^`]|``)*`)
   | (?P<sep>\|)
@@ -63,8 +62,16 @@ _TOKEN = re.compile(r'''
   | (?P<word>(?:(?!/\*|//)[^\s|,"()`])+)
 ''', re.VERBOSE | re.DOTALL)
 
-#: Commands that read an index they do not name, or hold a pipeline of their own.
-_UNREADABLE_COMMANDS = frozenset({"ENRICH", "FORK", "FROM", "TS", "ROW", "SHOW"})
+#: The commands a query may start with, and what follows each (A6 revised, #1347 r6.4.4). The lists
+#: are allow-lists: any other command, known to ES|QL or not, makes the query unreadable. Adding one is
+#: a reviewed change with a test.
+_FIRST_COMMANDS = frozenset({"FROM", "TS", "ROW", "SHOW"})
+_LATER_COMMANDS = frozenset({
+    "WHERE", "EVAL", "STATS", "KEEP", "DROP", "RENAME", "SORT", "LIMIT", "DISSECT", "GROK", "MV_EXPAND",
+})
+
+#: Three `"` in a row: a triple-quoted string, or text whose quoting another lexer may read otherwise.
+_QUOTE_RUN = '"""'
 
 _Token = tuple[str, str]
 
@@ -86,22 +93,28 @@ def _block_comment_end(query: str, start: int) -> int:
 
 def _tokens(query: str) -> list[_Token] | None:
     """The query's tokens without whitespace or comments, or `None` where the text does not
-    tokenize (an unterminated string or comment)."""
+    tokenize (an unterminated string or comment) or holds a run of three `"` anywhere outside a
+    backtick-quoted name (in a string, a comment or between tokens)."""
     out: list[_Token] = []
+    outside_names: list[str] = []
     i = 0
     while i < len(query):
         if query.startswith("/*", i):
-            i = _block_comment_end(query, i)
-            if i < 0:
+            end = _block_comment_end(query, i)
+            if end < 0:
                 return None
+            outside_names.append(query[i:end])
+            i = end
             continue
         m = _TOKEN.match(query, i)
         if m is None:
             return None
         i = m.end()
+        # a name stands in as one non-quote character, so quotes on either side never join across it
+        outside_names.append("x" if m.lastgroup == "tick" else m.group())
         if m.lastgroup not in ("ws", "line"):
             out.append((str(m.lastgroup), m.group()))
-    return out
+    return None if _QUOTE_RUN in "".join(outside_names) else out
 
 
 def _commands(tokens: list[_Token]) -> list[list[_Token]] | None:
@@ -117,7 +130,7 @@ def _commands(tokens: list[_Token]) -> list[list[_Token]] | None:
 
 def _index_name(token: _Token) -> str | None:
     """The index expression a source token names, or `None` if it is not a plain local one
-    (a subquery, a remote `cluster:index`, an escaped or triple-quoted name)."""
+    (a subquery, a remote `cluster:index`, an escaped name)."""
     kind, text = token
     if kind == "string":
         text = text[1:-1]
@@ -144,7 +157,8 @@ def _from_sources(rest: list[_Token]) -> list[str] | None:
 
 
 def _later_command_sources(command: list[_Token]) -> list[str] | None:
-    """What a command after the first reads: its `LOOKUP JOIN` index, nothing for most."""
+    """What an allowed command after the first reads: its `LOOKUP JOIN` index, nothing for the
+    rest; `None` for any command off the allow-list."""
     head, rest = command[0], command[1:]
     if head[0] != "word":
         return None
@@ -153,22 +167,23 @@ def _later_command_sources(command: list[_Token]) -> list[str] | None:
         joined = bool(rest) and rest[0][0] == "word" and rest[0][1].upper() == "JOIN"
         name = _index_name(rest[1]) if joined and len(rest) > 1 else None
         return None if name is None else [name]
-    return None if keyword in _UNREADABLE_COMMANDS else []
+    return [] if keyword in _LATER_COMMANDS else None
 
 
 def _first_command_sources(command: list[_Token]) -> list[str] | None:
     head, rest = command[0], command[1:]
     keyword = head[1].upper() if head[0] == "word" else ""
-    if keyword in ("ROW", "SHOW"):
-        return []
-    return _from_sources(rest) if keyword in ("FROM", "TS") else None
+    if keyword not in _FIRST_COMMANDS:
+        return None
+    return _from_sources(rest) if keyword in ("FROM", "TS") else []
 
 
 def sources(query: str) -> list[str] | None:
     """The index expressions this ES|QL query reads, in order: the `FROM` / `TS` list and every
     `LOOKUP JOIN` index, quotes removed, comments and string literals ignored. `[]` means it
-    reads no index (`ROW`, `SHOW`); `None` means it cannot be read with confidence (ENRICH, FORK,
-    a subquery, a remote cluster, unparsable text), and the caller must fail closed."""
+    reads no index (`ROW`, `SHOW`); `None` means it cannot be read with confidence (a command off
+    the allow-list, such as ENRICH or FORK; a subquery; a remote cluster; any run of three `"`
+    outside a backtick name; unparsable text), and the caller must fail closed."""
     tokens = _tokens(query)
     commands = _commands(tokens) if tokens else None
     if commands is None:

@@ -34,8 +34,6 @@ import json
 import os
 import subprocess
 import sys
-import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -63,14 +61,6 @@ class RunDied(RuntimeError):
 
 class TeardownFailed(RuntimeError):
     """The run finished and its row (if any) is written, but tearing the copy down failed."""
-
-
-class WallClock:
-    def now(self) -> datetime:
-        return datetime.now(UTC)
-
-    def sleep(self, seconds: float) -> None:
-        time.sleep(seconds)
 
 
 def _load_yaml(path: Path, what: str) -> Any:
@@ -213,7 +203,7 @@ def launch(case_dir: Path, *, freezes_dir: Path, tenant_settings: Path, index: P
     `settings/` directory: the copy is made with the freeze's patterns, which must be the tenant's
     current ones (D24)."""
     case_dir, parts_dir, index = Path(case_dir), Path(parts_dir), Path(index)
-    clock = clock if clock is not None else WallClock()
+    clock = clock if clock is not None else frozen_copy.WallClock()
     case, freeze, bound, _uuid = verify(case_dir, Path(freezes_dir), parts_dir, reference)
     try:
         frozen_copy.check_patterns(freeze, tenant_settings)

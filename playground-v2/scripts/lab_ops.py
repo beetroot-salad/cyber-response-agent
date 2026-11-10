@@ -36,7 +36,6 @@ import sys
 import tarfile
 import tempfile
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -101,14 +100,6 @@ class NotConfigured(LabOpsError):
 
 def _text(value: Any) -> str:
     return value.decode(errors="replace") if isinstance(value, bytes) else (value or "")
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
 
 
 def cmdb_patch(mutation: dict) -> dict:
@@ -488,7 +479,7 @@ class LabOps:
         address = self.frozen_endpoint.rsplit(":", 1)[0]
         hosts = [a for h in tenant_hosts for a in ("--add-host", f"{h}:{address}")]
         rewrite = ("import json, os; c = json.load(open('/proxy/config.json')); "
-                   "c['audit_path'] = os.environ['FROZEN_PROXY_AUDIT']; "
+                   "c['audit_path'] = os.environ['V2_FROZEN_PROXY_AUDIT']; "
                    "json.dump(c, open('/tmp/frozen-proxy.json', 'w'))")
         python = "defender/.venv/bin/python"
         script = (f"{python} -c {shlex.quote(rewrite)} && "
@@ -504,7 +495,7 @@ class LabOps:
                 "-e", "DEFENDER_CREDENTIAL_PROXY_CONFIG=/tmp/frozen-proxy.json",
                 "-e", "DEFENDER_CREDENTIAL_PROXY_HOST=0.0.0.0",
                 "-e", f"DEFENDER_CREDENTIAL_PROXY_PORT={PROXY_PORT}",
-                "-e", f"FROZEN_PROXY_AUDIT={self.audit_path}",
+                "-e", f"V2_FROZEN_PROXY_AUDIT={self.audit_path}",
                 self.proxy_image, "sh", "-c", script]
         self._exec(argv)
         return f"http://{FROZEN_PROXY}:{PROXY_PORT}"
@@ -670,7 +661,7 @@ class LabOps:
 
     def verify_restore(self, repository: str, snapshot: str) -> dict[str, int]:
         """Restore the snapshot into a scratch cluster on the lab server and return each index's
-        document count; the scratch cluster is removed either way."""
+        top-level document count (`_count`); the scratch cluster is removed either way."""
         name = "lab-verify-es"
         self._outer("rm", "-f", "-v", name, check=False)
         self._outer("run", "-d", "--name", name, "-e", "discovery.type=single-node",
@@ -699,8 +690,11 @@ class LabOps:
             call("POST", f"/_snapshot/{repository}/{snapshot}/_restore?wait_for_completion=true",
                  {"include_global_state": False})
             call("POST", "/_refresh?expand_wildcards=all")
-            rows = call("GET", "/_cat/indices?format=json&h=index,docs.count&expand_wildcards=all")
-            return {r["index"]: int(r["docs.count"]) for r in rows if not r["index"].startswith(".geoip")}
+            rows = call("GET", "/_cat/indices?format=json&h=index&expand_wildcards=all")
+            # Top-level documents (`_count`), the count every later check compares: `docs.count`
+            # also counts the hidden documents of nested fields (r6.4.4).
+            return {r["index"]: int(call("GET", f"/{r['index']}/_count")["count"])
+                    for r in rows if not r["index"].startswith(".geoip")}
         finally:
             self._outer("rm", "-f", "-v", name, check=False)
 
@@ -753,12 +747,17 @@ class LabOps:
         return found
 
     def freeze_rules(self, freeze_dir: Path) -> Path:
-        """The detection rules as of T, unpacked into a directory removed at teardown."""
+        """The detection rules as of T, unpacked into a directory removed at teardown (the caller
+        may remove it sooner; a failed unpack removes it at once)."""
         parts_dir = _configured_dir("V2_FROZEN_PARTS_DIR", "the rules at T cannot be read")
         target = Path(tempfile.mkdtemp(prefix="rules-at-T."))
         self._scratch.append(str(target))
-        with tarfile.open(parts_dir / Path(freeze_dir).name / RULES_PART) as tar:
-            tar.extractall(target, filter="data")
+        try:
+            with tarfile.open(parts_dir / Path(freeze_dir).name / RULES_PART) as tar:
+                tar.extractall(target, filter="data")
+        except BaseException:
+            _rmtree(str(target))
+            raise
         return target
 
     # -- helpers ----------------------------------------------------------------------------------
@@ -781,12 +780,7 @@ class LabOps:
         return path.name
 
 
-class _WallClock:
-    def now(self) -> datetime:
-        return datetime.now(UTC)
-
-
-_WALL = _WallClock()
+_WALL = frozen_copy.WallClock()
 
 
 def _dump_overlays(proc: Any) -> list[tuple[str, dict]]:

@@ -124,8 +124,11 @@ A tenant's `systems/elastic/` needs, in one commit: <!-- lint-shippable: ok — 
 the agent's, 5xx transport. The exceptions: a 403 on `health-check`, `query`, `alerts` or `esql` is a
 settings fault naming the missing privilege (`monitor`, or `read` on the configured indexes). `esql`
 names its sources in the query, so each must fall within the configured patterns (FROM, TS, LOOKUP
-JOIN) or the call is refused before the proxy; ENRICH, FORK, subqueries, remote `cluster:index` and
-unparsable text are refused, ROW and SHOW pass (#1347 O2a).
+JOIN) or the call is refused before the proxy. Commands are allow-listed: a query starts with FROM, TS,
+ROW or SHOW (ROW and SHOW read nothing), and later commands are WHERE, EVAL, STATS, KEEP, DROP, RENAME,
+SORT, LIMIT, DISSECT, GROK, MV_EXPAND and LOOKUP JOIN; any other command (ENRICH, FORK, RERANK, ...),
+a subquery, a remote `cluster:index`, any triple-quoted string or run of three `"` outside a backtick
+name, and unparsable text are refused (#1347 O2a, r6.4.4).
 
 ## Upgrade from before #1382
 

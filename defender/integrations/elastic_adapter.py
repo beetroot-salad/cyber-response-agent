@@ -289,7 +289,10 @@ def _confine_esql(query: str, patterns: tuple[str, str]) -> None:
     query may tell it from live."""
     named = esql_text.sources(query)
     if named is None:
-        raise ConfinementFault("the ES|QL query's sources cannot be read, so it is refused")
+        raise ConfinementFault(
+            "the ES|QL query's sources cannot be read, so it is refused: start with FROM, TS, ROW or SHOW, "
+            "use only WHERE, EVAL, STATS, KEEP, DROP, RENAME, SORT, LIMIT, DISSECT, GROK, MV_EXPAND and "
+            "LOOKUP JOIN after it, no triple-quoted string, no subquery and no remote cluster")
     for index in named:
         confine_index(index, patterns)
 

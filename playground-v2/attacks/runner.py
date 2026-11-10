@@ -224,14 +224,20 @@ def run_scenario(
     lock_token: str | None = None,
 ) -> tuple[str, Path, list[dict]]:
     # While a capture holds the lab (#1347 O10), only the capture itself may fire: it passes
-    # its lock token. Checked before anything is planned, posted or written; a dry run
-    # touches nothing, so it needs no lab.
-    if lock_store is not None and not dry_run:
+    # its lock token. Checked before anything is planned, posted or written, and again right
+    # before every execution of a step (each repeat included), so a capture that takes the lock
+    # mid-scenario stops it there; the steps already done stay done. A dry run touches nothing,
+    # so it needs no lab.
+    def require_lock(before: str) -> None:
+        if lock_store is None or dry_run:
+            return
         lock = _lock_module()
         try:
             lock.require(lock_store, lock.CAPTURE, lock_token)
         except lock.LockError as exc:
-            raise SystemExit(f"not firing {scenario['id']}: {exc}") from exc
+            raise SystemExit(f"not firing {scenario['id']} {before}: {exc}") from exc
+
+    require_lock("(nothing fired)")
 
     intensity = int(overrides.get("intensity") or scenario.get("default_intensity", 1))
     source_user = overrides.get("user") or scenario.get("source_user", "root")
@@ -290,7 +296,7 @@ def run_scenario(
             print(f"DRY-RUN: would activate chaos profile {chaos!r} (seed={seed}), revert after")
             pre_run["chaos"] = {"profile": chaos, "seed": seed, "dry_run": True}
         else:
-            active_chaos = ctl_mod.apply(chaos_plan)
+            active_chaos = ctl_mod.apply(chaos_plan, lock_store=lock_store, lock_token=lock_token)
             pre_run["chaos"] = {
                 "profile": chaos,
                 "seed": seed,
@@ -322,6 +328,11 @@ def run_scenario(
                     "intensity": intensity,
                 }
                 cmd = render(step["cmd"], ctx)
+                try:
+                    require_lock(f"at step {step_index}.{iteration} ({cmd}); the steps before it stay done")
+                except SystemExit:
+                    aborted = True
+                    raise
                 step_started = now_iso()
                 t0 = time.monotonic()
                 rc, out, err = exec_fn(source_host, cmd, step_user, dry_run)
