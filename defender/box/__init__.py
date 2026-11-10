@@ -34,8 +34,8 @@ from defender.execution import bash_exec
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,  # noqa: F401 — re-exported: tests read it as `box.BOX_ENV_ALLOWLIST`
     BOX_OUTPUT_LIMIT,  # the fence's limit, kept beside the codec (#1421); re-exported as `box.BOX_OUTPUT_LIMIT`
-    REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
-    RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.RESPONSE_MAGIC`
+    REQUEST_MAGIC,  # noqa: F401 — re-exported: test_exec_seam.py imports it as `box.REQUEST_MAGIC`
+    RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_exec_seam.py imports it as `box.RESPONSE_MAGIC`
     BOX_MARK_ENV,  # noqa: F401 — re-exported: tests read it as `box.BOX_MARK_ENV`
     BoxFault,
     BoxResult,
@@ -90,6 +90,8 @@ from ._alias import (
 from ._docker import (
     START_TOKEN_LABEL,
     TENANT_LABEL,
+    CLAIM_ENV,
+    CLAIM_LABEL,
     SharedMountsFn,
     _ALLOW_UNSANDBOXED,
     _BOX_PATH,
@@ -106,13 +108,13 @@ from ._docker import (
     _derived_infra_env,
     run_docker,
     remove_tenant_containers,
+    container_present,
+    remove_claimed_containers,
     _inspect_field,
     _own_container_ids,
     _own_container_mounts,
     _reap_on_fault,
     _refuse_an_existing_container,
-    Reaped,
-    reap_if_owned,
     BoxStartConflict,
     BoxStartFault,
     _render_env,
@@ -192,6 +194,8 @@ __all__ = [
     "RunTainted",
     "START_TOKEN_LABEL",
     "TENANT_LABEL",
+    "CLAIM_ENV",
+    "CLAIM_LABEL",
     "Sequence",
     "SharedMountsFn",
     "Transport",
@@ -225,6 +229,8 @@ __all__ = [
     "_did_not_run_for_request",
     "run_docker",
     "remove_tenant_containers",
+    "container_present",
+    "remove_claimed_containers",
     "_host_fallback_env",
     "_inspect_field",
     "_opt_out_or_raise",
@@ -237,8 +243,6 @@ __all__ = [
     "_probe_sentinel",
     "_reap_on_fault",
     "_refuse_an_existing_container",
-    "Reaped",
-    "reap_if_owned",
     "BoxStartConflict",
     "BoxStartFault",
     "_render_argv",

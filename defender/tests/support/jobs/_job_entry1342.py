@@ -11,7 +11,11 @@ lifecycle's `start_box` seam (never `DEFENDER_ALLOW_UNSANDBOXED`). Marks go in `
 - `hold` (death tie): the investigation blocks in the main thread; `hold-committed` is the same after
   closing the report on the facts holder it is handed (r5 C2). Marks: `pid`, `in-lifecycle`,
   `start-token` (the token the box start was handed), `interrupted` (the exception type that reached the investigation), `stop-box-started`, then
-  `stop-box-done` once `go-on` exists (a later signal during teardown would stop the wait)."""
+  `stop-box-done` once `go-on` exists (a later signal during teardown would stop the wait).
+- `replay-priced` (#1377): MAIN, one gather lead and the live review stages as priced stand-ins;
+  `replay-priced-ledger-fault` also refuses ledger inserts during the review; a mode ending `-raises` then raises out of the investigation, so the driver never returns its summary; one ending `-unseen` makes the correlation lead's request raise a non-HTTP error (an unseen outcome, #1377 r7); `-lead-fault` refuses only the correlation lead's own ledger insert (`agent_id = 'gather:l-00c'`) and `-refused` makes its request a 400 (#1377 r7 F3); at exit the child writes the landed rows' agent ids to the mark `ledger-agents`; one ending `-dies` raises inside the driver instead, from
+  MAIN's request after the close (`KeyboardInterrupt`, after marking `fault-raised`), between the failed writes and the run's
+  return. All configure logging as run.py's `__main__` does. Marks: `calls-<model>`."""
 from __future__ import annotations
 
 import functools
@@ -96,7 +100,156 @@ def _hold_lifecycle(*, closes: bool):
                              start_box=_unboxed, stop_box=stop_box, scrub=lambda *a, **k: None)
 
 
-lifecycle = (_replay_lifecycle(fault_after_close=mode == "replay-fault-after-close")
-             if mode.startswith("replay") else _hold_lifecycle(closes=mode == "hold-committed"))
+#: The priced modes' models (#1377): each name its own `in` rate (3.0, 1.0, 0.95 USD a million).
+PRICED_MAIN, PRICED_GATHER, PRICED_REVIEW = "claude-sonnet-4-6", "claude-haiku-4-5", "kimi-k2.6"
+
+
+def _counted(name: str, then=None):
+    """Append one line to `<marks>/calls-<name>` per call, then run `then`."""
+    def before():
+        with (marks / f"calls-{name}").open("a", encoding="utf-8") as fh:
+            fh.write("1\n")
+        if then is not None:
+            then()
+    return before
+
+
+def _session_database() -> Path:
+    import json
+
+    job, tenant = argv[argv.index("--job") + 1], argv[argv.index("--tenant") + 1]
+    pointer = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs" / f"{job}.session-pointer.json"
+    return Path(json.loads(pointer.read_text(encoding="utf-8"))["store_path"])
+
+
+def _ledger_trigger(sql: str):
+    """A real sqlite fault on the run's own ledger table, made from a second connection."""
+    import sqlite3
+    import threading
+
+    lock = threading.Lock()
+
+    def run() -> None:
+        with lock:
+            conn = sqlite3.connect(_session_database(), timeout=10)
+            try:
+                conn.execute(sql)
+                conn.commit()
+            finally:
+                conn.close()
+    return run
+
+
+def _failing_lead(answering, *, unseen: bool, refused: bool, before_failing=None):
+    """`-unseen` (r7): the correlation lead's one request raises a non-HTTP error, which the hook records as unseen;
+    `-refused`: a 400 from the provider, which it records as refused."""
+    if not (unseen or refused):
+        return answering
+
+    def lead(messages, info):
+        found = RH._DISPATCHED_LEAD.search(RH.messages_text(messages))
+        if found is not None and found.group(1) == "l-00c":
+            if before_failing is not None:  # the correlation lead runs before MAIN: refuse its insert from inside its own request
+                before_failing()
+            if refused:
+                from pydantic_ai.exceptions import ModelHTTPError
+                raise ModelHTTPError(400, "fake-gather", body={"error": "x"})
+            raise RuntimeError("the reply could not be parsed")
+        return answering(messages, info)
+    return lead
+
+
+def _priced_lifecycle(*, ledger_fault: bool, raises: bool = False, dies: bool = False, unseen: bool = False,
+                     lead_fault: bool = False, refused: bool = False):
+    """`replay-priced`: MAIN (dispatch one elastic lead, append, close, text), the lead (one query,
+    then its final summary), the correlation lead (its summary) and the live review stages, each a priced stand-in. `-ledger-fault`
+    refuses every ledger insert from the first review call until MAIN's turn after the close."""
+    import asyncio
+
+    from pydantic_ai.models import override_allow_model_requests
+
+    from defender.investigation import driver
+    from defender.records.formats import parse_report_text
+    from defender.tests.e2e._replay_harness import FakeVerbs
+    from defender.tests.e2e.test_query_tool import DONE, q
+
+    disposition = parse_report_text((GOLDEN / "report.md").read_text(encoding="utf-8")).disposition
+    from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER
+
+    refuse = _ledger_trigger(f"CREATE TRIGGER IF NOT EXISTS refuse_spend BEFORE INSERT ON {SPEND_LEDGER} "
+                             "BEGIN SELECT RAISE(ABORT, 'the disk is full'); END") if ledger_fault else None
+    allow = _ledger_trigger("DROP TRIGGER IF EXISTS refuse_spend") if ledger_fault else None
+    main_calls = {"n": 0}
+    lead_refuse = _ledger_trigger(f"CREATE TRIGGER IF NOT EXISTS refuse_lead BEFORE INSERT ON {SPEND_LEDGER} "
+                                  "WHEN NEW.agent_id = 'gather:l-00c' BEGIN SELECT RAISE(ABORT, 'the disk is full'); END") if lead_fault else None
+
+    def main_before():
+        main_calls["n"] += 1
+        if allow is not None and main_calls["n"] == 4:  # the text turn after the close
+            allow()
+        if dies and main_calls["n"] == 4:  # inside the driver, after the review's writes and before the run returns
+            (marks / "fault-raised").touch()
+            raise KeyboardInterrupt
+
+    main = RH.ReplayFn([
+        RH.Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic", "goal": "measure this lead",
+                                        "what_to_summarize": ["auth events"]})]),
+        RH.Turn(tool_calls=[("append_block", {"text": (GOLDEN / "investigation.md").read_text(encoding="utf-8")})]),
+        RH.Turn(tool_calls=[("close_investigation", {"disposition": disposition})]),
+        RH.Turn(text="Investigation complete."),
+    ])
+    # l-001 runs its query, then its final summary; the correlation lead (l-00c) answers its summary once.
+    lead = RH._with_default_correlation(RH.ReplayFn([q("elastic", "query", {"native_query": "user.name:root"}), DONE]), None)
+    lead = _failing_lead(lead, unseen=unseen, refused=refused, before_failing=lead_refuse)
+    review = RH.ReplayFn([RH.Turn(text=RH._review_bundle.composer_reply("holds"))] * 3)
+    make_model = RH.priced_make_model({
+        PRICED_MAIN: RH.Priced(main, before=_counted("main", main_before)),
+        PRICED_GATHER: RH.Priced(lead, before=_counted("gather")),
+        PRICED_REVIEW: RH.Priced(review, before=_counted("review", refuse)),
+    })
+    def query(ctx, *, native_query: str, limit: int = 10) -> list[dict]:
+        return [{"user": "root"}]
+
+    verbs = FakeVerbs({"elastic": {"query": query}})
+
+    def investigate(**handed):
+        # No `review_stages`: the run's own live bundle, built on the run's `make_model` (#1377).
+        with override_allow_model_requests(False):
+            summary = asyncio.run(driver.run_investigation(
+                **{**handed, "verbs": verbs}, make_model=make_model, orient_shim=RH.no_orient_shims))
+        if raises:
+            raise RuntimeError("the run died after its last response")
+        return summary
+
+    drive = functools.partial(run_py._drive_investigation, investigate=investigate)
+    return functools.partial(run_py._run_investigation_lifecycle, investigate=drive, start_box=_unboxed)
+
+
+if mode.startswith("replay-priced"):
+    from defender import _log
+
+    _log.configure_from_env()  # the way run.py's __main__ does: the priced modes' stderr is read for the failed-write ERROR line
+    import atexit
+    import sqlite3
+
+    def _landed() -> None:
+        try:
+            from defender.tests.support.jobs._jobs1342 import SPEND_LEDGER
+            conn = sqlite3.connect(f"file:{_session_database()}?mode=ro", uri=True, timeout=10)  # never creates a file
+            try:
+                agents = sorted(r[0] for r in conn.execute(f"SELECT agent_id FROM {SPEND_LEDGER}"))
+            finally:
+                conn.close()
+            (marks / "ledger-agents").write_text("\n".join(agents), encoding="utf-8")
+        except Exception:  # noqa: BLE001 - a premise mark only
+            pass
+    atexit.register(_landed)
+    lifecycle = _priced_lifecycle(ledger_fault="ledger-fault" in mode, raises="-raises" in mode,
+                                  dies=mode.endswith("-dies"), unseen="-unseen" in mode,
+                                  lead_fault="lead-fault" in mode, refused="-refused" in mode)
+elif mode.startswith("replay"):
+    lifecycle = _replay_lifecycle(fault_after_close=mode == "replay-fault-after-close")
+else:
+    lifecycle = _hold_lifecycle(closes=mode == "hold-committed")
 sys.exit(run_py.job_main(argv, lifecycle=lifecycle, preflight=lambda *a, **k: 0,
                          visualize=lambda *a, **k: None, publish=lambda *a, **k: f"fresh {commit}"))

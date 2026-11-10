@@ -256,7 +256,6 @@ RESIDUE = {
     ("tenancy.run_knowledge", "copy_for_run", ".mkdir"): (1, "nonrecord", ('held',)),
     ("tenancy.run_knowledge", "copy_for_run", "os.rename"): (1, "nonrecord", ('copies / temporary',)),
     ("tenancy.run_knowledge", "write_host_record", "write_guarded"): (1, "nonrecord", ('path',)),
-    ("investigation.driver", "_stop_before_main", "write_guarded"): (1, "retiring"),
     # #1255 extracted the existing empty tool-trace fallback; #1165 N-c still
     # retires this projection separately. Its record target and count are unchanged.
     ("investigation.driver", "_write_trace_or_empty", "write_guarded"): (

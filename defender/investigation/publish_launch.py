@@ -40,7 +40,7 @@ from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from defender.execution import kill_group
+from defender.execution import end_group, kill_group
 from defender.box import provider_scrubbed_environ
 from defender.tenancy import run_knowledge
 from defender.tenancy import knowledge_lock_holder
@@ -169,8 +169,9 @@ def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
                                   holds_lock=lambda: _holds_lock(proc, tenant_id, data_root))
     finally:
         # One publish is one process group (the child's session; its network git joins it):
-        # whatever the child left running dies with it, however it ended.
-        kill_group(proc.pid)
+        # whatever the child left running is gone (not only signalled) once it ends, however it
+        # ended.
+        end_group(proc.pid)
     line, failed = _read_report(proc.returncode, out, err)
     if not failed:
         return line

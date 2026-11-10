@@ -23,7 +23,7 @@ from defender._io import hold, hold_new
 from defender.records._episode_handle import Episode
 from defender.records._episode_paths import LAYOUT
 from defender.records import WIRE_LOG_NAMES
-from defender.tests.shared.filesystem.test_1111_rooted_io import (  # noqa: F401 — re-exported for the #1133 suite
+from defender.tests.shared.filesystem.test_rooted_io import (  # noqa: F401 — re-exported for the #1133 suite
     DEADLINE,
     HOST_BYTES,
     O6_ROWS,
@@ -179,7 +179,7 @@ NAME_REFUSAL = (r"not a valid path component|not a valid world id|not a non-nega
 #: non-directory folder.
 CORE_REFUSAL = r"aliased|symlinked|not a directory"
 
-#: The core's fault table for each plant (`test_1111_rooted_io.O6_ROWS`): exception type,
+#: The core's fault table for each plant (`test_rooted_io.O6_ROWS`): exception type,
 #: errno, and whether it carries the alias mark. A dangling link is a symlink.
 ROWS = {**O6_ROWS, "dangling": O6_ROWS["symlink"]}
 

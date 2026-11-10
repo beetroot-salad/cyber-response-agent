@@ -125,12 +125,6 @@ def test_rename_does_not_collide_with_a_literal_alias_of_the_same_name():
     assert defender_sql._disambiguate_columns(["a", "b"]) == (["a", "b"], [])
 
 
-def test_empty_stdin_is_input_error(monkeypatch, capsys):
-    code, out = _run(monkeypatch, capsys, "   ", "SELECT 1")
-    assert code == defender_sql.EXIT_INPUT_ERROR
-    assert out == ""
-
-
 def test_bad_sql_is_query_error(monkeypatch, capsys):
     code, out = _run(monkeypatch, capsys, _PAYLOAD, "SELECT no_such_col FROM data")
     assert code == defender_sql.EXIT_QUERY_ERROR
@@ -146,8 +140,9 @@ def test_utf8_payload_round_trips(monkeypatch, capsys):
     assert json.loads(out) == [{"u": "André", "c": 2}]
 
 
-def test_non_utf8_payload_is_clean_input_error(monkeypatch, capsys):
-    code, out = _run(monkeypatch, capsys, b'{"u":"a\xff b"}\n', "SELECT u FROM data")
+@pytest.mark.parametrize("payload", ["   ", b'{"u":"a\xff b"}\n'], ids=["empty_stdin", "non_utf8_payload"])
+def test_an_unreadable_payload_is_a_clean_input_error(monkeypatch, capsys, payload):
+    code, out = _run(monkeypatch, capsys, payload, "SELECT 1")
     assert code == defender_sql.EXIT_INPUT_ERROR
     assert out == ""
 
@@ -644,10 +639,15 @@ def test_c17_scratch_is_gone_once_the_load_finishes_so_a_killed_query_leaves_non
         proc = subprocess.Popen([*SQL_ARGV, *args], stdin=stdin, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, env=sql_env({**os.environ, "TMPDIR": str(scratch)}))
         try:
+            # The premise is what the poll saw: looking again can miss scratch the load has already removed.
+            made_scratch = False
             deadline = time.monotonic() + 60
-            while not any(scratch.iterdir()) and proc.poll() is None and time.monotonic() < deadline:
+            while proc.poll() is None and time.monotonic() < deadline:
+                if any(scratch.iterdir()):
+                    made_scratch = True
+                    break
                 time.sleep(0.005)
-            assert any(scratch.iterdir()), f"the load never made scratch: {proc.poll()} {proc.stderr.read()[-300:] if proc.poll() is not None else ''}"
+            assert made_scratch, f"the load never made scratch: {proc.poll()} {proc.stderr.read()[-300:] if proc.poll() is not None else ''}"
             deadline = time.monotonic() + 60
             while any(scratch.iterdir()) and proc.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.05)

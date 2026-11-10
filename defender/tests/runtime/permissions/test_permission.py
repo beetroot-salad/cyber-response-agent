@@ -338,20 +338,16 @@ def _skills_pol(skills):
     return permission.AgentPolicy(write_allow=(permission.build_write_allow(skills, suffix=".md"),))
 
 
-def test_write_outside_run_dir_denied(tmp_path):
+@pytest.mark.parametrize(("rel", "content", "allowed"), [
+    ("evil.txt", "x", False),  # outside the run dir
+    ("run/report.md", _VALID_REPORT, True),
+], ids=["outside_run_dir", "report"])
+def test_write_is_allowed_only_inside_the_run_dir(tmp_path, rel, content, allowed):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    d = permission.decide_write(tmp_path / "evil.txt", "x", run_dir=run_dir,
+    d = permission.decide_write(tmp_path / rel, content, run_dir=run_dir,
                                 defender_dir=tmp_path / "defender", policy=_run_dir_pol(run_dir))
-    assert not d.allow
-
-
-def test_write_report_allowed(tmp_path):
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    d = permission.decide_write(run_dir / "report.md", _VALID_REPORT, run_dir=run_dir,
-                                defender_dir=tmp_path / "defender", policy=_run_dir_pol(run_dir))
-    assert d.allow
+    assert bool(d.allow) == allowed
 
 
 def test_write_investigation_invalid_invlang_denied(tmp_path):

@@ -1,0 +1,469 @@
+"""#540 — the box execution seam: the length-prefixed binary wire (raw bytes, fault = frame absence), argv byte-exactness, the three-site cwd invariant, and the injected-box deps seam. Fakes enter at the transport."""
+from __future__ import annotations
+
+import pickle
+import struct
+from dataclasses import dataclass
+from pathlib import Path
+
+from defender.records import RunPaths
+
+import pytest
+
+from defender.tests.support.runtime.state._1255_view import MODEL_RUN, model_path
+
+from _replay_harness import DEFENDER, GOLDEN_AB3, materialize
+
+pytest.importorskip("pydantic_ai")
+
+from pydantic_ai import ModelRetry  # noqa: E402
+
+from defender.execution import bash_exec
+from defender import box
+from defender.investigation import permission
+from defender.investigation import tools as runtime_tools  # noqa: E402
+from defender.investigation.agent_definition import bind  # noqa: E402
+from defender.investigation.driver import MAIN_DEF  # noqa: E402
+
+pytestmark = pytest.mark.e2e
+
+SALT = "s540"
+RUN_ID = "exec-seam-540"
+
+
+@dataclass(frozen=True)
+class ExecCall:
+    """One `docker exec` a transport was asked to perform: the request frame, the cwd, whether
+    that cwd existed at the call (`docker exec -w <missing>` is rc=127), and the timeout."""
+
+    frame: bytes
+    cwd: Path
+    cwd_existed: bool
+    timeout: float
+
+
+class RecordingTransport:
+    """The injected box transport: records what it received, replies from a script."""
+
+    def __init__(self, *replies, view: dict[str, Path] | None = None):
+        self._replies = list(replies) or [framed(0, b"", b"")]
+        self._view = dict(view) if view is not None else {}
+        self.calls: list[ExecCall] = []
+
+    def _bound(self, cwd: Path) -> Path:
+        """Where `cwd` lives for the box: a model path under a mount target in `view` is the
+        directory bound there (`/runs/current` exists iff the run folder bound at it does);
+        any other cwd is itself."""
+        for target, source in self._view.items():
+            try:
+                return Path(source) / Path(cwd).relative_to(target)
+            except ValueError:
+                continue
+        return Path(cwd)
+
+    def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> box.RawExec:
+        self.calls.append(ExecCall(
+            frame=frame, cwd=Path(cwd), cwd_existed=self._bound(Path(cwd)).is_dir(),
+            timeout=timeout,
+        ))
+        reply = self._replies[min(len(self.calls) - 1, len(self._replies) - 1)]
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+    def only(self) -> ExecCall:
+        assert len(self.calls) == 1, f"expected exactly 1 box exec, got {len(self.calls)}"
+        return self.calls[0]
+
+    def argvs(self) -> list[list[str]]:
+        """Every stage argv in the first recorded request, read back through the REAL decoder."""
+        return [list(st.argv) for pl in box.decode_request(self.calls[0].frame) for st in pl.stages]
+
+
+def framed(rc: int, out: bytes, err: bytes) -> box.RawExec:
+    """A `RawExec` whose stdout is a WELL-FORMED response frame — the in-box entrypoint
+    completed and reported the program's own result. The exec's own rc is `rc`, as a real
+    `docker exec` returns when the in-box process exits with it."""
+    return box.RawExec(
+        rc=rc,
+        stdout=box.encode_response(box.BoxResult(rc=rc, out=out, err=err)),
+        stderr=b"",
+    )
+
+
+DAEMON_START_FAILURE = box.RawExec(
+    rc=127,
+    stdout=b"",
+    stderr=(b"docker: Error response from daemon: failed to create task for container: "
+            b"failed to create shim task: OCI runtime create failed: runc create failed: "
+            b"unable to start container process: exec: \"/nonexistent-binary-xyz\": stat "
+            b"/nonexistent-binary-xyz: no such file or directory: unknown\n"),
+)
+
+MISSING_WORKDIR_FAILURE = box.RawExec(
+    rc=127, stdout=b"",
+    stderr=b"OCI runtime exec failed: exec failed: unable to start container process: "
+           b"chdir to cwd: no such file or directory: unknown\n",
+)
+
+NAME_COLLISION_FAILURE = box.RawExec(
+    rc=125, stdout=b"",
+    stderr=b"docker: Error response from daemon: Conflict. The container name "
+           b"\"/defender-run-exec-seam-540\" is already in use.\n",
+)
+
+
+#: The stored alert, spelled relative to the run folder (it sits in the read-only input directory, #1222).
+ALERT_REL = RunPaths(Path("run")).alert.relative_to("run").as_posix()
+
+
+def _run_dir(tmp_path: Path) -> Path:
+    return materialize(tmp_path, GOLDEN_AB3)
+
+
+def _main_deps(run_dir: Path, transport) -> runtime_tools.AgentDeps:
+    """MAIN deps through the REAL `bind` seam, carrying a `BoxExecutor` over `transport`."""
+    return bind(
+        MAIN_DEF, run_dir, defender_dir=DEFENDER,
+        box=box.BoxExecutor(spec=box.BoxSpec(), transport=transport),
+    )
+
+
+def _bash(deps, command: str) -> str:
+    """Drive the REAL `_tool_bash` — gate, parse, box, envelope. No shortcut around it."""
+    return runtime_tools._tool_bash(deps, command)
+
+
+def _cat_alert(run_dir: Path) -> str:
+    """The alert read the model types, by its model path (a host path is refused)."""
+    return f"cat {_alert_model_path(run_dir)}"
+
+
+def _alert_model_path(run_dir: Path) -> str:
+    return model_path(RunPaths(run_dir).alert, run_dir=run_dir)
+
+
+def test_unframed_stdout_is_never_returned_as_program_output(tmp_path):
+    run_dir = _run_dir(tmp_path)
+    t = RecordingTransport(DAEMON_START_FAILURE)
+    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=t)
+
+    with pytest.raises(box.BoxFault):
+        executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=run_dir, timeout=5.0)
+
+    noise = box.RawExec(rc=0, stdout=b"Error response from daemon: something\n", stderr=b"")
+    executor2 = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(noise))
+    with pytest.raises(box.BoxFault):
+        executor2.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=run_dir, timeout=5.0)
+
+    t3 = RecordingTransport(noise)
+    deps = _main_deps(run_dir, t3)
+    with pytest.raises((ModelRetry, box.BoxFault)) as caught:
+        _bash(deps, _cat_alert(run_dir))
+    # Control: the gate admitted the command and the daemon-noise transport was reached, so
+    # the negatives below are about unframed stdout, not a gate refusal.
+    assert len(t3.calls) == 1, "the command never reached the box; the negatives are vacuous"
+    shown = str(caught.value)
+    assert "exit=0" not in shown, "daemon text was dressed up as a successful program result"
+    assert "--- stdout ---\nError response from daemon" not in shown
+
+
+def test_program_rc_127_inside_the_frame_reaches_the_model(tmp_path):
+    run_dir = _run_dir(tmp_path)
+    not_found = b"nosuchprog: command not found\n"
+    t = RecordingTransport(framed(127, b"", not_found))
+    deps = _main_deps(run_dir, t)
+
+    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(
+        framed(127, b"", not_found)))
+    result = executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=run_dir, timeout=5.0)
+    assert isinstance(result, box.BoxResult), "a framed rc=127 was misread as infrastructure"
+    assert result.rc == 127
+    assert result.err == not_found
+
+    shown = _bash(deps, _cat_alert(run_dir))
+    assert "exit=127" in shown, "the program's own rc did not reach the model"
+    assert "command not found" in shown
+
+
+def test_program_output_bytes_cross_the_frame_untranscoded(tmp_path):
+    payload = b"\xff\xfe\x00\x80 \xc3(" + box.RESPONSE_MAGIC + b"\r\n\x00tail"
+    errbytes = b"\x89PNG\r\n\x1a\n\xff"
+    t = RecordingTransport(framed(3, payload, errbytes))
+    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=t)
+
+    result = executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
+
+    assert result.out == payload, "program stdout bytes were transformed on the wire"
+    assert result.err == errbytes
+    assert b"\xef\xbf\xbd" not in result.out, "a U+FFFD transcode reappeared on the wire"
+    assert b"\xef\xbf\xbd" not in result.err
+    assert result.rc == 3
+
+
+def test_infrastructure_failure_raises_boxfault(tmp_path):
+    """`BoxFault` is raised, never returned as a value."""
+    executor = box.BoxExecutor(
+        spec=box.BoxSpec(), transport=RecordingTransport(NAME_COLLISION_FAILURE))
+    with pytest.raises(box.BoxFault):
+        executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
+
+    executor = box.BoxExecutor(
+        spec=box.BoxSpec(), transport=RecordingTransport(MISSING_WORKDIR_FAILURE))
+    with pytest.raises(box.BoxFault) as caught:
+        executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
+    assert not isinstance(caught.value, box.BoxResult)
+    assert isinstance(caught.value, Exception), "BoxFault must be raisable, not a value type"
+
+    boom = ConnectionError("Cannot connect to the Docker daemon at unix:///var/run/docker.sock")
+    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(boom))
+    with pytest.raises(box.BoxFault):
+        executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
+
+    ok = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(framed(0, b"ok\n", b"")))
+    assert ok.run(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0) == \
+        box.BoxResult(rc=0, out=b"ok\n", err=b"")
+
+
+def test_malformed_frame_never_becomes_a_different_command(tmp_path):
+    """A corrupted frame fails closed in both directions."""
+    good = box.encode_response(box.BoxResult(rc=0, out=b"abcdefgh", err=b"xy"))
+
+    overstated = good[:8] + struct.pack("!Q", 9999) + good[16:]
+    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(
+        box.RawExec(rc=0, stdout=overstated, stderr=b"")))
+    with pytest.raises(box.BoxFault):
+        executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
+
+    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(
+        box.RawExec(rc=0, stdout=good[:-3], stderr=b"")))
+    with pytest.raises(box.BoxFault):
+        executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
+
+    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(
+        box.RawExec(rc=0, stdout=b"XXXX" + good[4:], stderr=b"")))
+    with pytest.raises(box.BoxFault):
+        executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
+
+    pipelines = bash_exec.parse("cat /etc/hostname | grep -n root")
+    request = box.encode_request(pipelines)
+    original = box.decode_request(request)
+    assert original, "the request frame decoded to nothing"
+    assert original == pipelines, "the request frame does not round-trip at all"
+    for i in range(4, min(len(request), 64)):
+        mutated = request[:i] + bytes([request[i] ^ 0xFF]) + request[i + 1:]
+        try:
+            got = box.decode_request(mutated)
+        except Exception:
+            continue
+        assert got == original, (
+            f"a single flipped byte at offset {i} decoded into a DIFFERENT command: {got!r}")
+
+
+def test_no_pickle_on_the_box_boundary(tmp_path):
+    for module in (box, bash_exec):
+        source = Path(module.__file__).read_text()
+        assert "pickle" not in source, f"{module.__name__} names pickle on the box boundary"
+
+    pipelines = bash_exec.parse("cat x")
+    request = box.encode_request(pipelines)
+    assert request.startswith(box.REQUEST_MAGIC)
+    assert not request.startswith(b"\x80"), "the request frame begins with a pickle opcode"
+    assert box.decode_request(request) == pipelines, "the frame does not carry the real parse"
+
+    hostile = pickle.dumps({"rc": 0, "out": b"pwned", "err": b""})
+    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(
+        box.RawExec(rc=0, stdout=hostile, stderr=b"")))
+    with pytest.raises(box.BoxFault):
+        executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
+
+    ok = box.BoxExecutor(spec=box.BoxSpec(), transport=RecordingTransport(framed(0, b"", b"")))
+    assert ok.run(pipelines, command="cat x", cwd=tmp_path, timeout=5.0).rc == 0
+
+
+def test_an_empty_pipeline_crosses_as_a_valid_zero_rc_frame(tmp_path):
+    t = RecordingTransport(framed(0, b"", b""))
+    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=t)
+
+    result = executor.run_parsed([], command="", cwd=tmp_path, timeout=5.0)
+
+    assert len(t.calls) == 1, "the empty pipeline never crossed the box boundary"
+    assert box.decode_request(t.only().frame) == [], "the empty pipeline did not survive encoding"
+    assert result == box.BoxResult(rc=0, out=b"", err=b"")
+
+
+def test_hostile_argv_crosses_byte_exact(tmp_path):
+    """The argv the gate approved is the argv that crosses the wire, byte for byte."""
+    run_dir = _run_dir(tmp_path)
+    alert = _alert_model_path(run_dir)   # the model's spelling, and the box's
+
+    cases = [
+        (f"cat {alert} | grep -n 'a b'", ["grep", "-n", "a b"]),
+        (f'cat {alert} | grep -n "*.txt"', ["grep", "-n", "*.txt"]),
+        (f"cat {alert} | grep -n '$SECRET'", ["grep", "-n", "$SECRET"]),
+    ]
+    for command, expected_tail in cases:
+        t = RecordingTransport(framed(0, b"", b""))
+        deps = _main_deps(run_dir, t)
+        _bash(deps, command)
+
+        crossed = t.argvs()
+        assert crossed[-1] == expected_tail, f"argv was rewritten on the wire for {command!r}"
+        assert crossed[0] == ["cat", alert]
+        # The decomposition the box ran, stated literally in the model view (how the gate's own
+        # functions spell their inputs is free).
+        assert crossed == [["cat", alert], expected_tail], \
+            "the box ran a different decomposition than the command's own"
+
+    # The gate called directly keeps its own (host) spelling.
+    host_alert = RunPaths(run_dir).alert
+    for denied in (f"cat {host_alert} | grep -n '`id`'", f"cat {host_alert} | grep -n '$(whoami)'"):
+        assert not permission.decide_bash(
+            denied, policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow
+
+
+@pytest.mark.parametrize(("arg", "pattern"), [
+    ("\udcff", "(?i)utf-?8"),  # a non-UTF-8 argv is rejected rather than transcoded
+    ("a\x00b", "(?i)nul"),  # an embedded NUL
+], ids=["non_utf8", "embedded_nul"])
+def test_an_unencodable_argv_is_rejected_before_the_transport_is_touched(tmp_path, arg, pattern):
+    """The encoder rejects it loudly, before the transport is touched."""
+    hostile = [bash_exec.Pipeline("first", [bash_exec.Stage(["grep", "-n", arg])])]
+
+    t = RecordingTransport(framed(0, b"", b""))
+    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=t)
+
+    with pytest.raises(ValueError, match=pattern):
+        box.encode_request(hostile)
+
+    with pytest.raises(ValueError, match=pattern):
+        executor.run_parsed(hostile, command="grep -n <hostile>", cwd=tmp_path, timeout=5.0)
+    assert t.calls == [], "an unencodable argv reached the transport"
+
+
+def test_box_accepts_no_raw_command_string(tmp_path):
+    """The request frame carries the `Pipeline`/`Stage` structure and nothing else."""
+    run_dir = _run_dir(tmp_path)
+    alert = _alert_model_path(run_dir)   # the model's spelling, and the box's
+    command = f"cat   {alert}    |   grep -n   'a b'"
+
+    t = RecordingTransport(framed(0, b"", b""))
+    deps = _main_deps(run_dir, t)
+    _bash(deps, command)
+
+    frame = t.only().frame
+    assert command.encode() not in frame, "the raw command string crossed into the box"
+    assert b"   " not in frame, "raw command spacing survived into the frame"
+    assert t.argvs() == [["cat", alert], ["grep", "-n", "a b"]]
+    assert box.decode_request(frame) == bash_exec.parse(command), \
+        "the box received something other than the host's single parse"
+
+
+def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
+    run_dir = _run_dir(tmp_path)
+    # A product file the gate DOES let MAIN read by its full path, spelled relative to the repo
+    # root: a gate that rebased onto the repo root would allow it, so the denial below is about
+    # the rebase and nothing else.
+    product_page = DEFENDER / "skills" / "gather" / "SKILL.md"
+    product_rel = product_page.relative_to(DEFENDER.parent)
+    assert (DEFENDER.parent / product_rel).is_file()
+    assert not (run_dir / product_rel).exists(), "the run dir holds the file too; nothing separates the sites"
+
+    t = RecordingTransport(framed(0, b"", b""))
+    deps = _main_deps(run_dir, t)
+
+    assert permission.decide_bash(
+        f"cat {product_page}", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
+        "the control: MAIN may read the product page by its full path"
+    assert permission.decide_bash(
+        f"cat {ALERT_REL}", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
+        "the gate did not rebase a relative operand onto the run dir"
+    assert not permission.decide_bash(
+        f"cat {product_rel}", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
+        "the gate is still rebasing onto the repo root — site 1 did not move"
+
+    _bash(deps, f"cat {ALERT_REL}")
+    assert t.only().cwd == Path(MODEL_RUN), "the box ran at a different cwd than the gate validated"
+
+    assert runtime_tools._resolve_operand(deps, ALERT_REL) == RunPaths(run_dir).alert
+
+    assert (RunPaths(run_dir).alert).exists()
+    assert (t.only().cwd / ALERT_REL).as_posix() == \
+        model_path(runtime_tools._resolve_operand(deps, ALERT_REL), run_dir=run_dir)
+
+
+def test_cwd_is_reapplied_per_call_and_does_not_persist(tmp_path):
+    run_dir = _run_dir(tmp_path)
+    t = RecordingTransport(framed(0, b"", b""))
+    deps = _main_deps(run_dir, t)
+
+    _bash(deps, _cat_alert(run_dir))
+    _bash(deps, f"{_cat_alert(run_dir)} | wc -l")
+
+    assert len(t.calls) == 2
+    assert [c.cwd for c in t.calls] == [Path(MODEL_RUN), Path(MODEL_RUN)], \
+        "the cwd was not re-applied on the second call"
+    assert all(c.cwd.is_absolute() for c in t.calls), \
+        "a relative cwd would resolve against whatever the previous exec left behind"
+
+
+def test_the_chosen_cwd_exists_before_the_first_exec(tmp_path):
+    run_dir = _run_dir(tmp_path)
+    # The cwd `/runs/current` exists in the box iff the run folder bound there does.
+    t = RecordingTransport(framed(0, b"", b""), view={MODEL_RUN: run_dir})
+    deps = _main_deps(run_dir, t)
+
+    _bash(deps, _cat_alert(run_dir))
+
+    call = t.only()
+    assert call.cwd_existed, f"the box's cwd {call.cwd} did not exist at the first exec"
+    assert call.cwd == Path(MODEL_RUN)
+
+
+def test_tool_bash_executes_through_the_injected_box_seam(tmp_path):
+    """The real `_tool_bash` runs validated pipelines through the box on `AgentDeps`, and
+    through nothing else."""
+    run_dir = _run_dir(tmp_path)
+    real_content = (RunPaths(run_dir).alert).read_text()
+    only_the_box_says = b"<<from-the-box>>\n"
+    t = RecordingTransport(framed(0, only_the_box_says, b""))
+    deps = _main_deps(run_dir, t)
+
+    shown = _bash(deps, _cat_alert(run_dir))
+
+    assert len(t.calls) == 1, "the bash tool did not reach the injected box"
+    # The box mounts each tree at its model path, so it receives the model path the gate
+    # admitted, never the host path (which does not exist inside the box).
+    assert t.argvs() == [["cat", _alert_model_path(run_dir)]]
+    assert "<<from-the-box>>" in shown
+    assert real_content.strip() not in shown, \
+        "the host executed the command in-process; the box seam was bypassed"
+
+    t2 = RecordingTransport(framed(0, b"", b""))
+    deps2 = _main_deps(run_dir, t2)
+    with pytest.raises(ModelRetry):
+        _bash(deps2, "cat /etc/shadow")
+    assert t2.calls == [], "a denied command was still handed to the box"
+
+
+def test_infrastructure_fault_text_reaches_the_model_labelled(tmp_path):
+    run_dir = _run_dir(tmp_path)
+    t = RecordingTransport(DAEMON_START_FAILURE)
+    deps = _main_deps(run_dir, t)
+
+    with pytest.raises(ModelRetry) as caught:
+        _bash(deps, _cat_alert(run_dir))
+
+    shown = str(caught.value)
+    assert "OCI runtime create failed" in shown, "the infrastructure detail never reached the model"
+    assert "--- stdout ---" not in shown, "a box fault was dressed as program output"
+    assert "exit=" not in shown, "a box fault was given a program exit code"
+
+
+def test_output_limit_fault_is_fatal_instead_of_a_model_retry(tmp_path):
+    run_dir = _run_dir(tmp_path)
+    transport = RecordingTransport(box.BoxOutputLimitExceeded())
+    deps = _main_deps(run_dir, transport)
+    with pytest.raises(box.BoxOutputLimitExceeded):
+        _bash(deps, _cat_alert(run_dir))
+    transport.only()

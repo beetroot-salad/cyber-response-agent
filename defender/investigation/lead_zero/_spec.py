@@ -1,8 +1,9 @@
 """Lead-0 vocabulary: the correlation lead's id, provenance and endings. Imports none of its siblings."""
 from __future__ import annotations
 
+from defender._agent_role import CORRELATION_LEAD_ID
 
-L3 = "l-00c"
+L3 = CORRELATION_LEAD_ID
 RESERVED_LEAD_IDS = (L3,)
 CORRELATION_REQUEST_LIMIT = 8
 

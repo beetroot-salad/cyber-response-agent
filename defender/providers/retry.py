@@ -47,6 +47,33 @@ class ProviderDown(Exception):  # noqa: N818 — named for the state it reports,
         return self.__class__, (self.model, self.status, self.attempts)
 
 
+#: Refusals that say the model's setup or account is broken (key, payment or credit, access,
+#: model name, account suspended), not the request: every caller on that model gets the same
+#: answer, so even a lead's ends the run (#1243 r3). 412 is Fireworks' suspended or blocked
+#: account, and its fine-tuned model that failed to load (#1447). Read by status alone, so a
+#: provider that reports a broken account another way gets the wrong ending: Anthropic's low
+#: credit as 400 on a lead ends only that lead, and OpenAI's `insufficient_quota` as 429 is
+#: resent and ends the run `provider-down`. Telling them apart would mean reading the body
+#: text, which Fireworks, the provider in use, does not document.
+SETUP_STATUSES = frozenset({401, 402, 403, 404, 412})
+#: How much of the provider's refusal text the host log keeps. Never shown to a model.
+_REASON_CAP = 500
+
+
+class ProviderRejected(Exception):  # noqa: N818 — named for the state it reports, like `ProviderDown`
+    """The provider refused a request for good, in a way that ends the run (#1243 r3): MAIN's own
+    request, or a lead's whose status says the model's setup is broken. `reason` is the
+    provider's text, capped, for the host log only. Raised `from` the original error."""
+
+    def __init__(self, status: int, reason: str) -> None:
+        self.status = status
+        self.reason = reason
+        super().__init__(f"the model provider refused a request (HTTP {status}): {reason}")
+
+    def __reduce__(self) -> tuple[type, tuple[Any, ...]]:
+        return self.__class__, (self.status, self.reason)
+
+
 #: A monotonic-seconds reader. Aliased so the learning-state census, which reads any `Callable`
 #: field whose name contains "lock" as a lock seam, does not mistake `clock` for one.
 Seconds = Callable[[], float]
@@ -64,15 +91,47 @@ class RetryPolicy:
     jitter: Callable[[], float] = random.random
 
 
-def _temporary(exc: BaseException) -> tuple[bool, int | None]:
+def temporary_failure(exc: BaseException) -> tuple[bool, int | None]:
     """`(whether exc is a temporary provider failure, its HTTP status or None for no response)`.
-    Classified by status alone, never by body text."""
+    Classified by status alone, never by body text. The retrier retries exactly these."""
     from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 
     if isinstance(exc, ModelHTTPError):
         status = exc.status_code
         return (status in _TEMPORARY_STATUSES or status >= 500), status
     return isinstance(exc, ModelAPIError), None
+
+
+def refused_by_provider(exc: BaseException) -> bool:
+    """Whether `exc` is the provider refusing a request before its model ran: an HTTP error the
+    retrier does not retry (a 4xx other than 408, 409 or 429), so no attempt was billed. The one
+    reading of "refused" (#1377 r7.1 E), shared with what a refusal does to the run (#1243)."""
+    return refusal_status(exc) is not None
+
+
+def refusal_status(exc: BaseException) -> int | None:
+    """The HTTP status of `exc` if it is the provider refusing a request for good (an HTTP
+    error the retrier does not resend), else `None`. What a refusal means is the caller's: MAIN's
+    own, or a lead's whose status is in `SETUP_STATUSES`, ends the run `provider-rejected`; any
+    other refusal on a lead ends only that lead (#1243)."""
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    if isinstance(exc, ModelHTTPError) and not temporary_failure(exc)[0]:
+        return exc.status_code
+    return None
+
+
+def refusal_reason(exc: BaseException) -> str:
+    """The provider's own text for a refusal, capped: for the host log, never for a model."""
+    body = getattr(exc, "body", None)
+    text = str(body if body is not None else exc)
+    return text if len(text) <= _REASON_CAP else text[:_REASON_CAP] + "…"
+
+
+def rejected(exc: BaseException) -> ProviderRejected | None:
+    """`exc` as a run-ending `ProviderRejected` if it is a refusal, else `None`."""
+    status = refusal_status(exc)
+    return None if status is None else ProviderRejected(status, refusal_reason(exc))
 
 
 def _backoff(attempt: int, policy: RetryPolicy) -> float:
@@ -104,7 +163,7 @@ def _wrapper_class() -> type:
                     return await self.wrapped.request(
                         messages, model_settings, model_request_parameters)
                 except Exception as e:  # noqa: BLE001 — classified below; non-temporary re-raised as is
-                    temporary, status = _temporary(e)
+                    temporary, status = temporary_failure(e)
                     if not temporary:
                         raise
                     # `retry_after` is the framework's own parse of the header (seconds or HTTP-date).

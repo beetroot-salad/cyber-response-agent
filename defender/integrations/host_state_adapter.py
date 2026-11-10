@@ -20,7 +20,6 @@ unknown, route unknown) or a 400 (a bad user or path) is the agent's to fix (`Up
 """
 from __future__ import annotations
 
-import urllib.parse
 from typing import TYPE_CHECKING, Any
 
 import sys as _sys
@@ -30,7 +29,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender.kit.verbs import VerbContext
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 from defender.kit.faults import TransportFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -55,17 +54,14 @@ def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adap
     _host_state_settings(tenant)
 
 
-def _segment(value: str) -> str:
-    """`value` as exactly one path segment: a `/` the agent wrote cannot reach another route."""
-    return urllib.parse.quote(value, safe="")
-
-
-def _get(ctx: VerbContext, path: str, *, timeout_sec: int = DEFAULT_TIMEOUT_SEC) -> dict[str, Any]:
-    answer = transport.http_timed(ctx, _host_state_settings(ctx.tenant), "GET", path, None,
-                                  system=SYSTEM, timeout_sec=timeout_sec)
-    if not isinstance(answer, dict):
-        raise TransportFault(f"expected a JSON object from {SYSTEM}, got {type(answer).__name__}")
-    return answer
+def _get(ctx: VerbContext, template: str, values: dict[str, str] | None = None, *,
+         query: dict[str, str] | None = None,
+         timeout_sec: int = DEFAULT_TIMEOUT_SEC) -> dict[str, Any]:
+    """GET `template` filled by `values` (each one path segment, or the call is refused before
+    it is sent), its answer a JSON object."""
+    _host_state_settings(ctx.tenant)
+    return transport.request(ctx, SYSTEM, "GET", template, values, query=query,
+                             timeout_sec=timeout_sec)
 
 
 def _answer_field(answer: dict[str, Any], name: str, kind: type) -> Any:
@@ -100,7 +96,7 @@ def health_check(ctx: VerbContext) -> dict:
 
 
 def container_inspect(ctx: VerbContext, *, container_id: str) -> dict:
-    answer = _get(ctx, f"/containers/{_segment(container_id)}")
+    answer = _get(ctx, "/containers/{id}", {"id": container_id})
     return {
         "container_id": container_id,
         "name": _answer_field(answer, "name", str),
@@ -109,17 +105,18 @@ def container_inspect(ctx: VerbContext, *, container_id: str) -> dict:
 
 
 def proc_tree(ctx: VerbContext, *, host: str) -> dict:
-    answer = _get(ctx, f"/hosts/{_segment(host)}/processes")
+    answer = _get(ctx, "/hosts/{host}/processes", {"host": host})
     return {"host": host, "ps_output": _answer_field(answer, "ps_output", str)}
 
 
 def passwd(ctx: VerbContext, *, host: str) -> dict:
-    answer = _get(ctx, f"/hosts/{_segment(host)}/accounts")
+    answer = _get(ctx, "/hosts/{host}/accounts", {"host": host})
     return {"host": host, "entries": _lines(answer, "entries")}
 
 
 def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
-    answer = _get(ctx, f"/hosts/{_segment(host)}/accounts/{_segment(user)}/authorized-keys")
+    answer = _get(ctx, "/hosts/{host}/accounts/{user}/authorized-keys",
+                  {"host": host, "user": user})
     return {
         "host": host,
         "user": user,
@@ -129,13 +126,13 @@ def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
 
 
 def fim_checksum(ctx: VerbContext, *, host: str, path: str) -> dict:
-    query = urllib.parse.urlencode({"path": path})
-    answer = _get(ctx, f"/hosts/{_segment(host)}/files/sha256?{query}")
+    answer = _get(ctx, "/hosts/{host}/files/sha256", {"host": host}, query={"path": path})
     return {"host": host, "path": path, "sha256": _answer_field(answer, "sha256", str)}
 
 
 def package_list(ctx: VerbContext, *, host: str) -> dict:
-    answer = _get(ctx, f"/hosts/{_segment(host)}/packages", timeout_sec=PACKAGES_TIMEOUT_SEC)
+    answer = _get(ctx, "/hosts/{host}/packages", {"host": host},
+                  timeout_sec=PACKAGES_TIMEOUT_SEC)
     return {"host": host, "packages": _lines(answer, "packages")}
 
 

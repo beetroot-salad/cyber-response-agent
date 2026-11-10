@@ -28,6 +28,7 @@ from defender.tests.support.runtime.engine._spec767 import (
     record,
     use_case_record,
 )
+from defender.tests.support.api._programs1307 import NoProgramsRealm  # #1307 D7: the programs port is required
 
 # ---------------------------------------------------------------------------------------------
 # The run record's `knowledge_source`, spelled in one place.
@@ -545,6 +546,7 @@ def _investigation(investigation_id: str, knowledge: dict[str, Any] | None) -> A
         "disposition": "benign", "cost_usd": 1.0, "created_at": _NOW, "started_at": _NOW,
         "finished_at": _NOW,
         "request_key": f"rk-{investigation_id}", "attempt": 1,  # required on the wire model (#1342 D-d)
+        "cost_is_lower_limit": False,  # required on the wire model too (#1377 r4 API field)
     }
     if knowledge is not None:
         doc["knowledge"] = knowledge
@@ -592,7 +594,7 @@ def _client(*investigations: Any) -> Any:
 
     anyio.run(seed)
     identity = IdentityService(repo, signin=_NoPort(), mail=_NoPort(), clock=now,
-                               bootstrap=Bootstrap(administrators=()))
+                               bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
     deps = ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=_ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,

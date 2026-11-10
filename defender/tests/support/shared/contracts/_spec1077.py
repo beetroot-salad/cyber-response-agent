@@ -275,7 +275,7 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
 SIDECAR_ACCESSORS = ("run_end_sidecar", "scrub_verdict", "ticket_write", "session_pointer")
 #: Two more host-only records beside the run folder, keyed by run id: the call join and the
 #: ticket comments. UPWARD like the four above, but JSONL logs, so kept out of
-#: `SIDECAR_ACCESSORS` (whose members `test_1077_tree_identity` parses as whole JSON documents).
+#: `SIDECAR_ACCESSORS` (whose members `test_tree_identity` parses as whole JSON documents).
 JSONL_SIDECAR_ACCESSORS = ("call_join", "ticket_comments")
 UPWARD_ACCESSORS = (*SIDECAR_ACCESSORS, *JSONL_SIDECAR_ACCESSORS, "sessions_dir", "session_db")
 

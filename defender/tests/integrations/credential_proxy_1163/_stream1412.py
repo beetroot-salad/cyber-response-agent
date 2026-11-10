@@ -1,7 +1,7 @@
 """#1412: loopback stand-ins and readers for the proxy's framed reply. A scripted raw-socket server
 (an upstream that sends exactly what a case needs, or a proxy that sends chosen frames), a reader
 that leaves the proxy's response unread, and builders for the format's names in
-`defender._proxy_client`, imported at call time so a missing name fails one case, not collection."""
+`defender.kit.proxy_client`, imported at call time so a missing name fails one case, not collection."""
 from __future__ import annotations
 
 import contextlib
@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from defender._proxy_client import proxy_call
+from defender.kit.proxy_client import proxy_call
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH
@@ -25,7 +25,7 @@ JSON = {"Content-Type": "application/json"}
 
 def fmt() -> Any:
     """The format's owner, read at call time."""
-    import defender._proxy_client as owner
+    import defender.kit.proxy_client as owner
 
     return owner
 

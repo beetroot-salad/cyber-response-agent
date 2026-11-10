@@ -86,20 +86,20 @@ def _gate(tmp_path: Path, systems: tuple[str, ...] = _SYSTEMS):
 
 # 1. The two `SKILL.md` files that are agent system prompts.
 
-def test_the_lane_cannot_write_gathers_system_prompt(tmp_path: Path):
-    """`defender/skills/gather/SKILL.md` is not a system's skill doc — it is the whole of gather's `instructions=` (`investigation/driver._gather_instructions`), loaded on every dispatch."""
+@pytest.mark.parametrize(("prompt", "sibling"), [
+    # `defender/skills/gather/SKILL.md` is not a system's skill doc — it is the whole of gather's
+    # `instructions=` (`investigation/driver._gather_instructions`), loaded on every dispatch.
+    ("gather/SKILL.md", "elastic/SKILL.md"),
+    # `skills/invlang/SKILL.md` is read by `investigation/orient._invlang_grammar` and inlined verbatim
+    # into MAIN's ORIENT message, under a heading that calls it *authoritative* and tells the agent
+    # not to Read the file because it is reproduced there.
+    ("invlang/SKILL.md", "cmdb/SKILL.md"),
+])
+def test_the_lane_cannot_write_an_agent_system_prompt_but_can_write_a_systems_skill_doc(tmp_path: Path, prompt, sibling):
     admits, _ = _gate(tmp_path)
-    assert not admits("gather/SKILL.md")
-    assert not admits.product("gather/SKILL.md")
-    assert admits("elastic/SKILL.md")
-
-
-def test_the_lane_cannot_write_the_invlang_grammar_main_is_handed(tmp_path: Path):
-    """`skills/invlang/SKILL.md` is read by `investigation/orient._invlang_grammar` and inlined verbatim into MAIN's ORIENT message, under a heading that calls it *authoritative* and tells the agent not to Read the file because it is reproduced there."""
-    admits, _ = _gate(tmp_path)
-    assert not admits("invlang/SKILL.md")
-    assert not admits.product("invlang/SKILL.md")
-    assert admits("cmdb/SKILL.md")
+    assert not admits(prompt)
+    assert not admits.product(prompt)
+    assert admits(sibling)
 
 
 @pytest.mark.parametrize("rel", [

@@ -300,9 +300,11 @@ def run_main(  # noqa: PLR0913 — the composition's seams, one keyword each
         limits: dict | None = None, review_stages: Any = None, start_box: Any = None,
         investigate: Callable[..., dict] | None = None, oracle: Any = None,
         verifier: Any = None, registry_cls: type | None = None,
-        out: Launched | None = None, enqueue: Callable[..., bool] | None = None) -> Launched:
+        out: Launched | None = None, enqueue: Callable[..., bool] | None = None,
+        seams: Mapping[str, Any] | None = None) -> Launched:
     """`run.main(argv)` with the scripted models and the injected clock in its seams. `enqueue`
-    is the curation seam (default: enqueues nothing)."""
+    is the curation seam (default: enqueues nothing); `seams` are further `run.main` keywords
+    (the credential proxy's `signer`, `proxy_url`)."""
     import defender.run as run_mod
 
     launched = out if out is not None else Launched()  # lint-default: ok — a fresh record per call unless the caller holds one
@@ -328,7 +330,7 @@ def run_main(  # noqa: PLR0913 — the composition's seams, one keyword each
             argv, directory=directory_for_argv(argv), lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
             visualize=lambda *_a, **_k: None,
             enqueue=enqueue if enqueue is not None else (lambda *_a, **_k: False),
-            oracle=oracle, verifier=verifier, publish=in_process_publish())
+            oracle=oracle, verifier=verifier, publish=in_process_publish(), **(seams or {}))
     except SystemExit as refused:
         launched.exit = "SystemExit"
         launched.refusal = str(refused.code)

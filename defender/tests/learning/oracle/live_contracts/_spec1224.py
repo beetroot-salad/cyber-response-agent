@@ -1390,7 +1390,7 @@ def lead_rows(run_dir: Path) -> list[dict]:
 
 def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
                  run_id: str = RUN_ID, tenant: Any = None, **kw: Any) -> tuple[Path, Any]:
-    """A whole investigation through the replay harness (the `test_1106_query_lane` shape):
+    """A whole investigation through the replay harness (the `test_tenant_query_lane_e2e` shape):
     the main loop dispatches ONE gather lead on `system`, whose scripted turns are
     `gather_turns` (`query_turn(...)`s then `DONE`), with the registry injected as `verbs=`.
     Returns `(run dir, the gather ReplayFn)` — `gather.seen` is what the investigator saw."""

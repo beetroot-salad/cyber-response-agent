@@ -5,27 +5,35 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from fastapi.responses import RedirectResponse
-from starlette.datastructures import Headers
+from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from defender import identity as _identity
 from defender import tenancy as _tenancy
 from defender.identity import Authenticated, IdentityService, audit
 from defender.identity.service import SESSION_LIFETIME
-from defender.records.formats import AlertId, InvestigationId, LearningJobId, MembershipId, TenantId, UserId
+from defender.identity.roles import Permission
+from defender.records.formats import (
+    AlertId, CredentialId, InvestigationId, LearningJobId, MembershipId, TenantId, UserId,
+)
 
 from .models import (
     AlertMapping,
     RECORD_ID_PATTERN,
     Alert,
     AlertSummary,
+    Credential,
+    CredentialCreate,
+    CredentialIssued,
+    CredentialRef,
     CredentialsPut,
     Instant,
     Invitation,
@@ -39,6 +47,10 @@ from .models import (
     Me,
     Member,
     MeUser,
+    Program,
+    ProgramCreate,
+    ProgramMe,
+    ProgramRef,
     System,
     SystemCheck,
     SystemPut,
@@ -48,7 +60,7 @@ from .models import (
 )
 from .pages import Order, Page, newest_first, ordered_by_id, paginate
 from .problems import install as install_problems
-from .problems import problem, refusal, responses
+from .problems import HANDLERS, problem, refusal, responses
 from .ports import (
     ApiDeps,
     Conflict,
@@ -80,34 +92,181 @@ async def _deps(request: Request) -> ApiDeps:
     return deps
 
 
+#: The scope key under which a verified program's credential expiry travels to the response.
+_EXPIRY_SCOPE_KEY = "defender.credential_expires_at"
+#: The scope key under which the authenticated caller travels from `_AuthenticatingRoute` to the route's dependencies.
+_CALLER_SCOPE_KEY = "defender.caller"
+#: Every response to a verified program carries when the credential it used expires (#1307 D9).
+EXPIRY_HEADER = "Defender-Credential-Expires"
+
+
+def _way_in(headers: Headers) -> Literal["session", "bearer"]:
+    """How a request offers to be authenticated (P-F): an `Authorization` header of the `Bearer` scheme (with a value
+    or not) is `bearer`, and the cookie is then never read; anything else is the session cookie's way, an
+    `Authorization` header of another scheme included, which is not ours to read (a staging proxy's or a browser's
+    cached Basic login must not lock every person out; #1450 review). The origin layer and the authentication both
+    ask it, so they cannot disagree (#1307 A4). A cookie beside a Bearer header changes nothing: a load balancer's
+    or a cookie jar's cookie must not lock a program out, and a browser cannot be made to send a Bearer header to
+    another site, so such a request is not forged (#1450 review, amending P-F's "both is refused")."""
+    return "bearer" if _scheme_and_value(headers)[0].lower() == "bearer" else "session"
+
+
+def _scheme_and_value(headers: Headers) -> tuple[str, str]:
+    """The `Authorization` header's scheme and value, split at the first whitespace; empty strings for no header."""
+    parts = headers.get("authorization", "").split(None, 1)
+    return (parts[0] if parts else "", parts[1].strip() if len(parts) > 1 else "")
+
+
 class _FrontendOriginOnly:
-    """A request that changes state must come from the configured frontend (O6). A layer in front
-    of routing, so it answers before the session is looked at or the body is read: a forged
-    request learns nothing, not even whether its body would have parsed."""
+    """A request that changes state must come from the configured frontend (O6), unless it is a `bearer`
+    request (see `_way_in`): a browser attaches cookies by itself but never an `Authorization` header it was
+    not told to (a cached Basic login is the one it adds, and that is the cookie's way), so only a request
+    authenticated by its cookie can be forged from another site (#1307 O9). A layer in front of routing,
+    so it answers before the session is looked at or the body is read: a forged request learns
+    nothing, not even whether its body would have parsed."""
 
     def __init__(self, app: ASGIApp, *, origin: str) -> None:
         self._app = app
         self._origin = origin
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope["method"] not in _SAFE_METHODS \
-                and Headers(scope=scope).get("origin") != self._origin:
-            refused = problem(status.HTTP_403_FORBIDDEN, "this request does not come from the frontend")
-            await refused(scope, receive, send)
-            return
+        if scope["type"] == "http" and scope["method"] not in _SAFE_METHODS:
+            headers = Headers(scope=scope)
+            if _way_in(headers) != "bearer" and headers.get("origin") != self._origin:
+                refused = problem(status.HTTP_403_FORBIDDEN, "this request does not come from the frontend")
+                await refused(scope, receive, send)
+                return
         await self._app(scope, receive, send)
 
 
-async def _authenticated(request: Request, deps: Annotated[ApiDeps, Depends(_deps)]) -> Authenticated:
-    return await deps.identity.authenticate(request.cookies.get(SESSION_COOKIE))
+class _ExpiryHeader:
+    """Put the used credential's expiry on the response, whatever its status (D9). The route's
+    authentication leaves it in the scope once the credential has verified; a request refused before
+    that carries none."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        async def with_header(message: Any) -> None:
+            if message["type"] == "http.response.start":
+                _stamp_expiry(scope, MutableHeaders(scope=message))
+            await send(message)
+
+        await self._app(scope, receive, with_header)
+
+
+def _stamp_expiry(scope: Scope, headers: MutableHeaders) -> None:
+    if _EXPIRY_SCOPE_KEY in scope:
+        headers[EXPIRY_HEADER] = scope[_EXPIRY_SCOPE_KEY]
+
+
+async def _server_error(request: Request, exc: Exception) -> Response:
+    """The 500 for an unhandled failure. Starlette renders it outside every middleware of the app, so the
+    expiry header cannot be added on the way out like the others: it is put on here (D9, A6). The server still
+    logs the failure: the handler answers, then the server re-raises it."""
+    response = await HANDLERS[Exception](request, exc)
+    _stamp_expiry(request.scope, response.headers)
+    return response
+
+
+async def _not_authenticated(request: Request, exc: Exception) -> Response:
+    """The 401. A request that came the bearer way (see `_way_in`) is challenged as RFC 6750 says, so an OAuth
+    client knows to fetch a new token; one that came with the session cookie, or with nothing, is not: a session
+    has no challenge to offer, and a browser must not be invited to try Bearer."""
+    response = problem(status.HTTP_401_UNAUTHORIZED, str(exc))
+    if _way_in(request.headers) == "bearer":
+        presented = _scheme_and_value(request.headers)[1]
+        response.headers["WWW-Authenticate"] = 'Bearer error="invalid_token"' if presented else "Bearer"
+    return response
+
+
+def _declares(what: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Mark a dependency as the declaration a route owes (P-H): a permission, or a category outside the
+    tenant (`public`, `person`, `any`, `platform`). `undeclared_routes` finds the routes without one."""
+    def mark(dependency: Callable[..., Any]) -> Callable[..., Any]:
+        dependency.__dict__["declares"] = what
+        return dependency
+    return mark
+
+
+async def _credentialed(request: Request, deps: ApiDeps) -> Authenticated:
+    """The caller, by exactly one way in (`_way_in`): a session cookie (a person) or `Authorization: Bearer` (a
+    program). A Bearer header without a value is not authenticated, and the cookie is not tried instead."""
+    if _way_in(request.headers) == "session":
+        return await deps.identity.authenticate(request.cookies.get(SESSION_COOKIE))
+    value = _scheme_and_value(request.headers)[1]
+    if not value:
+        raise _identity.NotAuthenticated("sign in")
+    caller = await deps.identity.authenticate_bearer(value)
+    assert caller.credential is not None
+    request.scope[_EXPIRY_SCOPE_KEY] = caller.credential.expires_at.astimezone(_dt.UTC).isoformat()
+    return caller
+
+
+async def _authenticated(request: Request) -> Authenticated:
+    """The caller `_AuthenticatingRoute` authenticated before the request's body was read (A7)."""
+    caller: Authenticated = request.scope[_CALLER_SCOPE_KEY]
+    return caller
+
+
+def _authenticates(dependant: Any) -> bool:
+    return any(sub.call is _authenticated or _authenticates(sub) for sub in dependant.dependencies)
+
+
+class _AuthenticatingRoute(APIRoute):
+    """A route whose caller is known before FastAPI reads the request: authentication first, so an invalid or
+    missing credential is a 401 whatever the body holds, a malformed body included (#1307 A7). FastAPI parses
+    the body before it resolves dependencies, so a dependency alone cannot be first; every router of this
+    module is made with this class."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+        authenticates = _authenticates(self.dependant)
+
+        async def authenticate_first(request: Request) -> Response:
+            if authenticates:
+                request.scope[_CALLER_SCOPE_KEY] = await _credentialed(request, request.app.state.deps)
+            return await handler(request)
+        return authenticate_first
+
+
+def _router(**options: Any) -> APIRouter:
+    return APIRouter(route_class=_AuthenticatingRoute, **options)
 
 
 Authed = Annotated[Authenticated, Depends(_authenticated)]
 
 
+@_declares("public")
+async def _public() -> None:
+    """The sign-in routes: nobody is authenticated yet."""
+
+
+@_declares("person")
+async def _person(auth: Authed) -> Authenticated:
+    if auth.credential is not None:
+        raise _identity.Forbidden("only a person may do that")
+    return auth
+
+
+@_declares("any")
+async def _any_caller(auth: Authed) -> Authenticated:
+    return auth
+
+
+Person = Annotated[Authenticated, Depends(_person)]
+AnyCaller = Annotated[Authenticated, Depends(_any_caller)]
+
+
 class _Membered(NamedTuple):
     auth: Authenticated
     tenant_id: TenantId
+    membership: _identity.Membership
 
 
 async def _membered(
@@ -116,17 +275,41 @@ async def _membered(
 ) -> _Membered:
     """The tenant is the path's and is checked against the caller's membership on every request;
     a non-member and an unknown tenant are the same 404 (P-D). A malformed id is a 422, after the
-    sign-in check (#1382): it says nothing of any tenant."""
-    return _Membered(auth, await deps.identity.member_of(auth, tenant_id))
+    sign-in check (#1382): it says nothing of any tenant. Membership comes before permission (D1)."""
+    return _Membered(auth, tenant_id, await deps.identity.member_of(auth, tenant_id))
 
 
 Membered = Annotated[_Membered, Depends(_membered)]
 
 
-async def _principal(member: Membered) -> Principal:
-    return Principal(tenant_id=member.tenant_id, user_id=member.auth.user.id)
+def _permitted(permission: Permission) -> Callable[..., Any]:
+    """The dependency of a route that needs `permission`: the caller is a member of the path's tenant
+    and its role grants it, else 404 or 403 before anything else in the path is looked at (D1, D4)."""
+    @_declares(permission)
+    async def dependency(member: Membered, deps: Annotated[ApiDeps, Depends(_deps)]) -> _Membered:
+        deps.identity.require(member.membership, permission)
+        return member
+    return dependency
 
 
+def _principal(member: _Membered) -> Principal:
+    """The audit's caller, built here and nowhere else: the user and, for a program, the credential it used.
+    Every tenant route takes its `Principal` from `_caller_with`, so none can leave the credential out."""
+    credential = member.auth.credential
+    return Principal(tenant_id=member.tenant_id, user_id=member.auth.user.id,
+                     credential_id=None if credential is None else credential.id)
+
+
+def _caller_with(permission: Permission) -> Callable[..., Any]:
+    check = _permitted(permission)
+
+    @_declares(permission)
+    async def dependency(member: _Membered = Depends(check)) -> Principal:  # noqa: B008
+        return _principal(member)
+    return dependency
+
+
+@_declares("platform")
 async def _administrator(auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)]) -> Authenticated:
     deps.identity.require_administrator(auth)
     return auth
@@ -134,7 +317,14 @@ async def _administrator(auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)])
 
 Deps = Annotated[ApiDeps, Depends(_deps)]
 Admin = Annotated[Authenticated, Depends(_administrator)]
-Caller = Annotated[Principal, Depends(_principal)]
+#: A tenant route's caller, by the one permission the route needs (O3).
+WorkReader = Annotated[Principal, Depends(_caller_with("work.read"))]
+InvestigationRunner = Annotated[Principal, Depends(_caller_with("investigations.run"))]
+InvestigationDeleter = Annotated[Principal, Depends(_caller_with("investigations.delete"))]
+LearningRunner = Annotated[Principal, Depends(_caller_with("learning.run"))]
+ConfigReader = Annotated[Principal, Depends(_caller_with("config.read"))]
+ConfigWriter = Annotated[Principal, Depends(_caller_with("config.write"))]
+PeopleManager = Annotated[_Membered, Depends(_permitted("people.manage"))]
 def _declared_query(dependant: Any) -> set[str]:
     """The query parameter names a route reads, its dependencies' included."""
     names = {param.alias for param in dependant.query_params}
@@ -191,7 +381,7 @@ def _filter_moment(moment: _dt.datetime | None) -> str | None:
 
 
 def _transaction(deps: ApiDeps, caller: Principal) -> AbstractAsyncContextManager[WriteTransaction]:
-    return deps.writes.transaction(caller.tenant_id, caller.user_id)
+    return deps.writes.transaction(caller.tenant_id, caller)
 
 
 def _answered_for(what: str, named: str, answered: str) -> None:
@@ -212,13 +402,13 @@ def _created_at(request: Request, response: Response, route: str, tenant_id: str
     response.headers["Location"] = str(request.url_for(route, tenant_id=tenant_id, **path))
 
 
-alerts = APIRouter(prefix="/alerts", tags=["alerts"], responses=_EVERY_ROUTE)
+alerts = _router(prefix="/alerts", tags=["alerts"], responses=_EVERY_ROUTE)
 
 
 @alerts.get("")
 async def list_alerts(
     deps: Deps,
-    caller: Caller,
+    caller: WorkReader,
     fired_after: Instant | None = None,
     fired_before: Instant | None = None,
     cursor: Cursor = None,
@@ -235,19 +425,19 @@ async def list_alerts(
 
 
 @alerts.get("/{alert_id}", responses=responses(404))
-async def get_alert(deps: Deps, caller: Caller, alert_id: AlertId) -> Alert:
+async def get_alert(deps: Deps, caller: WorkReader, alert_id: AlertId) -> Alert:
     alert = await deps.alerts.get_alert(caller.tenant_id, alert_id)
     if alert is None:
         raise _not_found("alert", alert_id)
     return alert
 
 
-investigations = APIRouter(prefix="/investigations", tags=["investigations"], responses=_EVERY_ROUTE)
+investigations = _router(prefix="/investigations", tags=["investigations"], responses=_EVERY_ROUTE)
 
 
 @investigations.post("", responses={201: {"model": Investigation}, **responses(409)})
 async def start_investigation(
-    deps: Deps, caller: Caller, body: InvestigationCreate, request: Request, response: Response
+    deps: Deps, caller: InvestigationRunner, body: InvestigationCreate, request: Request, response: Response
 ) -> Investigation:
     """Start an investigation of an alert. While one of the alert's investigations is live, it
     is returned and nothing starts; otherwise a new one starts (a rerun, if an earlier one ended).
@@ -270,7 +460,7 @@ async def start_investigation(
 
 @investigations.get("")
 async def list_investigations(
-    deps: Deps, caller: Caller, alert_id: Annotated[AlertId | None, Query()] = None,
+    deps: Deps, caller: WorkReader, alert_id: Annotated[AlertId | None, Query()] = None,
     cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
 ) -> Page[Investigation]:
@@ -283,7 +473,7 @@ async def list_investigations(
 
 
 @investigations.get("/{investigation_id}", responses=responses(404))
-async def get_investigation(deps: Deps, caller: Caller, investigation_id: InvestigationId) -> Investigation:
+async def get_investigation(deps: Deps, caller: WorkReader, investigation_id: InvestigationId) -> Investigation:
     investigation = await deps.investigations.get_investigation(caller.tenant_id, investigation_id)
     if investigation is None:
         raise _not_found("investigation", investigation_id)
@@ -291,7 +481,7 @@ async def get_investigation(deps: Deps, caller: Caller, investigation_id: Invest
 
 
 @investigations.post("/{investigation_id}/cancel", responses=responses(404, 409))
-async def cancel_investigation(deps: Deps, caller: Caller, investigation_id: InvestigationId) -> Investigation:
+async def cancel_investigation(deps: Deps, caller: InvestigationRunner, investigation_id: InvestigationId) -> Investigation:
     async with _transaction(deps, caller) as tx:
         investigation = await tx.cancel_investigation(investigation_id)
         await tx.audit("investigation.cancel", investigation_id)
@@ -300,7 +490,7 @@ async def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Inv
 
 @investigations.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT,
                         responses=responses(404, 409))
-async def delete_investigation(deps: Deps, caller: Caller, investigation_id: InvestigationId) -> None:
+async def delete_investigation(deps: Deps, caller: InvestigationDeleter, investigation_id: InvestigationId) -> None:
     """Delete an investigation and every attempt of the request it belongs to. Its run folders
     stay: lessons cite runs. Refused while any attempt is queued or running."""
     async with _transaction(deps, caller) as tx:
@@ -314,7 +504,7 @@ async def delete_investigation(deps: Deps, caller: Caller, investigation_id: Inv
     response_class=RedirectResponse,
     responses=responses(404),
 )
-async def read_artifact(deps: Deps, caller: Caller, investigation_id: InvestigationId, key: str) -> RedirectResponse:
+async def read_artifact(deps: Deps, caller: WorkReader, investigation_id: InvestigationId, key: str) -> RedirectResponse:
     """Redirect to a short-lived signed link on the blob store's own origin. The bytes never
     pass through the API, and a run page never renders on the app's origin.
 
@@ -330,12 +520,12 @@ async def read_artifact(deps: Deps, caller: Caller, investigation_id: Investigat
     return RedirectResponse(url, headers={"Cache-Control": "no-store"})
 
 
-learning_jobs = APIRouter(prefix="/learning-jobs", tags=["learning"], responses=_EVERY_ROUTE)
+learning_jobs = _router(prefix="/learning-jobs", tags=["learning"], responses=_EVERY_ROUTE)
 
 
 @learning_jobs.post("", responses={201: {"model": LearningJob}, **responses(409)})
 async def start_learning_job(
-    deps: Deps, caller: Caller, body: LearningJobCreate, request: Request, response: Response
+    deps: Deps, caller: LearningRunner, body: LearningJobCreate, request: Request, response: Response
 ) -> LearningJob:
     """Learn again from an investigation: queue an explicit re-learn. A completed
     investigation is learned from automatically; this adds another, and re-learns are unlimited.
@@ -353,7 +543,7 @@ async def start_learning_job(
 
 @learning_jobs.get("")
 async def list_learning_jobs(
-    deps: Deps, caller: Caller,
+    deps: Deps, caller: WorkReader,
     investigation_id: Annotated[InvestigationId | None, Query()] = None,
     cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
@@ -367,19 +557,19 @@ async def list_learning_jobs(
 
 
 @learning_jobs.get("/{learning_job_id}", responses=responses(404))
-async def get_learning_job(deps: Deps, caller: Caller, learning_job_id: LearningJobId) -> LearningJob:
+async def get_learning_job(deps: Deps, caller: WorkReader, learning_job_id: LearningJobId) -> LearningJob:
     job = await deps.learning_jobs.get_learning_job(caller.tenant_id, learning_job_id)
     if job is None:
         raise _not_found("learning job", learning_job_id)
     return job
 
 
-lessons = APIRouter(prefix="/lessons", tags=["learning"], responses=_EVERY_ROUTE)
+lessons = _router(prefix="/lessons", tags=["learning"], responses=_EVERY_ROUTE)
 
 
 @lessons.get("")
 async def list_lessons(
-    deps: Deps, caller: Caller, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
+    deps: Deps, caller: WorkReader, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
 ) -> Page[Lesson]:
     return await paginate(
         lambda after, n: deps.lessons.list_lessons(caller.tenant_id, after=after, limit=n),
@@ -388,7 +578,7 @@ async def list_lessons(
     )
 
 
-systems = APIRouter(prefix="/systems", tags=["systems"], responses=_EVERY_ROUTE)
+systems = _router(prefix="/systems", tags=["systems"], responses=_EVERY_ROUTE)
 
 
 async def _served(deps: ApiDeps, caller: Principal, settings: SystemSettings) -> System:
@@ -401,7 +591,7 @@ async def _served(deps: ApiDeps, caller: Principal, settings: SystemSettings) ->
 
 @systems.get("")
 async def list_systems(
-    deps: Deps, caller: Caller, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
+    deps: Deps, caller: ConfigReader, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
 ) -> Page[System]:
     page = await paginate(
         lambda after, n: deps.systems.list_systems(caller.tenant_id, after=after, limit=n),
@@ -421,7 +611,7 @@ async def _settings(deps: ApiDeps, caller: Principal, system_id: str) -> SystemS
 
 @systems.put("/{system_id}", responses={201: {"model": System}})
 async def put_system(
-    deps: Deps, caller: Caller, system_id: SystemPath, body: SystemPut, request: Request, response: Response
+    deps: Deps, caller: ConfigWriter, system_id: SystemPath, body: SystemPut, request: Request, response: Response
 ) -> System:
     """Create or replace a connected system's settings. Credentials are set separately."""
     async with _transaction(deps, caller) as tx:
@@ -436,7 +626,7 @@ async def put_system(
 
 @systems.put("/{system_id}/credentials", status_code=status.HTTP_204_NO_CONTENT,
              responses=responses(404))
-async def put_credentials(deps: Deps, caller: Caller, system_id: SystemPath, body: CredentialsPut) -> None:
+async def put_credentials(deps: Deps, caller: ConfigWriter, system_id: SystemPath, body: CredentialsPut) -> None:
     """Replace the system's credentials. Write-only: no endpoint returns them."""
     await _settings(deps, caller, system_id)
     # The secret store is outside the transaction, so the audit event is written first and the
@@ -450,7 +640,7 @@ async def put_credentials(deps: Deps, caller: Caller, system_id: SystemPath, bod
 
 
 @systems.post("/{system_id}/check", responses=responses(404))
-async def check_system(deps: Deps, caller: Caller, system_id: SystemPath) -> SystemCheck:
+async def check_system(deps: Deps, caller: ConfigWriter, system_id: SystemPath) -> SystemCheck:
     """Test the connection and a first query."""
     return await deps.checker.check(caller.tenant_id, await _served(deps, caller, await _settings(deps, caller, system_id)))
 
@@ -465,11 +655,11 @@ def _cookie_options() -> dict[str, object]:
     return {"path": "/", "secure": True, "httponly": True, "samesite": "lax"}
 
 
-auth = APIRouter(tags=["auth"])
+auth = _router(tags=["auth"])
 
 
 @auth.get("/auth/login", status_code=status.HTTP_302_FOUND, response_class=RedirectResponse,
-          responses=responses(503, 500))
+          responses=responses(503, 500), dependencies=[Depends(_public)])
 async def login(deps: Deps) -> RedirectResponse:
     """Send the person to the sign-in page. The state, nonce and PKCE verifier travel back in a
     short-lived cookie."""
@@ -480,7 +670,7 @@ async def login(deps: Deps) -> RedirectResponse:
 
 
 @auth.get("/auth/callback", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse,
-          responses=responses(403, 503, 422, 500))
+          responses=responses(403, 503, 422, 500), dependencies=[Depends(_public)])
 @_any_query
 async def callback(request: Request, deps: Deps, code: str = "", state: str = "") -> Response:
     """Finish a sign-in: a session cookie and a redirect to the frontend, or a 403 problem of one
@@ -501,7 +691,7 @@ async def callback(request: Request, deps: Deps, code: str = "", state: str = ""
 
 
 @auth.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, responses=_IDENTITY)
-async def logout(request: Request, deps: Deps, caller: Authed) -> Response:
+async def logout(request: Request, deps: Deps, caller: Person) -> Response:
     """End this session only; other devices stay signed in."""
     await deps.identity.logout(caller, request.cookies.get(SESSION_COOKIE, ""))
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -510,8 +700,16 @@ async def logout(request: Request, deps: Deps, caller: Authed) -> Response:
 
 
 @auth.get("/me", responses=_IDENTITY)
-async def read_me(deps: Deps, caller: Authed) -> Me:
+async def read_me(deps: Deps, caller: AnyCaller) -> Me | ProgramMe:
+    """Who the caller is: a person with their tenants and invitations, or a program with its one tenant
+    and the credential it used."""
     view = await deps.identity.me(caller)
+    if view.credential is not None:  # a program, let in only while its one tenant is active
+        return ProgramMe(
+            program=ProgramRef(id=view.user.id, display_name=view.user.display_name),
+            tenant=TenantRef(tenant_id=view.tenants[0]),
+            credential=CredentialRef(id=view.credential.id, expires_at=view.credential.expires_at))
+    assert view.user.email is not None  # a person always has one
     return Me(
         user=MeUser(id=view.user.id, email=view.user.email, display_name=view.user.display_name),
         tenants=[TenantRef(tenant_id=t) for t in view.tenants],
@@ -520,12 +718,12 @@ async def read_me(deps: Deps, caller: Authed) -> Me:
 
 
 @auth.post("/invitations/{invitation_id}/accept", responses={**_IDENTITY, **responses(404)})
-async def accept_invitation(deps: Deps, caller: Authed, invitation_id: MembershipId) -> TenantRef:
+async def accept_invitation(deps: Deps, caller: Person, invitation_id: MembershipId) -> TenantRef:
     """Accept an invitation addressed to you, while signed in."""
     return TenantRef(tenant_id=await deps.identity.accept(caller, invitation_id))
 
 
-people = APIRouter(tags=["people"], responses=_EVERY_ROUTE)
+people = _router(tags=["people"], responses=_EVERY_ROUTE)
 
 
 def _invitation(view: _identity.InvitationView) -> Invitation:
@@ -533,37 +731,93 @@ def _invitation(view: _identity.InvitationView) -> Invitation:
 
 
 @people.get("/members")
-async def list_members(deps: Deps, member: Membered) -> Page[Member]:
+async def list_members(deps: Deps, member: PeopleManager) -> Page[Member]:
     rows = await deps.identity.members(member.tenant_id)
     return Page(items=[Member(user_id=m.user_id, email=m.email, display_name=m.display_name) for m in rows],
                 next_cursor=None)
 
 
 @people.delete("/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_member(deps: Deps, member: Membered, user_id: UserId) -> None:
+async def remove_member(deps: Deps, member: PeopleManager, user_id: UserId) -> None:
     """End a membership: yours, or another member's. Nothing else of that person changes."""
     await deps.identity.remove(member.auth, member.tenant_id, user_id)
 
 
 @people.get("/invitations")
-async def list_invitations(deps: Deps, member: Membered) -> Page[Invitation]:
+async def list_invitations(deps: Deps, member: PeopleManager) -> Page[Invitation]:
     return Page(items=[_invitation(v) for v in await deps.identity.invitations(member.tenant_id)],
                 next_cursor=None)
 
 
 @people.post("/invitations", status_code=status.HTTP_202_ACCEPTED, responses=responses(409))
-async def invite(deps: Deps, member: Membered, body: InviteCreate) -> Invitation:
+async def invite(deps: Deps, member: PeopleManager, body: InviteCreate) -> Invitation:
     """Invite a person by email. The answer is the same whoever the email belongs to; the
     email itself goes out afterwards."""
     return _invitation(await deps.identity.invite(member.auth, member.tenant_id, body.email))
 
 
 @people.delete("/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def revoke_invitation(deps: Deps, member: Membered, invitation_id: MembershipId) -> None:
+async def revoke_invitation(deps: Deps, member: PeopleManager, invitation_id: MembershipId) -> None:
     await deps.identity.revoke(member.auth, member.tenant_id, invitation_id)
 
 
-admin = APIRouter(prefix="/admin", tags=["admin"], responses={**_IDENTITY, **responses(404)})
+programs = _router(tags=["programs"], responses=_EVERY_ROUTE)
+
+#: A program id in a path: a person's id is as well-formed as one, and is found to be no program.
+ProgramPath = Annotated[UserId, Path(description="A program of the tenant.")]
+
+
+def _program(user: Any) -> Program:
+    return Program(id=user.id, display_name=user.display_name, created_by=user.created_by, created_at=user.created_at)
+
+
+def _credential(row: Any) -> Credential:
+    return Credential(id=row.id, kind=row.kind, name=row.name, state=row.state, created_by=row.created_by,
+                      created_at=row.created_at, expires_at=row.expires_at, last_used_at=row.last_used_at)
+
+
+@programs.post("/programs", status_code=status.HTTP_201_CREATED)
+async def create_program(deps: Deps, member: PeopleManager, body: ProgramCreate) -> Program:
+    """Make a program, a non-human caller that belongs to this tenant and outlives whoever made it."""
+    return _program(await deps.identity.create_program(member.auth, member.tenant_id, body.display_name))
+
+
+@programs.get("/programs")
+async def list_programs(deps: Deps, member: PeopleManager) -> Page[Program]:
+    return Page(items=[_program(u) for u in await deps.identity.programs(member.tenant_id)], next_cursor=None)
+
+
+@programs.delete("/programs/{program_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_program(deps: Deps, member: PeopleManager, program_id: ProgramPath) -> None:
+    """Cut a program off at once: its membership ends and every credential is revoked."""
+    await deps.identity.remove_program(member.auth, member.tenant_id, program_id)
+
+
+@programs.post("/programs/{program_id}/credentials", status_code=status.HTTP_201_CREATED,
+               responses=responses(409, 503))
+async def issue_credential(
+    deps: Deps, member: PeopleManager, program_id: ProgramPath, body: CredentialCreate,
+) -> CredentialIssued:
+    """Issue a key or an OAuth client. The secret is in this answer and nowhere else, ever."""
+    row, secret = await deps.identity.issue_credential(
+        member.auth, member.tenant_id, program_id, kind=body.kind, name=body.name, expires_at=body.expires_at)
+    return CredentialIssued(**_credential(row).model_dump(), secret=secret)
+
+
+@programs.get("/programs/{program_id}/credentials")
+async def list_credentials(deps: Deps, member: PeopleManager, program_id: ProgramPath) -> Page[Credential]:
+    rows = await deps.identity.credentials(member.tenant_id, program_id)
+    return Page(items=[_credential(r) for r in rows], next_cursor=None)
+
+
+@programs.delete("/programs/{program_id}/credentials/{credential_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_credential(
+    deps: Deps, member: PeopleManager, program_id: ProgramPath, credential_id: CredentialId,
+) -> None:
+    await deps.identity.revoke_credential(member.auth, member.tenant_id, program_id, credential_id)
+
+
+admin = _router(prefix="/admin", tags=["admin"], responses={**_IDENTITY, **responses(404)})
 
 
 #: An administrator's tenant path. A malformed id is a 422, after the administrator check (#1382).
@@ -673,11 +927,11 @@ async def _start_identity(identity: IdentityService) -> None:
         raise
 
 
-alert_mapping = APIRouter(prefix="/alert-mapping", tags=["alert mapping"], responses=_EVERY_ROUTE)
+alert_mapping = _router(prefix="/alert-mapping", tags=["alert mapping"], responses=_EVERY_ROUTE)
 
 
 @alert_mapping.get("")
-async def get_alert_mapping(deps: Deps, caller: Caller) -> AlertMapping:
+async def get_alert_mapping(deps: Deps, caller: ConfigReader) -> AlertMapping:
     """The tenant's alert mapping: all six entries, unmapped ones null. Not found until one is saved."""
     mapping = await deps.systems.get_alert_mapping(caller.tenant_id)
     if mapping is None:
@@ -687,10 +941,10 @@ async def get_alert_mapping(deps: Deps, caller: Caller) -> AlertMapping:
 
 @alert_mapping.put("", responses={201: {"model": AlertMapping}})
 async def put_alert_mapping(
-    deps: Deps, caller: Caller, body: AlertMapping, request: Request, response: Response
+    deps: Deps, caller: ConfigWriter, body: AlertMapping, request: Request, response: Response
 ) -> AlertMapping:
-    """Replace the tenant's alert mapping whole: all six entries, each a dotted path or null. Its alerts' title
-    and description are re-derived through it before this answers."""
+    """Replace the tenant's alert mapping whole: all six entries, each a dotted path or null. It applies to alerts
+    stored from now on; alerts already stored keep their title and description."""
     async with _transaction(deps, caller) as tx:
         mapping, created = await tx.put_alert_mapping(body)
         await tx.audit("alert_mapping.update", caller.tenant_id)
@@ -708,9 +962,10 @@ def create_app(deps: ApiDeps) -> FastAPI:
         dependencies=[Depends(_no_unknown_query)],
     )
     app.state.deps = deps
+    app.add_middleware(_ExpiryHeader)
     app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)
-    in_tenant = APIRouter(prefix="/tenants/{tenant_id}", responses=responses(404))
-    for router in (alerts, investigations, learning_jobs, lessons, systems, alert_mapping, people):
+    in_tenant = _router(prefix="/tenants/{tenant_id}", responses=responses(404))
+    for router in (alerts, investigations, learning_jobs, lessons, systems, alert_mapping, people, programs):
         in_tenant.include_router(router)
     for router in (auth, in_tenant, admin):
         app.include_router(router)
@@ -719,13 +974,52 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_exception_handler(Conflict, refusal(status.HTTP_409_CONFLICT))
     # The literal, not starlette's constant: it was renamed across starlette releases.
     app.add_exception_handler(UnknownReference, refusal(422))
-    # Unlike the data ports' refusals, none of these answers carries a `WWW-Authenticate`: a
-    # session cookie has no challenge to offer.
-    app.add_exception_handler(_identity.NotAuthenticated, refusal(status.HTTP_401_UNAUTHORIZED))
+    app.add_exception_handler(_identity.NotAuthenticated, _not_authenticated)
     app.add_exception_handler(_identity.Forbidden, refusal(status.HTTP_403_FORBIDDEN))
     app.add_exception_handler(_identity.NotFound, refusal(status.HTTP_404_NOT_FOUND))
     app.add_exception_handler(_identity.Conflict, refusal(status.HTTP_409_CONFLICT))
+    app.add_exception_handler(_identity.Invalid, refusal(422))
     app.add_exception_handler(_tenancy.NotFound, refusal(status.HTTP_404_NOT_FOUND))
     app.add_exception_handler(_tenancy.Conflict, refusal(status.HTTP_409_CONFLICT))
     app.add_exception_handler(_identity.SignInUnavailable, refusal(status.HTTP_503_SERVICE_UNAVAILABLE))
+    app.add_exception_handler(Exception, _server_error)
+    if undeclared := undeclared_routes(app):
+        raise RuntimeError(f"routes declare neither a permission nor a category (P-H): {undeclared}")
+    if unauthenticated := unauthenticated_routes(app):
+        raise RuntimeError(f"routes ask for the caller but are not made by `_router` (A7): {unauthenticated}")
     return app
+
+
+def _served_routes(routes: Any) -> Any:
+    """Every route as served: FastAPI includes routers lazily, so an included router yields its effective routes."""
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield route
+        elif hasattr(route, "effective_candidates"):
+            yield from _served_routes(route.effective_candidates())
+        elif hasattr(route, "dependant"):
+            yield route
+
+
+def _has_declaration(dependant: Any) -> bool:
+    return any(getattr(sub.call, "declares", None) is not None or _has_declaration(sub) for sub in dependant.dependencies)
+
+
+def undeclared_routes(app: FastAPI) -> list[tuple[str, str]]:
+    """The (method, path) of every route of `app` that declares neither a permission nor a category
+    outside the tenant (P-H): a route added without either is found by a test, not by a review."""
+    return sorted({
+        (method, route.path)
+        for route in _served_routes(app.routes) if not _has_declaration(route.dependant)
+        for method in route.methods if method not in {"HEAD", "OPTIONS"}})
+
+
+def unauthenticated_routes(app: FastAPI) -> list[tuple[str, str]]:
+    """The (method, path) of every route of `app` that asks for its caller but is not an `_AuthenticatingRoute`: only
+    that class puts the caller where the route's dependencies read it, so such a route would answer every request
+    with a server error. A router made by `_router` cannot hold one; a plain `APIRouter` or the app's own can."""
+    return sorted({
+        (method, route.path)
+        for route in _served_routes(app.routes)
+        if isinstance(route, APIRoute) and _authenticates(route.dependant) and not isinstance(route, _AuthenticatingRoute)
+        for method in route.methods or () if method not in {"HEAD", "OPTIONS"}})

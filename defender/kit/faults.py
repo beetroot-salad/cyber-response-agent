@@ -24,6 +24,13 @@ class ConfigFault(AdapterFault):
     exit_code = 2
 
 
+class ConfinementFault(AdapterFault):
+    """A target-fidelity refusal: never an infra fault (not in circuit_breaker's
+    INFRA_EXIT_CODES), and refused before any transport is attempted."""
+
+    exit_code = 1
+
+
 class TransportFault(AdapterFault):
     """No usable answer. `maybe_delivered` (#1374): may the request have reached the system? True
     unless the transport proved it did not (it was never sent, or the connection to the system was
@@ -51,6 +58,7 @@ __all__ = [
     "USAGE_EXIT_CODE",
     "AdapterFault",
     "ConfigFault",
+    "ConfinementFault",
     "TransportFault",
     "UpstreamFault",
 ]

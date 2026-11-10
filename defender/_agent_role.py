@@ -45,3 +45,26 @@ CORRELATION_GRANT_HOLDER = "lead-zero-correlation"
 #: would silently drop a namespace from the run's accounted cost.
 GATHER_AGENT_ID_PREFIX = "gather:"
 REVIEW_AGENT_ID_PREFIX = "review:"
+
+#: The reserved turn-zero correlation lead's id (`gather:l-00c` in the wire log and the spend
+#: ledger). Sourced here so `lead_zero` and the cost readers share one spelling (#1377 r7.1 F).
+CORRELATION_LEAD_ID = "l-00c"
+
+#: The four kinds of agent that spend on a run's behalf (#1377 r7 S6), in the cost bar's order.
+MAIN_KIND, GATHER_KIND, CORRELATION_KIND, REVIEW_KIND = "main", "gather", "correlation", "review"
+AGENT_KINDS = (MAIN_KIND, GATHER_KIND, CORRELATION_KIND, REVIEW_KIND)
+
+
+def agent_kind(agent_id: str) -> str:
+    """The kind of the run-side agent `agent_id` names: exactly `main`, `gather:<lead>` (the
+    correlation lead's reserved id is its own kind) or `review:<lens>`. Any other id, a bare
+    `gather` or `review` and an empty lead or lens included, raises `ValueError`: an id the
+    mapping does not know is never counted as MAIN's (#1377 r7.1 F)."""
+    if agent_id == MAIN_KIND:
+        return MAIN_KIND
+    for prefix, kind in ((GATHER_AGENT_ID_PREFIX, GATHER_KIND), (REVIEW_AGENT_ID_PREFIX, REVIEW_KIND)):
+        if agent_id.startswith(prefix) and agent_id != prefix:
+            if kind == GATHER_KIND and agent_id == f"{prefix}{CORRELATION_LEAD_ID}":
+                return CORRELATION_KIND
+            return kind
+    raise ValueError(f"{agent_id!r} is not a run-side agent id (main, gather:<lead>, review:<lens>)")

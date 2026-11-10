@@ -80,10 +80,11 @@ def _scrub_ran(run: Run) -> bool:
 
 def verify_family(
     episode: Episode, arms: Mapping[str, Run | RunRefused], *, source: dict,
-    allow_dirty: bool = False,
+    allow_dirty: bool = False, launch_waived: Sequence[str] = (),
 ) -> dict:
     """Check every sibling, archive each verified one, and write the family stamp unless a
-    comparability fault forbids it."""
+    comparability fault forbids it. `launch_waived` are the kinds `--allow-dirty` waived for the
+    live tree at launch, recorded in the stamp with the siblings' own."""
     family = load_family(episode.view(), expected_episode_id=episode.dir.name)
     labels = {world_id: family.world_by_id(world_id).label for world_id in arms}
     runs = {world_id: arm for world_id, arm in arms.items() if isinstance(arm, Run)}
@@ -128,7 +129,7 @@ def verify_family(
         # `not archived` record is not a member of what the stamp certifies.
         _write_family_stamp(
             episode, {world_id: stamps[world_id] for world_id in archived}, source=source,
-            allow_dirty=allow_dirty, waived=judged.waived)
+            allow_dirty=allow_dirty, waived=sorted({*judged.waived, *launch_waived}))
     else:
         # The judge names this reason when it stamps the family `not comparable`.
         outcome_mod.write_not_comparable(episode, not_comparable)

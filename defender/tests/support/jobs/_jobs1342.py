@@ -265,6 +265,17 @@ CHILD_SCRIPT = textwrap.dedent("""
             path.parent.mkdir(parents=True, exist_ok=True)
             path.symlink_to(target)
 
+    sealed_by = {}  # r7.3 T1: what a child that ends cleanly seals: set once its ledger rows are being written
+
+    def sealing():
+        if sealed_by and not sealed_by.get("done"):
+            sealed_by["done"] = True
+            try:
+                sealed_by["seal"](runs, sealed_by["case"], run_id)
+                Path(spec["sessions"]["marks"], "sealed").touch()
+            except Exception as fault:  # noqa: BLE001 - a missing seal is the code stage's red, named by its own mark
+                Path(spec["sessions"]["marks"], "seal-failed").write_text(repr(fault), encoding="utf-8")
+
     term = spec.get("term", "default")
     if term == "ignore":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -272,6 +283,7 @@ CHILD_SCRIPT = textwrap.dedent("""
         def on_term(*_):
             Path(fill(spec["term_mark"])).touch()
             if term == "finish":  # #1343 B11: a child that completes on its own as the SIGTERM lands
+                sealing()  # it completes: the run's exit seals its ledger before the records are left
                 leave_records()
             event("end")
             os._exit(0)
@@ -287,6 +299,7 @@ CHILD_SCRIPT = textwrap.dedent("""
     part.write_text(json.dumps({
         "argv": argv, "pid": os.getpid(), "pgid": os.getpgid(0), "sid": os.getsid(0),
         "data_root": os.environ.get("DEFENDER_DATA_ROOT"), "grandchild": grandchild,
+        "claim": os.environ.get("DEFENDER_BOX_CLAIM"),
         "launch_at_start": (runs / f"{run_id}.launch.json").is_file(),
         "alert_at_start": (runs / f"{run_id}.alert.json").is_file(),
         "stdio": [[os.fstat(fd).st_dev, os.fstat(fd).st_ino] for fd in (1, 2)],
@@ -299,34 +312,61 @@ CHILD_SCRIPT = textwrap.dedent("""
     if box:  # the box this child's start created: stamped with the token its launch record handed it, or another
         launch_token = json.loads((runs / f"{run_id}.launch.json").read_text(encoding="utf-8")).get("box_token") or ""
         stamp = {"launch": launch_token, "other": "f" * 32, "none": ""}[box["token"]]
-        planted = Path(box["dir"]) / f"defender-run-{run_id}"
+        # Its own start's box carries the claim its worker handed it; another start's carries none. A
+        # docker stand-in's box holds it as its third line; a `StandInContainers` one is filed under it.
+        claim = os.environ.get("DEFENDER_BOX_CLAIM", "") if box["token"] == "launch" else ""
+        folder = Path(box["dir"]) / "claims" / claim if claim and not box.get("state") else Path(box["dir"])
+        planted = folder / f"defender-run-{run_id}"
         planted.parent.mkdir(parents=True, exist_ok=True)
-        planted.write_text(f"{box['state']}\\n{stamp}" if box.get("state") else stamp, encoding="utf-8")
+        planted.write_text(f"{box['state']}\\n{stamp}\\n{claim}" if box.get("state") else stamp, encoding="utf-8")
+    claimed = spec.get("claimed")
+    if claimed:  # boxes this child's process tree started: each carries the claim its worker handed it
+        folder = Path(claimed["dir"]) / "claims" / os.environ["DEFENDER_BOX_CLAIM"]
+        folder.mkdir(parents=True, exist_ok=True)
+        for name in claimed["names"]:
+            (folder / name).write_text("", encoding="utf-8")
     spend = spec.get("sessions")
     if spend:  # #1343 B2/B6: the live child writes its session database while the worker reads it
         sys.path.insert(0, spend["path"])
         from defender.records.session_store._write import open_store
-        from defender.tests.support.jobs._jobs1342 import _paths, _response, session_pointer
+        from defender.tests.support.jobs._jobs1342 import _paths, _response, insert_spend, seal_spend, session_db, session_pointer
         import hashlib
         case = hashlib.md5(run_id.encode()).hexdigest() if spend.get("per_run") else spend["case"]  # per run: a retry never shares its parent's database
         (runs / f"{run_id}.session-pointer.json").write_text(session_pointer(case), encoding="utf-8")
         marks = Path(spend["marks"])
         marks.mkdir(parents=True, exist_ok=True)
+        if spend.get("seal", True):
+            sealed_by.update(seal=seal_spend, case=case)
         with open_store(case_id=case, sessions=_paths(runs)) as handle:
             session = handle.new_session("main")
             for n, (model, usage) in enumerate(spend["steps"]):
                 began = time.monotonic()
                 handle.append(session, _response(model, usage), agent_id="main")
-                (marks / f"wrote-{n}").write_text(str(time.monotonic() - began), encoding="utf-8")
+                appended = time.monotonic() - began
+                began = time.monotonic()
+                try:
+                    insert_spend(session_db(runs, case), run_id, [(model, usage)])  # #1377: the ledger row cost is read from
+                except Exception as fault:  # noqa: BLE001 - a missing ledger is the code stage's red, named by its own mark
+                    (marks / f"insert-failed-{n}").write_text(repr(fault), encoding="utf-8")
+                else:
+                    (marks / f"ledger-{n}").write_text(str(time.monotonic() - began), encoding="utf-8")
+                (marks / f"wrote-{n}").write_text(str(appended), encoding="utf-8")  # after the insert: a test that waits on this mark then signals the child must find the ledger row (or insert-failed-n)
                 until = time.monotonic() + 60
                 while not (marks / f"go-{n}").exists() and time.monotonic() < until:
                     time.sleep(0.02)
+            sealing()
     release = spec.get("wait_for")
     deadline = time.monotonic() + 60
     while release and not Path(release).exists() and time.monotonic() < deadline:
         time.sleep(0.02)
     leave_records()
     event("end")
+    die_by = spec.get("die_by")
+    if die_by:  # dies by a signal it sends itself, as a crash does: its default action, nothing handled
+        sys.stdout.flush(); sys.stderr.flush()
+        if die_by != signal.SIGKILL:
+            signal.signal(die_by, signal.SIG_DFL)
+        os.kill(os.getpid(), die_by)
     sys.exit(spec.get("exit", 0))
 """)
 
@@ -338,7 +378,8 @@ class ScriptedChild:
     `files` (text), `binary` (hex), `sparse` (`{head, size}`), `links` (symlink targets) and `dirs`
     name what the child leaves in the runs container (`padded`: `{head, size}`, the head then spaces
     up to `size` bytes, so a document that stays valid however much of it is read); `term` is how it takes SIGTERM (`default`,
-    `ignore`, `mark`: touch `term_mark` and exit with nothing written, or `finish`: touch it, write its records, exit 0); `grandchild` starts a `sleep` in its group."""
+    `ignore`, `mark`: touch `term_mark` and exit with nothing written, or `finish`: touch it, write its records, exit 0); `grandchild` starts a `sleep` in its group.
+    `die_by`: in place of exiting, it dies by that signal, sent to itself."""
 
     where: Path
     runs: Path
@@ -354,12 +395,18 @@ class ScriptedChild:
     term_mark: str | None = None
     grandchild: bool = False
     printed: str | None = None
+    die_by: int | None = None
     #: A box the child leaves behind, as a start would have made it: `box_dir` is where, `box_token`
-    #: whose (`launch`: the token its launch record carries; `other`: another claim's; `none`: no
-    #: token label), `box_state` the docker stand-in's state word (unset: a `StandInContainers` marker).
+    #: whose (`launch`: its own start's, stamped with its launch record's token and, as a
+    #: `StandInContainers` marker, carrying its claim; `other`: another start's; `none`: no token
+    #: label), `box_state` the docker stand-in's state word (unset: a `StandInContainers` marker).
     box_dir: Path | str | None = None
     box_token: str = "launch"
     box_state: str | None = None
+    #: Boxes the child's process tree starts under the claim its worker handed it (`box.CLAIM_ENV`), as
+    #: `StandInContainers` markers in `claimed_dir`: a sibling's, an oracle's, a drain's.
+    claimed_dir: Path | str | None = None
+    claimed_names: tuple[str, ...] = ()
     #: #1343 B2/B6: `{"case", "steps": [(model, usage)], "marks"}`: the child writes its session
     #: pointer, holds its session database open and appends one priced response per step, touching
     #: `marks/wrote-<n>` (its text: how long the append took) and waiting for `marks/go-<n>`. With
@@ -379,9 +426,11 @@ class ScriptedChild:
             "runs": str(self.runs), "seen_dir": str(self.seen_dir), "events": str(self.events_path),
             "files": self.files, "binary": self.binary, "sparse": self.sparse, "padded": self.padded, "links": self.links,
             "dirs": self.dirs, "exit": self.exit, "term": self.term, "term_mark": self.term_mark,
-            "grandchild": self.grandchild, "print": self.printed,
+            "grandchild": self.grandchild, "print": self.printed, "die_by": self.die_by,
             "box": None if self.box_dir is None else {"dir": str(self.box_dir), "token": self.box_token,
                                                      "state": self.box_state},
+            "claimed": None if self.claimed_dir is None else {"dir": str(self.claimed_dir),
+                                                               "names": list(self.claimed_names)},
             "wait_for": None if self.wait_for is None else str(self.wait_for),
             "sessions": None if self.sessions is None else {**self.sessions, "path": str(WORKTREE)},
         }
@@ -423,42 +472,49 @@ class ScriptedChild:
 
 
 class StandInContainers:
-    """The worker's `containers` seam over marker files: a container exists while its file does, and
-    the file's text is the start token it carries (empty: no token label). `reap(name, token)` answers
-    `removed` (ours, now gone), `absent`, or `not_ours` (another or no token: left in place). Records
-    every call, with the token it was given."""
+    """The worker's `containers` seam over marker files. A container a child's process tree started carries its
+    claim: a marker file under `claims/<claim>/`, which `remove_claimed(claim)` removes, noting the claim in `swept`.
+    A container under a name with no claim (another start's, `plant`) is a file directly in `where`, which no sweep
+    removes. `present(name)` answers whether either holds the name, and is noted in `probed`."""
 
     def __init__(self, where: Path) -> None:
         self.where = where
         where.mkdir(parents=True, exist_ok=True)
-        self.calls: list[tuple[str, str, str]] = []
+        self.swept: list[str] = []
+        self.probed: list[str] = []
+
+    def claimed(self, claim: str) -> list[str]:
+        """The containers still carrying `claim`."""
+        folder = self.where / "claims" / claim
+        return sorted(p.name for p in folder.iterdir()) if folder.is_dir() else []
+
+    def remove_claimed(self, claim: str) -> None:
+        self.swept.append(claim)
+        folder = self.where / "claims" / claim
+        if folder.is_dir():
+            for path in folder.iterdir():
+                path.unlink()
 
     def plant(self, name: str, token: str = "") -> None:
         (self.where / name).write_text(token, encoding="utf-8")
 
     def held(self, name: str) -> bool:
-        return (self.where / name).exists()
+        return (self.where / name).exists() or any((self.where / "claims").glob(f"*/{name}"))
 
-    def reap(self, name: str, token: str) -> str:
-        self.calls.append(("reap", name, token))
-        path = self.where / name
-        if not path.exists():
-            return "absent"
-        if not token or path.read_text(encoding="utf-8") != token:
-            return "not_ours"
-        path.unlink()
-        return "removed"
-
-    def reaped(self, name: str) -> list[str]:
-        """The tokens `reap` was given for `name`, in call order."""
-        return [token for _kind, called, token in self.calls if called == name]
+    def present(self, name: str) -> bool:
+        self.probed.append(name)
+        return self.held(name)
 
 
 class FaultyContainers(StandInContainers):
-    """The stand-in containers whose `reap` raises: a daemon that cannot be asked or will not remove."""
+    """The stand-in containers whose every question raises: a daemon that cannot be asked or will not remove."""
 
-    def reap(self, name: str, token: str) -> str:
-        self.calls.append(("reap", name, token))
+    def present(self, name: str) -> bool:
+        self.probed.append(name)
+        raise RuntimeError("the container daemon cannot be asked")
+
+    def remove_claimed(self, claim: str) -> None:
+        self.swept.append(claim)
         raise RuntimeError("the container daemon cannot be asked")
 
 
@@ -583,7 +639,7 @@ def plant_queued_investigation(dsn: str, *, tenant: str, alert_id: str, investig
     """A `queued` row with a chosen id, as SQL (the store mints ids; a case that must plant a file
     named for the id before the claim needs to know it)."""
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
-                 "stage, created_at, cost_usd) VALUES (%s, %s, %s, %s, 1, 'queued', %s, 0)",
+                 "stage, created_at, cost_usd, cost_is_lower_limit) VALUES (%s, %s, %s, %s, 1, 'queued', %s, 0, false)",
             (investigation_id, tenant, alert_id, key, NOW))
 
 
@@ -611,7 +667,8 @@ def is_box_token(value: object) -> bool:
 
 def job_end(*, setup: str = "done", box: str = "started", report_committed: bool = True,
             scrub_verified: bool = True, cut_short: str | None = None) -> str:
-    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its five facts (#1421)."""
+    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its five facts (#1421). r7.3 T1: no spend fact
+    rides on it; the ledger's seal says whether the run's spend is complete."""
     return json.dumps({"setup": setup, "box": box, "report_committed": report_committed,
                        "scrub_verified": scrub_verified, "cut_short": cut_short})
 
@@ -689,6 +746,73 @@ def plant_fork(runs: Path, case_id: str, parent: tuple[str, list[int]], *, agent
         fork = handle.fork(parent[0], parent[1][-1])
         handle.append(fork, _response(model, usage), agent_id=agent_id)
     return fork
+
+
+#: The spend ledger's table and columns as #1377's sketch names them (the design leaves them open). r7 row model: the
+#: requesting agent, the requested and reported model, the four billed counts and the request's outcome.
+SPEND_LEDGER = "spend_ledger"
+SPEND_COUNTS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+SPEND_COLUMNS = ("run_id", "agent_id", "requested_model", "reported_model", "outcome", *SPEND_COUNTS)
+#: r7 S2a: a request's outcome as the model-request hook saw it (sketch spelling).
+RESPONSE, REFUSED, UNSEEN = "response", "refused", "unseen"
+
+
+def insert_spend(database: Path, run_id: str, spend: list[tuple[str, dict[str, int]]], *, agent_id: str = "main",
+                 outcome: str = RESPONSE, reported: str | None = None) -> None:
+    """#1377: one ledger row per `(requested model, billed usage)` for `run_id` and `agent_id` in an existing session
+    database; `reported` (default the requested name; None on a refused or unseen row) is what the provider said."""
+    import sqlite3
+
+    conn = sqlite3.connect(database, timeout=30)
+    try:
+        for model, usage in spend:
+            said = reported if reported is not None else (model if outcome == RESPONSE else None)
+            values = (run_id, agent_id, model, said, outcome, *(usage.get(k, 0) for k in SPEND_COUNTS))
+            conn.execute(f"INSERT INTO {SPEND_LEDGER} ({', '.join(SPEND_COLUMNS)}) "  # noqa: S608
+                         f"VALUES ({', '.join('?' * len(SPEND_COLUMNS))})", values)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, dict[str, int]]], *, sealed: bool = True,
+                **row: str) -> None:
+    """#1377: `case_id`'s session database (made by the real store, so its own schema, and with a
+    `main` session when this call makes the file) holding one ledger row per `(model, billed usage)`
+    for `run_id`; `row` is `insert_spend`'s agent id, outcome and reported name. r7.3 T1: `sealed` (default) seals the
+    run's ledger after the rows land, as a run that ended without a failed write leaves it; a test that plants a run's rows in
+    several calls seals with the last one only (`sealed=False` before), and `sealed=False` throughout is a run killed before
+    its seal."""
+    from defender.records.session_store._write import open_store
+
+    fresh = not session_db(runs, case_id).exists()
+    with open_store(case_id=case_id, sessions=_paths(runs)) as handle:
+        if fresh:
+            handle.new_session("main")
+    insert_spend(session_db(runs, case_id), run_id, spend, **row)
+    if sealed:
+        seal_spend(runs, case_id, run_id)
+
+
+def seal_spend(runs: Path, case_id: str, run_id: str) -> None:
+    """r7.3 T1: seal `run_id`'s ledger in `case_id`'s database through the real `session_store.seal_ledger`."""
+    from defender.records import session_store
+    from defender.records.session_store._write import open_store
+
+    with open_store(case_id=case_id, sessions=_paths(runs)) as handle:
+        session_store.seal_ledger(handle, run_id)
+
+
+def seal_at(runs: Path, case_id: str, run_id: str) -> None:
+    """r7.3 T1: seal `run_id`'s ledger in `case_id`'s database (a store a test did not open itself: a fixture run's) through the
+    real `session_store.seal_ledger`, on a handle opened as production opens a store for writing."""
+    seal_spend(runs, case_id, run_id)
+
+
+def lower_limit(dsn: str, investigation_id: str) -> bool | None:
+    """#1377: the row's `cost_is_lower_limit` (kept apart from `row`, whose columns every #1342 case reads)."""
+    found = execute(dsn, "SELECT cost_is_lower_limit FROM jobs.investigations WHERE id = %s", (investigation_id,))
+    return found[0][0] if found else None
 
 
 @contextmanager

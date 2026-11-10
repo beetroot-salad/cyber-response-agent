@@ -62,6 +62,7 @@ from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 from defender.records.formats import AlertId  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
+from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
@@ -94,7 +95,7 @@ SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
 INV = Investigation(
     investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="completed", disposition="benign",
     request_key="req-1", attempt=1,
-    cost_usd=1.5, created_at=NOW, artifacts=["report.md", "gather_raw/L1/0.json"],
+    cost_usd=1.5, cost_is_lower_limit=False, created_at=NOW, artifacts=["report.md", "gather_raw/L1/0.json"],
     # The knowledge revision the run used (`current` = the run record's `fresh`).
     knowledge={"status": "current", "commit": "f4e5c0de0000f4e5c0de0000f4e5c0de0000f4e5",
                "stale_kind": None},
@@ -180,6 +181,16 @@ IDENTITY_ROUTES = {
     ("POST", "/admin/tenants/{tenant_id}/offboard"),
     ("POST", "/admin/tenants/{tenant_id}/rotate-forge-credential"),
 }
+#: What #1307 adds (design "Program and credential routes"; param names pinned by this suite). Conflict updated: r3.
+PROGRAM_ROUTES = {
+    ("POST", "/tenants/{tenant_id}/programs"),
+    ("GET", "/tenants/{tenant_id}/programs"),
+    ("DELETE", "/tenants/{tenant_id}/programs/{program_id}"),
+    ("POST", "/tenants/{tenant_id}/programs/{program_id}/credentials"),
+    ("GET", "/tenants/{tenant_id}/programs/{program_id}/credentials"),
+    ("DELETE", "/tenants/{tenant_id}/programs/{program_id}/credentials/{credential_id}"),
+}
+IDENTITY_ROUTES = IDENTITY_ROUTES | PROGRAM_ROUTES  # same refusal contract as the members/invitations routes
 PUBLIC_ROUTES = EXISTING_ROUTES | IDENTITY_ROUTES
 
 #: One successful call per route: (route, concrete path, body, the port answers it needs).
@@ -237,8 +248,9 @@ class Scripted:
         self.transactions: list[tuple[str, str]] = []
         self.audits: list[tuple[str, str, str, str, str]] = []
 
-    def transaction(self, tenant_id: str, actor: str) -> _ScriptedTransaction:
-        return _ScriptedTransaction(self, tenant_id, actor)
+    def transaction(self, tenant_id: str, principal: Any) -> _ScriptedTransaction:
+        # Conflict updated (#1307 D6): the transaction takes the principal in place of the bare actor id.
+        return _ScriptedTransaction(self, tenant_id, principal.user_id)
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         if name.startswith("_"):
@@ -313,8 +325,9 @@ async def _seed_identity() -> tuple[IdentityService, dict[str, str], InMemoryTen
                             created_at=NOW, accepted_at=NOW)
     await repo.add_session(SESSION_AB, cy.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
     users[SESSION_AB] = cy.id
+    # Conflict updated (#1307 D7): the programs port is required; these routes never reach the realm.
     service = IdentityService(repo, signin=_Unused(), mail=_Unused(), clock=lambda: NOW,
-                              bootstrap=Bootstrap(administrators=()))
+                              bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
     return service, users, tenants
 
 
@@ -455,11 +468,13 @@ def test_every_route_refuses_a_caller_without_a_known_session_cookie(
     route: tuple[str, str], path: str, body: dict[str, Any] | None, answers: dict[str, Any],
     headers: dict[str, str],
 ) -> None:
-    """No, unknown, or Bearer-carried session → 401, no port, no Bearer challenge."""
+    """No, unknown, or Bearer-carried session → 401, no port; no Bearer challenge unless the request came with an
+    `Authorization` header (#1307: then it is the programs' way in, challenged as RFC 6750 says)."""
     api = Api(**answers)
     response = api.client.request(route[0], path, headers=headers, json=body)
     assert response.status_code == 401
-    assert "Bearer" not in response.headers.get("WWW-Authenticate", "")
+    if "Authorization" not in headers:
+        assert "WWW-Authenticate" not in response.headers
     assert api.ports.calls == []
     assert api.ports.transactions == []
 
@@ -1201,7 +1216,7 @@ def test_a_blank_client_request_id_is_refused() -> None:
 def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="not a disposition"):
         Investigation(investigation_id="i", alert_id="a", status="completed", disposition="fine",
-                      request_key="k", attempt=1, cost_usd=0.0, created_at=NOW)
+                      request_key="k", attempt=1, cost_usd=0.0, cost_is_lower_limit=False, created_at=NOW)
 
 
 @pytest.mark.parametrize("bad", ["a/b", "a b", "a?b#c", "é", ""])
@@ -1221,7 +1236,7 @@ def test_a_principal_carries_a_checked_tenant(legacy) -> None:
 
 def test_a_naive_time_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="timezone"):
-        Investigation(investigation_id="i", alert_id="a", status="queued", cost_usd=0.0,
+        Investigation(investigation_id="i", alert_id="a", status="queued", cost_usd=0.0, cost_is_lower_limit=False,
                       request_key="k", attempt=1, created_at=NOW.replace(tzinfo=None))
 
 
@@ -1505,7 +1520,7 @@ def test_every_fake_port_method_is_a_coroutine_function_and_a_transaction_an_asy
     assert len(implemented) >= 9
     assert ("InMemoryStore", "AlertsRepository") in implemented
     assert ("_InMemoryTransaction", "WriteTransaction") in implemented
-    transaction = InMemoryStore(lambda: NOW).transaction(A, USER)
+    transaction = InMemoryStore(lambda: NOW).transaction(A, Principal(tenant_id=A, user_id=USER))  # the principal, not the bare id (#1307 D6)
     assert hasattr(transaction, "__aenter__")
     assert hasattr(transaction, "__aexit__")
 
@@ -1545,6 +1560,16 @@ def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
     auth = _session(sessions[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
     systems = client.get(f"/tenants/{DEMO_ONE}/systems", headers=auth).json()["items"]
     assert {s["system_id"]: s["has_credentials"] for s in systems} == {"siem": False, "tickets": True}
+
+
+def test_the_demo_seed_serves_every_investigation_with_an_exact_cost_beside_a_number() -> None:
+    """The demo's investigations carry `cost_is_lower_limit` over the wire: false, each beside a number. (#1377 S2, S4)"""
+    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
+    client = TestClient(create_app(deps), base_url=BASE)
+    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
+    items = client.get(f"/tenants/{DEMO_ONE}/investigations", headers=auth).json()["items"]
+    assert items
+    assert all((i["cost_is_lower_limit"], i["cost_usd"] is not None) == (False, True) for i in items), items
 
 
 def test_a_demo_session_outlasts_the_production_idle_limit() -> None:

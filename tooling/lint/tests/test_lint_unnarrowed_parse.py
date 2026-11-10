@@ -141,27 +141,38 @@ def test_an_isinstance_guard_is_not_flagged(tmp_path):
     assert _scan_src(tmp_path, _NARROWED_BY_ISINSTANCE) == []
 
 
-def test_a_first_party_validator_call_is_not_flagged(tmp_path):
-    """The retired judge-verdict parser's shape: the raw doc is bound, but what reaches
-    `return` is the first-party validator's result, not the raw doc."""
-    assert _scan_src(tmp_path, (
-        "from defender._yaml import safe_load\n"
+_NOT_FLAGGED = [
+    # The retired judge-verdict parser's shape: the raw doc is bound, but what reaches `return` is the
+    # first-party validator's result, not the raw doc.
+    pytest.param("from defender._yaml import safe_load\n"
         "from defender.learning.core.validate import validate_doc\n"
         "\n"
         "def parse_verdict(text) -> dict:\n"
         "    doc = safe_load(text)\n"
         "    validated = validate_doc(doc)\n"
-        "    return validated\n"
-    )) == []
-
-
-def test_a_pydantic_validator_is_not_flagged(tmp_path):
-    assert _scan_src(tmp_path, (
-        "import json\n"
+        "    return validated\n", id="a_first_party_validator_call_is_not_flagged"),
+    pytest.param("import json\n"
         "def f(t, Model) -> dict:\n"
         "    raw = json.loads(t)\n"
-        "    return Model.model_validate(raw)\n"
-    )) == []
+        "    return Model.model_validate(raw)\n", id="a_pydantic_validator_is_not_flagged"),
+    pytest.param("import json\n"
+        "from pathlib import Path\n"
+        "\n"
+        "def read_json_locked(path: Path) -> dict:  # lint-parse: ok — checked one frame out\n"
+        "    return json.loads(path.read_text(encoding='utf-8'))\n", id="suppression_on_the_signature"),
+    pytest.param("import json\n"
+        "\n"
+        "# lint-parse: ok — the caller owns the shape and this seam is its private helper,\n"
+        "# so narrowing here would be the second copy of that check.\n"
+        "def f(t) -> dict:\n"
+        "    return json.loads(t)\n", id="suppression_in_the_comment_block_above"),
+]
+
+
+@pytest.mark.parametrize("src", _NOT_FLAGGED)
+def test_a_validated_or_suppressed_parse_is_not_flagged(tmp_path, src):
+    """A first-party or pydantic validator, or a suppression on the signature or above it, scans clean."""
+    assert _scan_src(tmp_path, src) == []
 
 
 def test_a_function_claiming_no_shape_is_not_flagged(tmp_path):
@@ -212,27 +223,6 @@ def test_tests_are_out_of_scope(tmp_path):
 
 
 # (c) suppression
-
-
-def test_suppression_on_the_signature(tmp_path):
-    assert _scan_src(tmp_path, (
-        "import json\n"
-        "from pathlib import Path\n"
-        "\n"
-        "def read_json_locked(path: Path) -> dict:  # lint-parse: ok — checked one frame out\n"
-        "    return json.loads(path.read_text(encoding='utf-8'))\n"
-    )) == []
-
-
-def test_suppression_in_the_comment_block_above(tmp_path):
-    assert _scan_src(tmp_path, (
-        "import json\n"
-        "\n"
-        "# lint-parse: ok — the caller owns the shape and this seam is its private helper,\n"
-        "# so narrowing here would be the second copy of that check.\n"
-        "def f(t) -> dict:\n"
-        "    return json.loads(t)\n"
-    )) == []
 
 
 def test_suppression_on_the_return_and_on_the_iso_call(tmp_path):
