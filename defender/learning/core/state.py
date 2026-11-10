@@ -264,8 +264,8 @@ _LANES: dict[DrainLabel, str] = {
 def retirement_stamp() -> dict[str, str]:
     """@owns retired_at — when a graveyard record was written, on every writer's record.
 
-    Shared by every dead-letter writer (`_bump_rows`, `_retire_unkeyable`, the pitfalls
-    curator's `_graveyard_dropped_rows`); the queue page sorts and places records by it."""
+    Shared by the file queue's dead-letter writer (`_bump_rows`); the queue page sorts and places
+    records by it."""
     return {"retired_at": now_iso()}
 
 

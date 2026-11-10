@@ -595,8 +595,8 @@ def _retire_pitfalls_batch(
         state,
         channel=PITFALLS,
         batch_ids=batch_ids,
-        # `batch-error:<class>` is the groupable vocabulary, beside `_graveyard_dropped_rows`'
-        # classes and the hold ceiling's reason. The truncated message follows because one
+        # `batch-error:<class>` is the groupable vocabulary, beside the dropped-system classes
+        # and the hold ceiling's reason. The truncated message follows because one
         # class covers very different failures (a timeout, an attempted deletion), and the
         # graveyard is the lane's only durable record.
         reason=f"batch-error:{type(e).__name__}: {str(e)[:200]}",

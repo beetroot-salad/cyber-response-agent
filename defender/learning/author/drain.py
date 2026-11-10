@@ -35,8 +35,6 @@ AuthorError = author_shared.AuthorError
 _logger = logging.getLogger(__name__)
 
 
-#: Graveyard reason for a deferral that hit the ceiling, distinguishable from a fault's.
-DEFERRED_CEILING_REASON = "deferred_ceiling"
 #: Not `faults.SYSTEMIC_FAULTS`, which keeps `GitError` out of retirement — the opposite of what
 #: a commit-time git failure needs here. Nor just `AuthorError`: without `GitError` a commit-time
 #: git failure would wedge the channel, and without `ModelRetry` an externally killed boxed
@@ -123,8 +121,8 @@ def _bump_rows(
                     "deadletter_reason": reason,
                     **retirement_stamp(),
                     # Nested rather than spread, so a `_bump_rows` entry has one shape on every
-                    # channel and is readable without knowing its queue (`_retire_unkeyable`
-                    # spreads its row flat; the queue page reads both shapes).
+                    # channel and is readable without knowing its queue (older unkeyable-row records
+                    # spread their row flat; the queue page reads both shapes).
                     "row": {k: v for k, v in rec.items() if k != counter_key},
                 }
                 for rec in retired
@@ -173,7 +171,7 @@ def run_batch(
         # An already-dirty draft is never handed to the spawn (OD15: no pre-run stray is tolerated).
         log.critical(f"{e}")
         return 2
-    return _claim(cfg=cfg, items=items, outcomes=outcomes, log=log)
+    return _claim_items(cfg=cfg, items=items, outcomes=outcomes, log=log)
 
 
 def _require_clean_draft(cfg: CorpusAuthorConfig) -> None:
@@ -224,7 +222,7 @@ def _keyed(
     return keyed, item_of
 
 
-def _claim(
+def _claim_items(
     *, cfg: CorpusAuthorConfig, items: Sequence[Item], outcomes: dict[tuple[str, str], Any], log,
 ) -> int:
     key = cfg.channel.id_key

@@ -76,7 +76,7 @@ _WORKTREES = "worktrees"
 
 #: What a ledger row adds to the row as queued (`state.rotate`, the curators' reason fields).
 _LEDGER_FIELDS = ("consumed_category", "consumed_at", "consumed_commit", "skip_reason")
-#: What a flat dead-letter record (`_retire_unkeyable`) adds beside the row's own fields.
+#: What a flat dead-letter record (the file queue's unkeyable-row retirement) adds beside the row's own fields.
 _DEADLETTER_FIELDS = ("deadletter_reason", "retired_at")
 #: Today's separate counters (G-I5): carried as columns, and no part of a row's identity (a retirement bumps one).
 _COUNTERS = ("attempts", "deferrals", "offers_declined")
