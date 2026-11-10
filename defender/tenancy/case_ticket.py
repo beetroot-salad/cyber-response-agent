@@ -120,8 +120,9 @@ def parse_case_record(text: str) -> CaseRecordSettings:
 def load_case_record(settings: Path) -> CaseRecordSettings | None:
     """The tenant's case-record file under `settings`, or `None` when it has none (a tenant with
     no case system), or `CaseTicketError` naming the file when it cannot be read or stand.
-    Called once per run, by `run_tenant.resolved_settings`; every consumer is handed the result and
-    none reads the file."""
+    Since #1366 no run reads it (a run's case record is a record): only the retired folder reader
+    `run_tenant.folder_settings` calls it, for `tenant.py`'s folder-based case finding, which
+    `check`'s record findings replace."""
     path = Path(settings) / CASE_RECORD_REL
     try:
         raw = read_regular_bytes(path)

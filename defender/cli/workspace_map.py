@@ -31,6 +31,7 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
     ns = p.parse_args(argv[1:])
     from defender import tenancy
     from defender.systems.run_tenant import host_tenant
+    from defender.systems.catalog import Catalog, TenantSystems
     from defender.systems.verbs import RegistryError, read_roster
 
     try:
@@ -43,16 +44,19 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
         if isinstance(run, str):
             sys.stderr.write(f"workspace_map: {run}\n")
             return 2
-        # The CLI reads the checkout's roster itself; an unreadable adapters tree is a one-line
-        # refusal and exit 2, not a traceback.
+        # The tenant's systems (#1366 O1, DC7): its current enabled records the checkout's
+        # catalog carries, plus the platform-served ones; never every adapter of the checkout.
+        # An unreadable adapters tree or records that cannot be read are a one-line refusal and
+        # exit 2, not a traceback.
         try:
-            roster = read_roster(adapters_under(DEFENDER_DIR))
-        except RegistryError as e:
+            records = admitted.directory.current_records(admitted.tenant.id)
+            roster = TenantSystems.of(records, Catalog(read_roster(adapters_under(DEFENDER_DIR)))).roster
+        except (RegistryError, TenantRefused) as e:
             sys.stderr.write(f"workspace_map: {e}\n")
             return 2
-        # Every system this checkout serves, not the ones a grant shows: this is an operator's
-        # view drawn today, and no record says what the mapped run was granted.
-        print(workspace_map(Path(run.run_dir), systems=roster.systems,
+        # Every system the tenant has, not the ones a grant shows: this is an operator's view
+        # drawn today, and no record says what the mapped run was granted.
+        print(workspace_map(Path(run.run_dir), systems=roster.systems, skills_of=roster.systems,
                             agent_root=_stamped_agent_root(admitted.tenant, Path(run.run_dir))), end="")
     return 0
 

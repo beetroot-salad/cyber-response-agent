@@ -70,10 +70,10 @@ class _LeadAuthorRetry(Exception):
     pass
 
 
-def _invoke_lead_author(
+def _invoke_lead_author(  # noqa: PLR0913 — the work step's call shape plus its bound label, git bound and tenant records
     paths: LoopPaths, state: LearningState, run: Run, *, label: DrainLabel,
     batch: Batch | None = None, box: Any = None, on_done: Callable[[str | None], None],
-    git_timeout: float = GIT_TIMEOUT_SECONDS,
+    git_timeout: float = GIT_TIMEOUT_SECONDS, directory: TenantDirectory | None = None,
 ) -> None:
     """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
     `lead_author_drain`): the held roots of its writable mounts — the lanes of `batch`'s draft —
@@ -92,7 +92,7 @@ def _invoke_lead_author(
             "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             lambda mod: mod.run_under_held_queue_lock(
                 run, paths=paths, state=state, trees=trees, box=box, on_done=on_done,
-                git_timeout=git_timeout, batch=batch,
+                git_timeout=git_timeout, batch=batch, directory=directory,
             ),
         )
     if rc not in (0, None):
@@ -552,11 +552,11 @@ def _rehydrate(claim: Claimed, tenant: Tenant | None) -> Run | Exception:
         return refused
 
 
-def _invoke_pitfalls(
+def _invoke_pitfalls(  # noqa: PLR0913 — the work step's call shape plus its bound label, git bound and tenant records
     paths: LoopPaths, state: LearningState, *, label: DrainLabel, batch: Batch | None = None,
     box: Any = None, on_curated: Callable[[PitfallsDisposition], None],
     lock_wait_seconds: int | None = None,
-    git_timeout: float = GIT_TIMEOUT_SECONDS,
+    git_timeout: float = GIT_TIMEOUT_SECONDS, directory: TenantDirectory | None = None,
 ) -> int:
     """The lead-author lane's default pitfalls work step: as `_invoke_lead_author`, the held roots
     of the `label` lane's writable mounts in `batch`'s draft are opened here and closed when the
@@ -569,7 +569,7 @@ def _invoke_pitfalls(
             lambda mod: mod.run_pitfalls(
                 paths=paths, state=state, trees=trees, batch=batch, box=box,
                 on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
-                git_timeout=git_timeout,
+                git_timeout=git_timeout, directory=directory,
             ),
         )
     return rc if rc is not None else 0
@@ -1022,14 +1022,17 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     lock_wait_seconds = repo_lock_wait_seconds()
     # The lane's label and git bound reach its work steps bound into the DEFAULT seams, so an
     # injected seam keeps its call shape (#1134).
+    # The tenant records reach the default steps the same way: the lanes' systems are the
+    # tenant's current records' (#1366 O1).
     if run_lead_author is None:
         run_lead_author = functools.partial(
             _invoke_lead_author, label=LEAD_AUTHOR_DRAIN_LABEL, git_timeout=git_timeout,
+            directory=records,
         )
     if run_pitfalls is None:
         run_pitfalls = functools.partial(
             _invoke_pitfalls, lock_wait_seconds=lock_wait_seconds, label=LEAD_AUTHOR_DRAIN_LABEL,
-            git_timeout=git_timeout,
+            git_timeout=git_timeout, directory=records,
         )
     lead_step, pitfalls_step = run_lead_author, run_pitfalls
 

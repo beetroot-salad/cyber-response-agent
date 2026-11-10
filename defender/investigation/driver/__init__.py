@@ -83,7 +83,7 @@ from defender import _clock
 from defender.configuration import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender.records import Run, RunPaths
-from defender.systems.run_tenant import RunTenant
+from defender.systems.run_tenant import RunTenant, narrowed_to
 from ._prompts import (
     BUDGET_ENFORCE_FLAG,
     DEFAULT_GATHER_MODEL,
@@ -515,23 +515,46 @@ def _correlation_dispatch_at_run_start(
 def _adapters_at_run_start(
     defender_dir: Path, roster: RosterRead | None, verbs: Any, tenant: RunTenant,
 ) -> tuple[RosterRead, Any]:
+    """`_run_start_reads` without the narrowed tenant."""
+    roster, verbs, _tenant = _run_start_reads(defender_dir, roster, verbs, tenant)
+    return roster, verbs
+
+
+def _run_start_reads(
+    defender_dir: Path, roster: RosterRead | None, verbs: Any, tenant: RunTenant,
+) -> tuple[RosterRead, Any, RunTenant]:
     """Everything a run resolves from an adapters tree, resolved first — before the budget,
     logger or any model — so an unreadable tree fails here as `RegistryError`, not mid-tool.
 
-    The roster is read here only if the caller injected none; consumers take the value.
+    The roster is the tenant's systems (#1366 O1, DC7: its enabled records the catalog carries,
+    plus the platform-served ones); it is built here only if the caller injected none, from the
+    tenant's records over `defender_dir`'s catalog. Consumers take the value.
 
-    The invlang `nothing-to-try` gate is handed the checkout's roster (`hold_capabilities`)
-    rather than reading lazily, so a read fault is not misfiled as a document fault by the
-    gates that call it. When the run's tree is the checkout, the same read is reused."""
-    roster = roster if roster is not None else read_roster(adapters_under(defender_dir))  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    The invlang `nothing-to-try` gate is a no-tenant surface: it is handed the WHOLE catalog,
+    the checkout's (`hold_capabilities`), rather than reading lazily, so a read fault is not
+    misfiled as a document fault by the gates that call it. A whole read of the checkout is
+    reused; a tenant's roster never is, though it shares the checkout's root.
+
+    The tenant comes back with its grants narrowed to its roster (#1366 R12,
+    `run_tenant.narrowed_to`): a grant on a catalog system the tenant has no record of is not
+    the run's, whoever resolved the tenant."""
+    catalog = None
+    if roster is None:
+        from defender.systems.catalog import Catalog, TenantSystems
+
+        catalog = read_roster(adapters_under(defender_dir))
+        roster = TenantSystems.of(tenant.records, Catalog(catalog)).roster  # lint-default: ok — DI seam owning its default (the tenant's systems over the run's tree)
+    checkout = DefenderPaths(_git.REPO_ROOT).adapters_dir
+    whole = next(
+        (read for read in (roster, catalog) if read is not None and read.whole
+         and Path(read.root).resolve() == checkout.resolve()),
+        None) or read_roster(checkout)
+    hold_capabilities(whole)
+    tenant = narrowed_to(tenant, roster, roster if roster.whole else (catalog or whole))
     # Built over the run's gather grant; there is no process-level one.
     verbs = verbs if verbs is not None else ModuleVerbRegistry(  # lint-default: ok — DI seam owning its default (built over the run's own grant)
         roster, tenant.grants.gather, grant_home=tenant.table_pointer)
-    checkout = DefenderPaths(_git.REPO_ROOT).adapters_dir
-    hold_capabilities(
-        roster if Path(roster.root).resolve() == checkout.resolve() else read_roster(checkout)
-    )
-    return roster, verbs
+    return roster, verbs, tenant
 
 
 def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
@@ -736,7 +759,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # threaded inward.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
-    roster, verbs = _adapters_at_run_start(
+    roster, verbs, tenant = _run_start_reads(
         defender_dir, systems.roster if systems is not None else roster, verbs, tenant)
     judged = _systems_at_run_start(
         state, systems, roster, tenant, defender_dir,

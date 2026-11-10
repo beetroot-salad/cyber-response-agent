@@ -10,6 +10,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from defender._paths import DefenderPaths
 from defender.learning.leads._errors import LeadAuthorError
@@ -20,6 +21,10 @@ from defender.kit.verbs import is_system_name
 #: From `DefenderPaths` rather than re-spelled, so the resolver and the gates agree on where
 #: adapters live.
 ADAPTERS_REL = DefenderPaths.adapters_rel
+
+if TYPE_CHECKING:
+    from defender.tenancy import Tenant, TenantDirectory
+    from defender.tenancy.models import TenantRecords
 
 _logger = logging.getLogger(__name__)
 
@@ -116,6 +121,25 @@ def declared_systems_over(
             f"({roster.root} or the tenant's {SKILLS_PREFIX}<system>/execution.md)"
         )
     return union
+
+
+def tenant_systems_under(repo_root: Path, records: TenantRecords) -> frozenset[str]:
+    """A tenant's systems for its learning lanes (#1366 O1, DC7): its current enabled records
+    whose adapter the product checkout at `repo_root` carries, plus the platform-served names.
+    The tenant's committed `execution.md` markers declare nothing here: the records decide. An
+    unreadable adapter source raises `AdaptersUnreadable`."""
+    from defender.systems.catalog import Catalog, TenantSystems
+
+    return frozenset(TenantSystems.of(records, Catalog(read_adapters(repo_root / ADAPTERS_REL))).systems)
+
+
+def lane_systems(repo_root: Path, tenant: Tenant | None, directory: TenantDirectory | None) -> frozenset[str] | None:
+    """The tenant's systems for a lane handed the tenant records (`directory`) and its tenant
+    (`tenant`, the drain's accepted one): `tenant_systems_under` over its current records; `None`
+    when it has neither (a scene with no tenant: the checkout and the markers decide)."""
+    if directory is None or tenant is None:
+        return None
+    return tenant_systems_under(repo_root, directory.current_records(tenant.id))
 
 
 def adapter_declared_systems(repo_root: Path) -> frozenset[str]:

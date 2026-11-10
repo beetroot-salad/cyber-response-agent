@@ -189,16 +189,21 @@ class LeadAuthorDeps:
     git_timeout: float = GIT_TIMEOUT_SECONDS
 
 
-def build_lead_author_deps(
+def build_lead_author_deps(  # noqa: PLR0913 — the lane's tree, state and batch, plus the tenant records
     paths: _loop_config.LoopPaths, *, state: LearningState, trees: DrainTrees,
-    batch: Any = None, git_timeout: float = GIT_TIMEOUT_SECONDS,
+    batch: Any = None, git_timeout: float = GIT_TIMEOUT_SECONDS, directory: Any = None,
 ) -> LeadAuthorDeps:
     """The lane's seams over `batch`'s draft (#1108 P4 O7, OD16), reading and writing `skills/`
     through `trees`, the lane's held mounts (`open_drain_trees`): `trees` must hold the draft's
     `agent/skills` itself (`paths.skills_dir` with no batch), else `LeadAuthorError`. `paths`
     names the product checkout, whose adapters declare the systems with the markers the
-    batch's base commits. The deps must not outlive `trees`."""
-    from defender.learning.leads.declared_systems import declared_systems
+    batch's base commits. The deps must not outlive `trees`.
+
+    With the tenant records (`directory`, the drain's or the by-hand entry's) the systems are the
+    tenant's (#1366 O1, DC7): its current enabled records the product checkout's catalog carries,
+    plus the platform-served ones; its committed markers then declare nothing. The spawned
+    author's write and `rm` lanes are drawn over the same set."""
+    from defender.learning.leads.declared_systems import declared_systems, lane_systems
 
     if batch is not None:
         root = Path(batch.draft_root)
@@ -207,12 +212,14 @@ def build_lead_author_deps(
     else:
         root, skills_dir, base = paths.repo_root, paths.skills_dir, None
     skills = lane_skills(trees, paths, skills_dir=skills_dir)
-    systems = declared_systems(paths.repo_root, agent=base)
+    tenants = lane_systems(paths.repo_root, paths.tenant, directory)
+    systems = tenants if tenants is not None else declared_systems(paths.repo_root, agent=base)
+    lanes = {} if tenants is None else {"systems": tuple(sorted(tenants))}
     return LeadAuthorDeps(
         paths=paths,
         state=state,
         systems=systems,
-        invoke_agent=functools.partial(invoke_agent, repo_root=root),
+        invoke_agent=functools.partial(invoke_agent, repo_root=root, **lanes),
         extract=extract,
         synthesize=synthesize_drafts,
         build_handoff=functools.partial(
@@ -240,9 +247,10 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
     deps: LeadAuthorDeps | None = None,
     box: Any = None,
     on_done: DoneSink | None = None,
+    directory: Any = None,
 ) -> int:
     """Serve one run under the per-author queue lock, over `batch`'s draft (`deps.batch` when
-    deps are given)."""
+    deps are given). `directory` is the tenant records the systems are read from (#1366 O1)."""
     if deps is None and paths is None:
         raise TypeError("run takes paths= (or deps=)")
     # The lane's grant is read before anything else: a non-member label never reaches the
@@ -277,14 +285,15 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
             if not locked:
                 return QUEUE_LOCK_SKIP_RC
             with open_drain_trees(paths, label, batch=batch) as trees:
-                deps = build_lead_author_deps(paths, state=state, trees=trees, batch=batch)
+                deps = build_lead_author_deps(paths, state=state, trees=trees, batch=batch,
+                                              directory=directory)
                 return _run_locked(run_dir, deps, box=box, on_done=sink)
 
 
 def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the run, its held lock and trees, and its seams
     run: Run, *, paths: _loop_config.LoopPaths, state: LearningState, trees: DrainTrees,
     box: Any = None, on_done: DoneSink, git_timeout: float = GIT_TIMEOUT_SECONDS,
-    batch: Any = None, deps: LeadAuthorDeps | None = None,
+    batch: Any = None, deps: LeadAuthorDeps | None = None, directory: Any = None,
 ) -> int:
     """`run` for a caller that already holds the per-author queue lock (the drain holds it for
     its whole tick, since it defers the done sentinel) and the lane's held mounts, `trees` (the
@@ -293,7 +302,7 @@ def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the 
     `batch`."""
     if deps is None:
         deps = build_lead_author_deps(paths, state=state, trees=trees, batch=batch,
-                                      git_timeout=git_timeout)
+                                      git_timeout=git_timeout, directory=directory)
     return _run_locked(Path(run.run_dir), deps, box=box, on_done=on_done)
 
 
@@ -585,7 +594,8 @@ def main(argv: list[str], *, directory: Any = None) -> int:
             return 2
         # By hand this serves the lead-author lane's own queue under its lock, so it names that lane.
         return run(opened, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL,
-                   paths=_loop_config.LoopPaths.for_tenant(admitted.tenant))
+                   paths=_loop_config.LoopPaths.for_tenant(admitted.tenant),
+                   directory=admitted.directory)
 
 
 #: Re-exports: callers import these names from here; their real homes are the source

@@ -139,40 +139,6 @@ _CANNOT_VERIFY = "cannot verify .tenant-id is committed"
 _say = _tenant_records.say
 
 
-@dataclasses.dataclass(frozen=True)
-class _FolderRecord:
-    """A settings folder read the way run start reads a tenant's (`run_tenant.folder_settings`):
-    what the case system's own checks are asked over, with no accepted tenant to name."""
-
-    systems: Mapping[str, Any]
-    access: Mapping[str, Any]
-    case_record: Any
-    agent: Path
-
-
-def _case_findings(knowledge: Path) -> list[str]:
-    """What run start does not apply before a run: the case system the tenant names. A tenant with
-    no case-record file needs none. With one, the very judgement the record step makes at run end
-    (`case_system.judge_case_system`, D-17) must pass: the system on the roster, its adapter
-    accepted and exporting the comment action, its settings sound, and — through the credential
-    proxy — a declared write route. A folder still holding the retired case system folder is told
-    to move to the new file."""
-    settings = knowledge / SETTINGS_HALF
-    findings: list[str] = []
-    legacy = case_system.legacy_folder_finding(settings)
-    if legacy is not None:
-        findings.append(legacy)
-    record = _FolderRecord(agent=knowledge / "agent", **{
-        k: v for k, v in run_tenant.folder_settings(settings).items()})
-    if record.case_record is None:
-        return findings
-    try:
-        case_system.judge_case_system(record, defender_dir=_DEFENDER_DIR)
-    except case_system.CaseSettingsFault as fault:
-        findings.append(str(fault))
-    return findings
-
-
 # ==========================================================================================
 # check
 # ==========================================================================================
@@ -181,8 +147,14 @@ def check_tenant(admitted: run_tenant.Admitted, *, secrets: Any = None) -> int:
     """`check <id>`, for the tenant `main`'s host acceptance admitted: every finding about its
     settings, its repo and its last publish, all reported. `secrets` is the operator's OpenBao
     login, for the record findings that ask the secret store (#1366)."""
+    from defender.cli import _tenant_records_check as records_check
     tenant, records = admitted.tenant, admitted.directory
-    return _report([*_findings(tenant.knowledge), *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
+    mine = records_check.records_check(tenant.id, records, knowledge=tenant.knowledge, secrets=secrets,
+                                       defender_dir=_DEFENDER_DIR)
+    if mine.records is None:  # not imported (R8): the import finding alone, nothing judged from the folders
+        return _report([*mine.lines, *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
+    return _report([*mine.lines, *_findings(tenant.knowledge, systems=mine.systems),
+                    *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
 
 
 def _mapping_findings(tenant: tenancy.Tenant, records: tenancy.TenantDirectory) -> list[str]:
@@ -411,7 +383,7 @@ def check_folder(folder: Path) -> int:
     return _report(_findings(folder))
 
 
-def _findings(knowledge: Path) -> list[str]:
+def _findings(knowledge: Path, *, systems: Any = None) -> list[str]:
     """Everything `check` reports about a folder acceptance (or the folder rules) passed: the
     settings files load, the grant table loads, the lead-zero agreement against the running
     catalog, the grant census both ways against the running checkout, and the committed
@@ -419,7 +391,8 @@ def _findings(knowledge: Path) -> list[str]:
     table went unchecked and why, and every other rule still runs."""
     settings = knowledge / SETTINGS_HALF
     findings: list[str] = []
-    findings += _case_findings(knowledge)
+    from defender.cli._tenant_records_check import census_findings, leftover_findings
+    findings += leftover_findings(knowledge)
     # Here, not at the top: the census reaches the lead-author's whole extraction stack, which
     # only `check` uses — `update` and `propose` start without paying for it.
     from defender.cli import _tenant_census
@@ -438,7 +411,7 @@ def _findings(knowledge: Path) -> list[str]:
     findings += _registry_findings(knowledge)
     findings += _registry_grant_findings(knowledge)
     try:
-        findings += (_tenant_census.table_findings(settings, census).lines(table)
+        findings += (census_findings(_tenant_census.table_findings(settings, census), systems).lines(table)
                      if census is not None
                      else _tenant_census.folder_findings(settings).lines())
     except DispositionError as unloadable:
@@ -566,6 +539,9 @@ def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
     check_p = sub.add_parser("check", help="report the census and repo findings of a tenant")
     check_p.add_argument("tenant_id", nargs="?")
     check_p.add_argument("--folder", type=Path, default=None)
+    check_p.add_argument("--token-file", type=Path, default=None,
+                         help="a file holding the operator's OpenBao token: also report systems with no credentials")
+    check_p.add_argument("--kv-mount", default="kv", help="the KV mount credential sets are stored on (default kv)")
     update_p = sub.add_parser("update", help="publish the tenant's merged main as `current`")
     update_p.add_argument("tenant_id")
     propose_p = sub.add_parser(
@@ -613,6 +589,10 @@ def _admitted_command(admitted: run_tenant.Admitted, ns: argparse.Namespace, *, 
     if ns.command == "propose":
         return propose(admitted, ns.staged, client=client, identity=identity,
                        credential_config=credential_config)
+    if secrets is None and ns.token_file is not None:
+        secrets = _tenant_records.operator_secrets(ns.token_file, mount=ns.kv_mount)
+        if secrets is None:
+            return 1
     return check_tenant(admitted, secrets=secrets)
 
 

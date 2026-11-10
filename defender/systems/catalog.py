@@ -189,6 +189,7 @@ class TenantSystems:
                                              if r.adapter_id in whole.unparsed}),
             refused=types.MappingProxyType({}),
             no_verbs=frozenset(s for s, r in enabled.items() if r.adapter_id in whole.no_verbs),
+            whole=False,
         )
         return cls(catalog=catalog, records=records, roster=roster,
                    enabled=types.MappingProxyType(enabled), disabled=types.MappingProxyType(disabled),

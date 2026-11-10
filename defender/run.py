@@ -72,7 +72,8 @@ from defender.records import run_end  # noqa: E402
 from defender.tenancy import run_knowledge  # noqa: E402
 from defender.systems import case_system, system_status  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
-from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa: E402
+from defender.systems.run_tenant import Admitted, RunTenant, TenantVerdict, host_tenant  # noqa: E402
+from defender.tenancy.models import TenantRecords  # noqa: E402
 from defender.systems.system_status import RunSystems  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
@@ -369,7 +370,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     """
     # The roster `main` judged, handed down to the registry and `run_investigation` with its
     # verdict; read here only for a direct caller, whose run the driver judges.
-    roster = systems.roster if systems is not None else read_roster(adapters_under(defender_dir))
+    roster = systems.roster if systems is not None else _tenant_roster(tenant, defender_dir)
     held: dict[str, Any] = {} if job_facts is None else {"review_state": job_facts.review_state}
     if world is not None:
         if episode is None:
@@ -669,9 +670,17 @@ class _TokenMint:
         return {"request_token": token, "proxy_url": self._proxy_url or ""}
 
 
+def _tenant_roster(tenant: RunTenant, defender_dir: Path) -> RosterRead:
+    """The tenant's systems over `defender_dir`'s catalog (#1366 O1, DC7): for a direct caller
+    of the lifecycle, which no `main` judged."""
+    from defender.systems.catalog import Catalog, TenantSystems
+
+    return TenantSystems.of(tenant.records, Catalog(read_roster(adapters_under(defender_dir)))).roster
+
+
 def _resolve_run_tenant(
     tenant: tenancy.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
-    copy: run_knowledge.RunCopy | None = None,
+    records: TenantRecords, copy: run_knowledge.RunCopy | None = None,
 ) -> RunTenant:
     """The accepted tenant ready to run — its grants and lead-zero dispatch from run start's
     readiness function, over the run's own copy of its knowledge (#1108 P4, O-B: settings,
@@ -679,8 +688,10 @@ def _resolve_run_tenant(
     model call, so tenant misconfiguration fails early. Refusals name the file to edit.
 
     `dispatches_lead_zero` is False for an `--episode` sibling, which dispatches no turn-0
-    lead. Without `copy` (a direct caller), the record is resolved over the tenant's own
-    folder. `defender_dir` is not read: the code tree holds no tenant knowledge (O1)."""
+    lead. Without `copy` (a direct caller), the grants are resolved over the tenant's own
+    folder. Its systems, access and case record are the tenant's current `records` (#1366 O6),
+    read once at setup. `defender_dir` is not read: the code tree holds no tenant knowledge
+    (O1)."""
     from defender.systems import run_tenant as run_tenant_mod
 
     del defender_dir
@@ -689,7 +700,7 @@ def _resolve_run_tenant(
               "stage_token": copy.token})
     try:
         return run_tenant_mod.run_tenant_for(
-            tenant, dispatches_lead_zero=dispatches_lead_zero, **roots)
+            tenant, dispatches_lead_zero=dispatches_lead_zero, records=records, **roots)
     except run_tenant_mod.TenantRefused as refusal:
         sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
 
@@ -836,6 +847,48 @@ def _early_run(ns: argparse.Namespace, accepted: tenancy.Tenant, world: Any,
     except (RunRefused, TenantRefused) as refused:
         where = f"--episode {ns.episode}: " if world is not None else ""
         sys.exit(f"[run.py] {where}{refused}")
+
+def _read_records(records: Any, tenant_id: Any) -> TenantRecords:
+    """The tenant's current system and case records (#1366 O6, R10), read ONCE at setup, or a
+    `[run.py]` refusal: the records could not be reached, or the tenant is not imported (R8, named
+    before anything else of the tenant's settings is looked at, the alert mapping included)."""
+    from defender.systems import run_tenant as run_tenant_mod
+
+    try:
+        current = records.current_records(tenant_id)
+        run_tenant_mod.require_imported(current, tenant_id)
+    except TenantRefused as refused:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+    return current
+
+
+def _write_record_versions(run_dir: Path, records: TenantRecords) -> None:
+    """The host-held record of which system and case versions the run read at its start (#1366
+    O6, P3; audit only), beside the knowledge-source record: every current version, disabled ones
+    too. A run that cannot write it does not start, as for the knowledge record."""
+    path = RunPaths(run_dir).record_versions
+    used = {"systems": {system: record.version for system, record in sorted(records.systems.items())},
+            "case": None if records.case is None else records.case.version}
+    try:
+        path.write_text(json.dumps(used, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except OSError as e:
+        sys.exit(f"[run.py] could not write the run's record of versions {path}: {e}")
+
+
+def _tenant_verdict(tenant: RunTenant, roster: RosterRead) -> TenantVerdict:
+    """R12 at run start (#1366): the tenant's systems over `roster` (the catalog this run reads),
+    its grants narrowed to them, or the `[run.py]` refusal. Each ignored grant is warned of once,
+    here."""
+    from defender.systems import run_tenant as run_tenant_mod
+    from defender.systems.catalog import Catalog
+
+    try:
+        verdict = run_tenant_mod.tenant_systems(tenant, Catalog(roster))
+    except TenantRefused as refusal:
+        sys.exit(f"[run.py] this run's tenant {tenant.tenant_id!r} cannot be used: {refusal}")
+    run_tenant_mod.warn_ignored(verdict)
+    return verdict
+
 
 def _write_knowledge_record(run_dir: Path, source: run_knowledge.KnowledgeSource) -> None:
     """The host-held knowledge-source record beside the run dir (U12): what every reader of
@@ -1176,7 +1229,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
         # One readiness check, shared by the old-manifest judge (only for a manifest recording
         # no corpus patterns) and the run; resolved over the run's own copy of its knowledge.
         tenant_of = functools.cache(lambda: _resolve_run_tenant(
-            accepted, dispatches_lead_zero=ns.episode is None, copy=copy))
+            accepted, dispatches_lead_zero=ns.episode is None, records=current, copy=copy))
         world = _resume_target(ns, episode=episode, tenant=lambda: tenant_of(),
                                arm_ids=(lambda: None) if episode_runs is None
                                else episode_runs.arm_ids)
@@ -1185,6 +1238,9 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
         # A fresh run derives its facts through the tenant's alert mapping, read from the tenant records once,
         # here: before the knowledge copy and the run folder, so a tenant with none (or records that cannot be
         # reached) is refused with nothing made (#1345 O3, O4). A sibling carries its source's record.
+        # The tenant's current records (#1366 O6), read once here for every lane, siblings too
+        # (H9): a tenant not imported is refused (R8) before its alert mapping is looked at.
+        current = _read_records(records, accepted.id)
         mapping = None if world is not None else _read_alert_mapping(records, accepted.id)
 
         # The one refusal knowable without the run's knowledge, made before the launch-time
@@ -1206,7 +1262,12 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             # The tenant's settings (and with them the one tenant check), over the run's copy:
             # resolved before the input is read and before anything billable is spent; nothing
             # below reads them again.
-            tenant = tenant_of()
+            # The tenant's systems over the catalog this run reads (the injected roster, or the
+            # checkout's, read once here): R12's grants x records verdict (#1366), the grants
+            # narrowed to the systems the tenant has records for.
+            verdict = _tenant_verdict(
+                tenant_of(), roster if roster is not None else _run_roster(DEFENDER_DIR))
+            tenant = verdict.tenant
             # The run's one judgement of its systems (#1256), before the run is made: the roster
             # this run reads (the injected one, or the checkout's, read once here), judged by the
             # adapters' own settings checks over those settings — a start at which no granted
@@ -1216,8 +1277,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
 
             known_ids = (() if world is None else family_identities(world.family, world.arm_ids))
             systems = _judge_start(
-                tenant, defender_dir=DEFENDER_DIR,
-                roster=roster if roster is not None else _run_roster(DEFENDER_DIR),
+                tenant, defender_dir=DEFENDER_DIR, roster=verdict.systems.roster,
                 known_ids=known_ids)
             # The request tokens' signer, over the systems just judged, on both lanes (#1342
             # R6-8): a configuration that cannot sign them refuses here, before the run is made;
@@ -1261,6 +1321,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             # or the box exists.
             print(f"run_id={run_dir.name}", flush=True)
             _write_knowledge_record(run_dir, knowledge)
+            _write_record_versions(run_dir, current)
             yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world,
                            episode=episode, systems=systems, seams=seams, alert=alert,
                            minting=minting, case=case)
