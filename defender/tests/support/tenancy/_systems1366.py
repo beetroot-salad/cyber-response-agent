@@ -193,24 +193,51 @@ UNCONFIGURED = ".unconfigured"
 NO_CASE = ".no-case-record"
 
 
+class UnparseableFolder(AssertionError):
+    """A test planted a settings folder that cannot be turned into records (not UTF-8, not a mapping, not YAML)."""
+
+
 def records_from_settings(settings: Path) -> RecordsSpec:
     """The records a planter's `settings/` folder stands for: a system per `systems/<s>/` folder holding either file
     (a missing config.env is empty settings, a missing access.yaml is empty text: the system is then down at start, as
     the folder world had it) or the `UNCONFIGURED` marker (empty settings and access), the case from
-    `case-record.yaml` (none when absent). PURE: reads files, calls nothing of production."""
+    `case-record.yaml` (none when absent). PURE: reads files, calls nothing of production.
+
+    A file that cannot be read as records (invalid UTF-8, a case-record file that is not a mapping) raises
+    `UnparseableFolder`: such a file cannot reach a run any more (the store refuses it at write, the files are retired:
+    #1366 P2, O9), so a test that plants one is asserting a state that cannot exist. Seed records instead (an upgrade
+    leaves a record that FAILS the judgement: `R.edited(spec, system, settings=...)` or an access without the route)."""
     systems: dict[str, SysSpec] = {}
     root = Path(settings) / "systems"
+
+    def unparseable(path: Path, why: object) -> UnparseableFolder:
+        return UnparseableFolder(
+            f"test planted an unparseable folder; seed records instead (a bad file cannot reach a run: #1366 P2, O9): "
+            f"{path}: {type(why).__name__}: {why}")
+
     for folder in sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else ():
         config, access = folder / "config.env", folder / "access.yaml"
         if not (config.is_file() or access.is_file() or (folder / UNCONFIGURED).is_file()):
             continue
-        systems[folder.name] = SysSpec(parse_config_env(config.read_text("utf-8")) if config.is_file() else {},
-                                       access.read_text("utf-8") if access.is_file() else "")
+        try:
+            settings_of_system = parse_config_env(config.read_text("utf-8")) if config.is_file() else {}
+        except (UnicodeDecodeError, ValueError) as e:
+            raise unparseable(config, e) from e
+        try:
+            access_text = access.read_text("utf-8") if access.is_file() else ""
+        except UnicodeDecodeError as e:
+            raise unparseable(access, e) from e
+        systems[folder.name] = SysSpec(settings_of_system, access_text)
     case = None
     case_file = Path(settings) / "case-record.yaml"
     if case_file.is_file():
-        data = yaml.safe_load(case_file.read_text("utf-8")) or {}
-        case = CaseSpec(str(data.get("system", "")), str((data.get("comment") or {}).get("body", "")))
+        try:
+            data = yaml.safe_load(case_file.read_text("utf-8")) or {}
+            if not isinstance(data, Mapping):
+                raise ValueError("not a mapping")
+            case = CaseSpec(str(data.get("system", "")), str((data.get("comment") or {}).get("body", "")))
+        except (UnicodeDecodeError, yaml.YAMLError, ValueError, AttributeError) as e:
+            raise unparseable(case_file, e) from e
     return RecordsSpec(systems, case)
 
 

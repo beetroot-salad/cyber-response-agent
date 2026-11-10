@@ -59,36 +59,45 @@ def test_d_systems_verbatim(tmp_path):
                        "ELASTIC_ALERTS_INDEX": "vb-alerts-*"}, elastic
 
 
+def _identity_placeholder(folder: Path) -> None:
+    """identity's record carries the template's placeholder where its timeout belongs: what an upgrade that changes a
+    key's meaning leaves in a stored record (R12 'settings an upgrade invalidated'). A valid record, not a bad file."""
+    S.set_key(folder, "identity", "IDENTITY_TIMEOUT_SEC", "CHANGE-ME")
+
+
 def test_d_systems_fault_kept(tmp_path):
+    """A system whose record is unusable (no settings; a placeholder an upgrade invalidated) is that system's fault only:
+    resolve returns, the others keep their config. (R12 'record whose settings an upgrade invalidated', P2/O9: a
+    settings FILE that is not UTF-8 can no longer reach a run, so that arm is retired; it is seeded as a record that
+    fails the judgement.)"""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="fk")
-    S.config_path(folder, "cmdb").unlink()
-    # Invalid UTF-8: it must become this system's fault, never an escaping UnicodeDecodeError.
-    S.write_config(folder, "identity", b'IDENTITY_TIMEOUT_SEC="\xff\xfe"\n')
+    S.config_path(folder, "cmdb").unlink()  # the record's settings are empty
+    _identity_placeholder(folder)
 
     rec = _resolve(root)  # returns normally
 
     ConfigFault = S.config_fault()
     assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
-    assert isinstance(rec.systems["identity"], ConfigFault), rec.systems["identity"]
     assert isinstance(rec.systems["ticket"], S.record_type("SystemConfig")), rec.systems["ticket"]
-    ctx = _ctx(rec, tmp_path)
-    for system, prefix in (("cmdb", "CMDB"), ("identity", "IDENTITY")):
-        with pytest.raises(ConfigFault) as raised:
-            transport.load_config(ctx, system, prefix)
-        # the contract is the outcome: the same fault's text, not its identity
-        assert str(raised.value) == str(rec.systems[system]), (system, str(raised.value))
+    with pytest.raises(ConfigFault) as raised:
+        transport.load_config(_ctx(rec, tmp_path), "cmdb", "CMDB")
+    # the contract is the outcome: the same fault's text, not its identity
+    assert str(raised.value) == str(rec.systems["cmdb"]), str(raised.value)
+    with pytest.raises(ConfigFault, match="IDENTITY_TIMEOUT_SEC"):
+        S.mod("integrations.identity_adapter").check_settings(rec)
+    assert S.mod("integrations.ticket_adapter").check_settings(rec) is None
 
 
-def test_d_a_case_record_file_never_refuses_the_tenant(tmp_path):
-    """Acceptance never refuses a tenant over its case-record file, whatever it holds or whether it
-    exists; only a required settings file does (D-12, r4 Data). The record leg judges the file."""
+def test_d_a_case_record_never_refuses_the_tenant(tmp_path):
+    """Acceptance never refuses a tenant over its case record, whatever it names, whether it covers the comment route, or
+    whether there is one; only a required settings file does (D-12, r4 Data). The record leg judges it (C5). The
+    retired arms (a case-record FILE that is not YAML, not a mapping) cannot reach a run any more (P2, O9): the stored
+    shapes that can are the arms here."""
     root = tmp_path / "tenants"
     cases = {
         "valid": T1106.case_record_text(),
         "names-an-unknown-system": T1106.case_record_text("no-such-system"),
-        "not-yaml": "system: [unclosed\n  comment: : :\n",
-        "not-a-mapping": "- system\n- ticket\n",
         "empty": "",
     }
     for label, text in cases.items():
@@ -96,6 +105,14 @@ def test_d_a_case_record_file_never_refuses_the_tenant(tmp_path):
         folder = S.plant(root, tenant_id, marker=label)
         S.case_record_path(folder).write_text(text, encoding="utf-8")
         _resolve(root, tenant_id)  # never raises
+
+    uncovered = fixture_uuid("tenant:not-covering")
+    folder = S.plant(root, uncovered, marker="nc")
+    access = S.settings_of(folder) / "systems" / "ticket" / "access.yaml"
+    doc = json.loads(access.read_text(encoding="utf-8"))
+    doc["writes"] = []  # an upgrade moved the comment route: the stored declaration no longer covers it
+    access.write_text(json.dumps(doc), encoding="utf-8")
+    _resolve(root, uncovered)  # never raises
 
     none = fixture_uuid("tenant:no-case-file")
     S.plant(root, none, marker="none", case_system=None)
@@ -112,12 +129,12 @@ def test_o5_resolve_keeps_system_faults(tmp_path):
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="o5")
     S.config_path(folder, "cmdb").unlink()
-    S.write_config(folder, "identity", b"IDENTITY_URL_BASE=\xff\n")
-    S.case_record_path(folder).write_text("- not\n- a mapping\n", encoding="utf-8")
-    rec = _resolve(root)  # never raises because of a system's config or the case-record file
+    _identity_placeholder(folder)
+    rec = _resolve(root)  # never raises because of a system's settings
     ConfigFault = S.config_fault()
     assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
-    assert isinstance(rec.systems["identity"], ConfigFault), rec.systems["identity"]
+    with pytest.raises(ConfigFault, match="IDENTITY_TIMEOUT_SEC"):
+        S.mod("integrations.identity_adapter").check_settings(rec)
 
     # TenantRefused keeps its tenant-acceptance reasons, each still refusing.
     TenantRefused = S.tenant_refused()
@@ -313,7 +330,7 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     S.plant(root, fixture_uuid("tenant:healthy"), marker="pol")
     broken = S.plant(root, fixture_uuid("tenant:broken"), marker="pol")
     S.config_path(broken, "cmdb").unlink()
-    S.write_config(broken, "identity", b"IDENTITY_URL_BASE=\xff\n")
+    _identity_placeholder(broken)
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     base = ["show", "gather", "--run-dir", str(run_dir)]
@@ -330,7 +347,8 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     rec = _resolve(root, fixture_uuid("tenant:broken"))  # the frame policy_cli resolves through
     ConfigFault = S.config_fault()
     assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
-    assert isinstance(rec.systems["identity"], ConfigFault), rec.systems["identity"]
+    with pytest.raises(ConfigFault, match="IDENTITY_TIMEOUT_SEC"):
+        S.mod("integrations.identity_adapter").check_settings(rec)
     assert rec.grants.gather == _resolve(root, fixture_uuid("tenant:healthy")).grants.gather
 
 
@@ -494,20 +512,6 @@ def test_r5_a_folder_without_its_access_declaration_is_judged_by_that_first(tmp_
     else:
         env.write_text("CMDB_TIMEOUT_SEC=CHANGE-ME\n")
     with pytest.raises(ConfigFault, match=r"access\.yaml\S* not found — cmdb is reached only through"):
-        cmdb.check_settings(_resolve(root))
-
-
-def test_r5_a_folder_that_cannot_be_read_is_named_for_that_not_for_its_declaration(tmp_path):
-    """A system folder or `config.env` the run could not read is reported as that, ahead of the
-    access declaration it may also seem to lack: an unreadable folder hides its access.yaml, so
-    "access.yaml not found" would send the operator after a file that is there (#1391 r5 S1)."""
-    cmdb = S.mod("integrations.cmdb_adapter")
-    ConfigFault = S.config_fault()
-    root = tmp_path / "tenants"
-    folder = S.plant(root, marker="r5u")
-    S.drop_access(folder, "cmdb")
-    S.config_path(folder, "cmdb").write_bytes(b"CMDB_TIMEOUT_SEC=\xff\n")
-    with pytest.raises(ConfigFault, match="not UTF-8"):
         cmdb.check_settings(_resolve(root))
 
 

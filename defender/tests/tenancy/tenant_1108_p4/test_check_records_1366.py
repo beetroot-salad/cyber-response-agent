@@ -224,7 +224,7 @@ def test_1366_b6_no_credentials_at_the_current_generation_is_the_only_finding_th
     assert bare.rc != 0, bare
     assert {s for s in R.FIXTURE_SYSTEMS if R.lines_naming("\n".join(bare), s, "no credentials at the current generation")} \
         == R.FIXTURE_SYSTEMS, bare
-    others = ("orphan", "disabled", "retired", "import", "not among", "cover")
+    others = ("orphan", "disabled", "retired", "not among", "cover")
     assert not [line for line in bare if any(w in line for w in others)], bare
 
     assert _findings(op).rc == 0

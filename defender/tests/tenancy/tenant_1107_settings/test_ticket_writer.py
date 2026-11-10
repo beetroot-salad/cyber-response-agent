@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import yaml
 
 from defender.records import RunPaths
 from defender.records import run_end
@@ -303,7 +304,7 @@ def test_o6_aborted_missing_config_receipt(tmp_path, monkeypatch):
 def test_o5_run_start_makes_no_call_and_writes_no_receipt_on_any_path(tmp_path, monkeypatch):
     """Whatever run start finds wrong with the case settings it neither calls the store nor leaves
     a receipt: the record leg is the only source of one. O1, O5, run-start flow."""
-    for arm in ("ok", "missing-config", "bad-config", "bad-case-record", "no-key", "transport"):
+    for arm in ("ok", "missing-config", "bad-config", "case-record-not-covering", "no-key", "transport"):
         answers = [S.timed_out()] if arm == "transport" else S.store_answers_ok()
         shim = _shim(tmp_path, monkeypatch, *answers, name=f"proxy-{arm}")
         root, folder, alert = _world(tmp_path, name=f"tenants-{arm}")
@@ -311,8 +312,10 @@ def test_o5_run_start_makes_no_call_and_writes_no_receipt_on_any_path(tmp_path, 
             S.config_path(folder, CASE).unlink()
         elif arm == "bad-config":
             S.set_key(folder, CASE, "TICKET_TIMEOUT_SEC", "ten")
-        elif arm == "bad-case-record":
-            S.case_record_path(folder).write_text("- not\n- a mapping\n", encoding="utf-8")
+        elif arm == "case-record-not-covering":
+            # What an upgrade leaves (C5; a bad case-record FILE can no longer reach a run, O4/O9): the case system's
+            # stored declaration no longer has the comment route.
+            _uncover_comment_route(folder)
         elif arm == "no-key":
             alert = _alert_without_key(tmp_path / f"alert-nokey-{arm}")
         seen: list[tuple[int, bool]] = []
@@ -327,6 +330,14 @@ def test_o5_run_start_makes_no_call_and_writes_no_receipt_on_any_path(tmp_path, 
         got = S.receipt(run_dir)
         assert got is not None, f"{arm}: the record leg left no receipt"
         assert got["ok"] is (arm == "ok"), f"{arm}: {got}"
+
+
+def _uncover_comment_route(folder: Path) -> None:
+    """Rewrite the case system's access declaration without any write route (a valid declaration, valid record)."""
+    path = S.settings_of(folder) / "systems" / CASE / "access.yaml"
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    doc["writes"] = []
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
 
 
 def _alert_without_key(where: Path) -> Path:
