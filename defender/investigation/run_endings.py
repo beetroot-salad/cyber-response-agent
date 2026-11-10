@@ -20,8 +20,6 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from pydantic_ai.exceptions import ModelHTTPError
-
 from defender import box as box_mod
 from defender import providers
 from defender._exception_groups import carried, carried_unless_overridden
@@ -113,6 +111,10 @@ def _provider_refused_by_status(exc: BaseException) -> RunEnding | None:
     """MAIN's own request refused for good, arriving as the bare HTTP error (#1243 r3). Every
     HTTP error the group carries is read, not only the first: a temporary one ahead of a refusal
     must not hide it. Ranked after the refusal that arrives as `ProviderRejected`."""
+    # Lazy: the agent framework is not installed where operator tools load this module (the
+    # lead-zero census), and only the driver's sites ask this row.
+    from pydantic_ai.exceptions import ModelHTTPError
+
     if carried_unless_overridden(exc, ModelHTTPError, _REFUSAL_YIELDS_TO) is None:
         return None
     pending = [exc]
