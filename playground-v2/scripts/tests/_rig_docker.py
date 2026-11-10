@@ -38,7 +38,12 @@ what a marker, an offset or a variant is. What it models:
   exits 0. `commit [--pause=...] <container> <tag>` makes an image (`images`, bytes unique to that commit;
   a `commit` event); `save <image>` prints the image's bytes (an image the rig never committed: empty);
   `image rm` forgets it. `run --entrypoint E` runs `E` with the command as its arguments, and `tar -c -C
-  <dir> -f - .` prints a tar (sorted, mtime 0) of the files under `<dir>`. A live stub with
+  <dir> -f - .` prints a tar (sorted, mtime 0) of the files under `<dir>`; when `<dir>` is a volume a RUNNING
+  role host mounts (reached through `--volumes-from`), the host writes it as tar reads (live check
+  2026-11-10): tar still prints the archive but exits 1 with `tar: <file>: file changed as we read it`.
+  `pause` / `unpause` freeze and thaw a running container (`State.Status` paused, `State.Running` true; each
+  refuses a missing container or one in the wrong state, rc 1); `exec` into a paused container fails (rc 1,
+  "is paused, unpause the container before exec"), `start` refuses it, stop/kill/`rm -f` act on it. A live stub with
   `extra["serves"]` (`{path: payload}`) answers the GET script with that payload (a path it does not serve:
   HTTP 404, exit 1). `scratch_cluster(container)` gives an Elasticsearch-image container started on the lab
   server itself (outside any engine) the cluster it answers from.
@@ -303,6 +308,8 @@ class RigDocker(FakeDocker):
             return self._run(verb, rest, scope, stdin)
         if verb in ("start", "restart", "stop", "kill"):
             return self._lifecycle(verb, [a for a in rest if not a.startswith("-")], scope)
+        if verb in ("pause", "unpause"):
+            return self._pause(verb, [a for a in rest if not a.startswith("-")], scope)
         if verb == "rm":
             return self._rm(rest, scope)
         if verb == "exec":
@@ -442,13 +449,14 @@ class RigDocker(FakeDocker):
         for e in opts["env"]:
             k, _, v = e.partition("=")
             env[k] = v
-        mounts = []
+        mounts, sources = [], []
         for spec in opts["volumes_from"]:
             src_name, _, mode = spec.partition(":")
             src = self.containers.get((scope, src_name))
             if src is None:
                 return 125, "", f"docker: Error response from daemon: No such container: {src_name}"
             mounts += [(d, k, r, ro or mode == "ro") for d, k, r, ro in src.mounts]
+            sources.append(src)
         anon = []
         for spec in opts["volumes"]:
             parts = spec.split(":")
@@ -465,6 +473,7 @@ class RigDocker(FakeDocker):
                 mounts.append((_norm(parts[1]), "store", self._volume(scope, parts[0]), ro))
         c = self._new(scope, name, image, env, mounts, command, ["docker", "run", *rest])
         c.extra["anon"] = anon
+        c.extra["volumes_from"] = sources
         c.extra["add_hosts"] = list(opts["add_hosts"])
         c.engine = any("dockerd" in a for a in command)
         if "elasticsearch" in image and "/" in scope:
@@ -549,11 +558,33 @@ class RigDocker(FakeDocker):
                     if scope == f"{c.scope}/{c.name}" and inner.state == "running":
                         self._set_state(inner, "exited")
 
+    def _pause(self, verb: str, names: list[str], scope: str):
+        """`pause`: a running container freezes (`State.Status` paused, `State.Running` still true); `unpause`
+        thaws it. Each refuses a container in the wrong state, and a missing one, as docker does (rc 1)."""
+        if not names:
+            return 1, "", f'"docker {verb}" requires at least 1 argument.'
+        for name in names:
+            c = self.containers.get((scope, name))
+            if c is None:
+                return 1, "", NO_SUCH.format(name)
+            if verb == "pause" and c.state != "running":
+                why = "is already paused" if c.state == "paused" else "is not running"
+                return 1, "", f"Error response from daemon: container {c.id:064x} {why}"
+            if verb == "unpause" and c.state != "paused":
+                return 1, "", f"Error response from daemon: container {c.id:064x} is not paused"
+            c.state = "paused" if verb == "pause" else "running"
+            self.events.append({"kind": verb, "j": len(self.journal) - 1, "clock": self.clock.last, "container": c})
+        return 0, "\n".join(names) + "\n", ""
+
     def _lifecycle(self, verb: str, names: list[str], scope: str):
         for name in names:
             c = self.containers.get((scope, name))
             if c is None:
                 return 1, "", NO_SUCH.format(name)
+            if verb == "start" and c.state == "paused":
+                return 1, "", "Error response from daemon: cannot start a paused container, try unpause instead"
+            if c.state == "paused":
+                c.state = "running"      # stop, kill and restart act on a paused container as on a running one
             if verb in ("start", "restart"):
                 kind = "node-start" if c.cluster is self.cluster and "/" in scope else None
                 if kind and kind in self.fail:
@@ -598,8 +629,10 @@ class RigDocker(FakeDocker):
                 if force:
                     continue
                 return 1, "", NO_SUCH.format(name)
-            if c.state == "running" and not force:
+            if c.state in ("running", "paused") and not force:
                 return 1, "", f'Error response from daemon: cannot remove container "/{name}": container is running'
+            if c.state == "paused":
+                c.state = "running"
             if c.state == "running":
                 self._set_state(c, "exited")
             self._forget(c, volumes=vols)
@@ -658,10 +691,13 @@ class RigDocker(FakeDocker):
             if c is None:
                 return 1, "", f"Error: No such object: {name}"
             if fmt is None:
-                out.append(json.dumps([{"Name": name, "State": {"Running": c.state == "running"},
+                out.append(json.dumps([{"Name": name, "State": {"Running": c.state in ("running", "paused"),
+                                                                 "Paused": c.state == "paused"},
                                         "Config": {"Image": c.image}}]))
             elif fmt.replace(" ", "") == "{{.State.Running}}":
-                out.append("true" if c.state == "running" else "false")
+                out.append("true" if c.state in ("running", "paused") else "false")
+            elif fmt.replace(" ", "") == "{{.State.Paused}}":
+                out.append("true" if c.state == "paused" else "false")
             elif fmt.replace(" ", "") == "{{.Config.Image}}":
                 out.append(c.image)
             elif fmt.replace(" ", "") == "{{.State.Status}}":
@@ -693,6 +729,8 @@ class RigDocker(FakeDocker):
             if self.cluster is not None and "/" in scope and name == "elasticsearch":
                 self.cluster.down_requests.append(" ".join(command)[-120:])
             return 1, "", NO_SUCH.format(name)
+        if c.state == "paused":
+            return 1, "", f"Error response from daemon: Container {c.id:064x} is paused, unpause the container before exec"
         if c.state != "running":
             if c.cluster is not None:
                 c.cluster.down_requests.append(" ".join(command)[-120:])
@@ -1238,6 +1276,12 @@ class RigDocker(FakeDocker):
                 info = tarfile.TarInfo(name)
                 info.size, info.mtime = len(data), 0
                 tar.addfile(info, io.BytesIO(data))
+        live = [src for src in c.extra.get("volumes_from", []) if src.extra.get("role_host") and src.state == "running"
+                and any(kind == "store" and ref == store for _d, kind, ref, _ro in src.mounts)]
+        if live and members:
+            # a running role host's agent and logs write while tar reads them (#1347 live check, 2026-11-10)
+            changed = sorted(members)[-1]
+            return 1, buf.getvalue(), f"tar: {changed}: file changed as we read it\n".encode()
         return 0, buf.getvalue(), b""
 
     def _injected_marker_write(self, since: int) -> str | None:

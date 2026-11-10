@@ -131,3 +131,58 @@ def test_a_file_an_image_holds_is_read_in_a_container_of_that_image():
 def test_a_curl_post_to_a_stub_is_not_read_as_a_stub_read(flag):
     assert RigDocker._stub_request(["curl", "-s", flag, "@-", "http://localhost:8080/admin/overlay/"]) is None
     assert RigDocker._stub_request(["curl", "-s", "http://localhost:8080/hosts/h1"]) is not None
+
+
+def _host_rig():
+    """A role host with a live agent volume, on the lab server (live check, 2026-11-10)."""
+    journal = Journal()
+    docker = RigDocker(journal=journal, clock=FakeClock(journal, instant(T)))
+    docker.volume("lab", "web-1-agent").update({"data/elastic-agent-9.3.3-d70142/state.enc": b"state"})
+    host = docker.existing("lab", "web-1", "soc-playground-web-1",
+                           mounts=[("/var/lib/elastic-agent", "store", docker.volumes[("lab", "web-1-agent")], False)])
+    host.extra["role_host"] = True
+    return docker, host
+
+
+def _docker(docker, *args, **kw):
+    return docker(["docker", "--context", "lab", *args], capture_output=True, **kw)
+
+
+def test_pause_and_unpause_report_the_states_docker_reports_and_refuse_as_docker_does():
+    docker, host = _host_rig()
+    status = lambda: _docker(docker, "inspect", "-f", "{{.State.Status}}", "web-1", text=True).stdout.strip()
+    assert _docker(docker, "pause", "web-1").returncode == 0 and status() == "paused"
+    assert _docker(docker, "inspect", "-f", "{{.State.Running}}", "web-1", text=True).stdout.strip() == "true"
+    assert _docker(docker, "inspect", "-f", "{{.State.Paused}}", "web-1", text=True).stdout.strip() == "true"
+    assert _docker(docker, "pause", "web-1").returncode == 1, "a paused container paused again"
+    done = _docker(docker, "exec", "web-1", "sh", "-c", "true", text=True)
+    assert done.returncode == 1 and "is paused" in done.stderr, done
+    assert _docker(docker, "start", "web-1").returncode == 1
+    assert _docker(docker, "unpause", "web-1").returncode == 0 and status() == "running"
+    assert _docker(docker, "unpause", "web-1").returncode == 1, "a running container unpaused"
+    assert _docker(docker, "exec", "web-1", "sh", "-c", "true").returncode == 0
+    missing = _docker(docker, "pause", "web-9", text=True)
+    assert missing.returncode == 1 and "No such container" in missing.stderr
+    assert _docker(docker, "unpause", "web-9").returncode == 1
+    _docker(docker, "stop", "web-1")
+    assert _docker(docker, "pause", "web-1").returncode == 1, "a stopped container paused"
+    assert docker.unmodelled == []
+
+
+def test_a_tar_of_a_running_hosts_volume_sees_it_change_and_a_paused_one_does_not():
+    """Live check (2026-11-10): `run --volumes-from <host>:ro --entrypoint tar ... -cf - .` over a running host's
+    agent volume exits 1 (`file changed as we read it`, the archive still printed); with the host paused it
+    exits 0 with the same members."""
+    docker, host = _host_rig()
+    argv = ["run", "--rm", "--volumes-from", "web-1:ro", "--entrypoint", "tar", "--network", "none",
+            "soc-playground-web-1", "-C", "/var/lib/elastic-agent", "-cf", "-", "."]
+    live = _docker(docker, *argv)
+    assert live.returncode == 1, live
+    assert b"tar: ./data/elastic-agent-9.3.3-d70142/state.enc: file changed as we read it" in live.stderr
+
+    _docker(docker, "pause", "web-1")
+    frozen = _docker(docker, *argv)
+    _docker(docker, "unpause", "web-1")
+    assert (frozen.returncode, frozen.stderr) == (0, b""), frozen
+    assert frozen.stdout == live.stdout
+    assert docker.unmodelled == []
