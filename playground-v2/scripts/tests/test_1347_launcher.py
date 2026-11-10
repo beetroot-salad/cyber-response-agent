@@ -50,8 +50,9 @@ import pytest
 import yaml
 from _lab_fakes import (AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, ALERTS_PATTERN, DATA_DROP, EVENTS, FREEZE_ID,
                         LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SCHEMA_DRIFT,
-                        SLUG, SPAN_START, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T, FaultJournal, LabRig,
-                        canonical_digest, expected_copy, expected_variant, instant, is_clean_marker, nested_alert)
+                        SLUG, SNAP, SNAP_UUID, SPAN_START, STREAMS, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T,
+                        FakeCluster, FaultJournal, Journal, LabRig, alert_doc, canonical_digest, expected_copy,
+                        expected_variant, instant, is_clean_marker, nested_alert)
 
 LAUNCH = Path(__file__).resolve().parents[1] / "launch_frozen.py"
 KINDS = ["none", "drop", "drift", "cmdb"]
@@ -440,6 +441,103 @@ def test_an_overlay_that_died_midway_leaves_a_dirty_marker_and_the_next_launch_r
 
     assert rig.cluster.restores == 2 and rig.cluster.state() == expected_copy("drift")
     assert [r["verdict"] for r in rig.rows()] == ["valid"]
+
+
+# -- live check 10: real ancestors name the rule's pattern; the lab holds ~355k alerts with ancestry ----------------
+
+_ANCESTRY_MIX = {
+    # in-span auth events, named every way a live ancestor may name them: rewritten
+    "mixed": alert_doc("mixed", "2026-10-20T08:22:00Z", port=40122,
+                       ancestors=(("auth-05", AUTH), ("auth-22", "logs-system.auth-*"))),
+    "logs-star": alert_doc("logs-star", "2026-10-20T08:24:00Z", ancestors=(("auth-24", "logs-*"),), port=40124),
+    "stream-named": alert_doc("stream-named", "2026-10-20T08:23:00Z", port=40123,
+                              ancestors=(("auth-23", "logs-system.auth-default"),)),
+    # an in-span event of another stream, named by a pattern the drifted stream also matches: kept
+    "broad-other": alert_doc("broad-other", "2026-10-20T08:12:00Z", ancestors=(("syslog-21", "logs-system.*"),),
+                             port=41001),
+    # an auth event's id under another stream's index: no such event there, kept
+    "wrong-stream": alert_doc("wrong-stream", "2026-10-20T08:26:00Z", ancestors=(("auth-26", SYSLOG),), port=40126),
+    # a pattern-form ancestor before the span: kept
+    "pre-span": alert_doc("pre-span", "2026-10-20T07:40:00Z", ancestors=(("auth-10", "logs-system.*"),), port=40110),
+}
+
+
+def _drifted(rig) -> set[str]:
+    return {i[len("id-"):] for i, (_v, src) in rig.cluster.state()[ALERTS].items() if "source.port_no" in src}
+
+
+def test_a_schema_drift_rewrites_exactly_the_alerts_whose_ancestor_event_is_in_the_span_and_the_drifted_stream(tmp_path):
+    """#1347 live check 10 (a): live ancestors carry the rule's search pattern (`logs-system.auth-*`), not the
+    backing index. A schema-drift rewrites the alerts whose ancestor names an in-span event of the drifted stream
+    by its backing index, a pattern matching it, or its data stream; not one whose event is before the span, in
+    another stream a broader pattern also matches, or under an index that does not hold it."""
+    rig = LabRig(tmp_path, extra_alerts=_ANCESTRY_MIX)
+    state = expected_variant(SCHEMA_DRIFT, extra_alerts=_ANCESTRY_MIX)
+    rig.write_variant_case(SCHEMA_DRIFT, state=state)
+
+    rig.launch()
+
+    assert _drifted(rig) == {"young", "derived-in", "mixed", "logs-star", "stream-named"}, sorted(_drifted(rig))
+    assert rig.cluster.state() == state
+    assert [r["verdict"] for r in rig.rows()] == ["valid"], rig.rows()
+
+
+_BULK = 10_500      # alerts with ancestry in the copy: more than one from+size window (10 000)
+
+
+def _bulk_alerts() -> dict:
+    """`_BULK` alerts with live-form ancestry, all at or before T: a few derive from in-span auth events, the rest
+    from events before the span or in another stream. Built flat and cheap (one small dict each)."""
+    out = {}
+    for n in range(_BULK):
+        event, pattern = (f"auth-{n % 18:02d}", "logs-system.auth-*") if n % 2 else (f"nginx-{n % 10:02d}", "logs-*")
+        out[f"bulk-{n:05d}"] = {"@timestamp": "2026-10-20T06:00:00Z", "kibana.alert.uuid": f"bulk-{n:05d}",
+                                "kibana.alert.workflow_status": "closed", "source.port": 50000,
+                                "kibana.alert.ancestors": [{"id": event, "type": "event", "index": pattern,
+                                                            "depth": 0}]}
+    for n, event in enumerate(("auth-19", "auth-28", "auth-30")):
+        uuid = f"bulk-span-{n}"
+        out[uuid] = alert_doc(uuid, "2026-10-20T08:50:00Z", ancestors=((event, "logs-system.auth-*"),), port=50100 + n)
+    return out
+
+
+def test_a_schema_drift_completes_over_more_alerts_with_ancestry_than_one_search_window(tmp_path):
+    """#1347 live check 10 (b): the lab holds ~355k alerts with ancestry. With more than 10 000 of them in the copy
+    (the fake refuses from + size past 10 000, as Elasticsearch does), of which three derive from in-span events,
+    the drift launch completes and rewrites exactly those three (and the world's own two)."""
+    bulk = _bulk_alerts()
+    rig = LabRig(tmp_path, extra_alerts=bulk)
+    state = expected_variant(SCHEMA_DRIFT, extra_alerts=bulk)
+    rig.write_variant_case(SCHEMA_DRIFT, state=state)
+
+    rig.launch()
+
+    assert _drifted(rig) == {"young", "derived-in", "bulk-span-0", "bulk-span-1", "bulk-span-2"}
+    assert rig.cluster.state() == state
+    assert [r["verdict"] for r in rig.rows()] == ["valid"], rig.rows()
+
+
+def test_the_fake_cluster_pages_alerts_by_ancestor_id_as_elasticsearch_does():
+    """R6 for the fake the bulk test relies on: from + size past 10 000 is refused; `terms` on
+    `kibana.alert.ancestors.id` matches an alert by any ancestor; `_doc` order with `search_after` pages
+    through every hit once."""
+    content = {ALERTS: {f"id-{n}": {"_source": {"kibana.alert.ancestors": [
+        {"id": f"e-{n % 3}", "type": "event", "index": "logs-*", "depth": 0}]}, "_version": 1} for n in range(25)}}
+    cluster = FakeCluster(Journal(), repo=REPO, snapshot=SNAP, snapshot_uuid=SNAP_UUID, content={}, streams=STREAMS)
+    for i, doc in content[ALERTS].items():
+        cluster.put(ALERTS, i, doc["_source"])
+    with pytest.raises(Exception, match="Result window is too large"):
+        cluster.es_request("POST", f"/{ALERTS}/_search", {"from": 9_001, "size": 1_000})
+    query = {"terms": {"kibana.alert.ancestors.id": ["e-1"]}}
+    seen, after = [], None
+    while True:
+        body = {"size": 3, "sort": [{"_doc": "asc"}], "query": query, **({"search_after": after} if after else {})}
+        hits = cluster.es_request("POST", f"/{ALERTS}/_search", body)["hits"]["hits"]
+        seen += [h["_id"] for h in hits]
+        if len(hits) < 3:
+            break
+        after = hits[-1]["sort"]
+    assert sorted(seen) == sorted(f"id-{n}" for n in range(25) if n % 3 == 1) and len(seen) == len(set(seen))
 
 
 def test_a_copy_with_no_marker_is_restored_whole_over_whatever_it_holds(tmp_path):
