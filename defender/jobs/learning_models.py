@@ -42,7 +42,7 @@ OUTCOMES = ("merged", "closed", "abandoned")
 _TIME = DateTime(timezone=True)
 
 
-def _in(column: str, allowed: tuple[str, ...]) -> str:
+def _in_list(column: str, allowed: tuple[str, ...]) -> str:
     return f"{column} IN ({', '.join(repr(v) for v in allowed)})"
 
 
@@ -51,10 +51,10 @@ class BatchRow(Base, kw_only=True):
     __table_args__ = (
         ForeignKeyConstraint(["tenant_id"], [f"{TENANCY_SCHEMA}.tenants.id"]),
         ForeignKeyConstraint(["replaces"], [f"{SCHEMA}.batches.id"]),
-        CheckConstraint(_in("kind", BATCH_KINDS), name="kind"),
-        CheckConstraint(_in("lane", LANES), name="lane"),
-        CheckConstraint(_in("phase", PHASES), name="phase"),
-        CheckConstraint("outcome IS NULL OR " + _in("outcome", OUTCOMES), name="outcome"),
+        CheckConstraint(_in_list("kind", BATCH_KINDS), name="kind"),
+        CheckConstraint(_in_list("lane", LANES), name="lane"),
+        CheckConstraint(_in_list("phase", PHASES), name="phase"),
+        CheckConstraint("outcome IS NULL OR " + _in_list("outcome", OUTCOMES), name="outcome"),
         CheckConstraint("(phase = 'ended') = (outcome IS NOT NULL)", name="ended_has_an_outcome"),
         CheckConstraint("phase <> 'working' OR (lease_owner IS NOT NULL AND lease_expiry IS NOT NULL)",
                         name="working_has_a_lease"),
@@ -101,8 +101,8 @@ class WorkItemRow(Base, kw_only=True):
     __table_args__ = (
         ForeignKeyConstraint(["tenant_id"], [f"{TENANCY_SCHEMA}.tenants.id"]),
         ForeignKeyConstraint(["batch_id"], [f"{SCHEMA}.batches.id"]),
-        CheckConstraint(_in("kind", KINDS), name="kind"),
-        CheckConstraint(_in("status", STATUSES), name="status"),
+        CheckConstraint(_in_list("kind", KINDS), name="kind"),
+        CheckConstraint(_in_list("status", STATUSES), name="status"),
         # A request case is unique while waiting; the later run wins (r8 coalesce key).
         Index("work_items_one_waiting_request_per_case", "tenant_id", "kind", "coalesce_key", unique=True,
               postgresql_where=text("status = 'waiting' AND coalesce_key IS NOT NULL")),

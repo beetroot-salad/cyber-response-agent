@@ -171,7 +171,7 @@ def _forge_faults() -> tuple[type[BaseException], ...]:
 def arrived(kind: str, waiting: Sequence[Any], threshold: int) -> bool:
     """Whether a kind's waiting items clear its threshold: rows, but a pitfall counts its distinct mistakes (the
     store's claim applies the same rule)."""
-    if kind != "pitfall":
+    if kind != "pitfall":  # lint-half-table: ok — the pitfall's own distinct-mistake count, not its lane
         return len(waiting) >= max(1, threshold)
     from defender.learning.core.persist import merge_pitfalls, pitfalls_lane_is_open
 

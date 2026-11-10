@@ -82,9 +82,15 @@ def _scenario_items(tmp: Path) -> list[tuple[str, str, dict[str, Any]]]:
     """The scenario's findings as a learning store claim's items (`(kind, key, payload)`, #1278
     D1), in queue order; a row with no `finding_id` is handed under a key of its own so the
     author's own rule judges it."""
-    rows = [json.loads(line) for line in
-            (_state_dir(tmp) / "_pending" / "findings.jsonl").read_text(encoding="utf-8").splitlines()
-            if line.strip()]
+    lines = (_state_dir(tmp) / "_pending" / "findings.jsonl").read_text(encoding="utf-8").splitlines()
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            raise ValueError(f"a scenario finding row is not a JSON object: {line[:80]!r}")
+        rows.append(row)
     return [("finding", str(row.get("finding_id") or f"row-{i}"), row) for i, row in enumerate(rows)]
 
 

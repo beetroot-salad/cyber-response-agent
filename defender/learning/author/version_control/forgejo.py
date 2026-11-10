@@ -152,15 +152,13 @@ def _total_count(response: httpx.Response) -> int | None:
 class PullRequest:
     """One PR of our repository as Forgejo lists it: its number and URL, its head commit
     (`None` when the row carries none; the head branch plays no part in which PR is whose),
-    and its `status`: `open`, `merged` or `closed` (closed unmerged). `head_branch` is the
-    branch the PR was opened from; `merge_commit_sha` is, once it is merged, `main`'s new head
-    for a merge, a squash and a rebase alike (`None` when the row names none)."""
+    and its `status`: `open`, `merged` or `closed` (closed unmerged). `merge_commit_sha` is, once it is merged,
+    `main`'s new head for a merge, a squash and a rebase alike (`None` when the row names none)."""
 
     number: int
     url: str
     head_sha: str | None
     status: str
-    head_branch: str | None = None
     merge_commit_sha: str | None = None
 
 
@@ -175,14 +173,12 @@ def _pull_request(row: dict) -> PullRequest:
             f"Forgejo pull #{row['number']} has an unknown state {state!r}"
         )
     sha = row["head"].get("sha")
-    ref = row["head"].get("ref")
     merge_sha = row.get("merge_commit_sha")
     return PullRequest(
         number=row["number"],
         url=row["html_url"],
         head_sha=sha if isinstance(sha, str) and sha else None,
         status=status,
-        head_branch=ref if isinstance(ref, str) and ref else None,
         merge_commit_sha=(
             merge_sha if status == "merged" and isinstance(merge_sha, str) and merge_sha else None
         ),

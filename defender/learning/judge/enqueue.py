@@ -102,7 +102,7 @@ def _holds_nul(value: Any) -> bool:
     return False
 
 
-def _refuse_nul(row: dict[str, Any], where: str, channel: str) -> None:
+def _refuse_nul_row(row: dict[str, Any], where: str, channel: str) -> None:
     """A NUL character anywhere in the row: the store's jsonb can never hold it, so a row bound
     for the store that carries one fails validation, screened before anything is inserted
     (#1278). An episode's own record holds it; its publish refuses it. Keys and string values
@@ -253,7 +253,7 @@ def _screen_for_store(drawn: DrawnRows, where: str) -> None:
     the store refuses a NUL only per insert, after an earlier kind's rows went in."""
     for channel, rows in ((FINDINGS, drawn.defender), (QUESTIONER_FINDINGS, drawn.world)):
         for row in rows:
-            _refuse_nul(row, where, channel.name)
+            _refuse_nul_row(row, where, channel.name)
 
 
 def enqueue_report(episode_dir: Path, record: dict[str, Any], *, state: FindingsSink,
@@ -583,7 +583,7 @@ def _publish_held(episode: formats.Episode, *, store: Any, tenant_id: str) -> Pu
         for row in rows:
             try:
                 validate(row, episode_dir=episode.dir)
-                _refuse_nul(row, where, channel.name)
+                _refuse_nul_row(row, where, channel.name)
             except JudgeRefused as bad:
                 raise FindingsRefused(f"a held row fails the {channel.name} rule, so the job's "
                                       f"findings are not published: {bad}") from None

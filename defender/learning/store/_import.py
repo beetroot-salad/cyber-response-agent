@@ -36,7 +36,7 @@ from ._store import (
     LearningStore,
     _digest,
     _refuse_nul,
-    _text,
+    _str_or_none,
     lanes_of_branch,
 )
 from defender.jobs.learning_models import AUTHOR_LANE, LEAD_LANE, BatchRow, CommitChangeRow, CommitRow
@@ -215,11 +215,11 @@ def _row_key(row: Mapping[str, Any], id_key: str) -> tuple[str, bool]:
 def _new_item(kind: str, key: str, row: dict[str, Any], status: str, reason: str | None) -> _Item:
     item = _Item(kind=kind, key=key, payload=row, status=status, reason=reason,
                  counters={c: _counter(row.get(c)) for c in _COUNTERS})
-    if kind == "pitfall":
-        item.source_run = _text(row.get("source_run"))
+    if kind == "pitfall":  # lint-half-table: ok — the pitfall's own row shape (mistake key), not its lane
+        item.source_run = _str_or_none(row.get("source_run"))
         item.mistake_key = _digest([row.get("system"), row.get("stderr_digest")])
     else:
-        item.source_run = _text(row.get("run_id"))
+        item.source_run = _str_or_none(row.get("run_id"))
     return item
 
 
@@ -303,7 +303,7 @@ def _request(name: str, body: dict[str, Any] | None, text: str, status: str) -> 
     if body is None:
         return _Item(kind="curation_request", key=_digest(text), payload={"unreadable": name}, status="dead",
                      reason=f"the request file {name} is not a JSON object")
-    run_id, case_id = _text(body.get("run_id")), _text(body.get("case_id"))
+    run_id, case_id = _str_or_none(body.get("run_id")), _str_or_none(body.get("case_id"))
     keyed = run_id is not None and bool(run_id.strip())
     item = _Item(kind="curation_request", key=run_id if run_id is not None and keyed else _digest(body),
                  payload=dict(body), status=status, source_run=run_id if keyed else None, coalesce_key=case_id)

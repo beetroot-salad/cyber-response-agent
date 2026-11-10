@@ -232,7 +232,8 @@ def _refuse_nul(value: Any) -> None:
 def _superseded(item: Any) -> Any:
     """The test that a request returning to waiting has a fresher one waiting for its case."""
     other = _I.alias()
-    return and_(item.c.kind == "curation_request", item.c.coalesce_key.is_not(None),
+    return and_(item.c.kind == "curation_request",  # lint-half-table: ok — supersession is the curation request's own rule, not its lane
+                item.c.coalesce_key.is_not(None),
                 exists().where(and_(other.c.tenant_id == item.c.tenant_id, other.c.kind == item.c.kind,
                                     other.c.coalesce_key == item.c.coalesce_key, other.c.status == "waiting",
                                     other.c.item_key != item.c.item_key)))
@@ -312,7 +313,7 @@ class LearningStore:
         mistake = _digest([row.get("system"), row.get("stderr_digest")])
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
-            return bool(await self._insert_item(s, tenant, "pitfall", key, dict(row), source_run=_text(row.get("source_run")),
+            return bool(await self._insert_item(s, tenant, "pitfall", key, dict(row), source_run=_str_or_none(row.get("source_run")),
                                                 mistake_key=mistake))
 
     async def enqueue_request(self, tenant: str, run_id: str, case_id: str, spec: Mapping[str, Any]) -> bool:
@@ -441,7 +442,7 @@ class LearningStore:
             from defender.learning.core.persist import merge_pitfalls, pitfalls_lane_is_open
 
             payloads = [r.payload for r in (await s.execute(select(_I.c.payload).where(
-                _I.c.tenant_id == TenantId(tenant), _I.c.kind == "pitfall", _I.c.status == "waiting"))).all()]
+                _I.c.tenant_id == TenantId(tenant), _I.c.kind == "pitfall", _I.c.status == "waiting"))).all()]  # lint-half-table: ok — the pitfall's own distinct-mistake threshold, not its lane
             if not pitfalls_lane_is_open(merge_pitfalls(payloads), max(1, thresholds.get("pitfall", 1))):
                 due.remove("pitfall")
         if not due:
@@ -800,7 +801,7 @@ def lanes_of_branch(branch: str) -> tuple[str, ...]:
     return (LEAD_AUTHOR_DRAIN_LABEL if branch.startswith(BRANCH_PREFIX[LEAD_LANE]) else AUTHOR_DRAIN_LABEL).lanes
 
 
-def _text(value: Any) -> str | None:
+def _str_or_none(value: Any) -> str | None:
     return value if isinstance(value, str) else None
 
 

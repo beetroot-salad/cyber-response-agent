@@ -369,7 +369,7 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
     from defender.learning.store import Outcome
     from defender.records import RunAbsent
 
-    for kind, key, payload in [item for item in held.items if item[0] == "curation_request"]:
+    for kind, key, payload in [item for item in held.items if item[0] == "curation_request"]:  # lint-half-table: ok — this lane serves the curation request's own run rule, not a lane decision
         run = _run_of(payload, paths.tenant)
         if isinstance(run, RunAbsent):
             outcomes[(kind, key)] = Outcome.dead("artifact-missing")
@@ -388,7 +388,7 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
                 _logger.warning(f"lead_author_drain: request {key}: {type(e).__name__}: {one_line(str(e))}")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         if not done:
             outcomes.setdefault((kind, key), Outcome.waiting())
-    pitfalls = [item for item in held.items if item[0] == "pitfall"]
+    pitfalls = [item for item in held.items if item[0] == "pitfall"]  # lint-half-table: ok — the pitfall curation is the kind's own rule, not a lane decision
     if not pitfalls:
         return
     curated: list[PitfallsDisposition] = []
