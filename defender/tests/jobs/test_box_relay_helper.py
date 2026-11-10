@@ -96,6 +96,23 @@ def test_a4_an_exchange_with_no_frame_on_a_box_the_helper_cannot_vouch_for_is_an
     assert got["after"] > got["before"], "the box was judged lost without asking its status"
 
 
+@pytest.mark.parametrize(("exchange", "timeout"), [
+    (R.SLEEPS, 0.5),  # the helper's own deadline on the host: no exec status at all
+    (R.EXEC_HELPER_DEADLINE, 5.0),  # exec 3
+    (R.EXEC_KILLED, 5.0),  # exec 137
+    (R.NOT_A_FRAME, 5.0),  # bytes that are no frame
+], ids=["host-timeout", "exec-3", "exec-137", "no-frame"])
+def test_a4_every_frameless_end_on_a_box_that_has_exited_is_lost_with_its_class_never_a_timeout_or_a_kill(
+        scene, exchange, timeout):
+    """On a box the daemon shows exited, each way an exchange can end without a frame (the helper's own deadline passing,
+    exec 3, exec 137, bytes that are no frame) is `lost` with the box-lost class, judged after asking the box's status:
+    rule 1 outranks the timeout and the kill. Control: on a running box the same host deadline is `timeout`
+    (`test_a4_a_command_outliving_the_timeout...`). (A4, #1421 rule 1)"""
+    got = _exec_once(scene, state="exited", exec_with=exchange, timeout=timeout)
+    assert got["answer"] == LOST, got["answer"]
+    assert got["after"] > got["before"], "the box was judged without asking its status"
+
+
 @pytest.mark.parametrize("exchange", [R.EXEC_KILLED, R.EXEC_KILLED_WITH_BYTES, R.EXEC_KILLED_MID_FRAME],
                          ids=["no-bytes", "partial-bytes", "half-a-frame"])
 def test_a4_exec_137_with_the_box_running_is_an_ok_carrying_the_fixed_kill_line_whatever_arrived(scene, exchange):

@@ -133,16 +133,21 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         candidates=candidates if candidates is not None else choose(T.BRANCH_MESSAGE_ID))
     if grade is not None:
         seams["grade"] = grade
-    argv = ["--job", job, "--tenant", tenant, "--source", src.name, "--parent-pid", str(os.getppid())]
+    # In its job container (#1170 A6): no `--parent-pid`, and a job socket answering the helper's `launch` facts and the
+    # export it materialises; the helper's own answers are `tests/jobs/test_job_helper_learning.py`'s.
+    argv = ["--job", job, "--tenant", tenant, "--source", src.name]
     from defender.learning.branch import job_entry
+    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, materialise
 
     previous = signal.signal(signal.SIGTERM, _unexpected_sigterm)
     outcome: object = None
     try:
-        try:
-            outcome = job_entry.main(argv, **seams)
-        except SystemExit as stop:
-            outcome = stop.code
+        with SocketStandIn(tenant, launch={"kind": "learning", "job": job},
+                           answers={"export.materialise": materialise(tenant)}) as helper:
+            try:
+                outcome = job_entry.main(argv, environ=helper.environ(), **seams)
+            except SystemExit as stop:
+                outcome = stop.code
     finally:
         signal.signal(signal.SIGTERM, previous)
     return Ran(end=_read_json(runs / f"{job}.learning-end.json"),

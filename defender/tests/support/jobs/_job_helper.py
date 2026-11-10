@@ -9,6 +9,9 @@ Other slices import: `helper_scene(tmp_path, monkeypatch, dsn, *, proxied, files
 by the design): `job_host.main(argv, *, docker, signer, publish, forge, command)`, the client `job_host.ask(socket, request,
 **fields) -> dict` raising `job_host.Refused`, the in-container variable `job_host.SOCKET_ENV` naming the job socket, the label
 `job_host.JOB_LABEL` carried by every job container, and the settings `job_host.IMAGE_ENV` (the image). Requests name an id as `id=`.
+One request beyond the design's socket table: `export.materialise(commit=)`, a learning job's only (its pre-flight's
+`--knowledge-commit` pin), answers `{commit, path}` for `<T>/exports/<commit>/` made from the tenant's clone (flow 2), or is
+refused `delivery` for a commit the clone lacks.
 
 Docker double. The helper starts its job container as an attached `docker run` asked of the docker seam's `.popen`, and makes
 every other docker call through the seam. `ContainerStandIn` runs the job as a function on a thread (`job(container) -> rc`)
@@ -50,7 +53,11 @@ CANARY = "OTHER-TENANT-CANARY-1170"
 _UNDECLARED = ("ticket", "host-state", "threat-intel", "change-mgmt", "elastic", "cmdb")
 
 
-#: `helper_scene`'s `files=` for a tenant none of whose systems is `http-proxy`: an empty grant, so nothing is signed.
+#: Every system the fixture tenant declares `http-proxy` as published (`helper_scene(proxied=ALL_SYSTEMS)`: none removed).
+ALL_SYSTEMS: tuple[str, ...] = (*_UNDECLARED, "identity")
+
+#: `helper_scene`'s `files=` for a tenant none of whose systems is `http-proxy`: an empty grant, so nothing is signed. A
+#: system with no declaration is down, so a run over it gathers from nothing.
 NO_PROXY_FILES: dict[str, Any] = {f"settings/systems/{s}/access.yaml": None for s in (*_UNDECLARED, "identity")}
 
 _HELPER_CHILD = Path(__file__).resolve().with_name("_helper_child1170.py")
@@ -343,6 +350,7 @@ class ContainerStandIn(RecordingDocker):
         self.job_error: BaseException | None = None
         self.job_ran = False
         self.live: dict[str, dict[str, str]] = {}  # container name -> labels, until removed
+        self.made: set[str] = set()  # every container name a `create`/`run` through the call seam made
         self.log: list[list[str]] = []  # every call, `popen` ones included, in order
 
     @property
@@ -399,12 +407,20 @@ class ContainerStandIn(RecordingDocker):
         pids = self._process_question(argv, sub)
         if pids is not None:
             return pids
+        if self._asks_a_free_name(argv, sub):
+            # Per name, as a daemon answers: a name never created holds nothing, whatever state `status`/`phase`
+            # model for the boxes that were (one shared phase would make every fresh name look taken to the
+            # pre-create check, #1279 O6). A removed name keeps the modelled state: a removal that did not take.
+            self.calls.append(argv)
+            return subprocess.CompletedProcess(argv, 1, "", f"Error: No such object: {argv[-1]}\n")
         if sub in ("stop", "kill", "ps"):
             self.calls.append(argv)
             return self._stop(argv) if sub != "ps" else self._ps(argv)
         got = super().__call__(argv, **kw)
         if sub in ("create", "run") and got.returncode == 0:
-            self.live[(flag_values(argv, "--name") or [f"box-{len(self.live)}"])[0]] = parse_labels(argv)
+            made = (flag_values(argv, "--name") or [f"box-{len(self.live)}"])[0]
+            self.live[made] = parse_labels(argv)
+            self.made.add(made)
         if sub == "rm":
             for n in argv[2:]:
                 self.live.pop(n, None)
@@ -413,6 +429,13 @@ class ContainerStandIn(RecordingDocker):
                         box.stopping.set()  # `rm -f` kills a running container, as docker does
                         box.removed.set()
         return got
+
+    def _asks_a_free_name(self, argv: list[str], sub: str) -> bool:
+        """A `docker inspect -f {{.State.Status}} <name>` of a name no `create`/`run` ever made."""
+        if sub != "inspect" or not any("State.Status" in a for a in argv):
+            return False
+        name = argv[-1]
+        return name not in self.made and not any(b.name == name for b in self.boxes)
 
     def _stop(self, argv: list[str]) -> subprocess.CompletedProcess:
         for box in self.boxes:
@@ -460,6 +483,15 @@ class HelperScene:
     @property
     def tenant(self) -> str:
         return self.t.tenant_id
+
+    def forge_seams(self, forge: Any = None) -> dict[str, Any]:
+        """A post-step helper's forge seams over the fixture's forge: `forge`, the credential builder (default a
+        `ForgeCredentialRecorder` answering the token the fixture's git server accepts for this tenant), and `client`,
+        the forge API client (the fixture forge's)."""
+        from defender.tests.tenancy.tenant_1108_p4._support import issuer_token
+
+        return {"forge": forge if forge is not None else ForgeCredentialRecorder(accepted=issuer_token(self.tenant)),
+                "client": self.t.forge.client}
 
     def plant(self, inv: str) -> None:
         """The worker's two files for an investigation (launch record and alert), as the worker writes them."""
@@ -526,7 +558,8 @@ def helper_scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[s
     with contextlib.ExitStack() as cleanup:
         cleanup.callback(shutil.rmtree, outer, ignore_errors=True)
         t = cleanup.enter_context(B.run_tenant(tmp_path, root, files=over))
-        register_tenant(dsn, t.tenant_id, data_root=root, generations=(), alert_mapping=alert_mapping)
+        # The forge wiring names the fixture's served origin, so the post-step's drain publish reaches it (C23).
+        register_tenant(dsn, t.tenant_id, data_root=root, generations=(), alert_mapping=alert_mapping, origin=t.origin)
         fields = A.generation(t.tenant_id, tmp_path / "secrets", sign_role_id="role-1170-sign",
                               sign_secret="secret-1170-sign")
         insert_generation(dsn, t.tenant_id, fields)
@@ -581,6 +614,61 @@ def listing(folder: Path) -> list[str]:
     return sorted(p.name for p in folder.iterdir()) if folder.is_dir() else []
 
 
+@dataclass
+class ComponentSwap:
+    """One H10 arm: `component` (a folder on the way from `<T>/` to a bind source) swapped for a link into the other
+    tenant; `code` the refusal's code (`"answered"` when `box.start` was answered); the box starts and the other tenant's
+    mirror before and after."""
+
+    component: Path
+    code: str
+    creates: tuple[int, int]
+    mirror: tuple[list[str], list[str]]
+
+
+def swap_every_component(scene: HelperScene, c: Container, docker: ContainerStandIn,
+                         fields: dict[str, Any]) -> tuple[list[Path], list[ComponentSwap]]:
+    """H10's sweep, run by the job: `box.start(**fields)` once on the untouched folders (the control, then stopped), the
+    bind sources under `<T>/` read off that box's `docker create`, then each folder on the way from `<T>/` down to a
+    source (the source itself included) in turn moved aside and replaced by a link to a folder of the other tenant that
+    mirrors what lay below it (so the resolved path exists and is a real folder there), `box.start(**fields)` asked again,
+    and the folder put back. Returns `(sources, arms)`."""
+    from defender import job_host
+
+    first = c.request("box.start", **fields)
+    sources_create = docker.creates()[-1]
+    with contextlib.suppress(job_host.Refused):
+        c.request("box.stop", handle=first["handle"])
+    tenant = scene.root / scene.tenant
+    sources = sorted({Path(m["source"]) for m in parse_mounts(sources_create)
+                      if m["source"] and Path(m["source"]).is_relative_to(tenant) and Path(m["source"]) != tenant})
+    components = sorted({tenant.joinpath(*s.relative_to(tenant).parts[:i + 1])
+                         for s in sources for i in range(len(s.relative_to(tenant).parts))},
+                        key=lambda p: (len(p.parts), str(p)))
+    arms = []
+    for n, component in enumerate(components):
+        if not component.is_dir() or component.is_symlink():
+            continue  # a bind source that is a file: its folders are swapped above it
+        mirror = scene.root / OTHER_TENANT / "mirrors" / f"m{n}"
+        for below in (s for s in sources if s.is_relative_to(component)):
+            (mirror / below.relative_to(component)).mkdir(parents=True, exist_ok=True)
+        before = (len(docker.creates()), sorted(str(p.relative_to(mirror)) for p in mirror.rglob("*")))
+        moved = component.with_name(component.name + ".h10-moved")
+        component.rename(moved)
+        component.symlink_to(mirror, target_is_directory=True)
+        try:
+            try:
+                code = getattr(c.refused("box.start", **fields), "code", "refused")
+            except AssertionError:
+                code = "answered"
+        finally:
+            component.unlink()
+            moved.rename(component)
+        arms.append(ComponentSwap(component, code, (before[0], len(docker.creates())),
+                                  (before[1], sorted(str(p.relative_to(mirror)) for p in mirror.rglob("*")))))
+    return sources, arms
+
+
 def after_the_signal(scene: HelperScene, kind: str, request: str, fields: dict) -> dict:
     """A `kind` helper whose job asks `request` (answered: the control), signals its helper, waits for the container to be
     stopped, asks again. Returns the answers and the state (passes signed, boxes created, copies, drafts) either side."""
@@ -607,7 +695,8 @@ def after_the_signal(scene: HelperScene, kind: str, request: str, fields: dict) 
         return 143
 
     docker = ContainerStandIn(job)
-    ran = drive_helper(scene, argv, docker=docker, signer=signer, forge=ForgeCredentialRecorder())
+    seams = scene.forge_seams() if kind == "post-step" else {"forge": ForgeCredentialRecorder()}
+    ran = drive_helper(scene, argv, docker=docker, signer=signer, **seams)
     assert ran.raised is None, ran.raised
     assert docker.job_error is None, docker.job_error
     return got
@@ -645,11 +734,13 @@ def drive_helper(scene: HelperScene, argv: list[str], *, docker: ContainerStandI
 
 class ForgeCredentialRecorder:
     """The helper's forge seam (`forge(tenant_id, purpose)`): records who it was built for and every
-    `token(min_validity)` asked; answers a token naming its tenant."""
+    `token(min_validity)` asked; answers a fresh token naming its tenant, or `accepted` (the token a fixture forge
+    accepts for the tenant, for a case that reaches the forge) when given."""
 
-    def __init__(self) -> None:
+    def __init__(self, accepted: str | None = None) -> None:
         self.built: list[str] = []
         self.asked: list[float] = []
+        self.accepted = accepted
 
     def __call__(self, tenant_id: str, *_a: Any, **_k: Any) -> Any:
         self.built.append(tenant_id)
@@ -658,6 +749,8 @@ class ForgeCredentialRecorder:
         class _Credential:
             def token(self, min_validity: float = 0) -> str:
                 recorder.asked.append(min_validity)
+                if recorder.accepted is not None:
+                    return recorder.accepted
                 return f"forge-token-{tenant_id}-{len(recorder.asked)}"
         return _Credential()
 

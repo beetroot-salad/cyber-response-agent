@@ -101,6 +101,45 @@ def test_requests_are_refused_by_job_kind(scene, kind, request_name, fields):
     assert got["after"] == got["before"], "a refused request signed, minted, wrote, published or created something"
 
 
+#: A full commit id the tenant's clone does not hold.
+_ABSENT_COMMIT = "fedcba9876543210" * 2 + "fedcba98"
+
+
+@pytest.mark.parametrize("kind", ["learning", "post-step", "investigation"])
+def test_c32_export_materialise_writes_the_clones_commit_as_its_export_and_only_for_a_learning_job(scene, kind):
+    """For a learning job, `export.materialise(commit=)` for a commit the tenant's clone holds (merged and fetched, never
+    published) answers that commit and `<T>/exports/<commit>/`, which then holds exactly the commit's `agent/` and
+    `settings/` blobs; a commit the clone lacks is refused `delivery` and no export is made. The post-step and the
+    investigation are refused it and nothing is made. (Flow 2 behind the socket, C32; requests by job kind)"""
+    from defender.tests.tenancy.tenant_1108_p4._support import agent_blobs, export_dir, files_under, git
+
+    t = scene.t
+    later = t.merge({"agent/lessons/merged-not-yet-published.md": "merged on origin, fetched, never published\n"})
+    git(t.clone, "fetch", str(t.remote), "+refs/heads/main:refs/remotes/origin/main")
+    got: dict = {}
+
+    def job(c) -> int:
+        if kind == "learning":
+            got["answer"] = c.request("export.materialise", commit=later)
+            got["absent"] = c.refused("export.materialise", commit=_ABSENT_COMMIT).code
+        else:
+            got["refused"] = c.refused("export.materialise", commit=later).code
+        return 0
+
+    run_kind(scene, kind, job, family_less=kind == "post-step")
+
+    if kind != "learning":
+        assert got["refused"] in ("not-for-kind", "unknown-request"), got["refused"]
+        assert not export_dir(t.tenant, later).exists(), f"a {kind} job materialised an export"
+        return
+    assert got["answer"]["commit"] == later
+    assert Path(got["answer"]["path"]) == export_dir(t.tenant, later)
+    assert files_under(export_dir(t.tenant, later) / "agent") == agent_blobs(t.clone, later)
+    assert files_under(export_dir(t.tenant, later) / "settings") == agent_blobs(t.clone, later, prefix="settings")
+    assert got["absent"] == "delivery"
+    assert not export_dir(t.tenant, _ABSENT_COMMIT).exists()
+
+
 # --- the learning job: pre-flight --------------------------------------------------------------------------------------
 
 def test_o5_o6_pre_flight_asks_for_a_fresh_pass_naming_the_learning_job_each_time_and_none_lasts_an_hour(scene):
@@ -205,7 +244,11 @@ def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_o
     assert len(sibling_creates) == 2
     assert all(parse_labels(c)[TENANT_LABEL] == scene.tenant for c in sibling_creates)
     assert listing(knowledge) == [], "the helper left a sibling's run copy or a temporary behind"
-    assert listing(planted.dir / "runs") == sorted(x["run"] for x in got["copies"])
+    made = sorted(x["run"] for x in got["copies"])
+    # Each sibling's folder, and beside it only the host-held knowledge-source record of that run (U12).
+    assert [p.name for p in sorted((planted.dir / "runs").iterdir()) if p.is_dir()] == made
+    assert [p.name for p in sorted((planted.dir / "runs").iterdir()) if not p.is_dir()] == \
+        [f"{run}.knowledge-source.json" for run in made]
     assert (planted.dir / "runs" / got["copies"][0]["run"] / "report.md").read_text(encoding="utf-8") == "sibling output"
 
 
@@ -400,6 +443,50 @@ def test_c21_an_oracle_boxs_bind_sources_are_in_a_folder_per_claim_under_the_dat
             assert not src.exists(), f"the helper left {src} behind"
         sources.append(set(mounts))
     assert not (sources[0] & sources[1]), "two claims bound the same folder"
+
+
+@pytest.mark.parametrize("box", ["sibling-shell", "oracle", "batch"])
+def test_h10_every_folder_from_the_tenant_down_to_each_bind_source_of_a_learning_box_is_judged_and_an_unminted_id_is_refused(
+        scene, box):
+    """The learning kinds' twin of `test_job_helper::test_h10_every_folder_from_the_tenant_down...`, one box kind of the
+    helper's registry per case (a sibling's `shell`, the learning job's `oracle`, the post-step's `batch`): each folder on the way from `<T>/` to each bind source under `<T>/`, swapped in turn for a link into a folder
+    of the other tenant holding what lay below it, gets `box.start` refused as `confinement`, no further box and the other
+    tenant's folder unchanged; an id the helper did not mint is refused as `unknown-id` for that box kind and creates
+    nothing. Control: the untouched folders start the box. (H10, A6, O9, C21)"""
+    from defender.tests.support.jobs._job_helper import swap_every_component
+
+    planted = plant_siblings(scene) if box == "sibling-shell" else None
+    kind = {"batch": "post-step"}.get(box, "learning")
+    box_kind = {"sibling-shell": "shell"}.get(box, box)
+    job_id = planted.job_id if planted is not None else str(uuid.uuid4())
+    got: dict = {}
+
+    def job(c) -> int:
+        if box == "sibling-shell":
+            ident = c.request("copy.make", world=planted.worlds["b"])["run"]
+        elif box == "batch":
+            ident = c.request("batch.start", lanes=["lessons"])["batch"]
+        else:
+            ident = job_id
+        got["sources"], got["arms"] = swap_every_component(scene, c, docker, {"kind": box_kind, "id": ident})
+        before = len(docker.creates())
+        got["unminted"] = c.refused("box.start", kind=box_kind, id=str(uuid.uuid4())).code
+        got["unminted_creates"] = (before, len(docker.creates()))
+        return 0
+
+    docker = ContainerStandIn(job)
+    run_kind(scene, kind, None, job_id=None if kind == "post-step" else job_id, docker=docker,
+             family_less=kind == "post-step", source=planted.source if planted is not None else None)
+
+    if box != "oracle":  # the oracle's folders are the claim's, outside `<T>/` (C21): it has the unminted arm only
+        assert got["sources"], f"control: the {box} box binds nothing under the tenant's folder"
+        assert got["arms"], f"control: no folder on the way to the {box} box's sources was swapped"
+    for arm in got["arms"]:
+        assert arm.code == "confinement", f"{arm.component} swapped for a link: {arm.code}"
+        assert arm.creates[1] == arm.creates[0], f"a box was created over the link at {arm.component}"
+        assert arm.mirror[1] == arm.mirror[0], f"the other tenant's folder changed through {arm.component}"
+    assert got["unminted"] == "unknown-id"
+    assert got["unminted_creates"][1] == got["unminted_creates"][0], f"an unminted id started a {box} box"
 
 
 # --- the learning job: the busy lock (A3, C24) -------------------------------------------------------------------------
@@ -653,7 +740,7 @@ def test_r41_a_job_may_start_only_the_box_kinds_of_its_job_kind(scene, kind, ref
 
 @pytest.mark.parametrize(("kind", "request_name", "fields"), [
     ("learning", "pass", {"id": "<job>"}),
-    ("learning", "box.start", {"kind": "shell", "id": "<job>"}),
+    ("learning", "box.start", {"kind": "oracle", "id": "<job>"}),  # the learning job's own box kind (r4.1)
     ("post-step", "batch.start", {"lanes": ["lessons"]}),
 ])
 def test_a1_once_a_learning_kinds_helper_is_signalled_it_refuses_passes_boxes_copies_and_drafts(

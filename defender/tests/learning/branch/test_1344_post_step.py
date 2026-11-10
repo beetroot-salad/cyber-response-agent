@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -16,7 +15,6 @@ from defender.tenancy._tenant import requested_tenant
 from defender.tests.learning.branch.test_1344_job_lane import (
     sink_files)
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
-from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._locations_1210 import fixture_data_root
@@ -87,16 +85,23 @@ def _record(ep: Path, job: str) -> dict:
     return json.loads((Path(data_root) / tenant_id / "runs" / f"{job}.post-step.json").read_text(encoding="utf-8"))
 
 
-def _post_step(ep: Path, job: str, pending: list[str], *, tick=None, waiting=lambda *_a, **_k: True) -> None:
-    """The real post-step, its tenant admitted through the host acceptance from records handed in as `directory=`,
-    as the launcher and the job entry take theirs."""
+def post_step_in_container(job: str | None, tenant_id: str, **seams) -> int:
+    """The real post-step in its job container (#1170 A6): its argv as the helper starts it (no `--parent-pid`), and a
+    job socket answering the helper's `launch` facts (the helper's own answers are `tests/jobs/`'s)."""
     from defender.learning.branch import post_step
+    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn
 
+    argv = [*(["--job", job] if job is not None else []), "--tenant", tenant_id]
+    with SocketStandIn(tenant_id, launch={"kind": "post-step", "job": job}) as helper:
+        return post_step.main(argv, environ=helper.environ(), **seams)
+
+
+def _post_step(ep: Path, job: str, pending: list[str], *, tick=None, waiting=lambda *_a, **_k: True) -> None:
+    """The real post-step in its job container, the worker's pending list handed to it."""
     data_root, tenant_id = J.episode_location(ep)
     hand_pending(data_root, tenant_id, job, pending)
-    argv = ["--job", job, "--tenant", tenant_id, "--parent-pid", str(os.getppid())]
-    post_step.main(argv, author_tick=tick if tick is not None else (lambda *_a, **_k: 0),
-                   directory=T.launcher_directory(tenant_id), still_waiting=waiting)
+    post_step_in_container(job, tenant_id, author_tick=tick if tick is not None else (lambda *_a, **_k: 0),
+                           still_waiting=waiting)
 
 
 def test_o8_the_post_step_publishes_then_runs_the_drain_gate_and_records_it(tmp_path):
@@ -269,14 +274,11 @@ def test_a_pending_job_whose_episode_is_gone_is_refused_not_left_pending_for_eve
 def test_a_post_step_handed_no_readable_list_publishes_nothing_and_still_runs_the_gate(tmp_path):
     """No list where the worker writes it: nothing is published or refused (every job stays pending for the next
     post-step), and the drain's gate still runs. (O8, O14, #1446 review)"""
-    from defender.learning.branch import post_step
-
     ep, _new = _job_episode(tmp_path, "unhanded")
     _data_root, tenant_id = J.episode_location(ep)
     ticks: list[int] = []
-    post_step.main(["--job", ep.name, "--tenant", tenant_id, "--parent-pid", str(os.getppid())],
-                   author_tick=lambda *_a, **_k: ticks.append(1) or 0, directory=T.launcher_directory(tenant_id),
-                   still_waiting=lambda *_a, **_k: True)
+    post_step_in_container(ep.name, tenant_id, author_tick=lambda *_a, **_k: ticks.append(1) or 0,
+                           still_waiting=lambda *_a, **_k: True)
 
     assert _record(ep, ep.name) == {"published": [], "refused": []}
     assert ticks == [1]

@@ -285,7 +285,9 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
     root = short_root
     _priced_env(monkeypatch, root, migrated_database)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
-    with B.run_tenant(tmp_path, root, files=NO_PROXY_FILES) as t:
+    # Every system declared, as published: the priced run gathers from elastic, and a system with no access
+    # declaration is down by design (NO_PROXY_FILES would leave nothing to gather). The helper signs with its seam.
+    with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
@@ -344,7 +346,9 @@ async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_th
     root = short_root
     _priced_env(monkeypatch, root, migrated_database)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
-    with B.run_tenant(tmp_path, root, files=NO_PROXY_FILES) as t:
+    # Every system declared, as published: the priced run gathers from elastic, and a system with no access
+    # declaration is down by design (NO_PROXY_FILES would leave nothing to gather). The helper signs with its seam.
+    with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
@@ -382,7 +386,9 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
     err_file = tmp_path / "child.stderr"
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     modes: dict[str, str] = {}
-    with B.run_tenant(tmp_path, root, files=NO_PROXY_FILES) as t:
+    # Every system declared, as published: the priced run gathers from elastic, and a system with no access
+    # declaration is down by design (NO_PROXY_FILES would leave nothing to gather). The helper signs with its seam.
+    with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 

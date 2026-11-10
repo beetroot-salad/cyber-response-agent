@@ -1015,6 +1015,45 @@ async def test_o7_after_the_child_exits_its_own_box_is_swept_and_a_missing_box_i
     assert not _warned(caplog, clean), "an absent box is normal: nothing to warn about"
 
 
+class _HeldSweep(StandInContainers):
+    """The containers seam whose start sweep of the job containers a previous worker's helpers left
+    (`remove_job_containers`, #1170 A5) blocks until the test releases it, noting that it began."""
+
+    def __init__(self, where: Path) -> None:
+        super().__init__(where)
+        import threading
+
+        self.began, self.release = threading.Event(), threading.Event()
+
+    def remove_job_containers(self) -> None:
+        self.began.set()
+        assert self.release.wait(30), "the test never released the start sweep"
+
+
+async def test_a5_the_start_sweep_of_dead_helpers_containers_ends_before_any_row_is_claimed_or_child_spawned(world, tmp_path):
+    """At start the worker removes the job containers its previous run's helpers left, and claims nothing and spawns no
+    child until that sweep returns: held, the queued row stays queued and no child starts; released, the row runs.
+    (A5: a dead helper's container must not overlap a new claim)"""
+    containers = _HeldSweep(tmp_path / "containers")
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        serving = asyncio.create_task(_worker(world, store, child, containers=containers).serve())
+        began = await asyncio.to_thread(containers.began.wait, 15)
+        await asyncio.sleep(1.5)  # time enough for a claim that did not wait to land
+        held = (child.events(), row(world["dsn"], inv)["stage"], serving.done())
+        containers.release.set()
+        await _until(lambda: row(world["dsn"], inv)["stage"] == "completed", "the row to run once released")
+        assert not serving.done(), "premise: serve() is still running, so the SIGTERM below is its to handle"
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.wait_for(serving, timeout=60)
+
+    assert began, "the worker never swept the job containers at start"
+    assert held == ([], "queued", False), f"a row was claimed or a child spawned while the sweep ran: {held}"
+    assert child.events() == [("start", inv), ("end", inv)], "control: once released the row ran"
+    assert row(world["dsn"], inv)["stage"] == "completed"
+
+
 async def test_o7_the_sweep_runs_for_a_run_that_failed_and_never_writes_the_row(world, tmp_path):
     """A failed run's leftover box (its child's claim) is removed; the row keeps the rules' verdict. (O7, M8, r5 C1)"""
     containers = StandInContainers(tmp_path / "containers")

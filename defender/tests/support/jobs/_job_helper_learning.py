@@ -48,6 +48,10 @@ def run_kind(  # noqa: PLR0913 — one keyword per thing a case may replace
 
     jid = None if family_less else (job_id or str(uuid.uuid4()))
     assert not family_less or kind == "post-step"
+    if kind == "post-step":  # its drain publish reaches the fixture's forge (C23)
+        forge_seams = scene.forge_seams(forge)
+        forge = forge_seams.pop("forge")
+        seams = {**forge_seams, **seams}
     forge = forge or ForgeCredentialRecorder()
     signer = signer or A.MarkedSigner()
     docker = docker or ContainerStandIn(job)
@@ -72,16 +76,17 @@ class PlantedEpisode:
         return self.roster[self.worlds[label]]
 
 
-def plant_siblings(scene: HelperScene, source: str | None = None) -> PlantedEpisode:
+def plant_siblings(scene: HelperScene, source: str | None = None, *, fresh_worlds: bool = False) -> PlantedEpisode:
     """A real episode (`plant_episode`) at the learning job's own id (job id = episode id), whose `--source` is `source`,
-    with its arm roster. Run the job with `job_id=planted.job_id`."""
+    with its arm roster (`fresh_worlds`: world identities of its own, not the fixture's). Run the job with
+    `job_id=planted.job_id`."""
     from defender.tests.storage.ids_1187 import _spec1187 as S
     from defender.tests.support.jobs._learning_container1170 import plant_episode
     from defender.tests.support.learning.branch import _triplet_947 as T
 
     source = source or str(uuid.uuid4())
     job_id = str(uuid.uuid4())
-    ep, _ = plant_episode(scene, job_id, source)
+    ep, _ = plant_episode(scene, job_id, source, fresh_worlds=fresh_worlds)
     worlds = {w: T.world_id(ep, w) for w in T.WORLDS}
     roster = dict(S.read_roster(ep))
     return PlantedEpisode(ep, source, job_id, worlds, roster)
@@ -89,8 +94,10 @@ def plant_siblings(scene: HelperScene, source: str | None = None) -> PlantedEpis
 
 def plant_decoy(scene: HelperScene, planted: PlantedEpisode) -> PlantedEpisode:
     """Another episode of the tenant, at an id that is not the job's, made from the job's own `--source`: the one a helper
-    that finds the episode by `--source` would pick."""
-    return plant_siblings(scene, planted.source)
+    that finds the episode by `--source` would pick. Its worlds are its own (another launch's), none of the job's."""
+    decoy = plant_siblings(scene, planted.source, fresh_worlds=True)
+    assert not set(decoy.worlds.values()) & set(planted.worlds.values()), "premise: the decoy shares no world with the job"
+    return decoy
 
 
 def learning_end(scene: HelperScene, job_id: str) -> Any:

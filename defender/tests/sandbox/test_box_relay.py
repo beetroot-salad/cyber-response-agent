@@ -32,6 +32,23 @@ def _ask(executor: box.BoxExecutor, command: str = COMMAND, *, timeout: float = 
     return executor.run_parsed(bash_exec.parse(command), command=command, cwd=Path(cwd), timeout=timeout)
 
 
+def test_a4_of_every_box_transport_only_the_docker_and_the_relay_ones_count_as_sandboxed():
+    """Every transport class the box package defines (a name ending `Transport`), handed to an executor: `sandboxed` is
+    true for the docker transport and the relay alone; the host executor (`unboxed_executor`) is not sandboxed. (A4, the
+    #1170 relay is the one transport added to the confining set)"""
+    import inspect
+
+    from defender.box import _spec
+
+    transports = {cls for module in (box, _spec) for name, cls in vars(module).items()
+                  if inspect.isclass(cls) and name.endswith("Transport") and cls.__module__.startswith("defender.box")}
+    assert {box._DockerTransport, box.RelayTransport, box._HostTransport} <= transports, "control: the census sees them"
+    sandboxed = {cls.__name__ for cls in transports
+                 if box.BoxExecutor(name="x", transport=object.__new__(cls)).sandboxed}
+    assert sandboxed == {"_DockerTransport", "RelayTransport"}, sandboxed
+    assert box.unboxed_executor().sandboxed is False
+
+
 def test_a4_a_box_reached_over_the_relay_counts_as_sandboxed_and_an_unconfined_transport_does_not():
     """Sandboxed is derived from the transport: the relay is confining by construction; a host or scripted one is not. (A4)"""
     assert relay_executor(ScriptedHelper()).sandboxed is True

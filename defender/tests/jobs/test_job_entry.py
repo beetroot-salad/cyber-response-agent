@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 from defender.tests.support.jobs._container_entry1170 import enter
-from defender.tests.support.jobs._job_helper import helper_scene
+from defender.tests.support.jobs._job_helper import ContainerStandIn, helper_scene
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     AWKWARD_ALERT_BYTES,
@@ -91,16 +91,26 @@ class Scene:
 
 @contextlib.contextmanager
 def _scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, files: dict[str, Any] | None = None,
-           alert_mapping: Any = FIXTURE_ALERT_MAPPING) -> Any:
+           alert_mapping: Any = FIXTURE_ALERT_MAPPING, proxied: tuple[str, ...] = ()) -> Any:
     """The published fixture tenant (`files` written over it), active in `dsn`, with its runs container and #1345's
-    default alert mapping saved (`alert_mapping=None`: none saved, for a test of absence); the helper's environment (r4)."""
-    with helper_scene(tmp_path, monkeypatch, dsn, proxied=(), files=files, alert_mapping=alert_mapping) as hs:
+    default alert mapping saved (`alert_mapping=None`: none saved, for a test of absence); the helper's environment (r4).
+    `proxied`: the systems left declared (default none: an empty grant; a system with no declaration is down)."""
+    with helper_scene(tmp_path, monkeypatch, dsn, proxied=proxied, files=files, alert_mapping=alert_mapping) as hs:
         yield Scene(hs.root, hs.t, hs.runs, dsn=dsn, helper=hs, work=tmp_path)
 
 
 @pytest.fixture
 def scene(tmp_path, monkeypatch, migrated_database):
     with _scene(tmp_path, monkeypatch, migrated_database) as s:
+        yield s
+
+
+@pytest.fixture
+def declared_scene(tmp_path, monkeypatch, migrated_database):
+    """`scene` with every fixture system declared, as published: a run that gathers needs its system up."""
+    from defender.tests.support.jobs._job_helper import ALL_SYSTEMS
+
+    with _scene(tmp_path, monkeypatch, migrated_database, proxied=ALL_SYSTEMS) as s:
         yield s
 
 
@@ -141,13 +151,14 @@ def verified_lifecycle(ran: Ran, *, report_committed: bool = True):
 
 
 def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = None,
-            visualize: Any = None, ran: Ran | None = None) -> Ran:
+            visualize: Any = None, ran: Ran | None = None, docker: Any = None) -> Ran:
     """The helper and the in-container entry for `run_id` (A6: no `materialize` or `publish` seam on the entry; the helper's
-    publish is answered `fresh` at the published commit and counted in `calls["publish"]`)."""
+    publish is answered `fresh` at the published commit and counted in `calls["publish"]`). `docker`: the helper's docker
+    (a prebuilt `ContainerStandIn`)."""
     result = Ran() if ran is None else ran
     got = enter(s.helper, run_id, lifecycle=lifecycle if lifecycle is not None else verified_lifecycle(result),
                 preflight=preflight if preflight is not None else (lambda *a, **k: 0),
-                visualize=visualize if visualize is not None else (lambda *a, **k: None))
+                visualize=visualize if visualize is not None else (lambda *a, **k: None), docker=docker)
     result.calls["publish"] += got.helper.publishes
     result.rc, result.exit, result.out, result.err = got.rc, got.exit, got.out, got.err
     result.raised = got.raised if got.raised is not None else got.helper.raised
@@ -1169,10 +1180,11 @@ def test_s2_a_run_that_raises_after_a_failed_spend_write_leaves_its_ledger_unsea
 @pytest.mark.parametrize("lead_ends", ["unseen", "refused"])
 @pytest.mark.parametrize("run_ends", ["returns", "raises"])
 def test_s2c_r7_a_failed_write_of_a_non_response_row_is_in_the_job_end_record_whatever_the_run_ends_with(
-        scene, tmp_path, lead_ends, run_ends):
+        declared_scene, tmp_path, lead_ends, run_ends):
     """Only the correlation lead's own row (its unseen or refused-400 request) is refused; MAIN's and the review's rows land.
     The ledger reads incomplete, whether the run returns its summary or raises out of the investigation: no seal follows a
     failed write of any row. (r7 S2c, r7.1 H, r7.3 T1; triage F3)"""
+    scene = declared_scene  # the correlation lead gathers: its system must be up
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     marks = tmp_path / "marks"
@@ -1321,18 +1333,45 @@ def test_c1_the_job_lanes_box_is_started_by_the_helper_with_the_launch_records_t
     assert not operator[0].get("start_token"), operator
 
 
-def test_m3_a_box_start_fault_is_start_failed_and_nothing_ran(scene):
-    """The box could not start (no daemon): `box: start_failed`, the investigation never ran. (M3)"""
-    from defender import box as box_mod
-    from defender.tests.e2e import _replay_harness as RH
+class _NoDaemonForBoxes(ContainerStandIn):
+    """The helper's docker with no daemon behind its box starts (`_replay_harness._no_docker_daemon`: the call cannot reach
+    one): in the job container the run box is the helper's to start (A4, A6), so its start is where the daemon is missing.
+    The job container itself (its attached `docker run`, the peer questions about it) still starts."""
 
+    def __call__(self, argv, **kw):  # noqa: ANN001 — the docker seam's own signature
+        from defender.tests.e2e import _replay_harness as RH
+
+        argv = list(argv)
+        if argv[1:2] and argv[1] in ("create", "run", "start", "inspect", "version") \
+                and not any(b.name in argv for b in self.boxes):
+            self.log.append(argv)
+            self.calls.append(argv)
+            return RH._no_docker_daemon(argv)
+        return super().__call__(argv, **kw)
+
+    def daemon_asked(self) -> int:
+        return len([c for c in self.calls if c[1:2] and c[1] in ("create", "run", "start", "inspect", "version")])
+
+
+def _real_box_start():
+    """The lifecycle's real box start (`box.start_box`, which over the job socket asks the helper's `box.start`)."""
+    from defender import box as box_mod
+
+    return box_mod.start_box
+
+
+def test_m3_a_box_start_fault_is_start_failed_and_nothing_ran(scene):
+    """The box could not start (no daemon at the helper, which starts the job's box): `box: start_failed`, the
+    investigation never ran. (M3, A4)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     ran = Ran()
-    start = functools.partial(box_mod.start_box, docker=RH._no_docker_daemon)
+    docker = _NoDaemonForBoxes()
 
-    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=start))
+    run_job(scene, run_id, ran=ran, docker=docker,
+            lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=_real_box_start()))
 
+    assert docker.daemon_asked() >= 1, "premise: the helper tried the daemon for the job's box"
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "done", "box": "start_failed",
                                      "report_committed": False, "scrub_verified": False, "cut_short": None}
@@ -1390,18 +1429,18 @@ def test_o8_a_crash_in_the_post_steps_leaves_the_facts_set_before_it(scene):
 # --- R2: the job lane never runs unsandboxed ---------------------------------------------------------
 
 def test_r2_with_the_opt_out_set_and_no_docker_a_job_is_start_failed_and_nothing_runs(scene, monkeypatch):
-    """`DEFENDER_ALLOW_UNSANDBOXED` set, no daemon: `box: start_failed` and the investigation never ran on the host. (R2)"""
-    from defender import box as box_mod
-    from defender.tests.e2e import _replay_harness as RH
-
+    """`DEFENDER_ALLOW_UNSANDBOXED` set (in the helper's environment and so the job's), no daemon at the helper that starts
+    the job's box: `box: start_failed` and the investigation never ran on the host. (R2, A4)"""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
-    start = functools.partial(box_mod.start_box, docker=RH._no_docker_daemon)
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     job = Ran()
+    docker = _NoDaemonForBoxes()
 
-    run_job(scene, run_id, ran=job, lifecycle=_lifecycle(scene, investigate=_investigate(job), start_box=start))
+    run_job(scene, run_id, ran=job, docker=docker,
+            lifecycle=_lifecycle(scene, investigate=_investigate(job), start_box=_real_box_start()))
 
+    assert docker.daemon_asked() >= 1, "premise: the helper tried the daemon for the job's box"
     assert job.calls["lifecycle"] == 0, "the job lane ran the investigation on the host"
     assert scene.job_end(run_id)["box"] == "start_failed"
 

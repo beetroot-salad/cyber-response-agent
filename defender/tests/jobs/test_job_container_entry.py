@@ -37,6 +37,13 @@ def scene(tmp_path, monkeypatch, migrated_database):
         yield s
 
 
+@pytest.fixture
+def granted_scene(tmp_path, monkeypatch, migrated_database):
+    """The helper scene with `identity` proxied (the default grant), for a case whose control is a signed pass."""
+    with helper_scene(tmp_path, monkeypatch, migrated_database) as s:
+        yield s
+
+
 def _investigation(kept: dict[str, Any] | None = None):
     """A lifecycle double: records what the entry hands it and settles the facts holder it is given."""
     from defender.investigation.challenge_gate import ReviewState
@@ -46,8 +53,8 @@ def _investigation(kept: dict[str, Any] | None = None):
             kept.update(kw)
             kept["calls"] = kept.get("calls", 0) + 1
         facts = kw["job_facts"]
-        facts.box, facts.report_committed, facts.scrub_verified = "started", True, True
-        facts.review_state["state"] = ReviewState(closed=True)
+        facts.box, facts.scrub_verified = "started", True
+        facts.review_state["state"] = ReviewState(closed=True)  # the report is committed (a property of the state)
         return {"output": "x", "requests": 0, "truncated_by": None, "closed_before_cut": False, "exit_reason": None}
     return lifecycle
 
@@ -81,13 +88,59 @@ def test_a6_the_entry_takes_its_pass_from_the_socket_and_its_launch_facts_from_t
         assert kept["access"].proxy_url == PROXY
         claims = claims_of(signer, pass_seen[0])
         assert (claims["tenant"], claims["investigation"]) == (scene.tenant, inv)
-        assert sorted(claims["grant"]) == [("identity", "r")]
+        assert A.grant_of(claims) == [("identity", "r")]  # the decoded claims hold JSON lists, compared as pairs
         assert got.out.splitlines()[0] == f"run_id={inv}"
         assert scene.end(inv).setup == "done", got.err[-1500:]
         assert got.helper.publishes == 1, "control: the helper ran the launch-time publish"
 
 
-def test_a6_the_entry_opens_no_database_makes_no_copy_runs_no_publish_and_takes_no_lock(scene):
+def test_o6_the_entry_asks_for_its_pass_once_reuses_it_and_asks_again_only_within_the_reuse_margin(
+        granted_scene, monkeypatch):
+    """Inside the container the entry's read pass is asked of the helper when a call first needs one, reused on the next
+    call and while more than the reuse margin is left (the clock moved to just outside the margin), and asked afresh once
+    the clock is inside it: then the new pass is the one used. (O5, O6, H2: no pass outlives its lifetime)"""
+    from defender import run as run_py
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    scene, inv, signer, got = granted_scene, str(uuid.uuid4()), A.MarkedSigner(), {}
+    scene.plant(inv)
+    real_time, offset = time.time, [0.0]
+    # The stdlib wall clock is the boundary: the in-container pass holder reads it and has no clock seam, and the
+    # helper's expiry, read off the same clock, moves with it.
+    monkeypatch.setattr(time, "time", lambda: real_time() + offset[0])  # lint-monkeypatch: ok — stdlib clock boundary
+
+    def lifecycle(**kw: Any) -> dict[str, Any]:
+        access, seen = kw["access"], []
+
+        def take(label: str) -> None:
+            seen.append((label, access.token(), len(signer.payloads)))
+
+        take("first")
+        take("again")
+        expiry = claims_of(signer, seen[0][1])["exp"]
+        offset[0] = expiry - real_time() - run_py.TOKEN_REUSE_MARGIN_SEC - 5  # 5 s outside the margin
+        take("outside-margin")
+        offset[0] = expiry - real_time() - run_py.TOKEN_REUSE_MARGIN_SEC + 5  # 5 s inside it
+        take("inside-margin")
+        take("after-refresh")
+        offset[0] = 0.0
+        got["seen"] = seen
+        return _investigation()(**kw)
+
+    got_entry = enter(scene, inv, signer=signer, lifecycle=lifecycle, preflight=lambda *a, **k: 0,
+                      visualize=lambda *a, **k: None)
+
+    _clean(got_entry)
+    (first, t1, n1), (_, t2, n2), (_, t3, n3), (_, t4, n4), (_, t5, n5) = got["seen"]
+    assert t2 == t3 == t1, "the pass was asked again while more than the reuse margin was left"
+    assert n2 == n3 == n1, "a pass was signed for a call the held pass covered"
+    assert t4 != t1, "the held pass was used inside the reuse margin"
+    assert n4 == n1 + 1, "inside the margin the entry asked the helper for exactly one new pass"
+    assert (t5, n5) == (t4, n4), "the refreshed pass was not the one reused"
+    assert claims_of(signer, t4)["investigation"] == inv
+
+
+def test_a6_the_entry_opens_no_database_makes_no_copy_runs_no_publish_and_takes_no_lock(granted_scene):
     """On the container's side: no tenant-records repository, no admission, no run copy, no publish child, no host lock, no request signer or token mint; the helper's side made each once and signed the pass. (A6, O3, O4, P-B, P-C)"""
     from defender.credential_proxy import _launcher, _tokens
     from defender.investigation import publish_launch
@@ -95,6 +148,7 @@ def test_a6_the_entry_opens_no_database_makes_no_copy_runs_no_publish_and_takes_
     from defender.tenancy import host_lock, postgres, run_knowledge
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 
+    scene = granted_scene  # the control below needs a signed pass: an empty grant signs none (O11)
     inv = str(uuid.uuid4())
     scene.plant(inv)
     watched = {"repository": postgres.PostgresTenantRepository.__init__, "admission": run_tenant.host_tenant,
@@ -132,8 +186,10 @@ def test_a6_the_host_half_and_the_run_half_each_run_once_in_a_job_and_in_the_ope
         if lane == "job":
             inv = str(uuid.uuid4())
             scene.plant(inv)
-            got = enter(scene, inv, lifecycle=_investigation(ran), preflight=lambda *a, **k: 0,
+            kept: dict[str, Any] = {}
+            got = enter(scene, inv, lifecycle=_investigation(kept), preflight=lambda *a, **k: 0,
                         visualize=lambda *a, **k: None)
+            ran["lifecycle"] = kept.get("calls", 0)  # the double counts its calls under `calls`
             publishes = got.helper.publishes
             _clean(got)
         else:
@@ -270,7 +326,8 @@ def test_g3_the_real_lifecycle_starts_its_shell_box_and_runs_a_command_over_the_
     scene.plant(inv)
     docker = R.RelayDocker()
     docker.exec_with = R.printing(R.OK_FRAME)
-    docker.put("running")
+    # No `put("running")`: the double's own model answers `running` once the start lands and nothing once the box is
+    # removed; a status pinned to `running` would make the helper's proof of the box's stop impossible.
 
     def investigate(*, box: Any, **_kw: Any) -> dict[str, Any]:
         from defender.execution import bash_exec

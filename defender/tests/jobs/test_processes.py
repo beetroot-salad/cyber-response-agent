@@ -3,8 +3,8 @@ worker in another process running what this one queued (O15), `serve()`'s own si
 the worker's default child argv (O6).
 
 The worker runs as `_worker_proc1342.py` (its own process, `serve()` until SIGTERM/SIGINT). Children
-are the scripted stand-in or `_blocking_entry1342.py`, which calls the real job entry (never the real
-`run.py`). Every wait is bounded."""
+are the scripted stand-in (the job lane through the per-job host helper is `test_job_helper.py`'s). Every wait is
+bounded."""
 from __future__ import annotations
 
 import json
@@ -124,81 +124,21 @@ async def test_o15_a_worker_in_another_process_runs_what_this_one_queued(migrate
 
 # --- O7 ------------------------------------------------------------------------------------------
 
-def _blocking_config(dsn: str, root: Path, tmp_path: Path, t, *, stop_grace: float = 10.0) -> dict:
-    marks, containers = tmp_path / "marks", tmp_path / "containers"
-    containers.mkdir(exist_ok=True)
-    (root / t.tenant_id / "runs").mkdir(exist_ok=True)  # R1: tenant setup makes `runs/`
-    return {"dsn": dsn, "data_root": str(root), "child": "entry",
-            "entry": str(SUPPORT / "_blocking_entry1342.py"), "marks": str(marks), "commit": t.commit,
-            "containers": str(containers), "stop_grace": stop_grace}
-
-
 def _box_of(containers: Path, inv: str) -> Path:
     """The stand-in container the child's box start made for `inv`: filed under the claim its worker handed the child."""
     [box] = containers.glob(f"claims/*/defender-run-{inv}")
     return box
 
 
-def _blocked_child(marks: Path, proc: subprocess.Popen) -> int:
-    _wait(lambda: (marks / "in-lifecycle").exists() or proc.poll() is not None, timeout=120,
-          what="the child's lifecycle")
-    assert (marks / "in-lifecycle").exists(), "the child never reached its lifecycle"
-    return int((marks / "pid").read_text(encoding="utf-8"))
-
-
-async def test_o7_killing_the_worker_ends_the_child_through_its_unwind_but_leaves_the_box(
-        migrated_database, tmp_path):
-    """SIGKILL of the worker: the child exits via the parent-death signal and runs stop-box; the box is not removed (no sweep); the row stays `running`. (O7, M8)"""
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-
-    dsn, root = migrated_database, tmp_path / "data"
-    root.mkdir()
-    with B.run_tenant(tmp_path, root) as t:
-        register_tenant(dsn, t.tenant_id, data_root=root)
-        async with job_store(dsn) as store:
-            alert = await an_alert(store, t.tenant_id)
-            inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
-        config = _blocking_config(dsn, root, tmp_path, t)
-        with worker_process(tmp_path, config) as proc:
-            child_pid = _blocked_child(tmp_path / "marks", proc)
-            box = _box_of(tmp_path / "containers", inv.investigation_id)  # the child's box start made it
-            assert box.is_file(), "premise: the child's box start left its stand-in container"
-            proc.kill()
-            proc.wait(timeout=60)
-
-    _wait(lambda: _gone(child_pid), timeout=30, what="the child to exit with its worker")
-    assert (tmp_path / "marks" / "stop-box").exists(), "the child's box teardown did not run"
-    assert box.exists(), "with the worker killed outright nothing removes the box (r3's residual)"
-    assert row(dsn, inv.investigation_id)["stage"] == "running"
-
-
-async def test_o7_stopping_the_worker_terminates_the_child_removes_the_box_and_leaves_the_row(
-        migrated_database, tmp_path):
-    """SIGTERM to the worker: SIGTERM to the child, stop-box runs, the sweep removes the box carrying the child's claim, the row stays `running`. (O7, M8, D3, r5 C1)"""
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-
-    dsn, root = migrated_database, tmp_path / "data"
-    root.mkdir()
-    with B.run_tenant(tmp_path, root) as t:
-        register_tenant(dsn, t.tenant_id, data_root=root)
-        async with job_store(dsn) as store:
-            alert = await an_alert(store, t.tenant_id)
-            inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
-        config = _blocking_config(dsn, root, tmp_path, t)
-        with worker_process(tmp_path, config) as proc:
-            child_pid = _blocked_child(tmp_path / "marks", proc)
-            box = _box_of(tmp_path / "containers", inv.investigation_id)  # the child's box start made it
-            token = json.loads((root / t.tenant_id / "runs" / f"{inv.investigation_id}.launch.json").read_text(
-                encoding="utf-8"))["box_token"]
-            assert box.read_text(encoding="utf-8") == token == (tmp_path / "marks" / "start-token").read_text(
-                encoding="utf-8"), "premise: the child's box start was handed the launch record's token"
-            proc.send_signal(signal.SIGTERM)
-            proc.wait(timeout=60)
-
-    _wait(lambda: _gone(child_pid), timeout=30, what="the child to exit")
-    assert (tmp_path / "marks" / "stop-box").exists(), "the child's box teardown did not run"
-    assert not box.exists(), "the sweep left the box"
-    assert row(dsn, inv.investigation_id)["stage"] == "running"
+# Retired (#1170 A4, A5, B10): `test_o7_killing_the_worker_ends_the_child_through_its_unwind_but_leaves_the_box` and
+# `test_o7_stopping_the_worker_terminates_the_child_removes_the_box_and_leaves_the_row` drove the retired host job entry
+# (`_blocking_entry1342.py` calling `run.job_main` with no job socket, which now does nothing by design), and the first
+# pinned "the box outlives a killed worker", which the box-ends-with-its-helper rule replaces. Their surviving behaviour
+# is carried by `test_job_helper.py::test_a5_killing_the_worker_ends_its_helper_and_the_helpers_container_goes_with_it`
+# (the death tie), `::test_o7_a_stop_from_the_worker_stops_the_container_gracefully_lets_the_job_write_its_end_then_removes_by_label`
+# (the worker's stop: graceful stop, then removal by the claim's label), `::test_o9_..._shaped_by_the_helper` (the run box
+# stamped with the launch record's box token) and `test_o7_a_deliberate_stop_sends_sigterm_to_every_child_and_writes_no_row`
+# below (the row is left as it was).
 
 
 def _scripted_config(dsn: str, root: Path, runs: Path, tmp_path: Path, **options) -> dict:

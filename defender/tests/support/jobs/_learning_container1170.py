@@ -60,14 +60,21 @@ def seen_in_container(scene: HelperScene, kind: str, entry: Callable[[Any, Seen]
     return seen
 
 
-def plant_episode(scene: HelperScene, episode_id: str, source: str, world: str = "b") -> tuple[Path, str]:
+def plant_episode(scene: HelperScene, episode_id: str, source: str, world: str = "b", *,
+                  fresh_worlds: bool = False) -> tuple[Path, str]:
     """The learning job's episode `<T>/episodes/<episode_id>` as the job's pre-flight leaves it (its manifest, the source run's
-    folder beside the runs, and the arm roster minting a canonical run id per world) and the roster's id for `world`."""
+    folder beside the runs, and the arm roster minting a canonical run id per world) and the roster's id for `world`.
+    `fresh_worlds`: its worlds get identities of their own (the fixture's are fixed per label, so two episodes planted
+    from it would otherwise share every world id, as two real launches never do)."""
+    import uuid
+
     from defender.tests.storage.ids_1187 import _spec1187 as S
     from defender.tests.support.learning.branch import _triplet_947 as T
 
     (scene.runs / source).mkdir(exist_ok=True)
     doc = T.family_doc(episode_id=episode_id, source_run_dir=str(scene.runs / source), source_run_id=source)
+    if fresh_worlds:
+        doc["worlds"] = [{**w, "world_id": str(uuid.uuid4())} if "world_id" in w else w for w in doc["worlds"]]
     ep = T.episode(scene.root, doc=doc, root=scene.root / scene.tenant / "episodes", episode_id=episode_id)
     roster = {T.world_id(ep, w): S.new_id() for w in T.WORLDS}
     S.write_roster(ep, roster)

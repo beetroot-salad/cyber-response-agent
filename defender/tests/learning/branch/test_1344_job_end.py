@@ -11,7 +11,6 @@ import sqlite3
 import subprocess
 import sys
 import textwrap
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -29,7 +28,7 @@ from defender.tests.learning.branch.test_1344_job_lane import (
     names_the_refusal_not_its_text,
     run_entry,
 )
-from defender.tests.learning.branch.test_triplet_launcher import _BASE, _calls
+from defender.tests.learning.branch.test_triplet_launcher import _BASE
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -257,6 +256,11 @@ _PREFLIGHT_REFUSALS = {
 }
 #: The question-writer's family refused before pre-flight: the family's own refusal too.
 _QUESTIONER_UNUSABLE = "questioner family unusable"
+#: Inside the job container (#1170 O5, A3) pre-flight signs nothing: the per-job host helper signs the learning job's
+#: passes, and one it cannot sign at claim ends the job `failed: launch_refused` before its container starts
+#: (`tests/jobs/test_job_helper_learning.py::test_a3_a_learning_setup_the_helper_refuses_is_written_in_the_learning_
+#: entrys_refused_word[sign]`). The row stays in the census: pre-flight still records it on the operator's lane.
+_DECIDED_BY_THE_HELPER = "read token cannot be signed"
 
 
 def _preflight_refusal_sites() -> int:
@@ -272,18 +276,6 @@ def _preflight_refusal_sites() -> int:
                and node.args and isinstance(node.args[0], ast.Name) and node.args[0].id in {"REFUSED", "UNUSABLE"})
 
 
-@dataclass
-class _ProxiedEstate(S.Estate):
-    """The fixture estate plus `elastic` on the credential proxy, its declaration planted as every tenant's is."""
-
-    systems: tuple[str, ...] = (*S.SYSTEMS, "elastic")
-
-    def place(self, data_root=None, tenant_id=S.FIXTURE_TENANT, configs=None):
-        from defender.tests.support.tenancy._tenants1106 import config_texts
-
-        return super().place(data_root, tenant_id, configs={**(configs or {}), "elastic": config_texts(tenant_id)["elastic"]})
-
-
 def _refused_before_the_first_sibling(tmp_path, monkeypatch, cause: str):
     from defender.tests.learning.oracle.live_contracts.test_preflight_and_outcome import _family
 
@@ -296,18 +288,12 @@ def _refused_before_the_first_sibling(tmp_path, monkeypatch, cause: str):
     if cause == "no replayable call":
         return run_entry(tmp_path, estate=lambda root: S.estate(root, withheld=(("idp", "query"),)),
                          calls=[S.Call("idp", "query", S.query_params("user:alice"), _BASE)])
-    if cause == "read token cannot be signed":
-        from defender.kit.access import PROXY_URL_ENV
-
-        monkeypatch.delenv(PROXY_URL_ENV, raising=False)
-        return run_entry(tmp_path, estate=_ProxiedEstate,
-                         calls=[*_calls(), S.Call("elastic", "query", S.query_params("user.name:alice"), _BASE)])
     assert cause == "too many unservable worlds", cause
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     return run_entry(tmp_path, oracle=S.oracle(then=S.text_only("no served answer fits this world")))
 
 
-@pytest.mark.parametrize("cause", [*_PREFLIGHT_REFUSALS, _QUESTIONER_UNUSABLE])
+@pytest.mark.parametrize("cause", [*(c for c in _PREFLIGHT_REFUSALS if c != _DECIDED_BY_THE_HELPER), _QUESTIONER_UNUSABLE])
 def test_a_refusal_before_the_first_sibling_skips_the_job_when_the_family_caused_it_and_fails_it_when_the_environment_did(
         tmp_path, monkeypatch, cause):
     """Each refusal pre-flight records, and the question-writer's unusable family: the family's or its source's own end
