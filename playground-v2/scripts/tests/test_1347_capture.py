@@ -241,7 +241,12 @@ class CaptureDocker(RigDocker):
         r.held_at.setdefault(step, []).append(held)
         r.watching_at.setdefault(step, []).append(watching)
         r.at.setdefault(step, []).append(r.clock.last)
-        if step == r.fail_at:
+        copied = r.copied_host(argv) if step == "copy_volumes" else None
+        if copied is not None:
+            r.host_state_at_copy.append((copied, self.containers[(CONTEXT, copied)].state))
+            if copied == r.unpaused_during_copy and self.containers[(CONTEXT, copied)].state == "paused":
+                self.containers[(CONTEXT, copied)].state = "running"    # someone else unpaused it meanwhile
+        if step == r.fail_at or (copied is not None and copied == r.fail_copy_of):
             text = kw.get("text") or kw.get("universal_newlines")
             done = subprocess.CompletedProcess(argv, 125, stdout="" if text else b"",
                                                stderr=f"injected: {step} failed" if text else f"injected: {step} failed".encode())
@@ -264,9 +269,13 @@ class Rig:
     def __init__(self, tmp_path: Path, fail_at: str | None = None, faults: list | None = None,
                  state: str = "SUCCESS", repository_registered: bool = True, *, t=T, scenarios=None,
                  clock_start=None, clock_step: float = 1, occupied: str | None = None,
-                 patterns: list[str] = PATTERNS):
+                 patterns: list[str] = PATTERNS, fail_copy_of: str | None = None,
+                 unpaused_during_copy: str | None = None):
         self.t, self.scenarios = t, SCENARIOS if scenarios is None else scenarios
         self.fail_at = fail_at
+        self.fail_copy_of = fail_copy_of                  # this host's volume copies fail (exit 125)
+        self.unpaused_during_copy = unpaused_during_copy  # someone unpauses this host before its copy runs
+        self.host_state_at_copy: list[tuple[str, str]] = []
         self.journal = Journal()
         self.clock = FakeClock(self.journal, clock_start or T - MAX_AGE - timedelta(minutes=5), clock_step)
         self.tenant_settings = tmp_path / "tenant" / "settings"
@@ -417,6 +426,17 @@ class Rig:
         if verb == "rm" and VERIFY in rest:
             return "verify.call"
         return None
+
+    @staticmethod
+    def copied_host(argv: list[str]) -> str | None:
+        """The role host whose volumes a `run --volumes-from <host>[:ro]` copies (None: not a copy run)."""
+        if argv[3:4] != ["run"] or "--volumes-from" not in argv:
+            return None
+        host = argv[argv.index("--volumes-from") + 1].split(":", 1)[0]
+        return host if host in HOSTS else None
+
+    def host_states(self) -> dict[str, str]:
+        return {h: self.docker.containers[(CONTEXT, h)].state for h in HOSTS}
 
     def lock_record(self) -> str | None:
         data = self.docker.read_file(self.lock_box, LOCK_FILE)
@@ -687,6 +707,54 @@ def test_a_failed_capture_writes_nothing_and_frees_the_lock_and_the_pickups(tmp_
     assert not rig.lock_held()
     assert "release_pickups" in rig.journal.ops() and rig.watcher_running()
     assert (CONTEXT, VERIFY) not in rig.docker.containers
+    assert set(rig.host_states().values()) == {"running"}, rig.host_states()
+
+
+def test_capture_copies_each_hosts_volumes_with_the_host_paused_and_leaves_every_host_running(tmp_path):
+    """Live check (2026-11-10): a running host's Elastic Agent rewrites its state while tar reads it (`file
+    changed as we read it`, exit 1). Every volume copy reads its host paused, and afterwards every role host
+    runs again (none left paused)."""
+    rig = Rig(tmp_path)
+    rig.capture()
+
+    assert (rig.freeze_dir / "freeze.yaml").exists()
+    assert sorted({h for h, _st in rig.host_state_at_copy}) == sorted(HOSTS)
+    assert {st for _h, st in rig.host_state_at_copy} == {"paused"}, rig.host_state_at_copy
+    assert set(rig.host_states().values()) == {"running"}, rig.host_states()
+    assert sorted(e["container"].name for e in rig.docker.of_kind("pause")) == sorted(HOSTS)
+
+
+@pytest.mark.parametrize("which", [0, -1], ids=["first-host", "last-host"])
+def test_a_failure_during_one_hosts_copy_still_unpauses_it(tmp_path, which):
+    """A copy that fails while its host is paused fails the capture (all-or-nothing) and leaves that host, and
+    every other, running."""
+    host = HOSTS[which]
+    rig = Rig(tmp_path, fail_copy_of=host)
+    with pytest.raises(_FAILED):
+        rig.capture()
+
+    assert (host, "paused") in rig.host_state_at_copy, rig.host_state_at_copy
+    assert set(rig.host_states().values()) == {"running"}, rig.host_states()
+    assert not (rig.freeze_dir / "freeze.yaml").exists() and rig.snapshots == {}
+    assert not rig.lock_held() and rig.watcher_running()
+
+
+def test_a_copy_taken_while_its_host_runs_fails_the_capture_and_writes_nothing(tmp_path):
+    """A host unpaused by someone else before its copy: tar sees the agent's state change (exit 1), and the
+    capture fails as all-or-nothing: no freeze, no parts, no snapshot, the lock free, the watcher resumed."""
+    host = HOSTS[0]
+    rig = Rig(tmp_path, unpaused_during_copy=host)
+    with pytest.raises(_FAILED):
+        rig.capture()
+
+    assert (host, "paused") in rig.host_state_at_copy, "the copy was never reached with the host paused"
+    assert not (rig.freeze_dir / "freeze.yaml").exists()
+    stored = rig.parts_dir / FREEZE_ID
+    assert not stored.exists() or not any(stored.rglob("*")), list(stored.rglob("*"))
+    assert rig.snapshots == {}
+    assert not rig.lock_held()
+    assert "release_pickups" in rig.journal.ops() and rig.watcher_running()
+    assert set(rig.host_states().values()) == {"running"}, rig.host_states()
 
 
 @pytest.mark.parametrize("state", ["PARTIAL", "FAILED"])
