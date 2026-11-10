@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import contextlib
 import json
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
+import httpx
 import pytest
 
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
@@ -94,6 +96,29 @@ class Clock:
         return self.now
 
 
+class ScriptedBao(A.OpenBaoStandIn):
+    """The OpenBao stand-in whose sign requests follow `sign_script` in order, each `(delay_sec, status)`: it
+    waits `delay_sec`, then answers `status` (an error) or, for `None`, as the stand-in does. Once the
+    script is spent every sign answers normally. Every request path is recorded, as the stand-in's are."""
+
+    def __init__(self, *args: Any, **kw: Any) -> None:
+        super().__init__(*args, **kw)
+        self.sign_script: list[tuple[float, int | None]] = []
+        self._scripting = threading.Lock()
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        if "/sign/" in request.url.path:
+            with self._scripting:
+                step = self.sign_script.pop(0) if self.sign_script else None
+            if step is not None:
+                delay, status = step
+                time.sleep(delay)
+                if status is not None:
+                    self.requests.append(request.url.path)
+                    return httpx.Response(status, json={"errors": ["sign failed"]})
+        return super().handle_request(request)
+
+
 @dataclass
 class Rig:
     est: S.Estate
@@ -110,10 +135,13 @@ class Rig:
 
 @contextlib.contextmanager
 def rig(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = False,  # noqa: PLR0913
-        env_url: str | None = None, credential_set: bool = True) -> Iterator[Rig]:
+        env_url: str | None = None, credential_set: bool = True, source: str = "idp",
+        sign_login: bool = True, bao_type: type = A.OpenBaoStandIn) -> Iterator[Rig]:
     """The fixture tenant with `idp` and `crm` (granted, declared, never called by the source run)
     on the credential proxy, `hr` granted and declared but judged down, and the OpenBao stand-in
-    that signs with the live generation's sign login. Yields before any launch."""
+    that signs with the live generation's sign login. Yields before any launch. `source` is what the
+    source run called through the proxy: `idp` (a captured failure, read live), `idp2` (two such
+    failures), or `unproxied` (nothing proxied: only the other systems)."""
     S.T.isolate_learning_state(tmp_path, monkeypatch)
     if env_url is not None:  # operator OpenBao/Vault login material in the launcher's environment
         for name, value in (("VAULT_ADDR", env_url), ("BAO_ADDR", env_url),
@@ -130,8 +158,10 @@ def rig(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = False,  #
              if c.system != "idp"]
 
     def capture_idp_failure(src) -> None:
-        _capture_row(src, system="idp", verb=idp.verb, params=idp.params, seq=60, exit_code=1,
-                     payload={"error": "upstream said no"})
+        failed = {"idp": [idp.params], "idp2": [idp.params, S.query_params("user:zed")]}.get(source, [])
+        for seq, params in enumerate(failed, start=60):
+            _capture_row(src, system="idp", verb=idp.verb, params=params, seq=seq, exit_code=1,
+                         payload={"error": "upstream said no"})
 
     with H.upstream() as merged, H.upstream() as wt:
         merged.replies[f"{API}/events"] = (200, {"Content-Type": "application/json"},
@@ -156,8 +186,10 @@ def rig(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = False,  #
             fields = A.generation(S.FIXTURE_TENANT, default_secrets_dir(t), sign_role_id=ROLE,
                                   sign_secret=SECRET, role_id=DELIVERY_ROLE,
                                   delivery_secret=DELIVERY_SECRET, delivery_file=False)
+            if not sign_login:  # a live generation that records no sign login (A24')
+                fields["sign_role_id"] = None
             records = t.directory_with(generations=[fields])
-            bao = A.OpenBaoStandIn({ROLE: SECRET, DELIVERY_ROLE: DELIVERY_SECRET})
+            bao = bao_type({ROLE: SECRET, DELIVERY_ROLE: DELIVERY_SECRET})
             store = H.FakeStore({(S.FIXTURE_TENANT, "idp"): T.static_set()} if credential_set else {})
             # No second records read inside learning (A24): one through the environment's
             # database would meet an unreachable server, not a records source.
@@ -170,11 +202,16 @@ def rig(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = False,  #
 def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = False,  # noqa: PLR0913
                env_url: str | None = None, proxy_address: bool = True, oracle: Any = None,
                unreachable_proxy: bool = False, credential_set: bool = True,
-               on_read: Any = None, **seams: Any):
+               on_read: Any = None, source: str = "idp", sign_login: bool = True,
+               bao_type: type = A.OpenBaoStandIn, sign_script: Any = (), **seams: Any):
     """One launch through pre-flight over `rig`. `on_read(rig)` runs as the merged upstream serves
-    each idp read; `unreachable_proxy` hands the launcher an address nothing listens at."""
+    each idp read; `unreachable_proxy` hands the launcher an address nothing listens at;
+    `sign_script` (a `ScriptedBao`'s) shapes the sign requests in order."""
     with rig(tmp_path, monkeypatch, data_root, working_tree_edit=working_tree_edit, env_url=env_url,
-             credential_set=credential_set) as r:
+             credential_set=credential_set, source=source, sign_login=sign_login,
+             bao_type=ScriptedBao if sign_script else bao_type) as r:
+        if sign_script:
+            r.bao.sign_script = list(sign_script)
         if on_read is not None:
             body = r.merged.replies[f"{API}/events"]
 
@@ -319,26 +356,25 @@ def test_p1c_a_pass_longer_than_a_token_s_life_signs_again_on_demand_and_reuses_
 
 def test_p4_a_re_sign_that_fails_mid_calibration_refuses_the_pass_as_the_environments(
         tmp_path, monkeypatch, data_root):
-    """OpenBao fails the re-sign a lookup needs: access is lost, the pass is `refused` naming the
-    credential proxy, lists no unservable world, and nothing is signed or sent after it. #1363 O5, O6."""
+    """OpenBao fails the one re-sign a lookup needs and is healthy after: access is lost, so the pass is `refused`
+    naming the credential proxy, lists no unservable world, and nothing signs or is sent afterwards. #1363 O5, O6, D8"""
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     clock = Clock()
     start = clock.now
 
-    def openbao_down_after_the_first_read(r: Rig) -> None:
+    def first_read_leaves_no_life(_r: Rig) -> None:
         if clock.now == start:
             clock.now = start + TOKEN_SEC  # the held token has no life left
-            r.bao.sign_status = 503
 
     run, outcome, bao, tap, merged, _wt = _preflight(
         tmp_path, monkeypatch, data_root, oracle=_side_lookups("user:bob", "user:carol"),
-        on_read=openbao_down_after_the_first_read, clock=clock)
+        on_read=first_read_leaves_no_life, clock=clock, sign_script=[(0, None), (0, 503)])
     assert outcome is not None, run.message
     assert outcome["outcome"] == "refused", outcome
     assert "credential proxy" in outcome["reason"], outcome["reason"]
     assert outcome["unservable_worlds"] == [], "our own failure made a world unservable"
-    assert len(bao.signs) == 1, "positive control: the first token was signed"
-    assert _sign_requests(bao) == 2, "the failed re-sign was retried, or a later request signed again"
+    assert len(bao.signs) == 1, "positive control: the first token was signed; OpenBao healed and nothing signed again"
+    assert _sign_requests(bao) == 2, "the failed re-sign was retried, or a later request signed again (D8)"
     assert len(tap.tokens) == 1, "a call reached the proxy after access was lost"
     assert len(merged.seen) == 1
 
@@ -362,13 +398,111 @@ def test_p5_a_proxy_unreachable_during_the_live_reads_refuses_the_pass_before_ca
 
 def test_p6_no_credential_set_for_the_read_system_refuses_the_pass_naming_it(
         tmp_path, monkeypatch, data_root):
-    """No credential set stored for idp: the live read is a `setup` fault, so the pass is `refused`
-    naming our setup for idp, with no unservable world and nothing sent. #1363 O4, O6."""
+    """No credential set stored for idp: the first live read is a `setup` fault, so the pass is `refused` naming
+    our setup for idp, with no unservable world; the second live read is never made, nor any oracle turn.
+    #1363 O4, O5, O6"""
+    oracle = S.oracle(then=S.submit(S.default_calls()[0].payload, S.EMPTY_CLAIM))
     run, outcome, _bao, tap, merged, _wt = _preflight(
-        tmp_path, monkeypatch, data_root, credential_set=False)
+        tmp_path, monkeypatch, data_root, credential_set=False, source="idp2", oracle=oracle)
     assert outcome is not None, run.message
     assert outcome["outcome"] == "refused", outcome
-    assert "idp" in outcome["reason"] and "setup" in outcome["reason"].lower(), outcome["reason"]
+    assert "idp" in outcome["reason"], outcome["reason"]
+    assert "setup" in outcome["reason"].lower(), outcome["reason"]
     assert outcome["unservable_worlds"] == []
-    assert tap.tokens, "positive control: the proxy was asked"
+    assert len(tap.tokens) == 1, "the live-read loop read again after our setup failed (one proxy request is the first read)"
+    assert oracle.answered == 0, "calibration started after our setup failed"
     assert merged.seen == []
+
+
+def test_p5b_a_sign_that_fails_at_the_first_read_refuses_the_pass_before_calibration(
+        tmp_path, monkeypatch, data_root):
+    """OpenBao refuses the first sign: access is lost at the first live read, the pass is `refused` naming the
+    credential proxy, calibration never starts, and no sign is tried again. #1363 O1, O5, O6, D8"""
+    oracle = S.oracle(then=S.submit(S.default_calls()[0].payload, S.EMPTY_CLAIM))
+    run, outcome, bao, tap, merged, _wt = _preflight(
+        tmp_path, monkeypatch, data_root, source="idp2", oracle=oracle, sign_script=[(0, 503)])
+    assert outcome is not None, run.message
+    assert outcome["outcome"] == "refused", outcome
+    assert "credential proxy" in outcome["reason"], outcome["reason"]
+    assert outcome["unservable_worlds"] == []
+    assert _sign_requests(bao) == 1, "the live-read loop or a world signed again after the failed sign (D8)"
+    assert oracle.answered == 0
+    assert (bao.signs, tap.tokens, merged.seen) == ([], [], [])
+    assert bao.logins, "positive control: OpenBao was reached"
+
+
+def test_p3b_a_pass_with_no_proxy_address_is_refused_even_when_no_replayed_call_is_proxied(
+        tmp_path, monkeypatch, data_root):
+    """The source run called only unproxied systems, but idp and crm are granted and declared, so an oracle
+    lookup may reach them: with no proxy address the pass is `refused` naming the missing setting, before any
+    OpenBao contact. Control: p1d. #1363 O3, B5"""
+    from defender.kit.access import PROXY_URL_ENV
+    monkeypatch.delenv(PROXY_URL_ENV, raising=False)
+    run, outcome, bao, tap, merged, _wt = _preflight(
+        tmp_path, monkeypatch, data_root, proxy_address=False, source="unproxied")
+    assert outcome is not None, run.message
+    assert outcome["outcome"] == "refused", outcome
+    assert PROXY_URL_ENV in outcome["reason"], outcome["reason"]
+    assert (bao.requests, tap.tokens, merged.seen) == ([], [], [])
+
+
+def test_p3c_a_tenant_with_no_recorded_sign_login_is_refused_before_any_contact(
+        tmp_path, monkeypatch, data_root):
+    """The live generation records no sign login: `refused` naming the sign login, before any OpenBao
+    contact or read; the up-front check is unchanged by signing on demand. Control: p1. #1363 O3"""
+    run, outcome, bao, tap, merged, _wt = _preflight(tmp_path, monkeypatch, data_root, sign_login=False)
+    assert outcome is not None, run.message
+    assert outcome["outcome"] == "refused", outcome
+    assert "sign" in outcome["reason"].lower(), outcome["reason"]
+    assert (bao.requests, tap.tokens, merged.seen) == ([], [], [])
+
+
+def test_p1d_the_holder_serves_oracle_lookups_when_no_replayed_call_is_proxied(
+        tmp_path, monkeypatch, data_root):
+    """The source run called only unproxied systems; a world's oracle looks idp up: the read is signed for on
+    demand under the run's read grant (idp and crm, not hr) and reaches the system. Control: p3b. #1363 B5, O2"""
+    run, outcome, bao, tap, merged, _wt = _preflight(
+        tmp_path, monkeypatch, data_root, source="unproxied", oracle=_side_lookups("user:bob"))
+    assert run.rc == 0, run.message
+    assert outcome["outcome"] == "accepted", outcome
+    (sign,) = bao.signs
+    assert A.grant_of(A.claims_of_payload(sign.payload)) == [("crm", "r"), ("idp", "r")]
+    assert len(merged.seen) == 1, "positive control: the lookup reached the system"
+    assert len(tap.tokens) == 1
+
+
+# --- #1363: a token request in flight on a thread the oracle abandoned (O6, O1, D8) -------------------------
+
+#: The oracle's turn deadline (seconds), set through the environment: shorter than the slow sign below.
+KNOB_TURN_DEADLINE = "ORACLE_TURN_DEADLINE"
+
+
+@pytest.mark.parametrize("sign_answer", [503, None], ids=["fails", "succeeds"])
+def test_p7_a_slow_sign_in_flight_when_the_outcome_is_decided_is_counted_and_nothing_signs_after(
+        tmp_path, monkeypatch, data_root, sign_answer):
+    """A lookup's re-sign outlives the oracle's turn deadline, so its world gives up while the sign runs on an
+    abandoned thread. The outcome waits for it: failed, access was lost and the pass is `refused`; succeeded,
+    the pass records its own result (`accepted`, the one world listed unservable). Either way exactly the
+    two signs were asked, even after the outcome. #1363 O6, O1, D8"""
+    monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
+    monkeypatch.setenv(KNOB_TURN_DEADLINE, "0.3")
+    clock = Clock()
+    start = clock.now
+
+    def first_read_leaves_no_life(_r: Rig) -> None:
+        if clock.now == start:
+            clock.now = start + TOKEN_SEC
+
+    run, outcome, bao, _tap, _merged, _wt = _preflight(
+        tmp_path, monkeypatch, data_root, oracle=_side_lookups("user:bob"),
+        on_read=first_read_leaves_no_life, clock=clock, sign_script=[(0, None), (1.0, sign_answer)])
+    assert outcome is not None, run.message
+    if sign_answer is None:
+        assert outcome["outcome"] == "accepted", outcome
+        assert len(outcome["unservable_worlds"]) == 1, ("positive control: the abandoned lookup's world gave up", outcome)
+    else:
+        assert outcome["outcome"] == "refused", ("the sign in flight was not counted", outcome)
+        assert "credential proxy" in outcome["reason"], outcome["reason"]
+        assert outcome["unservable_worlds"] == []
+    time.sleep(0.5)
+    assert _sign_requests(bao) == 2, "something signed after the outcome was decided"

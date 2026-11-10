@@ -585,7 +585,7 @@ _SPELLINGS = {"trailing space": lambda w: w + " ", "trailing newline": lambda w:
               "leading byte-order mark": lambda w: "\ufeff" + w,
               "zero-width space inside": lambda w: w[:2] + "\u200b" + w[2:]}
 for _key, _words in (("setup", ("refused", "crashed", "done")), ("box", ("not_started", "start_failed", "started")),
-                     ("cut_short", ("box-lost", "box-output-limit", "provider-down", "budget"))):
+                     ("cut_short", ("box-lost", "box-output-limit", "provider-down", "budget", "proxy-access"))):
     for _word in _words:
         for _how, _spell in _SPELLINGS.items():
             CASES[f"1-job-end-{_key}-word-{_word}-{_how.replace(' ', '-')}"] = _spec(

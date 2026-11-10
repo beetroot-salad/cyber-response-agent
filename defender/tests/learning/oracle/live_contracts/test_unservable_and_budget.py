@@ -724,55 +724,174 @@ def test_exploration_query_errors_on_the_real_system(tmp_path):
 
 #: #1363: our own failure's detail, as the proxy client gives it.
 OURS = "OURS-1363: the credential proxy could not be used"
+OUR_ORIGINS = ["setup", "access"]
 
 
-@pytest.mark.parametrize("origin", ["setup", "access"])
+def _lost_edr(est: S.Estate, origin: str) -> None:
+    est.fail("edr", "query", HOST_DB1, fault="TransportFault", detail=OURS, origin=origin)
+
+
+def _our_fault(raised: BaseException | None) -> Any:
+    return getattr(raised, "our_fault", None)
+
+
+@pytest.mark.parametrize("origin", OUR_ORIGINS)
 def test_1363_o8_a_lookup_failing_on_our_side_fails_the_attempt_and_is_never_shown_as_the_tenants(tmp_path, origin):
-    """The oracle's side query meets a `setup` or `access` fault: the attempt fails as the oracle's own
-    machinery (M03=A), the model is never told the tenant failed, and the give-up says one of its attempts
-    failed our way. Control: `test_exploration_query_errors_on_the_real_system`. #1363 O8, O7."""
+    """The oracle's side query meets a `setup` or `access` fault: the attempt fails as the oracle's own machinery
+    (M03=A), never shown as "failed at the tenant", and the give-up says an attempt failed our way. #1363 O8, O7."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    est.fail("edr", "query", HOST_DB1, fault="TransportFault", detail=OURS, origin=origin)
-    ep = S.episode_v2(tmp_path)
+    _lost_edr(est, origin)
     o = S.oracle(then=_explore())  # every attempt looks edr up first
-    reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=1)
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=2)
 
     run = _drive(tmp_path, est, reg, [_q("user:alice"), S.done_turn()])
 
     assert run.raised is not None, "an attempt that failed our way still served the call"
-    assert getattr(run.raised, "our_fault", None) is True, run.raised
-    assert est.calls("edr", "query"), "positive control: the side query reached the adapter"
+    assert _our_fault(run.raised) is True, run.raised
+    assert len(est.calls("edr", "query")) >= 1, "positive control: a side query reached the adapter"
     seen = o.all_seen()
-    assert "failed at the tenant" not in seen and "OURS-1363" not in seen, (
-        "our own failure was shown to the oracle as the tenant's answer")
+    assert "Attempt failed" in _appended(o, 1), "positive control: the second attempt was told the first failed"
+    assert "failed at the tenant" not in seen, "our own failure was shown to the oracle as the tenant's answer"
+    assert OURS not in run.transcript
+    assert OURS not in run.evidence_text
     assert run.rows_for("idp", "user:alice") == []
-    assert run.failures("edr") == 0 and run.failures("idp") == 0, run.breaker
+    assert run.failures("edr") == 0, run.breaker
+    assert run.failures("idp") == 0, run.breaker
 
 
-@pytest.mark.parametrize(("origin", "record"), [("access", False), ("system", True)], ids=["access", "control-system"])
-def test_1363_o7_a_sibling_whose_oracle_gave_up_after_access_failures_exits_proxy_access_with_no_world_record(
-        tmp_path, monkeypatch, origin, record):
-    """World b's oracle gives up after its side query failed with `access`: the sibling writes no world
-    record and exits proxy-access's code. Control: the same give-up after the system's own failure keeps
-    the `oracle unservable` record and `UNSERVABLE_EXIT`. #1363 O7 (Decision S), G37."""
+@pytest.mark.parametrize("origin", OUR_ORIGINS)
+def test_1363_o8_a_verifiers_lookup_failing_on_our_side_fails_the_attempt(tmp_path, origin):
+    """The same door, reached by the verifier: the attempt fails and the give-up says so; the tenant's wording
+    never reaches the verifier. #1363 O8."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    _lost_edr(est, origin)
+    v = S.verifier(then=_explore())
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(then=S.submit(ALICE_ROWS)),
+                           verifier=v, retry_cap=2)
+
+    run = _drive(tmp_path, est, reg, [_q("user:alice"), S.done_turn()])
+
+    assert est.calls("edr", "query"), "positive control: the verifier's side query reached the adapter"
+    assert run.raised is not None, run.raised
+    assert _our_fault(run.raised) is True, run.raised
+    assert "failed at the tenant" not in v.all_seen()
+    assert run.rows_for("idp", "user:alice") == []
+
+
+@pytest.mark.parametrize(("origin", "ours"), [("setup", True), ("access", True), ("system", False), (None, False)],
+                         ids=["setup", "access", "control-system", "control-unlabelled"])
+def test_1363_o7_the_give_up_says_whether_an_attempt_failed_our_way(tmp_path, origin, ours):
+    """`OracleUnservable.our_fault` is true exactly when an attempt of the serving failed with `setup` or
+    `access`; a system's own failure, labelled or not, leaves it false. #1363 O7."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    est.fail("edr", "query", HOST_DB1, fault="TransportFault", detail=OURS, origin=origin)
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(then=_explore()),
+                           verifier=S.passing_verifier(), retry_cap=1)
+
+    with pytest.raises(S.unservable_cls()) as stopped:
+        S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+
+    assert est.calls("edr", "query"), "positive control: the side query was made"
+    assert _our_fault(stopped.value) is ours, (origin, _our_fault(stopped.value))
+
+
+def test_1363_o7_the_mark_belongs_to_the_serving_not_to_the_oracle(tmp_path):
+    """An attempt that failed our way and was retried to success marks nothing for a LATER call that gives up
+    for an ordinary reason; an ordinary attempt before an ours one still marks its own serving. #1363 O7."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", BOB, BOB_ROWS)
+    est.answer("idp", "query", CAROL, CAROL_ROWS)
+    _lost_edr(est, "access")
+    o = S.oracle(_explore(), S.submit(BOB_ROWS), then=S.text_only("no"))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=2)
+
+    run = _drive(tmp_path, est, reg, [_q("user:bob"), _q("user:carol"), S.done_turn()])
+
+    assert run.rows_for("idp", "user:bob")[0]["exit_code"] == 0, "positive control: the first call was served after the retry"
+    assert est.calls("edr", "query"), "premise: the first serving did fail our way"
+    assert run.raised is not None, "the second call was served"
+    assert _our_fault(run.raised) is not True, "the first serving's mark leaked into the second call's give-up"
+
+    est2 = S.estate(tmp_path / "e2")
+    est2.answer("idp", "query", BOB, BOB_ROWS)
+    _lost_edr(est2, "access")
+    o2 = S.oracle(S.text_only("no"), _explore(), then=S.text_only("no"))
+    reg2 = S.world_registry(S.episode_v2(tmp_path / "e2"), "b", est2, oracle=o2, verifier=S.passing_verifier(),
+                            retry_cap=2)
+    with pytest.raises(S.unservable_cls()) as stopped:
+        S.call(reg2, "idp", "query", est2.ctx(tmp_path / "inv2"), q="user:bob")
+    assert _our_fault(stopped.value) is True, "an ordinary first attempt hid the ours-failure of the second"
+
+
+@pytest.mark.parametrize("origin", OUR_ORIGINS)
+def test_1363_o7_a_sibling_whose_oracle_gave_up_after_our_failures_exits_proxy_access_with_no_world_record(
+        tmp_path, monkeypatch, caplog, origin):
+    """World b's oracle gives up after its side query failed with `setup` or `access`: the sibling writes no world
+    record, exits proxy-access's code and logs the cause (and, for setup, the system). #1363 O7, D11, G37."""
+    import logging
+
+    caplog.set_level(logging.INFO)
     est = S.estate(tmp_path)
     ep = _sibling_episode(tmp_path, monkeypatch, est)
     est.answer("idp", "query", BOB, BOB_ROWS)
-    est.fail("edr", "query", HOST_DB1, fault="TransportFault", detail=OURS, origin=origin)
+    _lost_edr(est, origin)
 
     sib = _resume(ep, est, oracle=S.oracle(_explore(), then=S.text_only("no")),
-                  verifier=S.passing_verifier(), turns=[_q("user:bob"), S.done_turn()], retry_cap=1)
+                  verifier=S.passing_verifier(), turns=[_q("user:bob"), S.done_turn()], retry_cap=2)
+
+    from defender.tests.runtime.providers import _spec1243 as P
 
     assert est.calls("edr", "query"), "positive control: the oracle's side query was made"
-    if record:
-        assert sib.rc == S.mod(S.RUN).UNSERVABLE_EXIT, sib.rc
-        assert (sib.record("b") or {}).get("reason") == S.REASON_UNSERVABLE, sib.record("b")
-    else:
-        from defender.tests.integrations.credential_proxy_1163.test_proxy_access_run_end import PROXY_ACCESS_EXIT
+    assert sib.rc == P.PROXY_ACCESS_EXIT, f"a sibling that lost access exited {sib.rc!r}, not proxy-access's code"
+    assert sib.record("b") is None, "lost access was recorded as the world's own unservability"
+    logged = "\n".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+    assert OURS in logged, "the cause was not logged"
+    if origin == "setup":
+        assert "edr" in logged, "the system whose setup failed was not logged"
 
-        assert sib.rc == PROXY_ACCESS_EXIT, f"a sibling that lost access exited {sib.rc!r}, not proxy-access's code"
-        assert sib.record("b") is None, "lost access was recorded as the world's own unservability"
+
+def test_1363_o7_control_a_sibling_whose_oracle_gave_up_after_the_systems_failure_keeps_the_unservable_record(
+        tmp_path, monkeypatch):
+    """Positive control on the same channel: the same give-up after a `system` failure keeps the `oracle
+    unservable` record and `UNSERVABLE_EXIT`. #1363 O7 (ordinary give-up), G37."""
+    est = S.estate(tmp_path)
+    ep = _sibling_episode(tmp_path, monkeypatch, est)
+    est.answer("idp", "query", BOB, BOB_ROWS)
+    est.fail("edr", "query", HOST_DB1, fault="TransportFault", detail=OURS, origin="system")
+
+    sib = _resume(ep, est, oracle=S.oracle(_explore(), then=S.text_only("no")),
+                  verifier=S.passing_verifier(), turns=[_q("user:bob"), S.done_turn()], retry_cap=2)
+
+    assert est.calls("edr", "query")
+    assert sib.rc == S.mod(S.RUN).UNSERVABLE_EXIT, sib.rc
+    assert (sib.record("b") or {}).get("reason") == S.REASON_UNSERVABLE, sib.record("b")
+
+
+def test_1363_b6_a_budget_give_up_keeps_its_budget_record_even_after_a_failure_of_ours(tmp_path, monkeypatch):
+    """The oracle's side query fails our way, then its budget runs out: the give-up carries both facts, and the
+    sibling keeps the `budget` record with `UNSERVABLE_EXIT`, not proxy-access's code. #1363 B6, O7."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    _lost_edr(est, "access")
+    reg = S.world_registry(S.episode_v2(tmp_path / "r"), "b", est, oracle=S.oracle(then=_explore()),
+                           verifier=S.passing_verifier(), budget=TINY_BUDGET, retry_cap=3)
+    with pytest.raises(S.unservable_cls()) as stopped:
+        S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+    assert est.calls("edr", "query"), "premise: the first lookup ran before the budget stopped the serving"
+    assert stopped.value.reason == S.REASON_BUDGET
+    assert _our_fault(stopped.value) is True
+
+    est2 = S.estate(tmp_path / "s")
+    ep = _sibling_episode(tmp_path / "s", monkeypatch, est2)
+    est2.answer("idp", "query", BOB, BOB_ROWS)
+    _lost_edr(est2, "access")
+    sib = _resume(ep, est2, oracle=S.oracle(then=_explore()), verifier=S.passing_verifier(),
+                  turns=[_q("user:bob"), S.done_turn()], budget=TINY_BUDGET, retry_cap=3)
+    assert sib.rc == S.mod(S.RUN).UNSERVABLE_EXIT, sib.rc
+    assert (sib.record("b") or {}).get("reason") == S.REASON_BUDGET, sib.record("b")
 
 
 def test_1363_o8_control_a_lookup_failing_with_the_systems_origin_is_shown_to_the_oracle(tmp_path):
@@ -789,6 +908,7 @@ def test_1363_o8_control_a_lookup_failing_with_the_systems_origin_is_shown_to_th
 
     assert run.raised is None, run.raised
     assert "OURS-1363" in _appended(o, 1), "the system's failure was not shown to the oracle"
+    assert "failed at the tenant" in _appended(o, 1)
     assert run.rows_for("idp", "user:alice")[0]["exit_code"] == 0
 
 

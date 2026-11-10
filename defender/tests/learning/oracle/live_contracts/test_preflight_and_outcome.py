@@ -1182,3 +1182,70 @@ def test_1224_empty_gather_grant_refuses_the_launch_before_the_question_writer(t
     assert run.spawn.launches == []
     outcome = S.read_outcome(run.ep) if run.ep.is_dir() else None
     assert outcome is None or outcome["outcome"] != "accepted"
+
+
+# --- #1363: the run's read grant in pre-flight: systems judged down, and a grant that cannot be judged ---
+
+
+def _down_estate(tmp_path: Path) -> S.Estate:
+    """The fixture tenant plus `hr`, granted for gather but with a failing settings check: judged down."""
+    est = S.estate(tmp_path, systems=(*S.SYSTEMS, "hr"))
+    est.break_settings("hr")
+    return est
+
+
+def test_1363_a_call_that_reaches_only_a_down_system_is_refused_at_admission_with_a_named_reason(tmp_path):
+    """The call to the down `hr` is listed not replayable under a reason that names `hr`, apart from an
+    ungranted call's reason; the pass goes on over the call to an up system, and nothing is sent to `hr`.
+    #1363 D9, O2"""
+    est = _down_estate(tmp_path)
+    oracle = _passing()
+    run = _launch(tmp_path, est, calls=[S.Call("edr", "query", _Q1, _BASE)], oracle=oracle,
+                  verifier=S.passing_verifier(),
+                  after_source=lambda src: _capture_row(src, system="hr", verb="query", params=_Q2,
+                                                        seq=60, payload=_BASE))
+    outcome = S.read_outcome(run.ep)
+    assert outcome is not None, run.message
+    assert outcome["outcome"] == "accepted", outcome
+    (entry,) = [e for e in outcome["not_replayable"] if e["system"] == "hr"]
+    assert "hr" in entry["reason"], entry
+    assert "live gather grant" not in entry["reason"], ("a down system's call read as an ungranted one", entry)
+    assert est.calls("hr") == [], "a call to a down system was sent"
+    assert est.calls("edr"), "positive control: the up system's call was replayed"
+    assert oracle.requests, "positive control: the pass went on to calibrate"
+
+
+def test_1363_a_pass_whose_calls_reach_only_down_systems_is_refused_and_replays_nothing(tmp_path):
+    """Every captured call reaches the down `hr`: `refused` naming `hr`, no unservable world, no oracle spend,
+    nothing sent, no sibling. Control: `test_1224_original_run_with_no_replayable_call` (ungranted). #1363 D9"""
+    est = _down_estate(tmp_path)
+    oracle, verifier = S.oracle(), S.verifier()
+    run = _launch(tmp_path, est, calls=[], oracle=oracle, verifier=verifier,
+                  after_source=lambda src: _capture_row(src, system="hr", verb="query", params=_Q1,
+                                                        seq=60, payload=_BASE))
+    outcome = S.read_outcome(run.ep)
+    assert outcome is not None, run.message
+    assert outcome["outcome"] == "refused", outcome
+    assert _key("hr", "query", _Q1) in _keys(outcome["not_replayable"])
+    assert "hr" in outcome["reason"], outcome["reason"]
+    assert outcome["unservable_worlds"] == []
+    assert est.calls() == [], "a call was sent"
+    assert (oracle.requests, verifier.requests) == (0, 0)
+    assert run.spawn.launches == []
+
+
+def test_1363_a_grant_naming_a_system_absent_from_the_roster_refuses_the_launch_before_anything_is_read(tmp_path):
+    """Judging the run's systems finds a gather grant for a system no adapter serves: the launch is refused
+    naming it, before any read or oracle turn, as an unjudgeable grant always was (the question-writer may already
+    have run).
+    Control: `test_1224_original_run_with_no_replayable_call`. #1363 B5"""
+    est = S.estate(tmp_path, systems=(*S.SYSTEMS, "ghost"))
+    (est.adapters / "ghost_adapter.py").unlink()
+    questioner, oracle, verifier = S.questioner_for(_family()), S.oracle(), S.verifier()
+    run = _launch(tmp_path, est, calls=_calls(), questioner=questioner, oracle=oracle, verifier=verifier)
+
+    assert run.rc != 0, "refused"
+    assert "ghost" in run.message, run.message
+    assert (oracle.requests, verifier.requests) == (0, 0)
+    assert est.calls() == []
+    assert run.spawn.launches == []

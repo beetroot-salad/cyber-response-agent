@@ -114,32 +114,45 @@ def test_f2_a_system_outside_the_token_grant_is_a_config_fault_unsent(tmp_path, 
     assert (refused["fault"], r.up.seen, r.store.reads) == ("ConfigFault", [], [])
 
 
-#: #1363 O4: the proxy's label in its final record. Wire name `origin` (left to the contract); values
-#: `request`, `setup`, `access`, and none for a system's answer.
-LABEL_FIELD = "origin"
-
-
 def _label_of(response) -> object:
     from defender.kit.proxy_client import decode_reply
 
-    return getattr(decode_reply(response.content).final, LABEL_FIELD, "<no such field>")
+    return T.label_of(decode_reply(response.content).final)
 
 
 def test_1363_o4_the_proxy_labels_each_refusal_where_it_raises_it(tmp_path, data_root):
-    """No credential set is `setup`, a token that does not grant the system is `request`, an expired
-    token `access`; a system's own answer carries no label. #1363 O4."""
+    """Through the route: no credential set is `setup`, a token that does not grant the system or a
+    URL off the base is `request`, an expired token and an unwritable audit `access`; a system's own
+    answer, failure included, carries no label. #1363 O4."""
     from datetime import timedelta
 
     with T.rig(tmp_path / "forge", data_root, creds=None) as r:
         no_set = r.post()
         r.store.sets[(r.t.tenant_id, "identity")] = T.static_set()
         ungranted = r.post(grant={("cmdb", "r")})
+        off_base = r.post(url=f"{r.up.url}/elsewhere")
         expired = r.post(tok=r.tok(expires_in=timedelta(minutes=-1)))
         r.up.replies[PATH] = (404, {}, b"{}")
         answered = r.post()
+        r.up.replies[PATH] = (503, {}, b"{}")
+        failed = r.post()
+        r.audit = H.FailingAudit()
+        r.rebuild()
+        unaudited = r.post()
 
-    assert [_label_of(x) for x in (no_set, ungranted, expired, answered)] == [
-        "setup", "request", "access", None]
+    assert [_label_of(x) for x in (no_set, ungranted, off_base, expired, answered, failed, unaudited)] == [
+        "setup", "request", "request", "access", None, None, "access"]
+
+
+def test_1363_o4_a_system_that_cannot_be_reached_carries_no_label(tmp_path, data_root):
+    """The proxy seeing the system's own call fail is the system's: no label, with the control that a
+    refusal of our own on the same route is labelled. #1363 O4."""
+    port = H.free_port()
+    with T.rig(tmp_path / "forge", data_root, lambda _u: H.declaration(f"http://127.0.0.1:{port}{BASE}")) as r:
+        down = r.post(url=f"http://127.0.0.1:{port}{PATH}")
+        ours = r.post(grant={("cmdb", "r")})
+
+    assert (_label_of(down), _label_of(ours)) == (None, "request")
 
 
 def _oauth_rig(tmp_path, data_root, token_url, **deps_kw):

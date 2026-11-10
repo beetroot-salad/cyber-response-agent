@@ -712,8 +712,57 @@ def test_1363_a_setup_transport_fault_is_a_charged_failed_call_naming_our_setup(
     assert run.calls_to(CONFIGURED) == [f"{CONFIGURED}.lookup", f"{CONFIGURED}.health-check"], (
         "a setup transport fault marked the system down")
     told = run.lead_answer("l-001", 0)
-    assert SETUP_TOKEN in told and "credential proxy" in told.lower(), told
+    assert SETUP_TOKEN in told, told
+    assert "credential proxy" in told.lower(), told
     assert [r.get("exit_code") for r in run.rows_for(CONFIGURED)] == [2, 0], run.rows
+
+
+@pytest.mark.parametrize("origin", [None, "system", "request"])
+def test_1363_control_a_config_fault_not_ours_still_marks_the_system_down_and_is_logged_as_a_defect(
+        tmp_path, caplog, origin):
+    """Positive control on the setup tests' channels: the same ConfigFault with no origin, the system's or one
+    call's still marks the system down, uncharged, and is logged as an adapter defect. #1363 O7, N1."""
+    caplog.set_level(logging.INFO)
+    root = _plant(tmp_path, f"s63n{origin}")
+
+    def fault() -> BaseException:
+        made = ConfigFault(f"{SETUP_TOKEN}: a settings fault")
+        if origin is not None:
+            made.origin = origin
+        return made
+
+    run = _drive(tmp_path, root, main=[dispatch("l-001", CONFIGURED), R.text(R.DONE)],
+                 leads={"l-001": [R.query(CONFIGURED, "lookup", {"value": "203.0.113.9"}),
+                                  R.query(CONFIGURED, "health-check"), SUMMARY]},
+                 behaviour={"cmdb": OK, "identity": OK, "change-mgmt": OK, CONFIGURED: fault})
+
+    assert run.calls_to(CONFIGURED) == [f"{CONFIGURED}.lookup"]
+    _assert_not_configured_refusal(run.lead_answer("l-001", 1), SETUP_TOKEN, "the lead's next call")
+    assert run.total_failures == 0, run.breaker
+    assert [r for r in caplog.records if "adapter defect" in r.getMessage()], "the escape was not logged as a defect"
+
+
+@pytest.mark.parametrize("origin", [None, "system", "request"])
+def test_1363_control_a_transport_fault_not_ours_is_still_a_charged_failed_call(tmp_path, origin):
+    """Positive control: a TransportFault with no origin, the system's or one call's is charged and marks nothing
+    down, and its detail does not claim our setup. #1363 O7, N1."""
+    root = _plant(tmp_path, f"s63x{origin}")
+
+    def fault() -> BaseException:
+        made = TransportFault(f"{SETUP_TOKEN}: the call failed")
+        if origin is not None:
+            made.origin = origin
+        return made
+
+    run = _drive(tmp_path, root, main=[dispatch("l-001", CONFIGURED), R.text(R.DONE)],
+                 leads={"l-001": [R.query(CONFIGURED, "lookup", {"value": "203.0.113.9"}),
+                                  R.query(CONFIGURED, "health-check"), SUMMARY]},
+                 behaviour={"cmdb": OK, "identity": OK, "change-mgmt": OK, CONFIGURED: OK,
+                            f"{CONFIGURED}.lookup": fault})
+
+    assert run.failures(CONFIGURED) == {CONFIGURED: 1}, run.breaker
+    assert run.calls_to(CONFIGURED) == [f"{CONFIGURED}.lookup", f"{CONFIGURED}.health-check"]
+    assert "our setup" not in run.lead_answer("l-001", 0).lower()
 
 
 class _AtFirstRequest:

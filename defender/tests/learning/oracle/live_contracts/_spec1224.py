@@ -374,6 +374,16 @@ class Estate:
         key = f"{system}|{verb}|" + ("*" if params is None else canonical(params))
         self._put(key, {"fault": fault, "detail": detail, "origin": origin})
 
+    def break_settings(self, system: str, detail: str = "HR_TIMEOUT_SEC is not set") -> None:
+        """The system's adapter settings check fails (a `ConfigFault`): judged down for a run, so
+        outside its read grant (#1363 O2, D5). Call before the tenant is placed."""
+        path = self.adapters / f"{system.replace('-', '_')}_adapter.py"
+        text = path.read_text(encoding="utf-8")
+        ok = '    return None\n\n\ndef _answer'
+        assert ok in text, "the stub adapter's settings check was not found"
+        path.write_text(text.replace(ok, f'    raise faults.ConfigFault({detail!r})\n\n\ndef _answer', 1),
+                        encoding="utf-8")
+
     # --- observing ---------------------------------------------------------------------
     def calls(self, system: str | None = None, verb: str | None = None) -> list[dict]:
         """Every call any stub adapter RECEIVED (the wire, as the tenant saw it)."""

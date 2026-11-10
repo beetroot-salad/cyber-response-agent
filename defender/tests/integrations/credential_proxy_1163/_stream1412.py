@@ -5,7 +5,10 @@ that leaves the proxy's response unread, and builders for the format's names in
 from __future__ import annotations
 
 import contextlib
+import dataclasses
+import json
 import socket
+import struct
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -32,10 +35,27 @@ def fmt() -> Any:
 
 def final_record(status: int | None = 200, **over: Any) -> Any:
     """A `FinalRecord` (every field given): a clean 200 that reached the system unless `over`
-    says otherwise."""
+    says otherwise. `origin` (#1363) is None, a system's answer, once the record declares it."""
     fields = {"status": status, "headers": {}, "fault": None, "detail": None, "system_side": False,
               "sent": True, "body_whole": True, "reader_fault": False} | over
+    if "origin" not in fields and "origin" in {f.name for f in dataclasses.fields(fmt().FinalRecord)}:
+        fields["origin"] = None
     return fmt().FinalRecord(**fields)
+
+
+#: The final record's fields before #1363 added `origin`: what an older proxy still sends.
+OLD_FINAL_FIELDS = ("status", "headers", "fault", "detail", "system_side", "sent", "body_whole", "reader_fault")
+
+
+def old_proxy_reply(*chunks: bytes, status: int | None = 200, **over: Any) -> bytes:
+    """A reply framed by hand as the proxy of #1412 framed it: body frames, then a final record of
+    exactly `OLD_FINAL_FIELDS` (no `origin`), whatever the current format's encoder writes."""
+    record = {"status": status, "headers": {}, "fault": None, "detail": None, "system_side": False,
+              "sent": True, "body_whole": True, "reader_fault": False} | over
+    assert tuple(record) == OLD_FINAL_FIELDS, "the old record has exactly its eight fields"
+    frame = struct.Struct(">cI")
+    payload = json.dumps(record).encode("utf-8")
+    return b"".join(frame.pack(b"B", len(c)) + c for c in chunks) + frame.pack(b"F", len(payload)) + payload
 
 
 def decoded(raw: bytes) -> tuple[bytes, dict[str, Any]]:

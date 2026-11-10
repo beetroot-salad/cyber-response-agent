@@ -132,6 +132,8 @@ def test_q2_the_proxys_fault_class_comes_back_as_the_adapters_fault(
     assert raised.value.exit_code == exit_code
     assert len(up.seen) == sent
     assert H.CANARY_KEY not in str(raised.value)
+    # #1363 O4: the system's answer is `system`; a system with no stored credential set is our setup.
+    assert getattr(raised.value, "origin", None) == ("system" if has_set else "setup")
 
 
 @pytest.mark.parametrize(("reply", "fault"), [
@@ -375,6 +377,9 @@ def test_1391_o3_elastic_faults_follow_the_proxys_classification(
     assert type(raised.value) is fault, raised.value
     if status == 403 and fault is ConfigFault:
         assert "`read`" in str(raised.value), "the setup fault does not name the missing privilege"
+    # #1363 O4, G26: the system answered, so even the adapter's own ConfigFault for a 403 is `system`.
+    assert getattr(raised.value, "origin", None) == "system"
+    assert raised.value.proxy_own is False
     assert [s.path.split("?")[0] for s in up.seen] == [path]
 
 
@@ -434,6 +439,7 @@ def test_1391_o3_health_check_faults_by_the_reply_and_a_403_names_the_monitor_pr
     assert type(raised.value) is fault, raised.value
     if names:
         assert names in str(raised.value), raised.value
+    assert getattr(raised.value, "origin", None) == "system"  # #1363 O4, G26: the system answered
     assert [s.path for s in up.seen] == ["/_cluster/health"], "the request was never sent"
 
 
