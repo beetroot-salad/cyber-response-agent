@@ -16,15 +16,11 @@ from pathlib import Path
 import pytest
 
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
-from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-from defender.tests.support.learning.core._store1278 import call, migrated_database, world  # noqa: F401 — fixtures the store arm needs
-from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._lead_author_1134 import repo_skills, skills_view
 from defender.tests.support.learning.core._state1135 import curation_run_dir, curation_tenant, run_of
-from defender.tests.support.shared._locations_1210 import location_path
 
 
 #: The seeded catalog, agent-relative (where it sits in the draft) and repo-relative.
@@ -285,27 +281,9 @@ def _claude_should_not_be_called(*args, **kwargs):
 # store is `tests/tenancy/tenant_1108_p4/test_1278_tick.py::test_locks_a_by_hand_lead_author_run_*`.
 
 
-# Conflict (design r8 Locks, "Pitfalls" r8/O10): the "tenant" arm held the deleted lead-queue file lock and read the file
-# queue; the arm now pins that the CLI's pitfall for the run's tenant lands in the store (a `work_items` row), no file.
-@pytest.mark.postgres
-def test_1186_lead_author_cli_files_the_runs_pitfall_for_the_runs_tenant_in_the_store(world):  # noqa: F811 — the imported fixture
-    """The CLI uses its Run's tenant for pitfall writes: the failed query becomes that tenant's pitfall item in the store. (r8 Pitfalls, O10)"""
-    import uuid
-
-    w = world
-    root = Path(location_path(w.t.tenant.tenant_root))
-    run_dir = root / "runs" / str(uuid.uuid4())
-    run_dir.mkdir(parents=True)
-    _write_lead_meta(run_dir, "l-001", "failed query")
-    _write_query(run_dir, "l-001", 0, "idp.query", payload_status="error")
-
-    rc = lead_author.main(["--tenant", w.t.tenant_id, run_dir.name], directory=w.t.directory)
-
-    assert rc == 0
-    pitfalls = [i for i in call(w.dsn, "work", w.t.tenant_id) if i.kind == "pitfall"]
-    assert [i.key.split(":")[0] for i in pitfalls] == [run_dir.name], pitfalls
-    assert [i.payload.get("query_id") for i in pitfalls] == ["idp.query"], pitfalls
-    assert not (root / "learning").exists()  # D10/O10: no learning folder is made for the store
+# Retired: test_1186_lead_author_cli_files_the_runs_pitfall_for_the_runs_tenant_in_the_store. The by-hand CLI
+# (`lead_author.main`, `store_tick.by_hand_claim`) is deleted (design amendment A3); a tenant's pitfalls are filed
+# through `build_lead_author_deps(file_pitfalls=)`, covered by the pitfall tests of test_1278_tick / test_items_1278.
 
 
 def test_run_done_sentinel_short_circuits(run_dir: Path, tmp_path: Path):
@@ -432,28 +410,24 @@ def test_verify_skills_state_rejects_stray_outside_skills(tmp_path: Path):
     assert lane.drift() == []
 
 
-def _queue_entry(paths, where: str, name: str) -> dict | None:
-    """The lead-author queue's request `name` in `where` (`""` queued, `"failed"`,
-    `"inflight"`), or `None`."""
-    at = location_path(paths.state_root) / "author-queue" / where / f"{name}.json"
-    return json.loads(at.read_text(encoding="utf-8")) if at.is_file() else None
-
-
 @pytest.mark.parametrize("fault", ["refused-claim", "gate-rejection", "unrelated"])
-def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
-        tmp_path: Path, fault: str, monkeypatch):
+def test_the_drain_serves_a_refused_claim_without_landing_anything_and_keeps_its_request(
+        tmp_path: Path, fault: str):
     """A claim the batch's ChangeSet refuses (a symlink the box left in `skills/`, at a path the
-    lane gate would admit as a plain file) stays queued with one attempt, neither dead-lettered
-    nor in flight; nothing lands and the draft is reset (#1175). Controls: a lane-gate content
-    rejection and an unrelated spawn fault are dead-lettered at once."""
-    from defender.learning.core import drains
-    from defender.tests.support.learning.core._state1135 import enqueue_run, state_for_paths
+    lane gate would admit as a plain file) lands nothing, leaves the draft reset and the outside file
+    untouched, and its request is not decided (it waits for the store's attempt ceiling, #1278 D8: no
+    dead letter here). Controls: a lane-gate content rejection and an unrelated spawn fault land
+    nothing either. (The old file queue's retry counter and dead letter are the store's: retired,
+    see test_items_1278's crash-to-the-ceiling cases.)"""
+    from types import SimpleNamespace
 
-    monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
-    lane = _lane(tmp_path, tenant=curation_tenant())
+    from defender.learning.core import drains
+
+    tenant = curation_tenant()
+    lane = _lane(tmp_path, tenant=tenant)
     run_dir = curation_run_dir("lead-u10")
-    state = state_for_paths(lane.paths)
-    enqueue_run(state, run_dir)
+    key = run_dir.name
+    payload = {"case_id": key, "tenant_id": run_dir.parent.parent.name, "run_id": key}
     outside = tmp_path / "outside" / "host.md"
     outside.parent.mkdir(parents=True, exist_ok=True)
     outside.write_text(query_template("wazuh.newthing", "established"))
@@ -474,23 +448,21 @@ def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
                      discover_system_drafts=lambda: [])
         lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps, box=box, on_done=on_done)
 
-    drains._drain_lead_author_markers(lane.paths, state, serve,
-                                      directory=directory_for_root())
+    outcomes: dict = {}
+    held = SimpleNamespace(items=[("curation_request", key, payload)])
+    try:
+        drains._store_lead_work(lane.paths, serve, lambda *a, **kw: 0, box=None, batch=lane.batch,
+                                held=held, feedback=None, outcomes=outcomes)
+    except Exception as halting:  # noqa: BLE001 — a halting fault ends the tick (its batch faults): decided nothing
+        assert fault != "refused-claim", f"a refused claim must be contained, not halt the tick: {halting!r}"
 
-    name = run_dir.name
     assert lane.landed() == []
-    assert _queue_entry(lane.paths, "inflight", name) is None
-    assert outside.read_text() == query_template("wazuh.newthing", "established")
-    if fault != "refused-claim":
-        assert _queue_entry(lane.paths, "", name) is None
-        failed = _queue_entry(lane.paths, "failed", name)
-        assert failed is not None, "the existing rule's dead letter is missing"
-        return
     assert lane.drift() == []
-    assert _queue_entry(lane.paths, "failed", name) is None, "a refused claim was dead-lettered"
-    queued = _queue_entry(lane.paths, "", name)
-    assert queued is not None, "the refused claim's request was lost"
-    assert queued.get("attempts") == 1
+    assert outside.read_text() == query_template("wazuh.newthing", "established")
+    named = outcomes.get(("curation_request", key))
+    assert named is None or named.name == "waiting", f"the request was decided: {named}"
+    if fault == "refused-claim":
+        assert named is not None and named.name == "waiting", "the refused claim's request was not kept"
 
 
 @pytest.mark.parametrize(("case", "mutate", "match"), [

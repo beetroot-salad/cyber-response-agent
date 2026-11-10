@@ -13,8 +13,7 @@ from pathlib import Path
 from defender.tests.support.learning.core._stage_args import as_curator_stage_args  # noqa: E402
 import pytest
 
-from defender._io import read_jsonl_rows
-from defender.tests.support.learning.curation._author_draft import DraftRepo, attempts, rows_without_attempts
+from defender.tests.support.learning.curation._author_draft import DraftRepo
 
 
 @pytest.fixture
@@ -35,22 +34,18 @@ def _head_files(tmp_repo) -> list[str]:
     return lane.git("show", "--name-only", "--pretty=format:", lane.tip()).stdout.split()
 
 
-def test_survival_partial_write_rollback(tmp_repo, helpers):
+def test_survival_partial_write_rollback(tmp_repo):
     a = tmp_repo.author
-    helpers.write_finding(tmp_repo.queue, finding_id="run-P/0", run_id="run-P")
+    tmp_repo.add("run-P/0")
     commits_before = _commit_count(tmp_repo)
-
-    def queued_ids() -> set[str]:
-        return {r["finding_id"] for r in read_jsonl_rows(tmp_repo.queue)}
 
     def partial_then_raise(findings, batch_id, cfg):
         tmp_repo.write_lesson("half", "run-P/0")
         raise a.AuthorError("run_stage RunUnprocessable mid-batch")
 
-    assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=partial_then_raise)) == 2
+    assert tmp_repo.run(replace(tmp_repo.cfg, invoke_agent=partial_then_raise)) == 2
     assert _commit_count(tmp_repo) == commits_before
-    assert queued_ids() == {"run-P/0"}
-    assert not tmp_repo.consumed.exists()
+    assert tmp_repo.outcomes == {}
 
     assert tmp_repo.lane.drift() == [], "the drain left the half-written lesson in the draft"
 
@@ -59,16 +54,14 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
         return {"committed": ["run-P/0"], "consumed_skip": [],
                 "commit_message": "defender: lesson full"}
 
-    assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=succeed)) == 0
+    assert tmp_repo.run(replace(tmp_repo.cfg, invoke_agent=succeed)) == 0
     assert _commit_count(tmp_repo) == commits_before + 1
     assert _head_files(tmp_repo) == ["agent/lessons/full.md"]
-    assert tmp_repo.queue.read_text().strip() == ""
+    assert tmp_repo.fate("run-P/0") is None, "the committed finding stays in its batch"
 
 
-def test_survival_scope_gate_strays(tmp_repo, helpers):
-    a = tmp_repo.author
-    helpers.write_finding(tmp_repo.queue, finding_id="run-S/0", run_id="run-S")
-    pre = rows_without_attempts(tmp_repo.queue.read_text())
+def test_survival_scope_gate_strays(tmp_repo):
+    tmp_repo.add("run-S/0")
 
     # The box writes only its lanes, so the stray sits in the drain's other lane, outside this
     # channel's corpus: the scope gate's case (a path outside every lane is a refused claim).
@@ -78,9 +71,8 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
         return {"committed": ["run-S/0"], "consumed_skip": [],
                 "commit_message": "defender: lesson in-scope"}
 
-    assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=writes_new_stray)) == 2
-    assert rows_without_attempts(tmp_repo.queue.read_text()) == pre
-    assert attempts(tmp_repo.queue.read_text()) == [1] * len(pre)
+    assert tmp_repo.run(replace(tmp_repo.cfg, invoke_agent=writes_new_stray)) == 2
+    assert tmp_repo.outcomes == {}
 
     assert tmp_repo.lane.drift() == [], "the refused tick left its stray in the draft"
     assert _commit_count(tmp_repo) == 0
@@ -90,9 +82,8 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
         return {"committed": ["run-S/0"], "consumed_skip": [],
                 "commit_message": "defender: lesson in-scope"}
 
-    assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=writes_lesson_only)) == 0
+    assert tmp_repo.run(replace(tmp_repo.cfg, invoke_agent=writes_lesson_only)) == 0
     assert _head_files(tmp_repo) == ["agent/lessons/in-scope.md"]
-    assert tmp_repo.queue.read_text().strip() == ""
 
 
 def _spawn_curator(**over):
