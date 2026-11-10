@@ -26,7 +26,7 @@ from defender.tests.learning.branch.test_947_triplet_launcher import _BASE, _cal
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.jobs._jobs1342 import register_tenant
-from defender.tests.support.learning.core._store1278 import call
+from defender.tests.support.learning.core._store1278 import ONE, call
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
@@ -669,10 +669,11 @@ def _queue(dsn: str) -> list[dict]:
 def test_judge_modes_the_job_lane_writes_the_episode_and_the_operator_lane_the_store(tmp_path, store_dsn):
     """Same reply, two lanes: the operator's findings reach the store now; the job's wait in the episode. (Judge modes)"""
     _graded_episode(tmp_path, store_dsn, job_lane=False)
-    assert _queue(store_dsn), "control: the operator lane inserted nothing"
+    operator_queue = _queue(store_dsn)
+    assert operator_queue, "control: the operator lane inserted nothing"
 
     _ep, new = _graded_episode(tmp_path, store_dsn, job_lane=True, episode_id=JOB)
-    assert len(_queue(store_dsn)) == 1, "a job's judge reached the store"
+    assert _queue(store_dsn) == operator_queue, "a job's judge reached the store"
     sunk = sink_files(new)
     assert sunk, f"the job's findings are in no file the judge added to the episode: {sorted(new)}"
     assert any(json.loads(line)["subject_topic"] == "the lead was never revisited"
@@ -697,7 +698,7 @@ def test_d5_a_jobs_findings_publish_once_even_after_an_author_consumed_them(tmp_
         publish(store)
         assert _queue(store_dsn) == rows, "a crash's republish doubled the queue"
 
-        claim = store.claim(S.FIXTURE_TENANT, "author", owner="host-a", thresholds={"finding": 1, "questioner_finding": 1})
+        claim = store.claim(S.FIXTURE_TENANT, "author", owner="host-a", thresholds=ONE)
         store.in_review(claim, 7, {})
         store.end_review(S.FIXTURE_TENANT, claim.batch_id, expect_phase="in_review", outcome="merged",
                          published=[(kind, key) for kind, key, _payload in claim.items], held=[])
@@ -716,7 +717,7 @@ def test_d5_dedup_is_by_the_store_on_both_kinds_and_holds_past_every_end(tmp_pat
             make = finding if kind == "finding" else world_finding
             row, fresh = make(f"{kind}-1"), make(f"{kind}-2")
             assert tuple(store.publish_findings(S.FIXTURE_TENANT, "run-1", [row], kind=kind)) == (1, 0)
-            claim = store.claim(S.FIXTURE_TENANT, "author", owner="host-a", thresholds={kind: 1})
+            claim = store.claim(S.FIXTURE_TENANT, "author", owner="host-a", thresholds=ONE)
             store.end_no_commits(claim, {(kind, f"{kind}-1"): _skipped("duplicate")})
             assert tuple(store.publish_findings(S.FIXTURE_TENANT, "run-2", [row], kind=kind)) == (0, 1)
             assert {i.key for i in store.work(S.FIXTURE_TENANT) if i.kind == kind and i.status == "waiting"} == set()

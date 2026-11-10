@@ -372,6 +372,18 @@ def test_reviews_and_comments_are_read_from_their_own_endpoints_and_returned_who
     _all_ours(http)
 
 
+def test_reviews_past_the_forges_page_are_all_returned_and_the_words_on_a_late_page_are_seen():
+    """35 reviews, a default page being 30: `reviews(n)` returns all 35, the only one with words among them. (C30, Feedback)"""
+    http = ForgeHTTP()
+    _stored_pr(http)
+    http.reviews[7] = [review_row(i, f"r{i}", "APPROVED") for i in range(1, 35)] + [
+        review_row(35, "late", "COMMENT", body="only on the last page")]
+    got = forge(http).reviews(7)
+
+    assert len(got) == 35
+    assert [r["body"] for r in got if r["body"]] == ["only on the last page"]
+
+
 def test_reading_reviews_needs_no_read_issue_but_reading_comments_does():
     """With `write:repository` alone reviews read and comments are a `ForgeError` carrying 403, never an empty list. (C23)"""
     http = ForgeHTTP()

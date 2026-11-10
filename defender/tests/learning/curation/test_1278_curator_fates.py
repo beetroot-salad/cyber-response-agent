@@ -15,7 +15,9 @@ from defender.tests.support.learning.core._curators1278 import (  # noqa: E402
     LESSONS, PITFALLS, QUESTIONER, Reply, ScriptedModel, result, scripted)
 from defender.tests.support.learning.core._store1278 import (  # noqa: E402
     AUTHOR_LANE, call, lapse_lease, lesson_citing, migrated_database, world, world_finding)  # noqa: F401 — fixtures
-from defender.tests.tenancy.tenant_1108_delivery._support import close_on_remote  # noqa: E402
+from defender.tests.support.learning.core._feedback1278 import framed  # noqa: E402
+from defender.tests.tenancy.tenant_1108_delivery._support import (  # noqa: E402
+    close_on_remote, comment_row, review_row)
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (  # noqa: E402
     BoxSpy, author_drain, critical_text, lead_author_drain, remote_branches)
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: E402, F401 — fixture `world` is built on
@@ -354,3 +356,73 @@ def test_d9_each_tick_claims_only_its_own_lanes_kinds(lead, caplog):
     items = _items(w)
     assert items[("pitfall", "p4-run:1")].batch_id == lead_batch.id
     assert items[("finding", "f1")].batch_id != lead_batch.id
+
+
+# --- Feedback: the real curators' prompts on a replacement tick (H13, G-F5) ------------------------------------------------
+
+_WORDS = ("cite the alert rule, not the host", "wrong lane")
+
+
+def _closed_with_words(w, branch: str, number: int) -> None:
+    """A person asks for changes and closes the PR with a comment."""
+    w.t.forge.scopes = {"write:repository", "read:issue"}
+    w.t.forge.comments[number] = [comment_row(501, "analyst", _WORDS[0])]
+    w.t.forge.reviews[number] = [review_row(651, "owner", "REQUEST_CHANGES", body=_WORDS[1])]
+    close_on_remote(w.t.p3, branch)
+
+
+@pytest.mark.parametrize(("kind", "mine", "other"), [
+    ("finding", LESSONS, QUESTIONER), ("questioner_finding", QUESTIONER, LESSONS)], ids=["lessons-only", "questioner-only"])
+def test_h13_the_replacement_hands_the_feedback_to_the_real_curator_of_its_kind_inside_the_untrusted_frame(
+        world, caplog, kind, mine, other):  # noqa: F811 — the imported fixture
+    """A PR of one kind is closed with words: on the replacement tick that kind's curator prompt carries both inside an
+    untrusted frame, and the other curator is not given them. (H13, G-F5)"""
+    w = world
+    _seed(w, "x1", kind=kind)
+    reply = Reply({"l1.md": lesson_citing("x1")}, result(committed=["x1"]))
+    _tick(w, ScriptedModel(**{mine: reply}))
+    first = _only_batch(w)
+    _closed_with_words(w, first.branch, first.pr_number)
+    model = ScriptedModel(**{mine: reply})
+
+    _tick(w, model)
+
+    [new] = [b for b in _batches(w).values() if b.replaces == first.id]
+    assert new.phase == "in_review", critical_text(caplog)
+    prompts = [s.prompt for s in model.seen if s.curator == mine]
+    assert prompts, "the curator of the batch's kind never ran"
+    for words in _WORDS:
+        assert any(framed(p, words) for p in prompts), f"{words!r} is not inside an untrusted frame in the prompt"
+    assert all(_WORDS[0] not in s.prompt and _WORDS[1] not in s.prompt for s in model.seen if s.curator == other), (
+        "feedback reached a curator of another kind")
+
+
+def test_h13_a_lead_pr_closed_with_words_is_left_to_the_operators_tick_which_hands_them_to_the_pitfalls_curator(lead, caplog):
+    """The post-step's tick leaves the lead batch's pitfall due when its PR is closed with words; the operator's lead
+    tick makes the replacement, `replaces` the closed batch, and the pitfalls curator's prompt carries the words framed. (H13, D9)"""
+    w = lead
+    call(w.dsn, "add_pitfall", w.t.tenant_id, _pitfall("p4-run:1"))
+    note = Reply({_reducer_path(): _reducer_note()})
+    _lead_tick(w, ScriptedModel(pitfalls=note))
+    first = _only_batch(w)
+    _closed_with_words(w, first.branch, first.pr_number)
+
+    _tick(w, ScriptedModel())  # the hosted post-step's tick: reconciles every lane, authors nothing for the lead lane
+
+    batches = _batches(w)
+    assert (batches[first.id].phase, batches[first.id].outcome) == ("ended", "closed"), critical_text(caplog)
+    assert [b for b in batches.values() if b.replaces == first.id] == [], "the post-step made a lead-lane replacement"
+    item = _items(w)[("pitfall", "p4-run:1")]
+    assert (item.status, item.batch_id) == ("in_batch", first.id), "the pitfall is not due on the closed batch"
+    assert len(w.t.forge.creates) == 1
+
+    model = ScriptedModel(pitfalls=note)
+    _lead_tick(w, model)
+
+    [new] = [b for b in _batches(w).values() if b.replaces == first.id]
+    assert (new.lane, new.phase) == (first.lane, "in_review"), critical_text(caplog)
+    assert _items(w)[("pitfall", "p4-run:1")].batch_id == new.id
+    prompts = [s.prompt for s in model.seen if s.curator == PITFALLS]
+    assert prompts
+    for words in _WORDS:
+        assert any(framed(p, words) for p in prompts), f"{words!r} is not inside an untrusted frame in the prompt"

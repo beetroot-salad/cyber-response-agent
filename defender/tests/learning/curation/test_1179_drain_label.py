@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from defender.learning.core.state import LEAD_QUEUE_LOCK, TRY_ONCE
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, DrainLabel, LoopPaths,
 )
@@ -84,12 +83,9 @@ def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
     with pytest.raises(AttributeError):
         lead_author.run(run, label=value, deps=deps)  # type: ignore[arg-type]
 
-    with state_for_paths(paths).lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held:
-        assert held, "precondition: the test holds the queue lock"
-        assert lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == \
-            lead_author.QUEUE_LOCK_SKIP_RC, "control: the held lock makes a member skip"
-        with pytest.raises(AttributeError):
-            lead_author.run(run, label=value, paths=paths)  # type: ignore[arg-type]
+    # Conflict (design r8 Locks): the lead-queue file lock and its skip control are gone; a non-member still fails first.
+    with pytest.raises(AttributeError):
+        lead_author.run(run, label=value, paths=paths)  # type: ignore[arg-type]
 
 
 def test_the_paths_carry_no_label_table():

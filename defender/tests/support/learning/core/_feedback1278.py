@@ -36,6 +36,22 @@ class Scene:
     def batch_rows(self) -> dict[str, Any]:
         return {b.id: b for b in batches(self.dsn, self.t.tenant_id)}
 
+    def bot_login(self) -> str:
+        """The tenant's real forge login: the live generation's `bot-<tenant>-<salt>` (what `bind_forge` recorded)."""
+        [generation] = self.t.__dict__["_bound"]["generations"]
+        return generation["bot_login"]
+
+    def stored_text(self) -> str:
+        """Every row of every `learning.*` table, cast to text, as one string (a scan for text that must not be stored)."""
+        from defender.tests.support.shared._postgres1339 import execute
+
+        tables = [name for (name,) in execute(
+            self.dsn, "SELECT table_name FROM information_schema.tables WHERE table_schema = 'learning' "
+                      "AND table_type = 'BASE TABLE'")]
+        assert tables, "no learning tables to scan"
+        return "\n".join(text for table in tables
+                         for (text,) in execute(self.dsn, f'SELECT t::text FROM learning."{table}" t'))
+
     def seed(self, *ids: str, kind: str = "finding") -> None:
         call(self.dsn, "publish_findings", self.t.tenant_id, "run-1", [finding(i) for i in ids], kind=kind)
 

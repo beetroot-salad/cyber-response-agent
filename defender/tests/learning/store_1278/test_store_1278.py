@@ -7,6 +7,7 @@ the active-tenant condition and cancel (O6), the per-tenant view (O2).
 """
 from __future__ import annotations
 
+import contextlib
 import uuid
 
 import anyio
@@ -16,6 +17,7 @@ from defender.tests.support.jobs._jobs1342 import move_tenant, register_tenant
 from defender.tests.support.learning.core._store1278 import (
     AUTHOR_LANE,
     FINDING,
+    LEAD_LANE,
     ONE,
     QUESTIONER,
     changes_of,
@@ -252,6 +254,24 @@ async def test_p6_a_holder_whose_lease_lapsed_changes_nothing_in_grace_or_after(
         assert (await _batch(store, BLUE, held.batch_id), await _work(store, BLUE)) == before
         assert await store.commit_record(BLUE) == []
         assert lease_seconds_left(dsn, held.batch_id) < 0, "a late call revived the lease"
+
+
+async def test_p6_a_successful_renew_extends_the_lease_and_the_default_lease_outlasts_a_stop_grace(dsn):
+    """Renew pushes the lease end out by the lease; with no knob a fresh claim holds over 30 s (the worker's stop grace). (P6, Renewal and stop)"""
+    async with learning_store(dsn, **KNOBS) as store:
+        await publish(store, BLUE, "f1")
+        held = await claim(store, BLUE)
+        execute(dsn, "UPDATE learning.batches SET lease_expiry = now() + interval '5 seconds' WHERE id = %s", (held.batch_id,))
+        assert lease_seconds_left(dsn, held.batch_id) < 10, "premise: the lease is nearly out"
+
+        await store.renew(held)
+
+        assert lease_seconds_left(dsn, held.batch_id) > 100, "a renewal that left the lease where it was lets a live holder lapse"
+    async with learning_store(dsn) as store:
+        await store.abandon_clean(held)
+        await publish(store, BLUE, "f2")
+        fresh = await claim(store, BLUE)
+        assert lease_seconds_left(dsn, fresh.batch_id) > 30, "the default lease must outlast the stop grace"
 
 
 async def test_p6_lease_lost_is_a_stop():
@@ -615,3 +635,48 @@ async def test_o2_the_view_names_each_items_status_batch_and_pr_per_tenant(dsn):
             ("g1", "waiting", None, None)]
         [batch] = await store.batches(BLUE)
         assert (batch.phase, batch.pr_number, batch.branch) == ("in_review", 7, held.branch)
+
+
+@pytest.mark.parametrize("outcome", ["merged", "closed"])
+async def test_d7_end_review_with_a_phase_that_is_no_longer_the_batchs_changes_nothing(dsn, outcome):
+    """A stale reconcile (the person abandoned the batch first) ends nothing and publishes nothing: the compare-and-set on phase. (D7, O7)"""
+    async with learning_store(dsn, **KNOBS) as store:
+        held = await _in_review(store, BLUE, "f1")
+        await store.abandon(BLUE, held.batch_id, by="person")
+        after_abandon = (await _batch(store, BLUE, held.batch_id), await _work(store, BLUE))
+        assert (after_abandon[0].phase, after_abandon[0].outcome) == ("ended", "abandoned"), "premise: the batch already ended"
+        published = [(FINDING, "f1")] if outcome == "merged" else []
+
+        with contextlib.suppress(Exception):  # refusing is as good as ignoring
+            await store.end_review(BLUE, held.batch_id, expect_phase="in_review", outcome=outcome, published=published, held=[])
+
+        batch = await _batch(store, BLUE, held.batch_id)
+        assert (batch.phase, batch.outcome) == ("ended", "abandoned")
+        assert await _work(store, BLUE) == after_abandon[1], "a stale end_review moved an item"
+
+
+@pytest.mark.parametrize("words", [False, True], ids=["closed-without-words", "closed-with-words"])
+async def test_d9_a_lead_batchs_curation_requests_keep_their_own_fate_until_the_batch_ends(dsn, words):
+    """A request the curator skipped stays skipped when the lead PR closes; the rest are held when it closed without words, and stay due when it closed with. (D9, H2)"""
+    S = store_mod()
+    async with learning_store(dsn, **KNOBS) as store:
+        await store.enqueue_request(BLUE, "run-1", "case-A", {"n": 1})
+        await store.enqueue_request(BLUE, "run-2", "case-B", {"n": 2})
+        await store.add_pitfall(BLUE, {"schema_version": 1, "pitfall_id": "p1", "source_run": "r", "system": "elastic",
+                                       "query_id": "elastic.esql", "goal": "g", "executed_query": "x",
+                                       "stderr_digest": "exit=1; digest", "error_class": "agent-fixable"})
+        held = await store.claim(BLUE, LEAD_LANE, owner="host-a", thresholds=ONE)
+        assert len(held.items) == 3
+        await store.in_review(held, pr_number=9, outcomes={("curation_request", "run-1"): S.Outcome.skipped("names no system")})
+        items = await _work(store, BLUE)
+        assert items["curation_request", "run-1"].status == "skipped", "premise: the curator's fate for one request"
+        assert {items["curation_request", "run-2"].status, items["pitfall", "p1"].status} == {"in_batch"}, "premise: committed items wait for the PR"
+
+        await store.end_review(BLUE, held.batch_id, expect_phase="in_review", outcome="closed", published=[],
+                               held=[] if words else [("curation_request", "run-2"), ("pitfall", "p1")])
+
+        items = await _work(store, BLUE)
+        assert (items["curation_request", "run-1"].status, "names no system" in (items["curation_request", "run-1"].reason or "")) \
+            == ("skipped", True), "a batch's end rewrote a request's own fate"
+        rest = {items["curation_request", "run-2"].status, items["pitfall", "p1"].status}
+        assert rest == ({"in_batch"} if words else {"held"})

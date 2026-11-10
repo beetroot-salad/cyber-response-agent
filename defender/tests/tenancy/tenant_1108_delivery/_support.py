@@ -392,14 +392,16 @@ class ForgeHTTP:
         if len(parts) == 4 and parts[1] == "pulls" and parts[3] == "reviews" and request.method == "GET":
             if not self._pull(parts[2]):
                 return httpx.Response(404, json={"message": "pull request does not exist"})
-            return httpx.Response(200, json=self.reviews.get(int(parts[2]), []))
+            return self._paged_reviews(request, self.reviews.get(int(parts[2]), []))
         if len(parts) == 4 and parts[1] == "issues" and parts[3] == "comments" and request.method == "GET":
             if "read:issue" not in self.scopes:
                 return httpx.Response(403, json={
                     "message": "token does not have at least one of required scope(s): [read:issue]"})
             if not self._pull(parts[2]):
                 return httpx.Response(404, json={"message": "issue does not exist"})
-            return httpx.Response(200, json=self.comments.get(int(parts[2]), []))
+            # Forgejo 17 (probe, 70 comments): comments ignore `page` and `limit` and answer the lot.
+            rows = self.comments.get(int(parts[2]), [])
+            return httpx.Response(200, json=rows, headers={"X-Total-Count": str(len(rows))})
         if len(parts) == 3 and parts[1] == "pulls" and request.method == "PATCH":
             rows = list(self.prs)
             found = [row for row in rows if str(row["number"]) == parts[2]]
@@ -411,6 +413,18 @@ class ForgeHTTP:
                 _save_pulls(self.remote, rows)
             return httpx.Response(201, json=found[0])
         return None
+
+    def _paged_reviews(self, request, rows):
+        """Forgejo 17 (probe, 70 reviews, #1278 C30): a review listing sent with neither `page` nor `limit` answers
+        every review; sent with either, it pages (30 by default, `limit` honoured) and never sends a `Link`.
+        `X-Total-Count` is always the total."""
+        params = request.url.params
+        if "page" in params or "limit" in params:
+            size, page = int(params.get("limit") or 30), int(params.get("page") or 1)
+            shown = rows[(page - 1) * size:page * size]
+        else:
+            shown = rows
+        return httpx.Response(200, json=shown, headers={"X-Total-Count": str(len(rows))})
 
     def _pull(self, number):
         return [row for row in self.prs if str(row["number"]) == number]
@@ -527,7 +541,9 @@ def merge_on_remote(repo, tmp_path, branch, style="merge", *, delete_branch=Fals
     the branch's open PR merged (there must be one), and `delete_branch` deletes the branch
     as Forgejo's merge option does. `edit(checkout)` (merge style only) changes the merge result
     before it is committed, as a reviewer's edit in the merge dialog would: the branch tip keeps
-    what the merge commit's tree drops (#1278 H16). Returns the new `main`."""
+    what the merge commit's tree drops (#1278 H16). The PR's `merge_commit_sha` is the new `main` for all three
+    styles (Forgejo 17 probe, C29: the merge commit, the squash commit, the last rebased commit), whose tree is
+    the merged tree. Returns the new `main`."""
     writer = tmp_path / f"merger-{len(list(tmp_path.glob('merger-*')))}"
     git(tmp_path, "clone", repo[1], writer)
     assert edit is None or style == "merge", "an edited merge is a merge commit"

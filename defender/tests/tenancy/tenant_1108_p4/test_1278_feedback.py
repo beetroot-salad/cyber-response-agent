@@ -8,7 +8,7 @@ A crash between the reconcile's end and the replacement's claim is made by endin
 """
 from __future__ import annotations
 
-import time
+import os
 
 import httpx
 import pytest
@@ -25,7 +25,17 @@ from defender.tests.support.learning.core._feedback1278 import (
     tick,
     wake_at,
 )
-from defender.tests.support.learning.core._store1278 import LEAD_LANE, call, lapse_lease, lesson_citing
+from defender.tests.support.learning.core._store1278 import (
+    LEAD_LANE,
+    RENEW_ENV,
+    TickChild,
+    await_file,
+    blocked_in_subprocess,
+    call,
+    kill_if_alive,
+    lapse_lease,
+    lesson_citing,
+)
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 from defender.tests.tenancy.tenant_1108_delivery._support import (
     close_on_remote,
@@ -47,8 +57,8 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
 pytestmark = pytest.mark.postgres
 
 READ_ISSUE = {"write:repository", "read:issue"}
-#: How long a cancelled curator step waits for its stop before giving up.
-STOP_WAIT_SECONDS = 45.0
+#: How long the forked post-step may take to end after its stop.
+STOP_BOUND = 30.0
 
 
 def _files(*finding_ids):
@@ -222,9 +232,12 @@ def test_feedback_words_posted_after_the_read_start_nothing(world, caplog):
 
 # --- Feedback: closed with words -> replacement in the same tick (H3, H7, D7, D8) ----------------------
 
+#: Stands for the tenant's real bot login (`bot-<tenant>-<salt>`), which a case knows only once its scene is built.
+BOT = "<the tenant's bot login>"
+
 WORDS = {
     "plain-comment": ([], [comment_row(501, "analyst", "cite the alert rule, not the host")]),
-    "comment-by-the-bot-login": ([], [comment_row(502, "tenant-bot", "no bot exclusion")]),
+    "comment-by-the-bot-login": ([], [comment_row(502, BOT, "no bot exclusion")]),
     "review-with-text": ([review_row(611, "owner", "COMMENT", body="wrong lane")], []),
     "approval-with-text": ([review_row(612, "owner", "APPROVED", body="fine but rename it")], []),
     "live-changes-requested": ([review_row(613, "owner", "REQUEST_CHANGES")], []),
@@ -240,6 +253,8 @@ def test_feedback_a_pr_closed_with_words_is_replaced_by_a_new_batch_in_the_same_
     w.seed("f1")
     writer = FeedbackCurator(_files("f1"))
     old_id, old_branch, old_number = opened(w, writer, caplog)
+    assert w.bot_login().startswith("bot-"), "premise: the scene's bot login is the provisioned spelling"
+    comments = [{**c, "user": {"login": w.bot_login()}} if c["user"]["login"] == BOT else c for c in comments]
     w.t.forge.reviews[old_number], w.t.forge.comments[old_number] = reviews, comments
     close_on_remote(w.t.p3, old_branch)
     tick(w, writer)
@@ -253,6 +268,21 @@ def test_feedback_a_pr_closed_with_words_is_replaced_by_a_new_batch_in_the_same_
     [old_url] = [r["html_url"] for r in w.t.forge.prs if r["number"] == old_number]
     assert f"#{old_number}" in second.get("body", "") or old_url in second.get("body", ""), second
     _no_orphans(w)
+
+
+def test_feedback_words_only_on_the_second_page_of_reviews_start_the_replacement(world, caplog):
+    """Thirty approvals with no words and a thirty-first review with some: the closed PR is replaced and the curator is handed the late words. (C30, H13)"""
+    w = world
+    w.seed("f1")
+    writer = FeedbackCurator(_files("f1"))
+    old_id, old_branch, number = opened(w, writer, caplog)
+    w.t.forge.reviews[number] = [review_row(800 + i, f"approver-{i}", "APPROVED") for i in range(30)] + [
+        review_row(900, "late-reviewer", "COMMENT", body="the only words, on page two")]
+    close_on_remote(w.t.p3, old_branch)
+    tick(w, writer)
+
+    assert len(_replacements(w, old_id)) == 1, "the words on the second page were not read"
+    assert framed(writer.seen_text(), "the only words, on page two")
 
 
 def test_feedback_the_replacement_is_made_once_whatever_follows(world, caplog):
@@ -367,22 +397,24 @@ def test_h13_the_replacement_hands_the_curator_the_feedback_in_an_untrusted_bloc
     assert any(p.endswith(f"/pulls/{number}/reviews") for p in asked), "the text is read live, not remembered"
     assert any(p.endswith(f"/issues/{number}/comments") for p in asked)
     assert [b.replaces for b in _replacements(w, old_id)] == [old_id]
+    stored = w.stored_text()
+    for words in ("cite the alert rule, not the host", "wrong lane"):
+        assert words not in stored, f"review text {words!r} was stored in the database"
 
 
 @pytest.mark.parametrize(("suffix", "status"), [("/comments", 403), ("/comments", 503), ("/reviews", 403), ("/reviews", 503)])
 def test_h13_a_failed_read_at_replacement_waits_and_never_authors_blind(world, caplog, suffix, status):
-    """The reconcile read the feedback; the replacement's own read fails: no claim, no curator run, the items still due; a good read then authors. (H13)"""
+    """The batch is already ended closed by hand and the forge refuses from the first request, so the replacement's own read is the only read: no claim, no curator run, the items still due; a good read then authors and stores no review text. (H13, GAP2)"""
     w = world
-    w.seed("f1")
-    writer = FeedbackCurator(_files("f1"))
-    old_id, branch, number = opened(w, writer, caplog)
-    w.t.forge.comments[number] = [comment_row(501, "analyst", "cite the alert rule")]
-    w.t.forge.reviews[number] = [review_row(661, "owner", "COMMENT", body="wrong lane")]
-    close_on_remote(w.t.p3, branch)
-    w.t.forge.refuse(suffix, status, after=1)
+    old_id, number = _due(w, caplog, comment="cite the alert rule, found in runbook-7731")
+    w.t.forge.reviews[number] = [review_row(661, "owner", "COMMENT", body="wrong lane, see runbook-8842")]
+    before = len(w.t.forge.requests)
+    w.t.forge.refuse(suffix, status)
     blind = FeedbackCurator(_files("f1"))
     tick(w, blind)
 
+    asked = [r.url.path for r in w.t.forge.requests[before:] if r.method == "GET"]
+    assert any(p.endswith(suffix) for p in asked), "the replacement never read the feedback"
     assert _end(w, old_id) == ("ended", "closed")
     assert (blind.served, _replacements(w, old_id), len(w.t.forge.creates)) == ([], [], 1)
     assert (w.items()["f1"].status, w.items()["f1"].batch_id) == ("in_batch", old_id), "still due"
@@ -391,8 +423,11 @@ def test_h13_a_failed_read_at_replacement_waits_and_never_authors_blind(world, c
     good = FeedbackCurator(_files("f1"))
     tick(w, good)
     assert good.served
-    assert framed(good.seen_text(), "cite the alert rule")
+    assert framed(good.seen_text(), "cite the alert rule, found in runbook-7731")
     assert len(_replacements(w, old_id)) == 1
+    stored = w.stored_text()
+    for words in ("runbook-7731", "runbook-8842"):
+        assert words not in stored, f"review text {words!r} was stored in the database"
 
 
 def test_h14_words_posted_after_the_reconcile_read_count_at_authoring(world, caplog):
@@ -467,27 +502,38 @@ def test_replacement_a_successor_abandoned_before_its_pr_passes_its_replaces_on(
     _no_orphans(w)
 
 
-def test_replacement_a_stop_before_its_pr_keeps_the_items_due_with_the_generation_unchanged(world, caplog):
-    """Cancel while the replacement's curator works: it ends abandoned, the items are due again, the next tick replaces. (O7, D4, D8)"""
+@pytest.mark.parametrize("how", ["cancel", "sigterm"])
+def test_replacement_a_stop_before_its_pr_keeps_the_items_due_with_the_generation_unchanged(world, caplog, monkeypatch, how):
+    """The post-step, forked, is stopped while the replacement's curator is blocked in a subprocess: the batch ends abandoned, the items are due again, the next tick replaces. (O7, D4, D8)"""
+    from defender.learning.branch import post_step
+
     w = world
     old_id, _number = _due(w, caplog)
-    outcome = {}
+    marker = w.scratch / "sleeper"
+    blocked = FeedbackCurator(_files("f1"), before_commit=blocked_in_subprocess(marker))
+    monkeypatch.setenv(RENEW_ENV, "0.2")
 
-    def cancel_then_wait(_batch):
-        call(w.dsn, "request_cancel", w.t.tenant_id)
-        deadline = time.monotonic() + STOP_WAIT_SECONDS
-        while time.monotonic() < deadline:
-            time.sleep(0.05)
-        outcome["waited_out"] = True
+    def body():
+        return post_step.main(["--tenant", w.t.tenant_id, "--parent-pid", str(os.getppid())],
+                              author_tick=lambda _paths: tick(w, blocked),
+                              still_waiting=lambda _paths: False, directory=w.t.directory)
+    child = TickChild(body, w.scratch / f"child-{how}.json")
+    sleeper = int(await_file(marker))
+    try:
+        if how == "cancel":
+            call(w.dsn, "request_cancel", w.t.tenant_id)
+        else:
+            child.terminate()
+        child.wait(seconds=STOP_BOUND)
+    finally:
+        kill_if_alive(sleeper)
 
-    tick(w, FeedbackCurator(_files("f1"), before_commit=cancel_then_wait))
-
-    assert "waited_out" not in outcome, "the stop never reached the curator step"
     [stopped] = _replacements(w, old_id)
     assert (stopped.phase, stopped.outcome) == ("ended", "abandoned")
     assert (w.items()["f1"].status, w.items()["f1"].batch_id) == ("in_batch", old_id), "still due on the closed batch"
     _no_orphans(w)
 
+    monkeypatch.setenv(RENEW_ENV, "600")
     again = FeedbackCurator(_files("f1"))
     tick(w, again)
     [fresh] = [b for b in _replacements(w, old_id) if b.id != stopped.id]
@@ -600,9 +646,12 @@ def test_h15_a_server_error_or_a_lost_connection_is_unknown_and_never_counts(wor
                                      if r.url.path.endswith(f"/pulls/{number}/reviews") else None)
     else:
         w.t.forge.refuse("/reviews", int(failure))
+    before = len(w.t.forge.requests)
     for _ in range(5):
         tick(w, writer)
 
+    asked = [r for r in w.t.forge.requests[before:] if r.method == "GET" and r.url.path.endswith(f"/pulls/{number}/reviews")]
+    assert len(asked) >= 5, "the reconcile never asked for the reviews, so nothing was refused or counted"
     b = w.batch_rows()[batch_id]
     assert (b.phase, b.refusals) == ("in_review", 0)
 

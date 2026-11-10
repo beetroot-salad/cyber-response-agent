@@ -23,6 +23,7 @@ from defender.tests.support.learning.core._store1278 import (
     world,  # noqa: F401 — fixture
 )
 from defender.tests.support.shared._locations_1210 import location_path
+from defender.tests.tenancy.tenant_1108_delivery._support import close_on_remote
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     LESSON_NAME,
     BoxSpy,
@@ -114,3 +115,22 @@ def test_reverts_a_revert_that_crashed_after_its_push_is_taken_over_and_gets_one
     opened = [r for r in t.forge.prs if r["state"] == "open" and r["head"]["ref"] == revert.branch]
     assert (after.phase, len(opened)) == ("in_review", 1), critical_text(caplog)
     assert after.pr_number == opened[0]["number"]
+
+
+def test_reverts_a_revert_pr_closed_unmerged_ends_its_batch_and_refuses_the_next_revert_of_that_lesson(world, caplog):  # noqa: F811 — the imported fixture
+    """A closed revert PR is a rejection kept in the store: its batch ends, a second CLI revert of the same lesson exits 2 and makes no branch or PR, and no batch is left not ended. (Reverts, D7)"""
+    t = world.t
+    authored_and_merged(world)
+    assert _revert(t, LESSON) == 0
+    [revert] = [b for b in batches(world.dsn, t.tenant_id) if b.kind == "revert"]
+    close_on_remote(t.p3, revert.branch)
+    author_drain(t, world.paths, trigger=LessonWriter({}), box=BoxSpy())  # the tick reconciles the closed PR
+    assert {b.id: b.phase for b in batches(world.dsn, t.tenant_id)}[revert.id] == "ended", critical_text(caplog)
+    branches, creates = remote_branches(t.remote, prefix=""), list(t.forge.creates)
+
+    assert _revert(t, LESSON) == 2
+
+    assert list(t.forge.creates) == creates, "a closed revert was made again"
+    assert remote_branches(t.remote, prefix="") == branches
+    assert [b.kind for b in batches(world.dsn, t.tenant_id) if b.kind == "revert"] == ["revert"], "a second revert batch was minted"
+    assert {b.phase for b in batches(world.dsn, t.tenant_id) if b.kind == "revert"} == {"ended"}

@@ -18,7 +18,7 @@ from defender.records.job_lane import post_step_key
 from defender.tests.learning.branch.test_1344_post_step import (  # noqa: F401 — store_dsn is the module's autouse fixture
     _job_episode, _learning_paths, _queue, hand_pending, store_dsn)
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, call, finding, lapse_lease
+from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, LEAD_LANE, ONE, call, finding, lapse_lease
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
 
@@ -81,16 +81,13 @@ def test_a1_a_family_less_post_step_with_nothing_pending_still_runs_the_gate(tmp
 # --- Wake (#1278 amendment): the record's `waiting` counts the store's state ----------------------------------------
 
 
-_ONE = {"finding": 1, "questioner_finding": 1}
-
-
 def _queued(dsn: str, tenant: str, *ids: str) -> None:
     call(dsn, "publish_findings", tenant, "run-1", [finding(i) for i in ids], kind="finding")
 
 
 def _claimed(dsn: str, tenant: str) -> Any:
     _queued(dsn, tenant, "f1")
-    return call(dsn, "claim", tenant, AUTHOR_LANE, owner="host-a", thresholds=_ONE)
+    return call(dsn, "claim", tenant, AUTHOR_LANE, owner="host-a", thresholds=ONE)
 
 
 def _reviewed(dsn: str, tenant: str) -> Any:
@@ -121,6 +118,16 @@ def _closed_with_feedback(dsn: str, tenant: str) -> None:
          published=[], held=[])
 
 
+def _lead_rejected(dsn: str, tenant: str) -> None:
+    """A lead-lane batch whose PR was closed with words: its pitfall stays in the batch, due a replacement nobody but an operator makes."""
+    call(dsn, "add_pitfall", tenant, {"schema_version": 1, "pitfall_id": "p0", "source_run": "r", "system": "elastic",
+                                      "query_id": "elastic.esql", "goal": "g", "executed_query": "x",
+                                      "stderr_digest": "exit=1; digest 0", "error_class": "agent-fixable"})
+    claim = call(dsn, "claim", tenant, LEAD_LANE, owner="lead-drain", thresholds=ONE)
+    call(dsn, "in_review", claim, 7, {})
+    call(dsn, "end_review", tenant, claim.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[])
+
+
 def _merged(dsn: str, tenant: str) -> None:
     call(dsn, "end_review", tenant, _reviewed(dsn, tenant).batch_id, expect_phase="in_review", outcome="merged",
          published=[("finding", "f1")], held=[])
@@ -136,6 +143,7 @@ _SCENARIOS = {
     "fresh_check_in_review": _checked,
     "due_replacement": _closed_with_feedback,
     "merged_and_nothing_else": _merged,
+    "lead_batch_closed_with_words": _lead_rejected,  # a lead replacement is operator-only: Wake does not count it (D9)
     "pitfalls_at_threshold": _pitfalls,  # the lead lane is operator-only: nothing a post-step can act on (D9)
 }
 
@@ -143,7 +151,8 @@ _SCENARIOS = {
 @pytest.mark.parametrize(("scenario", "waiting"), [
     ("items_at_threshold", True), ("lapsed_lease", True), ("overdue_check", True), ("due_replacement", True),
     ("fresh_check_in_review", True), ("live_working_batch", True),
-    ("below_threshold", False), ("merged_and_nothing_else", False), ("pitfalls_at_threshold", False)])
+    ("below_threshold", False), ("merged_and_nothing_else", False), ("pitfalls_at_threshold", False),
+    ("lead_batch_closed_with_words", False)])
 def test_wake_the_post_step_says_work_waits_exactly_when_the_stores_state_gives_it_something_to_do(
         tmp_path, monkeypatch, scenario, waiting):
     """Items at threshold, a lapsed lease, a batch overdue for a check, a due replacement, or any batch still to be
@@ -152,7 +161,7 @@ def test_wake_the_post_step_says_work_waits_exactly_when_the_stores_state_gives_
     (Wake, D9, amendment 3)"""
     from defender.tests.support.learning.core._store1278 import DSN_ENV
 
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "2" if scenario == "items_at_threshold" else "1")
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "2" if scenario in {"items_at_threshold", "below_threshold"} else "1")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "5")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     ep, _ = _job_episode(tmp_path, f"wake-{scenario}", findings=False)

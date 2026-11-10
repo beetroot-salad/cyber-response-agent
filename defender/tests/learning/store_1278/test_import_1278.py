@@ -47,12 +47,14 @@ def world(tmp_path, data_root, migrated_database):
 async def refused_import(w, *named):
     """The import is refused (`ImportRefused`, interface request) naming each of `named`, and the store holds nothing of the
     tenant afterwards: one transaction (G-I10)."""
+    files = files_under(w.root)
     async with learning_store(w.dsn) as store:
         with pytest.raises(store_mod().ImportRefused) as refusal:
             await store_mod().import_learning_state(store, w.tid, w.root, delivery=w.t.open_delivery())
         for name in named:
             assert name in str(refusal.value), f"the refusal does not name {name}: {refusal.value}"
         assert (await store.work(w.tid), await store.batches(w.tid), await store.commit_record(w.tid)) == ([], [], [])
+    assert files_under(w.root) == files, "a refused import changed the tenant's learning files"
 
 
 async def imported(w):
@@ -364,6 +366,9 @@ async def test_migration_a_retained_delivery_batch_holds_the_items_its_branch_ci
 
 async def test_migration_the_whole_commit_record_imports_with_its_own_branch_base_and_start_and_no_batch(world):
     """Every row of all lanes, a revert's target included, comes back as written; the batch link is null for imported history. (Migration, A2 D5)"""
+    from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+
+    lead_lanes = LEAD_AUTHOR_DRAIN_LABEL.lanes  # the real lead lane's lanes, not a literal
     a, b, c = "a" * 40, "b" * 40, "c" * 40
     own = {"branch": "lessons/ffffffffffff", "base": "1" * 40, "start": "0011223344556677"}
     rows = [
@@ -371,7 +376,7 @@ async def test_migration_the_whole_commit_record_imports_with_its_own_branch_bas
         legacy.commit_row(b, "lessons/revert-x-00ff00ff", "3" * 40, "8899aabbccddeeff",
                           lanes=("lessons", "lessons-questioner"), changes=[(f"{LESSONS}/x.md", "2" * 40, None)],
                           reverts=(own, f"{LESSONS}/x.md")),
-        legacy.commit_row(c, "lead-author/gggggggggggg", "4" * 40, "1122334455667788", lanes=("pitfalls",),
+        legacy.commit_row(c, "lead-author/gggggggggggg", "4" * 40, "1122334455667788", lanes=lead_lanes,
                           changes=[("agent/pitfalls/n.md", "5" * 40, "6" * 40)]),
     ]
     legacy.commit_record(world.root, rows)

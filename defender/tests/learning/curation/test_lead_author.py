@@ -271,39 +271,28 @@ def _claude_should_not_be_called(*args, **kwargs):
     raise AssertionError("claude was spawned despite gating check")
 
 
-def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path, tmp_path: Path):
-    deps = _deps(_lane(tmp_path), invoke_agent=_claude_should_not_be_called)
-    with deps.state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held:
-        assert held, "the test could not take the queue lock it means to hold"
-        rc = lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
-    assert rc == lead_author.QUEUE_LOCK_SKIP_RC
-    assert rc != 0
+# Conflict (design r8 Locks, "lead-queue: by-hand run uses the same claim"): the lead-queue file lock is deleted, so the
+# test that held it and expected QUEUE_LOCK_SKIP_RC is retired. A by-hand run held off by a working lead batch of the
+# store is `tests/tenancy/tenant_1108_p4/test_1278_tick.py::test_locks_a_by_hand_lead_author_run_*`.
 
 
-@pytest.mark.parametrize("held_root", ["tenant", "legacy"])
-def test_1186_lead_author_cli_takes_the_runs_tenant_queue_lock(
-    run_dir, tmp_path, monkeypatch, held_root,
-):
-    """The CLI uses its Run's tenant for the queue lock and pitfall writes."""
+# Conflict (design r8 Locks): the "tenant" arm held the deleted lead-queue file lock and expected QUEUE_LOCK_SKIP_RC; only
+# the arm where the held lock is another root's (so this run is not blocked) stays.
+def test_1186_lead_author_cli_takes_the_runs_tenant_queue_lock(run_dir, tmp_path, monkeypatch):
+    """The CLI uses its Run's tenant for pitfall writes; a lock held on another root does not block it."""
     set_state_dir(monkeypatch, tmp_path / "legacy-state")
     learning = run_dir.parent.parent / "learning"
     _write_lead_meta(run_dir, "l-001", "failed query")
     _write_query(run_dir, "l-001", 0, "idp.query", payload_status="error")
     learning.mkdir(exist_ok=True)
-    root = learning if held_root == "tenant" else tmp_path / "legacy-state"
-    with (state_over(root) as holder, holder.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held):
+    with (state_over(tmp_path / "legacy-state") as holder, holder.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held):
         assert held
         # r10.1 C1/C9: the command admits through the host acceptance; a test hands it one seeded active directory.
         rc = lead_author.main(["--tenant", run_dir.parent.parent.name, run_dir.name],
                               directory=active_directory(run_dir.parents[2], run_dir.parent.parent.name))
-    assert rc == (lead_author.QUEUE_LOCK_SKIP_RC if held_root == "tenant" else 0)
-    if held_root == "tenant":
-        assert not (run_dir / "lead_author" / "pitfalls_collected").exists()
-        assert not (learning / PITFALLS.queue).exists()
-        assert not (tmp_path / "legacy-state" / LEAD_QUEUE_LOCK.file).exists()
-    else:
-        rows = [json.loads(line) for line in (learning / PITFALLS.queue).read_text().splitlines()]
-        assert [(row["source_run"], row["query_id"]) for row in rows] == [(run_dir.name, "idp.query")]
+    assert rc == 0
+    rows = [json.loads(line) for line in (learning / PITFALLS.queue).read_text().splitlines()]
+    assert [(row["source_run"], row["query_id"]) for row in rows] == [(run_dir.name, "idp.query")]
     assert not (tmp_path / "legacy-state" / PITFALLS.queue).exists()
 
 

@@ -24,9 +24,9 @@ HANDLE = "LearningState"
 #: commit record file's location type and its unwrap.
 REACH_NAMES = frozenset({HANDLE, "LearningRoot", "unwrap_learning_root", "CommitRecord", "unwrap_commit_record"})
 #: Attributes that name the root or the record file: the loop paths' root accessors, the handle's raw-path verb, the
-#: existence check, the tenant's commit record location.
-REACH_ATTRS = frozenset({"state_root", "state_dir", "commit_record", "stage_dir", "learning_state_exists"})
-#: `<tenant or layout>.learning`: the root itself, as a location.
+#: existence check. (`commit_record` is one only on the old owners below: the store's verb of that name is not.)
+REACH_ATTRS = frozenset({"state_root", "state_dir", "stage_dir", "learning_state_exists"})
+#: `<tenant or layout>.learning` and `.commit_record`: the root and the record file, as locations.
 _OWNERS = frozenset({"tenant", "layout", "_layout"})
 
 
@@ -61,7 +61,7 @@ def _is_reach(node: ast.AST) -> bool:
     if isinstance(node, ast.Name):
         return node.id in REACH_NAMES
     if isinstance(node, ast.Attribute):
-        return node.attr in REACH_NAMES | REACH_ATTRS or (node.attr == "learning" and _owner(node.value) in _OWNERS)
+        return node.attr in REACH_NAMES | REACH_ATTRS or (node.attr in {"learning", "commit_record"} and _owner(node.value) in _OWNERS)
     if isinstance(node, ast.alias):
         return node.name in REACH_NAMES
     return isinstance(node, ast.FunctionDef | ast.ClassDef) and node.name in REACH_NAMES | {"stage_dir", "learning_state_exists"}
@@ -84,13 +84,13 @@ def test_o10_the_census_finds_each_old_reach_and_skips_prose_and_exempted_lines(
     """Control: every form of reach the census claims is found as code; a docstring, a comment, a string and an exempted line are not. (O10)"""
     code = [
         "with LearningState.open(paths) as s:\n    pass", "root = state.stage_dir(lane)", "root = paths.state_root",
-        "ok = tenant.learning_state_exists()", "log = layout.commit_record", "from x import LearningRoot",
+        "ok = tenant.learning_state_exists()", "log = layout.commit_record", "log = tenant.commit_record", "from x import LearningRoot",
         "where = self.tenant.learning", "class LearningState:\n    pass", "def stage_dir(self, lane):\n    pass",
     ]
     for line in code:
         assert reaches(line), line
     prose = ['"""The LearningState handle and its state_root."""', "# LearningState was deleted", "x = 'stage_dir(lane)'",
-             "learning = load()", "n = batch.learning_rate"]
+             "learning = load()", "n = batch.learning_rate", "await store.commit_record(batch, sha)", "x = batch.commit_record"]
     for line in prose:
         assert reaches(line) == [], line
     assert reaches(f"root = paths.state_root  {EXEMPT} — the cutover import reads the old files") == []

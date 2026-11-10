@@ -5,6 +5,9 @@ break the day the code stage lands. Record names below are state.py:64-170 (`_QU
 `_DELIVERY`, the three `Channel`s); row shapes are what `author/drain.py` (`_bump_rows` nests the row under
 `row`, `_retire_unkeyable` spreads it flat), `state.rotate` (`consumed_at`, `consumed_commit` only for
 `consumed_committed`), `drains._record_pending_delivery` and `version_control/record._record_made` write.
+Checked against the real writers (`LearningState` append/rotate/deadletter/stuck/enqueue/delivery verbs,
+`_bump_rows`, `_retire_unkeyable`, `_record_stuck`, `_record_pending_delivery`, `record._record_made`): same
+bytes and shape, apart from the values a call supplies.
 Git and forge state is planted with git plumbing and the delivery fake's rows, never the delivery objects
 whose writes the code stage moves into the database. Nothing here implements import policy.
 """
@@ -21,7 +24,8 @@ PENDING_PITFALLS = "_pending_pitfalls"
 QUEUE = "author-queue"
 DELIVERY = "_pending_delivery"
 COMMIT_RECORD = "commit-maker.jsonl"
-STAMP = "2026-11-01T00:00:00Z"
+#: `_clock.now_iso`'s spelling (`+00:00`, not `Z`): what every base writer stamps.
+STAMP = "2026-11-01T00:00:00+00:00"
 
 #: kind -> (queue, consumed ledger, dead-letter, stuck report, row key) record names (state.py:126-170).
 CHANNELS: dict[str, dict[str, str]] = {
@@ -81,15 +85,17 @@ def consumed(root: Path, kind: str, rows: Iterable[dict[str, Any]], category: st
 
 
 def deadletter(root: Path, kind: str, rows: Iterable[dict[str, Any]], reason: str, *, attempts: int = 3,
-               flat: bool = False) -> None:
+               flat: bool = False, counter: str = "attempts") -> None:
     """Append dead-letter records. Nested (`_bump_rows`): `{<key>, attempts, deadletter_reason, retired_at,
-    row}`. Flat (`_retire_unkeyable`): the row's fields at top level beside `attempts`, the reason and the stamp."""
+    row}`, `row` without the `counter` that reached its ceiling. Flat (`_retire_unkeyable`): the row's fields at
+    top level beside `attempts`, the reason and the stamp."""
     key = CHANNELS[kind]["key"]
     stamp = {"deadletter_reason": reason, "retired_at": STAMP}
     if flat:
         records = [{**row, "attempts": attempts, **stamp} for row in rows]
     else:
-        records = [{key: row.get(key), "attempts": attempts, **stamp, "row": row} for row in rows]
+        records = [{key: row.get(key), "attempts": attempts, **stamp,
+                    "row": {k: v for k, v in row.items() if k != counter}} for row in rows]
     _append(root, CHANNELS[kind]["deadletter"], records)
 
 
@@ -125,10 +131,12 @@ def pending_delivery(root: Path, batch_id: str, branch: str, *, label: str = "au
     return record_id
 
 
-def commit_row(commit: str, branch: str, base: str, start: str, *, lanes: Sequence[str] = ("lessons",),
+def commit_row(commit: str, branch: str, base: str, start: str, *,
+               lanes: Sequence[str] = ("lessons", "lessons-questioner"),
                changes: Sequence[tuple[str, str | None, str | None]] = (),
                reverts: tuple[dict[str, str], str] | None = None) -> dict[str, Any]:
-    """One commit-maker record row (`record._record_made`); `reverts` is `(target batch key, path)`."""
+    """One commit-maker record row (`record._record_made`); `reverts` is `(target batch key, path)`. Lanes are the
+    batch's (`DrainLabel.lanes`): both lessons lanes for the author lane, `("skills",)` for the lead lane."""
     row: dict[str, Any] = {
         "commit": commit, "batch": {"branch": branch, "base": base, "start": start}, "lanes": list(lanes),
         "changes": [{"path": p, "before": b, "after": a} for p, b, a in changes]}

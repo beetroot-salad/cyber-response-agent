@@ -227,13 +227,13 @@ async def test_crashes_to_the_ceiling_hold_the_item_for_a_person(dsn):
 
 
 async def test_a_person_abandon_does_not_forgive_an_attempt(dsn):
-    """Only a clean stop forgives; a person's abandon of a batch with no PR leaves the attempt counted. (D8)"""
+    """Only a clean stop forgives: a person's abandon holds the items, attempt still counted. (D8, O7, design Review-1 R1-F1)"""
     async with learning_store(dsn) as store:
         await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
         claim = await claim_author(store)
         await store.abandon(BLUE, claim.batch_id, by="person")
         got = (await items(store))[("finding", "f1")]
-        assert (got.status, got.attempts) == ("waiting", 1), "an ordinary batch abandoned before any PR returns its items"
+        assert (got.status, got.attempts) == ("held", 1), "a person's abandon always holds; stop and crash abandons (above) return items to waiting"
 
 
 async def test_o7_a_persons_abandon_of_a_batch_in_review_holds_its_items(dsn):
@@ -341,7 +341,7 @@ async def test_o7_releasing_an_item_that_is_not_held_changes_nothing(dsn):
     """A released key that is waiting, in a batch, published or absent is refused or ignored and moves nothing. (O7)"""
     async with learning_store(dsn) as store:
         await store.publish_findings(BLUE, "run-1", [finding("f1"), finding("f2")], kind="finding")
-        claim = await store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds={"finding": 2})
+        claim = await store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds={**ONE, "finding": 2})
         assert keys(claim) == [("finding", "f1"), ("finding", "f2")]
         before = {k: (i.status, i.batch_id, i.attempts) for k, i in (await items(store)).items()}
         for kind, key in (("finding", "f1"), ("finding", "nope")):

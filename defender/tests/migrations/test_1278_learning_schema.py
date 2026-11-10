@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from defender.tests.support.jobs._jobs1342 import register_tenant
-from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, LEAD_LANE, finding, learning_store
+from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, LEAD_LANE, ONE, finding, learning_store
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -144,7 +144,7 @@ def refused(statement_runner) -> None:
 
 
 def test_every_learning_table_carries_the_tenant_and_the_columns_the_cases_name(db):
-    """Each table has a foreign key to `tenancy.tenants`; batches and items have the design's enumerated columns. (Schema)"""
+    """Each table has a foreign key to `tenancy.tenants` (repo convention, design Review-1 R1-SCH); batches and items have the design's enumerated columns. (Schema)"""
     for table in TABLES:
         assert [ref for _c, ref, _nn in _foreign_keys(db, table)].count("tenancy.tenants") == 1, table
     assert {"kind", "lane", "phase", "outcome"} <= set(_columns(db, "batches"))
@@ -241,7 +241,7 @@ async def test_a_tenant_that_is_not_active_gets_no_new_batch_and_no_new_findings
         before = ([(i.kind, i.key, i.status) for i in await store.work(BLUE)], list(await store.batches(BLUE)))
 
         with pytest.raises(store_mod().TenantInactive):
-            await store.claim(BLUE, AUTHOR_LANE, owner="holder", thresholds={"finding": 1, "questioner_finding": 1})
+            await store.claim(BLUE, AUTHOR_LANE, owner="holder", thresholds=ONE)
         with pytest.raises(store_mod().TenantInactive):
             await store.publish_findings(BLUE, "run-2", [finding("f2")], kind="finding")
 

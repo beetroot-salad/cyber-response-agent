@@ -144,13 +144,13 @@ def test_o8_it_publishes_every_pending_job_of_the_tenant_not_only_its_own(tmp_pa
 
 def test_o8_a_batch_awaiting_review_wakes_the_gate_for_a_job_that_published_nothing(tmp_path):
     """No new findings and a batch in review from an earlier tick: the gate still runs. (O8)"""
-    from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, finding
+    from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, ONE, finding
 
     ep, _ = _job_episode(tmp_path, "empty", findings=False)
     _data_root, tenant_id = J.episode_location(ep)
     dsn = os.environ[DSN_ENV]
     call(dsn, "publish_findings", tenant_id, "run-1", [finding("f1")], kind="finding")
-    claim = call(dsn, "claim", tenant_id, AUTHOR_LANE, owner="host-a", thresholds={"finding": 1})
+    claim = call(dsn, "claim", tenant_id, AUTHOR_LANE, owner="host-a", thresholds=ONE)
     call(dsn, "in_review", claim, 7, {})
     ticks: list[int] = []
 
