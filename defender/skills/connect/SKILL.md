@@ -182,7 +182,7 @@ Step 6 validates it and proposes it to the tenant's repo.
 `settings/systems/{system}/config.env` and `settings/systems/{system}/access.yaml` in the
 connected tenant's OWN repo (deployed as `$DEFENDER_DATA_ROOT/{tenant}/knowledge/`, never in
 this repo) — the tenant's non-secret config: `config.env` holds exactly the keys the adapter
-reads (its `REQUIRED_KEYS`, prefixed; any other key is refused by name), and `access.yaml`
+reads (its `REQUIRED_CONFIG_KEYS`, prefixed; any other key is refused by name), and `access.yaml`
 the system's base, auth scheme and routes (`adapter.md` → "Access declaration"). Also add
 `CHANGE-ME` placeholder copies of both at
 `knowledge/tenant-template/settings/systems/{system}/` in this repo, so a tenant scaffolded

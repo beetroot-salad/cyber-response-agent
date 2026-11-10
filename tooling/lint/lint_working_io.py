@@ -288,6 +288,7 @@ RESIDUE = {
     ("investigation.tools._files", "_write_operand", "hold"): (1, "model_tools", ('root',)),
     ("systems.verb_roster", "audit_read_surfaces", "read_text_utf8"): (1, "nonrecord", ('path',)),
     ("systems.verbs", "read_roster", "read_bytes_capped"): (1, "nonrecord", ('path',)),
+    ("systems.catalog", "_cold_declarations", "read_bytes_capped"): (1, "nonrecord", ('path',)),
 }
 
 

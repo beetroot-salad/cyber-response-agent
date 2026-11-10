@@ -22,7 +22,11 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 
 SYSTEM = "elastic"
 
-#: The keys of `systems/elastic/config.env` this adapter requires (prefix stripped).
+#: The system's name in the catalog listing (#1366 O2).
+DISPLAY_NAME = "Elastic"
+#: A real system's adapter, not a lab stub (#1366 O2).
+EXAMPLE = False
+#: The keys of elastic's settings this adapter requires (prefix stripped).
 REQUIRED_CONFIG_KEYS = ("EVENTS_INDEX", "ALERTS_INDEX")
 #: The keys whose values go in a request path (a search's index), so each is one segment (T4).
 PATH_KEYS = REQUIRED_CONFIG_KEYS

@@ -80,7 +80,7 @@ This file covers the rest — the calls a script can't make.
       — not just in `config.env` (which the script scans).
 - [ ] **Declared for the proxy.** `access.yaml` names the base, the auth
       scheme and field name (never a value), and every route the adapter
-      calls; `config.env` holds exactly the adapter's `REQUIRED_KEYS`. A
+      calls; `config.env` holds exactly the adapter's `REQUIRED_CONFIG_KEYS`. A
       credential is the operator's to store with the proxy (noted in the
       summary).
 - [ ] **One system.** If others came up in the interview, they were noted
