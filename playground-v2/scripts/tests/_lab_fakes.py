@@ -499,9 +499,12 @@ class FakeCluster(FakeES):
                         "unassigned_shards": 0 if status == "green" else 1}
             if seg[0] == "_cat" and seg[1] == "indices":
                 names = self._expand(seg[2], closed=True) if len(seg) > 2 else list(self.indices)
+                names = [n for n in names if not n.startswith(".fs-")]     # live (9.3): never lists failure-store indices
                 return [{"index": n, "uuid": self.indices[n]["uuid"], "health": self.health_status,
                          "status": "close" if self.indices[n]["closed"] else "open",
                          "docs.count": str(len(self.indices[n]["docs"]) + self.nested.get(n, 0))} for n in names]
+            if path == "/_cluster/state/metadata":
+                return self._metadata()
             if path == "/_reindex":
                 return self._reindex(body)
             if seg[0] == "_ingest" and seg[1] == "pipeline":
@@ -538,6 +541,22 @@ class FakeCluster(FakeES):
             raise
         self.unsupported.append(f"{method} {path}")
         raise FakeGap(f"{method} {path}")
+
+    METADATA_FILTER = {"metadata.indices.*.state", "metadata.indices.*.settings.index.uuid"}
+    SYSTEM_INDICES = (".security-7",)      # the node's own, never the copy's
+
+    def _metadata(self) -> Any:
+        """`GET /_cluster/state/metadata?filter_path=metadata.indices.*.state,metadata.indices.*.settings.index.uuid`:
+        every index (failure-store ones and the node's own system indices included) with its state and uuid. Any
+        other filter_path (or parameter) is a gap."""
+        paths = {p for v in self.query.get("filter_path", []) for p in v.split(",")}
+        if paths != self.METADATA_FILTER or set(self.query) - {"filter_path"}:
+            raise FakeGap(f"_cluster/state/metadata with query {self.query}")
+        out = {n: {"state": "close" if ix["closed"] else "open", "settings": {"index": {"uuid": ix["uuid"]}}}
+               for n, ix in self.indices.items()}
+        for n in self.SYSTEM_INDICES:
+            out.setdefault(n, {"state": "open", "settings": {"index": {"uuid": f"uuid-{n}"}}})
+        return {"metadata": {"indices": out}}
 
     def _stream_names(self, expr: str) -> list[str]:
         """The existing data streams `expr` (comma list, wildcards) names; a literal that names none is a 404."""
@@ -894,6 +913,9 @@ REPO, SNAP, SNAP_UUID = "frozen-cases", "f-2026-10-20", "dGhlLXNuYXBzaG90LXV1aWQ
 EVENTS, ALERTS_PATTERN = "logs-*", ".internal.alerts-security.alerts-default-*"
 AUTH = ".ds-logs-system.auth-default-2026.10.01-000004"
 SYSLOG = ".ds-logs-system.syslog-default-2026.10.01-000004"
+# A failure-store backing index of the syslog stream. Live (9.3): `_cat/indices` never lists it, `_count` on its name
+# answers, `_cluster/state/metadata` has it. The freeze counts it (documents before T only: a pattern does not reach it).
+FAILURE_STORE = ".fs-logs-system.syslog-default-2026.10.01-000002"
 NGINX = ".ds-logs-nginx.access-default-2026.10.01-000002"
 ALERTS = ".internal.alerts-security.alerts-default-000001"
 # r6.4.5: an older consolidation, live: `dedup-logs-<dataset>-default` is a BACKING index of the stream, with a name no
@@ -1024,7 +1046,11 @@ def world_content() -> dict[str, dict[str, dict]]:
                                                   **{"user.name": f"user{i}", "source.ip": f"10.2.0.{i}",
                                                      "source.port": 43000 + i}), "_version": 1}
              for i, minute in enumerate((225, 255))}
-    return {DEDUP_OLD: archive, DEDUP: dedup, AUTH: auth, SYSLOG: syslog, NGINX: nginx, DECOY: decoy, ALERTS: alerts}
+    failed = {f"failed-{k}": {"_source": event(k, 60 * k + 5, "system.syslog", f"failed syslog line {k}",
+                                               **{"error.message": "parse failure"}), "_version": 1}
+              for k in range(3)}
+    return {FAILURE_STORE: failed, DEDUP_OLD: archive, DEDUP: dedup, AUTH: auth, SYSLOG: syslog, NGINX: nginx,
+            DECOY: decoy, ALERTS: alerts}
 
 
 def expected_copy(kind: str) -> dict[str, dict[str, tuple[int, dict]]]:
