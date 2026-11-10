@@ -559,13 +559,13 @@ class _LifespanClient(_WorldClient):
         return self
 
 
-class DevOffboarding:
-    """#1360 D6: the offboarding port as the development setup composes it: the tenant twin's offboard transition,
-    then the in-memory store ending that tenant's live jobs. Records each call as `(tenant, actor)` in `calls`;
-    with `failing` set it raises before doing either."""
+class OffboardingSpy:
+    """#1360 D6: a recorder around the dev composition's production port (`defender.api.fakes.InMemoryOffboarding`).
+    Records each call as `(tenant, actor)` in `calls`; with `failing` set it raises before delegating. It holds NO
+    policy: the tenant transition and the ending of jobs are the wrapped class's."""
 
-    def __init__(self, tenants: Any, store: InMemoryStore, now: Callable[[], _dt.datetime]) -> None:
-        self._tenants, self._store, self._now = tenants, store, now
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
         self.calls: list[tuple[str, str]] = []
         self.failing = False
 
@@ -573,9 +573,27 @@ class DevOffboarding:
         self.calls.append((str(tenant_id), str(actor)))
         if self.failing:
             raise InjectedFailure("offboard_tenant failed")
-        record = await self._tenants.request_offboard(tenant_id, now=self._now())
-        await self._store.end_live_jobs(tenant_id, actor=actor)
-        return record
+        return await self._inner.offboard_tenant(tenant_id, actor=actor)
+
+
+class _MissingOffboarding:
+    """Stands in for the spy while `defender.api.fakes.InMemoryOffboarding` does not exist: worlds of other cases
+    build, a case that touches the port fails here, naming the missing production class (the code stage makes the
+    class unconditional)."""
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError("defender.api.fakes.InMemoryOffboarding does not exist yet (#1360 D6)")
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AssertionError("defender.api.fakes.InMemoryOffboarding does not exist yet (#1360 D6)")
+
+
+def _offboarding_spy(tenants: Any, store: Any) -> Any:
+    try:
+        from defender.api.fakes import InMemoryOffboarding
+    except ImportError:
+        return _MissingOffboarding()
+    return OffboardingSpy(InMemoryOffboarding(tenants, store))
 
 
 class World:
@@ -600,7 +618,7 @@ class World:
         self.raw_repo: Any = InMemoryIdentityRepository(tenants=self.tenants)
         self.repo: Any = FailingRepository(self.raw_repo) if failing_writes else self.raw_repo
         #: #1360 D6: the one port the admin offboard route reaches the tenant transition and the jobs through.
-        self.offboarding = DevOffboarding(self.tenants, self.store, self.clock)
+        self.offboarding = _offboarding_spy(self.tenants, self.store)
         self._loop = _AppLoop()
         weakref.finalize(self, self._loop.stop)
         self.signin = FakeSignIn()
@@ -652,7 +670,8 @@ class World:
         # #1360 D6: handed over only once `ApiDeps` has the member, so the worlds of other cases build until then;
         # the code stage makes it unconditional.
         offboarding = ({"offboarding": self.offboarding}
-                       if "offboarding" in {f.name for f in dataclasses.fields(ApiDeps)} else {})
+                       if "offboarding" in {f.name for f in dataclasses.fields(ApiDeps)}
+                       and not isinstance(self.offboarding, _MissingOffboarding) else {})
         self.app = create_app(ApiDeps(
             alerts=self.store, investigations=self.store, learning_jobs=self.store,
             lessons=self.store, systems=self.store, writes=self.store,

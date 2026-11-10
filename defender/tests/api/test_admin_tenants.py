@@ -331,7 +331,7 @@ def test_1360_d6_the_offboard_request_ends_the_tenants_live_jobs_before_it_answe
     ended = _stored(world, T1, mine)
     for name, row in ended.items():
         if name.split("-")[1] in LIVE:
-            assert row.status in ("aborted", "skipped"), name
+            assert row.status == ("aborted" if name.startswith("inv") else "skipped"), name
             assert (row.failure_reason if name.startswith("inv") else row.reason) == "tenant_offboarded", name
             assert row.finished_at == now, name
             assert "offboard" in ((row.failure_message if name.startswith("inv") else row.message) or "").lower(), name
@@ -391,6 +391,74 @@ def test_1360_d6_a_malformed_tenant_id_never_reaches_the_offboarding_port() -> N
     assert world.offboarding.calls == []
     assert ops.post(f"/admin/tenants/{T1}/offboard").status_code == 202
     assert [t for t, _ in world.offboarding.calls] == [T1]
+
+
+def test_1360_d6_the_dev_composition_ends_the_offboarded_demo_tenants_live_jobs_and_no_other_demo_tenants() -> None:
+    """Through `demo_deps` (the development composition), `create_app` and the admin route: offboarding one demo tenant
+    moves it and ends its live demo jobs; the other demo tenant, active, keeps its live job. (#1360 D6, O3)
+
+    `demo_deps` seeds members only (`Bootstrap(administrators=())`), so no existing machinery signs in an administrator:
+    the test seeds one flagged user with a one-time-code session through the identity repository the demo composed
+    (the service's `_repo`), exactly the rows a real administrator's sign-in leaves."""
+    import anyio
+    from fastapi.testclient import TestClient
+
+    from defender.api.app import create_app
+    from defender.api.demo import demo_deps, demo_id
+    from defender.api.models import Investigation, LearningJob
+    from defender.records.formats import AlertId, InvestigationId, LearningJobId
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    one, two = fixture_uuid("tenant:1360-demo-one"), fixture_uuid("tenant:1360-demo-two")
+    now = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
+    deps = anyio.run(demo_deps, (one, two), lambda: now)
+    store = deps.writes
+
+    async def seed_admin() -> None:
+        repo = deps.identity._repo  # type: ignore[attr-defined]
+        user = await repo.add_user("ops@demo.example", created_at=now, status="active", display_name="ops",
+                                   is_platform_admin=True)
+        await repo.add_session("demo-admin-session", user.id, now=now, expires_at=now + _dt.timedelta(days=7), used_otp=True)
+    anyio.run(seed_admin)
+
+    def live_pair(tenant: str, name: str) -> tuple[Any, Any]:
+        inv = store.add_investigation(tenant, Investigation(
+            investigation_id=demo_id(InvestigationId, tenant, f"inv-{name}"), alert_id=demo_id(AlertId, tenant, "alert-0001"),
+            status="queued", request_key=f"k-{name}", attempt=1, cost_usd=0.0, cost_is_lower_limit=False, created_at=now))
+        job = store.add_learning_job(tenant, LearningJob(
+            learning_job_id=demo_id(LearningJobId, tenant, f"lj-{name}"), investigation_id=inv.investigation_id,
+            alert_id=inv.alert_id, status="queued", trigger="explicit", created_at=now))
+        return inv, job
+
+    live_pair(one, "queued")
+    theirs = live_pair(two, "queued")
+    seeded_running = demo_id(InvestigationId, one, "inv-running")  # the demo's own live job of the first tenant
+    seeded_done = demo_id(InvestigationId, one, "inv-completed")
+
+    def stored(tenant: str) -> dict[str, Any]:
+        inv = anyio.run(store.get_investigation, tenant, demo_id(InvestigationId, tenant, "inv-queued"))
+        job = anyio.run(store.get_learning_job, tenant, demo_id(LearningJobId, tenant, "lj-queued"))
+        return {"inv": inv, "job": job}
+
+    client = TestClient(create_app(deps), base_url="https://testserver")
+    client.cookies.set("__Host-defender_session", "demo-admin-session")
+    headers = {"Origin": deps.frontend_origin}
+    assert client.get("/me", headers=headers).json()["administrator"] is True, "premise: the seeded session is an administrator's"
+    done_before = anyio.run(store.get_investigation, one, seeded_done)
+    assert anyio.run(store.get_investigation, one, seeded_running).status == "running", "premise: the demo seeds a live job"
+
+    response = client.post(f"/admin/tenants/{one}/offboard", headers=headers)
+    assert response.status_code == 202, response.text
+
+    assert client.get(f"/admin/tenants/{one}").json()["state"] == "offboarding"
+    assert client.get(f"/admin/tenants/{two}").json()["state"] == "active"
+    gone = anyio.run(store.get_investigation, one, seeded_running)
+    assert (gone.status, gone.failure_reason, gone.finished_at) == ("aborted", "tenant_offboarded", now)
+    ended = stored(one)
+    assert (ended["inv"].status, ended["inv"].failure_reason) == ("aborted", "tenant_offboarded")
+    assert (ended["job"].status, ended["job"].reason) == ("skipped", "tenant_offboarded")
+    assert anyio.run(store.get_investigation, one, seeded_done) == done_before, "a completed demo investigation was changed"
+    assert stored(two) == {"inv": theirs[0], "job": theirs[1]}, "the other demo tenant's live jobs were touched"
 
 
 # --- the lifecycle world: failures and running steps ------------------------------------------------

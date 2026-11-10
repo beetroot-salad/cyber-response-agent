@@ -335,7 +335,8 @@ async def test_offboard_from_any_other_state_is_a_conflict_and_changes_nothing(s
 
 REPO = Path(__file__).resolve().parents[4]
 #: Imports the door and the models by path (`-I` ignores PYTHONPATH), optionally the PostgreSQL repository, and reports
-#: what the operation is and which database modules ended up loaded.
+#: what the operation is and whether the PostgreSQL repository module ended up loaded. Driver modules (psycopg, asyncpg)
+#: are not asserted on: nothing shows the probe would see them load, so such a check would pass vacuously.
 _LOADS = """
 import inspect, json, sys
 sys.path.insert(0, sys.argv[1])
@@ -343,7 +344,7 @@ import defender.tenancy as door
 import defender.tenancy.models as models
 if sys.argv[2] == "with-repository":
     import defender.tenancy.postgres
-loaded = sorted(m for m in sys.modules if m.split(".")[0] in ("psycopg", "asyncpg") or m == "defender.tenancy.postgres")
+loaded = sorted(m for m in sys.modules if m == "defender.tenancy.postgres")
 print(json.dumps({"same": door.offboard is models.offboard, "async": inspect.iscoroutinefunction(door.offboard),
                   "loaded": loaded}))
 """
@@ -356,9 +357,9 @@ def _probe(mode: str) -> dict[str, Any]:
     return json.loads(proc.stdout.splitlines()[-1])
 
 
-def test_1360_offboard_is_an_async_operation_of_the_tenancy_door_and_models_that_loads_no_database_driver():
-    """`defender.tenancy.offboard` is `defender.tenancy.models.offboard`, a coroutine function, and importing them loads
-    neither the PostgreSQL repository nor a driver; the probe does see the repository when it is imported. (#1360 D1, D6a)"""
+def test_1360_offboard_is_an_async_operation_of_the_tenancy_door_and_models_that_does_not_load_the_postgres_repository():
+    """`defender.tenancy.offboard` is `defender.tenancy.models.offboard`, a coroutine function, and importing them does
+    not load the PostgreSQL repository; the probe does see it when it is imported (the positive control). (#1360 D1, D6a)"""
     found = _probe("door")
     assert (found["same"], found["async"], found["loaded"]) == (True, True, [])
     assert "defender.tenancy.postgres" in _probe("with-repository")["loaded"]

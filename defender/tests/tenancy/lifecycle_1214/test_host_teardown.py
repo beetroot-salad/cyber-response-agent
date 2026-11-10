@@ -188,46 +188,102 @@ def _late_writer(folder, *, keep_adding_for=0.0):
                              str(keep_adding_for)])
 
 
-def test_teardown_removes_what_a_late_writer_adds_to_the_folder_while_it_is_being_removed(world, tmp_path, data_root):
-    """A file created in T's folder after teardown has listed it makes one removal pass fail 'directory not empty'; the
-    offboarding goes on to `offboarded` with the folder, and nothing of the late file, gone (#1360 O1). The wait is
-    shorter than the first pass: it runs from the first failed pass, not from the start of the removal."""
+def _plant_runs(folder, count=8000):
+    """A `runs` directory of many files in `folder`, so its removal is long enough for a late writer to land mid-way."""
+    runs = folder / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    for n in range(count):
+        (runs / f"entry-{n}").write_text("x")
+    return runs
+
+
+@pytest.mark.parametrize("target", ["data", "secrets", "publish"])
+def test_teardown_removes_what_a_late_writer_adds_to_the_folder_while_it_is_being_removed(
+        world, tmp_path, data_root, monkeypatch, target):
+    """A file created in one of T's three folders (data, secrets, dev output) after teardown has listed it makes one
+    removal pass fail 'directory not empty'; the offboarding goes on to `offboarded` with all three folders, and nothing
+    of the late file, gone (#1360 O1). The wait is shorter than the first pass: it runs from the first failed pass, not
+    from the start of the removal."""
+    from defender.configuration import _env, publish_root
+
+    published = tmp_path / "published"
+    published.mkdir()
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
+    monkeypatch.setenv(publish_root.PUBLISH_DIR_ENV, str(published))
     world.host_actor = world.new_host(world.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=0.02),
                                       containers=lambda _tenant: None)
     tenant = world.active_tenant()
-    runs = world.data_root / tenant / "runs"
-    runs.mkdir(exist_ok=True)
-    for n in range(8000):
-        (runs / f"entry-{n}").write_text("x")
+    folders = {"data": world.data_root / tenant, "secrets": world.config.secrets_dir / tenant, "publish": published / tenant}
+    folders["publish"].mkdir()
+    assert folders["secrets"].is_dir(), "premise: the tenant has a secrets folder"
+    runs = _plant_runs(folders[target])
     writer = _late_writer(runs)
     assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert writer.wait(timeout=35) == 0, "the late write never happened, so this run did not race the removal"
     item = world.item(tenant)
     assert (item["state"], item["failure"]) == ("offboarded", None), item
-    assert not (world.data_root / tenant).exists()
+    assert not any(folder.exists() for folder in folders.values()), {k: f.exists() for k, f in folders.items()}
 
 
 def test_teardown_that_keeps_finding_new_files_fails_naming_the_folder_and_resume_finishes_it(world):
     """A writer that adds a file after every removal pass never lets the folder empty: after the wait teardown gives
-    its holders the step fails (restart at teardown) saying the folder was still being added to and what was in it, and
-    once the writer stops a resume finishes the offboarding (#1360 O2)."""
+    its holders the step fails (restart at teardown) naming the folder and an entry left in it, and once the writer stops a
+    resume finishes the offboarding (#1360 O2). The failure is the teardown's own, not the raw 'Directory not empty'
+    error, but its wording is not pinned: it names the folder path and a name that was left in it."""
     tenant = world.active_tenant()
-    runs = world.data_root / tenant / "runs"
-    runs.mkdir(exist_ok=True)
-    for n in range(8000):
-        (runs / f"entry-{n}").write_text("x")
-    writer = _late_writer(runs, keep_adding_for=1.0)
+    folder = world.data_root / tenant
+    runs = _plant_runs(folder)
+    writer = _late_writer(runs, keep_adding_for=3.0)
     assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     item = world.item(tenant)
     assert (item["state"], item["step"]) == ("offboarding", "teardown"), item
-    assert "still being added to" in item["failure"] and str(runs.parent) in item["failure"], item["failure"]
+    failure = item["failure"]
+    assert str(folder) in failure, failure
+    assert "runs" in failure, f"the failure does not name an entry left in the folder: {failure}"
+    assert "Directory not empty" not in failure.replace(str(folder), ""), "the raw OSError text, not teardown's own"
     assert writer.wait(timeout=35) == 0, "the late writes never happened, so this run did not race the removal"
     assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "offboarded"
     assert not (world.data_root / tenant).exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses mode bits; CI runs unprivileged")
+def test_a_removal_that_fails_for_any_other_reason_fails_the_step_at_once(tmp_path, data_root):
+    """Only 'directory not empty' is waited out: a folder that cannot be removed for another reason (here a subdirectory
+    that grants no write, holding an entry) fails the step promptly, far inside the configured wait, with no claim that
+    the folder was still being added to; once the mode is restored a resume finishes (#1360 O2)."""
+    wait = 30.0
+    w = LifecycleWorld(tmp_path, data_root)
+    w.host_actor = w.new_host(w.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=wait),
+                              containers=lambda _tenant: None)
+    try:
+        tenant = w.active_tenant()
+        locked = w.data_root / tenant / "locked"
+        locked.mkdir()
+        (locked / "entry").write_text("x")
+        locked.chmod(0o500)
+        try:
+            assert w.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+            started = time.monotonic()
+            w.drive()
+            elapsed = time.monotonic() - started
+            item = w.item(tenant)
+            assert (item["state"], item["step"]) == ("offboarding", "teardown"), item
+            assert item["failure"], item
+            assert "still being added to" not in item["failure"], item["failure"]
+            assert elapsed < wait / 2, f"the step waited {elapsed:.1f}s of a {wait:g}s wait for a failure that cannot clear"
+            assert (locked / "entry").is_file()
+        finally:
+            locked.chmod(0o700)
+        assert w.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+        w.drive()
+        assert w.item(tenant)["state"] == "offboarded"
+        assert not (w.data_root / tenant).exists()
+    finally:
+        w.close()
 
 
 # --- H-12 --------------------------------------------------------------------------------------------

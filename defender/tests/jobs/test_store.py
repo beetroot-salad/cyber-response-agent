@@ -67,8 +67,8 @@ def unmapped_dsn(migrated_database: str) -> str:
 
 # --- machinery: SQL plants, locks, a clock the test moves ------------------------------------------
 
-def _plant_alert(dsn: str, *, tenant: str = T1, ticket: str = "P-1", vendor: str = "elastic") -> str:
-    alert_id = str(uuid.uuid4())
+def _plant_alert(dsn: str, *, tenant: str = T1, ticket: str = "P-1", vendor: str = "elastic", alert_id: str | None = None) -> str:
+    alert_id = alert_id or str(uuid.uuid4())
     execute(dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, "
                  "received_at, title, description, raw) VALUES (%s, %s, %s, %s, %s, %s, %s, 't', 'd', %s)",
             (alert_id, tenant, vendor, ticket, NOW, NOW, NOW, b"{}"))
@@ -2793,6 +2793,8 @@ async def _live_jobs(dsn: str, store: Any) -> dict[str, Any]:
     handed = _auto_job_of(dsn, handed_parent)
     assert (await store.claim_learning_job()).record.learning_job_id == handed
     assert await store.hand_back_learning_job(T1, handed) is not None
+    # The hand-back stamped `finished_at` with the fixed clock's NOW: move it back, so the offboard's overwrite with "now" is observable.
+    execute(dsn, "UPDATE jobs.learning_jobs SET finished_at = %s WHERE id = %s", (NOW - HOUR, handed))
     running_parent = await completed_investigation(store, ticket="L-2")
     running_job = _auto_job_of(dsn, running_parent)
     assert (await store.claim_learning_job()).record.learning_job_id == running_job
@@ -2975,7 +2977,10 @@ async def _holding_row(dsn: str, table: str, row_id: str) -> AsyncIterator[None]
 @pytest.mark.parametrize("overlap", ["take_over_investigation", "take_over_learning", "finish"])
 async def test_1360_o3_a_row_a_take_over_or_a_finish_inserts_while_the_offboard_waits_is_ended_too(dsn, caplog, overlap):
     """The offboard waits for a take-over's lapsed row or a finish's investigation; the retry or auto learning job that
-    transaction commits is ended too, and the only live row it first met ends as it was. (#1360 O3, Flow 1 step 3)"""
+    transaction commits is ended too, and the only live row it first met ends as it was. (#1360 O3, Flow 1 step 3)
+
+    The `finish` case guards that the auto learning job the finish queued is ended; it passes with a single pass, so it
+    does not test step 3's repeat (the cap test and the cases that insert a row on every ending do)."""
     from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
 
     async with job_store(dsn) as store:
@@ -3146,52 +3151,63 @@ async def test_1360_o3_a_job_the_database_refuses_to_end_takes_the_tenant_transi
 
 
 def _plant_running_pair(dsn: str, investigation_ids: list[str], job_ids: list[str]) -> None:
-    """Running investigations and running learning jobs of T1 with the given ids, inserted in the order given."""
-    for inv in investigation_ids:
+    """Running investigations and running learning jobs of T1 with the given ids, inserted in the order given. The alerts
+    and parents they hang on are inserted in that same order with ids ascending in it, so any scan (table order or a
+    unique index, which reads ascending) meets the rows in the order given."""
+    for inv, alert_id in zip(investigation_ids, sorted(str(uuid.uuid4()) for _ in investigation_ids), strict=True):
         execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
                      "started_at, cost_usd, cost_is_lower_limit, lease_expires_at) "
                      "VALUES (%s, %s, %s, 'k', 1, 'running', %s, %s, 0, false, now() + interval '30 seconds')",
-                (inv, T1, _plant_alert(dsn, ticket=f"W-{inv}"), NOW, NOW))
-    for job in job_ids:
-        alert = _plant_alert(dsn, ticket=f"V-{job}")
+                (inv, T1, _plant_alert(dsn, ticket=f"W-{inv}", alert_id=alert_id), NOW, NOW))
+    alerts, parents = (sorted(str(uuid.uuid4()) for _ in job_ids) for _ in range(2))
+    for job, alert_id, parent_id in zip(job_ids, alerts, parents, strict=True):
+        alert = _plant_alert(dsn, ticket=f"V-{job}", alert_id=alert_id)
         parent = _plant_investigation(dsn, tenant=T1, alert_id=alert, key="k", attempt=1, stage="completed")
+        execute(dsn, "UPDATE jobs.investigations SET id = %s WHERE id = %s", (parent_id, parent))
+        parent = parent_id
         execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
                      "status, created_at, started_at, lease_expires_at, sibling_cost_usd, findings_count, publish_state) "
                      "VALUES (%s, %s, %s, %s, 'k', 1, 'explicit', 'running', %s, %s, now() + interval '30 seconds', 0, 0, 'none')",
                 (job, T1, alert, parent, NOW, NOW))
 
 
-async def test_1360_flow1_an_offboard_and_a_renewal_of_several_of_the_tenants_running_rows_do_not_deadlock(dsn):
-    """A renewal holds its rows in id order (investigations, then learning jobs) while the offboard arrives, the table
-    holding them in the opposite physical order: neither transaction fails and every row ends. (#1360 Flow 1 lock order)"""
+@pytest.mark.parametrize("kind", ["investigations", "learning_jobs"])
+async def test_1360_flow1_an_offboard_and_a_renewal_of_several_of_the_tenants_running_rows_do_not_deadlock(dsn, kind):
+    """The real `renew` of several running rows and the real `offboard_tenant` of their tenant, the table holding the
+    rows in the opposite physical order to their ids and a held middle row making the two overlap: both lock several
+    rows, so both must take them in id order, and neither fails with a deadlock. (#1360 Flow 1 lock order, D9)"""
     import psycopg
 
-    investigations = sorted(str(uuid.uuid4()) for _ in range(6))
-    jobs = sorted(str(uuid.uuid4()) for _ in range(3))
-    _plant_running_pair(dsn, investigations[::-1], jobs[::-1])  # descending ids: a scan in table order meets the high ids first
-    async with job_store(dsn) as store, await psycopg.AsyncConnection.connect(dsn) as renewal:
-        async def lock(table: str, row_id: str) -> None:
-            await renewal.execute(f"SELECT id FROM jobs.{table} WHERE id = %s FOR UPDATE", (row_id,))  # noqa: S608
+    ids = sorted(str(uuid.uuid4()) for _ in range(6))
+    table = f"jobs.{kind}"
+    _plant_running_pair(dsn, ids[::-1] if kind == "investigations" else [], ids[::-1] if kind == "learning_jobs" else [])
+    heap = [row[0] for row in execute(dsn, f"SELECT id::text FROM {table} WHERE id = ANY(%s::uuid[]) ORDER BY ctid", (ids,))]  # noqa: S608
+    assert heap == ids[::-1]  # the setup: a scan in table order meets the high ids first, against id order
 
-        for inv in investigations[:2]:
-            await lock("investigations", inv)
-        offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+    async with job_store(dsn) as store, await psycopg.AsyncConnection.connect(dsn) as holder:
+        await holder.execute(f"SELECT 1 FROM {table} WHERE id = %s FOR UPDATE", (ids[3],))  # noqa: S608
+        renewal = asyncio.ensure_future(store.renew(set(ids)))
+        offboard = None
         try:
-            await until_blocked(dsn, 1)  # the offboard waits for the renewal's rows
-            for inv in investigations[2:]:
-                await lock("investigations", inv)
-            for job in jobs:
-                await lock("learning_jobs", job)
-            await renewal.execute("UPDATE jobs.investigations SET lease_expires_at = now() + interval '30 seconds' "
-                                  "WHERE id = ANY(%s::uuid[])", (investigations,))
-            await renewal.commit()
-            await asyncio.wait_for(offboard, 15)
+            await until_blocked(dsn, 1)  # the renewal has taken what it can and waits for the held middle row
+            offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+            await until_blocked(dsn, 2)  # and the offboard overlaps it: the contention is real before the holder lets go
+            await holder.commit()
+            outcomes = await asyncio.wait_for(asyncio.gather(renewal, offboard, return_exceptions=True), 20)
         finally:
-            offboard.cancel()
+            for pending in (renewal, offboard):
+                if pending is not None:
+                    pending.cancel()
 
+    renewed, offboarded = outcomes
+    assert not isinstance(renewed, BaseException), f"renew failed: {renewed!r}"
+    assert not isinstance(offboarded, BaseException), f"offboard failed: {offboarded!r}"
+    assert sorted(renewed) == ids  # the renewal was already under way, so it covered every row it held
     assert _live_of(dsn, T1) == 0
-    assert _count(dsn, "investigations", "stage = 'aborted' AND failure_reason = 'tenant_offboarded'") == 6
-    assert _count(dsn, "learning_jobs", "status = 'skipped' AND reason = 'tenant_offboarded'") == 3
+    if kind == "investigations":
+        assert _count(dsn, "investigations", "stage = 'aborted' AND failure_reason = 'tenant_offboarded'") == 6
+    else:
+        assert _count(dsn, "learning_jobs", "status = 'skipped' AND reason = 'tenant_offboarded'") == 6
 
 
 # --- O4: no job is created for an offboarding or offboarded tenant -----------------------------------------------
