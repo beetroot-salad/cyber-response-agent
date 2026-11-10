@@ -150,7 +150,9 @@ def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     deps = _lead_deps(rd, wt)
     assert deps.defender_dir == wt / "defender"
-    assert len(deps.policy.write_allow) == 5  # the five named lanes, anchored to the draft
+    # the six named lanes, anchored to the draft: the five of the lead author, plus L6 — the pitfalls curator's reducer
+    # surface (`knowledge.REDUCER_PITFALLS`, #1278 D9: the lead lane also curates the store claim's pitfalls)
+    assert len(deps.policy.write_allow) == 6
     assert deps.role is AgentRole.LEAD_AUTHOR
     skill = _agent(wt) / "skills" / "gather" / "queries" / "elastic" / "x.md"
     # positive: the binding lets the agent write + read its own draft

@@ -28,8 +28,7 @@ LEAKS = ("DrainLabel", "<", "AUTHOR:")
 def _paths(tmp_path: Path) -> LoopPaths:
     repo = tmp_path / "repo"
     (repo / "defender").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "state").mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
-    return LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    return LoopPaths(repo_root=repo)
 
 
 def _assert_shows_value(text: str, label: DrainLabel) -> None:

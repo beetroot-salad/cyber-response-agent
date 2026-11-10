@@ -1,12 +1,21 @@
-"""#773: bounded deferral, conservation of findings, and the tick's deferral/attempt counters.
+"""#773: bounded deferral and conservation of findings: the fate each claimed row gets from a tick.
 
-Every tick runs over a batch's git-free draft (`_spec773.build_draft_scene`)."""
+Every tick runs over a batch's git-free draft (`_spec773.build_draft_scene`). A tick's fates are the
+`outcomes` map the claim fills (#1278 D1): `deferred`, `skipped`, or none (a committed row stays in the batch; a
+row in no bucket returns to waiting by the tick's citation rule).
+
+Retired with the file queue (#1278 D1, design r8 Locks and Items; the store owns the counters, the ceilings and the
+wake gate, and no queue file is rotated or locked):
+- the `deferrals` counter bump, its graveyard at the ceiling, ten consecutive deferring ticks, the deferral ceiling
+  reason, the `deferrals`/`attempts` counters moving independently, a deferred row as the wake gate sees it
+  (`_pending_queue_counts`), and a tick that both defers and closes its rotation: covered by
+  `tests/learning/store_1278/test_items_1278.py::test_a_deferred_item_waits_with_a_deferral_counted_and_dies_at_the_ceiling`
+  and `::test_deferrals_and_attempts_are_separate_counters_with_the_deferral_ceiling_of_its_own`;
+- the held report's `deferred` group (the report file is gone: the fate and its reason are the item's);
+- a rotation that expires against the append lock / repo lock at the tick's close, leaving the queue as it was (no
+  queue file, no append lock, no rotation: design r8 Locks).
+"""
 from __future__ import annotations
-
-from pathlib import Path
-import time
-
-import pytest
 
 from defender.tests.support.learning.curation import _spec773 as S
 
@@ -24,112 +33,17 @@ def _orphan_tick(tmp_path, **kw):
     )
 
 
-def _defer_again(sc, filler_id: str) -> int:
-    """Reseed the queue with whatever is pending plus a fresh, disposable finding, and drive
-    one more tick over `orphan` riding uncited alongside it."""
-    filler = S.finding_row(filler_id, run_id=filler_id)
-    S.seed(sc.paths, sc.channel, [*sc.pending(), filler])
-    sc.curator.writes = {f"{filler_id}.md": S.lesson(filler_id)}
-    sc.curator.committed = ["orphan", filler_id]
-    return sc.run()
-
-
-def _hold_append_lock(store: dict):
-    """Grab the queue's append lock the moment the curator spawn runs."""
-
-    def grab(*args):
-        cfg = args[2]
-        holder = S.Holder(Path(cfg.state.describe(cfg.channel)).parent / Path(cfg.channel.append_lock).name)
-        holder.__enter__()
-        store["holder"] = holder
-
-    return grab
-
-
-def test_a_deferred_row_bumps_the_deferrals_counter_and_graveyards_at_the_ceiling_773(
-    tmp_path,
-):
-    """A deferred row is re-queued carrying an incremented `deferrals` count, and at the
-    ceiling it leaves the queue for the graveyard."""
-    sc = _orphan_tick(tmp_path, max_attempts=2)
-    assert sc.run() == 0
-    assert sc.pending_by_id()["orphan"]["deferrals"] == 1
-
-    assert _defer_again(sc, "filler1") == 0
-    assert "orphan" not in sc.pending_by_id()
-    assert [r["finding_id"] for r in sc.graveyard()] == ["orphan"]
-
-
-def test_every_deferred_finding_is_named_in_the_held_reports_deferred_group_773(tmp_path):
-    """Each tick's held report names every deferred finding in its `deferred` group, with id
-    and count, and no per-row free-text reason."""
+def test_a_row_reported_committed_that_no_file_cites_is_deferred_and_the_cited_one_stays_in_the_batch_773(tmp_path):
+    """The deferral fate itself: the uncited-but-reported row is `deferred` (never consumed, never skipped), the
+    cited one is named nowhere, and the lesson lands."""
     sc = _orphan_tick(tmp_path)
     assert sc.run() == 0
-    [line] = sc.report_lines()
-    assert "deferred=1" in line
-    assert "deferred_ids=['orphan']" in line
+    assert set(sc.outcomes) == {("finding", "orphan")}
+    assert sc.fate("orphan") == ("deferred", None)
+    assert sc.head_files() == [LESSON]
 
 
-def test_deferrals_and_attempts_counters_move_independently_across_ticks_773(tmp_path):
-    """Two counters on one row, each bumped only by its own event: a fault unwinds before the
-    deferral step, so a faulted tick charges `attempts` alone."""
-    sc = _orphan_tick(tmp_path)
-    assert sc.run() == 0
-    row = sc.pending_by_id()["orphan"]
-    assert row["deferrals"] == 1
-    assert "attempts" not in row
-
-    S.seed(sc.paths, sc.channel, sc.pending())
-    sc.curator.raises = S.author_error("now a fault")
-    assert sc.run() == 2
-    row = sc.pending_by_id()["orphan"]
-    assert row["deferrals"] == 1
-    assert row["attempts"] == 1
-
-
-def test_a_deferred_rows_count_after_ten_consecutive_deferring_ticks_773(tmp_path):
-    """A row cannot still be live and re-queued after ten deferring ticks."""
-    sc = _orphan_tick(tmp_path, max_attempts=3)
-    for _ in range(10):
-        S.seed(sc.paths, sc.channel, sc.pending() or [])
-        if not sc.pending():
-            break
-        sc.run()
-    assert "orphan" not in sc.pending_by_id()
-    assert [r["finding_id"] for r in sc.graveyard()] == ["orphan"]
-
-
-def test_a_deferral_that_reaches_the_ceiling_773(tmp_path):
-    sc = _orphan_tick(tmp_path, max_attempts=1)
-    assert sc.run() == 0
-    assert "orphan" not in sc.pending_by_id()
-    [record] = sc.graveyard()
-    assert record["attempts"] == 1
-    assert record["deadletter_reason"] == S.DEFERRED_CEILING_REASON
-
-
-def test_a_deferred_row_as_the_wake_gate_sees_it_773(tmp_path):
-    """To the wake gate a deferred row is ordinary pending work, not a held one, and the spin
-    that buys is bounded."""
-    from defender.learning.core import drains
-
-    sc = _orphan_tick(tmp_path, max_attempts=3)
-    assert sc.run() == 0
-    assert sc.pending_by_id()["orphan"]["deferrals"] == 1, (
-        "nothing was deferred, so the spin this bounds never started"
-    )
-    ticks = 1
-    while sc.pending_by_id().get("orphan") and ticks < 10:
-        authorable, held = drains._pending_queue_counts(sc.cfg.state, sc.cfg.channel)
-        assert authorable >= 1, "a deferred row must still read as work to the wake gate"
-        assert held == 0, "a deferred row is not a permanent hold"
-        _defer_again(sc, f"filler{ticks}")
-        ticks += 1
-    assert ticks <= 3
-    assert "orphan" not in sc.pending_by_id()
-
-
-def test_a_finding_cited_by_two_approved_files_is_consumed_committed_exactly_once_773(tmp_path):
+def test_a_finding_cited_by_two_approved_files_is_committed_once_and_named_nowhere_773(tmp_path):
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("shared", run_id="shared")],
@@ -140,13 +54,12 @@ def test_a_finding_cited_by_two_approved_files_is_consumed_committed_exactly_onc
     )
     assert sc.run() == 0
     assert sc.head_files() == [LESSON, LESSON2]
-    assert [r["finding_id"] for r in sc.consumed()] == ["shared"]
-    assert sc.category_of("shared") == "consumed_committed"
-    assert sc.pending_by_id() == {}
+    assert sc.outcomes == {}, "a committed finding is not given a second ending"
 
 
 def test_every_batch_row_reaches_exactly_one_disposition_773(tmp_path):
-    """The conservation invariant, over a tick that produces all three endings at once."""
+    """The conservation invariant, over a tick that produces all three endings at once: committed (cited, named
+    nowhere, stays in the batch), skipped with the curator's reason, and deferred."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[
@@ -161,35 +74,27 @@ def test_every_batch_row_reaches_exactly_one_disposition_773(tmp_path):
         ),
     )
     assert sc.run() == 0
-    consumed = sc.consumed_by_id()
-    queued = sc.pending_by_id()
-    assert set(consumed) | set(queued) == {"ok", "skip", "orphan"}
-    assert not (set(consumed) & set(queued))
-    assert consumed["ok"]["consumed_category"] == "consumed_committed"
-    assert consumed["skip"]["consumed_category"] == "consumed_skip"
-    assert queued["orphan"]["deferrals"] == 1
+    assert sc.fate("ok") is None and sc.head_files() == [LESSON]
+    assert sc.fate("skip") == ("skipped", "already taught")
+    assert sc.fate("orphan") == ("deferred", None)
+    assert set(sc.outcomes) == {("finding", "skip"), ("finding", "orphan")}
 
 
 def test_a_batch_row_the_curator_mentions_nowhere_and_no_file_cites_773(tmp_path):
-    """A row the curator mentions in no bucket and that no changed file cites stays queued
-    EXACTLY as it was, with no counter of any kind bumped."""
+    """A row the curator mentions in no bucket and that no changed file cites is decided nothing: no deferral, no
+    skip, no death (the tick returns it to waiting)."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("named", run_id="named"), S.finding_row("ghost", run_id="ghost")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("named")}, committed=["named"]),
     )
     assert sc.run() == 0
-    ghost = sc.pending_by_id()["ghost"]
-    assert ghost == sc.rows[1]
-    assert "deferrals" not in ghost
-    assert "attempts" not in ghost
+    assert sc.fate("ghost") is None
+    assert sc.outcomes == {}
 
 
-def test_rotation_runs_exactly_once_per_tick_even_when_the_commit_step_returned_none_773(
-    tmp_path,
-):
-    """Rotation runs once per tick even when nothing is committed: each skipped row is
-    consumed exactly once."""
+def test_each_skipped_row_gets_its_skip_exactly_once_even_when_nothing_is_committed_773(tmp_path):
+    """A claim that commits nothing still ends every row the curator skipped, each with its own fate."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("dup", run_id="dup"), S.finding_row("skip", run_id="skip")],
@@ -201,26 +106,15 @@ def test_rotation_runs_exactly_once_per_tick_even_when_the_commit_step_returned_
     )
     assert sc.run() == 0
     assert sc.commit_count() == 1
-    ids = [r["finding_id"] for r in sc.consumed()]
-    assert sorted(ids) == ["dup", "skip"]
-
-
-def test_a_tick_that_both_defers_a_row_and_closes_its_rotation_773(tmp_path):
-    """The deferral bump survives the tick's closing rotation (one queue write): a second
-    deferring tick reads `deferrals` 2."""
-    sc = _orphan_tick(tmp_path, max_attempts=9)
-    assert sc.run() == 0
-    assert sc.pending_by_id()["orphan"]["deferrals"] == 1
-
-    assert _defer_again(sc, "filler1") == 0
-    assert sc.pending_by_id()["orphan"]["deferrals"] == 2
+    assert sc.named("skipped") == {"dup": "dup", "skip": "dup"}
+    assert len(sc.outcomes) == 2
 
 
 def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation_773(
     tmp_path,
 ):
     """A batch that faults while authoring never reaches the deferral step: the uncited row
-    gets no `deferrals` (the unfaulted control defers it)."""
+    is not deferred (the unfaulted control defers it)."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("bad", run_id="bad"), S.finding_row("orphan", run_id="orphan")],
@@ -231,7 +125,7 @@ def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation
         ),
     )
     assert sc.run() == 2
-    assert "deferrals" not in sc.pending_by_id()["orphan"]
+    assert sc.fate("orphan") is None
     assert sc.head_files() == []
 
     control = S.build_draft_scene(
@@ -242,47 +136,107 @@ def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation
         ),
     )
     assert control.run() == 0
-    assert control.pending_by_id()["orphan"]["deferrals"] == 1
+    assert control.fate("orphan") == ("deferred", None)
     assert control.head_files() == ["agent/lessons/l1.md"]
 
 
-def test_repo_lock_wait_exceeded_at_the_closing_rotation_773(tmp_path):
-    """A commit that already landed is never undone by a later rotation failure."""
-    held: dict = {}
+QLESSON = "agent/lessons-questioner/w1.md"
+
+
+def test_the_curator_partitions_the_batch_into_committed_and_consumed_skip_only_773(tmp_path):
+    """`FINDINGS_BUCKETS` declares exactly `committed` and `consumed_skip`, and a tick sorts
+    its rows into those two."""
+    from defender.learning.author.lessons import run as lessons_run
+
+    assert [b.name for b in lessons_run.FINDINGS_BUCKETS] == ["committed", "consumed_skip"]
+    assert all(b.reason_field != "forward_bad_reason" for b in lessons_run.FINDINGS_BUCKETS)
+
+    sc = S.build_draft_scene(
+        tmp_path,
+        rows=[S.finding_row("ok", run_id="ok"), S.finding_row("skip", run_id="skip")],
+        curator=S.FakeCurator(
+            writes={"l1.md": S.lesson("ok")},
+            committed=["ok"],
+            consumed_skip=[{"finding_id": "skip", "reason": "dup"}],
+        ),
+    )
+    assert sc.run() == 0
+    assert sc.fate("ok") is None
+    assert sc.fate("skip") == ("skipped", "dup")
+
+
+def test_author_result_carries_an_unrecognized_bucket_key_773(tmp_path):
+    for stray in ("held_forward_bad", "some_key_nobody_declared"):
+        sc = S.build_draft_scene(
+            tmp_path / stray,
+            rows=[S.finding_row("f1", run_id="f1")],
+            curator=S.FakeCurator(
+                writes={"l1.md": S.lesson("f1")},
+                extra_result={stray: [{"finding_id": "f1", "reason": "r"}]},
+            ),
+        )
+        assert sc.run() == 2, stray
+        assert sc.head_files() == [], stray
+
+
+def test_author_result_consumed_skip_bucket_is_missing_773(tmp_path):
+    """A missing bucket key is an empty list, not a violation."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-        repo_lock_wait_seconds=1,
+        curator=S.FakeCurator(
+            writes={"l1.md": S.lesson("f1")},
+            result={"committed": ["f1"], "commit_message": "one finding"},
+        ),
     )
-    sc.curator.also = _hold_append_lock(held)
-    try:
-        with pytest.raises(TimeoutError):
-            sc.run()
-    finally:
-        held["holder"].__exit__()
+    assert sc.run() == 0
     assert sc.head_files() == [LESSON]
-    assert "f1" in sc.pending_by_id()
+    assert sc.fate("f1") is None
 
 
-def test_a_locked_rotation_that_expires_waiting_for_the_append_lock_773(tmp_path):
-    """A deferral rotation that expires against a busy appender gives up at the configured
-    `repo_lock_wait_seconds`, leaves the queue exactly as it was (no row half-rotated, no counter
-    half-bumped) and surfaces as a stuck tick; the next tick bumps the deferral from zero."""
-    held: dict = {}
-    sc = _orphan_tick(tmp_path, repo_lock_wait_seconds=1)
-    before = sc.pending()
-    sc.curator.also = _hold_append_lock(held)
-    started = time.monotonic()
-    try:
-        with pytest.raises(TimeoutError):
-            sc.run()
-    finally:
-        held["holder"].__exit__()
-    assert time.monotonic() - started < 10
-    assert sc.pending() == before
-    assert [r["fault_class"] for r in S.stuck_records(sc.paths, sc.channel)] == ["TimeoutError"]
+def test_the_questioner_channel_still_refuses_an_unvouched_file_773(tmp_path):
+    """An unvouched file fails the questioner tick as it does the lessons tick (`AuthorError`,
+    the draft reset); the control lands."""
+    sc = S.build_questioner_draft_scene(
+        tmp_path,
+        rows=[S.world_row("w1")],
+        curator=S.FakeCurator(writes={"stray.md": S.lesson("not-this-batch")},
+                              committed=["w1"]),
+    )
+    assert sc.run() == 2
+    assert sc.head_files() == []
+    assert sc.corpus_files() == []
 
-    sc.curator.also = None
-    assert _defer_again(sc, "filler1") == 0
-    assert sc.pending_by_id()["orphan"]["deferrals"] == 1
+    control = S.build_questioner_draft_scene(
+        tmp_path / "control",
+        rows=[S.world_row("w1")],
+        curator=S.FakeCurator(writes={"w1.md": S.lesson("w1")}),
+    )
+    assert control.run() == 0
+    assert control.head_files() == [QLESSON]
+
+
+def test_a_questioner_tick_whose_curator_committed_nothing_773(tmp_path):
+    sc = S.build_questioner_draft_scene(
+        tmp_path,
+        rows=[S.world_row("w1")],
+        curator=S.FakeCurator(writes={}, committed=[],
+                              consumed_skip=[{"finding_id": "w1", "reason": "nothing to say"}]),
+    )
+    assert sc.run() == 0
+    assert sc.head_files() == []
+    assert sc.fate("w1") == ("skipped", "nothing to say")
+
+
+def test_the_questioner_channel_does_not_consume_a_committed_row_no_file_cites_773(tmp_path):
+    """On the questioner channel too, a row claimed committed that no file cites is not
+    consumed, while the cited one lands."""
+    sc = S.build_questioner_draft_scene(
+        tmp_path,
+        rows=[S.world_row("w1"), S.world_row("w2")],
+        curator=S.FakeCurator(writes={"w1.md": S.lesson("w1")}, committed=["w1", "w2"]),
+    )
+    assert sc.run() == 0
+    assert sc.head_files() == [QLESSON]
+    assert sc.fate("w1") is None
+    assert sc.fate("w2") == ("deferred", None)
