@@ -134,7 +134,8 @@ def test_an_index_named_like_a_backing_index_but_not_in_the_stream_is_not_rewrit
         assert state[DECOY] == restored[DECOY] and all(
             "source.port" in source and "source.port_no" not in source for _v, source in state[DECOY].values())
         assert state[ALERTS]["id-derived-decoy"] == restored[ALERTS]["id-derived-decoy"]
-        assert not [m for m in rig.cluster.mutations if DECOY in m["target"]], rig.cluster.mutations
+        assert not [m for m in rig.cluster.mutations if m["kind"] != "restore" and DECOY in m["target"]], \
+            "an overlay write targeted the look-alike (the whole-snapshot restore is not a rewrite)"
     finally:
         if held is not None:
             held.release()

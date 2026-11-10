@@ -5,8 +5,8 @@ Design: Amendment r6.4.5, "Make-a-case refuses an unverifiable schema-drift". A 
 that the copy does not hold and whose data stream (from its backing-index name) matches the mutation's stream: its
 derived alerts could not be found by ancestry. An ancestor naming a pattern, or `''`, does not trigger it.
 
-Refused before anything: no case, no alert.json, no change to the copy, the lock free, the copy-state marker as it
-was (nothing was changed, as for the other refusals before anything, e.g. the guard's).
+Refused before anything: no case, no alert.json, no overlay write (only the restore, which the check needs: it reads the copy),
+the lock free, the marker dirty.
 """
 from __future__ import annotations
 
@@ -24,14 +24,31 @@ def _alert(at: str, ancestors: tuple) -> dict:
 
 
 def _refused(rig, tmp_path, overlay="drift-test"):
-    marker = rig.marker()
     rig.make_module
     with pytest.raises(Exception) as caught:
         rig.write_case("young", _overlay(overlay), profiles_dir=_drift_profiles(tmp_path))
     assert not isinstance(caught.value, _NOT_A_REFUSAL + (AssertionError, NotImplementedError)), repr(caught.value)
-    assert rig.cluster.mutations == [], "the copy was changed before the refusal"
+    _only_the_restore_and_dirty(rig)
     assert not (rig.case_dir / "case.yaml").exists() and not (rig.case_dir / "alert.json").exists()
-    assert "frozen-engine" not in rig.store.records and rig.marker() == marker
+    assert "frozen-engine" not in rig.store.records
+
+
+def _only_the_restore_and_dirty(rig):
+    """r6.4.5: the check reads the restored copy, so it runs after the restore and before any overlay write: the
+    only cluster mutation is the restore, and the marker stays dirty."""
+    assert [m["kind"] for m in rig.cluster.mutations] == ["restore"], rig.cluster.mutations
+    assert rig.marker() is not None and rig.marker().get("dirty") is True, rig.marker()
+
+
+def test_a_launch_of_a_case_whose_drift_is_unverifiable_on_the_copy_is_refused_with_no_row(tmp_path):
+    rig = LabRig(tmp_path, extra_alerts=_alert(IN_SPAN, (("auth-77", MISSING_AUTH),)))
+    rig.write_expected_case("drift")
+    with pytest.raises(Exception) as caught:
+        rig.launch()
+
+    assert not isinstance(caught.value, _NOT_A_REFUSAL + (AssertionError, NotImplementedError)), repr(caught.value)
+    assert rig.rows() == [] and "run" not in rig.journal.ops()
+    _only_the_restore_and_dirty(rig)
 
 
 @pytest.mark.parametrize("ancestor", [
