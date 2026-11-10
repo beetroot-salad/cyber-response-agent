@@ -185,6 +185,9 @@ def write_case(case_dir: Path, *, freeze_dir: Path, alert_uuid: str, overlay: di
     try:
         copy = frozen_copy.ready(es, ops=ops, clock=clock, freeze=freeze, freeze_id=freeze_id,
                                  overlay=recorded, whole=True, location=location)
+        if dangling := frozen_copy.unverifiable_ancestry(es, freeze, recorded):
+            raise CaseRefused(f"the schema-drift's span holds alerts built from events of {dangling}, which "
+                              f"the copy does not hold: their derived alerts cannot be found (pick a later span)")
         ops.load_stubs(Path(parts_dir) / freeze_id, frozen_copy.stamp(freeze["T"]),
                        (recorded or {}).get("mutations") or None)
         alert = _alert_of_copy(es, list(freeze["patterns"]), alert_uuid, case_dir)
