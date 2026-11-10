@@ -17,6 +17,11 @@ Entry points bound by this contract, `playground-v2/scripts/make_case.py` (the l
   as it was, and frees the lock. It refuses, before anything, when the freeze's patterns differ from
   those in `tenant_settings/systems/elastic/config.env` (D24), and for an alert that is not a
   candidate (O13), whatever the lab says about live runs and tickets.
+
+`ops` is the REAL lab layer (`lab_ops.LabOps`, r6.4.3 C-rig), built by `_lab_fakes.LabRig` with only its outer
+edge faked (docker, the frozen cluster through the real curl path `ops.frozen_es()`, the environment it reads:
+`V2_RUNS_DIR`, `V2_FROZEN_PARTS_DIR`); see the launcher tests' docstring. r6.4.3 D25 and D15 revised hold for
+make-a-case's restore as for a launch's.
 """
 from __future__ import annotations
 
@@ -27,9 +32,9 @@ from pathlib import Path
 
 import pytest
 import yaml
-from _lab_fakes import (ALERT_DOCS, ALERTS, ALERTS_PATTERN, AUTH, EVENTS, FREEZE_ID, SCHEMA_DRIFT, NGINX, PARTS, RUN_ID, SPAN_START, SYSLOG,
-                        SYSLOG_AFTER_T, T, FaultJournal, LabRig, alert_doc, canonical_digest, content_of, counts_of,
-                        expected_copy, instant, stub_state)
+from _lab_fakes import (ALERT_DOCS, ALERTS, ALERTS_PATTERN, AUTH, EVENTS, FREEZE_ID, SCHEMA_DRIFT, NGINX, RUN_ID, SPAN_START, SYSLOG,
+                        SYSLOG_AFTER_T, T, FaultJournal, LabRig, alert_doc, canonical_digest, counts_of,
+                        expected_copy, instant, is_clean_marker)
 
 from chaos.guard import GuardRefused, check_mutations
 from chaos.mutations import resolve_mutations
@@ -111,8 +116,7 @@ def test_write_case_readies_the_variant_and_records_what_the_copy_holds(tmp_path
         assert case["alert"] == canonical_digest(alert)
         assert json.loads((rig.case_dir / "alert.json").read_text()) == alert
         assert case["age"] == 50 * 60
-        stubs = stub_state({n: b for n, b in PARTS.items() if n != "detection-rules.tar"}, None)
-        assert case["content"] == content_of(state, stubs)
+        assert case["content"] == rig.expected_content(state, case["overlay"]["mutations"])
         for key in ("alert", "content"):
             assert len(case[key]) == 64 and case[key] == case[key].lower() and ":" not in case[key]
         assert rig.cluster.state() == state
@@ -152,9 +156,9 @@ def test_a_cmdb_stale_case_loads_its_mutations_at_stub_load_and_changes_no_docum
         case = rig.case()
         assert case["overlay"]["mutations"] == _mutations(PROFILES, "cmdb-stale-owner", 3)
         assert rig.cluster.state() == expected_copy("none")
-        assert rig.ops.stubs[2] == case["overlay"]["mutations"]
-        assert case["content"] != content_of(expected_copy("none"), stub_state(
-            {n: b for n, b in PARTS.items() if n != "detection-rules.tar"}, None))
+        flips = {m["host"]: {m["field"]: m["new_value"]} for m in case["overlay"]["mutations"] if m["kind"] == "field-flip"}
+        assert flips and rig.stubs()["cmdb"]["overlays"] == flips, rig.stubs()["cmdb"]
+        assert case["content"] != rig.expected_content(expected_copy("none"), None)
 
 
 def test_a_schema_drift_case_records_the_alert_as_the_overlay_rewrote_it(tmp_path):
@@ -271,8 +275,7 @@ def test_a_committed_schema_drift_profile_on_a_field_no_rule_reads_makes_a_case(
         usable.append(pid)
     assert usable, "no committed schema-drift profile passes the guard (D22 needs one, e.g. source.port)"
 
-    rig = LabRig(tmp_path)
-    rig.ops.freeze_rules = lambda freeze_dir: rules
+    rig = LabRig(tmp_path, rules={p.name: json.loads(p.read_text()) for p in sorted(rules.glob("*.json"))})
     with rig.write_case("young", _overlay(usable[0])):
         mutations = rig.case()["overlay"]["mutations"]
     assert mutations and mutations[0]["kind"] == "schema-drift"
@@ -361,8 +364,8 @@ def test_a_case_is_written_exactly_for_an_alert_that_is_a_candidate_and_for_no_o
     succeeds exactly when the alert is a candidate; a refusal writes nothing and frees the engine."""
     generated = _generated_alerts()
     rig = LabRig(tmp_path, extra_alerts={u: g[0] for u, g in generated.items()})
-    rig.ops.live_runs |= {u for u, g in generated.items() if g[2]}
-    rig.ops.tickets |= {u for u, g in generated.items() if g[3]}
+    rig.live_runs |= {u for u, g in generated.items() if g[2]}
+    rig.tickets |= {u for u, g in generated.items() if g[3]}
     expected = {u: g[1] for u, g in generated.items()}
     expected.update({"at-T": True, "derived-in": True, "derived-pre": True, "edge": True, "syslog-alert": True,
                      "young": True, "old": False, "future": False, "live-run": False, "ticketed": False,
@@ -389,7 +392,7 @@ def test_an_exclusion_source_that_is_not_configured_refuses_the_listing_and_the_
     raise; they never read the unknown as none excluded. A candidate writes nothing and the engine is free."""
     rig = LabRig(tmp_path)
     module = rig.make_module
-    setattr(rig.ops, source, None)
+    setattr(rig, source, None)
     with pytest.raises(Exception) as caught:
         module.candidates(rig.freeze_dir, ops=rig.ops)
     assert not isinstance(caught.value, _NOT_A_REFUSAL), repr(caught.value)
@@ -442,7 +445,7 @@ def test_make_a_case_restores_the_whole_snapshot_whatever_copy_and_marker_it_fin
         for name in ("case.yaml", "alert.json"):
             (rig.case_dir / name).unlink()           # the earlier case's files are not this case's
     if prior != "nothing":
-        assert rig.ops.marker["dirty"] is False
+        assert is_clean_marker(rig.marker()), rig.marker()
         rig.cluster.put(NGINX, "nginx-99", {"@timestamp": "2026-10-20T05:00:00Z", "message": "stray",
                                             "event.dataset": "nginx.access"})
     restores = rig.cluster.restores
@@ -527,8 +530,64 @@ def test_make_a_case_is_refused_before_anything_when_the_tenants_patterns_are_no
 
     _refused(rig, "young", None)
 
-    assert not rig.cluster.requests and rig.ops.stubs is None and rig.ops.marker is None
+    assert not rig.cluster.requests and rig.docker.calls == []
     assert not (rig.case_dir / "case.yaml").exists() and "frozen-engine" not in rig.store.records
     rig.set_tenant_patterns(EVENTS, ALERTS_ALT)
     with rig.write_case("young", None):
         assert (rig.case_dir / "case.yaml").exists()
+
+
+# =====================================================================================================
+# r6.4.3 (finalize-stage review of PR #1461)
+# =====================================================================================================
+
+
+def test_a_case_is_written_through_the_real_lab_layer(tmp_path):
+    """r6.4.3 finding 1 (C-rig): make-a-case's `write` runs against the lab layer that ships; a call it makes
+    with a signature the layer does not have (the content digest without its patterns) fails here."""
+    rig = LabRig(tmp_path)
+    with rig.write_case("young", None) as held:
+        assert held.token and rig.case()["content"] == rig.expected_content(expected_copy("none"), None)
+
+
+@pytest.mark.parametrize("prior", ["nothing", "launch-same-variant", "launch-other-variant"])
+def test_make_a_case_restores_into_a_fresh_node_whatever_it_finds(tmp_path, prior):
+    """D25/D23: make-a-case's restore, like every restore, discards the old node container and its data
+    volume, restores the whole snapshot into a new node, and sends no `_close` or index DELETE."""
+    from test_1347_launcher import _assert_every_restore_went_into_a_fresh_node
+
+    rig = LabRig(tmp_path)
+    if prior != "nothing":
+        rig.write_expected_case("drop" if prior == "launch-same-variant" else "drift")
+        rig.launch()
+        for name in ("case.yaml", "alert.json"):
+            (rig.case_dir / name).unlink()
+    with rig.write_case("young", _overlay("data-drop-syslog"), profiles_dir=_drift_profiles(tmp_path)):
+        assert rig.cluster.state() == expected_copy("drop")
+    _assert_every_restore_went_into_a_fresh_node(rig, prior)
+
+
+def test_make_a_case_starts_every_frozen_node_with_its_offset_file_already_holding_T(tmp_path):
+    """D15 revised/P1: the node make-a-case restores into never reads the real now."""
+    from test_1347_launcher import _assert_every_node_start_already_holds_the_offset_for_T
+
+    rig = LabRig(tmp_path)
+    with rig.write_case("young", None):
+        pass
+    _assert_every_node_start_already_holds_the_offset_for_T(rig, "make-a-case")
+
+
+@pytest.mark.parametrize("shape", ["flat", "nested"])
+def test_an_alert_with_a_live_run_is_no_candidate_whatever_the_shape_of_the_runs_alert_json(tmp_path, shape):
+    """r6.4.3 finding 6 (C-parse)/O13: a live run's `alert.json` may carry the uuid flat
+    (`{"kibana.alert.uuid": U}`) or nested (`{"kibana": {"alert": {"uuid": U}}}`); either way U is excluded."""
+    rig = LabRig(tmp_path)
+    rig.live_runs = set()
+    if shape == "nested":
+        rig.nested_live_runs = {"young"}
+        rig.live_runs = set()       # rewrites the runs directory with the nested run
+    else:
+        rig.live_runs = {"young"}
+    got = rig.make_module.candidates(rig.freeze_dir, ops=rig.ops)
+
+    assert "young" not in got and "derived-in" in got, got

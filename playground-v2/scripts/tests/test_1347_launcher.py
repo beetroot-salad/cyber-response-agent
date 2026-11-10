@@ -11,10 +11,10 @@ knowledge=None, reference=False, lock_token=None) -> run_id`.
 
 * `es` is the FROZEN cluster through the chaos seam's `es_request(method, path, body=None)`; the
   launcher talks to it directly, never through the frozen proxy.
-* `ops` (see `_lab_fakes.LabOps`): read_marker, write_marker, load_stubs(parts_dir, as_of,
-  mutations), ensure_node() (the frozen node runs: teardown stops it, so the first thing a launch
-  does to the cluster is to make sure it is up), restart_node(clock_offset), start_proxy() -> the
-  frozen proxy's own url, content_digest(patterns) (the freeze's patterns, as a list), teardown().
+* `ops` is the REAL lab layer, `lab_ops.LabOps` (r6.4.3 C-rig), built by `_lab_fakes.LabRig` with only its
+  outer edge faked: docker through `run=` (`_rig_docker.RigDocker`) and the frozen cluster reached through
+  the real curl path, `ops.frozen_es()` (the rig passes it as `es`). Tests observe what the layer sent to
+  docker and the cluster and the state those fakes hold: containers, volumes, files in the engine, requests.
 * `case_dir` holds alert.json, ground_truth.yaml and case.yaml (freeze, alert, age, overlay
   `None | {mutations, span_start}`, counts, content, confirmed); the freeze is
   `freezes_dir/<freeze>/freeze.yaml`; parts are `parts_dir/<freeze>/<name>`, digests bare hex.
@@ -24,6 +24,13 @@ knowledge=None, reference=False, lock_token=None) -> run_id`.
   over the parsed freeze.yaml and case.yaml, imported, not re-implemented (A8).
 
 Tests read the copy's END STATE from `_lab_fakes.FakeCluster`, not a request sequence (A3).
+
+r6.4.3: D25 (every restore goes into a fresh node: the old node container and its data volume are discarded,
+nothing is closed or deleted to make room, the copy-state marker lives in the engine's state volume
+`lab-engine-state`) and D15 revised (the node's wall-clock shim reads its offset from a file named by the
+node's `V2_CLOCK_OFFSET_FILE`, a decimal integer number of seconds; the node starts with it already holding
+T - now; the launcher rewrites it to T - now as the last lab step before the agent runs; a launch never
+restarts the node for its clock).
 """
 from __future__ import annotations
 
@@ -37,9 +44,9 @@ from pathlib import Path
 import pytest
 import yaml
 from _lab_fakes import (AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, ALERTS_PATTERN, DATA_DROP, EVENTS, FREEZE_ID,
-                        FROZEN_PROXY_URL, LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SCHEMA_DRIFT,
+                        LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SCHEMA_DRIFT,
                         SLUG, SPAN_START, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T, FaultJournal, LabRig,
-                        canonical_digest, expected_copy, expected_variant, instant, seconds)
+                        canonical_digest, expected_copy, expected_variant, instant, is_clean_marker, seconds)
 
 LAUNCH = Path(__file__).resolve().parents[1] / "launch_frozen.py"
 KINDS = ["none", "drop", "drift", "cmdb"]
@@ -60,6 +67,21 @@ def _once(pred):
 def _opt(argv, flag):
     assert flag in argv, f"{flag} missing from {argv}"
     return argv[argv.index(flag) + 1]
+
+
+def _names_the_frozen_proxy(rig, url):
+    """`url` addresses the frozen proxy container the launch started (by its name or hostname)."""
+    from urllib.parse import urlsplit
+    proxy = rig.proxy()
+    assert proxy is not None, "no frozen proxy was started"
+    argv = proxy.argv
+    names = {proxy.name} | {argv[i + 1] for i, a in enumerate(argv[:-1]) if a in ("--hostname", "-h", "--network-alias")}
+    return urlsplit(url).hostname in names
+
+
+def _no_lab_traffic(rig):
+    """Nothing reached the lab: no docker call, no cluster request."""
+    assert rig.docker.calls == [] and not rig.cluster.requests, (rig.docker.calls[:3], rig.cluster.requests[:3])
 
 
 def _mutating(rig):
@@ -85,15 +107,16 @@ def test_a_scored_launch_runs_the_agent_as_of_T_on_the_frozen_proxy_and_writes_t
     assert not {"--update-ticket", "--episode", "--world", "--arrived-by"} & set(rig.argv)
     assert _opt(rig.argv, "--tenant") == "tenant-1" and _opt(rig.argv, "--knowledge-commit") == "abc1234"
     assert str(rig.case_dir / "alert.json") in rig.argv and all(isinstance(a, str) for a in rig.argv)
-    assert rig.env["DEFENDER_CREDENTIAL_PROXY_URL"] == FROZEN_PROXY_URL != LIVE_PROXY_URL
-    assert j.first("start_proxy") < j.first("run")
+    url = rig.env["DEFENDER_CREDENTIAL_PROXY_URL"]
+    assert url != LIVE_PROXY_URL and _names_the_frozen_proxy(rig, url), url
+    assert rig.docker.of_kind("proxy-start")[0]["j"] < j.first("run")
     assert rig.index.read_text().startswith(older), "an existing row was rewritten"
     first, row = rig.rows()
     assert set(row) == ROW_KEYS and isinstance(row["reason"], str)
     assert (row["slug"], row["run_id"], row["binding"], row["verdict"], row["knowledge"]) == (
         SLUG, RUN_ID, rig.binding(), "valid", "abc1234")
     assert instant(row["verified_at"]) > instant("2026-11-08T12:00:00Z")
-    assert [json.loads(x) for x in rig.index_at_teardown.splitlines()] == [first, row]
+    assert [json.loads(x) for x in rig.teardown_seen()["index"].splitlines()] == [first, row]
     assert rig.lock_in_run and "frozen-engine" not in rig.store.records
 
 
@@ -216,8 +239,11 @@ def test_a_cmdb_stale_overlay_is_applied_at_stub_load_and_changes_no_document(tm
     case = rig.write_expected_case("cmdb")
     rig.launch()
 
-    parts, as_of, mutations = rig.ops.stubs
-    assert instant(as_of) == instant(T) and mutations == case["overlay"]["mutations"]
+    stubs = rig.stubs()
+    assert set(stubs) == {"cmdb", "threat-intel", "change-mgmt", "ticket-server", "identity"}, stubs
+    assert all(instant(s["as_of"]) == instant(T) for s in stubs.values()), stubs
+    flip = case["overlay"]["mutations"][0]
+    assert stubs["cmdb"]["overlays"] == {flip["host"]: {flip["field"]: flip["new_value"]}}, stubs["cmdb"]
     assert not [m for m in rig.cluster.mutations if m["kind"] == "reindex"]
 
 
@@ -227,8 +253,9 @@ def test_a_variant_without_an_overlay_loads_the_stubs_with_no_mutations(tmp_path
     rig.write_expected_case("none")
     rig.launch()
 
-    _parts, as_of, mutations = rig.ops.stubs
-    assert instant(as_of) == instant(T) and not mutations
+    stubs = rig.stubs()
+    assert len(stubs) == 5 and all(instant(s["as_of"]) == instant(T) for s in stubs.values()), stubs
+    assert all(not s["overlays"] for s in stubs.values()), stubs
 
 
 def test_the_copy_is_made_safe_before_it_is_changed(tmp_path):
@@ -261,25 +288,23 @@ def test_the_copy_state_marker_is_dirty_from_before_the_first_change_until_the_v
         assert marker is None or marker["dirty"] is True, entry
         if entry["kind"] in ("delete_by_query", "reindex"):
             assert marker is not None and marker["dirty"] is True, entry
-    assert rig.ops.marker["dirty"] is False and rig.ops.marker["freeze"] == FREEZE_ID
+    assert is_clean_marker(rig.marker()), rig.marker()     # D25: the marker keeps the variant id and tallies
 
 
-def test_the_launch_pins_the_clock_restarts_the_node_and_checks_the_copy_in_order(tmp_path):
-    """D15/O6: the node restarts after the overlays with the offset T - now (taken just before),
-    health is awaited, counts are read after that, and only then does the agent run."""
+def test_the_launch_checks_the_copy_after_the_overlays_and_only_then_runs_the_agent(tmp_path):
+    """O6 (D15's restart retired by D15 revised): health is awaited after the overlays, counts are read
+    after that, the stubs are up, and only then does the agent run."""
     rig = LabRig(tmp_path)
     rig.write_expected_case("drift")
     rig.launch()
     j = rig.journal
 
-    expected_offset = (instant(T) - rig.ops.offset_reading).total_seconds()
-    assert abs(seconds(rig.ops.offset) - expected_offset) <= 5, rig.ops.offset
     last_overlay = max(i for i, m in enumerate(j) if m[0] == "es" and m[1][1] in ("/_reindex",)
                        or m[0] == "es" and m[1][1].endswith("/_delete_by_query"))
     health = rig.es_at(lambda m, p: p == "/_cluster/health")
     counts = rig.es_at(lambda m, p: p.endswith("/_count") or p.startswith("/_cat/indices"))
-    assert last_overlay < j.first("restart_node") < health[-1] < max(counts) < j.first("run")
-    assert j.first("load_stubs") < j.first("run")
+    assert last_overlay < health[-1] < max(counts) < j.first("run")
+    assert rig.docker.of_kind("stub-start") and max(e["j"] for e in rig.docker.of_kind("stub-start")) < j.first("run")
 
 
 # -- credentials (A9) ------------------------------------------------------------------------------
@@ -292,17 +317,15 @@ def test_the_read_only_user_gets_the_current_password_and_the_node_cert_is_mount
     rig.write_expected_case("none")
     parts_before = {p.name: p.read_bytes() for p in (rig.parts / FREEZE_ID).iterdir()}
     rig.launch()
-    first_end = len(rig.journal)
-    rig.ops.password = "pw-rotated"
+    rig.password = "pw-rotated"
     rig.launch()
-    slices = [rig.journal.ops()[:first_end], rig.journal.ops()[first_end:]]
 
-    assert [pw for pw, _ in rig.ops.users] == ["pw-0", "pw-rotated"], rig.ops.users
-    assert all(up is False for _, up in rig.ops.users) and rig.ops.cert_mounts == [False, False]
-    for ops in slices:
-        assert ops.index("create_readonly_user") < ops.index("start_proxy"), ops
-        assert ops.index("mount_node_cert") < ops.index("start_proxy"), ops
-        assert ops.index("mount_node_cert") < ops.index("restart_node"), ops
+    assert [pw for pw, _ in rig.users()] == ["pw-0", "pw-rotated"], rig.users()
+    assert all(up is False for _, up in rig.users()), rig.users()      # created before the proxy started
+    starts = rig.docker.of_kind("proxy-start")
+    assert len(starts) == 2
+    for start in starts:      # when each launch's proxy starts, the node serving it reads the live certificate
+        assert start["node_running"] and rig.certs_mounted(start["node"]), start
     assert {p.name: p.read_bytes() for p in (rig.parts / FREEZE_ID).iterdir()} == parts_before
     assert not any(b"pw-" in b for b in parts_before.values())
     after = (rig.freeze_dir / "freeze.yaml").read_text() + (rig.case_dir / "case.yaml").read_text()
@@ -348,7 +371,7 @@ def test_an_overlay_that_died_midway_leaves_a_dirty_marker_and_the_next_launch_r
     rig.write_expected_case("drift")
     with pytest.raises(Exception):
         rig.launch()
-    assert rig.ops.marker is None or rig.ops.marker["dirty"] is True
+    assert not is_clean_marker(rig.marker()), rig.marker()
 
     rig.launch()
 
@@ -358,16 +381,18 @@ def test_an_overlay_that_died_midway_leaves_a_dirty_marker_and_the_next_launch_r
 
 def test_a_copy_with_no_marker_is_restored_whole_over_whatever_it_holds(tmp_path):
     """A4: an unknown copy state (no marker) is never trusted: stray and altered documents in an
-    open index are gone after the launch."""
+    open index of the copy an earlier launch left are gone after the launch."""
     rig = LabRig(tmp_path)
     rig.write_expected_case("none")
+    rig.launch()
+    rig.drop_marker()
     rig.cluster.put(AUTH, "auth-99", {"@timestamp": "2026-10-20T05:00:00Z", "message": "stray"})
     rig.cluster.put(AUTH, "auth-05", {"@timestamp": "2026-10-20T04:50:00Z", "message": "altered"})
     rig.cluster.put(NGINX, "nginx-99", {"@timestamp": "2026-10-20T05:00:00Z", "message": "stray"})
     rig.launch()
 
-    assert rig.cluster.state() == expected_copy("none")
-    assert [r["verdict"] for r in rig.rows()] == ["valid"]
+    assert rig.cluster.restores == 2 and rig.cluster.state() == expected_copy("none")
+    assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"]
 
 
 def test_a_clean_marker_does_not_hide_a_copy_altered_behind_its_back(tmp_path):
@@ -427,10 +452,10 @@ def _launch_failures():
         pytest.param({"fail": lambda m, p, b: p.endswith("/_restore")}, None, "/_restore", id="restore"),
         pytest.param({"fail": lambda m, p, b: p.endswith("/_delete_by_query")}, None, "/_delete_by_query", id="base-overlay"),
         pytest.param({"fail": reindex}, None, "/_reindex", id="fault-overlay"),
-        pytest.param({}, "write_marker", None, id="marker"),
-        pytest.param({}, "load_stubs", None, id="stubs"),
-        pytest.param({}, "restart_node", None, id="node-restart"),
-        pytest.param({}, "start_proxy", None, id="proxy"),
+        pytest.param({}, "marker-write", None, id="marker"),
+        pytest.param({}, "stub-start", None, id="stubs"),
+        pytest.param({}, "node-start", None, id="node-start"),
+        pytest.param({}, "proxy-start", None, id="proxy"),
     ]
 
 
@@ -457,18 +482,18 @@ def _fails_to_launch(rig, injected=None):
 
 @pytest.mark.parametrize("rig_kw, ops_fail, reached", _launch_failures())
 def test_a_copy_that_cannot_be_made_is_a_launch_failure_with_no_row(tmp_path, rig_kw, ops_fail, reached):
-    """A2/O6: not stale: the failing step was reached, nothing runs, no row, the copy is torn down,
-    the lock is free and no clean marker is left."""
-    rig = LabRig(tmp_path, **rig_kw)
+    """A2/O6: not stale: the failing step was reached, nothing runs, no row, nothing the launch started
+    still serves (torn down), the lock is free and no clean marker is left. A docker-edge failure
+    (`ops_fail`) is an effect the rig docker refuses: a marker write, a stub, node or proxy start."""
+    rig = LabRig(tmp_path, **rig_kw, docker_fail={ops_fail} if ops_fail else None)
     rig.write_expected_case("drift")
-    rig.ops.fail_at = ops_fail
     _fails_to_launch(rig, f"{ops_fail} failed" if ops_fail else f"{reached} failed")
 
-    assert (ops_fail in rig.journal.ops()) if ops_fail else rig.es_at(lambda m, p: reached in p)
+    assert (ops_fail in rig.docker.injected) if ops_fail else rig.es_at(lambda m, p: reached in p)
     assert "run" not in rig.journal.ops() and rig.rows() == []
-    assert "teardown" in rig.journal.ops() and "frozen-engine" not in rig.store.records
-    if not ops_fail or ops_fail == "write_marker":     # a copy that was made stays clean when only a service failed
-        assert rig.ops.marker is None or rig.ops.marker["dirty"] is True
+    assert rig.nothing_serving() == [] and "frozen-engine" not in rig.store.records
+    if not ops_fail or ops_fail == "marker-write":     # a copy that was made stays clean when only a service failed
+        assert not is_clean_marker(rig.marker()), rig.marker()
 
 
 def test_a_cluster_that_never_turns_green_is_a_launch_failure_with_no_row(tmp_path):
@@ -480,7 +505,7 @@ def test_a_cluster_that_never_turns_green_is_a_launch_failure_with_no_row(tmp_pa
 
     assert len(rig.es_at(lambda m, p: p == "/_cluster/health")) >= 1, "health was never polled"
     assert "run" not in rig.journal.ops() and rig.rows() == [] and "frozen-engine" not in rig.store.records
-    assert "teardown" in rig.journal.ops()
+    assert rig.nothing_serving() == []
 
 
 def _damage(rig, how, name):
@@ -502,7 +527,7 @@ def test_a_missing_or_altered_freeze_part_refuses_the_case_before_anything_and_n
 
     assert not isinstance(caught.value, (AttributeError, TypeError, NameError))
     assert RULES_PART in PARTS
-    assert not rig.cluster.requests and rig.ops.stubs is None and rig.ops.marker is None
+    _no_lab_traffic(rig)
     assert rig.rows() == [] and "frozen-engine" not in rig.store.records
 
 
@@ -535,7 +560,7 @@ def test_a_malformed_or_unconfirmed_case_is_refused_before_anything(tmp_path, da
         rig.launch()
 
     assert not isinstance(caught.value, (AttributeError, TypeError, NameError))
-    assert not rig.cluster.requests and rig.ops.stubs is None
+    _no_lab_traffic(rig)
     assert rig.rows() == [] and "frozen-engine" not in rig.store.records
 
 
@@ -547,7 +572,8 @@ def test_a_fixture_without_a_case_file_is_not_a_case(tmp_path):
         rig.launch()
 
     assert not isinstance(caught.value, (AttributeError, TypeError, NameError))
-    assert not rig.cluster.requests and rig.rows() == []
+    _no_lab_traffic(rig)
+    assert rig.rows() == []
 
 
 # -- the run and the row (O9) -----------------------------------------------------------------------------
@@ -575,7 +601,7 @@ def test_a_run_that_never_announced_its_id_gets_no_row_and_the_launch_cleans_up(
         pass
 
     assert rig.rows() == []
-    assert "teardown" in rig.journal.ops() and "frozen-engine" not in rig.store.records
+    assert rig.nothing_serving() == [] and rig.teardown_seen() is not None and "frozen-engine" not in rig.store.records
 
 
 def test_an_interrupt_during_the_run_tears_down_and_frees_the_engine_without_a_row(tmp_path):
@@ -590,7 +616,8 @@ def test_an_interrupt_during_the_run_tears_down_and_frees_the_engine_without_a_r
     with pytest.raises(KeyboardInterrupt):
         rig.launch()
 
-    assert "teardown" in rig.journal.ops() and "frozen-engine" not in rig.store.records and rig.rows() == []
+    assert rig.nothing_serving() == [] and rig.teardown_seen() is not None
+    assert "frozen-engine" not in rig.store.records and rig.rows() == []
 
 
 def test_teardown_stops_the_services_but_keeps_the_elasticsearch_data(tmp_path):
@@ -599,8 +626,9 @@ def test_teardown_stops_the_services_but_keeps_the_elasticsearch_data(tmp_path):
     rig.write_expected_case("drop")
     rig.launch()
 
-    assert rig.cluster.state() == rig.cluster_at_teardown == expected_copy("drop")
-    assert rig.ops.proxy_up is False and rig.journal.last("teardown") > rig.journal.last("run")
+    assert rig.cluster.state() == rig.teardown_seen()["cluster"] == expected_copy("drop")
+    assert rig.proxy().state != "running" and rig.nothing_serving() == []
+    assert rig.docker.of_kind("service-stop")[-1]["j"] > rig.journal.last("run")
 
 
 def test_a_second_launch_is_refused_while_the_engine_lock_is_held_and_touches_nothing(tmp_path):
@@ -614,7 +642,8 @@ def test_a_second_launch_is_refused_while_the_engine_lock_is_held_and_touches_no
         rig.launch()
 
     assert not isinstance(caught.value, (AttributeError, TypeError, NameError))
-    assert not rig.cluster.requests and rig.rows() == []
+    _no_lab_traffic(rig)
+    assert rig.rows() == []
     assert rig.store.records["frozen-engine"] == "someone-else"
 
 
@@ -664,7 +693,8 @@ def test_a_launch_handed_a_token_that_is_not_the_holders_is_refused_and_leaves_t
         rig.launch(reference=True, lock_token="not-the-holders-token")
 
     assert not isinstance(caught.value, (AttributeError, TypeError, NameError, ImportError, OSError))
-    assert not rig.cluster.requests and rig.rows() == [] and rig.lock_in_run is None
+    _no_lab_traffic(rig)
+    assert rig.rows() == [] and rig.lock_in_run is None
     assert rig.store.records["frozen-engine"] == record
     _only_lock_traffic(rig.journal, "wrong token")
 
@@ -693,29 +723,36 @@ def _launch_cases(tmp_path, joined):
 
 
 def _teardown_ran_under_the_lock(rig, joined, where):
-    """The engine lock record still existed when teardown ran, owned or joined: an owned lock is released
-    after teardown's last call, never before it (C3/O9)."""
-    assert rig.ops.locks_at_teardown == [{"frozen-engine"}], (where, rig.ops.locks_at_teardown)
+    """Nothing the launch started still serves, and when it had started a service, the engine lock record still
+    existed when the last one stopped (the teardown), owned or joined: an owned lock is released after
+    teardown, never before it (C3/O9). (r6.4.3 C-rig: a teardown is what it does at the docker edge.)"""
+    assert rig.nothing_serving() == [], (where, rig.nothing_serving())
+    if rig.docker.of_kind("stub-start") or rig.docker.of_kind("proxy-start") or rig.docker.of_kind("service-stop"):
+        seen = rig.teardown_seen()
+        assert seen is not None and "frozen-engine" in seen["locks"], (where, seen and seen["locks"])
 
 
 def test_a_launch_cut_at_any_step_after_verify_tears_down_once_and_frees_only_a_lock_it_took(tmp_path):
     """C3/A1/O9/O10: for every step after the UUID check (cluster request, lab op, agent run) and the row
-    write, owned or joined lock: one teardown; an owned lock is released once, after it; a joined one is untouched."""
+    write, owned or joined lock: torn down under the lock (nothing it started still serves); an owned lock is
+    released once, after the launch's last docker call; a joined one is untouched. A step is a docker call, a
+    cluster request or the agent run, up to the run (the teardown's own calls are not cut)."""
     for joined in (False, True):
         build = _launch_cases(tmp_path / ("joined" if joined else "owned"), joined)
-        clean = FaultJournal(skip=("teardown",))
+        clean = FaultJournal()
         rig, token = build(clean)
         rig.launch(**({"reference": True, "lock_token": token} if joined else {}))
         # the step at which the cluster served the snapshot's UUID: the fake has no other route that does
         assert rig.cluster.uuid_served_step is not None, "the launch never read the snapshot to check its UUID"
-        steps = list(range(rig.cluster.uuid_served_step + 1, len(clean.step_log) + 1))
+        run_step = [op for op, _d in clean.step_log].index("run") + 1
+        steps = list(range(rig.cluster.uuid_served_step + 1, run_step + 1))
         assert len(steps) >= 10, "the clean run shows too few steps to be cut anywhere"
         _teardown_ran_under_the_lock(rig, joined, "uncut, " + ("joined" if joined else "owned"))
 
         for n in steps + ["row"]:
             if n == "row" and joined:
                 continue                                     # a reference run writes no row
-            journal = FaultJournal(trip_at=None if n == "row" else n, skip=("teardown",))
+            journal = FaultJournal(trip_at=None if n == "row" else n)
             rig, token = build(journal)
             if n == "row":
                 rig.index.mkdir()                            # the row cannot be written: a directory is in its place
@@ -732,13 +769,12 @@ def test_a_launch_cut_at_any_step_after_verify_tears_down_once_and_frees_only_a_
             assert not isinstance(caught, _NOT_A_REFUSAL + (AssertionError, NotImplementedError)), (where, repr(caught))
             if n == "row" or (clean.step_log[n - 1][0] != "run"):
                 assert caught is not None, f"{where}: the launch went on as if nothing failed"
-            assert ops.count("teardown") == 1, where
             _teardown_ran_under_the_lock(rig, joined, where)
             if joined:
                 assert rig.store.records == record and "lock.delete" not in ops[started:], where
                 assert "lock.create" not in ops[started:], where
             else:
-                assert ops.count("lock.delete") == 1 and rig.journal.last("lock.delete") > rig.journal.last("teardown"), where
+                assert ops.count("lock.delete") == 1 and rig.journal.last("lock.delete") > max(rig.docker_at()), where
                 assert "frozen-engine" not in rig.store.records, where
             if n != "row":
                 assert rig.rows() == [], where
@@ -763,7 +799,7 @@ def test_a_token_handed_to_a_launch_while_no_one_holds_the_lock_is_refused_befor
         rig.launch(reference=True, lock_token=token)
 
     assert not isinstance(caught.value, _NOT_A_REFUSAL + (OSError,)), repr(caught.value)
-    assert not rig.cluster.requests and rig.ops.stubs is None and rig.ops.marker is None
+    _no_lab_traffic(rig)
     assert "run" not in rig.journal.ops() and rig.rows() == [] and not rig.store.records
     assert "lock.create" not in rig.journal.ops()[before:]
     _only_lock_traffic(rig.journal, "refused")
@@ -879,7 +915,7 @@ def test_a_launch_after_any_earlier_copy_ends_as_it_would_from_an_empty_cluster(
         if prior == "dirty":
             with pytest.raises(Exception):
                 rig.launch()
-            assert rig.ops.marker is None or rig.ops.marker["dirty"] is True
+            assert not is_clean_marker(rig.marker()), rig.marker()
         else:
             rig.launch()
     rig.write_variant_case(*VARIANTS[target])
@@ -899,21 +935,8 @@ def test_a_launch_after_any_earlier_copy_ends_as_it_would_from_an_empty_cluster(
     assert "frozen-engine" not in rig.store.records
 
 
-# -- C5: the clock offset is the one at the node restart ---------------------------------------------------
-
-
-def test_the_clock_offset_is_taken_when_the_node_restarts_however_long_the_copy_took(tmp_path):
-    """C5/D15: with a restore of six minutes and overlays of minutes, every restart is handed T minus the
-    clock as it reads at that call, within a second."""
-    rig = LabRig(tmp_path, latency={"restore": timedelta(minutes=6), "delete_by_query": timedelta(seconds=90),
-                                    "reindex": timedelta(minutes=2)})
-    rig.write_expected_case("drift")
-    start = rig.clock.last
-    rig.launch()
-
-    assert rig.ops.restarts and rig.ops.restarts[-1][1] - start >= timedelta(minutes=9)
-    for offset, reading in rig.ops.restarts:
-        assert abs(seconds(offset) - (instant(T) - reading).total_seconds()) <= 1, (offset, reading)
+# -- C5 retired: the clock offset taken at a node restart is withdrawn by D15 revised (r6.4.3); its
+# successor is the D15 section at the end of this file.
 
 
 # -- C6: every recorded fact is compared at launch, each on its own ----------------------------------------
@@ -970,11 +993,11 @@ def test_a_stale_launch_marks_the_copy_dirty_and_the_next_launch_restores_it_who
     rig = LabRig(tmp_path)
     rig.write_expected_case("drop")
     rig.launch()
-    assert rig.ops.marker["dirty"] is False and rig.cluster.restores == 1
+    assert is_clean_marker(rig.marker()) and rig.cluster.restores == 1
     _write_case_differing_in(rig, fact)
     rig.launch()
     assert [r["verdict"] for r in rig.rows()] == ["valid", "stale"]
-    assert rig.ops.marker["dirty"] is True, rig.ops.marker
+    assert not is_clean_marker(rig.marker()), rig.marker()
 
     rig.write_expected_case("drop")
     rig.launch()
@@ -991,11 +1014,12 @@ def test_a_stale_launch_marks_the_copy_dirty_and_the_next_launch_restores_it_who
 def test_a_launch_finds_the_node_stopped_and_starts_it_before_asking_it_anything(tmp_path, start):
     """B1/A1: teardown stops the node (and a node may never have run): a launch, or make-a-case and its
     reference run, make sure it is up before the first cluster request and end valid in the variant's state."""
-    rig = LabRig(tmp_path, node_up=start != "cold")
+    rig = LabRig(tmp_path)          # a cold lab: no engine, no node
     rig.write_expected_case("drop")
     if start != "cold":
         rig.launch()
-        assert rig.cluster.up is False, "the fake teardown must leave the node stopped"
+        if rig.node_running():      # a teardown that leaves the node up does not exercise the claim: stop it
+            rig.docker.containers[(rig.docker.node().scope, rig.docker.node().name)].state = "exited"
     if start == "make-a-case-after-a-launch":
         with rig.write_case("young", None) as held:
             assert rig.launch(reference=True, lock_token=held.token) == RUN_ID
@@ -1010,7 +1034,7 @@ def test_a_launch_finds_the_node_stopped_and_starts_it_before_asking_it_anything
 
     ops = rig.journal.ops()[mark:]
     assert rig.cluster.down_requests == [], "the cluster was asked something while its node was stopped"
-    assert "ensure_node" in ops or "restart_node" in ops
+    assert any(e["j"] >= mark for e in rig.docker.of_kind("node-start")), "no frozen node was started"
     assert [r["verdict"] for r in rig.rows()][-1] == "valid" and rig.cluster.state() == expected_copy(kind)
 
 
@@ -1027,8 +1051,8 @@ def test_a_launch_works_on_the_patterns_of_its_freeze_not_on_a_built_in_default(
     rig.launch()
 
     assert [r["verdict"] for r in rig.rows()] == ["valid"] and rig.cluster.state() == expected_copy("drop")
-    assert rig.ops.digest_patterns, "the launch never compared the copy's content digest"
-    assert all(list(p) == [EVENTS, ALERTS_ALT] for p in rig.ops.digest_patterns), rig.ops.digest_patterns
+    asked_for = [p for _m, p, _b in rig.cluster.requests if ALERTS_ALT in p]
+    assert asked_for, "no request to the cluster used the freeze's alerts pattern"
     asked = json.dumps([[m, p, b] for m, p, b in rig.cluster.requests], default=str)
     assert ALERTS_PATTERN not in asked
 
@@ -1048,7 +1072,7 @@ def test_a_launch_is_refused_before_anything_when_the_tenants_patterns_are_no_lo
         rig.launch()
 
     assert not isinstance(caught.value, _NOT_A_REFUSAL), repr(caught.value)
-    assert not rig.cluster.requests and rig.ops.stubs is None and rig.ops.marker is None
+    _no_lab_traffic(rig)
     assert "run" not in rig.journal.ops() and rig.rows() == [] and "frozen-engine" not in rig.store.records
     rig.set_tenant_patterns(EVENTS, ALERTS_ALT)
     rig.launch()
@@ -1066,3 +1090,221 @@ def test_no_lab_script_carries_a_built_in_pattern_default_or_a_pattern_flag():
         found += [(path.name, n.value) for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
                   and id(n) not in docs and (n.value == "--pattern" or "alerts-default" in n.value or n.value in ("logs-*", EVENTS))]
     assert not found, found
+
+
+# =====================================================================================================
+# r6.4.3 (finalize-stage review of PR #1461): D25, D15 revised, findings 2 and 4
+# =====================================================================================================
+
+LIFECYCLE = ("run", "create", "start", "restart", "stop", "kill", "rm")
+
+
+def _node_names(rig):
+    return {e["container"].name for e in rig.docker.of_kind("node-start")}
+
+
+def _restores(rig):
+    return [e for e in rig.docker.of_kind("curl") if e["path"].split("?")[0].endswith("/_restore")]
+
+
+def _assert_every_restore_went_into_a_fresh_node(rig, where=""):
+    """D25: before each restore, every node that served the cluster earlier was removed and its data volume
+    discarded; the restoring node and its data volume never served before; the cluster it restores into holds
+    no index; the restore is the whole snapshot. Nothing was ever closed, and no index of the freeze was
+    deleted, to make room."""
+    curls, removed = rig.docker.of_kind("curl"), rig.docker.of_kind("container-rm")
+    wiped = rig.docker.of_kind("volume-rm")
+    restores = _restores(rig)
+    assert restores, f"{where}: no restore happened"
+    for r in restores:
+        earlier = [e for e in curls if e["j"] < r["j"] and e["node"] != r["node"]]
+        for e in earlier:
+            assert any(x["container"].id == e["node"] and x["j"] < r["j"] for x in removed), (
+                where, "the old node container was not removed before the restore", e["path"])
+            assert e["data"] != r["data"], (where, "the restore went into a data volume an older node used")
+            if e["data"][0] == "vol":
+                assert any(w["volume"] == e["data"] and w["j"] < r["j"] for w in wiped), (
+                    where, "the old node's data volume was not discarded before the restore", e["data"])
+        assert not any(e["data"] == r["data"] for e in curls if e["j"] < r["j"] and e["node"] != r["node"])
+    for entry in [m for m in rig.cluster.mutations if m["kind"] == "restore"]:
+        assert entry["indices_before"] == [], (where, "restored over existing indices", entry["indices_before"])
+        assert entry["whole"], (where, "a partial restore", entry["target"])
+    names = set(rig.freeze["elastic"]["indices"])
+    assert not [p for m, p, _b in rig.cluster.requests if "/_close" in p], where
+    deleted = [p for m, p, _b in rig.cluster.requests if m == "DELETE"
+               and set(p.strip("/").split("?")[0].split("/")[0].split(",")) & names]
+    assert not deleted, (where, deleted)
+    assert all(w["volume"][2] != "lab-engine-state" for w in wiped), "the engine's state volume was wiped"
+    for w in wiped:      # the marker is not on the node's volume: at each wipe a marker that is not clean is kept
+        assert not is_clean_marker(w["seen"]), (where, "a clean marker stood while the copy was wiped", w["seen"])
+
+
+@pytest.mark.parametrize("before", ["cold", "variant-switch", "dirty-marker", "no-marker", "stale"])
+def test_every_restore_goes_into_a_fresh_node_and_the_copy_ends_valid(tmp_path, before):
+    """D25: whatever an earlier launch left (another variant, a half-made copy, no marker, a stale verdict),
+    a launch that restores discards the old node container and its data volume, starts a new node, restores
+    the whole snapshot into it, sends no `_close` or index DELETE to make room, and ends valid."""
+    rig = LabRig(tmp_path, fail=_once(lambda m, p, b: p.endswith("/_delete_by_query")) if before == "dirty-marker" else None)
+    if before == "variant-switch":
+        rig.write_expected_case("drift")
+        rig.launch()
+    elif before == "dirty-marker":
+        rig.write_expected_case("drop")
+        with pytest.raises(Exception):
+            rig.launch()
+    elif before == "no-marker":
+        rig.write_expected_case("drop")
+        rig.launch()
+        rig.drop_marker()
+    elif before == "stale":
+        rig.write_expected_case("drop", content="f" * 64)
+        rig.launch()
+    rig.write_expected_case("drop")
+    rows = len(rig.rows())
+    rig.launch()
+
+    assert [r["verdict"] for r in rig.rows()][rows:] == ["valid"], rig.rows()
+    assert rig.cluster.state() == expected_copy("drop") and is_clean_marker(rig.marker())
+    _assert_every_restore_went_into_a_fresh_node(rig, before)
+
+
+def test_a_launch_with_a_clean_marker_for_its_variant_reuses_the_copy_and_wipes_nothing(tmp_path):
+    """D25: a clean marker for the launch's own variant: no restore, no node or volume discarded, the same
+    data volume serves both launches, both valid."""
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("drift")
+    rig.launch()
+    wiped, restores = len(rig.docker.of_kind("volume-rm")), rig.cluster.restores
+    first_data = {e["data"] for e in rig.docker.of_kind("curl")}
+    mark = len(rig.journal)
+    rig.launch()
+
+    assert rig.cluster.restores == restores and len(rig.docker.of_kind("volume-rm")) == wiped
+    assert {e["data"] for e in rig.docker.of_kind("curl") if e["j"] >= mark} <= first_data
+    assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"]
+
+
+# -- D15 revised: the node's clock offset is written when the agent starts ------------------------------
+
+
+def _offset_writes(rig):
+    """`(journal index, clock reading, offset)` of each write to a file a frozen node's `V2_CLOCK_OFFSET_FILE`
+    names, in order."""
+    files = set()
+    for e in rig.docker.of_kind("node-start"):
+        if e["offset_file"]:
+            store, key, _ro = rig.docker.resolve(e["container"], e["offset_file"])
+            files.add((store, key))
+    out = []
+    for w in rig.docker.writes:
+        if (w["store"], w["key"]) in files and w["data"].strip():
+            out.append((w["j"], w["clock"], int(w["data"].decode().strip()), w["inode"]))
+    return out
+
+
+def _assert_every_node_start_already_holds_the_offset_for_T(rig, where=""):
+    starts = rig.docker.of_kind("node-start")
+    assert starts, f"{where}: no frozen node was started"
+    for e in starts:
+        env = e["container"].env
+        assert "LD_PRELOAD" in env and e["offset_file"], (where, "the node runs without the file-fed shim", env)
+        assert e["offset"] is not None and e["offset"].strip(), (where, "the node started before its offset file held T", e["offset"])
+        node_now = e["clock"] + timedelta(seconds=int(e["offset"].strip()))
+        assert abs((node_now - instant(T)).total_seconds()) <= 5, (where, "at its start the node's clock is not T", e["offset"])
+
+
+@pytest.mark.parametrize("before", ["cold", "same-variant", "other-variant"])
+def test_every_frozen_node_starts_with_its_offset_file_already_holding_T_minus_now(tmp_path, before):
+    """D15 revised/P1: no process in the copy ever reads the real now: each time a frozen node starts, the
+    shim is preloaded and the file its `V2_CLOCK_OFFSET_FILE` names already holds the offset that makes the
+    node's wall clock read T at that moment."""
+    rig = LabRig(tmp_path)
+    if before != "cold":
+        rig.write_expected_case("drop")
+        rig.launch()
+    rig.write_expected_case("drift" if before == "other-variant" else "drop")
+    rig.launch()
+
+    _assert_every_node_start_already_holds_the_offset_for_T(rig, before)
+
+
+def test_the_offset_is_rewritten_to_T_minus_now_as_the_last_lab_step_and_the_node_clock_matches_the_agents(tmp_path):
+    """D15 revised/O5: with a slow setup (a six-minute restore, minutes of overlays, slow searches), the last
+    lab step before the agent runs is the rewrite of the offset file to T - now, read on the clock at the
+    rewrite; no docker call or cluster request comes between it and the run. From the run on, the node's
+    clock (now + offset) and the agent's (`--as-of T` from its start) agree within one clock step. An offset
+    fixed at a node restart before the health wait, the user, the counts and the proxy fails this."""
+    step = 1
+    rig = LabRig(tmp_path, clock_step=step, latency={
+        "restore": timedelta(minutes=6), "delete_by_query": timedelta(seconds=90),
+        "reindex": timedelta(minutes=2), "search": timedelta(seconds=5)})
+    rig.write_expected_case("drift")
+    rig.launch()
+    run_j = rig.journal.first("run")
+
+    writes = [w for w in _offset_writes(rig) if w[0] < run_j]
+    assert writes, "the offset file was never written before the run"
+    j, at, offset, inode = writes[-1]
+    serving = [e for e in rig.docker.of_kind("node-start") if e["j"] < run_j][-1]
+    assert inode == serving["inode"], ("the offset was not rewritten in place: the running node's shim maps the "
+                                       "file it found at its start, and a new file put in its place is never read")
+    assert abs((at + timedelta(seconds=offset) - instant(T)).total_seconds()) <= step, (at, offset)
+    between = [(op, d) for op, d in rig.journal[j + 1:run_j] if op in ("docker", "es")]
+    assert not between, f"lab steps after the offset rewrite and before the run: {between[:5]}"
+    assert (rig.run_clock - at).total_seconds() <= step, (rig.run_clock, at)
+    node_at_run = rig.run_clock + timedelta(seconds=offset)
+    assert abs((node_at_run - instant(T)).total_seconds()) <= step, node_at_run
+    assert instant(_opt(rig.argv, "--as-of")) == instant(T)
+    proxy, counts = rig.docker.of_kind("proxy-start")[-1]["j"], rig.es_at(lambda m, p: p.endswith("/_count"))
+    assert proxy < j and max(counts) < j, "the rewrite comes after the proxy start and the count comparison"
+
+
+def test_a_launch_never_restarts_the_frozen_node_for_its_clock(tmp_path):
+    """D15 revised: once the copy is ready (after the last overlay, or, on a clean marker, after the first
+    request the node serves), no launch stops, starts, restarts or replaces the frozen node before its run."""
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("drop")
+    for n in range(2):
+        mark = len(rig.journal)
+        rig.launch()
+        run_j = rig.journal.last("run")
+        es = [i for i, (op, _d) in enumerate(rig.journal) if op == "es" and i >= mark]
+        mutating = [i for i in es if rig.journal[i][1][1].endswith(("/_delete_by_query", "/_reindex", "/_restore"))]
+        ready = max(mutating) if mutating else min(es)
+        names = _node_names(rig)
+        touched = [(i, d) for i, (op, d) in enumerate(rig.journal)
+                   if op == "docker" and ready < i < run_j and "/" in d[0] and d[1] in LIFECYCLE and d[2] in names]
+        assert not touched, (f"launch {n + 1}", touched)
+    assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"]
+
+
+# -- finding 2: a node that is not listening yet is waited for --------------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["none", "drift"])
+def test_a_node_that_is_not_listening_yet_is_waited_for_and_the_launch_proceeds(tmp_path, kind):
+    """r6.4.3 finding 2/O6: a freshly started node refuses connections for a while (curl exits 7, `000`);
+    the launch waits through it and ends valid, it does not fail."""
+    rig = LabRig(tmp_path, boot_requests=3)
+    rig.write_expected_case(kind)
+    rig.launch()
+
+    assert rig.docker.of_kind("curl-refused"), "the node never refused a connection: the claim was not exercised"
+    assert [r["verdict"] for r in rig.rows()] == ["valid"] and rig.cluster.state() == expected_copy(kind)
+
+
+# -- finding 4: a stopped engine is started again ---------------------------------------------------------
+
+
+def test_an_engine_that_exists_but_is_stopped_is_started_again_not_assumed_up(tmp_path):
+    """r6.4.3 finding 4: after a reboot (or a `docker stop`) the engine container exists but does not run
+    (`inspect` says `false` with rc 0); the next launch brings it up and ends valid."""
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("none")
+    rig.launch()
+    [engine] = [c for c in rig.docker.containers.values() if c.engine]
+    rig.docker.stop_engine(engine.scope, engine.name)
+    rig.launch()
+
+    assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"]
+    assert any(c.engine and c.state == "running" for c in rig.docker.containers.values())

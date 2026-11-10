@@ -5,7 +5,10 @@ bound by this contract:
   `release(store, name, token)`, `require(store, name, token=None)`, `clear(store, name)`,
   exceptions `Held` and `WrongToken`, names `CAPTURE = "capture"` and `FROZEN_ENGINE =
   "frozen-engine"`, and `DockerLockStore(run=subprocess.run)`. A store offers
-  `create_exclusive(name, record) -> bool`, `read(name) -> str | None`, `delete(name)`.
+  `create_exclusive(name, record) -> bool`, `read(name) -> str | None`, `delete(name)` and (r6.4.3 finding 9)
+  `delete_if_held_by(name, token) -> bool`: one engine-side step that deletes the record only when its token is
+  `token`. `release` frees through it, so a lock cleared and retaken between a read and the delete keeps
+  its new holder.
 * `attacks/runner.py::run_scenario(..., lock_store=None, lock_token=None)` and
   `cmd_run(args, ..., lock_store=None)` with a `--lock-token` flag; `None` = no check at the
   library level, `cmd_run` supplies a `DockerLockStore()` by default.
@@ -484,3 +487,46 @@ def test_clear_removes_the_named_lock_only(lock, lab, name):
     other = ({lock.CAPTURE, lock.FROZEN_ENGINE} - {name}).pop()
     assert lock.main(["clear", name]) == 0
     assert lab.store.read(name) is None and lab.store.read(other)
+
+
+# -- r6.4.3 finding 9: a release is one engine-side check-and-delete ----------------------------------------
+
+
+def _other_holders_record(lock, name):
+    other = _store()
+    lock.take(other, name)
+    return other.records[name]
+
+
+@pytest.mark.parametrize("name", ["capture", "frozen-engine"])
+def test_a_release_racing_a_clear_and_a_retake_never_removes_the_new_holders_record(lock, name):
+    """r6.4.3 finding 9/O10: between the old holder's read and its delete, the operator clears the lock and
+    another holder takes it. The old holder's release does not remove the new holder's record."""
+    store = _store()
+    token = lock.take(store, name)
+    newer = _other_holders_record(lock, name)
+
+    def clear_and_retake():
+        store.records.pop(name, None)
+        store.records[name] = newer
+
+    store.race(name, clear_and_retake)
+    try:
+        lock.release(store, name, token)
+    except lock.LockError:
+        pass          # refusing is fine: the old holder no longer holds it
+
+    assert store.records.get(name) == newer, store.records
+
+
+def test_the_lab_store_deletes_only_the_holders_record_in_one_step(lock, tmp_path):
+    """r6.4.3 finding 9: on the lab store (a real shell), the check-and-delete keeps another holder's
+    record, removes the holder's own, and `release` reaches the lab in exactly one exec."""
+    store, box = _docker_store(lock, tmp_path)
+    mine = lock.take(store, lock.FROZEN_ENGINE)
+    assert store.delete_if_held_by(lock.FROZEN_ENGINE, "f" * 32) is False
+    assert mine in store.read(lock.FROZEN_ENGINE)
+    before = len(box.argvs)
+    lock.release(store, lock.FROZEN_ENGINE, mine)
+    assert store.read(lock.FROZEN_ENGINE) is None
+    assert len(box.argvs) - before - 1 == 1, box.argvs[before:]      # the release's exec, then the read above

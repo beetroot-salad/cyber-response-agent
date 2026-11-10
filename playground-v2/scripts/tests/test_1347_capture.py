@@ -458,3 +458,38 @@ def test_a_capture_whose_snapshot_name_is_taken_fails_or_takes_a_fresh_name_and_
     assert elastic["snapshot"] not in rig.preexisting and elastic["uuid"] == SNAP_UUID
     assert set(rig.snapshots) == set(rig.preexisting) | {elastic["snapshot"]}
     assert (REPO, elastic["snapshot"]) in [d for op, d in rig.journal if op == "verify_restore"]
+
+
+# -- r6.4.3 finding 7 (C-parse): an operator-given instant without an offset is UTC -------------------------
+
+
+@pytest.mark.parametrize("given, meant", [("2026-11-10T14:00:00", "2026-11-10T14:00:00Z"),
+                                          ("2026-11-10T14:00:00Z", "2026-11-10T14:00:00Z"),
+                                          ("2026-11-10T16:00:00+02:00", "2026-11-10T14:00:00Z")])
+def test_capture_reads_a_T_given_without_an_offset_as_UTC_whatever_the_local_zone(tmp_path, monkeypatch, given, meant):
+    """r6.4.3 finding 7/O1: `capture_case.py --T 2026-11-10T14:00:00` means 14:00Z, as its help says, even
+    where local time is two hours ahead (TZ=Etc/GMT-2); a value with an offset keeps it."""
+    import time
+
+    module = _module()
+    seen = {}
+
+    def capture(freeze_dir, **kw):
+        seen.update(kw)
+        return {}
+
+    monkeypatch.setattr(module, "capture", capture)
+    monkeypatch.setenv("TZ", "Etc/GMT-2")
+    time.tzset()
+    try:
+        monkeypatch.setenv("V2_FROZEN_TENANT_DIR", str(tmp_path / "tenant"))
+        (tmp_path / "tenant" / "settings" / "systems" / "elastic").mkdir(parents=True)
+        (tmp_path / "tenant" / "settings" / "systems" / "elastic" / "config.env").write_text(config_env(*PATTERNS))
+        module.main([str(tmp_path / "freezes" / FREEZE_ID), "--repository", REPO, "--T", given,
+                     "--parts-dir", str(tmp_path / "parts")])
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+    assert "T" in seen, "capture was not called"
+    assert instant(seen["T"]) == instant(meant), seen["T"]

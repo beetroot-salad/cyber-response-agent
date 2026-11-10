@@ -15,3 +15,18 @@ PLAYGROUND_ROOT = Path(__file__).resolve().parents[2]
 for path in (PLAYGROUND_ROOT, Path(__file__).resolve().parent):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
+
+
+import os  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _environment_restored():
+    """The rig sets the lab's `V2_*` variables in os.environ (the real lab layer reads them there); each
+    test gets the environment back as it found it."""
+    saved = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(saved)

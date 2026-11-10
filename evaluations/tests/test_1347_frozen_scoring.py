@@ -288,9 +288,10 @@ def test_a_reference_run_without_a_row_leaves_its_case_unscored(tmp_path):
     assert rc not in (0, 2), said
 
 
-def test_a_fixture_without_a_case_file_is_not_a_case(tmp_path):
-    """A2/O11: a labelled fixture with no case.yaml is neither scored nor listed; the cases that
-    have one, all scored, exit 0 (the old "un-run fixtures exit 0" rule is gone)."""
+def test_a_fixture_labelled_held_out_without_a_case_file_refuses_the_whole_set(tmp_path):
+    """r6.4.3 finding 8 (supersedes A2's "a fixture with no case.yaml is neither scored nor listed"): a
+    fixture labelled `held_out: true` with no case.yaml would shrink the denominator silently; the set is
+    refused like any case that cannot be bound (exit 2, the fixture named), nothing scored."""
     root, runs = fixtures(tmp_path), tmp_path / "runs"
     rows = rows_for(root, runs)
     legacy = root / "z-legacy"
@@ -300,8 +301,24 @@ def test_a_fixture_without_a_case_file_is_not_a_case(tmp_path):
 
     rc, verdicts, said = scored(tmp_path, runs, root, *rows)
 
+    assert rc == 2, said
+    assert verdicts == {}, said
+    assert "z-legacy" in said and "refused" in said, said
+
+
+def test_a_fixture_not_labelled_held_out_needs_no_case_file(tmp_path):
+    """r6.4.3 finding 8, control: a fixture without `held_out: true` is not part of the set; with no
+    case.yaml it is ignored and the set scores and exits 0."""
+    root, runs = fixtures(tmp_path), tmp_path / "runs"
+    rows = rows_for(root, runs)
+    other = root / "z-not-held-out"
+    other.mkdir()
+    (other / "alert.json").write_text("{}")
+    (other / "ground_truth.yaml").write_text("disposition: benign\n")
+
+    rc, verdicts, said = scored(tmp_path, runs, root, *rows)
+
     assert (rc, verdicts) == (0, {GOOD: "OK", OTHER: "OK"}), said
-    assert "z-legacy" not in said, said
     assert "incomplete" not in said.lower(), said
 
 
