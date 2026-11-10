@@ -363,8 +363,10 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
 ) -> None:
     """The lead-author lane's work over a claim: each curation request's run served through the drain's
     accepted tenant, then the pitfalls curation over the claim's pitfalls, each one claim of `batch`
-    (the draft re-synced after it). Items kept until the batch ends (r8 Lead-author lane): an item no
-    commit took waits again when the batch enters review; a request whose run is gone is dead."""
+    (the draft re-synced after it). Items kept until the batch ends (r8 Lead-author lane): an item stays in the
+    batch only when its curator positively took it (`Outcome.kept()`: a request its serve finished, a pitfall the
+    curation committed); an item that is not named waits again when the batch enters review (P3); a request whose
+    run is gone is dead."""
     from defender.learning.author.version_control import DeliveryRefused
     from defender.learning.store import Outcome
     from defender.records import RunAbsent
@@ -386,8 +388,7 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
                 raise
             except (_LeadAuthorRetry, DeliveryRefused, Exception) as e:  # noqa: BLE001 — contained to this request
                 _logger.warning(f"lead_author_drain: request {key}: {type(e).__name__}: {one_line(str(e))}")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-        if not done:
-            outcomes.setdefault((kind, key), Outcome.waiting())
+        outcomes.setdefault((kind, key), Outcome.kept() if done else Outcome.waiting())
     pitfalls = [item for item in held.items if item[0] == "pitfall"]  # lint-half-table: ok — the pitfall curation is the kind's own rule, not a lane decision
     if not pitfalls:
         return
@@ -405,8 +406,8 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
     for kind, key, _payload in pitfalls:
         if key in declined:
             outcomes.setdefault((kind, key), Outcome.declined())
-        elif key not in committed:
-            outcomes.setdefault((kind, key), Outcome.waiting())
+        else:
+            outcomes.setdefault((kind, key), Outcome.kept() if key in committed else Outcome.waiting())
 
 
 def _run_of(payload: dict, tenant: Tenant | None) -> Run | Exception:
