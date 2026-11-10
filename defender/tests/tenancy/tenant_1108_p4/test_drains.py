@@ -279,7 +279,8 @@ def test_flow4_a_retained_batch_whose_pr_was_closed_is_delivered_as_closed_and_n
     assert git(t.remote, "for-each-ref", "--format=%(refname) %(objectname)") == refs_before
     said = "\n".join(r.getMessage() for r in caplog.records)
     assert "closed" in said, said
-    assert str(batch.id) in said and f"#{batch.pr_number}" in said, said  # names the batch and its PR
+    assert str(batch.id) in said, said  # names the batch ...
+    assert f"#{batch.pr_number}" in said, said  # ... and its PR
 
 
 # ---------------------------------------------------------------------------------------------

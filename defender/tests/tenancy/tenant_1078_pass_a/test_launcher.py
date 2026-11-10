@@ -159,7 +159,7 @@ def _a_findings_store(monkeypatch) -> None:
         yield sink
 
     monkeypatch.setenv(database_address_variable(), "postgresql://a-store-that-records/findings")
-    monkeypatch.setattr(store, "blocking", blocking)
+    monkeypatch.setattr(store, "blocking", blocking)  # lint-monkeypatch: ok — the store opener is a module-level door the launcher reaches itself; no seam carries a recording store to it
 
 
 def _graded_launch(tmp_path: Path, monkeypatch, root: Path, *, collide: bool):

@@ -1,7 +1,7 @@
 """#1234 suite fixtures: the configured roots every scenario needs.
 
 Episodes live under the per-test `DEFENDER_DATA_ROOT` (`defender/tests/conftest.py`). Here every
-test also points the learning-state queues (`DEFENDER_LEARNING_STATE_DIR`, by default inside the
+test also points the learning-state queues (the retired state variable, by default inside the
 checkout) under its own `tmp_path` and sets a fast `ORACLE_RATE` for real-path siblings, so no
 scenario depends on or writes to the ambient environment.
 """

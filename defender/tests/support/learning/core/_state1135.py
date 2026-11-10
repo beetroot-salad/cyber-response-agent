@@ -1,7 +1,7 @@
 """Test-side doors onto the learning state handle (#1135).
 
 The handle's root must already exist (nothing creates it lazily), so a fixture that points
-`DEFENDER_LEARNING_STATE_DIR` at a path under `tmp_path` has to create the folder too. This is
+the retired learning-state variable at a path under `tmp_path` has to create the folder too. This is
 an explicit test scratch setting used by helpers that inject `state=`; production launchers
 ignore the retired variable and select their accepted tenant's learning root.
 
@@ -22,7 +22,7 @@ from defender.learning.core.config import LoopPaths
 if TYPE_CHECKING:
     from defender.learning.core.state import LearningState
 
-STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"
+STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"  # lint-stale-ref: ok — the retired variable is named here to set or clear it as an ambient decoy
 
 
 def set_state_dir(monkeypatch, root: Path) -> Path:

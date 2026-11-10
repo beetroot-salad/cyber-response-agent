@@ -259,7 +259,7 @@ def _publish_held(w: Any) -> None:
 
 
 @pytest.fixture
-def no_questioner_corpus_world(tmp_path, data_root, migrated_database, monkeypatch):
+def no_questioner_corpus_world(tmp_path, data_root, migrated_database, monkeypatch):  # noqa: F811 — the imported fixture
     """The `world` of the store tests over a tenant repo that never committed `agent/lessons-questioner/`."""
     from types import SimpleNamespace
 
@@ -278,7 +278,7 @@ def no_questioner_corpus_world(tmp_path, data_root, migrated_database, monkeypat
 
 
 @pytest.mark.postgres
-def test_author_drains_real_default_seam_carries_the_label_to_the_open(store_world):
+def test_author_drains_real_default_seam_carries_the_label_to_the_open(store_world):  # noqa: F811 — the imported fixture
     """The drain's production `trigger_author` opens the author label's trees over the batch's
     draft: the gate holds the row (the store records it held, not failed), and nothing stays held
     under the drafts or is delivered."""
@@ -362,7 +362,7 @@ def _spy_build(monkeypatch, repo: Path, seen: list[list[str]], *,
             raise fault
         return real(*a, **kw)
 
-    monkeypatch.setattr(lessons_run, "build_author_config", spy)
+    monkeypatch.setattr(lessons_run, "build_author_config", spy)  # lint-monkeypatch: ok — a recording wrapper around the real builder; no seam reports the config the drain builds for the call
 
 
 def _held_roots(paths: LoopPaths) -> list[str]:
@@ -451,7 +451,7 @@ print(json.dumps({"rc": run.returncode, "stdout": run.stdout, "stderr": run.stde
 
 def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_path):
     """The harness runs an empty-queue scenario cleanly in its own scratch dir and never reads
-    the retired `DEFENDER_LEARNING_STATE_DIR`."""
+    the retired learning-state variable."""
     evals = _harness().parent
     scenario = tmp_path / "scenario"
     scenario.mkdir()
@@ -461,7 +461,7 @@ def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_p
     decoy = tmp_path / "decoy-state"
     decoy.mkdir()
     env = {**os.environ, "PYTHONPATH": str(evals.parent),
-           "DEFENDER_LEARNING_STATE_DIR": str(decoy)}
+           "DEFENDER_LEARNING_STATE_DIR": str(decoy)}  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
 
     proc = subprocess.run(
         [sys.executable, "-c", _HARNESS_RUN, str(evals), str(scenario), str(scratch)],
@@ -475,7 +475,7 @@ def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_p
 
 
 @pytest.mark.postgres
-def test_the_trigger_holds_nothing_for_an_injected_seam(store_world):
+def test_the_trigger_holds_nothing_for_an_injected_seam(store_world):  # noqa: F811 — the imported fixture
     """An injected `trigger_author` keeps its call shape (no `label`) and the lane opens nothing
     around it: the default seam is the only place the author label is consumed."""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain

@@ -73,7 +73,7 @@ def test_dc1_a_source_under_a_linked_runs_folder_is_refused(tmp_path):
 
 
 @pytest.mark.postgres
-def test_dc2_the_judges_prompt_carries_no_sibling_view_or_tally(tmp_path, monkeypatch, migrated_database):
+def test_dc2_the_judges_prompt_carries_no_sibling_view_or_tally(tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     P.reach_launch_store(migrated_database, monkeypatch)  # the judge pass inserts into the learning store (#1278)
     est, src = P.launch_source(tmp_path)
     prior = src.parent / "20260101t000000z-prior-trial"
@@ -96,7 +96,7 @@ def test_dc2_the_judges_prompt_carries_no_sibling_view_or_tally(tmp_path, monkey
 
 
 @pytest.mark.postgres
-def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog, monkeypatch, migrated_database):
+def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     import yaml
 
     from defender.tests.support.learning.judge import _judge_921 as J
@@ -319,7 +319,7 @@ def test_dc7_the_run_page_refuses_a_linked_run_folder(tmp_path):
 
 
 @pytest.mark.postgres
-def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tenant, monkeypatch, migrated_database):
+def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tenant, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     """#1278: the request run end files is a row of the learning store (payload `{case_id, tenant_id, run_id}`)."""
     from defender.box import _scrub as scrub
     from defender.learning.core.config import LoopPaths
@@ -441,7 +441,7 @@ def test_dc8_a_drain_without_an_accepted_tenant_serves_nothing_and_accepts_none(
 
 
 @pytest.mark.postgres
-def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch, capsys, migrated_database):
+def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch, capsys, migrated_database):  # noqa: F811 — the imported fixture
     """With no data root the drain command is refused at its host acceptance, before it claims anything: its request stays
     waiting in the store, with no attempt charged and not dead (r10 A1: the data root is judged at acceptance, step 2)."""
     from defender.learning.core import cli

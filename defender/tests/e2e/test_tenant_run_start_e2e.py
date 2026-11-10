@@ -72,7 +72,6 @@ def world(tmp_path, monkeypatch):
     root = tmp_path / "data"
     root.mkdir()
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "learning-state"))
     chosen: dict[str, str] = {}
 
     def runs_base(tenant_id: str) -> Path:

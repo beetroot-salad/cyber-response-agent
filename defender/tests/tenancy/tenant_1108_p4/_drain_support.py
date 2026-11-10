@@ -108,12 +108,11 @@ def queue(paths: Any, rows: list[dict], *, channel: Any = None) -> None:
     from defender.tests.support.learning.core._store1278 import call
 
     tenant = str(paths.tenant.id)
-    channel = channel if channel is not None else FINDINGS
     if channel == PITFALLS:
         for row in rows:
             call(store_dsn(), "add_pitfall", tenant, row)
         return
-    kind = {FINDINGS: "finding", QUESTIONER_FINDINGS: "questioner_finding"}[channel]
+    kind = {None: "finding", FINDINGS: "finding", QUESTIONER_FINDINGS: "questioner_finding"}[channel]
     call(store_dsn(), "publish_findings", tenant, f"run-{rows[0]['finding_id']}", rows, kind=kind)
 
 

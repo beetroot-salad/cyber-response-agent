@@ -56,7 +56,7 @@ ALERT_RAW = json.dumps({"alert_id": ALERT_ID, "rule": {"id": ALERT_ID}}).encode(
 #: The learning state root, under which the shared findings queue lives. Every scenario points
 #: it inside its own `tmp_path`: left unset, the judge's appender would write fixture rows into
 #: the real `learning/_pending/` queue.
-STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"
+STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"  # lint-stale-ref: ok — the retired variable is named here to set or clear it as an ambient decoy
 
 #: The judge's operator knobs, spelled without a `DEFENDER_` prefix (like `QUESTIONER_EFFORT`).
 DRAWS_KNOB = "JUDGE_DRAWS"
@@ -860,5 +860,5 @@ def install_launcher_store(monkeypatch: Any) -> Any:
 
     store = MemoryStore()
     monkeypatch.setenv(database_address_variable(), "postgresql://stand-in/unused")
-    monkeypatch.setattr("defender.learning.store.blocking", lambda dsn: contextlib.nullcontext(store))  # noqa: ARG005
+    monkeypatch.setattr("defender.learning.store.blocking", lambda dsn: contextlib.nullcontext(store))  # noqa: ARG005  # lint-monkeypatch: ok — the store opener is a module-level door the entrypoints under test reach themselves; no seam carries a stand-in store to them
     return store

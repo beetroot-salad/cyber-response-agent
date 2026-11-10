@@ -460,7 +460,7 @@ def git_repo(path: Path) -> Path:
 # fate (the attempt ceiling, the retirement of a waiting request) is pinned by the store's own contract tests
 # (`tests/learning/store_1278/test_store_1278.py`, D8). The real tick over the store is `file_request` + `drains.lead_author_drain`.
 
-_QUEUES: dict[str, "_Queue"] = {}
+_QUEUES: dict[str, _Queue] = {}
 
 
 @dataclass

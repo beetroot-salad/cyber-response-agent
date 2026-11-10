@@ -20,12 +20,10 @@ import html
 import json
 import os
 import re
-import shutil
 from pathlib import Path
 
 import pytest
 
-from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared.contracts._frontend_outputs import frontend_outputs_lock  # noqa: F401 — shared pytest fixture
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 
@@ -219,7 +217,8 @@ def test_an_empty_store_reads_as_four_idle_channels_and_nothing_set_aside(tmp_pa
 
     assert [ch["name"] for ch in view["channels"]] == ["findings", "questioner_findings", "pitfalls", "curation_requests"]
     for ch in view["channels"]:
-        assert ch["items"] == [] and ch["deadletter"] == []
+        assert ch["items"] == []
+        assert ch["deadletter"] == []
         assert ch["depth"] == {"waiting": 0, "queued": 0}
         assert ch["held"] == {"count": 0, "ids": []}
     assert view["quarantine"]["tainted"]["rows"] == []
@@ -322,11 +321,11 @@ def test_an_unreadable_archive_directory_is_counted_not_fatal(paths):
 
 
 def test_stamped_view_builds_from_the_tenant_its_paths_name_not_an_ambient_variable(paths, tmp_path, monkeypatch):
-    """Handed a tenant's `LoopPaths`, nothing is resolved from the environment: a legacy `DEFENDER_LEARNING_STATE_DIR` is
+    """Handed a tenant's `LoopPaths`, nothing is resolved from the environment: a legacy learning-state variable is
     not read, written or listed, and the view is stamped with when it was built."""
     poison = tmp_path / "old-env-root"
     poison.mkdir()
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(poison))
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(poison))  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
 
     stamped = serialize_queues.stamped_view(paths, store=_NoWork())
 
@@ -451,7 +450,7 @@ def _build_cli(tenant_id: str, data_root: Path, **env: str):
 @pytest.mark.postgres
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
-        migrated_database, data_root, run_visualizations_dir, monkeypatch):  # noqa: F811
+        migrated_database, data_root, run_visualizations_dir, monkeypatch):  # noqa: F811 — the imported fixture
     """`main` writes the four pages to the tenant's publish area (`<root>/<T>/learning/`), replacing a stale page, built from
     the tenant's rows in the learning store, and nothing into the source tree."""
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
@@ -494,7 +493,7 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
 @pytest.mark.parametrize("order", ["a-then-b", "b-then-a"])
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_1279_o1_two_tenants_each_keep_their_own_pages_in_their_own_publish_area(
-        migrated_database, data_root, run_visualizations_dir, order):  # noqa: F811
+        migrated_database, data_root, run_visualizations_dir, order):  # noqa: F811 — the imported fixture
     """Each tenant's four pages land in `<root>/<T>/learning/`, built in either order from that tenant's own rows; none
     in the tree."""
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H

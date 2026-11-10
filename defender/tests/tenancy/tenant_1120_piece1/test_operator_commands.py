@@ -441,7 +441,7 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     before_pages = {p: p.read_bytes() if p.exists() else None for p in outputs}
     try:
         proc = H.run_script(H.REPO_ROOT / script, *args, *identity, root=data_root, DEFENDER_DEPLOYMENT="dev",
-                            DEFENDER_LEARNING_STATE_DIR=str(poison), **records)
+                            DEFENDER_LEARNING_STATE_DIR=str(poison), **records)  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
         out = H.output(proc)
         assert proc.returncode != 0, f"tenant-free command ran successfully: {out}"
         assert "tenant" in out.lower(), out
@@ -496,7 +496,7 @@ def test_1186_learning_operator_cli_meets_the_explicit_tenants_busy_lane(
         call(migrated_database, "enqueue_request", H.TID, "run-2", "case-2", {"case": "case-2"})
     ambient = {p.name for p in data_root.iterdir() if p.name != H.TID}
     proc = H.run_script(H.REPO_ROOT / script, *args, "--tenant", H.TID, root=data_root,
-                        DEFENDER_LEARNING_STATE_DIR=str(data_root), LEARNING_AUTHOR_THRESHOLD="1",
+                        DEFENDER_LEARNING_STATE_DIR=str(data_root), LEARNING_AUTHOR_THRESHOLD="1",  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
                         LEARNING_QUESTIONER_THRESHOLD="1", **database_env(migrated_database))
     assert proc.returncode == status, H.output(proc)
     assert diagnostic in H.output(proc), H.output(proc)

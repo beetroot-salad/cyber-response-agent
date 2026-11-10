@@ -216,7 +216,8 @@ def test_a_tick_runs_both_curators_in_one_box_and_stops_it(world, caplog):  # no
     assert rc == 0, critical_text(caplog)
     assert (len(spy.requests), spy.stopped) == (1, 1), "the tick did not start one box and stop it once"
     assert [m for m, _ in boxes] == ["author", "questioner_curator"]
-    assert boxes[0][1] is not None and boxes[0][1] is boxes[1][1], "the curators were not handed the one box of the tick"
+    assert boxes[0][1] is not None, "the curators were not handed the one box of the tick"
+    assert boxes[0][1] is boxes[1][1], "the curators were not handed the one box of the tick"
 
 
 def test_a_box_that_will_not_stop_halts_the_tick_and_delivers_nothing(world, caplog):  # noqa: F811 — the imported fixture

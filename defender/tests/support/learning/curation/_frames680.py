@@ -12,7 +12,6 @@ from defender.agents import (
 )
 from defender.learning.author import shared as author_shared
 from defender.learning.author.curator_engine import CuratorDeps
-from defender.learning.core.config import LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.investigation.agent_definition import RunScope, bind
 from defender.box import BoxResult

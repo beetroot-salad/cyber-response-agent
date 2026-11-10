@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import pytest
 
-from defender import _git  # type: ignore[import-not-found]
 from defender.learning.core import cli  # type: ignore[import-not-found]
 from defender.learning.core.config import (  # type: ignore[import-not-found]
     FatalConfigError,

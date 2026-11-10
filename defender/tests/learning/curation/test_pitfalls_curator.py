@@ -189,7 +189,8 @@ def test_run_pitfalls_no_edit_claim_still_reports_its_pitfalls_taken(tmp_path: P
     assert rc == 0
     assert lane.commits() == []
     [taken] = claim.curated
-    assert set(taken.committed_ids) == {"r:l-000:0", "r:l-001:0"} and taken.sha is None
+    assert set(taken.committed_ids) == {"r:l-000:0", "r:l-001:0"}
+    assert taken.sha is None
     assert claim.outcomes == {}
 
 

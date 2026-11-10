@@ -74,7 +74,8 @@ def test_every_batch_row_reaches_exactly_one_disposition_773(tmp_path):
         ),
     )
     assert sc.run() == 0
-    assert sc.fate("ok") is None and sc.head_files() == [LESSON]
+    assert sc.fate("ok") is None
+    assert sc.head_files() == [LESSON]
     assert sc.fate("skip") == ("skipped", "already taught")
     assert sc.fate("orphan") == ("deferred", None)
     assert set(sc.outcomes) == {("finding", "skip"), ("finding", "orphan")}

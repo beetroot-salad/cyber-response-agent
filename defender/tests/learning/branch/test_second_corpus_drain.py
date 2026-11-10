@@ -43,7 +43,7 @@ class TwoLaneRecorder:
         self._fail_on = fail_on
         self._fault_class = fault_class
 
-    def __call__(self, paths, _state, kind, threshold_env, module_name, pending_label,
+    def __call__(self, paths, _state, kind, threshold_env, module_name, pending_label,  # noqa: PLR0913 — the curator seam's own signature
                  *, box=None, batch=None, items=(), feedback=None, outcomes=None, **_kw) -> None:
         self.calls.append({
             "kind": kind, "keys": [key for _k, key, _p in items], "threshold_env": threshold_env,

@@ -250,8 +250,8 @@ def test_1186_legacy_state_override_cannot_refuse_the_data_root(tmp_path, monkey
     if shape == "equal-through-a-symlink":
         learning.symlink_to(data, target_is_directory=True)
     H.set_data_root(monkeypatch, data)
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
     assert H.resolve_data_root() == data.resolve(), "the retired state override moved the data root"
     # Both overlapping and disjoint stale overrides are ignored.
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "elsewhere" / "learning"))
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "elsewhere" / "learning"))  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
     assert H.resolve_data_root() == data.resolve()

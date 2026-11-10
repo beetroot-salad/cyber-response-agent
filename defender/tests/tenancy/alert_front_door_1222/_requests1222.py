@@ -35,5 +35,5 @@ def a_store_that_records_requests(monkeypatch: pytest.MonkeyPatch) -> RequestSto
         yield FILED
 
     monkeypatch.setenv(tenancy.database_address_variable(), "postgresql://a-store-that-records/requests")
-    monkeypatch.setattr(store, "blocking", blocking)
+    monkeypatch.setattr(store, "blocking", blocking)  # lint-monkeypatch: ok — the store opener is a module-level door the entrypoint under test reaches itself; no seam carries a recording store to it
     return FILED

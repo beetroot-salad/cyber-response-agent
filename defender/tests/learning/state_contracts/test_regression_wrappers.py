@@ -69,7 +69,8 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(world, monkeypat
     writer = _Recording({"family-lesson.md": lesson_citing(*queued)})
     assert author_drain(w.t, w.paths, trigger=writer, box=BoxSpy()) == 0, "author_drain did not complete its batch"
     handed = [keys for module, keys in writer.items if module == "author"]
-    assert len(handed) == 1 and sorted(handed[0]) == sorted(queued), f"the curator was handed {handed}, not the graded rows {queued}"
+    assert len(handed) == 1, f"the curator was handed {handed}, not the graded rows {queued}"
+    assert sorted(handed[0]) == sorted(queued), f"the curator was handed {handed}, not the graded rows {queued}"
 
     # hop 3: the tenant repo gains one lessons/ branch whose one commit adds one document naming both ids; the product
     # checkout is untouched; the rows stay in their batch until the PR is merged

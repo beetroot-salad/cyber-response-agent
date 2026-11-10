@@ -39,15 +39,12 @@ from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._declared870 import (
     REDUCER_REL,
     Spawn,
-    commit_all,
     curate_agent_execution_md,
     pitfall_row,
     reducer_surface_text,
     seed_agent_files,
     seed_product,
-    seed_tree,
     shim_row,
-    write_reducer_surface,
 )
 from defender.tests.support.learning.core._store1278 import call, migrated_database, world  # noqa: F401 — fixtures
 from defender.tests.support.learning.curation import _curator1134 as C
