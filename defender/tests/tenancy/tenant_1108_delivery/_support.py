@@ -271,17 +271,19 @@ class ForgeHTTP:
         self.refusals = []
         self.client = httpx.Client(transport=httpx.MockTransport(self.reply))
 
-    def refuse(self, suffix, status, *, after=0, times=None):
-        """#1278 (D7, H15): answer `status` to the requests whose path ends `suffix`, skipping the
-        first `after` of them, for `times` requests (always when `None`). `clear_refusals` ends it."""
-        self.refusals.append({"suffix": suffix, "status": status, "skip": after, "left": times})
+    def refuse(self, suffix, status, *, after=0, times=None, method=None):
+        """#1278 (D7, H15): answer `status` to the requests whose path ends `suffix` (of one HTTP `method`
+        when given, so a refused `GET /pulls` leaves `POST /pulls` visible), skipping the first `after` of them,
+        for `times` requests (always when `None`). `clear_refusals` ends it."""
+        self.refusals.append({"suffix": suffix, "status": status, "skip": after, "left": times,
+                              "method": method})
 
     def clear_refusals(self):
         self.refusals.clear()
 
-    def _refused(self, path):
+    def _refused(self, path, method):
         for rule in self.refusals:
-            if not path.rstrip("/").endswith(rule["suffix"]):
+            if not path.rstrip("/").endswith(rule["suffix"]) or rule["method"] not in (None, method):
                 continue
             if rule["skip"] > 0:
                 rule["skip"] -= 1
@@ -334,7 +336,7 @@ class ForgeHTTP:
         if not self._ours(request) or not (path == api or path.startswith(api + "/")):
             self.foreign.append(request)
             return httpx.Response(404, json={"message": "not this forge's repository"})
-        refused = self._refused(path)
+        refused = self._refused(path, request.method)
         if refused is not None:
             return refused
         if self.remote is None:
@@ -416,11 +418,11 @@ class ForgeHTTP:
 
     def _paged_reviews(self, request, rows):
         """Forgejo 17 (probe, 70 reviews, #1278 C30): a review listing sent with neither `page` nor `limit` answers
-        every review; sent with either, it pages (30 by default, `limit` honoured) and never sends a `Link`.
-        `X-Total-Count` is always the total."""
+        every review; sent with either, it pages (30 by default, `limit` honoured up to the forge's 50, as the
+        PR listing clamps it) and never sends a `Link`. `X-Total-Count` is always the total."""
         params = request.url.params
         if "page" in params or "limit" in params:
-            size, page = int(params.get("limit") or 30), int(params.get("page") or 1)
+            size, page = min(int(params.get("limit") or 30), 50), int(params.get("page") or 1)
             shown = rows[(page - 1) * size:page * size]
         else:
             shown = rows

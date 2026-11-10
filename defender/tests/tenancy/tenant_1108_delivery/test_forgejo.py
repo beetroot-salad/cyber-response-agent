@@ -373,14 +373,14 @@ def test_reviews_and_comments_are_read_from_their_own_endpoints_and_returned_who
 
 
 def test_reviews_past_the_forges_page_are_all_returned_and_the_words_on_a_late_page_are_seen():
-    """35 reviews, a default page being 30: `reviews(n)` returns all 35, the only one with words among them. (C30, Feedback)"""
+    """70 reviews, the forge's page at most 50: `reviews(n)` returns all 70, the only one with words the last. (C30, Feedback)"""
     http = ForgeHTTP()
     _stored_pr(http)
-    http.reviews[7] = [review_row(i, f"r{i}", "APPROVED") for i in range(1, 35)] + [
-        review_row(35, "late", "COMMENT", body="only on the last page")]
+    http.reviews[7] = [review_row(i, f"r{i}", "APPROVED") for i in range(1, 70)] + [
+        review_row(70, "late", "COMMENT", body="only on the last page")]
     got = forge(http).reviews(7)
 
-    assert len(got) == 35
+    assert len(got) == 70
     assert [r["body"] for r in got if r["body"]] == ["only on the last page"]
 
 

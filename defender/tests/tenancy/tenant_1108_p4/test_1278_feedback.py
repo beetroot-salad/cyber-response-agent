@@ -270,18 +270,18 @@ def test_feedback_a_pr_closed_with_words_is_replaced_by_a_new_batch_in_the_same_
     _no_orphans(w)
 
 
-def test_feedback_words_only_on_the_second_page_of_reviews_start_the_replacement(world, caplog):
-    """Thirty approvals with no words and a thirty-first review with some: the closed PR is replaced and the curator is handed the late words. (C30, H13)"""
+def test_feedback_words_only_on_the_last_page_of_reviews_start_the_replacement(world, caplog):
+    """Sixty-nine approvals with no words and a seventieth review with some, past the forge's 50-row page: the closed PR is replaced and the curator is handed the late words. (C30, H13)"""
     w = world
     w.seed("f1")
     writer = FeedbackCurator(_files("f1"))
     old_id, old_branch, number = opened(w, writer, caplog)
-    w.t.forge.reviews[number] = [review_row(800 + i, f"approver-{i}", "APPROVED") for i in range(30)] + [
+    w.t.forge.reviews[number] = [review_row(800 + i, f"approver-{i}", "APPROVED") for i in range(69)] + [
         review_row(900, "late-reviewer", "COMMENT", body="the only words, on page two")]
     close_on_remote(w.t.p3, old_branch)
     tick(w, writer)
 
-    assert len(_replacements(w, old_id)) == 1, "the words on the second page were not read"
+    assert len(_replacements(w, old_id)) == 1, "the words on the last page were not read"
     assert framed(writer.seen_text(), "the only words, on page two")
 
 

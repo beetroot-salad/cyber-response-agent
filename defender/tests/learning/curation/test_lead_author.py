@@ -16,16 +16,16 @@ from pathlib import Path
 import pytest
 
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
-from defender.tests.support.tenancy._active1214 import active_directory
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS, TRY_ONCE
+from defender.learning.core.state import PITFALLS
+from defender.tests.support.learning.core._store1278 import call, migrated_database, world  # noqa: F401 — fixtures the store arm needs
+from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.learning.curation._lead_author_1134 import repo_skills, skills_view
 from defender.tests.support.learning.core._state1135 import curation_run_dir, curation_tenant, run_of
-from defender.tests.support.learning.core._state1135 import state_over, set_state_dir
 from defender.tests.support.shared._locations_1210 import location_path
 
 
@@ -276,24 +276,27 @@ def _claude_should_not_be_called(*args, **kwargs):
 # store is `tests/tenancy/tenant_1108_p4/test_1278_tick.py::test_locks_a_by_hand_lead_author_run_*`.
 
 
-# Conflict (design r8 Locks): the "tenant" arm held the deleted lead-queue file lock and expected QUEUE_LOCK_SKIP_RC; only
-# the arm where the held lock is another root's (so this run is not blocked) stays.
-def test_1186_lead_author_cli_takes_the_runs_tenant_queue_lock(run_dir, tmp_path, monkeypatch):
-    """The CLI uses its Run's tenant for pitfall writes; a lock held on another root does not block it."""
-    set_state_dir(monkeypatch, tmp_path / "legacy-state")
-    learning = run_dir.parent.parent / "learning"
+# Conflict (design r8 Locks, "Pitfalls" r8/O10): the "tenant" arm held the deleted lead-queue file lock and read the file
+# queue; the arm now pins that the CLI's pitfall for the run's tenant lands in the store (a `work_items` row), no file.
+@pytest.mark.postgres
+def test_1186_lead_author_cli_files_the_runs_pitfall_for_the_runs_tenant_in_the_store(world):  # noqa: F811 — the imported fixture
+    """The CLI uses its Run's tenant for pitfall writes: the failed query becomes that tenant's pitfall item in the store. (r8 Pitfalls, O10)"""
+    import uuid
+
+    w = world
+    root = Path(location_path(w.t.tenant.tenant_root))
+    (root / "learning").mkdir(exist_ok=True)  # the host's prepare step makes it when the tenant is created
+    run_dir = root / "runs" / str(uuid.uuid4())
+    run_dir.mkdir(parents=True)
     _write_lead_meta(run_dir, "l-001", "failed query")
     _write_query(run_dir, "l-001", 0, "idp.query", payload_status="error")
-    learning.mkdir(exist_ok=True)
-    with (state_over(tmp_path / "legacy-state") as holder, holder.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held):
-        assert held
-        # r10.1 C1/C9: the command admits through the host acceptance; a test hands it one seeded active directory.
-        rc = lead_author.main(["--tenant", run_dir.parent.parent.name, run_dir.name],
-                              directory=active_directory(run_dir.parents[2], run_dir.parent.parent.name))
+
+    rc = lead_author.main(["--tenant", w.t.tenant_id, run_dir.name], directory=w.t.directory)
+
     assert rc == 0
-    rows = [json.loads(line) for line in (learning / PITFALLS.queue).read_text().splitlines()]
-    assert [(row["source_run"], row["query_id"]) for row in rows] == [(run_dir.name, "idp.query")]
-    assert not (tmp_path / "legacy-state" / PITFALLS.queue).exists()
+    pitfalls = [i for i in call(w.dsn, "work", w.t.tenant_id) if i.kind == "pitfall"]
+    assert [i.key.split(":")[0] for i in pitfalls] == [run_dir.name], pitfalls
+    assert not (root / "learning" / PITFALLS.queue).exists()
 
 
 def test_run_done_sentinel_short_circuits(run_dir: Path, tmp_path: Path):
