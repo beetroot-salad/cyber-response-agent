@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-import defender
+from defender import job_host
 from defender.box import BoxSpec
 from defender.tests.support.jobs._job_helper import CANARY, OTHER_TENANT, drive_helper, helper_scene
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
@@ -33,52 +33,57 @@ PROBE = r'''
 import json, os, shutil, subprocess, sys
 out, other, own, viz, inv, secrets = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6:]
 seen = {"env": dict(os.environ)}
-def reads(p):
+try:
+    def reads(p):
+        try:
+            return open(p, encoding="utf-8").read()
+        except OSError as e:
+            return f"<{type(e).__name__}>"
+    seen["other_canary"] = reads(other)
+    seen["own_canary"] = reads(own)
+    seen["secrets"] = [reads(p) for p in secrets]
+    def writes(p):
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("x")
+            return True
+        except OSError:
+            return False
+    from defender import job_host
+    # `defender` is a namespace package (no `__file__`); a module of it names the tree: <root>/defender/job_host.py
+    code = os.path.dirname(os.path.dirname(os.path.abspath(job_host.__file__)))
+    seen["code_root"] = code
+    seen["code_env_files"] = [n for n in os.listdir(code) + os.listdir(os.path.join(code, "defender")) if n.startswith(".env")]
+    seen["code_writable"] = writes(os.path.join(code, "defender", "written-by-job"))
+    seen["own_writable"] = writes(own + ".w")
+    seen["viz_canary"] = reads(os.path.join(viz, "canary"))
+    seen["viz_writable"] = writes(os.path.join(viz, "written-by-job"))
+    seen["docker_sock"] = os.path.exists("/var/run/docker.sock")
     try:
-        return open(p, encoding="utf-8").read()
+        rc = subprocess.run(["docker", "ps"], capture_output=True, timeout=30).returncode
+        seen["docker_ps"] = rc
     except OSError as e:
-        return f"<{type(e).__name__}>"
-seen["other_canary"] = reads(other)
-seen["own_canary"] = reads(own)
-seen["secrets"] = [reads(p) for p in secrets]
-def writes(p):
+        seen["docker_ps"] = f"<{type(e).__name__}>"
     try:
-        with open(p, "w", encoding="utf-8") as f:
-            f.write("x")
-        return True
-    except OSError:
-        return False
-import defender
-code = os.path.dirname(os.path.dirname(os.path.abspath(defender.__file__)))
-seen["code_root"] = code
-seen["code_env_files"] = [n for n in os.listdir(code) + os.listdir(os.path.join(code, "defender")) if n.startswith(".env")]
-seen["code_writable"] = writes(os.path.join(code, "defender", "written-by-job"))
-seen["own_writable"] = writes(own + ".w")
-seen["viz_canary"] = reads(os.path.join(viz, "canary"))
-seen["viz_writable"] = writes(os.path.join(viz, "written-by-job"))
-seen["docker_sock"] = os.path.exists("/var/run/docker.sock")
-try:
-    rc = subprocess.run(["docker", "ps"], capture_output=True, timeout=30).returncode
-    seen["docker_ps"] = rc
-except OSError as e:
-    seen["docker_ps"] = f"<{type(e).__name__}>"
-try:
-    import psycopg
-    psycopg.connect("", connect_timeout=5).close()
-    seen["db"] = "connected"
-except Exception as e:
-    seen["db"] = f"<{type(e).__name__}>"
-from defender import job_host
-sock = os.environ[job_host.SOCKET_ENV]
-try:
-    h = job_host.ask(sock, "box.start", kind="shell", id=inv)["handle"]
-    from defender.execution import bash_exec, box_codec
-    frame = box_codec.encode_request(bash_exec.parse("echo box-ok"))
-    answer = job_host.ask(sock, "box.exec", handle=h, frame=frame)
-    seen["shell"] = [answer.get("result"), box_codec.decode_response(answer["frame"]).out.decode()]
-except Exception as e:
-    seen["shell"] = f"<{type(e).__name__}: {e}>"
-json.dump(seen, open(out, "w"))
+        import psycopg
+        psycopg.connect("", connect_timeout=5).close()
+        seen["db"] = "connected"
+    except Exception as e:
+        seen["db"] = f"<{type(e).__name__}>"
+    sock = os.environ[job_host.SOCKET_ENV]
+    try:
+        h = job_host.ask(sock, "box.start", kind="shell", id=inv)["handle"]
+        from defender.execution import bash_exec, box_codec
+        frame = box_codec.encode_request(bash_exec.parse("echo box-ok"))
+        answer = job_host.ask(sock, "box.exec", handle=h, frame=frame)
+        seen["shell"] = [answer.get("result"), box_codec.decode_response(answer["frame"]).out.decode()]
+    except Exception as e:
+        seen["shell"] = f"<{type(e).__name__}: {e}>"
+except BaseException:
+    import traceback
+    seen["error"] = traceback.format_exc()
+finally:
+    json.dump(seen, open(out, "w"))
 '''
 
 
@@ -106,7 +111,9 @@ def probed(tmp_path, monkeypatch, migrated_database):  # noqa: F811
         ran = drive_helper(scene, scene.argv("investigation", inv), docker=run_docker, signer=A.MarkedSigner(),
                            command=command)
         assert ran.raised is None, ran.raised
-        yield scene, json.loads(out.read_text(encoding="utf-8")), viz
+        seen = json.loads(out.read_text(encoding="utf-8"))
+        assert "error" not in seen, f"the probe crashed inside the container: {seen['error']}"
+        yield scene, seen, viz
 
 
 def test_o1_from_inside_another_tenants_canary_is_unreadable_and_its_own_folder_is(probed):
@@ -146,7 +153,7 @@ def test_a7_the_code_mounted_is_the_code_tree_the_helper_runs_from_read_only_at_
     into it; it holds no `.env*`. That the tree a worker's helper runs from is the worker's code copy rests on the worker's
     `child_cwd` (nothing in the helper names the copy); no path of the copy (`.defender-code`) is assumed here."""
     scene, seen, _viz = probed
-    assert Path(seen["code_root"]) == Path(defender.__file__).resolve().parents[1]
+    assert Path(seen["code_root"]) == Path(job_host.__file__).resolve().parents[2]
     assert seen["code_writable"] is False
     assert seen["code_env_files"] == []
     assert seen["own_writable"] is True, "control: the tenant's own folder is writable"

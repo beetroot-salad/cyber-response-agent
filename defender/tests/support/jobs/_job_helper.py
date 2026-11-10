@@ -36,14 +36,14 @@ import textwrap
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pytest
 from defender.tests.e2e._box665 import RecordingDocker
-from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, TITLE, register_tenant
+from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, TITLE, WORKTREE, register_tenant
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
 
 HELPER_MODULE = "defender.job_host"
@@ -59,6 +59,16 @@ ALL_SYSTEMS: tuple[str, ...] = (*_UNDECLARED, "identity")
 #: `helper_scene`'s `files=` for a tenant none of whose systems is `http-proxy`: an empty grant, so nothing is signed. A
 #: system with no declaration is down, so a run over it gathers from nothing.
 NO_PROXY_FILES: dict[str, Any] = {f"settings/systems/{s}/access.yaml": None for s in (*_UNDECLARED, "identity")}
+
+
+def child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """`base` (default: this process's environment) with the checkout on `PYTHONPATH`, for a child started with
+    `sys.executable` that imports `defender` (the checkout is a namespace package: nothing else finds it when the suite
+    runs without an ambient `PYTHONPATH`)."""
+    env = dict(os.environ if base is None else base)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(WORKTREE), os.environ.get("PYTHONPATH")) if p)
+    return env
+
 
 _HELPER_CHILD = Path(__file__).resolve().with_name("_helper_child1170.py")
 
@@ -265,7 +275,7 @@ class Container:
     def foreign(code: str, *args: str, timeout: float = 20.0) -> str:
         """`python -c code args` run by the test, outside the container: the same uid, not the container's process."""
         done = subprocess.run([sys.executable, "-c", code, *args], capture_output=True, text=True, timeout=timeout,
-                              check=False)
+                              check=False, env=child_env())
         return done.stdout + done.stderr
 
     def socket(self) -> Path:
@@ -383,7 +393,7 @@ class ContainerStandIn(RecordingDocker):
             assert self._queue is not None, "init=True needs a queue folder"
             self._queue.mkdir(parents=True, exist_ok=True)
             box.queue = self._queue
-            self.init_proc = subprocess.Popen([sys.executable, "-c", _INIT, str(self._queue)])
+            self.init_proc = subprocess.Popen([sys.executable, "-c", _INIT, str(self._queue)], env=child_env())
 
         def body() -> None:
             self.job_ran = True
@@ -869,7 +879,7 @@ class ProcessHelper:
         shim = bin_dir / "docker"
         shim.write_text(_SHIM.replace("PYTHON", sys.executable).replace("STATE", str(self.state)), encoding="utf-8")
         shim.chmod(0o755)
-        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"}
+        env = child_env({**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"})
         cfg = json.dumps({"argv": argv, "commit": scene.t.commit})
         command = [sys.executable, "-c", _PARENT, cfg, _DRIVER] if worker else [sys.executable, "-c", _DRIVER, cfg]
         self.proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
