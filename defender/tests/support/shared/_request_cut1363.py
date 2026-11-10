@@ -29,7 +29,7 @@ def real_proxy_request_faults() -> dict[str, tuple[type, str]]:
     """The proxy's own `request`-origin refusals for a request body that was not read, by name:
     `(fault class, detail)` exactly as `credential_proxy._app` words them, read off the proxy's
     parser rather than copied, so a reworded detail is followed."""
-    from defender.credential_proxy._app import _parse_request, _Unread
+    from defender.credential_proxy._app import _broken_reply, _parse_request, _Unread
     from defender.credential_proxy._refusal import Refused
 
     out: dict[str, tuple[type, str]] = {}
@@ -41,4 +41,10 @@ def real_proxy_request_faults() -> dict[str, tuple[type, str]]:
             out[name] = (FAULT_CLASSES[refused.fault], refused.detail)
         else:
             raise AssertionError(f"the proxy parsed an unread body ({name})")
+    # The run itself cut a reply the system had begun to send: the record the proxy builds with
+    # `reader_fault=True` (_app ~353/356). The proxy client raises its fault kind (`fault`) from that
+    # record (`raise_proxy_fault`), and a reader fault is the run's own cut, so origin `request`.
+    cut = _broken_reply("cmdb", 200, "the run was too slow reading it", reader_fault=True)
+    assert cut.reader_fault and cut.fault in FAULT_CLASSES, cut
+    out["reader-cut-the-reply"] = (FAULT_CLASSES[cut.fault], cut.detail)
     return out

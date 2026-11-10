@@ -251,5 +251,6 @@ def test_1363_the_gather_failure_modes_have_a_branch_for_a_cut_request_that_says
     assert re.search(r"\bnot down\b|\bis not an outage\b", branch), f"the branch does not say the system is up: {branch!r}"
     assert re.search(r"\bdifferently\b", branch), \
         f"the branch does not say to retry differently: {branch!r}"
+    assert re.search(r"\breport", branch), f"the branch does not say the call may be reported: {branch!r}"
     assert re.search(r"(?:\bnot\b|\bnever\b|n't)\W+(?:\w+\W+){0,4}(?:identical|same)", branch), \
         f"the branch does not rule out an identical retry: {branch!r}"
