@@ -22,7 +22,7 @@ from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noq
 
 TICK = dt.timedelta(seconds=30)
 NOW = dt.datetime(2026, 11, 9, 12, 0, tzinfo=dt.UTC)
-PRE_1414_HEAD = "0007_alert_mapping"
+PRE_1414_HEAD = "0010_cost_lower_limit"  # the head #1414's eligibility revision sits on (main took 0008-0010 meanwhile)
 
 
 @pytest.fixture
