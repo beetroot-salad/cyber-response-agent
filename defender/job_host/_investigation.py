@@ -14,19 +14,17 @@ process; the helper adds only the lock, the launch check, the pass mint and its 
 from __future__ import annotations
 
 import contextlib
-import functools
 import logging
-import signal
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender.job_socket import Refused
 
-from ._common import answer_pass
-from ._paths import confined
-from ._session import PASS_LIFETIME, KindSpec, PassMint, Prepared, Registry, Session, SetupRefused, StartFailed
+from ._common import answer_pass, first_pass, grant, settle_knowledge
+from ._session import KindSpec, Prepared, Registry, Session, SetupRefused
 
 if TYPE_CHECKING:
     from defender.records import Run
@@ -48,55 +46,6 @@ class _State:
     copy: Any
     tenant: Any
     box_token: str
-
-
-def _publish_line(session: Session, accepted: Any, data_root: Any, records: Any) -> str:
-    """The launch-time publish's one report line (#1108 P4, U7), run under this helper's lock (C19). A seam that
-    raises is U11's `stale:operator`, recorded as the run's own launcher records it."""
-    from defender import tenancy
-    from defender.tenancy import run_knowledge
-
-    try:
-        if session.publish is not None:
-            launch = session.publish
-        else:
-            from defender.investigation.publish_launch import launch_publish
-
-            launch = functools.partial(launch_publish, directory=records)
-        return str(launch(accepted.id, data_root=tenancy.data_root_for_child(data_root)))
-    except Exception as failed:  # noqa: BLE001 — U11: a failed publish is stale:operator, recorded
-        from defender.tenancy import record_report
-
-        line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
-        record_report(records, accepted.id, line, by="launch-time publish")
-        return line
-
-
-def _grant(run_tenant: Any) -> tuple[str, ...]:
-    """The pass's reads: the granted systems declared `http-proxy`, none subtracted as down (O5)."""
-    from defender import run_common
-
-    return run_common.proxied_reads(run_tenant)
-
-
-def _first_pass(session: Session, accepted: Any, records: Any, reads: tuple[str, ...]) -> PassMint | None:
-    """The pass mint over the grant, its first pass signed now (O5, O11); None for an empty grant (nothing to sign,
-    so a sealed signer is never asked)."""
-    from defender.credential_proxy import signing_access
-    from defender.kit.faults import ConfigFault
-
-    if not reads:
-        return None
-    try:
-        signer, address = signing_access(accepted.id, directory=records, signer=session.signer)
-    except ConfigFault as refused:
-        raise SetupRefused(f"the job's first pass cannot be signed: {refused.detail}") from None
-    mint = PassMint(signer, address, str(accepted.id), reads)
-    try:
-        mint.mint(str(session.job_id))
-    except Exception as failed:  # noqa: BLE001 — a first pass that cannot be signed refuses the job (O11)
-        raise SetupRefused(f"the job's first pass could not be signed: {type(failed).__name__}: {failed}") from None
-    return mint
 
 
 def _shared(step: Any, *args: Any, **kwargs: Any) -> Any:
@@ -131,7 +80,6 @@ def _materialize(session: Session, accepted: Any, run: Any, launch: Any, mapping
 def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: C901, PLR0915 — the host half, in order
     from defender import run_common
     from defender.records import job_lane
-    from defender.run_common import knowledge_source
     from defender.records.formats import TenantRefused
     from defender.systems.run_tenant import host_tenant
 
@@ -143,19 +91,14 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
     hold.enter_context(admitted)
     accepted, records = admitted.tenant, admitted.directory
+    session.tenant_accepted(accepted)
     try:
         with job_lane.JobLane.open(data_root, session.tenant_id) as lane:
             launch = lane.check_launch(inv)
     except job_lane.JobLaneRefused as refused:
         raise SetupRefused(f"the launch check refused the job: {refused}") from None
     mapping = _shared(run_common.read_alert_mapping, records, accepted.id)
-    try:
-        source = knowledge_source(accepted, pin=None, publish=session.publish, data_root=data_root, records=records)
-    except SystemExit as refused:
-        if refused.code == 128 + signal.SIGTERM:  # told to stop while the publish ran: no container (A1)
-            session.signalled.set()
-            raise StartFailed("the helper was told to stop before its container started; none was started") from None
-        raise SetupRefused(str(refused.code)) from None
+    source = settle_knowledge(session, accepted, records)
     try:
         run = accepted.runs_repository().launched(launch)
     except TenantRefused as refused:
@@ -165,11 +108,11 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         copy = _shared(run_common.copy_knowledge, accepted, source, inv)
         cleanup.callback(copy.remove)
         try:
-            run_tenant = _shared(run_common.resolve_run_tenant, accepted, dispatches_lead_zero=True, copy=copy)
+            run_tenant = _shared(run_common.run_tenant_or_exit, accepted, dispatches_lead_zero=True, copy=copy)
         except TenantRefused as refused:
             raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
-        reads = _grant(run_tenant)
-        passes = _first_pass(session, accepted, records, reads)
+        reads = grant(run_tenant)
+        passes = first_pass(session, accepted, records, reads)
         made = _materialize(session, accepted, run, launch, mapping, source)
     except BaseException:
         cleanup.close()
@@ -181,7 +124,7 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         "kind": KIND, "tenant": session.tenant_id, "job": inv, "tenant_state": "active",
         "export_commit": source.commit, "knowledge": source.host_record(), "run_dir": str(made.run_dir),
         "run_copy": str(copy.root), "proxy_url": passes.proxy_url if passes is not None else None,
-        "grant": [[s, "r"] for s in reads], "pass_lifetime": PASS_LIFETIME,
+        "grant": [[s, "r"] for s in reads], "pass_lifetime": PASS_LIFETIME_SEC,
         # The start token the worker minted for the run box (#1342 r5 C1); the helper stamps it on the box itself.
         "box_token": launch.record.box_token,
     }
@@ -252,10 +195,9 @@ def _run_box(session: Session, ident: str) -> Any:
     if not isinstance(state, _State) or ident != session.job_id:
         raise Refused(f"no run box is served for {ident!r}", "unknown-id")
     run_dir = Path(state.run.run_dir)
-    root = session.tenant_root
-    confined(root, run_dir)
-    confined(root, Path(state.copy.agent))
-    confined(root, box.clock_dir(run_dir).parent, must_exist=False)
+    session.inside_tenant(run_dir)
+    session.inside_tenant(Path(state.copy.agent))
+    session.inside_tenant(box.clock_dir(run_dir).parent, must_exist=False)
     return box.start_box(run_dir, session.defender_dir, docker=session.docker, tenant_agent=state.copy.agent,
                          staged_token=state.copy.token, tenant_id=session.tenant_id, require_sandbox=True,
                          start_token=state.box_token)

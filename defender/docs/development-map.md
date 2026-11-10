@@ -45,10 +45,16 @@ external command names, protocol values, and historical records retain their exi
 ```
 defender/
   SKILL.md          # runtime agent spec (the loop's system prompt)
-  run.py            # entrypoint: investigate one alert; post-steps render HTML + enqueue catalog curation
+  run.py            # entrypoint: investigate one alert; post-steps render HTML + enqueue catalog curation;
+                    #   in a job container, the job's run half (`--job`) or a learning sibling (#1170)
   agents.py         # agent registry
-  run_common.py     # shared run-dir + post-step helpers
+  run_common.py     # shared run-dir + post-step helpers, and run setup's host half (the operator's and the helper's)
   box/              # shared sandbox lifecycle, image naming, scrub, and seccomp policy
+                    #   _relay.py + _spec.RelayTransport — a box reached over the job socket (#1170)
+  worker/           # the job worker: claims rows, spawns one per-job host helper per claim, renews and fences
+  job_host/         # the per-job host helper (#1170): the tenant's lock, admission, publish, run copies,
+                    #   passes, boxes; starts the job's one container and answers its job socket by job kind
+  job_socket/       # the job socket's wire and client, low in the import order for every in-container caller
   execution/        # stdlib-only command parser, executor, codec, and process helpers
   runtime/          # in-process PydanticAI engine: driver, tools, permission/, observe, orient, compaction
                     #   branch.py — the turn-N resume (#920): which message may be branched from, and where the fork lands
@@ -73,6 +79,7 @@ defender/
                     #   branch/ forks a finished run at turn N and runs a family of worlds from it:
                     #   ledger.py records every response the estate served with the decision behind it;
                     #   estate/ is what a sibling world queries through. judge/ grades the archived episode.
+                    #   branch/container.py is learning's door onto the job socket inside its job container
                     #   The four-stage actor/oracle/judge pipeline that used to live here was deleted (#922)
   api/              # the platform HTTP API (#1131) — a STUB: routes + wire models + ports. The data rules are the
                     #   store's (#1082), stated on the ports; `fakes.py` enforces none of them. Never imports

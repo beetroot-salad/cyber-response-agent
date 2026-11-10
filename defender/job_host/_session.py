@@ -19,13 +19,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender.job_socket import Refused
 from defender.records.formats import TenantId
 
 #: The job kinds the helper is started for (the worker's three).
 KINDS = ("investigation", "learning", "post-step")
-#: Seconds a pass lives from when it is signed (#1163 r7 A20; `run.py`'s `TOKEN_SEC`).
-PASS_LIFETIME = 600
 
 
 class SetupRefused(Exception):
@@ -56,7 +55,7 @@ class PassMint:
     def mint(self, investigation: str) -> dict[str, Any]:
         from defender.credential_proxy import mint_request_token
 
-        expires_at = time.time() + PASS_LIFETIME
+        expires_at = time.time() + PASS_LIFETIME_SEC
         with self._signing:
             token = mint_request_token(self.signer, tenant_id=self.tenant_id, investigation=investigation,
                                        grant={(s, "r") for s in self.reads},
@@ -100,9 +99,11 @@ class Session:
     job_id: str | None
     tenant_id: TenantId
     source: str | None
-    #: The data root as `tenancy.resolve_data_root` resolved it (a `DataRoot`), and as a plain path.
+    #: The data root as `tenancy.resolve_data_root` resolved it (a `DataRoot`), and as the plain folder its owner
+    #: exports to a child (`tenancy.data_root_for_child`): where the claim's socket and scratch folders are made
+    #: (H9, C21), outside every tenant's folder, and the container's `DEFENDER_DATA_ROOT`.
     root: Any
-    data_root: Path
+    root_folder: Path
     claim: str
     docker: Any
     defender_dir: Path
@@ -117,11 +118,25 @@ class Session:
     prepared: Prepared | None = None
     boxes: dict[str, Box] = field(default_factory=dict)
     container: str = ""
+    #: The tenant's folder, from the tenant the kind's `prepare` accepted (`tenancy.job_tenant_folder`): the job
+    #: container's tenant bind (O1) and the folder every path the helper derives is confined to (H10). None until
+    #: the tenant is accepted.
+    tenant_folder: Path | None = None
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
-    @property
-    def tenant_root(self) -> Path:
-        return self.data_root / self.tenant_id
+    def tenant_accepted(self, tenant: Any) -> None:
+        """The tenant `prepare` admitted: its folder is the one this job's container and boxes are confined to."""
+        from defender import tenancy
+
+        self.tenant_folder = tenancy.job_tenant_folder(tenant)
+
+    def inside_tenant(self, path: Path, *, must_exist: bool = True) -> Path:
+        """`path`, judged inside the accepted tenant's folder with no link followed (`_paths.confined`)."""
+        from ._paths import confined
+
+        if self.tenant_folder is None:
+            raise Refused("the job's tenant is not accepted yet", "internal")
+        return confined(self.tenant_folder, path, must_exist=must_exist)
 
     def require_minted(self, ident: object) -> str:
         if not isinstance(ident, str) or ident not in self.minted:

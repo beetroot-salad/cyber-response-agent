@@ -13,17 +13,18 @@ from pathlib import Path
 from defender.job_socket import Refused
 
 
-def confined(tenant_root: Path, path: Path, *, must_exist: bool = True) -> Path:
-    """`path`, once every component from `tenant_root` down to it is a real folder (no link followed); a component
-    that does not exist yet passes only when `must_exist` is false (the rest is then the helper's to make)."""
-    tenant_root, path = Path(tenant_root), Path(path)
+def confined(folder: Path, path: Path, *, must_exist: bool = True) -> Path:
+    """`path`, once every component from the tenant's `folder` down to it is a real folder (no link followed); a
+    component that does not exist yet passes only when `must_exist` is false (the rest is then the helper's to
+    make)."""
+    folder, path = Path(folder), Path(path)
     try:
-        rel = path.relative_to(tenant_root)
+        rel = path.relative_to(folder)
     except ValueError:
         raise Refused(f"{path} is not inside the tenant's folder", "confinement") from None
     if any(part in ("..", ".", "") for part in rel.parts):
         raise Refused(f"{path} climbs out of the tenant's folder", "confinement")
-    current = tenant_root
+    current = folder
     for step in (None, *rel.parts):
         if step is not None:
             current = current / step

@@ -11,11 +11,12 @@ from __future__ import annotations
 import logging
 import math
 import secrets
+import signal
 from typing import Any
 
 from defender.job_socket import Refused
 
-from ._session import KINDS, Box, Registry, Session
+from ._session import KINDS, Box, PassMint, Registry, Session, SetupRefused, StartFailed
 
 _logger = logging.getLogger(__name__)
 
@@ -110,6 +111,50 @@ def stop_boxes(session: Session) -> None:
             except BoxFault as leftover:
                 _logger.warning("the %s box for %s was not removed: %s", box.kind, box.ident, leftover)
             box.stopped = {"result": "stopped"}
+
+
+def settle_knowledge(session: Session, accepted: Any, records: Any) -> Any:
+    """The export the job reads (O5): the launch-time publish run under this helper's hold (C19), then the export it
+    settled on, by run setup's shared step (`run_common.resolve_knowledge`, the operator command's too, A6). Told to
+    stop while the publish ran, the helper starts no container (A1); any other refusal is `setup: refused`."""
+    from defender import run_common
+
+    try:
+        return run_common.resolve_knowledge(accepted, pin=None, publish=session.publish, data_root=session.root,
+                                            records=records)
+    except SystemExit as refused:
+        if refused.code == 128 + signal.SIGTERM:
+            session.signalled.set()
+            raise StartFailed("the helper was told to stop before its container started; none was started") from None
+        raise SetupRefused(str(refused.code)) from None
+
+
+def grant(run_tenant: Any) -> tuple[str, ...]:
+    """The pass's reads: the granted systems declared `http-proxy` in the export the job reads, none subtracted as
+    down (that judgement runs adapter code, O5)."""
+    from defender import run_common
+
+    return run_common.proxied_reads(run_tenant)
+
+
+def first_pass(session: Session, accepted: Any, records: Any, reads: tuple[str, ...]) -> PassMint | None:
+    """The pass mint over the grant, its first pass signed now (O5, O11); None for an empty grant (nothing to sign,
+    so a sealed signer is never asked)."""
+    from defender.credential_proxy import signing_access
+    from defender.kit.faults import ConfigFault
+
+    if not reads:
+        return None
+    try:
+        signer, address = signing_access(accepted.id, directory=records, signer=session.signer)
+    except ConfigFault as refused:
+        raise SetupRefused(f"the job's first pass cannot be signed: {refused.detail}") from None
+    mint = PassMint(signer, address, str(accepted.id), reads)
+    try:
+        mint.mint(str(session.job_id))
+    except Exception as failed:  # noqa: BLE001 — a first pass that cannot be signed refuses the job (O11)
+        raise SetupRefused(f"the job's first pass could not be signed: {type(failed).__name__}: {failed}") from None
+    return mint
 
 
 def answer_pass(session: Session, fields: dict[str, Any]) -> dict[str, Any]:

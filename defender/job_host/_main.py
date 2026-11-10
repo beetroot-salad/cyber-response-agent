@@ -266,7 +266,7 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
         return 1
     os.environ[CLAIM_ENV] = claim  # every box the helper starts carries the claim's label
     session = Session(kind=ns.kind, job_id=ns.job, tenant_id=tenant_id, source=ns.source, root=root,
-                      data_root=tenancy.data_root_for_child(root), claim=claim,
+                      root_folder=tenancy.data_root_for_child(root), claim=claim,
                       docker=docker if docker is not None else run_docker,
                       defender_dir=process_defender_dir().resolve(), signer=signer, publish=publish, forge=forge,
                       command=list(command) if command is not None else None)

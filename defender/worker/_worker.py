@@ -341,7 +341,7 @@ class Worker:
 
     async def _remove_leftover_job_containers(self) -> None:
         """At start, before anything is claimed: every container carrying the job-container label
-        (`job_host.JOB_LABEL`) is a dead helper's, since this worker is the only one on its machine and
+        (`job_socket.JOB_LABEL`) is a dead helper's, since this worker is the only one on its machine and
         its previous run's helpers died with it, claim tokens included (#1170 A5). Never an error: what
         cannot be removed is logged, and the tenant's teardown removes it by the tenant's label."""
         try:

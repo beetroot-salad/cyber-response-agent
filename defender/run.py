@@ -75,7 +75,12 @@ from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa
 from defender.systems.system_status import RunSystems  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
-from defender.credential_proxy import mint_request_token, signing_access  # noqa: E402
+from defender.credential_proxy import (  # noqa: E402
+    PASS_LIFETIME_SEC,
+    PASS_REUSE_MARGIN_SEC,
+    mint_request_token,
+    signing_access,
+)
 from defender.kit.access import AccessDeclaration, RequestAccess  # noqa: E402
 from defender.kit.faults import AdapterFault, ConfigFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
@@ -569,8 +574,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
 
 #: Seconds a request token lives from when it is signed, read or write-back (r7 A20), and the
 #: life a held read token must have left to be handed out again.
-TOKEN_SEC = 600
-TOKEN_REUSE_MARGIN_SEC = 60
+TOKEN_SEC = PASS_LIFETIME_SEC
+TOKEN_REUSE_MARGIN_SEC = PASS_REUSE_MARGIN_SEC
 
 
 class _TokenMint:
@@ -671,10 +676,10 @@ class _TokenMint:
 
 # Run setup's host half lives in `run_common` (#1170 A6): the per-job host helper runs it for a job, and the
 # operator command runs it here, beside its run half.
-_resolve_run_tenant = _run.resolve_run_tenant
+_resolve_run_tenant = _run.run_tenant_or_exit
 _publish_report = _run.publish_report
 PublishLaunch = _run.PublishLaunch
-_knowledge_source = _run.knowledge_source
+_knowledge_source = _run.resolve_knowledge
 _copy_knowledge = _run.copy_knowledge
 _write_knowledge_record = _run.write_knowledge_record
 _read_alert_mapping = _run.read_alert_mapping
@@ -818,17 +823,24 @@ def _screened_source_alert(episode: Episode) -> Path:
     return alert
 
 
+def _open_run(runs: Any, run_id: Any, *, what: str) -> Run:
+    """The run `run_id` names, opened by its id in `runs` (a tenant's runs repository, or an
+    episode's arms), or `what`'s refusal naming why: the one place `run.py` opens a run it did not
+    make itself."""
+    from defender.records import RunId, RunRefused
+
+    try:
+        return runs.open(run_id if isinstance(run_id, RunId) else RunId.parse(run_id))
+    except (RunRefused, TenantRefused) as refused:
+        sys.exit(f"[run.py] {what} cannot be opened: {refused}")
+
+
 def _open_world_source(runs: Any, world: Any) -> Run:
     """The source run a world forks: the manifest's `source_run_id`, opened in the request's
     tenant's natural container (#1105 PR 2, decision A — an old manifest's `source_run_dir` is
     never read). An id the repository refuses, or a run that is not there, is the sibling's
     refusal, before anything is spent."""
-    from defender.records import RunId, RunRefused
-
-    try:
-        return runs.open(RunId.parse(world.family.source_run_id))
-    except RunRefused as refused:
-        sys.exit(f"[run.py] the episode's source run cannot be opened: {refused}")
+    return _open_run(runs, world.family.source_run_id, what="the episode's source run")
 
 
 def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
@@ -1146,12 +1158,14 @@ TEARDOWN_FAULTED = "teardown_faulted"
 def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's inputs
     started: _Started, summary: dict[str, Any], *,
     visualize: Callable[..., None], update_ticket: bool,
-    operator_steps: Callable[[], None] | None = None,
+    operator_steps: Callable[[], None] | None = None, mirror: bool = True,
 ) -> None:
     """The post-steps both compositions share (#1342 M4), after the lifecycle has scrubbed the
     run folder: the readers of the scrubbed tree and the run page. `operator_steps` is the
     operator composition's own (the ticket comment and the curation enqueue), run where they
     always ran: after the table cross-check, before the page, which shows the ticket's receipt.
+    `mirror=False` is a job container's page (#1170 A10): saved in the run's own folder only, the
+    helper copying it to the shared publish folder after the container exits.
 
     None of them runs for a run whose box ending's teardown faulted (`TEARDOWN_FAULTED`, #1421):
     they assume a dead box and a scrubbed tree, and a possibly live box's writes must not be read
@@ -1185,22 +1199,26 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
         operator_steps()
 
     try:
-        visualize(run, tenant=started.accepted, update_ticket=update_ticket)
+        visualize(run, tenant=started.accepted, update_ticket=update_ticket,
+                  **({} if mirror else {"mirror": False}))
     except _run.VisualizeFailed:
         _logger.warning("the run page was not saved", exc_info=True)
 
 
-def _curate(started: _Started, summary: dict[str, Any], *, ns: argparse.Namespace,
-            enqueue_curation: Callable[..., bool]) -> None:
-    """The operator run's curation enqueue, its failure never the run's: a sibling's evidence was
-    staged on purpose, so it never feeds the catalog, and `--no-learn` asks for none."""
-    if started.world is not None:
-        _logger.info("--episode: a sibling world is not enqueued for curation")
-    elif ns.no_learn:
-        _logger.info("--no-learn set; not enqueuing for curation")
-    elif enqueue_curation(started.run, started.alert, tenant=started.accepted,
-                          truncated_by=summary.get("truncated_by")):
-        _logger.info("enqueued for catalog curation")
+
+@contextlib.contextmanager
+def _operator_set_up(ns: argparse.Namespace, *, directory: tenancy.TenantDirectory | None,
+                     **seams: Any) -> Iterator[_Started]:
+    """The operator command's setup: the request's tenant id, then the data root, resolved once
+    (nothing below resolves either again); the one host acceptance (r10 A1; #1342 r6 R6-3), this
+    command's own, held for the whole run; then both halves of run setup (`_set_up`)."""
+    data_root = _request_data_root(ns)
+    try:
+        admitted = host_tenant(data_root, ns.tenant, directory=directory, **_acceptance_args(ns, data_root))
+    except TenantRefused as refused:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+    with admitted, _set_up(ns, data_root, admitted, **seams) as started:
+        yield started
 
 
 def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
@@ -1251,27 +1269,20 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     # Undrivable dependencies (credentialed lifecycle, HTML render, ticket endpoint) are
     # injection seams defaulting to production.
     ns = parse_args(argv)
+    # In a job container (#1170 A6) only a learning sibling runs here: its host half is its job's
+    # helper's, which `request` (the job socket's client) asks; elsewhere the operator's own.
     request = job_socket.from_environ(os.environ if environ is None else environ)
-    if request is not None:
-        # In a job container (#1170 A6): only a learning sibling runs here, its host half its job's helper's.
-        return _sibling_in_container(ns, request, lifecycle=lifecycle, visualize=visualize, preflight=preflight,
-                                     roster=roster, oracle=oracle, verifier=verifier)
     # Bound under its production name so the curation lane is visibly reached from here.
     enqueue_curation = enqueue
-
-    # The request's tenant id, then the data root, resolved once; nothing below resolves either
-    # again.
-    data_root = _request_data_root(ns)
-    # The one host acceptance (r10 A1; #1342 r6 R6-3), this command's own, held for the whole run.
+    setup = (_operator_set_up(ns, directory=directory, preflight=preflight, materialize=materialize,
+                              oracle=oracle, verifier=verifier, roster=roster, publish=publish,
+                              signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport)
+             if request is None else
+             _sibling_set_up(ns, request, preflight=preflight, roster=roster, oracle=oracle, verifier=verifier))
+    # A sibling in its container: its box over the socket, its page left in its own run folder.
+    in_container: dict[str, Any] = {} if request is None else {"job_lane": True, "relay": request}
     try:
-        admitted = host_tenant(data_root, ns.tenant, directory=directory, **_acceptance_args(ns, data_root))
-    except TenantRefused as refused:
-        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
-    try:
-        with admitted, _set_up(ns, data_root, admitted, preflight=preflight,
-                               materialize=materialize, oracle=oracle, verifier=verifier,
-                               roster=roster, publish=publish, signer=signer, proxy_url=proxy_url,
-                               issuer_transport=issuer_transport) as started:
+        with setup as started:
             run, tenant, world, episode = started.run, started.tenant, started.world, started.episode
             run_dir = run.run_dir
             # Every log line from here on, the crash included, names this run and the tenant this
@@ -1286,7 +1297,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                 _announce_provenance(run_dir)
 
                 try:
-                    summary = lifecycle(**started.lifecycle_kwargs(ns))
+                    summary = lifecycle(**started.lifecycle_kwargs(ns), **in_container)
                 except (ServingAbort, BaseExceptionGroup) as escaped:
                     return _unservable_exit(escaped, world=world, episode=episode)
 
@@ -1311,10 +1322,17 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                             truncated_by=truncated_by, closed_before_cut=closed_before_cut,
                             case=started.case, **token)
 
-                    _curate(started, summary, ns=ns, enqueue_curation=enqueue_curation)
+                    # A sibling's evidence was staged on purpose, so it must never feed the catalog.
+                    if world is not None:
+                        _logger.info("--episode: a sibling world is not enqueued for curation")
+                    elif ns.no_learn:
+                        _logger.info("--no-learn set; not enqueuing for curation")
+                    elif enqueue_curation(run, started.alert, tenant=started.accepted,
+                                          truncated_by=summary.get("truncated_by")):
+                        _logger.info("enqueued for catalog curation")
 
                 _post_steps(started, summary, visualize=visualize, update_ticket=ns.update_ticket,
-                            operator_steps=ticket_and_curation)
+                            operator_steps=ticket_and_curation, mirror=request is None)
                 return _exit_code(summary)
     except _PreflightRefused as refused:
         return refused.rc
@@ -1470,13 +1488,8 @@ def _helper_made(ns: argparse.Namespace, accepted: tenancy.Tenant,
                  launch: Mapping[str, Any]) -> tuple[Run, run_knowledge.RunCopy]:
     """The run folder and its knowledge copy the job's host helper made at the job's id (#1170 A6):
     opened, never made. The launch facts must name the same two places."""
-    from defender.records import RunId, RunRefused
-
     copy = run_knowledge.RunCopy(accepted.run_knowledge / ns.job)
-    try:
-        run = accepted.runs_repository().open(RunId.parse(ns.job))
-    except (RunRefused, TenantRefused) as refused:
-        sys.exit(f"[run.py] job {ns.job}: its run folder cannot be opened: {refused}")
+    run = _open_run(accepted.runs_repository(), ns.job, what=f"job {ns.job}: its run folder")
     for what, made, said in (("run folder", run.run_dir, launch.get("run_dir")),
                              ("knowledge copy", copy.root, launch.get("run_copy"))):
         if str(made) != str(said):
@@ -1553,8 +1566,7 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
                                     relay=request, **({"start_token": token} if token else {}))
                 # The page is saved in the run's own folder only: the helper copies it to the shared
                 # publish folder once this container has exited (#1170 A10).
-                _post_steps(started, summary, visualize=functools.partial(visualize, mirror=False),
-                            update_ticket=False)
+                _post_steps(started, summary, visualize=visualize, update_ticket=False, mirror=False)
                 return _exit_code(summary)
     except _PreflightRefused as refused:
         return refused.rc
@@ -1630,9 +1642,10 @@ def _sibling_made(request: Callable[..., dict[str, Any]], ns: argparse.Namespace
         sys.exit(f"[run.py] --episode {ns.episode}: the job's host helper did not make the sibling's run: "
                  f"{type(lost).__name__}: {lost}")
     try:
-        run = episode_runs.open(episode_runs.arm_id(world.world_id))
-    except (RunRefused, TenantRefused) as refused:
+        arm = episode_runs.arm_id(world.world_id)
+    except RunRefused as refused:
         sys.exit(f"[run.py] --episode {ns.episode}: the sibling's run cannot be opened: {refused}")
+    run = _open_run(episode_runs, arm, what=f"--episode {ns.episode}: the sibling's run")
     copy = run_knowledge.RunCopy(accepted.run_knowledge / run.run_dir.name)
     for what, ours, said in (("run id", run.run_dir.name, made.get("run")), ("run folder", run.run_dir, made.get("run_dir")),
                              ("knowledge copy", copy.root, made.get("path"))):
@@ -1641,17 +1654,18 @@ def _sibling_made(request: Callable[..., dict[str, Any]], ns: argparse.Namespace
     return run, copy
 
 
-def _sibling_in_container(  # noqa: PLR0913 — the request, the socket and the sibling's seams
-    ns: argparse.Namespace, request: Callable[..., dict[str, Any]], *, lifecycle: Callable[..., dict[str, Any]],
-    visualize: Callable[..., None], preflight: Callable[..., int], roster: Any, oracle: Any, verifier: Any,
-) -> int:
+@contextlib.contextmanager
+def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the sibling's seams
+    ns: argparse.Namespace, request: Callable[..., dict[str, Any]], *, preflight: Callable[..., int],
+    roster: Any, oracle: Any, verifier: Any,
+) -> Iterator[_Started]:
     """`run.py --tenant <T> --episode <id> --world <label>` inside its learning job's container (#1170
-    A6, #1449): the sibling's run half. Its tenant judged by the folder rules (the job's helper holds
-    the lock and ran the admission), its episode door opened, its world resumed, its run (id, folder
-    with input and stamp) and copy made by the helper at the family's knowledge, its
-    systems judged, its preflight, the run its helper made announced, its lifecycle with its box over
-    the socket and a read pass from the helper, then the shared post-steps. No database, host lock, publish
-    or signer; no curation (a sibling never feeds the catalog)."""
+    A6, #1449): the sibling's run half, which `main` composes. Its tenant judged by the folder rules
+    (the job's helper holds the lock and ran the admission), its episode door opened, its world
+    resumed, its run (id, folder with input and stamp) and copy made by the helper at the family's
+    knowledge, its systems judged, its preflight, the run its helper made announced, a read pass
+    from the helper — or the refusal (`SystemExit` naming it; `_PreflightRefused`). No database,
+    host lock, publish or signer. Yields the started run, holding the episode door."""
     from defender.records.formats import family_identities
 
     if ns.episode is None:
@@ -1680,23 +1694,13 @@ def _sibling_in_container(  # noqa: PLR0913 — the request, the socket and the 
         model = driver.resolve_main_model(ns.model)
         rc = preflight(ns.model, branching=True)
         if rc:
-            return rc
+            raise _PreflightRefused(rc)
         seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source,
                              tenant_id=str(tenant.tenant_id))
         alert = _screened_source_alert(episode)
         print(f"run_id={run.run_dir.name}", flush=True)
-        started = _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world, episode=episode,
-                           systems=systems, seams=seams, alert=alert, minting=passes)
-        with _log.run_context(run.run_dir.name, tenant.tenant_id, logger=_logger):
-            _logger.info(f"run_dir={run.run_dir} model={model}")
-            _announce_provenance(run.run_dir)
-            try:
-                summary = lifecycle(**started.lifecycle_kwargs(ns), job_lane=True, relay=request)
-            except (ServingAbort, BaseExceptionGroup) as escaped:
-                return _unservable_exit(escaped, world=world, episode=episode)
-            _logger.info("--episode: a sibling world is not enqueued for curation")
-            _post_steps(started, summary, visualize=functools.partial(visualize, mirror=False), update_ticket=False)
-            return _exit_code(summary)
+        yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world, episode=episode,
+                       systems=systems, seams=seams, alert=alert, minting=passes)
 
 
 #: A sibling whose world went unservable exits with this (its world record says why).

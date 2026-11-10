@@ -18,7 +18,7 @@ from typing import Any
 from defender._io import read_bytes_capped
 from defender.job_socket import Refused, read_message, write_message
 
-from ._container import STAT_LIMIT, container_processes
+from ._container import STAT_LIMIT, container_processes, owner
 from ._session import Registry, Session
 
 _logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class Server:
         try:
             self._listener.bind(str(path))
             os.chmod(path, 0o600)
-            uid, gid = os.stat(session.data_root).st_uid, os.stat(session.data_root).st_gid
+            uid, gid = owner(session)
             if os.geteuid() == 0 and (uid, gid) != (0, 0):
                 os.chown(path, uid, gid)
             self._listener.listen(64)

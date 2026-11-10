@@ -12,6 +12,8 @@ Its requests: `pass` for an id this helper minted (the job's own, or a sibling's
 run id, run copy and materialized run folder (input, stamp, knowledge record), all made here (A6, C20, C23): the world is looked up in the job's own episode only
 (`<T>/episodes/<job id>`, never found by `--source`), its id is the arm roster's canonical id for it, its folder is
 `<episode>/runs/<run>/`, made with no link followed out of the episode (H10), and its copy is owned by this helper.
+`export.materialise(commit=)`, the export of the commit the launch pins its family to (its source's), materialised
+here from the tenant's clone under the knowledge lock if absent: the container writes no export (P-A).
 Boxes: `shell` (a sibling's run box over its run folder and copy, or the job's own scratch shell) and `oracle` (the
 oracle's box, its bind folders in a per-claim folder under the data root, never host `/tmp`, C21).
 
@@ -43,11 +45,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from defender import _io
+from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender.job_socket import Refused
 
-from ._investigation import _first_pass, _grant, _publish_line
-from ._paths import confined
-from ._session import PASS_LIFETIME, HandBack, KindSpec, Prepared, Registry, Session, SetupRefused
+from ._common import answer_pass, first_pass, grant, settle_knowledge
+from ._session import HandBack, KindSpec, Prepared, Registry, Session, SetupRefused
 
 if TYPE_CHECKING:
     from defender.records.formats import Episode
@@ -114,7 +116,7 @@ def _hold_within_wait(session: Session, hold: contextlib.ExitStack) -> None:
     it then records this helper and holds the lock shared itself."""
     from defender.tenancy import host_lock
 
-    fd = host_lock.acquire(session.data_root, session.tenant_id, exclusive=False, timeout=LOCK_WAIT_SECONDS)
+    fd = host_lock.acquire(session.root_folder, session.tenant_id, exclusive=False, timeout=LOCK_WAIT_SECONDS)
     if fd is None:
         raise HandBack(f"the tenant's host lock was still held after {LOCK_WAIT_SECONDS:.0f} s")
     hold.callback(host_lock.release_lock, fd)
@@ -129,11 +131,12 @@ def _admit_tenant(session: Session, hold: contextlib.ExitStack) -> Any:
     except TenantRefused as refused:
         raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
     hold.enter_context(admitted)
+    session.tenant_accepted(admitted.tenant)
     return admitted
 
 
 def _scratch(session: Session, cleanup: contextlib.ExitStack) -> Path:
-    base = session.data_root
+    base = session.root_folder
     folder = base / SCRATCH / session.claim
     if os.path.lexists(folder):
         raise SetupRefused(f"{folder} exists already: a claim's scratch folder is made once")
@@ -147,7 +150,6 @@ def _scratch(session: Session, cleanup: contextlib.ExitStack) -> Path:
 
 
 def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
-    from defender import tenancy
     from defender.records.formats import TenantRefused
     from defender.systems.run_tenant import run_tenant_for
     from defender.tenancy import run_knowledge
@@ -156,20 +158,15 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     _hold_within_wait(session, hold)
     admitted = _admit_tenant(session, hold)
     accepted, records = admitted.tenant, admitted.directory
-    report = run_knowledge.read_publish_report(_publish_line(session, accepted, session.root, records))
+    source = settle_knowledge(session, accepted, records)
     try:
-        source = run_knowledge.resolve_source(accepted, report=report, pinned=None)
-    except run_knowledge.KnowledgeRefused as refused:
-        raise SetupRefused(str(refused)) from None
-    export = tenancy.tenant_exports(session.root, session.tenant_id) / source.commit
-    try:
-        confined(session.tenant_root, export)
+        export = session.inside_tenant(accepted.export_folder(source.commit))
         ready = run_tenant_for(accepted, dispatches_lead_zero=False, agent_root=export / run_knowledge.AGENT_HALF,
                                settings_root=export / run_knowledge.SETTINGS_HALF)
     except (TenantRefused, Refused) as refused:
         raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
-    reads = _grant(ready)
-    passes = _first_pass(session, accepted, records, reads)
+    reads = grant(ready)
+    passes = first_pass(session, accepted, records, reads)
     cleanup = contextlib.ExitStack()
     try:
         scratch = _scratch(session, cleanup)
@@ -183,7 +180,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
                                   "--tenant", session.tenant_id, "--source", str(session.source)]
     facts = {"kind": LEARNING, "tenant": session.tenant_id, "job": job, "tenant_state": "active",
              "export_commit": source.commit, "proxy_url": passes.proxy_url if passes is not None else None,
-             "grant": [[s, "r"] for s in reads], "pass_lifetime": PASS_LIFETIME}
+             "grant": [[s, "r"] for s in reads], "pass_lifetime": PASS_LIFETIME_SEC}
     return Prepared(launch=facts, command=list(command), passes=passes, state=state, cleanup=cleanup,
                     exited=_learning_exited)
 
@@ -280,24 +277,15 @@ def _learning_exited(session: Session, rc: int) -> None:
 
 # --- the learning job's requests ------------------------------------------------------------------------------------------
 
-def _pass(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
-    ident = session.require_minted(fields["id"])
-    passes = session.prepared.passes if session.prepared is not None else None
-    if passes is None:
-        raise Refused("this job's grant is empty: it reaches no system through the proxy", "no-grant")
-    try:
-        return passes.mint(ident)
-    except Exception as failed:  # noqa: BLE001 — a pass that cannot be signed is the job's to report
-        raise Refused(f"the pass could not be signed: {type(failed).__name__}: {failed}", "sign-fault") from None
-
-
 #: The tenant's episodes folder, `<T>/episodes` (`tenancy.box_mounted_episodes`).
 EPISODES = "episodes"
 
 
 def _episode_folder(session: Session) -> Path:
     """The learning job's own episode, `<T>/episodes/<job id>` (episode id = job id), with no link on the way."""
-    return confined(session.tenant_root, session.tenant_root / EPISODES / str(session.job_id))
+    if session.tenant_folder is None:
+        raise Refused("the job's tenant is not accepted yet", "internal")
+    return session.inside_tenant(session.tenant_folder / EPISODES / str(session.job_id))
 
 
 def _roster_id(state: _Learning, session: Session, world: str) -> str:
@@ -354,7 +342,7 @@ def _copy_make(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     run = _roster_id(state, session, world)
     runs = episode / "runs"
     run_dir = runs / run
-    confined(session.tenant_root, run_dir, must_exist=False)
+    session.inside_tenant(run_dir, must_exist=False)
     source = run_knowledge.KnowledgeSource(kind=run_knowledge.PINNED,
                                            commit=_pinned_commit(state, session, state.commit))
     try:
@@ -363,9 +351,9 @@ def _copy_make(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
         raise Refused(f"the sibling's run copy could not be made: {refused}", "internal") from None
     try:
         _io.guarded_mkdir(runs, base=episode)
-        confined(session.tenant_root, runs)
+        session.inside_tenant(runs)
         made_dir = _materialize_sibling(session, state, world, run, source)
-        confined(session.tenant_root, made_dir)
+        session.inside_tenant(made_dir)
     except BaseException:
         copy.remove()
         raise
@@ -375,6 +363,25 @@ def _copy_make(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
         state.by_world[world] = run
         session.minted.add(run)
     return _copy_answer(sibling)
+
+
+def _export_materialise(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
+    """`export.materialise(commit=)`: `<T>/exports/<commit>/` for a commit the tenant's clone holds, written from its
+    objects under the knowledge lock if absent (`materialise_export`), by this helper (P-A, C20: no export is written
+    and no knowledge lock is taken inside the container). The learning launch pins its family to its source's
+    commit; the job reads the export it is answered."""
+    from defender.learning.author.version_control import DeliveryRefused, LockBusy, materialise_export
+
+    commit = fields["commit"]
+    if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
+        raise Refused("export.materialise takes a full commit id", "bad-fields")
+    state = _state(session, _Learning)
+    try:
+        export = materialise_export(state.tenant, commit)
+    except (DeliveryRefused, LockBusy) as refused:
+        raise Refused(f"the export of {commit} could not be materialised: {refused}", "delivery") from None
+    session.inside_tenant(Path(export.path))
+    return {"commit": export.commit, "path": str(export.path)}
 
 
 def _source_alert(episode: Episode) -> Path:
@@ -428,8 +435,8 @@ def _shell_box(session: Session, ident: str) -> Any:
     state = _state(session, _Learning)
     sibling = state.siblings.get(ident)
     if sibling is not None:
-        confined(session.tenant_root, sibling.run_dir)
-        confined(session.tenant_root, Path(sibling.copy.agent))
+        session.inside_tenant(sibling.run_dir)
+        session.inside_tenant(Path(sibling.copy.agent))
         return box.start_box(sibling.run_dir, session.defender_dir, docker=session.docker,
                              tenant_agent=sibling.copy.agent, staged_token=sibling.copy.token,
                              tenant_id=session.tenant_id, require_sandbox=True)
@@ -555,7 +562,7 @@ def _batch_box(session: Session, ident: str) -> Any:
     batch = state.batches.get(ident)
     if batch is None:
         raise Refused(f"no draft of this helper's is {ident!r}", "unknown-id")
-    confined(session.tenant_root, batch.draft_root.parent)
+    session.inside_tenant(batch.draft_root.parent)
     return _drain_delivery(session, state).start_box(batch.box_request(), docker=session.docker)
 
 
@@ -563,8 +570,9 @@ def register(registry: Registry) -> None:
     """The learning kinds' hooks, requests and boxes (module doc)."""
     registry.kind(LEARNING, KindSpec(prepare=_prepare_learning, end=_learning_end))
     registry.kind(POST_STEP, KindSpec(prepare=_prepare_post_step, end=_post_step_end))
-    registry.add("pass", kinds=(LEARNING,), handler=_pass, required=("id",))
+    registry.add("pass", kinds=(LEARNING,), handler=answer_pass, required=("id",))
     registry.add("copy.make", kinds=(LEARNING,), handler=_copy_make, required=("world",))
+    registry.add("export.materialise", kinds=(LEARNING,), handler=_export_materialise, required=("commit",))
     registry.add("batch.start", kinds=(POST_STEP,), handler=_batch_start, required=("lanes",))
     registry.add("forge.token", kinds=(POST_STEP,), handler=_forge_token, required=("min_validity",),
                  after_signal=True)

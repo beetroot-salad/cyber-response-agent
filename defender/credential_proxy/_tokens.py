@@ -26,6 +26,11 @@ READ_WRITE = "rw"
 MODES = (READ, READ_WRITE)
 _CLAIM_KEYS = frozenset({"tenant", "investigation", "grant", "exp"})
 _PAYLOAD = re.compile(r"[A-Za-z0-9_-]+")
+#: Seconds a read pass lives from when it is signed (#1163 r7 A20; #1170 O5): the operator run's own
+#: signer and a job's host helper both sign for this long.
+PASS_LIFETIME_SEC = 600
+#: A pass held is asked for (or signed) again once it has this many seconds left or fewer (C2).
+PASS_REUSE_MARGIN_SEC = 60
 #: A token longer than this is not one the minter writes: refused before any decoding.
 MAX_TOKEN_CHARS = 16384
 _MAX_INVESTIGATION_CHARS = 128

@@ -65,6 +65,14 @@ jobs:
         timeout-minutes: 4
         run: python3 defender/box/image_cli.py build
 
+      # #1170 A7: the job image every per-job host helper starts its job container from, under the
+      # name the helper defaults to (`DEFENDER_JOB_IMAGE` unset: `job_host`'s `defender-job:latest`).
+      # The real-container job tests (tests/e2e/test_job_box_boundary_e2e.py) need it; the helper
+      # never pulls, so without it a job is a start failure.
+      - name: Build the job image
+        timeout-minutes: 6
+        run: docker build -f .devcontainer/Dockerfile.job -t defender-job:latest .
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 

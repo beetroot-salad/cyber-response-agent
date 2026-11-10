@@ -328,7 +328,30 @@ def sibling_argv(
 _UNPINNABLE = "the source run's knowledge cannot be pinned for the family"
 
 
-def _pinned_export(tenant: RunTenant, source: Run) -> Any:
+def _materialised(tenant: RunTenant, commit: str, container: JobContainer | None) -> Any:
+    """`<T>/exports/<commit>/`, materialised from the tenant clone when absent: by this process for an operator's
+    launch; inside a job container by its per-job host helper (#1170 P-A, C20: the container writes no export and
+    takes no knowledge lock), the folder it answers held to the one this tenant names for that commit. A helper
+    refusal, or a helper that cannot be reached, is `DeliveryRefused`."""
+    from defender import job_socket
+    from defender.learning.author.version_control import DeliveryRefused, TenantExport, materialise_export
+
+    if container is None:
+        return materialise_export(tenant.tenant, commit)
+    try:
+        answer = container.materialised_export(commit)
+        folder = tenant.tenant.export_folder(commit)
+    except job_socket.Refused as refused:
+        raise DeliveryRefused(f"the job's host helper did not materialise it ({refused.code}): {refused}") from None
+    except (OSError, ValueError, TenantRefused) as lost:
+        raise DeliveryRefused(f"no export from the job's host helper: {type(lost).__name__}: {lost}") from None
+    if answer.get("commit") != commit or str(answer.get("path")) != str(folder):
+        raise DeliveryRefused(f"the job's host helper answered another export ({answer.get('path')!r}) than "
+                              f"{folder}")
+    return TenantExport(commit=commit, path=folder)
+
+
+def _pinned_export(tenant: RunTenant, source: Run, container: JobContainer | None = None) -> Any:
     """The export every sibling is pinned to and the questioner's corpus is read from (flow 7,
     O-PIN): the knowledge commit the source run's HOST-HELD knowledge record names (U12, beside
     the run folder, where no box writes), materialised from the tenant clone when absent —
@@ -338,12 +361,12 @@ def _pinned_export(tenant: RunTenant, source: Run) -> Any:
     clone cannot materialise; both before anything is spent. Only a source from before records
     were written (no record, and a stamp naming no knowledge source) is judged by its stamp, as
     before: a commit it names, a refusal for `unversioned`/`unavailable`, or with none recorded
-    the tenant's published `current` (pre-flight still refuses that unless `--allow-dirty`)."""
+    the tenant's published `current` (pre-flight still refuses that unless `--allow-dirty`). Inside a job
+    container the export is materialised by the job's host helper (`_materialised`)."""
     from defender.learning.author.version_control import (
         DeliveryRefused,
         LockBusy,
         current_export,
-        materialise_export,
     )
     status = source.knowledge_status()
     commit = None if status is None else status.commit
@@ -367,7 +390,7 @@ def _pinned_export(tenant: RunTenant, source: Run) -> Any:
                 f"[branch] source run {source.run_dir}'s knowledge record is unreadable: there "
                 "is no knowledge commit to pin its siblings to, so the family cannot be "
                 "launched (not waived by --allow-dirty)", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
-        return materialise_export(tenant.tenant, commit)
+        return _materialised(tenant, commit, container)
     except (DeliveryRefused, LockBusy) as refused:
         at = "" if commit is None else f" ran at knowledge commit {commit}, which"
         raise ending(
@@ -742,7 +765,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         # `tmp_path` corpus and this frame is the only one that ever sees the production path.
         # #1108 P4 flow 7: the family's knowledge is the source's commit, its export materialised
         # here (git-capable) before anything is spent; the questioner's corpus is that export's.
-        pinned = _pinned_export(tenant, source)
+        pinned = _pinned_export(tenant, source, container)
         questioner_lessons_dir = (
             KnowledgePaths(Path(pinned.path) / "agent").lessons_questioner_dir
             if lessons_dir is None else lessons_dir)

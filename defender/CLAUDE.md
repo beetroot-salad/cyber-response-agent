@@ -34,6 +34,25 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1170
+
+The worker no longer runs a job as its own child process. For each claim it starts a per-job host helper
+(`python -m defender.job_host`), which runs the job in a container of its own, scoped to the job's tenant. Before
+upgrading a worker:
+
+1. Build the job image on every execution host: `docker build -f .devcontainer/Dockerfile.job -t defender-job:latest .`
+   from the repository root, or set `DEFENDER_JOB_IMAGE` to an image you built from it. The helper never pulls. Without
+   the image every job fails its row (an investigation `worker_error`, a learning job `failed: entry_error`), and no
+   job runs outside a container.
+2. Job containers start under the box runtime (`DEFENDER_BOX_RUNTIME`). Set `DEFENDER_JOB_NETWORK` to the Docker network
+   from which the job reaches the credential proxy and the model provider. Leave OpenBao and the database off that network.
+3. The job container runs as the uid that owns the data root, and its socket lives under
+   `<data root>/.job-sockets/<claim>/`. A data root whose socket path would exceed 107 bytes fails every job as a start
+   failure: keep the data root's path short.
+
+`run.py --job` is now only a job container's entry. From a host shell it does nothing and exits non-zero. Queue the
+investigation for the worker instead, or run it by hand with `run.py <alert> --tenant <id>`, which is unchanged.
+
 ## Upgrade from before #1345
 
 The tenant's alert mapping lives in the database; nothing reads `settings/alert-mapping.yaml` any more. After migration

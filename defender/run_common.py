@@ -478,7 +478,7 @@ def publish_report(
     return run_knowledge.read_publish_report(line)
 
 
-def knowledge_source(
+def resolve_knowledge(
     tenant: tenancy.Tenant, *, pin: str | None, publish: PublishLaunch | None,
     data_root: DataRoot, records: tenancy.TenantDirectory,
 ) -> KnowledgeSource:
@@ -515,7 +515,7 @@ def copy_knowledge(tenant: tenancy.Tenant, source: KnowledgeSource, run_id: str)
     return copy
 
 
-def resolve_run_tenant(
+def run_tenant_or_exit(
     tenant: tenancy.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
     copy: RunCopy | None = None,
 ) -> RunTenant:

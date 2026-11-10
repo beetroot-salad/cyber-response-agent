@@ -50,7 +50,7 @@ _DATABASE_VALUE = re.compile(r"postgres(?:ql)?://", re.IGNORECASE)
 
 
 def socket_folder(session: Session) -> Path:
-    return session.data_root / SOCKETS / session.claim
+    return session.root_folder / SOCKETS / session.claim
 
 
 def socket_path(session: Session) -> Path:
@@ -62,8 +62,9 @@ def socket_path(session: Session) -> Path:
     return path
 
 
-def _owner(data_root: Path) -> tuple[int, int]:
-    st = os.stat(data_root)
+def owner(session: Session) -> tuple[int, int]:
+    """The uid and gid that own the data root: the job container's (H9)."""
+    st = os.stat(session.root_folder)
     return st.st_uid, st.st_gid
 
 
@@ -79,7 +80,7 @@ def make_socket_folder(session: Session) -> Path:
         raise StartFailed(f"{parent} is not a folder the helper made")
     folder.mkdir(mode=0o700)  # lint-unguarded-tree-write: ok — exclusive, made before its container exists
     os.chmod(folder, 0o700)
-    uid, gid = _owner(session.data_root)
+    uid, gid = owner(session)
     if os.geteuid() == 0 and (uid, gid) != (0, 0):
         os.chown(folder, uid, gid)
     return folder
@@ -130,7 +131,7 @@ def job_environment(session: Session, socket: Path, environ: Mapping[str, str] =
             env[k] = environ[k]
     env.update(_provider_keys(environ))
     env.update({
-        "DEFENDER_DATA_ROOT": str(session.data_root),
+        "DEFENDER_DATA_ROOT": str(session.root_folder),
         CLAIM_ENV: session.claim,
         SOCKET_ENV: str(socket),
         "PYTHONPATH": str(session.defender_dir.parent),
@@ -152,8 +153,10 @@ def container_run_argv(session: Session, socket: Path, command: list[str], envir
         runtime = BoxSpec.from_env(environ).runtime
     except ValueError as unknown:
         raise StartFailed(str(unknown)) from None
-    uid, gid = _owner(session.data_root)
-    tenant = str(session.tenant_root)
+    if session.tenant_folder is None:
+        raise StartFailed("the job's tenant was not accepted: there is no tenant folder to bind")
+    uid, gid = owner(session)
+    tenant = str(session.tenant_folder)
     code = str(session.defender_dir)
     sockets = str(socket.parent)
     argv = [

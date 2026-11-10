@@ -10,6 +10,8 @@ answers the rest over the job socket (`job_socket`). This module is that side's 
 - `JobContainer.access(id)`: a read pass for an id the helper minted, asked afresh whenever the one held is within the
   reuse margin (O5, O6: no single long pass);
 - `JobContainer.box(kind, id)`: a box the helper starts (O9: the request names a kind and an id, never a path);
+- `JobContainer.materialised_export(commit)`: the export of a commit, materialised by the helper (the container
+  writes no export and takes no knowledge lock, P-A);
 - `JobContainer.records()` / `.forge_credential()`: the post-step's drain's tenant records (its publish outcomes
   written by the helper, `record.*`) and forge credential (tokens minted by the helper, `forge.token`), so the drain
   runs unchanged with no database login and no forge login (O3, O4);
@@ -27,14 +29,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from defender import job_socket
+from defender.credential_proxy import PASS_REUSE_MARGIN_SEC
 from defender.kit.access import RequestAccess
 
 _logger = logging.getLogger(__name__)
 
 __all__ = ["JobContainer", "NotInContainer", "sigterm_on_stdin_eof"]
 
-#: A pass held is asked for again once it has less than this many seconds left (the run's mint's margin, C2).
-PASS_REUSE_MARGIN_SEC = 60.0
 
 
 class NotInContainer(RuntimeError):
@@ -124,6 +125,15 @@ class JobContainer:
         from defender import box
 
         return box.relay_start(self.ask, kind, str(ident))
+
+    def materialised_export(self, commit: str) -> Mapping[str, Any]:
+        """`<T>/exports/<commit>/` made by the helper if absent (`export.materialise`, P-A: the container writes no
+        export and takes no knowledge lock): the helper's answer, `{commit, path}`. A refusal is the helper's
+        `job_socket.Refused`; a helper that cannot be reached, its `OSError`."""
+        answer = self.ask("export.materialise", commit=commit)
+        if not isinstance(answer, Mapping):
+            raise ValueError("the helper's answer to export.materialise is not a mapping")
+        return answer
 
     def box_factory(self, kind: str, ident: str) -> Callable[[], Any]:
         return lambda: self.box(kind, ident)
