@@ -7,12 +7,14 @@ spaces and ending in a newline (r6.4.3 settlements), rewritten in place at byte 
 The file is mapped on the first clock call and its mapped bytes are read on every call, so rewriting it in
 place changes the next reading without a restart, and no file is opened per call. Monotonic clocks are untouched.
 
-Compiles and runs a real process; skipped only where no C compiler is installed. Run:
+Compiles and runs a real process; skipped only where no C compiler is installed, and never in CI (with `CI`
+set, a missing gcc fails the tests). Run:
 
     defender-pytest defender/.venv/bin/python -m pytest playground-v2/clockshim/tests -q
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -33,6 +35,8 @@ PROBE = ("import sys, time\n"
 @pytest.fixture(scope="module")
 def shim(tmp_path_factory):
     if shutil.which("gcc") is None:
+        if os.environ.get("CI"):
+            pytest.fail("no C compiler (gcc) on the CI runner: the shim tests must run there, not skip")
         pytest.skip("no C compiler (gcc) on this machine")
     out = tmp_path_factory.mktemp("clockshim") / "clockshim.so"
     built = subprocess.run(["gcc", "-shared", "-fPIC", "-O2", "-o", str(out), str(SOURCE), "-ldl"],

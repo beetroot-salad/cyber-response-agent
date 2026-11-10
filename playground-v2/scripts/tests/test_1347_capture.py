@@ -33,6 +33,9 @@ outer edge, as the make-a-case and launcher tests do (`_rig_docker.RigDocker`):
 * the chaos ledger `active_faults` reads (redirected to a scratch ledger per test) and the attack runner's
   sleeps (not slept). The committed inventory, detection rules and attack catalog are read as they are.
 
+Bound by the r6.4.3 review repair: `LabOps.fire` writes the attack runner's run records into the directory
+`$V2_ATTACK_RUNS_DIR` names (read when it fires), never into the repository's `attacks/runs/`.
+
 `fail_at` makes the docker calls of one capture step fail (exit 125): `hold_pickups` (stopping the watcher),
 `fire` (every command a role host runs for the batch), `proc_tree`, `stub_dumps`, `commit_hosts`,
 `copy_volumes`, `verify_restore` (starting the scratch cluster); `snapshot` fails the snapshot request.
@@ -51,8 +54,9 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import os
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -89,6 +93,7 @@ STUBS = {
 }
 PART_STEPS = ["proc_tree", "stub_dumps", "commit_hosts", "copy_volumes", "detection_rules"]
 SNAP_URL = re.compile(rf"^/_snapshot/{REPO}/(?P<name>[^_/][^/]*)$")
+REPO_RUNS = PLAYGROUND / "attacks" / "runs"
 
 
 def _module():
@@ -140,8 +145,9 @@ _EDGES: dict = {}
 @pytest.fixture(autouse=True)
 def _lab_edges(monkeypatch, tmp_path):
     """The edges no `run=` reaches: the attack runner's own `subprocess.run` (pointed at the rig's docker by each
-    Rig), its sleeps, the chaos ledger (a scratch one) and the run records the real runner writes under
-    `attacks/runs/` (removed after the test)."""
+    Rig), its sleeps, the chaos ledger (a scratch one), and the runs directory (`V2_ATTACK_RUNS_DIR`, a scratch
+    one). Run records a `fire` still put under the repository's `attacks/runs/` are removed by the run ids `fire`
+    returned (never by listing that shared directory)."""
     real_read, real_sleep = ledger.read_ledger, time.sleep
     scratch = tmp_path / "scratch-ledger"
     scratch.mkdir()
@@ -157,17 +163,21 @@ def _lab_edges(monkeypatch, tmp_path):
     def no_docker(argv, *a, **kw):
         raise AssertionError(f"a command outside the rig: {argv}")
 
+    real_run = subprocess.run
     monkeypatch.setattr(ledger, "read_ledger", read_ledger)
     monkeypatch.setattr(time, "sleep", sleep)
     monkeypatch.setattr(subprocess, "run", no_docker)
-    runs = PLAYGROUND / "attacks" / "runs"
-    before = set(runs.iterdir()) if runs.is_dir() else set()
-    _EDGES.update(monkeypatch=monkeypatch, ledger=scratch)
+    attack_runs = tmp_path / "attack-runs"
+    attack_runs.mkdir()
+    monkeypatch.setenv("V2_ATTACK_RUNS_DIR", str(attack_runs))
+    returned: list[str] = []
+    _EDGES.update(monkeypatch=monkeypatch, ledger=scratch, real_run=real_run, run_ids=returned,
+                  attack_runs=attack_runs)
     yield
     _EDGES.clear()
-    for path in (set(runs.iterdir()) if runs.is_dir() else set()) - before:
-        if path.is_dir() and path.name.startswith(tuple(SCENARIOS)) and (path / "meta.json").is_file():
-            shutil.rmtree(path, ignore_errors=True)
+    for run_id in returned:
+        if run_id and Path(run_id).name == run_id:
+            shutil.rmtree(REPO_RUNS / run_id, ignore_errors=True)
 
 
 class ScratchCluster:
@@ -309,6 +319,7 @@ class Rig:
         self.lab_module = load_script("lab_ops_1347_capture", LAB_OPS)
         self.ops = self.lab_module.LabOps(run=self.docker)
         self._observe_detection_rules()
+        self._observe_fire()
         self.store = lock.DockerLockStore(run=self.docker)
         self.seam = DockerExecSeam(run=self.docker)
         self.freeze_dir = tmp_path / "held_out" / "freezes" / FREEZE_ID
@@ -346,6 +357,19 @@ class Rig:
 
         self.ops.detection_rules = detection_rules
 
+    def _observe_fire(self) -> None:
+        real = self.ops.fire
+        self.run_ids: list[str] = []
+
+        def fire(scenario, lock_token):
+            out = real(scenario, lock_token)
+            run_id = out.get("run_id") if isinstance(out, dict) else None
+            self.run_ids.append(run_id)
+            _EDGES["run_ids"].append(run_id)
+            return out
+
+        self.ops.fire = fire
+
     # -- what a test reads ---------------------------------------------------------------------------
 
     def classify(self, argv: list[str]) -> str | None:
@@ -362,8 +386,8 @@ class Rig:
             if name == lock.LOCK_CONTAINER and LOCK_FILE in command:
                 script = command[2] if len(command) > 2 else ""
                 return "lock.create" if "set -C" in script else "lock.delete" if "rm " in script else "lock.read"
-            if name in HOSTS:
-                return "proc_tree" if command[:1] == ["ps"] else "fire"
+            if name in HOSTS:      # a batch command is one the committed catalog renders; any other host read
+                return "fire" if any(scenario_of(a) for a in command) else "proc_tree"   # is the process tree
             if name in STUBS:
                 return "stub_dumps"
             if name == VERIFY:
@@ -416,7 +440,7 @@ class Rig:
                 checked = True
             if c["step"] != "fire":
                 continue
-            sid = scenario_of(c["argv"][-1])
+            sid = next((s for s in map(scenario_of, c["argv"]) if s), None)
             if out and out[-1][0] == sid:
                 out[-1][2] += 1
                 out[-1][3] = out[-1][3] and c["held"]
@@ -446,6 +470,7 @@ class Rig:
                 if r[0] in ("PUT", "POST") and SNAP_URL.match(r[1].split("?", 1)[0])]
 
     def edges_modelled(self) -> None:
+        """An unmodelled docker command is a gap in the fake, closed by a test repair, not a contract demand."""
         assert not self.docker.unmodelled, self.docker.unmodelled
 
 
@@ -772,6 +797,65 @@ def test_a_capture_whose_snapshot_name_is_taken_fails_or_takes_a_fresh_name_and_
     assert rig.restores == [(REPO, elastic["snapshot"])]
 
 
+def test_fire_writes_the_attack_runs_into_the_configured_runs_dir_not_the_repository(tmp_path):
+    """r6.4.3 review repair: the batch's run records go where `V2_ATTACK_RUNS_DIR` says (one per firing, named by
+    the run id `fire` returned); none lands in the repository's `attacks/runs/`."""
+    rig = Rig(tmp_path)
+    rig.capture()
+
+    assert len(rig.run_ids) == len(SCENARIOS) and all(rig.run_ids), rig.run_ids
+    configured = _EDGES["attack_runs"]
+    assert sorted(p.name for p in configured.iterdir()) == sorted(rig.run_ids), list(configured.iterdir())
+    assert not [r for r in rig.run_ids if (REPO_RUNS / r).exists()], "a run record was written into the repository"
+
+
+def _point_defaults(monkeypatch, fn, fake) -> None:
+    """Replace a `run=subprocess.run` default (bound when its module was imported) by the rig docker."""
+    real = _EDGES["real_run"]
+    if fn.__defaults__:
+        monkeypatch.setattr(fn, "__defaults__", tuple(fake if d is real else d for d in fn.__defaults__))
+    if fn.__kwdefaults__:
+        monkeypatch.setattr(fn, "__kwdefaults__", {k: fake if d is real else d for k, d in fn.__kwdefaults__.items()})
+
+
+def _aware(value) -> datetime:
+    """A recorded instant that must carry its zone: a naive one fails here instead of being read as UTC."""
+    dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    assert dt.tzinfo is not None, f"a naive instant was recorded: {value!r}"
+    return dt
+
+
+def test_capture_main_freezes_a_T_given_without_an_offset_as_that_UTC_instant_whatever_the_local_zone(tmp_path, monkeypatch):
+    """r6.4.3 finding 7/O1, end to end: `capture_case.py <freeze> --T <naive>` with local time two hours ahead
+    (TZ=Etc/GMT-2) runs the real capture over the rig and freezes exactly that instant read as UTC. Read as local
+    time, T would be two hours in the past and refused; kept naive, the real capture cannot compare it."""
+    rig = Rig(tmp_path, scenarios=[])
+    rig.module.main  # noqa: B018 - the script is loaded (and its directory importable) before lab_ops is imported
+    import lab_ops
+
+    for cls in (lab_ops.LabOps, DockerExecSeam, lock.DockerLockStore):
+        _point_defaults(monkeypatch, cls.__init__, rig.docker)
+    monkeypatch.setenv("V2_FROZEN_TENANT_DIR", str(tmp_path / "tenant"))
+    moment = (datetime.now(timezone.utc) + timedelta(seconds=3)).replace(microsecond=0)
+    saved = os.environ.get("TZ")
+    os.environ["TZ"] = "Etc/GMT-2"
+    time.tzset()
+    try:
+        rc = rig.module.main([str(rig.freeze_dir), "--repository", REPO, "--T", moment.strftime("%Y-%m-%dT%H:%M:%S"),
+                              "--parts-dir", str(rig.parts_dir), "--captured-by", "operator"])
+    finally:
+        if saved is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = saved
+        time.tzset()
+
+    assert rc == 0, rc
+    doc = yaml.safe_load((rig.freeze_dir / "freeze.yaml").read_text())
+    assert _aware(doc["T"]) == moment, (doc["T"], moment)
+    rig.edges_modelled()
+
+
 # -- r6.4.3 finding 7 (C-parse): an operator-given instant without an offset is UTC -------------------------
 
 
@@ -804,4 +888,4 @@ def test_capture_reads_a_T_given_without_an_offset_as_UTC_whatever_the_local_zon
         time.tzset()
 
     assert "T" in seen, "capture was not called"
-    assert instant(seen["T"]) == instant(meant), seen["T"]
+    assert _aware(seen["T"]) == instant(meant), seen["T"]

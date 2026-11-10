@@ -45,6 +45,13 @@ what a marker, an offset or a variant is. What it models:
   `*_SEED_PATH` named when it started, the CMDB overlays posted to it); a `python3 -c <overlay script>` exec
   with a JSON list of `{host, patch}` on stdin posts overlays.
 
+What this rig answers is a model of docker, not a demand of the contract. A command it does not model is
+listed in `unmodelled` (exit 127), and the rigs assert that list is empty: that is a GAP IN THE FAKE, to be
+closed by a test repair (model the command), never a reason for the lab code to change how it does something
+the design leaves open. The stub names are the playground's own services (`playground-v2/compose.yml`); a stub
+read is recognised however the lab spells it (a python `-c` script with the path as its argument or a local
+URL in it, or curl/wget of a local URL).
+
 Faults: `fail` is a set of effects that fail when attempted (`node-start`, `stub-start`, `proxy-start`,
 `marker-write`: a write into the engine's state volume of a JSON object carrying `dirty` or `variant`). The
 call returns rc 125 with `injected: <effect> failed` and changes nothing.
@@ -94,8 +101,6 @@ def _norm(path: str) -> str:
     return posixpath.normpath("/" + path.lstrip("/"))
 
 
-_SUBST = re.compile(r"\$\((?:[^()]|\([^()]*\))*\)")
-_VAR = re.compile(r"\$(\w+)|\$\{(\w+)\}")
 
 
 class RigDocker(FakeDocker):
@@ -124,6 +129,14 @@ class RigDocker(FakeDocker):
         self._inode = 0
         self.scratch_cluster = scratch_cluster
         self.images: dict[tuple[str, str], bytes] = {}
+        # The ENV of an image, as a test declares it: `build` is a no-op here, so a variable the lab bakes into an
+        # image it builds is visible only through this map (a gap to fill by test repair, not a demand).
+        self.image_env: dict[str, dict] = {}
+        # flock: the lock files the running exec holds; races armed on a lock record (see `race_record`)
+        self._held: list[tuple] = []
+        self.lock_races: dict[tuple, Callable[[], Any]] = {}
+        self.guard_of: dict[tuple, frozenset] = {}     # lock record -> the flock files held when it was created
+        self._deferred: list[Callable[[], Any]] = []
 
     # -- setup a test does ---------------------------------------------------------------------------
 
@@ -137,6 +150,28 @@ class RigDocker(FakeDocker):
         c = self._new(scope, name, image, env or {}, mounts or [], [], [])
         c.state, c.cluster = "running", cluster
         return c
+
+    def race_record(self, c: Container, path: str, fn: Callable[[], Any]) -> None:
+        """Arm another operator acting on the record at `path` (in container `c`), e.g. a clear and a retake.
+        That operator takes the record's flock (the lock file held when the record was created) for what it
+        does, and acts at the worst moment for the holder: `fn()` runs right before the first write or delete of
+        the record made WITHOUT holding that flock (after any read the holder already made). A write or delete
+        inside the flock is never interleaved; then, as when nothing is written, `fn()` runs after the docker call
+        ends. A release that compares and deletes inside the same flock as the take therefore cannot remove a
+        record taken in between; a release that reads and then deletes outside it can."""
+        store, key, _ro = self.resolve(c, path)
+        self.lock_races[(store, key)] = fn
+
+    def _touch(self, c: Container, path: str) -> None:
+        store, key, _ro = self.resolve(c, path)
+        fn = self.lock_races.get((store, key))
+        if fn is None:
+            return
+        del self.lock_races[(store, key)]
+        if self.guard_of.get((store, key), frozenset()) & set(self._held):
+            self._deferred.append(fn)
+        else:
+            fn()
 
     def stop_engine(self, scope: str, name: str) -> None:
         """The lab server rebooted, or someone ran `docker stop` on the engine: it and all it runs stop."""
@@ -198,6 +233,10 @@ class RigDocker(FakeDocker):
         self._undo = []
         rc, out, err = self._docker(argv, None, stdin)
         self._undo = None
+        self._held = []
+        deferred, self._deferred = self._deferred, []
+        for fn in deferred:
+            fn()
         text = kw.get("text") or kw.get("universal_newlines")
         out_v = out.decode(errors="replace") if text and isinstance(out, bytes) else out
         if not text and isinstance(out_v, str):
@@ -460,10 +499,13 @@ class RigDocker(FakeDocker):
         raw = self.read_file(c, offset_file) if offset_file else None
         where = self.resolve(c, offset_file) if offset_file else None
         inode = self.inodes.get((where[0], where[1])) if where else None
+        preload = c.env.get("LD_PRELOAD") or self.image_env.get(c.image, {}).get("LD_PRELOAD")
         self.events.append({"kind": "node-start", "j": len(self.journal) - 1, "clock": self.clock.last,
                             "container": c, "data": store, "offset_file": offset_file,
                             "offset": raw.decode(errors="replace") if raw is not None else None,
-                            "inode": inode})
+                            "inode": inode, "preload": preload,
+                            "preload_found": bool(preload) and all(
+                                self.read_file(c, p) is not None for p in re.split(r"[\s:]+", preload) if p)})
 
     def _set_state(self, c: Container, state: str) -> None:
         was = c.state
@@ -504,6 +546,9 @@ class RigDocker(FakeDocker):
             self._drop_store(sid)
 
     def _drop_store(self, sid: tuple) -> None:
+        if sid in self.stores:
+            self.events.append({"kind": "store-drop", "j": len(self.journal) - 1, "clock": self.clock.last,
+                                "store": sid})
         self.stores.pop(sid, None)
         if sid == self.cluster_store:
             self.cluster.load_node_state(None)
@@ -622,7 +667,7 @@ class RigDocker(FakeDocker):
             return self._docker(command, f"{scope}/{name}", stdin)
         if c.cluster is not None and self._curl_args(command) is not None:
             return self._curl(c, self._curl_args(command), stdin)
-        if c.name in STUBS and command[:2] == ["python3", "-c"]:
+        if c.name in STUBS and self._stub_request(command) is not None:
             return self._stub(c, command, stdin)
         if c.extra.get("role_host") and len(command) >= 3 and command[0].rsplit("/", 1)[-1] in ("bash", "sh") \
                 and command[1] in ("-c", "-lc", "-cl"):
@@ -705,15 +750,40 @@ class RigDocker(FakeDocker):
 
     # -- stubs ---------------------------------------------------------------------------------------
 
+    _LOCAL_URL = re.compile(r"https?://(?:127\.0\.0\.1|localhost)(?::\d+)?(/[^\s'\"]*)")
+
+    @classmethod
+    def _stub_request(cls, command: list[str]):
+        """(kind, path) of a stub request however it is spelled: a python `-c` script reading the path from its
+        argument or naming a local URL, or curl/wget of a local URL; kind is "read" or "overlay" (the overlay
+        post: a script naming `/admin/overlay/` with no argument). None: not a stub request this rig knows."""
+        if len(command) >= 3 and command[0].rsplit("/", 1)[-1] in ("python", "python3") and command[1] == "-c":
+            script, args = command[2], command[3:]
+            if "/admin/overlay/" in script and not args:
+                return "overlay", None
+            if args and args[0].startswith("/"):
+                return "read", args[0]
+            m = cls._LOCAL_URL.search(script)
+            return ("read", m.group(1)) if m else None
+        if command and command[0].rsplit("/", 1)[-1] in ("curl", "wget"):
+            for a in command[1:]:
+                m = cls._LOCAL_URL.fullmatch(a)
+                if m:
+                    return "read", m.group(1)
+        return None
+
     def _stub(self, c: Container, command: list[str], stdin: bytes):
-        script, args = command[2], command[3:]
+        request = self._stub_request(command)
+        if request is None:
+            return self._unmodelled(["docker", "exec", c.name, *[a[:60] for a in command]])
+        kind, path = request
         serves = c.extra.get("serves")
-        if serves is not None and args and "argv[1]" in script and "urlopen" in script:
-            if args[0] not in serves:
-                return 1, "", "urllib.error.HTTPError: HTTP Error 404: Not Found"
-            return 0, json.dumps(serves[args[0]]), ""
+        if serves is not None and kind == "read":
+            if path not in serves:
+                return 1, "", "HTTP Error 404: Not Found"
+            return 0, json.dumps(serves[path]), ""
         state = self.stub_state.setdefault(c.id, {"seeds": {}, "overlays": {}})
-        if "/admin/overlay/" in script and not args:
+        if kind == "overlay":
             try:
                 items = json.loads(stdin.decode() or "[]")
             except ValueError:
@@ -721,11 +791,9 @@ class RigDocker(FakeDocker):
             for item in items:
                 state["overlays"].setdefault(item["host"], {}).update(copy.deepcopy(item["patch"]))
             return 0, "", ""
-        if args and "argv[1]" in script and "urlopen" in script:
-            view = {"stub": c.name, "path": args[0], "env": dict(sorted(c.env.items())),
-                    "seeds": state["seeds"], "overlays": state["overlays"]}
-            return 0, json.dumps(view, sort_keys=True), ""
-        return self._unmodelled(["docker", "exec", c.name, "python3", "-c", script[:60], *args])
+        view = {"stub": c.name, "path": path, "env": dict(sorted(c.env.items())),
+                "seeds": state["seeds"], "overlays": state["overlays"]}
+        return 0, json.dumps(view, sort_keys=True), ""
 
     # -- files and the small shell -------------------------------------------------------------------
 
@@ -742,8 +810,11 @@ class RigDocker(FakeDocker):
         store, key, ro = self.resolve(c, path)
         if ro or store == ("gone",):
             return f"{path}: Read-only file system"
+        self._touch(c, path)
         files = self.stores.setdefault(store, {})
         prior = files.get(key)
+        if prior is None:
+            self.guard_of[(store, key)] = frozenset(self._held)
         self._undo.append((store, key, prior))
         if key not in files or (store, key) not in self.inodes:
             self._inode += 1
@@ -762,6 +833,7 @@ class RigDocker(FakeDocker):
         return None
 
     def _remove(self, c: Container, path: str, recursive: bool) -> None:
+        self._touch(c, path)
         store, key, _ro = self.resolve(c, path)
         files = self.stores.get(store, {})
         for k in [k for k in files if k == key or (recursive and k.startswith(key.rstrip("/") + "/"))]:
@@ -786,7 +858,8 @@ class RigDocker(FakeDocker):
         return self._commands(c, [("", list(command), [])], stdin, {**c.env, **(env or {})})
 
     def _shell(self, c: Container, script: str, stdin: bytes, env: dict, positional: list[str]):
-        script = _SUBST.sub("substituted", script).replace("\n", ";")
+        subs: dict[str, str] = {}
+        script = _premark(script, subs).replace("\n", ";")
         lex = shlex.shlex(script, posix=True, punctuation_chars=";&|<>")
         lex.whitespace_split, lex.commenters = True, ""
         try:
@@ -797,7 +870,7 @@ class RigDocker(FakeDocker):
                  **{str(i): v for i, v in enumerate(positional[1:], 1)}, **env}
 
         def expand(word: str) -> str:
-            return _VAR.sub(lambda m: names.get(m.group(1) or m.group(2), ""), word)
+            return _VARMARK.sub(lambda m: names.get(m.group(1), ""), word)
 
         commands, words, redirects, op = [], [], [], ""
         k = 0
@@ -831,11 +904,18 @@ class RigDocker(FakeDocker):
             k += 1
         if words or redirects:
             commands.append((op, words, redirects))
-        return self._commands(c, commands, stdin, env)
+        return self._commands(c, commands, stdin, env, {"subs": subs, "positional": positional})
 
-    def _commands(self, c: Container, commands: list, stdin: bytes, env: dict):
+    def _commands(self, c: Container, commands: list, stdin: bytes, env: dict, ctx: dict | None = None):
         writes_before = len(self.writes)
-        st = {"noclobber": False, "rc": 0, "out": b"", "err": b""}
+        held_before = len(self._held)
+        st = {"noclobber": False, "rc": 0, "out": b"", "err": b"", "fds": {}, **(ctx or {"subs": {}, "positional": []})}
+        try:
+            return self._commands_in(c, commands, stdin, env, st, writes_before)
+        finally:
+            del self._held[held_before:]          # a flock taken on an fd lasts until its shell ends
+
+    def _commands_in(self, c: Container, commands: list, stdin: bytes, env: dict, st: dict, writes_before: int):
         try:
             nodes, _end = self._block(commands, 0, ())
         except _Syntax:
@@ -909,7 +989,67 @@ class RigDocker(FakeDocker):
             st["rc"] = rc
         return rc
 
+    def _substitute(self, c: Container, word: str, env: dict, st: dict) -> str:
+        """`$(...)` run when its command runs; a substitution this shell cannot run yields a fixed word."""
+        for key, inner in st["subs"].items():
+            if key in word:
+                before = len(self.unmodelled)
+                _rc, o, _e = self._shell(c, inner, b"", env, st["positional"])
+                if len(self.unmodelled) > before:
+                    del self.unmodelled[before:]
+                    value = "substituted"
+                else:
+                    value = (o.decode(errors="replace") if isinstance(o, bytes) else o).rstrip("\n")
+                word = word.replace(key, value)
+        return word
+
+    def _flock(self, c: Container, words: list, stdin: bytes, env: dict, st: dict) -> int:
+        """`flock [-x|-s|-n|-w N] <file> <command...>` / `flock <file> -c <script>`: the command runs holding
+        the lock file; `flock [-x] <fd>` holds the file `exec <fd>>file` opened until the shell ends."""
+        args, j = words[1:], 0
+        while j < len(args) and args[j].startswith("-") and args[j] != "-c":
+            j += 2 if args[j] in ("-w", "--timeout", "-E", "--conflict-exit-code") else 1
+        if j >= len(args):
+            self._unmodelled(words)
+            return 127
+        target, rest = args[j], args[j + 1:]
+        if target.isdigit():
+            if rest or target not in st["fds"]:
+                self._unmodelled(words)
+                return 127
+            self._held.append(self.resolve(c, st["fds"][target])[:2])
+            return 0
+        if self.read_file(c, target) is None:
+            self._write(c, target, b"", "append")
+        self._held.append(self.resolve(c, target)[:2])
+        try:
+            if rest[:1] == ["-c"] and len(rest) == 2:
+                rc, o, e = self._shell(c, rest[1], stdin, env, [])
+            elif rest:
+                rc, o, e = self._shell_argv(c, rest, stdin, env)
+            else:
+                self._unmodelled(words)
+                return 127
+        finally:
+            self._held.pop()
+        st["out"] += o if isinstance(o, bytes) else o.encode()
+        st["err"] += e if isinstance(e, bytes) else e.encode()
+        return rc
+
     def _simple(self, c: Container, words: list, redirects: list, stdin: bytes, env: dict, st: dict) -> int:
+        if st["subs"]:
+            words = [self._substitute(c, w, env, st) for w in words]
+            redirects = [(k, self._substitute(c, t, env, st)) for k, t in redirects]
+        if words and words[0] == "exec":
+            if len(words) == 2 and words[1].isdigit() and [k for k, _t in redirects] in ([">"], [">>"]):
+                st["fds"][words[1]] = redirects[0][1]
+                if self.read_file(c, redirects[0][1]) is None:
+                    self._write(c, redirects[0][1], b"", "append")
+                return 0
+            self._unmodelled(words)
+            return 127
+        if words and words[0] == "flock":
+            return self._flock(c, words, stdin, env, st)
         if words and words[0] == "exit":
             raise _Exit(int(words[1]) if len(words) > 1 else st["rc"])
         if words[:2] == ["set", "-C"] or words[:3] == ["set", "-o", "noclobber"]:
@@ -938,6 +1078,38 @@ class RigDocker(FakeDocker):
         st["out"] += o
         st["err"] += e
         return rc
+
+    def _grep(self, c: Container, words: list[str], args: list[str], stdin: bytes):
+        quiet = fixed = False
+        pattern, files, j = None, [], 0
+        while j < len(args):
+            a = args[j]
+            if a == "-e":
+                pattern, j = args[j + 1], j + 2
+                continue
+            if a.startswith("-") and len(a) > 1 and pattern is None:
+                if set(a[1:]) - set("qFs"):
+                    return self._unmodelled(words)
+                quiet, fixed = quiet or "q" in a, fixed or "F" in a
+            elif pattern is None:
+                pattern = a
+            else:
+                files.append(a)
+            j += 1
+        if pattern is None:
+            return self._unmodelled(words)
+        texts = []
+        for f in files or [None]:
+            data = stdin if f is None else self.read_file(c, f)
+            if data is None:
+                return 2, b"", f"grep: {f}: No such file or directory".encode()
+            texts.append(data.decode(errors="replace"))
+        try:
+            rx = re.compile(re.escape(pattern) if fixed else pattern)
+        except re.error:
+            return self._unmodelled(words)
+        hits = [ln for t in texts for ln in t.splitlines() if rx.search(ln)]
+        return (0 if hits else 1), (b"" if quiet else "".join(h + "\n" for h in hits).encode()), b""
 
     def _dd(self, c: Container, args: list[str], stdin: bytes):
         opts = dict(a.split("=", 1) for a in args if "=" in a)
@@ -993,6 +1165,11 @@ class RigDocker(FakeDocker):
         cmd, args = words[0], words[1:]
         if cmd in ("true", ":", "set", "sync", "chmod", "chown", "sleep", "umask", "export"):
             return 0, b"", b""
+        if cmd in ("dirname", "basename") and len(args) == 1:
+            fn = posixpath.dirname if cmd == "dirname" else posixpath.basename
+            return 0, ((fn(args[0].rstrip("/")) or ("/" if cmd == "dirname" else "")) + "\n").encode(), b""
+        if cmd == "grep":
+            return self._grep(c, words, args, stdin)
         if cmd == "ps" and "ps" in c.extra:
             return 0, c.extra["ps"], b""
         if cmd == "dd":
@@ -1005,6 +1182,12 @@ class RigDocker(FakeDocker):
             args = args[1:] if negate else args
             if len(args) == 2 and args[0] in ("-f", "-e", "-d", "-s"):
                 ok = self._exists(c, args[1], args[0])
+                return (0 if ok != negate else 1), b"", b""
+            if len(args) == 3 and args[1] in ("=", "==", "!="):
+                ok = (args[0] == args[2]) == (args[1] != "!=")
+                return (0 if ok != negate else 1), b"", b""
+            if len(args) == 2 and args[0] in ("-n", "-z"):
+                ok = bool(args[1]) == (args[0] == "-n")
                 return (0 if ok != negate else 1), b"", b""
             return self._unmodelled(["test", *words])
         if cmd == "mkdir":
@@ -1070,6 +1253,69 @@ class RigDocker(FakeDocker):
                 return 2, b"", f"tar: {exc}".encode()
             return 0, b"", b""
         return self._unmodelled(words)
+
+
+_VARMARK = re.compile("\x01(\\w+)\x02")
+
+
+def _premark(script: str, subs: dict) -> str:
+    """`script` with each `$NAME`/`${NAME}` and `$(...)` outside single quotes replaced by a marker, so the
+    value is put in after the words are split (and a single-quoted script, e.g. one handed to `sh -c` or
+    `flock`, keeps its own `$1` for its own shell). `subs` receives each substitution's command."""
+    out, i, sq, n = [], 0, False, len(script)
+    while i < n:
+        ch = script[i]
+        if sq:
+            out.append(ch)
+            sq = ch != "'"
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            out.append(script[i:i + 2])
+            i += 2
+            continue
+        if ch == "'" and not _in_double(out):
+            sq = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "$" and script[i + 1:i + 2] == "(":
+            depth, j = 0, i + 1
+            while j < n:
+                depth += {"(": 1, ")": -1}.get(script[j], 0)
+                if depth == 0:
+                    break
+                j += 1
+            key = f"\x03{len(subs)}\x04"
+            subs[key] = script[i + 2:j]
+            out.append(key)
+            i = j + 1
+            continue
+        m = re.match(r"\$(\w+)|\$\{(\w+)\}", script[i:])
+        if m:
+            out.append(f"\x01{m.group(1) or m.group(2)}\x02")
+            i += m.end()
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _in_double(out: list) -> bool:
+    text = "".join(out)
+    count, k = 0, 0
+    while k < len(text):          # unescaped double quotes outside single-quoted runs
+        if text[k] == "\\":
+            k += 2
+            continue
+        if text[k] == "'" and count % 2 == 0:
+            end = text.find("'", k + 1)
+            k = len(text) if end < 0 else end + 1
+            continue
+        if text[k] == '"':
+            count += 1
+        k += 1
+    return count % 2 == 1
 
 
 class _Exit(Exception):

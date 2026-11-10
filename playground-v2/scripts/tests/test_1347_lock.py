@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+import json
 import os
 import threading
 from types import SimpleNamespace
@@ -33,7 +34,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from _lab_fakes import FakeLockStore, Journal
+from _lab_fakes import FakeLockStore, Journal, instant
 from _periphery_fakes import LocalContainer, containers_in, install_fake_docker
 
 PLAYGROUND = Path(__file__).resolve().parents[2]
@@ -513,10 +514,58 @@ def test_a_release_racing_a_clear_and_a_retake_never_removes_the_new_holders_rec
     store.race(name, clear_and_retake)
     try:
         lock.release(store, name, token)
-    except lock.LockError:
+    except (lock.Held, lock.WrongToken):
         pass          # refusing is fine: the old holder no longer holds it
 
     assert store.records.get(name) == newer, store.records
+
+
+def _rig_lab_store(lock):
+    """`DockerLockStore` over the rig docker: the lab server's lock container, its files and its shell."""
+    from _lab_fakes import CONTEXT, FakeClock, Journal
+    from _rig_docker import RigDocker
+
+    journal = Journal()
+    docker = RigDocker(journal=journal, clock=FakeClock(journal, instant("2026-11-10T09:00:00Z")))
+    box = docker.existing(CONTEXT, lock.LOCK_CONTAINER, "docker.elastic.co/elasticsearch/elasticsearch:9.3.3")
+    return lock.DockerLockStore(run=docker), docker, box
+
+
+@pytest.mark.parametrize("name", ["capture", "frozen-engine"])
+def test_a_release_on_the_lab_store_racing_a_clear_and_a_retake_keeps_the_new_holders_record(lock, name):
+    """r6.4.3 finding 9 (settled mechanism: every take and every release of a lock record runs under `flock` on
+    a per-lock lock file, and the release compares the record's token before it deletes, in one exec). On the
+    lab store, another operator clears the lock and takes it again at any moment the old holder's release is
+    not inside the flock its take held (`RigDocker.race_record`). Outcome only: the new holder's record is
+    still there after the old holder's release, which may refuse."""
+    store, docker, box = _rig_lab_store(lock)
+    token = lock.take(store, name)
+    newer = json.dumps({"token": "b" * 32, "taken_at": "2026-11-10T09:05:00+00:00", "holder": "other@lab"})
+    path = f"{lock.LOCK_DIR}/{name}"
+
+    def clear_and_retake():
+        where, key, _ro = docker.resolve(box, path)
+        docker.stores.setdefault(where, {})[key] = newer.encode()
+
+    docker.race_record(box, path, clear_and_retake)
+    try:
+        lock.release(store, name, token)
+    except (lock.Held, lock.WrongToken):
+        pass          # refusing is fine: the old holder no longer holds it
+
+    assert store.read(name) == newer, store.read(name)
+    assert not docker.unmodelled, f"a gap in the rig docker (repair the fake): {docker.unmodelled}"
+
+
+def test_a_release_on_the_lab_store_frees_the_holders_own_record(lock):
+    """Control for the race test: with no one racing, the holder's release frees the lock and a new take works."""
+    store, docker, _box = _rig_lab_store(lock)
+    token = lock.take(store, lock.CAPTURE)
+    lock.release(store, lock.CAPTURE, token)
+
+    assert store.read(lock.CAPTURE) is None
+    assert lock.take(store, lock.CAPTURE)
+    assert not docker.unmodelled, docker.unmodelled
 
 
 def test_the_lab_store_deletes_only_the_holders_record_in_one_step(lock, tmp_path):

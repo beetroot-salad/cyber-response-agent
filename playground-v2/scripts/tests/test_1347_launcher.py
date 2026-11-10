@@ -51,7 +51,7 @@ import yaml
 from _lab_fakes import (AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, ALERTS_PATTERN, DATA_DROP, EVENTS, FREEZE_ID,
                         LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SCHEMA_DRIFT,
                         SLUG, SPAN_START, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T, FaultJournal, LabRig,
-                        canonical_digest, expected_copy, expected_variant, instant, is_clean_marker)
+                        canonical_digest, expected_copy, expected_variant, instant, is_clean_marker, nested_alert)
 
 LAUNCH = Path(__file__).resolve().parents[1] / "launch_frozen.py"
 KINDS = ["none", "drop", "drift", "cmdb"]
@@ -122,6 +122,10 @@ def test_a_scored_launch_runs_the_agent_as_of_T_on_the_frozen_proxy_and_writes_t
         SLUG, RUN_ID, rig.binding(), "valid", "abc1234")
     assert instant(row["verified_at"]) > instant("2026-11-08T12:00:00Z")
     assert [json.loads(x) for x in rig.teardown_seen()["index"].splitlines()] == [first, row]
+    stops = [e for e in rig.docker.of_kind("service-stop") if e["j"] > j.first("run")]
+    assert stops, "nothing the launch started was stopped after the run"
+    for e in stops:      # every teardown step, not only the last, finds the row already on disk
+        assert [json.loads(x) for x in e["seen"]["index"].splitlines()] == [first, row], e["container"].name
     assert rig.lock_in_run and "frozen-engine" not in rig.store.records
 
 
@@ -238,6 +242,19 @@ def test_a_schema_drift_rewrites_span_events_and_the_alerts_derived_from_them_ke
     assert state[ALERTS]["id-syslog-alert"] == base[ALERTS]["id-syslog-alert"]
 
 
+# The stubs that read `V2_STUB_AS_OF` (their own pinned-clock tests: ticket-server/tests and change-mgmt/tests).
+CLOCKED_STUBS = ("ticket-server", "change-mgmt")
+
+
+def _assert_the_stubs_that_read_a_clock_are_pinned_at_T(stubs):
+    """O3: the stubs whose clock is `V2_STUB_AS_OF` run with it at T; the others may carry it or not, but
+    never another instant."""
+    for name in CLOCKED_STUBS:
+        assert stubs[name]["as_of"] is not None and instant(stubs[name]["as_of"]) == instant(T), (name, stubs[name])
+    for name, s in stubs.items():
+        assert s["as_of"] is None or instant(s["as_of"]) == instant(T), (name, s)
+
+
 def test_a_cmdb_stale_overlay_is_applied_at_stub_load_and_changes_no_document(tmp_path):
     """A3: the stub store loads with the case's resolved mutations; the cluster gets only the base overlay."""
     rig = LabRig(tmp_path)
@@ -246,7 +263,7 @@ def test_a_cmdb_stale_overlay_is_applied_at_stub_load_and_changes_no_document(tm
 
     stubs = rig.stubs()
     assert set(stubs) == {"cmdb", "threat-intel", "change-mgmt", "ticket-server", "identity"}, stubs
-    assert all(instant(s["as_of"]) == instant(T) for s in stubs.values()), stubs
+    _assert_the_stubs_that_read_a_clock_are_pinned_at_T(stubs)
     flip = case["overlay"]["mutations"][0]
     assert stubs["cmdb"]["overlays"] == {flip["host"]: {flip["field"]: flip["new_value"]}}, stubs["cmdb"]
     assert not [m for m in rig.cluster.mutations if m["kind"] == "reindex"]
@@ -259,7 +276,8 @@ def test_a_variant_without_an_overlay_loads_the_stubs_with_no_mutations(tmp_path
     rig.launch()
 
     stubs = rig.stubs()
-    assert len(stubs) == 5 and all(instant(s["as_of"]) == instant(T) for s in stubs.values()), stubs
+    assert len(stubs) == 5, stubs
+    _assert_the_stubs_that_read_a_clock_are_pinned_at_T(stubs)
     assert all(not s["overlays"] for s in stubs.values()), stubs
 
 
@@ -283,7 +301,8 @@ def test_the_copy_is_made_safe_before_it_is_changed(tmp_path):
 
 def test_the_copy_state_marker_is_dirty_from_before_the_first_change_until_the_variant_is_ready(tmp_path):
     """A4: at every restore and overlay request the stored marker is not a clean one; afterwards it
-    is clean and names the freeze."""
+    is clean (D25: the marker's variant id carries the freeze; that it does is pinned by
+    `test_a_clean_marker_of_the_same_variant_of_another_freeze_is_not_trusted`)."""
     rig = LabRig(tmp_path)
     rig.write_expected_case("drop")
     rig.launch()
@@ -353,6 +372,45 @@ def test_a_clean_marker_for_the_same_variant_skips_the_restore_and_the_copy_stay
     assert rig.cluster.restores == 1 and len(rig.cluster.mutations) == after_first
     assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"]
     assert rig.cluster.state() == expected_copy("drop")
+
+
+def test_a_launch_reads_the_alert_uuid_of_a_nested_alert_json(tmp_path):
+    """r6.4.3 C-parse: the case's alert.json may carry the alert nested (`{"kibana": {"alert": {"uuid": U}}}`);
+    the launch reads U from it (no "carries no kibana.alert.uuid" refusal) and looks that alert up in the copy."""
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("none")
+    doc = json.loads((rig.case_dir / "alert.json").read_text())
+    (rig.case_dir / "alert.json").write_text(json.dumps(nested_alert(doc)))
+    try:
+        rig.launch()
+    except Exception as exc:  # noqa: BLE001 - a stale verdict for the reshaped file is not what is checked
+        assert "uuid" not in str(exc), exc
+
+    lookups = [b for m, p, b in rig.cluster.requests if p.split("?")[0].endswith("/_search")
+               and '"young"' in json.dumps(b)]
+    assert lookups, "the launch never looked the case's alert up in the copy"
+
+
+def test_a_clean_marker_of_the_same_variant_of_another_freeze_is_not_trusted(tmp_path):
+    """A4/D25: the marker's variant id carries the freeze. The same variant (`none`) of a second freeze, a copy
+    of the first under another freeze id, is another variant: the second launch restores again, into a fresh
+    node, and both runs are valid. A variant id that ignored the freeze would reuse the first copy."""
+    import shutil
+
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("none")
+    rig.launch()
+    other = "f-2026-10-20-copy"
+    shutil.copytree(rig.freeze_dir, rig.freezes / other)
+    shutil.copytree(rig.parts / FREEZE_ID, rig.parts / other)
+    case = yaml.safe_load((rig.case_dir / "case.yaml").read_text())
+    case["freeze"] = other
+    (rig.case_dir / "case.yaml").write_text(yaml.safe_dump(case))
+    rig.launch()
+
+    assert rig.cluster.restores == 2, "a clean marker of another freeze's copy was trusted"
+    assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"], rig.rows()
+    _assert_every_restore_went_into_a_fresh_node(rig, "another freeze")
 
 
 @pytest.mark.parametrize("first, second", [("drop", "none"), ("drift", "drop"), ("none", "drift")])
@@ -547,6 +605,29 @@ def test_a_snapshot_with_another_uuid_is_refused_before_the_copy_is_touched(tmp_
 
     assert rig.cluster.mutations == [] and rig.cluster.restores == 0
     assert "run" not in rig.journal.ops() and rig.rows() == [] and "frozen-engine" not in rig.store.records
+
+
+def test_a_snapshot_with_another_uuid_leaves_the_existing_copy_untouched_when_a_restore_is_due(tmp_path):
+    """A2 under D25: a copy is up (a valid `drop` launch); the next case wants another variant, so a restore is
+    due, but the repository's snapshot now carries another UUID. The refusal comes before the copy is touched:
+    no restore, no overlay, and the old node container and its data volume still exist (D25's discard of the old
+    node waits until the snapshot is known to be the freeze's)."""
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("drop")
+    rig.launch()
+    node = rig.docker.of_kind("node-start")[-1]
+    mutations, restores = len(rig.cluster.mutations), rig.cluster.restores
+    rig.cluster.snapshot_uuid = "another-uuid"
+    rig.write_expected_case("drift")
+    with pytest.raises(Exception, match="(?i)uuid"):
+        rig.launch()
+
+    assert rig.cluster.restores == restores and len(rig.cluster.mutations) == mutations
+    key = (node["container"].scope, node["container"].name)
+    assert rig.docker.containers.get(key) is node["container"], "the old node container was removed before the refusal"
+    assert node["data"] in rig.docker.stores, "the old node's data volume was discarded before the refusal"
+    assert not [w for w in rig.docker.of_kind("volume-rm") if w["volume"] == node["data"]]
+    assert len(rig.rows()) == 1
 
 
 @pytest.mark.parametrize("damage", ["unconfirmed", "no-freeze", "no-counts"])
@@ -1129,6 +1210,9 @@ def _assert_every_restore_went_into_a_fresh_node(rig, where=""):
             if e["data"][0] == "vol":
                 assert any(w["volume"] == e["data"] and w["j"] < r["j"] for w in wiped), (
                     where, "the old node's data volume was not discarded before the restore", e["data"])
+            else:        # anonymous volume or the container's own layer: gone with the old container
+                assert any(d["store"] == e["data"] and d["j"] < r["j"] for d in rig.docker.of_kind("store-drop")), (
+                    where, "the old node's anonymous data was not discarded before the restore", e["data"])
         assert not any(e["data"] == r["data"] for e in curls if e["j"] < r["j"] and e["node"] != r["node"])
     for entry in [m for m in rig.cluster.mutations if m["kind"] == "restore"]:
         assert entry["indices_before"] == [], (where, "restored over existing indices", entry["indices_before"])
@@ -1266,7 +1350,9 @@ def _assert_every_node_start_already_holds_the_offset_for_T(rig, where=""):
     assert starts, f"{where}: no frozen node was started"
     for e in starts:
         env = e["container"].env
-        assert "LD_PRELOAD" in env and e["offset_file"], (where, "the node runs without the file-fed shim", env)
+        assert e["preload"] and e["offset_file"], (where, "the node runs without the file-fed shim", env)
+        assert e["preload_found"], (where, "LD_PRELOAD names no file in the node (from its run env or its image's)",
+                                    e["preload"])
         assert e["offset"] is not None and e["offset"].strip(), (where, "the node started before its offset file held T", e["offset"])
         node_now = e["clock"] + timedelta(seconds=int(e["offset"].strip()))
         assert abs((node_now - instant(T)).total_seconds()) <= 5, (where, "at its start the node's clock is not T", e["offset"])
