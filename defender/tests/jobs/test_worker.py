@@ -4585,3 +4585,81 @@ async def test_b11_a_service_cancelled_as_its_store_call_finishes_still_ends_so_
             await asyncio.wait({task}, timeout=5)
     assert not leftover, f"the {service} service survived its cancel"
     assert task.cancelled()
+
+
+async def test_1170_the_worker_starts_each_investigation_as_its_tenants_host_helper(world):
+    """The worker's default child is the per-job host helper, not the job entry: one spawn per claim, naming the
+    helper module, the job's kind, the investigation, its tenant and the worker's pid; the row ends as the child's
+    end record says. (#1170 H7, Flow: claim)
+
+    The `spawn` door records the command the worker asked for and starts the scripted child in its place."""
+    from defender.worker import Launch, run_argv
+
+    child = _child(world, files=_committed())
+    real_spawn = asyncio.create_subprocess_exec
+    asked: list[list[str]] = []
+
+    async def as_scripted(*argv, **kw):
+        asked.append(list(argv))
+        inv = argv[argv.index("--job") + 1]
+        return await real_spawn(*child(Launch(inv, T1, os.getpid())), **kw)
+
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        await _worker(world, store, run_argv, spawn=as_scripted).drain()
+
+    assert asked == [[sys.executable, "-m", "defender.job_host", "--kind", "investigation", "--job", inv,
+                      "--tenant", T1, "--parent-pid", str(os.getpid())]]
+    assert row(world["dsn"], inv)["stage"] == "completed"
+
+
+@pytest.mark.parametrize("copied", [True, False], ids=["code-copy", "control-no-copy"])
+async def test_1170_the_worker_spawns_the_helper_in_its_code_copy_and_only_there(world, copied):
+    """The helper is started with `cwd` set to the worker's code copy (the `child_cwd` it was given), so it imports the copy and the container mounts it; a worker given no copy sets no `cwd` (control). (#1170 A7, G-D3)"""
+    from defender.worker import Launch, run_argv
+
+    copy = world["tmp"] / "code-copy"
+    copy.mkdir()
+    child = _child(world, files=_committed())
+    real_spawn = asyncio.create_subprocess_exec
+    cwds: list[str] = []
+
+    async def as_scripted(*argv, **kw):
+        cwds.append(kw.get("cwd", "<unset>"))
+        inv = argv[argv.index("--job") + 1]
+        kw.pop("cwd", None)
+        return await real_spawn(*child(Launch(inv, T1, os.getpid())), **kw)
+
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        await _worker(world, store, run_argv, spawn=as_scripted, **({"child_cwd": copy} if copied else {})).drain()
+
+    assert cwds == [str(copy) if copied else "<unset>"]
+    assert row(world["dsn"], inv)["stage"] == "completed", "control: the spawned child ran to its end record"
+
+
+async def test_1170_the_worker_start_sweeps_the_job_containers_a_dead_helper_left_by_their_label(world):
+    """At start the worker removes every container carrying the job-container label (their helper, and the claim tokens
+    that named them, died with the previous worker); a tenant's box without that label stays. (#1170 A5)"""
+    import signal
+
+    from defender import job_host
+    from defender.box import CLAIM_LABEL, TENANT_LABEL
+    from defender.tests.support.jobs._job_helper import ContainerStandIn, until
+    from defender.worker._containers import DockerContainers
+
+    docker = ContainerStandIn()
+    docker.live.update({"job-left-over": {job_host.JOB_LABEL: "1", TENANT_LABEL: T1, CLAIM_LABEL: "a" * 32},
+                        "tenant-box": {TENANT_LABEL: T1}})
+    async with job_store(world["dsn"]) as store:
+        worker = _worker(world, store, _child(world), containers=DockerContainers(docker=docker))
+        serving = asyncio.create_task(worker.serve())
+        try:
+            await asyncio.to_thread(until, lambda: "job-left-over" not in docker.live, "the start sweep", 15.0)
+        finally:
+            assert not serving.done(), "premise: serve() is still running, so the SIGTERM below is its to handle"
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+
+    assert "tenant-box" in docker.live, "the sweep took a container that is not a job container"
+    assert any(c[1] == "rm" and "job-left-over" in c for c in docker.calls)

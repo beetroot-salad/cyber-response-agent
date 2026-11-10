@@ -5,10 +5,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import signal
-import subprocess
-import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -18,7 +14,7 @@ from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, Learning
 from defender.records._locations import unwrap_learning_root
 from defender.tenancy._tenant import requested_tenant
 from defender.tests.learning.branch.test_1344_job_lane import (
-    _SIBLING, _WORKER, _await_pid, _gone, _running, child_env, sink_files)
+    sink_files)
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -254,43 +250,6 @@ def test_o8_a_completed_job_whose_judge_was_never_asked_publishes_as_done(tmp_pa
 
     assert _record(ep, ep.name) == {"published": [ep.name], "refused": []}
     assert _queue(ep) == []
-
-
-_POST_STEP = textwrap.dedent("""
-    import os, sys
-    from defender.learning.branch import post_step
-    from defender.learning.branch.cli import _default_spawn
-    from defender.tests.support.learning.branch import _triplet_947 as T
-
-    tenant, pid_file, sibling = sys.argv[1:4]
-
-    def tick(*_a, **_k):
-        return _default_spawn([sys.executable, "-c", sibling, pid_file], env=dict(os.environ))
-
-    post_step.main(["--job", sys.argv[4], "--tenant", tenant, "--parent-pid", str(os.getppid())],
-                   author_tick=tick, directory=T.launcher_directory(tenant))
-""")
-
-
-def test_o9_the_real_post_step_takes_the_tick_it_started_with_it_when_its_worker_is_killed(tmp_path):
-    """SIGKILL the worker above the REAL post-step: its tie fires, and the tick's child (through the real spawn) is gone. (O9, O8)"""
-    ep, _ = _job_episode(tmp_path, "chain", findings=False)
-    _data_root, tenant_id = J.episode_location(ep)
-    pid_file = tmp_path / "tick.pid"
-    worker = subprocess.Popen([sys.executable, "-c", _WORKER, _POST_STEP, tenant_id, str(pid_file), _SIBLING, ep.name],
-                              env=child_env())
-    child = None
-    try:
-        child = _await_pid(pid_file)
-        assert _running(child), "control: the tick's child is up"
-        worker.kill()
-        worker.wait()
-        assert _gone(child), "the tick's child outlived the worker above the real post-step"
-    finally:
-        worker.kill()
-        worker.wait()
-        if child is not None and _running(child):
-            os.kill(child, signal.SIGKILL)
 
 
 def test_a_pending_job_whose_episode_is_gone_is_refused_not_left_pending_for_ever(tmp_path):

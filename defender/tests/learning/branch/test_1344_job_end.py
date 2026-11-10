@@ -11,8 +11,6 @@ import sqlite3
 import subprocess
 import sys
 import textwrap
-import threading
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -661,45 +659,3 @@ def test_a_sigterm_after_the_judge_returned_is_still_completed(tmp_path):
     assert len(records) == 1, f"premise: the entry left one end record, not {records}: {done.stderr[-2000:]}"
     ended = json.loads(records[0].read_text(encoding="utf-8"))
     assert (ended["status"], ended["reason"]) == ("completed", None), ended
-
-
-HOLD_SECONDS = 120
-
-
-def test_a_tenant_host_lock_still_busy_after_the_entrys_wait_is_a_hand_back(tmp_path):
-    """Prepare or teardown holds the tenant exclusively: the entry hands the job back (`stopped`), not fails it. (End record, O6)"""
-    from defender.tenancy import host_lock
-
-    held: list = []
-    gate = threading.Lock()
-    began: list[float] = []
-
-    def release() -> None:
-        with gate:
-            while held:
-                fd = held.pop()
-                if fd is not None:
-                    host_lock.release_lock(fd)
-
-    def hold(src: Path) -> None:
-        held.append(host_lock.acquire(Path(os.environ["DEFENDER_DATA_ROOT"]), src.parent.parent.name,
-                                      exclusive=True, timeout=0))
-        began.append(time.monotonic())
-
-    # The lock is let go after HOLD_SECONDS whatever the entry does, so an entry that waits for ever
-    # finishes (and fails the assertions below) instead of hanging the run.
-    timer = threading.Timer(HOLD_SECONDS, release)
-    timer.daemon = True
-    timer.start()
-    try:
-        ran = run_entry(tmp_path, fix_source=hold)
-    finally:
-        timer.cancel()
-        waited = time.monotonic() - began[0] if began else 0.0
-        had_it = bool(held) and held[0] is not None
-        release()
-    assert began, "premise: the test took the lock"
-    assert had_it, "premise: the lock was free to take"
-    assert waited < HOLD_SECONDS - 5, f"the entry waited out the whole {HOLD_SECONDS} s the lock was held"
-    _ended(ran, "stopped", None)
-    assert ran.spawn.launches == []

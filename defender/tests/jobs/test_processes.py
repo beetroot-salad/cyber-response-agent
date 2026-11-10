@@ -303,10 +303,13 @@ async def test_o7_serve_takes_sigterm_itself_and_returns(migrated_database, tmp_
 
 # --- O6 ------------------------------------------------------------------------------------------
 
-def test_o6_the_default_child_argv_is_run_py_job():
-    """The worker's default child is `run.py --job <id> --tenant <T> --parent-pid <pid>`. (O6)"""
+def test_o6_the_default_child_argv_is_the_per_job_host_helper():
+    """CONFLICT (was `run.py --job ... --parent-pid`): the worker's default child is the host helper,
+    `python -m defender.job_host --kind investigation --job <id> --tenant <T> --parent-pid <pid>`; the
+    host-mode `run.py --job` is retired (#1170 A6, H7)."""
     from defender.worker import Launch, run_argv
 
     launch = Launch(investigation_id="i-1", tenant_id=T1, parent_pid=4242)
-    assert run_argv(launch) == [sys.executable, str(DEFENDER / "run.py"), "--job", "i-1",
-                                "--tenant", T1, "--parent-pid", "4242"]
+    assert run_argv(launch) == [sys.executable, "-m", "defender.job_host", "--kind", "investigation",
+                                "--job", "i-1", "--tenant", T1, "--parent-pid", "4242"]
+    assert "run.py" not in " ".join(run_argv(launch)), "the retired host-mode job entry is still the child"

@@ -666,3 +666,25 @@ def test_1449_a_world_reads_on_a_runs_terms_and_is_never_minted_a_write_back_tok
         ("identity", "r"), ("ticket", "r")], "a world's read grant is not a regular run's"
     assert run.write_back(), "control: the regular run's mint signs no write-back token"
     assert world.write_back() == {}, "a world's mint signed a write-back token"
+
+
+def test_a6_the_job_entry_holds_no_signer_and_the_operator_command_still_does():
+    """CONFLICT (H2, P-B, A6): the job lane signed through `job_main`'s production defaults; in the container the
+    entry has no signer, directory, proxy or issuer seam (the helper signs; passes come over the socket), while the
+    operator command keeps all four (every test above)."""
+    import inspect
+
+    from defender import run as run_py
+
+    signing = {"signer", "directory", "proxy_url", "issuer_transport"}
+    assert signing <= set(inspect.signature(run_py.main).parameters), "control: the operator command still signs"
+    assert not signing & set(inspect.signature(run_py.job_main).parameters)
+
+
+def test_a6_the_job_entry_never_builds_a_request_signer():
+    """The job entry reaches no sign-login code in run.py: not `_TokenMint`, not `signing_access`/`approle_login`
+    (the helper's, not the container's). The operator command reaches `_TokenMint` (control). (O4, P-B)"""
+    from defender.tests.jobs.test_read_only import _reached_names
+
+    assert "_TokenMint" in _reached_names("main"), "control: the operator command mints through _TokenMint"
+    assert not {"_TokenMint", "signing_access", "approle_login", "TenantRequestSigner"} & _reached_names("job_main")
