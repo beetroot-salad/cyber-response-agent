@@ -278,6 +278,7 @@ class HostActor(Actor):
         folder, its secrets directory and its dev output are removed; anything already gone is done
         (Flow 2.3, RC-4)."""
         tenant = held.tenant_id
+        await self._offboard_learning(tenant)
         fd = await asyncio.to_thread(take_exclusive, self._root, tenant,
                                      wait=self._config.teardown_wait, containers=self._containers)
         try:
@@ -286,6 +287,23 @@ class HostActor(Actor):
             await held.commit(step=step, actor=actor)
         finally:
             host_lock.release_lock(fd)
+
+    async def _offboard_learning(self, tenant: str) -> None:
+        """The tenant's learning rows (#1278 O6): holders told to stop, lapsed batches ended, rows purged. A live holder
+        past the wait fails the step, which is retried. No database address: nothing of learning is stored here."""
+        dsn = os.environ.get("DEFENDER_DATABASE_DSN")
+        if not dsn:
+            return
+        from defender.learning.store import LaneBusy, LearningStore
+
+        store = LearningStore(dsn)
+        try:
+            await store.offboard(tenant, wait=self._config.teardown_wait)
+        except LaneBusy as busy:
+            # Not a failure: a failure waits for an operator's resume. The pass ends here and the next one asks again.
+            raise FenceMissed(f"the tenant's learning batch is still held: {busy}") from None
+        finally:
+            await store.close()
 
     def _remove_tenant_files(self, tenant: str) -> None:
         targets = [self._root / tenant, self._tenant_secrets(tenant)]

@@ -716,6 +716,34 @@ class LearningStore:
             phase="ended", outcome=outcome, ended_at=func.now(), reason=reason, lease_owner=None, lease_expiry=None,
             fencing_token=token))
 
+    async def offboard(self, tenant: str, *, wait: float) -> None:
+        """Offboarding's learning step (O6): tell working holders to stop, end the ones whose lease lapsed past grace,
+        and purge once none is left. A live holder still renewing at `wait` seconds is `LaneBusy`: the step fails and
+        is retried (G-T2); nothing is purged under a live lease."""
+        import asyncio
+        import time
+
+        deadline = time.monotonic() + wait
+        while True:
+            await self.request_cancel(tenant)
+            async with self._sessions() as s:
+                working = [r.id for r in (await s.execute(select(_B.c.id).where(
+                    _B.c.tenant_id == TenantId(tenant), _B.c.phase == "working"))).all()]
+            for batch_id in working:
+                try:
+                    await self.abandon(tenant, str(batch_id), by="recovery")
+                except NotLapsed:
+                    continue
+            async with self._sessions() as s:
+                left = (await s.execute(select(_B.c.id).where(
+                    _B.c.tenant_id == TenantId(tenant), _B.c.phase == "working").limit(1))).first()
+            if left is None:
+                await self.purge(tenant)
+                return
+            if time.monotonic() >= deadline:
+                raise LaneBusy(f"a live holder of {tenant} outlasted the wait")
+            await asyncio.sleep(0.1)
+
     async def purge(self, tenant: str) -> None:
         """Offboarding's last step: every row of the tenant."""
         t = TenantId(tenant)
