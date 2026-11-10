@@ -1,11 +1,20 @@
 """Forked runs continue the source clock and elapsed budget."""
 from __future__ import annotations
 
+import contextlib
+import json
+import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from defender._io import read_jsonl_rows
+from defender.learning.branch.estate.oracle import BASE_HANDLE
+from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
+from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.runtime.state import _1255_clock as C
 from defender.tests.support.learning.branch import _triplet_947 as T
 
@@ -25,13 +34,14 @@ def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def launch_arm(tmp_path: Path, tenant_id: str, source: Path, *steps: C.Step,  # noqa: PLR0913 — the arm's seams, one keyword each
                clock: C.FakeClock, limits: dict | None = None, gather: Any = None,
-               oracle: Any = None, verifier: Any = None) -> tuple[C.Launched, C.Clocked]:
+               oracle: Any = None, verifier: Any = None,
+               seams: dict | None = None) -> tuple[C.Launched, C.Clocked]:
     """Launch a recorded source at its L2 read, with scripted clocked main and gather models."""
     branch = C.branch_response(source, tool="read_file", arg_suffix=f"/{L2}.md")
     ep = C.control_episode(tmp_path, source, branch)
     main = C.Clocked(clock, steps)
     out = C.run_main(C.arm_argv(tenant_id, ep.name, "a"), clock=clock, main=main, gather=gather,
-                     limits=limits, oracle=oracle, verifier=verifier)
+                     limits=limits, oracle=oracle, verifier=verifier, seams=seams)
     return out, main
 
 
@@ -122,7 +132,90 @@ def test_a3_an_arms_denial_log_continues_from_the_sources_reading_at_the_branch_
         f"30 s ({C.at(R, 30)}): {rows}")
 
 
-# A4 (an arm's live host-state capture is stamped with its run clock) and A5 (the oracle is handed the
-# run-clock fork time) are retired with #1391: host-state is reached only through the credential proxy,
-# and a world mints no read token (O10, learning holds no token), so an arm can read no system live.
-# Tracked in #1449; they come back against whichever path it settles.
+#: What the host-state service answers the arm's new `proc-tree` question with, and what the
+#: adapter makes of it (#1391 O5's shape).
+PS_OUTPUT = "PID PPID\n1 0 init\n"
+
+
+@contextlib.contextmanager
+def _proxied_host_state() -> Iterator[tuple[str, A.MarkedSigner]]:
+    """A credential proxy stand-in answering every request with host-state's `proc-tree` reply,
+    and the run's request-token signer, which records each token it is asked to sign."""
+    answer = json.dumps({"ps_output": PS_OUTPUT}).encode()
+    framed = W.fmt().encode_body(answer) + W.fmt().encode_final(W.final_record())
+    with W.fake_proxy(framed, ended=True) as url:
+        yield url, A.MarkedSigner()
+
+
+def _new_host_state_question(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, proxy_url: str,
+                             signer: A.MarkedSigner) -> tuple[C.Launched, S.ScriptedModel, Path]:
+    """Launch an arm whose host-state question (one its source never asked) needs a new oracle
+    answer, with the credential proxy's seams handed to the arm's run as to any run's (#1449)."""
+    monkeypatch.setenv(S.KNOB_RATE, "1e6")
+    tenant_id, source = C.record_source(tmp_path)
+    time.sleep(1.1)
+    oracle = S.oracle(then=S.submit(BASE_HANDLE, S.EMPTY_CLAIM))
+    arm_clock = C.FakeClock(C.ARM_START)
+    gather = C.script(arm_clock, (10, C.query("host-state", "proc-tree", {"host": "web-1"})),
+                      (0, _summary("Summary: captured the process tree.")))
+    out, _main = launch_arm(tmp_path, tenant_id, source,
+                            (20, C.gather_turn("l-002", "host-state")), (0, C.DONE),
+                            clock=arm_clock, gather=gather, oracle=oracle.model,
+                            verifier=S.passing_verifier().model,
+                            seams={"signer": signer, "proxy_url": proxy_url})
+    _launched(out)
+    return out, oracle, source
+
+
+def test_1449_an_arms_new_question_is_read_through_the_proxy_with_a_run_read_token(
+        tmp_path, monkeypatch):
+    """A branched run is a run (#1449 W1, W3): the arm's new question reaches the proxy with a
+    read token over the run's granted systems, naming the arm's own run, and no write grant."""
+    with _proxied_host_state() as (url, signer):
+        out, _oracle, source = _new_host_state_question(tmp_path, monkeypatch, url, signer)
+
+    claims = [A.claims_of_payload(p) for p in signer.payloads]
+    assert claims, "the arm's new host-state question was never sent with a request token"
+    for one in claims:
+        assert one["investigation"] == out.run_dir.name != source.name, (
+            f"the arm's token does not name the arm's own run {out.run_dir.name}: {one}")
+        grant = A.grant_of(one)
+        assert ("host-state", "r") in grant, (
+            f"the arm's read token does not grant the system the source never asked: {grant}")
+        assert all(mode == "r" for _system, mode in grant), f"a world's token grants a write: {grant}"
+
+
+def test_a4_an_arms_host_state_capture_is_stamped_by_the_platform_with_its_run_clock(tmp_path, monkeypatch):
+    with _proxied_host_state() as (url, signer):
+        out, oracle, _source = _new_host_state_question(tmp_path, monkeypatch, url, signer)
+
+    rows = [r for r in read_jsonl_rows(out.run_dir / "executed_queries.jsonl")
+            if r.get("lead_id") == "l-002" and r.get("verb") == "proc-tree"]
+    assert len(rows) == 1, f"the arm's host-state question was not served to its lead: {rows}"
+    assert rows[0].get("exit_code") == 0, f"the arm's host-state question was not served to its lead: {rows}"
+    assert rows[0].get("payload_path"), f"the arm's host-state question was not served to its lead: {rows}"
+    assert oracle.submissions() == 1, (
+        f"the control world's new question took {oracle.submissions()} oracle turns, not one")
+    payload = json.loads((out.run_dir / rows[0]["payload_path"]).read_text(encoding="utf-8"))
+    assert payload.get("ps_output") == PS_OUTPUT, f"the arm was not served the system's answer: {payload}"
+    assert "captured_at" not in payload, f"the adapter stamped a time of its own: {payload}"
+    assert C.instant(rows[0].get("received_at")) == C.at(R, 30), (
+        "the arm's host-state reply is not stamped by the platform with its run clock's reading "
+        f"at the call ({C.at(R, 30)}): {rows[0].get('received_at')!r}")
+
+
+def test_a5_the_oracle_is_handed_the_snapshots_run_clock_reading_as_the_fork_time(
+        tmp_path, monkeypatch):
+    with _proxied_host_state() as (url, signer):
+        _out, oracle, source = _new_host_state_question(tmp_path, monkeypatch, url, signer)
+
+    assert oracle.requests >= 1, "the control world's oracle was never consulted"
+    shown = oracle.all_seen()
+    assert C.mentions(shown, R), (
+        f"the oracle was not handed the snapshot's run-clock reading {R} as the fork time")
+    framework_times = C.source_message_times(source)
+    assert framework_times, "the source's messages carry no timestamps; the check below is empty"
+    leaked = [t for t in framework_times if C.mentions(shown, t)]
+    assert not leaked, (
+        "the oracle was handed a fork time taken from the source's message timestamps (the "
+        f"wall clock) rather than the run clock: {leaked}")
