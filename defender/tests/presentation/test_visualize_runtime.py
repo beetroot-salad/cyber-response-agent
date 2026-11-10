@@ -296,7 +296,6 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
     import re
 
     run = _build_run(tmp_path)
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     html = render_runtime_page(run)
 
     for marker in (
@@ -342,7 +341,6 @@ def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path
     import re
 
     run = _build_run(tmp_path)
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     review_total = _append_review_calls(run)
     assert review_total > 0.002, "fixture too cheap to discriminate against the tolerance"
 
@@ -423,7 +421,6 @@ def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
     plain = _build_run(tmp_path / "plain")
     doubled = _build_run(tmp_path / "doubled")
     _duplicate_the_gather_phase(doubled)
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
 
     assert _phase_order(doubled).count("GATHER (loop 1)") == 2, (
         f"fixture no longer duplicates a name: {_phase_order(doubled)}"

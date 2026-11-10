@@ -686,7 +686,7 @@ class FakeCapture:
 
 
 #: Explicit test scratch setting for injected state handles; production ignores this variable.
-LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
+LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"  # lint-stale-ref: ok — the retired variable is named here to set or clear it as an ambient decoy
 
 
 def isolate_learning_state(tmp_path: Path, monkeypatch: Any) -> Path:

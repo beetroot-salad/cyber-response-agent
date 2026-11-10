@@ -208,7 +208,7 @@ def test_1186_sibling_ignores_legacy_state_override(
         learning = {"root": tenant_root, "inside": tenant_root / T_ID / "learning",
                     "ancestor": tmp_path, "disjoint": tmp_path.parent / "elsewhere-learning"}[
                         state_location]
-        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
+        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
         assert H.resolve_data_root() == tenant_root.resolve()
         rc, refused = H.drive_main(argv, H.Recorder(tmp_path / "sib-ok"))
         assert refused is None, H.refusal_text(refused)

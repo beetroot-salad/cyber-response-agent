@@ -222,7 +222,7 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - Flow 7 branch replay → `test_branch_replay.py`
 - A-ID drain AppRole login → `test_drain_credentials.py`, `test_live_dev_issuer.py`
 - U9 stage layout → `test_run_copy.py`, `test_drains.py`, `test_run_isolation_e2e.py`, `tenant_1108_delivery/test_batches.py`, `tenant_1108_delivery/test_box.py`, `e2e/test_1106_box_mount.py`
-- U10 refused claims (OD18/19/23) → `test_refused_claims.py`, `learning/curation/test_1134_curator_drain.py`, `test_773_commit_list.py`, `test_lead_author.py`
+- U10 refused claims (OD18/19/23) → `test_refused_claims.py`, `learning/curation/test_1134_curator_drain.py`, `test_lead_author.py`
 - U11 broken child (OD20) → `test_publish_child.py`
 - U12 host record (OD17/21/22') → `test_stale_visibility.py`, `test_run_page.py`, `test_run_start.py`
 - U14 (OD21 consequence) resumed box never sees the source's `runtime.html` or its reason → `e2e/test_920_branch_resume.py::test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason`
@@ -251,7 +251,7 @@ Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as 
 - Deleted, class (i):
   - `learning/curation/test_drain_byte_identity.py` (whole file, above).
   - `learning/stages/test_frames_680_lifecycle.py::test_revert_lesson_driver_holds_shared_author_lock_and_calls_through` (`revert(branch=)`)
-    → `test_revert_cli.py::test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_agent_lesson`, `::test_flow5_revert_cli_waits_out_a_running_author_drain`.
+    → `test_revert_cli.py::test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_agent_lesson`, `::test_flow5_revert_cli_waits_out_a_running_author_tick`.
   - `tenant_1108_delivery/test_forgejo.py::test_the_writer_lease_is_not_held_by_a_fork_pr` (lease on `AuthorBranch`)
     → `test_drains.py::test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_else_does` (`_LEASE_ROWS`, both drains).
   - `learning/curation/test_curator_glm_engine.py::test_marker_commit_message_with_trailer_rejected` (`commit_corpus` trailer guard; the commit-maker composes none);
@@ -268,7 +268,7 @@ Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as 
     `::test_o_b_the_live_capture_...`; the arm's no-lineage fields → `storage/ids_1187/test_1187_roster_sibling.py::test_natural_and_arm_stamps_carry_no_world_lineage`.
   - `learning/branch/test_1204_family_knowledge.py`: the two `--allow-dirty` waiver rows for an `unversioned`/`unavailable` source (OD9)
     → `test_branch_replay.py::test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allow_dirty`.
-  - `learning/retrieval/test_1195_lessons_run_windows.py`: the `before-the-run` rows (a pre-run stray tolerated, OD15)
+  - the retired `learning/retrieval` run-windows file (#1278): the `before-the-run` rows (a pre-run stray tolerated, OD15)
     → `test_changes.py::test_change_set_is_the_draft_against_the_batch_base_...`, `::test_claims_commit_and_reset_one_after_another_within_one_batch`.
   - `e2e/test_771_write_backstop.py`: the planted-component case and the leaf-alias case of `drain._restore_corpus`
     → `test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`.
@@ -279,8 +279,8 @@ Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as 
 - Re-spelled, class (ii), assertions kept or made stricter: `test_1178_run_gate.py` link/out-of-lane rows (`LeadAuthorError` → `DeliveryRefused`, OD18/OD23),
   exec rows (mode 100644, P3), the two "larger than any read commits" cases → `..._is_refused`; `test_1134_lead_author_adversary.py` link rows
   (`DeliveryRefused`); `test_1134_curator_drain.py` hard-linked base lesson → refused claim (owner ruling 2);
-  `test_frames_680_lifecycle.py::test_lead_author_bash_reads_cross_agent_artifact` onto a batch-draft scene; `test_1195_lessons_run_windows.py`
-  out-of-lane stray rows → refused claim (`test_a_stray_the_box_writes_outside_the_lanes_once_started_is_a_refused_claim`);
+  `test_frames_680_lifecycle.py::test_lead_author_bash_reads_cross_agent_artifact` onto a batch-draft scene; the retired run-windows file's
+  out-of-lane stray rows → refused claim (retired in #1278 with the file-state tick; see `learning/state_contracts/test_1135_drain_halt.py`);
   `test_curator_manifest.py::test_p4_both_callers_forward_the_abs_corpus_path` over a draft; `tenancy/test_1204_knowledge_revision.py`'s pointer.
 
 Repair round r4 (this round), all additive or stricter:
@@ -315,7 +315,7 @@ Repair round r4 (this round), all additive or stricter:
   - `e2e/test_771_lifecycle_and_scope.py::test_a_quarantined_tainted_tree_carries_its_verdict_beside_the_archive` and its driver
     `_spec771.quarantine_a_tainted_tree` (`quarantine.preserve_tainted_tree`, whose only caller was `AuthorBranch`): no successor, §6 owner item.
   - Dead support `support/learning/curation/_claim1175.py` (imported the deleted `defender._claim_git`; its suites were deleted with the contract).
-- Re-spelled with the cleanup: `tenant_1120_piece1/test_1120_operator_commands.py::test_1186_learning_operator_cli_uses_the_explicit_tenants_lock`
+- Re-spelled with the cleanup: `tenant_1120_piece1/test_1120_operator_commands.py::test_1186_learning_operator_cli_meets_the_explicit_tenants_busy_lane`
   rows for `lessons/run.py` and `questioner/run.py` now meet `.author-drain.lock` ("another drainer holds the lock", rc 0), as those commands run the
   author lane's tenant batch; census rows naming the deleted `version_control/restore.py` dropped (`e2e/_spec771.py`, `_census1134.py`);
   `_census_1107.py`/`test_1107_census_lint.py` homonym docs pruned to `skills/connect/SKILL.md` (the others moved to tenants);

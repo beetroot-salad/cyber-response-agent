@@ -451,7 +451,7 @@ print(json.dumps({"rc": run.returncode, "stdout": run.stdout, "stderr": run.stde
 
 def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_path):
     """The harness runs an empty-queue scenario cleanly in its own scratch dir and never reads
-    the retired `DEFENDER_LEARNING_STATE_DIR`."""
+    the retired learning-state variable."""
     evals = _harness().parent
     scenario = tmp_path / "scenario"
     scenario.mkdir()
@@ -461,7 +461,7 @@ def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_p
     decoy = tmp_path / "decoy-state"
     decoy.mkdir()
     env = {**os.environ, "PYTHONPATH": str(evals.parent),
-           "DEFENDER_LEARNING_STATE_DIR": str(decoy)}
+           "DEFENDER_LEARNING_STATE_DIR": str(decoy)}  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
 
     proc = subprocess.run(
         [sys.executable, "-c", _HARNESS_RUN, str(evals), str(scenario), str(scratch)],

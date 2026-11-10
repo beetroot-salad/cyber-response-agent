@@ -25,7 +25,6 @@ def test_run_py_tail_takes_both_record_fields_off_the_summary(
         tmp_path, monkeypatch, truncated_by, closed_before_cut):
     """Both halves of the run-end record reach the ticket lane from ONE in-process value, the
     driver's summary — `closed_before_cut` is not read back off the sidecar."""
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     paths = loop_paths(tmp_path)
 

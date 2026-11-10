@@ -1099,7 +1099,7 @@ def scan(recording: Mapping[str, Any], tokens: Mapping[str, str], *,
 
 _NOT_COPIED = shutil.ignore_patterns(
     ".venv", "__pycache__", "*.pyc", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    "node_modules", "run-visualizations", "_pending")
+    "node_modules", "run-visualizations")
 
 
 def copy_checkout(dest_root: Path) -> Path:
@@ -1120,7 +1120,6 @@ def _child_env(config: Mapping[str, Any]) -> dict[str, str]:
     env.update({
         "PYTHONPATH": str(config["checkout_root"]),
         "DEFENDER_DATA_ROOT": str(config["data_root"]),
-        "DEFENDER_LEARNING_STATE_DIR": str(config["learning_root"]),
         "DEFENDER_RUN_VISUALIZATIONS_DIR": str(config["pages_root"]),
         "DEFENDER_ALLOW_UNSANDBOXED": "1",
         # The fixture tenant's elastic is proxied (#1391 D12): run start needs the proxy's address (nothing is sent to it).

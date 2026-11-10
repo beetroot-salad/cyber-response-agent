@@ -321,11 +321,11 @@ def test_an_unreadable_archive_directory_is_counted_not_fatal(paths):
 
 
 def test_stamped_view_builds_from_the_tenant_its_paths_name_not_an_ambient_variable(paths, tmp_path, monkeypatch):
-    """Handed a tenant's `LoopPaths`, nothing is resolved from the environment: a legacy `DEFENDER_LEARNING_STATE_DIR` is
+    """Handed a tenant's `LoopPaths`, nothing is resolved from the environment: a legacy learning-state variable is
     not read, written or listed, and the view is stamped with when it was built."""
     poison = tmp_path / "old-env-root"
     poison.mkdir()
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(poison))
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(poison))  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
 
     stamped = serialize_queues.stamped_view(paths, store=_NoWork())
 

@@ -41,6 +41,7 @@ import pytest
 
 from defender import _git
 from defender._git import REPO_ROOT
+from defender.tests.support.learning.core._legacy1278 import PENDING
 from defender.tests.tenancy.tenant_1108_p4._support import committed_blobs
 
 #: O1's product allowlist: these skills stay in the product; every other `defender/skills/<x>/`
@@ -54,7 +55,7 @@ REGISTRY = "skills/tacit-knowledge/registry.yaml"
 CATEGORIES = ("lessons", "lessons-questioner", "system skills", "queries", "registry")
 LEARNING_PR_PREFIXES = ("lessons/", "lead-author/")
 #: The learning state folders (the `.gitignore`d ones under `defender/learning/` at base).
-STATE_FOLDERS = ("_pending", "_pending_leads", "_pending_pitfalls", "_pending_delivery",
+STATE_FOLDERS = (PENDING, "_pending_leads", "_pending_pitfalls", "_pending_delivery",
                  "author-queue", "learn-queue")
 _PRODUCT_CORPUS_PATH = re.compile(
     r"(^|/)defender/(lessons|lessons-questioner|lessons-actor|lessons-environment|skills)(/|$)")
@@ -304,17 +305,17 @@ def test_o14_state_scanners_see_corpus_paths_pending_deliveries_and_learning_prs
     or absolute), a pending-delivery record and an open `lessons/` PR are each reported; a
     consumed row, a non-corpus path and a feature PR are not."""
     root = tmp_path / "learning"
-    (root / "_pending").mkdir(parents=True)
-    (root / "_pending" / "findings.jsonl").write_text(
+    (root / PENDING).mkdir(parents=True)
+    (root / PENDING / "findings.jsonl").write_text(
         json.dumps({"target": "defender/lessons/x.md"}) + "\n"
         + json.dumps({"run_dir": "/data/runs/r1"}) + "\n", encoding="utf-8")
-    (root / "_pending" / "consumed.jsonl").write_text(
+    (root / PENDING / "consumed.jsonl").write_text(
         json.dumps({"target": "defender/lessons/old.md"}) + "\n", encoding="utf-8")
     (root / "author-queue").mkdir()
     (root / "author-queue" / "r2.json").write_text(
         json.dumps({"paths": ["/workspace/defender/skills/cmdb/SKILL.md"]}), encoding="utf-8")
     assert queued_corpus_paths(root) == [
-        (str(root / "_pending" / "findings.jsonl"), "defender/lessons/x.md"),
+        (str(root / PENDING / "findings.jsonl"), "defender/lessons/x.md"),
         (str(root / "author-queue" / "r2.json"), "/workspace/defender/skills/cmdb/SKILL.md"),
     ]
     assert pending_deliveries(root) == []

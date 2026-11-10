@@ -613,8 +613,8 @@ def test_the_scrub_survives_a_crashed_investigation(tmp_path):
 
 
 # The drain scrubs no worktree: its claim refuses any link or special file whole
-# (tenant_1108_delivery/test_changes.py), and its stop-on-failure is pinned in
-# learning/retrieval/test_1195_lessons_run_windows.py.
+# (tenant_1108_delivery/test_changes.py); the retired run-windows file's stop-on-failure case went with the
+# file-state tick (#1278).
 
 
 def _reap_probe(*, stop_fault=None, scrub_fault=None):

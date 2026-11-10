@@ -138,7 +138,7 @@ def _curator_deps(tmp_path: Path):
     repo = tmp_path / "wt"
     corpus = repo / "defender" / "lessons"
     corpus.mkdir(parents=True, exist_ok=True)
-    pending_dir = tmp_path / "_pending"
+    pending_dir = tmp_path / "curator-run"
     pending_dir.mkdir(parents=True, exist_ok=True)
     deps = CuratorDeps.for_run(
         pending_dir,

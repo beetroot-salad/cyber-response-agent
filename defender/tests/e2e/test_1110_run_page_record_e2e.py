@@ -250,7 +250,6 @@ def entrypoint_env(tmp_path, monkeypatch) -> Path:
 
     for var in providers.api_key_vars():
         monkeypatch.setenv(var, "spec1110-not-used")
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     return location_path(set_up_tenant(current_data_root()).runs)
 
 
