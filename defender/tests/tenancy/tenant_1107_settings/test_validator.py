@@ -1,60 +1,80 @@
-"""check_config: validator behaviour for connected systems' config.env."""
+"""Connect's validator over its handoff (#1366 O11): the folder connect hands the operator (`config.env` +
+`access.yaml`, the folder `set-system` takes) is judged by the same settings and access judgement the store applies,
+with no tenant and no database. Replaces the retired `check_config` over a tenant's `settings/systems/<s>/config.env`
+(connect writes no such folder now; its secret-name rule is `lint_catalog_declarations`, K8)."""
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
-from defender.skills.connect import validate_scaffold
+import pytest
 
-#: The scaffolded system and its key prefix. A name no committed tenant uses, so a row naming it
-#: can only have come from the planted folder.
-SYSTEM = "mysys"
-PREFIX = "MYSYS"
-DOCKER_EXEC = "docker-exec"
+from defender.tests.support.jobs._jobs1342 import register_tenant
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — the fixture
+from defender.tests.support.tenancy import _systems1366 as R
+from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
-
-# ---- fixture planting (returns, never asserts) ----------------------------------------------------
-
-def _scaffold(root: Path, *, extra: str = "", transport: str | None = DOCKER_EXEC,
-              context: str | None = "ctx-mysys") -> Path:
-    """A tenant `settings/` folder holding one scaffolded system's `config.env` (URL base plus the
-    access-method lines unless dropped, plus `extra` verbatim). Returns the settings folder."""
-    settings = Path(root) / "settings"
-    cfg = settings / "systems" / SYSTEM / "config.env"
-    cfg.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f'{PREFIX}_URL_BASE="http://mysys:8080"']
-    if transport is not None:
-        lines.append(f'{PREFIX}_TRANSPORT="{transport}"')
-    if context is not None:
-        lines.append(f'{PREFIX}_DOCKER_CONTEXT="{context}"')
-    cfg.write_text("\n".join(lines) + "\n" + extra, encoding="utf-8")
-    return settings
+REPO = Path(__file__).resolve().parents[4]
+CMDB_CONFIG, CMDB_ACCESS = R.FIXTURE_FOLDERS["cmdb"]
+#: Keys cmdb's adapter does not read: an access method, a docker context, an unknown one, a secret-named one.
+UNDECLARED = ["CMDB_TRANSPORT", "CMDB_DOCKER_CONTEXT", "CMDB_COLOUR", "CMDB_API_TOKEN"]
+#: An access declaration `parse_access` refuses (an unknown top-level key).
+BAD_ACCESS = R.declaration("http://soc-playground:8001").replace('"reads"', '"colour": "red",\n  "reads"')
 
 
-def _check(settings: Path) -> list[tuple[str, str]]:
-    """The real validator over `settings`, returning its report rows."""
-    report = validate_scaffold.Report()
-    validate_scaffold.check_config(report, settings, SYSTEM)
-    return list(report.rows)
+def _validated(folder: Path, system: str = "cmdb") -> str:
+    """The real validator over a handoff folder, as a process, with no tenant and no database in its environment."""
+    env = {k: v for k, v in os.environ.items() if k not in ("DEFENDER_DATA_ROOT", "DEFENDER_DATABASE_DSN")}
+    env["PYTHONPATH"] = str(REPO)
+    done = subprocess.run([sys.executable, "-m", "defender.skills.connect.validate_scaffold", system,
+                           "--handoff", str(folder)], cwd=REPO, env=env, capture_output=True, text=True,
+                          timeout=120, check=False)
+    return done.stdout + done.stderr
 
 
-def _passes(rows: list[tuple[str, str]]) -> list[str]:
-    return [m for s, m in rows if s == validate_scaffold.PASS]
+def _folder(where: Path, *, config: dict[str, str] | None = None, access: str | None = None) -> Path:
+    return R.system_folder(where, "cmdb", config=CMDB_CONFIG if config is None else config,
+                           access=CMDB_ACCESS if access is None else access)
 
 
-def _naming(messages: list[str], needle: str) -> list[str]:
-    return [m for m in messages if needle in m]
+def test_o11_the_handoff_is_judged_by_the_stores_settings_rules_without_a_tenant(tmp_path):
+    """Every undeclared key (an access method, a docker context, a secret-named key) is named; the clean folder names
+    none of them. (#1366 O11, K1)"""
+    clean = _validated(_folder(tmp_path / "clean"))
+    assert "validate_scaffold: cmdb" in clean, clean  # printed only once the arguments were accepted
+    for key in UNDECLARED:
+        assert key not in clean, (key, clean)
+        said = _validated(_folder(tmp_path / key, config={**CMDB_CONFIG, key: "x"}))
+        assert key in said, (key, said)
 
 
-# ---- the access method is not the product's to check -----------------------------------------------
+@pytest.mark.parametrize("access", [BAD_ACCESS, "access: [unclosed\n"], ids=["unknown-key", "unparsable"])
+def test_o11_the_handoffs_access_is_judged_too(tmp_path, access):
+    """An access declaration `parse_access` refuses changes the validator's report and fails a row about the access;
+    the clean declaration fails none. (#1366 O11)"""
+    def failed_access_rows(text: str) -> list[str]:
+        return [ln for ln in text.splitlines() if "access" in ln.lower() and "✗" in ln]
 
-def test_validator_does_not_judge_an_access_method(tmp_path):
-    cases = {"neither": dict(transport=None, context=None),
-             "half": dict(transport=DOCKER_EXEC, context=None),
-             "other-method": dict(transport="http")}
-    for label, kw in cases.items():
-        rows = _check(_scaffold(tmp_path / label, **kw))
-        messages = [m for _, m in rows]
-        assert not _naming(messages, f"{PREFIX}_TRANSPORT"), f"{label}: an access-method row: {rows}"
-        assert not _naming(messages, f"{PREFIX}_DOCKER_CONTEXT"), (
-            f"{label}: an access-method row: {rows}")
-        assert _passes(rows), f"{label}: the validator reported no PASS: {rows}"
+    clean = _validated(_folder(tmp_path / "clean"))
+    said = _validated(_folder(tmp_path / "bad", access=access))
+    assert failed_access_rows(clean) == [], clean
+    assert failed_access_rows(said), said
+
+
+@pytest.mark.postgres
+def test_o11_the_handoffs_access_fault_is_the_stores_sentence(migrated_database, tmp_path, data_root, capsys,  # noqa: F811
+                                                              monkeypatch):
+    """The sentence the store gives for an access declaration it refuses appears verbatim in the validator's report of
+    the same folder. (#1366 O11, K1)"""
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
+    with published_tenant(tmp_path / "forge", root=data_root, files=R.import_files()) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=t.data_root, records=None)
+        op = R.Operator(t.tenant_id, migrated_database, tmp_path / "op", capsys)
+        rc, said = op.import_()
+        assert rc == 0, said
+        rc, said = op.set_system("cmdb", replaces=1, config=CMDB_CONFIG, access=BAD_ACCESS)
+    assert rc != 0, said
+    (fault,) = [line.removeprefix("[tenant.py] ").strip() for line in R.lines_naming(said, "colour")]
+    assert fault in _validated(_folder(tmp_path / "handoff", access=BAD_ACCESS))

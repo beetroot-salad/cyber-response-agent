@@ -315,6 +315,7 @@ class Records:
             for fields in generations:
                 active.run_sync(self.twin.add_generation(tenant, **fields))
             seed_twin(self.twin, tenant, alert_mapping)
+            active.seed_twin_records(self.twin, data_root, tenant)  # #1366 R8
         self.directory = TenantDirectory(lambda: self.twin)
 
     def rotate(self, tenant: str, fields: Mapping[str, Any]) -> None:

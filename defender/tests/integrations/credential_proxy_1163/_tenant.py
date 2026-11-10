@@ -78,10 +78,19 @@ def data_root_of(tenants: Mapping[str, Path]) -> Path:
 
 def deps(tenants: Mapping[str, Path] | Path, store: Any, *, verifier: Any = None,
          audit: Any = None, **extra: Any) -> Any:
-    """`ProxyDeps` over a data root: `tenants` is the root itself or the `{id: exports}` mapping
-    of tenants under it; `extra` keywords (e.g. `max_response_bytes`) pass through."""
+    """`ProxyDeps` for tenants under a data root: `tenants` is the root itself or the `{id: exports}` mapping
+    of tenants under it; `extra` keywords (e.g. `max_response_bytes`) pass through. #1366: the proxy reads its systems
+    through the records port, so `records=` (default `R.ExportRecords(root)`: the legacy export folders, handed through
+    the port as version 1 / generation 1) is the port, and a `store` whose `read` takes no generation is wrapped
+    (`R.GenerationBlind`); pass `records=` and an already generation-aware `store=` (`generation_aware=True`) for a
+    test of the new behaviour."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
     root = tenants if isinstance(tenants, Path) else data_root_of(tenants)
-    return proxy().ProxyDeps(data_root=root, store=store,
+    records = extra.pop("records", None)
+    if not extra.pop("generation_aware", False):
+        store = R.GenerationBlind(store)
+    return proxy().ProxyDeps(records=records if records is not None else R.ExportRecords(root), store=store,
                              verifier=verifier if verifier is not None else H.FakeVerifier(),
                              audit=audit if audit is not None else H.AuditRecorder(), **extra)
 

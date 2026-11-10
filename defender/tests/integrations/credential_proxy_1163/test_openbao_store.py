@@ -91,6 +91,23 @@ def test_b1_the_writer_sets_and_asks_but_only_the_proxy_reads(openbao):
         "api_key": H.CANARY_KEY}
 
 
+def test_1366_p5_the_two_policies_cover_a_generations_path_and_a_set_is_stored_only_there(openbao):
+    """Against a real OpenBao (CI only): the writer sets and asks at `<tenant>/<system>/g<N>`, the proxy reads that
+    generation and not another, and the proxy still cannot write. (#1366 P5, A4)"""
+    tenant = openbao.tenant(key=False)
+    tokens = _tokens(openbao)
+    writer, reader = _writer(openbao, tokens["writer"]), _store(openbao, tokens["proxy"])
+    asyncio.run(writer.put_credentials(tenant, "identity", STATIC, {"api_key": H.CANARY_KEY}, generation=3))
+
+    assert asyncio.run(writer.has_credentials(tenant, "identity", generation=3)) is True
+    assert asyncio.run(writer.has_credentials(tenant, "identity", generation=2)) is False
+    assert reader.read(tenant, "identity", 3).fields == {"api_key": H.CANARY_KEY}
+    assert reader.read(tenant, "identity", 2) is None
+    assert reader.read(tenant, "identity", 1) is None
+    with pytest.raises(ConfigFault):  # the proxy may not write, at a generation path either
+        asyncio.run(_writer(openbao, tokens["proxy"]).put_credentials(tenant, "identity", STATIC, {"api_key": "x" * 32}, generation=3))
+
+
 def test_b1_at_the_wire_the_writer_gets_metadata_and_never_the_value(openbao):
     """With the writer's token, reading data is a 403 and the existence (metadata) read answers
     without the value; the proxy's token reads data. O5."""

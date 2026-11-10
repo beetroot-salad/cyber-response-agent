@@ -21,6 +21,7 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime as dt
+import json
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -794,3 +795,132 @@ async def test_a_malformed_tenant_id_is_refused_by_every_read_and_request(pg_sto
             await call
     assert [t.id for t in await store.repo.tenants()] == [T1]
     assert (await store.repo.tenant(T1)).id == T1, "control: the connection still answers after the malformed ones"
+
+
+# --- #1366 R10, R11, O10: the current-records read, on both twins ---------------------------------------------
+
+
+def _records_value(**systems: tuple[int, bool, int]) -> Any:
+    """`TenantRecords` (imported) with the ticket case record and the named systems, `name=(version, enabled, generation)`."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    spec = R.RecordsSpec({s: R.SysSpec({f"{s.upper()}_TIMEOUT_SEC": "10"}, R.declaration(f"http://{s}.test"), version=v,
+                                       generation=g, enabled=e) for s, (v, e, g) in systems.items()}, R.CaseSpec())
+    return R.to_value(spec)
+
+
+def _declaration(system: str) -> str:
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    return R.declaration(f"http://{system}.test")
+
+
+def _system_row(store: Store, tenant: str, system: str, version: int, *, enabled: bool = True, deleted: bool = False,
+                generation: int = 1) -> None:
+    """One stored system version, raw SQL (the writer is not the oracle of its own read)."""
+    execute(store.dsn, """INSERT INTO tenancy.system_versions (tenant_id, system_id, version, adapter_id, enabled, settings,
+                          access, credential_generation, deleted, author, written_at)
+                          VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, 'seed', %s)""",
+            (tenant, system, version, system, enabled, json.dumps({f"{system.upper()}_TIMEOUT_SEC": "10"}),
+             _declaration(system), generation, deleted, SEEDED_AT))
+
+
+async def _seed_records(store: Store, tenant: str, value: Any) -> None:
+    """Put `value` into the read side: the twin's seeder, or the mark and one row per record on PostgreSQL."""
+    if store.dsn is None:
+        await store.twin.add_records(tenant, value)
+        return
+    execute(store.dsn, "INSERT INTO tenancy.records_mark (tenant_id) VALUES (%s)", (tenant,))
+    for system, rec in value.systems.items():
+        _system_row(store, tenant, system, rec.version, enabled=rec.enabled, generation=rec.credential_generation)
+    if value.case is not None:
+        execute(store.dsn, """INSERT INTO tenancy.case_versions (tenant_id, version, system_id, comment_body, deleted, author,
+                              written_at) VALUES (%s, %s, %s, %s, false, 'seed', %s)""",
+                (tenant, value.case.version, value.case.system_id, value.case.comment_body, SEEDED_AT))
+
+
+async def test_1366_r10_a_tenant_nothing_was_imported_for_reads_as_not_imported_and_empty(store):
+    """A tenant with no records mark reads `imported=False`, no systems, no case, and so does an unknown tenant. (#1366 R10, R8)"""
+    await store.seed(T1)
+    for tenant in (T1, ABSENT):
+        read = await store.repo.current_records(tenant)
+        assert (read.imported, dict(read.systems), read.case) == (False, {}, None), tenant
+
+
+async def test_1366_r10_the_read_is_the_asked_tenants_own_records_disabled_ones_included_and_the_case(store):
+    """T1 holds an enabled and a disabled system and a case record, T2 one other system: each reads exactly its own,
+    the disabled one with `enabled` false at its version and generation. (#1366 R10, O1, R7)"""
+    await store.seed(T1)
+    await store.seed(T2)
+    mine = _records_value(cmdb=(3, True, 2), identity=(5, False, 4))
+    await _seed_records(store, T1, mine)
+    await _seed_records(store, T2, _records_value(ticket=(1, True, 1)))
+
+    assert await store.repo.current_records(T1) == mine
+    read = await store.repo.current_records(T2)
+    assert (read.imported, set(read.systems)) == (True, {"ticket"})
+
+
+async def test_1366_r10_the_current_record_is_the_highest_version_and_a_delete_hides_the_system(pg_store):
+    """cmdb v1 enabled then v2 disabled (current: v2, disabled); identity v1 then v2 a delete (absent); elastic v1, a delete
+    v2 and a re-create v3 (current: v3); a case v1 then a case delete v2 (no case). (#1366 R10, O5)"""
+    store, tenant = pg_store, T1
+    await store.seed(tenant)
+    execute(store.dsn, "INSERT INTO tenancy.records_mark (tenant_id) VALUES (%s)", (tenant,))
+    for system, version, kw in (("cmdb", 1, {}), ("cmdb", 2, {"enabled": False}), ("identity", 1, {}),
+                                ("identity", 2, {"deleted": True}), ("elastic", 1, {}), ("elastic", 2, {"deleted": True}),
+                                ("elastic", 3, {"generation": 2}), ("ticket", 1, {})):
+        _system_row(store, tenant, system, version, **kw)
+    for version, deleted in ((1, False), (2, True)):
+        execute(store.dsn, """INSERT INTO tenancy.case_versions (tenant_id, version, system_id, comment_body, deleted, author,
+                              written_at) VALUES (%s, %s, 'ticket', 'b', %s, 'seed', %s)""", (tenant, version, deleted, SEEDED_AT))
+
+    read = await store.repo.current_records(tenant)
+
+    assert read.imported
+    assert {s: (r.version, r.enabled, r.credential_generation) for s, r in read.systems.items()} == {
+        "cmdb": (2, False, 1), "elastic": (3, True, 2), "ticket": (1, True, 1)}
+    assert read.case is None
+
+
+async def test_1366_r11_a_tenant_made_by_the_create_request_is_imported_with_no_systems_and_a_seeded_one_is_not(store):
+    """`request_create` sets the mark in the same statement: the new tenant reads imported, empty; a tenant row that was not
+    requested (a pre-#1366 tenant) does not, until it is imported. (#1366 R11, R8)"""
+    made = (await store.repo.request_create(now=NOW)).id
+    await store.seed(T1)
+
+    created = await store.repo.current_records(made)
+    assert (created.imported, dict(created.systems), created.case) == (True, {}, None)
+    assert not (await store.repo.current_records(T1)).imported
+
+
+@pytest.mark.parametrize("fenced", [True, False])
+async def test_1366_o10_a_commit_that_drops_records_removes_that_tenants_versions_and_mark_only_inside_its_fence(store, fenced):
+    """`commit(drop_records=True)` of the offboarding step leaves the tenant with no mark, system or case record and the
+    other tenant's untouched; with the fence missed nothing is dropped (and the commit raises). (#1366 O10, R10)"""
+    from defender.tenancy import FenceMissed
+
+    await store.seed(T1, OFFBOARDING)
+    await store.seed(T2, OFFBOARDING)
+    mine, theirs = _records_value(cmdb=(2, True, 1), ticket=(1, True, 1)), _records_value(cmdb=(1, True, 1))
+    await _seed_records(store, T1, mine)
+    await _seed_records(store, T2, theirs)
+
+    async with store.repo.lock(T1) as held:
+        assert held is not None
+        if not fenced:
+            await _change(store, "step_actor", "service")
+        attempt = held.commit(step=None, actor=None, state="offboarded", pending_action=None, offboarded_at=NOW,
+                              drop_records=True)
+        if fenced:
+            await attempt
+        else:
+            with pytest.raises(FenceMissed):
+                await attempt
+
+    after = await store.repo.current_records(T1)
+    if fenced:
+        assert (after.imported, dict(after.systems), after.case) == (False, {}, None)
+    else:
+        assert after == mine
+    assert await store.repo.current_records(T2) == theirs

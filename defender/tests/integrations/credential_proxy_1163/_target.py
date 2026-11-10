@@ -41,7 +41,7 @@ SEAM_ADDR = "openbao_addr"
 SEAM_TRANSPORT = "transport"
 #: The config keys r8.2 A26 and #1412 remove: unknown keys now.
 REMOVED_CONFIG_KEYS = ("tenant_keys", "tenant_exports", "transit_mount", "openbao_addr",
-                       "max_response_bytes")
+                       "max_response_bytes", "data_root")  # #1366: `data_root` is replaced by `records_dsn`
 
 
 def app_from_config(config: Any, *, addr: str | None = None, transport: Any = None) -> Any:
@@ -75,8 +75,8 @@ PROXY_PATH = "/v1/request"
 #: The access declaration's place in the tenant's settings (design's example path).
 ACCESS_FILE = "settings/systems/{system}/access.yaml"
 #: The keys of a proxy audit record (r5 A4): `outcome` is `sent <status>` or the fault class;
-#: `path` is relative to the declared base; `commit` is the `current` commit applied.
-AUDIT_KEYS = ("tenant", "system", "investigation", "commit", "method", "path", "outcome")
+#: `path` is relative to the declared base; `version` is the system record's version applied (#1366 O7; was `commit`).
+AUDIT_KEYS = ("tenant", "system", "investigation", "version", "method", "path", "outcome")
 
 
 # --- Names the design does not settle (r6 repair 2, F3). Working choices, listed as gaps. ------

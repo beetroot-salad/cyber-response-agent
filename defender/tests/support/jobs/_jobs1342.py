@@ -20,6 +20,7 @@ from typing import Any
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._systems1366 import DERIVED, drop_records
 from defender.tests.support.tenancy._mapping1345 import (
     ALERT_BYTES_DESCRIPTION,
     ALERT_BYTES_TITLE,
@@ -68,9 +69,13 @@ DESCRIPTION = ALERT_BYTES_DESCRIPTION
 
 def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: bool = True,
                     data_root: Path | None = None, generations: Any = None,
-                    alert_mapping: Mapping[str, str | None] | None = FIXTURE_ALERT_MAPPING) -> None:
+                    alert_mapping: Mapping[str, str | None] | None = FIXTURE_ALERT_MAPPING,
+                    records: Any = DERIVED) -> None:
     """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6), and #1345's
     default alert mapping saved through the store (`alert_mapping=None`: a tenant with none, for a test of absence).
+    #1366 R8: also the tenant's current system and case records, imported through the store (`_systems1366`): by default
+    those of the tenant's planted or published `settings/` under `data_root` (else the fixture's); `records=None`
+    registers a tenant NOT imported (the operator's `import` then has work to do); a `RecordsSpec` seeds exactly that.
 
     An active tenant gets one live generation with a sign login (the fixture tenant's elastic is proxied,
     #1391 P1/D12: run start signs request tokens), unless `generations` says otherwise (`()` for none)."""
@@ -80,12 +85,13 @@ def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: 
     if generations is None:
         generations = [sign_generation(tenant_id)] if state == "active" else ()
     insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root, generations=generations,
-                         alert_mapping=alert_mapping)
+                         alert_mapping=alert_mapping, records=records)
 
 
 def drop_tenant(dsn: str, tenant_id: str) -> None:
     """Delete `tenant_id`'s record and the tenancy rows that reference it (alert mapping, generations, publish status,
-    forge wiring)."""
+    forge wiring) and, since #1366, its records (system and case versions, the imported mark)."""
+    drop_records(dsn, tenant_id)
     for table in ("alert_mappings", "generations", "publish_status", "forge_wiring"):
         execute(dsn, f'DELETE FROM tenancy."{table}" WHERE tenant_id = %s', (tenant_id,))  # noqa: S608
     execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))

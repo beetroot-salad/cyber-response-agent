@@ -60,7 +60,10 @@ def main(data_root: str, tenant: str, port: str, trace: str) -> None:
     audit = H.AuditRecorder()
     store = H.FakeStore({(tenant, "identity"): CredentialSet(
         kind="static", fields={"api_key": H.CANARY_KEY}, version=1)})
-    app = create_app(ProxyDeps(data_root=Path(data_root), store=store, verifier=H.FakeVerifier(),
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    app = create_app(ProxyDeps(records=R.ExportRecords(Path(data_root)), store=R.GenerationBlind(store),
+                               verifier=H.FakeVerifier(),
                                audit=audit))
     if trace == "trace":
         tracemalloc.start()

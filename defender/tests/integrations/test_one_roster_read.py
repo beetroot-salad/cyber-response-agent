@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from defender import _git
+from defender._paths import adapters_under
 from defender.tests.support.tenancy import _tenants1106
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
@@ -565,3 +566,47 @@ def test_an_adapter_that_does_not_parse_is_recorded_on_the_roster_not_raised_or_
     with pytest.raises(GrantError) as exc:
         ModuleVerbRegistry(roster, VerbGrant(role="gather", entries=(("latin", "query", "r"),)))
     assert "latin.query" in str(exc.value)
+
+
+# #1366 O1/DC7: a tenant's roster is its records'; the invlang ceiling gate stays the whole catalog
+
+
+def _tenants_run_start(tmp_path: Path, name: str, *, with_cmdb: bool):
+    """Production's own `RunTenant` for a twin tenant whose records lack cmdb (or not), taken off `run.main`'s lifecycle."""
+    from defender.tests.tenancy.alert_front_door_1222.test_tenant_surfaces_1366 import _scene
+
+    drive, _directory = _scene(tmp_path, name, with_cmdb=with_cmdb)
+    return drive.lifecycle_calls[0]["tenant"]
+
+
+def test_1366_o1_the_drivers_own_roster_fallback_serves_the_systems_of_the_tenants_records(tmp_path):
+    """With no roster injected, the driver's roster is the tenant's records' (cmdb for B, not for A), never the checkout's. (#1366 O1)"""
+    at_run_start = _run_start()
+    defender_dir = Path(_git.REPO_ROOT) / "defender"
+    tenant_a = _tenants_run_start(tmp_path, "a", with_cmdb=False)
+    tenant_b = _tenants_run_start(tmp_path, "b", with_cmdb=True)
+
+    roster_a, _ = at_run_start(defender_dir, None, object(), tenant_a)
+    roster_b, _ = at_run_start(defender_dir, None, object(), tenant_b)
+
+    assert "elastic" in roster_a.systems
+    assert "cmdb" not in roster_a.systems, sorted(roster_a.systems)
+    assert {"cmdb", "elastic"} <= set(roster_b.systems), sorted(roster_b.systems)
+
+
+@pytest.mark.parametrize("handed", ["fallback", "tenant roster injected"])
+def test_1366_o1_the_ceiling_gate_is_the_whole_catalog_even_when_the_runs_roster_is_the_tenants_subset(tmp_path, handed):
+    """The `nothing-to-try` gate is handed every checkout system whether the run's roster is the driver's fallback or the tenant's subset passed in. (#1366 O1, DC7)"""
+    at_run_start = _run_start()
+    defender_dir = Path(_git.REPO_ROOT) / "defender"
+    tenant_a = _tenants_run_start(tmp_path, "a", with_cmdb=False)
+    subset, _ = at_run_start(defender_dir, None, object(), tenant_a)
+    assert "cmdb" not in subset.systems, "premise: the run's roster lacks cmdb"
+    whole = verbs.read_roster(adapters_under(Path(_git.REPO_ROOT) / "defender"))
+    assert "cmdb" in whole.verbs, "premise: the catalog has cmdb"
+
+    _gating.release_capabilities()
+    at_run_start(defender_dir, None if handed == "fallback" else subset, object(), tenant_a)
+
+    assert set(_gating.known_capabilities()) == set(whole.verbs)
+    assert _gating._capability_exists("cmdb") is True

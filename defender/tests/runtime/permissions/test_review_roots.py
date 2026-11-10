@@ -163,30 +163,6 @@ def test_stored_faults_carry_no_traceback_or_cause(tmp_path):
     assert kept.__context__ is None, f"{kept!r} keeps its context: {kept.__context__!r}"
 
 
-def _validate(tmp_path: Path, extra: str) -> list[tuple[str, str]]:
-    from defender.skills.connect import validate_scaffold
-
-    settings = tmp_path / "settings"
-    cfg = settings / "systems" / "mysys" / "config.env"
-    cfg.parent.mkdir(parents=True)
-    cfg.write_text('MYSYS_URL_BASE="http://mysys:8080"\nMYSYS_TRANSPORT="docker-exec"\n'
-                   'MYSYS_DOCKER_CONTEXT="ctx"\n' + extra, encoding="utf-8")
-    report = validate_scaffold.Report()
-    validate_scaffold.check_config(report, settings, "mysys")
-    return report.rows
-
-
-@pytest.mark.parametrize("extra", [
-    'export MYSYS_API_TOKEN="sk-live-9f8e7d6c5b4a3f2e1d0c"\n',
-    'MYSYS_PASSWORD="hunter2-live"\nMYSYS_PASSWORD=""\n',
-    'MYSYS_TOKEN_SECRET_REF="ghp-AbC!d3f@xyz"\nMYSYS_TOKEN_SECRET_REF=""\n',
-], ids=["export line", "overridden duplicate", "overridden reference"])
-def test_validator_finds_secrets_on_lines_the_run_ignores(tmp_path, extra):
-    rows = _validate(tmp_path, extra)
-    assert any(s == "FAIL" for s, _ in rows), rows
-    assert ("PASS", "config.env carries no inline secrets") not in rows, rows
-
-
 def _raised(fn, *args, **kw):
     try:
         fn(*args, **kw)

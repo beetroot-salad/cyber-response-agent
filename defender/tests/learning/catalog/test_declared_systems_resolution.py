@@ -530,3 +530,31 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
     assert spawn.calls == [], "the agent must not be spawned against an empty declared set"
     assert lane.landed() == []
     assert len(lane.batch.change_set()) == 0
+
+
+def test_1366_o1_the_lead_lanes_declared_systems_are_the_tenants_records_not_the_product_checkouts(tmp_path):
+    """The product checkout carries cmdb and elastic adapters; the draft commits no marker: a tenant with no cmdb
+    record declares elastic and the platform-served system, one with it declares cmdb too. (#1366 O1 learning)"""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
+    from defender.tests.support.shared.contracts._repo import seed_adapter_stubs
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    product = tmp_path / "product"
+    (product / "defender" / "integrations").mkdir(parents=True)
+    seed_adapter_stubs(product / "defender", ("elastic", "cmdb"))
+    tenant = _state1135.curation_tenant()
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, tenant=tenant, files={
+        "skills/gather/SKILL.md": "---\nname: gather\n---\n\nbody\n"})
+    whole = R.fixture_records()
+    assert {"cmdb", "elastic"} <= set(whole.systems), "fixture premise: the records can hold both systems"
+
+    declared = {}
+    for name, spec in (("a", R.without(whole, "cmdb")), ("b", whole)):
+        directory = tenant_directory(current_data_root(), tenant.id, records=spec)
+        deps = lead_author.build_lead_author_deps(
+            lane.paths, state=C.open_state(lane.paths), trees=C.draft_trees(lane), batch=lane.batch, directory=directory)
+        declared[name] = deps.systems
+
+    assert {"elastic", PLATFORM_SERVED} <= declared["a"], declared["a"]
+    assert "cmdb" not in declared["a"], declared["a"]
+    assert {"cmdb", "elastic", PLATFORM_SERVED} <= declared["b"], declared["b"]

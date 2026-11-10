@@ -304,56 +304,6 @@ def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
     assert "ELASTIC_DOCKER_CONTEXT" not in elastic, dict(elastic)
 
 
-def _config_keys(path: Path) -> set[str]:
-    """The key names a committed `config.env` spells (`KEY=` lines; comments skipped)."""
-    keys = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            keys.add(line.split("=", 1)[0].strip())
-    return keys
-
-
-#: The keys a shipped system's config.env holds when it is not just `<PREFIX>_TIMEOUT_SEC`.
-SHIPPED_KEYS = {
-    "elastic": {"ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX"},
-    "ticket": {"TICKET_TIMEOUT_SEC", "TICKET_KEY_PATTERN"},
-    "host-state": set(),
-}
-
-
-def test_d2_shipped_tenants_complete():
-    for tenant_settings in (S.FIXTURE / "settings", S.TEMPLATE_DIR / "settings"):
-        systems = tenant_settings / "systems"
-        folders = sorted(p.name for p in systems.iterdir() if p.is_dir())
-        assert "host-state" in folders, (tenant_settings, folders)
-        for name in folders:
-            assert name in S.PREFIX, f"{tenant_settings}: no known prefix for system {name!r}"
-            prefix = S.PREFIX[name]
-            config_env = systems / name / "config.env"
-            expected = SHIPPED_KEYS.get(name, {f"{prefix}_TIMEOUT_SEC"})
-            # #1391 O1/O2/Q4: every system is declared, and its config.env holds exactly the keys
-            # its adapter reads (no Docker, transport or base key); a system whose adapter reads
-            # none ships no config.env (r5 O-S1).
-            assert (systems / name / "access.yaml").is_file(), (tenant_settings, name, "no declaration")
-            if not expected:
-                assert not config_env.exists(), config_env
-                continue
-            assert config_env.is_file(), config_env
-            keys = _config_keys(config_env)
-            assert keys == expected, (tenant_settings, name, sorted(keys ^ expected))
-
-    # The committed fixture, set up under this test's data root as `playground`.
-    T1106.fixture_tenant(S.PLAYGROUND_ID)
-    rec = _resolve(current_data_root(), S.PLAYGROUND_ID)
-    ConfigFault = S.config_fault()
-    faulted = {name: str(entry) for name, entry in rec.systems.items()
-               if isinstance(entry, ConfigFault) and SHIPPED_KEYS.get(name) != set()}
-    assert not faulted, faulted
-    # host-state reads no key, so its absent config.env leaves it usable.
-    assert S.mod("integrations.host_state_adapter").check_settings(rec) is None
-
-
 def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys):
     policy_cli = S.mod("cli.policy_cli")
     # policy_cli reads its tenants from `DEFENDER_DATA_ROOT` alone.
@@ -465,46 +415,6 @@ def test_o2_each_call_uses_the_record_it_was_resolved_with(tmp_path):
     old_base = T1106.default_base("ocs", "cmdb")
     assert seen == [(f"{old_base}/hosts/web-1", 7), ("http://edited-cmdb:9/hosts/web-1", 3),
                     (f"{old_base}/hosts/web-1", 7)], seen
-
-
-def test_a_tenant_copied_from_the_template_has_every_system_down_until_its_placeholders_go(tmp_path):
-    """Every system of a tenant copied from the template is down for its settings — a
-    `ConfigFault` naming the CHANGE-ME left in it — and no call reaches the proxy, whether the
-    placeholder sits in its `config.env` or only in its access declaration's base (host-state
-    reads no keys; elastic's indexes are not checked)."""
-    import json
-    import shutil
-
-    ConfigFault = S.config_fault()
-    root = tmp_path / "tenants"
-    folder = root / S.PLAYGROUND_ID / "knowledge"
-    shutil.copytree(S.TEMPLATE_DIR, folder)
-    (folder / "agent" / ".tenant-id").write_text(f"{S.PLAYGROUND_ID}\n", encoding="utf-8")
-    (root / S.PLAYGROUND_ID / "tenant.json").write_text(json.dumps(
-        {"tenant_id": S.PLAYGROUND_ID, "created_at": "2026-09-28T00:00:00+00:00"}) + "\n",
-        encoding="utf-8")
-    # The template grants nothing (the run would be refused for that, not for its placeholders).
-    (S.settings_of(folder) / "verb-grants.yaml").write_text(T1106.TABLE_A, encoding="utf-8")
-    declared = sorted(p.parent.name for p in (S.settings_of(folder) / "systems").glob("*/access.yaml"))
-    assert declared == sorted(S.PREFIX), f"precondition: the template declares every system: {declared}"
-
-    record = _resolve(root)
-    stand_in = S.ProxyStandIn(tmp_path / "proxy", [S.answer('{"hosts": []}')])
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    ctx = S.verb_context(record, run_dir, {}, proxy_url=stand_in.url, request_token="token-tpl")
-    adapter = {system: S.mod(f"integrations.{system.replace('-', '_')}_adapter") for system in S.PREFIX}
-    calls = [(system, adapter[system].health_check, {}) for system in sorted(S.PREFIX)] + [
-        ("host-state", adapter["host-state"].proc_tree, {"host": "web-1"}),
-        ("elastic", adapter["elastic"].query, {"native_query": "*"}),
-    ]
-    for system, fn, kw in calls:
-        with pytest.raises(ConfigFault) as raised:
-            fn(ctx, **kw)
-        assert raised.value.exit_code == 2, f"{system}.{fn.__name__}: {raised.value!r}"
-        assert "CHANGE-ME" in str(raised.value), \
-            f"{system}.{fn.__name__}: the fault must name the placeholder left in: {raised.value}"
-    assert stand_in.requests() == [], f"a placeholder system reached the proxy: {stand_in.requests()}"
 
 
 def _called(record, tmp_path, name, fn, **kw):

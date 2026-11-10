@@ -190,9 +190,9 @@ def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import
              "names": (BROKEN_SYSTEM, str(checkout.resolve()))}
     _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None), **blind)
     _unparseable_mapping(folder)
-    # A case-record file that does not parse is a finding naming it (#1359 r4), census or not.
-    H.assert_refused(H.run_script(script, "check", "--folder", str(folder), root=None),
-                     "settings/case-record.yaml")
+    # #1366 O9: the case record is a database row; a leftover case-record.yaml is not read, so it is no folder finding.
+    text, _line = _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None), **blind)
+    assert "settings/case-record.yaml" not in text, text
 
 
 def test_1120_s6_defender_dir_env_names_another_tree(
