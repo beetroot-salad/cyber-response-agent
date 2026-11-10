@@ -302,7 +302,8 @@ def _remove_tree(target: Path, *, wait: float) -> None:
     """Remove `target` without following it: a link is unlinked, a directory removed whole.
 
     The job worker takes no host lock (#1342 r6), so a job it already claimed can still create a file in
-    the folder while it is being removed, and that pass fails "directory not empty". Such a pass is run
+    the folder while it is being removed, and that pass fails "directory not empty"; a job that removes
+    a file the pass had already listed (a database's journal files, say) makes it fail "no such file". Either pass is run
     again, for up to `wait` seconds from the first failed pass, until the folder is gone (#1360 O1); a folder still being added to
     after that fails the step naming what is in it (O2). Any other failure ends the step at once."""
     if target.is_symlink() or target.is_file():
@@ -313,7 +314,7 @@ def _remove_tree(target: Path, *, wait: float) -> None:
         try:
             shutil.rmtree(target)
         except OSError as fault:
-            if fault.errno != errno.ENOTEMPTY:
+            if fault.errno not in (errno.ENOTEMPTY, errno.ENOENT):
                 raise
             deadline = time.monotonic() + wait if deadline is None else deadline
             if time.monotonic() >= deadline:

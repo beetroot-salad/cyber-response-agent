@@ -83,6 +83,7 @@ OFFBOARD_MAX_PASSES = 5
 #: Why an offboard ended a job (#1360 O5): a reason of its own, unlike a user's cancel or a worker fault.
 TENANT_OFFBOARDED = "tenant_offboarded"
 _OFFBOARD_MESSAGE = "its tenant was offboarded"
+_LEARNING_LIVE = ("queued", "running")
 #: The tenant states that take no new job and start nothing new (#1360 D7).
 _BEING_REMOVED = ("offboarding", "offboarded")
 
@@ -377,25 +378,31 @@ class JobStore:
         Tenancy's own transition runs first (`NotFound`, `Conflict`: its refusals, nothing changed); then the tenant's
         live investigations end `aborted` and its live learning jobs `skipped`, both with the reason
         `tenant_offboarded`, until a fresh read finds none: a take-over or a finish that the first pass waited on may
-        have inserted a retry or an auto job it could not see. Rows are locked in id order, investigations before
-        learning jobs (D9). `OffboardNotSettled`, with nothing changed, when rows keep appearing past the cap (D8).
-        Each ended job is audited after the commit, by `actor`."""
+        have inserted a retry or an auto job it could not see. Investigations are ended until none are left, then
+        learning jobs (investigations derive only from investigations, so the first phase is never repeated after a
+        learning job is locked); rows are locked in id order (D9). `OffboardNotSettled`, with nothing changed, when rows keep
+        appearing past the cap (D8), counted over both phases. Each ended job is audited after the commit, by `actor`."""
         investigations: list[str] = []
         learning: list[str] = []
+        phases = (
+            (InvestigationRow, InvestigationRow.stage.in_(LIVE), investigations,
+             {"stage": "aborted", "failure_reason": TENANT_OFFBOARDED, "failure_message": _OFFBOARD_MESSAGE}),
+            (LearningJobRow, LearningJobRow.status.in_(_LEARNING_LIVE), learning,
+             {"status": "skipped", "reason": TENANT_OFFBOARDED, "message": _OFFBOARD_MESSAGE}),
+        )
         async with self._tx() as s:
             record = await _tenancy_offboard(s, tenant_id)
-            for _ in range(OFFBOARD_MAX_PASSES):
-                investigations += await self._end_live(s, InvestigationRow, tenant_id, stage="aborted",
-                                                       failure_reason=TENANT_OFFBOARDED,
-                                                       failure_message=_OFFBOARD_MESSAGE, live=InvestigationRow.stage.in_(LIVE))
-                learning += await self._end_live(s, LearningJobRow, tenant_id, status="skipped", reason=TENANT_OFFBOARDED,
-                                                 message=_OFFBOARD_MESSAGE, live=LearningJobRow.status.in_(("queued", "running")))
-                if not await self._any_live(s, tenant_id):
-                    break
-            else:
-                raise OffboardNotSettled(
-                    f"tenant {tenant_id} still had live jobs after {OFFBOARD_MAX_PASSES} passes of ending them; "
-                    f"the offboard was rolled back")
+            passes = 0
+            for row, live, ended, ending in phases:  # investigations until none are left, then learning jobs
+                while True:
+                    if passes >= OFFBOARD_MAX_PASSES:
+                        raise OffboardNotSettled(
+                            f"tenant {tenant_id} still had live jobs after {OFFBOARD_MAX_PASSES} passes of ending "
+                            f"them; the offboard was rolled back")
+                    passes += 1
+                    ended += await self._end_live(s, row, tenant_id, live=live, **ending)
+                    if not (await s.execute(select(row.id).where(row.tenant_id == tenant_id, live).limit(1))).first():
+                        break
         for job_id in sorted(investigations):
             announce("investigation.cancel", actor=actor, tenant_id=tenant_id, target=job_id,
                      detail=f"reason={TENANT_OFFBOARDED}")
@@ -415,15 +422,6 @@ class JobStore:
             .values(finished_at=self._clock(), lease_expires_at=None, **ending)
             .returning(row.id).execution_options(synchronize_session=False))).scalars().all()
         return [str(i) for i in ended]
-
-    @staticmethod
-    async def _any_live(s: AsyncSession, tenant_id: TenantId) -> bool:
-        """A fresh read: whether the tenant has a queued or running job of either kind."""
-        for row, live in ((InvestigationRow, InvestigationRow.stage.in_(LIVE)),
-                          (LearningJobRow, LearningJobRow.status.in_(("queued", "running")))):
-            if (await s.execute(select(row.id).where(row.tenant_id == tenant_id, live).limit(1))).first() is not None:
-                return True
-        return False
 
     # --- delete -------------------------------------------------------------------------
 
