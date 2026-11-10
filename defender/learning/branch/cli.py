@@ -678,15 +678,9 @@ class _ContainerAdmitted:
         return None
 
 
-def _admitted(data_root: Any, tenant_id: TenantId, *, directory: Any, container: JobContainer | None) -> Any:
-    """The launch's tenant: the one host acceptance for an operator's launch (lock, records, folder rules); inside a
-    job container the folder rules alone (`_ContainerAdmitted`)."""
-    from defender.systems import run_tenant as run_tenant_mod
-
-    box_mounted = (tenancy.box_mounted_episodes(data_root, tenant_id),)
-    if container is None:
-        return run_tenant_mod.host_tenant(data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
-                                          box_mounted=box_mounted)
+def _admitted(data_root: Any, tenant_id: TenantId, *, box_mounted: tuple[Any, ...]) -> _ContainerAdmitted:
+    """The tenant of a launch inside a job container: the folder rules alone (`_ContainerAdmitted`). An operator's
+    launch opens the one host acceptance in `_launch` itself, the command that holds it."""
     return _ContainerAdmitted(tenancy.accept_tenant(data_root, tenant_id, defender_dir=_DEFENDER_DIR,
                                                     box_mounted=box_mounted))
 
@@ -721,8 +715,12 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     # refused here at launch exactly as a run refuses one inside its runs base (#1107 MF-13).
     from defender.systems import run_tenant as run_tenant_mod
 
+    admitted: Any
     try:
-        admitted = _admitted(data_root, tenant_id, directory=directory, container=container)
+        box_mounted = (tenancy.box_mounted_episodes(data_root, tenant_id),)
+        admitted = (run_tenant_mod.host_tenant(data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
+                                               box_mounted=box_mounted)
+                    if container is None else _admitted(data_root, tenant_id, box_mounted=box_mounted))
     except TenantRefused as refusal:
         raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
                      brief=f"the job's tenant was refused ({type(refusal).__name__})",

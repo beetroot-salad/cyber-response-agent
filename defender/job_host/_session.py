@@ -110,6 +110,7 @@ class Session:
     signer: Any = None
     publish: Any = None
     forge: Any = None
+    client: Any = None
     command: list[str] | None = None
     signalled: threading.Event = field(default_factory=threading.Event)
     #: Every id this helper minted for the claim (the job's own, a sibling's run, a draft): `pass` and `box.start`

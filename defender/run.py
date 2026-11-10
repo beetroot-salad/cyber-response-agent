@@ -889,14 +889,22 @@ def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     return run
 
 
+@contextlib.contextmanager
+def _tenant_refusal_exits() -> Iterator[None]:
+    """A refusal of the request's tenant (its id, the data root, the host acceptance) is the
+    `[run.py]` exit, before the preflight."""
+    try:
+        yield
+    except TenantRefused as refused:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+
+
 def _request_data_root(ns: argparse.Namespace) -> DataRoot:
     """The request's tenant id checked (`--tenant` is required, there is no default), then the
     data root resolved — once, here — or a `[run.py]` refusal before the preflight."""
-    try:
+    with _tenant_refusal_exits():
         tenancy.requested_tenant_id(ns.tenant)
         return tenancy.resolve_data_root()
-    except TenantRefused as refused:
-        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
 def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> Iterator[RunsBase]:
@@ -1207,16 +1215,10 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
 
 
 @contextlib.contextmanager
-def _operator_set_up(ns: argparse.Namespace, *, directory: tenancy.TenantDirectory | None,
+def _operator_set_up(ns: argparse.Namespace, data_root: DataRoot, admitted: Admitted,
                      **seams: Any) -> Iterator[_Started]:
-    """The operator command's setup: the request's tenant id, then the data root, resolved once
-    (nothing below resolves either again); the one host acceptance (r10 A1; #1342 r6 R6-3), this
-    command's own, held for the whole run; then both halves of run setup (`_set_up`)."""
-    data_root = _request_data_root(ns)
-    try:
-        admitted = host_tenant(data_root, ns.tenant, directory=directory, **_acceptance_args(ns, data_root))
-    except TenantRefused as refused:
-        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+    """The operator command's setup under the host acceptance `main` opened (r10 A1; #1342 r6
+    R6-3), held here for the whole run: both halves of run setup (`_set_up`)."""
     with admitted, _set_up(ns, data_root, admitted, **seams) as started:
         yield started
 
@@ -1274,11 +1276,19 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     request = job_socket.from_environ(os.environ if environ is None else environ)
     # Bound under its production name so the curation lane is visibly reached from here.
     enqueue_curation = enqueue
-    setup = (_operator_set_up(ns, directory=directory, preflight=preflight, materialize=materialize,
-                              oracle=oracle, verifier=verifier, roster=roster, publish=publish,
-                              signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport)
-             if request is None else
-             _sibling_set_up(ns, request, preflight=preflight, roster=roster, oracle=oracle, verifier=verifier))
+    setup: contextlib.AbstractContextManager[_Started]
+    if request is None:
+        # The request's tenant id, then the data root, resolved once; nothing below resolves
+        # either again. The one host acceptance (r10 A1; #1342 r6 R6-3), this command's own,
+        # held for the whole run by its setup.
+        data_root = _request_data_root(ns)
+        with _tenant_refusal_exits():
+            admitted = host_tenant(data_root, ns.tenant, directory=directory, **_acceptance_args(ns, data_root))
+        setup = _operator_set_up(ns, data_root, admitted, preflight=preflight, materialize=materialize,
+                                 oracle=oracle, verifier=verifier, roster=roster, publish=publish,
+                                 signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport)
+    else:
+        setup = _sibling_set_up(ns, request, preflight=preflight, roster=roster, oracle=oracle, verifier=verifier)
     # A sibling in its container: its box over the socket, its page left in its own run folder.
     in_container: dict[str, Any] = {} if request is None else {"job_lane": True, "relay": request}
     try:

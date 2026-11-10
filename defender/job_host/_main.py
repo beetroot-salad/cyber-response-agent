@@ -240,11 +240,11 @@ def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
 
 
 def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: Any = None, forge: Any = None,
-         command: list[str] | None = None) -> int:
+         command: list[str] | None = None, client: Any = None) -> int:
     """The helper for one job (module doc). `docker` is the docker seam (the box package's real one by default),
     `signer` the request signer (the tenant's sign login), `publish` the launch-time publish (the real child),
     `forge` the forge credential's builder (the learning kinds'), `command` a container command line in place of the
-    kind's entry. Returns the container's exit status, or 1 for an ending decided before it."""
+    kind's entry, `client` the forge client the drain's delivery uses (a new one by default). Returns the container's exit status, or 1 for an ending decided before it."""
     from defender import tenancy
     from defender._parent_tie import require_parent, tie_to_parent
     from defender._paths import process_defender_dir
@@ -269,7 +269,7 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
                       root_folder=tenancy.data_root_for_child(root), claim=claim,
                       docker=docker if docker is not None else run_docker,
                       defender_dir=process_defender_dir().resolve(), signer=signer, publish=publish, forge=forge,
-                      command=list(command) if command is not None else None)
+                      client=client, command=list(command) if command is not None else None)
     session.container = job_container_name(session)
     spec = registry().kinds.get(ns.kind)
     if spec is None:

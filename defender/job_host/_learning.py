@@ -14,7 +14,7 @@ run id, run copy and materialized run folder (input, stamp, knowledge record), a
 `<episode>/runs/<run>/`, made with no link followed out of the episode (H10), and its copy is owned by this helper.
 `export.materialise(commit=)`, the export of the commit the launch pins its family to (its source's), materialised
 here from the tenant's clone under the knowledge lock if absent: the container writes no export (P-A).
-Boxes: `shell` (a sibling's run box over its run folder and copy, or the job's own scratch shell) and `oracle` (the
+Boxes: `shell` (a sibling's run box over its run folder and copy) and `oracle` (the learning job's own: the
 oracle's box, its bind folders in a per-claim folder under the data root, never host `/tmp`, C21).
 
 **The post-step and the family-less check** (`--kind post-step [--job <id>] --tenant T`). Its host half: the tenant's
@@ -61,7 +61,7 @@ LEARNING, POST_STEP = "learning", "post-step"
 LOCK_WAIT_SECONDS = 30.0
 #: The longest validity a forge token is asked for (C25: the network timeout, 120 s, plus 30 s of skew).
 FORGE_TOKEN_CAP = 150.0
-#: Where under the data root each claim's scratch folder lives (oracle boxes' binds, the job's own shell): outside
+#: Where under the data root each claim's scratch folder lives (oracle boxes' binds): outside
 #: every tenant's folder, the job socket's folder and host `/tmp` (C21).
 SCRATCH = ".job-scratch"
 _DOCKER_DID_NOT_RUN = frozenset({125, 126, 127})
@@ -428,20 +428,13 @@ def _copy_answer(sibling: _Sibling) -> dict[str, Any]:
             "agent": str(copy.agent), "settings": str(copy.settings), "token": str(copy.token)}
 
 
-def _shell_box(session: Session, ident: str) -> Any:
-    """A sibling's run box over its run folder and copy; at the job's own id, a shell over its scratch folder."""
-    from defender import box
-
-    state = _state(session, _Learning)
-    sibling = state.siblings.get(ident)
-    if sibling is not None:
-        return start_run_box(session, sibling.run_dir, sibling.copy)
-    if ident != session.job_id:
-        raise Refused(f"no shell box is served for {ident!r}", "unknown-id")
-    folder = state.scratch / "shell" / ident
-    _io.guarded_mkdir(folder, base=state.scratch)
-    return box.start_box(folder, session.defender_dir, docker=session.docker, tenant_id=session.tenant_id,
-                         require_sandbox=True)
+def _sibling_box(session: Session, ident: str) -> Any:
+    """A sibling's run box over its run folder and copy. The learning job itself is started `oracle` boxes only
+    (r4.1): a `shell` box is a sibling's."""
+    sibling = _state(session, _Learning).siblings.get(ident)
+    if sibling is None:
+        raise Refused(f"a shell box is served only for a sibling's run, not {ident!r}", "not-for-kind")
+    return start_run_box(session, sibling.run_dir, sibling.copy)
 
 
 def _oracle_box(session: Session, _ident: str) -> Any:
@@ -528,7 +521,7 @@ def _drain_delivery(session: Session, state: _PostStep) -> Any:
 
         state.delivery = state.opened.enter_context(opened_delivery(
             state.tenant, defender_dir=session.defender_dir, directory=state.records, purpose="drain",
-            identity=_drain_credential(session, state)))
+            client=session.client, identity=_drain_credential(session, state)))
     return state.delivery
 
 
@@ -579,6 +572,6 @@ def register(registry: Registry) -> None:
                  after_signal=True)
     registry.add("record.refusal", kinds=(POST_STEP,), handler=_record_refusal, required=("kind", "reason"),
                  after_signal=True)
-    registry.box_kind("shell", kinds=(LEARNING,), start=_shell_box)
+    registry.box_kind("shell", kinds=(LEARNING,), start=_sibling_box)
     registry.box_kind("oracle", kinds=(LEARNING,), start=_oracle_box)
     registry.box_kind("batch", kinds=(POST_STEP,), start=_batch_box)
