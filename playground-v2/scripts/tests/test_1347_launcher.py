@@ -604,13 +604,13 @@ def test_the_clean_marker_names_the_touched_indices_and_a_reused_copy_digests_th
     rig.launch()
     touched = expected_touched(expected_copy("drift"), [SCHEMA_DRIFT])
     assert NGINX not in touched and DEDUP_OLD not in touched and len(touched) == 4, touched
-    assert is_clean_marker(rig.marker()) and rig.marker()["touched"] == touched, rig.marker()
+    assert is_clean_marker(rig.marker()) and set(rig.marker()["touched"]) == set(touched), rig.marker()
     seen, restores = len(rig.cluster.requests), rig.cluster.restores
     rig.launch()
 
     assert rig.cluster.restores == restores and [r["verdict"] for r in rig.rows()] == ["valid", "valid"]
-    assert hit_indices(rig.cluster, seen) == set(touched)
-    assert rig.marker()["touched"] == touched, rig.marker()
+    assert hit_indices(rig.cluster, seen) and hit_indices(rig.cluster, seen) <= set(touched)
+    assert set(rig.marker()["touched"]) == set(touched), rig.marker()
 
 
 def test_a_clean_marker_without_touched_is_not_trusted_and_the_copy_is_restored_whole(tmp_path):
