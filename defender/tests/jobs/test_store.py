@@ -3054,6 +3054,84 @@ async def test_1360_o3_an_offboard_that_locks_the_investigation_first_leaves_the
     assert _count(dsn, "learning_jobs") == 0
 
 
+#: Every shape a live row of the tenant can have when the offboard meets it (O3: queued or running, of either kind, the
+#: handed-back learning job included): `lapsed` is a running row whose worker died and that nobody has taken over yet.
+_LIVE_SHAPES = [("investigation", "queued"), ("investigation", "running"), ("investigation", "lapsed"),
+                ("learning", "queued"), ("learning", "running"), ("learning", "lapsed"), ("learning", "handed_back")]
+
+
+def _plant_queued(dsn: str, kind: str) -> str:
+    """One queued row of T1 of `kind`, committed on its own connection, as a derived insert (a take-over's retry, a
+    finish's auto learning job) leaves it: it refers to the tenant only by its foreign key."""
+    alert = _plant_alert(dsn, ticket=f"Z-{uuid.uuid4()}")
+    if kind == "investigation":
+        return _plant_investigation(dsn, tenant=T1, alert_id=alert, key="k-late", attempt=1, stage="queued")
+    parent = _plant_investigation(dsn, tenant=T1, alert_id=alert, key="k", attempt=1, stage="completed")
+    job = str(uuid.uuid4())
+    execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
+                 "status, created_at, sibling_cost_usd, findings_count, publish_state) "
+                 "VALUES (%s, %s, %s, %s, 'k-late', 1, 'explicit', 'queued', %s, 0, 0, 'none')", (job, T1, alert, parent, NOW))
+    return job
+
+
+async def _into_shape(dsn: str, store: Any, kind: str, shape: str, row_id: str) -> None:
+    """Bring the queued row to `shape` the way the system does: the store's own claim (a worker that still reads the
+    tenant `active`) and hand-back, and a lease lapsed by the database's clock (the worker died; no take-over ran yet)."""
+    if shape == "queued":
+        return
+    if kind == "investigation":
+        assert (await store.claim()).record.investigation_id == row_id, "premise: the claim took the row being shaped"
+    else:
+        assert (await store.claim_learning_job()).record.learning_job_id == row_id, "premise: the claim took the row being shaped"
+    if shape == "lapsed":
+        table = "investigations" if kind == "investigation" else "learning_jobs"
+        execute(dsn, f"UPDATE jobs.{table} SET lease_expires_at = now() - interval '1 second' WHERE id = %s", (row_id,))  # noqa: S608
+    elif shape == "handed_back":
+        assert await store.hand_back_learning_job(T1, row_id) is not None, "premise: the running job was handed back"
+
+
+@pytest.mark.parametrize("arrives", ["at_start", "behind_a_held_row"])
+@pytest.mark.parametrize(("kind", "shape"), _LIVE_SHAPES, ids=[f"{kind}-{shape}" for kind, shape in _LIVE_SHAPES])
+async def test_1360_o3_every_live_shape_of_either_kind_ends_whether_there_at_the_start_or_arriving_while_the_offboard_waits(
+        dsn, kind, shape, arrives):
+    """The tenant's one other live job is a running learning job a raw connection holds, so the offboard waits on it. A
+    row of each live shape is there before the offboard starts, or is committed (queued, then claimed, lapsed or handed
+    back as the system does it) while the offboard waits, after its statements for that pass were taken: either way the
+    commit leaves the tenant no queued or running row, that row ends with the offboarding's reason, and the take-over
+    and both claims that run next find nothing of the tenant to fail, retry or start. A lapsed running row is live until
+    it ends; leaving it to the take-over queues a retry for a tenant being removed. (#1360 O3, O4 invariant, Flow 1
+    step 3 fresh read)"""
+    held = str(uuid.uuid4())
+    _plant_running_pair(dsn, [], [held])
+    async with job_store(dsn) as store:
+        if arrives == "at_start":
+            late = _plant_queued(dsn, kind)
+            await _into_shape(dsn, store, kind, shape, late)
+        async with _holding_row(dsn, "learning_jobs", held):
+            offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+            try:
+                await until_blocked(dsn, 1)  # the offboard waits for the held learning job
+                if arrives == "behind_a_held_row":
+                    late = _plant_queued(dsn, kind)
+                    await _into_shape(dsn, store, kind, shape, late)
+            except BaseException:
+                offboard.cancel()
+                raise
+        await asyncio.wait_for(offboard, 20)
+
+        assert _live_of(dsn, T1) == 0, f"a {shape} {kind} row of the offboarding tenant is still live"
+        if kind == "investigation":
+            assert (row(dsn, late)["stage"], row(dsn, late)["failure_reason"]) == ("aborted", OFFBOARDED)
+        else:
+            assert (_learning(dsn, late)["status"], _learning(dsn, late)["reason"]) == ("skipped", OFFBOARDED)
+        assert (_learning(dsn, held)["status"], _learning(dsn, held)["reason"]) == ("skipped", OFFBOARDED)
+        taken = await store.take_over()
+        claimed, learning_claimed = await store.claim(), await store.claim_learning_job()
+    assert taken == [], "the take-over found a running row of the offboarding tenant to fail and retry"
+    assert (claimed, learning_claimed) == (None, None), "a claim started a job of the offboarding tenant"
+    assert _live_of(dsn, T1) == 0
+
+
 def _reinsert_on_end(dsn: str, kind: str, *, up_to: int) -> None:
     """A real fault: ending a live row of `kind` inserts a fresh queued row for the same alert (investigation), or the
     same investigation (learning job), while fewer than `up_to` such rows exist: a late writer the offboard keeps meeting."""
@@ -3292,6 +3370,88 @@ async def test_1360_flow1_an_offboard_and_a_renewal_over_both_tables_take_invest
     assert _live_of(dsn, T1) == 0
     assert _count(dsn, "investigations", "stage = 'aborted' AND failure_reason = 'tenant_offboarded'") == 6
     assert _count(dsn, "learning_jobs", "status = 'skipped' AND reason = 'tenant_offboarded'") == 6
+
+
+#: Each locker of the order (tenant row, then investigations by id, then learning jobs by id) and each point at which it
+#: takes a lock: the offboard and the renewal at their rows, the two outside creates at the tenant row and the alert.
+_FOOTPRINT = [("offboard", "tenant"), ("offboard", "investigation"), ("offboard", "learning"),
+              ("renew", "investigation"), ("renew", "learning"),
+              ("create_investigation", "tenant"), ("create_investigation", "alert"),
+              ("create_learning_job", "tenant"), ("create_learning_job", "alert")]
+
+
+async def _got_at_once(conn: Any, table: str, row_id: str, mode: str) -> bool:
+    """Whether `FOR <mode> NOWAIT` on the row got its lock at once, on an autocommit connection (so released at once)."""
+    import psycopg
+
+    try:
+        await conn.execute(f"SELECT 1 FROM {table} WHERE id = %s FOR {mode} NOWAIT", (row_id,))  # noqa: S608
+    except psycopg.errors.LockNotAvailable:
+        return False
+    return True
+
+
+@pytest.mark.parametrize(("locker", "at"), _FOOTPRINT, ids=[f"{locker}-at-{at}" for locker, at in _FOOTPRINT])
+async def test_1360_flow1_flow2_a_locker_held_up_at_any_point_holds_what_comes_before_it_in_the_order_and_nothing_after(
+        dsn, locker, at):
+    """One order for every transaction that locks several of these rows: the tenant row, then investigations by id, then
+    learning jobs by id (Flow 1 lock order; D9 as amended by r3.2; Flow 2: an outside create takes the tenant row, with
+    a share lock, before any other lock). The real locker is held up at one point by a raw connection holding that row
+    (an outside create's share lock, a middle job row, an offboard's update of the tenant row, the alert); while it
+    waits, NOWAIT probes find every row it takes earlier in the order held, every row it takes later free, and the
+    tenant row open to `FOR KEY SHARE`, the lock a derived insert's foreign key takes, which neither the offboard's
+    update nor a create's share lock may block. (#1360 Flow 1, Flow 2, D9)"""
+    import psycopg
+
+    from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
+
+    tenant = ("tenancy.tenants", T1)
+    inv_ids, job_ids = (sorted(str(uuid.uuid4()) for _ in range(4)) for _ in range(2))
+    invs = [("jobs.investigations", i) for i in inv_ids]
+    jobs = [("jobs.learning_jobs", j) for j in job_ids]
+    async with job_store(dsn) as store:
+        if locker in ("offboard", "renew"):
+            _plant_running_pair(dsn, inv_ids[::-1], job_ids[::-1])  # a scan in table order meets the high ids first
+
+            def operation() -> Any:
+                return _offboard(store, T1, actor="admin-1") if locker == "offboard" else store.renew({*inv_ids, *job_ids})
+            hold, mode = {"tenant": (tenant, "SHARE"), "investigation": (invs[2], "UPDATE"), "learning": (jobs[2], "UPDATE")}[at]
+            earlier = {"tenant": [], "investigation": invs[:2], "learning": invs + jobs[:2]}[at]
+            earlier = ([tenant] if locker == "offboard" and at != "tenant" else []) + earlier
+            later = {"tenant": invs + jobs, "investigation": invs[3:] + jobs, "learning": jobs[3:]}[at]
+        else:
+            if locker == "create_investigation":
+                alert = (await an_alert(store, T1, ticket="N-1")).alert_id
+
+                def operation() -> Any:
+                    return store.create_investigation(T1, alert, "k-new", actor="u-1")
+            else:
+                done = await completed_investigation(store, ticket="C-1")
+                alert = str(execute(dsn, "SELECT alert_id FROM jobs.investigations WHERE id = %s", (done,))[0][0])
+
+                def operation() -> Any:
+                    return store.create_learning_job(T1, done, "c-1", actor="u-1")
+            alert_row = ("jobs.alerts", alert)
+            hold, mode = {"tenant": (tenant, "NO KEY UPDATE"), "alert": (alert_row, "UPDATE")}[at]
+            earlier, later = {"tenant": ([], [alert_row]), "alert": ([tenant], [])}[at]
+
+        async with await psycopg.AsyncConnection.connect(dsn) as holder, \
+                await psycopg.AsyncConnection.connect(dsn, autocommit=True) as probe:
+            await holder.execute(f"SELECT 1 FROM {hold[0]} WHERE id = %s FOR {mode}", (hold[1],))  # noqa: S608
+            pending = asyncio.ensure_future(operation())
+            try:
+                await until_blocked(dsn, 1)  # the locker waits at the held row
+                free_earlier = [r for r in earlier if await _got_at_once(probe, *r, "UPDATE")]
+                held_later = [r for r in later if not await _got_at_once(probe, *r, "UPDATE")]
+                key_share = await _got_at_once(probe, *tenant, "KEY SHARE")
+                await holder.commit()
+                await asyncio.wait_for(pending, 20)
+            finally:
+                pending.cancel()
+
+    assert free_earlier == [], f"{locker}, waiting at the {at}, does not hold what comes before it in the order"
+    assert held_later == [], f"{locker}, waiting at the {at}, already holds what comes after it in the order"
+    assert key_share, f"{locker}, waiting at the {at}, blocks a foreign key's key-share lock on the tenant row"
 
 
 # --- O4: no job is created for an offboarding or offboarded tenant -----------------------------------------------

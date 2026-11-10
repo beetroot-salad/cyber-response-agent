@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -226,22 +227,89 @@ def test_teardown_removes_what_a_late_writer_adds_to_the_folder_while_it_is_bein
     assert not any(folder.exists() for folder in folders.values()), {k: f.exists() for k, f in folders.items()}
 
 
-def test_teardown_that_keeps_finding_new_files_fails_naming_the_folder_and_resume_finishes_it(world):
-    """A writer that adds a file after every removal pass never lets the folder empty: after the wait teardown gives
-    its holders the step fails (restart at teardown) naming the folder and an entry left in it, and once the writer stops a
-    resume finishes the offboarding (#1360 O2). Its wording is not pinned (it may carry the underlying
-    error): it names the folder path and a name that was left in it."""
+_PASS_WRITER = """
+import os, sys, time
+folder, ballast, entries = sys.argv[1], sys.argv[2], int(sys.argv[3])
+for k in range(entries):
+    landed = os.path.join(folder, 'late-%d' % k)
+    try:
+        os.rename(os.path.join(ballast, str(k)), landed)
+    except FileNotFoundError:
+        sys.exit(1)
+    if k == entries - 1:
+        sys.exit(0)
+    children = len(os.listdir(landed))
+    deadline = time.monotonic() + 20
+    while True:
+        try:
+            if len(os.listdir(landed)) < children:
+                break
+        except FileNotFoundError:
+            break
+        if time.monotonic() > deadline:
+            sys.exit(2)
+"""
+
+
+def _pass_writer(folder, ballast, entries):
+    """A process that moves `entries` prepared directories (`ballast/0`, `ballast/1`, ...) into `folder` as `late-0`,
+    `late-1`, ..., each one only once a removal pass has begun deleting the previous one's children. That pass listed
+    `folder` before the next entry landed, so it ends "directory not empty"; the next entry is deleted only by a later
+    pass. It never removes anything. Exits 0 once every entry landed: then at least `entries - 1` passes in a row failed
+    because something appeared, and after the last one nothing more is added."""
+    return subprocess.Popen([sys.executable, "-I", "-c", _PASS_WRITER, str(folder), str(ballast), str(entries)])
+
+
+def test_teardown_keeps_removing_for_its_wait_however_many_passes_a_writer_that_then_stops_makes_fail(
+        world, tmp_path, data_root):
+    """A writer adds an entry to T's folder during each of 30 removal passes in a row, then stops. Late writes per pass
+    are not bounded by any fixed number, so the bound is the wait (`teardown_wait`, here far longer than the whole
+    race), not a pass count: the offboarding goes on to `offboarded` with the folder gone. (#1360 O1, Flow 4)"""
+    entries, children = 30, 400
+    ballast = tmp_path / "ballast"
+    for k in range(entries):
+        for n in range(children):
+            (ballast / str(k) / f"c-{n}").mkdir(parents=True)
+    assert ballast.stat().st_dev == world.data_root.stat().st_dev, "premise: the entries can be moved into the folder"
+    world.host_actor = world.new_host(world.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=60.0),
+                                      containers=lambda _tenant: None)
     tenant = world.active_tenant()
     folder = world.data_root / tenant
-    runs = _plant_runs(folder)
-    writer = _late_writer(runs, keep_adding_for=3.0)
+    writer = _pass_writer(folder, ballast, entries)
+    try:
+        deadline = time.monotonic() + 10
+        while not (folder / "late-0").exists():
+            assert time.monotonic() < deadline and writer.poll() is None, "the writer never placed its first entry"
+            time.sleep(0.01)
+        assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        world.drive()
+        item = world.item(tenant)
+        assert (item["state"], item["failure"]) == ("offboarded", None), item
+        assert not folder.exists()
+        assert writer.wait(timeout=30) == 0, "not every entry landed, so fewer passes than intended failed"
+    finally:
+        if writer.poll() is None:
+            writer.kill()
+            writer.wait()
+
+
+def test_teardown_that_keeps_finding_new_files_fails_naming_the_folder_and_resume_finishes_it(world):
+    """A writer that adds entries to the folder itself after every removal pass never lets the folder empty: after the
+    wait teardown gives its holders the step fails (restart at teardown) naming the folder and an entry left in it,
+    and once the writer stops a resume finishes the offboarding (#1360 O2). Its wording is not pinned (it may carry the
+    underlying error, which names only the folder): it names the folder path and the name of an entry the writer added."""
+    tenant = world.active_tenant()
+    folder = world.data_root / tenant
+    for n in range(4000):  # a first pass long enough for the writer to land mid-way, whichever entry it removes first
+        (folder / f"entry-{n}").write_text("x")
+    writer = _late_writer(folder, keep_adding_for=3.0)
     assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     item = world.item(tenant)
     assert (item["state"], item["step"]) == ("offboarding", "teardown"), item
     failure = item["failure"]
     assert str(folder) in failure, failure
-    assert "runs" in failure, f"the failure does not name an entry left in the folder: {failure}"
+    assert re.search(r"late-dir-\d+", failure), f"the failure does not name an entry left in the folder: {failure}"
     assert writer.wait(timeout=35) == 0, "the late writes never happened, so this run did not race the removal"
     assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
