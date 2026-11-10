@@ -2,7 +2,8 @@
 
 Bound here: `playground-v2/clockshim/clockshim.c` builds with `gcc -shared -fPIC -o clockshim.so clockshim.c
 -ldl` (as its Dockerfile does) and, preloaded, shifts CLOCK_REALTIME readings by the offset held in the file
-`V2_CLOCK_OFFSET_FILE` names: a decimal integer number of seconds (sign allowed, surrounding blanks ignored).
+`V2_CLOCK_OFFSET_FILE` names: a fixed 24-byte record, a signed decimal integer number of seconds padded with
+spaces and ending in a newline (r6.4.3 settlements), rewritten in place at byte 0 and never truncated.
 The file is mapped on the first clock call and its mapped bytes are read on every call, so rewriting it in
 place changes the next reading without a restart, and no file is opened per call. Monotonic clocks are untouched.
 

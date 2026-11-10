@@ -28,9 +28,14 @@ Tests read the copy's END STATE from `_lab_fakes.FakeCluster`, not a request seq
 r6.4.3: D25 (every restore goes into a fresh node: the old node container and its data volume are discarded,
 nothing is closed or deleted to make room, the copy-state marker lives in the engine's state volume
 `lab-engine-state`) and D15 revised (the node's wall-clock shim reads its offset from a file named by the
-node's `V2_CLOCK_OFFSET_FILE`, a decimal integer number of seconds; the node starts with it already holding
-T - now; the launcher rewrites it to T - now as the last lab step before the agent runs; a launch never
-restarts the node for its clock).
+node's `V2_CLOCK_OFFSET_FILE`; the node starts with it already holding T - now; the launcher rewrites it to
+T - now as the last lab step before the agent runs; a launch never restarts the node for its clock).
+
+r6.4.3 settlements, the offset file: a fixed-width record of 24 bytes, a signed decimal integer number of
+seconds padded with spaces and ending in a newline. It is created at that size before the node starts and only
+ever rewritten in place at byte 0 (the same file, never truncated), so the shim's mapping never runs past the
+file's end. The rig docker records how each write opened the file (`>` truncates; `1<>` and `dd
+conv=notrunc` write in place).
 """
 from __future__ import annotations
 
@@ -46,7 +51,7 @@ import yaml
 from _lab_fakes import (AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, ALERTS_PATTERN, DATA_DROP, EVENTS, FREEZE_ID,
                         LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SCHEMA_DRIFT,
                         SLUG, SPAN_START, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T, FaultJournal, LabRig,
-                        canonical_digest, expected_copy, expected_variant, instant, is_clean_marker, seconds)
+                        canonical_digest, expected_copy, expected_variant, instant, is_clean_marker)
 
 LAUNCH = Path(__file__).resolve().parents[1] / "launch_frozen.py"
 KINDS = ["none", "drop", "drift", "cmdb"]
@@ -1032,7 +1037,6 @@ def test_a_launch_finds_the_node_stopped_and_starts_it_before_asking_it_anything
 
     rig.launch()
 
-    ops = rig.journal.ops()[mark:]
     assert rig.cluster.down_requests == [], "the cluster was asked something while its node was stopped"
     assert any(e["j"] >= mark for e in rig.docker.of_kind("node-start")), "no frozen node was started"
     assert [r["verdict"] for r in rig.rows()][-1] == "valid" and rig.cluster.state() == expected_copy(kind)
@@ -1200,6 +1204,61 @@ def _offset_writes(rig):
         if (w["store"], w["key"]) in files and w["data"].strip():
             out.append((w["j"], w["clock"], int(w["data"].decode().strip()), w["inode"]))
     return out
+
+
+OFFSET_RECORD = 24
+_RECORD = re.compile(rb" *[-+]?[0-9]+ *\n")
+
+
+def _assert_the_offset_file_is_a_fixed_record_rewritten_in_place(rig, where=""):
+    """r6.4.3 settlements: every write to a file a frozen node's `V2_CLOCK_OFFSET_FILE` names is the whole
+    24-byte record (signed decimal, space-padded, newline-ended) written at byte 0 and leaving the file 24 bytes;
+    the file is created at that size (by any means, a rename into place included) before the node that maps it
+    starts; once there it is only written in place (never truncated), and every write while a node maps it
+    reaches that node's file (the same inode: no replacement either)."""
+    starts = rig.docker.of_kind("node-start")
+    assert starts, f"{where}: no frozen node was started"
+    by_file: dict = {}
+    for e in starts:
+        assert e["offset_file"], (where, "the node runs without an offset file")
+        store, key, _ro = rig.docker.resolve(e["container"], e["offset_file"])
+        by_file.setdefault((store, key), []).append(e)
+    for where_file, nodes in by_file.items():
+        writes = [w for w in rig.docker.writes if (w["store"], w["key"]) == where_file]
+        assert writes, (where, "the offset file was never written")
+        seen_inodes: set = set()
+        for w in writes:
+            creates = w["inode"] not in seen_inodes      # this write brings a new file to the path (any way of making it)
+            seen_inodes.add(w["inode"])
+            assert creates or w["mode"] == "in-place", (where, f"the offset file was rewritten with mode {w['mode']!r}: "
+                                                         "a truncate, not an in-place rewrite", w["data"])
+            assert len(w["data"]) == OFFSET_RECORD and _RECORD.fullmatch(w["data"]), (
+                where, "a write is not the whole 24-byte record at byte 0", w["data"])
+            assert w["size"] == OFFSET_RECORD, (where, "the offset file is not 24 bytes after a write", w["size"])
+        for k, e in enumerate(nodes):
+            created = [w for w in writes if w["inode"] == e["inode"]]
+            assert e["inode"] is not None and created and created[0]["j"] < e["j"], (
+                where, "the node started before its offset file was created at its size")
+            assert e["offset"] is not None and len(e["offset"].encode()) == OFFSET_RECORD, (where, e["offset"])
+            until = nodes[k + 1]["j"] if k + 1 < len(nodes) else len(rig.journal)
+            later = [w for w in writes if e["j"] < w["j"] < until]
+            assert all(w["inode"] == e["inode"] for w in later), (
+                where, "while the node maps its offset file, a write reached another file at that path")
+
+
+@pytest.mark.parametrize("before", ["cold", "same-variant", "other-variant"])
+def test_the_offset_file_is_a_fixed_24_byte_record_created_before_the_node_and_only_rewritten_in_place(tmp_path, before):
+    """r6.4.3 settlements/D15 revised: the node's offset file is one 24-byte record, created at that size before
+    the node starts and from then on rewritten in place at byte 0, never truncated or replaced, across the
+    launches that reuse a copy or replace it."""
+    rig = LabRig(tmp_path)
+    if before != "cold":
+        rig.write_expected_case("drop")
+        rig.launch()
+    rig.write_expected_case("drift" if before == "other-variant" else "drop")
+    rig.launch()
+
+    _assert_the_offset_file_is_a_fixed_record_rewritten_in_place(rig, before)
 
 
 def _assert_every_node_start_already_holds_the_offset_for_T(rig, where=""):

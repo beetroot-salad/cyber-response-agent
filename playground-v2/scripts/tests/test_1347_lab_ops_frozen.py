@@ -16,7 +16,10 @@ Every value is looked for in what `run` was handed (argv, `input=`, `env=`), so 
 sent, not the docker flag it rides on.
 
 r6.4.3, also bound here: the frozen node's environment carries `LD_PRELOAD` of the shim and
-`V2_CLOCK_OFFSET_FILE`, the path (inside the node) of the offset file, a decimal integer number of seconds;
+`V2_CLOCK_OFFSET_FILE`, the path (inside the node) of the offset file: a fixed 24-byte record, a signed decimal
+integer number of seconds padded with spaces and ending in a newline, created at that size before the node
+starts and only ever rewritten in place at byte 0, never truncated (r6.4.3 settlements; pinned in the launcher
+and make-a-case tests);
 its cluster name comes from `V2_FROZEN_CLUSTER_NAME` (an unprefixed `CLUSTER_NAME` has no effect).
 
 r6.4.2 (attack batch 1), also bound here: the real `LabOps` takes `es=` (the frozen cluster through the

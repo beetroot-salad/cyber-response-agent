@@ -577,6 +577,17 @@ def test_make_a_case_starts_every_frozen_node_with_its_offset_file_already_holdi
     _assert_every_node_start_already_holds_the_offset_for_T(rig, "make-a-case")
 
 
+def test_make_a_case_creates_the_offset_file_as_the_fixed_record_and_never_truncates_it(tmp_path):
+    """r6.4.3 settlements/D15 revised: make-a-case's node, too, maps a 24-byte offset record created before it
+    starts and only ever rewritten in place."""
+    from test_1347_launcher import _assert_the_offset_file_is_a_fixed_record_rewritten_in_place
+
+    rig = LabRig(tmp_path)
+    with rig.write_case("young", None):
+        pass
+    _assert_the_offset_file_is_a_fixed_record_rewritten_in_place(rig, "make-a-case")
+
+
 @pytest.mark.parametrize("shape", ["flat", "nested"])
 def test_an_alert_with_a_live_run_is_no_candidate_whatever_the_shape_of_the_runs_alert_json(tmp_path, shape):
     """r6.4.3 finding 6 (C-parse)/O13: a live run's `alert.json` may carry the uuid flat

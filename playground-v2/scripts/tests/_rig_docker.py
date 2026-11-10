@@ -25,6 +25,21 @@ what a marker, an offset or a variant is. What it models:
   (`/usr/share/elasticsearch/data`): a node started on another volume finds that volume's state (a new volume:
   an empty cluster), and removing the volume discards it. For `boot_requests` curls after each start the node
   is not listening yet: curl exits 7 and prints `000`, as it does on a refused connection.
+* Capture's side of the live lab (#1347 r6.4.3 settlements: capture drives the real `LabOps` too). A container
+  with `extra["role_host"]` is a role host: `exec <it> ps ...` prints its `extra["ps"]`; `exec [-u U] <it>
+  bash -lc <cmd>` (or `sh -c`) is a command the host runs, opaque here: it is recorded (`host-command`) and
+  exits 0. `commit [--pause=...] <container> <tag>` makes an image (`images`, bytes unique to that commit;
+  a `commit` event); `save <image>` prints the image's bytes (an image the rig never committed: empty);
+  `image rm` forgets it. `run --entrypoint E` runs `E` with the command as its arguments, and `tar -c -C
+  <dir> -f - .` prints a tar (sorted, mtime 0) of the files under `<dir>`. A live stub with
+  `extra["serves"]` (`{path: payload}`) answers the GET script with that payload (a path it does not serve:
+  HTTP 404, exit 1). `scratch_cluster(container)` gives an Elasticsearch-image container started on the lab
+  server itself (outside any engine) the cluster it answers from.
+* Opening files: `>` truncates (or creates), `>>` appends, `1<>` opens for writing without truncating (the
+  bytes written replace the file's first bytes, the rest stays), as does `dd of=F conv=notrunc` (from stdin,
+  at byte 0). Each write records its `mode` (`create`, `truncate`, `append`, `in-place`, `copy`, `rename`)
+  and the file's `size` after it. `set -C` (noclobber) makes `>` onto an existing file fail; `if ...; then
+  ...; [else ...;] fi` and `exit N` work as in sh.
 * Stubs (`cmdb`, `threat-intel`, `change-mgmt`, `ticket-server`, `identity`): a `python3 -c <GET script>
   <path>` exec answers a canonical view of what the stub holds (its environment, the seed files its
   `*_SEED_PATH` named when it started, the CMDB overlays posted to it); a `python3 -c <overlay script>` exec
@@ -85,7 +100,7 @@ _VAR = re.compile(r"\$(\w+)|\$\{(\w+)\}")
 
 class RigDocker(FakeDocker):
     def __init__(self, *, journal: Any, clock: Any, cluster: Any = None, live_cluster: Any = None,
-                 boot_requests: int = 0, fail: set | None = None,
+                 boot_requests: int = 0, fail: set | None = None, scratch_cluster: Callable | None = None,
                  on_service_stop: Callable[[], Any] | None = None,
                  on_volume_rm: Callable[[], Any] | None = None) -> None:
         super().__init__()
@@ -107,6 +122,8 @@ class RigDocker(FakeDocker):
         self.injected: list[str] = []      # the effects `fail` refused, in order
         self.inodes: dict[tuple, int] = {}  # (store, key) -> inode: a rewrite keeps it, `mv` onto it replaces it
         self._inode = 0
+        self.scratch_cluster = scratch_cluster
+        self.images: dict[tuple[str, str], bytes] = {}
 
     # -- setup a test does ---------------------------------------------------------------------------
 
@@ -227,15 +244,39 @@ class RigDocker(FakeDocker):
             return self._volume_cmd(rest, scope)
         if verb in ("network", "build", "version", "load", "pull", "tag"):
             return 0, "", ""
+        if verb == "commit":
+            return self._commit(rest, scope)
         if verb == "image":
+            if rest and rest[0] == "rm":
+                for tag in [a for a in rest[1:] if not a.startswith("-")]:
+                    self.images.pop((scope, tag), None)
             return (0, "", "") if rest and rest[0] in ("inspect", "rm", "ls", "prune", "tag") else self._unmodelled(argv)
         if verb == "save":
-            return 0, b"", ""
+            names = [a for a in rest if not a.startswith("-")]
+            if any(a in ("-o", "--output") or a.startswith("--output=") for a in rest) or len(names) != 1:
+                return self._unmodelled(argv)
+            return 0, self.images.get((scope, names[0]), b""), ""
         return self._unmodelled(argv)
 
     def _unmodelled(self, argv):
         self.unmodelled.append(" ".join(map(str, argv)))
         return 127, "", "unmodelled by the rig docker"
+
+    def _commit(self, rest: list[str], scope: str):
+        names = [a for a in rest if not a.startswith("-")]
+        if not names or len(names) > 2:
+            return self._unmodelled(["docker", "commit", *rest])
+        c = self.containers.get((scope, names[0]))
+        if c is None:
+            return 1, "", NO_SUCH.format(names[0])
+        self._ids += 1
+        tag = names[1] if len(names) == 2 else f"sha256:{self._ids:064x}"
+        data = f"<image committed from {scope}/{c.name}, commit #{self._ids}>".encode()
+        self.images[(scope, tag)] = data
+        paused = not any(a in ("--pause=false", "-p=false", "--pause=0") for a in rest)
+        self.events.append({"kind": "commit", "j": len(self.journal) - 1, "clock": self.clock.last, "container": c,
+                            "tag": tag, "image": data, "paused": paused, "running": c.state == "running"})
+        return 0, f"sha256:{self._ids:064x}\n", ""
 
     def _daemon_up(self, scope: str) -> bool:
         outer, name = scope.rsplit("/", 1)
@@ -303,6 +344,8 @@ class RigDocker(FakeDocker):
                 self.unmodelled.append(f"run option {opt}")
             j += 1
         image, command = (rest[j], rest[j + 1:]) if j < len(rest) else ("", [])
+        if opts["entrypoint"]:
+            command = [opts["entrypoint"], *command]
         return opts, image, command
 
     def _run(self, verb: str, rest: list[str], scope: str, stdin: bytes):
@@ -357,6 +400,8 @@ class RigDocker(FakeDocker):
         c.engine = any("dockerd" in a for a in command)
         if "elasticsearch" in image and "/" in scope:
             c.cluster = self.cluster
+        elif "elasticsearch" in image and self.scratch_cluster is not None:
+            c.cluster = self.scratch_cluster(c)
         c.extra["service"] = kind in ("stub-start", "proxy-start", "service-start")
         if verb == "create":
             return 0, f"{c.id:064x}\n", ""
@@ -549,13 +594,15 @@ class RigDocker(FakeDocker):
     # -- exec ----------------------------------------------------------------------------------------
 
     def _exec(self, rest: list[str], scope: str, stdin: bytes):
-        j, env = 0, {}
+        j, env, user = 0, {}, None
         while j < len(rest) and rest[j].startswith("-"):
             if rest[j] in ("-e", "--env"):
                 k, _, v = rest[j + 1].partition("=")
                 env[k] = v
                 j += 2
-            elif rest[j] in ("-u", "-w", "--user", "--workdir"):
+            elif rest[j] in ("-u", "--user"):
+                user, j = rest[j + 1], j + 2
+            elif rest[j] in ("-w", "--workdir"):
                 j += 2
             else:
                 j += 1
@@ -577,6 +624,11 @@ class RigDocker(FakeDocker):
             return self._curl(c, self._curl_args(command), stdin)
         if c.name in STUBS and command[:2] == ["python3", "-c"]:
             return self._stub(c, command, stdin)
+        if c.extra.get("role_host") and len(command) >= 3 and command[0].rsplit("/", 1)[-1] in ("bash", "sh") \
+                and command[1] in ("-c", "-lc", "-cl"):
+            self.events.append({"kind": "host-command", "j": len(self.journal) - 1, "clock": self.clock.last,
+                                "container": c, "host": c.name, "user": user, "command": command[2]})
+            return 0, "", ""
         return self._shell_argv(c, command, stdin, env)
 
     # -- Elasticsearch over curl ---------------------------------------------------------------------
@@ -655,6 +707,11 @@ class RigDocker(FakeDocker):
 
     def _stub(self, c: Container, command: list[str], stdin: bytes):
         script, args = command[2], command[3:]
+        serves = c.extra.get("serves")
+        if serves is not None and args and "argv[1]" in script and "urlopen" in script:
+            if args[0] not in serves:
+                return 1, "", "urllib.error.HTTPError: HTTP Error 404: Not Found"
+            return 0, json.dumps(serves[args[0]]), ""
         state = self.stub_state.setdefault(c.id, {"seeds": {}, "overlays": {}})
         if "/admin/overlay/" in script and not args:
             try:
@@ -679,18 +736,28 @@ class RigDocker(FakeDocker):
             return None if engine is None else self.read_file(engine, path)
         return self.stores.get(("host", scope), {}).get(_norm(path))
 
-    def _write(self, c: Container, path: str, data: bytes) -> str | None:
+    def _write(self, c: Container, path: str, data: bytes, mode: str = "truncate") -> str | None:
+        """`mode`: `truncate` (`>`), `append` (`>>`, `data` is what is added), `in-place` (`1<>`, dd
+        conv=notrunc: `data` replaces the first bytes), `copy`, `rename`. A file that did not exist is `create`."""
         store, key, ro = self.resolve(c, path)
         if ro or store == ("gone",):
             return f"{path}: Read-only file system"
         files = self.stores.setdefault(store, {})
-        self._undo.append((store, key, files.get(key)))
+        prior = files.get(key)
+        self._undo.append((store, key, prior))
         if key not in files or (store, key) not in self.inodes:
             self._inode += 1
             self.inodes[(store, key)] = self._inode
-        files[key] = data
+        if mode == "append":
+            files[key] = (prior or b"") + data
+        elif mode == "in-place":
+            files[key] = data + (prior or b"")[len(data):]
+        else:
+            files[key] = data
         entry = {"kind": "write", "j": len(self.journal) - 1, "clock": self.clock.last, "store": store, "key": key,
-                 "data": data, "container": c, "inode": self.inodes[(store, key)]}
+                 "data": data, "container": c, "inode": self.inodes[(store, key)],
+                 "mode": "create" if prior is None and mode not in ("rename", "copy") else mode,
+                 "size": len(files[key])}
         self.writes.append(entry)
         return None
 
@@ -742,12 +809,21 @@ class RigDocker(FakeDocker):
                 if words or redirects:
                     commands.append((op, words, redirects))
                 words, redirects, op = [], [], t
-            elif t in (">", ">>", "<", ">|"):
+            elif t in (">", ">>", "<", ">|", "<>", "1<>"):
+                if k + 1 >= len(tokens):
+                    return self._unmodelled(["sh", "-c", script])
                 target = expand(tokens[k + 1])
                 if words and words[-1] == "2" and t in (">", ">>"):
                     words.pop()
                     redirects.append(("2>", target))
+                elif t == "<>" and words and words[-1] == "1":
+                    words.pop()
+                    redirects.append(("1<>", target))
+                elif t == "<>":
+                    return self._unmodelled(["sh", "-c", script])
                 else:
+                    if words and words[-1] == "1" and t in (">", ">>", ">|"):
+                        words.pop()
                     redirects.append((t, target))
                 k += 1
             else:
@@ -758,29 +834,17 @@ class RigDocker(FakeDocker):
         return self._commands(c, commands, stdin, env)
 
     def _commands(self, c: Container, commands: list, stdin: bytes, env: dict):
-        rc, out, err = 0, b"", b""
         writes_before = len(self.writes)
-        for op, words, redirects in commands:
-            if (op == "&&" and rc != 0) or (op == "||" and rc == 0):
-                continue
-            data_in = stdin
-            for kind, target in redirects:
-                if kind == "<":
-                    data_in = self.read_file(c, target) or b""
-            rc, o, e = self._command(c, words, data_in)
-            for kind, target in redirects:
-                if kind in (">", ">>", ">|") and target != "/dev/null":
-                    if rc == 0 or o:
-                        prior = self.read_file(c, target) if kind == ">>" else b""
-                        problem = self._write(c, target, (prior or b"") + o)
-                        if problem:
-                            rc, e = 1, problem.encode()
-                    o = b""
-                elif kind in (">", ">|") and target == "/dev/null":
-                    o = b""
-                if kind == "2>":
-                    e = b""
-            out, err = out + o, err + e
+        st = {"noclobber": False, "rc": 0, "out": b"", "err": b""}
+        try:
+            nodes, _end = self._block(commands, 0, ())
+        except _Syntax:
+            return self._unmodelled(["sh", "-c", " ; ".join(" ".join(w) for _o, w, _r in commands)])
+        try:
+            rc = self._nodes(c, nodes, stdin, env, st)
+        except _Exit as done:
+            rc = done.rc
+        out, err = st["out"], st["err"]
         failed = self._injected_marker_write(writes_before)
         if failed:
             for store, key, prior in reversed(self._undo or []):
@@ -793,6 +857,122 @@ class RigDocker(FakeDocker):
             self.injected.append(failed)
             return 125, b"", f"injected: {failed} failed".encode()
         return rc, out, err
+
+    def _block(self, cmds: list, i: int, stops: tuple):
+        """`cmds[i:]` as nodes up to a command whose first word is in `stops`: ("cmd", op, words, redirects)
+        or ("if", op, condition, then, else)."""
+        nodes = []
+        while i < len(cmds):
+            op, words, redirects = cmds[i]
+            if words and words[0] in stops:
+                return nodes, i
+            if words and words[0] in ("then", "else", "elif", "fi", "while", "for", "until", "do", "done", "case"):
+                raise _Syntax(words[0])
+            if words and words[0] == "if":
+                cond, k = self._block([("", words[1:], redirects), *cmds[i + 1:]], 0, ("then",))
+                j = i + k
+                if j >= len(cmds):
+                    raise _Syntax("if")
+                then, k = self._block([("", cmds[j][1][1:], cmds[j][2]), *cmds[j + 1:]], 0, ("else", "elif", "fi"))
+                j += k
+                if j >= len(cmds) or cmds[j][1][0] == "elif":
+                    raise _Syntax("then")
+                orelse = []
+                if cmds[j][1][0] == "else":
+                    orelse, k = self._block([("", cmds[j][1][1:], cmds[j][2]), *cmds[j + 1:]], 0, ("fi",))
+                    j += k
+                    if j >= len(cmds):
+                        raise _Syntax("else")
+                if cmds[j][1][1:] or cmds[j][2]:
+                    raise _Syntax("fi")
+                nodes.append(("if", op, cond, then, orelse))
+                i = j + 1
+                continue
+            if words or redirects:
+                nodes.append(("cmd", op, words, redirects))
+            i += 1
+        if stops:
+            raise _Syntax("unterminated")
+        return nodes, i
+
+    def _nodes(self, c: Container, nodes: list, stdin: bytes, env: dict, st: dict) -> int:
+        rc = st["rc"]
+        for node in nodes:
+            op = node[1]
+            if (op == "&&" and rc != 0) or (op == "||" and rc == 0):
+                continue
+            if node[0] == "if":
+                branch = node[3] if self._nodes(c, node[2], stdin, env, st) == 0 else node[4]
+                rc = self._nodes(c, branch, stdin, env, st) if branch else 0
+            else:
+                rc = self._simple(c, node[2], node[3], stdin, env, st)
+            st["rc"] = rc
+        return rc
+
+    def _simple(self, c: Container, words: list, redirects: list, stdin: bytes, env: dict, st: dict) -> int:
+        if words and words[0] == "exit":
+            raise _Exit(int(words[1]) if len(words) > 1 else st["rc"])
+        if words[:2] == ["set", "-C"] or words[:3] == ["set", "-o", "noclobber"]:
+            st["noclobber"] = True
+            return 0
+        quiet = any(kind == "2>" for kind, _t in redirects)
+        data_in = stdin
+        for kind, target in redirects:
+            if kind == "<":
+                data_in = self.read_file(c, target) or b""
+            if kind == ">" and st["noclobber"] and target != "/dev/null" and self._exists(c, target, "-e"):
+                if not quiet:
+                    st["err"] += f"sh: can't create {target}: File exists\n".encode()
+                return 1
+        rc, o, e = self._command(c, words, data_in)
+        for kind, target in redirects:
+            if kind in (">", ">>", ">|", "1<>"):
+                if target != "/dev/null":
+                    mode = {">>": "append", "1<>": "in-place"}.get(kind, "truncate")
+                    problem = self._write(c, target, o, mode)
+                    if problem:
+                        rc, e = 1, problem.encode()
+                o = b""
+            if kind == "2>":
+                e = b""
+        st["out"] += o
+        st["err"] += e
+        return rc
+
+    def _dd(self, c: Container, args: list[str], stdin: bytes):
+        opts = dict(a.split("=", 1) for a in args if "=" in a)
+        if set(opts) - {"of", "if", "conv", "bs", "count", "seek", "status", "oflag", "iflag"} or "of" not in opts \
+                or opts.get("seek", "0") != "0" or opts.get("oflag") or opts.get("iflag"):
+            return self._unmodelled(["dd", *args])
+        data = stdin if "if" not in opts else self.read_file(c, opts["if"])
+        if data is None:
+            return 1, b"", f"dd: failed to open '{opts['if']}': No such file or directory".encode()
+        if "count" in opts:
+            data = data[:int(opts.get("bs", "512")) * int(opts["count"])]
+        mode = "in-place" if "notrunc" in opts.get("conv", "").split(",") else "truncate"
+        problem = self._write(c, opts["of"], data, mode)
+        return (1, b"", problem.encode()) if problem else (0, b"", b"")
+
+    def _tar_create(self, c: Container, args: list[str], words: list[str]):
+        if "-C" not in args or args.index("-C") + 1 >= len(args):
+            return self._unmodelled(words)
+        top = args[args.index("-C") + 1]
+        rest = [a for k, a in enumerate(args) if not a.startswith("-") and (k == 0 or args[k - 1] != "-C")]
+        if rest != ["-", "."] and rest != ["."]:
+            return self._unmodelled(words)
+        if not ("f" in "".join(a for a in args if a.startswith("-") and a != "-C") and "-" in args):
+            return self._unmodelled(words)
+        store, key, _ro = self.resolve(c, top)
+        files = self.stores.get(store, {})
+        prefix = key.rstrip("/") + "/" if key else ""
+        members = {"./" + k[len(prefix):]: v for k, v in files.items() if (not prefix or k.startswith(prefix))}
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for name, data in sorted(members.items()):
+                info = tarfile.TarInfo(name)
+                info.size, info.mtime = len(data), 0
+                tar.addfile(info, io.BytesIO(data))
+        return 0, buf.getvalue(), b""
 
     def _injected_marker_write(self, since: int) -> str | None:
         if "marker-write" not in self.fail:
@@ -813,6 +993,10 @@ class RigDocker(FakeDocker):
         cmd, args = words[0], words[1:]
         if cmd in ("true", ":", "set", "sync", "chmod", "chown", "sleep", "umask", "export"):
             return 0, b"", b""
+        if cmd == "ps" and "ps" in c.extra:
+            return 0, c.extra["ps"], b""
+        if cmd == "dd":
+            return self._dd(c, args, stdin)
         if cmd == "false":
             return 1, b"", b""
         if cmd in ("[", "test"):
@@ -851,7 +1035,7 @@ class RigDocker(FakeDocker):
                 data = f"<{c.image}:{paths[0]}>".encode()
             if data is None:
                 return 1, b"", f"{cmd}: {paths[0]}: No such file or directory".encode()
-            problem = self._write(c, paths[1], data)
+            problem = self._write(c, paths[1], data, "rename" if cmd == "mv" else "copy")
             if problem:
                 return 1, b"", problem.encode()
             if cmd == "mv":      # a rename: the destination is the source's inode, not a rewrite of its own
@@ -868,7 +1052,9 @@ class RigDocker(FakeDocker):
                 self._remove(c, p, recursive)
             return 0, b"", b""
         if cmd == "tar":
-            flags = " ".join(a for a in args if a.startswith("-") or a in ("x", "xf", "-xf"))
+            flags = " ".join(a for a in args if (a.startswith("-") and a != "-C") or a in ("x", "xf", "-xf"))
+            if "c" in flags and "x" not in flags:
+                return self._tar_create(c, args, words)
             if "x" not in flags or "-C" not in args:
                 return self._unmodelled(words)
             dest = args[args.index("-C") + 1]
@@ -884,6 +1070,16 @@ class RigDocker(FakeDocker):
                 return 2, b"", f"tar: {exc}".encode()
             return 0, b"", b""
         return self._unmodelled(words)
+
+
+class _Exit(Exception):
+    def __init__(self, rc: int) -> None:
+        super().__init__(rc)
+        self.rc = rc
+
+
+class _Syntax(Exception):
+    pass
 
 
 def _printf(args: list[str]) -> str:

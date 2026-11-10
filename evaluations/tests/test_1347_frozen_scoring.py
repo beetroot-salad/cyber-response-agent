@@ -290,8 +290,10 @@ def test_a_reference_run_without_a_row_leaves_its_case_unscored(tmp_path):
 
 def test_a_fixture_labelled_held_out_without_a_case_file_refuses_the_whole_set(tmp_path):
     """r6.4.3 finding 8 (supersedes A2's "a fixture with no case.yaml is neither scored nor listed"): a
-    fixture labelled `held_out: true` with no case.yaml would shrink the denominator silently; the set is
-    refused like any case that cannot be bound (exit 2, the fixture named), nothing scored."""
+    fixture labelled `held_out: true` that has its alert.json but no case.yaml would shrink the denominator
+    silently; the set is refused like any case that cannot be bound (exit 2, the fixture named), nothing
+    scored. (A labelled fixture with no alert.json is checked first and keeps its loud exclusion: the next
+    test and `test_held_out_scoring.py::test_labeled_fixture_with_no_alert_is_excluded_loudly`.)"""
     root, runs = fixtures(tmp_path), tmp_path / "runs"
     rows = rows_for(root, runs)
     legacy = root / "z-legacy"
@@ -304,6 +306,26 @@ def test_a_fixture_labelled_held_out_without_a_case_file_refuses_the_whole_set(t
     assert rc == 2, said
     assert verdicts == {}, said
     assert "z-legacy" in said and "refused" in said, said
+
+
+@pytest.mark.parametrize("with_case", [False, True], ids=["no-case-file", "with-a-case-file"])
+def test_a_labelled_fixture_with_no_alert_is_excluded_loudly_not_refused_whatever_its_case_file(tmp_path, with_case):
+    """r6.4.3 settlements, finding 8's precedence: a fixture labelled held-out with no alert.json keeps its
+    existing loud exclusion, because that check comes first (with or without a case.yaml): it is named with
+    the missing alert.json, and the set is not refused; the cases that bind still score."""
+    root, runs = fixtures(tmp_path), tmp_path / "runs"
+    rows = rows_for(root, runs)
+    alertless = root / "z-no-alert"
+    alertless.mkdir()
+    (alertless / "ground_truth.yaml").write_text("held_out: true\ndisposition: benign\n")
+    if with_case:
+        (alertless / "case.yaml").write_bytes(case_file(root, GOOD).read_bytes())
+
+    rc, verdicts, said = scored(tmp_path, runs, root, *rows)
+
+    assert rc != 2 and "refused" not in said, said
+    assert verdicts == {GOOD: "OK", OTHER: "OK"}, said
+    assert "z-no-alert" in said and "alert.json" in said, said
 
 
 def test_a_fixture_not_labelled_held_out_needs_no_case_file(tmp_path):
