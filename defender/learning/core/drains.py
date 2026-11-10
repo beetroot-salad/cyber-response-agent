@@ -146,7 +146,7 @@ def _maybe_trigger_author(  # noqa: PLR0913 — the trigger seam's call shape, p
         rc = _run_curator_module(
             module_name,
             lambda mod: mod.run_batch(
-                hold_committed=True, paths=paths, state=state, trees=trees, box=box,
+                paths=paths, trees=trees, box=box,
                 batch=batch, **_store_kw(items, feedback, outcomes, make_model)),
         )
     if rc not in (0, None):

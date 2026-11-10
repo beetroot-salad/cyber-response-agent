@@ -4,9 +4,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-import contextlib
 from dataclasses import replace
 from defender._model import model
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic_ai.exceptions import ModelRetry
@@ -16,17 +16,14 @@ from defender._git import GitError
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._text import one_line
 from defender.learning.author import shared as author_shared
-from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
+from defender.learning.author._config import CorpusAuthorConfig
 from defender.learning.core.config import (
     FatalConfigError,
     provenance_field,
 )
 from defender.learning.core.state import (
-    REPO_LOCK,
-    TRY_ONCE,
     Channel,
     LearningState,
-    StateRefused,
     canonical_row,
     retirement_stamp,
 )
@@ -58,23 +55,6 @@ class RetireOutcome:
     bumped: dict[str, int]
     #: the ids that crossed the ceiling on this observation and left the queue.
     retired: tuple[str, ...]
-
-
-@model(frozen=True)
-class DrainOutcome:
-    """What one completed tick did, handed to `cfg.post_rotate` after the rotation."""
-
-    batch_id: str
-    commit_sha: str | None
-    committed: list[dict]
-    #: @owns held["deferred"] — the one key beyond the AUTHOR_RESULT bucket names, assembled
-    #: in `_author_and_rotate`.
-    held: dict[str, list[dict]]
-    consumed: dict[str, list[dict]]
-    #: The pre-author gate's holds. Kept out of `held` (the AUTHOR_RESULT buckets, rows the
-    #: agent judged) because these never reached the agent. They are also the permanent holds —
-    #: they wait on a fact with no writer — so the operator report needs them most.
-    gate_held: list[dict]
 
 
 def retire(
@@ -159,43 +139,41 @@ def channel_logger(cfg: CorpusAuthorConfig) -> logging.Logger:
     curators run this module's code."""
     return logging.getLogger(f"{__name__}.{cfg.log_prefix}")
 
-def run_batch(
-    *, cfg: CorpusAuthorConfig, hold_committed: bool = False, box: Any = None
-) -> int:
-    """One tick of one corpus-author channel.
 
-    Returns 0 for nothing-to-do — an empty queue, a drain lock another process holds, an
-    unavailable repo lock, an append lock an appender is holding past the deadline — and 2
-    for a batch whose authoring faulted with a member of `RETIRE_SET`. Anything else
-    propagates."""
+#: One item of a store claim: `(kind, key, payload)` (`learning.store.Held.items`).
+Item = tuple[str, str, dict[str, Any]]
+
+
+def run_batch(
+    *, cfg: CorpusAuthorConfig, items: Sequence[Item], outcomes: dict[tuple[str, str], Any],
+    box: Any = None,
+) -> int:
+    """One claim of one corpus-author channel over a learning store claim (#1278 D1): `items` are the
+    claim's items of this channel's kind, and `outcomes` the map this claim fills with each item's fate,
+    keyed by the item's `(kind, key)`. The store's claim is the lane's lock, so no lock is taken here.
+    The fates (applied by the tick when the batch enters review, or ends with no commits):
+
+    - a row with no id under the channel's key is dead;
+    - the gate's holds are held with the gate's reason; a row the corpus already cites is published;
+      a world row naming no systems is skipped with that reason;
+    - the curator's `consumed_skip` is skipped with its reason; an id it reports committed that no
+      lesson cites is deferred;
+    - a committed (cited) item is not named: it stays in the batch; nor is an item in no bucket: the
+      tick's citation rule returns it to waiting.
+
+    Returns 0 for a claim that ran (or had nothing to author) or that the commit-maker refused, and 2
+    for one whose authoring faulted with a member of `RETIRE_SET` (its items then take what the batch's
+    commits show). Anything else propagates."""
     if box is not None:
         cfg = replace(cfg, box=box)
     log = channel_logger(cfg)
-    channel = cfg.channel
-
-    state = cfg.state
-    with contextlib.ExitStack() as locks:
-        if channel.drain_role is not None and not locks.enter_context(
-                state.lock(channel.drain_role, wait=TRY_ONCE)):
-            log.info("drain lock held by another process — skipping this tick")
-            return 0
-        try:
-            locks.enter_context(state.lock(REPO_LOCK, wait=cfg.repo_lock_wait_seconds))
-        except TimeoutError as e:
-            log.warning(f"repo lock unavailable: {e}; queue intact")
-            return 0
-        try:
-            _require_clean_draft(cfg)
-        except (AuthorError, DeliveryRefused) as e:
-            log.critical(f"{e}")
-            # An already-dirty draft at tick start is recorded as stuck, not skipped silently,
-            # and never handed to the spawn (OD15: no pre-run stray is tolerated).
-            try:
-                _record_stuck(state, channel, e, [])
-            except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
-                log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
-            return 2
-        return _tick(cfg=cfg, hold_committed=hold_committed, log=log)
+    try:
+        _require_clean_draft(cfg)
+    except (AuthorError, DeliveryRefused) as e:
+        # An already-dirty draft is never handed to the spawn (OD15: no pre-run stray is tolerated).
+        log.critical(f"{e}")
+        return 2
+    return _claim(cfg=cfg, items=items, outcomes=outcomes, log=log)
 
 
 def _require_clean_draft(cfg: CorpusAuthorConfig) -> None:
@@ -211,77 +189,128 @@ def _require_clean_draft(cfg: CorpusAuthorConfig) -> None:
         )
 
 
-def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
-    channel = cfg.channel
-    key = channel.id_key
+def _gate_outcome(rec: dict) -> Any:
+    """The fate of a row the gate decided before the spawn: held with its reason, published when
+    the corpus already cites it, else skipped naming the gate's category."""
+    from defender.learning.store import Outcome
 
-    state = cfg.state
-    window = state.read_window(channel, timeout=cfg.repo_lock_wait_seconds)
-    if window is None:
-        log.info("append lock held by an appender past the deadline — skipping this tick")
-        return 0
-    batch, unreadable = window
-    if not batch and not unreadable:
-        log.info("queue empty — nothing to author")
-        return 0
-    if unreadable:
-        # Fall through rather than return: the wake gate (`core/drains._pending_queue_counts`)
-        # counts an unreadable line as work, so returning would re-fire on the same junk every
-        # tick. Such a line can't be graveyarded (there is no row), but any rotation rewrites
-        # the queue from the rows it can read, so whichever rotation runs next drops it. This
-        # warning is the deletion's only trace; a fault before any rotation leaves the lines
-        # for the next tick.
-        log.warning(
-            f"{unreadable} unreadable line(s) in the queue — the next rotation this tick "
-            "reaches, if it reaches one, will drop them"
-        )
+    if "held_reason" in rec:
+        return Outcome.held(str(rec["held_reason"]))
+    category = str(rec.get("consumed_category") or "")
+    if category == "consumed_idempotent":
+        return Outcome.published()
+    if category == "consumed_no_systems":
+        return Outcome.skipped("consumed_no_systems: the world finding names no systems")
+    return Outcome.skipped(category or "declined at the gate")
+
+
+def _keyed(
+    items: Sequence[Item], key: str, outcomes: dict[tuple[str, str], Any],
+) -> tuple[list[dict], dict[str, tuple[str, str]]]:
+    """The claim's rows that carry an id under `key`, and each id's item; a row with none (or a
+    second row under one id) is dead at once, named by its own item."""
+    from defender.learning.store import Outcome
 
     keyed: list[dict] = []
-    unkeyable: list[dict] = []
-    for row in batch:
-        (keyed if _row_id(row, key) else unkeyable).append(row)
-    # One stuck-recording guard around the whole tick body, with `stuck_rows` naming the rows
-    # the phase in flight is stuck on, so no phase can lack one. E.g. `_retire_unkeyable`
-    # retakes the append lock for its own rotation, and an appender in that window raises
-    # `TimeoutError` (outside `RETIRE_SET`), which must still leave a stuck record.
-    stuck_rows = unkeyable
+    item_of: dict[str, tuple[str, str]] = {}
+    for kind, item_key, payload in items:
+        row = dict(payload)
+        rid = _row_id(row, key)
+        if rid is None or rid in item_of:
+            outcomes[(kind, item_key)] = Outcome.dead(f"row carries no value under {key!r}")
+            continue
+        keyed.append(row)
+        item_of[rid] = (kind, item_key)
+    return keyed, item_of
+
+
+def _claim(
+    *, cfg: CorpusAuthorConfig, items: Sequence[Item], outcomes: dict[tuple[str, str], Any], log,
+) -> int:
+    key = cfg.channel.id_key
+    keyed, item_of = _keyed(items, key, outcomes)
+    if not item_of:
+        log.info("no keyed item in the claim — nothing to author")
+        return 0
+    # The gate reads per-row fields the claim cannot vouch for (`run_id`, `direction`), so it can
+    # raise; its fates are written before the spawn, so a later fault cannot lose them.
+    held, consumed_pre, to_author = cfg.gate(keyed, cfg)
+    for rec in (*held, *consumed_pre):
+        outcomes[item_of[rec[key]]] = _gate_outcome(rec)
+    batch_id = uuid.uuid4().hex[:12]
+    log.info(
+        f"batch={batch_id} total={len(items)} to_author={len(to_author)} "
+        f"held={len(held)} pre_consumed={len(consumed_pre)} unkeyable={len(items) - len(item_of)}"
+    )
+    if not to_author:
+        return 0
+    outcome = _author_or_reset(cfg, to_author, batch_id, author_shared.by_id(keyed, key), log)
+    if isinstance(outcome, int):
+        return outcome
+    _record_fates(outcome, item_of, key, outcomes)
+    log.info(
+        f"done batch={batch_id} committed={len(outcome.committed)} held={len(held)} "
+        f"pre_consumed={len(consumed_pre)} deferred={len(outcome.deferred_ids)} "
+        f"commit_sha={outcome.commit_sha}"
+    )
+    return 0
+
+
+def _author_or_reset(
+    cfg: CorpusAuthorConfig, to_author: list[dict], batch_id: str, all_rows: dict[str, dict], log,
+) -> _BatchOutcome | int:
+    """The claim authored (`_author_batch`), its draft re-synced with the branch after, whatever
+    happened: the outcome, or the claim's rc (0 for a claim the commit-maker refused, 2 for an
+    authoring fault in `RETIRE_SET`; anything else propagates)."""
     try:
-        _retire_unkeyable(state, channel, unkeyable, log, cfg.repo_lock_wait_seconds)
-        # The gate reads per-row fields the queue's own key check cannot vouch for
-        # (`run_id`, `direction`), so it is a live source of non-retiring faults.
-        stuck_rows = keyed
-        held, consumed_pre, to_author = cfg.gate(keyed, cfg)
-        batch_id = uuid.uuid4().hex[:12]
-        log.info(
-            f"batch={batch_id} total={len(batch)} to_author={len(to_author)} "
-            f"held={len(held)} pre_consumed={len(consumed_pre)} unkeyable={len(unkeyable)}"
-        )
-        # This call also runs the closing rotation, which writes the gate's held rows back.
-        # When the gate held or consumed everything, `to_author` is `[]` and a rotation fault
-        # would record no rows, so name `keyed` — what the rotation was writing.
-        stuck_rows = to_author or keyed
-        return _author_and_rotate(
-            cfg=cfg,
-            log=log,
-            batch_id=batch_id,
-            hold_committed=hold_committed,
-            all_rows=author_shared.by_id(keyed, key),
-            held=held,
-            consumed_pre=consumed_pre,
-            to_author=to_author,
-        )
+        outcome = _author_batch(cfg, to_author, batch_id, all_rows)
+    except DeliveryRefused as refused:
+        # U10 (OD18, OD23): the commit-maker refused the claim. Its draft is reset; its items take
+        # what the batch's commits show (the claim counted their attempt).
+        _reset_claim(cfg)
+        reason = one_line(str(refused)).replace(f"{cfg.repo_root}/", "")
+        log.warning(f"the claim was refused by the commit-maker: {reason} — its draft is reset")
+        return 0
     except BaseException as e:
-        if not isinstance(e, (*RETIRE_SET, StateRefused)):
-            # The recorder must never replace the fault it records (a full disk would surface
-            # the writer's `OSError` instead). `Exception`, not `BaseException`, so an
-            # interrupt mid-record still leaves at once. Logged rather than swallowed: the
-            # record is a stuck row's only external trace. A refusal writes nothing at all: a
-            # planted entry stops the tick, and nothing is recorded after it.
-            try:
-                _record_stuck(state, channel, e, stuck_rows)
-            except Exception as unrecorded:  # noqa: BLE001 — see above; never replaces `e`
-                log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
-        raise
+        # Reset on every fault, member or not: leaving the edits would hand them to the next claim.
+        box_fault = isinstance(e, box_mod.BoxFault)
+        try:
+            _reset_claim(cfg)
+        except Exception as undo_fault:
+            # A box whose stop failed may still be writing while the reset runs, and the reset's
+            # own fault must not replace the box fault: the box fault must halt the batch (#1195
+            # D3a, O4). Any other fault keeps today's precedence.
+            if not box_fault:
+                raise
+            log.error(f"reset after a box fault failed: {undo_fault!r} "
+                      "(the box fault follows)", exc_info=undo_fault)
+        if box_fault or not isinstance(e, RETIRE_SET):
+            raise
+        log.critical(f"{e}")
+        return 2
+    # The claim landed (or made no change): the draft is re-synced with what the branch holds, so
+    # nothing unapproved reaches the next claim (OD15).
+    _reset_claim(cfg)
+    return outcome
+
+
+def _record_fates(
+    outcome: _BatchOutcome, item_of: dict[str, tuple[str, str]], key: str,
+    outcomes: dict[tuple[str, str], Any],
+) -> None:
+    """The authored claim's fates (D1): an id reported committed that no lesson cites is deferred,
+    the curator's skips are skipped with its reason; a cited id is not named (it stays in the batch)."""
+    from defender.learning.store import Outcome
+
+    for fid in sorted(outcome.deferred_ids):
+        outcomes[item_of[fid]] = Outcome.deferred()
+    for rows in outcome.bucket_consumed.values():
+        for rec in rows:
+            outcomes[item_of[rec[key]]] = Outcome.skipped(
+                str(rec.get("skip_reason") or rec.get("consumed_category")))
+    for rows in outcome.bucket_held.values():
+        for rec in rows:
+            outcomes[item_of[rec[key]]] = Outcome.held(str(rec.get("held_reason") or "held by the curator"))
 
 
 # ---------------------------------------------------------------------------
@@ -484,164 +513,6 @@ def _author_batch(
     )
 
 
-def _handle_refused(
-    cfg: CorpusAuthorConfig, refused: DeliveryRefused, to_author: list[dict], key: str, log,
-) -> int:
-    """U10: a claim the commit-maker refused counts one attempt on each of its rows, which stay
-    queued until the ceiling retires them (#952); the tick itself completes (rc 0, OD19)."""
-    # Named by the entry's repo-relative spelling (`agent/lessons/x.md`), never the draft's host
-    # path.
-    reason = one_line(str(refused)).replace(f"{cfg.repo_root}/", "")
-    log.warning(f"the claim was refused by the commit-maker: {reason} — its draft is reset, "
-                "its rows count one attempt and stay queued")
-    outcome = retire(
-        cfg.state,
-        channel=cfg.channel,
-        batch_ids=[row[key] for row in to_author],
-        reason=f"refused-claim: {reason}",
-        max_attempts=cfg.max_attempts,
-        timeout_seconds=cfg.repo_lock_wait_seconds,
-    )
-    survivors = [row for row in to_author if row[key] not in outcome.retired]
-    if survivors:
-        try:
-            _record_stuck(cfg.state, cfg.channel, refused, survivors)
-        except Exception as unrecorded:  # noqa: BLE001 — never replaces the routed refusal
-            log.error(f"stuck record NOT written: {unrecorded!r} (the refusal itself: {reason})")
-    return 0
-
-
-def _handle_retire(
-    cfg: CorpusAuthorConfig, e: BaseException, to_author: list[dict], key: str, log
-) -> int:
-    channel = cfg.channel
-    log.critical(f"{e}")
-    outcome = retire(
-        cfg.state,
-        channel=channel,
-        batch_ids=[row[key] for row in to_author],
-        reason=str(e),
-        max_attempts=cfg.max_attempts,
-        timeout_seconds=cfg.repo_lock_wait_seconds,
-    )
-    # Only rows that survive the bump are recorded as stuck: a retired row's graveyard entry
-    # already names the reason, and recording it too would make the signal fire on every
-    # retiring fault.
-    survivors = [row for row in to_author if row[key] not in outcome.retired]
-    if survivors:
-        try:
-            _record_stuck(cfg.state, channel, e, survivors)
-        except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
-            log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
-    return 2
-
-
-def _fold_deferrals(
-    cfg: CorpusAuthorConfig, deferred_ids: set[str], all_rows: dict[str, dict]
-) -> tuple[list[dict], list[dict]]:
-    """Bump deferred rows for the closing rotation to write — one write, so the increment
-    cannot be lost to a lock timeout between two rotations.
-
-    @owns deferrals — the one function that increments a queued row's `deferrals` counter."""
-    bumped = _bump_rows(
-        cfg.state, cfg.channel, [all_rows[fid] for fid in sorted(deferred_ids)],
-        counter_key="deferrals", max_attempts=cfg.max_attempts, reason=DEFERRED_CEILING_REASON,
-    )
-    return bumped.survivors, [
-        {**rec, "consumed_category": "consumed_retired"} for rec in bumped.retired
-    ]
-
-
-def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded rather than global
-    *,
-    cfg: CorpusAuthorConfig,
-    log,
-    batch_id: str,
-    hold_committed: bool,
-    all_rows: dict[str, dict],
-    held: list[dict],
-    consumed_pre: list[dict],
-    to_author: list[dict],
-) -> int:
-    channel = cfg.channel
-    key = channel.id_key
-    outcome = _BatchOutcome(
-        commit_sha=None, committed=[], bucket_held={}, bucket_consumed={}, deferred_ids=set(),
-    )
-
-    if to_author:
-        try:
-            outcome = _author_batch(cfg, to_author, batch_id, all_rows)
-        except DeliveryRefused as refused:
-            # U10 (OD18, OD23): the commit-maker refused the claim. Its draft is reset, its
-            # rows count one attempt and stay queued until the ceiling; the tick goes on.
-            _reset_claim(cfg)
-            return _handle_refused(cfg, refused, to_author, key, log)
-        except BaseException as e:
-            # Reset on every fault, member or not: a stuck tick leaves the same edits a
-            # retiring one does, and leaving them would hand them to the next claim.
-            box_fault = isinstance(e, box_mod.BoxFault)
-            try:
-                _reset_claim(cfg)
-            except Exception as undo_fault:
-                # A box whose stop failed may still be writing while the reset runs, and the
-                # reset's own fault must not replace the box fault: the box fault must halt
-                # the batch (#1195 D3a, O4). Any other fault keeps today's precedence.
-                if not box_fault:
-                    raise
-                log.error(f"reset after a box fault failed: {undo_fault!r} "
-                          "(the box fault follows)", exc_info=undo_fault)
-            if box_fault or not isinstance(e, RETIRE_SET):
-                raise
-            return _handle_retire(cfg, e, to_author, key, log)
-        # The claim landed (or made no change): the draft is re-synced with what the branch
-        # holds, so nothing unapproved reaches the next claim (OD15).
-        _reset_claim(cfg)
-
-    committed = outcome.committed
-    bucket_held, bucket_consumed = outcome.bucket_held, outcome.bucket_consumed
-    deferred_ids = outcome.deferred_ids
-    commit_sha = outcome.commit_sha
-
-    held_committed, rotated_committed = author_shared.partition_committed(
-        committed, hold_committed=hold_committed
-    )
-
-    deferred_held, deferred_consumed = _fold_deferrals(cfg, deferred_ids, all_rows)
-
-    cfg.state.rotate(
-        channel,
-        [*held, *_flatten(cfg.buckets, bucket_held), *held_committed, *deferred_held],
-        [
-            *consumed_pre,
-            *rotated_committed,
-            *_flatten(cfg.buckets, bucket_consumed),
-            *deferred_consumed,
-        ],
-        commit_sha,
-        timeout=cfg.repo_lock_wait_seconds,
-    )
-    if cfg.post_rotate is not None:
-        cfg.post_rotate(
-            DrainOutcome(
-                batch_id=batch_id, commit_sha=commit_sha, committed=committed,
-                held={**bucket_held, "deferred": deferred_held + deferred_consumed},
-                consumed=bucket_consumed, gate_held=held,
-            ),
-            cfg,
-        )
-    log.info(
-        f"done batch={batch_id} committed={len(committed)} held={len(held)} "
-        f"pre_consumed={len(consumed_pre)} "
-        f"deferred={len(deferred_ids)} commit_sha={commit_sha}"
-    )
-    return 0
-
-
-def _flatten(buckets: tuple[BucketSpec, ...], rows: dict[str, list[dict]]) -> list[dict]:
-    return [row for bucket in buckets for row in rows.get(bucket.name, [])]
-
-
 def _project(
     result: dict, all_rows: dict[str, dict], cfg: CorpusAuthorConfig, *, exclude: set[str],
 ) -> tuple[dict[str, list[dict]], dict[str, list[dict]]]:
@@ -682,34 +553,6 @@ def _cited_ids_in(text: str, field: str) -> set[str]:
     if not isinstance(cited, list):
         return set()
     return {c for c in cited if isinstance(c, str)}
-
-
-def _retire_unkeyable(
-    state: LearningState, channel: Channel, rows: list[dict], log, timeout_seconds: int
-) -> None:
-    """Retire rows with no id under the channel's key at once, on their own rotation; their
-    well-formed batch-mates are authored this tick.
-
-    Not left to the closing rotation, which never runs on a retiring or stuck tick. A keyless
-    row can't be matched by id, so this rotation names the rows as read (`drop`) and `rotate`
-    removes exactly those, keeping any other keyless row appended meanwhile.
-
-    The record is flat (row content at top level, not nested under `row` as `retire` writes
-    it), since there is no id to reference; consumers must branch on the presence of `row`."""
-    if not rows:
-        return
-    reason = f"row carries no value under {channel.id_key!r}"
-    log.warning(f"{len(rows)} unkeyable row(s) retired: {reason}")
-    state.deadletter(
-        channel,
-        [{**row, "attempts": int(row.get("attempts") or 0) + 1,
-          "deadletter_reason": reason, **retirement_stamp()} for row in rows],
-    )
-    state.rotate(
-        channel, [],
-        [{**row, "consumed_category": "consumed_retired"} for row in rows],
-        None, drop=rows, timeout=timeout_seconds,
-    )
 
 
 def _row_id(row: dict, key: str) -> str | None:

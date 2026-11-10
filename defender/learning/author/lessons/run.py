@@ -8,28 +8,27 @@ from dataclasses import field
 from defender._model import model
 from pathlib import Path
 
+from collections.abc import Callable, Sequence
 from typing import Any
 
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._paths import PATHS
 from defender.learning.author import drain
 from defender.learning.author import shared as _shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender.learning.core.config import (
-    AUTHOR_DRAIN_LABEL,
     LoopPaths,
     StageContext,
     StageWiring,
     author_effort as _author_effort,
     author_model as _author_model,
     author_request_limit,
-    repo_lock_wait_seconds,
-    author_max_attempts,
     author_timeout as _author_timeout,
 )
 from defender.learning.core.lane_trees import DrainTrees
-from defender.learning.core.state import FINDINGS, LearningState
+from defender.learning.core.state import FINDINGS
 from defender.knowledge import LESSONS
 
 
@@ -57,15 +56,17 @@ class AuthorConfig(CorpusAuthorConfig):
     author_effort: str | None = field(default_factory=_author_effort)
 
 
-def build_author_config(
-    paths: LoopPaths, *, state: LearningState, trees: DrainTrees,
+def build_author_config(  # noqa: PLR0913 — the claim's seams: its trees, batch, box, feedback and model
+    paths: LoopPaths, *, trees: DrainTrees,
     manifest_seed: str | None = None, box: Any = None, batch: Any = None,
+    feedback: str | None = None, make_model: Callable[..., Any] | None = None,
 ) -> AuthorConfig:
     """This channel's config, reading and writing its corpus through `trees`, the lane's open
     trees (`open_drain_trees`), which must hold the corpus itself (`shared.lane_corpus`, else
     `FatalConfigError`): `batch`'s draft `agent/lessons`, or — with no batch — the scene's
-    `paths.lessons_dir`. `paths` keeps the learning state and the product checkout. The config
-    must not outlive `trees`."""
+    `paths.lessons_dir`. `paths` keeps the product checkout. `feedback` is a replacement's framed
+    review text (#1278 H13), `make_model` the spawn's model seam. The config must not outlive
+    `trees`."""
     from defender.learning.author import shared as _shared
 
     root, corpus_dir, corpus_rel = _shared.lane_corpus_dir(paths, batch, LESSONS)
@@ -76,19 +77,18 @@ def build_author_config(
         tree_for=trees.tree_for,
         corpus_rel=corpus_rel,
         batch=batch,
-        state=state,
         channel=FINDINGS,
-        repo_lock_wait_seconds=repo_lock_wait_seconds(),
         log_prefix=_LOG_PREFIX,
-        author_prompt=paths.learning_dir / "author" / "lessons" / "prompt.md",
+        # The prompt is product code: the running checkout's, as the lead lane's (`LEARNING_DIR`).
+        author_prompt=PATHS.learning_dir / "author" / "lessons" / "prompt.md",
         invoke_agent=invoke_agent,
         gate=_gate_findings,
         buckets=FINDINGS_BUCKETS,
         noun="findings",
-        max_attempts=author_max_attempts(),
-        post_rotate=_write_held_report_after_rotate,
         manifest_seed=manifest_seed,
         box=box,
+        feedback=feedback,
+        make_model=make_model,
     )
 
 
@@ -108,7 +108,7 @@ def build_user_prompt(
         findings, batch_id, corpus=cfg.corpus.view(), corpus_dir=cfg.corpus_dir,
         corpus_dir_rel=cfg.corpus_rel, label="findings",
         manifest_seed=cfg.manifest_seed,
-        salt=salt,
+        salt=salt, feedback=cfg.feedback,
     )
 
 
@@ -123,7 +123,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
             batch_id=batch_id, label="curator",
         ),
         ctx=StageContext(
-            learning_run_dir=cfg.state.stage_dir(AUTHOR_DRAIN_LABEL),
+            learning_run_dir=curator_engine.call_folder_of(cfg, "lessons"),
             user=build_user_prompt(findings, batch_id, cfg, salt=stage_salt),
             request_limit=author_request_limit(),
             wall_clock_timeout=cfg.author_timeout,
@@ -133,6 +133,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
         ),
         corpus_dir=cfg.corpus_dir,
         log=_logger,
+        run_author=curator_engine.run_author_for(cfg.make_model),
     )
 
 
@@ -145,72 +146,35 @@ FINDINGS_BUCKETS: tuple[BucketSpec, ...] = (
 )
 
 
-def write_held_report(
-    cfg: AuthorConfig,
-    *,
-    batch_id: str,
-    deferred: list[dict],
-    skipped: list[dict],
-    gate_held: list[dict],
-) -> None:
-    """The lessons channel's three decline reasons, as the labels its report line carries.
-
-    `shared.write_disposition_report` composes the line and derives the `<label>_ids` keys;
-    this function picks which labels the lessons channel reports. Each implies a different
-    recovery:
-
-    - `deferred`: couldn't land through no fault of its own; bounded and still queued.
-    - `skipped`: terminal.
-    - `gate_held`: never reached the agent; held every tick until a human moves it.
-
-    Nothing is written when the tick declined nothing."""
-    _shared.write_disposition_report(
-        cfg.state, cfg.channel, batch_id=batch_id,
-        groups={
-            "deferred": deferred, "skipped": skipped, "gate_held": gate_held,
-        },
-    )
-
-
 _logger = logging.getLogger(__name__)
 
 
-def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:
-    """Runs after both the corpus commit and the queue rotation — the only seam that sees the
-    tick's closing edge.
-
-    Unconditional: this report is the operator's one written trace of what the tick declined,
-    and must not depend on how the tick's other rows went."""
-    write_held_report(
-        cfg,
-        batch_id=outcome.batch_id,
-        deferred=outcome.held.get("deferred", []),
-        skipped=outcome.consumed.get("consumed_skip", []),
-        gate_held=outcome.gate_held,
-    )
-
-
-def run_batch(
+def run_batch(  # noqa: PLR0913 — the drain's work step's call shape: the claim, its trees and its seams
     *,
-    hold_committed: bool = False,
     paths: LoopPaths | None = None,
-    state: LearningState | None = None,
     trees: DrainTrees | None = None,
     cfg: AuthorConfig | None = None,
     box: Any = None,
     batch: Any = None,
+    items: Sequence[drain.Item] = (),
+    outcomes: dict[tuple[str, str], Any] | None = None,
+    feedback: str | None = None,
+    make_model: Callable[..., Any] | None = None,
 ) -> int:
-    """This channel's entry point; the batch body is `drain.run_batch`, one claim of `batch`.
-    Exactly one of `trees` (the lane's open trees: the drain's work step opens them over the
-    batch's draft, #1134) and `cfg` (a config already built over such trees) is given."""
+    """This channel's entry point over a learning store claim (#1278 D1); the claim body is
+    `drain.run_batch`, one claim of `batch`. `items` are the claim's findings, `outcomes` the map
+    their fates are written to, `feedback` a replacement's framed review text. Exactly one of
+    `trees` (the lane's open trees: the drain's work step opens them over the batch's draft, #1134)
+    and `cfg` (a config already built over such trees) is given."""
     if (trees is None) == (cfg is None):
         raise TypeError("run_batch takes exactly one of trees= and cfg=")
     if trees is not None:
-        if paths is None or state is None:
-            raise TypeError("run_batch with trees= takes paths= and state=")
-        cfg = build_author_config(paths, state=state, trees=trees, box=box, batch=batch)
+        if paths is None:
+            raise TypeError("run_batch with trees= takes paths=")
+        cfg = build_author_config(paths, trees=trees, box=box, batch=batch, feedback=feedback,
+                                  make_model=make_model)
     assert cfg is not None  # narrowed for mypy: exactly one of the two was given
-    return drain.run_batch(cfg=cfg, hold_committed=hold_committed, box=box)
+    return drain.run_batch(cfg=cfg, items=items, outcomes=outcomes if outcomes is not None else {}, box=box)
 
 
 def _gate_family(entry: dict) -> tuple[str, dict] | None:

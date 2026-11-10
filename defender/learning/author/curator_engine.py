@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import re
@@ -139,7 +140,9 @@ class CuratorDeps(AgentDeps):
     def agent_root(self) -> Path | None:
         """The agent root this curator serves: the batch draft's `agent/` it works over. Its
         read confine drops the scope's `tenant_agent`, so the knowledge root `bind` was handed
-        is the answer — a read of its lesson then leaves its `lessons_loaded` row."""
+        is the answer. A curator's lesson read is not recorded: the deps carry no run, so no
+        `lessons_loaded` row is written (the only reader of those rows maps merged lessons to
+        investigations, and a curator reading a draft is not one; #1278 A1)."""
         return Path(self.roots.defender_dir) if self.roots is not None else super().agent_root
 
     @property
@@ -212,6 +215,28 @@ def _run_curator_pydantic(
         wiring=wiring, ctx=ctx, deps=deps,
         make_model=make_model, require_output=True,
     )
+
+
+def call_folder_of(cfg: Any, stage: str) -> Path:
+    """The run folder of `cfg`'s one `stage` call in its claim: a call folder of the claim's drain
+    batch, made here, private to the call and holding only its trace (#1278 A1, P7). A config with
+    no batch never spawns: a curator runs only as a claim of a tenant batch."""
+    from defender.learning.call_folders import call_folder
+
+    batch = cfg.batch
+    if batch is None:
+        raise config.FatalConfigError(
+            f"{cfg.log_prefix}: a curator runs only as a claim of a tenant batch, and this config "
+            "names none — nothing is spawned"
+        )
+    return call_folder(batch.tenant, str(batch.id), stage, 1, make=True)
+
+
+def run_author_for(make_model: MakeModel | None) -> Callable[..., str]:
+    """The curator stage's runner over `make_model` (`None`: the stage's own default model)."""
+    if make_model is None:
+        return _run_curator_pydantic
+    return functools.partial(_run_curator_pydantic, make_model=make_model)
 
 
 def run_curator_stage(
