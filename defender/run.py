@@ -614,6 +614,8 @@ class _TokenMint:
         reads = tuple(sorted(system_status.granted_systems(tenant.grants) & proxied))
         # The write-back token is for a case system run start judged sound (`case`), reached
         # through the proxy; a case system with bad settings is told so by the record step.
+        # A world never gets one: `--update-ticket` with `--episode` is refused before this
+        # (`_resume_target`); `world is None` is the mint's own guard behind that refusal (#1449).
         named = case.system if isinstance(case, case_system.CaseTarget) else None
         written = named if (world is None and ns.update_ticket
                                 and isinstance(tenant.access.get(named or ""), AccessDeclaration)) else None
