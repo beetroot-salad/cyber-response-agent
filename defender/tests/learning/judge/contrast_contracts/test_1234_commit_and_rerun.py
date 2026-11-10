@@ -4,7 +4,6 @@ from __future__ import annotations
 import collections
 import contextlib
 import json
-import multiprocessing
 import os
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -47,16 +46,16 @@ WORDS = {k: S.COINED[k] for k in ("page.in_progress", "page.graded", "page.ungra
 DEFENDER_Q, QUESTIONER_Q = "defender", "questioner"
 
 
+#: The store kind each judge channel is queued under (#1278).
+STORE_KIND = {DEFENDER_Q: "finding", QUESTIONER_Q: "questioner_finding"}
+
+
 def _channel(kind: str) -> Any:
     return S.sym(S.STATE, "FINDINGS" if kind == DEFENDER_Q else "QUESTIONER_FINDINGS")
 
 
-def _kind_of(channel: Any) -> str:
-    return DEFENDER_Q if channel.queue == _channel(DEFENDER_Q).queue else QUESTIONER_Q
-
-
-def _state_refused() -> type[BaseException]:
-    return S.sym(S.STATE, "StateRefused")
+def _kind_of(store_kind: str) -> str:
+    return DEFENDER_Q if store_kind == STORE_KIND[DEFENDER_Q] else QUESTIONER_Q
 
 
 def _worlds(*labels: str) -> list[S.World]:
@@ -220,15 +219,16 @@ class Seen:
 
 
 class Refuse:
-    """A refused entry, planted when fired: at `path`, or (`queue="same"` / `"other"`) at the
-    queue file of the channel the firing append names / of the other judge channel. A plain
-    file standing there gets a second hard link at `spare` (outside the episode; its bytes
+    """A refused entry, planted when fired: at `path` (a file the guarded episode writer refuses), or
+    (`queue="same"` / `"other"`) a store insert that fails for the channel the firing append names / for the other
+    judge channel (#1278: the default store's `fail_kinds`; the file queue's planted entry is gone). A plain
+    file standing at `path` gets a second hard link at `spare` (outside the episode; its bytes
     untouched), so the guarded writer or reader refuses it; an absent one becomes an empty
-    directory. `clear()` removes the plant, as an operator freeing the disk does."""
+    directory. `clear()` removes the plant, as an operator freeing the disk (or restoring the database) does."""
 
     def __init__(self, spare: Path, path: Path | None = None, *, queue: str | None = None):
         self.spare, self.path, self.queue = Path(spare), path, queue
-        self.planted: Path | None = None
+        self.planted: Path | str | None = None
         self.kind: str | None = None
 
     @property
@@ -236,13 +236,14 @@ class Refuse:
         return self.planted is not None
 
     def __call__(self, channel: Any = None) -> None:
-        if self.path is not None:
-            target = Path(self.path)
-        else:
-            kind = _kind_of(channel)
+        if self.path is None:
+            kind = DEFENDER_Q if channel.name == _channel(DEFENDER_Q).name else QUESTIONER_Q
             if self.queue == "other":
                 kind = QUESTIONER_Q if kind == DEFENDER_Q else DEFENDER_Q
-            target = Path(S.env_state().describe(_channel(kind)))
+            S.env_state().fail_kinds.add(STORE_KIND[kind])
+            self.kind, self.planted = "store", STORE_KIND[kind]
+            return
+        target = Path(self.path)
         if target.is_file():
             S.plant_hardlink(self.spare, target)
             self.kind = "link"
@@ -252,10 +253,12 @@ class Refuse:
         self.planted = target
 
     def clear(self) -> None:
-        if self.kind == "link":
+        if self.kind == "store":
+            S.env_state().fail_kinds.discard(str(self.planted))
+        elif self.kind == "link":
             self.spare.unlink()
         elif self.kind == "dir" and self.planted is not None:
-            self.planted.rmdir()
+            Path(self.planted).rmdir()
         self.kind = None
 
 
@@ -263,8 +266,8 @@ Action = Callable[[Any], None]
 
 
 class Watch:
-    """The `judge=` seam (wrapping a `RoutedJudge`) and, through `.state`, the `state=` seam
-    (wrapping the real learning-state handle). Records a `Seen` as every model call starts and
+    """The `judge=` seam (wrapping a `RoutedJudge`) and, through `.state`, the `store=` seam
+    (wrapping the findings store). Records a `Seen` as every model call starts and
     before every queue append. Fires only the faults declared: `at_call[(label, n)]` as that
     call starts; `stop_at=(label, n)` raises `KeyboardInterrupt` there; `before_append` /
     `after_append[(label, kind)]` (kind `None`: either channel) around the first append whose
@@ -289,10 +292,7 @@ class Watch:
         self.judge.bind_worlds(world_ids)
 
     def _queue(self, kind: str) -> list[dict] | None:
-        try:
-            return self.real.rows(_channel(kind))
-        except _state_refused():
-            return None
+        return self.real.rows(_channel(kind))
 
     def snap(self, event: str, who: str | None, kind: str | None) -> None:
         self.seen.append(Seen(event, who, kind, S.record(self.built), self._queue(DEFENDER_Q),
@@ -328,7 +328,7 @@ class Watch:
 
 
 class _WatchedState:
-    """The real learning-state handle with `append` observed; every other verb delegated."""
+    """The findings store with `publish_findings` observed; every other verb delegated."""
 
     def __init__(self, watch: Watch) -> None:
         self._watch = watch
@@ -336,22 +336,23 @@ class _WatchedState:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._watch.real, name)
 
-    def append(self, channel: Any, rows: list[dict], **kw: Any) -> Any:
+    def publish_findings(self, tenant: str, run_id: str, rows: Any, *, kind: str) -> Any:
         w = self._watch
-        kind = _kind_of(channel)
+        rows = list(rows)
+        channel = _channel(_kind_of(kind))
         labels = list(dict.fromkeys(_label_of(r) for r in rows))
         for label in labels:
-            w.snap("append", label, kind)
-        w.fire(w.before_append, labels, kind, channel)
-        out = w.real.append(channel, rows, **kw)
-        w.fire(w.after_append, labels, kind, channel)
+            w.snap("append", label, _kind_of(kind))
+        w.fire(w.before_append, labels, _kind_of(kind), channel)
+        out = w.real.publish_findings(tenant, run_id, rows, kind=kind)
+        w.fire(w.after_append, labels, _kind_of(kind), channel)
         return out
 
 
 def _stopped(built: Any, watch: Watch, **kw: Any) -> BaseException:
     """Run a pass expected to stop at its planted fault; return what stopped it."""
     try:
-        S.grade(built, watch, state=watch.state, **kw)
+        S.grade(built, watch, store=watch.state, **kw)
     except (*S.stops(), KeyboardInterrupt) as stopped:
         return stopped
     raise AssertionError("the pass was expected to stop at its planted fault and finished")
@@ -438,7 +439,7 @@ def test_1234_world_row_commits_queueing_then_appends_then_queued(tmp_path):
     })
     watch = Watch(built, judge)
 
-    S.grade(built, watch, state=watch.state)
+    S.grade(built, watch, store=watch.state)
 
     appends = [s for s in watch.seen if s.event == "append"]
     assert {(s.who, s.kind) for s in appends} >= {
@@ -745,153 +746,25 @@ def test_1234_bare_rerun_grades_only_the_world_with_no_completed_draw(tmp_path):
     assert _state_of(second, C) == S.QUEUED
 
 
-_G05_PROCESSES, _G05_EPISODES_EACH = 4, 3
-
-
-def _g05_episode_id(k: int) -> str:
-    return fixture_uuid(f"fresh-case-n{70 + k}")  # a UUID, like every episode id
-
-
-def _g05_judge(k: int) -> S.RoutedJudge:
-    """Episode `k`'s replies: bravo three defender findings and one design finding, charlie two
-    defender findings, the family one design finding — each claim marked `g05-<k>-<i>`."""
-    return S.judge({
-        B: _reply(inv=[_inv(B, f"g05-{k}-{i}") for i in range(3)],
-                  world=[_design(B, f"g05-{k}-3")]),
-        C: _reply(inv=[_inv(C, f"g05-{k}-{i}") for i in range(2)]),
-        FAMILY: S.family_reply(world=[_family_design(f"g05-{k}-0")]),
-    })
-
-
-def _g05_marks(k: int) -> list[str]:
-    return ([S.marker(B, f"g05-{k}-{i}") for i in range(4)]
-            + [S.marker(C, f"g05-{k}-{i}") for i in range(2)]
-            + [S.marker(FAMILY, f"g05-{k}-0")])
-
-
-def _g05_held(state: Any, root: Path, channels: list[Any]) -> tuple[list[dict], int]:
-    """Every row both judge channels hold — queued, or retired into consumed — and how many
-    lines of either were unreadable."""
-    held: list[dict] = []
-    unreadable = 0
-    for ch in channels:
-        rows, bad = state.rows_report(ch)
-        held += rows
-        unreadable += bad
-        consumed = root / ch.consumed
-        for line in (consumed.read_text(encoding="utf-8").splitlines()
-                     if consumed.is_file() else []):
-            try:
-                held.append(json.loads(line))
-            except ValueError:
-                unreadable += 1
-    return held, unreadable
-
-
-def _g05_round(tmp_path: Path, name: str, state_cls: type) -> dict[str, Any]:
-    """One race: `_G05_PROCESSES` forked judge processes, each grading its own episodes
-    through `state=` (a `state_cls` handle over this round's root), while this process's drain
-    retires and rotates both judge channels over the seed episode's rows."""
-    config, drain = S.mod(S.CONFIG), S.mod(S.DRAIN)
-    root = tmp_path / name
-    root.mkdir()
-    paths = config.LoopPaths(repo_root=tmp_path / "repo", state_dir=root)
-    state = state_cls.open(paths)
-    episodes_root = tmp_path / f"{name}-episodes"
-    seed = S.family(tmp_path, _worlds(), episode_id=_g05_episode_id(0), root=episodes_root)
-    S.grade(seed, _g05_judge(0), state=state)
-    channels = [_channel(DEFENDER_Q), _channel(QUESTIONER_Q)]
-    seeds = {ch.name: _ids(state.rows(ch)) for ch in channels}
-    assert all(seeds.values()), f"the seed pass queued nothing: {seeds}"
-    episodes = [S.family(tmp_path, _worlds(), episode_id=_g05_episode_id(k), root=episodes_root)
-                for k in range(1, 1 + _G05_PROCESSES * _G05_EPISODES_EACH)]
-
-    def grade_share(share: list[tuple[int, S.Built]]) -> None:
-        mine = state_cls.open(paths)
-        for k, built in share:
-            S.grade(built, _g05_judge(k), state=mine)
-
-    shares = [[(k + 1, episodes[k]) for k in range(p, len(episodes), _G05_PROCESSES)]
-              for p in range(_G05_PROCESSES)]
-    fork = multiprocessing.get_context("fork")
-    procs = [fork.Process(target=grade_share, args=(share,)) for share in shares]
-    for p in procs:
-        p.start()
-    retires = 0
-    while any(p.is_alive() for p in procs):
-        for ch in channels:
-            drain.retire(state, channel=ch, batch_ids=seeds[ch.name], reason="g05 race",
-                         max_attempts=10_000)
-            retires += 1
-    for p in procs:
-        p.join()
-    for ch in channels:
-        drain.retire(state, channel=ch, batch_ids=seeds[ch.name], reason="g05 race",
-                     max_attempts=1)
-    held, unreadable = _g05_held(state, root, channels)
-    marks = [m for k in range(1, 1 + len(episodes)) for m in _g05_marks(k)]
-    return {"exitcodes": [p.exitcode for p in procs], "retires": retires,
-            "unreadable": unreadable,
-            "missing": [m for m in marks if not _carrying(held, m)],
-            "twice": [m for m in marks if len(_carrying(held, m)) > 1],
-            "ids_twice": [i for i, n in collections.Counter(_ids(held)).items() if n > 1],
-            "episodes": episodes, "state": state, "root": root}
-
-
-def test_1234_per_world_appends_while_the_drain_retires_lose_no_row(tmp_path):
-    learning_state = S.sym(S.STATE, "LearningState")
-
-    class Unlocked(learning_state):
-        """The positive control's one fault: the per-channel append lock removed."""
-
-        def _append_lock(self, channel: Any, timeout: Any) -> Any:  # noqa: ARG002 — the lock's own signature
-            return contextlib.nullcontext()
-
-    locked = _g05_round(tmp_path, "locked", learning_state)
-
-    assert locked["exitcodes"] == [0] * _G05_PROCESSES, locked["exitcodes"]
-    assert locked["retires"] > 0
-    assert not locked["missing"], f"rows lost: {locked['missing']}"
-    assert not locked["twice"], (locked["twice"], locked["ids_twice"])
-    assert not locked["ids_twice"], (locked["twice"], locked["ids_twice"])
-    assert locked["unreadable"] == 0
-    files = sorted(p for p in (locked["root"] / "_pending").iterdir() if p.suffix == ".jsonl")
-    before = _bytes_of(files)
-    rerun = S.judge()
-    for built in locked["episodes"]:
-        S.grade(built, rerun, state=locked["state"])
-    assert rerun.calls == 0, "a re-run changed a queue"
-    assert _bytes_of(files) == before, "a re-run changed a queue"
-
-    control = _g05_round(tmp_path, "unlocked", Unlocked)
-    assert control["exitcodes"] == [0] * _G05_PROCESSES, control["exitcodes"]
-    assert control["missing"] or control["twice"] or control["unreadable"], (
-        "control: with the append lock removed no row was lost")
+# Retired: test_1234_per_world_appends_while_the_drain_retires_lose_no_row (with its `_g05_*` race helpers). It forked
+# judge processes appending per-world rows into the file queue while the drain's `retire` rotated the same channel,
+# and its positive control removed the per-channel append lock. The queue file, its append lock and `drain.retire` are
+# replaced by the learning store (design r8 "Locks": the store's transaction is the only writer, a judge insert and a
+# claim never share a file). That no row is lost or doubled under concurrent inserts and claims is the store's contract:
+# tests/learning/store_1278/test_items_1278.py (a finding id is unique for good) and test_store_1278.py (the claim).
 
 
 @contextlib.contextmanager
 def _gate_config(tmp_path: Path, *, questioner: bool) -> Iterator[tuple[Any, Path]]:
-    """The real curator config over a corpus under `tmp_path/repo` (never the checkout's):
-    `(config, corpus dir)`, its trees held for the block."""
-    from defender.tests.support.learning.curation._curator1134 import author_trees
+    """The real curator config over a batch's git-free draft under `tmp_path` (never the checkout's):
+    `(config, corpus dir)`."""
+    from defender.tests.support.learning.judge import _gate_1278 as G
 
-    paths = S.sym(S.CONFIG, "LoopPaths")(repo_root=tmp_path / "repo",
-                                         state_dir=tmp_path / "learning-state")
-    (tmp_path / "repo" / "defender").mkdir(parents=True, exist_ok=True)
-    trees = author_trees(paths)
-    try:
-        if questioner:
-            corpus = Path(paths.lessons_questioner_dir)
-            cfg = S.mod(S.QUESTIONER_RUN).build_questioner_config(paths, trees=trees,
-                                                                  state=S.env_state())
-        else:
-            corpus = Path(paths.lessons_dir)
-            cfg = S.mod(S.LESSONS_RUN).build_author_config(paths, trees=trees,
-                                                           state=S.env_state())
-        corpus.mkdir(parents=True, exist_ok=True)
-        yield cfg, corpus
-    finally:
-        trees.close()
+    lane = G.gate_lane(tmp_path)
+    if questioner:
+        yield G.questioner_cfg(lane), lane.sibling_dir
+    else:
+        yield G.lessons_cfg(lane), lane.lessons_dir
 
 
 def _author_lesson(corpus: Path, name: str, finding_id: str) -> None:
@@ -919,10 +792,11 @@ def test_1234_questioner_dedup_and_gate_resolve_per_draw_ids_with_skipped_indexe
 
     append_world_rows = S.sym(S.JUDGE_ENQUEUE, "append_world_rows")
     text = S.queue_bytes()[1]
-    assert append_world_rows(built.ep, queue, state=S.env_state()) == 0
+    assert append_world_rows(built.ep, queue, state=S.sink(S.J.episode_runs_for(built.ep).tenant.id)) == 0
     assert S.queue_bytes()[1] == text, "re-appending one pass's rows changed the queue"
     changed = {**by_id[built.finding_id(B, 1, 1)], "finding_id": built.finding_id(B, 2, 1)}
-    assert append_world_rows(built.ep, [*queue, changed], state=S.env_state()) == 1
+    assert append_world_rows(built.ep, [*queue, changed],
+                                 state=S.sink(S.J.episode_runs_for(built.ep).tenant.id)) == 1
     assert _ids(S.questioner_queue()).count(built.finding_id(B, 2, 1)) == 1
 
     with _gate_config(tmp_path, questioner=True) as (cfg, corpus):
@@ -938,7 +812,7 @@ def test_1234_questioner_dedup_and_gate_resolve_per_draw_ids_with_skipped_indexe
     other = _built(tmp_path, episode_id=EP3)
     fid = other.finding_id(B, 0, 0)
     old = S.pre_change_world_row(fid, finding=f"{_claim(B, 'old')} — stopped early")
-    S.env_state().append(_channel(QUESTIONER_Q), [old], dedup_key="finding_id")
+    S.sink(S.J.episode_runs_for(other.ep).tenant.id).append(_channel(QUESTIONER_Q), [old], dedup_key="finding_id")
     assert [r for r in S.questioner_queue() if r.get("finding_id") == fid] == [old], (
         "fixture: the pre-change row sits on the queue at the colliding id")
     assert not (other.ep / "judge.yaml").exists(), "fixture: the pre-change pass left no record"

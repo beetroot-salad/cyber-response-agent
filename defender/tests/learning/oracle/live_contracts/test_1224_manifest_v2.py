@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender import _yaml
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -76,10 +77,9 @@ def _page_file(ep: Path) -> Path:
 def _grade(ep: Path, judge: Any, where: Path) -> Any:
     """`grade_episode` over the episode at `ep` (`J.grade_at`): the judge reads only the
     episode it is handed, so `where` threads nothing in."""
-    from defender.tests.support.learning.core._state1135 import env_state
 
     del where
-    return J.grade_at(ep, judge=judge, state=env_state())
+    return J.grade_at(ep, judge=judge, store=MemoryStore())
 
 
 def _refused(call: Any, cls: type[BaseException]) -> str:

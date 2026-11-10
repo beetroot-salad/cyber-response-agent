@@ -17,6 +17,7 @@ from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
 @pytest.fixture(autouse=True)
 def _configured_roots_1234(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     S.isolate_learning_state(tmp_path, monkeypatch)
+    S.reset_default_store()
     # The default oracle rate (5/s) really sleeps between oracle-side queries; a real-path
     # sibling would pay it on every call.
     monkeypatch.setenv(S.KNOB_RATE, "1e6")

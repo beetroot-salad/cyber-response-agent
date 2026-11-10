@@ -442,8 +442,8 @@ def test_1234_contrast_pointer_naming_a_reference_worlds_judge_draw(
     seen = {}
     for name, built in (("natural", natural), ("judged-before", judged_before)):
         if name == "judged-before":
-            (tmp_path / "second-state").mkdir()
-            S.isolate_learning_state(tmp_path / "second-state", monkeypatch)
+            # A findings store of its own: the two passes mint the same finding ids, which the store dedups.
+            S.reset_default_store()
         _run(built, _draw_file_replies(framed))
         seen[name] = {(w, i): S.lane_of(built, built.finding_id(w, 0, i)) for w, i in expected}
     assert seen == {"natural": expected, "judged-before": expected}
