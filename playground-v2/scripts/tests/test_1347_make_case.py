@@ -80,7 +80,8 @@ def test_candidates_are_the_alerts_within_max_age_of_T_with_no_live_trace(tmp_pa
 
     got = rig.make_module.candidates(rig.freeze_dir, ops=rig.ops)
 
-    assert sorted(got) == ["at-T", "derived-in", "derived-pre", "edge", "syslog-alert", "young"]
+    assert sorted(got) == ["at-T", "derived-decoy", "derived-dedup", "derived-dedup-pattern", "derived-in", "derived-pre", "edge",
+                          "syslog-alert", "young"]
 
 
 def test_max_age_has_one_owner_and_the_default_is_six_hours(tmp_path):
@@ -90,7 +91,8 @@ def test_max_age_has_one_owner_and_the_default_is_six_hours(tmp_path):
 
     assert module.MAX_AGE == timedelta(hours=6)
     narrow = module.candidates(rig.freeze_dir, ops=rig.ops, max_age=timedelta(hours=1))
-    assert sorted(narrow) == ["at-T", "derived-in", "syslog-alert", "young"]
+    assert sorted(narrow) == ["at-T", "derived-decoy", "derived-dedup", "derived-dedup-pattern", "derived-in", "syslog-alert",
+                      "young"]
     owners = [p.name for p in SCRIPTS.glob("*.py") if any(
         isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "MAX_AGE" for t in n.targets)
         for n in ast.walk(ast.parse(p.read_text())))]
@@ -428,7 +430,8 @@ def test_a_case_is_written_exactly_for_an_alert_that_is_a_candidate_and_for_no_o
     rig.tickets |= {u for u, g in generated.items() if g[3]}
     expected = {u: g[1] for u, g in generated.items()}
     expected.update({"at-T": True, "derived-in": True, "derived-pre": True, "edge": True, "syslog-alert": True,
-                     "young": True, "old": False, "future": False, "live-run": False, "ticketed": False,
+                     "young": True, "derived-dedup": True, "derived-dedup-pattern": True, "derived-decoy": True,
+                     "old": False, "future": False, "live-run": False, "ticketed": False,
                      "acknowledged": False})
     assert any(expected.values()) and not all(expected.values())
     assert {u for u in rig.make_module.candidates(rig.freeze_dir, ops=rig.ops)} == {u for u, ok in expected.items() if ok}
