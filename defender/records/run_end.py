@@ -36,12 +36,16 @@ TRUNCATED_BY_PROVIDER_REJECTED = "provider-rejected"
 TRUNCATED_BY_BOX_LOST = "box-lost"
 #: The host fence tripped (#1205, #1421 O9): a process in the box wrote past the in-box helper.
 TRUNCATED_BY_BOX_OUTPUT_LIMIT = "box-output-limit"
+#: The run lost its access to the credential proxy (#1363 O7, D4): its read token could not be
+#: signed, or the proxy answered that our access as a whole is unusable. Ours to fix, not the
+#: tenant's: no verdict, no report, no case comment, and no system marked down.
+TRUNCATED_BY_PROXY_ACCESS = "proxy-access"
 TRUNCATED_BY_VALUES = (
     TRUNCATED_BY_REQUEST_LIMIT, TRUNCATED_BY_RETRY_EXHAUSTED, TRUNCATED_BY_ABORTED,
     TRUNCATED_BY_BUDGET, TRUNCATED_BY_STORE, TRUNCATED_BY_DEAD_END,
     TRUNCATED_BY_SERVED_LEDGER, TRUNCATED_BY_EXECUTED_QUERIES, TRUNCATED_BY_TIMED_OUT,
     TRUNCATED_BY_PROVIDER_DOWN, TRUNCATED_BY_BOX_LOST, TRUNCATED_BY_BOX_OUTPUT_LIMIT,
-    TRUNCATED_BY_PROVIDER_REJECTED,
+    TRUNCATED_BY_PROVIDER_REJECTED, TRUNCATED_BY_PROXY_ACCESS,
 )
 
 
@@ -56,13 +60,15 @@ class ExitClass:
 
 #: The one exit-class table (#1421): every class whose run exits non-zero, by its own code. A
 #: class not here exits 0. Rerun later for provider-down; the operator's box for box-lost and
-#: box-output-limit; the operator's model configuration (or a defect) for provider-rejected.
+#: box-output-limit; the operator's model configuration (or a defect) for provider-rejected; the
+#: credential proxy and the tenant's setup of it for proxy-access.
 #: Each code is non-zero, so a branched sibling that meets one is recorded `did not finish`.
 EXIT_CLASSES: dict[str, ExitClass] = {
     TRUNCATED_BY_PROVIDER_DOWN: ExitClass(4),
     TRUNCATED_BY_BOX_LOST: ExitClass(5, box_ending=True),
     TRUNCATED_BY_BOX_OUTPUT_LIMIT: ExitClass(6, box_ending=True),
     TRUNCATED_BY_PROVIDER_REJECTED: ExitClass(7),
+    TRUNCATED_BY_PROXY_ACCESS: ExitClass(8),
 }
 
 #: Endings with no verdict whose case gets the escalation note: a person must look, and a rerun
@@ -91,6 +97,21 @@ FORCED_CLOSE_EXITS = frozenset({TRUNCATED_BY_REQUEST_LIMIT, TRUNCATED_BY_RETRY_E
 
 #: The records `CallRecordWriteFailed` may name, each the exit class its failure stamps.
 CALL_RECORDS = frozenset({TRUNCATED_BY_SERVED_LEDGER, TRUNCATED_BY_EXECUTED_QUERIES})
+
+
+class ProxyAccessLost(Exception):  # noqa: N818 — named for what it reports, like `RunAborted`
+    """The run's access to the credential proxy is lost (#1363 O7, D4): a call met a fault of
+    origin `access`, ours for the whole process. Control flow, never an adapter fault: raised by
+    the query tool for the first such fault, carried out of lead zero, the gather tools and the
+    driver (bare or inside an exception group), and ended as `proxy-access`. `detail` is the
+    fault's own; the message names the credential proxy, so the ending's reason does."""
+
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+        super().__init__(f"the credential proxy could not be used: {detail}")
+
+    def __reduce__(self) -> tuple[type, tuple[Any, ...]]:
+        return self.__class__, (self.detail,)
 
 
 class CallRecordWriteFailed(Exception):  # noqa: N818 — named for what it reports, like `RunAborted`
@@ -174,6 +195,8 @@ __all__ = [
     "EXIT_CLASSES",
     "ExitClass",
     "FORCED_CLOSE_EXITS",
+    "ProxyAccessLost",
+    "TRUNCATED_BY_PROXY_ACCESS",
     "TRUNCATED_BY_ABORTED",
     "TRUNCATED_BY_BOX_LOST",
     "TRUNCATED_BY_BOX_OUTPUT_LIMIT",

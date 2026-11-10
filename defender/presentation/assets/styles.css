@@ -666,7 +666,9 @@ pre.files { font-size: 11px; color: var(--text-dim); }
    writes into the field, and an unbounded one makes its table row thousands of pixels tall
    in this narrow column. The internal scroll keeps every character reachable. */
 .lq-goal { color: var(--text-dim); font-size: 11px; margin-top: 2px; max-width: 220px; max-height: 9em; overflow-y: auto; }
-.lq-qid, .lq-sys, .lq-params, .lq-payload { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; }
+.lq-qid, .lq-sys, .lq-params, /* Cut for this request only (exit 3): the system is fine, retry differently — amber-dim, not red. */
+.lq-exit.lq-cut { color: var(--warn); font-style: italic; }
+.lq-payload { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; }
 .lq-qid { color: var(--code); }
 .lq-params { color: var(--text-dim); max-width: 260px; overflow-wrap: anywhere; }
 .lq-exit { text-align: center; font-weight: 600; }

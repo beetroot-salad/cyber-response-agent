@@ -20,7 +20,16 @@ from defender.hooks.budget_enforcer import BudgetKill
 from defender._text import as_str
 from defender._untrusted import wrap_fresh
 from defender._redaction import redact_model_visible
-from defender.kit.faults import USAGE_EXIT_CODE, AdapterFault, ConfigFault
+from defender.kit.faults import (
+    ORIGIN_ACCESS,
+    ORIGIN_REQUEST,
+    ORIGIN_SETUP,
+    USAGE_EXIT_CODE,
+    AdapterFault,
+    ConfigFault,
+)
+from defender.records.run_end import ProxyAccessLost
+from defender.systems.circuit_breaker import REQUEST_CUT_EXIT_CODE
 from defender.investigation.payload_view import payload_text_of, render as _render_payload
 from defender.investigation.request_ceiling import WRITE_SUMMARY_NOW
 from defender.investigation.tools import DeadEnd
@@ -637,7 +646,8 @@ class QueryCapture(AbstractCapability[Any]):
         query_id = resolve_query_id(system, verb, as_str(model_query_id) or None)
 
         payload: Any = None
-        escaped = False
+        escaped: str | None = None
+        charged = True
         try:
             payload = await handler(args)
             exit_code, detail = 0, ""
@@ -645,12 +655,8 @@ class QueryCapture(AbstractCapability[Any]):
             raise
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
             raise
-        except ConfigFault as e:
-            # A settings fault the system's start check did not catch (#1256 O-5b, DP3): the
-            # system is not configured for this run, from this call on.
-            exit_code, detail, escaped = e.exit_code, e.detail, True
         except AdapterFault as e:
-            exit_code, detail = e.exit_code, e.detail
+            exit_code, detail, escaped, charged = _react_to_fault(e, system)
         except BaseException as e:  # noqa: BLE001 — the point: an unmapped fault still writes a row
             exit_code, detail = _fault_exit(e), str(e) or type(e).__name__
 
@@ -663,7 +669,7 @@ class QueryCapture(AbstractCapability[Any]):
             system_status.mark_escaped(
                 run_state_of(deps), system, detail, tenant=getattr(deps, "tenant", None),
                 defender_dir=Path(defender_dir) if defender_dir is not None else None,
-                known_ids=self._known_ids)
+                known_ids=self._known_ids, defect=escaped == "defect")
             await self._record(
                 deps, system=system, verb=verb, query_id=query_id, params=params,
                 payload=payload, exit_code=exit_code, detail=detail, system_key="",
@@ -675,6 +681,7 @@ class QueryCapture(AbstractCapability[Any]):
         row, text = await self._record(
             deps, system=system, verb=verb, query_id=query_id, params=params,
             payload=payload, exit_code=exit_code, detail=detail, system_key="",
+            charged=charged,
         )
         return self._model_view(deps, row, text, exit_code, detail)
 
@@ -744,6 +751,37 @@ class QueryCapture(AbstractCapability[Any]):
         if repeat is not None:
             view = f"{repeat}\n{view}"
         return _format_bash_result(0, wrap_fresh(view, "untrusted"), "", note)
+
+
+def _react_to_fault(fault: AdapterFault, system: str) -> tuple[int, str, str | None, bool]:
+    """The one place a failed call's fault decides its row (#1363 O7a): (exit code, detail,
+    mark-the-system-down, charge-the-breaker), by whose failure the fault is.
+
+    `access`: the run lost its proxy access; ends the run, no row. `request`: this one call was
+    cut; an uncharged row of its own exit class, nothing marked down. `setup`: ours, for this
+    system: a settings fault marks it down uncharged, a transport fault is a charged failed call.
+    Otherwise (the system's, or a fault that never met the proxy): a ConfigFault marks it down as
+    an adapter defect; anything else is a charged failed call."""
+    origin = fault.origin
+    if origin == ORIGIN_ACCESS:
+        raise ProxyAccessLost(fault.detail)
+    if origin == ORIGIN_REQUEST:
+        suspect = (" — a settings fault on one request: suspect an adapter or settings defect"
+                   if isinstance(fault, ConfigFault) else "")
+        _logger.warning(
+            "%s: a call was cut for this request only (origin request, %s): %s%s",
+            system, type(fault).__name__, fault.detail, suspect)
+        return REQUEST_CUT_EXIT_CODE, fault.detail, False, False
+    if origin == ORIGIN_SETUP:
+        named = f"the credential proxy's setup for {system}: {fault.detail}"
+        if isinstance(fault, ConfigFault):
+            _logger.warning("%s: marked down, the credential proxy's setup is incomplete: %s",
+                            system, fault.detail)
+            return fault.exit_code, named, "setup", False
+        return fault.exit_code, f"our setup failed ({named})", False, True
+    if isinstance(fault, ConfigFault):
+        return fault.exit_code, fault.detail, "defect", False
+    return fault.exit_code, fault.detail, False, True
 
 
 def register_query_tool(agent, registry) -> None:

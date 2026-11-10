@@ -87,18 +87,32 @@ def _call_record(exc: BaseException) -> RunEnding | None:
     return RunEnding(found, found.record, "CallRecordWriteFailed", plain=True)
 
 
+def _proxy_access(exc: BaseException) -> RunEnding | None:
+    """The run's access to the credential proxy is lost (#1363 O7, D4): ours, for the whole
+    process, so it overrides a provider outage or refusal beside it. Like them it yields to a
+    budget kill, an abort and a box ending, but not to a serving abort: a sibling that holds both
+    ends `proxy-access`, not as the oracle's unservable world."""
+    found = carried_unless_overridden(
+        exc, run_end.ProxyAccessLost, (BudgetKill, RunAborted, box_mod.BoxEnding))
+    if found is None:
+        return None
+    return RunEnding(found, run_end.TRUNCATED_BY_PROXY_ACCESS, str(found))
+
+
 def _provider_down(exc: BaseException) -> RunEnding | None:
     """A model request kept failing temporarily past the retrier (#1243): an infrastructure
     end, so like the budget kill it writes no report."""
     found = carried_unless_overridden(
-        exc, providers.ProviderDown, (BudgetKill, RunAborted, box_mod.BoxEnding))
+        exc, providers.ProviderDown,
+        (BudgetKill, RunAborted, box_mod.BoxEnding, run_end.ProxyAccessLost))
     if found is None:
         return None
     return RunEnding(found, run_end.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")
 
 
-#: What a refusal yields to: an interrupt, kill or abort, a box ending, an outage.
-_REFUSAL_YIELDS_TO = (BudgetKill, RunAborted, box_mod.BoxEnding, providers.ProviderDown)
+#: What a refusal yields to: an interrupt, kill or abort, a box ending, lost access, an outage.
+_REFUSAL_YIELDS_TO = (BudgetKill, RunAborted, box_mod.BoxEnding, run_end.ProxyAccessLost,
+                      providers.ProviderDown)
 
 
 def _provider_rejected(exc: BaseException) -> RunEnding | None:
@@ -134,19 +148,20 @@ def _provider_refused_by_status(exc: BaseException) -> RunEnding | None:
 #: The endings, most overriding first. The ending a new failure adds is one row here.
 BOX = EndingRow("box", _box)
 CALL_RECORD = EndingRow("call-record", _call_record)
+PROXY_ACCESS = EndingRow("proxy-access", _proxy_access)
 PROVIDER_DOWN = EndingRow("provider-down", _provider_down)
 PROVIDER_REJECTED = EndingRow("provider-rejected", _provider_rejected)
 PROVIDER_REFUSED_BY_STATUS = EndingRow("provider-refused-by-status", _provider_refused_by_status)
 ENDINGS: tuple[EndingRow, ...] = (
-    BOX, CALL_RECORD, PROVIDER_DOWN, PROVIDER_REJECTED, PROVIDER_REFUSED_BY_STATUS,
+    BOX, CALL_RECORD, PROXY_ACCESS, PROVIDER_DOWN, PROVIDER_REJECTED, PROVIDER_REFUSED_BY_STATUS,
 )
 
 #: Sites that take part in fewer endings name them here, in table order. The driver's main
 #: loop takes all of them; the gather lead's stamp only the two that are not stamped where
 #: they are raised.
 CORRELATION_ENDINGS = tuple(row for row in ENDINGS if row is not CALL_RECORD)
-STAMPED_ON_THE_WAY_UP = (BOX, PROVIDER_DOWN)
-LEAD_ZERO_PROPAGATES = (PROVIDER_DOWN, PROVIDER_REJECTED)
+STAMPED_ON_THE_WAY_UP = (BOX, PROXY_ACCESS, PROVIDER_DOWN)
+LEAD_ZERO_PROPAGATES = (PROXY_ACCESS, PROVIDER_DOWN, PROVIDER_REJECTED)
 
 
 def ending_in(exc: BaseException, among: tuple[EndingRow, ...] = ENDINGS) -> RunEnding | None:

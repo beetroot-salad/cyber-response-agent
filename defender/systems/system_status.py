@@ -287,7 +287,7 @@ def cause_text(cause: Down) -> str:
 
 def mark_escaped(state: SystemsState, system: str, fault_text: str, *,
                  tenant: RunTenant | None = None, defender_dir: Path | None = None,
-                 known_ids: Collection[str] = ()) -> None:
+                 known_ids: Collection[str] = (), defect: bool = True) -> None:
     """A verb of `system` raised `ConfigFault` at call time (O-5b): its settings check missed a
     fault its verbs can raise. The system is down as not configured from this call on — the same
     status and accounting the start check gives, reached late — and the escape is logged as the
@@ -303,10 +303,11 @@ def mark_escaped(state: SystemsState, system: str, fault_text: str, *,
         adapters_root=adapters_under(defender_dir) if defender_dir is not None else None,
         known_ids=frozenset(known_ids))
     cause = NotConfigured(scope.reason(fault_text))
-    _logger.error(
-        f"adapter defect: a {system} verb raised ConfigFault at call time — a settings fault "
-        f"its `check_settings` does not cover. {system} is down for the rest of this run as "
-        f"{cause_text(cause)}")
+    if defect:
+        _logger.error(
+            f"adapter defect: a {system} verb raised ConfigFault at call time — a settings fault "
+            f"its `check_settings` does not cover. {system} is down for the rest of this run as "
+            f"{cause_text(cause)}")
     _mark(state, system, cause)
 
 

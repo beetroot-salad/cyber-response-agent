@@ -314,8 +314,8 @@ async def _drive_agent(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the loop's 
         _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
-    except (run_end.CallRecordWriteFailed, providers.ProviderDown, providers.ProviderRejected,
-            ModelHTTPError, box_mod.BoxEnding, BaseExceptionGroup) as e:
+    except (run_end.CallRecordWriteFailed, run_end.ProxyAccessLost, providers.ProviderDown,
+            providers.ProviderRejected, ModelHTTPError, box_mod.BoxEnding, BaseExceptionGroup) as e:
         # These failures end the run by name. Concurrent leads may deliver any of them inside an
         # exception group; a group that carries none propagates as itself.
         # One owner picks which ending the failure carries (`run_endings`): the box first, then a
