@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 
 from defender.tenancy import Tenant
 
@@ -27,10 +28,17 @@ class _Line:
         return self.tip or self.batch.base
 
 
+#: Where the commit-maker records a commit before its branch moves: the learning store's verb for a
+#: batch's commit (#1278 D5, its holder's token checked in the same transaction), or, with none
+#: given, the legacy record file (a `propose`, which has no learning batch).
+Recorder = Callable[[_Made], None]
+
+
 @dataclass
 class CommitMaker:
     tenant: Tenant
     repository: GitRepository
+    recorder: Recorder | None = None
 
     def commit(
         self,
@@ -89,20 +97,21 @@ class CommitMaker:
                 else self.repository.regular_blobs(line.batch.base, paths)
             )
             commit, after = self.repository.make_commit(parent, change_set, message)
-            _record_made(
-                self.tenant,
-                _Made(
-                    commit=commit,
-                    batch=line.batch,
-                    lanes=line.lanes,
-                    reverts=reverts,
-                    changes=()
-                    if reverts is not None
-                    else tuple(
-                        (path, at_base.get(path), after[path]) for path in paths
-                    ),
+            made = _Made(
+                commit=commit,
+                batch=line.batch,
+                lanes=line.lanes,
+                reverts=reverts,
+                changes=tuple(
+                    (path, at_base.get(path), after[path]) for path in paths
                 ),
             )
+            if self.recorder is not None:
+                # Recorded before the branch moves (P2'): a recorder that refuses (a holder whose
+                # lease is gone, `LeaseLost`) leaves a commit object no branch holds.
+                self.recorder(made)
+            else:
+                _record_made(self.tenant, replace(made, changes=() if reverts is not None else made.changes))
             self.repository.move_branch(branch, commit, tip)
             line.tip = commit
             return commit

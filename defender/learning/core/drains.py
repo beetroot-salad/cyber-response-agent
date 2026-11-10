@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import functools
 import importlib
 import logging
 import subprocess
-import uuid
 from defender._model import model
 from typing import TYPE_CHECKING, Any
 from collections.abc import Callable, Iterator
@@ -20,7 +18,6 @@ from defender.learning.core.config import (
     author_max_attempts,
     env_int,
     merge_mode,
-    now_iso,
     pitfalls_threshold,
     repo_lock_wait_seconds,
 )
@@ -40,20 +37,25 @@ from defender.learning.core.pitfalls_disposition import PitfallsDisposition
 # A runtime import, not a `TYPE_CHECKING` one: `ServedMarker` (a model) names it as a field.
 from defender.records import Run
 from defender.learning.core.state import (
-    AUTHOR_DRAIN_LOCK,
     FINDINGS,
     PITFALLS,
-    LEAD_AUTHOR_DRAIN_LOCK,
-    LEAD_QUEUE_LOCK,
     QUESTIONER_FINDINGS,
-    TRY_ONCE,
     Channel,
     Claimed,
     LearningState,
     PendingDelivery,  # noqa: F401 — re-export: the delivery record the drains and the pin name
-    StateRefused,
 )
 from defender.records.formats import TenantRefused
+from defender.learning.core.store_tick import (
+    AUTHOR_LANE,
+    LEAD_LANE,
+    Refused,
+    Tick,
+    classified_refusal,
+    lane_waiting,
+    opened_store,
+)
+from defender.learning.store import Stop
 
 if TYPE_CHECKING:
     import httpx
@@ -70,29 +72,29 @@ class _LeadAuthorRetry(Exception):
     pass
 
 
-def _invoke_lead_author(
-    paths: LoopPaths, state: LearningState, run: Run, *, label: DrainLabel,
+def _invoke_lead_author(  # noqa: PLR0913 — the lead step's call shape, plus its bound label and the claim's items
+    paths: LoopPaths, state: LearningState | None, run: Run, *, label: DrainLabel,
     batch: Batch | None = None, box: Any = None, on_done: Callable[[str | None], None],
-    git_timeout: float = GIT_TIMEOUT_SECONDS,
+    git_timeout: float = GIT_TIMEOUT_SECONDS, items: list[Any] | None = None, feedback: str | None = None,
+    outcomes: dict[tuple[str, str], Any] | None = None, make_model: Callable[..., Any] | None = None,
 ) -> None:
-    """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
-    `lead_author_drain`): the held roots of its writable mounts — the lanes of `batch`'s draft —
-    are opened here, with the batch's box stopped, and closed when the claim's serve returns or
-    raises (#1134 A3, #1108 P4). A fault holding them propagates as itself, never as a
-    swallowed transient. With no `batch` (a checkout-shaped scene), the label's trees over
-    `paths` are held, and the curator refuses at its commit (it commits only into a batch)."""
+    """The lead-author lane's default work step for one claimed curation request. `label` is the lane's
+    (bound in by `lead_author_drain`): the held roots of its writable mounts — the lanes of `batch`'s
+    draft — are opened here, with the batch's box stopped, and closed when the request's serve returns
+    or raises (#1134 A3, #1108 P4). A fault holding them propagates as itself, never as a swallowed
+    transient. Over the store (#1278) the claim's `items`, the framed `feedback` of a replacement and
+    the `outcomes` the curator decides are handed through to the curator's entry. With no `batch` (a
+    checkout-shaped scene), the label's trees over `paths` are held, and the curator refuses at its
+    commit (it commits only into a batch)."""
     from defender.learning.leads.lead_extraction import LeadAuthorError
 
     _logger.info("step=lead-author")
-    # The drain holds the per-author queue lock for the whole tick (`lead_author_drain`), so
-    # the curator is entered past its own acquisition and its done sentinel is deferred to
-    # `on_done`.
     with open_drain_trees(paths, label, batch=batch) as trees:
         rc = _run_curator_module(
             "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             lambda mod: mod.run_under_held_queue_lock(
                 run, paths=paths, state=state, trees=trees, box=box, on_done=on_done,
-                git_timeout=git_timeout, batch=batch,
+                git_timeout=git_timeout, batch=batch, **_store_kw(items, feedback, outcomes, make_model),
             ),
         )
     if rc not in (0, None):
@@ -101,10 +103,23 @@ def _invoke_lead_author(
         raise _LeadAuthorRetry("lead-author hit a swallowed transient (rc=None)")
 
 
-def _maybe_trigger_author(  # noqa: PLR0913 — the trigger seam's call shape, plus its bound label and the tick's batch
+def _store_kw(items: list[Any] | None, feedback: str | None, outcomes: dict[tuple[str, str], Any] | None,
+              make_model: Callable[..., Any] | None) -> dict[str, Any]:
+    """What a default work step hands its curator over a store claim (#1278): the claim's items of the
+    curator's kind, the framed feedback (a replacement's), the outcomes map it fills, and the model
+    seam when one is given. Nothing outside a claim (a by-hand run passes none)."""
+    kw: dict[str, Any] = {}
+    if items is not None:
+        kw.update(items=items, feedback=feedback, outcomes=outcomes)
+    if make_model is not None:
+        kw["make_model"] = make_model
+    return kw
+
+
+def _maybe_trigger_author(  # noqa: PLR0913 — the trigger seam's call shape, plus its bound label and the tick's claim
     paths: LoopPaths,
-    state: LearningState,
-    channel: Channel,
+    state: LearningState | None,
+    kind: str,
     threshold_env: str,
     module_name: str,
     pending_label: str,
@@ -112,38 +127,30 @@ def _maybe_trigger_author(  # noqa: PLR0913 — the trigger seam's call shape, p
     label: DrainLabel,
     batch: Batch | None = None,
     box: Any = None,
+    items: list[Any] | None = None,
+    feedback: str | None = None,
+    outcomes: dict[tuple[str, str], Any] | None = None,
+    make_model: Callable[..., Any] | None = None,
 ) -> None:
-    """The author lane's default work step for one curator. `label` is the lane's (bound in by
-    `author_drain`): when the curator's queue is at threshold, the held roots of the lane's
-    writable mounts — the lanes of `batch`'s draft — are opened here, with the batch's box
-    stopped, and closed when the curator's batch returns or raises (#1134 A3, #1108 P4). Each
-    curator opens its own and is one claim of the batch. A fault holding them propagates out of
-    this step (to `_drain_one_curator`'s stuck record), never as a swallowed crash. With no
-    `batch` (a checkout-shaped scene), the label's trees over `paths` are held instead, and the
-    curator refuses any commit (it commits only into a batch's draft)."""
-    threshold = env_int(threshold_env, 5)
-    # Held is logged beside authorable: the count is authorable rows, not queue depth, so
-    # without it a queue of permanent holds would log `pending=0` with no explanation.
-    pending_count, held_count = _pending_queue_counts(state, channel)
-    if pending_count < threshold:
-        _logger.info(
-            f"{pending_label}={pending_count} held={held_count} threshold={threshold} "
-            f"— {module_name} not invoked"
-        )
-        return
-    _logger.info(
-        f"step={module_name} {pending_label}={pending_count} held={held_count} "
-        f"threshold={threshold}"
-    )
+    """The author lane's default work step for one curator over a store claim (#1278). `label` is the
+    lane's (bound in by `author_drain`): the held roots of the lane's writable mounts — the lanes of
+    `batch`'s draft — are opened here, with the batch's box stopped, and closed when the curator's
+    batch returns or raises (#1134 A3, #1108 P4). The claim already decided there is work (its wake
+    count, `threshold_env`, is the store's claim threshold): the curator is handed the claim's `items`
+    of its `kind`, the framed `feedback` of a replacement, and the `outcomes` it decides. Each curator
+    opens its own trees and is one claim of the batch. A fault holding them propagates out of this
+    step, never as a swallowed crash. With no `batch` (a checkout-shaped scene), the label's trees over
+    `paths` are held instead, and the curator refuses any commit."""
+    _logger.info(f"step={module_name} kind={kind} {pending_label}={len(items or ())} ({threshold_env})")
     with open_drain_trees(paths, label, batch=batch) as trees:
         rc = _run_curator_module(
             module_name,
             lambda mod: mod.run_batch(
                 hold_committed=True, paths=paths, state=state, trees=trees, box=box,
-                batch=batch),
+                batch=batch, **_store_kw(items, feedback, outcomes, make_model)),
         )
     if rc not in (0, None):
-        _logger.warning(f"{module_name} returned rc={rc} (queue intact, retry next tick)")
+        _logger.warning(f"{module_name} returned rc={rc} (its items take what the batch's commits show)")
 
 
 _CURATOR_MODULES = {
@@ -224,7 +231,7 @@ def _has_lead_author_work(state: LearningState) -> bool:
 #: Ctrl-C as a curator fault, run the sibling curator, and go on to commit, push and open a PR
 #: for the batch the operator asked to stop.
 _HALTING: tuple[type[BaseException], ...] = (
-    *drain.RETIRE_SET, box_mod.BoxFault, KeyboardInterrupt,
+    *drain.RETIRE_SET, box_mod.BoxFault, KeyboardInterrupt, Stop,
 )
 
 
@@ -552,16 +559,19 @@ def _rehydrate(claim: Claimed, tenant: Tenant | None) -> Run | Exception:
         return refused
 
 
-def _invoke_pitfalls(
-    paths: LoopPaths, state: LearningState, *, label: DrainLabel, batch: Batch | None = None,
+def _invoke_pitfalls(  # noqa: PLR0913 — the pitfalls step's call shape, plus its bound label and the claim's items
+    paths: LoopPaths, state: LearningState | None, *, label: DrainLabel, batch: Batch | None = None,
     box: Any = None, on_curated: Callable[[PitfallsDisposition], None],
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
+    items: list[Any] | None = None, feedback: str | None = None,
+    outcomes: dict[tuple[str, str], Any] | None = None, make_model: Callable[..., Any] | None = None,
 ) -> int:
     """The lead-author lane's default pitfalls work step: as `_invoke_lead_author`, the held roots
     of the `label` lane's writable mounts in `batch`'s draft are opened here and closed when the
-    curation returns or raises (#1134 A3). With no `batch` (a checkout-shaped scene), the
-    label's trees over `paths` are held, and the curation refuses any commit."""
+    curation returns or raises (#1134 A3), and a store claim's `items`, `feedback` and `outcomes` are
+    handed through (#1278). With no `batch` (a checkout-shaped scene), the label's trees over `paths`
+    are held, and the curation refuses any commit."""
     _logger.info("step=pitfalls-curation")
     with open_drain_trees(paths, label, batch=batch) as trees:
         rc = _run_curator_module(
@@ -569,7 +579,7 @@ def _invoke_pitfalls(
             lambda mod: mod.run_pitfalls(
                 paths=paths, state=state, trees=trees, batch=batch, box=box,
                 on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
-                git_timeout=git_timeout,
+                git_timeout=git_timeout, **_store_kw(items, feedback, outcomes, make_model),
             ),
         )
     return rc if rc is not None else 0
@@ -652,32 +662,10 @@ def _validate_merge_mode() -> None:
     merge_mode()
 
 
-def _branch_prefix(label: DrainLabel) -> str:
-    """Each lane's branch prefix on the tenant repository, by its label: its writer lease and
-    its retained deliveries are its own (the other lane delivers under its own drain lock). The
-    author lane's is delivery's own lessons prefix. Read once per tick, by `_run_tenant_batch`,
-    for both the no-network pre-check and the delivery it opens."""
-    from defender.learning.author.version_control.delivery import LESSONS_BRANCH_PREFIX
-
-    return LESSONS_BRANCH_PREFIX if label is AUTHOR_DRAIN_LABEL else "lead-author/"
-
-
-class _Refused(Exception):
-    """A delivery refusal met while the drain opens its tenant delivery or starts its batch:
-    re-raised by the entry as one `FatalConfigError` line, outside every `except`, so the stage
-    runner logs the cause alone (no displaced exception, no traceback) — unless `transient`
-    (an outage that may pass by itself, `status.classify`), which skips the tick instead."""
-
-    def __init__(self, message: str, *, transient: bool = False) -> None:
-        super().__init__(message)
-        self.transient = transient
-
-
-def _classified_refusal(message: str, fault: BaseException) -> _Refused:
-    """`message` as a `_Refused`, transient when `fault` is an outage (`status.classify`)."""
-    from defender.learning.author.version_control.status import TRANSIENT, classify
-
-    return _Refused(message, transient=classify(fault)[0] == TRANSIENT)
+#: The tick's refusal while it opens its tenant delivery or starts its batch (`store_tick.Refused`): the
+#: stage's one-line `FatalConfigError`, or, when transient, a skipped tick.
+_Refused = Refused
+_classified_refusal = classified_refusal
 
 
 @contextlib.contextmanager
@@ -743,196 +731,112 @@ def _drain_directory(directory: TenantDirectory | None) -> TenantDirectory:
         raise FatalConfigError(str(refused)) from refused
 
 
-def _record_pending_delivery(
-    state: LearningState, batch: Batch, *, prefix: str, label: DrainLabel, reason: str,
+
+def _store_curators(
+    paths: LoopPaths, trigger_author: Callable[..., None], *, box: Any, batch: Batch, held: Any,
+    feedback: str | None, outcomes: dict[tuple[str, str], Any],
 ) -> None:
-    slug = prefix.rstrip("/").replace("/", "-") or "author"
-    state.record_delivery(f"{slug}-{batch.id}", {
-        "branch": batch.branch, "batch_id": batch.id, "label": str(label),
-        "reason": reason, "at": now_iso(),
-    })
-
-
-def _deliver_pending(state: LearningState, delivery: TenantDelivery, label: DrainLabel) -> bool:
-    """Deliver every batch this lane committed but could not push or open a PR for, before
-    anything new is served (`TenantDelivery.deliver`: the batch's PR status when the forge has
-    one — D-closed — else its branch pushed and a PR opened). Answers whether the lane is clear
-    to serve.
-
-    An undelivered batch holds the writer lease like an open PR: the next batch must build on
-    its commit, and a fresh branch beside it would open conflicting PRs. So a failed delivery
-    parks the lane until the remote takes it. Nothing here re-runs an agent."""
-    from defender.learning.author.version_control import DeliveryRefused, DeliveryStatus
-
-    for pending in state.deliveries(delivery.branch_prefix):
+    """The author lane's work over a claim (A2 D1): each curator whose kind has items in the batch is
+    handed its own kind's items (and, on a replacement, the framed feedback, H13); a kind with none is
+    not run. Each curator's fault is contained to it, so the other still runs, unless it halts the tick
+    (`_HALTING`: a stop, a lost lease, a box fault, a `RETIRE_SET` fault)."""
+    for kind, threshold_env, module_name, pending_label in _AUTHOR_CURATORS:
+        mine = [item for item in held.items if item[0] == kind]
+        if not mine:
+            continue
         try:
-            delivered = delivery.deliver(pending.batch_id)
-        except DeliveryRefused as e:
-            _logger.error(
-                f"{label}: delivery of retained batch {pending.branch} failed again: "
-                f"{one_line(str(e))} — it holds the writer lease; nothing served this tick"
-            )
-            return False
-        state.delivered(pending)
-        if delivered.status is DeliveryStatus.NOTHING:
-            _logger.info(f"{label}: retained batch {pending.branch} has nothing left to deliver "
-                         "— record dropped")
-        else:
-            _logger.info(f"{label}: retained batch {pending.branch} delivered: its PR is "
-                         f"{delivered.status}" + (f" ({delivered.url})" if delivered.url else ""))
-    return True
-
-
-def _land_batch(
-    state: LearningState, delivery: TenantDelivery, batch: Batch, label: DrainLabel,
-) -> None:
-    """`TenantDelivery.finish`: the batch's branch pushed and its PR opened, or the status the
-    forge already gives its PR (D-closed). On a refusal the commits stay on the batch branch of
-    the tenant clone, and the batch is recorded for the next tick to deliver
-    (`_deliver_pending`) before serving anything."""
-    from defender.learning.author.version_control import DeliveryRefused, DeliveryStatus
-
-    try:
-        delivered = delivery.finish(batch)
-    except DeliveryRefused as e:
-        _record_pending_delivery(state, batch, prefix=delivery.branch_prefix, label=label,
-                                 reason=one_line(str(e)))
-        _logger.error(
-            f"{label}: delivery of batch {batch.branch} failed: {one_line(str(e))} — its "
-            "commits stay on that branch of the tenant clone; delivery is retried next tick, "
-            "before anything new is served"
-        )
-        return
-    if delivered.status is DeliveryStatus.NOTHING:
-        _logger.info(f"{label}: batch produced no commits — no PR opened")
-        return
-    _logger.info(f"{label}: batch {batch.branch}: PR {delivered.status}"
-                 + (f" {delivered.url}" if delivered.url else ""))
-    if merge_mode() == "auto_on_green":
-        _logger.info(f"{label}: merge_mode=auto_on_green — green-bar auto-merge not yet "
-                     "wired (PR C); leaving PR for review")
-
-
-def _stop_after_work(stop_box: Callable[..., None], box: Any, *, work_ok: bool,
-                     label: DrainLabel) -> None:
-    """Remove the batch's box after the work (amendment 3 C3: a draft box is stopped, never
-    scrubbed). A teardown fault outranks a clean batch (nothing is delivered beside a box that
-    may still run) and never displaces the work's own fault."""
-    try:
-        stop_box(box)
-    except Exception as e:  # noqa: BLE001 — re-raised below unless a work fault outranks it
-        if work_ok:
+            trigger_author(paths, None, kind, threshold_env, module_name, pending_label, box=box, batch=batch,
+                           items=mine, feedback=feedback, outcomes=outcomes)
+        except _HALTING:
             raise
-        _logger.error(f"{label}: the batch's box could not be torn down after a failed batch: {e!r}")
+        except (Exception, SystemExit) as e:  # noqa: BLE001 — contained to this curator, never silently
+            _logger.error(f"{module_name}: {type(e).__name__} took this curator out of the tick: {one_line(str(e))} "
+                          "(its items take what the batch's commits show; the other curator still ran)")
 
 
-def _gate_opens(state: LearningState, prefix: str, has_work: Callable[[LearningState], bool]) -> bool:
-    """A lane's wake gate: something retained to deliver, or work queued. A tick it keeps shut
-    opens nothing, so nothing waits for that lane."""
-    return bool(state.deliveries(prefix)) or has_work(state)
+#: The author lane's curators, in order: the kind each is handed, its wake count's variable, its module
+#: and its log label.
+_AUTHOR_CURATORS = (
+    ("finding", "LEARNING_AUTHOR_THRESHOLD", "author", "pending"),
+    ("questioner_finding", "LEARNING_QUESTIONER_THRESHOLD", "questioner_curator", "questioner_pending"),
+)
+
+
+def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim and what the curators decide, kept as one pass over the claim
+    paths: LoopPaths, run_lead_author: Callable[..., None], run_pitfalls: Callable[..., int], *,
+    box: Any, batch: Batch, held: Any, feedback: str | None, outcomes: dict[tuple[str, str], Any],
+) -> None:
+    """The lead-author lane's work over a claim: each curation request's run served through the drain's
+    accepted tenant, then the pitfalls curation over the claim's pitfalls, each one claim of `batch`
+    (the draft re-synced after it). Items kept until the batch ends (r8 Lead-author lane): an item no
+    commit took waits again when the batch enters review; a request whose run is gone is dead."""
+    from defender.learning.author.version_control import DeliveryRefused
+    from defender.learning.store import Outcome
+    from defender.records import RunAbsent
+
+    for kind, key, payload in [item for item in held.items if item[0] == "curation_request"]:
+        run = _run_of(payload, paths.tenant)
+        if isinstance(run, RunAbsent):
+            outcomes[(kind, key)] = Outcome.dead("artifact-missing")
+            continue
+        if not isinstance(run, Run):
+            outcomes.setdefault((kind, key), Outcome.waiting())
+            continue
+        done: list[str | None] = []
+        with _batch_claim(batch):
+            try:
+                run_lead_author(paths, None, run, box=box, on_done=done.append, batch=batch,
+                                items=[(kind, key, payload)], feedback=feedback, outcomes=outcomes)
+            except _HALTING:
+                raise
+            except (_LeadAuthorRetry, DeliveryRefused, Exception) as e:  # noqa: BLE001 — contained to this request
+                _logger.warning(f"lead_author_drain: request {key}: {type(e).__name__}: {one_line(str(e))}")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+        if not done:
+            outcomes.setdefault((kind, key), Outcome.waiting())
+    pitfalls = [item for item in held.items if item[0] == "pitfall"]
+    if not pitfalls:
+        return
+    curated: list[PitfallsDisposition] = []
+    with _batch_claim(batch):
+        try:
+            run_pitfalls(paths, None, box=box, on_curated=curated.append, batch=batch, items=pitfalls,
+                         feedback=feedback, outcomes=outcomes)
+        except _HALTING:
+            raise
+        except Exception as e:  # noqa: BLE001 — contained: the pitfalls take their fates below
+            _logger.error(f"lead_author_drain: pitfalls curation error: {e!r}")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+    committed = set(curated[-1].committed_ids) if curated else set()
+    for kind, key, _payload in pitfalls:
+        if key not in committed:
+            outcomes.setdefault((kind, key), Outcome.waiting())
+
+
+def _run_of(payload: dict, tenant: Tenant | None) -> Run | Exception:
+    """The run a curation request names (`{case_id, tenant_id, run_id}`), opened through the drain's own
+    accepted tenant and its repository, else the refusal (`RunAbsent` when the run is gone)."""
+    from defender.records import RunAddress, RunRefused
+
+    try:
+        address = RunAddress(payload["tenant_id"], payload["run_id"])
+    except (KeyError, TypeError, ValueError) as unreadable:
+        return TenantRefused(f"the request names no run: {unreadable}")
+    if tenant is None or str(tenant.id) != str(address.tenant_id):
+        return TenantRefused(f"tenant {address.tenant_id} is not the drain's accepted tenant")
+    try:
+        return tenant.runs_repository().resolve(address)
+    except RunRefused as refused:
+        _logger.warning(f"request for run {address.run_id}: its run cannot be opened ({refused})")
+        return refused
 
 
 def author_work_waiting(paths: LoopPaths) -> bool:
-    """Whether `author_drain`'s gate would open now: what a post-step reports as still waiting,
-    so a tenant whose gate stays shut is not checked again until a job arms it (#1344
-    amendment 3)."""
-    with LearningState.open(paths) as state:
-        return _gate_opens(state, _branch_prefix(AUTHOR_DRAIN_LABEL), _has_curator_work)
-
-
-def _run_tenant_batch(  # noqa: PLR0913 — one batch, kept whole
-    paths: LoopPaths,
-    state: LearningState,
-    *,
-    label: DrainLabel,
-    has_work: Callable[[LearningState], bool],
-    do_work: Callable[..., BatchDisposition | None],
-    open_delivery: Callable[[], contextlib.AbstractContextManager[TenantDelivery]],
-    start_box: Callable[..., Any] | None,
-    stop_box: Callable[..., None],
-) -> int:
-    """One tick of a lane (flow 4): open the tenant's delivery (login, `open`); deliver what an
-    earlier tick retained; the wake gate; the writer lease (our open PR on the lane's prefix);
-    `start_batch` (publish, then the draft); the box over the draft (`Batch.box_request`); the
-    work, each claim committed by P3's commit-maker; the disposition; `finish`; `discard()`.
-
-    A tick with nothing retained and nothing queued opens nothing. A refusal while opening is
-    the stage's refusal, before any claim, box or model call (O9); an outage there skips the
-    tick."""
-    prefix = _branch_prefix(label)
-    if not _gate_opens(state, prefix, has_work):
-        _logger.info(f"{label}: nothing queued and no curator at threshold — skipping")
-        return 0
-    with open_delivery() as opened:
-        delivery = dataclasses.replace(opened, branch_prefix=prefix)
-        return _run_opened_batch(paths, state, delivery, label=label, has_work=has_work,
-                                 do_work=do_work, start_box=start_box, stop_box=stop_box)
-
-
-def _run_opened_batch(  # noqa: PLR0913 — one batch, kept whole
-    paths: LoopPaths,
-    state: LearningState,
-    delivery: TenantDelivery,
-    *,
-    label: DrainLabel,
-    has_work: Callable[[LearningState], bool],
-    do_work: Callable[..., BatchDisposition | None],
-    start_box: Callable[..., Any] | None,
-    stop_box: Callable[..., None],
-) -> int:
-    """`_run_tenant_batch`'s tick past the open: everything after the delivery is open."""
-    from defender.learning.author.version_control import DeliveryRefused
-
-    prefix = delivery.branch_prefix
-    if not _deliver_pending(state, delivery, label):
-        return 0
-    if not has_work(state):
-        _logger.info(f"{label}: nothing queued and no curator at threshold — skipping")
-        return 0
-    try:
-        if delivery.open_pr_exists():
-            _logger.info(f"{label}: an open {prefix} PR holds the writer lease — skipping")
-            return 0
-        batch = delivery.start_batch(uuid.uuid4().hex[:12], lanes=label.lanes)
-    except DeliveryRefused as e:
-        raise _classified_refusal(f"{label}: the batch could not start: {e}", e) from None
-
-    disposition: BatchDisposition | None = None
-    consumed = False
-    try:
-        box = (start_box or delivery.start_box)(batch.box_request())
-        # The lanes' handle: the box is reachable only inside a run window (#1195).
-        runs = box_mod.BoxRuns(box)
-        work_ok = False
-        try:
-            # Stopped before the batch's first host step; inside this `try`, so a stop that
-            # fails still gets the batch-end removal.
-            runs.stop()
-            disposition = do_work(paths, batch=batch, box=runs)
-            work_ok = True
-        finally:
-            _stop_after_work(stop_box, box, work_ok=work_ok, label=label)
-        if disposition is not None:
-            disposition.apply(state)
-        consumed = True
-        _land_batch(state, delivery, batch, label)
-    except StateRefused as halted:
-        # The halt may strand a commit this batch already made: it stays on the batch branch
-        # of the tenant clone, so the operator is told which.
-        _logger.error(
-            f"{label}: halted by a refused state entry; any commit of batch {batch.id} is on "
-            f"branch {batch.branch} of the tenant clone: {halted}")
-        raise
-    finally:
-        # A disposition not (fully) applied stays for the next tick's reclaim; its steps are
-        # idempotent, so a partial apply is safe.
-        if disposition is not None and not consumed:
-            _logger.info(
-                f"{label}: batch not consumed — left for the next tick's reclaim, up to: "
-                f"{disposition.retained_summary()}"
-            )
-        batch.discard()
-    return 0
+    """Whether `author_drain` could find work now (#1344 amendment 3, G-T1): a batch not ended (in review
+    to check, working to recover, or a person's), a replacement due or an author-lane kind at its
+    threshold. What a post-step reports as still waiting."""
+    if paths.tenant is None:
+        return False
+    with opened_store() as store:
+        return lane_waiting(store, str(paths.tenant.id), AUTHOR_LANE)
 
 
 def _refusing(entry: Callable[[], int]) -> int:
@@ -949,10 +853,24 @@ def _refusing(entry: Callable[[], int]) -> int:
     raise FatalConfigError(one_line(refused))
 
 
+
+
+def _store_tick(paths: LoopPaths, *, lane: str, label: DrainLabel, open_delivery: Callable[..., Any],
+          author_work: Callable[..., None], start_box: Callable[..., Any] | None, stop_box: Callable[..., None],
+          reconcile_lanes: tuple[str, ...]) -> int:
+    if paths.tenant is None:
+        raise FatalConfigError("the drain delivers to a tenant's repository: no tenant is selected")
+    with opened_store() as store:
+        tick = Tick(paths=paths, lane=lane, label=label, store=store, open_delivery=open_delivery,
+                    author_work=author_work, start_box=start_box, stop_box=stop_box,
+                    reconcile_lanes=reconcile_lanes)
+        return _refusing(tick.run)
+
+
 def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the forge, the tenant records, the issuer, the box
     paths: LoopPaths,
     *,
-    # `(paths, state, channel, threshold_env, module_name, pending_label, *, batch, box)`.
+    # `(paths, state, kind, threshold_env, module_name, pending_label, *, batch, box, items, feedback, outcomes)`.
     trigger_author: Callable[..., None] | None = None,
     client: httpx.Client | None = None,
     identity: ForgeCredential | None = None,
@@ -961,40 +879,29 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
     issuer_transport: httpx.BaseTransport | None = None,
     start_box: Callable[..., Any] | None = None,
     stop_box: Callable[..., None] = box_mod.stop_box,
+    make_model: Callable[..., Any] | None = None,
 ) -> int:
-    """The lessons lane's tick into the selected tenant's repository (flow 4). `directory` is
-    the tenant records (else the ones `DEFENDER_DATABASE_DSN` names); `client` the forge's HTTP
-    client (one is built when absent); `identity` the tenant's delivery credential, else the
-    tenant's forge credential minted through its live generation (`credential_config` the host's
-    issuer configuration, its requests through `issuer_transport` when given);
-    `start_box`/`stop_box` the batch's box (default `TenantDelivery.start_box`, sandbox
-    required, and `box.stop_box`)."""
+    """The lessons lane's tick into the selected tenant's repository over the learning store (#1278):
+    reconcile every batch in review (both lanes, D9), recover a lapsed batch of the lane, then claim and
+    author (`store_tick.Tick`). `directory` is the tenant records (else the ones `DEFENDER_DATABASE_DSN`
+    names); `client` the forge's HTTP client; `identity` the tenant's delivery credential, else minted
+    through its live generation (`credential_config`, `issuer_transport`); `start_box`/`stop_box` the
+    batch's box; `make_model` the curators' model (default their own)."""
     _validate_merge_mode()
     records = _drain_directory(directory)
     # The lane's label reaches its work step bound into the DEFAULT seam, so an injected seam
     # keeps its call shape (#1134).
     if trigger_author is None:
-        trigger_author = functools.partial(_maybe_trigger_author, label=AUTHOR_DRAIN_LABEL)
+        trigger_author = functools.partial(_maybe_trigger_author, label=AUTHOR_DRAIN_LABEL, make_model=make_model)
     seam = trigger_author
 
     def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
         return _open_delivery(paths, directory=records, client=client, identity=identity,
                               credential_config=credential_config, issuer_transport=issuer_transport)
 
-    # The root is opened once, here, and handed inward; a missing root stops the stage.
-    with LearningState.open(paths) as state, state.lock(
-            AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as locked:
-        if not locked:
-            _logger.warning("author_drain: another drainer holds the lock — exiting")
-            return 0
-        return _refusing(lambda: _run_tenant_batch(
-            paths, state, label=AUTHOR_DRAIN_LABEL,
-            has_work=_has_curator_work,
-            do_work=lambda work_paths, *, batch, box=None: _drain_curators(
-                work_paths, state, seam, box=box, batch=batch
-            ),
-            open_delivery=open_delivery, start_box=start_box, stop_box=stop_box,
-        ))
+    return _store_tick(paths, lane=AUTHOR_LANE, label=AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
+                 author_work=lambda work_paths, **kw: _store_curators(work_paths, seam, **kw),
+                 start_box=start_box, stop_box=stop_box, reconcile_lanes=(AUTHOR_LANE, LEAD_LANE))
 
 
 def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two steps, the forge, the issuer, the box
@@ -1010,26 +917,25 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     start_box: Callable[..., Any] | None = None,
     stop_box: Callable[..., None] = box_mod.stop_box,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
+    make_model: Callable[..., Any] | None = None,
 ) -> int:
-    """The lead-author lane's tick into the selected tenant's repository (flow 4), its
-    delivery seams as `author_drain`'s; each claim's tenant is re-admitted through `directory`
-    before it is served. `git_timeout` is bound into the DEFAULT work steps only (the lanes' own
-    bounded reads, #1175)."""
+    """The lead-author lane's tick over the learning store (operator-only, A2 D9): reconcile the lane's
+    batches in review, recover a lapsed one, then claim its pitfalls and curation requests and author
+    them; its delivery seams as `author_drain`'s. `git_timeout` is bound into the DEFAULT work steps only
+    (the lanes' own bounded reads, #1175)."""
     _validate_merge_mode()
     records = _drain_directory(directory)
     # Read every configured value before a batch, box or agent exists, so a malformed setting
     # refuses the tick rather than a commit.
     lock_wait_seconds = repo_lock_wait_seconds()
-    # The lane's label and git bound reach its work steps bound into the DEFAULT seams, so an
-    # injected seam keeps its call shape (#1134).
     if run_lead_author is None:
         run_lead_author = functools.partial(
-            _invoke_lead_author, label=LEAD_AUTHOR_DRAIN_LABEL, git_timeout=git_timeout,
+            _invoke_lead_author, label=LEAD_AUTHOR_DRAIN_LABEL, git_timeout=git_timeout, make_model=make_model,
         )
     if run_pitfalls is None:
         run_pitfalls = functools.partial(
             _invoke_pitfalls, lock_wait_seconds=lock_wait_seconds, label=LEAD_AUTHOR_DRAIN_LABEL,
-            git_timeout=git_timeout,
+            git_timeout=git_timeout, make_model=make_model,
         )
     lead_step, pitfalls_step = run_lead_author, run_pitfalls
 
@@ -1037,30 +943,6 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
         return _open_delivery(paths, directory=records, client=client, identity=identity,
                               credential_config=credential_config, issuer_transport=issuer_transport)
 
-    with LearningState.open(paths) as state, state.lock(
-            LEAD_AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as locked:
-        if not locked:
-            _logger.warning("lead_author_drain: another drainer holds the lock — exiting")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-            return 0
-        # The per-author queue lock (the one a by-hand `lead_author.py --tenant T <run_id>` takes) is
-        # held for the whole tick: the `done` sentinel is only written once the batch is
-        # delivered, and a by-hand run in that gap would see no sentinel and re-serve the run.
-        # Contended, the tick skips before claiming anything.
-        with state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as queue_locked:
-            if not queue_locked:
-                _logger.warning("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-                return 0
-            # Whether the tick claims, chosen before a batch or box exists. A queued request's run
-            # is opened through the drain's own accepted tenant (`paths.tenant`, r10.1 C1). A tick
-            # with nothing queued claims no row: one that lands mid-tick waits for the next tick.
-            claims = state.has_requests()
-            return _refusing(lambda: _run_tenant_batch(
-                paths, state, label=LEAD_AUTHOR_DRAIN_LABEL,
-                has_work=_has_lead_author_work,
-                do_work=lambda work_paths, *, batch, box=None: _drain_lead_author(
-                    work_paths, state, lead_step, pitfalls_step, box=box, batch=batch,
-                    lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
-                    claims=claims, directory=records,
-                ),
-                open_delivery=open_delivery, start_box=start_box, stop_box=stop_box,
-            ))
+    return _store_tick(paths, lane=LEAD_LANE, label=LEAD_AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
+                 author_work=lambda work_paths, **kw: _store_lead_work(work_paths, lead_step, pitfalls_step, **kw),
+                 start_box=start_box, stop_box=stop_box, reconcile_lanes=(LEAD_LANE,))

@@ -26,7 +26,7 @@ from defender.box import DockerFn, run_docker
 
 from .auth import ForgeCredential
 from .batch import Batch
-from .commits import CommitMaker, _Line
+from .commits import CommitMaker, Recorder, _Line
 from .exports import (
     DRAFT_STAGE,
     draft_path,
@@ -149,16 +149,21 @@ class TenantDelivery:
         record_published(self.directory, self.tenant.id, export.commit, by="delivery")
         return export
 
-    def start_batch(self, batch_id: str, *, lanes: Sequence[str]) -> Batch:
+    def start_batch(self, batch_id: str, *, lanes: Sequence[str], branch: str | None = None,
+                    recorder: Recorder | None = None) -> Batch:
         """Flow 3: refuse at once an id whose draft or branch exists (ids are never retried, so
         a reused one is caught before any box runs); publish; then, under the same lock hold,
         build the git-free draft of the export commit's `agent/` in a dot-named temporary
         under `<T>/drafts/` and rename it to `<T>/drafts/<batch_id>`. A build that fails leaves
-        nothing. No checkout is made, and the branch exists from the first commit on."""
+        nothing. No checkout is made, and the branch exists from the first commit on.
+
+        `branch` is the learning store's (#1278 D5: set at claim, never re-derived; else the
+        prefix and the id), and `recorder` where each commit is recorded before its branch
+        moves (else the legacy record file)."""
         with _refusals():
             batch_id = _one_word(batch_id, "batch id")
             declared = _lanes(lanes)
-            branch = f"{self.branch_prefix}{batch_id}"
+            branch = branch if branch is not None else f"{self.branch_prefix}{batch_id}"
             self._refuse_taken(batch_id, branch)
             with recording(self.directory, self.tenant.id, by="delivery"), _refusals():
                 self.repository.fetch()
@@ -187,7 +192,7 @@ class TenantDelivery:
                 tenant=self.tenant,
                 defender_dir=self.defender_dir,
                 repository=self.repository,
-                committer=CommitMaker(self.tenant, self.repository),
+                committer=CommitMaker(self.tenant, self.repository, recorder),
                 _line=line,
             )
 

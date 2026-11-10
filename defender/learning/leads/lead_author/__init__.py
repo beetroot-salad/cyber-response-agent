@@ -160,7 +160,8 @@ class LeadAuthorDeps:
     #: spelling; never the lane's corpus, which is `root`'s (#1108 P4 OD16).
     paths: _loop_config.LoopPaths
     #: The learning state handle: the queue lock and the pitfalls queue are reached through it.
-    state: LearningState
+    #: `None` over the learning store (#1278), whose claim is the lane's lock.
+    state: LearningState | None
     #: The declared systems (adapter glob ∪ committed marker), resolved once before the agent
     #: is spawned and never re-derived by a consumer.
     systems: frozenset[str]
@@ -187,11 +188,15 @@ class LeadAuthorDeps:
     batch: Any = None
     #: Kept for the drain's call shape; the lane runs no git (#1108 P4 O7).
     git_timeout: float = GIT_TIMEOUT_SECONDS
+    #: Where the run files the pitfalls it collects over the learning store (#1278 O10): the store's
+    #: pitfall items. `None`: the file queue `state` holds.
+    file_pitfalls: Callable[[list[dict]], int] | None = None
 
 
-def build_lead_author_deps(
-    paths: _loop_config.LoopPaths, *, state: LearningState, trees: DrainTrees,
+def build_lead_author_deps(  # noqa: PLR0913 — the lane's seams, plus where its pitfalls go
+    paths: _loop_config.LoopPaths, *, state: LearningState | None, trees: DrainTrees,
     batch: Any = None, git_timeout: float = GIT_TIMEOUT_SECONDS,
+    file_pitfalls: Callable[[list[dict]], int] | None = None,
 ) -> LeadAuthorDeps:
     """The lane's seams over `batch`'s draft (#1108 P4 O7, OD16), reading and writing `skills/`
     through `trees`, the lane's held mounts (`open_drain_trees`): `trees` must hold the draft's
@@ -227,6 +232,7 @@ def build_lead_author_deps(
         skills_dir=skills_dir,
         batch=batch,
         git_timeout=git_timeout,
+        file_pitfalls=file_pitfalls,
     )
 
 
@@ -240,9 +246,12 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
     deps: LeadAuthorDeps | None = None,
     box: Any = None,
     on_done: DoneSink | None = None,
+    file_pitfalls: Callable[[list[dict]], int] | None = None,
 ) -> int:
     """Serve one run under the per-author queue lock, over `batch`'s draft (`deps.batch` when
-    deps are given)."""
+    deps are given). With `file_pitfalls` (#1278) the caller holds the lane through the learning
+    store's claim (`store_tick.by_hand_claim`): no learning state is opened and no file lock is
+    taken, and the run's pitfalls are filed there."""
     if deps is None and paths is None:
         raise TypeError("run takes paths= (or deps=)")
     # The lane's grant is read before anything else: a non-member label never reaches the
@@ -264,12 +273,19 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
             raise LeadAuthorError(
                 f"refused: the {str(label)!r} lane does not mount {skills_dir}"
             )
+        if deps.state is None:
+            # Over the learning store the caller's claim holds the lane (`store_tick.by_hand_claim`).
+            return _run_locked(run_dir, deps, box=box, on_done=sink)
         with deps.state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as locked:
             if not locked:
                 return QUEUE_LOCK_SKIP_RC
             return _run_locked(run_dir, deps, box=box, on_done=sink)
 
     assert paths is not None  # the guard above: without `deps`, `paths` is required
+    if file_pitfalls is not None:
+        with open_drain_trees(paths, label, batch=batch) as trees:
+            deps = build_lead_author_deps(paths, state=None, trees=trees, batch=batch, file_pitfalls=file_pitfalls)
+            return _run_locked(run_dir, deps, box=box, on_done=sink)
     with contextlib.ExitStack() as owned:
         if state is None:
             state = owned.enter_context(LearningState.open(paths))
@@ -297,7 +313,7 @@ def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the 
     return _run_locked(Path(run.run_dir), deps, box=box, on_done=on_done)
 
 
-def _run_locked(
+def _run_locked(  # noqa: C901 — one served run, its pitfalls filed where the deps say
     run_dir: Path, deps: LeadAuthorDeps, *, box: Any = None, on_done: DoneSink,
 ) -> int:
     if _done_sentinel(run_dir).is_file():
@@ -340,7 +356,12 @@ def _run_locked(
     if not collected_marker.is_file():
         failures = collect_general_failures(executed, run_dir, catalog=catalog)
         if failures:
-            _loop_persist.append_pitfalls(failures, state=deps.state)
+            if deps.file_pitfalls is not None:
+                deps.file_pitfalls(failures)
+            elif deps.state is not None:
+                _loop_persist.append_pitfalls(failures, state=deps.state)
+            else:
+                raise LeadAuthorError("lead-author refused: these deps name nowhere to file the run's pitfalls")
             # Both numbers: a large gap between failures and this run's distinct mistakes
             # signals a looping lead. (The curation threshold merges across the whole queue.)
             distinct = len(_loop_persist.merge_pitfalls(failures))
@@ -583,9 +604,20 @@ def main(argv: list[str], *, directory: Any = None) -> int:
         if isinstance(opened, str):
             print(f"lead_author: {opened}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 2
-        # By hand this serves the lead-author lane's own queue under its lock, so it names that lane.
-        return run(opened, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL,
-                   paths=_loop_config.LoopPaths.for_tenant(admitted.tenant))
+        # By hand this serves the lead-author lane, so it names that lane, and it claims the lane
+        # through the learning store as the drain does (#1278 r8 Locks, R1-F13): a working lead batch
+        # refuses it before anything moves, and its own claim refuses the drain while it runs.
+        from defender.learning.core.store_tick import LEAD_LANE, by_hand_claim
+        from defender.learning.store import LaneBusy
+
+        try:
+            with by_hand_claim(str(admitted.tenant.id), LEAD_LANE, purpose="lead-author-by-hand") as file_pitfalls:
+                return run(opened, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL,
+                           paths=_loop_config.LoopPaths.for_tenant(admitted.tenant), file_pitfalls=file_pitfalls)
+        except LaneBusy:
+            print("lead_author: the lead-author lane has a working batch (the lead drain's, or another "  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+                  "by-hand run's): try again when it ends", file=sys.stderr)
+            return QUEUE_LOCK_SKIP_RC
 
 
 #: Re-exports: callers import these names from here; their real homes are the source
