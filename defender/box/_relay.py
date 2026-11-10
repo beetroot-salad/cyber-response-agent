@@ -5,10 +5,10 @@ The per-job host helper holds the daemon, so it classifies each exchange where t
 `timeout`, or `lost` with its class; and the job's `box.stop` with proof the box stopped, or a fault with the reason. The
 job's executor (`RelayTransport`, `_spec.py`) keeps the refusal latch, readmit, the run clock and the typed endings.
 
-The rules are `BoxExecutor._unframed`'s, on the box's one status answer: a clean frame is the result whatever its code
-(no status asked); the output fence is `output-limit`; otherwise the status is asked once: not `running` (or no answer)
-is `lost`; `running` with exec 137 is the kill line; a host timeout or the in-box helper's own deadline (exec 3) is
-`timeout`; anything else is `lost`."""
+A clean frame is the result whatever its code (no status asked); the output fence is `output-limit`; otherwise the
+status is asked once and the exchange is classified by the one rule the job's own executor uses (`classify_unframed`):
+not `running` (or no answer) is `lost`, a host timeout included; `running` with exec 137 is the kill line; a host
+timeout or the in-box helper's own deadline (exec 3) is `timeout`; anything else is `lost`."""
 from __future__ import annotations
 
 import logging
@@ -19,10 +19,12 @@ from typing import Any
 from defender.execution.box_codec import KILLED_LINE, BoxFault, BoxResult, RawExec, decode_response, encode_response
 from defender.records.run_end import TRUNCATED_BY_BOX_LOST
 
-from ._docker import DockerFn, _container_status, _inspect_field
+from ._docker import DockerFn, _container_status
 from ._lifecycle import BoxRuns, stop_box
 from ._output import BoxOutputLimitExceeded
-from ._spec import _EXEC_KILLED, _HELPER_DEADLINE, _KILLED_RC, BoxExecutor, _DockerTransport
+from ._spec import (
+    _KILLED_RC, KILLED, NOT_RUNNING, TIMED_OUT, BoxExecutor, _DockerTransport, box_status, classify_unframed,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -30,13 +32,6 @@ OUTPUT_LIMIT: dict[str, Any] = {"result": "output-limit"}
 TIMEOUT: dict[str, Any] = {"result": "timeout"}
 RELAY_LOST: dict[str, Any] = {"result": "lost", "class": TRUNCATED_BY_BOX_LOST}
 STOPPED: dict[str, Any] = {"result": "stopped"}
-
-
-def _status(docker: DockerFn, name: str) -> str | None:
-    try:
-        return _inspect_field(docker, name, "{{.State.Status}}")
-    except BoxFault:
-        return None
 
 
 def relay_exec(box: BoxExecutor, docker: DockerFn, frame: bytes, *, cwd: str, timeout: float) -> dict[str, Any]:
@@ -58,13 +53,14 @@ def relay_exec(box: BoxExecutor, docker: DockerFn, frame: bytes, *, cwd: str, ti
             return {"result": "ok", "frame": raw.stdout}
         except BoxFault as e:
             failure = e
-    status = _status(docker, box.name)
-    if status != "running":
+    status = box_status(docker, box.name)
+    verdict = classify_unframed(raw, failure, status)
+    if verdict == NOT_RUNNING:
         _logger.error("the box %s is not running (its status: %s): lost", box.name, status or "no answer")
         return dict(RELAY_LOST)
-    if raw is not None and raw.rc == _EXEC_KILLED:
+    if verdict == KILLED:
         return {"result": "ok", "frame": encode_response(BoxResult(rc=_KILLED_RC, out=b"", err=KILLED_LINE))}
-    if isinstance(failure, subprocess.TimeoutExpired) or (raw is not None and raw.rc == _HELPER_DEADLINE):
+    if verdict == TIMED_OUT:
         return dict(TIMEOUT)
     said = f"exec rc {raw.rc}, no frame" if raw is not None else type(failure).__name__
     _logger.error("the box %s is running but did not answer as its helper does (%s): lost", box.name, said)

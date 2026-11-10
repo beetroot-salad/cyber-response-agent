@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender.job_socket import Refused
 
-from ._common import answer_pass, first_pass, grant, settle_knowledge
+from ._common import answer_pass, first_pass, grant, settle_knowledge, start_run_box
 from ._session import KindSpec, Prepared, Registry, Session, SetupRefused
 
 if TYPE_CHECKING:
@@ -186,21 +186,12 @@ def _copy_page(run: Run, tenant: Any) -> None:
 
 
 def _run_box(session: Session, ident: str) -> Any:
-    """The investigation's run box (#1343 B10, its attached start held here), shaped from the claim alone: the run
-    folder `<T>/runs/<inv>`, the run copy's stage, the run clock, the code tree; each path judged with no link
-    followed out of the tenant's folder first (H10)."""
-    from defender import box
-
+    """The investigation's run box (`start_run_box`), shaped from the claim alone: the run folder `<T>/runs/<inv>`,
+    the run copy's stage, the run clock, the code tree."""
     state = session.prepared.state if session.prepared is not None else None
     if not isinstance(state, _State) or ident != session.job_id:
         raise Refused(f"no run box is served for {ident!r}", "unknown-id")
-    run_dir = Path(state.run.run_dir)
-    session.inside_tenant(run_dir)
-    session.inside_tenant(Path(state.copy.agent))
-    session.inside_tenant(box.clock_dir(run_dir).parent, must_exist=False)
-    return box.start_box(run_dir, session.defender_dir, docker=session.docker, tenant_agent=state.copy.agent,
-                         staged_token=state.copy.token, tenant_id=session.tenant_id, require_sandbox=True,
-                         start_token=state.box_token)
+    return start_run_box(session, Path(state.run.run_dir), state.copy, start_token=state.box_token)
 
 
 def register_investigation(registry: Registry) -> None:

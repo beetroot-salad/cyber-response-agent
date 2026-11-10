@@ -12,6 +12,7 @@ import logging
 import math
 import secrets
 import signal
+from pathlib import Path
 from typing import Any
 
 from defender.job_socket import Refused
@@ -93,6 +94,22 @@ def _box_stop(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
                 box.stopped = answer
             return answer
         return dict(box.stopped)
+
+
+def start_run_box(session: Session, run_dir: Path, copy: Any, *, start_token: str | None = None) -> Any:
+    """A run's box over its run folder and its knowledge copy (the investigation's, a learning sibling's; #1343 B10,
+    its attached start held here). Before the start, the run folder and the copy's agent half must be real folders
+    inside the tenant's, and every other bind source the run lane makes under `<T>/` (its input folder, the copy's
+    stage, the run clock's folder) is judged along every component with no link followed (H10)."""
+    from defender import box
+
+    session.inside_tenant(run_dir)
+    session.inside_tenant(Path(copy.agent))
+    session.judge_binds(box.run_lane_sources(run_dir, session.defender_dir, Path(copy.agent), Path(copy.token)),
+                        must_exist=False)
+    return box.start_box(run_dir, session.defender_dir, docker=session.docker, tenant_agent=copy.agent,
+                         staged_token=copy.token, tenant_id=session.tenant_id, require_sandbox=True,
+                         start_token=start_token)
 
 
 def stop_boxes(session: Session) -> None:

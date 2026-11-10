@@ -48,7 +48,7 @@ from defender import _io
 from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender.job_socket import Refused
 
-from ._common import answer_pass, first_pass, grant, settle_knowledge
+from ._common import answer_pass, first_pass, grant, settle_knowledge, start_run_box
 from ._session import HandBack, KindSpec, Prepared, Registry, Session, SetupRefused
 
 if TYPE_CHECKING:
@@ -435,11 +435,7 @@ def _shell_box(session: Session, ident: str) -> Any:
     state = _state(session, _Learning)
     sibling = state.siblings.get(ident)
     if sibling is not None:
-        session.inside_tenant(sibling.run_dir)
-        session.inside_tenant(Path(sibling.copy.agent))
-        return box.start_box(sibling.run_dir, session.defender_dir, docker=session.docker,
-                             tenant_agent=sibling.copy.agent, staged_token=sibling.copy.token,
-                             tenant_id=session.tenant_id, require_sandbox=True)
+        return start_run_box(session, sibling.run_dir, sibling.copy)
     if ident != session.job_id:
         raise Refused(f"no shell box is served for {ident!r}", "unknown-id")
     folder = state.scratch / "shell" / ident
@@ -562,8 +558,11 @@ def _batch_box(session: Session, ident: str) -> Any:
     batch = state.batches.get(ident)
     if batch is None:
         raise Refused(f"no draft of this helper's is {ident!r}", "unknown-id")
-    session.inside_tenant(batch.draft_root.parent)
-    return _drain_delivery(session, state).start_box(batch.box_request(), docker=session.docker)
+    # Judged on the request the box is started with: the draft's stage (read-only) and each lane (writable), every
+    # component from `<T>/` down (H10), not only the draft's folder.
+    request = batch.box_request()
+    session.judge_binds(m.source for m in request.mounts)
+    return _drain_delivery(session, state).start_box(request, docker=session.docker)
 
 
 def register(registry: Registry) -> None:

@@ -7,8 +7,8 @@ answers the rest over the job socket (`job_socket`). This module is that side's 
 
 - `JobContainer.of(environ, ...)`: the job's client and its `launch` facts; `NotInContainer` outside a job container
   (a host shell: the entry then does nothing, A6);
-- `JobContainer.access(id)`: a read pass for an id the helper minted, asked afresh whenever the one held is within the
-  reuse margin (O5, O6: no single long pass);
+- `JobContainer.access(id)`: a read pass for an id the helper minted, held by `job_socket.PassHolder` and asked
+  afresh whenever the one held is within the reuse margin (O5, O6: no single long pass);
 - `JobContainer.box(kind, id)`: a box the helper starts (O9: the request names a kind and an id, never a path);
 - `JobContainer.materialised_export(commit)`: the export of a commit, materialised by the helper (the container
   writes no export and takes no knowledge lock, P-A);
@@ -23,7 +23,6 @@ import logging
 import os
 import signal
 import threading
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -37,30 +36,8 @@ _logger = logging.getLogger(__name__)
 __all__ = ["JobContainer", "NotInContainer", "sigterm_on_stdin_eof"]
 
 
-
 class NotInContainer(RuntimeError):
     """A container-only entry run with no job socket in its environment (a host shell): it does nothing."""
-
-
-@dataclass
-class _Pass:
-    """The pass held for one id, asked of the helper again once within the margin."""
-
-    ask: Callable[..., dict[str, Any]] = field(repr=False)
-    ident: str
-    token: str | None = field(default=None, repr=False)
-    expires_at: float = 0.0
-    proxy_url: str | None = None
-    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
-
-    def current(self) -> str:
-        with self.lock:
-            if self.token is None or self.expires_at - time.time() <= PASS_REUSE_MARGIN_SEC:
-                answer = self.ask("pass", id=self.ident)
-                self.token = str(answer["token"])
-                self.expires_at = float(answer.get("expires_at") or 0.0)
-                self.proxy_url = answer.get("proxy_url") or self.proxy_url
-            return self.token
 
 
 @dataclass(frozen=True)
@@ -117,8 +94,8 @@ class JobContainer:
         again within the margin); None when the helper's launch facts name no proxy (an empty grant)."""
         if self.proxy_url is None:
             return None
-        held = _Pass(self.ask, str(ident), proxy_url=self.proxy_url)
-        return RequestAccess(self.proxy_url, held.current)
+        held = job_socket.PassHolder(self.ask, str(ident), margin=PASS_REUSE_MARGIN_SEC)
+        return RequestAccess(self.proxy_url, held.token)
 
     def box(self, kind: str, ident: str) -> Any:
         """A box of `kind` for `ident`, started by the helper (`box.relay_start`); a refusal is the box's `BoxFault`."""

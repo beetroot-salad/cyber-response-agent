@@ -16,13 +16,15 @@ import json
 import math
 import socket as _socket
 import struct
+import threading
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 __all__ = [
-    "IMAGE_ENV", "JOB_LABEL", "MAX_MESSAGE", "SOCKET_ENV", "Refused", "ask", "from_environ", "read_message",
-    "write_message",
+    "IMAGE_ENV", "JOB_LABEL", "MAX_MESSAGE", "SOCKET_ENV", "PassHolder", "Refused", "ask", "from_environ",
+    "read_message", "write_message",
 ]
 
 #: The in-container variable naming the job socket's path (the same path inside and on the host: the socket's folder is
@@ -134,3 +136,27 @@ def from_environ(environ: Mapping[str, str]) -> Callable[..., dict[str, Any]] | 
     """The job's client bound to the socket `environ` names (`SOCKET_ENV`), or None outside a job container."""
     path = environ.get(SOCKET_ENV)
     return functools.partial(ask, path) if path else None
+
+
+class PassHolder:
+    """A job's read pass for one id the helper minted, held inside the job container (#1170 O5, O6, H2): asked of the
+    helper (`pass`) when a call first needs one, and asked again once the one held has `margin` seconds left or fewer
+    (the caller passes `credential_proxy.PASS_REUSE_MARGIN_SEC`, which this package sits below), so no single pass
+    outlives its lifetime. Nothing is retried or mapped here: the helper's refusal is its `Refused`, a socket fault
+    its `OSError`, an answer without a token or an expiry a `KeyError`, `ValueError` or `TypeError`; each caller maps
+    them as its own callers expect."""
+
+    def __init__(self, ask: Callable[..., dict[str, Any]], ident: str, *, margin: float) -> None:
+        self._ask = ask
+        self._ident = ident
+        self._margin = margin
+        self._held: tuple[str, float] | None = None
+        self._holding = threading.Lock()
+
+    def token(self) -> str:
+        """The pass held, or a fresh one when none is held or the one held is within the margin of its expiry."""
+        with self._holding:
+            if self._held is None or self._held[1] - self._margin <= time.time():
+                answer = self._ask("pass", id=self._ident)
+                self._held = (str(answer["token"]), float(answer["expires_at"]))
+            return self._held[0]

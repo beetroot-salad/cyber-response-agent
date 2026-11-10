@@ -141,6 +141,14 @@ def _run_lane_mounts(
     return mounts
 
 
+def run_lane_sources(
+    run_dir: Path, defender_dir: Path, tenant_agent: Path | None = None, staged_token: Path | None = None,
+) -> tuple[Path, ...]:
+    """The host source of every bind the run lane makes for these arguments (`_run_lane_mounts`, the list its argv is
+    rendered from): what a starter that does not own those folders judges before the start (#1170 H10)."""
+    return tuple(Path(m.source) for m in _run_lane_mounts(run_dir, defender_dir, tenant_agent, staged_token))
+
+
 def _refuse_a_start_that_conflicts(
     docker: DockerFn, name: str, sources: Sequence[tuple[str, Path]],
 ) -> None:

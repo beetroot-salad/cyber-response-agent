@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, ClassVar, Literal, NoReturn, Protocol, runtime_checkable
+from typing import Any, ClassVar, Final, Literal, NoReturn, Protocol, runtime_checkable
 
 from defender._model import model
 from defender.execution import bash_exec
@@ -53,6 +53,40 @@ _HELPER_DEADLINE = 3
 #: The code a command's result carries when the helper itself was killed (rule 2): a kill, as a
 #: stage's own kill reads.
 _KILLED_RC = -9
+
+#: `classify_unframed`'s answers, one per rule.
+NOT_RUNNING: Final = "not-running"
+KILLED: Final = "killed"
+TIMED_OUT: Final = "timeout"
+UNUSABLE: Final = "unusable"
+Unframed = Literal["not-running", "killed", "timeout", "unusable"]
+
+
+def box_status(docker: Any, name: str) -> str | None:
+    """The box's status, asked of `docker` once; `None` for no daemon, no answer or a fault asking."""
+    if docker is None:
+        return None
+    try:
+        return _inspect_field(docker, name, "{{.State.Status}}")
+    except BoxFault:
+        return None
+
+
+def classify_unframed(raw: RawExec | None, failure: Exception | None, status: str | None) -> Unframed:
+    """#1421's rule for an exchange that gave no clean frame, on the box's one status answer (`box_status`), in this
+    order: the job's own executor (`BoxExecutor._unframed`) and the helper's relay (`relay_exec`) both answer by it.
+    1. not `running`, no answer, or a fault asking: the box is lost (`NOT_RUNNING`), whatever else the exchange
+       said, a host timeout included: a command past its timeout on a box that died is a lost box, not a timeout;
+    2. `running` and exec 137: the in-box helper was killed, the box lives (`KILLED`);
+    3. `running` and a host timeout or the in-box helper's own deadline (exec 3): a timeout (`TIMED_OUT`);
+    4. `running` and anything else: the box is lost, worded as unusable (`UNUSABLE`)."""
+    if status != "running":
+        return NOT_RUNNING
+    if raw is not None and raw.rc == _EXEC_KILLED:
+        return KILLED
+    if isinstance(failure, subprocess.TimeoutExpired) or (raw is not None and raw.rc == _HELPER_DEADLINE):
+        return TIMED_OUT
+    return UNUSABLE
 
 
 # This module is host-only (it pulls in pydantic); nothing inside a box imports it. An unset
@@ -297,22 +331,20 @@ class BoxExecutor:
     def _unframed(
         self, raw: RawExec | None, failure: Exception | None, *, command: str, timeout: float,
     ) -> BoxResult:
-        """#1421's executor rule for an exchange with no clean frame, on the box's one answer:
-        1. not `running`, no answer, or a fault asking: the box is lost;
-        2. `running` and exec 137: the helper was killed, the box lives: a result with the kill
-           line (a result, so the row is recorded);
-        3. `running` and a host timeout or the helper's own deadline (exec 3): a timeout;
-        4. `running` and anything else: the box is lost, worded as unusable."""
+        """An exchange with no clean frame, classified by #1421's rule (`classify_unframed`) on the box's one
+        status answer: lost ends the box, a kill of the in-box helper is a result with the kill line (so the row is
+        recorded), a timeout is the timeout and leaves the box usable."""
         status = self._status()
-        if status != "running":
+        verdict = classify_unframed(raw, failure, status)
+        if verdict == NOT_RUNNING:
             self._end(BoxLost(
                 f"the box {self.name} is not running (its status: {status or 'no answer'}); "
                 "it can run no command"), command, cause=failure)
-        if raw is not None and raw.rc == _EXEC_KILLED:
+        if verdict == KILLED:
             return BoxResult(rc=_KILLED_RC, out=b"", err=KILLED_LINE)
-        if isinstance(failure, subprocess.TimeoutExpired):
-            raise failure
-        if raw is not None and raw.rc == _HELPER_DEADLINE:
+        if verdict == TIMED_OUT:
+            if isinstance(failure, subprocess.TimeoutExpired):
+                raise failure
             raise subprocess.TimeoutExpired(command, timeout)
         said = f"exec rc {raw.rc}, no frame" if raw is not None else f"{type(failure).__name__}"
         self._end(BoxLost(
@@ -355,13 +387,8 @@ class BoxExecutor:
                           f"({type(answer).__name__} {result!r}); it is unusable"), command)
 
     def _status(self) -> str | None:
-        """The box's status, asked once; `None` for no answer or a fault asking."""
-        if self.docker is None:
-            return None
-        try:
-            return _inspect_field(self.docker, self.name, "{{.State.Status}}")
-        except BoxFault:
-            return None
+        """The box's status, asked once (`box_status`)."""
+        return box_status(self.docker, self.name)
 
     def _end(self, ending: BoxEnding, command: str, *, cause: BaseException | None = None) -> NoReturn:
         """Refuse every later command with `ending`'s class, stop the box, and raise `ending`.

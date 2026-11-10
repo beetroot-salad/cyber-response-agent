@@ -138,6 +138,17 @@ class Session:
             raise Refused("the job's tenant is not accepted yet", "internal")
         return confined(self.tenant_folder, path, must_exist=must_exist)
 
+    def judge_binds(self, sources: Iterable[Path | str], *, must_exist: bool = True) -> None:
+        """Every bind source of a box under the accepted tenant's folder, judged from `<T>/` down with no link
+        followed at any component (`inside_tenant`, H10), so a job that swaps any folder on the way for a link is
+        refused (`confinement`) before the box is started over it; with `must_exist` false a source not there yet
+        passes (the start makes it, or refuses it). A source outside `<T>/` (the code tree, the claim's scratch
+        folder) is none the job can swap."""
+        for source in sources:
+            path = Path(source)
+            if self.tenant_folder is None or path.is_relative_to(self.tenant_folder):
+                self.inside_tenant(path, must_exist=must_exist)
+
     def require_minted(self, ident: object) -> str:
         if not isinstance(ident, str) or ident not in self.minted:
             raise Refused(f"{ident!r} is no id this helper minted for its claim", "unknown-id")

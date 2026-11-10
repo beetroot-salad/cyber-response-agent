@@ -1423,31 +1423,24 @@ class _JobFacts:
 class _HelperPass:
     """A job's read pass, asked of its host helper over the job socket (#1170 O5, O6, H2): the
     helper signs it (the job holds no sign login) for this run's id, the grant and the lifetime it
-    decided. Asked when a call first needs one, and asked again once the held one is within the
+    decided; held by `job_socket.PassHolder`, which asks again once the held one is within the
     reuse margin of its expiry, as the operator run's own signer reuses its token (r7 A20). A
     refusal (the job fenced, the helper signalled) or a helper that is gone is the asking call's
     `AdapterFault`; nothing is retried here."""
 
     def __init__(self, request: Callable[..., dict[str, Any]], *, run_id: str, proxy_url: str,
                  granted: bool) -> None:
-        self._request = request
-        self._run_id = run_id
+        self._held = job_socket.PassHolder(request, run_id, margin=TOKEN_REUSE_MARGIN_SEC)
         self._proxy_url = proxy_url
         self._granted = granted
-        self._held: tuple[str, float] | None = None
-        self._holding = threading.Lock()
 
     def _token(self) -> str:
-        with self._holding:
-            if self._held is None or self._held[1] - TOKEN_REUSE_MARGIN_SEC <= time.time():
-                try:
-                    answer = self._request("pass", id=self._run_id)
-                    self._held = (str(answer["token"]), float(answer["expires_at"]))
-                except job_socket.Refused as refused:
-                    raise AdapterFault(f"the job's host helper refused a pass ({refused.code}): {refused}") from None
-                except (OSError, ValueError, KeyError, TypeError) as lost:
-                    raise AdapterFault(f"no pass from the job's host helper: {type(lost).__name__}: {lost}") from None
-            return self._held[0]
+        try:
+            return self._held.token()
+        except job_socket.Refused as refused:
+            raise AdapterFault(f"the job's host helper refused a pass ({refused.code}): {refused}") from None
+        except (OSError, ValueError, KeyError, TypeError) as lost:
+            raise AdapterFault(f"no pass from the job's host helper: {type(lost).__name__}: {lost}") from None
 
     def access_kwargs(self) -> dict[str, RequestAccess]:
         return _access_kwargs(RequestAccess(self._proxy_url, self._token) if self._granted else None)
