@@ -12,7 +12,11 @@ Every scored held-out run is started here, under the frozen engine's lab-server 
 
 A copy that cannot be made (restore, overlay, marker, services, health) is a launch failure: it
 raises, writes no row and leaves no clean marker. A copy that differs from what the case recorded
-is a `stale` row. A run that dies before printing `run_id=` gets no row. `--reference` serves the
+is a `stale` row, and the marker is marked dirty so the next launch restores whole (D23). The
+index patterns are the freeze's; a freeze whose patterns are not the lab tenant's current ones
+(`patterns`) is refused before anything runs (D24).
+
+A run that dies before printing `run_id=` gets no row. `--reference` serves the
 copy the same way but appends no row and prints the run id, for labelling (O8); it works before
 `confirmed` is filled. `lock_token` joins a lock make-a-case holds and leaves it held.
 
@@ -42,7 +46,6 @@ import frozen_copy  # noqa: E402
 from chaos import lock  # noqa: E402
 from evaluations.held_out import binding  # noqa: E402
 
-DEFAULT_PATTERNS = ["logs-*", ".internal.alerts-security.alerts-default-*"]
 CASE_KEYS = ("freeze", "alert", "counts", "content")
 
 
@@ -171,12 +174,13 @@ def _agent_python() -> str:
 
 
 def _serve_copy(es: Any, ops: Any, clock: Any, *, case: dict, freeze: dict, freeze_id: str,
-                patterns: list[str], parts_dir: Path, alert_file: Path, location: str) -> list[str]:
-    """Ready the copy, bring its services up and compare it with the case; returns the stale reasons."""
-    overlay = case.get("overlay")
+                parts_dir: Path, alert_file: Path, location: str) -> list[str]:
+    """Ready the copy, bring its services up and compare it with the case; returns the stale
+    reasons. A stale copy is marked dirty so the next launch restores it whole."""
+    overlay, patterns = case.get("overlay"), list(freeze["patterns"])
     T = frozen_copy.stamp(freeze["T"])
     frozen_copy.ready(es, ops=ops, clock=clock, freeze=freeze, freeze_id=freeze_id,
-                      overlay=overlay, patterns=patterns, location=location)
+                      overlay=overlay, location=location)
     ops.load_stubs(parts_dir / freeze_id, T, (overlay or {}).get("mutations") or None)
     ops.mount_node_cert()
     offset = round((frozen_copy.utc(T) - clock.now()).total_seconds())
@@ -187,7 +191,10 @@ def _serve_copy(es: Any, ops: Any, clock: Any, *, case: dict, freeze: dict, free
     uuid = alert_uuid_of(alert_file)
     alert = frozen_copy.find_alert(es, patterns, uuid)
     file_digest = frozen_copy.digest_of(json.loads(alert_file.read_text()))
-    return _stale(case, observed, ops.content_digest(), alert, file_digest)
+    reasons = _stale(case, observed, ops.content_digest(), alert, file_digest)
+    if reasons:
+        frozen_copy.mark_dirty(ops, freeze_id, overlay)
+    return reasons
 
 
 def _quiet_teardown(ops: Any, why: str) -> None:
@@ -202,10 +209,15 @@ def launch(case_dir: Path, *, freezes_dir: Path, patterns: list[str], index: Pat
            env: dict | None = None, tenant: str, knowledge: str | None = None,
            reference: bool = False, lock_token: str | None = None,
            location: str = frozen_copy.REPO_LOCATION) -> str:
-    """Serve one frozen run of `case_dir`; returns its run id."""
+    """Serve one frozen run of `case_dir`; returns its run id. `patterns` are the lab tenant's
+    current index patterns: the copy is made with the freeze's, which must be the same (D24)."""
     case_dir, parts_dir, index = Path(case_dir), Path(parts_dir), Path(index)
     clock = clock if clock is not None else WallClock()
     case, freeze, bound, _uuid = verify(case_dir, Path(freezes_dir), parts_dir, reference)
+    try:
+        frozen_copy.check_patterns(freeze, list(patterns))
+    except frozen_copy.CopyRefused as exc:
+        raise LaunchRefused(str(exc)) from exc
     slug, alert_file = case_dir.name, case_dir / "alert.json"
     token = lock_token
     if token is None:
@@ -221,8 +233,7 @@ def launch(case_dir: Path, *, freezes_dir: Path, patterns: list[str], index: Pat
     try:
         try:
             reasons = _serve_copy(es, ops, clock, case=case, freeze=freeze, freeze_id=case["freeze"],
-                                  patterns=list(patterns), parts_dir=parts_dir, alert_file=alert_file,
-                                  location=location)
+                                  parts_dir=parts_dir, alert_file=alert_file, location=location)
             proxy_url = ops.start_proxy()
             argv = [_agent_python(), str(REPO / "defender" / "run.py"), str(alert_file),
                     "--tenant", tenant, "--no-learn", "--as-of", frozen_copy.stamp(freeze["T"])]
@@ -272,7 +283,6 @@ def main(argv: list[str] | None = None) -> int:
                         help="default: <case dir>/../freezes")
     parser.add_argument("--parts-dir", type=Path, default=os.environ.get("V2_FROZEN_PARTS_DIR"),
                         help="the lab disk path parts live under (D8); default $V2_FROZEN_PARTS_DIR")
-    parser.add_argument("--pattern", action="append", dest="patterns", default=None)
     parser.add_argument("--knowledge-commit", default=None, metavar="SHA")
     parser.add_argument("--reference", action="store_true",
                         help="a labelling run: serve the copy, write no row, print the run id")
@@ -281,11 +291,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.parts_dir or (not args.reference and not args.index):
         parser.error("--parts-dir (or $V2_FROZEN_PARTS_DIR) and, unless --reference, --index are required")
-    from lab_ops import LabOps
+    from lab_ops import LabOps, NotConfigured, tenant_patterns
+    try:
+        patterns = tenant_patterns(os.environ.get("V2_FROZEN_TENANT_DIR"))
+    except NotConfigured as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 4
     ops = LabOps.from_environment()
     try:
         launch(args.case_dir, freezes_dir=args.freezes_dir or args.case_dir.resolve().parent / "freezes",
-               patterns=args.patterns or DEFAULT_PATTERNS, index=args.index or Path(os.devnull),
+               patterns=patterns, index=args.index or Path(os.devnull),
                parts_dir=args.parts_dir, lock_store=lock.DockerLockStore(), es=ops.frozen_es(), ops=ops,
                tenant=args.tenant, knowledge=args.knowledge_commit, reference=args.reference,
                lock_token=args.lock_token)

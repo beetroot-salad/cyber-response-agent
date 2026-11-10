@@ -26,6 +26,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -75,6 +76,11 @@ RO_ROLE = "frozen_readonly"
 
 class LabOpsError(RuntimeError):
     """A lab command failed, or Elasticsearch answered with an error."""
+
+
+class NotConfigured(LabOpsError):
+    """A setting the operation needs is unset (a runs directory, a parts directory, the lab
+    tenant's directory or its index patterns): a refusal, never an empty answer."""
 
 
 def _text(value: Any) -> str:
@@ -143,8 +149,7 @@ class LabOps:
                  es_image: str = DEFAULT_ES_IMAGE, cluster_name: str = "soc-playground",
                  certs_volume: str = "soc-playground_certs", repo_dir: str = "/srv/lab/frozen-cases",
                  parts_dir: Any = None, runs_dir: Any = None, readonly_user: str = "defender-readonly",
-                 events_pattern: str = "logs-*",
-                 alerts_pattern: str = ".internal.alerts-security.alerts-default-*",
+                 events_pattern: str | None = None, alerts_pattern: str | None = None,
                  poll_s: float = 5.0, ready_timeout_s: float = 300.0) -> None:
         self._run, self.context, self.proxy_context = run, context, proxy_context
         self.tenant_hosts, self.frozen_endpoint = list(tenant_hosts or ()), frozen_endpoint
@@ -164,11 +169,14 @@ class LabOps:
     @classmethod
     def from_environment(cls) -> LabOps:
         """The operator's `V2_FROZEN_*` settings (runbook). Tenant host names come from the live
-        lab tenant's `settings/systems/*/access.yaml` (`V2_FROZEN_TENANT_DIR`)."""
+        lab tenant's `settings/systems/*/access.yaml`, and the index patterns from its
+        `settings/systems/elastic/config.env` (`V2_FROZEN_TENANT_DIR`, D24)."""
         env = os.environ
         tenant = env.get("V2_FROZEN_TENANT_DIR")
+        events, alerts = tenant_patterns(tenant) if tenant else (None, None)
         return cls(
             tenant_hosts=declared_hosts(Path(tenant)) if tenant else (),
+            events_pattern=events, alerts_pattern=alerts,
             frozen_endpoint=env.get("V2_FROZEN_ENDPOINT"), audit_path=env.get("V2_FROZEN_PROXY_AUDIT"),
             live_audit_path=env.get("V2_LIVE_PROXY_AUDIT"), proxy_context=env.get("V2_FROZEN_PROXY_CONTEXT"),
             es_image=env.get("V2_FROZEN_ES_IMAGE", DEFAULT_ES_IMAGE),
@@ -202,6 +210,13 @@ class LabOps:
 
     def frozen_es(self) -> FrozenEs:
         return FrozenEs(self)
+
+    def _patterns(self) -> tuple[str, str]:
+        """The lab tenant's events and alerts patterns; there is no default (D24)."""
+        if not (self.events_pattern and self.alerts_pattern):
+            raise NotConfigured("the lab tenant's index patterns are not configured "
+                                "($V2_FROZEN_TENANT_DIR, settings/systems/elastic/config.env)")
+        return self.events_pattern, self.alerts_pattern
 
     def _live_es(self, method: str, path: str, body: Any = None) -> Any:
         from chaos.ctl import DockerExecSeam   # the live cluster's seam; the repo's own
@@ -292,6 +307,8 @@ class LabOps:
     # -- the copy-state marker (A4) ---------------------------------------------------------------
 
     def read_marker(self) -> dict | None:
+        """The launch's first operation: ensures the node (a teardown stops it) before the marker
+        is read, so no cluster request comes before a node exists."""
         self._ensure_node()
         proc = self._engine("sh", "-c", f"cat {MARKER_FILE} 2>/dev/null; true", text=True)
         text = _text(proc.stdout).strip()
@@ -374,7 +391,7 @@ class LabOps:
         es = self.frozen_es()
         es.es_request("PUT", f"/_security/role/{RO_ROLE}", {
             "cluster": ["monitor"],
-            "indices": [{"names": [self.events_pattern, self.alerts_pattern], "privileges": ["read"]}]})
+            "indices": [{"names": list(self._patterns()), "privileges": ["read"]}]})
         es.es_request("PUT", f"/_security/user/{self.readonly_user}",
                       {"password": password, "roles": [RO_ROLE]})
 
@@ -430,7 +447,7 @@ class LabOps:
         caught (A1)."""
         es = self.frozen_es()
         digest = hashlib.sha256()
-        for pattern in (self.events_pattern, self.alerts_pattern):
+        for pattern in self._patterns():
             pit = es.es_request("POST", f"/{pattern}/_pit?keep_alive=10m&expand_wildcards=open,hidden")["id"]
             try:
                 after: list | None = None
@@ -598,6 +615,7 @@ class LabOps:
         """Alerts stamped up to T: read from the live alerts index (it only grows), so a workflow
         status changed after T shows here; make-a-case re-reads the alert in the frozen copy."""
         freeze = yaml.safe_load((Path(freeze_dir) / "freeze.yaml").read_text())
+        alerts_pattern = self._patterns()[1]
         fields = ["@timestamp", "kibana.alert.uuid", "kibana.alert.workflow_status"]
         out: list[dict] = []
         after = None
@@ -607,16 +625,19 @@ class LabOps:
                                     "query": {"range": {"@timestamp": {"lte": _stamp(freeze["T"])}}}}
             if after:
                 body["search_after"] = after
-            hits = self._live_es("POST", f"/{self.alerts_pattern}/_search?expand_wildcards=open,hidden", body)["hits"]["hits"]
+            hits = self._live_es("POST", f"/{alerts_pattern}/_search?expand_wildcards=open,hidden", body)["hits"]["hits"]
             out += [h["_source"] for h in hits]
             if len(hits) < 1000:
                 return out
             after = hits[-1]["sort"]
 
     def live_run_alerts(self) -> set[str]:
-        """Alerts a defender run has been started for: the `alert.json` of every run directory."""
+        """Alerts a defender run has been started for: the `alert.json` of every run directory.
+        An unset runs directory is a refusal: an empty set would exclude nothing."""
+        if self.runs_dir is None:
+            raise NotConfigured("V2_RUNS_DIR is not set: the live runs cannot be excluded")
         found: set[str] = set()
-        for path in (self.runs_dir.rglob("alert.json") if self.runs_dir else []):
+        for path in self.runs_dir.rglob("alert.json"):
             try:
                 doc = json.loads(path.read_text())
             except (OSError, ValueError):
@@ -628,9 +649,11 @@ class LabOps:
 
     def ticketed_alerts(self) -> set[str]:
         """Alerts that had a ticket at T: the ticket ids in each freeze's stub dump (the watcher keys
-        a ticket by its alert's uuid)."""
+        a ticket by its alert's uuid). An unset parts directory is a refusal, not an empty set."""
+        if self.parts_dir is None:
+            raise NotConfigured("V2_FROZEN_PARTS_DIR is not set: the ticketed alerts cannot be excluded")
         found: set[str] = set()
-        for tarball in (self.parts_dir.glob(f"*/{STUBS_PART}") if self.parts_dir else []):
+        for tarball in self.parts_dir.glob(f"*/{STUBS_PART}"):
             with tarfile.open(tarball) as tar:
                 member = tar.extractfile("stub-ticket-server.json")
                 for ticket in json.load(member) if member else []:
@@ -640,7 +663,7 @@ class LabOps:
     def freeze_rules(self, freeze_dir: Path) -> Path:
         """The detection rules as of T, unpacked into a directory removed at teardown."""
         if self.parts_dir is None:
-            raise LabOpsError("parts_dir (V2_FROZEN_PARTS_DIR) is needed to read the rules at T")
+            raise NotConfigured("parts_dir (V2_FROZEN_PARTS_DIR) is needed to read the rules at T")
         target = Path(tempfile.mkdtemp(prefix="rules-at-T."))
         self._scratch.append(str(target))
         with tarfile.open(self.parts_dir / Path(freeze_dir).name / RULES_PART) as tar:
@@ -698,6 +721,26 @@ def _load_module(name: str, path: Path) -> Any:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def tenant_patterns(tenant_dir: Any) -> tuple[str, str]:
+    """`(events, alerts)` index patterns from the lab tenant's `settings/systems/elastic/config.env`
+    (`ELASTIC_EVENTS_INDEX`, `ELASTIC_ALERTS_INDEX`), parsed by the product's own reader."""
+    if not tenant_dir:
+        raise NotConfigured("V2_FROZEN_TENANT_DIR is not set: the index patterns come from the lab tenant")
+    path = Path(tenant_dir) / "settings" / "systems" / "elastic" / "config.env"
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise NotConfigured(f"{path} is unreadable: {exc}") from exc
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    from defender.tenancy.tenant_settings import parse_env
+    values = parse_env(text)
+    missing = [k for k in ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX") if not values.get(k)]
+    if missing:
+        raise NotConfigured(f"{path} lacks {', '.join(missing)}")
+    return values["ELASTIC_EVENTS_INDEX"], values["ELASTIC_ALERTS_INDEX"]
 
 
 def declared_hosts(tenant_dir: Path) -> list[str]:

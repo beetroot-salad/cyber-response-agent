@@ -374,13 +374,18 @@ def _score_run(fx: HeldOutAlert, run_dir: Path, true_disp: str,
 
 
 #: The alert's age at T, in the bands the report names (#1347 A2: the cases are one moment's).
-_AGE_BANDS = ((3600, "under 1 h"), (3 * 3600, "1–3 h"), (6 * 3600, "3–6 h"))
+#: Together they cover [0, 6 h]: the last band includes its upper edge. The 6 h is the lab's
+#: candidate window, restated here because the scorer imports no lab code.
+_AGE_BANDS = ((3600, "under 1 h"), (3 * 3600, "1–3 h"))
+_LAST_BAND, _LAST_EDGE = "3–6 h", 6 * 3600
 
 
 def _age_band(age: int | float | None) -> str:
     if age is None:
         return ""
-    return next((label for limit, label in _AGE_BANDS if age < limit), "over 6 h")
+    if age <= _LAST_EDGE:
+        return next((label for limit, label in _AGE_BANDS if age < limit), _LAST_BAND)
+    return "over 6 h"
 
 
 def _print_unscored(scored: Scored) -> None:

@@ -6,6 +6,9 @@ copy is this variant, restore the whole snapshot and apply the base overlay (del
 stamped after T) and then each fault overlay; record a clean marker. A durable marker is written
 dirty before the first change and clean after the last, so a crash leaves a copy nobody trusts.
 
+The index patterns come from the freeze (`patterns`, D24); `check_patterns` refuses a freeze whose
+patterns differ from the lab tenant's current ones.
+
 Every Elasticsearch call goes through `es.es_request(method, path, body=None)` (the chaos seam's
 shape) and reaches the FROZEN cluster only. Overlays promise an end state: documents outside the
 span are untouched, each in-span document is what the overlay's verbatim processor makes of it, and
@@ -81,7 +84,9 @@ def check_freeze(freeze: Any, name: str) -> None:
     elastic = freeze.get("elastic") if isinstance(freeze, dict) else None
     ok = (isinstance(elastic, dict) and isinstance(freeze.get("parts"), dict)
           and all(isinstance(elastic.get(k), str) and elastic[k] for k in ("repository", "snapshot", "uuid"))
-          and isinstance(elastic.get("indices"), dict) and elastic["indices"])
+          and isinstance(elastic.get("indices"), dict) and elastic["indices"]
+          and isinstance(freeze.get("patterns"), list) and freeze["patterns"]
+          and all(isinstance(p, str) and p for p in freeze["patterns"]))
     if ok:
         try:
             utc(freeze.get("T"))
@@ -89,7 +94,14 @@ def check_freeze(freeze: Any, name: str) -> None:
         except (TypeError, ValueError):
             pass
     raise CopyRefused(f"freeze {name}: freeze.yaml lacks T, elastic (repository, snapshot, uuid, "
-                      "indices) or parts")
+                      "indices), patterns or parts")
+
+
+def check_patterns(freeze: dict, current: list[str]) -> None:
+    """The freeze's patterns are the lab tenant's current ones (D24); order does not matter."""
+    if sorted(freeze["patterns"]) != sorted(current):
+        raise CopyRefused(f"the freeze's index patterns {freeze['patterns']} are not the lab tenant's "
+                          f"current {list(current)}: the tenant changed since the capture")
 
 
 def check_parts(freeze: dict, directory: Path) -> None:
@@ -106,11 +118,11 @@ def check_parts(freeze: dict, directory: Path) -> None:
 
 
 def variant_id(freeze_id: str, overlay: dict | None) -> str:
-    """The copy's identity: the freeze plus what the overlay does to Elasticsearch. A stub-only
-    overlay (cmdb-stale) shares the copy of no overlay: stubs reload every launch."""
-    mutations = es_mutations(overlay)
-    span = stamp(overlay["span_start"]) if mutations else None
-    return digest_of({"freeze": freeze_id, "mutations": mutations, "span_start": span})
+    """The copy's identity: the freeze plus the whole resolved overlay (every leaf: each mutation's
+    parameters and the span's start), so no change to the overlay can share a copy."""
+    resolved = overlay if overlay is None or "span_start" not in overlay \
+        else {**overlay, "span_start": stamp(overlay["span_start"])}
+    return digest_of({"freeze": freeze_id, "overlay": resolved})
 
 
 def es_mutations(overlay: dict | None) -> list[dict]:
@@ -310,17 +322,23 @@ class Copy:
 
 def _is_clean(marker: Any, freeze_id: str, vid: str, current: dict[str, dict], names: set[str]) -> bool:
     return bool(marker) and marker.get("dirty") is False and marker.get("freeze") == freeze_id \
-        and marker.get("variant") == vid and set(current) == names \
+        and marker.get("variant") == vid and isinstance(marker.get("tallies"), dict) \
+        and set(current) == names \
         and all(i["status"] != "close" for i in current.values()) \
         and marker.get("index_uuids") == {n: i["uuid"] for n, i in current.items()}
 
 
-def _build(es: Any, ops: Any, clock: Any, freeze: dict, freeze_id: str, overlay: dict | None,
-           patterns: list[str], current: dict[str, dict], location: str) -> dict[str, int]:
-    names = list(freeze["elastic"]["indices"])
-    T = stamp(freeze["T"])
+def mark_dirty(ops: Any, freeze_id: str, overlay: dict | None) -> None:
+    """Record that the copy cannot be trusted (a stale launch): the next launch restores whole."""
     ops.write_marker({"freeze": freeze_id, "variant": variant_id(freeze_id, overlay),
                       "dirty": True, "index_uuids": {}})
+
+
+def _build(es: Any, ops: Any, clock: Any, freeze: dict, freeze_id: str, overlay: dict | None,
+           current: dict[str, dict]) -> dict[str, int]:
+    names, patterns = list(freeze["elastic"]["indices"]), list(freeze["patterns"])
+    T = stamp(freeze["T"])
+    mark_dirty(ops, freeze_id, overlay)
     es.es_request("POST", "/_ilm/stop")
     _clear(es, current, set(names))
     elastic = freeze["elastic"]
@@ -341,20 +359,25 @@ def _build(es: Any, ops: Any, clock: Any, freeze: dict, freeze_id: str, overlay:
 
 
 def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overlay: dict | None,
-          patterns: list[str], location: str = REPO_LOCATION) -> Copy:
-    """Make the frozen cluster hold exactly this variant, restoring only if it must."""
+          whole: bool = False, location: str = REPO_LOCATION) -> Copy:
+    """Make the frozen cluster hold exactly this variant. A clean marker for the variant is
+    trusted unless `whole` (make-a-case always restores whole, D23). The snapshot's UUID is
+    checked every time."""
     check_freeze(freeze, freeze_id)
-    names = list(freeze["elastic"]["indices"])
+    names, patterns = list(freeze["elastic"]["indices"]), list(freeze["patterns"])
     vid = variant_id(freeze_id, overlay)
+    # The first operation: it brings the node up if a teardown stopped it, so that every cluster
+    # request below has a node to reach (and the node gets time to answer).
+    marker = ops.read_marker()
+    wait_for_cluster(es, clock, "the node start")
     register_repository(es, freeze, location)
     current = list_indices(es, patterns)
-    restored = not _is_clean(ops.read_marker(), freeze_id, vid, current, set(names))
-    tallies: dict[str, int] = {}
+    restored = whole or not _is_clean(marker, freeze_id, vid, current, set(names))
     if restored:
-        tallies = _build(es, ops, clock, freeze, freeze_id, overlay, patterns, current, location)
-        ops.write_marker({"freeze": freeze_id, "variant": vid, "dirty": False,
+        tallies = _build(es, ops, clock, freeze, freeze_id, overlay, current)
+        ops.write_marker({"freeze": freeze_id, "variant": vid, "dirty": False, "tallies": tallies,
                           "index_uuids": {n: i["uuid"] for n, i in list_indices(es, patterns).items()}})
     else:
-        tallies = {n: 0 for n in names}   # unused: a trusted copy's counts are read, not derived
+        tallies = {n: int(t) for n, t in marker["tallies"].items()}
     counts = {n: int(c) - tallies.get(n, 0) for n, c in freeze["elastic"]["indices"].items()}
     return Copy(counts=counts, tallies=tallies, restored=restored)

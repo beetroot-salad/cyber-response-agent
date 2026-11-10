@@ -5,11 +5,12 @@
     make_case.py write <case-dir> --freeze <freeze-dir> --alert <kibana.alert.uuid> \\
         [--profile P --seed N --span-start ISO]
 
-`write` takes the frozen-engine lock, readies the variant exactly as the launcher does, runs the
-chaos guard against the rules as of T, and writes `alert.json` and `case.yaml` (`confirmed`
-empty). The lock stays held for labelling: run `launch_frozen.py --reference --lock-token <token>`
-against the case, label it, fill `confirmed`, then release. Any refusal or failure writes nothing
-and frees the lock.
+`write` writes a case only for a candidate of `list`. It takes the frozen-engine lock, readies the
+variant with a whole restore (never trusting a copy-state marker, D23), runs the chaos guard
+against the rules as of T, and writes `alert.json` and `case.yaml` (`confirmed` empty). The index
+patterns are the freeze's, which must be the lab tenant's current ones (D24). The lock stays held for labelling: run `launch_frozen.py --reference --lock-token <token>`
+against the case, label it, fill `confirmed`, then release. Any refusal or failure leaves the case
+directory as it was and frees the lock.
 """
 from __future__ import annotations
 
@@ -53,7 +54,8 @@ def _freeze_of(freeze_dir: Path) -> dict:
 
 def candidates(freeze_dir: Path, *, ops: Any, max_age: timedelta = MAX_AGE) -> list[str]:
     """`kibana.alert.uuid` of each alert in the freeze's snapshot stamped in [T - max_age, T], with
-    no live run, no ticket reference and the default (`open`) workflow status; oldest first."""
+    no live run, no ticket reference and the default (`open`) workflow status; oldest first.
+    The one owner of eligibility: `write_case` writes only what this lists."""
     T = frozen_copy.utc(_freeze_of(freeze_dir)["T"])
     skip = set(ops.live_run_alerts()) | set(ops.ticketed_alerts())
     found = []
@@ -122,6 +124,31 @@ def _record(*, freeze: dict, freeze_id: str, overlay: dict | None, alert: dict, 
             "overlay": overlay, "counts": copy.counts, "content": ops.content_digest(), "confirmed": None}
 
 
+def _remember(case_dir: Path) -> Any:
+    """What `case_dir` holds now; the returned function puts it back (files and any directory
+    this call is about to create)."""
+    missing = []
+    node = case_dir
+    while not node.exists():
+        missing.append(node)
+        node = node.parent
+    prior = {name: (case_dir / name).read_bytes() if (case_dir / name).is_file() else None
+             for name in ("alert.json", "case.yaml")}
+
+    def restore() -> None:
+        for name, data in prior.items():
+            if data is None:
+                (case_dir / name).unlink(missing_ok=True)
+            else:
+                (case_dir / name).write_bytes(data)
+        for directory in missing:
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+    return restore
+
+
 def _write(case_dir: Path, alert: dict, case: dict) -> None:
     case_dir.mkdir(parents=True, exist_ok=True)
     (case_dir / "alert.json").write_text(json.dumps(alert, indent=2) + "\n")
@@ -131,28 +158,35 @@ def _write(case_dir: Path, alert: dict, case: dict) -> None:
 def write_case(case_dir: Path, *, freeze_dir: Path, alert_uuid: str, overlay: dict | None,
                patterns: list[str], parts_dir: Path, lock_store: Any, es: Any, ops: Any, clock: Any,
                profiles_dir: Path, inventory: dict, location: str = frozen_copy.REPO_LOCATION) -> Held:
-    """Ready the variant, check the alert and the guard, write the case; returns the held lock."""
+    """Ready the variant, check the alert and the guard, write the case; returns the held lock.
+    `patterns` are the lab tenant's current ones; the copy uses the freeze's, which must match."""
     case_dir, freeze_dir = Path(case_dir), Path(freeze_dir)
     freeze, freeze_id = _freeze_of(freeze_dir), freeze_dir.name
+    frozen_copy.check_patterns(freeze, list(patterns))
     frozen_copy.check_parts(freeze, Path(parts_dir) / freeze_id)
+    if alert_uuid not in candidates(freeze_dir, ops=ops):
+        raise CaseRefused(f"alert {alert_uuid} is not a candidate of {freeze_id} (see `list`): outside "
+                          "[T - max age, T], or it has a live run, a ticket or a changed workflow status")
     recorded = _overlay_of(overlay, frozen_copy.utc(freeze["T"]), profiles_dir=profiles_dir,
                            inventory=inventory)
     if recorded:   # the guard, against the rules as of T, before the copy is touched
         check_mutations(recorded["mutations"], rules_dir=Path(ops.freeze_rules(freeze_dir)))
     token = lock.take(lock_store, lock.FROZEN_ENGINE)
+    restore = None
     try:
         copy = frozen_copy.ready(es, ops=ops, clock=clock, freeze=freeze, freeze_id=freeze_id,
-                                 overlay=recorded, patterns=list(patterns), location=location)
+                                 overlay=recorded, whole=True, location=location)
         ops.load_stubs(Path(parts_dir) / freeze_id, frozen_copy.stamp(freeze["T"]),
                        (recorded or {}).get("mutations") or None)
-        alert = _alert_of_copy(es, list(patterns), alert_uuid, case_dir)
+        alert = _alert_of_copy(es, list(freeze["patterns"]), alert_uuid, case_dir)
         case = _record(freeze=freeze, freeze_id=freeze_id, overlay=recorded, alert=alert, copy=copy,
                        es=es, ops=ops)
+        restore = _remember(case_dir)
         _write(case_dir, alert, case)
         ops.teardown()   # the stubs stop; the copy stays for the reference run
     except BaseException:
-        for leftover in ("case.yaml",):
-            (case_dir / leftover).unlink(missing_ok=True)
+        if restore is not None:
+            restore()
         try:
             ops.teardown()
         except Exception as exc:  # noqa: BLE001 - the first failure is the one to report
@@ -174,25 +208,32 @@ def main(argv: list[str] | None = None) -> int:
     wr.add_argument("--profile")
     wr.add_argument("--seed", type=int, default=42)
     wr.add_argument("--span-start")
-    wr.add_argument("--pattern", action="append", dest="patterns")
     wr.add_argument("--parts-dir", type=Path, default=os.environ.get("V2_FROZEN_PARTS_DIR"))
     args = parser.parse_args(argv)
-    from lab_ops import LabOps
+    from lab_ops import LabOps, NotConfigured, tenant_patterns
     ops = LabOps.from_environment()
     if args.cmd == "list":
-        print("\n".join(candidates(args.freeze_dir, ops=ops)))
+        try:
+            print("\n".join(candidates(args.freeze_dir, ops=ops)))
+        except NotConfigured as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 4
         return 0
     if not args.parts_dir or bool(args.profile) != bool(args.span_start):
         parser.error("--parts-dir (or $V2_FROZEN_PARTS_DIR) is required; --profile needs --span-start")
-    from launch_frozen import DEFAULT_PATTERNS, WallClock
-    held = write_case(
-        args.case_dir, freeze_dir=args.freeze_dir, alert_uuid=args.alert,
-        overlay={"profile": args.profile, "seed": args.seed, "span_start": args.span_start}
-        if args.profile else None,
-        patterns=args.patterns or DEFAULT_PATTERNS, parts_dir=args.parts_dir,
-        lock_store=lock.DockerLockStore(), es=ops.frozen_es(), ops=ops, clock=WallClock(),
-        profiles_dir=PLAYGROUND / "chaos" / "profiles",
-        inventory=yaml.safe_load((PLAYGROUND / "hosts" / "inventory.yaml").read_text()))
+    from launch_frozen import WallClock
+    try:
+        held = write_case(
+            args.case_dir, freeze_dir=args.freeze_dir, alert_uuid=args.alert,
+            overlay={"profile": args.profile, "seed": args.seed, "span_start": args.span_start}
+            if args.profile else None,
+            patterns=tenant_patterns(os.environ.get("V2_FROZEN_TENANT_DIR")), parts_dir=args.parts_dir,
+            lock_store=lock.DockerLockStore(), es=ops.frozen_es(), ops=ops, clock=WallClock(),
+            profiles_dir=PLAYGROUND / "chaos" / "profiles",
+            inventory=yaml.safe_load((PLAYGROUND / "hosts" / "inventory.yaml").read_text()))
+    except (CaseRefused, frozen_copy.CopyRefused, lock.LockError, NotConfigured) as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 4
     print(f"case written to {args.case_dir}; the frozen-engine lock is held, token {held.token}")
     print(f"label it: launch_frozen.py {args.case_dir} --reference --lock-token {held.token} ...")
     print("then fill `confirmed` in case.yaml and release: python3 chaos/lock.py clear frozen-engine")
