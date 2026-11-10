@@ -16,6 +16,7 @@ import pytest
 import defender
 from defender.box import BoxSpec
 from defender.tests.support.jobs._job_helper import CANARY, OTHER_TENANT, drive_helper, helper_scene
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 
 _NO_DAEMON = not daemon_reachable()
@@ -82,7 +83,7 @@ json.dump(seen, open(out, "w"))
 
 
 @pytest.fixture
-def probed(tmp_path, monkeypatch, migrated_database):
+def probed(tmp_path, monkeypatch, migrated_database):  # noqa: F811
     """One real job container of the scene's tenant, run with the probe; what it saw."""
     from defender.box import run_docker
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A

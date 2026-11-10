@@ -23,6 +23,7 @@ from defender.tests.support.jobs._job_helper import (  # noqa: F401 — process_
     make_signer,
     until,
 )
+from defender.tests.support.jobs._jobs1342 import WORKTREE
 from defender.tests.support.sandbox._box1343 import input_open
 
 # The shared fixtures (`_job_helper`'s docs): `process_state` is autouse, `scene` the default helper scene.
@@ -313,7 +314,9 @@ def test_o10_a_box_past_the_limit_ends_only_its_own_job_and_another_helpers_rela
     scene.plant(other_inv)
     cfg = {"state": str(state), "inv": other_inv, "commit": scene.t.commit,
            "argv": scene.argv("investigation", other_inv, parent=os.getpid())}
-    env = {**os.environ, box.CLAIM_ENV: uuid.uuid4().hex}
+    checkout = str(WORKTREE)
+    env = {**os.environ, box.CLAIM_ENV: uuid.uuid4().hex,
+           "PYTHONPATH": os.pathsep.join(p for p in (checkout, os.environ.get("PYTHONPATH")) if p)}
     proc = subprocess.Popen([sys.executable, "-c", R.OTHER_HELPER, json.dumps(cfg)], env=env, stdin=subprocess.DEVNULL,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:

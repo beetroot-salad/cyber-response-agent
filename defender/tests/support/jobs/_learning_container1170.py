@@ -93,6 +93,9 @@ def child_environment(container: Any) -> dict[str, str]:
     env = {k: v for k, v in container.env.items() if v is not None}
     env["PYTHONPATH"] = f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"
     env["PATH"] = os.environ["PATH"]
+    # Preflight of a real `run.py` wants the selected model's key to exist; a dummy one (never used: the hold replaces the
+    # box start).
+    env.setdefault("FIREWORKS_API_KEY", "test-dummy-key")
     return env
 
 
