@@ -11,11 +11,14 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.learning.core._store1278 import (
+    authored_and_merged,
+    migrated_database,  # noqa: F401 — fixture the world needs
+    world,  # noqa: F401 — fixture
+)
 from defender.tests.support.shared.contracts._by_path import import_lint_lib
-from defender.tests.tenancy.tenant_1108_delivery._support import merged_agent_lesson
 from defender.tests.tenancy.tenant_1108_p4._drain_support import critical_text, remote_branches
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
-from defender.tests.tenancy.tenant_1108_p4.test_revert_cli import LESSON, LESSON_PATH, _cli
+from defender.tests.tenancy.tenant_1108_p4.test_revert_cli import LESSON, _cli
 
 DEFENDER = Path(__file__).resolve().parents[3]
 _astlib = import_lint_lib("_astlib")
@@ -31,26 +34,27 @@ def _directory_for(t: Any, state: str | None) -> Any:
     return t.directory_with(state=state)
 
 
+@pytest.mark.postgres
 @pytest.mark.parametrize("state", ["active", "creating", "offboarding", "offboarded", None])
-def test_the_by_hand_revert_proceeds_only_for_an_active_tenant(p4_tenant, caplog, state):
+def test_the_by_hand_revert_proceeds_only_for_an_active_tenant(world, caplog, state):  # noqa: F811 — the imported fixture
     """Revert of a lesson refuses a tenant that is creating, offboarding, offboarded or unknown: exit 2 naming why, no
     branch pushed, no PR; the active tenant's revert opens its PR (control)."""
-    t = p4_tenant
-    bind_forge(t)
-    merged_agent_lesson(t.p3, t.scratch, "seed-revert", LESSON_PATH, b"agent-written lesson\n")
+    t = world.t
+    authored_and_merged(world)  # the lesson as an author tick made it (its commit in the store's record), merged by a person
     before = set(remote_branches(t.remote, prefix=""))
+    opened = len(t.forge.creates)  # the seeding author tick's own PR
     with caplog.at_level(logging.INFO):
         rc = _cli().main(["--tenant", t.tenant_id, LESSON], client=t.forge.client, identity=t.vault.identity(),
                          directory=_directory_for(t, "active" if state == "active" else state))
     after = set(remote_branches(t.remote, prefix=""))
     if state == "active":
         assert rc == 0, critical_text(caplog)
-        assert len(after - before) == 1 and len(t.forge.creates) == 1
+        assert len(after - before) == 1 and len(t.forge.creates) == opened + 1
         return
     assert rc == 2, critical_text(caplog)
     text = critical_text(caplog)
     assert (state in text and "not active" in text) if state else "no such tenant" in text, text
-    assert after == before and t.forge.creates == []
+    assert after == before and len(t.forge.creates) == opened
 
 
 class _ReadsCounted:
@@ -76,37 +80,40 @@ class _ReadsCounted:
         return self.inner.generations(tenant_id)
 
 
-def test_the_by_hand_revert_reads_the_tenants_state_once_at_acceptance_and_not_again_for_its_delivery(p4_tenant, caplog):
+@pytest.mark.postgres
+def test_the_by_hand_revert_reads_the_tenants_state_once_at_acceptance_and_not_again_for_its_delivery(world, caplog):  # noqa: F811 — the imported fixture
     """The revert judges the tenant's state once, in its host acceptance; opening its delivery reads no state
     again (r10.1 C1: the delivery takes the admitted value, not a second look)."""
-    t = p4_tenant
-    bind_forge(t)
-    merged_agent_lesson(t.p3, t.scratch, "seed-revert-reads", LESSON_PATH, b"agent-written lesson\n")
+    t = world.t
+    authored_and_merged(world)
     directory = _ReadsCounted(_directory_for(t, "active"))
+    opened = len(t.forge.creates)  # the seeding author tick's own PR
     with caplog.at_level(logging.INFO):
         rc = _cli().main(["--tenant", t.tenant_id, LESSON], client=t.forge.client, identity=t.vault.identity(),
                          directory=directory)
     assert rc == 0, critical_text(caplog)
-    assert len(t.forge.creates) == 1, "control: the revert reached its delivery"
+    assert len(t.forge.creates) == opened + 1, "control: the revert reached its delivery"
     assert directory.reads.count("admission") == 1, directory.reads
     assert "state" not in directory.reads, (
         f"the delivery judged the tenant's state again, after the acceptance did: {directory.reads}")
 
 
-def test_the_by_hand_revert_builds_one_tenant_and_hands_its_delivery_that_very_tenant_and_directory(p4_tenant, caplog):
+@pytest.mark.postgres
+def test_the_by_hand_revert_builds_one_tenant_and_hands_its_delivery_that_very_tenant_and_directory(world, caplog):  # noqa: F811 — the imported fixture
     """The revert builds one `Tenant` and opens its delivery on that very tenant and directory, not a copy (r10.1 C1: the
     admitted value is passed down)."""
     from defender.learning.author import version_control as vc
     from defender.tests.support.tenancy import _host1214 as H
 
-    t = p4_tenant
-    bind_forge(t)
-    merged_agent_lesson(t.p3, t.scratch, "seed-revert-identity", LESSON_PATH, b"agent-written lesson\n")
+    t = world.t
+    authored_and_merged(world)
     directory = _ReadsCounted(_directory_for(t, "active"))
+    opened = len(t.forge.creates)  # the seeding author tick's own PR
     with caplog.at_level(logging.INFO), H.acceptance_calls(delivery=vc.opened_delivery) as calls:
         rc = _cli().main(["--tenant", t.tenant_id, LESSON], client=t.forge.client, identity=t.vault.identity(),
                          directory=directory)
-    assert rc == 0 and len(t.forge.creates) == 1, f"control: the revert reached its delivery: {critical_text(caplog)}"
+    assert rc == 0 and len(t.forge.creates) == opened + 1, (
+        f"control: the revert reached its delivery: {critical_text(caplog)}")
     assert (calls["accepted"], calls["built"]) == (1, 1), calls.counts
     [built] = calls.locals["built"]
     assert calls.locals["delivery"], "control: the delivery was opened"

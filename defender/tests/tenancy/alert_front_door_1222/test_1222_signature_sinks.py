@@ -21,7 +21,9 @@ from typing import Any
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.runtime.state import _1255_view as V
 from defender.tests.support.learning.curation import _spec773 as S773
-from defender.tests.support.learning.core._state1135 import env_state
+from defender.learning.core.state import FINDINGS
+from defender.tests.support.learning.judge._memory_store import MemoryStore
+from defender.tests.tenancy.alert_front_door_1222 import _lane1222 as L
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
 # The scenario's values
@@ -206,7 +208,7 @@ def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,
             alter: Callable[[Path], None] | None = None) -> tuple[Path, J.FakeJudge, list[dict]]:
     """An accepted episode carrying the launch's copies of the source run's alert and record,
     graded end to end; returns the episode, the judge seam (holding every prompt it was shown)
-    and the rows the pass appended to the findings queue."""
+    and the rows the pass queued for the learning store."""
     # Separate episode roots still share finding identity on the queue (#1241), so each pass
     # gets an episode id of its own (a manifest's `episode_id` must be its folder's name).
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
@@ -219,12 +221,9 @@ def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,
     base = runs_base if runs_base is not None else location_path(J.runs_base)(tmp_path)[0]
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()),
                         family_default=J.as_reply_text(J.family_reply()))
-    J.grade_at(ep, judge=judge, runs_base=base, draws=1,
-                                          state=env_state())
-    record = J.judge_record(ep)
-    appended = int(record.get("enqueued_rows") or 0)
-    # The queue is shared by every pass this test makes: this pass's rows are its last ones.
-    rows = J.enqueued_rows(record)[-appended:] if appended else []
+    queue = MemoryStore()  # the learning store's findings sink (#1278): the rows this pass queued, in order
+    J.grade_at(ep, judge=judge, runs_base=base, draws=1, store=queue)
+    rows = queue.rows(FINDINGS)
     assert rows, "the graded episode enqueued no finding row to read a key from"
     return ep, judge, rows
 
@@ -255,30 +254,27 @@ def _stage_frames(text: str) -> tuple[list[str], str]:
 
 
 def _lesson_author_received(tmp_path: Path, rows: list[dict]) -> tuple[list[dict], str, str]:
-    """What the lesson author receives for `rows`: the REAL drain tick (`_spec773.build_draft_scene`)
-    hands its batch to the recording fake, whose hook builds the user turn with production's
+    """What the lesson author receives for `rows`: the REAL drain claim (`drain.run_batch` over the
+    claim's items) hands its batch to the recording fake, whose hook builds the user turn with production's
     `build_user_prompt`. The instructions are the prompt file `cfg.author_prompt` names, read
     from this checkout (the drain's scratch repo carries no code)."""
     seen: dict[str, Any] = {}
-    product: list[Path] = []
 
     def received(handed: list[dict], batch_id: str, cfg: Any) -> None:
         lessons_run = S.mod("learning.author.lessons.run")
         seen["rows"] = [dict(r) for r in handed]
         seen["user"] = lessons_run.build_user_prompt(handed, batch_id, cfg)
-        # The prompt file sits in the product checkout the lane's paths name (the config's
-        # `repo_root` is the batch's draft, which holds no code).
-        rel = Path(cfg.author_prompt).relative_to(product[0])
-        seen["instructions"] = (S.REPO_ROOT / rel).read_text(encoding="utf-8")
+        # The prompt file is product code: the running checkout's (the config's `repo_root` is the batch's
+        # draft, which holds no code).
+        seen["instructions"] = Path(cfg.author_prompt).read_text(encoding="utf-8")
 
     skip = [{"finding_id": r["finding_id"], "skip_reason": "front-door suite: not authored"}
             for r in rows]
-    # The tick runs over a batch's git-free draft.
-    scene = S773.build_draft_scene(tmp_path / "drain", rows=rows,
-                             curator=S773.FakeCurator(also=received, committed=[],
-                                                      consumed_skip=skip))
-    product.append(scene.paths.repo_root)
-    scene.run()
+    # The claim runs over a batch's git-free draft.
+    lane = L.draft_lane(tmp_path / "drain", files={})
+    cfg = L.author_cfg(lane, invoke_agent=S773.FakeCurator(also=received, committed=[], consumed_skip=skip))
+    items = [("finding", str(r["finding_id"]), dict(r)) for r in rows]
+    assert S.sym("learning.author.drain", "run_batch")(cfg=cfg, items=items, outcomes={}) == 0
     assert seen, "the drain never handed the batch to the lesson author"
     return seen["rows"], seen["user"], seen["instructions"]
 
