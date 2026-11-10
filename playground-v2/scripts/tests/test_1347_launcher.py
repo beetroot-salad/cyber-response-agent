@@ -1,14 +1,20 @@
 """#1347 r6.4.1 A1-A7: the launcher readies a variant's frozen copy, runs the agent on it and writes the row.
 
 Entry point bound by this contract: `playground-v2/scripts/launch_frozen.py::launch(case_dir, *,
-freezes_dir, patterns, index, parts_dir, lock_store, es, ops, run_fn, clock, env, tenant,
+freezes_dir, tenant_settings, index, parts_dir, lock_store, es, ops, run_fn, clock, env, tenant,
 knowledge=None, reference=False, lock_token=None) -> run_id`.
+
+* `tenant_settings` is the lab tenant's `settings/` directory (D24). The patterns the launcher works
+  on are the freeze's (`freeze.yaml["patterns"]`, a list `[events, alerts]`); it refuses a case, before
+  anything, when they differ from the ones `tenant_settings/systems/elastic/config.env` has now. There is
+  no `patterns` parameter and no built-in default.
 
 * `es` is the FROZEN cluster through the chaos seam's `es_request(method, path, body=None)`; the
   launcher talks to it directly, never through the frozen proxy.
 * `ops` (see `_lab_fakes.LabOps`): read_marker, write_marker, load_stubs(parts_dir, as_of,
-  mutations), restart_node(clock_offset), start_proxy() -> the frozen proxy's own url,
-  content_digest(), teardown().
+  mutations), ensure_node() (the frozen node runs: teardown stops it, so the first thing a launch
+  does to the cluster is to make sure it is up), restart_node(clock_offset), start_proxy() -> the
+  frozen proxy's own url, content_digest(patterns) (the freeze's patterns, as a list), teardown().
 * `case_dir` holds alert.json, ground_truth.yaml and case.yaml (freeze, alert, age, overlay
   `None | {mutations, span_start}`, counts, content, confirmed); the freeze is
   `freezes_dir/<freeze>/freeze.yaml`; parts are `parts_dir/<freeze>/<name>`, digests bare hex.
@@ -22,13 +28,17 @@ Tests read the copy's END STATE from `_lab_fakes.FakeCluster`, not a request seq
 from __future__ import annotations
 
 import ast
+import copy
 import json
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 import yaml
-from _lab_fakes import (AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, FREEZE_ID, FROZEN_PROXY_URL,
-                        LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SLUG, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T, LabRig, expected_copy, instant, seconds)
+from _lab_fakes import (AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, ALERTS_PATTERN, DATA_DROP, EVENTS, FREEZE_ID,
+                        FROZEN_PROXY_URL, LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SCHEMA_DRIFT,
+                        SLUG, SNAP, SPAN_START, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T, FaultJournal, LabRig,
+                        canonical_digest, expected_copy, expected_variant, instant, seconds)
 
 LAUNCH = Path(__file__).resolve().parents[1] / "launch_frozen.py"
 KINDS = ["none", "drop", "drift", "cmdb"]
@@ -655,3 +665,316 @@ def test_a_launch_handed_a_token_that_is_not_the_holders_is_refused_and_leaves_t
     assert not isinstance(caught.value, (AttributeError, TypeError, NameError, ImportError, OSError))
     assert not rig.cluster.requests and rig.rows() == [] and rig.lock_in_run is None
     assert rig.store.records["frozen-engine"] == record
+
+
+# =====================================================================================================
+# r6.4.2 repairs (attack batch 1): one test per family, whose input is the whole class
+# =====================================================================================================
+
+
+def _launch_cases(tmp_path, joined):
+    """A rig whose launch is scored (owned lock) or a reference run joined to make-a-case's token."""
+    from chaos import lock
+
+    def build(journal=None):
+        rig = LabRig(tmp_path / f"r{len(list(tmp_path.glob('r*')))}", journal=journal)
+        rig.write_expected_case("drift", confirmed=not joined)
+        return rig, (lock.take(rig.store, lock.FROZEN_ENGINE) if joined else None)
+
+    return build
+
+
+def test_a_launch_cut_at_any_step_after_verify_tears_down_once_and_frees_only_a_lock_it_took(tmp_path):
+    """C3/A1/O9/O10: for every step after the UUID check (cluster request, lab op, agent run) and the row
+    write, owned or joined lock: one teardown; an owned lock is released once, after it; a joined one is untouched."""
+    for joined in (False, True):
+        build = _launch_cases(tmp_path / ("joined" if joined else "owned"), joined)
+        clean = FaultJournal(skip=("teardown",))
+        rig, token = build(clean)
+        rig.launch(**({"reference": True, "lock_token": token} if joined else {}))
+        uuid_check = next((i for i, (op, d) in enumerate(clean.step_log) if op == "es" and d[0] == "GET"
+                           and d[1].split("?")[0] == f"/_snapshot/{REPO}/{SNAP}"), None)
+        assert uuid_check is not None, "the launch never read the snapshot to check its UUID"
+        steps = list(range(uuid_check + 2, len(clean.step_log) + 1))
+        assert len(steps) >= 10, "the clean run shows too few steps to be cut anywhere"
+
+        for n in steps + ["row"]:
+            if n == "row" and joined:
+                continue                                     # a reference run writes no row
+            journal = FaultJournal(trip_at=None if n == "row" else n, skip=("teardown",))
+            rig, token = build(journal)
+            if n == "row":
+                rig.index.mkdir()                            # the row cannot be written: a directory is in its place
+            record = dict(rig.store.records)
+            started = len(journal)
+            where = f"{'joined' if joined else 'owned'}, cut at {n}: {clean.step_log[n - 1] if n != 'row' else 'the row write'}"
+            caught = None
+            try:
+                rig.launch(**({"reference": True, "lock_token": token} if joined else {}))
+            except Exception as exc:  # noqa: BLE001 - every failure is the class under test
+                caught = exc
+            ops = journal.ops()
+
+            assert not isinstance(caught, _NOT_A_REFUSAL + (AssertionError, NotImplementedError)), (where, repr(caught))
+            if n == "row" or (clean.step_log[n - 1][0] != "run"):
+                assert caught is not None, f"{where}: the launch went on as if nothing failed"
+            assert ops.count("teardown") == 1, where
+            if joined:
+                assert rig.store.records == record and "lock.delete" not in ops[started:], where
+                assert "lock.create" not in ops[started:], where
+            else:
+                assert ops.count("lock.delete") == 1 and rig.journal.last("lock.delete") > rig.journal.last("teardown"), where
+                assert "frozen-engine" not in rig.store.records, where
+            if n != "row":
+                assert rig.rows() == [], where
+
+
+@pytest.mark.parametrize("how", ["holder-cleared", "never-held"])
+def test_a_token_handed_to_a_launch_while_no_one_holds_the_lock_is_refused_before_anything(tmp_path, how):
+    """C3/O10: a token whose lock is free (its holder cleared, or never issued) does not take the lock
+    or reach the cluster, the lab or the agent."""
+    from chaos import lock
+
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("none", confirmed=False)
+    token = "0123456789abcdef" * 2
+    if how == "holder-cleared":
+        token = lock.take(rig.store, lock.FROZEN_ENGINE)
+        lock.clear(rig.store, lock.FROZEN_ENGINE)
+    rig.launch_module
+    before = len(rig.journal)
+
+    with pytest.raises(Exception) as caught:
+        rig.launch(reference=True, lock_token=token)
+
+    assert not isinstance(caught.value, _NOT_A_REFUSAL + (OSError,)), repr(caught.value)
+    assert not rig.cluster.requests and rig.ops.stubs is None and rig.ops.marker is None
+    assert "run" not in rig.journal.ops() and rig.rows() == [] and not rig.store.records
+    assert "lock.create" not in rig.journal.ops()[before:]
+
+
+# -- C4: a copy left by an earlier launch is never trusted beyond what a restore would give ---------------
+
+
+def _drop(threshold=25, salt="7"):
+    m = copy.deepcopy(DATA_DROP)
+    m["processor"]["drop"]["if"] = m["processor"]["drop"]["if"].replace("'7'", f"'{salt}'").replace("< 25", f"< {threshold}")
+    return m
+
+
+def _drift(target="source.port_no"):
+    m = copy.deepcopy(SCHEMA_DRIFT)
+    m["processor"]["rename"]["target_field"] = target
+    return m
+
+
+_LATER = "2026-10-20T08:00:00Z"
+VARIANTS = {   # one leaf of the resolved overlay differs from its neighbour: threshold, salt, rename target, span_start
+    "none": (None, SPAN_START), "drop": (DATA_DROP, SPAN_START), "drop/threshold": (_drop(60), SPAN_START),
+    "drop/salt": (_drop(salt="a"), SPAN_START), "drop/span_start": (DATA_DROP, _LATER),
+    "drift": (SCHEMA_DRIFT, SPAN_START), "drift/target": (_drift("source.port_alt"), SPAN_START),
+    "drift/span_start": (SCHEMA_DRIFT, _LATER)}
+NEIGHBOUR = {"none": "drop", "drop": "drop/threshold", "drop/threshold": "drop", "drop/salt": "drop",
+             "drop/span_start": "drop", "drift": "drift/target", "drift/target": "drift", "drift/span_start": "drift"}
+
+
+@pytest.mark.parametrize("uuid_ok", [True, False], ids=["uuid-ok", "uuid-changed"])
+@pytest.mark.parametrize("prior", ["empty", "same", "neighbour", "dirty"])
+@pytest.mark.parametrize("target", list(VARIANTS))
+def test_a_launch_after_any_earlier_copy_ends_as_it_would_from_an_empty_cluster(tmp_path, target, prior, uuid_ok):
+    """C4/O6/A4: whatever copy an earlier launch left (same variant, one leaf different, half-made), the
+    launch is refused on a changed snapshot UUID, else leaves the variant's own end state and a valid row."""
+    other = NEIGHBOUR[target]
+    assert expected_variant(*VARIANTS[target]) != expected_variant(*VARIANTS[other]), "the leaf must change the copy"
+    rig = LabRig(tmp_path, fail=_once(lambda m, p, b: p.endswith("/_delete_by_query")) if prior == "dirty" else None)
+    if prior != "empty":
+        rig.write_variant_case(*VARIANTS[target if prior == "same" else other])
+        if prior == "dirty":
+            with pytest.raises(Exception):
+                rig.launch()
+            assert rig.ops.marker is None or rig.ops.marker["dirty"] is True
+        else:
+            rig.launch()
+    rig.write_variant_case(*VARIANTS[target])
+    if not uuid_ok:
+        rig.cluster.snapshot_uuid = "another-uuid"
+    seen = (len(rig.cluster.mutations), rig.journal.ops().count("run"), len(rig.rows()))
+    rig.launch_module
+
+    if uuid_ok:
+        rig.launch()
+        assert [r["verdict"] for r in rig.rows()][seen[2]:] == ["valid"], rig.rows()
+        assert rig.cluster.state() == expected_variant(*VARIANTS[target]) and rig.cluster.pipelines == {}
+        return
+    with pytest.raises(Exception, match="(?i)uuid"):
+        rig.launch()
+    assert (len(rig.cluster.mutations), rig.journal.ops().count("run"), len(rig.rows())) == seen
+    assert "frozen-engine" not in rig.store.records
+
+
+# -- C5: the clock offset is the one at the node restart ---------------------------------------------------
+
+
+def test_the_clock_offset_is_taken_when_the_node_restarts_however_long_the_copy_took(tmp_path):
+    """C5/D15: with a restore of six minutes and overlays of minutes, every restart is handed T minus the
+    clock as it reads at that call, within a second."""
+    rig = LabRig(tmp_path, latency={"restore": timedelta(minutes=6), "delete_by_query": timedelta(seconds=90),
+                                    "reindex": timedelta(minutes=2)})
+    rig.write_expected_case("drift")
+    start = rig.clock.last
+    rig.launch()
+
+    assert rig.ops.restarts and rig.ops.restarts[-1][1] - start >= timedelta(minutes=9)
+    for offset, reading in rig.ops.restarts:
+        assert abs(seconds(offset) - (instant(T) - reading).total_seconds()) <= 1, (offset, reading)
+
+
+# -- C6: every recorded fact is compared at launch, each on its own ----------------------------------------
+
+INDICES = [AUTH, SYSLOG, NGINX, ALERTS]
+
+
+def _write_case_differing_in(rig, fact):
+    """case.yaml/alert.json for the `drop` variant, with exactly one recorded fact off (or the copy's
+    own alert in the snapshot off, for `copy-alert`)."""
+    state = expected_copy("drop")
+    original = state[ALERTS]["id-young"][1]
+    if fact == "copy-alert":
+        changed = {**original, "host.name": "web-2"}
+        rig.cluster.content[ALERTS]["id-young"]["_source"]["host.name"] = "web-2"
+        state[ALERTS]["id-young"] = (state[ALERTS]["id-young"][0], changed)
+        return rig.write_variant_case(DATA_DROP, state=state, alert_json=original, alert=canonical_digest(original))
+    case = rig.write_variant_case(DATA_DROP, alert_json={**original, "host.name": "web-9"} if fact == "alert-json" else None)
+    over = {"case-alert": {"alert": "e" * 64}, "content": {"content": "f" * 64}}.get(fact)
+    if fact.startswith("count:"):
+        index = fact.split(":", 1)[1]
+        over = {"counts": {**case["counts"], index: case["counts"][index] + 1}}
+    if fact == "unrecorded-index":      # the copy holds an index the case recorded no count for
+        over = {"counts": {k: v for k, v in case["counts"].items() if k != NGINX}}
+    if fact == "phantom-index":         # the case recorded a count for an index the copy does not hold
+        over = {"counts": {**case["counts"], "logs-ghost-default-2026.10.01-000001": 3}}
+    if over:
+        rig.write_variant_case(DATA_DROP, **over)
+    return case
+
+
+@pytest.mark.parametrize("fact, needle", [
+    ("content", "content"), ("case-alert", "alert"), ("alert-json", "alert"), ("copy-alert", "alert"),
+    *[(f"count:{i}", i) for i in INDICES], ("unrecorded-index", NGINX), ("phantom-index", "ghost")])
+def test_a_copy_differing_from_the_case_in_exactly_one_recorded_fact_is_stale_and_names_it(tmp_path, fact, needle):
+    """C6/A1/A2/P2: one count (or an index missing from either side), the content digest, case.yaml's alert,
+    alert.json or the copy's alert off, all else right: stale, run, bound row, reason names the fact."""
+    rig = LabRig(tmp_path)
+    _write_case_differing_in(rig, fact)
+    rig.launch()
+
+    [row] = rig.rows()
+    assert (row["verdict"], row["run_id"], row["binding"]) == ("stale", RUN_ID, rig.binding())
+    assert needle in row["reason"], row
+
+
+# -- D23: a stale verdict is not trusted by the next launch -------------------------------------------------
+
+
+@pytest.mark.parametrize("fact", ["content", "case-alert", "count:" + SYSLOG])
+def test_a_stale_launch_marks_the_copy_dirty_and_the_next_launch_restores_it_whole(tmp_path, fact):
+    """D23/A4: after a valid launch the marker is clean; a stale verdict makes it dirty; the next
+    launch restores the whole snapshot and is valid."""
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("drop")
+    rig.launch()
+    assert rig.ops.marker["dirty"] is False and rig.cluster.restores == 1
+    _write_case_differing_in(rig, fact)
+    rig.launch()
+    assert [r["verdict"] for r in rig.rows()] == ["valid", "stale"]
+    assert rig.ops.marker["dirty"] is True, rig.ops.marker
+
+    rig.write_expected_case("drop")
+    rig.launch()
+
+    assert rig.cluster.restores == 2 and rig.cluster.state() == expected_copy("drop")
+    assert [r["verdict"] for r in rig.rows()] == ["valid", "stale", "valid"]
+
+
+# -- B1: the node is up before the cluster is asked anything ---------------------------------------------
+
+
+@pytest.mark.parametrize("start", ["cold", "after-a-launch-same-variant", "after-a-launch-other-variant",
+                                   "make-a-case-after-a-launch"])
+def test_a_launch_finds_the_node_stopped_and_starts_it_before_asking_it_anything(tmp_path, start):
+    """B1/A1: teardown stops the node (and a node may never have run): a launch, or make-a-case and its
+    reference run, make sure it is up before the first cluster request and end valid in the variant's state."""
+    rig = LabRig(tmp_path, node_up=start != "cold")
+    rig.write_expected_case("drop")
+    if start != "cold":
+        rig.launch()
+        assert rig.cluster.up is False, "the fake teardown must leave the node stopped"
+    if start == "make-a-case-after-a-launch":
+        with rig.write_case("young", None) as held:
+            assert rig.launch(reference=True, lock_token=held.token) == RUN_ID
+        assert rig.cluster.down_requests == [] and rig.cluster.state() == expected_copy("none")
+        return
+    if start.endswith("other-variant"):
+        rig.write_expected_case("drift")
+    kind = "drift" if start.endswith("other-variant") else "drop"
+    mark = len(rig.journal)
+
+    rig.launch()
+
+    ops = rig.journal.ops()[mark:]
+    assert rig.cluster.down_requests == [], "the cluster was asked something while its node was stopped"
+    assert "ensure_node" in ops or "restart_node" in ops
+    assert [r["verdict"] for r in rig.rows()][-1] == "valid" and rig.cluster.state() == expected_copy(kind)
+
+
+# -- D24: the freeze owns the patterns ----------------------------------------------------------------------
+
+ALERTS_ALT = ".internal.alerts-security.alerts-*"     # matches the same index as the old built-in default
+
+
+def test_a_launch_works_on_the_patterns_of_its_freeze_not_on_a_built_in_default(tmp_path):
+    """D24/O2a: a freeze whose alerts pattern is spelled another way from any default is launched valid
+    and no request to the cluster carries the default spelling."""
+    rig = LabRig(tmp_path, patterns=(EVENTS, ALERTS_ALT))
+    rig.write_expected_case("drop")
+    rig.launch()
+
+    assert [r["verdict"] for r in rig.rows()] == ["valid"] and rig.cluster.state() == expected_copy("drop")
+    assert [list(p) for p in rig.ops.digest_patterns] == [[EVENTS, ALERTS_ALT]], rig.ops.digest_patterns
+    asked = json.dumps([[m, p, b] for m, p, b in rig.cluster.requests], default=str)
+    assert ALERTS_PATTERN not in asked
+
+
+@pytest.mark.parametrize("now_configured", [
+    ("logs-*,extra-*", ALERTS_ALT), ("logs-other-*", ALERTS_ALT), (EVENTS, ".internal.alerts-other-*"),
+    ("logs-other-*", ".internal.alerts-other-*")], ids=["events-widened", "events-changed", "alerts-changed", "both-changed"])
+def test_a_launch_is_refused_before_anything_when_the_tenants_patterns_are_no_longer_the_freezes(tmp_path, now_configured):
+    """D24/A2: the lab tenant now configures other patterns than the freeze recorded: no cluster request,
+    no lab op, no run, no row, engine free; with the settings restored the same case launches valid."""
+    rig = LabRig(tmp_path, patterns=(EVENTS, ALERTS_ALT))
+    rig.write_expected_case("none")
+    rig.set_tenant_patterns(*now_configured)
+    rig.launch_module
+
+    with pytest.raises(Exception) as caught:
+        rig.launch()
+
+    assert not isinstance(caught.value, _NOT_A_REFUSAL), repr(caught.value)
+    assert not rig.cluster.requests and rig.ops.stubs is None and rig.ops.marker is None
+    assert "run" not in rig.journal.ops() and rig.rows() == [] and "frozen-engine" not in rig.store.records
+    rig.set_tenant_patterns(EVENTS, ALERTS_ALT)
+    rig.launch()
+    assert [r["verdict"] for r in rig.rows()] == ["valid"]
+
+
+def test_no_lab_script_carries_a_built_in_pattern_default_or_a_pattern_flag():
+    """D24: the freeze owns the patterns; no lab script holds an events/alerts pattern literal or a `--pattern` flag."""
+    scripts = [LAUNCH.parent / name for name in ("launch_frozen.py", "make_case.py", "capture_case.py", "lab_ops.py")]
+    found = []
+    for path in scripts:
+        tree = ast.parse(path.read_text())
+        docs = {id(n.body[0].value) for n in ast.walk(tree) if isinstance(n, (ast.Module, ast.FunctionDef, ast.ClassDef))
+                and n.body and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
+        found += [(path.name, n.value) for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                  and id(n) not in docs and (n.value == "--pattern" or "alerts-default" in n.value or n.value in ("logs-*", EVENTS))]
+    assert not found, found

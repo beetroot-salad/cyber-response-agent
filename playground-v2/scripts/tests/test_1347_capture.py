@@ -1,7 +1,10 @@
 """#1347 r6.4 O1/O10/A5/A9: one capture per freeze, all-or-nothing, under the capture lock.
 
 Entry point bound by this contract: `playground-v2/scripts/capture_case.py::capture(freeze_dir,
-*, T, scenarios, patterns, repository, ops, es, lock_store, parts_dir, clock, captured_by)`.
+*, T, scenarios, repository, tenant_settings, ops, es, lock_store, parts_dir, clock, captured_by)`.
+`tenant_settings` is the lab tenant's `settings/` directory: capture reads the events and alerts
+patterns from its `systems/elastic/config.env` (`ELASTIC_EVENTS_INDEX`, `ELASTIC_ALERTS_INDEX`, D24)
+and records them in `freeze.yaml` as `patterns: [events, alerts]`; there is no `patterns` parameter.
 `freeze_dir` is `held_out/freezes/<freeze-id>/` (the freeze id is its name); parts go under
 `parts_dir/<freeze-id>/`; writes `freeze_dir/freeze.yaml`. `es` is the LIVE cluster through
 the chaos seam's `es_request(method, path, body=None)`. `ops` offers:
@@ -16,20 +19,21 @@ POST `/_snapshot/<repo>/_verify`) and never registers it.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import re
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
 import yaml
-from _lab_fakes import RULES_PART, FakeClock, FakeES, Journal, instant, sha
+from _lab_fakes import RULES_PART, FakeClock, FakeES, Journal, config_env, instant, sha
 from _periphery_fakes import TimedLockStore
 
 CAPTURE = Path(__file__).resolve().parents[1] / "capture_case.py"
 FREEZE_ID = "f-2026-10-20"
 T = instant("2026-10-20T09:00:00Z")
 MAX_AGE = timedelta(hours=6)
-PATTERNS = ["logs-*", ".internal.alerts-security.alerts-default-*"]
+PATTERNS = ["logs-*", ".internal.alerts-security.alerts-*"]   # as the lab tenant configures them (not a built-in default)
 REPO = "frozen-cases"
 SNAP_UUID = "dGhlLXNuYXBzaG90LXV1aWQ"
 COUNTS = {"logs-system.auth-2026.10": 120_400, ".internal.alerts-security.alerts-default-000001": 37}
@@ -109,28 +113,53 @@ class Ops:
 
 
 class Rig:
+    """`occupied` models a repository that already holds a snapshot: "same-name" under whatever name
+    capture asks for first (a reused freeze id), "other-name" under `older`. Creating a snapshot
+    under a taken name fails as Elasticsearch fails it. `clock_step=0` makes `now()` stand still
+    until slept, for exact-boundary tests."""
+
     def __init__(self, tmp_path: Path, fail_at: str | None = None, faults: list | None = None,
-                 state: str = "SUCCESS", repository_registered: bool = True):
+                 state: str = "SUCCESS", repository_registered: bool = True, *, t=T, scenarios=None,
+                 clock_start=None, clock_step: float = 1, occupied: str | None = None,
+                 patterns: list[str] = PATTERNS):
+        self.t, self.scenarios = t, SCENARIOS if scenarios is None else scenarios
         self.journal = Journal()
-        self.clock = FakeClock(self.journal, T - MAX_AGE - timedelta(minutes=5))
+        self.clock = FakeClock(self.journal, clock_start or T - MAX_AGE - timedelta(minutes=5), clock_step)
         self.store = TimedLockStore(self.journal, self.clock)
+        self.tenant_settings = tmp_path / "tenant" / "settings"
+        env = self.tenant_settings / "systems" / "elastic" / "config.env"
+        env.parent.mkdir(parents=True)
+        env.write_text(config_env(*patterns))
+        self.patterns = list(patterns)
         self.held_at: dict[str, list[bool]] = {}
         self.at: dict[str, list] = {}
         self.snapshots: dict[str, dict] = {}  # what the live cluster's repository holds
+        self.preexisting: dict[str, dict] = {}   # what it held before capture touched it
+        self.occupied = occupied
+        if occupied == "other-name":
+            self._seed("older")
         self.ops = Ops(self, fail_at, faults or [])
 
         def route(method, path, body):
-            if method in ("PUT", "POST") and (m := SNAP_URL.match(path)):
+            m = SNAP_URL.match(path)
+            if m and occupied == "same-name" and not self.preexisting:
+                self._seed(m["name"])
+            if method in ("PUT", "POST") and m:
                 self.held_at.setdefault("snapshot", []).append("capture" in self.store.records)
                 self.at.setdefault("snapshot", []).append(self.clock.last)
                 if fail_at == "snapshot":
                     raise RuntimeError("snapshot failed")
+                if m["name"] in self.snapshots:
+                    raise RuntimeError(f"invalid_snapshot_name_exception: [{REPO}:{m['name']}] Invalid "
+                                       f"snapshot name [{m['name']}], snapshot with the same name already exists")
                 self.snapshots[m["name"]] = {"snapshot": m["name"], "uuid": SNAP_UUID,
                                              "state": state, "indices": list(COUNTS)}
                 return {"snapshot": self.snapshots[m["name"]]}
-            if method == "GET" and (m := SNAP_URL.match(path)):
+            if method == "GET" and m:
+                if m["name"] not in self.snapshots:
+                    raise RuntimeError(f"snapshot_missing_exception [{REPO}:{m['name']}]")
                 return {"snapshots": [self.snapshots[m["name"]]]}
-            if method == "DELETE" and (m := SNAP_URL.match(path)):
+            if method == "DELETE" and m:
                 self.snapshots.pop(m["name"], None)
             return {}
 
@@ -144,11 +173,16 @@ class Rig:
         self.parts_dir = tmp_path / "parts"
         self.module = _module()  # loaded here, so a missing script is never the failure a raises() expects
 
+    def _seed(self, name: str) -> None:
+        self.snapshots[name] = {"snapshot": name, "uuid": "AN-EARLIER-FREEZES-UUID", "state": "SUCCESS",
+                                "indices": ["earlier-index"]}
+        self.preexisting[name] = dict(self.snapshots[name])
+
     def capture(self):
         return self.module.capture(
-            self.freeze_dir, T=T, scenarios=SCENARIOS, patterns=PATTERNS, repository=REPO,
-            ops=self.ops, es=self.es, lock_store=self.store, parts_dir=self.parts_dir,
-            clock=self.clock, captured_by="operator")
+            self.freeze_dir, T=self.t, scenarios=self.scenarios, repository=REPO,
+            tenant_settings=self.tenant_settings, ops=self.ops, es=self.es, lock_store=self.store,
+            parts_dir=self.parts_dir, clock=self.clock, captured_by="operator")
 
     def creates(self) -> list[tuple[str, str, object]]:
         return [r for r in self.es.requests
@@ -177,8 +211,8 @@ def test_a_capture_writes_one_freeze_of_every_part_with_the_verification_counts(
 
 
 def test_the_snapshot_covers_the_configured_patterns_after_a_refresh(tmp_path):
-    """O1: one snapshot of every index the events and alerts patterns match, taken after a refresh
-    of them (the parts come first, then refresh, then snapshot)."""
+    """O1/D24: one snapshot of every index the lab tenant's events and alerts patterns match, taken
+    after a refresh of them (the parts come first, then refresh, then snapshot)."""
     rig = Rig(tmp_path)
     rig.capture()
 
@@ -319,3 +353,77 @@ def test_a_capture_is_refused_while_a_fault_is_active_or_the_lock_is_held(tmp_pa
         assert not (rig.freeze_dir / "freeze.yaml").exists() and rig.snapshots == {}
     assert held.store.records["capture"] == "someone-else"
     assert "capture" not in faulted.store.records
+
+
+_NOT_A_REFUSAL = (AttributeError, TypeError, NameError, ImportError)
+
+
+@pytest.mark.parametrize("patterns", [PATTERNS, ["logs-system.*", ".alerts-lab-*"]])
+def test_the_freeze_records_the_patterns_the_lab_tenant_configures_and_capture_takes_none(tmp_path, patterns):
+    """D24/O1: freeze.yaml's `patterns` are the tenant's events and alerts patterns as its config.env
+    has them, and the snapshot is of exactly those; capture has no `patterns` parameter."""
+    rig = Rig(tmp_path, patterns=patterns)
+    settings = (rig.tenant_settings / "systems" / "elastic" / "config.env").read_text()
+    rig.capture()
+
+    doc = yaml.safe_load((rig.freeze_dir / "freeze.yaml").read_text())
+    assert doc["patterns"] == patterns
+    body = rig.creates()[0][2]["indices"]
+    assert sorted(body.split(",") if isinstance(body, str) else body) == sorted(patterns)
+    assert "patterns" not in inspect.signature(rig.module.capture).parameters
+    assert (rig.tenant_settings / "systems" / "elastic" / "config.env").read_text() == settings
+
+
+# -- C7: the moments are ordered (O1 "wait until T", A9 max_age, O7) --------------------------------
+
+_NOW = T - MAX_AGE - timedelta(minutes=5)
+_ONE = timedelta(seconds=1)
+
+
+@pytest.mark.parametrize("scenarios, t, accepted", [
+    ([], _NOW, True), ([], _NOW - _ONE, False), ([], _NOW + timedelta(hours=1), True),
+    (SCENARIOS, _NOW + MAX_AGE, True), (SCENARIOS, _NOW + MAX_AGE - _ONE, False),
+    (SCENARIOS, _NOW + MAX_AGE + _ONE, True)], ids=[
+    "no-scenarios-T-is-now", "no-scenarios-T-one-second-past", "no-scenarios-T-ahead",
+    "scenarios-T-exactly-max-age-ahead", "scenarios-T-one-second-short", "scenarios-T-further-ahead"])
+def test_T_is_not_before_the_capture_starts_and_a_batch_has_the_max_age_before_T(tmp_path, scenarios, t, accepted):
+    """O1/A9: with the clock standing at `now`, T >= now captures (and with scenarios T - now >= max_age);
+    one second less is refused with nothing fired, nothing written, nothing snapshotted and the lock free."""
+    rig = Rig(tmp_path, t=t, scenarios=scenarios, clock_start=_NOW, clock_step=0)
+    if accepted:
+        rig.capture()
+        assert instant(yaml.safe_load((rig.freeze_dir / "freeze.yaml").read_text())["T"]) == t
+        assert sorted(s for s, *_ in rig.ops.fired) == sorted(scenarios)
+        return
+    with pytest.raises(Exception) as caught:
+        rig.capture()
+
+    assert not isinstance(caught.value, _NOT_A_REFUSAL), repr(caught.value)
+    assert not rig.ops.fired and not (rig.freeze_dir / "freeze.yaml").exists()
+    stored = rig.parts_dir / FREEZE_ID
+    assert not stored.exists() or not any(stored.rglob("*"))
+    assert rig.snapshots == {} and "capture" not in rig.store.records
+    assert rig.journal.ops().count("hold_pickups") == rig.journal.ops().count("release_pickups")
+
+
+# -- B3: capture removes only what it wrote ----------------------------------------------------------
+
+_BEFORE_THE_SNAPSHOT = ["hold_pickups", "fire", "proc_tree", "stub_dumps", "commit_hosts", "copy_volumes",
+                        "detection_rules"]
+
+
+@pytest.mark.parametrize("occupied, fail_at, state", [
+    ("same-name", None, "SUCCESS"), ("same-name", "snapshot", "SUCCESS"),
+    *[("other-name", s, "SUCCESS") for s in [*_BEFORE_THE_SNAPSHOT, "snapshot", "verify_restore"]],
+    ("other-name", None, "PARTIAL")])
+def test_a_failed_capture_leaves_the_repositorys_snapshots_exactly_as_it_found_them(tmp_path, occupied, fail_at, state):
+    """O1/A9: whatever step fails, a snapshot that was in the repository before (under the name
+    capture asked for, or another) is still there, unchanged; capture deletes only what it created."""
+    rig = Rig(tmp_path, fail_at=fail_at, state=state, occupied=occupied)
+    with pytest.raises(Exception) as caught:
+        rig.capture()
+
+    assert not isinstance(caught.value, _NOT_A_REFUSAL), repr(caught.value)
+    assert rig.preexisting, "the repository held nothing: the fixture did not reach the snapshot step"
+    assert rig.snapshots == rig.preexisting
+    assert not (rig.freeze_dir / "freeze.yaml").exists() and "capture" not in rig.store.records

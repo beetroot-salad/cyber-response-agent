@@ -9,6 +9,13 @@ stands in for `docker --context <context> ...`: nothing here runs docker (a loca
 execute the proxy program). Every value is looked for in what `run` was handed (argv, `input=`,
 `env=`), so the test fixes the content sent, not the docker flag it rides on.
 
+r6.4.2 (attack batch 1), also bound here: the real `LabOps` takes `es=` (the frozen cluster through the
+chaos seam's `es_request(method, path, body=None)`) and answers `content_digest(patterns)` from the
+documents it reads there for the freeze's patterns and from the stub stores it loaded;
+`ensure_node()` starts the frozen node if it is stopped; `teardown()` leaves no container running
+that the other operations started. `live_run_alerts()` and `ticketed_alerts()` read `V2_RUNS_DIR` and
+`V2_FROZEN_PARTS_DIR` from the environment and raise when one is unset.
+
 Deferred to the operator (needs the lab): that the shim really shifts Elasticsearch's wall clock, that
 the stub containers honour `V2_STUB_AS_OF`, and that the frozen proxy reaches OpenBao and the frozen
 engine's frontends.
@@ -22,7 +29,9 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-from _lab_fakes import CMDB_STALE, T, instant
+import pytest
+from _lab_fakes import ALERTS, CMDB_STALE, EVENTS, NGINX, REPO, SNAP, T, ALERTS_PATTERN, LabRig, instant
+from _periphery_fakes import FakeDocker
 
 LAB_OPS = Path(__file__).resolve().parents[1] / "lab_ops.py"
 HOSTS = ["elastic.lab.example", "kibana.lab.example"]
@@ -46,14 +55,14 @@ class Recorder:
         return "\n".join(parts)
 
 
-def _ops(tmp_path):
+def _ops(tmp_path, run=None, **extra):
     spec = importlib.util.spec_from_file_location("lab_ops_1347", LAB_OPS)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    rec = Recorder()
+    rec = Recorder() if run is None else run
     ops = module.LabOps(run=rec, tenant_hosts=HOSTS, frozen_endpoint=ENDPOINT,
-                        audit_path=AUDIT, live_audit_path=LIVE_AUDIT)
+                        audit_path=AUDIT, live_audit_path=LIVE_AUDIT, **extra)
     return SimpleNamespace(ops=ops, rec=rec)
 
 
@@ -152,3 +161,97 @@ def test_the_node_restart_hands_the_clock_offset_to_the_frozen_elasticsearch_thr
     assert any(v == "-1234567" for e in env for v in map(str, e.values())) or any(
         re.search(rf"[=:]\s*[\"']?-1234567(?={stop}|$)", t) for t in _search_texts(lab.rec)), blob
     assert any("restart" in a or "elasticsearch" in a for argv, _ in lab.rec.calls for a in argv)
+
+
+# =====================================================================================================
+# r6.4.2 repairs (attack batch 1)
+# =====================================================================================================
+
+
+def _stub_parts(tmp_path, body=b"stub-dump-bytes"):
+    parts = tmp_path / "stub-parts"
+    parts.mkdir(exist_ok=True)
+    (parts / "stubs.tar").write_bytes(body)
+    return parts
+
+
+@pytest.mark.parametrize("started", [("start_proxy",), ("load_stubs",), ("restart_node",),
+                                     ("load_stubs", "restart_node", "start_proxy")])
+def test_teardown_leaves_no_container_running_that_the_operations_started(tmp_path, started):
+    """C8/A1: after start_proxy, load_stubs and the node restart in any combination, no container
+    they brought up (the proxy, the frontends, the stubs, the node) is still running."""
+    docker = FakeDocker()
+    lab = _ops(tmp_path, run=docker)
+    parts = _stub_parts(tmp_path)
+    do = {"start_proxy": lab.ops.start_proxy, "load_stubs": lambda: lab.ops.load_stubs(parts, T, [CMDB_STALE]),
+          "restart_node": lambda: lab.ops.restart_node(-1_234_567)}
+    for name in started:
+        do[name]()
+    assert not docker.unmodelled, f"the fake docker does not model: {docker.unmodelled}"
+    if "start_proxy" in started or "restart_node" in started:
+        assert docker.started & docker.running(), "nothing was brought up: the fixture did not reach the claim"
+
+    lab.ops.teardown()
+
+    assert not docker.started & docker.running(), sorted(docker.started & docker.running())
+
+
+def _digest_lab(tmp_path, *, body=b"stub-dump-bytes", mutations=None):
+    """A real LabOps over a restored copy of the world, its stubs loaded; returns (lab, rig)."""
+    rig = LabRig(tmp_path)
+    rig.cluster.es_request("PUT", f"/_snapshot/{REPO}", {"type": "fs", "settings": {"readonly": True}})
+    rig.cluster.es_request("POST", f"/_snapshot/{REPO}/{SNAP}/_restore", {})
+    lab = _ops(tmp_path, run=FakeDocker(), es=rig.cluster)
+    lab.ops.load_stubs(_stub_parts(tmp_path, body), T, mutations)
+    return lab, rig
+
+
+def test_the_content_digest_follows_every_document_and_every_stub_byte(tmp_path):
+    """C8/A1: the same copy and stubs give the same digest; any one document altered, added, removed
+    or re-versioned, one stub byte, or the stub mutations, give another."""
+    patterns = [EVENTS, ALERTS_PATTERN]
+    lab, rig = _digest_lab(tmp_path / "base")
+    digest = lab.ops.content_digest(patterns)
+    assert isinstance(digest, str) and digest
+    assert lab.ops.content_digest(patterns) == digest
+    assert _digest_lab(tmp_path / "again")[0].ops.content_digest(patterns) == digest
+
+    def edits(r):
+        doc = r.cluster.indices[NGINX]["docs"]["nginx-03"]
+        return {
+            "altered": lambda: doc["_source"].__setitem__("message", "GET /changed"),
+            "re-versioned": lambda: doc.__setitem__("_version", 2),
+            "removed": lambda: r.cluster.indices[NGINX]["docs"].pop("nginx-03"),
+            "added": lambda: r.cluster.put(NGINX, "nginx-99", {"@timestamp": "2026-10-20T05:00:00Z", "message": "new"}),
+            "alert altered": lambda: r.cluster.indices[ALERTS]["docs"]["id-young"]["_source"].__setitem__("host.name", "web-2"),
+        }
+
+    for name in edits(rig):
+        lab2, rig2 = _digest_lab(tmp_path / name.replace(" ", "-"))
+        edits(rig2)[name]()
+        assert lab2.ops.content_digest(patterns) != digest, name
+
+    assert _digest_lab(tmp_path / "byte", body=b"stub-dump-bytez")[0].ops.content_digest(patterns) != digest
+    assert _digest_lab(tmp_path / "flip", mutations=[CMDB_STALE])[0].ops.content_digest(patterns) != digest
+
+
+# -- B2: an exclusion source that is not configured refuses, it never reads as "none excluded" ------------
+
+
+def test_a_live_run_or_ticket_source_that_is_not_configured_refuses_instead_of_excluding_nothing(tmp_path, monkeypatch):
+    """B2/O13: with V2_RUNS_DIR and V2_FROZEN_PARTS_DIR unset the two lookups raise, not return an empty
+    set; with both set to existing (empty) directories they return empty sets."""
+    lab = _ops(tmp_path, run=FakeDocker())
+    runs, parts = tmp_path / "runs", tmp_path / "frozen-parts"
+    runs.mkdir()
+    parts.mkdir()
+    monkeypatch.setenv("V2_RUNS_DIR", str(runs))
+    monkeypatch.setenv("V2_FROZEN_PARTS_DIR", str(parts))
+    assert lab.ops.live_run_alerts() == set() and lab.ops.ticketed_alerts() == set()
+
+    monkeypatch.delenv("V2_RUNS_DIR")
+    monkeypatch.delenv("V2_FROZEN_PARTS_DIR")
+    for lookup in (lab.ops.live_run_alerts, lab.ops.ticketed_alerts):
+        with pytest.raises(Exception) as caught:
+            lookup()
+        assert not isinstance(caught.value, (AttributeError, TypeError, NameError)), repr(caught.value)

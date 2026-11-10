@@ -6,6 +6,7 @@ Imports `_lab_fakes` read-only.
 from __future__ import annotations
 
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -102,3 +103,152 @@ def containers_in(log: Path) -> set[str]:
             i += 2 if rest[i] in ("-u", "-e", "-w", "--user", "--env", "--workdir") else 1
         found.add(rest[i])
     return found
+
+
+# -- docker, as the real lab operations see it ---------------------------------------------------
+
+_VALUE_OPTS = {"--name", "-e", "--env", "-v", "--volume", "-p", "--publish", "--network", "--net", "-w",
+               "--workdir", "-u", "--user", "--add-host", "--env-file", "--entrypoint", "-l", "--label",
+               "--restart", "-m", "--memory", "--cpus", "-h", "--hostname", "--ip", "--dns", "--mount",
+               "--log-driver", "--pid", "--cap-add", "--cap-drop", "--security-opt", "--ulimit",
+               "--tmpfs", "--device", "--group-add", "--platform", "--pull", "--health-cmd", "--network-alias"}
+_GLOBAL_OPTS = {"--context", "-c", "-H", "--host", "--config", "-l", "--log-level"}
+
+
+def _words(text: str) -> list[str]:
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
+
+
+class FakeDocker:
+    """A `run=` that behaves as the docker CLI does for the container life cycle, and records every call.
+
+    Models: `run` (detached = running; foreground = ran and exited; `--rm` removes it), `create`,
+    `start`, `restart`, `stop`, `kill`, `rm [-f]` (a running container needs `-f`; `-f` on a missing
+    one is silent), and `exec` with a nested `docker ...` (also inside `sh -c "..."`), which acts on
+    the engine inside that container (a different scope). A container the model has not seen but
+    that a command names is taken to exist already, running (the deployed stack). Nothing else
+    changes state; every other verb succeeds with empty output. A verb that creates or removes
+    containers in a way the model does not parse (`compose`, `swarm`, `service`, `stack`) is listed
+    in `unmodelled`, so a test says so instead of passing on a container it never saw.
+
+    `running()` is `{(scope, name)}` now; `started` is every container a `run -d`, `start`,
+    `restart` or `create`+`start` brought up, whether or not it still runs."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], dict]] = []
+        self.state: dict[tuple[str, str], str] = {}     # (scope, name) -> running | exited | created
+        self.started: set[tuple[str, str]] = set()
+        self.unmodelled: list[str] = []
+        self._anon = 0
+
+    def __call__(self, argv, **kw):
+        self.calls.append((list(argv), kw))
+        failure = self._docker([str(a) for a in argv], "", kw)
+        rc, out, err = failure if failure else (0, "", "")
+        done = subprocess.CompletedProcess(argv, rc, stdout=out, stderr=err)
+        if rc and kw.get("check"):
+            raise subprocess.CalledProcessError(rc, argv, output=out, stderr=err)
+        return done
+
+    def running(self) -> set[tuple[str, str]]:
+        return {k for k, v in self.state.items() if v == "running"}
+
+    def _docker(self, argv: list[str], scope: str, kw: dict):
+        if not argv or argv[0] != "docker":
+            return None
+        i = 1
+        while i < len(argv) and argv[i].startswith("-"):
+            i += 2 if argv[i] in _GLOBAL_OPTS else 1
+        if i >= len(argv):
+            return None
+        verb, rest = argv[i], argv[i + 1:]
+        if verb in ("run", "create"):
+            return self._run(verb, rest, scope)
+        if verb in ("start", "restart", "stop", "kill", "rm", "exec"):
+            names = [a for a in rest if not a.startswith("-")]
+            if verb == "exec":
+                return self._exec(rest, scope, kw)
+            return self._lifecycle(verb, rest, names, scope)
+        if verb in ("compose", "swarm", "service", "stack"):
+            self.unmodelled.append(" ".join(argv))
+        return None
+
+    def _run(self, verb: str, rest: list[str], scope: str):
+        name, detach, remove, j = None, False, False, 0
+        while j < len(rest) and rest[j].startswith("-"):
+            opt = rest[j]
+            if opt.startswith("--name="):
+                name = opt.split("=", 1)[1]
+            elif opt == "--name":
+                name, j = rest[j + 1], j + 1
+            elif opt in ("-d", "--detach"):
+                detach = True
+            elif opt == "--rm":
+                remove = True
+            elif opt in _VALUE_OPTS:
+                j += 1
+            j += 1
+        out = ""
+        if name is None:
+            self._anon += 1
+            name = f"anon{self._anon:04d}"
+            out = f"{name}\n"
+        key = (scope, name)
+        if key in self.state and self.state[key] != "removed":
+            return 125, "", f"Conflict. The container name \"{name}\" is already in use"
+        if verb == "create":
+            self.state[key] = "created"
+        elif detach:
+            self.state[key] = "running"
+            self.started.add(key)
+        else:
+            self.state[key] = "exited"
+        if remove and not detach and verb == "run":
+            del self.state[key]
+        return 0, out, ""
+
+    def _lifecycle(self, verb: str, rest: list[str], names: list[str], scope: str):
+        force = any(a in ("-f", "--force") for a in rest)
+        for name in names:
+            key = (scope, name)
+            if key not in self.state:
+                if verb == "rm" and force:
+                    continue
+                self.state[key] = "running"          # deployed before the test began
+            current = self.state[key]
+            if verb in ("start", "restart"):
+                self.state[key] = "running"
+                self.started.add(key)
+            elif verb in ("stop", "kill"):
+                if current == "running":
+                    self.state[key] = "exited"
+            elif verb == "rm":
+                if current == "running" and not force:
+                    return 1, "", f"Error response from daemon: cannot remove container \"{name}\": container is running"
+                del self.state[key]
+        return None
+
+    def _exec(self, rest: list[str], scope: str, kw: dict):
+        j = 0
+        while j < len(rest) and rest[j].startswith("-"):
+            j += 2 if rest[j] in ("-u", "-e", "-w", "--user", "--env", "--workdir") else 1
+        if j >= len(rest):
+            return None
+        container, command = rest[j], rest[j + 1:]
+        key = (scope, container)
+        self.state.setdefault(key, "running")
+        if self.state[key] != "running":
+            return 1, "", f"Error response from daemon: container {container} is not running"
+        inner = (scope + "/" if scope else "") + container
+        commands = [command]
+        if len(command) >= 3 and command[0].rsplit("/", 1)[-1] in ("sh", "bash") and command[1].endswith("c"):
+            commands = [_words(part) for part in re.split(r"&&|\|\||;|\n", command[2]) if part.strip()]
+        result = None
+        for cmd in commands:
+            result = self._docker(cmd, inner, kw) or result
+            if result and result[0]:
+                return result
+        return result
