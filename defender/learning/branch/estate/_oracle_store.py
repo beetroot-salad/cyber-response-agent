@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 
+from defender.kit.faults import ORIGIN_ACCESS, ORIGIN_SETUP, AdapterFault
 from defender.records.formats import OracleStorePaths
 
 from defender._io import guarded_mkdir, read_bytes_capped, read_jsonl_rows, write_guarded
@@ -269,6 +270,10 @@ class QueryDoor:
     limiter: RateLimiter
     store: OracleStore
     context: Callable[[], Any]
+    #: How many lookups failed on our side (a `setup` or `access` fault, #1363 O8), and the first one's
+    #: system and detail: read by the serving that asked, to say whether an attempt failed our way.
+    ours_count: int = 0
+    ours_first: tuple[str, str] | None = None
 
     def run(self, actor: str, system: Any, verb: Any, params: Any, *,
             waits: LimiterWaits) -> Any:
@@ -306,6 +311,9 @@ class QueryDoor:
         outside_the_run = CALL_RUN_STATE.set(None)
         try:
             answer = fn(self.context(), **dict(params))
+        except AdapterFault as exc:
+            self._log(actor, system, verb, params)
+            raise self._refusal(system, verb, exc) from None
         except Exception as exc:  # noqa: BLE001 — a tenant error is the oracle's to see
             self._log(actor, system, verb, params)
             raise Refused(f"run_query {system}.{verb} failed at the tenant: "
@@ -315,6 +323,18 @@ class QueryDoor:
         self._log(actor, system, verb, params)
         # One spelling, as every served payload: the adapter's own answer, round-tripped.
         return json.loads(json.dumps(answer, sort_keys=True, default=str))
+
+    def _refusal(self, system: str, verb: str, exc: AdapterFault) -> Exception:
+        """What a lookup's adapter fault becomes: our own failure (a `setup` or `access` fault, #1363
+        O8) fails the attempt as the oracle's own machinery does (M03=A) and tells the oracle nothing
+        of its cause; any other is the tenant's answer, shown to the oracle."""
+        if exc.origin in (ORIGIN_SETUP, ORIGIN_ACCESS):
+            self.ours_count += 1
+            if self.ours_first is None:
+                self.ours_first = (system, exc.detail)
+            return _AttemptFailed(f"run_query {system}.{verb} could not be made (a failure on our side)")
+        return Refused(f"run_query {system}.{verb} failed at the tenant: "
+                       f"{type(exc).__name__}: {exc}")
 
     def _log(self, actor: str, system: str, verb: str, params: Mapping[str, Any]) -> None:
         try:

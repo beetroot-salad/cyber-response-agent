@@ -83,12 +83,17 @@ class OracleUnservable(ServingAbort):
     failed on. A `ServingAbort`, so the query tool re-raises it rather than filing a fault row
     or charging the circuit breaker: the sibling aborts and records its world as unservable."""
 
-    def __init__(self, reason: str, call: tuple[str, str, dict], detail: str = "") -> None:
+    def __init__(self, reason: str, call: tuple[str, str, dict], detail: str = "", *,
+                 our_fault: bool = False, our_cause: tuple[str, str] | None = None) -> None:
         system, verb, params = call
         super().__init__(f"the oracle could not serve {system}.{verb} ({reason}): {detail}")
         self.reason = reason
         self.call = (system, verb, dict(params))
         self.detail = detail
+        #: True when an attempt of this serving failed because a lookup met our own failure (a
+        #: `setup` or `access` fault, #1363 O7), with `our_cause` the system and detail of the first.
+        self.our_fault = our_fault
+        self.our_cause = our_cause
 
 
 class OracleSandboxError(RuntimeError):
@@ -478,15 +483,17 @@ class Oracle:
             # the first abort found writes the world's record, which must name the failing call
             # (S8), not one the oracle never saw.
             stop = self.unservable
-            raise OracleUnservable(stop.reason, stop.call, stop.detail)
+            raise OracleUnservable(stop.reason, stop.call, stop.detail,
+                                   our_fault=stop.our_fault, our_cause=stop.our_cause)
         failures = 0
+        ours_before = self.door.ours_count
         first = True
         while True:
             try:
                 result = self._attempt(call, base, real, first=first, fixed=fixed, live=live,
                                        gate=gate)
             except _BudgetSpent as spent:
-                stop = OracleUnservable(REASON_BUDGET, call, str(spent))
+                stop = OracleUnservable(REASON_BUDGET, call, str(spent), **self._ours(ours_before))
                 self._give_up(stop)
                 raise stop from None
             except ServingAbort:
@@ -495,7 +502,8 @@ class Oracle:
                 _logger.exception(f"the oracle's serving of {call[0]}.{call[1]} broke; the "
                                   "world goes unservable")
                 stop = OracleUnservable(REASON_FAULT, call,
-                                        f"the oracle's serving broke ({type(broken).__name__})")
+                                        f"the oracle's serving broke ({type(broken).__name__})",
+                                        **self._ours(ours_before))
                 self._give_up(stop)
                 raise stop from broken
             first = False
@@ -511,7 +519,7 @@ class Oracle:
             failures += 1
             self._failures = [*self._failures, result][-5:]
             if failures >= self.retry_cap:
-                stop = OracleUnservable(REASON_RETRIES, call, result)
+                stop = OracleUnservable(REASON_RETRIES, call, result, **self._ours(ours_before))
                 self._give_up(stop)
                 raise stop
 
@@ -563,6 +571,12 @@ class Oracle:
         reported = str(getattr(response, "model_name", None) or self._price_rows[actor])
         self.store.charge(actor, reported, billed_usage(getattr(response, "usage", None)),
                           priced_as=self._price_rows[actor])
+
+    def _ours(self, before: int) -> dict[str, Any]:
+        """The give-up's mark: whether a lookup of this serving (since `before`) failed our way."""
+        if self.door.ours_count > before:
+            return {"our_fault": True, "our_cause": self.door.ours_first}
+        return {}
 
     def _give_up(self, stop: OracleUnservable) -> None:
         self.unservable = stop
