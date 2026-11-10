@@ -9,13 +9,15 @@ tenant ids normalised, so wording is pinned only where the design words it.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
+import re
 import subprocess
+import sys
 
 import pytest
 import yaml
 
-from defender.cli import tenant as tenant_py
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — the fixture
 from defender.tests.support.tenancy import _systems1366 as R
@@ -438,15 +440,16 @@ def test_1366_o2_a_tenant_with_no_case_record_passes_check(tenants):
 
 # --- C3: one case judgement, three callers -- `check`'s caller, over a case adapter the checkout carries ---------------
 
-CASESYS = "casesys"
+#: The case system's id holds no "case", so a line naming it and the case is not satisfied by the id alone.
+CASESYS = "helpdesk"
 CASE_ROUTE = ("POST", "/rest/*/comment")
 #: A sound case adapter: the cold K2 constants, a settings check, the comment action and its declared route (C1).
 CASE_ADAPTER = (
     "from defender.kit import transport\n\n"
-    "PREFIX = 'CASESYS'\nREQUIRED_CONFIG_KEYS = ('TIMEOUT_SEC',)\nPATH_KEYS = ()\n"
-    "DISPLAY_NAME = 'Case system'\nEXAMPLE = {}\n\n\n"
+    "PREFIX = 'HELPDESK'\nREQUIRED_CONFIG_KEYS = ('TIMEOUT_SEC',)\nPATH_KEYS = ()\n"
+    "DISPLAY_NAME = 'Help desk'\nEXAMPLE = {}\n\n\n"
     "def check_settings(tenant):\n"
-    "    transport.check_settings_of(tenant, 'casesys', 'CASESYS')\n\n\n"
+    "    transport.check_settings_of(tenant, 'helpdesk', 'HELPDESK')\n\n\n"
     "def comment_route(settings):\n    return ('POST', '/rest/*/comment')\n\n\n"
     "def health_check(ctx):\n    return {}\n\n\n"
     "def add_case_comment(ctx, *, key, body):\n    return None\n\n\n"
@@ -455,7 +458,7 @@ CASE_ADAPTER_VARIANTS = {
     "verbs-hold-the-comment-action": CASE_ADAPTER.replace(
         "VERBS = {'health-check': health_check}", "VERBS = {'health-check': health_check, 'add_case_comment': health_check}"),
     "check-crashes": CASE_ADAPTER.replace(
-        "    transport.check_settings_of(tenant, 'casesys', 'CASESYS')\n", "    return tenant.grants.missing\n"),
+        "    transport.check_settings_of(tenant, 'helpdesk', 'HELPDESK')\n", "    return tenant.grants.missing\n"),
     "no-check": CASE_ADAPTER.replace("def check_settings(tenant):", "def _unused(tenant):"),
 }
 
@@ -466,25 +469,44 @@ def _grants_with_casesys() -> str:
     return yaml.safe_dump(doc, sort_keys=False)
 
 
+#: Runs `defender.cli.tenant.main(argv, secrets=)` of a tmp checkout: the checkout's own packages first on the path, the
+#: worktree's test support after it (namespace packages: `defender.tests` resolves there), the operator's OpenBao a KV
+#: stand-in holding argv[1]'s credential sets -- as `R.Operator` drives `check` in-process.
+_CHECK_DRIVER = """
+import json, sys
+from defender.cli import tenant
+from defender.tests.support.tenancy import _systems1366 as R
+kv = R.KvStandIn()
+kv.held.update(json.loads(sys.argv[1]))
+sys.exit(tenant.main(sys.argv[2:], secrets=R.operator_secrets(kv)))
+"""
+
+
 def _casesys_check(tenants, data_root, tmp_path, adapter: str) -> subprocess.CompletedProcess:
-    """`tenant.py check <id>` as a process from a tmp checkout whose adapters also hold `casesys` (`adapter`), over a
-    tenant with a `casesys` record and the case record naming it; the database from `DEFENDER_DATABASE_DSN`."""
+    """`check <id>` of a tmp checkout whose adapters also hold `helpdesk` (`adapter`), over a tenant with a `helpdesk`
+    record and the case record naming it, every system credentialed at its generation (`_stocked`), so neither a
+    missing secret store nor "no credentials" can decide the outcome; the database from `DEFENDER_DATABASE_DSN`."""
     checkout = H.tmp_checkout(tmp_path / "checkout")
     H.add_adapter(checkout, CASESYS, adapter)
-    script = checkout / H.script_of(tenant_py).resolve().relative_to(H.REPO_ROOT)
     systems = {**R.fixture_records().systems,
-               CASESYS: R.SysSpec({"CASESYS_TIMEOUT_SEC": "5"}, R.declaration("https://cases.example.test", writes=(CASE_ROUTE,)))}
+               CASESYS: R.SysSpec({"HELPDESK_TIMEOUT_SEC": "5"}, R.declaration("https://cases.example.test", writes=(CASE_ROUTE,)))}
     op = tenants(R.RecordsSpec(systems, R.CaseSpec(CASESYS)), files={"settings/verb-grants.yaml": _grants_with_casesys()})
-    return H.run_script(script, "check", op.tid, root=data_root)
+    _stocked(op)
+    env = H.tenant_env(data_root)
+    env["PYTHONPATH"] = os.pathsep.join((str(checkout), str(H.REPO_ROOT)))
+    return subprocess.run(  # noqa: S603 -- fixed argv, the test's own interpreter
+        [sys.executable, "-c", _CHECK_DRIVER, json.dumps(op.kv.held), "check", op.tid], env=env, cwd=str(checkout),
+        capture_output=True, text=True, timeout=180, check=False)
 
 
 def _case_lines(done: subprocess.CompletedProcess) -> list[str]:
+    """Lines naming the case system and, as a word, the case."""
     return [line for line in (done.stdout + done.stderr).splitlines()
-            if CASESYS in line and "case" in line.lower() and "credential" not in line]
+            if CASESYS in line and re.search(r"\bcase\b", line, re.IGNORECASE)]
 
 
 def test_1366_c3_check_over_a_sound_case_adapter_judges_the_case_system_clean(tenants, data_root, tmp_path):
-    """Positive control for the two tests below: the sound `casesys` adapter (the cold constants, a settings check, the
+    """Positive control for the two tests below: the sound `helpdesk` adapter (the cold constants, a settings check, the
     comment action declared as a route, not held in `VERBS`) draws no line naming the case system and the case, and no
     traceback. (#1366 C3: one case judgement, `check` its caller; O1)"""
     done = _casesys_check(tenants, data_root, tmp_path, CASE_ADAPTER)

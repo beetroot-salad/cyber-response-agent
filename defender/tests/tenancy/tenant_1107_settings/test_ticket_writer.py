@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import html
-import inspect
 import json
 import logging
 from pathlib import Path
@@ -211,17 +210,14 @@ def _with_report(run_dir: Path) -> None:
 def _directory_with_twin(root: Path, tenant: str) -> tuple[Any, Any]:
     """`(directory, twin)`: the in-process directory `with_publish` would build for `tenant` (active, forge wiring,
     mapping and records derived from its planted settings), with its memory twin kept so a test can write records
-    through the twin's public seeder (`add_records`) while a run is under way."""
-    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+    through the twin's public seeder (`add_records`) while a run is under way. Seeded as `tenant_directory` seeds it,
+    including the sign generation run start needs for the proxied elastic (#1391 P1/D12)."""
+    from defender.tenancy import TenantDirectory
+    from defender.tests.support.shared._locations_1210 import location_path
     from defender.tests.support.tenancy import _active1214
+    from defender.tests.support.tenancy._proxied1391 import sign_generation
 
-    twin: Any = InMemoryTenantRepository()
-    added = twin.add_tenant(tenant, created_at=_active1214.CREATED, state="active", repo=f"tenants/{tenant}",
-                            origin=_active1214._origin_of(root, tenant, None))
-    if inspect.isawaitable(added):
-        _active1214.run_sync(_active1214._await(added))
-    _active1214.seed_twin(twin, tenant, _active1214.PLANTED_ALERT_MAPPING)
-    _active1214.seed_twin_records(twin, root, tenant)
+    twin = _active1214.active_repository(Path(location_path(root)), tenant, generations=[sign_generation(tenant)])
     return TenantDirectory(lambda: twin), twin
 
 

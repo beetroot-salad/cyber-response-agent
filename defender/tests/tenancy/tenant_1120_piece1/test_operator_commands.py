@@ -77,22 +77,10 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
     assert "agent: gather" in capsys.readouterr().out
 
 
-def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_without_a_traceback(
-        data_root: Path, tmp_path: Path) -> None:
-    """validate_scaffold and the census lint catch TenantRefused and surface its message in their
-    own idiom, never a traceback."""
-    elsewhere = tmp_path / "elsewhere" / "knowledge"
-    shutil.copytree(H.FIXTURE, elsewhere)
-    H.write_tenant_id_file(elsewhere, H.TID, "id")
-    link = H.knowledge_dir(data_root)
-    link.parent.mkdir(parents=True)
-    link.symlink_to(elsewhere, target_is_directory=True)
-    # (#1366 O1/O11: connect's `validate_scaffold` is a no-tenant surface judging the handoff; its `--tenant` halves of
-    # this test -- the acceptance refusal as a WARN and its positive control -- are retired. The guard of the other
-    # surfaces stays: the placed-for-real folder is accepted, and the census lint below refuses a fixture with a link.)
-    link.unlink()
-    shutil.move(str(elsewhere), str(link))
-
+def test_1120_the_census_lint_refuses_a_fixture_with_a_link_without_a_traceback(tmp_path: Path) -> None:
+    """The census lint refuses a fixture holding a link, in its own idiom, never a traceback; the clean checkout passes.
+    (Its validate_scaffold half is retired: connect's validator is a no-tenant surface judging the handoff, #1366
+    O1/O11.)"""
     # The census lint over a tmp repo whose fixture folder acceptance's folder rules refuse.
     repo = H.tmp_checkout(tmp_path / "repo")
     lint = _census_lint(repo)
