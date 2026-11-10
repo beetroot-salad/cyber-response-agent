@@ -36,6 +36,10 @@ if TYPE_CHECKING:
         store_policies as store_policies,
         transit_key_for as transit_key_for,
     )
+    from defender.credential_proxy._records import (
+        PostgresSystemRecords as PostgresSystemRecords,
+        SystemRecordsPort as SystemRecordsPort,
+    )
     from defender.credential_proxy._tokens import (
         mint_request_token as mint_request_token,
     )
@@ -47,6 +51,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("CredentialSet",), "_credentials"),
     **dict.fromkeys(("TenantRequestSigner", "request_signer", "signing_access",), "_launcher"),
     **dict.fromkeys(("OpenBaoSecrets", "OpenBaoStore", "TransitVerifier", "store_policies", "transit_key_for",), "_openbao"),
+    **dict.fromkeys(("PostgresSystemRecords", "SystemRecordsPort",), "_records"),
     **dict.fromkeys(("mint_request_token",), "_tokens"),
 }
 
