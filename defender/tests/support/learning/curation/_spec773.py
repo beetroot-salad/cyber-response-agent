@@ -32,8 +32,15 @@ from defender.tests.support.learning.curation._drain719 import (  # noqa: F401 �
 from defender.learning.author import drain
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.core.config import LoopPaths
-from defender.learning.core.state import QUESTIONER_FINDINGS, Channel, LearningState
+from defender.learning.core.state import QUESTIONER_FINDINGS, Channel
 from defender.tests.support.learning.curation._curator1134 import author_trees
+
+
+def _handle(paths):
+    """TEMPORARY census opener: the deleted file handle, named where it is used so a stale test fails at the call."""
+    from defender.learning.core.state import LearningState
+
+    return LearningState.open(paths)
 
 
 #: The graveyard reason that tells a deferral reaching the ceiling apart from a fault exit.
@@ -175,7 +182,7 @@ def build_scene(  # noqa: PLR0913 — one tick's whole world, threaded rather th
     curator = curator if curator is not None else FakeCurator()
 
     base = lessons_run.build_author_config(
-        paths, state=LearningState.open(paths), trees=author_trees(paths))
+        paths, state=_handle(paths), trees=author_trees(paths))
     wiring: dict[str, Any] = {"invoke_agent": curator}
     wiring.update(cfg_overrides)
     cfg = dataclasses.replace(base, **wiring)
@@ -232,7 +239,7 @@ def build_questioner_scene(
     curator = curator if curator is not None else FakeCurator()
 
     base = questioner_run.build_questioner_config(
-        paths, state=LearningState.open(paths), trees=author_trees(paths))
+        paths, state=_handle(paths), trees=author_trees(paths))
     wiring: dict[str, Any] = {"invoke_agent": curator}
     wiring.update(cfg_overrides)
     cfg = dataclasses.replace(base, **wiring)
@@ -299,7 +306,7 @@ def _draft_scene(  # noqa: PLR0913 — one draft tick's whole world, threaded ra
     seed(lane.paths, channel, rows)
     # A fresh fake per scene (it records its calls), so it cannot be a signature default.
     fake = curator if curator is not None else FakeCurator()
-    base = build(lane, state=LearningState.open(lane.paths))
+    base = build(lane, state=_handle(lane.paths))
     wiring: dict[str, Any] = {"invoke_agent": fake}
     wiring.update(cfg_overrides)
     cfg = dataclasses.replace(base, **wiring)

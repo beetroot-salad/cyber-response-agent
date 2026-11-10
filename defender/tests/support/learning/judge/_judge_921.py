@@ -417,26 +417,16 @@ def grade_at(episode_dir: Path, *, runs: Any = None, **kw: Any) -> Any:
     return mod("learning.judge").grade_episode(repository, episode_dir.name, **kw)
 
 
-def grade(episode_dir: Path, *, judge: Any = None, state: Any = None, **kw: Any) -> Any:
-    """`grade_at` with `judge=None` meaning `scripted_judge()`. With no `state`, it injects the
-    scratch state when `STATE_DIR_ENV` is set, otherwise the episode tenant's prepared learning
-    state; the launcher's production state selection is not exercised."""
-    if state is None:
-        from defender.tests.support.learning.core._state1135 import env_state
+def grade(episode_dir: Path, *, judge: Any = None, store: Any = None, **kw: Any) -> Any:
+    """`grade_at` with `judge=None` meaning `scripted_judge()`. An operator's pass inserts its findings into `store`
+    (#1278: the learning store's synchronous face); with none given it gets a fresh `MemoryStore`, which the caller
+    can pass itself to read back what was queued. A job-lane pass (`job_lane=True`) reaches no store."""
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
 
-        if os.environ.get(STATE_DIR_ENV):
-            state = env_state()
-        else:
-            from defender.learning.core.config import LoopPaths
-            from defender.learning.core.state import LearningState
-            from defender.tenancy._tenant import requested_tenant
-
-            data_root, tenant_id = episode_location(episode_dir)
-            tenant = requested_tenant(fixture_data_root(data_root), tenant_id)
-            location_path(tenant.learning).mkdir(exist_ok=True)
-            state = LearningState.open(LoopPaths.for_tenant(tenant))
+    if store is None and not kw.get("job_lane"):
+        store = MemoryStore()
     return grade_at(episode_dir, judge=judge if judge is not None else scripted_judge(),
-                    state=state, **kw)
+                    store=store, **kw)
 
 
 def judge_record(episode_dir: Path) -> dict:

@@ -17,7 +17,7 @@ from defender.learning.author import drain  # type: ignore[import-not-found]  # 
 from defender.learning.author.lessons import run as lessons_run  # type: ignore[import-not-found]
 from defender import _flock as _lockfile  # type: ignore[import-not-found]
 from defender.learning.core.state import (  # type: ignore[import-not-found]
-    FINDINGS, PITFALLS, QUESTIONER_FINDINGS, Channel, LearningState,
+    FINDINGS, PITFALLS, QUESTIONER_FINDINGS, Channel,
 )
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 
@@ -33,6 +33,7 @@ ALL_CHANNELS = AUTHOR_CHANNELS + ("pitfalls",)
 #: channel name -> the channel's real config builder.
 def _findings_cfg(paths: LoopPaths):
     """The real findings config over `paths`."""
+    from defender.learning.core.state import LearningState
     from defender.tests.support.learning.curation._curator1134 import author_trees
 
     return lessons_run.build_author_config(
