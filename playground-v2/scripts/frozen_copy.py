@@ -19,7 +19,9 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+import os
 import re
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,8 +43,17 @@ class CopyRefused(RuntimeError):
     """The freeze or case cannot be served as it stands (a part, the snapshot's UUID)."""
 
 
+class NotConfigured(CopyRefused):
+    """The lab tenant's settings (its directory, or the index patterns in them) are not available."""
+
+
 class CopyFault(RuntimeError):
     """The copy could not be made."""
+
+
+class NodeNotReady(RuntimeError):
+    """The node is running but not answering yet (connection refused, 502/503/504): the one failure
+    a health poll waits out. The cluster seam raises it; any other failure ends the poll."""
 
 
 def utc(value: Any) -> datetime:
@@ -97,11 +108,45 @@ def check_freeze(freeze: Any, name: str) -> None:
                       "indices), patterns or parts")
 
 
-def check_patterns(freeze: dict, current: list[str]) -> None:
+ELASTIC_CONFIG = ("systems", "elastic", "config.env")
+
+
+def tenant_settings_dir() -> Path:
+    """The lab tenant's `settings/` directory, from `$V2_FROZEN_TENANT_DIR`."""
+    tenant = os.environ.get("V2_FROZEN_TENANT_DIR")
+    if not tenant:
+        raise NotConfigured("V2_FROZEN_TENANT_DIR is not set: the lab tenant's directory")
+    return Path(tenant) / "settings"
+
+
+def tenant_patterns(tenant_settings: Any) -> list[str]:
+    """`[events, alerts]` index patterns of the lab tenant: `ELASTIC_EVENTS_INDEX` and
+    `ELASTIC_ALERTS_INDEX` in `<tenant_settings>/systems/elastic/config.env`, read by the product's
+    own parser. The one reader of the tenant's patterns (D24); there is no default."""
+    if not tenant_settings:
+        raise NotConfigured("the lab tenant's settings directory is not set ($V2_FROZEN_TENANT_DIR)")
+    path = Path(tenant_settings).joinpath(*ELASTIC_CONFIG)
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise NotConfigured(f"{path} is unreadable: {exc}") from exc
+    repo = str(Path(__file__).resolve().parents[2])
+    if repo not in sys.path:
+        sys.path.insert(0, repo)
+    from defender.tenancy.tenant_settings import parse_env
+    values = parse_env(text)
+    keys = ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX")
+    if missing := [k for k in keys if not values.get(k)]:
+        raise NotConfigured(f"{path} lacks {', '.join(missing)}")
+    return [values[k] for k in keys]
+
+
+def check_patterns(freeze: dict, tenant_settings: Any) -> None:
     """The freeze's patterns are the lab tenant's current ones (D24); order does not matter."""
+    current = tenant_patterns(tenant_settings)
     if sorted(freeze["patterns"]) != sorted(current):
         raise CopyRefused(f"the freeze's index patterns {freeze['patterns']} are not the lab tenant's "
-                          f"current {list(current)}: the tenant changed since the capture")
+                          f"current {current}: the tenant changed since the capture")
 
 
 def check_parts(freeze: dict, directory: Path) -> None:
@@ -166,7 +211,8 @@ def _stream_of(index: str) -> str | None:
 
 
 def wait_for_cluster(es: Any, clock: Any, what: str, timeout_s: float = RESTORE_WAIT_S) -> None:
-    """Poll `_cluster/health` until the cluster answers, is not red and has nothing initializing."""
+    """Poll `_cluster/health` until the cluster answers, is not red and has nothing initializing.
+    Only `NodeNotReady` is waited out."""
     deadline = clock.now().timestamp() + timeout_s
     last: Any = None
     while True:
@@ -174,8 +220,8 @@ def wait_for_cluster(es: Any, clock: Any, what: str, timeout_s: float = RESTORE_
             last = es.es_request("GET", "/_cluster/health")
             if last.get("status") in ("green", "yellow") and not last.get("initializing_shards"):
                 return
-        except Exception as exc:  # noqa: BLE001 - a node coming up refuses connections
-            last = f"{type(exc).__name__}: {exc}"
+        except NodeNotReady as exc:
+            last = str(exc)
         if clock.now().timestamp() > deadline:
             raise CopyFault(f"the frozen cluster was not ready after {what}: {last}")
         clock.sleep(HEALTH_POLL_S)
@@ -303,11 +349,13 @@ def fault_overlay(es: Any, mutation: dict, names: list[str], patterns: list[str]
             jobs += [(index, {"ids": {"values": ids}}) for index, ids in sorted(derived.items())]
         for index, query in jobs:
             tallies[index] = tallies.get(index, 0) + _rewrite(es, index, query)
-    finally:
+    except BaseException:
         try:
             es.es_request("DELETE", f"/_ingest/pipeline/{PIPELINE}")
         except Exception:  # noqa: BLE001 - the first failure is the one to report
             pass
+        raise
+    es.es_request("DELETE", f"/_ingest/pipeline/{PIPELINE}")   # a pipeline left behind fails the copy
 
 
 # -- the one ready step ----------------------------------------------------------------------------
@@ -366,8 +414,8 @@ def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overla
     check_freeze(freeze, freeze_id)
     names, patterns = list(freeze["elastic"]["indices"]), list(freeze["patterns"])
     vid = variant_id(freeze_id, overlay)
-    # The first operation: it brings the node up if a teardown stopped it, so that every cluster
-    # request below has a node to reach (and the node gets time to answer).
+    # The first operation: a teardown stops the node, so it is brought up before any cluster request.
+    ops.ensure_node()
     marker = ops.read_marker()
     wait_for_cluster(es, clock, "the node start")
     register_repository(es, freeze, location)

@@ -191,7 +191,7 @@ def _serve_copy(es: Any, ops: Any, clock: Any, *, case: dict, freeze: dict, free
     uuid = alert_uuid_of(alert_file)
     alert = frozen_copy.find_alert(es, patterns, uuid)
     file_digest = frozen_copy.digest_of(json.loads(alert_file.read_text()))
-    reasons = _stale(case, observed, ops.content_digest(), alert, file_digest)
+    reasons = _stale(case, observed, ops.content_digest(patterns), alert, file_digest)
     if reasons:
         frozen_copy.mark_dirty(ops, freeze_id, overlay)
     return reasons
@@ -204,18 +204,19 @@ def _quiet_teardown(ops: Any, why: str) -> None:
         print(f"teardown after {why} also failed: {exc}", file=sys.stderr)
 
 
-def launch(case_dir: Path, *, freezes_dir: Path, patterns: list[str], index: Path, parts_dir: Path,
+def launch(case_dir: Path, *, freezes_dir: Path, tenant_settings: Path, index: Path, parts_dir: Path,
            lock_store: Any, es: Any, ops: Any, run_fn: Any = _default_run_fn, clock: Any = None,
            env: dict | None = None, tenant: str, knowledge: str | None = None,
            reference: bool = False, lock_token: str | None = None,
            location: str = frozen_copy.REPO_LOCATION) -> str:
-    """Serve one frozen run of `case_dir`; returns its run id. `patterns` are the lab tenant's
-    current index patterns: the copy is made with the freeze's, which must be the same (D24)."""
+    """Serve one frozen run of `case_dir`; returns its run id. `tenant_settings` is the lab tenant's
+    `settings/` directory: the copy is made with the freeze's patterns, which must be the tenant's
+    current ones (D24)."""
     case_dir, parts_dir, index = Path(case_dir), Path(parts_dir), Path(index)
     clock = clock if clock is not None else WallClock()
     case, freeze, bound, _uuid = verify(case_dir, Path(freezes_dir), parts_dir, reference)
     try:
-        frozen_copy.check_patterns(freeze, list(patterns))
+        frozen_copy.check_patterns(freeze, tenant_settings)
     except frozen_copy.CopyRefused as exc:
         raise LaunchRefused(str(exc)) from exc
     slug, alert_file = case_dir.name, case_dir / "alert.json"
@@ -291,16 +292,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.parts_dir or (not args.reference and not args.index):
         parser.error("--parts-dir (or $V2_FROZEN_PARTS_DIR) and, unless --reference, --index are required")
-    from lab_ops import LabOps, NotConfigured, tenant_patterns
-    try:
-        patterns = tenant_patterns(os.environ.get("V2_FROZEN_TENANT_DIR"))
-    except NotConfigured as exc:
-        print(f"refused: {exc}", file=sys.stderr)
-        return 4
+    from lab_ops import LabOps
     ops = LabOps.from_environment()
     try:
         launch(args.case_dir, freezes_dir=args.freezes_dir or args.case_dir.resolve().parent / "freezes",
-               patterns=patterns, index=args.index or Path(os.devnull),
+               tenant_settings=frozen_copy.tenant_settings_dir(), index=args.index or Path(os.devnull),
                parts_dir=args.parts_dir, lock_store=lock.DockerLockStore(), es=ops.frozen_es(), ops=ops,
                tenant=args.tenant, knowledge=args.knowledge_commit, reference=args.reference,
                lock_token=args.lock_token)

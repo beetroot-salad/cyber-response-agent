@@ -16,8 +16,8 @@ already there), frees the lock and resumes the pickups, and writes no freeze.yam
 registers the snapshot repository once; capture only verifies it.
 
 The index patterns are the lab tenant's (`settings/systems/elastic/config.env` under
-`$V2_FROZEN_TENANT_DIR`: `ELASTIC_EVENTS_INDEX`, `ELASTIC_ALERTS_INDEX`) and are recorded in
-freeze.yaml as `patterns` (D24).
+`$V2_FROZEN_TENANT_DIR`: `ELASTIC_EVENTS_INDEX`, `ELASTIC_ALERTS_INDEX`) and are
+recorded in freeze.yaml as `patterns: [events, alerts]` (D24).
 
     python3 playground-v2/scripts/capture_case.py <held_out>/freezes/<freeze-id> \\
         --repository frozen-cases [--scenario <id> ...] [--T <iso>] --parts-dir <lab disk path>
@@ -47,6 +47,7 @@ for _path in (HERE, HERE.parent):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+import frozen_copy  # noqa: E402
 from chaos import lock  # noqa: E402
 from make_case import MAX_AGE  # noqa: E402
 
@@ -193,12 +194,14 @@ def _check_moment(T: datetime, scenarios: list[str], now: datetime) -> None:
         raise CaptureRefused(f"T leaves less than {MAX_AGE} for the scenario batch: pick a later T")
 
 
-def capture(freeze_dir: Path, *, T: datetime, scenarios: list[str], patterns: list[str],
-            repository: str, ops: Any, es: Any, lock_store: Any, parts_dir: Path, clock: Any,
+def capture(freeze_dir: Path, *, T: datetime, scenarios: list[str], repository: str,
+            tenant_settings: Path, ops: Any, es: Any, lock_store: Any, parts_dir: Path, clock: Any,
             captured_by: str) -> dict:
     """Capture the freeze `freeze_dir.name` at `T`; returns the freeze.yaml document.
 
-    `es` is the LIVE cluster (`es_request(method, path, body=None)`). `ops` is called as:
+    `tenant_settings` is the lab tenant's `settings/` directory: the freeze's patterns are its
+    events and alerts patterns (D24). `es` is the LIVE cluster
+    (`es_request(method, path, body=None)`). `ops` is called as:
     active_faults() -> list; hold_pickups(); release_pickups(); fire(scenario, lock_token);
     proc_tree(dest), stub_dumps(dest), detection_rules(dest), commit_hosts(dest),
     copy_volumes(dest) -> part names written under dest; verify_restore(repository, snapshot)
@@ -208,6 +211,7 @@ def capture(freeze_dir: Path, *, T: datetime, scenarios: list[str], patterns: li
     freeze_id = freeze_dir.name
     if (freeze_dir / "freeze.yaml").exists():
         raise CaptureRefused(f"freeze {freeze_id} already exists; a freeze is never overwritten")
+    patterns = frozen_copy.tenant_patterns(tenant_settings)
     _check_moment(T, scenarios, clock.now())
     token = lock.take(lock_store, lock.CAPTURE)
     started: list[str] = []
@@ -266,18 +270,13 @@ def main(argv: list[str] | None = None) -> int:
     moment = (datetime.fromisoformat(args.T.replace("Z", "+00:00")).astimezone(UTC) if args.T
               else datetime.now(UTC) + (MAX_AGE + LEAD if args.scenarios else MARGIN))
     from chaos.ctl import DockerExecSeam
-    from lab_ops import LabOps, NotConfigured, tenant_patterns
+    from lab_ops import LabOps
     try:
-        patterns = tenant_patterns(os.environ.get("V2_FROZEN_TENANT_DIR"))
-    except NotConfigured as exc:
-        print(f"refused: {exc}", file=sys.stderr)
-        return 4
-    try:
-        capture(args.freeze_dir, T=moment, scenarios=args.scenarios, patterns=patterns,
-                repository=args.repository, ops=LabOps.from_environment(), es=DockerExecSeam(),
-                lock_store=lock.DockerLockStore(), parts_dir=args.parts_dir, clock=WallClock(),
-                captured_by=args.captured_by)
-    except (lock.LockError, CaptureRefused) as exc:
+        capture(args.freeze_dir, T=moment, scenarios=args.scenarios, repository=args.repository,
+                tenant_settings=frozen_copy.tenant_settings_dir(), ops=LabOps.from_environment(),
+                es=DockerExecSeam(), lock_store=lock.DockerLockStore(), parts_dir=args.parts_dir,
+                clock=WallClock(), captured_by=args.captured_by)
+    except (lock.LockError, CaptureRefused, frozen_copy.CopyRefused) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 4
     return 0
