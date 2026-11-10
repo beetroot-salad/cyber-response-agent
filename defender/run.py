@@ -646,6 +646,11 @@ class _TokenMint:
     def access_kwargs(self) -> dict[str, RequestAccess]:
         return _access_kwargs(self._access)
 
+    def access_lost(self) -> str | None:
+        """Why the process lost its credential-proxy access (the holder's latched detail), or None
+        while it has not, or never held any (#1363 D11)."""
+        return None if self._access is None else self._access.lost
+
     def write_back(self) -> dict[str, str]:
         """The record step's keywords: a fresh write-back token (`rw` on the case system only) and
         the proxy's address, when the case system is an `http-proxy` system run start judged sound
@@ -1392,7 +1397,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                 try:
                     summary = lifecycle(**started.lifecycle_kwargs(ns), run_state=run_state)
                 except (ServingAbort, BaseExceptionGroup) as escaped:
-                    return _unservable_exit(escaped, world=world, episode=episode)
+                    return _unservable_exit(escaped, world=world, episode=episode,
+                                            lost=started.minting.access_lost())
 
                 def ticket_and_curation() -> None:
                     # No automatic feed into the learning pipeline; only catalog curation is
@@ -1615,16 +1621,19 @@ def _serving_abort(exc: BaseException) -> ServingAbort | None:
     return None
 
 
-def _unservable_exit(escaped: BaseException, *, world: Any, episode: Episode | None) -> int:
+def _unservable_exit(escaped: BaseException, *, world: Any, episode: Episode | None,
+                     lost: str | None = None) -> int:
     """A sibling whose world went unservable: its world record written and `UNSERVABLE_EXIT`.
     Anything else that escaped the lifecycle is raised again."""
     abort = _serving_abort(escaped)
     if abort is None or world is None or episode is None:
         raise escaped
-    if getattr(abort, "our_fault", False) and getattr(abort, "reason", "") != "budget":
-        # The oracle gave up because a lookup met our own failure (#1363 D11): the world is not
-        # unservable, so no world record is written; the sibling ends as a run that lost its access.
-        system, detail = getattr(abort, "our_cause", None) or ("", "")
+    ours = getattr(abort, "our_fault", False) or lost is not None
+    if ours and getattr(abort, "reason", "") != "budget":
+        # The oracle gave up because a lookup met our own failure, or the process lost its access
+        # while it served (#1363 D11): the world is not unservable, so no world record is written;
+        # the sibling ends as a run that lost its access.
+        system, detail = getattr(abort, "our_cause", None) or ("", lost or "")
         _logger.error(f"--episode: world {world.label}: the oracle's lookup of {system or 'a system'} "
                       f"failed on our side ({detail}); the sibling ends proxy-access, no world "
                       "record is written")
