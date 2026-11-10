@@ -1,34 +1,31 @@
-"""#869: a dropped row is reported, never silently absorbed, and leaves a durable record.
+"""#869: a dropped row is reported, never silently absorbed, and takes a fate of its own.
 
-The mixed pitfalls tick runs over a batch draft (`_curator1134.draft_lane`) with adapters in a
-product checkout; what landed is read from the batch branch (`agent/...`)."""
+The mixed pitfalls tick runs over a batch draft (`_curator1134.draft_lane`) with adapters in a product checkout; what landed is
+read from the batch branch (`agent/...`).
+
+#1278: the file queue's consumed ledger and graveyard are gone (design r8 Schema "Retired files"); the tick reports into the
+claim's `outcomes` and `on_curated` (D1/D9): a taught row is committed (it stays in its batch for the merge), a row naming an
+undeclared system is skipped, naming it, at once, and a row with no id is dead.
+
+Retired from this file: `test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record` (a refused request moved to
+`author-queue/failed/` with its record, once: the folder, the `failed` record and the re-drive are gone with the file queue;
+that a failing request is not retried without bound is `test_loop.py::test_lead_author_drain_bounds_the_retries_of_a_failing_request`).
+"""
 from __future__ import annotations
 
-from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
-from defender.tests.support.shared._locations_1210 import location_path
-
-import json
 from pathlib import Path
 
-
-from defender.learning.core import drains, persist
-from defender.learning.core.config import LoopPaths
-from defender.learning.leads.lead_extraction import LeadAuthorError
+from defender.learning.store import Outcome
+from defender.tests.support.learning.core._declared870 import Claim, tick
+from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.runtime.engine._declared869 import (
     Spawn,
     agent_marker_file,
     pitfall_row,
-    read_rows,
     seed_agent_files,
     seed_product,
-    seed_tree,
     write,
 )
-from defender.tests.support.learning.curation import _curator1134 as C
-from defender.tests.support.learning.curation._curator1134 import open_state
-from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls
-from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, drained_for
-from defender.learning.core.state import PITFALLS
 
 
 def _mixed_batch(tmp_path: Path, monkeypatch, *, name: str = "repo"):
@@ -38,93 +35,33 @@ def _mixed_batch(tmp_path: Path, monkeypatch, *, name: str = "repo"):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     product = seed_product(tmp_path, adapters=("elastic",), name=f"product-{name}")
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product,
-                        files=seed_agent_files(markers=("elastic",), skills=("elastic",),
-                                               catalog=()),
-                        state_dir=tmp_path / f"state-{name}")
-    paths = lane.paths
-    state = open_state(paths)
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "elastic"),
-         pitfall_row("r:l-001:0", "elastic"),
-         pitfall_row("r:l-002:0", "elastik")],
-        state=state,
-    )
+                        files=seed_agent_files(markers=("elastic",), skills=("elastic",), catalog=()))
+    claim = Claim()
+    claim.add(pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic"), pitfall_row("r:l-002:0", "elastik"))
     spawn = Spawn(lambda root: write(
         agent_marker_file(root, "elastic"), "# elastic\n## Common pitfalls\n- curated\n",
     ), root=lane.root)
-    return lane, paths, spawn
+    return lane, claim, spawn
 
 
 def test_a_dropped_row_is_never_labelled_committed(tmp_path, monkeypatch):
-    lane, paths, spawn = _mixed_batch(tmp_path, monkeypatch)
-    state = open_state(paths)
-    run_pitfalls(lane, state, spawn)
+    """Of three rows, the two taught are reported committed (with the tick's commit) and the undeclared one is not."""
+    lane, claim, spawn = _mixed_batch(tmp_path, monkeypatch)
+    assert tick(lane, spawn, claim) == 0
 
-    consumed = {r["pitfall_id"]: r for r in read_rows(location_path(paths.state_root) / PITFALLS.consumed)}
-    assert set(consumed) == {"r:l-000:0", "r:l-001:0", "r:l-002:0"}
     assert "agent/skills/elastic/execution.md" in lane.landed()
-
-    dropped = consumed["r:l-002:0"]
-    assert dropped["consumed_category"] != "consumed_committed"
-    assert dropped.get("consumed_commit") is None
-
-    for kept in ("r:l-000:0", "r:l-001:0"):
-        assert consumed[kept]["consumed_category"] == "consumed_committed"
-        assert consumed[kept]["consumed_commit"]
+    assert claim.committed == {"r:l-000:0", "r:l-001:0"}, f"the committed set is {claim.committed}"
+    [disposition] = claim.curated
+    assert disposition.sha, "the committed rows carry no commit"
+    assert ("pitfall", "r:l-002:0") not in {(k, i) for k, i in claim.outcomes if i in claim.committed}
 
 
 def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatch):
-    lane, paths, spawn = _mixed_batch(tmp_path, monkeypatch, name="undeclared")
-    state = open_state(paths)
-    run_pitfalls(lane, state, spawn)
+    """The row naming an undeclared system is skipped at once, naming the system; the taught rows take no fate yet (they
+    stay in the batch until the merge)."""
+    lane, claim, spawn = _mixed_batch(tmp_path, monkeypatch, name="undeclared")
+    assert tick(lane, spawn, claim) == 0
 
-    consumed = {r["pitfall_id"]: r for r in read_rows(location_path(paths.state_root) / PITFALLS.consumed)}
-    assert consumed["r:l-002:0"]["consumed_category"] == "consumed_unattributable"
-    assert "consumed_commit" not in consumed["r:l-002:0"]
-    assert consumed["r:l-000:0"]["consumed_category"] == "consumed_committed"
-
-    assert persist.read_pitfalls(state) == [], "pending must go empty; the row is terminal"
-    graveyard = {r.get("pitfall_id") for r in read_rows(location_path(paths.state_root) / PITFALLS.deadletter)}
-    assert "r:l-002:0" in graveyard, (
-        "the dropped row leaves no durable record, so nothing reaches human review"
-    )
-    assert "r:l-000:0" not in graveyard
+    assert claim.outcomes == {("pitfall", "r:l-002:0"): Outcome.skipped("undeclared-system:elastik")}, (
+        f"the dropped row's fate is {claim.outcomes}")
     assert "agent/skills/elastic/execution.md" in lane.landed()
-
-
-def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_path, capsys):
-    repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",), skills=("elastic",),
-                     catalog=())
-    # A run folder the drain rehydrates the row from: the row is its address.
-    run_dir = curation_run_dir("run-x")
-    paths = drained_for(LoopPaths(repo_root=repo, state_dir=tmp_path / "state"), run_dir)  # r10.1 C1: paths.tenant
-    state = open_state(paths)
-    (run_dir / "gather_raw").mkdir()
-    write(location_path(paths.state_root) / "author-queue" / "case-1.json",
-          json.dumps(curation_row("case-1", run_dir)) + "\n")
-
-    calls: list[Path] = []
-
-    def refusing_lane(_paths, _state, run, *, box=None, **_kw):
-        calls.append(run.run_dir)
-        raise LeadAuthorError(
-            "lead author refused: mcpsys is not a declared system in this tree")
-
-    capsys.readouterr()
-    for _tick in range(5):
-        drains._drain_lead_author_markers(paths, state, refusing_lane,
-                                          directory=directory_for_root())
-
-    assert len(calls) == 1, f"the refusal was retried: {len(calls)} invocations"
-    assert not (location_path(paths.state_root) / "author-queue" / "case-1.json").exists()
-    assert not list((location_path(paths.state_root) / "author-queue" / "inflight").glob("*.json"))
-
-    failed = location_path(paths.state_root) / "author-queue" / "failed" / "case-1.json"
-    assert failed.is_file()
-    record = json.loads(failed.read_text())
-    assert "mcpsys" in record["failed"]
-    assert (record["tenant_id"], record["run_id"]) == (run_dir.parent.parent.name, run_dir.name)
-    assert record["case_id"] == "case-1"
-    assert "attempts" not in record, (
-        "an attempts counter means the retriable class was taken, which §7 declined"
-    )

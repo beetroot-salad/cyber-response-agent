@@ -101,7 +101,7 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
     # The deps' declared set: the product's adapters joined with the draft's committed markers.
     deps = dataclasses.replace(
         lead_author.build_lead_author_deps(
-            paths, state=C.open_state(paths), trees=C.draft_trees(lane), batch=lane.batch),
+            paths, trees=C.draft_trees(lane), batch=lane.batch),
         invoke_agent=spawn, extract=lambda _rd: ([], []),
     )
     systems = deps.systems
