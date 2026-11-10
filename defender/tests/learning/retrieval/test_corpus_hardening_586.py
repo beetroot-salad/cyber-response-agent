@@ -16,7 +16,6 @@ from defender.tests.support.shared.contracts._locale import C_LOCALE_ENV
 from defender.tests.learning.retrieval.test_trace_lesson import _mk_run  # noqa: E402
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
 from defender.tests.support.learning.retrieval._lessons_corpus import _tenant_runs, trace_main
-from defender.tests.support.learning.curation._curator1134 import open_state
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 
@@ -82,8 +81,8 @@ def test_the_real_lessons_cli_survives_a_c_locale_over_the_real_corpus(tmp_path)
 def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsys):
     """``iter_lessons`` warn-skips an unreadable lesson, so the id pre-flight beside it must not
     crash on one."""
-    paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
-    cfg = build_author_config(paths, trees=author_trees(paths), state=open_state(paths))
+    paths = LoopPaths(repo_root=tmp_path)
+    cfg = build_author_config(paths, trees=author_trees(paths))
     d = cfg.corpus_dir
     d.mkdir(parents=True, exist_ok=True)  # the trees made the mount point (a drain's always exists)
     (d / "good.md").write_text("---\nname: good\nsource_finding_ids: [o-1]\n---\nbody\n")

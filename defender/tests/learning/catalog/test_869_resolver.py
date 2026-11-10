@@ -1,16 +1,12 @@
 """#869: `declared_systems`, the resolver as a value."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
-
 import shutil
 from pathlib import Path
 
 import pytest
 
 from defender.learning.author.version_control import DeliveryRefused
-from defender.learning.core import drains, persist
-from defender.learning.core.config import LoopPaths
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.systems import verbs
 from defender.tests.support.runtime.engine._declared869 import (
@@ -29,9 +25,7 @@ from defender.tests.support.runtime.engine._declared869 import (
 )
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._lead_author_1134 import draft_lead_deps, lead_lane
-from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-from defender.tests.support.learning.core import _state1135
-from defender.learning.core.state import PITFALLS
+from defender.tests.support.learning.core._declared870 import Claim, Spawn, tick
 
 
 #: The system the platform serves on every roster, with no adapter file (#1390).
@@ -204,17 +198,13 @@ def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypat
     repo = seed_tree(tmp_path, adapters=(), markers=("elastic",), skills=("elastic",),
                      catalog=())
     (repo / ADAPTERS_REL).rmdir()
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")],
-        state=_state1135.state_for_paths(paths),
-    )
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=repo)
+    claim = Claim()
+    claim.add(pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys"))
     capsys.readouterr()
 
     with pytest.raises(LeadAuthorError):
-        drains._invoke_pitfalls(
-            paths, _state1135.state_for_paths(paths), on_curated=lambda _d: None, label=LEAD_AUTHOR_DRAIN_LABEL)
+        tick(lane, Spawn(None), claim)
 
-    assert len(persist.read_pitfalls(_state1135.state_for_paths(paths))) == 2
-    assert not (location_path(paths.state_root) / PITFALLS.consumed).exists()
+    assert claim.outcomes == {} and claim.committed == set(), "a resolver failure decided the claim's rows"
     assert "(continuing)" not in loop_log(capsys)
