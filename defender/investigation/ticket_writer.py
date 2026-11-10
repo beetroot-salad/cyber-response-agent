@@ -139,8 +139,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         if not key:
             _leg_refused(run, key, REASON_NO_TICKET)
             return
-        proxied = target.system in tenant.access  # reached through the credential proxy
-        if proxied and not request_token:
+        if not request_token:  # every case system is reached through the credential proxy
             _leg_refused(run, key, REASON_NO_TOKEN)
             return
         try:

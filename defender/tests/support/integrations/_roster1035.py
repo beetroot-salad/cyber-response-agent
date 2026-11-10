@@ -1,4 +1,4 @@
-"""Helpers for `test_1035_one_roster_read.py`: a run-as-`nobody` probe and the surface under test."""
+"""Helpers for `test_one_roster_read.py`: a run-as-`nobody` probe and the surface under test."""
 from __future__ import annotations
 
 import io

@@ -74,6 +74,7 @@ ENTRY_POINT_MODULES = (
     "learning/frontend/serialize.py",
     "cli/learning/trace_lesson.py",
     "cli/retire_legacy_runs.py",
+    "learning/branch/post_step.py",   # #1344: the learning job's post-step, a host entry of its own
 )
 
 
@@ -215,7 +216,7 @@ class watch_folder:
     touch happened, sampled without taking the lock: what a command's own reads saw of its hold (r10 O-A1: none before the
     state is judged; O-A2: held for as long as the command works). A fault inside the hook is reported when the block ends.
 
-    What it cannot see: a `stat` (no audit event), so the behavioural matrix of `test_1214_entry_boundaries` is the other
+    What it cannot see: a `stat` (no audit event), so the behavioural matrix of `test_entry_boundaries` is the other
     observation of the order."""
 
     def __init__(self, data_root: Path, tenant: str) -> None:

@@ -7,8 +7,8 @@ from .anthropic import AnthropicProvider
 from .base import BuiltModel, Provider
 from .openai_compat import OpenAICompatProvider
 from .retry import (
-    DEFAULT_POLICY, SETUP_STATUSES, ProviderDown, ProviderRejected, RetryPolicy, rejected,
-    with_retries,
+    DEFAULT_POLICY, SETUP_STATUSES, ProviderDown, ProviderRejected, RetryPolicy, refused_by_provider,
+    rejected, with_retries,
 )
 
 if TYPE_CHECKING:
@@ -127,6 +127,7 @@ __all__ = [
     "effort_for_role",
     "provider_for",
     "provider_id_for",
+    "refused_by_provider",
     "rejected",
     "selectable_aliases",
     "with_retries",

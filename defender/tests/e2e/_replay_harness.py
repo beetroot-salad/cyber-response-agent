@@ -381,6 +381,73 @@ def _awaiting(fn):
     return call
 
 
+#: What every priced stand-in response reports (#1377), in pydantic-ai's `RequestUsage` terms: all four
+#: billed counts, at values no rate or rounding makes whole. `input_tokens` includes the cache reads
+#: and writes, as a provider's does, so a ledger that billed it raw would charge them twice.
+PRICED_USAGE = {"input_tokens": 1_234_567, "output_tokens": 76_543, "cache_read_tokens": 345_678,
+                "cache_write_tokens": 123_457}
+
+
+def priced_billed(responses: int = 1) -> dict[str, int]:
+    """The four billed counts (`configuration.billed_usage`'s keys) of `responses` priced stand-in responses."""
+    from pydantic_ai.usage import RequestUsage
+
+    from defender.configuration import billed_usage
+
+    return {k: responses * v for k, v in billed_usage(RequestUsage(**PRICED_USAGE)).items()}
+
+
+def priced_cost(model: str, responses: int = 1) -> float:
+    """What `responses` priced stand-in responses reported under `model` cost, by the pricing table
+    (`usage_cost` over `billed_usage`, the one rule from a provider's usage to a bill)."""
+    from defender.configuration import usage_cost
+
+    return responses * usage_cost(model, priced_billed())
+
+
+class Priced:
+    """A replay callable as a priced stand-in (#1377): each response reports `PRICED_USAGE`, and
+    `before()` (when given) runs before the response is made."""
+
+    def __init__(self, fn, *, before: Callable[[], None] | None = None):
+        self._fn, self._before = fn, before
+        self.__name__ = getattr(fn, "__name__", type(fn).__name__)
+
+    def __call__(self, messages, info) -> ModelResponse:
+        from pydantic_ai.usage import RequestUsage
+
+        if self._before is not None:
+            self._before()
+        response = self._fn(messages, info)
+        response.usage = RequestUsage(**PRICED_USAGE)
+        return response
+
+
+def priced_make_model(by_name: Mapping[str, Any]):
+    """The driver's `make_model` seam answering each model NAME with its own stand-in, reported
+    under that name, so the pricing table prices it (FunctionModel stamps its own `model_name`)."""
+    def make_model(name, effort):
+        return BuiltModel(FunctionModel(_awaiting(by_name[name]), model_name=name), None)
+
+    return make_model
+
+
+def named_models(**by_kind: str):
+    """`drive(wrap_model=...)` stamping each scripted model's responses with `by_kind`'s model name ("main", "gather"), so the
+    pricing table prices a `Priced` stand-in on the in-process driver as `priced_make_model` does for the job child."""
+    def wrap(kind: str, model: Any) -> Any:
+        return FunctionModel(model.function, model_name=by_kind[kind])
+
+    return wrap
+
+
+def priced_gather(fn, **kw) -> Priced:
+    """`fn` as a priced gather script that also answers the correlation lead (its own default summary), marked as serving it."""
+    priced = Priced(_with_default_correlation(fn, None), **kw)
+    priced.serves_correlation = True
+    return priced
+
+
 def _with_default_correlation(gather, main):
     """`gather` (or `main`, when none is given) as the gather model, except that the
     correlation lead's conversation is answered by its own default fake. A `gather` that routes

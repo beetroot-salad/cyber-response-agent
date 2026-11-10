@@ -105,13 +105,13 @@ claims:
   - id: C4
     kind: behavior
     claim: "Learning tools use model coordinates across host layouts and workspace instructions leave the user message verbatim."
-    probe: "At R1: flock /tmp/defender-pytest.lock .venv/bin/python -m pytest tests/runtime/engine/test_1262_learning_workspace.py tests/learning/core/test_hardening_772.py -q (cwd defender)."
+    probe: "At R1: flock /tmp/defender-pytest.lock .venv/bin/python -m pytest tests/runtime/engine/test_learning_workspace.py tests/learning/core/test_hardening_772.py -q (cwd defender)."
     probe_kind: executed
     observed: "42 passed, including real host-fallback reads/deletions and the model instruction/user-message capture."
     verdict: holds
 ```
 
-The executable regression suite is `tests/runtime/engine/test_1262_learning_workspace.py`.
+The executable regression suite is `tests/runtime/engine/test_learning_workspace.py`.
 Legacy framing and sandbox suites migrate model input spellings while retaining their
 behavioral assertions. No stored-record migration or new external publishing action is needed.
 

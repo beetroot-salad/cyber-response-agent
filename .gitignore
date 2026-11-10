@@ -122,7 +122,7 @@ experiments/actor-author-discipline/__pycache__/
 experiments/actor-author-discipline/**/__pycache__/
 
 # Local runs base when DEFENDER_RUNS_BASE must sit on a host-shared mount (C46/DooD).
-# tests/e2e/test_540_box_boundary.py anchors its run dirs here when it detects DooD, because
+# tests/e2e/test_box_boundary_e2e.py anchors its run dirs here when it detects DooD, because
 # pytest's tmp_path is a private /tmp the docker daemon cannot resolve as a bind source.
 .defender-runs/
 # The tenant data root (#1078 D8) — no default; the devcontainer points DEFENDER_DATA_ROOT here.

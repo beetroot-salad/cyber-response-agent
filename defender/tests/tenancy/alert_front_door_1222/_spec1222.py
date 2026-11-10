@@ -1104,7 +1104,7 @@ def default_main_turns() -> list[Turn]:
 
 
 def closing_main_turns(disposition: str = "inconclusive") -> list[Turn]:
-    """MAIN writes a whole valid investigation (the sshd golden's, as `test_1077_replay` does),
+    """MAIN writes a whole valid investigation (the sshd golden's, as `test_replay` does),
     closes it through the real `close_investigation` (the review gate answers through drive's
     default bundle) and stops — the script for a demand that needs the run to reach `report.md`."""
     doc = (H.GOLDEN / "investigation.md").read_text(encoding="utf-8")
@@ -1397,8 +1397,8 @@ class RecordingShim:
 
 
 class TicketStore(FakeStore):
-    """The case system's store behind the docker route (`_spec767.FakeStore`: a fake `docker` on PATH
-    recording every request, answering 201), in a fresh folder under `where`. Observe it at the wire:
+    """The case system's store behind the credential proxy's stand-in (`_spec767.FakeStore`,
+    recording every request, answering 201; #1391 O1), in a fresh folder under `where`. Observe it at the wire:
     `.calls` (method, path, body), `.comment_payloads`, `.only_comment()`, `.comment_body()`."""
 
     def __init__(self, where: Path, **kw: Any) -> None:
@@ -1406,10 +1406,10 @@ class TicketStore(FakeStore):
         super().__init__(Path(where) / f"ticket-store-{n}", **kw)
 
 
-class _WriterOverTheShim:
-    """The REAL ticket writer, as `run.main(ticket_writer=…)` takes it, with `store`'s fake `docker`
-    first on the PATH of the env run.py hands the record leg (#1359 D-13: the writer has no request
-    seam). Every attribute is the writer's own (`clear_receipt` included; there is no open leg)."""
+class _WriterOverTheProxy:
+    """The REAL ticket writer, as `run.main(ticket_writer=…)` takes it, for a run handed `store`'s
+    proxy stand-in and a signer (`drive`'s seams, #1391 O1). Every attribute is the writer's own
+    (`clear_receipt` included; there is no open leg)."""
 
     def __init__(self, store: TicketStore) -> None:
         self.store = store
@@ -1419,14 +1419,15 @@ class _WriterOverTheShim:
         return getattr(self._writer, name)
 
     def record_case_ticket(self, run: Any, **kw: Any) -> Any:
-        # An empty or absent env (a test driving the leg directly) means the process env.
-        kw["env"] = self.store.env(kw.get("env") or None)
+        # A test driving the leg directly hands no address or token: the stand-in's, and one token.
+        kw.setdefault("proxy_url", self.store.url)
+        kw.setdefault("request_token", "token-1222")
         return self._writer.record_case_ticket(run, **kw)
 
 
 def ticket_writer(store: TicketStore) -> Any:
     """The real writer over `store` — what `run.main(ticket_writer=…)` takes."""
-    return _WriterOverTheShim(store)
+    return _WriterOverTheProxy(store)
 
 
 class NoTicket:
@@ -1772,6 +1773,8 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
         seams["materialize"] = materialize  # run.main's setup seam (faults planted in setup)
     seams["publish"] = publish_double(d.published)
     seams["directory"] = directory if directory is not None else planted.directory  # #1345 slice B: a test-held directory
+    if isinstance(writer, _WriterOverTheProxy):
+        seams.update(writer.store.stand_in.seams())  # the proxy's address and a signer for its token
     try:
         d.rc = run_main(
             argv, lifecycle=lifecycle_fn, preflight=lambda *_a, **_k: 0,

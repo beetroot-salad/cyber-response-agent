@@ -1,0 +1,514 @@
+from __future__ import annotations
+
+from defender.tests.support.learning.branch import _triplet_947 as T
+
+
+import contextlib
+import dataclasses
+import datetime as dt
+import json
+import sys
+import time
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+pytest.importorskip("pydantic_ai")
+
+from defender import _clock  # noqa: E402
+from defender._io import read_jsonl_rows  # noqa: E402
+from defender._paths import PATHS  # noqa: E402
+from defender.tests.learning.oracle.live_contracts._spec1224 import build_registry  # noqa: E402
+from defender.systems.verbs import read_roster  # noqa: E402
+from defender.records._episode_handle import Episode  # noqa: E402
+from defender.records._episode_paths import BASE_FILENAME, SERVED_DIRNAME  # noqa: E402
+from defender.learning.branch.ledger import (  # noqa: E402
+    PASSTHROUGH,
+    Ledger,
+)
+from defender.systems.verb_grant import VerbGrant  # noqa: E402
+from defender.systems.verbs import VerbContext  # noqa: E402
+from defender.tests.support.runtime.state import _1255_clock as C
+from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A  # noqa: E402
+from defender.tests.integrations.credential_proxy_1163 import _harness as H  # noqa: E402
+from defender.tests.support.tenancy import _tenants1106
+from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S  # noqa: E402
+from defender.integrations import elastic_adapter  # noqa: E402
+from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402
+    branch_mod,
+    spec_at,
+)
+
+T0 = dt.datetime(2026, 5, 25, 15, 30, 45, tzinfo=dt.UTC)
+T0_Z = "2026-05-25T15:30:45Z"
+
+REAL_ADAPTERS = PATHS.adapters_dir
+
+#: The source's run-clock reading at the branch point `recorded_branch` forks at
+#: (`_1255_clock.record_source`'s script: 10 s, then 600 s of MAIN work).
+R = C.BRANCH_READING
+
+
+def _gather_grant() -> VerbGrant:
+    """The committed playground tenant's gather grant (grants are per run, projected from the
+    run's tenant's table)."""
+    return _tenants1106.fixture_grants().gather
+
+#: What the fake `docker` records, under the run dir the test reads.
+DOCKER_LOG = "docker-calls.jsonl"
+
+#: The elastic config a driven search resolves through. `logs-*` is its own configured pattern,
+#: so `confine_index` admits it by reach and the arms below are about the WINDOW alone.
+EVENTS_INDEX = "logs-*"
+ALERTS_INDEX = ".alerts-security.alerts-*"
+
+
+# the injected estate: a `docker` on the run's own PATH, and a fake adapters dir
+
+_DOCKER_SHIM = r'''
+import json
+import os
+import sys
+
+argv = sys.argv[1:]
+with open(os.environ["DOCKER_CALL_LOG"], "a", encoding="utf-8") as fh:
+    fh.write(json.dumps(argv) + "\n")
+
+if "inspect" in argv:
+    sys.stdout.write('"/canary-1"\t"nginx:1.25"\n')
+elif "sh" in argv:
+    # The curl lane: `docker exec -i <c> sh -c 'exec curl … "$@"' -- …`. `curl -w` writes the
+    # status on its own trailing line and `split_status` recovers it with `rfind`, so the
+    # status must be LAST with no newline after it.
+    sys.stdout.write(json.dumps({"hits": {"total": {"value": 0}, "hits": []}}))
+    sys.stdout.write("\n200")
+elif "getent" in argv:
+    sys.stdout.write("root:x:0:0:root:/root:/bin/bash\n")
+elif "sha256sum" in argv:
+    sys.stdout.write("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /etc/hosts\n")
+elif "dpkg-query" in argv:
+    sys.stdout.write("openssh-server 1:8.9p1-3\n")
+elif "cat" in argv:
+    sys.stdout.write("root:x:0:0:root:/root:/bin/bash\n")
+else:
+    sys.stdout.write("  PID  PPID USER STAT ELAPSED COMMAND\n    1     0 root Ss 01:00 /sbin/init\n")
+'''
+
+_CLOCK_ADAPTER = '''\
+"""Verb bodies that record what the seam put on their ctx."""
+from __future__ import annotations
+
+from defender.tests.support.learning.branch import _triplet_947 as T
+
+import json
+from pathlib import Path
+
+from defender.kit.verbs import VerbContext, verb
+
+CALLS = "adapter-calls.jsonl"
+
+
+def _record(ctx: VerbContext, name: str, params: dict) -> None:
+    log = Path(ctx.run_dir) / CALLS
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "verb": name, "params": params,
+        }) + "\\n")
+
+
+@verb(engine="esql", body_param="query")
+def esql(ctx: VerbContext, *, query: str, limit: int = 5) -> dict:
+    _record(ctx, "esql", {"query": query, "limit": limit})
+    return {"query": query}
+
+
+@verb()
+def get_host(ctx: VerbContext, *, host: str) -> dict:
+    _record(ctx, "get-host", {"host": host})
+    return {"host": host, "owner": "estate"}
+
+
+@verb()
+def health_check(ctx: VerbContext) -> dict:
+    _record(ctx, "health-check", {})
+    return {"ok": True}
+
+
+VERBS = {"esql": esql, "get-host": get_host, "health-check": health_check}
+'''
+
+#: The fake estate's grant: two systems, so the every-system arm has a pair to compare.
+FAKE_GRANT = VerbGrant(role="gather", entries=(
+    ("elastic", "esql", "r"), ("elastic", "health-check", "r"),
+    ("cmdb", "get-host", "r"), ("cmdb", "health-check", "r"),
+))
+
+
+class World:
+    """The world object the seam reads: an id, and the systems it declares it touches."""
+
+    def __init__(self, world_id: str, touches: tuple[str, ...] = ()):
+        self.label = world_id
+        self.world_id = T.fixture_world_id(world_id)
+        self.touches = touches
+
+
+def fake_estate(tmp_path: Path) -> Path:
+    adapters = tmp_path / "adapters"
+    adapters.mkdir(parents=True, exist_ok=True)
+    for name in ("elastic_adapter.py", "cmdb_adapter.py"):
+        (adapters / name).write_text(_CLOCK_ADAPTER, encoding="utf-8")
+    return adapters
+
+
+#: The open `Episode` handles of the running test, closed when it ends (`_held_episodes`).
+_HELD: list[contextlib.ExitStack] = []
+
+
+@pytest.fixture(autouse=True)
+def _held_episodes():
+    """Scope every handle `primed_ledger` opens to the test that asked for it."""
+    with contextlib.ExitStack() as stack:
+        _HELD.append(stack)
+        try:
+            yield
+        finally:
+            _HELD.pop()
+
+
+CLOCK_WORLD_ID = T.fixture_world_id("w1")
+
+
+def primed_ledger(tmp_path: Path, *, world_id: str = CLOCK_WORLD_ID) -> Ledger:
+    """A ledger over an explicit world UUID, beside the (empty) primed capture a ledger requires."""
+    served = tmp_path / SERVED_DIRNAME
+    served.mkdir(parents=True, exist_ok=True)
+    base = served / BASE_FILENAME
+    base.touch()
+    episode = _HELD[-1].enter_context(Episode.open(tmp_path))
+    return Ledger.for_world(episode, world_id)
+
+
+def fake_docker(tmp_path: Path) -> Path:
+    """A `docker` on a PATH of this test's own, and the run dir it logs under."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    shim = bindir / "docker"
+    shim.write_text(f"#!{sys.executable}\n{_DOCKER_SHIM}", encoding="utf-8")
+    shim.chmod(0o755)
+    return bindir
+
+
+def docker_ctx(tmp_path: Path, *, defender_dir: Path | None = None,
+               tenant: Any = None) -> VerbContext:
+    """A `VerbContext` whose env is the whole world the transports fork into."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    if tenant is None:
+        tenant = _fixture_tenant(tmp_path)
+    return VerbContext(
+        defender_dir=defender_dir if defender_dir is not None else tmp_path / "defender",
+        run_dir=run_dir,
+        # A fixture tenant whose every system names the docker context `spec-947`, unless a
+        # caller hands its own.
+        tenant=tenant,
+        env={
+            "PATH": str(fake_docker(tmp_path)),
+            "DOCKER_CALL_LOG": str(tmp_path / DOCKER_LOG),
+        },
+    )
+
+
+def _fixture_tenant(tmp_path: Path) -> Any:
+    """The record resolved from a tenant folder planted under `tmp_path`, whose elastic holds this
+    file's indices."""
+    root = tmp_path / "tenants"
+    texts = S.config_texts("spec947", events_index=EVENTS_INDEX, alerts_index=ALERTS_INDEX)
+    S.plant(root, marker="spec947", configs=texts)
+    return S.resolve(root)
+
+
+@contextlib.contextmanager
+def elastic_ctx(tmp_path: Path, data_root: Path) -> Iterator[tuple[VerbContext, Any]]:
+    """A `VerbContext` over the proxy channel (#1391 O3): elastic declared at a recording upstream
+    behind the real proxy. Yields the context and the upstream, whose `seen` holds each request
+    the cluster received; every search is answered with no hits."""
+    with H.upstream() as up:
+        for path in (f"/{A.ELASTIC_EVENTS}/_search", f"/{A.ELASTIC_ALERTS}/_search", "/_query"):
+            up.replies[path] = (200, {"Content-Type": "application/json"},
+                                json.dumps({"hits": {"total": {"value": 0}, "hits": []}}).encode())
+        with A.elastic_proxied(tmp_path, data_root, up.url) as (ctx, _tap):
+            yield ctx, up
+
+
+def search_body(up: Any) -> dict:
+    """The body of the LAST request the cluster received: what the search put on the wire."""
+    return json.loads(up.seen[-1].body)
+
+
+def range_filter(body: dict) -> dict | None:
+    """The `@timestamp` bounds this body carries, or `None` when it carries no range at all."""
+    for entry in body["query"]["bool"]["filter"]:
+        if "range" in entry:
+            return entry["range"]["@timestamp"]
+    return None
+
+
+def pass_through() -> dict[str, Any]:
+    """`build_registry`'s oracle-side seam (`oracle=`, `verifier=`) for a world with no facts.
+    Such a world answers each call through one oracle turn, so production's lazy oracle model
+    would reach a provider. This double serves the base UNCHANGED with an empty claim (still
+    recorded `passthrough`); it decides nothing a test here asserts."""
+    from defender.tests.learning.oracle.live_contracts import _spec1224 as S
+
+    base = S.sym("learning.branch.estate.oracle", "BASE_HANDLE")
+    return {"oracle": S.oracle(then=S.submit(base, S.EMPTY_CLAIM)).model,
+            "verifier": S.passing_verifier().model}
+
+
+def adapter_calls(ctx: VerbContext) -> list[dict]:
+    return read_jsonl_rows(Path(ctx.run_dir) / "adapter-calls.jsonl")
+
+
+def served_rows(ledger: Ledger) -> list[dict]:
+    return read_jsonl_rows(ledger.path)
+
+
+# 1. the format
+
+def test_the_z_spelling_drops_the_precision_it_cannot_carry():
+    """`z_seconds` answers whole seconds with a trailing `Z`, and `Z_SECONDS` is that format."""
+    assert _clock.z_seconds(dt.datetime(2026, 5, 25, 15, 30, 45, 987654, tzinfo=dt.UTC)) == T0_Z
+    assert _clock.z_seconds(T0) == T0_Z
+    assert dt.datetime.strptime(T0_Z, _clock.Z_SECONDS).replace(tzinfo=dt.UTC) == T0
+
+
+def test_a_naive_moment_is_read_as_utc_and_not_as_local_time(tz_east_of_utc):
+    """A naive input is UTC, the rule `parse_iso_utc` documents — never the host's zone."""
+    naive = dt.datetime(2026, 5, 25, 15, 30, 45)
+
+    assert _clock.z_seconds(naive) == T0_Z
+    assert _clock.z_seconds(naive) != _clock.z_seconds(naive.astimezone()), (
+        "the naive moment was read as local time — the stamp moves with the host's zone")
+
+
+def test_an_offset_bearing_moment_is_converted_rather_than_relabelled():
+    """An aware moment in another zone is CONVERTED to UTC before the `Z` is written."""
+    berlin = dt.datetime(2026, 5, 25, 17, 30, 45, tzinfo=dt.timezone(dt.timedelta(hours=2)))
+
+    assert _clock.z_seconds(berlin) == T0_Z
+
+
+@pytest.fixture
+def tz_east_of_utc(monkeypatch):
+    """This process, five hours east of UTC."""
+    monkeypatch.setenv("TZ", "XXX-5")
+    time.tzset()
+    try:
+        assert dt.datetime(2026, 5, 25, 15, 30).astimezone().utcoffset() == dt.timedelta(hours=5), (
+            "the host did not take the TZ override, so local and UTC are the same clock here")
+        yield
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+# 2. the seam: no adapter context carries the branch point (#1385 O1)
+
+
+# Retired by #1391 O5 (design r4's retire list): host-state's captures were driven through a
+# fake `docker`. Host-state is now an HTTP adapter, and
+# credential_proxy_1163/test_query_flow.py::test_1391_o5_host_state_verbs_are_gets_on_the_endpoint_query_api_with_unchanged_outputs
+# pins each verb's whole output, so a `captured_at` of its own would fail there.
+
+
+def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
+    ctx = docker_ctx(tmp_path)
+    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("A", ("cmdb",)),
+                        ledger=primed_ledger(tmp_path, world_id=T.fixture_world_id("A")), **pass_through())
+
+    reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
+
+    own = [r for r in served_rows(reg.ledger) if r["world_id"] == T.fixture_world_id("A")]
+    assert len(own) == 1, f"one served call, one world row; got {own}"
+    assert "asked_params" not in own[0], (
+        f"an unstaged call recorded a second identity: {own[0]}")
+    assert own[0]["params"] == {"host": "canary-1"}
+    assert own[0]["source"] == PASSTHROUGH
+
+
+def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
+    """A ctx with no `as_of` FIELD is handed to the body untouched, not repaired and not raised on."""
+    @dataclasses.dataclass(frozen=True)
+    class ClocklessContext:
+        """A ctx from before the clock existed: no `as_of` to replace."""
+
+        defender_dir: Path
+        run_dir: Path
+        env: dict
+        capture: object = None
+        world_id: str | None = None
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
+                        ledger=primed_ledger(tmp_path), **pass_through())
+
+    payload = reg.verbs("cmdb")["get-host"](
+        ClocklessContext(defender_dir=tmp_path, run_dir=run_dir, env={}), host="canary-1")
+
+    assert payload["host"] == "canary-1"
+    # The live base read is kept in the world's oracle store, never as a ledger row, so the one
+    # row is the call served to the investigator.
+    assert [r["source"] for r in served_rows(reg.ledger)] == [PASSTHROUGH]
+
+
+# 3. no adapter stamps a time or cuts a window (#1385 O1, O7: the platform stamps, the oracle cuts)
+
+
+
+
+
+@pytest.mark.parametrize("verb", ["query", "alerts"])
+@pytest.mark.parametrize("end", [None, ""], ids=["absent", "empty-string"])
+def test_an_unbounded_search_is_sent_as_asked(tmp_path, data_root, verb, end):
+    """Design O1: no window end filled in, no cluster-side filter. The open end stays open."""
+    with elastic_ctx(tmp_path, data_root) as (ctx, up):
+        getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login", end=end)
+
+    body = search_body(up)
+    assert range_filter(body) is None, "the adapter closed the open window"
+    assert "post_filter" not in body, "the adapter added a cluster-side cut"
+
+
+@pytest.mark.parametrize(("start", "end", "expected"), [
+    (None, "2026-06-01T00:00:00Z", {"lte": "2026-06-01T00:00:00Z"}),
+    ("2026-05-01T00:00:00Z", None, {"gte": "2026-05-01T00:00:00Z"}),
+    ("2026-05-01T00:00:00Z", "2026-06-01T00:00:00Z",
+     {"gte": "2026-05-01T00:00:00Z", "lte": "2026-06-01T00:00:00Z"}),
+])
+def test_a_search_window_reaches_the_wire_exactly_as_the_caller_spelled_it(
+        tmp_path, data_root, start, end, expected):
+    """Design O1: the request is what an ordinary run would send for the same parameters."""
+    with elastic_ctx(tmp_path, data_root) as (ctx, up):
+        elastic_adapter.query(ctx, native_query="event.action:ssh_login", start=start, end=end)
+
+    body = search_body(up)
+    assert range_filter(body) == expected
+    assert "post_filter" not in body
+
+
+@pytest.mark.parametrize("asked", [
+    "FROM logs-zeek.ssh-* | LIMIT 1",
+    "FROM logs-x-* METADATA _id | LIMIT 5",
+    'FROM "logs|weird"',
+    ('FROM logs-system.auth-*\n'
+     '| WHERE @timestamp >= "2026-05-01T00:00:00Z" AND @timestamp < "2026-06-01T00:00:00Z"\n'
+     '| STATS events = COUNT(*) BY user = user.name'),
+    # Spellings the retired splice's own recognizer missed: it must still touch none of them.
+    "// note\nFROM logs-zeek.ssh-* | LIMIT 1",
+    "from logs-zeek.ssh-* | limit 1",
+])
+def test_an_esql_query_reaches_the_wire_and_the_payload_exactly_as_asked(
+        tmp_path, data_root, asked):
+    """Design O1: no ES|QL splice; `esql` echoes what was sent, which is now what was asked."""
+    with elastic_ctx(tmp_path, data_root) as (ctx, up):
+        payload = elastic_adapter.esql(ctx, query=asked)
+
+    assert payload["query"] == asked
+    assert search_body(up)["query"] == asked
+
+
+# 4. T0 itself: derived from the prefix, and pinned into the spec
+
+
+def test_t0_is_the_snapshots_run_clock_reading_at_each_branch_response(recorded_branch):
+    from defender.learning.branch import cli
+
+    _store, run_dir, l2_response, source = recorded_branch
+    l1_response = C.branch_response(run_dir, tool="read_file", arg_suffix=f"/{C.LESSONS[0]}.md")
+
+    early = cli.branch_point_clock(source, l1_response)
+    late = cli.branch_point_clock(source, l2_response)
+
+    assert (early, late) == (C.FIRST_READ_READING, C.BRANCH_READING), (
+        f"T0 is not the snapshot's run-clock reading at each branch response: early={early} "
+        f"(expected {C.FIRST_READ_READING}), late={late} (expected {C.BRANCH_READING})")
+    assert late.utcoffset() == dt.timedelta(0), f"T0 is not aware UTC: {late!r}"
+    framework = C.source_message_times(run_dir)
+    assert framework, "the source's messages carry no timestamps; the check below is empty"
+    assert not {early, late} & set(framework), (
+        "T0 is a framework message timestamp (the wall clock), not the run clock's reading")
+
+
+def test_the_branch_spec_carries_the_moment_it_forks_at(tmp_path):
+    """`as_of` is a REQUIRED coordinate of a `BranchSpec`, not an optional one."""
+    branch = branch_mod()
+    names = [f.name for f in dataclasses.fields(branch.BranchSpec)]
+    as_of = next(f for f in dataclasses.fields(branch.BranchSpec) if f.name == "as_of")
+
+    # The two remaining coordinates keep their place (the continuation prompt is gone, #1255).
+    assert names[:2] == ["source_run_dir", "branch_message_id"], (
+        f"the two coordinates moved: {names}")
+    assert as_of.default is dataclasses.MISSING, "a resume can be spelled without a moment"
+    assert as_of.default_factory is dataclasses.MISSING, (
+        "the moment defaults to something the caller never chose — most likely `now`, which "
+        "is the wall clock this batch exists to take out of a branched run")
+
+
+@pytest.fixture
+def recorded_branch(tmp_path, monkeypatch):
+    """A branch point #1255 admits: a source RECORDED through `run.main` (so it carries the fork
+    snapshot) and its tool-calling MAIN response, with the source's store held open. Not
+    `_branch_947.legal_source`: that source has no snapshot, so every launch refuses it.
+
+    Yields `(store, source run folder, branch message id, opened source run)`."""
+    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    _tenant_id, run_dir = C.record_source(tmp_path)
+    source = C.opened_source(run_dir)
+    branch_id = C.branch_response(run_dir, tool="read_file", arg_suffix=f"/{C.LESSONS[1]}.md")
+    opened = branch_mod().source_store_if_any(run_dir, source_run=source)
+    assert opened is not None, "the recorded source left no session store"
+    with opened as store:
+        yield store, run_dir, branch_id, source
+
+
+def test_a_spec_whose_clock_disagrees_with_its_branch_point_is_refused(recorded_branch):
+    branch = branch_mod()
+    store, run_dir, branch_id, source = recorded_branch
+    legal = spec_at(store, run_dir, branch_id, as_of=R)
+
+    assert branch.validate(store, legal, source_run=source) is None, (
+        "the spec at the snapshot's run-clock reading was refused, so the refusal below pins "
+        "nothing")
+
+    for wrong in (dt.timedelta(seconds=1), dt.timedelta(seconds=-1), dt.timedelta(hours=3)):
+        with pytest.raises(branch.BranchError):
+            branch.validate(store, dataclasses.replace(legal, as_of=legal.as_of + wrong),
+                            source_run=source)
+    framework = C.source_message_times(run_dir)
+    assert framework, "the source's messages carry no timestamps; the check below is empty"
+    for wall in framework:
+        with pytest.raises(branch.BranchError):
+            branch.validate(store, dataclasses.replace(legal, as_of=wall), source_run=source)
+
+
+@pytest.mark.parametrize("as_of", [
+    None,
+    _clock.z_seconds(R),
+    R.replace(tzinfo=None),
+    R.astimezone(dt.timezone(dt.timedelta(hours=2))),
+], ids=["none", "a-string", "naive", "plus-two-hours"])
+def test_a_spec_whose_clock_is_not_aware_utc_is_refused(recorded_branch, as_of):
+    branch = branch_mod()
+    store, run_dir, branch_id, source = recorded_branch
+
+    assert branch.validate(store, spec_at(store, run_dir, branch_id, as_of=R),
+                           source_run=source) is None, (
+        "the spec at the snapshot's run-clock reading was refused, so the refusal below pins "
+        "nothing")
+    with pytest.raises(branch.BranchError):
+        branch.validate(store, spec_at(store, run_dir, branch_id, as_of=as_of), source_run=source)

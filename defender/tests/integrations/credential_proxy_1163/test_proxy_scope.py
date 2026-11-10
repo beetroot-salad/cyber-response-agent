@@ -122,6 +122,16 @@ def test_s1_a_token_whose_tenant_has_no_exports_is_refused(tmp_path, data_root, 
                  id="dotdot-path-parameter"),
     pytest.param(lambda up, other: f"{up}/api/v2/%2e%2e%3b/admin", "ConfinementFault",
                  id="encoded-dotdot-path-parameter"),
+    # A segment that decodes to hold a separator: a server that decodes before routing splits
+    # it (#1391 r5 O-T5). Other escapes in a segment are sent.
+    pytest.param(lambda up, other: f"{up}/api/v2/users/x%2Fadmin", "ConfinementFault",
+                 id="encoded-slash"),
+    pytest.param(lambda up, other: f"{up}/api/v2/users/x%2fadmin", "ConfinementFault",
+                 id="encoded-slash-lower-case"),
+    pytest.param(lambda up, other: f"{up}/api/v2/users/x%5Cadmin", "ConfinementFault",
+                 id="encoded-backslash"),
+    pytest.param(lambda up, other: f"{up}/api/v2/users/x%3Fy%23z%25", None,
+                 id="other-escapes-are-sent"),
     pytest.param(lambda up, other: f"http://127.0.0.1:{other}/api/v2/users/x", "ConfigFault",
                  id="other-port"),
     pytest.param(lambda up, other: up.replace("http://", "https://") + "/api/v2/users/x",
@@ -154,6 +164,19 @@ def test_s2_the_query_string_reaches_the_upstream_with_the_path(tmp_path, data_r
 
     assert answer["fault"] is None
     assert [s.path for s in r.up.seen] == ["/api/v2/users?limit=5&name=dana"]
+
+
+def test_s2_the_encoded_separator_check_reads_only_the_path_under_the_base(tmp_path, data_root):
+    """The tenant's own base may hold an escaped `/` (a project named `group%2Fproject`): requests
+    under it are sent; an escaped `/` in the part the run filled in is still refused (#1391 r5
+    O-T5)."""
+    project = "/api/v4/projects/group%2Fproject"
+    with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(u + project)) as r:
+        sent = r.ask(url=f"{r.up.url}{project}/issues")
+        split = r.ask(url=f"{r.up.url}{project}/issues/x%2Fadmin")
+
+    assert (sent["fault"], split["fault"]) == (None, "ConfinementFault"), (sent, split)
+    assert [s.path for s in r.up.seen] == [f"{project}/issues"]
 
 
 # --- O3 route scope (routes are relative to the base, A2) ------------------------------------

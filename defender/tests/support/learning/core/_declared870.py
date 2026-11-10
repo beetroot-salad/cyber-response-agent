@@ -23,7 +23,7 @@ from defender.tests.support.runtime.engine._declared869 import (  # noqa: F401 â
 )
 
 # The literals the tests assert against, spelled HERE rather than imported from the target: an
-# oracle read out of the code it judges cannot disagree with it. `test_870_handoff.py` asserts
+# oracle read out of the code it judges cannot disagree with it. `test_reducer_queue.py` asserts
 # the real committed file still matches them.
 
 #: The reducer surface the pitfalls lane writes: the tenant's add-on page, repo-relative in the

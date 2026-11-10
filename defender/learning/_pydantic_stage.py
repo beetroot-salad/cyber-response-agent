@@ -122,6 +122,7 @@ def run_stage(
     logger = observe.RequestLogger(
         observe.stage_trace_path(ctx.learning_run_dir, wiring.trace_name)
     )
+    logger.bind_ledger(observe.NO_LEDGER)  # a learning stage has its own charge and no spend ledger (#1377)
     _logger.info(f"step={label} engine=pydantic_ai model={wiring.model} effort={wiring.effort}")
     try:
         try:

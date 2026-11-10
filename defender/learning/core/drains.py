@@ -847,6 +847,20 @@ def _stop_after_work(stop_box: Callable[..., None], box: Any, *, work_ok: bool,
         _logger.error(f"{label}: the batch's box could not be torn down after a failed batch: {e!r}")
 
 
+def _gate_opens(state: LearningState, prefix: str, has_work: Callable[[LearningState], bool]) -> bool:
+    """A lane's wake gate: something retained to deliver, or work queued. A tick it keeps shut
+    opens nothing, so nothing waits for that lane."""
+    return bool(state.deliveries(prefix)) or has_work(state)
+
+
+def author_work_waiting(paths: LoopPaths) -> bool:
+    """Whether `author_drain`'s gate would open now: what a post-step reports as still waiting,
+    so a tenant whose gate stays shut is not checked again until a job arms it (#1344
+    amendment 3)."""
+    with LearningState.open(paths) as state:
+        return _gate_opens(state, _branch_prefix(AUTHOR_DRAIN_LABEL), _has_curator_work)
+
+
 def _run_tenant_batch(  # noqa: PLR0913 — one batch, kept whole
     paths: LoopPaths,
     state: LearningState,
@@ -867,7 +881,7 @@ def _run_tenant_batch(  # noqa: PLR0913 — one batch, kept whole
     the stage's refusal, before any claim, box or model call (O9); an outage there skips the
     tick."""
     prefix = _branch_prefix(label)
-    if not state.deliveries(prefix) and not has_work(state):
+    if not _gate_opens(state, prefix, has_work):
         _logger.info(f"{label}: nothing queued and no curator at threshold — skipping")
         return 0
     with open_delivery() as opened:

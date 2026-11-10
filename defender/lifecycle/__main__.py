@@ -27,8 +27,9 @@ def _now() -> _dt.datetime:
 
 
 class _NoPeople:
-    """The sign-in and mail ports of an identity service that only ends memberships (offboarding's
-    `end_tenant`); anything else it is asked is a programming error."""
+    """The sign-in, mail and programs ports of an identity service that only ends memberships (offboarding's
+    `end_tenant`); anything else it is asked is a programming error. Offboarding revokes a program's
+    credentials but never touches the programs realm: the API's reconciliation deletes the clients."""
 
     async def close(self) -> None:
         return None
@@ -69,7 +70,7 @@ async def _serve() -> int:
     dsn, config = _dsn(), _lifecycle_settings()
     tenants = PostgresTenantRepository(dsn, lock_keepalive=config.lock_keepalive)
     identity = IdentityService(PostgresIdentityRepository(dsn), signin=_NoPeople(), mail=_NoPeople(),
-                               clock=_now, bootstrap=Bootstrap(administrators=()))
+                               programs=_NoPeople(), clock=_now, bootstrap=Bootstrap(administrators=()))
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):

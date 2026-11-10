@@ -81,17 +81,17 @@ if not old_host:
 
 pathlib.Path(path).write_text("".join(out))
 print(f"OLD_HOST={shlex.quote(old_host)}")
-print(f"KNOWN_HOSTS={shlex.quote(known_hosts)}")
+print(f"KNOWN_HOSTS={shlex.quote(known_hosts)}")  # lint-stale-ref: ok — this script's own SSH variable, not the product constant #1391 removed
 PY
 )"
 
 # Purge the stale key from the file the stanza actually reads. A bare `ssh-keygen -R`
 # defaults to ~/.ssh/known_hosts, which is NOT where UserKnownHostsFile points — that
 # mismatch is why stale keys survived this script until 2026-07-17.
-if [ -n "${KNOWN_HOSTS:-}" ] && [ -f "${KNOWN_HOSTS}" ]; then
+if [ -n "${KNOWN_HOSTS:-}" ] && [ -f "${KNOWN_HOSTS}" ]; then  # lint-stale-ref: ok — this script's own SSH variable, not the product constant #1391 removed
     for host in "${OLD_HOST}" "${NEW_HOST}"; do
         [ "${host}" = "${SENTINEL}" ] && continue
-        ssh-keygen -R "${host}" -f "${KNOWN_HOSTS}" >/dev/null 2>&1 || true
+        ssh-keygen -R "${host}" -f "${KNOWN_HOSTS}" >/dev/null 2>&1 || true  # lint-stale-ref: ok — this script's own SSH variable, not the product constant #1391 removed
     done
 fi
 

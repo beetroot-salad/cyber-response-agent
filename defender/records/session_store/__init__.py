@@ -25,6 +25,18 @@ from defender.records.run_end import (  # noqa: F401 — re-exports
     normalized_truncated_by,
 )
 
+from ._ledger import (  # noqa: F401
+    COUNTS as SPEND_COUNTS,
+    REFUSED as REFUSED,
+    RESPONSE as RESPONSE,
+    UNSEEN as UNSEEN,
+    LedgerRead as LedgerRead,
+    SpendRow as SpendRow,
+    read_ledger as read_ledger,
+    record_spend as record_spend,
+    run_spend as run_spend,
+    seal_ledger as seal_ledger,
+)
 from ._schema import (
     CyclicParentChain as CyclicParentChain,
     DDL as DDL,
@@ -100,11 +112,9 @@ from ._read import (
     displaced_tip as displaced_tip,
     ends_on_complete_pair as ends_on_complete_pair,
     fold_history as fold_history,
-    SessionRow as SessionRow,
+    has_session as has_session,
     hydrate as hydrate,
-    list_sessions as list_sessions,
     main_session_id as main_session_id,
-    own_responses as own_responses,
     path_row_ids as path_row_ids,
     synthesized_flags as synthesized_flags,
 )

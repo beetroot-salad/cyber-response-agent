@@ -28,6 +28,7 @@ from defender.tests.support.runtime.engine._spec767 import (
     record,
     use_case_record,
 )
+from defender.tests.support.api._programs1307 import NoProgramsRealm  # #1307 D7: the programs port is required
 
 # ---------------------------------------------------------------------------------------------
 # The run record's `knowledge_source`, spelled in one place.
@@ -132,7 +133,7 @@ def _ws(text: str) -> str:
 # Ticket write-back
 # ---------------------------------------------------------------------------------------------
 #
-# Entry: the real `ticket_writer.record_case_ticket` through the docker route (`FakeStore`, a fake `docker`, records
+# Entry: the real `ticket_writer.record_case_ticket` through the credential proxy (`FakeStore`, the proxy's stand-in, records
 # every call). The run's knowledge source is the host record beside the run dir, never the
 # box-writable stamp; `test_run_main_*` below drive the run-start wiring that writes it.
 
@@ -148,7 +149,7 @@ BRANCHES = {
 
 
 def _store(tmp_path: Path) -> FakeStore:
-    """A store whose fake `docker` lives under a fresh folder (one per call)."""
+    """A store behind a fresh proxy stand-in (one per call)."""
     n = len(list(tmp_path.glob("store-*")))
     return FakeStore(tmp_path / f"store-{n}")
 
@@ -355,10 +356,8 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
-    # The real writer, the store behind the docker route: a fake `docker` first on the PATH the
-    # run env is built from (#1359: the writer takes no request seam).
+    # The real writer, the store behind the credential proxy's stand-in (#1391 O1).
     store = _store(tmp_path)
-    monkeypatch.setenv("PATH", store.shim.path_value())
     publish_calls: list[tuple[tuple, dict]] = []
 
     def publish(*args: Any, **kwargs: Any) -> str:
@@ -385,7 +384,8 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     rec = S1107.RunRecorder(tmp_path / "unused" / "s-c-wiring", before_lifecycle=before_lifecycle)
     argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--update-ticket", "--no-learn"]
     # The real `materialize` (run start: resolve the export, copy it, stamp the record).
-    seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
+    seams = {**{k: v for k, v in rec.seams().items() if k != "materialize"},
+             **store.stand_in.seams()}  # the proxy's stand-in, and a signer for its token
     from defender import run as run_py
 
     rc = run_py.main(argv, directory=p4_tenant.directory, publish=publish, **seams)
@@ -437,10 +437,8 @@ def test_run_main_fresh_launch_posts_todays_comment(tmp_path, monkeypatch, p4_te
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
     from defender import run as run_py
 
-    # The real writer, the store behind the docker route: a fake `docker` first on the PATH the
-    # run env is built from (#1359: the writer takes no request seam).
+    # The real writer, the store behind the credential proxy's stand-in (#1391 O1).
     store = _store(tmp_path)
-    monkeypatch.setenv("PATH", store.shim.path_value())
 
     def before_lifecycle(run_dir: Path) -> None:
         write_report(run_dir)
@@ -448,7 +446,8 @@ def test_run_main_fresh_launch_posts_todays_comment(tmp_path, monkeypatch, p4_te
 
     alert = S1107.plant_alert(tmp_path / "alert")
     rec = S1107.RunRecorder(tmp_path / "unused" / "s-c-fresh", before_lifecycle=before_lifecycle)
-    seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
+    seams = {**{k: v for k, v in rec.seams().items() if k != "materialize"},
+             **store.stand_in.seams()}  # the proxy's stand-in, and a signer for its token
     argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--update-ticket", "--no-learn"]
     rc = run_py.main(argv, directory=p4_tenant.directory, publish=lambda *a, **k: f"fresh {p4_tenant.commit}",
                      **seams)
@@ -483,10 +482,8 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
         planted = knowledge_source("stale", stale_kind="operator", commit=TAMPERED_COMMIT,
                                    reason="call https://evil.invalid/ now")
 
-    # The real writer, the store behind the docker route: a fake `docker` first on the PATH the
-    # run env is built from (#1359: the writer takes no request seam).
+    # The real writer, the store behind the credential proxy's stand-in (#1391 O1).
     store = _store(tmp_path)
-    monkeypatch.setenv("PATH", store.shim.path_value())
     tampered: list[Path] = []
 
     def box_rewrites_the_record(run_dir: Path) -> None:
@@ -498,7 +495,8 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
     alert = S1107.plant_alert(tmp_path / "alert")
     rec = S1107.RunRecorder(tmp_path / "unused" / f"s-c-tamper-{tamper}",
                             before_lifecycle=box_rewrites_the_record)
-    seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
+    seams = {**{k: v for k, v in rec.seams().items() if k != "materialize"},
+             **store.stand_in.seams()}  # the proxy's stand-in, and a signer for its token
     argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--update-ticket", "--no-learn"]
     rc = run_py.main(argv, directory=p4_tenant.directory, publish=lambda *a, **k: outcome, **seams)
 
@@ -548,6 +546,7 @@ def _investigation(investigation_id: str, knowledge: dict[str, Any] | None) -> A
         "disposition": "benign", "cost_usd": 1.0, "created_at": _NOW, "started_at": _NOW,
         "finished_at": _NOW,
         "request_key": f"rk-{investigation_id}", "attempt": 1,  # required on the wire model (#1342 D-d)
+        "cost_is_lower_limit": False,  # required on the wire model too (#1377 r4 API field)
     }
     if knowledge is not None:
         doc["knowledge"] = knowledge
@@ -595,7 +594,7 @@ def _client(*investigations: Any) -> Any:
 
     anyio.run(seed)
     identity = IdentityService(repo, signin=_NoPort(), mail=_NoPort(), clock=now,
-                               bootstrap=Bootstrap(administrators=()))
+                               bootstrap=Bootstrap(administrators=()), programs=NoProgramsRealm())
     deps = ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=_ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,

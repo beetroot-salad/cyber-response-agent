@@ -48,10 +48,14 @@ class ProviderDown(Exception):  # noqa: N818 — named for the state it reports,
 
 
 #: Refusals that say the model's setup or account is broken (key, payment or credit, access,
-#: model name), not the request: every caller on that model gets the same answer, so even a
-#: lead's ends the run (#1243 r3). A provider that reports these as a plain 400 is not caught:
-#: telling them apart would mean reading the body text.
-SETUP_STATUSES = frozenset({401, 402, 403, 404})
+#: model name, account suspended), not the request: every caller on that model gets the same
+#: answer, so even a lead's ends the run (#1243 r3). 412 is Fireworks' suspended or blocked
+#: account, and its fine-tuned model that failed to load (#1447). Read by status alone, so a
+#: provider that reports a broken account another way gets the wrong ending: Anthropic's low
+#: credit as 400 on a lead ends only that lead, and OpenAI's `insufficient_quota` as 429 is
+#: resent and ends the run `provider-down`. Telling them apart would mean reading the body
+#: text, which Fireworks, the provider in use, does not document.
+SETUP_STATUSES = frozenset({401, 402, 403, 404, 412})
 #: How much of the provider's refusal text the host log keeps. Never shown to a model.
 _REASON_CAP = 500
 
@@ -87,15 +91,22 @@ class RetryPolicy:
     jitter: Callable[[], float] = random.random
 
 
-def _temporary(exc: BaseException) -> tuple[bool, int | None]:
+def temporary_failure(exc: BaseException) -> tuple[bool, int | None]:
     """`(whether exc is a temporary provider failure, its HTTP status or None for no response)`.
-    Classified by status alone, never by body text."""
+    Classified by status alone, never by body text. The retrier retries exactly these."""
     from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 
     if isinstance(exc, ModelHTTPError):
         status = exc.status_code
         return (status in _TEMPORARY_STATUSES or status >= 500), status
     return isinstance(exc, ModelAPIError), None
+
+
+def refused_by_provider(exc: BaseException) -> bool:
+    """Whether `exc` is the provider refusing a request before its model ran: an HTTP error the
+    retrier does not retry (a 4xx other than 408, 409 or 429), so no attempt was billed. The one
+    reading of "refused" (#1377 r7.1 E), shared with what a refusal does to the run (#1243)."""
+    return refusal_status(exc) is not None
 
 
 def refusal_status(exc: BaseException) -> int | None:
@@ -105,7 +116,7 @@ def refusal_status(exc: BaseException) -> int | None:
     other refusal on a lead ends only that lead (#1243)."""
     from pydantic_ai.exceptions import ModelHTTPError
 
-    if isinstance(exc, ModelHTTPError) and not _temporary(exc)[0]:
+    if isinstance(exc, ModelHTTPError) and not temporary_failure(exc)[0]:
         return exc.status_code
     return None
 
@@ -152,7 +163,7 @@ def _wrapper_class() -> type:
                     return await self.wrapped.request(
                         messages, model_settings, model_request_parameters)
                 except Exception as e:  # noqa: BLE001 — classified below; non-temporary re-raised as is
-                    temporary, status = _temporary(e)
+                    temporary, status = temporary_failure(e)
                     if not temporary:
                         raise
                     # `retry_after` is the framework's own parse of the header (seconds or HTTP-date).

@@ -45,6 +45,19 @@ The tenant's alert mapping lives in the database; nothing reads `settings/alert-
    describes the six entries.
 3. Delete the file from the tenant's repository.
 
+## Upgrade from before #1377
+
+A run's cost is now the sum of a spend ledger (a table in the run's session database, one row per model
+response any agent of the run received, review calls included), so `cost_usd` and the run file's
+`total_cost_usd` count what the run really paid. Old run files keep their main-only totals: totals before
+and after this change are not comparable. Stop the API and workers before running the migration: it adds a
+required column with no default, so an older process fails on every insert until it is upgraded. Run
+migrations (revision `0010_cost_lower_limit`): the API's investigations gain `cost_is_lower_limit`, true
+when `cost_usd` is "at least" that much (a spend write failed, or the run was killed before it sealed its
+ledger). The mark is worked out when a record is read: a row that
+ended after it started, with a cost and no final figure from its worker, reads "at least" (this includes such rows
+already in the database); every other existing row reads exact.
+
 ## Upgrade from before #1412
 
 The credential proxy streams each upstream reply to the run in its own frame format (content
@@ -55,15 +68,51 @@ A reply over 8 MiB is still refused; the fault now tells the model to narrow the
 limit is no longer configurable: remove `max_response_bytes` from the proxy's config file before
 upgrading, or the proxy refuses to start.
 
+## Upgrade from before the Docker removal (#1391 O1, O2, O5)
+
+Every system with network access is reached only through the credential proxy: a system is
+proxied because its folder holds an `access.yaml`, and there is no access-method key. The settings
+check now judges each system's whole folder against the keys its adapter reads, so a tenant on
+old settings has every such system down at once until this is done. In one tenant commit, make
+every folder under `settings/systems/` (elastic, cmdb, identity, change-mgmt, threat-intel, <!-- lint-shippable: ok — the vendor-specific product integration. -->
+host-state, the case system — ticket, jira or servicenow — and any other) meet this rule:
+
+1. `config.env` holds only the keys the adapter reads, and none is `CHANGE-ME` or blank. Every
+   other key is refused by name. That removes, wherever they appear, `<PREFIX>_TRANSPORT`
+   (including `JIRA_TRANSPORT` and `SERVICENOW_TRANSPORT`), `<PREFIX>_DOCKER_CONTEXT`,
+   `<PREFIX>_BASTION_HOST`, `<PREFIX>_URL_BASE` and `<PREFIX>_HOST`, and for elastic  <!-- lint-shippable: ok — the vendor-specific product integration. -->
+   `ELASTIC_TRANSPORT` and `ELASTIC_RETENTION_DAYS`. The stubs read `<PREFIX>_TIMEOUT_SEC`, ticket <!-- lint-shippable: ok — the vendor-specific product integration. -->
+   also `TICKET_KEY_PATTERN`. host-state reads no key: delete its `config.env`. A key a system
+   puts in a URL path (elastic's index patterns) must be one path segment: no `/ \ ? # % ;`. <!-- lint-shippable: ok — the vendor-specific product integration. -->
+2. `access.yaml` is always required, with the system's `base` and `auth` (bearer, field
+   `api_key`), and holds no `CHANGE-ME`. Any request other than a GET is declared: the case
+   system's comment write under `writes`, and threat-intel's lookup under `reads` as
+   `{method: POST, path: "/lookup"}` (the value now travels in the body). Copy the template's
+   folders. host-state's base is an endpoint-query service (an endpoint-security product's query
+   API) that answers `GET /hosts`, `/hosts/{host}/processes`, `/hosts/{host}/accounts`,
+   `/hosts/{host}/accounts/{user}/authorized-keys`, `/hosts/{host}/files/sha256?path=…`,
+   `/hosts/{host}/packages` and `/containers/{id}`.
+3. A stored `bearer` credential per system, and a published export carrying the declarations
+   (the proxy reads only `exports/current`).
+4. Remove a leftover folder of the case system retired by #1359 (the case system is named by
+   `settings/case-record.yaml` since then; `tenant check` names the folder).
+
+A host, record id or other value the agent names that is not one path segment is now refused
+before it is sent, and the proxy refuses a path holding an escaped `/` or `\`.
+
+host-state's `health-check` no longer reports a docker context, and a host the service does not
+enroll is now the agent's to fix (`UpstreamFault`, from the service's 404) rather than refused
+before any call.
+
 ## Upgrade from before #1391
 
 Elastic is reached only through the credential proxy; its Docker access is gone. <!-- lint-shippable: ok — the vendor-specific product integration. -->
 A tenant's `systems/elastic/` needs, in one commit: <!-- lint-shippable: ok — the vendor-specific product integration. -->
 
-1. `config.env` with `ELASTIC_TRANSPORT="http-proxy"` and the two index keys
-   (`ELASTIC_EVENTS_INDEX`, `ELASTIC_ALERTS_INDEX`); delete `ELASTICSEARCH_URL`, `KIBANA_URL` (a
-   leftover is refused by name) and, as they now do nothing, `ELASTIC_DOCKER_CONTEXT`,
-   `ELASTIC_ES_CONTAINER`, `ELASTIC_KIBANA_CONTAINER` and `ELASTIC_SSL_VERIFY`.
+1. `config.env` with the two index keys (`ELASTIC_EVENTS_INDEX`, `ELASTIC_ALERTS_INDEX`) and no
+   other key: since the Docker removal above, any other key — `ELASTIC_TRANSPORT`,
+   `ELASTICSEARCH_URL`, `KIBANA_URL`, `ELASTIC_DOCKER_CONTEXT`, `ELASTIC_ES_CONTAINER`,
+   `ELASTIC_KIBANA_CONTAINER`, `ELASTIC_SSL_VERIFY` — is refused by name.
 2. `access.yaml`: `base` (the cluster URL, a path allowed), basic `auth`, `reads` of
    `POST /*/_search` and `POST /_query`, and `ca:` (inline PEM certificates, nothing else) when the
    cluster's certificate comes from a private CA. `ca` is then the only trust for that system, the

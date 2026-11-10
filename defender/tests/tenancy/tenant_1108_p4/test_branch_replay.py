@@ -42,7 +42,7 @@ ABSENT_COMMIT = "abcdef0123456789" * 2 + "abcdef01"
 PIN = "--knowledge-commit"
 
 #: One answer every captured call carries, so one scripted oracle submission serves them all
-#: (as `test_947_triplet_launcher` does).
+#: (as `test_triplet_launcher` does).
 _BASE = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon", "host": "web-1",
                    "ts": "2026-07-28T15:00:00Z"}]}
 

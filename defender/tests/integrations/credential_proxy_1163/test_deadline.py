@@ -14,7 +14,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from defender._proxy_client import proxy_call
+from defender.kit.proxy_client import proxy_call
 from defender.credential_proxy._connections import DeliveryLimited
 from defender.integrations import identity_adapter
 from defender.kit.access import CALLER_GRACE_SEC

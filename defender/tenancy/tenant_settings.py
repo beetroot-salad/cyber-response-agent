@@ -12,7 +12,13 @@ from types import MappingProxyType
 
 from defender._io import is_plain_entry
 from defender.kit.faults import ConfigFault
-from defender.kit.settings import NOT_CONFIGURED, SystemConfig, config_pointer, pointer_to
+from defender.kit.settings import (
+    NOT_CONFIGURED,
+    ConfigAbsent,
+    SystemConfig,
+    config_pointer,
+    pointer_to,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -103,7 +109,7 @@ def read_env_file(path: Path, *, shown: str) -> dict[str, str]:
     try:
         raw = read_regular_bytes(path)
     except FileNotFoundError:
-        raise ConfigFault(f"config file not found: {shown} — {NOT_CONFIGURED}") from None
+        raise ConfigAbsent(f"config file not found: {shown} — {NOT_CONFIGURED}") from None
     except OSError as e:
         raise ConfigFault(f"config file unreadable: {shown}: {e.strerror or type(e).__name__}") from e
     try:
@@ -148,7 +154,7 @@ def read_systems(settings: Path) -> Mapping[str, SystemConfig | ConfigFault]:
                 # A fresh instance, never the caught one: the caught fault's traceback holds this
                 # frame (and `out`, the live dict behind the read-only view) and its cause holds
                 # the OSError with the host path. The record keeps the text only.
-                out[folder.name] = ConfigFault(str(fault))
+                out[folder.name] = type(fault)(str(fault))
     return MappingProxyType(out)
 
 

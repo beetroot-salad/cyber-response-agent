@@ -61,7 +61,7 @@ def dev_unset_root(monkeypatch: Any) -> None:
 def fake_main_and_worktree(base: Path) -> tuple[Path, Path]:
     """A main checkout (`.git` a directory, a `defender/`) and one worktree of it (`.git` a file
     pointing back, with a `defender/` holding the product check file), written the way git
-    leaves them (as test_1084_mirror's layouts). Returns `(main, worktree)`."""
+    leaves them (as test_mirror's layouts). Returns `(main, worktree)`."""
     import shutil
 
     main, wt = base / "main", base / "trees" / "wt"

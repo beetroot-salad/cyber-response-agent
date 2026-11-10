@@ -1,6 +1,7 @@
 """Shared builders, a fake ticket store and drivers for the #767 case-ticket writer suite (#1359: the
-record leg comments through the case system's adapter, so the store is the docker route's fake
-`docker`, not a seam inside the writer)."""
+record leg comments through the case system's adapter, which reaches the store through the
+credential proxy (#1391 O1), so the store is a stand-in for the proxy, not a seam inside the
+writer)."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -42,11 +43,9 @@ COMMENTS_SUFFIX = "/comments"
 TRANSITIONS_SUFFIX = "/transitions"
 TICKETS_PATH = "/tickets"
 
-#: The `ticket` system's settings the planted tenant carries (docker route): the keys the
-#: adapter requires beside the access method.
+#: The `ticket` system's settings the planted tenant carries: the keys the adapter reads (its
+#: base is its access declaration's, #1391 P1).
 CONFIG: dict[str, str] = {
-    "URL_BASE": "http://ticket.test",
-    "BASTION_HOST": "bastion.test",
     "TIMEOUT_SEC": "10",
     "KEY_PATTERN": "C767-[0-9]+",
 }
@@ -70,6 +69,8 @@ CONFIG_RELPATH = f"systems/{CASE_SYSTEM}/config.env"
 
 #: The tenant `use_case_record` plants under the test's root.
 TENANT_ID = fixture_uuid("tenant:t767")
+#: The base the planted tenant's `ticket` access declaration names.
+TICKET_BASE = T1106.default_base(TENANT_ID, CASE_SYSTEM)
 
 
 # --------------------------------------------------------------------------------------
@@ -139,8 +140,6 @@ def _write_case_config(settings: Path, config: dict[str, str] | None) -> None:
         path.unlink(missing_ok=True)
         return
     lines = [f'TICKET_{key}="{value}"' for key, value in config.items()]
-    lines += [f'TICKET_TRANSPORT="{S1107.DOCKER_EXEC}"',
-              f'TICKET_DOCKER_CONTEXT="{S1107.context_name(TENANT_ID, CASE_SYSTEM)}"']
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -218,48 +217,43 @@ ALERT_MAPPING = {"signature": "rule.id", "event_time": "timestamp", "summary": "
 
 
 # --------------------------------------------------------------------------------------
-# The store fake — the docker route's fake `docker` (one per test), driven by canned answers
+# The store fake — a stand-in for the credential proxy (one per test), driven by canned answers
 # --------------------------------------------------------------------------------------
+
+#: The write-back token the record leg presents (the stand-in checks none).
+WRITE_TOKEN = "write-token-767"
 
 
 @dataclass(frozen=True)
 class OutboundCall:
-    """One request the store received (read off the `curl` argv the transport forked): what
-    shape assertions check, never the canned reply."""
+    """One request the store received (as the run sent it to the proxy): what shape assertions
+    check, never the canned reply."""
 
     method: str
     path: str
     body: Any
 
 
-def outbound(argv: list[str]) -> OutboundCall | None:
-    """The request a docker-exec'd `curl` argv carries, or `None` for any other docker call."""
-    from urllib.parse import urlparse
-
-    url = S1107.curl_url(argv)
-    if "curl" not in argv or url is None:
-        return None
-    method = argv[argv.index("-X") + 1] if "-X" in argv else "GET"
-    body = json.loads(argv[argv.index("-d") + 1]) if "-d" in argv else None
-    return OutboundCall(method=method, path=urlparse(url).path, body=body)
-
-
 class FakeStore:
-    """The ticket store behind the docker route: a fake `docker` on PATH that records each call
-    and answers `answers` in order (the last repeats). It injects a status and a body; it decides
-    nothing. `env()` puts the shim first on a run env's PATH."""
+    """The ticket store behind the proxy: a `ProxyStandIn` that records each request and answers
+    `answers` in order (the last repeats). It injects a status and a body; it decides nothing."""
 
     def __init__(self, root: Path, *, status: str = "201", body: str = '{"id": 1}',
                  answers: list[dict[str, Any]] | None = None) -> None:
-        self.shim = S1107.DockerShim(
+        self.stand_in = S1107.ProxyStandIn(
             Path(root), answers if answers is not None else [S1107.answer(body, status)])
 
+    @property
+    def url(self) -> str:
+        return self.stand_in.url
+
     def env(self, base: Any) -> dict[str, str]:
-        return self.shim.env(base)
+        return dict(base)
 
     @property
     def calls(self) -> list[OutboundCall]:
-        return [c for c in (outbound(x["argv"]) for x in self.shim.calls()) if c is not None]
+        return [OutboundCall(method=r["method"], path=r["path"], body=r["body"])
+                for r in self.stand_in.requests()]
 
     def writes(self) -> list[OutboundCall]:
         """Every call that could change the estate (any non-`GET`)."""
@@ -306,17 +300,19 @@ class FakeStore:
 
 
 def _handed(run_dir: Path, store: FakeStore, config: dict[str, str] | None | object) -> dict[str, Any]:
-    """What run.py hands the leg: the record, the code tree and the run's env (the store's `docker` first on PATH)."""
+    """What run.py hands the leg: the record, the code tree, the run's env, and the proxy's
+    address and write-back token (the store's stand-in)."""
     from defender import box as box_mod
 
     return {"tenant": current_record(config=config), "defender_dir": T1106.DEFENDER,
-            "env": store.env(box_mod.run_env(T1106.DEFENDER, Path(run_dir)))}
+            "env": store.env(box_mod.run_env(T1106.DEFENDER, Path(run_dir))),
+            "proxy_url": store.url, "request_token": WRITE_TOKEN}
 
 
 def record(run_dir: Path, store: FakeStore, *,
            config: dict[str, str] | None | object = _CONFIG_UNSET, **kw: Any) -> Any:
     """Drive the record leg (`record_case_ticket`) over one run dir, through the real seam and
-    the real shared transport, the store being `store`'s fake `docker`."""
+    the real shared transport, the store being behind `store`'s proxy stand-in."""
     from defender.investigation import ticket_writer
 
     return ticket_writer.record_case_ticket(

@@ -3,7 +3,7 @@ secret stays in host-side delivery processes, never in a box or an environment v
 under no box mount source (O8); a tenant P3's `open` refuses is the stage's refusal (O9).
 
 `forge_credential(T, purpose, *, directory, config, transport=)` replaces `issuer_login` (RC-9); its own cases
-are `lifecycle_1214/test_1214_forge_credential.py`. Cases here that need no minting hand the drain an `identity`.
+are `lifecycle_1214/test_forge_credential.py`. Cases here that need no minting hand the drain an `identity`.
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 def test_a_id_a_refused_approle_login_is_a_refusal_that_never_echoes_the_secret(p4_tenant, tmp_path):
     """A refused `secret_id` is an auth refusal, never a token, and its text carries neither the secret
-    id from the host file nor the generation's role id. (Minting itself: `test_1214_forge_credential`.)"""
+    id from the host file nor the generation's role id. (Minting itself: `test_forge_credential`.)"""
     import httpx
 
     from defender.learning.author.version_control import forge_credential

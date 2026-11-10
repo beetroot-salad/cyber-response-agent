@@ -12,7 +12,6 @@ from datetime import timedelta
 import httpx
 import pytest
 
-from defender.integrations import _stub_transport as transport
 from defender.integrations import identity_adapter
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
@@ -21,7 +20,7 @@ from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163 import test_query_flow as Q
 from defender.tests.integrations.credential_proxy_1163 import test_ticket_flow as K
-from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH, transport_uses_proxy
+from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4.test_r6_issuer import tls_issuer  # noqa: F401 — fixture
 
@@ -154,14 +153,8 @@ def test_x4_an_http_proxy_system_with_no_token_is_refused_as_a_proxy_fault_and_n
     assert len(up.seen) == 1, "only the control call was sent"
 
 
-def test_x5_the_docker_transport_refuses_an_http_proxy_system(tmp_path, data_root):
-    """The docker access check names an `http-proxy` system as not its own and gives it no
-    default context. A5, A6."""
-    with H.upstream() as up, Q._published(tmp_path, data_root, up) as t:
-        record = T.run_record(t)
-        with pytest.raises(ConfigFault):
-            transport.record_access_context(record, "identity")
-        assert transport_uses_proxy(record, "identity"), "positive control: it is http-proxy"
+# x5 (the docker access check refuses an http-proxy system) is retired: #1391 O1 removed the
+# Docker access method, so there is no second access check to refuse anything.
 
 
 class _BlipThenToken:
@@ -200,7 +193,7 @@ def test_the_run_reaches_the_proxy_directly_never_through_a_web_proxy_from_the_e
     """A run's request (and its bearer token) goes straight to the proxy address it was handed, even when the
     environment names a web proxy (P-1: the token reaches no third party). The stand-in's reply is not the
     proxy's format, so the call is refused as the proxy's own (#1412 O9)."""
-    from defender import _proxy_client
+    from defender.kit import proxy_client as _proxy_client
     port, got, folder = tls_issuer
     monkeypatch.delenv("SSL_CERT_DIR", raising=False)
     monkeypatch.setenv("SSL_CERT_FILE", str(folder / "server.pem"))

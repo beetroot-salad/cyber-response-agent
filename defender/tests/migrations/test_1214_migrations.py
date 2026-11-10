@@ -13,7 +13,7 @@ import pytest
 
 from defender.tests.migrations.test_1339_migrations import catalog
 from defender.tests.support.shared._postgres1339 import execute
-from defender.tests.tenancy.lifecycle_1214.test_1214_repository_contract import fill_row
+from defender.tests.tenancy.lifecycle_1214.test_repository_contract import fill_row
 
 BASELINE = "0001_baseline"
 TENANCY = "0002_tenancy"
@@ -75,22 +75,26 @@ def _fk_to_tenants(dsn: str) -> list[tuple[str, str]]:
 def test_the_history_is_the_baseline_and_five_revisions_on_it_in_a_line():
     """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11); #1163 adds one more, the six
     sign columns of the generation record (A24/r8.4); #1342 puts its jobs revision on #1163's, #1382 its uuid ids
-    revision on that, #1343 its lease revision on that, and #1345 its mapping revision on that: a single line baseline
-    -> #1214's -> #1163's -> #1342's -> #1382's -> #1343's -> #1345's, no branch. (The name predates the later revisions;
-    the node id is kept.)"""
+    revision on that, #1343 its lease revision on that, #1345 its mapping revision on that, and #1344 its learning jobs
+    revision on that: a single line baseline -> #1214's -> #1163's -> #1342's -> #1382's -> #1343's -> #1345's -> #1344's,
+    no branch. (The name predates the later revisions; the node id is kept.)"""
     from alembic.script import ScriptDirectory
 
     from defender.migrations import _config
 
     script = ScriptDirectory.from_config(_config())
     chain = [(r.revision, r.down_revision) for r in script.walk_revisions()]  # newest first
-    assert len(chain) == 8  # #1414 D13: the merge-eligibility record's revision sits on #1345's
-    [(head, _)] = chain[:1]
-    assert [revision for revision, _ in chain][1:] == [
-        "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE]
-    assert [down for _, down in chain] == [
+    # #1307 puts `0009_programs` (and a later change may put more) on top of #1344's `0008_learning_jobs` (design:
+    # migrations): what this test pins is the line from the baseline to 0008, so it is read from the bottom.
+    old = chain[-8:]
+    assert [revision for revision, _ in old] == [
+        "0008_learning_jobs", "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY,
+        BASELINE]
+    assert [down for _, down in old] == [
         "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE, None]
-    assert script.get_heads() == [head], "the history branches"
+    assert len(script.get_heads()) == 1, "the history branches"
+    # The whole line, newest first: each revision's down revision is the next one listed, and the last has none.
+    assert all(down == chain[i + 1][0] for i, (_, down) in enumerate(chain[:-1])), "the history is not one line"
 
 @pytest.mark.postgres
 def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_database):
@@ -115,8 +119,7 @@ def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_datab
 def test_the_revision_moves_tenants_and_adds_the_lifecycle_tables(migrated_database):
     """At head `tenancy` holds tenants and the new tables, `identity` no tenants, and memberships reference `tenancy.tenants` (O11)."""
     assert _tables(migrated_database, "tenancy") == {"tenants", "forge_wiring", "generations", "publish_status",
-                                                     "alert_mappings",  # #1345 r5: the mapping is a tenant record
-                                                     "merge_eligibility"}  # #1414 D13: the service's eligibility record
+                                                     "alert_mappings"}  # #1345 r5: the mapping is a tenant record
     assert "tenants" not in _tables(migrated_database, "identity")
     assert [target for _, target in _fk_to_tenants(migrated_database)] == ["tenancy.tenants"]
 
@@ -137,8 +140,8 @@ def test_set_schema_keeps_the_rows_the_memberships_and_the_foreign_keys_name(emp
     assert execute(empty_database, "SELECT id, tenant_id, status FROM identity.memberships") == [("e1000000-0000-4000-8000-000000000001", LAB, "invited")]
     with pytest.raises(psycopg.errors.ForeignKeyViolation):  # a membership of a tenant that is not there
         execute(empty_database, """INSERT INTO identity.memberships (id, user_id, tenant_id, status, invited_by, created_at,
-                                   notify_requested_seq, notify_sent_seq, notify_attempts)
-                                   VALUES ('e1000000-0000-4000-8000-000000000002', 'd1000000-0000-4000-8000-000000000001', 'f1000000-0000-4000-8000-000000000009', 'invited', NULL, %s, 0, 0, 0)""", (CREATED,))
+                                   notify_requested_seq, notify_sent_seq, notify_attempts, role)
+                                   VALUES ('e1000000-0000-4000-8000-000000000002', 'd1000000-0000-4000-8000-000000000001', 'f1000000-0000-4000-8000-000000000009', 'invited', NULL, %s, 0, 0, 0, 'admin')""", (CREATED,))
     with pytest.raises(psycopg.errors.ForeignKeyViolation):  # a tenant with a membership cannot be deleted
         execute(empty_database, "DELETE FROM tenancy.tenants WHERE id = %s", (LAB,))
     execute(empty_database, "DELETE FROM tenancy.tenants WHERE id = %s", (OTHER,))  # control: one without can
@@ -251,8 +254,7 @@ def test_the_upgrade_keeps_every_row_of_every_tenancy_table_and_only_adds_the_si
                      bot_login=f"bot-{tenant}-{status}", role_id=f"role-{status}")
 
     def rows() -> dict[str, list[dict[str, object]]]:
-        tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version", "alert_mappings",  # #1345: a table the head adds
-                                                              "merge_eligibility"})  # #1414 D13: so is this
+        tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version", "alert_mappings"})  # #1345: a table the head adds
         return {t: sorted((r[0] for r in execute(empty_database, f"SELECT to_jsonb(x) FROM tenancy.{t} x")),  # noqa: S608
                           key=lambda row: json.dumps(row, sort_keys=True)) for t in tables}
     before = rows()

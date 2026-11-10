@@ -241,10 +241,10 @@ class TicketCall:
 
 @dataclass
 class FakeTicketSystem:
-    """The case system's store behind the docker route (#1359: the writer calls the case
-    adapter, so the store is the fake `docker` of `_spec767.FakeStore`, not a seam inside the
-    writer). `status=None` makes the request die in transport (curl times out). The calls it
-    received are read off the fake's argvs once a drive has attached it."""
+    """The case system's store behind the credential proxy (#1359, #1391: the writer calls the
+    case adapter, so the store is `_spec767.FakeStore`'s proxy stand-in, not a seam inside the
+    writer). `status=None` makes the request die in transport (the system never answers). The
+    calls it received are read off the stand-in once a drive has attached it."""
 
     status: str | None = "200"
     configured: bool = True
@@ -255,7 +255,7 @@ class FakeTicketSystem:
         from defender.tests.tenancy.tenant_1107_settings import _spec1107
 
         if self.status is None:
-            self.store = FakeStore(scratch, answers=[_spec1107.curl_timed_out()])
+            self.store = FakeStore(scratch, answers=[_spec1107.timed_out()])
         else:
             self.store = FakeStore(scratch, status=self.status, body="{}")
         return self.store
@@ -299,8 +299,8 @@ def record_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None,
 
 
 def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
-    """What `run.py` hands the record leg: the tenant record, the code tree and the run's env
-    (the store's fake `docker` first on PATH).
+    """What `run.py` hands the record leg: the tenant record, the code tree, the run's env, and
+    the proxy's address with the run's write-back token (the store's stand-in answers there).
 
     A configured fake gets the committed fixture tenant's record; an unconfigured one gets a
     tenant planted beside the run with no `config.env` for its case system."""
@@ -314,7 +314,8 @@ def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
         _spec1107.plant(root, "t1047", configs={})
         record = _spec1107.resolve(root, "t1047")
     return {"tenant": record, "defender_dir": _tenants1106.DEFENDER,
-            "env": fake.store.env(mod("box").run_env(_tenants1106.DEFENDER, Path(run_dir)))}
+            "env": fake.store.env(mod("box").run_env(_tenants1106.DEFENDER, Path(run_dir))),
+            "proxy_url": fake.store.url, "request_token": "token-1047"}
 
 
 def receipt_path(run_dir: Path) -> Path:

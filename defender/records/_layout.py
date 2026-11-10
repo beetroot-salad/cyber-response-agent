@@ -134,6 +134,13 @@ KNOWLEDGE_SOURCE_SUFFIX = ".knowledge-source.json"
 _LAUNCH_SUFFIX = ".launch.json"
 _LAUNCH_ALERT_SUFFIX = ".alert.json"
 _JOB_END_SUFFIX = ".job-end.json"
+#: A learning job's three host-held records (#1344), beside the runs, keyed by the job id: the
+#: entry's progress (replaced whole), its end (create-only) and the post-step's; and the jobs the
+#: worker hands a post-step to publish (replaced whole before each start, #1446 review).
+_LEARNING_PROGRESS_SUFFIX = ".learning-progress.json"
+_LEARNING_END_SUFFIX = ".learning-end.json"
+_POST_STEP_SUFFIX = ".post-step.json"
+_POST_STEP_PENDING_SUFFIX = ".post-step-pending.json"
 #: The sidecar names that mean "this id was used" (#1279 O8): run setup refuses an id with any of
 #: them beside its folder (`sidecar_names`). The accounting-failures name reserved, see above.
 USED_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
@@ -143,7 +150,9 @@ USED_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTIN
 #: the listing, the run-name check, the retire command). The launch record and alert file are
 #: written before the run folder exists and do not mean "used": the child's setup goes on over
 #: them. `USED_SIDECAR_SUFFIXES` is a subset (#1342).
-ACCEPTED_SIDECAR_SUFFIXES = (*USED_SIDECAR_SUFFIXES, _LAUNCH_SUFFIX, _LAUNCH_ALERT_SUFFIX)
+ACCEPTED_SIDECAR_SUFFIXES = (*USED_SIDECAR_SUFFIXES, _LAUNCH_SUFFIX, _LAUNCH_ALERT_SUFFIX,
+                             _LEARNING_PROGRESS_SUFFIX, _LEARNING_END_SUFFIX, _POST_STEP_SUFFIX,
+                             _POST_STEP_PENDING_SUFFIX)
 #: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
 #: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
 _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
@@ -493,6 +502,25 @@ class RunPaths:
         """The job entry's job-end record (#1342): the facts the worker classifies the run's
         ending by, written create-only as the job entry exits."""
         return self._container(runs_base) / f"{self.run_dir.name}{_JOB_END_SUFFIX}"
+
+    def learning_progress(self, runs_base: RunsBase | None = None) -> Path:
+        """A learning job's progress record (#1344), when this name is a job id: the fork it
+        picked, its stage and its siblings' cost, replaced whole by the job entry."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_LEARNING_PROGRESS_SUFFIX}"
+
+    def learning_end(self, runs_base: RunsBase | None = None) -> Path:
+        """A learning job's end record (#1344): how the job entry ended, written create-only."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_LEARNING_END_SUFFIX}"
+
+    def post_step(self, runs_base: RunsBase | None = None) -> Path:
+        """The post-step's record (#1344) for the job it followed: the pending jobs it
+        published and refused."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_POST_STEP_SUFFIX}"
+
+    def post_step_pending(self, runs_base: RunsBase | None = None) -> Path:
+        """The jobs the worker hands a post-step to publish (#1446 review), written whole
+        before the post-step starts, under the same key as its record."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_POST_STEP_PENDING_SUFFIX}"
 
     def session_pointer(self, runs_base: RunsBase | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the

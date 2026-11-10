@@ -138,10 +138,9 @@ investigations(investigation_id PK, tenant_id, alert_id FK, request_key, attempt
        disposition, confidence, cost, artifact_manifest, status_detail,
        created_at, started_at, finished_at, ...)
 
-learning_jobs(learning_job_id PK, tenant_id, alert_id FK, investigation_id FK, client_request_id,
-       status, stage, claim_epoch,
-       claimed_by_worker, lease_expires_at, last_heartbeat_at,
-       status_detail, created_at, finished_at, ...)   -- field notes in §2.5
+learning_jobs(id PK, tenant_id, alert_id FK, investigation_id FK, request_key, attempt, trigger,
+       status, stage, fork_message_id, sibling_cost_usd, findings_count, publish_state,
+       reason, message, created_at, started_at, finished_at, lease_expires_at)   -- §2.5 (#1344)
 ```
 
 **Field notes (alerts + investigations; `learning_jobs` in §2.5).**
@@ -223,64 +222,54 @@ The incident-review screen shows **one row per alert, investigations on drill-do
 incident review. There is no analyst-facing _resolution_ state in v1; if needed later, add
 `alerts.review_status` distinct from lifecycle and disposition (§6).
 
-### 2.5 `learning_jobs` table (also the completion outbox)
+### 2.5 `learning_jobs` table
 
-Learning jobs have their **own** lifecycle (`status: queued → running → completed | failed | skipped`,
-with a `stage` cursor — §4.3); never overload it onto the investigation's `job_status`.
+> **Amended by #1344 (design r5).** What follows replaces this section's earlier outbox, reconciler,
+> `claim_epoch`, stage-resume and `status_detail` design; the table is `jobs.learning_jobs`, created by
+> migration `0008_learning_jobs`.
 
-In the same transaction that marks an investigation `completed`, insert a `learning_jobs` row
-(`status=queued`, `ON CONFLICT DO NOTHING`). **The table is the outbox** — a worker drains queued rows, a
-reconciler backfills any `completed` investigation lacking an auto job, so a crash can't silently skip
-learning. `unparseable` is excluded.
-
-Learning uses the **same single-table model as investigations** (§4.1): one row carries lifecycle +
-`stage` checkpoint + infra, fenced by `claim_epoch`. It is **strictly sequential per tenant** (§4.3), so
-structurally it's just an investigation with a cheaper liveness story.
+Learning jobs have their **own** lifecycle (`status: queued → running → completed | failed | skipped`);
+never overload it onto the investigation's stage. The transaction that ends an investigation `completed`
+inserts its one auto job (`queued`, attempt 1); `unparseable`, `failed` and `aborted` insert none. A job
+insert the database refuses takes the `completed` write back with it, and the worker then ends the
+investigation `failed: worker_error` (D10). **No reconciler and no backfill**: an investigation completed
+before the table existed queues nothing.
 
 ```
 learning_jobs(
-  learning_job_id  PK,
-  tenant_id,                              -- matches the investigation's tenant
-  alert_id         FK → alerts,           -- denormalized: "all learning activity for this alert"
+  id               PK,                    -- the job (attempt) id; the episode id of its family
+  tenant_id, alert_id                     -- FK → alerts (tenant_id, id)
   investigation_id FK → investigations,   -- the source execution
-  client_request_id nullable,             -- NULL = auto (outbox/reconciler); set = explicit re-learn
+  request_key, attempt,                   -- UNIQUE (tenant_id, investigation_id, request_key, attempt)
+  trigger          auto | explicit,
   status           queued | running | completed | failed | skipped,
-  stage            nullable,              -- durable checkpoint: actor | oracle | judge | author
-  claim_epoch,                            -- fences a recovered run (§4.1)
-  claimed_by_worker, lease_expires_at, last_heartbeat_at,
-  status_detail    nullable,              -- one free-text field: skip reason or error summary
-  created_at, finished_at, ...
+  stage, fork_message_id, sibling_cost_usd,   -- progress, copied from the job entry; never resumed from
+  findings_count,
+  publish_state    none | pending | done | refused,
+  reason, message,                        -- a fixed reason word and our own sentence (O12)
+  created_at, started_at, finished_at, lease_expires_at
 )
 ```
 
-- **No `container_*` columns.** Learning has one backend-worker substrate (§4.3), nothing
-  substrate-specific to address. Liveness is a coarse lease (no live-view to feed), and recovery needs no
-  kill handle: a partitioned zombie self-terminates at its next fenced write (`claim_epoch` → 0 rows,
-  §4.1), worst-case wasting one stage.
-- **`stage` is the durable checkpoint on the row** — it survives a recovery, so a mid-`author` crash
-  resumes at a stage boundary. Unlike investigation `phase`, the stage boundary is a real orchestrator
-  seam between LLM calls, so it's reliable to record.
-- **One live learning job per tenant** — a partial unique index (at most one `queued`/`running` per
-  `tenant_id`) enforces the sequencing that makes corpus authoring conflict-free by construction (§4.4).
-  > **Revised (2026-06-09):** with learning decoupled from authoring (§4.3), learning jobs run
-  > **concurrently**; the one-live / conflict-free constraint moves to a separate serial **author** job and
-  > a learning job's `stage` is `actor | oracle | judge`. The author-job schema (own row + one-live-author
-  > index, or a column here) is a follow-up re-thread of this section.
-- **No `reason` column** — auto vs. explicit re-learn is exactly `client_request_id IS NULL` vs. set; the
-  GET endpoints derive the label (§2.6).
-- **Auto creation is deduped; explicit re-learn is not.** Re-learning is cheap and unlimited; only the
-  _auto_ path must not double-fire. Partial unique index on auto jobs:
-  `UNIQUE (investigation_id) WHERE client_request_id IS NULL AND status IN ('queued','running','completed','skipped')`.
-  Explicit re-learns carry a `client_request_id`, dedupe by
-  `UNIQUE (tenant_id, investigation_id, client_request_id)`, and coexist. A request id is scoped to the
-  investigation it names, as an investigation's is to its alert (§4.1): the same id sent for another
-  investigation is another request, never a replay of a job for a different investigation. This is the
-  one statement of the re-learn rules; the API's port points here. The insert transaction, in order: a
-  job with this `(tenant_id, investigation_id, client_request_id)` → return it, `created=false`; else
-  refuse an `unparseable` investigation (`Conflict`); else insert the job and its `learning_job.start`
-  audit row (§2.10), `created=true`.
-- **One `status_detail`, not two** — a `skipped` or `failed` job just needs a short note. A `skipped` job
-  is a record, not a lock; re-learning is just another job. The one hard block is `unparseable` (§4.6).
+- **One row per attempt (P1).** A retry is a new row, new id, same request key, attempt + 1, keeping its
+  original's `created_at`. Worker writes are fenced on the row still `running`. Only a lapsed lease
+  retries, cap 3, as for investigations; a stopped family is handed back and uses an attempt.
+- **No stage resume.** `stage` is read-only progress; a retried family starts from scratch on the code
+  the claiming worker runs.
+- **Request key.** An auto job's key is a system key with the reserved prefix `auto:`, derived from its
+  investigation, so "one auto job per investigation" is the plain unique constraint above. An explicit
+  re-learn's key is the client's request id (refused if it carries the reserved prefix), scoped to the
+  investigation it names; a replay answers the latest attempt. Only a `completed` investigation can be
+  learned from (`Conflict` otherwise).
+- **`reason` + `message`, not `status_detail`.** The reasons are fixed words from the outcome table
+  (`no_fork_point`, `history_unreadable`, `expired`, `family_unusable`, `control_failed`,
+  `launch_refused`, `verify_refused`, `source_unavailable`, `judge_failed`, `entry_error`,
+  `exited_without_result`, `worker_error`, `lease_lapsed`, `retry_cap`); the message is our own code's,
+  never launcher or run text. A `completed` job with no findings carries the judge's verdict word.
+- **Publish state.** Findings wait in the episode folder until the row ends; `completed` sets `pending`,
+  and the worker writes `done` or `refused` from the post-step's record (§4.3).
+- **Delete** is the investigation delete: it locks the jobs' rows, refuses (`Conflict`) while one runs,
+  and otherwise removes queued and ended jobs with the investigation. Episode folders stay on disk.
 - **No durable URLs** — `lessons_corpus_version` resolves to a blob bundle and the PR link is a GitHub URL;
   both are surfaced on the detail endpoint at read time (§2.6).
 
@@ -523,12 +512,17 @@ nothing in the database names a worker or a machine. Every worker runs take-over
 `running` row whose lease (database clock) has lapsed and that the worker does not itself hold is failed
 (`lease_lapsed`) and its retry queued in the same transaction (attempt + 1; at attempt 3, `retry_cap` and
 no retry). Take-over reads no disk and reaches no machine: everything a run starts dies with the process
-that started it (worker → child → box), so there is nothing to stop or clean up. A holder keeps its row
+that started it (worker → child → box), so there is nothing to stop or clean up. A child's end is its whole
+process group killed and waited for, not only signalled: the worker removes the box and writes the row's end
+once no member it can signal still runs. The wait is bounded (10 s, logged, once per row), so a member that
+never dies is left running; and a worker cancelled a second time while stopping kills every group at once and
+leaves without waiting. A holder keeps its row
 until its last write lands: it writes the terminal stage, or — if cancel or a take-over already ended the
 row — its own final cost and knowledge, once. `cost_usd` is cost so far (copied about every 15 s) until
 then. A stopping worker hands its rows back (lease lapsed, final cost) so they are retried within seconds,
 except a row whose run had already decided its ending (a report committed, or setup refused): that ending
-is recorded. A last write whose value the database refuses is written again with less (the knowledge as
+is recorded. A stopping worker takes nothing over from the moment its stop begins, so it never takes over
+the rows it is handing back; other workers' take-over retries them. A last write whose value the database refuses is written again with less (the knowledge as
 unreadable, then a bare `worker_error`), rather than dropped into a re-run.
 A cancelled or taken-over row's worker finds out at its next renewal and ends its child. Until that child
 has ended, a new run of the same alert can already be working beside it: accepted, since a repeat is safe.
@@ -558,6 +552,14 @@ libraries (Solid Queue, Oban, River, graphile-worker). Split into a narrow queue
 only on real throughput / fan-out / independent-scaling need (§6).
 
 ### 4.3 Investigation ↔ learning seam
+
+> **Amended by #1344 (design r5).** Learning is **not** SIEM-free: the oracle re-asks tenant systems, so
+> a family's sibling base answers can be live reads. Learning runs as child processes of the worker, in
+> its one image, on the worker's slots (deployment doc §4). A job ends at the judge; **authoring has no
+> job row of its own**: after any job whose child started a family step, a post-step in the same slot
+> publishes the tenant's `pending` findings and runs the drain's own gate (threshold, retained
+> deliveries), which keeps its own lock, requeue and dead-letter handling. The text below is the earlier
+> design and stands only where this note does not contradict it.
 
 **Learning and authoring are SIEM-free backend work — no container.** Only the **author** holds a
 privileged op (`git push` / `gh pr`); learning (actor/oracle/judge) holds LLM + FS only (verified: the

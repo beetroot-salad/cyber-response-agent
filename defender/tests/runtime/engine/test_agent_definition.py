@@ -1,6 +1,6 @@
 """AgentDefinition: toolset registration, policy compilation, roots, model/effort and request-limit wiring.
 
-Grant semantics belong to `test_grant_gate_575.py`; this file stays at the definition layer. Hermetic:
+Grant semantics belong to `test_grant_gate.py`; this file stays at the definition layer. Hermetic:
 a `FunctionModel` enters through the `make_model` seam under `override_allow_model_requests(False)`."""
 from __future__ import annotations
 

@@ -19,11 +19,6 @@ def _tree(tmp_path: Path, files: dict[str, str]) -> Path:
     return root
 
 
-def test_a_construction_with_retries_is_clean(tmp_path):
-    src = "from pydantic_ai import Agent\nA = Agent(m, retries=3)\n"
-    assert _GATE.scan(_tree(tmp_path, {"x.py": src})) == []
-
-
 @pytest.mark.parametrize("src", [
     "from pydantic_ai import Agent\nA = Agent(m)\n",
     "from pydantic_ai import Agent as Ag\nA = Ag(m, model_settings=s)\n",
@@ -36,14 +31,13 @@ def test_a_construction_without_retries_is_found_however_it_is_spelled(tmp_path,
     assert "retries" in found[0], found
 
 
-def test_an_unrelated_agent_class_is_not_a_construction(tmp_path):
-    src = "from mine import Agent\nA = Agent(m)\n"
-    assert _GATE.scan(_tree(tmp_path, {"x.py": src})) == []
-
-
-def test_tests_are_not_swept(tmp_path):
-    src = "from pydantic_ai import Agent\nA = Agent(m)\n"
-    assert _GATE.scan(_tree(tmp_path, {"tests/x.py": src})) == []
+@pytest.mark.parametrize("rel, src", [
+    ("x.py", "from pydantic_ai import Agent\nA = Agent(m, retries=3)\n"),
+    ("x.py", "from mine import Agent\nA = Agent(m)\n"),
+    ("tests/x.py", "from pydantic_ai import Agent\nA = Agent(m)\n"),
+], ids=["with_retries", "unrelated_agent_class", "tests_are_not_swept"])
+def test_a_construction_that_is_clean_or_out_of_scope_has_no_findings(tmp_path, rel, src):
+    assert _GATE.scan(_tree(tmp_path, {rel: src})) == []
 
 
 def test_a_file_that_does_not_parse_is_exit_2(tmp_path, capsys):
