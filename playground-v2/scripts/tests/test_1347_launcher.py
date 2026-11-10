@@ -48,7 +48,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from _lab_fakes import (AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, ALERTS_PATTERN, DATA_DROP, EVENTS, FREEZE_ID,
+from _lab_fakes import (DEDUP_OLD, AUTH, AUTH_AFTER_T, AUTH_IN_SPAN, ALERTS, ALERTS_PATTERN, DATA_DROP, EVENTS, FREEZE_ID,
                         LIVE_PROXY_URL, NGINX, PARTS, REPO, ROW_KEYS, RULES_PART, RUN_ID, SCHEMA_DRIFT,
                         SLUG, SNAP, SNAP_UUID, SPAN_START, STREAMS, SYSLOG, SYSLOG_AFTER_T, SYSLOG_IN_SPAN, T,
                         FakeCluster, FaultJournal, Journal, LabRig, alert_doc, canonical_digest, expected_copy,
@@ -477,7 +477,8 @@ def test_a_schema_drift_rewrites_exactly_the_alerts_whose_ancestor_event_is_in_t
 
     rig.launch()
 
-    assert _drifted(rig) == {"young", "derived-in", "mixed", "logs-star", "stream-named"}, sorted(_drifted(rig))
+    assert _drifted(rig) == {"young", "derived-in", "derived-dedup", "derived-dedup-pattern", "mixed", "logs-star",
+                               "stream-named"}, sorted(_drifted(rig))
     assert rig.cluster.state() == state
     assert [r["verdict"] for r in rig.rows()] == ["valid"], rig.rows()
 
@@ -512,7 +513,8 @@ def test_a_schema_drift_completes_over_more_alerts_with_ancestry_than_one_search
 
     rig.launch()
 
-    assert _drifted(rig) == {"young", "derived-in", "bulk-span-0", "bulk-span-1", "bulk-span-2"}
+    assert _drifted(rig) == {"young", "derived-in", "derived-dedup", "derived-dedup-pattern", "bulk-span-0", "bulk-span-1",
+                               "bulk-span-2"}
     assert rig.cluster.state() == state
     assert [r["verdict"] for r in rig.rows()] == ["valid"], rig.rows()
 
@@ -600,7 +602,7 @@ def test_the_clean_marker_names_the_touched_indices_and_a_reused_copy_digests_th
     rig.write_expected_case("drift")
     rig.launch()
     touched = expected_touched(expected_copy("drift"), [SCHEMA_DRIFT])
-    assert NGINX not in touched and len(touched) == 3
+    assert NGINX not in touched and DEDUP_OLD not in touched and len(touched) == 4, touched
     assert is_clean_marker(rig.marker()) and rig.marker()["touched"] == touched, rig.marker()
     seen, restores = len(rig.cluster.requests), rig.cluster.restores
     rig.launch()

@@ -150,7 +150,9 @@ def _docker(docker, *args, **kw):
 
 def test_pause_and_unpause_report_the_states_docker_reports_and_refuse_as_docker_does():
     docker, host = _host_rig()
-    status = lambda: _docker(docker, "inspect", "-f", "{{.State.Status}}", "web-1", text=True).stdout.strip()
+    def status():
+        return _docker(docker, "inspect", "-f", "{{.State.Status}}", "web-1", text=True).stdout.strip()
+
     assert _docker(docker, "pause", "web-1").returncode == 0 and status() == "paused"
     assert _docker(docker, "inspect", "-f", "{{.State.Running}}", "web-1", text=True).stdout.strip() == "true"
     assert _docker(docker, "inspect", "-f", "{{.State.Paused}}", "web-1", text=True).stdout.strip() == "true"

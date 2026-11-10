@@ -399,6 +399,7 @@ class FakeCluster(FakeES):
         # whatever restores the index.
         self.nested: dict[str, int] = {}
         self.mutations: list[dict] = []
+        self.lifecycle_deletes: list[str] = []      # the stream of every lifecycle DELETE, in order
         self.returned: list[tuple[int, str]] = []     # (request number, index) of every document a search returned
         self.restores = 0
         self.unsupported: list[str] = []
@@ -478,7 +479,10 @@ class FakeCluster(FakeES):
                 return {"operation_mode": self.ilm}
             if seg[0] == "_data_stream" and seg[-1] == "_lifecycle" and method == "DELETE":
                 self.lifecycle_off.add(seg[1])
+                self.lifecycle_deletes.append(seg[1])
                 return ack
+            if seg[0] == "_data_stream" and method == "GET" and len(seg) <= 2:
+                return self._data_streams(seg[1] if len(seg) == 2 else "*")
             if path == "/_cluster/health":
                 n = sum(1 for ix in self.indices.values() if not ix["closed"])
                 status = "red" if self.wedged else self.health_status
@@ -521,6 +525,25 @@ class FakeCluster(FakeES):
             raise
         self.unsupported.append(f"{method} {path}")
         raise FakeGap(f"{method} {path}")
+
+    def _data_streams(self, expr: str) -> Any:
+        """`GET /_data_stream/<expr>` as Elasticsearch answers (r6.4.5): a comma list of names and globs; each stream
+        lists its backing indices that exist, the write index last. Membership is `streams` (backing index ->
+        stream), never a parse of a name."""
+        found: dict[str, list[str]] = {}
+        for name, stream in self.stream_of.items():
+            if name in self.indices:
+                found.setdefault(stream, []).append(name)
+        out = []
+        for part in expr.split(","):
+            hits = [s for s in found if fnmatch.fnmatchcase(s, part)]
+            if not hits and not any(c in part for c in "*?"):
+                raise RuntimeError(f"resource_not_found_exception: no such data stream [{part}]")
+            out += [s for s in hits if s not in out]
+        return {"data_streams": [
+            {"name": s, "timestamp_field": {"name": "@timestamp"}, "generation": len(found[s]), "status": "GREEN",
+             "indices": [{"index_name": n, "index_uuid": self.indices[n]["uuid"]} for n in found[s]]}
+            for s in out]}
 
     def _snapshots(self, method: str, seg: list[str], body: Any) -> Any:
         repo = seg[1]
@@ -703,8 +726,18 @@ AUTH = ".ds-logs-system.auth-default-2026.10.01-000004"
 SYSLOG = ".ds-logs-system.syslog-default-2026.10.01-000004"
 NGINX = ".ds-logs-nginx.access-default-2026.10.01-000002"
 ALERTS = ".internal.alerts-security.alerts-default-000001"
-STREAMS = {AUTH: "logs-system.auth-default", SYSLOG: "logs-system.syslog-default",
-           NGINX: "logs-nginx.access-default"}
+# r6.4.5: an older consolidation, live: `dedup-logs-<dataset>-default` is a BACKING index of the stream, with a name no
+# `.ds-` pattern parses. Membership is what the cluster reports (`GET /_data_stream`), listed oldest first (the write
+# index last), so the consolidated index comes before the `.ds-` one.
+DEDUP = "dedup-logs-system.auth-default"
+# A member with no event in any span (only older ones): no overlay changes a document of it, so it is not touched.
+DEDUP_OLD = "dedup-logs-system.auth-archive"
+# An index whose name looks like a backing index of the auth stream but that is not a member of it (not in `STREAMS`).
+DECOY = ".ds-logs-system.auth-default-2026.10.15-000003"
+STREAMS = {DEDUP_OLD: "logs-system.auth-default", DEDUP: "logs-system.auth-default", AUTH: "logs-system.auth-default",
+           SYSLOG: "logs-system.syslog-default", NGINX: "logs-nginx.access-default"}
+DEDUP_IN_SPAN = ["dedup-auth-01", "dedup-auth-02", "dedup-auth-03"]
+DECOY_IN_SPAN = ["decoy-auth-0", "decoy-auth-1"]
 _BASE = datetime(2026, 10, 20, 4, 0, tzinfo=UTC)
 
 # Events: auth every 10 min from 04:00 (auth-00..35: 05 after T, 13 in the span [07:00, T] with a
@@ -757,6 +790,11 @@ ALERT_DOCS = {a["kibana.alert.uuid"]: a for a in [
     alert_doc("derived-pre", "2026-10-20T07:30:00Z", ancestors=(("auth-12", AUTH_RULE_PATTERN),), port=40012),
     # derived from a span event of another dataset that carries the renamed field too
     alert_doc("syslog-alert", "2026-10-20T08:00:00Z", ancestors=(("syslog-20", SYSLOG_RULE_PATTERN),), port=41000),
+    # r6.4.5: derived from events the consolidated index holds (ancestry naming that index, or the stream's pattern)
+    alert_doc("derived-dedup", "2026-10-20T08:36:00Z", ancestors=(("dedup-auth-03", DEDUP),), port=42003),
+    alert_doc("derived-dedup-pattern", "2026-10-20T08:06:00Z", ancestors=(("dedup-auth-02", AUTH_RULE_PATTERN),), port=42002),
+    # derived from an event of the look-alike index, which is not the stream's: never rewritten
+    alert_doc("derived-decoy", "2026-10-20T08:26:00Z", ancestors=(("decoy-auth-1", DECOY),), port=43001),
     alert_doc("edge", "2026-10-20T03:00:00Z"),                       # exactly max_age old
     alert_doc("at-T", T),
     alert_doc("old", "2026-10-20T02:59:59Z"),                        # older than max_age
@@ -783,7 +821,20 @@ def world_content() -> dict[str, dict[str, dict]]:
              for k in range(10)}
     alerts = {f"id-{u}": {"_source": copy.deepcopy(a), "_version": ALERT_VERSIONS.get(u, 1)}
               for u, a in ALERT_DOCS.items()}
-    return {AUTH: auth, SYSLOG: syslog, NGINX: nginx, ALERTS: alerts}
+    # r6.4.5: dedup-auth-00 is before the span, 01..03 in it; the decoy's two are in it too (it is not the stream's)
+    dedup = {f"dedup-auth-{i:02d}": {"_source": event(i, minute, "system.auth", f"dedup auth event {i}",
+                                                      **{"user.name": f"user{i % 4}", "source.ip": f"10.1.0.{i}",
+                                                         "source.port": 42000 + i}), "_version": 1}
+             for i, minute in enumerate((125, 215, 245, 275))}
+    archive = {f"archive-auth-{i}": {"_source": event(i, minute, "system.auth", f"archive auth event {i}",
+                                                      **{"user.name": f"user{i}", "source.ip": f"10.3.0.{i}",
+                                                         "source.port": 44000 + i}), "_version": 1}
+               for i, minute in enumerate((65, 95))}
+    decoy = {f"decoy-auth-{i}": {"_source": event(i, minute, "system.auth", f"decoy auth event {i}",
+                                                  **{"user.name": f"user{i}", "source.ip": f"10.2.0.{i}",
+                                                     "source.port": 43000 + i}), "_version": 1}
+             for i, minute in enumerate((225, 255))}
+    return {DEDUP_OLD: archive, DEDUP: dedup, AUTH: auth, SYSLOG: syslog, NGINX: nginx, DECOY: decoy, ALERTS: alerts}
 
 
 def expected_copy(kind: str) -> dict[str, dict[str, tuple[int, dict]]]:
@@ -805,7 +856,9 @@ def expected_copy(kind: str) -> dict[str, dict[str, tuple[int, dict]]]:
 
         for i in AUTH_IN_SPAN:
             drift(state[AUTH][i][1])
-        for u in ("young", "derived-in"):
+        for i in DEDUP_IN_SPAN:
+            drift(state[DEDUP][i][1])
+        for u in ("young", "derived-in", "derived-dedup", "derived-dedup-pattern"):
             drift(state[ALERTS][f"id-{u}"][1])
     return state
 
@@ -813,18 +866,14 @@ def expected_copy(kind: str) -> dict[str, dict[str, tuple[int, dict]]]:
 def expected_touched(state: dict, mutations: Any) -> list[str]:
     """The indices a copy holding `state` (with the fault `mutations`) has touched, written out from the
     explicit state and the design, not from running the code under test: every index whose documents differ
-    from the restored freeze (the base overlay deleted from it, or a rewrite changed it), plus every index a
-    fault overlay runs a rewrite job on (the stream's backing indices; for a schema-drift, the alert index)."""
+    from the restored freeze (the base overlay deleted from it, or a rewrite changed a document of it: r6.4.5,
+    touched = an index in which an overlay changed at least one document; a fault target with nothing in the
+    span is not touched)."""
     frozen, out = world_content(), set()
     for name, docs in state.items():
         held = {i: (d["_version"], d["_source"]) for i, d in frozen.get(name, {}).items()}
         if dict(docs) != held:
             out.add(name)
-    for m in mutations or ():
-        if m["kind"] in ("data-drop", "schema-drift"):
-            out |= {n for n in state if STREAMS.get(n) and fnmatch.fnmatchcase(STREAMS[n], m["stream"])}
-        if m["kind"] == "schema-drift":
-            out.add(ALERTS)
     return sorted(out)
 
 
@@ -835,7 +884,9 @@ def hit_indices(cluster: Any, since: int = 0) -> set[str]:
 
 
 def counts_of(state: dict) -> dict[str, int]:
-    return {n: len(docs) for n, docs in state.items()}
+    """Per-index document counts of the indices the freeze's patterns reach (a freeze records what its patterns
+    match: `logs-*` matches a data stream's indices through the stream, never the look-alike `DECOY`)."""
+    return {n: len(docs) for n, docs in state.items() if n != DECOY}
 
 
 def ancestor_reaches(ancestor: dict, index: str, doc_id: str) -> bool:
@@ -860,8 +911,8 @@ def expected_variant(mutation: dict | None, span_start: str = SPAN_START, *, ext
         return state
     start, end, hit = instant(span_start), instant(T), set()
     for index, docs in state.items():
-        if index == ALERTS:
-            continue
+        if index == ALERTS or not (STREAMS.get(index) and fnmatch.fnmatchcase(STREAMS[index], mutation["stream"])):
+            continue      # only a member of the mutation's stream (not an index that merely looks like one)
         for doc_id, (version, source) in list(docs.items()):
             if source.get("event.dataset") == mutation["dataset"] and start <= instant(source["@timestamp"]) <= end:
                 hit.add((index, doc_id))
