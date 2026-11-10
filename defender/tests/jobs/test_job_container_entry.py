@@ -280,9 +280,11 @@ def test_g3_the_real_lifecycle_starts_its_shell_box_and_runs_a_command_over_the_
         ran["sandboxed"] = box.sandboxed
         return _summary()
 
+    from defender.execution import bash_exec
+
     watched = {"docker_call": _docker._RealDocker.__call__, "docker_popen": _docker._RealDocker.popen,
                "exec": _output.capture_bounded, "box_start": _lifecycle._start_boxed}
-    with ThreadCalls(watched) as calls:
+    with ThreadCalls({**watched, "parse": bash_exec.parse}) as calls:
         got = enter(scene, inv, docker=docker, lifecycle=_real_lifecycle(investigate), preflight=lambda *a, **k: 0,
                     visualize=lambda *a, **k: None)
 
@@ -291,6 +293,7 @@ def test_g3_the_real_lifecycle_starts_its_shell_box_and_runs_a_command_over_the_
     assert ran["sandboxed"] is True, "the job's box is not counted as confined"
     assert len(docker.creates()) >= 1, "control: the helper's side never created the box"
     assert any(c[1] == "exec" for c in docker.calls), "control: the helper's side never ran the command in the box"
+    assert calls.container("parse") >= 1, "control: the watch sees the job's own calls on the container thread"
     assert {k: calls.container(k) for k in watched} == dict.fromkeys(watched, 0)
     assert scene.end(inv).box == "started"
 
