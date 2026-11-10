@@ -1,7 +1,7 @@
 """Shared fixtures and fakes for the family-judge tests (#921); no tests here."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+from defender.tests.support.shared._locations_1210 import location_path
 
 import json
 import os
@@ -450,12 +450,20 @@ def rows(grade: Any) -> dict[str, dict]:
     return {row["world"]: row for row in worlds}
 
 
-def enqueued_rows(record: dict) -> list[dict]:
-    """The finding rows a grade appended, read back off the queue file the record names
-    (`enqueued_to`): the queue is a shared sink, and a guessed path may be a file the pass never
-    opened.
+def enqueued_rows(record: dict, store: Any = None) -> list[dict]:
+    """The defender finding rows a grade queued. An operator's pass inserts into the learning store (#1278), so they
+    are read back off the `store` the pass was given (`MemoryStore.rows`); the record only names it
+    (`enqueued_to`: "the learning store (finding)"), there is no queue file. A job-lane pass's findings sit in the
+    episode's own record, which `enqueued_to` names as a path.
     """
-    path = Path(record["enqueued_to"])
+    if store is not None:
+        from defender.learning.core.state import FINDINGS
+
+        return store.rows(FINDINGS)
+    named = str(record["enqueued_to"])
+    if named.startswith("the learning store"):
+        raise AssertionError(f"this pass queued into the store ({named!r}), not a file: pass the store it was given")
+    path = Path(named)
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
@@ -812,3 +820,45 @@ __all__ = [
     "oracle_row", "sibling_run_dir", "staged_row", "sym", "untrusted_frames", "wire_logs", "world_doc",
     "rows", "world_rows", "fixture_world_id", "write_ledger",
 ]
+
+
+def faultable_store(*, fail: tuple[str, ...] = ()) -> Any:
+    """A findings store (`_memory_store.MemoryStore`) whose insert fails for the kinds named in its `fail_kinds`
+    (`finding`, `questioner_finding`): #1278's append that cannot land (the database cannot be reached), the file
+    queue's refused entry over the store. Cleared, it behaves as the plain stand-in and holds what it was given."""
+    from dataclasses import dataclass, field
+
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
+
+    @dataclass
+    class FaultableStore(MemoryStore):
+        fail_kinds: set[str] = field(default_factory=set)
+
+        def publish_findings(self, tenant: str, run_id: str, rows: Any, *, kind: str) -> tuple[int, int]:
+            if kind in self.fail_kinds:
+                raise ConnectionError(f"the learning store cannot be reached (inserting {kind})")
+            return super().publish_findings(tenant, run_id, rows, kind=kind)
+
+    return FaultableStore(fail_kinds=set(fail))
+
+
+def findings_sink(store: Any, *, tenant: str = "tenant", run_id: str = "run") -> Any:
+    """The operator lane's findings sink over `store` (`enqueue.StoreFindings`): what `enqueue.append_rows(..., state=)`
+    takes. Rows land in `store` as `tenant`'s, so a test that must collide with a graded pass's ids names that pass's
+    tenant (`episode_runs_for(ep).tenant.id`)."""
+    return mod("learning.judge.enqueue").StoreFindings(store, str(tenant), run_id)
+
+
+def install_launcher_store(monkeypatch: Any) -> Any:
+    """The learning store the launcher's grade opens (`learning.branch.cli._grade`: `blocking(dsn)` at the host's
+    database address, #1278), replaced by the in-memory stand-in: returns the `MemoryStore` a launch inserts into, so a
+    test of the launched pass reads back what it queued and needs no database."""
+    import contextlib
+
+    from defender.tenancy import database_address_variable
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
+
+    store = MemoryStore()
+    monkeypatch.setenv(database_address_variable(), "postgresql://stand-in/unused")
+    monkeypatch.setattr("defender.learning.store.blocking", lambda dsn: contextlib.nullcontext(store))  # noqa: ARG005
+    return store

@@ -12,8 +12,7 @@ import pytest
 from defender.records._episode_handle import Episode
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.core._state1135 import env_state
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 
@@ -23,7 +22,6 @@ WITHHELD = "sibling 'b' ran commit cafef00, not the source's deadbee"
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _judge():
@@ -37,13 +35,21 @@ def _judge():
                             family_default=S.as_reply_text(family))
 
 
+#: The findings store every grade of one test inserts into (#1278), reset per test.
+_STORE: list[MemoryStore] = []
+
+
+@pytest.fixture(autouse=True)
+def _store():
+    _STORE[:] = [MemoryStore()]
+
+
 def _grade(tmp_path, ep, judge):
-    return J.grade(ep, judge=judge, state=env_state())
+    return J.grade(ep, judge=judge, store=_STORE[0])
 
 
 def _queued() -> list[dict]:
-    state = env_state()
-    return state.rows(FINDINGS) + state.rows(QUESTIONER_FINDINGS)
+    return _STORE[0].rows(FINDINGS) + _STORE[0].rows(QUESTIONER_FINDINGS)
 
 
 def _not_graded(ep) -> dict:

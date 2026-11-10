@@ -7,16 +7,10 @@ import difflib
 import pytest
 
 from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
 
 JUDGE_ROLE_PROMPT = T.DEFENDER / "learning" / "judge" / "role.md"
-
-
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    """The learning-state root, pointed at this test's own tree."""
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _role():
@@ -112,7 +106,7 @@ def test_1008_every_judge_draw_is_declared_under_the_judges_role(tmp_path):
 
     J.grade_at(
         ep, judge=judge, draws=2,
-        state=_state1135.env_state())
+        store=MemoryStore())
 
     assert judge.calls == 6, (
         f"the judge was called {judge.calls} times, not once per draw per graded world plus "
