@@ -520,7 +520,7 @@ def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the ten
 
 
 #: How long a stopped sibling is given to exit on SIGTERM before it is killed.
-_STOP_GRACE_SECONDS = 30.0
+_STOP_GRACE_SECONDS = 20.0
 
 
 def _default_spawn(argv: list[str], *, env: dict[str, str] | None = None,
