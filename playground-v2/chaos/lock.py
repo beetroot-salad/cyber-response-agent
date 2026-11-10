@@ -34,9 +34,12 @@ CAPTURE = "capture"
 FROZEN_ENGINE = "frozen-engine"
 
 DOCKER_CONTEXT = "soc-playground"
-# Always running, and not one of the hosts whose filesystem the agent reads. The record lives in
-# the container's writable layer: it survives a restart, not a recreate.
-LOCK_CONTAINER = "elasticsearch"
+# Always running, and not one of the hosts whose filesystem the agent reads. It must carry `flock`
+# and `grep` (every take and release runs under flock): the elasticsearch image (RHEL minimal) has no
+# flock, the lab's DNS resolver (busybox) has both, is never a chaos target and is not a pickup capture
+# holds off (#1347 live check 16). The record lives in the container's writable layer: it survives a
+# restart, not a recreate.
+LOCK_CONTAINER = "unbound"
 LOCK_DIR = "/tmp/lab-locks"
 
 _NAME = re.compile(r"^[a-z][a-z0-9-]*$")
