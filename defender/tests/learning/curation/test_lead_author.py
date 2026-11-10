@@ -450,11 +450,13 @@ def test_the_drain_serves_a_refused_claim_without_landing_anything_and_keeps_its
 
     outcomes: dict = {}
     held = SimpleNamespace(items=[("curation_request", key, payload)])
+    halted: Exception | None = None
     try:
         drains._store_lead_work(lane.paths, serve, lambda *a, **kw: 0, box=None, batch=lane.batch,
                                 held=held, feedback=None, outcomes=outcomes)
     except Exception as halting:  # noqa: BLE001 — a halting fault ends the tick (its batch faults): decided nothing
-        assert fault != "refused-claim", f"a refused claim must be contained, not halt the tick: {halting!r}"
+        halted = halting
+    assert halted is None or fault != "refused-claim", f"a refused claim must be contained, not halt the tick: {halted!r}"
 
     assert lane.landed() == []
     assert lane.drift() == []
@@ -462,7 +464,8 @@ def test_the_drain_serves_a_refused_claim_without_landing_anything_and_keeps_its
     named = outcomes.get(("curation_request", key))
     assert named is None or named.name == "waiting", f"the request was decided: {named}"
     if fault == "refused-claim":
-        assert named is not None and named.name == "waiting", "the refused claim's request was not kept"
+        assert named is not None, "the refused claim's request was not kept"
+        assert named.name == "waiting", "the refused claim's request was not kept"
 
 
 @pytest.mark.parametrize(("case", "mutate", "match"), [

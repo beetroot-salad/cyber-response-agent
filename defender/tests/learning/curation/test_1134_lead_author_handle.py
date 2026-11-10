@@ -881,7 +881,7 @@ def _request(w: Any) -> Any:
 
 @pytest.mark.postgres
 def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skills(
-    store_world, tmp_path: Path, monkeypatch, caplog,
+    store_world, tmp_path: Path, monkeypatch, caplog,  # noqa: F811 — the imported fixture
 ):
     """A box swapped the draft's catalog folder for a link out: the lane's default seams (label
     carried to the held `skills/` mount) refuse every draft write behind the link, write nothing
@@ -913,7 +913,7 @@ def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skill
 
 @pytest.mark.postgres
 def test_a_seam_that_cannot_hold_skills_leaves_the_request_unserved_and_delivers_nothing(
-        store_world, tmp_path: Path, caplog):
+        store_world, tmp_path: Path, caplog):  # noqa: F811 — the imported fixture
     """A box that removed the draft's `skills/` lane leaves the lead author nothing to hold: the
     fault is contained to the request (logged naming `FileNotFoundError`), the request is not
     decided (it waits; the store's attempt ceiling is what dead-letters it, #1278 D8), the run gets no

@@ -49,7 +49,7 @@ class _EnqueueingBox(R1._Box):
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("root_set", [True, False], ids=["root-set", "root-unset"])
-def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(published, tmp_path, monkeypatch, root_set, migrated_database):
+def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(published, tmp_path, monkeypatch, root_set, migrated_database):  # noqa: F811 — the imported fixture
     """Through the REAL tenant-selected tick over the published tenant's drain paths. The late request is filed in the
     store after the tick's claim (#1278: the claim is the store's, so it is not in the batch and stays `waiting`)."""
     from defender.tests.support.runtime.engine._declared869 import pitfall_row
@@ -132,7 +132,7 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
 
 
 @pytest.mark.postgres
-def test_4_a_dead_curation_request_shows_its_address(published, tmp_path, monkeypatch, migrated_database):
+def test_4_a_dead_curation_request_shows_its_address(published, tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     """The request is retired by the REAL tenant-selected tick over the published tenant's drain paths, and the queue
     page lists it dead with the run id it names and the reason, with no run folder. #1278 update: the queue page's
     dead-letter list (design O2) carries the item's id (the run id the request is keyed by) and reason; the old
@@ -203,7 +203,7 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
 
 
 @pytest.mark.postgres
-def test_7_the_judge_prompts_views_are_numbered_without_a_gap(tmp_path, monkeypatch, migrated_database):
+def test_7_the_judge_prompts_views_are_numbered_without_a_gap(tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     from defender.learning.judge import layout as judge_layout
 
     numbers = [int(m.group(1)) for title in judge_layout.FOCUS_VIEW_TITLES.values()

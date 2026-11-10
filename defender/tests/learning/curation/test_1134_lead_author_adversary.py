@@ -19,7 +19,7 @@ from defender.learning.leads import lead_author, lead_neighbors, pitfalls_curato
 from defender.learning.leads.draft_synthesis import synthesize_drafts
 from defender.tests.support.learning.core._state1135 import tenant_of
 from defender.tests.support.learning.curation._tree_listing_1134 import RealOs, fd_path
-from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn, pitfall_row
+from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn
 from defender.tests.support.learning.core._declared870 import (
     REDUCER_REL,
     Spawn,

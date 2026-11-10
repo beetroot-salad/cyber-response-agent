@@ -97,7 +97,7 @@ def test_a_taught_reducer_row_is_reported_committed_not_retired(scene):
 
 def test_a_no_edit_reducer_tick_holds_its_rows(scene):
     lane, claim = scene, Claim()
-    ids = _shim_batch(claim)
+    _shim_batch(claim)
     head_before = lane.tip()
     spawn = _spawn(lane)
 

@@ -15,7 +15,6 @@ from defender._io import REFUSED_ALIAS, Bound, Held, NotPlainEntry, RecordRead, 
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.tests.support.learning.curation._tree_listing_1134 import RealOs, fd_path, last_component
-from defender.tests.support.shared._locations_1210 import location_path
 
 #: The type `DrainTrees.tree_for` has (bound): a working-copy path to `(held mount, name)`, or
 #: `None` outside the lane's mounts.

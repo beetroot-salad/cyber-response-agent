@@ -206,5 +206,6 @@ def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypat
     with pytest.raises(LeadAuthorError):
         tick(lane, Spawn(None), claim)
 
-    assert claim.outcomes == {} and claim.committed == set(), "a resolver failure decided the claim's rows"
+    assert claim.outcomes == {}, "a resolver failure decided the claim's rows"
+    assert claim.committed == set(), "a resolver failure decided the claim's rows"
     assert "(continuing)" not in loop_log(capsys)

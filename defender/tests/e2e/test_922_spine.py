@@ -3,7 +3,6 @@ mounts from the retired direction table."""
 from __future__ import annotations
 
 import dataclasses
-import json
 import os
 from pathlib import Path
 
@@ -39,7 +38,7 @@ RETIRED_CORPORA = ("lessons-actor", "lessons-environment")
 
 
 @pytest.fixture(autouse=True)
-def _isolated_roots(tmp_path, monkeypatch, migrated_database):  # noqa: F811
+def _isolated_roots(tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     """Every shared root this spine touches, pointed inside `tmp_path`; the learning store is the test database."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(ST.DSN_ENV, migrated_database)
@@ -62,7 +61,7 @@ class TriggerRecorder:
         self.completed: list[str] = []
         self._agent = agent
 
-    def __call__(self, paths, state, kind, threshold_env, module_name, pending_label,
+    def __call__(self, paths, state, kind, threshold_env, module_name, pending_label,  # noqa: PLR0913 — the curator seam's own signature
                  *, batch, box=None, items=(), outcomes=None, feedback=None, make_model=None) -> None:
         # The curator runs over the tick's batch draft lanes (`batch=`, as
         # `_drain_support.CuratorTrigger` does), never over checkout trees built from `paths`.
@@ -113,7 +112,7 @@ def graded_episode(tmp_path: Path, t):
 
 
 @pytest.fixture
-def tenant(tmp_path, data_root, migrated_database):  # noqa: F811
+def tenant(tmp_path, data_root, migrated_database):  # noqa: F811 — the imported fixture
     """The fixture tenant published for real, its forge bound and its row registered in the store: the drain's
     batches are branches of the tenant repo."""
     from defender.tests.support.jobs._jobs1342 import register_tenant
@@ -250,7 +249,8 @@ def test_922_the_drain_box_gets_exactly_the_lessons_corpus_writable(tenant, tmp_
     assert trigger.modules == ["author"], (
         f"author_drain triggered {trigger.modules}: a curator with no items of its kind was woken")
     call = trigger.calls[0]
-    assert call["kind"] == "finding" and call["threshold_env"] == "LEARNING_AUTHOR_THRESHOLD"
+    assert call["kind"] == "finding"
+    assert call["threshold_env"] == "LEARNING_AUTHOR_THRESHOLD"
     assert call["pending_label"] == "pending"
     assert len(call["items"]) == 2, call["items"]
     request = rec.only_request()

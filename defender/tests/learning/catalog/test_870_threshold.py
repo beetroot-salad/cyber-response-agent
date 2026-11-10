@@ -99,7 +99,8 @@ def test_silent_reducer_failures_alone_do_not_open_the_lane(world, lane, monkeyp
     offered = Spawn(None)
     claim = _offer(lane, world, offered)
     assert [e["surface"] for e in offered.calls[-1]["handoffs"]] == ["reducer"]
-    assert claim.committed == set() and claim.outcomes == {}, "the undiagnosable batch was decided on the tick it was only offered"
+    assert claim.committed == set(), "the undiagnosable batch was decided on the tick it was only offered"
+    assert claim.outcomes == {}, "the undiagnosable batch was decided on the tick it was only offered"
     assert {i.status for i in pitfall_items(world).values()} == {"waiting"}
     assert len(pitfall_items(world)) == 8
 

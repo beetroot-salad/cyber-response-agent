@@ -179,7 +179,7 @@ def _steps(episode_dir: Path) -> list[str]:
 
 @pytest.mark.postgres
 def test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged(
-        tmp_path, monkeypatch, migrated_database):
+        tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     """Through the launcher: after the siblings ran, `<ep>/runs` became a link to a folder
     holding every finished arm. VERIFY never follows it: every world is `not archived` (its
     `RunRefused`, or the container's `TenantRefused`, caught too), the launch returns a status
@@ -315,7 +315,7 @@ def _tick(t: Any, paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> i
 
 
 @pytest.mark.postgres
-def test_c_a_pitfalls_only_tick_needs_no_data_root(published, tmp_path, monkeypatch, migrated_database):
+def test_c_a_pitfalls_only_tick_needs_no_data_root(published, tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     """With `DEFENDER_DATA_ROOT` unset, a tick with only pitfalls work still starts its box and
     reaches pitfalls (the pitfall is a row of the learning store, #1278)."""
     from defender.tests.support.runtime.engine._declared869 import pitfall_row
@@ -336,7 +336,7 @@ def test_c_a_pitfalls_only_tick_needs_no_data_root(published, tmp_path, monkeypa
 
 @pytest.mark.postgres
 def test_c_a_tenant_tick_serves_its_rows_from_its_own_root_without_the_env(
-        published, tmp_path, monkeypatch, migrated_database):
+        published, tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     """A drain is tenant-selected, so a queued row's run is rehydrated under that tenant's own
     data root: with `DEFENDER_DATA_ROOT` unset, the row is still served."""
     t = published

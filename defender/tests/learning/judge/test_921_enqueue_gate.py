@@ -100,7 +100,8 @@ def test_921_gate_family_is_idempotent_over_a_replayed_batch(tmp_path):
     lane = G.gate_lane(tmp_path)
     first = D.recording(D.committing("once"))
     rc, _ = G.claim(G.lessons_cfg(lane, invoke_agent=first), [_family_row("ep-1/b/0/0")])
-    assert rc == 0 and first.calls, "the positive control failed: the first row authored nothing"
+    assert rc == 0, "the positive control failed: the first row authored nothing"
+    assert first.calls, "the positive control failed: the first row authored nothing"
 
     second = D.recording(D.committing("twice"))
     rc, outcomes = G.claim(G.lessons_cfg(lane, invoke_agent=second),
@@ -268,7 +269,8 @@ def test_921_a_store_already_holding_a_finding_does_not_change_what_a_pass_queue
     ids = [r["finding_id"] for r in store.rows(D.channel_of("findings"))]
     assert "ep-0/b/0/0" in ids, "the row that was already queued went missing"
     own = [i for i in ids if i != "ep-0/b/0/0"]
-    assert own and len(own) == record["enqueued_rows"], (
+    assert own
+    assert len(own) == record["enqueued_rows"], (
         f"the record claims {record['enqueued_rows']} enqueued rows and the store holds {len(own)} of this pass's own")
 
 

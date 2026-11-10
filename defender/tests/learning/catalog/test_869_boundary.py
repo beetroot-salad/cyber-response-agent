@@ -98,7 +98,8 @@ def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, capsy
     assert tick(lane, spawn, claim) == 0
     assert spawn.systems_seen == ["wtonly"]
     assert spawn.handoffs[0]["path"] == "agent/skills/wtonly/execution.md"
-    assert claim.committed == {"r:l-000:0", "r:l-001:0"} and claim.outcomes == {}
+    assert claim.committed == {"r:l-000:0", "r:l-001:0"}
+    assert claim.outcomes == {}
     assert lane.text_at_tip("agent/skills/wtonly/execution.md") == "# pitfalls\n- x\n"
 
 
@@ -121,7 +122,8 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
         tick(lane, Spawn(land_an_adapter_then_plant, root=lane.root), claim)
     # By the end of the tick the tree declares mcpsys; the tick's resolved value still does not.
     assert "mcpsys" in adapter_declared_systems(product)
-    assert claim.outcomes == {} and claim.committed == set(), "a refused tick decided the claim's rows"
+    assert claim.outcomes == {}, "a refused tick decided the claim's rows"
+    assert claim.committed == set(), "a refused tick decided the claim's rows"
     assert before != head_sha(product), "the plant's own commit is the mid-tick change"
     assert lane.commits() == [], "the refused tick committed into the batch"
 

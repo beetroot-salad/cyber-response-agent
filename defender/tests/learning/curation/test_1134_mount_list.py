@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
 
 import dataclasses
 import enum
