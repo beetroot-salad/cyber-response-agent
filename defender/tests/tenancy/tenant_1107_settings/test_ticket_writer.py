@@ -210,7 +210,9 @@ def _with_report(run_dir: Path) -> None:
 def test_o8_edits_to_the_case_settings_after_run_start_change_nothing_the_comment_carries(
         tmp_path, monkeypatch):
     """Editing the tenant's case-record.yaml or the system's config.env under the data root during
-    a run changes nothing the comment carries; control: the body planted before start is sent. D-18."""
+    a run changes nothing the comment carries; control: the body planted before start is sent. D-18.
+    (#1366 O6/O9: a run reads records frozen at start and no folder at all, so the edit is inert twice over; the
+    record-world guard that a record written during a run changes nothing is `alert_front_door_1222/test_run_records_1366.py`.)"""
     edited_body = "EDITED-BODY {disposition}"
     control_shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-control")
     root, _folder, alert = _world(tmp_path, name="control", case_body=edited_body)

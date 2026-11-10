@@ -250,7 +250,9 @@ def test_1120_accept_tenant_refuses_a_missing_half_or_required_settings_file(
 
     control = tmp_path / "control"
     H.adopted(control)
-    (H.settings_dir(control) / "systems" / "cmdb" / "config.env").unlink()
+    # #1366 O9: a tenant repo holds no `settings/systems/` (the systems are records), so acceptance reads none: the
+    # untouched twin is accepted, the control that the refusals above are about the removed half or file.
+    assert not (H.settings_dir(control) / "systems").exists()
     assert H.accept(_tenant, control).settings == H.settings_dir(control)
 
 
@@ -571,7 +573,8 @@ def test_1120_accept_tenant_refuses_a_fifo_socket_or_device_inside_either_half_w
 
 
 def _unlistable_settings_dir(knowledge: Path) -> Path:
-    target = knowledge / "settings" / "systems" / "cmdb"
+    target = knowledge / "settings" / "systems" / "cmdb"  # #1366 O9: a leftover retired folder (the fixture holds none)
+    target.mkdir(parents=True, exist_ok=True)
     target.chmod(0)
     return target
 

@@ -216,7 +216,7 @@ def test_run_start_judges_the_case_settings_before_the_mint(tmp_path, data_root,
     folder = _case_tenant(data_root, C.CASE_SYSTEM_TICKET)
     if spoil == "bad config.env":
         S.set_key(folder, C.CASE_SYSTEM_TICKET, "TICKET_TIMEOUT_SEC", "ten")
-        named = "systems/ticket/config.env"
+        named = "system ticket settings"  # #1366 DC6: the record, not the retired file
     else:
         # The stored declaration keeps its reads and base but no longer has the comment route (a valid record).
         for rel, text in H.access_files(

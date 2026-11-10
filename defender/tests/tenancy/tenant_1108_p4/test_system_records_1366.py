@@ -595,6 +595,19 @@ def test_1366_o4_a_case_record_naming_a_file_that_is_not_a_record_is_refused(imp
 
 
 @pytest.mark.postgres
+def test_1366_p2_a_handoff_folder_whose_files_are_not_text_is_refused_and_stored_nowhere(imported_op, tmp_path):
+    """A `config.env` or `access.yaml` that is not UTF-8 text never becomes a record: `set-system` refuses naming the
+    system, with no traceback, and stores nothing. Moved from the startup tests that planted a non-UTF-8 `config.env`
+    (a file that cannot reach a run any more). (#1366 P2, O9, DC8)"""
+    before = _state(imported_op)
+    for n, name in enumerate(("config.env", "access.yaml")):
+        folder = R.system_folder(tmp_path / f"bytes-{n}", "cmdb", config=CMDB_CONFIG, access=CMDB_ACCESS)
+        (folder / name).write_bytes(b"\xff\xfe not text \x80\n")
+        rc, said = imported_op.run(R.SET_SYSTEM, imported_op.tid, "cmdb", str(folder), R.REPLACES, "1")
+        _refused(imported_op, before, rc, said, (("cmdb",),), file_ok=True)
+
+
+@pytest.mark.postgres
 @pytest.mark.parametrize("how", ["delete", "disable"])
 def test_1366_o4_the_case_system_cannot_be_deleted_or_disabled_until_the_case_record_is_deleted(imported_op, how):
     """ticket is the case system: deleting or disabling it is refused naming ticket and the case record; once

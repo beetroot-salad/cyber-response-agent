@@ -43,38 +43,8 @@ HEALTH_CHECK_ONLY_TABLE = "dispositions:\n  cmdb:\n    health-check: {roles: [ga
 UNPARSEABLE_TABLE = "dispositions:\n  cmdb:\n    health-check: {roles: [gather]\n"
 
 
-#: The row `validate_scaffold` prints once it has checked a clean `config.env`.
-CONFIG_CHECKED = "config.env carries no inline secrets"
-
 #: The WARN / FAIL glyphs `validate_scaffold.Report` prints each row with.
 WARN_ROW, FAIL_ROW = "[!]", "[✗]"
-
-
-def _ticket_config(settings: Path) -> Path:
-    return settings / "systems" / "ticket" / "config.env"
-
-
-def _mark_ticket_config(settings: Path, marker_key: str, *, drop_timeout: bool) -> Path:
-    """Give a tenant's ticket `config.env` an inline-secret marker line (a key `validate_scaffold`
-    FAILs by name) and, with `drop_timeout`, lose the required `TICKET_TIMEOUT_SEC`."""
-    path = _ticket_config(settings)
-    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines(keepends=True)
-             if not (drop_timeout and ln.startswith("TICKET_TIMEOUT_SEC"))]
-    path.write_text("".join(lines) + f'{marker_key}="inline-marker-{marker_key.lower()}"\n',
-                    encoding="utf-8")
-    return path
-
-
-def _other_tree(tmp_path: Path, tenant_id: str, marker_key: str) -> Path:
-    """Another checkout's `defender/` whose `knowledge/tenants/<tenant_id>` holds a complete tenant
-    folder carrying `marker_key` in its ticket config — what a command would find if it derived its
-    tenants root from an exported `$DEFENDER_DIR`."""
-    other = tmp_path / "other-checkout"
-    (other / "defender").mkdir(parents=True)
-    folder = other / "knowledge" / "tenants" / tenant_id
-    shutil.copytree(H.FIXTURE, folder)
-    _mark_ticket_config(folder / "settings", marker_key, drop_timeout=True)
-    return other / "defender"
 
 
 def _validate_scaffold(root: Path | None, tenant_id: str, **kw: Any) -> Any:
@@ -103,14 +73,13 @@ def _census_lint(repo: Path) -> Any:
 
 def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_checkouts(
         data_root: Path, tmp_path: Path, capsys) -> None:
-    """policy_cli's grant and validate_scaffold's config check come from the data root's copy,
-    never the checkout's knowledge/ or an exported `DEFENDER_DIR`'s tree."""
+    """policy_cli's grants come from the data root's copy, never the checkout's knowledge/. (validate_scaffold's
+    `config.env` check over a data-root tenant is retired: #1366 O9/O11, its judgement moved onto connect's handoff,
+    `tenant_1107_settings/test_validator.py`.)"""
     tid = fixture_uuid("tenant:playground")
     H.adopted(data_root, tid)
     settings = H.settings_dir(data_root, tid)
     (settings / "verb-grants.yaml").write_text(HEALTH_CHECK_ONLY_TABLE, encoding="utf-8")
-    _mark_ticket_config(settings, "TICKET_SPEC1120_DATA_ROOT_TOKEN", drop_timeout=True)
-    other_defender = _other_tree(tmp_path, tid, "TICKET_SPEC1120_OTHER_TREE_TOKEN")
     table = settings / "verb-grants.yaml"
 
     # policy_cli: the data-root table decides gather's grant.
@@ -123,17 +92,6 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
     assert rc == 0, f"policy_cli refused the data-root tenant's granting table: {text}"
     assert "agent: gather" in capsys.readouterr().out
 
-    for defender_dir_env in ({}, {"DEFENDER_DIR": str(other_defender)}):
-        unset = ("DEFENDER_DIR",) if not defender_dir_env else ()
-        # validate_scaffold: the data-root config.env is the one checked.
-        out = H.output(_validate_scaffold(data_root, tid, unset=unset, **defender_dir_env))
-        assert "Traceback (most recent call last)" not in out, out
-        assert any("TICKET_SPEC1120_DATA_ROOT_TOKEN" in row for row in _rows(out, FAIL_ROW)), (
-            f"validate_scaffold did not check the data-root config.env ({defender_dir_env}):"
-            f"\n{out}")
-        assert "OTHER_TREE" not in out, out
-        assert str(H.KNOWLEDGE_ROOT) not in out, out
-
 
 def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_without_a_traceback(
         data_root: Path, tmp_path: Path) -> None:
@@ -142,8 +100,6 @@ def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_witho
     elsewhere = tmp_path / "elsewhere" / "knowledge"
     shutil.copytree(H.FIXTURE, elsewhere)
     H.write_tenant_id_file(elsewhere, H.TID, "id")
-    _mark_ticket_config(elsewhere / "settings", "TICKET_SPEC1120_CONTROL_TOKEN",
-                        drop_timeout=True)
     link = H.knowledge_dir(data_root)
     link.parent.mkdir(parents=True)
     link.symlink_to(elsewhere, target_is_directory=True)
@@ -156,15 +112,14 @@ def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_witho
         f"validate_scaffold did not print accept_tenant's refusal as a WARN:\n"
         f"{H.output(scaffold)}")
     assert not any(owner in row for row in _rows(H.output(scaffold), FAIL_ROW))
-    assert "TICKET_SPEC1120_CONTROL_TOKEN" not in H.output(scaffold), (
-        "validate_scaffold checked the config of a tenant acceptance refused")
 
-    # The positive control: the same folder, placed for real.
+    # The positive control: the same folder, placed for real, is not told it is refused. (#1366 O9/O11: the retired
+    # config-token assertions are gone with validate_scaffold's data-root `config.env` check.)
     link.unlink()
     shutil.move(str(elsewhere), str(link))
     scaffold = _validate_scaffold(data_root, H.TID)
     H.assert_ran(scaffold)
-    assert "TICKET_SPEC1120_CONTROL_TOKEN" in H.output(scaffold), H.output(scaffold)
+    assert not any(owner in row for row in _rows(H.output(scaffold), WARN_ROW)), H.output(scaffold)
 
     # The census lint over a tmp repo whose fixture folder acceptance's folder rules refuse.
     repo = H.tmp_checkout(tmp_path / "repo")
@@ -196,8 +151,6 @@ def test_1120_s6_operator_tools_in_a_shell_without_the_data_root(
     assert any(H.DATA_ROOT_ENV in row for row in _rows(out, WARN_ROW)), (
         f"validate_scaffold did not WARN naming {H.DATA_ROOT_ENV}:\n{out}")
     assert not any(H.DATA_ROOT_ENV in row for row in _rows(out, FAIL_ROW)), out
-    assert CONFIG_CHECKED not in out, (
-        f"validate_scaffold checked a config.env without a data root:\n{out}")
     monkeypatch.delenv(H.DATA_ROOT_ENV, raising=False)
     rc, text = _policy_gather(tmp_path, tid)
     assert rc is None, f"policy_cli gather built a policy without a data root: {rc}"
@@ -206,7 +159,7 @@ def test_1120_s6_operator_tools_in_a_shell_without_the_data_root(
 
     scaffold = _validate_scaffold(data_root, tid)
     H.assert_ran(scaffold)
-    assert CONFIG_CHECKED in H.output(scaffold), H.output(scaffold)
+    assert not any(H.DATA_ROOT_ENV in row for row in _rows(H.output(scaffold), WARN_ROW)), H.output(scaffold)
     monkeypatch.setenv(H.DATA_ROOT_ENV, str(data_root))
     rc, text = _policy_gather(tmp_path, tid)
     assert rc == 0, f"policy_cli refused a tenant under a set data root: {text}"
@@ -251,8 +204,6 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     H.adopted(data_root)
     table = H.settings_dir(data_root) / "verb-grants.yaml"
     table.write_text(UNPARSEABLE_TABLE, encoding="utf-8")
-    _mark_ticket_config(H.settings_dir(data_root), "TICKET_SPEC1120_UNLOADABLE_TOKEN",
-                        drop_timeout=True)
 
     H.assert_refused(H.check(tenant_py, data_root, H.TID), "verb-grants.yaml")
 
@@ -282,8 +233,7 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     # The consumer that never loads the table accepts the tenant.
     capsys.readouterr()
     out = H.output(_validate_scaffold(data_root, H.TID))
-    assert "TICKET_SPEC1120_UNLOADABLE_TOKEN" in out, (
-        f"validate_scaffold did not check the tenant's config:\n{out}")
+    H.assert_ran(_validate_scaffold(data_root, H.TID))  # #1366 O11: no config token to read any more
     assert "verb-grants.yaml" not in out, out
 
 

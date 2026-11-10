@@ -60,8 +60,9 @@ def test_d_systems_verbatim(tmp_path):
 
 
 def _identity_placeholder(folder: Path) -> None:
-    """identity's record carries the template's placeholder where its timeout belongs: what an upgrade that changes a
-    key's meaning leaves in a stored record (R12 'settings an upgrade invalidated'). A valid record, not a bad file."""
+    """identity's record carries the template's placeholder where its timeout belongs. The store refuses `CHANGE-ME` at write
+    (O4), so this is a stand-in for any value the judgement fails: the shape a record an upgrade invalidated has (R12
+    'settings an upgrade invalidated'; a rule added later fails a value stored earlier). A record, not a bad file."""
     S.set_key(folder, "identity", "IDENTITY_TIMEOUT_SEC", "CHANGE-ME")
 
 
@@ -477,9 +478,9 @@ def test_r5_a_config_env_value_the_system_cannot_use_leaves_it_not_configured(
 
 
 def test_r5_a_config_env_is_optional_only_for_an_adapter_that_reads_no_key(tmp_path):
-    """host-state reads no `config.env` key: with only its `access.yaml` it is usable and its
-    verbs are sent. cmdb reads a key: without its `config.env` it is still "config file not
-    found" (#1391 r5 O-S1)."""
+    """host-state reads no settings key: with only its access declaration it is usable and its
+    verbs are sent. cmdb reads a key: with empty settings it is still not configured, located
+    `system cmdb settings` (#1391 r5 O-S1; #1366 DC6: the record, not the file)."""
     host_state = S.mod("integrations.host_state_adapter")
     cmdb = S.mod("integrations.cmdb_adapter")
     ConfigFault = S.config_fault()
@@ -491,14 +492,14 @@ def test_r5_a_config_env_is_optional_only_for_an_adapter_that_reads_no_key(tmp_p
     assert host_state.check_settings(record) is None
     fault, sent = _called(record, tmp_path, "hs", host_state.passwd, host="web-1")
     assert [r["url"] for r in sent] == [f"{T1106.default_base('r5o', 'host-state')}/hosts/web-1/accounts"], (fault, sent)
-    with pytest.raises(ConfigFault, match="config file not found"):
+    with pytest.raises(ConfigFault, match="system cmdb settings"):
         cmdb.check_settings(record)
 
 
 @pytest.mark.parametrize("config", ["absent", "undeclared-key", "placeholder"])
 def test_r5_a_folder_without_its_access_declaration_is_judged_by_that_first(tmp_path, config):
-    """The access declaration is checked before `config.env`: a system with none is named for
-    the missing declaration, whatever else its folder lacks (#1391 r5 S1 step 1)."""
+    """The access declaration is judged before the settings: a system with none is named for
+    the missing declaration (`system cmdb access`, #1366 DC6), whatever its settings lack (#1391 r5 S1 step 1)."""
     cmdb = S.mod("integrations.cmdb_adapter")
     ConfigFault = S.config_fault()
     root = tmp_path / "tenants"
@@ -511,8 +512,9 @@ def test_r5_a_folder_without_its_access_declaration_is_judged_by_that_first(tmp_
         env.write_text(env.read_text() + "CMDB_URL_BASE=http://cmdb:8080\n")
     else:
         env.write_text("CMDB_TIMEOUT_SEC=CHANGE-ME\n")
-    with pytest.raises(ConfigFault, match=r"access\.yaml\S* not found — cmdb is reached only through"):
+    with pytest.raises(ConfigFault, match=r"system cmdb access") as raised:
         cmdb.check_settings(_resolve(root))
+    assert "system cmdb settings" not in str(raised.value), str(raised.value)
 
 
 @pytest.mark.parametrize("required", [("URL_BASE", "TIMEOUT_SEC"), ("TIMEOUT_SEC", "HOST")])

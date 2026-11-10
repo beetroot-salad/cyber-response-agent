@@ -28,7 +28,8 @@ def test_o2_the_committed_tenants_carry_no_case_history_folder():
     """Neither the committed template nor the fixture tenant holds `systems/case-history/`. O2."""
     for half in ("tenant-template", "tenant-fixture"):
         folder = DEFENDER.parent / "knowledge" / half / "settings" / "systems" / C.RETIRED_SYSTEM
-        assert (folder.parent / "ticket").is_dir() or half == "tenant-template", "positive control"
+        # positive control (#1366 O9: neither half carries `settings/systems/` at all; the half is there)
+        assert (folder.parent.parent / "verb-grants.yaml").is_file(), f"{half} has no settings"
         assert not folder.exists(), f"the committed {half} still carries {folder}"
 
 

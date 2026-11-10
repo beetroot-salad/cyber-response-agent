@@ -269,7 +269,7 @@ def _pre_trip() -> Callable[[Path], None]:
 def _config_fault() -> BaseException:
     """A missing elastic config faults before reaching the backend."""
     return S.sym("kit.faults", "ConfigFault")(
-        "config file not found: the tenant's settings/systems/elastic/config.env - this "
+        "missing required config keys in system elastic settings: ELASTIC_EVENTS_INDEX - this "
         "tenant's settings do not configure this system")
 
 
@@ -492,7 +492,7 @@ def _o6_scenario(ending: str, tmp_path: Path, withheld: _Scene) -> dict[str, Any
         return {"limits": S.with_deadline(), "leads": {S.L3: [S.text("late")]},
                 "lead_faults": {S.L3: S.LeadFault(delay=S.SHORT_DEADLINE_S + 2.0)}}
     if ending == "down_at_start":
-        # Elastic has no config.env, so it is down from run start; cmdb stays usable.
+        # Elastic's record is unconfigured (empty settings and access), so it is down from run start; cmdb stays usable.
         return {"scene": _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down"), omit_systems=("elastic",)),
                 "leads": {S.L3: [_q(1), _q(2), S.text("narration")]}}
     raise AssertionError(f"no scenario for the ending {ending!r}")

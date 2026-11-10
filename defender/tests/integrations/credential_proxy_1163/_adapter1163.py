@@ -66,14 +66,13 @@ def elastic_files(base: str, *, ca: str | bytes | None = None, env_extra: str = 
     """Repo files making `elastic` a proxied system at `base`: a basic-auth declaration with
     `ELASTIC_READS` (and `ca` when given), and a config.env holding the two index keys and
     `env_extra` (no access method, URL, Kibana or container key);
-    `declared=False` deletes the declaration from the placed fixture (the shipped
-    fixture tenant carries one, #1391 D12), as a `None` entry `files` applies after placement."""
+    `declared=False` plants no declaration file (the record then holds empty access text, #1366 O9)."""
     decl = H.declaration(base, scheme=scheme or H.basic_scheme(), reads=ELASTIC_READS, ca=ca)
     env = (f'ELASTIC_EVENTS_INDEX="{ELASTIC_EVENTS}"\n'
            f'ELASTIC_ALERTS_INDEX="{ELASTIC_ALERTS}"\n{env_extra}')
     files: dict[str, str | None] = dict(H.access_files("elastic", decl, env=env))
     if not declared:
-        files[ACCESS_FILE.format(system="elastic")] = None
+        del files[ACCESS_FILE.format(system="elastic")]  # #1366 O9: no fixture folder to delete from; none planted = empty access
     return files
 
 

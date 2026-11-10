@@ -30,8 +30,6 @@ PREFLIGHT_LIFETIME = 3600
 CLOCK_TOLERANCE = 60
 ROLE, SECRET = "role-1163-learning", "secret-1163-learning"
 DELIVERY_ROLE, DELIVERY_SECRET = "role-1163-delivery", "secret-1163-delivery"
-FIXTURE_SYSTEMS = ("identity", "ticket", "host-state", "threat-intel", "change-mgmt",
-                   "elastic", "cmdb")
 #: `idp` is a tenant-only name: no product allowlist knows it (A6). Its `query` goes through the
 #: shared transport; its other verbs answer locally.
 IDP_ADAPTER = '''\
@@ -94,9 +92,8 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool, env
         merged.replies[f"{API}/events"] = (200, {"Content-Type": "application/json"},
                                            json.dumps(idp.payload).encode())
         files = {"settings/verb-grants.yaml": est.table(),
-                 # host-state reads no key, so it ships no config.env to remove (#1391 r5 O-S1).
-                 **{f"settings/systems/{s}/config.env": None for s in FIXTURE_SYSTEMS
-                    if s != "host-state"},
+                 # #1366 O9: the fixture ships no `settings/systems/` (its folders are retired), so there is none to remove;
+                 # the tenant's records are idp and crm alone, derived from the files planted below.
                  **A.system_files("idp", H.declaration(merged.url + API)),
                  # Another http-proxy system the source run never called: the grant must not reach it.
                  **A.system_files("crm", H.declaration(merged.url + "/crm"))}

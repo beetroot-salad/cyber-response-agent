@@ -13,9 +13,12 @@ import pytest
 from defender.kit import transport
 from defender.integrations import elastic_adapter
 from defender.kit.faults import ConfigFault
+from defender.kit.settings import NOT_CONFIGURED
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
-_POINTER = "the tenant's settings/"
+#: #1366 DC6: a record's fault is located "system <s> settings" (never a host path or the retired file).
+def _locator(system: str) -> str:
+    return f"system {system} settings"
 
 
 def _tenant(tmp_path: Path, marker: str, **kw) -> tuple[Path, Path]:
@@ -37,22 +40,26 @@ def test_settings_faults_name_no_host_path(tmp_path):
     from defender.integrations import cmdb_adapter
 
     root, folder = _tenant(tmp_path, "pth")
-    S.write_config(folder, "identity", b"IDENTITY_URL_BASE=\xff\n")
+    # #1366 P2/O9: a settings file that is not UTF-8 cannot reach a run; the record that fails the judgement is a placeholder
+    S.set_key(folder, "identity", "IDENTITY_TIMEOUT_SEC", "CHANGE-ME")
     S.drop_key(folder, "cmdb", "CMDB_TIMEOUT_SEC")
     S.drop_key(folder, "elastic", "ELASTIC_EVENTS_INDEX")
     record = S.resolve(root)
     ctx = _ctx(record, tmp_path)
 
     texts = {
-        "not utf-8": str(record.systems["identity"]),
+        "placeholder": str(record.systems["identity"]),
         "missing key": str(_raised(cmdb_adapter.health_check, ctx)),
         "elastic key": str(_raised(elastic_adapter.query, ctx, native_query="*")),
         "no folder": str(_raised(transport.system_entry, ctx, "no-such-system")),
     }
+    located = {"placeholder": "identity", "missing key": "cmdb", "elastic key": "elastic", "no folder": "no-such-system"}
     host = str(tmp_path)
     for arm, text in texts.items():
         assert host not in text, f"{arm}: the fault names the host path: {text!r}"
-        assert _POINTER in text, f"{arm}: the fault does not name the file by the pointer: {text!r}"
+        # a system with no record at all is "not configured" (kit.settings.NOT_CONFIGURED), also located by the record or not
+        ok = (_locator(located[arm]) in text) or (arm == "no folder" and NOT_CONFIGURED in text)
+        assert ok, f"{arm}: the fault does not locate the record as {_locator(located[arm])!r}: {text!r}"
 
 
 def test_lone_cr_line_endings_parse_as_lines(tmp_path):

@@ -361,7 +361,8 @@ LEGACY_RECORD = "settings/case-record.yaml"
 @pytest.mark.parametrize("shape", _shape_params(CASE_FAULTS))
 def test_a_legacy_case_history_folder_is_a_check_finding_naming_the_new_file(
         tmp_path: Path, capsys: Any, shape: str) -> None:
-    """Whatever the retired mapping holds, `check` names `settings/case-record.yaml`; acceptance and run start go on. #1359 r4."""
+    """Whatever the retired mapping holds, `check --folder` names `settings/case-record.yaml`; acceptance and run start go on. #1359 r4.
+    (#1366 DC8: the file is now reported as retired and ignored, never parsed, so every shape is the same finding.)"""
     w = world(tmp_path, capsys)
     sites = ("acceptance", "check-folder", "run-start")
     for v in verdicts(w, sites).values():

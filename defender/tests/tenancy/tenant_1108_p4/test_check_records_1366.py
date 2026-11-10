@@ -16,7 +16,7 @@ import yaml
 from defender.tests.support.jobs._jobs1342 import register_tenant
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — the fixture
 from defender.tests.support.tenancy import _systems1366 as R
-from defender.tests.tenancy.tenant_1108_p4._support import published_tenant, second_tenant
+from defender.tests.tenancy.tenant_1108_p4._support import FIXTURE, published_tenant, second_tenant
 
 pytestmark = pytest.mark.postgres
 
@@ -345,3 +345,67 @@ def test_1366_b6_check_exits_zero_over_a_sound_tenant_with_credentials_and_nonze
 
     assert op.delete_system("cmdb", replaces=1)[0] == 0
     assert _findings(op).rc != 0
+
+
+def _grants_without_ticket_held() -> str:
+    """The fixture's grants table with every `ticket` verb granted to nobody (the case system is then held by no role)."""
+    doc = yaml.safe_load((FIXTURE / "settings" / "verb-grants.yaml").read_text(encoding="utf-8"))
+    doc["dispositions"]["ticket"] = {
+        verb: {"roles": [], "reason": "a case system; no agent reads it"} for verb in doc["dispositions"]["ticket"]}
+    return yaml.safe_dump(doc, sort_keys=False)
+
+
+def test_1366_r1_an_ungranted_case_system_with_unusable_settings_is_a_finding_naming_its_settings(tenants):
+    """The settings judgement runs on the case system though no role holds it: ticket (the case system, granted to
+    nobody) with empty stored settings is reported naming `system ticket settings`, not a file; the same tenant with
+    sound settings gets no such line. Moved from `case_comment_1359/test_case_comment_tenant_check.py::test_r1_an_ungranted_
+    case_system_with_bad_settings` (#1366 O9: a bad `config.env` file cannot reach a check; DC6: the record is the locator)."""
+    files = {"settings/verb-grants.yaml": _grants_without_ticket_held()}
+    sound = _findings(tenants(files=files))
+
+    found = _findings(tenants(R.edited(R.fixture_records(), "ticket", settings={}), files=files))
+
+    assert _only_in(found, sound, "system ticket settings"), found
+    _exits_for_its_own_finding(found)
+    assert not R.lines_naming("\n".join(found), "config.env"), found
+
+
+def test_1366_c5_check_reports_a_case_record_naming_a_system_whose_adapter_offers_no_comment_action(tenants):
+    """A stored case record naming cmdb (whose adapter has no comment route; an upgrade can remove one): `check` reports
+    it naming the case record and cmdb, exits nonzero; the tenant whose case system is ticket gets no such line. Moved
+    from `test_case_comment_tenant_check.py::test_r1_a_case_system_that_exports_no_comment_action...` (#1366 O4, C5, O9)."""
+    sound = _findings(tenants())
+
+    found = _findings(tenants(R.RecordsSpec(R.fixture_records().systems, R.CaseSpec("cmdb"))))
+
+    assert [line for line in found if line not in sound and "cmdb" in line and "case" in line.lower()], found
+    _exits_for_its_own_finding(found)
+
+
+def test_1366_r1_a_settings_fault_that_tells_the_operator_the_base_is_in_the_access_is_located_at_the_settings(tenants):
+    """ticket's stored settings carry a `TICKET_URL_BASE` key (its text says the base lives in the access declaration):
+    the finding is located `system ticket settings`, never `system ticket access`. Moved from
+    `test_case_comment_tenant_check.py::test_r1_a_config_env_fault_that_mentions_access_yaml_names_config_env`
+    (#1366 DC6)."""
+    sound = _findings(tenants())
+    settings = {**R.FIXTURE_FOLDERS["ticket"][0], "TICKET_URL_BASE": "https://cases.example.test"}
+
+    found = _findings(tenants(R.edited(R.fixture_records(), "ticket", settings=settings)))
+
+    mine = _only_in(found, sound, "system ticket settings", "TICKET_URL_BASE")
+    assert mine, found
+    # the sentence may mention the access declaration in its body; its LOCATOR (what comes first) is the settings
+    for line in mine:
+        access = line.find("system ticket access")
+        assert access == -1 or line.index("system ticket settings") < access, line
+    _exits_for_its_own_finding(found)
+
+
+def test_1366_o2_a_tenant_with_no_case_record_passes_check(tenants):
+    """No case record (the case record is optional, #1359 O2): the tenant whose systems are all recorded and credentialed
+    exits zero and `check` names no case finding. Moved from the `check <id>` half of
+    `case_comment_1359/test_case_comment_tenant_check.py::test_o2_a_tenant_with_no_case_file_passes_check`. (#1366 O2, R10)"""
+    found = _findings(tenants(R.RecordsSpec(R.fixture_records().systems, None)))
+
+    assert found.rc == 0, found
+    assert not R.lines_naming("\n".join(found), "case"), found

@@ -41,8 +41,8 @@ def _published(scratch, root, decl):
     """The fixture tenant (its case-record file names `ticket`) with `ticket` on `http-proxy`;
     `decl=None` leaves `ticket` with no `access.yaml` at all."""
     files = A.system_files(SYSTEM, decl or "", env_extra=KEY_PATTERN)
-    if decl is None:  # the committed fixture declares `ticket`: take its declaration away too
-        files[H.ACCESS_FILE.format(system=SYSTEM)] = None
+    if decl is None:  # no declaration file at all: the record's access text is then empty (#1366 O9; the fixture folders are retired)
+        del files[H.ACCESS_FILE.format(system=SYSTEM)]
     with published_tenant(scratch, root=root, files=files) as t:
         yield t
 
@@ -135,8 +135,8 @@ def test_t3_failures_are_text_in_the_receipt_and_carry_no_credential(tmp_path, d
 
 def test_t6_an_access_file_with_no_write_route_is_named_by_the_receipt_and_nothing_is_sent(
         tmp_path, data_root):
-    """A case system on `http-proxy` whose `access.yaml` declares no write route, is unparsable or
-    is absent: the leg's own judgement names `systems/ticket/access.yaml` in the receipt and makes
+    """A case system on `http-proxy` whose access declaration declares no write route, is unparsable or
+    is absent: the leg's own judgement names the record, `system ticket access` (#1366 DC6), in the receipt and makes
     no call, not even to the proxy. D-16, O5."""
     for label in ("no write route", "unparsable", "absent"):
         with H.upstream() as up:
@@ -150,7 +150,10 @@ def test_t6_an_access_file_with_no_write_route_is_named_by_the_receipt_and_nothi
                     receipt = _leg(t, run, rec, url, tok)
             assert receipt is not None, label
             assert (receipt["ok"], receipt["status"], receipt["url"]) == (False, "error", None), receipt
-            assert f"systems/{SYSTEM}/access.yaml" in receipt["reason"], (label, receipt)
+            # C5 words no part for a stored uncovered declaration: that arm names only the system (the discriminators are
+            # "no call, nothing sent"); the two judged by `parse_access` name its access (DC6).
+            named = SYSTEM if label == "no write route" else f"system {SYSTEM} access"
+            assert named in receipt["reason"], (label, receipt)
             assert tap.tokens == [], f"{label}: the proxy was called"
             assert up.seen == [], f"{label}: the store was reached"
 
@@ -158,7 +161,7 @@ def test_t6_an_access_file_with_no_write_route_is_named_by_the_receipt_and_nothi
 def test_t6b_a_write_the_proxy_refuses_at_call_time_is_a_refusal_not_a_transport_error(
         tmp_path, data_root):
     """The declaration holds a write route, but not the comment's path: the leg's judgement
-    passes, the proxy refuses the call, and the receipt says so (not an access.yaml fault, not
+    passes, the proxy refuses the call, and the receipt says so (not an access declaration fault, not
     "could not be reached"); nothing reaches the store. Control: t1 (matching route). O5, O4."""
     other = (("POST", "/elsewhere/*"),)
     with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up, writes=other)) as t:
@@ -172,7 +175,7 @@ def test_t6b_a_write_the_proxy_refuses_at_call_time_is_a_refusal_not_a_transport
     reason = (receipt.get("reason") or "").lower()
     assert "the credential proxy refused" in reason, reason
     assert "could not be reached" not in reason, reason
-    assert "access.yaml" not in reason, reason
+    assert f"system {SYSTEM} access" not in reason, reason  # #1366 DC6: no record fault
     assert tap.tokens == [tok]
     assert up.seen == []
 

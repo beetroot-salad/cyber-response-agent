@@ -84,7 +84,7 @@ def _breaker_references(scene: _Scene) -> tuple[S.Drive, S.Drive]:
 
 
 def _unconfigured(tmp_path: Path) -> _Scene:
-    """A tenant whose elastic has no access.yaml (#1391 P1); cmdb stays complete, so gather keeps
+    """A tenant whose elastic has no access declaration (#1391 P1); cmdb stays complete, so gather keeps
     a usable system and the run is not refused."""
     scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down-url"))
     _no_access(scene, "elastic")
@@ -175,7 +175,7 @@ def test_o6_lead_on_an_unconfigured_system_ends_before_its_claim_naming_the_caus
         assert _section(down) != _section(ref), (
             f"MAIN's correlation section for a system down at start is the {label!r} one")
     _assert_names_not_configured(down, control, "down at start (not configured)",
-                                 "access.yaml")
+                                 "system elastic access")  # #1366 DC6: the record, not the file
     _assert_never_started(down, "down at start (not configured)")
     # Never a run refusal: the run proceeds, MAIN runs, report.md is written.
     _assert_continued(down, "down at start (not configured)", requests=3)
@@ -183,7 +183,7 @@ def test_o6_lead_on_an_unconfigured_system_ends_before_its_claim_naming_the_caus
 
 
 def test_o6_every_start_time_settings_fault_is_down_at_start(tmp_path: Path) -> None:
-    """No config.env at all, or no access.yaml (elastic's base comes from the declaration `load_config` reads): either way l-00c ends down at start naming 'not configured'.
+    """An unconfigured record (empty settings and access), or no access declaration (elastic's base comes from the declaration `load_config` reads): either way l-00c ends down at start naming 'not configured'.
     Nothing is run or charged."""
     scene = _Scene(tmp_path)
     control = scene.control()
@@ -191,8 +191,8 @@ def test_o6_every_start_time_settings_fault_is_down_at_start(tmp_path: Path) -> 
     container = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-no-access"))
     _no_access(container, "elastic")
 
-    for label, sc, tokens in (("no config.env", no_file, ()),
-                              ("no access.yaml", container, ("access.yaml",))):
+    for label, sc, tokens in (("no settings", no_file, ()),
+                              ("no access", container, ("system elastic access",))):
         d = sc.run(label.replace(" ", "-").replace(".", "").lower(), **_down_lead())
         _named(d, control, f"down at start ({label})")
         _assert_names_not_configured(d, control, f"down at start ({label})", *tokens)
@@ -565,7 +565,7 @@ def test_o8_every_granted_system_down_at_start_refuses_the_run_naming_each(
     d = scene.run("all-down", **_down_lead())
 
     text = _refusal_text(d, scene.tenant)
-    _assert_names_each(text, (("cmdb", "CMDB_TIMEOUT_SEC"), ("elastic", "access.yaml")),
+    _assert_names_each(text, (("cmdb", "CMDB_TIMEOUT_SEC"), ("elastic", "system elastic access")),
                        "every granted system down")
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
     _assert_refused_before_anything(d, scene.tenant, before, "every granted system down")
@@ -585,7 +585,7 @@ def test_o8_a_system_up_with_only_its_health_check_granted_does_not_save_the_run
 
     text = _refusal_text(d, scene.tenant)
     assert _names_system(text, "elastic"), f"the refusal does not name the down system: {text!r}"
-    assert "access.yaml" in text, f"the refusal does not name elastic's reason: {text!r}"
+    assert "system elastic access" in text, f"the refusal does not name elastic's reason: {text!r}"
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
     _assert_refused_before_anything(d, scene.tenant, before, "only a health check up")
 
@@ -632,8 +632,8 @@ def test_o8_all_down_through_settings_load_config_never_reads(tmp_path: Path) ->
     d = scene.run("access-down", **_down_lead())
 
     text = _refusal_text(d, scene.tenant)
-    _assert_names_each(text, (("cmdb", "access.yaml"),
-                              ("elastic", "access.yaml")), "down without a declaration")
+    _assert_names_each(text, (("cmdb", "system cmdb access"),
+                              ("elastic", "system elastic access")), "down without a declaration")
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
     _assert_refused_before_anything(d, scene.tenant, before, "down without a declaration")
 
@@ -818,7 +818,7 @@ def test_o8_d4_acceptance_adopts_an_all_down_tenant_whose_runs_are_refused(
     before = _runs_entries(tenant)
     d = S.run_alert(tmp_path / "run", alert=_alert(), tenant=tenant, **_down_lead())
     text = _refusal_text(d, tenant)
-    _assert_names_each(text, (("cmdb", "CMDB_TIMEOUT_SEC"), ("elastic", "access.yaml")),
+    _assert_names_each(text, (("cmdb", "CMDB_TIMEOUT_SEC"), ("elastic", "system elastic access")),
                        "an adopted all-down tenant")
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
     _assert_refused_before_anything(d, tenant, before, "an adopted all-down tenant")

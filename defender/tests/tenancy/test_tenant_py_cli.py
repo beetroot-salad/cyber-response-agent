@@ -6,7 +6,6 @@ tenant.py's venv re-exec cannot loop.
 
 A folder tenant.py cannot read is a refusal, never a traceback.
 
-An unreadable case-record file is a finding of `check`, never a traceback.
 """
 from __future__ import annotations
 
@@ -21,7 +20,6 @@ import pytest
 
 from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
-from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 
 
 def test_check_folder_ignores_an_exported_git_dir_for_every_git_read(tmp_path: Path) -> None:
@@ -177,18 +175,7 @@ def test_check_over_an_unreadable_tenant_folder_refuses(tmp_path: Path) -> None:
         folder.chmod(0o755)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 file anyway; CI runs unprivileged")
-def test_an_unreadable_case_record_is_named_by_check(tmp_path: Path) -> None:
-    """case-record.yaml at mode 000: `check <id>` exits 1 naming it. Control: mode restored with a whole file, check is clean. r4 tenant check, D-17."""
-    root = tmp_path / "data"
-    H.place_knowledge(root)
-    record = H.settings_dir(root) / "case-record.yaml"
-    # A WHOLE file (D-17: `comment.body` is required, so a body-less file is itself a finding and
-    # the control below would not be clean).
-    record.write_text(C.case_record_text("ticket"), encoding="utf-8")
-    record.chmod(0)
-    try:
-        H.assert_refused(H.check(tenant_py, root, H.TID), "[tenant.py]", "settings/case-record.yaml")
-    finally:
-        record.chmod(0o644)
-    H.assert_clean(H.check(tenant_py, root, H.TID))
+# Retired (#1366 O9/DC8, P2): `test_an_unreadable_case_record_is_named_by_check`. The case-record file is retired, never read:
+# `check` reports a leftover as retired and ignored whatever its mode (`test_check_records_1366.py::test_1366_o9_check_reports_
+# a_tenant_repos_leftover_system_folders_and_case_file_as_retired_and_ignored`), so there is no unreadable-file finding, and
+# its "mode restored, check is clean" control is now a finding (a leftover). The case record's judgement is over records.

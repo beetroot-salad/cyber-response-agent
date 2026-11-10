@@ -109,9 +109,9 @@ def test_o5_an_alert_naming_no_ticket_is_an_empty_key_receipt_the_page_shows(tmp
     assert S.RECEIPT_UNREADABLE not in page
 
 
-def test_run_start_bad_case_settings_make_no_call_and_name_the_file(tmp_path, monkeypatch):
-    """A case system whose settings fail its check: no store call, the run goes on, the receipt names the settings file.
-    Run-start flow, O5."""
+def test_run_start_bad_case_settings_make_no_call_and_name_the_record(tmp_path, monkeypatch):
+    """A case system whose settings fail its check: no store call, the run goes on, the receipt names the system's
+    settings record (`system ticket settings`, #1366 DC6, not the retired file). Run-start flow, O5."""
     root, folder, alert = _world(tmp_path)
     S.set_key(folder, "ticket", "TICKET_TIMEOUT_SEC", "ten")
     shim = _shim(tmp_path, monkeypatch)
@@ -123,7 +123,7 @@ def test_run_start_bad_case_settings_make_no_call_and_name_the_file(tmp_path, mo
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
     assert (got["key"], got["status"], got["ok"]) == (C.TICKET_KEY, C.ERROR, False), got
-    assert "config.env" in (got.get("reason") or ""), got
+    assert "system ticket settings" in (got.get("reason") or ""), got
     for host in (str(folder), str(folder.resolve()), str(root), str(root.resolve())):
         assert host not in got["reason"], f"the reason carries the host path {host}: {got['reason']!r}"
 

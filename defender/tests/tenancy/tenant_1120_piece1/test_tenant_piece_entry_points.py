@@ -276,7 +276,8 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
     text = H.output(proc)
     if entry == "validate_scaffold.main":
         # Advisory: the refusal is its WARN and the tenant's config check is skipped; its exit
-        # status follows the other checks and is not the observable.
+        # status follows the other checks and is not the observable. (#1366 O11: validate_scaffold no longer reads a
+        # tenant's `config.env` at all, so "skipped" holds in every cell; the guard is the WARN and no traceback.)
         skipped = "config.env carries no inline secrets" not in text and "config.env:" not in text
         return skipped and "Traceback" not in text, text, not skipped
     return proc.returncode != 0 and "Traceback" not in text, text, False

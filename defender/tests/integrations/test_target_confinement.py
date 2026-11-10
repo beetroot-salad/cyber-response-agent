@@ -178,7 +178,7 @@ def test_a_case_adapter_the_cold_read_refused_serves_no_comment(
         tmp_path: Path, monkeypatch: Any, spelling: str):
     """Through the record leg, a case adapter whose `VERBS` holds the comment action is refused by
     the cold read and does not serve the host's comment either: no request reaches the store, an
-    `error` receipt (`url` null) names `settings/case-record.yaml` and says the adapter was
+    `error` receipt (`url` null) names the case record (#1366 O9, DC6: a record, not the retired file) and says the adapter was
     refused. Control: the same adapter without that `VERBS` entry comments. O4, D-7 amended."""
     control_store, control = _leg_over_planted_adapter(
         tmp_path / "control", monkeypatch, method="POST", suffix="/comments")
@@ -191,7 +191,7 @@ def test_a_case_adapter_the_cold_read_refused_serves_no_comment(
     assert store.calls == [], f"{spelling}: a refused adapter still served the comment"
     assert (got["status"], got["ok"], got["url"]) == ("error", False, None), got
     reason = got["reason"].lower()
-    assert "case-record.yaml" in reason, got
+    assert "case record" in reason, got
     assert str(tmp_path).lower() not in reason, f"the reason carries a host path: {got}"
     assert "adapter" in reason, got
     assert "refused" in reason, got

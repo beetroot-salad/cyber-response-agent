@@ -381,20 +381,21 @@ def test_the_acceptance_names_are_spelled_only_where_the_design_puts_them():
 # --- X-H4: the scaffold validator never asks the tenant records (A3, O-A4) ---------------------------------------------
 
 @pytest.mark.parametrize("database", ["unset", "unreachable"])
-def test_the_scaffold_validator_checks_the_config_without_asking_the_tenant_records(tmp_path, database):
-    """The validator, run as the connect agent runs it, checks the tenant's config with the database address unset or
-    pointing at nothing, and its output names no records and no database (r10 A3, O-A4: advisory, no admission)."""
+def test_the_scaffold_validator_judges_a_handoff_without_asking_the_database(tmp_path, database):
+    """The validator, run as the connect agent runs it, judges connect's handoff folder with the database address unset or
+    pointing at nothing, and its output names no database (r10 A3, O-A4: advisory, no admission). #1366 O9/O11: the
+    validator's input is the handoff folder, not a tenant's retired `settings/systems/<s>/config.env`."""
     from defender.skills.connect import validate_scaffold
+    from defender.tests.support.tenancy import _systems1366 as R
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as S
 
-    root = tmp_path / "data"
-    S.adopted(root)
+    config, access = R.FIXTURE_FOLDERS["cmdb"]
+    folder = R.system_folder(tmp_path / "handoff", "cmdb", config=config, access=access)
     extra = {} if database == "unset" else {"DEFENDER_DATABASE_DSN": "postgresql://nobody:not-the-password@127.0.0.1:1/postgres"}
-    proc = S.run_script(S.script_of(validate_scaffold), "cmdb", "--tenant", S.TID, root=root,
+    proc = S.run_script(S.script_of(validate_scaffold), "cmdb", "--handoff", str(folder), root=None,
                         unset=("DEFENDER_DIR", "DEFENDER_DATABASE_DSN"), **extra)
     S.assert_ran(proc)
     text = S.output(proc)
-    assert "config.env" in text, f"the tenant's config was not checked: {text}"
+    assert "validate_scaffold: cmdb" in text, f"the handoff was not judged: {text}"  # printed once the arguments were accepted
     assert "could not be resolved" not in text, text
-    for word in ("database", "records"):
-        assert word not in text.lower(), f"the validator asked the tenant records: {text}"
+    assert "database" not in text.lower(), f"the validator asked the database: {text}"

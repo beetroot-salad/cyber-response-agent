@@ -441,7 +441,7 @@ def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatc
     assert no_config.calls == [], "a run with no case-system config still reached the store"
     got = receipt(unconfigured)
     assert (got["ok"], got["url"], got["key"]) == (False, None, CASE_KEY), got
-    assert "systems/ticket/config.env" in got["reason"], got
+    assert "system ticket settings" in got["reason"], got  # #1366 DC6: the record, not the retired file
 
     reachable = _store(tmp_path)
     kept = make_run(tmp_path, name="run-reachable")
