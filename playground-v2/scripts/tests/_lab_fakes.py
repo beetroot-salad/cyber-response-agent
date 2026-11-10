@@ -170,7 +170,7 @@ class FakeES:
             return answer(body) if callable(answer) else answer
         return self.route(method, key[1], body) if self.route is not None else {}
 
-    SEARCH_URL_PARAMS = ("version", "size", "from", "track_total_hits", "sort")
+    SEARCH_URL_PARAMS = ("version", "size", "from", "track_total_hits", "sort", "expand_wildcards")
 
     def _with_search_params(self, body: Any, query: str) -> dict:
         """The body with the URL parameters Elasticsearch accepts for `_search` merged in (the URL wins, as
@@ -183,6 +183,10 @@ class FakeES:
                     self.unsupported.append(gap)
                 raise FakeGap(gap)
             value = values[-1]
+            if name == "expand_wildcards":
+                # Which index states a pattern reaches (open, hidden, closed, all); the fake's patterns
+                # reach every index it holds, as `all` would, so this changes nothing it models.
+                continue
             if name in ("size", "from"):
                 merged[name] = int(value)
             elif name in ("version", "track_total_hits"):
