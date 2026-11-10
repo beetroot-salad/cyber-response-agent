@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 
 import contextlib
 import dataclasses
 from types import SimpleNamespace
-import json
 import os
 import subprocess
 from collections.abc import Callable, Iterator
@@ -958,7 +956,7 @@ class Lanes:
     def run_lead(self, paths: LoopPaths, state: Any, run: Any, *, box: Any = None,
                  on_done: Any, **_kw: Any) -> int:
         self.handed.append(box)
-        deps = draft_lead_deps(self.lane, state=state, invoke_agent=self.agent,
+        deps = draft_lead_deps(self.lane, invoke_agent=self.agent,
                                extract=lambda _run_dir: ([], [ELASTIC_LEAD]))
         if self.log is not None:
             deps = _journaled_deps(deps, self.log)
@@ -1357,7 +1355,7 @@ class TenantLanes(Lanes):
         # its deps built with that batch, never `paths`' checkout.
         with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
             deps = dataclasses.replace(
-                lead_author.build_lead_author_deps(paths, state=state, trees=trees, batch=batch),
+                lead_author.build_lead_author_deps(paths, trees=trees, batch=batch),
                 invoke_agent=self.agent, extract=lambda _run_dir: ([], [ELASTIC_LEAD]))
             # The draft's `agent/skills` lane, where the box's agent writes — not `deps.paths`,
             # which stays product-rooted.
@@ -1405,16 +1403,13 @@ def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
         assert calls == X.REFUSED_FIRST_RUN, f"a default step called docker outside its run: {calls}"
         assert _failed(s) == [], "a claim was dead-lettered for a box that would not start"
         _nothing_delivered(s)
+        # The halted batch committed nothing, so its claim ends with the fates the lane decided, which are none: every
+        # request waits again, with the attempt the claim stamped on it (design D8, `ST::test_d8_*`); none is served
+        # past the fault and none is dead. (The old per-claim `inflight/` marker count is retired with the marker: the
+        # store stamps the attempt at claim.)
         fates = _fates(s)
-        if first == "nothing-to-author":
-            # claim-0 had nothing to author (it is spent without a box run); claim-1 is the one the box fault met
-            assert fates[("curation_request", "case-claim-1")] != "waiting", fates
-            return
-        assert fates[("curation_request", "case-claim-1")] == "waiting", (
-            f"the next claim was served, or the first handed back as a transient: {fates}")
-        assert fates[("curation_request", "case-claim-0")] != "waiting", fates  # claimed into the halted batch
-        # retired: `_claim_attempts` (the `inflight/` marker's count); the store stamps an attempt at claim (D8), and the
-        # halted batch is stopped, not ended, so nothing beyond that one claim is charged.
+        assert set(fates.values()) == {"waiting"}, fates
+        assert _charged(s) == {"case-claim-0": 1, "case-claim-1": 1}, _charged(s)
 
 
 @pytest.mark.postgres
@@ -1498,13 +1493,16 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
     """Nothing is delivered or dead-lettered (#1195). Control (the stop holds): the failing claim
     waits to be retried (an attempt stamped, D8; no dead letter at the first failure) and the next claim's commit is
     delivered as a `lead-author/` PR."""
-    claims = ("run-0", "run-1") if follows == "next-claim" else ("run-0",)
+    # The store hands a claim its requests in key order (`kind, item_key`, the run id), not the order they were filed: the
+    # first served is the one whose run id sorts first.
+    first, second = sorted(("run-0", "run-1"), key=fixture_uuid)
+    claims = (first, second) if follows == "next-claim" else (first,)
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, *claims) as (s, daemon):
         raised = failure()
 
         def author(run_dir: Path) -> None:
             daemon.mark(f"agent:{run_dir.name}")
-            if run_dir.name != fixture_uuid("run-0"):
+            if run_dir.name != fixture_uuid(first):
                 write(lanes.skills_dir / AGENT_NAME, VETTED)
                 return
             if stop != "holds":  # 1: the post-create stop; 2: this run's; its proof: the next ask
@@ -1521,24 +1519,25 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
         if stop == "holds":
             assert got is None, got
             assert _failed(s) == [], _failed(s)
-            assert _fates(s)[("curation_request", "case-run-0")] == "waiting"
+            assert _fates(s)[("curation_request", f"case-{first}")] == "waiting"
             if follows == "next-claim":
                 # #1344 amendment 2: one plain start for the probes, then each run's window attaches.
-                assert kept == ["create", "start", "stop", "attach", f"agent:{fixture_uuid('run-0')}",
-                                "stop", "attach", f"agent:{fixture_uuid('run-1')}", "stop", "rm"], kept
+                assert kept == ["create", "start", "stop", "attach", f"agent:{fixture_uuid(first)}",
+                                "stop", "attach", f"agent:{fixture_uuid(second)}", "stop", "rm"], kept
                 assert _delivered_text(s, AGENT_NAME) == VETTED.strip()
             return
         X.assert_the_stop_fault_won(got, raised, daemon, stop)
         assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
         assert _failed(s) == [], "a claim was dead-lettered under a box fault"
         fates = _fates(s)
-        assert fates[("curation_request", "case-run-1")] == "waiting" if follows == "next-claim" else True, (
-            f"the next claim was served after the halt: {fates}")
-        assert fates[("curation_request", "case-run-0")] != "dead", fates
-        assert kept[:5] == ["create", "start", "stop", "attach", f"agent:{fixture_uuid('run-0')}"], kept
+        assert fates[("curation_request", f"case-{second}")] != "dead" if follows == "next-claim" else True, fates
+        assert fates[("curation_request", f"case-{first}")] != "dead", fates
+        assert kept[:5] == ["create", "start", "stop", "attach", f"agent:{fixture_uuid(first)}"], kept
         assert not {"start", "attach"} & set(kept[5:]), (
             f"a later run was started beside the box: {kept}")
         assert kept[-1:] == ["rm"], kept
+        assert [x for x in kept if x.startswith("agent:")] == [f"agent:{fixture_uuid(first)}"], (
+            f"the next claim's agent ran after the halt: {kept}")
         assert lanes.pitfalls_ticks == 0
         _nothing_delivered(s)
 

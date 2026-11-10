@@ -294,7 +294,9 @@ def foreign_commit_on(remote: Path, branch: str, scratch: Path) -> str:
 def world(p4_tenant, migrated_database, monkeypatch, tmp_path):  # noqa: F811 â€” fixtures imported by the test module
     """The p4 tenant bound to its forge, active in the database the tick's (and the revert CLI's) store reads, both
     curators waking at one item. A lease of ten minutes with five of grace and a renewer that never fires, so only a
-    case that lapses a lease, or sets a short renewal itself, sees one end."""
+    case that lapses a lease, or sets a short renewal itself, sees one end. The product tree carries a shipped adapter
+    (`cmdb`): the lead lane resolves declared systems from the tree it commits into (`paths.repo_root`), so a tree
+    with no `defender/integrations` is invalid and the lane refuses it (`test_declared_systems_resolution`)."""
     from types import SimpleNamespace
 
     from defender.tests.support.jobs._jobs1342 import register_tenant
@@ -310,7 +312,7 @@ def world(p4_tenant, migrated_database, monkeypatch, tmp_path):  # noqa: F811 â€
     monkeypatch.setenv(RENEW_ENV, "600")
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
-    return SimpleNamespace(t=t, dsn=migrated_database, paths=drain_paths(t, product_repo(tmp_path)),
+    return SimpleNamespace(t=t, dsn=migrated_database, paths=drain_paths(t, product_repo(tmp_path, adapters=("cmdb",))),
                            scratch=tmp_path, monkeypatch=monkeypatch)
 
 

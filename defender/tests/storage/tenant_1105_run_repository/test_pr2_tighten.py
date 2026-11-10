@@ -238,7 +238,11 @@ def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d
     ("tenant-int", {"tenant_id": 7, "run_id": _F6_R1}),
     ("tenant-dict", {"tenant_id": {"id": H.T_ID}, "run_id": _F6_R1}),
 ])
-def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_id, body):
+def test_f6_a_malformed_row_is_not_served_and_the_drain_goes_on(tmp_path, case_id, body):
+    """#1278 update: the old drain quarantined a malformed row (`unreadable`) at its first claim. A payload that names no
+    readable run address is a refusal at the drain's door (`drains._run_of` -> `TenantRefused`): the row is not served and
+    not decided dead, it waits and the store counts its attempt up to the ceiling (design D8). What survives is that it
+    raises nothing out of the drain and does not wedge the rows beside it."""
     root = location_path(P.data_root)()
     t = H.tenant(root, H.T_ID)
     H.runs_folder(t)
@@ -251,17 +255,17 @@ def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_
     lane = P.Lane()
     assert H.raised(P.drain, paths, lane) is None, "the malformed row raised out of the drain"
     assert lane.run_dirs == [Path(location_path(t.runs)) / _F6_R1], f"served {lane.run_dirs}"
-    letter = P.dead_letter(paths, case_id)
-    assert letter is not None, f"{case_id} was not quarantined"
-    assert str(letter.get("failed", "")).startswith("unreadable"), letter
-    assert not P.still_queued(paths, case_id)
+    assert P.dead_letter(paths, case_id) is None, f"{case_id} was dead-lettered, not left waiting"
+    assert P.fate_name(paths, case_id) == "waiting"
+    assert P.still_queued(paths, case_id)
+    assert not P.still_queued(paths, "good"), "control: the well-formed row beside it was not served"
 
-    # The next tick raises nothing and serves the next row (this lane double never consumes
-    # what it is handed, so it may be handed `good` again).
+    # The next tick raises nothing and serves the next row; the malformed one is handed again, and still not served.
     P.queue_row(paths, "next", {"case_id": "next", "tenant_id": H.T_ID, "run_id": _F6_R2})
     again = P.Lane()
     assert H.raised(P.drain, paths, again) is None, "the next tick raised: the drain is wedged"
-    assert Path(location_path(t.runs)) / _F6_R2 in again.run_dirs, f"the next tick served {again.run_dirs}"
+    assert again.run_dirs == [Path(location_path(t.runs)) / _F6_R2], f"the next tick served {again.run_dirs}"
+    assert P.still_queued(paths, case_id)
 
 
 _ABSENT = fixture_uuid("pr2-absent")
@@ -305,30 +309,6 @@ def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
     _refused_naming(_launched_process("workspace_map", d9_tenant, "--tenant", d9_tenant, _ABSENT), _ABSENT)
 
 
-def _done_run(tenant_id: str) -> Path:
-    """A run of `tenant_id` the lead author has already served (its `done` sentinel written
-    through the real writer), so serving it again is the clean no-op exit 0."""
-    import uuid
-
-    from defender.learning.leads import lead_author
-
-    tenant = H.tenant(location_path(P.data_root)(), tenant_id)
-    location_path(tenant.learning).mkdir(exist_ok=True)
-    run = H.make_run(location_path(tenant.runs), str(uuid.uuid4()))
-    lead_author.write_done_sentinel(run, "0" * 40)
-    return run
-
-
-def test_f9_the_lead_author_resolves_tenant_and_run_id_and_refuses_a_path(tmp_path, d9_tenant):
-    from defender.learning.leads import lead_author
-
-    run = _done_run(d9_tenant)
-    ok = P.drive_cli(lead_author.main, ["--tenant", d9_tenant, run.name])
-    assert ok.rc == 0, f"--tenant T <run id> was not served: {ok.said}"
-
-    P.second_tenant(location_path(P.data_root)(), H.U_ID)
-    for argv in (["--tenant", d9_tenant, str(run)],
-                 ["--tenant", H.U_ID, run.name],
-                 ["--tenant", d9_tenant, _ABSENT]):
-        got = P.drive_cli(lead_author.main, argv)
-        assert _refused(got), f"the lead author served {argv}"
+# retired: `_done_run` and `test_f9_the_lead_author_resolves_tenant_and_run_id_and_refuses_a_path`: the by-hand
+# `lead_author.main --tenant T <run id>` entry is deleted (design A3); the lead author reaches a run only through the
+# drain's claim, whose tenant and run-address refusals are `test_f6_*` below and `test_1105_pr2_declared_changes::test_dc8_*`.
