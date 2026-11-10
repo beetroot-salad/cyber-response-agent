@@ -11,7 +11,8 @@ FakeClock, FakeES, sha, canonical_digest, instant, seconds. Added (r6.4.1):
 * `FakeCluster(FakeES)`: a frozen Elasticsearch that HOLDS documents, so a test reads the end
   state (`cluster.indices`, `.pipelines`, `.repos`, `.ilm`, `.lifecycle_off`, `.mutations`).
   Supported: snapshot GET/PUT/restore, `_ilm/stop`, per-stream lifecycle DELETE, index DELETE and
-  `_close`, `_count`, `_search` (match_all/term/terms/range/exists/ids/bool; size/from/sort/version;
+  `_close`, `_count`, `_search` (match_all/term/terms/range/exists/ids/bool; size/from/sort/search_after/version, also as URL params, any other search
+  URL param is a FakeGap; sorting on `_id` is refused as ES 9 does;
   unsorted = a seeded shuffle that differs between calls; from+size <= 10 000; `_version` only with
   `"version": true`; the total stops at 10 000 unless `track_total_hits`),
   `_delete_by_query`, `_reindex` (pipeline, version_type external, op_type create), ingest
@@ -41,6 +42,7 @@ from __future__ import annotations
 
 import copy
 import fnmatch
+import functools
 import hashlib
 import json
 import random
@@ -50,6 +52,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
 import yaml
 
@@ -158,12 +161,37 @@ class FakeES:
         self.requests.append((method, path, body))
         self.journal.append(("es", (method, path)))
         key = (method, path.split("?", 1)[0])
+        if "?" in path and key[1].endswith("/_search"):
+            body = self._with_search_params(body, path.split("?", 1)[1])     # real ES reads these from the URL too
         if self.fail is not None and self.fail(method, key[1], body):   # faults match and report on the query-stripped path
             raise RuntimeError(f"{method} {key[1]} failed")
         if key in self.answers:
             answer = self.answers[key]
             return answer(body) if callable(answer) else answer
         return self.route(method, key[1], body) if self.route is not None else {}
+
+    SEARCH_URL_PARAMS = ("version", "size", "from", "track_total_hits", "sort")
+
+    def _with_search_params(self, body: Any, query: str) -> dict:
+        """The body with the URL parameters Elasticsearch accepts for `_search` merged in (the URL wins, as
+        in ES). A parameter the fake does not model is a gap: loud, never silently ignored."""
+        merged = dict(body or {})
+        for name, values in parse_qs(query, keep_blank_values=True).items():
+            if name not in self.SEARCH_URL_PARAMS:
+                gap = f"search URL parameter [{name}]"
+                if isinstance(getattr(self, "unsupported", None), list):
+                    self.unsupported.append(gap)
+                raise FakeGap(gap)
+            value = values[-1]
+            if name in ("size", "from"):
+                merged[name] = int(value)
+            elif name in ("version", "track_total_hits"):
+                merged[name] = {"true": True, "false": False}.get(value.lower(), None)
+                if merged[name] is None:
+                    merged[name] = int(value)
+            else:    # sort=field:dir,field2
+                merged[name] = [{f: d} if d else f for f, _, d in (part.partition(":") for part in value.split(","))]
+        return merged
 
     def matching(self, method: str, needle: str) -> list[tuple[str, str, Any]]:
         return [r for r in self.requests if r[0] == method and needle in r[1]]
@@ -477,30 +505,53 @@ class FakeCluster(FakeES):
                 "illegal_argument_exception: Result window is too large, from + size must be less than or "
                 f"equal to: [{self.MAX_RESULT_WINDOW}] but was [{start + size}]. See the scroll api for a "
                 "more efficient way to request large data sets.")
+        sort = body.get("sort")
+        keys = []
+        for key in ([] if not sort else sort if isinstance(sort, list) else [sort]):
+            field, spec = next(iter(key.items())) if isinstance(key, dict) else (key, "asc")
+            if field == "_id":
+                raise RuntimeError(
+                    "illegal_argument_exception: Fielddata access on the _id field is disallowed, you can "
+                    "re-enable it by updating the dynamic cluster setting: indices.id_field_data.enabled")
+            keys.append((field, (spec.get("order") if isinstance(spec, dict) else spec) == "desc"))
+        if body.get("search_after") is not None and (not keys or len(body["search_after"]) != len(keys)):
+            raise RuntimeError("illegal_argument_exception: search_after has "
+                               f"[{len(body['search_after'])}] values but sort has [{len(keys)}]")
         hits = []
         for n in self._expand(expr):
-            for i, d in sorted(self.indices[n]["docs"].items()):
+            docs = self.indices[n]["docs"]
+            for i, d in (docs.items() if keys else sorted(docs.items())):
                 if _matches(body.get("query"), d["_source"], i):
                     hit = {"_index": n, "_id": i, "_source": copy.deepcopy(d["_source"])}
                     if body.get("version"):
                         hit["_version"] = d["_version"]
                     hits.append(hit)
-        if body.get("sort"):
-            for key in reversed(body["sort"] if isinstance(body["sort"], list) else [body["sort"]]):
-                field, spec = next(iter(key.items())) if isinstance(key, dict) else (key, "asc")
-                desc = (spec.get("order") if isinstance(spec, dict) else spec) == "desc"
-                def sort_key(h, f=field):
-                    return h["_id"] if f in ("_id", "_doc") else h["_source"].get(f)
+        if keys:
+            for position, hit in enumerate(hits):    # `_doc` is index order (insertion), not id order
+                hit["sort"] = [position if f == "_doc" else hit["_source"].get(f) for f, _ in keys]
 
-                have = sorted((h for h in hits if sort_key(h) is not None), key=sort_key, reverse=desc)
-                hits = have + [h for h in hits if sort_key(h) is None]
+            def compare(a, b):
+                for (f, desc), x, y in zip(keys, a, b):
+                    if x == y:
+                        continue
+                    if x is None or y is None:
+                        return 1 if x is None else -1    # a missing value sorts last, whatever the direction
+                    return (x > y) - (x < y) if not desc else (y > x) - (y < x)
+                return 0
+            hits.sort(key=functools.cmp_to_key(lambda h, g: compare(h["sort"], g["sort"])))
+            if body.get("search_after") is not None:
+                after = list(body["search_after"])
+                hits = [h for h in hits if compare(after, h["sort"]) < 0]
         else:
             self._order.shuffle(hits)
         tracked = body.get("track_total_hits", self.MAX_RESULT_WINDOW)
+        page = hits[start:start + size]
+        if tracked is False:
+            return {"hits": {"hits": page}}      # ES leaves the total out
         limit = None if tracked is True else int(tracked)
         capped = limit is not None and len(hits) > limit
         total = {"value": limit if capped else len(hits), "relation": "gte" if capped else "eq"}
-        return {"hits": {"total": total, "hits": hits[start:start + size]}}
+        return {"hits": {"total": total, "hits": page}}
 
     def _delete_by_query(self, expr: str, body: dict) -> Any:
         self._note("delete_by_query", expr)

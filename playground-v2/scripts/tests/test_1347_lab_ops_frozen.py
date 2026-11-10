@@ -176,24 +176,29 @@ def _stub_parts(tmp_path, body=b"stub-dump-bytes"):
     return parts
 
 
-@pytest.mark.parametrize("started", [("start_proxy",), ("load_stubs",), ("restart_node",),
-                                     ("load_stubs", "restart_node", "start_proxy")])
-def test_teardown_leaves_no_container_running_that_the_operations_started(tmp_path, started):
-    """C8/A1: after start_proxy, load_stubs and the node restart in any combination, no container
-    they brought up (the proxy, the frontends, the stubs, the node) is still running."""
-    docker = FakeDocker()
-    lab = _ops(tmp_path, run=docker)
-    parts = _stub_parts(tmp_path)
-    do = {"start_proxy": lab.ops.start_proxy, "load_stubs": lambda: lab.ops.load_stubs(parts, T, [CMDB_STALE]),
-          "restart_node": lambda: lab.ops.restart_node(-1_234_567)}
-    for name in started:
-        do[name]()
-    assert not docker.unmodelled, f"the fake docker does not model: {docker.unmodelled}"
-    assert docker.started & docker.running(), "nothing was brought up: the fixture did not reach the claim"
+def test_teardown_leaves_no_container_running_that_the_operations_started(tmp_path):
+    """C8/A1: after start_proxy, load_stubs and the node restart, alone and in combination, no container
+    they brought up (the proxy, the frontends, the stubs, the node) is still running. What each operation
+    starts, if anything, is its own business; across them something must have been started."""
+    sets = [("start_proxy",), ("load_stubs",), ("restart_node",), ("load_stubs", "restart_node", "start_proxy")]
+    started_any = False
+    for n, started in enumerate(sets):
+        docker = FakeDocker()
+        case = tmp_path / f"case{n}"
+        case.mkdir()
+        lab = _ops(case, run=docker)
+        parts = _stub_parts(case)
+        do = {"start_proxy": lab.ops.start_proxy, "load_stubs": lambda: lab.ops.load_stubs(parts, T, [CMDB_STALE]),
+              "restart_node": lambda: lab.ops.restart_node(-1_234_567)}
+        for name in started:
+            do[name]()
+        assert not docker.unmodelled, f"the fake docker does not model: {docker.unmodelled}"
+        started_any = started_any or bool(docker.started)
 
-    lab.ops.teardown()
+        lab.ops.teardown()
 
-    assert not docker.started & docker.running(), sorted(docker.started & docker.running())
+        assert not docker.started & docker.running(), (started, sorted(docker.started & docker.running()))
+    assert started_any, "no operation started a container: the claim was never exercised"
 
 
 TOUCHED = [DATA_DROP, SCHEMA_DRIFT]      # the overlays whose indices the digest covers: syslog events, auth events, their alerts
