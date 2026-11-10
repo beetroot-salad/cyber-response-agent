@@ -37,7 +37,6 @@ SCRATCH = "-overlay"          # suffix of the scratch index an overlay copies th
 PIPELINE = "frozen-overlay"   # the temporary pipeline holding the processor verbatim
 ANCESTORS = "kibana.alert.ancestors"
 PAGE = 1000
-MAX_WINDOW = 10000            # Elasticsearch's from+size ceiling
 RESTORE_WAIT_S, HEALTH_POLL_S = 3600.0, 10.0
 #: The A2 pre-check's bound on bringing an existing node up (its start and its health wait, r6.4.4).
 PRECHECK_WAIT_S = 600
@@ -318,38 +317,47 @@ def _rewrite(es: Any, index: str, query: dict) -> int:
     return int(removed["deleted"]) - created
 
 
+def _page_ids(es: Any, index: str, query: dict) -> list[dict]:
+    """Every hit of `query` in `index` (`_id`, `_index`, ancestry), in pages ordered by `_doc`."""
+    found: list[dict] = []
+    after: list | None = None
+    while True:
+        body: dict[str, Any] = {"size": PAGE, "_source": [ANCESTORS], "sort": [{"_doc": "asc"}], "query": query}
+        if after:
+            body["search_after"] = after
+        hits = es.es_request("POST", f"/{index}/_search?expand_wildcards=open,hidden", body)["hits"]["hits"]
+        found += hits
+        if len(hits) < PAGE:
+            return found
+        after = hits[-1].get("sort")
+        if not after:
+            raise CopyFault(f"{index}: a full page came back without a sort value to continue from")
+
+
+def _names(ancestor_index: str, target: str) -> bool:
+    """An ancestor names `target` by its concrete index or by a pattern the rule searched, which
+    matches the backing index or its data stream (real ancestors carry the rule's pattern)."""
+    stream = _stream_of(target)
+    return ancestor_index == target or fnmatch.fnmatchcase(target, ancestor_index) \
+        or bool(stream and fnmatch.fnmatchcase(stream, ancestor_index))
+
+
 def _alerts_derived_from(es: Any, patterns: list[str], targets: list[str],
                          span: dict) -> dict[str, list[str]]:
     """`{alert index: [alert ids]}` of the alerts with an ancestor event in `targets` that lies in
-    `span`. Ancestry (`kibana.alert.ancestors`), not time, says what an alert was built from."""
-    alerts: list[tuple[str, str, list]] = []
-    for start in range(0, MAX_WINDOW, PAGE):
-        page = es.es_request("POST", f"/{_expr(patterns)}/_search?expand_wildcards=open,hidden", {
-            "query": {"exists": {"field": ANCESTORS}}, "_source": [ANCESTORS], "from": start, "size": PAGE})
-        hits = page["hits"]["hits"]
-        alerts += [(h["_index"], h["_id"], dug(h["_source"], ANCESTORS) or []) for h in hits]
-        if len(hits) < PAGE:
-            break
-    else:
-        raise CopyFault(f"more than {MAX_WINDOW} alerts carry ancestry; the overlay cannot page them")
-    wanted: dict[str, set[str]] = {}
-    for _index, _id, ancestors in alerts:
-        for a in ancestors:
-            if a.get("index") in targets:
-                wanted.setdefault(a["index"], set()).add(a["id"])
-    in_span: set[tuple[str, str]] = set()
-    for index, ids in wanted.items():
-        ordered = sorted(ids)
-        for i in range(0, len(ordered), PAGE):
-            batch = ordered[i:i + PAGE]
-            found = es.es_request("POST", f"/{index}/_search", {
-                "query": {"bool": {"filter": [{"ids": {"values": batch}}, span]}}, "size": len(batch)})
-            in_span |= {(index, h["_id"]) for h in found["hits"]["hits"]}
-    derived: dict[str, list[str]] = {}
-    for index, _id, ancestors in alerts:
-        if any((a.get("index"), a.get("id")) in in_span for a in ancestors):
-            derived.setdefault(index, []).append(_id)
-    return derived
+    `span`. Ancestry (`kibana.alert.ancestors`), not time, says what an alert was built from. The
+    in-span events are found first and the alerts looked up by their ids, so the work follows the
+    span, not the size of the alerts index (#1347 live check 10)."""
+    derived: dict[str, set[str]] = {}
+    for target in targets:
+        events = [h["_id"] for h in _page_ids(es, target, {"bool": {"filter": [span]}})]
+        for i in range(0, len(events), PAGE):
+            batch = set(events[i:i + PAGE])
+            for hit in _page_ids(es, _expr(patterns), {"terms": {f"{ANCESTORS}.id": sorted(batch)}}):
+                ancestors = dug(hit.get("_source") or {}, ANCESTORS) or []
+                if any(a.get("id") in batch and _names(str(a.get("index", "")), target) for a in ancestors):
+                    derived.setdefault(hit["_index"], set()).add(hit["_id"])
+    return {index: sorted(ids) for index, ids in sorted(derived.items())}
 
 
 def fault_overlay(es: Any, mutation: dict, names: list[str], patterns: list[str], span: dict,
