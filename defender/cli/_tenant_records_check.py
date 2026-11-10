@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from defender.cli._tenant_census import TableFindings
     from defender.kit.settings import SystemConfig
     from defender.tenancy import TenantDirectory
+    from defender.records.formats import TenantId
 
 #: The retired parts of a tenant repo's `settings/` (O9): read by nothing since the import.
 RETIRED_SYSTEMS = "systems"
@@ -76,7 +77,7 @@ class _CaseRecordOf:
     case_record: Any
 
 
-def records_check(tenant_id: object, directory: TenantDirectory, *, knowledge: Path, secrets: Any,
+def records_check(tenant_id: TenantId, directory: TenantDirectory, *, knowledge: Path, secrets: Any,
                   defender_dir: Path) -> RecordsCheck:
     """`check <id>`'s record findings for `tenant_id`, read through `directory` (the CLI's, over
     `DEFENDER_DATABASE_DSN`). `knowledge` is the tenant's repo (its grants table, its agent half); `secrets` the

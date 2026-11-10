@@ -5,12 +5,11 @@ and sees the tenant's whole after-state, read under the lock."""
 from __future__ import annotations
 
 import datetime as _dt
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
-from collections.abc import AsyncIterator
 
-from sqlalchemy import insert, select
+from sqlalchemy import Table, insert, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from defender.database import async_engine
@@ -20,7 +19,8 @@ from defender.tenancy.models import (CaseRecord, CaseVersionRow, RecordsMark, Sy
                                      adapter_column)
 
 #: What a record store reports as the writer of a version when a caller names none.
-Judge = Callable[[TenantRecords], Sequence[str]]
+#: The injected judgement: the after-state, and (when it takes one) the state the write replaces (C4).
+Judge = Callable[..., Sequence[str]]
 
 
 class RecordRefused(Exception):
@@ -31,7 +31,9 @@ class RecordRefused(Exception):
         super().__init__("; ".join(self.faults))
 
 
-_SV, _CV, _RM = SystemVersionRow.__table__, CaseVersionRow.__table__, RecordsMark.__table__
+_SV: Table = SystemVersionRow.__table__  # type: ignore[assignment]
+_CV: Table = CaseVersionRow.__table__  # type: ignore[assignment]
+_RM: Table = RecordsMark.__table__  # type: ignore[assignment]
 _TENANTS = "tenancy.tenants"
 
 

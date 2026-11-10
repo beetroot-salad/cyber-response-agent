@@ -214,12 +214,12 @@ def build_lead_author_deps(  # noqa: PLR0913 — the lane's tree, state and batc
     skills = lane_skills(trees, paths, skills_dir=skills_dir)
     tenants = lane_systems(paths.repo_root, paths.tenant, directory)
     systems = tenants if tenants is not None else declared_systems(paths.repo_root, agent=base)
-    lanes = {} if tenants is None else {"systems": tuple(sorted(tenants))}
+    lanes = None if tenants is None else tuple(sorted(tenants))
     return LeadAuthorDeps(
         paths=paths,
         state=state,
         systems=systems,
-        invoke_agent=functools.partial(invoke_agent, repo_root=root, **lanes),
+        invoke_agent=functools.partial(invoke_agent, repo_root=root, systems=lanes),
         extract=extract,
         synthesize=synthesize_drafts,
         build_handoff=functools.partial(

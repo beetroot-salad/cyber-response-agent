@@ -180,10 +180,14 @@ def _settings_fault(record: SystemRecord, *, catalog: Catalog, locator: Locator)
     return None
 
 
+#: The parts of a record a fault may name (DC6).
+_PARTS: tuple[Part, ...] = ("settings", "access")
+
+
 def _located(text: str, system: str, locator: Locator) -> str:
     """`text` located: as it is when it names the record (or a part of it), else opening with the record's locator."""
     text = _relocated(text, system, locator)
-    if locator.system(system) in text or any(locator.part(system, p) in text for p in ("settings", "access")):
+    if locator.system(system) in text or any(locator.part(system, p) in text for p in _PARTS):
         return text
     return f"{locator.system(system)}: {text}"
 
