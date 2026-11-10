@@ -615,10 +615,8 @@ class _TokenMint:
         A20). A run that needs only the write-back token goes on instead (R4): it mints nothing
         and the record step says why. The signer is the tenant's own
         (`credential_proxy.request_signer`, r8.5) unless one is injected."""
-        proxied = {name for name, found in tenant.access.items()
-                   if isinstance(found, AccessDeclaration) and name not in systems.down}
         # A branched run is a run (#1449): a world reads its granted systems on a run's terms.
-        reads = tuple(sorted(system_status.granted_systems(tenant.grants) & proxied))
+        reads = system_status.read_grant(tenant, systems.down)
         # The write-back token is for a case system run start judged sound (`case`), reached
         # through the proxy; a case system with bad settings is told so by the record step.
         # A world never gets one: `--update-ticket` with `--episode` is refused before this

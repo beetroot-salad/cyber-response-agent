@@ -3,6 +3,7 @@ from __future__ import annotations
 
 
 import concurrent.futures
+import contextlib
 
 import contextvars
 
@@ -24,10 +25,11 @@ from pathlib import Path
 from contextlib import AbstractContextManager
 from typing import Any, NamedTuple
 
-from datetime import UTC, datetime, timedelta
+import time
+from datetime import UTC, datetime
 
 from defender.credential_proxy import mint_request_token, signing_access
-from defender.kit.access import AccessDeclaration, RequestAccess
+from defender.kit.access import RequestAccess
 from defender.kit.faults import AdapterFault, ConfigFault
 from defender.records import formats
 
@@ -40,6 +42,7 @@ from defender.records import (
     Run,
 )
 
+from defender.systems import system_status
 from defender.systems.run_tenant import RunTenant
 
 from defender.learning.branch import outcome as outcome_mod
@@ -74,6 +77,12 @@ ACCEPTED, UNUSABLE, REFUSED = outcome_mod.ACCEPTED, outcome_mod.UNUSABLE, outcom
 #: the credential proxy could not be signed. A job ends that one `failed: launch_refused`; every
 #: other refusal before the first sibling is `skipped: family_unusable` (#1344 r5 table).
 ENVIRONMENT_REFUSED = "environment_refused"
+#: The values of `ENVIRONMENT_REFUSED` on a refusal that was the environment's (#1363 O6, B5), each
+#: choosing the job's fixed brief: the read token `sign`s no longer, the proxy cannot be used
+#: (`access`), our `setup` for one system failed, or every system the source run's calls reached
+#: is down for this run (`down-systems`, D9). The record holds None for any other refusal.
+CAUSE_SIGN, CAUSE_ACCESS, CAUSE_SETUP, CAUSE_DOWN = "sign", "access", "setup", "down-systems"
+ENVIRONMENT_CAUSES = (CAUSE_SIGN, CAUSE_ACCESS, CAUSE_SETUP, CAUSE_DOWN)
 
 
 
@@ -285,9 +294,6 @@ def _not_admitted(reader: Any, call: _Original) -> str | None:
 
 
 
-#: Seconds a preflight read token lives: one pass of live reads.
-PREFLIGHT_TOKEN_SEC = 3600
-
 #: The checkout's `defender/`, from this file's own location (not `$DEFENDER_DIR`).
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 
@@ -304,35 +310,40 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any,
     env = run_env(_DEFENDER_DIR, Path(episode_dir))
     env["DEFENDER_RUNS_BASE"] = source.runs_base_export()
     proxied = ({} if access is None
-               else {"proxy_url": access.proxy_url, "request_token": access.token()})
+               else {"proxy_url": access.proxy_url, "access": access})
     return VerbContext(defender_dir=_DEFENDER_DIR, run_dir=Path(episode_dir), env=env,
                        capture=None, tenant=tenant, **proxied)
 
 
-def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any], *, signer: Any,  # noqa: PLR0913 — the pass's identity plus the operator's seams
-                      proxy_url: str | None, issuer_transport: Any,
-                      directory: Any) -> RequestAccess | None:
-    """A read token over the `http-proxy` systems the source run's replayable calls reach (H12),
-    signed in this process as the run does (A11, A24'), with the source run as its investigation;
-    `None` when no replayed call reaches one. With no `signer` injected, the tenant's own
-    (`request_signer`) over the episode's tenant records `directory`, the launcher's (no second
-    records read here). Curators and the author are handed none."""
-    proxied = sorted({call.system for call in replayable
-                      if isinstance(tenant.access.get(call.system), AccessDeclaration)})
-    if not proxied:
+def _preflight_access(source: Run, tenant: RunTenant, reads: Sequence[str], *, signer: Any,  # noqa: PLR0913 — the pass's identity plus the operator's seams
+                      proxy_url: str | None, issuer_transport: Any, directory: Any,
+                      clock: Callable[[], float], on_fault: Callable[[AdapterFault], None],
+                      sign_failures: list[AdapterFault]) -> RequestAccess | None:
+    """The pass's one access holder (#1363 O1): the read token over `reads`, the run's read grant,
+    signed in this process as a run signs it, on demand, with the source run as its investigation;
+    `None` when the grant is empty. A configuration that cannot sign (no proxy address, no sign
+    login recorded) raises before anything is contacted. With no `signer` injected, the tenant's
+    own (`request_signer`) over the episode's tenant records `directory`. A sign that fails is
+    noted in `sign_failures`, so the refusal can say the token was the failure. Curators and the
+    author are handed none."""
+    if not reads:
         return None
     if directory is None:
         raise ConfigFault("no tenant records were handed to pre-flight to sign its read token with")
     signer, address = signing_access(tenant.tenant_id, directory=directory, signer=signer,
                                      proxy_url=proxy_url, transport=issuer_transport)
-    token = mint_request_token(
-        signer, tenant_id=str(tenant.tenant_id), investigation=source.run_dir.name,
-        grant={(system, "r") for system in proxied},
-        expires_at=datetime.now(UTC) + timedelta(seconds=PREFLIGHT_TOKEN_SEC))
-    # Pre-flight is one short pass: its one token is signed here, not on demand (r7 A20).
-    return RequestAccess(address, lambda: token)
+    grant = {(system, "r") for system in reads}
 
+    def mint(expires_at: float) -> str:
+        try:
+            return mint_request_token(
+                signer, tenant_id=str(tenant.tenant_id), investigation=source.run_dir.name,
+                grant=grant, expires_at=datetime.fromtimestamp(expires_at, UTC))
+        except AdapterFault as failed:
+            sign_failures.append(failed)
+            raise
 
+    return RequestAccess(address, mint, clock=clock, on_fault=on_fault)
 
 
 def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
@@ -365,9 +376,16 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
     reader = ModuleVerbRegistry(roster, tenant.grants.gather, grant_home=tenant.table_pointer)
     family = formats.load_family(episode.view(), expected_episode_id=episode.dir.name)
     originals = _originals(source.run_dir)
+    # The systems the run could not use (#1363 D5, D9): judged as a run judges them.
+    down = system_status.judge_run(roster, tenant, defender_dir=_DEFENDER_DIR).down
     not_replayable: list[dict[str, Any]] = []
     replayable: list[_Original] = []
+    held_down = 0
     for call in originals:
+        if call.system in down:
+            held_down += 1
+            not_replayable.append({**call.entry, "reason": f"{call.system} is down for this run"})
+            continue
         why = _not_admitted(reader, call)
         if why is None:
             replayable.append(call)
@@ -375,8 +393,12 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
             not_replayable.append({**call.entry, "reason": why})
     fact_worlds = [w for w in runnable_worlds(family) if w.facts]
 
+    access: RequestAccess | None = None
+
     def record(outcome: str, reason: str, *, unservable: Sequence[Mapping[str, Any]] = (),
-               environment: bool = False) -> dict[str, Any]:
+               environment: str | None = None) -> dict[str, Any]:
+        if access is not None:
+            access.shut()
         outcome_mod.write_outcome(episode, outcome, reason=reason, unservable_worlds=unservable,
                                   not_replayable=not_replayable)
         return {"outcome": outcome, "reason": reason,
@@ -391,6 +413,10 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
     if not originals:
         return record(REFUSED, "the source run made no call that reached a system a world "
                                "can vary, so there is no original call to replay")
+    if not replayable and held_down == len(not_replayable):
+        return record(REFUSED, f"every call the source run made reached a system that is down "
+                               f"for this run ({', '.join(sorted({c.system for c in originals}))})",
+                      environment=CAUSE_DOWN)
     if not replayable:
         return record(REFUSED, f"none of the source run's {len(originals)} call(s) can be "
                                "replayed: the live gather grant admits none of them (see "
@@ -399,15 +425,41 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
     # The oracle's knobs, settled once for every world of the pass: `knobs` over the process's
     # knobs. Each world's serving is built from them in its own thread (`calibrate`).
     box = knobs.pop("box", None)
+    knobs_clock = knobs.pop("clock", time.time)
     restart_after = knobs.pop("restart_after", DEFAULT_RESTART_AFTER)
     settings = oracle_settings_with(**knobs)
     limiter = RateLimiter(settings.rate)
+    # `stop` first: the holder's owner callback sets it, so a world stops before its next call once
+    # access is lost or a setup fault is known (#1363 O5).
+    stop = threading.Event()
+    clock = knobs_clock
+    sign_failures: list[AdapterFault] = []
     try:
-        access = _preflight_access(source, tenant, replayable, signer=signer, proxy_url=proxy_url,
-                                   issuer_transport=issuer_transport, directory=directory)
+        access = _preflight_access(
+            source, tenant, system_status.read_grant(tenant, down), signer=signer,
+            proxy_url=proxy_url, issuer_transport=issuer_transport, directory=directory,
+            clock=clock, on_fault=lambda _fault: stop.set(), sign_failures=sign_failures)
     except AdapterFault as unsigned:
         return record(REFUSED, f"the read token for the credential proxy cannot be signed: "
-                               f"{unsigned.detail}", environment=True)
+                               f"{unsigned.detail}", environment=CAUSE_SIGN)
+
+    def environment_refusal() -> dict[str, Any] | None:
+        """The pass's refusal when its holder has lost access or met a setup fault, else None.
+        Decided under the holder's lock, which shuts it (#1363 O6)."""
+        if access is None or (access.lost is None and not access.setup_faults):
+            return None
+        with access.deciding():
+            if access.lost is not None:
+                if sign_failures:
+                    return record(
+                        REFUSED, "the read token for the credential proxy cannot be signed: "
+                                 f"{access.lost}", environment=CAUSE_SIGN)
+                return record(REFUSED, f"the credential proxy could not be used: {access.lost}",
+                              environment=CAUSE_ACCESS)
+            system, detail = next(iter(access.setup_faults.items()))
+            return record(REFUSED, f"our setup for {system or 'a system'} failed (the credential "
+                                   f"proxy's setup): {detail}", environment=CAUSE_SETUP)
+
     ctx = _preflight_context(episode.dir, source, tenant, access)
     resumed = {w.label: formats.resume_world_from(family, w.label, episode.dir)
                for w in fact_worlds}
@@ -430,6 +482,9 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
             try:
                 base_text = payload_text(reader.verbs(call.system)[call.verb](ctx, **call.params))
             except Exception:  # noqa: BLE001 — the capture's own failure, still failing
+                refused = environment_refusal()
+                if refused is not None:
+                    return refused
                 # World telemetry, passed through as itself to any sibling that asks
                 # (`real-error`), never the oracle's to serve.
                 continue
@@ -442,7 +497,6 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
                            unrecorded=unrecorded)
         calibrated.append((call, json.loads(base_text), fixed, recorded is None))
 
-    stop = threading.Event()
     failures: list[dict[str, Any]] = []
     tally = threading.Lock()
 
@@ -498,21 +552,30 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
         futures = [pool.submit(contextvars.copy_context().run, calibrate, w.label)
                    for w in fact_worlds]
     for future in futures:
+        if future.exception() is not None and access is not None:
+            access.shut()
         # Anything but a world's own failure is the launch's (it stopped every other world's
         # calibration), and leaves no outcome record: the outcome words are the family's
         # (accepted, unusable, refused), and an episode with none is never graded.
         future.result()
 
-    unservable = sorted(failures, key=lambda entry: entry["world"])
-    names = ", ".join(entry["world"] for entry in unservable)
-    if len(unservable) >= outcome_mod.UNUSABLE_AT:
-        return record(UNUSABLE, f"{len(unservable)} worlds failed calibration ({names}), so "
-                                "the family cannot be compared (O5)",
-                      unservable=unservable)
-    reason = ("every fact world calibrated" if not unservable else
-              f"world {names} failed calibration and runs no sibling; the family is graded "
-              "on the rest")
-    return record(ACCEPTED, reason, unservable=unservable)
+    # Decided under the holder's lock, which shuts it: a token request still running on a thread an
+    # oracle turn abandoned is counted first, and nothing signs afterwards (#1363 O6).
+    with access.deciding() if access is not None else contextlib.nullcontext():
+        if access is not None and (access.lost is not None or access.setup_faults):
+            refused = environment_refusal()
+            assert refused is not None
+            return refused
+        unservable = sorted(failures, key=lambda entry: entry["world"])
+        names = ", ".join(entry["world"] for entry in unservable)
+        if len(unservable) >= outcome_mod.UNUSABLE_AT:
+            return record(UNUSABLE, f"{len(unservable)} worlds failed calibration ({names}), so "
+                                    "the family cannot be compared (O5)",
+                          unservable=unservable)
+        reason = ("every fact world calibrated" if not unservable else
+                  f"world {names} failed calibration and runs no sibling; the family is graded "
+                  "on the rest")
+        return record(ACCEPTED, reason, unservable=unservable)
 
 
 
