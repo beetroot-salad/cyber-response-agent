@@ -416,11 +416,9 @@ def _build(es: Any, clock: Any, freeze: dict, overlay: dict | None) -> dict[str,
     return tallies
 
 
-def _reusable(es: Any, ops: Any, clock: Any, freeze: dict, location: str) -> bool:
-    """With a clean marker for the variant: bring the node up on the data it has and check that it
-    holds exactly the freeze's indices, all open (the snapshot's UUID is checked every time)."""
-    ops.ensure_node(freeze["T"], clock)
-    wait_for_cluster(es, clock, "the node start")
+def _holds_the_freeze(es: Any, freeze: dict, location: str) -> bool:
+    """On a node that came up: the snapshot is the freeze's (refuses otherwise), and the node holds
+    exactly the freeze's indices, all open."""
     register_repository(es, freeze, location)
     current = list_indices(es, list(freeze["patterns"]))
     return set(current) == set(freeze["elastic"]["indices"]) \
@@ -453,11 +451,14 @@ def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overla
     check_freeze(freeze, freeze_id)
     vid = variant_id(freeze_id, overlay)
     marker = None if whole else ops.read_marker()
-    if _is_clean(marker, vid) and _reusable(es, ops, clock, freeze, location):
+    # One bounded attempt to bring up the node that is there (r6.4.4): it serves both the reuse of a
+    # clean copy and A2's check before a wipe, and a node that does not come up is never waited on twice.
+    up = ops.node_exists() and _came_up(es, ops, clock, freeze)
+    if up and _is_clean(marker, vid) and _holds_the_freeze(es, freeze, location):
         tallies = {n: int(t) for n, t in marker["tallies"].items()}   # type: ignore[index]
         restored = False
     else:
-        if ops.node_exists() and _came_up(es, ops, clock, freeze):
+        if up:
             # A2 under D25: the snapshot must be the freeze's before the copy there is discarded.
             register_repository(es, freeze, location)
         mark_dirty(ops, freeze_id, overlay)   # before the wipe: a crash from here leaves no trusted copy
