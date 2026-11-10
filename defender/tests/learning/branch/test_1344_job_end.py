@@ -279,7 +279,7 @@ _PREFLIGHT_REFUSALS = {
     "our failure: no sign login recorded for the tenant": ("failed", "launch_refused", ("cause", "sign")),
     "our failure: a re-sign fails mid-pass": ("failed", "launch_refused", ("cause", "sign")),
 }
-#: The brief the job's end must carry, where the design fixes one (B5, C2): every sign failure, up front or mid-pass.
+#: The brief the job's end must carry, where the design fixes one (B5, C2, O6): the brief of the row's cause (sign, access, setup).
 #: The D9 down-systems-only refusal has none named, so none is pinned for it.
 _PREFLIGHT_BRIEFS = {
     row: _BRIEF_OF_CAUSE[site[1]] for row, (_s, _r, site) in _PREFLIGHT_REFUSALS.items()
@@ -371,6 +371,8 @@ def test_a_refusal_before_the_first_sibling_skips_the_job_when_the_family_caused
     assert ran.spawn.launches == []
     if cause in _PREFLIGHT_BRIEFS:
         assert _PREFLIGHT_BRIEFS[cause] in message, message
+    if cause == "only down systems":  # D9: its own cause, so none of the other causes' briefs (O6)
+        assert not [b for b in _BRIEF_OF_CAUSE.values() if b in message], ("a down system read as our failure", message)
 
 
 def test_1363_the_refusal_table_names_exactly_the_sites_and_causes_pre_flight_records():
