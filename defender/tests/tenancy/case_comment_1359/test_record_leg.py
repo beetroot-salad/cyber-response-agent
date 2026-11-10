@@ -501,8 +501,8 @@ def test_1374_the_page_tells_unknown_from_error_by_its_words(tmp_path):
 
 
 def _sent_comment(shim: S.DockerShim) -> str:
-    [argv] = C.comment_calls(shim)
-    return " ".join(argv)
+    [call] = C.comment_calls(shim)
+    return str(call["body"])
 
 
 @pytest.mark.parametrize(("exit_class", "report", "status", "marker"), [
