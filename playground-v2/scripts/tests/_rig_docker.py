@@ -60,6 +60,8 @@ URL in it, or curl/wget of a local URL).
 Faults: `fail` is a set of effects that fail when attempted (`node-start`, `stub-start`, `proxy-start`,
 `marker-write`: a write into the engine's state volume of a JSON object carrying `dirty` or `variant`). The
 call returns rc 125 with `injected: <effect> failed` and changes nothing.
+`node-restart` (r6.4.4) refuses `docker start` of an EXISTING frozen node as docker does when a container will
+not start (rc 1, `Error response from daemon: ...`); a new node (`docker run`) still starts.
 
 What a test reads: `containers`, `events` (`node-start`, `proxy-start`, `service-stop`, `volume-rm`, `curl`,
 `write`), `writes`, `read_file`, `files_in_volume`, `running()`, `calls`, `unmodelled`.
@@ -555,6 +557,10 @@ class RigDocker(FakeDocker):
                 if kind and kind in self.fail:
                     self.injected.append(kind)
                     return 125, "", f"injected: {kind} failed"
+                if kind and "node-restart" in self.fail:       # r6.4.4: an existing node that will not start again
+                    self.injected.append("node-restart")
+                    return 1, "", (f"Error response from daemon: failed to create task for container: {name}\n"
+                                   f"Error: failed to start containers: {name}")
                 if verb == "restart" and c.state == "running":
                     self._set_state(c, "exited")
                 if c.state != "running":

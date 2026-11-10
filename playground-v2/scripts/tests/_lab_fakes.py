@@ -38,6 +38,11 @@ its real curl path (`FrozenEs`): the rig docker answers the in-container curl fr
 own exit code and `000` while the node does not listen. A node's cluster state lives on its data volume
 (`save_node_state`/`load_node_state`). `FakeLockStore.delete_if_held_by` and `race` model finding 9.
 A case's `content` is the digest the real layer gives the expected state (`LabRig.expected_content`).
+
+r6.4.4: `FakeCluster.wedged` (on the node's data volume: health answers red for good; a fresh node on a new volume
+is healthy) and `FakeCluster.nested` (`{index: n}` hidden nested documents: `_cat/indices` `docs.count` counts
+them, `_count` does not, as in Elasticsearch). `LabRig.dirty_marker()` writes a dirty marker as a crashed restore
+leaves it.
 """
 from __future__ import annotations
 
@@ -382,6 +387,13 @@ class FakeCluster(FakeES):
         self.repos: dict[str, Any] = {}
         self.pipelines: dict[str, dict] = {}
         self.ilm, self.lifecycle_off, self.health_status = "RUNNING", set(), "green"
+        # r6.4.4: the node's data never recovers (shards red for good, as after a restore that crashed); it lives on
+        # the data volume, so a fresh node on a new volume is healthy again.
+        self.wedged = False
+        # r6.4.4: `{index: n}` hidden nested (Lucene) documents an index holds beside its top-level ones: ES's
+        # `_cat/indices` `docs.count` counts them, `_count` does not. Part of the index mapping, so it comes with
+        # whatever restores the index.
+        self.nested: dict[str, int] = {}
         self.mutations: list[dict] = []
         self.restores = 0
         self.unsupported: list[str] = []
@@ -399,7 +411,7 @@ class FakeCluster(FakeES):
 
     def save_node_state(self) -> dict:
         return copy.deepcopy({"indices": self.indices, "repos": self.repos, "pipelines": self.pipelines,
-                              "ilm": self.ilm, "lifecycle_off": self.lifecycle_off})
+                              "ilm": self.ilm, "lifecycle_off": self.lifecycle_off, "wedged": self.wedged})
 
     def load_node_state(self, state: dict | None) -> None:
         """`None`: a node on a new, empty data volume."""
@@ -407,6 +419,7 @@ class FakeCluster(FakeES):
                                                     "ilm": "RUNNING", "lifecycle_off": set()}
         self.indices, self.repos, self.pipelines = state["indices"], state["repos"], state["pipelines"]
         self.ilm, self.lifecycle_off = state["ilm"], state["lifecycle_off"]
+        self.wedged = bool(state.get("wedged", False))
 
     # -- state helpers a test reads -----------------------------------------------------------
 
@@ -463,13 +476,14 @@ class FakeCluster(FakeES):
                 return ack
             if path == "/_cluster/health":
                 n = sum(1 for ix in self.indices.values() if not ix["closed"])
-                return {"status": self.health_status, "active_primary_shards": n,
-                        "unassigned_shards": 0 if self.health_status == "green" else 1}
+                status = "red" if self.wedged else self.health_status
+                return {"status": status, "active_primary_shards": n,
+                        "unassigned_shards": 0 if status == "green" else 1}
             if seg[0] == "_cat" and seg[1] == "indices":
                 names = self._expand(seg[2], closed=True) if len(seg) > 2 else list(self.indices)
                 return [{"index": n, "uuid": self.indices[n]["uuid"], "health": self.health_status,
                          "status": "close" if self.indices[n]["closed"] else "open",
-                         "docs.count": str(len(self.indices[n]["docs"]))} for n in names]
+                         "docs.count": str(len(self.indices[n]["docs"]) + self.nested.get(n, 0))} for n in names]
             if path == "/_reindex":
                 return self._reindex(body)
             if seg[0] == "_ingest" and seg[1] == "pipeline":
@@ -1093,6 +1107,12 @@ class LabRig:
         files = self.docker.stores.get(sid, {})
         for key in [k for k, d in files.items() if b'"dirty"' in d or b'"variant"' in d]:
             del files[key]
+
+    def dirty_marker(self) -> None:
+        """A copy nobody trusts, as a restore that crashed partway leaves it: the marker says dirty."""
+        marker = self.marker() or {}
+        self.drop_marker()
+        self.ops.write_marker({"variant": marker.get("variant", "unknown"), "dirty": True})
 
     def node_running(self) -> bool:
         node = self.docker.node()

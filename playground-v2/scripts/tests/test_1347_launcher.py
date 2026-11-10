@@ -637,6 +637,83 @@ def test_a_snapshot_with_another_uuid_leaves_the_existing_copy_untouched_when_a_
     assert len(rig.rows()) == 1
 
 
+# -- r6.4.4: a leftover node that never becomes healthy, or will not start, is replaced after a bounded wait ------
+
+#: The design's bound on the A2 pre-check's wait for an existing node (r6.4.4 `PRECHECK_WAIT_S`, 10 min), plus the
+#: launch's or make-a-case's own steps before it (each rig clock reading moves it a second).
+PRECHECK_BOUND = timedelta(minutes=10) + timedelta(minutes=2)
+
+
+def _leftover(rig, leftover: str) -> dict:
+    """A valid `drop` launch left a node; then a restore crashed partway: the marker says dirty, and the node's
+    data never recovers (`never-healthy`) or the node will not start again (`will-not-start`)."""
+    rig.write_expected_case("drop")
+    rig.launch()
+    old = rig.docker.of_kind("node-start")[-1]
+    rig.dirty_marker()
+    if leftover == "never-healthy":
+        rig.cluster.wedged = True
+    elif leftover == "will-not-start":
+        rig.docker.fail.add("node-restart")
+    return old
+
+
+@pytest.mark.parametrize("entry", ["launch", "make-a-case"])
+@pytest.mark.parametrize("leftover", ["never-healthy", "will-not-start"])
+def test_a_leftover_node_that_never_becomes_healthy_or_will_not_start_is_replaced_after_a_bounded_wait(
+        tmp_path, leftover, entry):
+    """r6.4.4 (leftover node, finding 3): the A2 pre-check gives an existing node a bounded wait (10 min). A node
+    that does not become healthy in that time, or does not start, has no good copy to protect: the restore goes into
+    a fresh node (the old data volume is discarded) and the launch, or make-a-case, completes. The wait is bounded
+    in rig clock, not its exact length."""
+    rig = LabRig(tmp_path)
+    old = _leftover(rig, leftover)
+    begun = rig.clock.last
+    if entry == "launch":
+        rig.write_expected_case("drop")
+        rig.launch()
+        assert [r["verdict"] for r in rig.rows()] == ["valid", "valid"], rig.rows()
+    else:
+        for name in ("case.yaml", "alert.json"):
+            (rig.case_dir / name).unlink()
+        with rig.write_case("young", None):
+            assert rig.cluster.state() == expected_copy("none")
+
+    fresh = [e for e in rig.docker.of_kind("node-start") if e["clock"] > begun and e["data"] != old["data"]]
+    assert fresh, "the restore did not go into a fresh node"
+    assert fresh[0]["clock"] - begun <= PRECHECK_BOUND, f"waited {fresh[0]['clock'] - begun} for the leftover node"
+    assert [w for w in rig.docker.of_kind("volume-rm") if w["volume"] == old["data"]], "the old data was kept"
+    assert ("node-restart" in rig.docker.injected) == (leftover == "will-not-start")
+
+
+def test_a_leftover_node_that_comes_up_with_another_snapshot_uuid_still_refuses_and_stays_untouched(tmp_path):
+    """r6.4.4 control (A2 kept): a dirty marker and a node that does come up, but the repository's snapshot shows
+    another UUID: refused, no restore, the old node container and its data volume still exist."""
+    rig = LabRig(tmp_path)
+    old = _leftover(rig, "healthy")
+    restores = rig.cluster.restores
+    rig.cluster.snapshot_uuid = "another-uuid"
+    rig.write_expected_case("drop")
+    with pytest.raises(Exception, match="(?i)uuid"):
+        rig.launch()
+
+    assert rig.cluster.restores == restores
+    key = (old["container"].scope, old["container"].name)
+    assert rig.docker.containers.get(key) is old["container"], "the old node container was removed"
+    assert old["data"] in rig.docker.stores, "the old node's data volume was discarded"
+    assert len(rig.rows()) == 1
+
+
+def test_the_precheck_wait_is_named_and_is_ten_minutes():
+    """r6.4.4: the bound is `frozen_copy.PRECHECK_WAIT_S`, 10 min (the design names it)."""
+    import sys
+    scripts = str(Path(__file__).resolve().parents[1])
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import frozen_copy
+    assert getattr(frozen_copy, "PRECHECK_WAIT_S", None) == 600
+
+
 @pytest.mark.parametrize("damage", ["unconfirmed", "no-freeze", "no-counts"])
 def test_a_malformed_or_unconfirmed_case_is_refused_before_anything(tmp_path, damage):
     """A2: a scored launch of an unconfirmed case, a case naming a freeze that does not exist and a

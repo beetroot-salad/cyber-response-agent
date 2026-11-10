@@ -239,6 +239,66 @@ def test_the_guard_runs_against_the_rules_as_of_T_and_refuses_before_the_copy_is
     assert "frozen-engine" not in rig.store.records
 
 
+_KEYED = {"r.json": {"rule_id": "r", "type": "query", "index": ["logs-system.auth-*"],
+                    "query": "source.port:22 and event.outcome:failure"}}
+
+
+@pytest.mark.parametrize("exit_by", ["guard-refused-a-rule-key-field", "guard-refused-a-read-dataset", "case-written"])
+def test_the_extracted_rules_directory_is_removed_on_every_exit(tmp_path, monkeypatch, exit_by):
+    """r6.4.4 (finding 9): make-a-case's rules as of T are unpacked into a directory removed on every exit path,
+    including a refusal before the launch (the guard refusing a mutation of a rule-key field, or a data drop on a
+    dataset the rules read). Observed at the edge: temporary directories go under a directory this test owns,
+    each one made is recorded, and none is left once write_case has returned or raised. Control: a written case."""
+    import tempfile
+    scratch = tmp_path / "tmp"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    made: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def mkdtemp(*a, **kw):
+        made.append(Path(real_mkdtemp(*a, **kw)))
+        return str(made[-1])
+
+    monkeypatch.setattr(tempfile, "mkdtemp", mkdtemp)
+    rig = LabRig(tmp_path / "rig", rules=_KEYED if exit_by == "guard-refused-a-rule-key-field" else None)
+    profiles = _drift_profiles(tmp_path)
+    rig.make_module
+    if exit_by == "case-written":
+        with rig.write_case("young", _overlay("drift-test"), profiles_dir=profiles):
+            pass
+    else:
+        with pytest.raises(GuardRefused):
+            rig.write_case("young", _overlay("drift-test" if exit_by.endswith("rule-key-field") else "data-drop-auth"),
+                           profiles_dir=profiles)
+
+    assert made, "no temporary directory was made: the rules were not unpacked where this test can see them"
+    assert [d for d in made if d.exists()] == [], "a temporary directory was left behind"
+    assert list(scratch.iterdir()) == [], list(scratch.iterdir())
+
+
+def test_counts_agree_through_make_a_case_and_the_launch_when_an_index_holds_nested_documents(tmp_path):
+    """r6.4.4 (counts, finding 4): the alerts index holds hidden nested documents, so `_cat/indices` `docs.count`
+    exceeds `_count`. The freeze records top-level counts; make-a-case's count check and the launcher's count
+    comparison both read top-level counts: the case is written with the freeze's counts and launches valid."""
+    rig = LabRig(tmp_path / "made")
+    for cluster in (rig.cluster, rig.live):
+        cluster.nested = {ALERTS: 40}
+    with rig.write_case("young", None):
+        assert rig.case()["counts"] == counts_of(expected_copy("none"))
+    case = rig.case()
+    case["confirmed"] = {"by": "op", "at": "2026-11-09T10:00:00Z", "reference_run": "r0"}
+
+    later = LabRig(tmp_path / "later")
+    for cluster in (later.cluster, later.live):
+        cluster.nested = {ALERTS: 40}
+    (later.case_dir / "case.yaml").write_text(yaml.safe_dump(case))
+    (later.case_dir / "alert.json").write_text((rig.case_dir / "alert.json").read_text())
+    later.launch()
+
+    assert [r["verdict"] for r in later.rows()] == ["valid"], later.rows()
+
+
 def test_a_data_drop_on_a_dataset_the_frozen_rules_read_is_refused(tmp_path):
     """A5/P8: system.auth is read by the frozen rules' index patterns."""
     rig = LabRig(tmp_path)

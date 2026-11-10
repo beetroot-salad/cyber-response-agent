@@ -259,11 +259,23 @@ def test_1347_o2a_an_esql_source_outside_the_configured_patterns_never_reaches_t
     pytest.param("", id="empty"),
     pytest.param("LIMIT 1", id="no-source-command"),
     pytest.param("SELECT * FROM {events}", id="not-esql"),
+    pytest.param('FROM {events} | EVAL x = """a"""" | LOOKUP JOIN secret ON k | EVAL y = "x\\""',
+                 id="the-reviewers-triple-quote-bypass"),
+    pytest.param('FROM {events} | WHERE m == """x""" | LIMIT 1', id="a-triple-quoted-string"),
+    pytest.param('FROM {events} // """\n| LIMIT 1', id="a-run-of-three-quotes-in-a-comment"),
+    pytest.param('FROM {events} | RERANK "q" ON message', id="rerank"),
+    pytest.param('FROM {events} | COMPLETION c = "q" WITH { "inference_id": "x" }', id="completion"),
+    pytest.param("FROM {events} | INLINESTATS c = COUNT(*) BY a", id="inlinestats"),
+    pytest.param("FROM {events} | CHANGE_POINT v ON @timestamp", id="change-point"),
+    pytest.param("FROM {events} | SAMPLE 0.1", id="sample"),
+    pytest.param("FROM {events} | WHERE a > 1 | FOOBAR a | LIMIT 1", id="an-invented-command"),
 ])
 def test_1347_o2a_an_esql_query_that_cannot_be_confined_is_refused_on_every_run(
         tmp_path: Path, data_root: Path, query: str):
     """O2a/A6: ENRICH, FORK, subqueries, remote `cluster:index` and unparsable text are a ConfinementFault
-    before the proxy is asked. Control: a FROM on the events pattern is sent."""
+    before the proxy is asked; so (A6 revised, r6.4.4) are a triple-quoted string or any run of three `"`, and
+    every command off the allow-list, known (RERANK, COMPLETION, INLINESTATS, CHANGE_POINT, SAMPLE) or invented.
+    Control: a FROM on the events pattern is sent."""
     from defender.integrations import elastic_adapter
 
     with _esql_channel(tmp_path, data_root) as (ctx, tap, up):

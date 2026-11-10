@@ -26,16 +26,17 @@ from defender.integrations import esql_text
                  id="a-string-literal-is-data"),
     pytest.param('FROM logs-* | WHERE m == "LOOKUP JOIN .security-7"', ["logs-*"],
                  id="a-string-literal-holding-a-join-is-data"),
-    pytest.param('FROM logs-* | WHERE m == """a " | LOOKUP JOIN .security-7 FROM .security-7 """ | LIMIT 1', ["logs-*"],
-                 id="a-triple-quoted-string-holding-a-bare-quote-is-data"),
-    pytest.param('FROM logs-* | WHERE m == """x""" | LOOKUP JOIN hosts ON k', ["logs-*", "hosts"],
-                 id="a-triple-quoted-string-then-a-join"),
+    pytest.param('FROM logs-* | WHERE m == "a\\" | LOOKUP JOIN .security-7 ON k"', ["logs-*"],
+                 id="an-escaped-quote-is-data"),
+    pytest.param('FROM logs-* | KEEP `a"""b` | LIMIT 1', ["logs-*"],
+                 id="a-quote-run-inside-a-backtick-name-is-a-name"),
     pytest.param("ROW a = 1 | EVAL b = a + 1", [], id="row-reads-nothing"),
     pytest.param("SHOW INFO", [], id="show-reads-nothing"),
 ])
 def test_sources_lists_every_index_expression_the_query_reads(query, expected):
     """A5/A6: FROM, TS and LOOKUP JOIN name sources (quotes and METADATA dropped, string literals
-    ignored); ROW and SHOW read none."""
+    ignored); ROW and SHOW read none. The two triple-quoted positives that stood here moved to the
+    refusals below (A6 revised, r6.4.4: any triple-quoted string is `None`)."""
     assert esql_text.sources(query) == expected
 
 
@@ -55,11 +56,74 @@ def test_sources_lists_every_index_expression_the_query_reads(query, expected):
     pytest.param("FROM remote:logs-* | LIMIT 1", id="remote-cluster"),
     pytest.param("FROM *:logs-* | LIMIT 1", id="every-remote-cluster"),
     pytest.param("FROM logs-*, remote:logs-* | LIMIT 1", id="remote-among-sources"),
+    pytest.param("WHERE a > 1 | LIMIT 1", id="a-later-command-first"),
+    pytest.param("FROM logs-a | TS logs-b", id="a-first-command-later"),
 ])
 def test_sources_is_none_when_the_query_cannot_be_read_with_confidence(query):
     """A5/A6: unparsable text, a subquery, FORK, ENRICH and a remote `cluster:index` are `None`
     (not an empty list, which means "reads no index"), so every caller fails closed."""
     assert esql_text.sources(query) is None
+
+
+#: A6 revised (r6.4.4): the reviewer's bypass. ES|QL's lexer ends a triple-quoted string with up to two
+#: extra `"` (`"""a""""` is one literal), so the join is real; a reader that disagrees sees it as data.
+BYPASS = 'FROM events-* | EVAL x = """a"""" | LOOKUP JOIN secret ON k | EVAL y = "x\\""'
+
+
+@pytest.mark.parametrize("query", [
+    pytest.param(BYPASS, id="the-reviewers-bypass"),
+    pytest.param('FROM logs-* | WHERE m == """a " | LOOKUP JOIN .security-7 FROM .security-7 """ | LIMIT 1',
+                 id="a-triple-quoted-string-holding-a-bare-quote"),
+    pytest.param('FROM logs-* | WHERE m == """x""" | LOOKUP JOIN hosts ON k', id="a-triple-quoted-string-then-a-join"),
+    pytest.param('FROM logs-* | EVAL x = """""" | LIMIT 1', id="an-empty-triple-quoted-string"),
+    pytest.param('FROM logs-* | EVAL x = """a""""" | LIMIT 1', id="a-triple-quoted-string-ending-in-five"),
+    pytest.param('FROM logs-* | WHERE m == "\\"""', id="a-run-of-three-made-by-an-escape"),
+    pytest.param('FROM logs-* | EVAL x = "" | EVAL y = """', id="a-run-of-three-after-an-empty-string"),
+    pytest.param('FROM logs-* // """\n| LIMIT 1', id="a-run-of-three-in-a-line-comment"),
+    pytest.param('FROM logs-* /* """" */ | LIMIT 1', id="a-run-of-four-in-a-block-comment"),
+])
+def test_quoting_that_might_be_misread_is_none(query):
+    """A6 revised (r6.4.4): any triple-quoted string, and any run of three or more `"` outside a backtick-quoted
+    name, is `None`, wherever it stands (string, comment, between tokens), so no lexer disagreement can hide a
+    source. Control: the same run inside a backtick name is a name (in the listing above)."""
+    assert esql_text.sources(query) is None
+
+
+#: A6 revised: the allow-list. First commands and what each reads; later commands, each with a sample body.
+FIRST = {"FROM": ("FROM logs-a", ["logs-a"]), "TS": ("TS metrics-a", ["metrics-a"]),
+         "ROW": ("ROW a = 1", []), "SHOW": ("SHOW INFO", [])}
+LATER = {"WHERE": ("WHERE a > 1", []), "EVAL": ("EVAL b = a + 1", []), "STATS": ("STATS c = COUNT(*) BY a", []),
+         "KEEP": ("KEEP a, b", []), "DROP": ("DROP b", []), "RENAME": ("RENAME a AS z", []),
+         "SORT": ("SORT a DESC", []), "LIMIT": ("LIMIT 5", []), "DISSECT": ('DISSECT m "%{a} %{b}"', []),
+         "GROK": ('GROK m "%{WORD:w}"', []), "MV_EXPAND": ("MV_EXPAND a", []),
+         "LOOKUP JOIN": ("LOOKUP JOIN hosts ON a", ["hosts"])}
+#: Every other command, known to ES|QL or not.
+OTHER = {"RERANK": 'RERANK "q" ON message', "COMPLETION": 'COMPLETION c = "q" WITH { "inference_id": "x" }',
+         "ENRICH": "ENRICH hosts ON a", "FORK": "FORK (WHERE a > 1) (WHERE a < 1)",
+         "INLINESTATS": "INLINESTATS c = COUNT(*) BY a", "CHANGE_POINT": "CHANGE_POINT v ON @timestamp",
+         "SAMPLE": "SAMPLE 0.1", "FOOBAR": "FOOBAR a"}
+
+
+@pytest.mark.parametrize("first", sorted(FIRST))
+@pytest.mark.parametrize("later", sorted(LATER))
+def test_each_allowed_command_reads_as_expected_after_each_first_command_and_after_another_command(first, later):
+    """A6 revised (r6.4.4): every allowed first command, followed by every allowed later command, directly and after
+    another allowed command, reads as the sources each one names. Controls for the allow-list's positive side."""
+    head, head_reads = FIRST[first]
+    body, reads = LATER[later]
+    assert esql_text.sources(f"{head} | {body}") == head_reads + reads
+    assert esql_text.sources(f"{head} | LIMIT 9 | {body} | KEEP a") == head_reads + reads
+
+
+@pytest.mark.parametrize("command", sorted(OTHER))
+@pytest.mark.parametrize("where", ["second", "later", "first"])
+def test_every_command_off_the_allow_list_is_none(command, where):
+    """A6 revised (r6.4.4): a command not on the allow-list gives `None` wherever it stands, known to ES|QL
+    (RERANK, COMPLETION, ENRICH, FORK, INLINESTATS, CHANGE_POINT, SAMPLE) or not (FOOBAR)."""
+    query = {"second": f"FROM logs-a | {OTHER[command]}",
+             "later": f"FROM logs-a | WHERE a > 1 | {OTHER[command]} | LIMIT 1",
+             "first": f"{OTHER[command]} | LIMIT 1"}[where]
+    assert esql_text.sources(query) is None, query
 
 
 @pytest.mark.parametrize("query", [
@@ -126,7 +190,7 @@ def _spell(rng: random.Random, name: str) -> str:
 
 def _literal(rng: random.Random) -> str:
     """A string literal of hostile text: double-quoted, or triple-quoted (where a bare `"` is allowed)."""
-    if rng.random() < 0.5:
+    if rng.random() < 0.8:   # A6 revised: a triple-quoted literal makes the query `None`; most stay readable
         return f'"{_words(rng, HOSTILE, rng.randint(1, 5))}"'
     body = _words(rng, HOSTILE + ['"', '""', "|", "FROM zz", '" | LOOKUP JOIN zz "'], rng.randint(1, 5))
     while '"""' in body:
@@ -186,10 +250,13 @@ def _query(rng: random.Random, remote: bool) -> tuple[str, list[str] | None]:
 def test_sources_reads_every_generated_query_as_its_source_set_or_as_unreadable():
     """A5/A6: queries built around a known source set, with comments (nested too), hostile string
     literals (double- and triple-quoted) everywhere, and sources spelled bare or quoted, read as exactly
-    that set (as a set: the design fixes no multiplicity); any source holding `:` reads `None`, bare or quoted."""
+    that set (as a set: the design fixes no multiplicity); any source holding `:` reads `None`, bare or quoted,
+    and (A6 revised, r6.4.4) so does any query holding a run of three `"`: a triple-quoted literal included."""
     rng = random.Random(1347)
     for case in range(400):
         query, want = _query(rng, remote=case % 4 == 3)
+        if '"""' in query:   # A6 revised: a run of three `"` (no backtick names are generated) is `None`
+            want = None
         got = esql_text.sources(query)
         assert (got is None) if want is None else (got is not None and set(got) == set(want)), \
             f"case {case}: {query!r} -> {got!r}"
