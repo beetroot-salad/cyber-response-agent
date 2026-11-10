@@ -86,9 +86,11 @@ def _stamp_duration(store: Any, session_id: str | None, duration_ms: float) -> N
 
 
 def _make_hooks(  # noqa: PLR0913 — the hook set's full wiring: logging, budget, and the store stamp
-    logger: observe.RequestLogger, agent_id: str, *, enforce: bool, limits: dict = DEFAULT_LIMITS,
-    session_id: str | None = None, store: Any = None, toon_gate: Any = None,
+    logger: observe.RequestLogger, agent_id: str, *, enforce: bool,
+    limits: dict = DEFAULT_LIMITS, session_id: str | None = None, store: Any = None, toon_gate: Any = None,
 ) -> Hooks[Any]:
+    """The agent's hook set. Its spend is recorded at the model, not here (`_spend`, #1377 r7.3 T3);
+    the request log is written here, where the run step is known."""
     hooks = Hooks()
 
     @hooks.on.tool_execute

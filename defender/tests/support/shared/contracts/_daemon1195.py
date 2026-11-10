@@ -222,15 +222,26 @@ def _create(here: Path, state: dict, argv: list[str], status: str = "running") -
     return 0, "f" * 64 + "\n", ""
 
 
-def attach(here: Path, argv: list[str]) -> None:
-    """The landing of a held `docker start -a -i <name>`: a created box now runs. Not logged here."""
+def attach(here: Path, argv: list[str]) -> tuple[int, str] | None:
+    """The landing of a held `docker start -a -i <name>` (the run box's start, #1343 B10; each run
+    window of a request-lane box, #1344 amendment 2): a start like a plain one, its faults, the
+    box's on-start writes and the boot count included, so a `created` or `exited` box now runs.
+    Not logged here. None while the start holds (the box runs as long as its input is held);
+    else the attached client's exit, `(rc, stderr)`: nonzero for a refused start, 0 for one
+    that took no effect (no box came up to attach to)."""
     with locked(here):
         state = load(here)
-        box = state["containers"].get(argv[-1])
-        if box is not None and box["status"] == "created":
-            box["status"] = "running"
-            state["counts"]["boot"] += 1
-            save(here, state)
+        if state["faults"]["down"]:
+            return 1, "Cannot connect to the Docker daemon (the fake is down)\n"
+        name = argv[-1]
+        rc, _out, err = _run_verb(state, "start", name)
+        save(here, state)
+        box = state["containers"].get(name)
+        if rc != 0:
+            return rc, err
+        if box is None or box["status"] != "running":
+            return 0, ""
+        return None
 
 
 def handle(here: Path, argv: list[str]) -> tuple[int, str, str]:
@@ -264,9 +275,27 @@ def _handle(here: Path, argv: list[str]) -> tuple[int, str, str]:  # noqa: PLR09
     return 1, "", f"the fake daemon does not answer `docker {verb}`\n"
 
 
+def _held_attach(here: Path, argv: list[str]) -> int:
+    """`docker start -a -i <name>` run as a program: logged, started as `attach` starts, then held
+    while its input is open, as the attached client is; its input closed, it ends. (A real box
+    whose main process reads that input ends with it; nothing here stops this fake's box.)"""
+    with locked(here):
+        log(here, argv)
+    ended = attach(here, argv)
+    if ended is not None:
+        sys.stderr.write(ended[1])
+        return ended[0]
+    while sys.stdin.buffer.read(65536):
+        pass
+    return 0
+
+
 def main() -> None:
     here = Path(sys.argv[1])
-    rc, out, err = handle(here, ["docker", *sys.argv[2:]])
+    argv = ["docker", *sys.argv[2:]]
+    if argv[1:2] == ["start"] and "-a" in argv:
+        sys.exit(_held_attach(here, argv))
+    rc, out, err = handle(here, argv)
     sys.stdout.write(out)
     sys.stderr.write(err)
     sys.exit(rc)

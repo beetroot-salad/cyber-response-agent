@@ -46,14 +46,13 @@ PINNED = BoxSpec(rootfs="python:3.11-slim")
 
 
 # C46 — source translation
-def test_a_nested_path_is_rewritten_through_its_covering_mount():
-    assert _daemon_source(Path("/workspace/defender"), MOUNTS) == Path(
-        "/home/dev/projects/repo/defender"
-    )
-
-
-def test_the_mount_point_itself_translates():
-    assert _daemon_source(Path("/workspace"), MOUNTS) == Path("/home/dev/projects/repo")
+@pytest.mark.parametrize(("path", "expected"), [
+    ("/workspace/defender", "/home/dev/projects/repo/defender"),  # a nested path, through its covering mount
+    ("/workspace", "/home/dev/projects/repo"),  # the mount point itself
+    ("/workspace/defender/../defender/bin", "/home/dev/projects/repo/defender/bin"),  # a normalized traversal that stays inside
+], ids=["nested_path", "mount_point", "normalized_traversal_inside"])
+def test_a_path_is_rewritten_through_its_covering_mount(path, expected):
+    assert _daemon_source(Path(path), MOUNTS) == Path(expected)
 
 
 def test_a_pass_through_mount_translates_to_itself():
@@ -154,12 +153,6 @@ def test_a_traversal_path_cannot_smuggle_a_source_off_the_shared_mount():
     escape = Path("/workspace/../etc/shadow")
     assert not _covered(escape, MOUNTS)
     assert _daemon_source(escape, MOUNTS) == escape
-
-
-def test_a_normalized_traversal_that_stays_inside_still_translates():
-    assert _daemon_source(Path("/workspace/defender/../defender/bin"), MOUNTS) == Path(
-        "/home/dev/projects/repo/defender/bin"
-    )
 
 
 def test_create_argv_refuses_a_traversal_run_dir():

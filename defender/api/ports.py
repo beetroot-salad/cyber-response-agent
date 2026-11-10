@@ -13,7 +13,7 @@ from defender.identity import IdentityService
 # The store's refusals are the API's: one class each, so the store's raise is the API's answer
 # with no mapping between them (#1342).
 from defender.jobs.errors import Conflict, NotFound, UnknownReference  # noqa: F401 — re-exported: the API's refusals
-from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId, UserId
+from defender.records.formats import AlertId, CredentialId, InvestigationId, LearningJobId, TenantId, UserId
 
 from .models import (
     Alert,
@@ -43,6 +43,8 @@ class Principal:
 
     tenant_id: TenantId
     user_id: UserId
+    #: The credential a program's request came in on; None for a person (#1307 D6).
+    credential_id: CredentialId | None = None
 
 
 class StoreBrokePromise(Exception):
@@ -133,6 +135,11 @@ AuditAction = Literal[
     "investigation.retry",
     "artifact.read",
     "learning_job.start",
+    "learning_job.claim",
+    "learning_job.finish",
+    "learning_job.takeover",
+    "learning_job.retry",
+    "learning_post_step",
     "system.update",
     "system.credentials",
     "alert_mapping.update",
@@ -165,18 +172,19 @@ class WriteTransaction(Protocol):
         ...
 
     async def delete_investigation(self, investigation_id: InvestigationId) -> None:
-        """Remove every attempt of the request the investigation belongs to (its run folders
-        stay). `NotFound`, or `Conflict` while any attempt is live. A replay of the request
-        afterwards starts a new investigation."""
+        """Remove every attempt of the request the investigation belongs to, and every learning
+        job of those attempts, queued or ended (their run and episode folders stay). `NotFound`, or
+        `Conflict` while any attempt is live or any of their learning jobs is running (#1344 O10). A
+        replay of the request afterwards starts a new investigation."""
         ...
 
     async def create_learning_job(
         self, investigation_id: InvestigationId, client_request_id: str
     ) -> tuple[LearningJob, bool]:
         """Queue an explicit re-learn of an investigation, or answer the job this request
-        already queued — the rules are §2.5's. Returns `(job, created)`. `UnknownReference` for
-        an investigation this tenant does not have; `Conflict` for one that cannot be learned
-        from — the design names `unparseable`."""
+        already queued: a replay by `(investigation, client request id)` answers the latest
+        attempt (#1344 O11). Returns `(job, created)`. `UnknownReference` for an investigation
+        this tenant does not have; `Conflict` for one that did not end `completed`."""
         ...
 
     async def put_system(self, system_id: str, body: SystemPut) -> tuple[SystemSettings, bool]:
@@ -184,8 +192,8 @@ class WriteTransaction(Protocol):
         ...
 
     async def put_alert_mapping(self, body: AlertMapping) -> tuple[AlertMapping, bool]:
-        """Replace the tenant's alert mapping whole, re-deriving its alerts' title and description in the same
-        transaction (#1345). Returns `(mapping, created)`, `created` only for the tenant's first save."""
+        """Replace the tenant's alert mapping whole (#1345); it applies to alerts stored from now on, and stored
+        alerts keep their title and description (#1420). Returns `(mapping, created)`, `created` only for the tenant's first save."""
         ...
 
     async def audit(self, action: AuditAction, target: str, detail: str = "") -> None:
@@ -196,9 +204,10 @@ class WriteTransaction(Protocol):
 
 class Writes(Protocol):
     def transaction(
-        self, tenant_id: TenantId, actor: str
+        self, tenant_id: TenantId, principal: Principal
     ) -> AbstractAsyncContextManager[WriteTransaction]:
-        """A transaction for `tenant_id`, acting as `actor` (the user id the audit names)."""
+        """A transaction for `tenant_id`, acting as `principal`: the audit names its user and, for a
+        program, the credential it used."""
         ...
 
 

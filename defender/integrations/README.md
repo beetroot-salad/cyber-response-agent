@@ -6,8 +6,8 @@ the shim, never the script directly — see `../../bin/README.md` for the
 shim contract and `../../docs/system-skill-shape.md` for the per-system
 knowledge an adapter is paired with.
 
-(Every file here is an adapter `*_adapter.py` or the shared `_stub_transport.py`
-they import. The gather pipe-tools, run-dir tooling, and analytics that used
+(Every file here is an adapter `*_adapter.py`, or `confinement.py`, Elastic's own
+endpoint and index confinement; the shared transport they import is `kit/transport.py`. The gather pipe-tools, run-dir tooling, and analytics that used
 to share this dir now live under `investigation/`, `presentation/`,
 and the repo-root `scripts/` tree.)
 
@@ -20,9 +20,10 @@ answers; the connect interview confirms them rather than re-deriving them per
 system. One shared module for the tree — extend it in place, never fork a
 second one.
 
-- **Shared module — `_stub_transport.py`.** Every adapter imports it for
-  `load_config(system, prefix)` and the transport helpers (`http_get`/`http_post`,
-  `http_timed`, `health_check`). New verbs are plain annotated functions registered in the
+- **Shared module — `defender/kit/transport.py`.** Every adapter imports it for
+  `record_config` / `load_config` and the transport: `request` (a path template plus
+  values, each refused unless it is one path segment), `host_write`, `link` and
+  `health_check`. New verbs are plain annotated functions registered in the
   adapter's `VERBS` mapping, keyed by verb name — each *returns* its JSON
   payload as a dict (the query tool renders it), never prints; usage errors
   come from the `faults.py` taxonomy (bad params → exit 64). The contract
@@ -46,7 +47,7 @@ second one.
   An exported variable does not override a key: the run's record is the one source.
 - **Settings check — `check_settings(tenant)`, in every adapter.** A pure
   function of the run's tenant record that raises `ConfigFault` for every
-  settings fault any verb can raise (`_stub_transport.check_settings_of` for the
+  settings fault any verb can raise (`kit.transport.check_settings_of` for the
   stubs and the ready-made adapters' shared rules: undeclared keys, required keys,
   the declaration). The run judges each granted system with it
   once, at start: one that fails is down for the run with that reason, and no

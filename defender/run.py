@@ -25,8 +25,6 @@ takes precedence over the ambient value.
 
 from __future__ import annotations
 
-from defender.records.formats import ALERT_MAPPING_MISSING, AlertMapping, DataRoot, RunsBase, TenantId
-
 import logging
 import json
 import os
@@ -43,7 +41,6 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 import argparse  # noqa: E402
 import asyncio  # noqa: E402
 import contextlib  # noqa: E402
-import ctypes  # noqa: E402
 import dataclasses  # noqa: E402
 import functools  # noqa: E402
 import inspect  # noqa: E402
@@ -57,9 +54,11 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _clock, _log  # noqa: E402
+from defender.records.formats import ALERT_MAPPING_MISSING, AlertMapping, DataRoot, RunsBase, TenantId  # noqa: E402
 from defender.records import formats  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
+from defender._parent_tie import require_parent, tie_to_parent  # noqa: E402
 from defender.records import Run  # noqa: E402
 from defender.records import job_facts, job_lane  # noqa: E402
 from defender.records.job_facts import BOX_STARTED as _BOX_STARTED  # noqa: E402 — `lifecycle`'s `job_facts` keyword shadows the module
@@ -397,10 +396,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     Passes `verbs=` explicitly: `run_investigation`'s fallback registry deliberately does not
     enable lead-0, which hermetic tests rely on.
 
-    On the resume path the production registry is never constructed: a sibling's queries must
-    be answered from the primed recording and staged corpus, and a module registry beside them
-    would route uncaptured keys to real adapters. The two registries are built in separate
-    arms of one `if` so both can never exist.
+    On the resume path the production registry is never constructed: a sibling's queries are
+    served by its world registry (the primed recording, else one live read through the run's
+    proxy access, #1449), and a module registry beside it would route keys around the oracle.
+    The two registries are built in separate arms of one `if` so both can never exist.
     """
     # The roster `main` judged, handed down to the registry and `run_investigation` with its
     # verdict; read here only for a direct caller, whose run the driver judges.
@@ -451,6 +450,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
                 defender_dir=defender_dir, model_name=model_name,
                 model_override=model_override, box=box, verbs=verbs, roster=roster,
                 systems=systems, resume=resume, tenant=tenant, source_run=source, **held,
+                **_access_kwargs(access),
             )
         finally:
             verbs.close()
@@ -649,10 +649,12 @@ class _TokenMint:
         (`credential_proxy.request_signer`, r8.5) unless one is injected."""
         proxied = {name for name, found in tenant.access.items()
                    if isinstance(found, AccessDeclaration) and name not in systems.down}
-        reads = () if world is not None else tuple(sorted(
-            system_status.granted_systems(tenant.grants) & proxied))
+        # A branched run is a run (#1449): a world reads its granted systems on a run's terms.
+        reads = tuple(sorted(system_status.granted_systems(tenant.grants) & proxied))
         # The write-back token is for a case system run start judged sound (`case`), reached
         # through the proxy; a case system with bad settings is told so by the record step.
+        # A world never gets one: `--update-ticket` with `--episode` is refused before this
+        # (`_resume_target`); `world is None` is the mint's own guard behind that refusal (#1449).
         named = case.system if isinstance(case, case_system.CaseTarget) else None
         written = named if (world is None and ns.update_ticket
                                 and isinstance(tenant.access.get(named or ""), AccessDeclaration)) else None
@@ -1495,10 +1497,6 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
 
 # -- the job lane (#1342) --------------------------------------------------------------------------
 
-#: `prctl` option: the signal this process gets when the thread that spawned it exits.
-_PR_SET_PDEATHSIG = 1
-
-
 def parse_job_args(argv: list[str]) -> argparse.Namespace:
     """The job entry's arguments: `--job <id> --tenant <T> --parent-pid <pid>` and nothing else.
     The id is the investigation's (its launch record names it); the data root comes from
@@ -1516,24 +1514,6 @@ def parse_job_args(argv: list[str]) -> argparse.Namespace:
                           ("as_of", None)):
         setattr(ns, name, default)
     return ns
-
-
-def _tie_to_parent() -> None:
-    """Die with the worker (#1342 O7): the parent-death signal is SIGTERM, set here in the child
-    (no `preexec_fn` in a threaded worker), before anything else."""
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0) != 0:
-        err = ctypes.get_errno()
-        raise OSError(err, f"could not set the parent-death signal: {os.strerror(err)}")
-
-
-def _require_parent(parent_pid: int) -> None:
-    """Exit at once unless the parent is still the worker `--parent-pid` names: one that died
-    between the spawn and the death tie leaves this process to another parent, which no
-    parent-death signal will ever reach."""
-    if os.getppid() != parent_pid:
-        sys.exit(f"[run.py] --parent-pid {parent_pid} is not this process's parent "
-                 f"({os.getppid()}): the worker that started this job is gone; nothing was run")
 
 
 def _interrupt_on_sigterm() -> None:
@@ -1611,9 +1591,9 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
     execution (R2). The job-end record is written however it ends. Its tenant records are read
     from `DEFENDER_DATABASE_DSN` (#1214, r6 R6-2): the job's tenant must be `active` there, and
     the acceptance is held until the job-end record is written (R6-6)."""
-    _tie_to_parent()
+    tie_to_parent()  # die with the worker (#1342 O7), before anything else
     ns = parse_job_args(argv)
-    _require_parent(ns.parent_pid)
+    require_parent(ns.parent_pid, who="run.py")
     _interrupt_on_sigterm()
     data_root = _request_data_root(ns)
     try:
@@ -1656,6 +1636,9 @@ UNSERVABLE_EXIT = 3
 _EXIT_WORDS = {
     run_end.TRUNCATED_BY_PROVIDER_DOWN: "the model provider stayed down; the run ended with no "
                                         "report (rerun later)",
+    run_end.TRUNCATED_BY_PROVIDER_REJECTED: "the model provider refused a request for good; the "
+                                            "run ended (rerunning will not help: the run log "
+                                            "names the HTTP status and the provider's reason)",
     run_end.TRUNCATED_BY_BOX_LOST: "the run's box became unusable; the run ended (the operator's "
                                    "to fix: the run log names the command that found it)",
     run_end.TRUNCATED_BY_BOX_OUTPUT_LIMIT: "a process in the run's box wrote past its helper and "
@@ -1665,7 +1648,8 @@ _EXIT_WORDS = {
 
 def _exit_code(summary: dict) -> int:
     """The exit status of a run whose post-steps are done or skipped: its exit class's own code
-    from the one table (`run_end.EXIT_CLASSES`: provider-down 4, box-lost 5, box-output-limit 6),
+    from the one table (`run_end.EXIT_CLASSES`: provider-down 4, box-lost 5, box-output-limit 6,
+    provider-rejected 7),
     said on the way out, else 0."""
     truncated_by = run_end.normalized_truncated_by(summary.get("truncated_by"))
     code = run_end.exit_code_of(truncated_by)

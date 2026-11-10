@@ -10,7 +10,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender.kit.verbs import VerbContext
-from defender.integrations import _stub_transport as transport
+from defender.kit import transport
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.kit.verbs import TenantRecord
@@ -23,6 +23,10 @@ def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module 
     return transport.load_config(ctx, SYSTEM, PREFIX)
 
 
+def _timeout(ctx: VerbContext) -> int:  # lint-dup: ok — per-module alias over the shared transport.timeout_of
+    return transport.timeout_of(_config(ctx))
+
+
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """This system's settings check (#1256 O-5): every `ConfigFault` a verb here can raise —
     `_config`'s keys and the access declaration — raised over the run's record, or None when
@@ -31,11 +35,12 @@ def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adap
 
 
 def health_check(ctx: VerbContext) -> dict:
-    return transport.health_check(ctx, _config(ctx), SYSTEM)
+    return transport.health_check(ctx, SYSTEM, timeout_sec=_timeout(ctx))
 
 
 def get_host(ctx: VerbContext, *, host: str) -> dict:
-    return transport.http_get_obj(ctx, _config(ctx), f"/hosts/{host}", system=SYSTEM)
+    return transport.request(ctx, SYSTEM, "GET", "/hosts/{host}", {"host": host},
+                             timeout_sec=_timeout(ctx))
 
 
 def list_hosts(
@@ -47,11 +52,12 @@ def list_hosts(
 ) -> dict | list:
     params = {k: v for k, v in
               (("role", role), ("criticality", criticality), ("owner", owner)) if v}
-    return transport.http_get(ctx, _config(ctx), "/hosts", system=SYSTEM, params=params or None)
+    return transport.request(ctx, SYSTEM, "GET", "/hosts", query=params or None,
+                             timeout_sec=_timeout(ctx), answer="any")
 
 
 def list_roles(ctx: VerbContext) -> dict | list:  # lint-dup: ok — distinct service
-    return transport.http_get(ctx, _config(ctx), "/roles", system=SYSTEM)
+    return transport.request(ctx, SYSTEM, "GET", "/roles", timeout_sec=_timeout(ctx), answer="any")
 
 
 VERBS = {

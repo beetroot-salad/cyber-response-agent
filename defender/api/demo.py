@@ -24,7 +24,9 @@ from defender.identity import (
     Bootstrap,
     IdentityService,
     InMemoryIdentityRepository,
+    SignInRefused,
     SignInUnavailable,
+    VerifiedProgramToken,
     VerifiedSignIn,
 )
 
@@ -93,6 +95,38 @@ class _LoggedMail:
     async def notify_invitation(self, to: str, tenant_id: str, invitation_id: str) -> None:
         _logger.info("invitation %s to %s for tenant %s (not sent: demo)", invitation_id, to, tenant_id)
 
+    async def notify_credential_expiry(self, to: str, tenant_id: str, program_id: str, credential_id: str,
+                                       expires_at: _dt.datetime) -> None:
+        _logger.info("credential %s of program %s expires %s; warning to %s for tenant %s (not sent: demo)",
+                     credential_id, program_id, expires_at.isoformat(), to, tenant_id)
+
+
+class _DemoProgramsRealm:
+    """The demo's stand-in for the programs realm: it makes a client and a secret per OAuth credential and
+    keeps the clients in memory, but issues no tokens, so no OAuth credential can sign in (keys can)."""
+
+    def __init__(self) -> None:
+        self._clients: set[str] = set()
+
+    async def create_client(self, credential_id: str) -> tuple[str, str]:
+        self._clients.add(credential_id)
+        return str(uuid.uuid4()), uuid.uuid4().hex
+
+    async def delete_client(self, client_id: str) -> bool:
+        if client_id not in self._clients:
+            return False
+        self._clients.discard(client_id)
+        return True
+
+    async def client_ids(self) -> set[str]:
+        return set(self._clients)
+
+    async def verify_token(self, token: str) -> VerifiedProgramToken:
+        raise SignInRefused("the demo issues no program tokens")
+
+    async def close(self) -> None:
+        """Nothing is open."""
+
 
 async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = UTC_NOW,
               frontend_origin: str = DEMO_FRONTEND_ORIGIN) -> ApiDeps:
@@ -126,7 +160,7 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
                                   created_at=now, accepted_at=now)
             await people.add_session(demo_sessions([tenant])[f"{tenant}-{role}"], user.id, now=now,
                                expires_at=now + _SESSION_LIFETIME)
-    identity = IdentityService(people, signin=_NoSignIn(), mail=_LoggedMail(), clock=clock,
+    identity = IdentityService(people, signin=_NoSignIn(), mail=_LoggedMail(), clock=clock, programs=_DemoProgramsRealm(),
                                bootstrap=Bootstrap(administrators=()),
                                session_idle_limit=_SESSION_LIFETIME)
     return ApiDeps(
@@ -183,7 +217,7 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId
     done = store.add_investigation(tenant, Investigation(
         investigation_id=demo_id(InvestigationId, tenant, "inv-completed"), alert_id=brute.alert_id, status="completed",
         request_key="demo-request-1", attempt=1,
-        disposition="benign", cost_usd=1.84, created_at=now - 29 * hour,
+        disposition="benign", cost_usd=1.84, cost_is_lower_limit=False, created_at=now - 29 * hour,
         started_at=now - 29 * hour, finished_at=now - 29 * hour + _dt.timedelta(minutes=11),
         artifacts=[RUN_LAYOUT.report.name, RUN_LAYOUT.investigation.name,
                    RUN_LAYOUT.runtime_html.name],
@@ -191,7 +225,7 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId
     running = store.add_investigation(tenant, Investigation(
         investigation_id=demo_id(InvestigationId, tenant, "inv-running"), alert_id=shell.alert_id, status="running",
         request_key="demo-request-2", attempt=1,
-        cost_usd=0.0, created_at=now - 2 * hour, started_at=now - 2 * hour,
+        cost_usd=0.0, cost_is_lower_limit=False, created_at=now - 2 * hour, started_at=now - 2 * hour,
     ))
     # Each run's knowledge record as run start writes it (#1108 P4, O-WARN): the completed run
     # read the latest approved knowledge; the running one started on the last published

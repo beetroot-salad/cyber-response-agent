@@ -161,6 +161,39 @@ CREATE TABLE IF NOT EXISTS session_head_log (
     reason TEXT NOT NULL
 ) STRICT;
 
+-- spend_ledger (#1377): one row per model request a run's agent sent, written when the request
+-- ended. Append-only and on no session's path, so forks, folds and resume never see it; it holds
+-- no conversation content, only what prices the request. `run_id` says whose spend a row is: a
+-- branch arm joins its source's database, and a total sums one run's rows only. `agent_id` is the
+-- requesting agent; `requested_model` the model it was built to request, which alone selects a
+-- price when the ledger is read (r7 S1); `reported_model` the name the provider answered with
+-- (audit only; NULL unless a response came back). `outcome` is how the request ended (r7 S2a):
+-- `response` (its billed counts), `refused` (the provider refused it before its model ran: $0)
+-- or `unseen` (no response, and not known to be unbilled: the total may be short).
+CREATE TABLE IF NOT EXISTS spend_ledger (
+    id INTEGER PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    requested_model TEXT NOT NULL,
+    reported_model TEXT,
+    outcome TEXT NOT NULL CHECK (outcome IN ('response', 'refused', 'unseen')),
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cache_read_input_tokens INTEGER NOT NULL,
+    cache_creation_input_tokens INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS spend_ledger_run ON spend_ledger(run_id);
+
+-- spend_ledger_seal (#1377 r7.3 T1): one row per run whose request logger ended it with no failed
+-- ledger write. `last_row_id` is the id of the run's last ledger row when it was sealed (NULL for a
+-- run with no rows). A run's ledger reads complete only when its seal names its current last row:
+-- no seal (a failed write, a kill, a failed seal) or a row written after it reads "at least".
+CREATE TABLE IF NOT EXISTS spend_ledger_seal (
+    run_id TEXT PRIMARY KEY,
+    last_row_id INTEGER
+) STRICT;
+
 -- gather_boundary — the danger-lens surface, scoped to each session's PATH from its
 -- recorded head (#753 / FK16). `session_id` names the session whose conversation the row
 -- is on, NOT the session that happens to own the row: a fork therefore sees the prefix it

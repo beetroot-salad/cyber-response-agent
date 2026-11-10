@@ -91,26 +91,26 @@ def test_flags_the_spelled_appender(tmp_path, imp, call):
     assert any(f.fingerprint.endswith(":append") for f in _GATE._scan(tree))
 
 
-def test_splitlines_on_a_plain_value_is_clean(tmp_path):
-    """A subprocess stdout string has no torn-file failure mode — deliberately
-    NOT matched, and the refactor must not widen into it."""
-    assert not _flags(tmp_path, (
-        "import json\n"
+_CLEAN = [
+    # A subprocess stdout string has no torn-file failure mode — deliberately NOT matched, and the
+    # refactor must not widen into it.
+    pytest.param("import json\n"
         "def read(out):\n"
-        "    return [json.loads(x) for x in out.splitlines()]\n"
-    ))
-
-
-def test_suppression(tmp_path):
-    assert not _flags(tmp_path, (
-        "import json\n"
+        "    return [json.loads(x) for x in out.splitlines()]\n", id="splitlines_on_a_plain_value_is_clean"),
+    pytest.param("import json\n"
         "def read(p):\n"
         "    rows = []\n"
         "    with open(p) as fh:\n"
         "        for line in fh:  # lint-jsonl-io: ok — deliberate\n"
         "            rows.append(json.loads(line))\n"
-        "    return rows\n"
-    ))
+        "    return rows\n", id="suppression"),
+]
+
+
+@pytest.mark.parametrize("src", _CLEAN)
+def test_a_plain_value_or_a_suppressed_read_is_clean(tmp_path, src):
+    """A plain string split into lines, or a read marked deliberate, scans clean."""
+    assert not _flags(tmp_path, src)
 
 
 def test_append_handle_from_a_module_opener_is_flagged(tmp_path):

@@ -407,7 +407,7 @@ def admission_bytes(shape: str, base: Mapping[str, Any] | None = None) -> bytes:
     if shape == "lone_surrogate":
         return b'{"rule": {"id": "R-1001", "description": "x\\ud800y"}}'
     if shape == "oversize":
-        cap = sym("_io", "READ_LIMIT")
+        cap = sym("records.formats", "ALERT_BYTE_CAP")
         filler = b"a" * (cap + 1 - len(b'{"pad": ""}'))
         return b'{"pad": "' + filler + b'"}'
     if shape == "raw_line_separators":
@@ -1104,7 +1104,7 @@ def default_main_turns() -> list[Turn]:
 
 
 def closing_main_turns(disposition: str = "inconclusive") -> list[Turn]:
-    """MAIN writes a whole valid investigation (the sshd golden's, as `test_1077_replay` does),
+    """MAIN writes a whole valid investigation (the sshd golden's, as `test_replay` does),
     closes it through the real `close_investigation` (the review gate answers through drive's
     default bundle) and stops — the script for a demand that needs the run to reach `report.md`."""
     doc = (H.GOLDEN / "investigation.md").read_text(encoding="utf-8")

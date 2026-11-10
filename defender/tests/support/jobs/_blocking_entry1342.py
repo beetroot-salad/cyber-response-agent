@@ -40,9 +40,11 @@ def investigate(**_kw):
 
 
 def _start_box(run_dir, *_a, start_token, **_k):
-    """A box start that requires the token the launch record carries and leaves the container it stamps."""
-    containers.mkdir(parents=True, exist_ok=True)
-    (containers / f"defender-run-{Path(run_dir).name}").write_text(start_token, encoding="utf-8")
+    """A box start that requires the token the launch record carries and leaves the container it stamps, carrying
+    the claim its worker handed the child, as a `StandInContainers` marker (`claims/<claim>/<name>`)."""
+    folder = containers / "claims" / os.environ["DEFENDER_BOX_CLAIM"]
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"defender-run-{Path(run_dir).name}").write_text(start_token, encoding="utf-8")
     (marks / "start-token").write_text(start_token, encoding="utf-8")
     return box_mod.unboxed_executor()
 

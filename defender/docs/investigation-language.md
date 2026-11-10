@@ -1725,7 +1725,7 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
     where the run's own `l-002` showed no successful auth and `p3`
     predicted one. Both genuine, neither a shipped golden or a worked
     example, both left as they are. It also fires on five minimal
-    fixtures in `defender/tests/test_invlang_rules_933*.py` written for
+    fixtures in `defender/tests/test_invlang_rules*.py` written for
     rules #23/#24 — documents that declare predictions, write a
     `:T conclude`, and never cite or defer them. Those fixtures are
     non-compliant under this rule and need one

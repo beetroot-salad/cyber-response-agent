@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
-from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.usage import RunUsage, UsageLimits
 
@@ -190,7 +190,8 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
     `end` (exit class, and whether the model had already closed) is flattened on so `run.py`'s
     post-steps read it in-process rather than off disk. The run's live state is not on it
     (#1235): a caller that wants it hands it in (`run_investigation(run_state=…)`) and keeps its
-    own reference."""
+    own reference. Nothing about spend rides on it: the run's ledger says for itself whether it is
+    complete (#1377 r7.3 T1)."""
     return {
         "output": output, "model": model_name, "requests": requests,
         "truncated_by": end.truncated_by, "closed_before_cut": end.closed_before_cut,
@@ -257,7 +258,7 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
             _logger.warning(f"truncated_by write skipped: {e!r}")
 
 
-async def _drive_agent(  # noqa: PLR0913, PLR0912, C901 — the loop's own inputs: agent, prompt, deps, store, bounds
+async def _drive_agent(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the loop's own inputs; one except arm per ending
     agent: Agent[AgentDeps, str], prompt: str | None, deps: AgentDeps, store: Any,
     session_id: str, bounds: challenge_gate.Bounds, message_history: list | None = None,
     *, usage: RunUsage | None = None, snapshots: branch.SnapshotWriter | None = None,
@@ -313,13 +314,14 @@ async def _drive_agent(  # noqa: PLR0913, PLR0912, C901 — the loop's own input
         _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
-    except (run_end.CallRecordWriteFailed, providers.ProviderDown, box_mod.BoxEnding,
-            BaseExceptionGroup) as e:
+    except (run_end.CallRecordWriteFailed, providers.ProviderDown, providers.ProviderRejected,
+            ModelHTTPError, box_mod.BoxEnding, BaseExceptionGroup) as e:
         # These failures end the run by name. Concurrent leads may deliver any of them inside an
         # exception group; a group that carries none propagates as itself.
         ending = box_ending_in(e)
         failed = carried(e, run_end.CallRecordWriteFailed)
         down = _provider_down_in(e)
+        refused = _refusal_in(e)
         if ending is not None:
             # The box is unusable, or a process wrote past its helper (#1421 O8, O9): ahead of a
             # call-record or provider fault beside it. Its own words are logged here, once; the
@@ -339,6 +341,14 @@ async def _drive_agent(  # noqa: PLR0913, PLR0912, C901 — the loop's own input
             _logger.error(f"{down}; ending the run")
             truncated_by = session_store.TRUNCATED_BY_PROVIDER_DOWN
             exit_reason = "ProviderDown"
+        elif refused is not None:
+            # The provider refused MAIN's own request, or a lead's with a broken setup, for good
+            # (#1243 r3): resending gets the same answer, so like provider-down it is an
+            # infrastructure end with no report. The traceback is kept: a 400 may be our own
+            # request built wrong.
+            _logger.error(f"{refused}; ending the run", exc_info=e)
+            truncated_by = run_end.TRUNCATED_BY_PROVIDER_REJECTED
+            exit_reason = "ProviderRejected"
         else:
             raise
     finally:
@@ -366,6 +376,28 @@ def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
 
     run = getattr(verbs, "call_run", None)
     bind_call_ids(state, run if isinstance(run, str) and run else run_id)
+
+
+def _refusal_in(exc: BaseException) -> providers.ProviderRejected | None:
+    """The refusal that should end the run on `exc` (#1243 r3): a lead's `ProviderRejected`, or
+    MAIN's own refused request, bare or carried by a group that holds no interrupt, kill, abort
+    or outage; else `None`."""
+    overriding = (BudgetKill, RunAborted, box_mod.BoxEnding, providers.ProviderDown)
+    found = carried_unless_overridden(exc, providers.ProviderRejected, overriding)
+    if found is not None:
+        return found
+    if carried_unless_overridden(exc, ModelHTTPError, overriding) is None:
+        return None
+    # Every HTTP error the group carries, not only the first: a temporary one ahead of a
+    # refusal must not hide it.
+    pending = [exc]
+    while pending:
+        leaf = pending.pop(0)
+        if isinstance(leaf, BaseExceptionGroup):
+            pending.extend(leaf.exceptions)
+        elif isinstance(leaf, ModelHTTPError) and (rejection := providers.rejected(leaf)):
+            return rejection
+    return None
 
 
 def _provider_down_in(exc: BaseException) -> providers.ProviderDown | None:
@@ -517,14 +549,7 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
         run_end.write_sidecar(run, end)
     except OSError as e:
         _logger.warning(f"run-end record write skipped: {e!r}")
-    try:
-        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
-    except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
-        _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
-        try:
-            write_guarded(RunPaths(run_dir).tool_trace, "")
-        except OSError as fallback_err:
-            _logger.error(f"the empty-trace fallback also failed ({fallback_err!r})")  # lint-run-records: ok — an operator diagnostic naming the missing record
+    _write_trace_or_empty(run_dir, store, session_id, wall_ms, run_id=str(run.id), logger=logger)
     return _run_summary(
         output=None, model_name=model_name, requests=logger.n_requests, end=end,
         exit_reason=exit_reason, case_id=case_id, store_path=store.path)
@@ -539,8 +564,9 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
     """Run the correlation lead to its end and return `(the correlation section of MAIN's
     opening message, None)`, or `(None, the run summary)` when a run-level stop arrived first.
 
-    A run-level kill or a store fault while the lead runs ends the run the way MAIN's own would,
-    with the agent never started. An interrupt, a cancellation or a run folder that refuses the
+    A run-level kill, a store fault, or a provider refusal that ends the run (`ProviderRejected`,
+    #1243) while the lead runs ends the run the way MAIN's own would, with the agent never
+    started. An interrupt, a cancellation or a run folder that refuses the
     lead's summary propagates (the run's block releases the wire log and the store)."""
     from .. import lead_zero as lead_zero_mod
 
@@ -575,6 +601,11 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
         if down is not None:
             _logger.error(f"{down}; stopping before the agent starts")
             return None, stop(session_store.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")
+        refused = _refusal_in(e)
+        if refused is not None:
+            # The correlation lead's model has a broken setup (#1243 r3): MAIN's leads share it.
+            _logger.error(f"{refused}; stopping before the agent starts", exc_info=e)
+            return None, stop(run_end.TRUNCATED_BY_PROVIDER_REJECTED, "ProviderRejected")
         raise
     return lead_zero_mod.render_correlation_section(
         outcome, grant_home=tenant.table_pointer), None
@@ -628,11 +659,15 @@ def _snapshot_writer(  # noqa: PLR0913 — the run's identity plus the caps its 
         base_request_limit=bounds.base_request_limit, extra_turns=bounds.extra_turns)
 
 
-def _write_trace_or_empty(run_dir: Path, store: Any, session_id: str, wall_ms: float) -> None:
-    """Write the run's tool trace, or an empty one when the store cannot produce it; never
-    fails the run (the trace is observability)."""
+def _write_trace_or_empty(run_dir: Path, store: Any, session_id: str, wall_ms: float, *,
+                          run_id: str, logger: observe.RequestLogger) -> None:
+    """Seal the run's ledger (its request logger does, unless a spend write failed), then write the
+    run's tool trace, or an empty one when the store cannot produce it; never fails the run (the
+    trace is observability). The one place a run file is written, so every exit that writes one
+    seals first and the file reads the sealed ledger (#1377 r7.3 T1)."""
+    logger.seal_spend()
     try:
-        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
+        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms, run_id=run_id)
     except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
         _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
         try:
@@ -746,6 +781,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             review_stages if review_stages is not None
             else review_roles.live_review_stages(  # lint-default: ok — DI seam owning its default (the live bundle, buildable only where the run dir and the run's logger are)
                 run_dir, defender_dir, logger=logger, model_override=model_override,
+                make_model=make_model,
             )
         )
 
@@ -754,6 +790,10 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         try:
             factory = _resolve_store_factory(resume, store_factory, source_run=source_run)
             store = owns_the_run.enter_context(factory(case_id, run_dir))
+            # The ledger every agent of the run writes its spend to, bound to the run's one logger
+            # now that the store is open (the logger and the review stages exist before it, so a
+            # store-setup failure still leaves a wire log).
+            logger.bind_ledger(observe.SpendLedger(store, run_id))
             # A resume joins the source run's case, so the case pointer comes from the store,
             # not the uuid minted above (they match on a fresh run). `run_dir` is passed because
             # a resumed MAIN inherits the investigation document as well as the message history.
@@ -836,7 +876,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         wall_ms = (time.monotonic() - run_started) * 1000.0
 
         result = agent_run.result if agent_run is not None else None
-        _write_trace_or_empty(run_dir, store, session_id, wall_ms)
+        _write_trace_or_empty(run_dir, store, session_id, wall_ms, run_id=run_id, logger=logger)
         output = result.output if result is not None else None
         return _run_summary(
             output=output, model_name=model_name, requests=logger.n_requests,

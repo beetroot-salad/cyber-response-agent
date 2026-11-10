@@ -15,7 +15,7 @@ from defender.tests.support.invlang.validation._dispositions995 import grant_for
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 
-#: The holder's name as the table spells it — a literal, as in `test_correlation_holder_999`.
+#: The holder's name as the table spells it — a literal, as in `test_correlation_holder`.
 HOLDER = "lead-zero-correlation"
 SHIPPED_TEMPLATE_ID = "elastic.correlate-alerts-by-entity"
 

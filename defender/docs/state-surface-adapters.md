@@ -71,11 +71,11 @@ that need to match `elastic_adapter.py`:
   the `VERBS` registry's annotations are the authoritative surface (per the
   memory-recorded discipline in the elastic SKILL).
 
-Config at the tenant's `$DEFENDER_DATA_ROOT/<tenant>/knowledge/settings/systems/{system}/config.env`
-declaring `{SYSTEM}_HOST=web-1`, `{SYSTEM}_URL_BASE=http://{system}:8080`,
-`{SYSTEM}_TIMEOUT_SEC=10`. The adapter loads via the same `ctx.settings_dir /
-systems/{system}/config.env` pattern as
-elastic_adapter.
+Settings at the tenant's `$DEFENDER_DATA_ROOT/<tenant>/knowledge/settings/systems/{system}/`:
+`access.yaml` names the system's base and auth (the credential proxy reaches it there), and
+`config.env` holds only the keys the adapter reads, e.g. `{SYSTEM}_TIMEOUT_SEC=10`. A host is a
+verb parameter, never a setting, and the base is never a `config.env` key. The adapter reads
+both from the run's record (`ctx.tenant`) through `kit.transport`, as every adapter does.
 
 ## Verbs (minimum viable surface)
 

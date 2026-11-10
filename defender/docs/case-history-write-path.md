@@ -47,7 +47,7 @@ case; a person closes it.
   run begins (D-18); a folder still holding `systems/case-history/` is told to move to the file.
 
 - **Cut-short runs record per exit class (#1047 O2), still as comments.** The exit class comes
-  in-process from `run.py` off the driver's own summary. `aborted` → an escalation note (no
+  in-process from `run.py` off the driver's own summary. `aborted` / `provider-rejected` → an escalation note (no
   verdict), ticket stays open. `request-limit` / `retry-exhausted` → the record, proposing the
   host's forced `unresolved`; with no usable report → the escalation note. `budget` / `store` /
   `provider-down` / `box-lost` / `box-output-limit` → no call at all (the case stays open). Anything else → the record off the report. A run whose model
@@ -58,7 +58,7 @@ case; a person closes it.
   template; the drivers and the report schema never bind to ticket field names.
 
 - **One transport.** The comment goes through the shared adapter transport's host write entry
-  (`_stub_transport.http_write`, through the proxy: any 2xx is success, a 4xx is an
+  (`kit.transport.host_write`, through the proxy: any 2xx is success, a 4xx is an
   `UpstreamFault` carrying the store's status, a 5xx or unreachable store a `TransportFault`).
   There is no second copy of the route in the writer.
 

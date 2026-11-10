@@ -15,7 +15,7 @@ tier, `knowledge`, the `lazy_door` helper its door binds (#1315) and itself; and
 `integrations/` imports it. The named reach-ins
 that remain are baseline entries owned by #1172, so they fail like any other once gone. That the
 API loads no `investigation` or `learning` module is a question of what Python executes, not of
-spelling, so it is answered by importing (`defender/tests/api/test_1080_api_loads.py`), not here.
+spelling, so it is answered by importing (`defender/tests/api/test_api_loads.py`), not here.
 
 It fails (exit 1) on an unlisted finding, on a baseline entry no finding matches (the list only
 shrinks), on an entry whose reason names no owner issue (`#<n>`), and on a scanned top-level

@@ -324,17 +324,18 @@ def _lines(err: str) -> list[str]:
 
 
 @pytest.mark.postgres
-def test_1345_o6_the_verb_stores_a_six_entry_file_prints_it_and_re_derives_the_tenants_titles(verb):
-    """A valid file becomes the tenant's mapping (created), the stored mapping is printed, and the tenant's alerts
-    now read through it. (#1345 O6, D3, O2)"""
+def test_1345_o6_the_verb_stores_a_six_entry_file_prints_it_and_alerts_stored_after_read_through_it(verb):
+    """A valid file becomes the tenant's mapping (created), the stored mapping is printed, and alerts stored from then
+    on read through it; one stored before keeps its null display (#1420 D5, D6). (#1345 O6, D3, O2)"""
     verb.alert("T-1")
     assert verb.display() == [(None, None)], "premise: no mapping, no display"
 
     rc, out, err = verb.run(SIX_FILE)
+    verb.alert("T-2")
 
     assert (rc, err) == (0, "")
     assert verb.stored() == {k: v for k, v in FIXTURE_ALERT_MAPPING.items()}
-    assert verb.display() == [("sketch", "r-1342")]
+    assert verb.display() == [(None, None), ("sketch", "r-1342")]
     # "prints the stored mapping": each entry's name and path on one line (the layout is the code stage's).
     for entry, path in FIXTURE_ALERT_MAPPING.items():
         assert any(entry in line and path in line for line in out.splitlines()), (entry, out)
@@ -342,7 +343,8 @@ def test_1345_o6_the_verb_stores_a_six_entry_file_prints_it_and_re_derives_the_t
 
 @pytest.mark.postgres
 def test_1345_o6_a_four_entry_file_loads_with_title_and_description_unmapped(verb):
-    """Today's four-entry file loads: what the file leaves out is unmapped and the titles go null. (#1345 O6, D3)
+    """Today's four-entry file loads: what the file leaves out is unmapped, so alerts stored after it have no title;
+    one stored before keeps its own (#1420). (#1345 O6, D3)
     D4's counterpart (the same four entries as an API PUT body are 422) is pinned in the API suite:
     `test_api_stub.py::test_1345_the_mapping_body_names_exactly_the_records_entries_all_required` and the over-the-fake `missing-entry` case (round 1 repair 12; the API half left this test)."""
     seed_alert_mapping(verb.dsn, verb.tid, FIXTURE_ALERT_MAPPING)
@@ -352,9 +354,10 @@ def test_1345_o6_a_four_entry_file_loads_with_title_and_description_unmapped(ver
     rc, _, err = verb.run(ALERT_MAPPING_TEXT)
 
     assert (rc, err) == (0, "")
+    verb.alert("T-2")
     assert verb.stored() == {"signature": "rule.id", "event_time": "timestamp", "summary": "rule.description",
                              "case_key": "alert_id"}
-    assert verb.display() == [(None, None)]
+    assert verb.display() == [("sketch", "r-1342"), (None, None)]
 
 
 @pytest.mark.postgres
@@ -364,9 +367,10 @@ def test_1345_o6_an_empty_mapping_file_is_a_valid_choice_that_unmaps_everything(
     verb.alert("T-1")
 
     rc, _, err = verb.run("{}\n")
+    verb.alert("T-2")
 
     assert (rc, err) == (0, "")
-    assert (verb.stored(), verb.display()) == ({}, [(None, None)])
+    assert (verb.stored(), verb.display()) == ({}, [("sketch", "r-1342"), (None, None)])
 
 
 @pytest.mark.postgres
@@ -403,7 +407,7 @@ def test_1345_o6_a_malformed_file_or_invalid_entry_is_refused_and_writes_nothing
 
 @pytest.mark.postgres
 def test_1345_o6_an_entry_given_as_null_in_the_file_is_unmapped_like_one_left_out(verb):
-    """`description: null` is stored as unmapped (absent from the stored paths) and the display is re-derived with no
+    """`description: null` is stored as unmapped (absent from the stored paths): an alert stored after it has no
     description, while the mapped `title` still derives; with a path in its place the description derives (control, the six-entry
     test above). (r5.1 O6 file syntax)"""
     seed_alert_mapping(verb.dsn, verb.tid, FIXTURE_ALERT_MAPPING)
@@ -411,10 +415,11 @@ def test_1345_o6_an_entry_given_as_null_in_the_file_is_unmapped_like_one_left_ou
     assert verb.display() == [("sketch", "r-1342")], "control: with a path the description derives"
 
     rc, _, err = verb.run("signature: rule.id\ntitle: rule.description\ndescription: null\ncase_key: ~\n")
+    verb.alert("T-2")
 
     assert (rc, err) == (0, "")
     assert verb.stored() == {"signature": "rule.id", "title": "rule.description"}
-    assert verb.display() == [("sketch", None)]
+    assert verb.display() == [("sketch", "r-1342"), ("sketch", None)]
 
 
 @pytest.mark.postgres
@@ -430,22 +435,23 @@ def test_1345_o6_a_missing_file_is_refused_and_writes_nothing(verb):
 
 @pytest.mark.postgres
 def test_1345_o6_a_second_run_replaces_whole_like_a_put_and_touches_no_other_tenant(verb):
-    """The same outcome as a PUT: the file replaces the mapping whole (an entry it leaves out is gone), every alert of the
-    tenant is re-derived, another tenant's mapping and display are untouched. (#1345 O6, M1, O2)"""
+    """The same outcome as a PUT: the file replaces the mapping whole (an entry it leaves out is gone), alerts stored
+    after it read through it and earlier ones keep theirs (#1420), another tenant's mapping and display are untouched.
+    (#1345 O6, M1, O2)"""
     register_tenant(verb.dsn, OTHER, alert_mapping={"title": "a"})
-    verb.alert("T-1")
-    verb.alert("T-2")
     verb.alert("T-1", OTHER)
 
     rc, _, err = verb.run("signature: rule.id\ntitle: rule.description\ndescription: rule.id\n")
     assert (rc, err) == (0, "")
-    assert verb.display() == [("sketch", "r-1342")] * 2
+    verb.alert("T-1")
+    assert verb.display() == [("sketch", "r-1342")]
 
     rc, _, err = verb.run("title: a\n")
+    verb.alert("T-2")
 
     assert (rc, err) == (0, "")
     assert verb.stored() == {"title": "a"}, "a replace is whole: the earlier entries are gone"
-    assert verb.display() == [("\u00e9", None)] * 2
+    assert verb.display() == [("sketch", "r-1342"), ("\u00e9", None)]
     assert (verb.stored(OTHER), verb.display(OTHER)) == ({"title": "a"}, [("\u00e9", None)])
 
 

@@ -97,7 +97,8 @@ def _close_fds(fds: list[int]) -> None:
 
 class AttachedStartSeam:
     """Mixin: gives a docker fake the attached-start capability. The fake implements `_record(argv)`
-    (log the call as it logs its others) and `_landed(argv)` (the container now reports running)."""
+    (log the call as it logs its others) and `_landed(argv)` (the container now reports running; or, a
+    daemon that models start faults, the starter's `(rc, stderr)` when the start did not hold)."""
 
     starter_exit: tuple[int, bytes] | None = None   # (rc, stderr): the starter dies before the box ran
     lands = True                                    # False: the start never lands (the box never runs)
@@ -114,13 +115,15 @@ class AttachedStartSeam:
         read, write = os.pipe()
         os.set_blocking(read, False)
         rc, err = self.starter_exit if self.starter_exit is not None else (None, b"")
+        if self.starter_exit is None and self.lands:
+            ended = self._landed(argv)
+            if ended is not None:   # the daemon refused the start, or it took no effect
+                rc, err = ended[0], ended[1].encode()
         ledger = StarterLedger(argv, dict(kw), read, rc)
         starter = FakeStarter(ledger, write, err)
         self.asks.append(ledger)
         self._read_fds.append(read)
         self._starters.append(weakref.ref(starter))   # held weakly: an executor that drops it frees it
-        if self.starter_exit is None and self.lands:
-            self._landed(argv)
         return starter
 
     def held_starters(self) -> list[FakeStarter]:

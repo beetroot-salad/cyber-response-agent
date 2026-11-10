@@ -531,8 +531,12 @@ class LearningState:
             if dedup_key is not None:
                 # String ids only on both sides: an unhashable id off the shared file would raise
                 # `TypeError` inside the lock, and a non-string id can only fail to suppress a
-                # write, the safe direction.
-                seen = {r[dedup_key] for r in existing if isinstance(r.get(dedup_key), str)}
+                # write, the safe direction. The consumed ledger is read too, under the same
+                # lock (#1344 r5, L-C19): a row an author already consumed and rotated off the
+                # queue is not appended again by a republish.
+                consumed = self._read_rows(channel.consumed)[0]
+                seen = {r[dedup_key] for r in (*existing, *consumed)
+                        if isinstance(r.get(dedup_key), str)}
                 to_write = []
                 for row in rows:
                     identity = row.get(dedup_key)

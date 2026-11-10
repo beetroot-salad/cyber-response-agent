@@ -193,7 +193,7 @@ def test_the_run_reaches_the_proxy_directly_never_through_a_web_proxy_from_the_e
     """A run's request (and its bearer token) goes straight to the proxy address it was handed, even when the
     environment names a web proxy (P-1: the token reaches no third party). The stand-in's reply is not the
     proxy's format, so the call is refused as the proxy's own (#1412 O9)."""
-    from defender import _proxy_client
+    from defender.kit import proxy_client as _proxy_client
     port, got, folder = tls_issuer
     monkeypatch.delenv("SSL_CERT_DIR", raising=False)
     monkeypatch.setenv("SSL_CERT_FILE", str(folder / "server.pem"))
