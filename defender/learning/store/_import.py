@@ -17,10 +17,10 @@ import os
 import shutil
 import stat
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, Protocol, cast
 
 from sqlalchemy import Table, func
 from sqlalchemy.exc import IntegrityError
@@ -41,8 +41,27 @@ from ._store import (
 )
 from defender.jobs.learning_models import AUTHOR_LANE, LEAD_LANE, BatchRow, CommitChangeRow, CommitRow
 
-if TYPE_CHECKING:
-    from defender.learning.author.version_control import TenantDelivery
+
+class _Repository(Protocol):
+    """What the import reads of a tenant's clone and its forge: the delivery's repository, named by shape so this
+    module does not import the delivery package (the run process imports the store; it never reaches delivery)."""
+
+    path: Path
+    forge: Any
+
+    def fetch(self) -> Any: ...
+    def revision(self, ref: str) -> str: ...
+    def holds_ref(self, ref: str) -> bool: ...
+    def branch_tip(self, branch: str) -> str | None: ...
+    def entries(self, rev: str, paths: Sequence[str], *, recursive: bool) -> Any: ...
+    def blobs(self, oids: Iterable[str]) -> Mapping[str, bytes]: ...
+
+
+class TenantDelivery(Protocol):
+    """The tenant's `TenantDelivery`, as far as the import reads it."""
+
+    @property
+    def repository(self) -> _Repository: ...
 
 _logger = logging.getLogger(__name__)
 
