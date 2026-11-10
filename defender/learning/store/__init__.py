@@ -4,6 +4,7 @@ Published content stays in Git and review state on the forge; this records what 
 it. `LearningStore` is the async store, `blocking(dsn)` its synchronous face."""
 
 from ._blocking import BlockingStore, blocking
+from ._import import cut_over_learning_state, import_learning_state
 from ._store import (
     BatchView,
     CommitRecord,
@@ -22,5 +23,6 @@ from ._store import (
 
 __all__ = [
     "BatchView", "BlockingStore", "CommitRecord", "Held", "ImportRefused", "ItemRefused", "LaneBusy", "LearningStore",
-    "LeaseLost", "NotLapsed", "Outcome", "Stop", "TenantInactive", "WorkItem", "blocking",
+    "LeaseLost", "NotLapsed", "Outcome", "Stop", "TenantInactive", "WorkItem", "blocking", "cut_over_learning_state",
+    "import_learning_state",
 ]

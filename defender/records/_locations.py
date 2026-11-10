@@ -115,6 +115,12 @@ class WorktreesRoot(_Location):
     __slots__ = ()
 
 
+def unwrap_worktrees_root(location: WorktreesRoot) -> Path:
+    if not isinstance(location, WorktreesRoot):
+        raise TypeError("expected WorktreesRoot")
+    return location._record_location_path
+
+
 class ExportsRoot(_Location):
     """The opaque exports root location."""
     __slots__ = ()

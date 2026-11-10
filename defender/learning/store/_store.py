@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from sqlalchemy import and_, case, delete, exists, func, literal, or_, select, update
+from sqlalchemy import Text, and_, case, delete, exists, func, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -189,7 +189,10 @@ class CommitRecord:
     start: str
     batch_id: BatchId | None
     changes: tuple[tuple[str, str | None, str | None], ...]
-    reverts: tuple[tuple[str, str], ...]
+    #: `(batch, path)` a revert commit undoes (the batch by id; by branch for imported history); `None` otherwise.
+    reverts: tuple[tuple[str, str], ...] | None
+    #: The corpora the commit's batch writes (`DrainLabel.lanes`), by its branch's lane.
+    lanes: tuple[str, ...] = ()
 
 
 def _view(row: Any) -> BatchView:
@@ -356,8 +359,9 @@ class LearningStore:
         for c in changes:
             by_commit.setdefault(c.commit_row, []).append((c.path, c.blob_base, c.blob_left))
         return [CommitRecord(commit=c.commit, branch=c.branch, base=c.base, start=c.start, batch_id=c.batch_id,
-                             changes=tuple(by_commit.get(c.id, ())),
-                             reverts=tuple((str(a), str(b)) for a, b in (c.reverts or ()))) for c in commits]
+                             changes=tuple(by_commit.get(c.id, ())), lanes=lanes_of_branch(c.branch),
+                             reverts=None if c.reverts is None else tuple((str(a), str(b)) for a, b in c.reverts))
+                for c in commits]
 
     # -- claims ------------------------------------------------------------------------------------------------
 
@@ -630,7 +634,8 @@ class LearningStore:
             ended = (await s.execute(update(_B).where(
                 _B.c.id == BatchId(batch_id), _B.c.tenant_id == TenantId(tenant), _B.c.phase == expect_phase)
                 .values(phase="ended", outcome=outcome, ended_at=func.now(), last_checked=func.now(), refusals=0,
-                        lease_owner=None, lease_expiry=None, reason=reason).returning(_B.c.id))).first()
+                        lease_owner=None, lease_expiry=None, reason=func.coalesce(literal(reason, Text), _B.c.reason))
+                .returning(_B.c.id))).first()
             if ended is None:
                 return False
             outcomes: dict[tuple[str, str], Outcome] = {k: Outcome.published() for k in published}
@@ -709,6 +714,14 @@ class LearningStore:
             await s.execute(delete(_C).where(_C.c.tenant_id == t))
             await s.execute(delete(_I).where(_I.c.tenant_id == t))
             await s.execute(delete(_B).where(_B.c.tenant_id == t))
+
+
+def lanes_of_branch(branch: str) -> tuple[str, ...]:
+    """The corpora a batch on `branch` writes (`DrainLabel.lanes`): the lead lane's for its prefix, else the author
+    lane's (a revert's included: it undoes an author-lane change)."""
+    from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL
+
+    return (LEAD_AUTHOR_DRAIN_LABEL if branch.startswith(BRANCH_PREFIX[LEAD_LANE]) else AUTHOR_DRAIN_LABEL).lanes
 
 
 def _text(value: Any) -> str | None:
