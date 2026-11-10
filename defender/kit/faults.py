@@ -3,16 +3,36 @@ from __future__ import annotations
 
 USAGE_EXIT_CODE = 64
 
+#: Whose failure a proxy-path fault is (#1363 O4). `system`: the target system answered, or the
+#: proxy saw its own call to it fail. `request`: this call was outside what the token and the
+#: declaration allow, or the caller cut it short. `setup`: ours, for one system. `access`: ours,
+#: for the whole process.
+ORIGIN_SYSTEM = "system"
+ORIGIN_REQUEST = "request"
+ORIGIN_SETUP = "setup"
+ORIGIN_ACCESS = "access"
+ORIGINS = (ORIGIN_SYSTEM, ORIGIN_REQUEST, ORIGIN_SETUP, ORIGIN_ACCESS)
+#: The origins the proxy labels on the wire; a system's own answer carries none.
+PROXY_LABELS = (ORIGIN_REQUEST, ORIGIN_SETUP, ORIGIN_ACCESS)
+
 
 class AdapterFault(Exception):
 
     exit_code: int = 1
-    #: True when the fault is the credential proxy's own (#1404): the proxy refused or failed, or
-    #: could not be used at all (unreachable, an unusable answer, no address handed to the call, or
-    #: no request token produced for it).
-    #: False for a fault that never touched the proxy and for one where the proxy saw the target
-    #: system's own call fail or answer, so a reader names the proxy only for its own faults.
-    proxy_own: bool = False
+    #: Whose failure a proxy-path fault is (`ORIGINS`), set once, by the proxy client where the
+    #: fault is raised (#1363 B2). None for a fault that never touched the proxy: a missing origin
+    #: is not read as `access`.
+    origin: str | None = None
+    #: The system a `setup` fault is about, when it names one (#1363 B1).
+    system: str | None = None
+
+    @property
+    def proxy_own(self) -> bool:
+        """True when the fault is the credential proxy's own (#1404): the proxy refused or failed,
+        or could not be used at all. Derived from `origin`, never set: False for a fault that
+        never touched the proxy and for one the target system caused, so a reader names the proxy
+        only for its own faults."""
+        return self.origin in PROXY_LABELS
 
     def __init__(self, detail: str):
         super().__init__(detail)
@@ -55,6 +75,12 @@ class UpstreamFault(AdapterFault):
 
 
 __all__ = [
+    "ORIGINS",
+    "ORIGIN_ACCESS",
+    "ORIGIN_REQUEST",
+    "ORIGIN_SETUP",
+    "ORIGIN_SYSTEM",
+    "PROXY_LABELS",
     "USAGE_EXIT_CODE",
     "AdapterFault",
     "ConfigFault",

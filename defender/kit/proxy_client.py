@@ -19,7 +19,14 @@ from dataclasses import asdict, dataclass, fields
 import httpx
 
 from defender.kit.access import caller_wait_sec
-from defender.kit.faults import AdapterFault, TransportFault
+from defender.kit.faults import (
+    ORIGIN_ACCESS,
+    ORIGIN_REQUEST,
+    ORIGIN_SYSTEM,
+    PROXY_LABELS,
+    AdapterFault,
+    TransportFault,
+)
 from defender.kit.internal_http import internal_client, tls_trust
 from defender.kit.verbs import VerbContext
 
@@ -39,7 +46,9 @@ class FinalRecord:
     and only if the body frames carry the complete body (an empty one included). `sent` is false
     only when the proxy never began the system's call or never connected to it (#1374).
     `reader_fault` says the run itself cut the reply, by reading too slowly or leaving; the status,
-    if any, still stands, but the fault is not the system's."""
+    if any, still stands, but the fault is not the system's. `origin` is the proxy's label for a
+    refusal of its own (`request`, `setup` or `access`, #1363 O4); None for the system's own
+    answer or failure."""
 
     status: int | None
     headers: Mapping[str, str]
@@ -49,6 +58,7 @@ class FinalRecord:
     sent: bool
     body_whole: bool
     reader_fault: bool
+    origin: str | None
 
 
 _FIELDS = tuple(f.name for f in fields(FinalRecord))
@@ -113,6 +123,8 @@ def _record_of(payload: bytes) -> FinalRecord:
             or not (detail is None or isinstance(detail, str))
             or not all(isinstance(doc[k], bool) for k in ("system_side", "sent", "body_whole", "reader_fault"))):
         raise ValueError("a field of the final record has the wrong type")
+    if not (doc["origin"] is None or doc["origin"] in PROXY_LABELS):
+        raise ValueError("a field of the final record has the wrong type")
     if doc["fault"] is None and (status is None or not doc["body_whole"]):
         raise ValueError("a final record with no fault is not a whole answer")
     return FinalRecord(**doc)
@@ -136,22 +148,36 @@ class ProxyAnswer:
     sent: bool = True
     #: The run itself cut the reply (`FinalRecord.reader_fault`).
     reader_fault: bool = False
+    #: Whose failure the answer is (`ORIGINS`), assigned by `proxy_exchange` and `proxy_call`, the
+    #: one place the rule lives (#1363 B2): a reply the run cut is `request`; a status or a
+    #: system-side mark is `system`; otherwise the proxy's label, and `access` when it gave none.
+    origin: str = ORIGIN_ACCESS
 
     @property
     def from_system(self) -> bool:
-        """The system's own answer or failure: it answered (any status) or the proxy marked it,
-        unless the run itself cut the reply."""
-        return (bool(self.status) or self.system_side) and not self.reader_fault
+        """The system's own answer or failure (`origin` is `system`)."""
+        return self.origin == ORIGIN_SYSTEM
+
+
+def origin_of(final: FinalRecord) -> str:
+    """The origin of the answer `final` records."""
+    if final.reader_fault:
+        return ORIGIN_REQUEST
+    if final.status or final.system_side:
+        return ORIGIN_SYSTEM
+    return final.origin or ORIGIN_ACCESS
 
 
 @contextlib.contextmanager
 def _the_proxys_own() -> Iterator[None]:
-    """Every fault raised inside is the proxy's own (`proxy_own`, #1404): marked once around the
-    whole exchange, so a raise site added later cannot be left blaming the system."""
+    """Every fault raised inside, before the proxy answered, is `access` (#1363 O4): marked once
+    around the whole exchange, so a raise site added later cannot be left blaming the system. A
+    fault that already carries its origin keeps it."""
     try:
         yield
     except AdapterFault as fault:
-        fault.proxy_own = True
+        if fault.origin is None:
+            fault.origin = ORIGIN_ACCESS
         raise
 
 
@@ -192,7 +218,7 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
         status=final.status or 0, headers=dict(final.headers),
         body=b"".join(reply.chunks).decode("utf-8", "replace") if final.body_whole else "",
         fault=final.fault, detail=final.detail or "", system_side=final.system_side,
-        sent=final.sent, reader_fault=final.reader_fault)
+        sent=final.sent, reader_fault=final.reader_fault, origin=origin_of(final))
 
 
 def _post(proxy_url: str, token: str, doc: Mapping[str, object], timeout: float) -> bytes:
@@ -232,10 +258,14 @@ def _client() -> httpx.Client:
 
 
 def token_of(ctx: VerbContext) -> str | None:
-    """The request token `ctx` presents: its own, or one asked of its source now, inside the
-    verb's call (r7 A20). A source that cannot mint raises its fault here."""
+    """The request token `ctx` presents: its own, or one asked of its access holder or source
+    now, inside the verb's call (r7 A20). A holder or source that cannot mint raises its fault
+    here."""
     if ctx.request_token is not None:
         return ctx.request_token
+    holder = getattr(ctx, "access", None)
+    if holder is not None:
+        return holder.token()
     source = ctx.token_source
     return None if source is None else source()
 
@@ -249,8 +279,8 @@ def proxy_exchange(
     ctx: VerbContext, *, system: str, method: str, url: str, body: dict | None, timeout_sec: int,
 ) -> ProxyAnswer:
     """One JSON request to `system` through the credential proxy, with the token `ctx` presents;
-    the proxy's answer as it came. A fault raised before the answer (no token minted, the proxy
-    not reached) is the proxy's own (`proxy_own`)."""
+    the proxy's answer as it came, with the origin the client gave it. A fault raised before the
+    answer (no token minted, the proxy not reached) is `access`."""
     with _the_proxys_own(), _before_sending():
         token = token_of(ctx)
     return proxy_call(
@@ -260,4 +290,12 @@ def proxy_exchange(
         body=request_body(body), timeout_sec=timeout_sec)
 
 
-__all__ = ["PROXY_PATH", "REPLY_CONTENT_TYPE", "DecodedReply", "FinalRecord", "ProxyAnswer", "decode_reply", "encode_body", "encode_final", "proxy_call", "proxy_exchange", "request_body", "token_of"]
+def report_fault(ctx: VerbContext, fault: AdapterFault) -> None:
+    """Tell the call's access holder, if it has one, of a fault the client raised (#1363 B1). The
+    holder keeps only what concerns it: a `setup` or `access` fault."""
+    holder = getattr(ctx, "access", None)
+    if holder is not None:
+        holder.report(fault)
+
+
+__all__ = ["PROXY_PATH", "REPLY_CONTENT_TYPE", "DecodedReply", "FinalRecord", "ProxyAnswer", "decode_reply", "encode_body", "encode_final", "proxy_call", "origin_of", "proxy_exchange", "report_fault", "request_body", "token_of"]
