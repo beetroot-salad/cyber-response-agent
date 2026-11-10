@@ -20,23 +20,24 @@ FakeClock, FakeES, sha, canonical_digest, instant, seconds. Added (r6.4.1):
   `_cluster/health`. Anything else raises NotImplementedError so a gap is loud, not silent.
   Data-stream membership is by backing-index name only (deferred verification item 7).
 * `World`: the documents a snapshot holds (auth, syslog, nginx events; alerts with ancestry).
-* `LabOps`: the lab operations seam both make-a-case and the launcher drive.
-* `LabRig`: a freeze + parts + case dir + cluster + ops wired together on a tmp path.
+* `LabRig`: a freeze + parts + case dir + cluster + the REAL lab layer wired together on a tmp path.
 
 Added (r6.4.2, repairs after attack batch 1):
 
-* `FaultJournal`: a journal that raises from `append` at the k-th STEP entry (every entry but the
-  lock store's and the clock's), after recording it, so one mechanism faults ES requests, lab
-  operations and the agent run alike. `step_log` lists the steps of a run that was not faulted.
-* `FakeCluster`: a node that can be DOWN (`up`; a request while down raises as docker exec into a
-  stopped container does and is listed in `down_requests`) and per-operation `latency` that moves
-  the rig clock (a restore takes minutes).
-* `LabOps.ensure_node()` (pinned seam): starts the frozen node if it is stopped. `teardown()`
-  stops it (the real teardown does), `restart_node` starts it.
-* `LabRig(patterns=, extra_alerts=, journal=, latency=, node_up=, clock_step=)`, `tenant_settings`
-  (the lab tenant's `settings/` dir with `systems/elastic/config.env`, D24), `freeze["patterns"]`.
+* `FaultJournal`: a journal that raises `InjectedStep` from `append` at the k-th STEP entry (every entry but
+  the lock store's and the clock's), after recording it, so one mechanism faults docker calls, cluster
+  requests and the agent run alike. `step_log` lists the steps of a run that was not faulted.
+* `FakeCluster`: per-operation `latency` that moves the rig clock (a restore takes minutes; `search` too).
 * `expected_variant(mutation, span_start)` and `LabRig.write_variant_case(...)`: the end state of a
   variant and its case.yaml, from the world constants and the verbatim-processor oracle.
+
+r6.4.3 (C-rig): the hand-written stand-in for the lab layer (`LabOps`) is gone. `LabRig` builds the real
+`lab_ops.LabOps` and fakes only its outer edge: docker (`_rig_docker.RigDocker`, container-state aware, with
+volumes and the files the lab keeps in the engine) and the frozen cluster, which the lab layer reaches through
+its real curl path (`FrozenEs`): the rig docker answers the in-container curl from `FakeCluster`, with curl's
+own exit code and `000` while the node does not listen. A node's cluster state lives on its data volume
+(`save_node_state`/`load_node_state`). `FakeLockStore.delete_if_held_by` and `race` model finding 9.
+A case's `content` is the digest the real layer gives the expected state (`LabRig.expected_content`).
 """
 from __future__ import annotations
 
@@ -70,6 +71,10 @@ class Journal(list):
         return len(self) - 1 - self.ops()[::-1].index(op)
 
 
+class InjectedStep(RuntimeError):
+    """What a `FaultJournal` trip raises; the rig docker never turns it into an HTTP answer."""
+
+
 class FaultJournal(Journal):
     """A `Journal` that raises `RuntimeError` when the `trip_at`-th step is appended (1-based), after
     recording it. A step is every entry except the lock store's (`lock.*`) and the clock's (`clock.*`)
@@ -88,16 +93,31 @@ class FaultJournal(Journal):
         self.step_log.append(entry)
         if self.trip_at is not None and len(self.step_log) == self.trip_at:
             self.tripped = entry
-            raise RuntimeError(f"injected failure at step {self.trip_at}: {op}")
+            raise InjectedStep(f"injected failure at step {self.trip_at}: {op}")
 
 
 class FakeLockStore:
-    """The lab-side record store `chaos.lock` drives: three primitives, nothing more."""
+    """The lab-side record store `chaos.lock` drives: four primitives, nothing more. r6.4.3 finding 9 adds
+    `delete_if_held_by(name, token) -> bool`: one engine-side step that deletes the record only if its token is
+    `token` (True when it deleted).
+
+    `race(name, fn)` models another operator acting between a holder's read and its delete: `fn()` runs once,
+    right AFTER the next `read(name)` has answered, or right BEFORE the next delete of `name` (either primitive)
+    is served, whichever comes first, so a delete always meets the state `fn` left."""
 
     def __init__(self, journal: Journal) -> None:
         self.journal = journal
         self.records: dict[str, str] = {}
         self._mutex = threading.Lock()
+        self._races: dict[str, Callable[[], None]] = {}
+
+    def race(self, name: str, fn: Callable[[], None]) -> None:
+        self._races[name] = fn
+
+    def _run_race(self, name: str) -> None:
+        fn = self._races.pop(name, None)
+        if fn is not None:
+            fn()
 
     def create_exclusive(self, name: str, record: str) -> bool:
         with self._mutex:
@@ -109,11 +129,28 @@ class FakeLockStore:
 
     def read(self, name: str) -> str | None:
         self.journal.append(("lock.read", name))
-        return self.records.get(name)
+        answer = self.records.get(name)
+        self._run_race(name)
+        return answer
 
     def delete(self, name: str) -> None:
+        self._run_race(name)
         self.journal.append(("lock.delete", name))
         self.records.pop(name, None)
+
+    def delete_if_held_by(self, name: str, token: str) -> bool:
+        with self._mutex:
+            self._run_race(name)
+            self.journal.append(("lock.delete", name))
+            record = self.records.get(name)
+            try:
+                held = json.loads(record).get("token") if record is not None else None
+            except (ValueError, AttributeError):
+                held = None
+            if record is None or not isinstance(held, str) or held != token:
+                return False
+            del self.records[name]
+            return True
 
 
 class FakeClock:
@@ -327,8 +364,8 @@ class FakeCluster(FakeES):
     `streams` maps a backing index to its data stream's name (membership by name only).
     `observe()` is called at every mutating request and its result kept in `mutations`, so a test
     reads, e.g., what the copy-state marker said at that moment. `health_status` is what
-    `_cluster/health` answers. `up` is whether the node's container runs: a request while it does
-    not raises (as `docker exec` into a stopped container does) and is listed in `down_requests`.
+    `_cluster/health` answers. `down_requests` lists what was asked while the node's container did not run
+    (the rig docker refuses the exec, as docker does). `up=False` makes a direct request raise.
     `latency` maps `restore` / `delete_by_query` / `reindex` to the time that request takes, moved
     onto `clock` once the request has done its work."""
 
@@ -357,6 +394,19 @@ class FakeCluster(FakeES):
     def _took(self, kind: str) -> None:
         if self.clock is not None and kind in self.latency:
             self.clock.advance(self.latency[kind])
+
+    # -- the node's data volume (the rig docker swaps it when a node starts on another volume) ----
+
+    def save_node_state(self) -> dict:
+        return copy.deepcopy({"indices": self.indices, "repos": self.repos, "pipelines": self.pipelines,
+                              "ilm": self.ilm, "lifecycle_off": self.lifecycle_off})
+
+    def load_node_state(self, state: dict | None) -> None:
+        """`None`: a node on a new, empty data volume."""
+        state = copy.deepcopy(state) if state else {"indices": {}, "repos": {}, "pipelines": {},
+                                                    "ilm": "RUNNING", "lifecycle_off": set()}
+        self.indices, self.repos, self.pipelines = state["indices"], state["repos"], state["pipelines"]
+        self.ilm, self.lifecycle_off = state["ilm"], state["lifecycle_off"]
 
     # -- state helpers a test reads -----------------------------------------------------------
 
@@ -485,6 +535,8 @@ class FakeCluster(FakeES):
                 fnmatch.fnmatchcase(n, p) or (n in self.stream_of and fnmatch.fnmatchcase(self.stream_of[n], p))
                 for p in parts)]
         self._note("restore", ",".join(names))
+        self.mutations[-1]["indices_before"] = sorted(self.indices)
+        self.mutations[-1]["whole"] = names == list(self.content)
         for n in names:
             if n in self.indices and not self.indices[n]["closed"]:
                 raise RuntimeError(f"snapshot_restore_exception: cannot restore index [{n}] because an "
@@ -503,6 +555,7 @@ class FakeCluster(FakeES):
         """As Elasticsearch: no order without a `sort` (here a seeded shuffle that differs between
         calls), `from + size` capped at the result window, `_version` only with `"version": true`,
         and a total that stops counting at 10 000 unless `track_total_hits` asks for it."""
+        self._took("search")
         start, size = int(body.get("from", 0)), int(body.get("size", 10))
         if start + size > self.MAX_RESULT_WINDOW:
             raise RuntimeError(
@@ -772,139 +825,45 @@ def config_env(events: str, alerts: str) -> str:
             f'ELASTIC_EVENTS_INDEX="{events}"\nELASTIC_ALERTS_INDEX="{alerts}"\n')
 
 
-# -- the lab operations seam -------------------------------------------------------------------------
+# -- the lab's outer edge, as the real lab layer reaches it --------------------------------------------
 
-FROZEN_PROXY_URL = "http://frozen-proxy.internal:8443"
 LIVE_PROXY_URL = "http://credential-proxy:8443"
+CONTEXT = "soc-playground"                      # the lab server's docker context (lab_ops' default)
+DEPLOY = "deploy"                               # the deployment's own engine (the rig docker's name for no --context)
+CERTS_VOLUME = "soc-playground_certs"           # the lab's certs volume (lab_ops' default)
+STATE_VOLUME = "lab-engine-state"               # D25: the engine's state volume, where the copy-state marker lives
+TENANT_HOSTS = ["elasticsearch", "soc-playground"]
+FROZEN_ENDPOINT = "10.99.0.1:19200"
+FROZEN_AUDIT, LIVE_AUDIT = "/audit/frozen-proxy.jsonl", "/audit/proxy.jsonl"
+LAB_OPS = Path(__file__).resolve().parents[1] / "lab_ops.py"
 
 
-def stub_state(parts: dict[str, bytes], mutations: Any) -> str:
-    """What the stub stores hold once loaded from `parts` with the case's resolved mutations."""
-    return canonical_digest({"parts": {n: sha(b) for n, b in sorted(parts.items())},
-                             "mutations": [m for m in (mutations or []) if m.get("kind") == "field-flip"]})
+def tar_bytes(members: dict[str, bytes]) -> bytes:
+    """A deterministic tar of `members` (mtime 0, sorted)."""
+    import io
+    import tarfile
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for name, data in sorted(members.items()):
+            info = tarfile.TarInfo(name)
+            info.size, info.mtime = len(data), 0
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
 
 
-def content_of(state: dict, stubs: str) -> str:
-    """The content digest the fake lab ops answers: every index's documents and the stub stores."""
-    return canonical_digest({"es": {n: {i: [v, s] for i, (v, s) in sorted(docs.items())}
-                                    for n, docs in sorted(state.items())}, "stubs": stubs})
+def stub_dump(tickets: list[str] = ()) -> bytes:
+    """A stub dump in the shape capture writes (`stubs.tar`: one seed file per stub)."""
+    return tar_bytes({"stub-change-mgmt.yaml": b"- {id: CHG-1, status: approved}\n",
+                      "stub-ticket-server.json": json.dumps([{"id": t} for t in tickets]).encode(),
+                      "stub-threat-intel.json": b'[{"indicator": "203.0.113.9"}]',
+                      "stub-cmdb-overlays.json": b"{}"})
 
 
-class LabOps:
-    """The lab operations both make-a-case and the launcher drive. Records; implements no policy.
-
-    read_marker() -> dict | None; write_marker(marker); load_stubs(parts_dir_of_the_freeze, as_of, mutations);
-    restart_node(clock_offset); start_proxy() -> url; current_password(); create_readonly_user(password);
-    mount_node_cert(); content_digest(patterns) -> hex (patterns = the freeze's; needs stubs loaded
-    since the last teardown); ensure_node() (the frozen node runs; idempotent); teardown() (stops
-    the proxy, the stubs and the node; the ES data stays); and for make-a-case: snapshot_alerts(freeze_dir),
-    live_run_alerts(), ticketed_alerts(), freeze_rules(freeze_dir) -> dir of rule JSON."""
-
-    def __init__(self, rig: "LabRig") -> None:
-        self.rig = rig
-        self.marker: dict | None = None
-        self.markers: list[dict] = []
-        self.stubs: tuple | None = None
-        self.stub_digest: str | None = None
-        self.offset = self.offset_reading = None
-        self.digest_patterns: list = []      # the patterns handed to each content_digest (the freeze's, D24)
-        self.restarts: list[tuple] = []      # (offset, clock reading) at each restart_node
-        self.loads: list[tuple] = []
-        self.proxy_up = False
-        self.fail_at: str | None = None      # an op name that raises when called
-        self.password = "pw-0"               # the lab's current read-only password (changes over time)
-        self.users: list[tuple] = []         # (password, proxy_up) at each create_readonly_user
-        self.cert_mounts: list[bool] = []    # proxy_up at each mount_node_cert
-        self.locks_at_teardown: list[set] = []   # the lock records that existed when each teardown ran
-        self.live_runs: set[str] | None = {"live-run"}   # what the lab says has a live run / a ticket;
-        self.tickets: set[str] | None = {"ticketed"}     # None = that source is not configured (lookup raises)
-
-    def _j(self, name: str, detail: Any = None) -> None:
-        self.rig.journal.append((name, detail))
-        if name == self.fail_at:
-            raise RuntimeError(f"{name} failed")
-
-    def read_marker(self):
-        self._j("read_marker")
-        return None if self.marker is None else copy.deepcopy(self.marker)
-
-    def write_marker(self, marker):
-        self.marker = copy.deepcopy(marker)
-        self.markers.append(copy.deepcopy(marker))
-        self._j("write_marker", copy.deepcopy(marker))
-
-    def load_stubs(self, parts, as_of, mutations=None):
-        self.stubs = (parts, as_of, mutations)
-        self.loads.append(self.stubs)
-        root = Path(parts)
-        self.stub_digest = stub_state({p.name: p.read_bytes() for p in sorted(root.iterdir())
-                                       if p.is_file() and p.name != RULES_PART}, mutations)
-        self._j("load_stubs")
-
-    def restart_node(self, clock_offset):
-        self.offset, self.offset_reading = clock_offset, self.rig.clock.last
-        self.restarts.append((clock_offset, self.rig.clock.last))
-        self.rig.cluster.up = True
-        self._j("restart_node", clock_offset)
-
-    def ensure_node(self):
-        self.rig.cluster.up = True
-        self._j("ensure_node")
-
-    def current_password(self):
-        self._j("current_password")
-        return self.password
-
-    def create_readonly_user(self, password):
-        self.users.append((password, self.proxy_up))
-        self._j("create_readonly_user", password)
-
-    def mount_node_cert(self):
-        self.cert_mounts.append(self.proxy_up)
-        self._j("mount_node_cert")
-
-    def start_proxy(self):
-        self.proxy_up = True
-        self._j("start_proxy")
-        return FROZEN_PROXY_URL
-
-    def content_digest(self, patterns=None):
-        assert self.stub_digest is not None, "content digest asked before the stub stores were loaded"
-        self.digest_patterns.append(patterns)
-        self._j("content_digest")
-        return content_of(self.rig.cluster.state(), self.stub_digest)
-
-    def teardown(self):
-        self.rig.index_at_teardown = self.rig.index.read_text() if self.rig.index.is_file() else ""
-        self.rig.cluster_at_teardown = self.rig.cluster.state()
-        self.locks_at_teardown.append(set(self.rig.store.records))
-        self.stub_digest, self.proxy_up = None, False
-        self.rig.cluster.up = False      # the real teardown stops the node; its data stays on disk
-        self._j("teardown")
-
-    def snapshot_alerts(self, freeze_dir):
-        return [copy.deepcopy(d["_source"]) for d in self.rig.cluster.content[ALERTS].values()]
-
-    def live_run_alerts(self):
-        self._j("live_run_alerts")
-        if self.live_runs is None:       # the lab's source of live runs is not configured: the real lookup raises
-            raise RuntimeError("V2_RUNS_DIR is not set")
-        return set(self.live_runs)
-
-    def ticketed_alerts(self):
-        self._j("ticketed_alerts")
-        if self.tickets is None:
-            raise RuntimeError("V2_FROZEN_PARTS_DIR is not set")
-        return set(self.tickets)
-
-    def freeze_rules(self, freeze_dir):
-        return self.rig.rules_dir
+def rules_tar(rules: dict) -> bytes:
+    return tar_bytes({name: json.dumps(rule).encode() for name, rule in rules.items()})
 
 
-# -- the rig ------------------------------------------------------------------------------------------
-
-PARTS = {"stubs.tar": b"stub-dump-bytes", "proc-tree.txt": b"PID PPID\n1 0 init\n",
-         RULES_PART: b"rules-as-of-T"}
+PARTS = {"stubs.tar": stub_dump(), "proc-tree.txt": b"PID PPID\n1 0 init\n", RULES_PART: rules_tar(RULES)}
 ROW_KEYS = {"slug", "run_id", "binding", "verdict", "reason", "verified_at", "knowledge"}
 RUN_ID = "5b0d1f2e-3c4d-4e5f-8a6b-7c8d9e0f1a2b"
 
@@ -919,66 +878,167 @@ def load_script(name: str, path: Path):
     return module
 
 
-class LabRig:
-    """A freeze, its parts, a case dir, an empty frozen cluster that can restore the freeze's
-    snapshot, the lab ops and a lock store, on `tmp_path`. `overlay`/`kind` pick the variant for
-    `write_expected_case`; `fail(method, path, body)` faults a cluster request.
+def is_clean_marker(marker: Any) -> bool:
+    """A marker that says the copy may be reused (D25: anything else, or none, means "do not reuse")."""
+    return isinstance(marker, dict) and marker.get("dirty") is False
 
-    `patterns` are the freeze's and the lab tenant's (D24): the rig writes them into
-    `freeze.yaml["patterns"]` as a list `[events, alerts]` and into `tenant_settings`
-    (`<tmp>/tenant/settings/systems/elastic/config.env`). `extra_alerts` adds alert documents to the
-    snapshot (the freeze counts them). `journal` is shared by every fake (a `FaultJournal` cuts a
-    step); `latency` is per-request time on the clock (see `FakeCluster`); `node_up=False` starts
-    with the frozen node stopped; `clock_step` is the clock's seconds per `now()`."""
+
+# -- the rig ------------------------------------------------------------------------------------------
+
+
+class LabRig:
+    """A freeze, its parts, a case dir, the REAL lab layer (`lab_ops.LabOps`) and a lock store, on `tmp_path`
+    (r6.4.3 C-rig). Only the lab layer's outer edge is faked:
+
+    * docker, through `run=`: `_rig_docker.RigDocker` (`rig.docker`). The lab starts cold: no engine, no frozen
+      node; deployed before the test are the live Elasticsearch (`elasticsearch` on the lab server, answering
+      from `rig.live`, a cluster holding everything the snapshot holds), the live credential proxy
+      (`response-credential-proxy` on the deployment) and the lab's certs volume;
+    * the frozen cluster (`rig.cluster`, a `FakeCluster`), reached only through the real curl path
+      (`ops.frozen_es()`, curl run inside the frozen node's container), never through `es=`;
+    * the environment the lab layer reads (`V2_RUNS_DIR` holding `rig.live_runs`, `V2_FROZEN_PARTS_DIR` holding
+      the freeze's parts and a second freeze's stub dump carrying `rig.tickets`, `V2_FROZEN_READONLY_PASSWORD` =
+      `rig.password`); a source set to None is unset;
+    * the lock store, the clock and the journal, as before.
+
+    `fail(method, path, body)` faults a cluster request; `docker_fail` is a set of effects that fail at the
+    docker edge (`node-start`, `stub-start`, `proxy-start`, `marker-write`); `boot_requests` is how many curls a
+    freshly started node refuses before it listens. `patterns`, `extra_alerts`, `journal`, `latency` (per cluster
+    request kind, `search` included) and `clock_step` as before."""
 
     def __init__(self, tmp_path: Path, *, fail: Callable | None = None, snapshot_uuid: str = SNAP_UUID,
                  rules: dict | None = None, run_rc: int = 0, run_out: str | None = None,
                  patterns: tuple[str, str] = (EVENTS, ALERTS_PATTERN), extra_alerts: dict | None = None,
-                 journal: Journal | None = None, latency: dict | None = None, node_up: bool = True,
-                 clock_step: float = 1) -> None:
+                 journal: Journal | None = None, latency: dict | None = None, clock_step: float = 1,
+                 boot_requests: int = 0, docker_fail: set | None = None) -> None:
+        from _rig_docker import RigDocker
+
         self.tmp_path = tmp_path
         self.journal = Journal() if journal is None else journal
         self.store = FakeLockStore(self.journal)
         self.clock = FakeClock(self.journal, instant("2026-11-08T12:00:00Z"), clock_step)
-        self.ops = LabOps(self)
         content = world_content()
         for uuid, doc in (extra_alerts or {}).items():
             content[ALERTS][f"id-{uuid}"] = {"_source": copy.deepcopy(doc), "_version": 1}
         self.cluster = FakeCluster(self.journal, repo=REPO, snapshot=SNAP, snapshot_uuid=snapshot_uuid,
                                    content=content, streams=STREAMS, fail=fail,
-                                   observe=lambda: copy.deepcopy(self.ops.marker),
-                                   clock=self.clock, latency=latency, up=node_up)
+                                   observe=lambda: copy.deepcopy(self.marker()),
+                                   clock=self.clock, latency=latency)
+        self.live = FakeCluster(Journal(), repo=REPO, snapshot=SNAP, snapshot_uuid=snapshot_uuid,
+                                content=content, streams=STREAMS)
+        for name, docs in content.items():
+            self.live._index(name)
+            for doc_id, d in docs.items():
+                self.live.put(name, doc_id, d["_source"], d["_version"])
+        self.docker = RigDocker(journal=self.journal, clock=self.clock, cluster=self.cluster,
+                                live_cluster=self.live, boot_requests=boot_requests, fail=docker_fail,
+                                on_service_stop=self._seen, on_volume_rm=lambda: copy.deepcopy(self.marker()))
+        self._deployed(self.docker)
         self.patterns = list(patterns)
-        self.tenant_settings = tmp_path / "tenant" / "settings"
+        self.tenant_dir = tmp_path / "tenant"
+        self.tenant_settings = self.tenant_dir / "settings"
         self.set_tenant_patterns(*patterns)
         self.freezes = tmp_path / "held_out" / "freezes"
         self.freeze_dir = self.freezes / FREEZE_ID
         self.freeze_dir.mkdir(parents=True)
+        self.parts = tmp_path / "parts"
+        (self.parts / FREEZE_ID).mkdir(parents=True)
+        parts = {**PARTS, **({RULES_PART: rules_tar(rules)} if rules is not None else {})}
+        for n, b in parts.items():
+            (self.parts / FREEZE_ID / n).write_bytes(b)
         self.freeze = {"T": T, "patterns": list(patterns),
                        "elastic": {"repository": REPO, "snapshot": SNAP, "uuid": SNAP_UUID,
                                    "indices": counts_of(content)},
-                       "parts": {n: sha(b) for n, b in PARTS.items()}, "captured_by": "op"}
+                       "parts": {n: sha(b) for n, b in parts.items()}, "captured_by": "op"}
         (self.freeze_dir / "freeze.yaml").write_text(yaml.safe_dump(self.freeze))
-        self.parts = tmp_path / "parts"
-        (self.parts / FREEZE_ID).mkdir(parents=True)
-        for n, b in PARTS.items():
-            (self.parts / FREEZE_ID / n).write_bytes(b)
-        self.rules_dir = tmp_path / "rules-at-T"
-        self.rules_dir.mkdir()
-        for name, rule in (rules or RULES).items():
-            (self.rules_dir / name).write_text(json.dumps(rule))
         self.case_dir = tmp_path / "held_out" / SLUG
         self.case_dir.mkdir(parents=True)
         (self.case_dir / "ground_truth.yaml").write_text("held_out: true\ndisposition: benign\n")
         self.index = tmp_path / "ops" / "held-out-index.jsonl"
         self.index.parent.mkdir()
+        self.runs = tmp_path / "runs"
         self.run_rc = run_rc
         self.run_out = f"run_id={RUN_ID}\n" if run_out is None else run_out
         self.argv = self.env = None
-        self.index_at_teardown: str | None = None
-        self.cluster_at_teardown: dict | None = None
+        self.run_clock = None
         self.run_hook: Callable[[], None] | None = None
         self.lock_in_run: bool | None = None
+        self._live_runs: set[str] | None = {"live-run"}
+        self.nested_live_runs: set[str] = set()     # live runs whose alert.json is nested (`{"kibana": {"alert": ...}}`)
+        self._tickets: set[str] | None = {"ticketed"}
+        self._password = "pw-0"
+        self.lab_module = load_script("lab_ops_1347", LAB_OPS)
+        self.ops = self.lab_module.LabOps(run=self.docker, **self._ops_kw())
+        self._sync_env()
+
+    def _ops_kw(self) -> dict:
+        return {"tenant_dir": self.tenant_dir, "tenant_hosts": TENANT_HOSTS, "frozen_endpoint": FROZEN_ENDPOINT,
+                "audit_path": FROZEN_AUDIT, "live_audit_path": LIVE_AUDIT}
+
+    @staticmethod
+    def _deployed(docker) -> None:
+        certs = docker.volume(CONTEXT, CERTS_VOLUME)
+        certs.update({"elasticsearch/elasticsearch.crt": b"crt", "elasticsearch/elasticsearch.key": b"key",
+                      "ca/ca.crt": b"ca"})
+        docker.existing(CONTEXT, "elasticsearch", "docker.elastic.co/elasticsearch/elasticsearch:9.3.3",
+                        cluster=docker.live_cluster, env={"ELASTIC_PASSWORD": "live-elastic"})
+        docker.existing(DEPLOY, "response-credential-proxy", "credential-proxy",
+                        mounts=[("/proxy", "store", ("vol", DEPLOY, "proxy-config", 0), True)])
+        docker.stores[("vol", DEPLOY, "proxy-config", 0)] = {"config.json": b"{}"}
+
+    def _seen(self) -> dict:
+        return {"index": self.index.read_text() if self.index.is_file() else "",
+                "cluster": self.cluster.state(), "locks": set(self.store.records)}
+
+    # -- the environment the lab layer reads ---------------------------------------------------------
+
+    @property
+    def live_runs(self):
+        return self._live_runs
+
+    @live_runs.setter
+    def live_runs(self, value):
+        self._live_runs = None if value is None else set(value)
+        self._sync_env()
+
+    @property
+    def tickets(self):
+        return self._tickets
+
+    @tickets.setter
+    def tickets(self, value):
+        self._tickets = None if value is None else set(value)
+        self._sync_env()
+
+    @property
+    def password(self):
+        return self._password
+
+    @password.setter
+    def password(self, value):
+        self._password = value
+        self._sync_env()
+
+    def _sync_env(self) -> None:
+        import os
+        import shutil
+        shutil.rmtree(self.runs, ignore_errors=True)
+        self.runs.mkdir()
+        for uuid in sorted((self._live_runs or set()) | self.nested_live_runs):
+            run = self.runs / f"run-{uuid}"
+            run.mkdir()
+            doc = {"kibana": {"alert": {"uuid": uuid}}} if uuid in self.nested_live_runs else {"kibana.alert.uuid": uuid}
+            (run / "alert.json").write_text(json.dumps(doc))
+        side = self.parts / "f-tickets"
+        side.mkdir(exist_ok=True)
+        (side / "stubs.tar").write_bytes(stub_dump(sorted(self._tickets or ())))
+        for var, value in (("V2_RUNS_DIR", None if self._live_runs is None and not self.nested_live_runs else self.runs),
+                           ("V2_FROZEN_PARTS_DIR", None if self._tickets is None else self.parts),
+                           ("V2_FROZEN_READONLY_PASSWORD", self._password)):
+            if value is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = str(value)
 
     def set_tenant_patterns(self, events: str, alerts: str) -> None:
         """What the lab tenant's settings say the agent's patterns are now (D24)."""
@@ -994,20 +1054,103 @@ class LabRig:
     def make_module(self):
         return load_script("make_case_1347", Path(__file__).resolve().parents[1] / "make_case.py")
 
+    # -- what the lab holds now ---------------------------------------------------------------------
+
+    def marker(self) -> Any:
+        """The copy-state marker: the JSON object carrying `dirty` or `variant` in the engine's state
+        volume (D25), or None when there is none. Two of them is a test failure."""
+        sid = self.docker.volumes.get((CONTEXT, STATE_VOLUME))
+        found = []
+        for _key, data in sorted(self.docker.stores.get(sid, {}).items()) if sid else []:
+            try:
+                doc = json.loads(data)
+            except ValueError:
+                continue
+            if isinstance(doc, dict) and {"dirty", "variant"} & set(doc):
+                found.append(doc)
+        assert len(found) <= 1, f"more than one copy-state marker in {STATE_VOLUME}: {found}"
+        return found[0] if found else None
+
+    def drop_marker(self) -> None:
+        """An unknown copy state: the marker is gone (lost, or never written)."""
+        sid = self.docker.volumes.get((CONTEXT, STATE_VOLUME))
+        files = self.docker.stores.get(sid, {})
+        for key in [k for k, d in files.items() if b'"dirty"' in d or b'"variant"' in d]:
+            del files[key]
+
+    def node_running(self) -> bool:
+        node = self.docker.node()
+        return node is not None and node.state == "running"
+
+    def stubs(self) -> dict[str, dict]:
+        """`{stub: {"as_of", "overlays", "running"}}` of each stub container the lab started last."""
+        out = {}
+        for e in self.docker.of_kind("stub-start"):
+            c = e["container"]
+            out[c.name] = {"as_of": c.env.get("V2_STUB_AS_OF"), "running": c.state == "running",
+                           "overlays": copy.deepcopy(self.docker.stub_state.get(c.id, {}).get("overlays", {}))}
+        return out
+
+    def proxy(self):
+        """The frozen proxy container last started (the one running the product's proxy program), or None."""
+        starts = self.docker.of_kind("proxy-start")
+        return starts[-1]["container"] if starts else None
+
+    def teardown_seen(self) -> dict | None:
+        """What the index, the cluster and the lock store held at the last moment a frozen service (a stub,
+        a frontend, the proxy) stopped: the teardown."""
+        stops = self.docker.of_kind("service-stop")
+        return stops[-1]["seen"] if stops else None
+
+    def nothing_serving(self) -> list:
+        """Frozen services still running (the proxy, the stubs, the frontends): empty after a teardown."""
+        return [(c.scope, c.name) for c in self.docker.services()]
+
+    def users(self) -> list[tuple]:
+        """`(password, frozen proxy running)` at each read-only user creation in the frozen cluster."""
+        return [((e["body"] or {}).get("password"), e["proxy_running"]) for e in self.docker.of_kind("curl")
+                if e["method"] in ("PUT", "POST") and e["path"].split("?")[0].startswith("/_security/user/")]
+
+    def certs_mounted(self, node) -> bool:
+        """The node container reads the live node's certificate from the lab's certs volume."""
+        certs = self.docker.volumes.get((CONTEXT, CERTS_VOLUME))
+        for dst, *_ in node.mounts:
+            store, _key, _ro = self.docker.resolve(node, dst)
+            if store == certs:
+                return True
+        return False
+
     # -- cases --------------------------------------------------------------------------------------
+
+    def expected_content(self, state: dict, mutations: Any) -> str:
+        """The content digest the real lab layer gives a copy holding exactly `state` with the freeze's stubs
+        loaded with `mutations`: a separate lab (its own docker and cluster, reached directly) runs the real
+        `load_stubs` and `content_digest`. The oracle is the state; the digest is the layer's own function."""
+        from _rig_docker import RigDocker
+        cluster = FakeCluster(Journal(), repo=REPO, snapshot=SNAP, snapshot_uuid=SNAP_UUID, content={},
+                              streams=STREAMS)
+        for name, docs in state.items():
+            cluster._index(name)
+            for doc_id, (version, source) in docs.items():
+                cluster.put(name, doc_id, source, version)
+        docker = RigDocker(journal=Journal(), clock=FakeClock(Journal(), self.clock.last), live_cluster=self.live)
+        self._deployed(docker)
+        ops = self.lab_module.LabOps(run=docker, es=cluster, **self._ops_kw())
+        ops.load_stubs(self.parts / FREEZE_ID, T, mutations or None)
+        return ops.content_digest(list(self.patterns))
 
     def write_expected_case(self, kind: str, *, alert_uuid: str = "young", confirmed: bool = True,
                             **over: Any) -> dict:
         """case.yaml (and alert.json) for variant `kind`, every recorded value derived from the
-        explicit `expected_copy(kind)`, not from running anything."""
+        explicit `expected_copy(kind)`, not from running the code under test."""
         mutations = {"none": None, "cmdb": [CMDB_STALE], "drop": [DATA_DROP], "drift": [SCHEMA_DRIFT]}[kind]
         overlay = None if mutations is None else {"mutations": mutations, "span_start": SPAN_START}
         state = expected_copy(kind)
         doc = state[ALERTS][f"id-{alert_uuid}"][1]
         (self.case_dir / "alert.json").write_text(json.dumps(doc))
-        stubs = stub_state({n: b for n, b in PARTS.items() if n != RULES_PART}, mutations)
         case = {"freeze": FREEZE_ID, "alert": canonical_digest(doc), "age": 3000, "overlay": overlay,
-                "counts": counts_of(state), "content": content_of(state, stubs),
+                "counts": counts_of(state),
+                "content": over.pop("content", None) or self.expected_content(state, mutations),
                 "confirmed": ({"by": "op", "at": "2026-10-21T10:00:00Z", "reference_run": "r0"}
                               if confirmed else None), **over}
         (self.case_dir / "case.yaml").write_text(yaml.safe_dump(case))
@@ -1024,9 +1167,9 @@ class LabRig:
         state = expected_variant(mutation, span_start) if state is None else state
         doc = state[ALERTS][f"id-{alert_uuid}"][1]
         (self.case_dir / "alert.json").write_text(json.dumps(doc if alert_json is None else alert_json))
-        stubs = stub_state({n: b for n, b in PARTS.items() if n != RULES_PART}, mutations)
         case = {"freeze": FREEZE_ID, "alert": canonical_digest(doc), "age": 3000, "overlay": overlay,
-                "counts": counts_of(state), "content": content_of(state, stubs),
+                "counts": counts_of(state),
+                "content": over.pop("content", None) or self.expected_content(state, mutations),
                 "confirmed": ({"by": "op", "at": "2026-10-21T10:00:00Z", "reference_run": "r0"}
                               if confirmed else None), **over}
         (self.case_dir / "case.yaml").write_text(yaml.safe_dump(case))
@@ -1039,36 +1182,43 @@ class LabRig:
 
     def run_fn(self, argv, env):
         self.journal.append(("run", None))
+        self.run_clock = self.clock.last
         self.argv, self.env = list(argv), dict(env)
         self.lock_in_run = "frozen-engine" in self.store.records
         if self.run_hook is not None:
             self.run_hook()
         return self.run_rc, self.run_out, ""
 
+    def _edges_modelled(self) -> None:
+        assert not self.cluster.unsupported, f"the fake cluster does not model: {self.cluster.unsupported}"
+        assert not self.docker.unmodelled, f"the rig docker does not model: {self.docker.unmodelled}"
+
     def launch(self, **kw):
         kw = {"knowledge": "abc1234", **kw}
+        self._sync_env()
         try:
             return self.launch_module.launch(
                 self.case_dir, freezes_dir=self.freezes, tenant_settings=self.tenant_settings,
-                index=self.index, parts_dir=self.parts, lock_store=self.store, es=self.cluster,
+                index=self.index, parts_dir=self.parts, lock_store=self.store, es=self.ops.frozen_es(),
                 ops=self.ops, run_fn=self.run_fn, clock=self.clock,
                 env={"PATH": "/usr/bin", "DEFENDER_CREDENTIAL_PROXY_URL": LIVE_PROXY_URL},
                 tenant="tenant-1", **kw)
         finally:
-            assert not self.cluster.unsupported, f"the fake cluster does not model: {self.cluster.unsupported}"
+            self._edges_modelled()
 
     def write_case(self, alert_uuid: str, overlay: dict | None, **kw):
+        self._sync_env()
         try:
             return self.make_module.write_case(
                 self.case_dir, freeze_dir=self.freeze_dir, alert_uuid=alert_uuid, overlay=overlay,
                 tenant_settings=self.tenant_settings, parts_dir=self.parts, lock_store=self.store,
-                es=self.cluster, ops=self.ops, clock=self.clock,
+                es=self.ops.frozen_es(), ops=self.ops, clock=self.clock,
                 profiles_dir=kw.pop("profiles_dir", None) or Path(__file__).resolve().parents[2] / "chaos" / "profiles",
                 inventory=kw.pop("inventory", None) or yaml.safe_load(
                     (Path(__file__).resolve().parents[2] / "hosts" / "inventory.yaml").read_text()),
                 **kw)
         finally:
-            assert not self.cluster.unsupported, f"the fake cluster does not model: {self.cluster.unsupported}"
+            self._edges_modelled()
 
     # -- reading what happened ----------------------------------------------------------------------
 
@@ -1080,3 +1230,6 @@ class LabRig:
 
     def es_at(self, pred: Callable[[str, str], bool]) -> list[int]:
         return [i for i, (op, d) in enumerate(self.journal) if op == "es" and pred(*d)]
+
+    def docker_at(self) -> list[int]:
+        return [i for i, (op, _d) in enumerate(self.journal) if op == "docker"]

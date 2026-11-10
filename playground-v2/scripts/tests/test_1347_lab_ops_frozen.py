@@ -2,12 +2,25 @@
 
 Names bound by this contract (proposals the implementer may rename, with this file): the module
 `playground-v2/scripts/lab_ops.py`, class `LabOps(run=subprocess.run, *, context="soc-playground",
-tenant_hosts, frozen_endpoint, audit_path, live_audit_path)` with the methods the launcher's fake
-`_lab_fakes.LabOps` models: `load_stubs(parts, as_of, mutations=None)`, `start_proxy() -> url`,
-`restart_node(clock_offset)`. `run` is called like `subprocess.run` (argv list, keyword options) and
-stands in for `docker --context <context> ...`: nothing here runs docker (a local fake docker would
-execute the proxy program). Every value is looked for in what `run` was handed (argv, `input=`,
-`env=`), so the test fixes the content sent, not the docker flag it rides on.
+tenant_dir, tenant_hosts, frozen_endpoint, audit_path, live_audit_path, es=None)` and
+`LabOps.from_environment()`, with the methods make-a-case and the launcher call (r6.4.3 C-rig: their tests
+drive this class itself, through `_lab_fakes.LabRig`, never a stand-in): `load_stubs(parts, as_of,
+mutations=None)`, `start_proxy() -> url`, `ensure_node()`, `frozen_es()` (the frozen cluster through the
+chaos seam's `es_request`, by curl inside the frozen node's container unless `es=` is given),
+`content_digest(patterns)`, `read_marker()`/`write_marker(marker)`, `create_readonly_user(password)`,
+`current_password()`, `mount_node_cert()`, `teardown()`, `snapshot_alerts(freeze_dir)`, `live_run_alerts()`,
+`ticketed_alerts()`, `freeze_rules(freeze_dir)`. `restart_node(clock_offset)` is withdrawn (D15 revised: the
+node's offset is a file the launcher rewrites, never a restart). `run` is called like `subprocess.run`
+(argv list, keyword options) and stands in for `docker --context <context> ...`: nothing here runs docker.
+Every value is looked for in what `run` was handed (argv, `input=`, `env=`), so the test fixes the content
+sent, not the docker flag it rides on.
+
+r6.4.3, also bound here: the frozen node's environment carries `LD_PRELOAD` of the shim and
+`V2_CLOCK_OFFSET_FILE`, the path (inside the node) of the offset file: a fixed 24-byte record, a signed decimal
+integer number of seconds padded with spaces and ending in a newline, created at that size before the node
+starts and only ever rewritten in place at byte 0, never truncated (r6.4.3 settlements; pinned in the launcher
+and make-a-case tests);
+its cluster name comes from `V2_FROZEN_CLUSTER_NAME` (an unprefixed `CLUSTER_NAME` has no effect).
 
 r6.4.2 (attack batch 1), also bound here: the real `LabOps` takes `es=` (the frozen cluster through the
 chaos seam's `es_request(method, path, body=None)`) and answers `content_digest(patterns)` from the
@@ -150,18 +163,8 @@ def test_a_host_mapped_to_another_ip_is_not_read_as_the_frozen_endpoint():
     assert _mapped_ips(rec, HOSTS[0]) == {"10.0.0.9"} and _mapped_ips(rec, HOSTS[1]) == {"10.99.0.1"}
 
 
-def test_the_node_restart_hands_the_clock_offset_to_the_frozen_elasticsearch_through_the_preload_shim(tmp_path):
-    """D15/O5: the offset reaches the frozen Elasticsearch's environment with `LD_PRELOAD`."""
-    lab = _ops(tmp_path)
-    lab.ops.restart_node(-1_234_567)
-    blob = lab.rec.blob()
-
-    env = [kw.get("env") or {} for _, kw in lab.rec.calls]
-    assert "LD_PRELOAD" in blob, blob
-    stop = r"[;\"'\s,}\]]"
-    assert any(v == "-1234567" for e in env for v in map(str, e.values())) or any(
-        re.search(rf"[=:]\s*[\"']?-1234567(?={stop}|$)", t) for t in _search_texts(lab.rec)), blob
-    assert any("restart" in a or "elasticsearch" in a for argv, _ in lab.rec.calls for a in argv)
+# The restart-time clock offset (D15) is withdrawn by D15 revised (r6.4.3); the offset file is pinned at the
+# launcher and make-a-case level (test_1347_launcher.py, "D15 revised"), where the rewrite's timing is visible.
 
 
 # =====================================================================================================
@@ -177,10 +180,10 @@ def _stub_parts(tmp_path, body=b"stub-dump-bytes"):
 
 
 def test_teardown_leaves_no_container_running_that_the_operations_started(tmp_path):
-    """C8/A1: after start_proxy, load_stubs and the node restart, alone and in combination, no container
+    """C8/A1: after start_proxy, load_stubs and the node start, alone and in combination, no container
     they brought up (the proxy, the frontends, the stubs, the node) is still running. What each operation
     starts, if anything, is its own business; across them something must have been started."""
-    sets = [("start_proxy",), ("load_stubs",), ("restart_node",), ("load_stubs", "restart_node", "start_proxy")]
+    sets = [("start_proxy",), ("load_stubs",), ("ensure_node",), ("load_stubs", "ensure_node", "start_proxy")]
     started_any = False
     for n, started in enumerate(sets):
         docker = FakeDocker()
@@ -189,7 +192,7 @@ def test_teardown_leaves_no_container_running_that_the_operations_started(tmp_pa
         lab = _ops(case, run=docker)
         parts = _stub_parts(case)
         do = {"start_proxy": lab.ops.start_proxy, "load_stubs": lambda: lab.ops.load_stubs(parts, T, [CMDB_STALE]),
-              "restart_node": lambda: lab.ops.restart_node(-1_234_567)}
+              "ensure_node": lab.ops.ensure_node}
         for name in started:
             do[name]()
         assert not docker.unmodelled, f"the fake docker does not model: {docker.unmodelled}"
@@ -270,3 +273,50 @@ def test_a_live_run_or_ticket_source_that_is_not_configured_refuses_instead_of_e
         with pytest.raises(Exception) as caught:
             lookup()
         assert not isinstance(caught.value, (AttributeError, TypeError, NameError)), repr(caught.value)
+
+
+# =====================================================================================================
+# r6.4.3 finding 10: the lab's variables start with V2_
+# =====================================================================================================
+
+
+def _node_cluster_names(tmp_path, monkeypatch, env):
+    """The `cluster.name` the frozen node is started with, by a `LabOps.from_environment()` under `env`."""
+    from _lab_fakes import Journal, FakeClock, LabRig
+    from _rig_docker import RigDocker
+
+    for name in ("CLUSTER_NAME", "V2_FROZEN_CLUSTER_NAME"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("V2_FROZEN_TENANT_DIR", str(tmp_path / "tenant"))
+    journal = Journal()
+    docker = RigDocker(journal=journal, clock=FakeClock(journal, instant(T)))
+    LabRig._deployed(docker)
+    monkeypatch.setattr(subprocess, "run", docker)      # from_environment takes the default `run`
+    spec = importlib.util.spec_from_file_location("lab_ops_1347_env", LAB_OPS)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    ops = module.LabOps.from_environment()
+    try:
+        ops.ensure_node()
+    except Exception:  # noqa: BLE001 - only the node's start command is read
+        pass
+    names = []
+    for argv, _kw in docker.calls:
+        names += [a.split("=", 1)[1] for a in argv if a.startswith("cluster.name=")]
+    return names
+
+
+def test_the_frozen_nodes_cluster_name_comes_from_V2_FROZEN_CLUSTER_NAME(tmp_path, monkeypatch):
+    """r6.4.3 finding 10: `V2_FROZEN_CLUSTER_NAME` names the frozen node's cluster."""
+    names = _node_cluster_names(tmp_path, monkeypatch, {"V2_FROZEN_CLUSTER_NAME": "frozen-lab-x"})
+    assert names and set(names) == {"frozen-lab-x"}, names
+
+
+def test_an_unprefixed_CLUSTER_NAME_has_no_effect_on_the_frozen_node(tmp_path, monkeypatch):
+    """r6.4.3 finding 10/playground CLAUDE.md: an unprefixed `CLUSTER_NAME` (shadowed by /workspace/.env in a
+    shell) is not read: the node's cluster name is the same as with no such variable."""
+    plain = _node_cluster_names(tmp_path / "plain", monkeypatch, {})
+    shadowed = _node_cluster_names(tmp_path / "shadowed", monkeypatch, {"CLUSTER_NAME": "v1-shadow"})
+    assert plain and shadowed == plain and "v1-shadow" not in shadowed, (plain, shadowed)
