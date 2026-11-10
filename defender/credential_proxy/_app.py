@@ -63,7 +63,7 @@ from defender.kit.faults import (
     ORIGIN_ACCESS,
     ORIGIN_REQUEST,
     ORIGIN_SETUP,
-    PROXY_LABELS,
+    is_proxy_label,
     AdapterFault,
     ConfigFault,
     TransportFault,
@@ -202,7 +202,7 @@ def _refused_answer(fault: str, detail: str, *, origin: str | None,
     that is the target system's (its call failed, #1404); unmarked, the refusal is the proxy's
     own and carries the label of whose failure it is (#1363 O4): `origin`, or `access` when
     the refusal came from somewhere that names none (a port's plain fault, the catch-all)."""
-    label = None if system_side else (origin if origin in PROXY_LABELS else ORIGIN_ACCESS)
+    label = None if system_side else (origin if is_proxy_label(origin) else ORIGIN_ACCESS)
     return FinalRecord(status=None, headers={}, fault=fault, detail=detail,
                        system_side=system_side, sent=False, body_whole=False, reader_fault=False,
                        origin=label)

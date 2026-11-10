@@ -16,6 +16,12 @@ ORIGINS = (ORIGIN_SYSTEM, ORIGIN_REQUEST, ORIGIN_SETUP, ORIGIN_ACCESS)
 PROXY_LABELS = (ORIGIN_REQUEST, ORIGIN_SETUP, ORIGIN_ACCESS)
 
 
+def is_proxy_label(origin: object) -> bool:
+    """True when `origin` is a label the proxy puts on the wire (`PROXY_LABELS`): the one test of
+    that vocabulary's membership, for the proxy's modules and its client alike."""
+    return origin in PROXY_LABELS
+
+
 class AdapterFault(Exception):
 
     exit_code: int = 1
@@ -32,7 +38,7 @@ class AdapterFault(Exception):
         or could not be used at all. Derived from `origin`, never set: False for a fault that
         never touched the proxy and for one the target system caused, so a reader names the proxy
         only for its own faults."""
-        return self.origin in PROXY_LABELS
+        return is_proxy_label(self.origin)
 
     def __init__(self, detail: str):
         super().__init__(detail)
@@ -82,6 +88,7 @@ __all__ = [
     "ORIGIN_SYSTEM",
     "PROXY_LABELS",
     "USAGE_EXIT_CODE",
+    "is_proxy_label",
     "AdapterFault",
     "ConfigFault",
     "ConfinementFault",

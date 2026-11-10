@@ -77,7 +77,7 @@ from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa
 from defender.systems.system_status import RunSystems  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
-from defender.credential_proxy import mint_request_token, read_access, signing_access  # noqa: E402
+from defender.credential_proxy import mint_request_token, request_access, signing_access  # noqa: E402
 from defender.kit.access import TOKEN_SEC, AccessDeclaration, RequestAccess  # noqa: E402
 from defender.kit.faults import AdapterFault, ConfigFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
@@ -588,7 +588,6 @@ class _TokenMint:
         self._proxy_url = proxy_url
         self._tenant_id = tenant_id
         self._run_id = run_id
-        self._reads = reads
         self._case_system = case_system
         #: Why a write-back token cannot be signed (R4), when it cannot: the run goes on, and the
         #: record step says so.
@@ -596,7 +595,7 @@ class _TokenMint:
         #: The process's access holder: built here, signs nothing until a call first needs a
         #: token. `clock` is the holder's own; `on_fault` is its owner's callback (#1363 B1).
         self._access: RequestAccess | None = (
-            read_access(signer, proxy_url or "", tenant_id=tenant_id, investigation=run_id,
+            request_access(signer, proxy_url or "", tenant_id=tenant_id, investigation=run_id,
                         reads=reads, clock=clock, on_fault=on_fault) if reads else None)
 
     @classmethod

@@ -87,7 +87,7 @@ def _call_record(exc: BaseException) -> RunEnding | None:
     return RunEnding(found, found.record, "CallRecordWriteFailed", plain=True)
 
 
-def _proxy_access(exc: BaseException) -> RunEnding | None:
+def _proxy_access_lost(exc: BaseException) -> RunEnding | None:
     """The run's access to the credential proxy is lost (#1363 O7, D4): ours, for the whole
     process, so it overrides a provider outage or refusal beside it. Like them it yields to a
     budget kill, an abort and a box ending, but not to a serving abort: a sibling that holds both
@@ -148,7 +148,7 @@ def _provider_refused_by_status(exc: BaseException) -> RunEnding | None:
 #: The endings, most overriding first. The ending a new failure adds is one row here.
 BOX = EndingRow("box", _box)
 CALL_RECORD = EndingRow("call-record", _call_record)
-PROXY_ACCESS = EndingRow("proxy-access", _proxy_access)
+PROXY_ACCESS = EndingRow("proxy-access", _proxy_access_lost)
 PROVIDER_DOWN = EndingRow("provider-down", _provider_down)
 PROVIDER_REJECTED = EndingRow("provider-rejected", _provider_rejected)
 PROVIDER_REFUSED_BY_STATUS = EndingRow("provider-refused-by-status", _provider_refused_by_status)

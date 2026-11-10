@@ -24,7 +24,7 @@ from defender.kit.faults import (
     ORIGIN_REQUEST,
     ORIGIN_SETUP,
     ORIGIN_SYSTEM,
-    PROXY_LABELS,
+    is_proxy_label,
     AdapterFault,
     TransportFault,
 )
@@ -124,7 +124,7 @@ def _record_of(payload: bytes) -> FinalRecord:
             or not (detail is None or isinstance(detail, str))
             or not all(isinstance(doc[k], bool) for k in ("system_side", "sent", "body_whole", "reader_fault"))):
         raise ValueError("a field of the final record has the wrong type")
-    if not (doc["origin"] is None or doc["origin"] in PROXY_LABELS):
+    if not (doc["origin"] is None or is_proxy_label(doc["origin"])):
         raise ValueError("a field of the final record has the wrong type")
     if doc["fault"] is None and (status is None or not doc["body_whole"]):
         raise ValueError("a final record with no fault is not a whole answer")

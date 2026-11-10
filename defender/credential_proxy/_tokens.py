@@ -74,7 +74,7 @@ def mint_request_token(signer: TokenSigner, *, tenant_id: str, investigation: st
     return f"{payload}.{signer.sign(payload.encode('ascii'))}"
 
 
-def read_access(signer: TokenSigner, proxy_url: str, *, tenant_id: str, investigation: str,
+def request_access(signer: TokenSigner, proxy_url: str, *, tenant_id: str, investigation: str,
                 reads: Iterable[str], clock: Callable[[], float] = time.time,
                 on_fault: Callable[[AdapterFault], None] | None = None) -> RequestAccess:
     """The one holder of a process's read token (#1363 O1, B1), built the same way by a run, a

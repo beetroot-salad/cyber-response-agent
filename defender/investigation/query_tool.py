@@ -771,17 +771,17 @@ def _react_to_fault(fault: AdapterFault, system: str) -> tuple[int, str, str | N
         _logger.warning(
             "%s: a call was cut for this request only (origin request, %s): %s%s",
             system, type(fault).__name__, fault.detail, suspect)
-        return REQUEST_CUT_EXIT_CODE, fault.detail, False, False
+        return REQUEST_CUT_EXIT_CODE, fault.detail, None, False
     if origin == ORIGIN_SETUP:
         named = f"the credential proxy's setup for {system}: {fault.detail}"
         if isinstance(fault, ConfigFault):
             _logger.warning("%s: marked down, the credential proxy's setup is incomplete: %s",
                             system, fault.detail)
             return fault.exit_code, named, "setup", False
-        return fault.exit_code, f"our setup failed ({named})", False, True
+        return fault.exit_code, f"our setup failed ({named})", None, True
     if isinstance(fault, ConfigFault):
         return fault.exit_code, fault.detail, "defect", False
-    return fault.exit_code, fault.detail, False, True
+    return fault.exit_code, fault.detail, None, True
 
 
 def register_query_tool(agent, registry) -> None:
