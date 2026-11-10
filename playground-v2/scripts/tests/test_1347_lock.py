@@ -394,6 +394,37 @@ def test_a_capture_taking_the_lock_between_two_repeats_stops_the_runner_before_t
     assert json.loads(store.records[lock.CAPTURE])["token"] == capture["token"]
 
 
+@pytest.mark.parametrize("k", [1, 2])
+def test_a_capture_taking_the_lock_during_the_pause_between_repeats_stops_the_next_repeat(
+        runner, lock, tmp_path, monkeypatch, k):
+    """O10 tightened (r6.4.4; fidelity review B1): the check comes right BEFORE each execution, not after the one
+    before it. A step repeated three times with `delay_s_between: 1`; the capture takes the lock during the k-th
+    pause (the runner's own `time.sleep`), after repeat k has run and before repeat k+1. Repeat k+1 never runs. A
+    runner that checks after each repeat, before its pause, fires repeat k+1 and fails here."""
+    import time as real_time
+    store, ran, sleeps = _store(), [], []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == k:
+            lock.take(store, lock.CAPTURE)       # during the pause between repeat k and repeat k+1
+
+    monkeypatch.setattr(runner, "time", SimpleNamespace(sleep=sleep, monotonic=real_time.monotonic,
+                                                        time=real_time.time))
+    repeated = {**SCENARIO, "id": "paused-repeats", "steps": [{"cmd": "echo again", "repeat": 3, "delay_s_between": 1}]}
+
+    def exec_fn(host, cmd, user, dry_run):
+        ran.append(cmd)
+        return 0, "", ""
+
+    with pytest.raises((SystemExit, lock.LockError)):
+        runner.run_scenario(repeated, 42, {}, False, "none", runs_dir=tmp_path / "runs", chaos="none",
+                            exec_fn=exec_fn, post_cr=lambda body: (0, {}), lock_store=store)
+
+    assert ran == ["echo again"] * k, ran
+    assert len(sleeps) == k, sleeps
+
+
 def test_with_the_captures_token_every_step_runs_while_the_lock_is_held(runner, lock, tmp_path):
     """O10 tightened control: a capture holds the lock throughout and fires with its own token; the check before
     every step passes and every step runs."""

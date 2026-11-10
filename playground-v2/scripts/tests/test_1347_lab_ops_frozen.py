@@ -134,8 +134,9 @@ def test_the_frozen_proxy_runs_the_products_proxy_program_unmodified_with_its_ow
 
 
 def test_the_frozen_proxys_setup_names_every_lab_variable_with_the_V2_prefix(tmp_path):
-    """r6.4.4 (finding 6, playground-v2/CLAUDE.md): every variable the frozen proxy's container is given is the
-    product's own (`DEFENDER_...`) or a lab variable named `V2_...`; the audit path rides as `V2_FROZEN_PROXY_AUDIT`
+    """r6.4.4 (finding 6, playground-v2/CLAUDE.md): no variable the frozen proxy's container is given is an unprefixed
+    lab name: each is the product's own (`DEFENDER_...`), a standard runtime variable (TZ, PATH, PYTHON*, LANG, LC_*)
+    or a lab variable named `V2_...`; the audit path rides as `V2_FROZEN_PROXY_AUDIT`
     and the setup script reads that name, never the unprefixed `FROZEN_PROXY_AUDIT`."""
     lab = _ops(tmp_path)
     lab.ops.start_proxy()
@@ -145,7 +146,8 @@ def test_the_frozen_proxys_setup_names_every_lab_variable_with_the_V2_prefix(tmp
     given = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a in ("-e", "--env")]
     given += [a.split("=", 1)[1] for a in argv if a.startswith("--env=")]
     names = [g.split("=", 1)[0] for g in given]
-    assert names and all(n.startswith(("V2_", "DEFENDER_")) for n in names), names
+    runtime = re.compile(r"(TZ|PATH|PYTHON\w*|LANG|LC_\w+)$")
+    assert names and all(n.startswith(("V2_", "DEFENDER_")) or runtime.match(n) for n in names), names
     assert f"V2_FROZEN_PROXY_AUDIT={AUDIT}" in given, given
     script = " ".join(argv[argv.index("-c") + 1:]) if "-c" in argv else ""
     assert "V2_FROZEN_PROXY_AUDIT" in script, script
