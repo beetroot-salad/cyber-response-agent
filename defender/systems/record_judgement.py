@@ -120,17 +120,22 @@ def judge_records(after: TenantRecords, before: TenantRecords | None = None, *, 
     With `before` (the current state a write replaces), only the records the write changes are judged, and the case
     record's rules only where the write touches the case record or its system; a cover refusal names the part whose
     change alone broke it (C4). With none, everything is judged. `catalog` defaults to the running checkout's."""
-    catalog = catalog if catalog is not None else Catalog.of_checkout()
+    adapters = _the_catalog(catalog)
     faults: list[str] = []
     broken: set[str] = set()
     old_systems = before.systems if before is not None else {}
     for system, record in sorted(after.systems.items()):
         if before is None or old_systems.get(system) != record:
-            found = system_faults(record, catalog=catalog, locator=locator)
+            found = system_faults(record, catalog=adapters, locator=locator)
             faults += found
             if found:
                 broken.add(system)
-    return faults + _case_faults(after, before, catalog=catalog, locator=locator, broken=broken)
+    return faults + _case_faults(after, before, catalog=adapters, locator=locator, broken=broken)
+
+
+def _the_catalog(catalog: Catalog | None) -> Catalog:
+    """The catalog handed in, else the running checkout's."""
+    return Catalog.of_checkout() if catalog is None else catalog
 
 
 def system_faults(record: SystemRecord, *, catalog: Catalog, locator: Locator = RECORDS) -> list[str]:
@@ -296,7 +301,7 @@ def judge_system(system: str, *, settings: Mapping[str, str], access: str, locat
     """One candidate system (catalog id = `system`) judged alone, with no tenant: connect's handoff (O11) passes a
     folder locator so it prints the store's own sentence naming the file."""
     record = SystemRecord(system_id=system, version=1, adapter_id=system, settings=dict(settings), access=access)
-    return system_faults(record, catalog=catalog if catalog is not None else Catalog.of_checkout(), locator=locator)
+    return system_faults(record, catalog=_the_catalog(catalog), locator=locator)
 
 
 def case_cover_fault(module: Any, settings: Mapping[str, str], declaration: AccessDeclaration) -> str | None:
