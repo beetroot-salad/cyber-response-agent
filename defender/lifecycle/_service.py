@@ -90,7 +90,7 @@ class ManagementService(Actor):
             oidc_role=f"tenant-{tenant}-{salt}", approle=f"delivery-{tenant}-{salt}", entity=f"tenant-{tenant}-{salt}",
             sign_approle=sign["sign_approle"], sign_entity=sign["sign_entity"],
             integration_args=["--username", bot, "--name", f"defender-{salt}", "--issuer", self._config.issuer_url,
-                              "--claim-eq", f"tenant_id={tenant}", "--scope", "write:repository",
+                              "--claim-eq", f"tenant_id={tenant}", "--scope", "write:repository", "--scope", "read:issue",
                               "--repo", wiring.repo])
         repo_url = held.record.repo_url or f"{self._config.forge_url.rstrip('/')}/{wiring.repo}"
         await self._commit_next(held, add_generation=generation, wiring=wiring, repo_url=repo_url)
