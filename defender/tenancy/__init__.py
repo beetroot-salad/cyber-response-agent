@@ -108,10 +108,13 @@ if TYPE_CHECKING:
     )
     from defender.tenancy.memory import InMemoryTenantRepository as InMemoryTenantRepository
     from defender.tenancy.models import (
+        CaseRecord as CaseRecord,
         ForgeWiring as ForgeWiring,
         Generation as Generation,
         PublishStatus as PublishStatus,
+        SystemRecord as SystemRecord,
         TenantRecord as TenantRecord,
+        TenantRecords as TenantRecords,
     )
     from defender.tenancy.repository import (
         ALL as ALL,
