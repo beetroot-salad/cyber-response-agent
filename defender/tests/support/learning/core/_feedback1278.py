@@ -65,7 +65,7 @@ def make_scene(p4_tenant: Any, dsn: str, scratch: Path, monkeypatch: Any, thresh
     bind_forge(p4_tenant)
     register_tenant(dsn, p4_tenant.tenant_id)
     monkeypatch.setenv(DSN_ENV, dsn)
-    scene = Scene(p4_tenant, dsn, drain_paths(p4_tenant, product_repo(scratch)), scratch)
+    scene = Scene(p4_tenant, dsn, drain_paths(p4_tenant, product_repo(scratch, adapters=("cmdb",))), scratch)
     wake_at(monkeypatch, threshold)
     return scene
 
