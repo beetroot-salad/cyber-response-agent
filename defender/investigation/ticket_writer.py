@@ -86,9 +86,11 @@ def escalated(truncated_by: str | None, closed_before_cut: bool) -> bool:
 
 
 def run_outcome(run: Run, *, truncated_by: str | None, closed_before_cut: bool) -> str:
-    """The word naming how a run ended, shared by the case ticket and the feedback setting (#1414
-    O1): the escalated word when the run ended in an escalated exit without a verdict;
-    `unreadable` when the report cannot be parsed; otherwise the report's disposition."""
+    """The word naming how a run ended, as the feedback setting matches it (#1414 O1): the escalated
+    word when the run ended in an escalated exit without a verdict; `unreadable` when the report
+    cannot be parsed; otherwise the report's disposition. It differs from the case ticket on one
+    path, by design (C21): a forced close whose report cannot be parsed is `unreadable` here,
+    while the ticket posts the escalation note for it (`_comment_body`)."""
     truncated_by = run_end.normalized_truncated_by(truncated_by)
     if escalated(truncated_by, closed_before_cut):
         return str(truncated_by)

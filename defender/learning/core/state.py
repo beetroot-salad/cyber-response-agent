@@ -66,6 +66,8 @@ _QUEUE = "author-queue"
 FEEDBACK_REQUESTS = "feedback-issue-queue"
 FEEDBACK_CASES = "feedback-cases"
 FEEDBACK_POSITIONS = "feedback-positions"
+#: The forge time of the newest comment the feedback tick has read (one record, `comments`).
+FEEDBACK_CURSOR = "feedback-cursor"
 FEEDBACK_ITEMS = "feedback-items"
 FEEDBACK_DECISIONS = "feedback-decisions"
 _INFLIGHT = _join_record(_QUEUE, "inflight")

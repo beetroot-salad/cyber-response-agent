@@ -12,16 +12,11 @@ from .auth import ForgeCredential
 
 
 class ForgeError(Exception):
-    """A forge call that failed; `status` is the HTTP status when the forge answered, else None (#1414 A4:
-    a transport fault or a 5xx is the forge being unreachable, a 4xx its refusal)."""
+    """A forge call that failed; `status` is the HTTP status when the forge answered, else None."""
 
     def __init__(self, message: str = "", *, status: int | None = None) -> None:
         super().__init__(message)
         self.status = status
-
-    @property
-    def refused(self) -> bool:
-        return self.status is not None and 400 <= self.status < 500
 
 
 #: The port each network scheme means when an origin spells none (O-G: made explicit at parse).
@@ -329,7 +324,9 @@ class ForgejoForge:
     # -- #1414: issues, comments, the merge whitelist ----------------------------------------
 
     def _pages(self, path: str, params: dict[str, str]) -> list[dict]:
-        """Every row of a listing, page by page, until the forge's total is seen."""
+        """Every row of a listing, page by page. The forge may page by fewer than asked, and may ignore `page`
+        altogether, so a listing ends at the forge's total, at an empty page, or at a page that adds no row
+        not already read (the lifecycle's `listed_logins` rule)."""
         import httpx
 
         rows: list[dict] = []
@@ -341,13 +338,13 @@ class ForgejoForge:
             value = self._json(response)
             if not isinstance(value, list) or not all(isinstance(r, dict) for r in value):
                 raise ForgeError(f"Forgejo {path} JSON must be an array of objects")
-            if not value:
+            seen = {r.get("id") for r in rows}
+            fresh = [r for r in value if r.get("id") not in seen]
+            if not fresh:
                 return rows
-            rows.extend(value)
+            rows.extend(fresh)
             total = _total_count(response)
             if total is not None and len(rows) >= total:
-                return rows
-            if total is None and len(value) < _PAGE_LIMIT:  # no header: a short page ends it
                 return rows
             page += 1
 
@@ -382,6 +379,10 @@ class ForgejoForge:
 
     def list_comments(self, number: int) -> list[dict]:
         return self._pages(f"/issues/{number}/comments", {})
+
+    def list_repo_comments(self, *, since: str | None = None) -> list[dict]:
+        """Every issue comment in the repository updated at or after `since` (an ISO time), all of them when None."""
+        return self._pages("/issues/comments", {} if since is None else {"since": since})
 
     def create_comment(self, number: int, body: str) -> dict:
         made = self._json(self._request("POST", f"{self.address.api}/issues/{number}/comments", json={"body": body}))

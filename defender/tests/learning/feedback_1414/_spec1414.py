@@ -37,6 +37,7 @@ REGISTRY = "agent/skills/tacit-knowledge/registry.yaml"
 STATE_CASES_FOLDER = "feedback-cases"
 STATE_ITEMS_FOLDER = "feedback-items"
 STATE_POSITIONS_FOLDER = "feedback-positions"
+STATE_CURSOR_FOLDER = "feedback-cursor"
 STATE_PENDING_FOLDER = "_pending"
 #: FC: a record in a state folder is `<comment_id>.json` (the file the test takes with a directory to fail one write).
 STATE_RECORD_SUFFIX = ".json"

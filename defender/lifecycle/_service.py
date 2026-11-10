@@ -43,6 +43,9 @@ TOKEN_TTL = "10m"
 WRAP_TTL = "600"
 #: The integration's grant: the repository, and issues, labels and comments (#1414 D13). One value, the way the forge takes it.
 INTEGRATION_SCOPES = "write:repository,write:issue"
+#: How old a tenant's merge-eligibility record may be before a pass reads it again: a third of the feedback tick's
+#: default 60 s staleness bound, so a record never goes stale between passes, and the forge is not read every pass.
+ELIGIBILITY_REFRESH = _dt.timedelta(seconds=20)
 MAIN_WAIT_TRIES = 40
 MAIN_WAIT_SECONDS = 0.25
 
@@ -74,8 +77,8 @@ class ManagementService(Actor):
                 "offboard": self._offboard, "finish": self._finish, "delete_repo": self._delete_repo}
 
     async def work(self) -> int:
-        """The job's steps (`Actor.work`), then every active tenant's merge eligibility read afresh (#1414 D13), on every
-        pass whether or not a step ran. The count is the steps run."""
+        """The job's steps (`Actor.work`), then the merge eligibility of every active tenant whose record is older than
+        `ELIGIBILITY_REFRESH` read afresh (#1414 D13), whether or not a step ran. The count is the steps run."""
         ran = await super().work()
         await self._record_eligibility()
         return ran
@@ -96,6 +99,9 @@ class ManagementService(Actor):
                 _logger.warning("tenant %s: merge eligibility not read, the earlier record stays: %s", tenant.id, failed)
 
     async def _record_eligibility_of(self, tenant: TenantId) -> None:
+        recorded = await self._tenants.merge_eligibility(tenant)
+        if recorded is not None and _dt.timedelta(0) <= self._clock() - recorded.read_at < ELIGIBILITY_REFRESH:
+            return
         wiring = await self._tenants.forge_wiring(tenant)
         if wiring is None:
             raise StepFailed("the tenant has no forge wiring")

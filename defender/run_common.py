@@ -378,7 +378,19 @@ def enqueue_curation(
     return True
 
 
-def enqueue_feedback_issue(
+def enqueue_feedback_issue(run: Run, alert: Path | None = None, **kw: Any) -> bool:
+    """Queue an open-issue request for a run whose outcome the tenant's feedback setting lists
+    (#1414 F1); False when none is queued. Never raises: it runs at run end beside curation and
+    the run page, and a failure of any kind (an unreadable record, a broken gate) costs the run
+    only its feedback issue, logged."""
+    try:
+        return _enqueue_feedback_issue(run, alert, **kw)
+    except Exception as failed:  # noqa: BLE001 — a post-step must never break the run
+        _logger.error(f"NOT enqueuing a feedback issue: it failed unexpectedly: {failed!r}")
+        return False
+
+
+def _enqueue_feedback_issue(
     run: Run,
     alert: Path | None = None,
     *,
@@ -388,9 +400,8 @@ def enqueue_feedback_issue(
     run_state: Any = None,
     fixtures_dir: Path = HELD_OUT_FIXTURES,
 ) -> bool:
-    """Queue an open-issue request for a run whose outcome the tenant's feedback setting lists
-    (#1414 F1). The learning gate's refusals apply except its truncation arm (the escalated
-    outcomes are truncations); a run that ended silently opens nothing."""
+    """`enqueue_feedback_issue`'s work. The learning gate's refusals apply except its truncation
+    arm (the escalated outcomes are truncations); a run that ended silently opens nothing."""
     from defender.investigation import ticket_writer
     from defender.investigation.record_query import captured_lookups
     from defender.tenancy import feedback_setting

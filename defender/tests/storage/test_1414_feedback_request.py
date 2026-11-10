@@ -184,6 +184,39 @@ def test_1414_a_later_run_whose_outcome_is_not_listed_leaves_the_earlier_request
     assert (request["outcome"], request["run_id"]) == ("aborted", _run_id(first))
 
 
+
+def test_1414_run_end_files_curation_before_the_feedback_request(tmp_path, tenant, state):
+    """Run end's feedback enqueue runs after curation has filed its marker, and the run page follows it. F1."""
+    seen = []
+
+    def watching(*_a, **_kw):
+        seen.append(bool(author_markers(state)))
+        return False
+
+    _set(tenant, ["benign"])
+    tail = F.FeedbackTail(state, plan=F.plan_for("benign"))
+    assert drive_tail(functools.partial(run_py.main, enqueue_feedback=watching), plant_alert(tmp_path / "w"), tail) == 0
+    assert seen == [True], "the feedback enqueue ran before curation filed its marker"
+    assert tail.visualized, "control: the run page was drawn"
+
+
+def test_1414_the_feedback_enqueue_never_raises(tmp_path, caplog):
+    """A failure of any kind inside the feedback enqueue is logged and answered False, never raised to run end, where
+    it would cost the run its page. F1."""
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    run = make_run_dir(tmp_path, name=fixture_uuid("never-raises"))
+
+    class Broken:
+        @property
+        def tenant(self):
+            raise RuntimeError("the tenant handle broke")
+
+    with caplog.at_level("ERROR"):
+        assert run_common.enqueue_feedback_issue(run_of(run), tenant=Broken()) is False
+    assert any("the tenant handle broke" in r.getMessage() for r in caplog.records)
+
+
 # ---------------------------------------------------------------- F1's flow predicate, through the real entry
 
 def _held_set(tmp_path: Path) -> Path:

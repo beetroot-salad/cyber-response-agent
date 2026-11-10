@@ -24,9 +24,7 @@ class FeedbackSettingError(Exception):
 def load_feedback_outcomes(settings: Path) -> frozenset[str] | None:
     """The outcomes the setting lists, `None` when the tenant has no file; `FeedbackSettingError`
     when it cannot stand."""
-    import yaml
-
-    from defender._yaml import duplicate_key_paths, reject_unread_keys, safe_load
+    from defender._yaml import parse_reviewed_mapping
 
     path = Path(settings) / SETTING_FILE
     try:
@@ -35,18 +33,12 @@ def load_feedback_outcomes(settings: Path) -> frozenset[str] | None:
         return None
     except OSError as e:
         raise FeedbackSettingError(f"settings/{SETTING_FILE} cannot be read: {e.strerror}") from None
-    shown = f"settings/{SETTING_FILE}"
     try:
-        text = raw.decode("utf-8")
-        duplicates = duplicate_key_paths(text)
-        data = safe_load(text)
-    except (UnicodeDecodeError, yaml.YAMLError, RecursionError):
-        raise FeedbackSettingError(f"{shown} is not valid YAML text") from None
-    if duplicates:
-        raise FeedbackSettingError(f"{shown} has duplicate key(s) {list(duplicates)}; write each key once")
-    if isinstance(data, dict):
-        reject_unread_keys(shown, data, (KEY,), error=FeedbackSettingError)
-    listed = data.get(KEY) if isinstance(data, dict) else None
+        data = parse_reviewed_mapping(raw.decode("utf-8"), Path("settings") / SETTING_FILE, what="the feedback setting",
+                                      known=(KEY,), error=FeedbackSettingError)
+    except (UnicodeDecodeError, RecursionError):
+        raise FeedbackSettingError(f"settings/{SETTING_FILE} is not valid YAML text") from None
+    listed = data.get(KEY)
     if not isinstance(listed, list) or not all(isinstance(o, str) for o in listed):
         raise FeedbackSettingError(f"settings/{SETTING_FILE} must hold `open_issue_on:` as a list of outcomes")
     unknown = sorted(set(listed) - OUTCOME_VOCABULARY)

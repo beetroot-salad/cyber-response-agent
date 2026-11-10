@@ -161,31 +161,45 @@ def test_1414_recovery_finds_the_runs_own_issue_never_another_runs_of_the_case(f
     assert S.open_issue_requests(fb.paths) == {}
 
 
-def test_1414_an_issue_the_forge_no_longer_has_is_treated_as_closed_and_logged(fb, caplog):
-    """A recorded issue the forge no longer has is read as closed: the loss is logged, the issue is never made again, and a
-    later run of the case still opens its own. A6 (ruling 2026-11-09: one issue per run)."""
+def test_1414_an_issue_the_forge_no_longer_has_is_treated_as_closed(fb):
+    """A recorded issue the forge no longer has is read as closed: it is never made again, and a later run of the case
+    still opens its own. A6 (ruling 2026-11-09: one issue per run). The tick touches an issue only when the forge lists
+    a new comment on it or a reply is owed there (ruling 2026-11-10: no refusal ceiling), so a quiet gone issue is not looked at, and not logged, each
+    tick; a reply owed on one is dropped and logged (`test_1414_a_reply_owed_on_a_gone_issue_*`)."""
     number = fb.opened("case-gone")
-    names = re.compile(rf"(?<!\d){number}(?!\d)")
-    with caplog.at_level(logging.INFO):  # baseline: a tick while the forge still holds the issue
-        assert fb.tick(S.Decider()) == 0
-    baseline = {r.getMessage() for r in caplog.records}
-    caplog.clear()
+    assert fb.tick(S.Decider()) == 0
     fb.forge.remove_issue(number)
-
-    with caplog.at_level(logging.INFO):
-        assert fb.tick(S.Decider()) == 0
-        assert fb.tick(S.Decider()) == 0
+    assert fb.tick(S.Decider()) == 0
+    assert fb.tick(S.Decider()) == 0
     assert len(fb.forge.issue_creates()) == 1, "the gone issue was made again"
-    # FC: the loss is logged by comparison with the baseline tick, not by a word list: some WARNING-or-higher record
-    # names the issue's number and is not one the baseline tick (issue present) already produced.
-    assert any(r.levelno >= logging.WARNING and names.search(r.getMessage()) and r.getMessage() not in baseline
-               for r in caplog.records), "no new warning names the issue the forge no longer has"
 
     later = fb.request("case-gone")
     assert fb.tick(S.Decider()) == 0
     assert len(_run_issues(fb, later)) == 1, "a later run of the case opened nothing"
     assert len(fb.forge.issue_creates()) == 2
     assert S.open_issue_requests(fb.paths) == {}
+
+
+def test_1414_a_reply_owed_on_a_gone_issue_is_dropped_and_logged(fb, caplog):
+    """A decided comment whose reply could not be posted, on an issue the forge then loses: the next tick drops the
+    reply, logs it naming the comment, and never asks again. A6/A4 (ruling 2026-11-10: no refusal ceiling)."""
+    number = fb.opened("case-gone-reply")
+    comment = fb.forge.add_comment(number, user=OWNER, body="a thanks")
+    decider = S.Decider({comment["id"]: S.answer(reason="a thanks")})
+    fb.forge.respond = lambda r: (httpx.Response(503, json={}) if r.method == "POST"
+                                  and r.url.path.endswith(f"/issues/{number}/comments") else None)
+    assert fb.tick(decider) == 0
+    assert decider.decided == [comment["id"]], "premise: the comment was decided"
+    fb.forge.respond = None
+    fb.forge.remove_issue(number)
+    with caplog.at_level(logging.INFO):
+        assert fb.tick(decider) == 0
+    assert any(r.levelno >= logging.WARNING and str(comment["id"]) in r.getMessage() for r in caplog.records), (
+        "the dropped reply is not logged with its comment id")
+    asked = len(fb.forge.requests)
+    assert fb.tick(decider) == 0
+    assert not any(f"/issues/{number}" in r.url.path for r in fb.forge.requests[asked:]), "the gone issue was asked again"
+    assert decider.decided == [comment["id"]]
 
 
 def test_1414_a_comment_is_framed_by_its_issues_run(fb):
@@ -617,6 +631,7 @@ _BLOCKED_WRITES = [
     pytest.param(S.STATE_CASES_FOLDER, "open", id="cases-open"),
     pytest.param(S.STATE_ITEMS_FOLDER, "read", id="items-read"),
     pytest.param(S.STATE_POSITIONS_FOLDER, "read", id="positions-read"),
+    pytest.param(S.STATE_CURSOR_FOLDER, "read", id="cursor-read"),
     pytest.param(S.STATE_PENDING_FOLDER, "read", id="pending-read"),
     pytest.param(S.STATE_ITEMS_FOLDER, "first-comment", id="items-first-comment"),
     pytest.param(S.STATE_ITEMS_FOLDER, "second-comment", id="items-second-comment"),
@@ -700,3 +715,43 @@ def test_1414_on_a_closed_issue_a_comment_in_the_same_second_as_the_close_is_rea
     assert fb.tick(decider) == 0
     assert decider.decided == [same["id"]]
     assert later["id"] not in decider.decided
+
+
+def _issue_reads(fb, since: int) -> set[int]:
+    """The issues whose own path a GET named, among the forge requests after `since`."""
+    found = set()
+    for r in fb.forge.requests[since:]:
+        parts = r.url.path.split("/")
+        if r.method == "GET" and "issues" in parts[:-1] and parts[parts.index("issues") + 1].isdigit():
+            found.add(int(parts[parts.index("issues") + 1]))
+    return found
+
+
+def test_1414_the_tick_reads_only_the_issues_with_new_comments(fb):
+    """The comments are read in one repository listing a tick: an issue with no new comment is not asked for at all,
+    so a tick's work follows the comments, not every issue the tenant ever had. A4 (ruling 2026-11-10: no refusal ceiling)."""
+    numbers = [fb.opened(f"case-quiet-{n}") for n in range(5)]
+    assert fb.tick(S.Decider()) == 0
+    asked = len(fb.forge.requests)
+    assert fb.tick(S.Decider()) == 0
+    assert _issue_reads(fb, asked) == set(), "a quiet tick read issues one by one"
+    listings = [r for r in fb.forge.requests[asked:] if r.method == "GET" and r.url.path.endswith("/issues/comments")]
+    assert len(listings) == 1, "the repository's comments were not listed once"
+
+    comment = fb.forge.add_comment(numbers[2], user=OWNER, body="expected")
+    decider = S.Decider()
+    asked = len(fb.forge.requests)
+    assert fb.tick(decider) == 0
+    assert decider.decided == [comment["id"]]
+    assert {n for n in _issue_reads(fb, asked) if n in numbers} == {numbers[2]}, "issues without new comments were read"
+
+
+def test_1414_the_forge_is_listed_for_recovery_once_a_tick_however_many_requests_are_new(fb):
+    """A tick with several new requests lists the feedback issues once, not once per request. A6."""
+    for n in range(4):
+        fb.request(f"case-new-{n}")
+    asked = len(fb.forge.requests)
+    assert fb.tick(S.Decider()) == 0
+    listings = [r for r in fb.forge.requests[asked:] if r.method == "GET" and r.url.path.endswith("/issues")]
+    assert len({r.url.params.get("page") for r in listings}) == len(listings), "a page of the listing was asked twice"
+    assert all(len(fb.issues(f"case-new-{n}")) == 1 for n in range(4))

@@ -148,6 +148,29 @@ def test_the_read_is_made_with_the_admin_credential_and_the_bot_is_never_asked(w
     assert world.forge.bearer_calls() == [] or all(f"/{tenant}/branch_protections" not in c.path for c in world.forge.bearer_calls())
 
 
+
+def test_a_fresh_record_is_not_read_again_until_it_ages_and_never_goes_stale_between_passes(world):
+    """D13/D15: a pass reads a tenant's whitelist only when its record is older than the refresh age, a third of the
+    tick's 60 s bound, so the forge is not read every 5 s pass and a record is never past the bound while passes run."""
+    from defender.lifecycle._service import ELIGIBILITY_REFRESH
+
+    tenant = world.active_tenant()
+    _whitelist(world, tenant, users=["dave"])
+    first = _pass(world)
+
+    def rule_reads(since):
+        return [c for c in world.forge.calls[since:] if f"/{tenant}/branch_protections" in c.path]
+
+    mark = len(world.forge.calls)
+    _pass(world, after=dt.timedelta(seconds=5))
+    assert rule_reads(mark) == [], "a fresh record was read again"
+    assert _recorded(world, tenant).read_at == first
+    later = _pass(world, after=ELIGIBILITY_REFRESH)
+    assert rule_reads(mark), "an aged record was not read again"
+    assert _recorded(world, tenant).read_at == later
+    assert dt.timedelta(seconds=60) >= ELIGIBILITY_REFRESH * 3, "the refresh age lets a record go stale between passes"
+
+
 # --- a forge failure -------------------------------------------------------------------------------------------
 
 def _two_tenants(world) -> tuple[str, str]:

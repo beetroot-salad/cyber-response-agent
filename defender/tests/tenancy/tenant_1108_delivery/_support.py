@@ -225,6 +225,13 @@ def _forge_now():
     return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _iso(text):
+    """A forge timestamp as an aware instant."""
+    import datetime as dt
+
+    return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
 class ForgeHTTP:
     """Boundary fake: replies from the observed Forgejo schema, records actual requests."""
 
@@ -435,6 +442,13 @@ class ForgeHTTP:
                     and all(n in {label["name"] for label in i["labels"]}
                             for n in filter(None, (params.get("labels") or "").split(",")))
                     and params.get("created_by") in (None, i["user"]["login"])]
+            return self._paged(request, rows)
+        if rest == "/issues/comments" and method == "GET":
+            # Every issue comment of the repository, oldest first, `since` (an ISO time) on `updated_at`, inclusive.
+            since = params.get("since")
+            rows = sorted((c for cs in self.issue_comments.values() for c in cs), key=lambda c: c["id"])
+            if since:
+                rows = [c for c in rows if _iso(c["updated_at"]) >= _iso(since)]
             return self._paged(request, rows)
         if parts[0] == "issues" and len(parts) in (2, 3):
             return self._one_issue_answer(request, parts)

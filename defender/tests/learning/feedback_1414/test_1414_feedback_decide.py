@@ -274,36 +274,28 @@ def _set_aside_cases(fb) -> set[str]:
     return kept
 
 
-def test_1414_every_4xx_on_a_request_is_counted_to_the_3rd_tick_and_no_5xx_or_fault_ever_is(fb):
-    """For each status 400-599 and a transport fault on the issue open: a 4xx sets the request aside at exactly the 3rd tick, a 5xx or fault never, and once the forge answers the kept ones open their issue. A4/O9."""
+def test_1414_no_failure_on_a_request_is_counted_and_each_opens_its_issue_once_the_forge_answers(fb):
+    """For each status 400-599 and a transport fault on the issue open: the request is never set aside, however many
+    ticks it fails (a 403 is a bot not yet granted issues, a 429 a throttling forge: the forge's state, never the
+    request's, whose text the host composed), and once the forge answers each opens exactly one issue. A4/O9 (ruling 2026-11-10: no refusal ceiling)."""
     cases = {f"s{status}": status for status in (*_REFUSED, *_UNREACHABLE)}
     for case in (*cases, "fault", "healthy"):
         fb.request(case)
     fb.forge.respond = lambda r: (httpx.Response(cases[c], json={"message": "no"})
                                   if (c := _request_case(fb, r)) in cases else None)
     fb.forge.fault = lambda r: httpx.ConnectError("down", request=r) if _request_case(fb, r) == "fault" else None
-    refused = {c for c, status in cases.items() if status < 500}
-    kept = set(cases) - refused | {"fault"}
 
     assert fb.tick(S.Decider()) == 0
     assert len(fb.issues("healthy")) == 1, "a failing request held back the one after it"
-    for _ in range(CEILING - 2):
-        fb.tick(S.Decider())
-    assert _live_cases(fb) == set(cases) | {"fault"}, "a request was set aside before the ceiling"
-    assert _set_aside_cases(fb) == set()
-    fb.tick(S.Decider())
-    assert _set_aside_cases(fb) == refused, "the 4xx requests were not set aside at exactly the 3rd refusal"
-    assert _live_cases(fb) == kept
     for _ in range(CEILING + 3):
-        fb.tick(S.Decider())
-    assert _live_cases(fb) == kept, "an unreachable forge was counted against a request"
-    assert _set_aside_cases(fb) == refused
+        assert fb.tick(S.Decider()) == 0
+    assert _live_cases(fb) == set(cases) | {"fault"}, "a failing request left the queue"
+    assert _set_aside_cases(fb) == set(), "a failing request was set aside"
 
     fb.forge.respond = fb.forge.fault = None
     assert fb.tick(S.Decider()) == 0
     assert _live_cases(fb) == set()
-    assert {c for c in (*cases, "fault") if fb.issues(c)} == kept, "a kept request lost its issue, or a refused one got one"
-    assert len(fb.issues("healthy")) == 1
+    assert all(len(fb.issues(c)) == 1 for c in (*cases, "fault", "healthy")), "a waiting request lost its issue or made two"
 
 
 def _issue_of(path: str) -> int | None:
@@ -322,10 +314,19 @@ def _sweep(fb, *, step):
     comments = {case: fb.forge.add_comment(number, user=OWNER, body="a note") for case, number in numbers.items()}
     status_of = {number: cases[case] for case, number in numbers.items()}
 
+    # The repository's comment listing names every issue at once, so it fails as a whole, tick by tick: the
+    # transport fault first, then 5xx statuses in turn. One verdict per request (`fault` and `respond` both ask).
+    listings = iter([None, *sorted(_UNREACHABLE, reverse=True)])
+    verdicts: dict[int, object] = {}
+
     def trouble(r):
         number = _issue_of(r.url.path)
         if number in status_of and r.method == step[0] and r.url.path.endswith(step[1]):
             return status_of[number]
+        if step[0] == "GET" and r.method == "GET" and r.url.path.endswith("/issues/comments"):
+            if id(r) not in verdicts:
+                verdicts[id(r)] = next(listings, False)
+            return verdicts[id(r)]
         return False
 
     fb.forge.respond = lambda r: (httpx.Response(t, json={}) if (t := trouble(r)) else None)
@@ -355,26 +356,28 @@ def test_1414_no_5xx_or_fault_on_a_comment_step_is_counted_and_nothing_past_it_i
             assert decider.decided.count(c["id"]) == 1, f"{case}: a failed forge call spent a decision"
 
 
-def test_1414_a_request_the_forge_refuses_is_set_aside_with_its_reason_in_a_kept_file(fb):
-    """A request refused three times (422) is kept in a quarantine folder with a non-empty reason and never retried. A4/A8."""
-    fb.request("case-refused")
-    fb.forge.respond = lambda r: httpx.Response(422, json={"message": "refused"}) if _request_case(fb, r) else None
-    for _ in range(CEILING + 1):
-        fb.tick(S.Decider())
+def test_1414_a_bot_not_yet_granted_issues_loses_no_request(fb):
+    """A bot minted before issues were granted gets 403 on every issue call; its requests wait, logged, and each opens
+    its issue on the first tick after the tenant rotates. A4 (ruling 2026-11-10: no refusal ceiling)."""
+    fb.request("case-early")
+    fb.forge.respond = lambda r: (httpx.Response(403, json={"message": "token does not have scope write:issue"})
+                                  if r.method == "POST" else None)
+    for _ in range(CEILING + 3):
+        assert fb.tick(S.Decider()) == 0
+    assert fb.issues("case-early") == []
+    assert {r["case_id"] for r in S.open_issue_requests(fb.paths).values()} == {"case-early"}
+    assert S.quarantined_requests(fb.paths, "case-early") == [], "the request was set aside"
     fb.forge.respond = None
-    fb.tick(S.Decider())
-    assert fb.issues("case-refused") == [], "a refused request was retried forever"
+    assert fb.tick(S.Decider()) == 0
+    assert len(fb.issues("case-early")) == 1
     assert S.open_issue_requests(fb.paths) == {}
-    [kept] = S.quarantined_requests(fb.paths, "case-refused")
-    assert kept.is_file(), "the quarantined request is not kept in a quarantine folder (A8)"
-    reason = json.loads(kept.read_text(encoding="utf-8")).get("failed")  # as the lead-author lane's `failed/` records
-    assert isinstance(reason, str), "the quarantined request carries no reason it failed (A8)"
-    assert reason.strip(), "the quarantined request's reason is empty (A8)"
 
 
-def test_1414_a_4xx_on_a_comment_reply_is_bounded_and_given_up_with_the_comment_logged(fb, caplog):
-    """For each status 400-499 on a comment's reply POST: at most 2 x the ceiling reply POSTs per comment, none added by 12 further ticks, the give-up logged naming the comment; a healthy issue is unaffected. A4/O9."""
-    cases = {f"r{status}": status for status in _REFUSED} | {"healthy": None}
+def test_1414_a_4xx_on_a_comment_reply_is_retried_once_a_tick_and_posted_once_when_the_forge_takes_it(fb, caplog):
+    """For each status 400-499 on a comment's reply POST: the reply is tried at most once a tick (the forge is never
+    flooded), never given up, each failure logged naming the comment, and posted exactly once when the forge takes
+    it; a healthy issue is unaffected. A 404 is the issue gone, whose reply is dropped (the gone-issue tests). A4/O9 (ruling 2026-11-10: no refusal ceiling)."""
+    cases = {f"r{status}": status for status in _REFUSED if status != 404} | {"healthy": None}
     for case in cases:
         fb.request(case)
     assert fb.tick(S.Decider()) == 0
@@ -388,20 +391,23 @@ def test_1414_a_4xx_on_a_comment_reply_is_bounded_and_given_up_with_the_comment_
     def posts_to(case: str) -> int:
         return sum(r.method == "POST" and r.url.path.endswith(f"/issues/{numbers[case]}/comments") for r in fb.forge.requests)
 
+    ticks = CEILING + 3
     with caplog.at_level(logging.INFO):
-        for _ in range(CEILING + 3):
-            assert fb.tick(decider) == 0
-        after_six = {case: posts_to(case) for case, status in cases.items() if status}
-        for _ in range(12):
+        for _ in range(ticks):
             assert fb.tick(decider) == 0
     for case, status in cases.items():
         if status:
-            # FC: the decision's reply and the host's "could not be processed" reply may each be tried up to the ceiling
-            # (3) times, so a comment takes at most 2 x CEILING reply POSTs; the exact split is the host's call.
-            assert after_six[case] <= 2 * CEILING, f"{status}: {after_six[case]} reply POSTs, past 2 x the ceiling"
-            assert posts_to(case) == after_six[case], f"{status}: a refused reply was still retried after tick 6"
+            assert posts_to(case) <= ticks, f"{status}: {posts_to(case)} reply POSTs in {ticks} ticks"
+            assert fb.replies(numbers[case], comments[case]["id"]) == []
     assert len(fb.replies(numbers["healthy"], comments["healthy"]["id"])) == 1, "control: a healthy issue's reply was held back"
     logged = " ".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING and r.name != "httpx")
     for case, status in cases.items():
         if status:
-            assert re.search(rf"\b{comments[case]['id']}\b", logged), f"{status}: the given-up reply is not logged with its comment id"
+            assert re.search(rf"\b{comments[case]['id']}\b", logged), f"{status}: the failed reply is not logged with its comment id"
+
+    fb.forge.respond = None
+    for _ in range(2):
+        assert fb.tick(decider) == 0
+    for case in cases:
+        assert len(fb.replies(numbers[case], comments[case]["id"])) == 1, f"{case}: the reply was lost or posted twice"
+        assert decider.decided.count(comments[case]["id"]) == 1, f"{case}: a failed reply spent a decision"

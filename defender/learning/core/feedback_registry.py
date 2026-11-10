@@ -34,10 +34,6 @@ _TOP_KEY = re.compile(r"^([A-Za-z_][\w-]*)[ \t]*:")
 _RANK = {"open": 0, "merged": 1, "closed": 2}
 
 
-#: Counted refusals of one reply before it is given up (A4; as the request ceiling).
-MAX_REPLY_ATTEMPTS = 3
-
-
 class ShapeRefused(Exception):
     """The registry file is not in a shape entries may be appended to (A7), or the append broke the reader."""
 
@@ -161,7 +157,8 @@ def main_registry(delivery: Any) -> tuple[str, list[dict[str, str]]]:
 # ------------------------------------------------------------------ settlement
 
 def _decisions(state: LearningState, *, open_only: bool = False) -> list[dict]:
-    found = [state.records(FEEDBACK_DECISIONS)[k] for k in sorted(state.records(FEEDBACK_DECISIONS), key=int)]
+    records = state.records(FEEDBACK_DECISIONS)
+    found = [records[k] for k in sorted(records, key=int)]
     return [d for d in found if not (open_only and d.get("settled"))]
 
 
@@ -309,24 +306,9 @@ def _reply_is_on_issue(forge: Any, seen: dict[int, str], bots: frozenset[str], d
         return True
     if not all(a["settled"] for a in decision["approved"]):
         return False
-    return _post_reply(forge, decision)
-
-
-def _post_reply(forge: Any, decision: dict) -> bool:
-    """Post the reply. A refusal (4xx) counts toward the ceiling and the reply is given up at it, logged naming the
-    comment; an unreachable forge (transport fault, 5xx) counts for nothing and is retried (A4/O9)."""
-    try:
-        forge.create_comment(decision["issue"], reply_text(decision))
-    except ForgeError as e:
-        if not e.refused:
-            raise
-        decision["reply_attempts"] = int(decision.get("reply_attempts", 0)) + 1
-        if decision["reply_attempts"] < MAX_REPLY_ATTEMPTS:
-            _logger.error(f"feedback: the reply to comment {decision['comment_id']} was refused "
-                          f"(attempt {decision['reply_attempts']}/{MAX_REPLY_ATTEMPTS}): {e}")
-            return False
-        _logger.warning(f"feedback: the reply to comment {decision['comment_id']} was refused "
-                        f"{decision['reply_attempts']} times ({e}); given up")
+    # A failure raises and is retried next tick, never given up: the text is the host's own and always sendable,
+    # so a failure is the forge's state (down, throttling, a bot not yet granted issues), not the reply's (ruling 2026-11-10: no refusal ceiling).
+    forge.create_comment(number, reply_text(decision))
     return True
 
 
@@ -347,5 +329,3 @@ def reply(state: LearningState, forge: Any, bots: frozenset[str]) -> None:
             done = True
         if done:
             _mark_replied(state, decision)
-        elif decision.get("reply_attempts"):
-            state.put_record(FEEDBACK_DECISIONS, str(decision["comment_id"]), decision)  # the refusal is counted

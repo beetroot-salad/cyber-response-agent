@@ -21,6 +21,7 @@ from defender.learning.core import feedback_decide, feedback_registry
 from defender.learning.core.config import FEEDBACK_DRAIN_LABEL, LoopPaths
 from defender.learning.core.state import (
     FEEDBACK_CASES,
+    FEEDBACK_CURSOR,
     FEEDBACK_ITEMS,
     FEEDBACK_POSITIONS,
     FEEDBACK_REQUESTS,
@@ -33,8 +34,11 @@ FEEDBACK_LABEL = "defender-feedback"
 #: How long the service's merge-eligibility record may be before the tick reads no comments (D13/D15).
 ELIGIBILITY_MAX_AGE_ENV = "LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE"
 DEFAULT_ELIGIBILITY_MAX_AGE = dt.timedelta(seconds=60)
-#: Counted refusals of one request before it is set aside (A4; the lead-author lane's ceiling).
-MAX_ATTEMPTS = 3
+#: The longest issue title the forge takes; the host's own title is cut to it, so it is never refused for length.
+TITLE_LIMIT = 255
+#: How far back of the last comment read each tick asks again: a comment the forge dated just before it but
+#: listed only later is still found. Positions drop what was already read.
+COMMENT_OVERLAP = dt.timedelta(seconds=60)
 #: How far ahead of this host's clock the service's record may be dated and still count as fresh.
 CLOCK_SKEW = dt.timedelta(seconds=5)
 
@@ -42,6 +46,12 @@ CLOCK_SKEW = dt.timedelta(seconds=5)
 def _first_line(case_id: str, run_id: str) -> str:
     """The host-written first line of a run's issue: it names the case and the run (ruling 5: one issue per run)."""
     return f"<!-- defender-feedback case:{case_id} run:{run_id} -->"
+
+
+def sendable(text: str) -> str:
+    """`text` as the forge can be sent it: valid UTF-8 (a lone surrogate becomes a replacement mark). Every byte the
+    host sends it composes itself, so no request can be refused for its text and none is ever given up."""
+    return text.encode("utf-8", "replace").decode("utf-8")
 
 
 def _fence(text: str) -> str:
@@ -71,6 +81,8 @@ class Tick:
     bots: frozenset[str]
     tenant_id: str
     eligible: frozenset[str] | None = None
+    #: First line -> issue number of every feedback issue a tenant bot made: read once per tick, when needed.
+    made: dict[str, int] | None = None
 
 
 def eligibility_bound(seam: dt.timedelta | None) -> dt.timedelta:
@@ -130,13 +142,16 @@ def tick(paths: LoopPaths, state: LearningState, open_delivery: Callable[[], Any
 
 def _recover(ctx: Tick, case_id: str, run_id: str) -> int | None:
     """The run's issue when the forge holds one this host made but never recorded: labelled, created by one of
-    the tenant's bots (any generation), open or closed, whose first line is exactly the host's own for this run."""
-    for bot in sorted(ctx.bots):
-        for issue in ctx.forge.list_issues(label=FEEDBACK_LABEL, created_by=bot, state="all"):
-            first = (issue.get("body") or "").split("\n")[:1]
-            if first == [_first_line(case_id, run_id)] and issue["user"]["login"] in ctx.bots:
-                return issue["number"]
-    return None
+    the tenant's bots (any generation), open or closed, whose first line is exactly the host's own for this run.
+    The forge is listed once per tick, the first time a request has no record; an issue made later this tick is
+    recorded by the tick that made it."""
+    if ctx.made is None:
+        ctx.made = {}
+        for bot in sorted(ctx.bots):
+            for issue in ctx.forge.list_issues(label=FEEDBACK_LABEL, created_by=bot, state="all"):
+                if issue["user"]["login"] in ctx.bots:
+                    ctx.made.setdefault((issue.get("body") or "").split("\n")[0], issue["number"])
+    return ctx.made.get(_first_line(case_id, run_id))
 
 
 def _record_run(ctx: Tick, request: dict, number: int) -> None:
@@ -151,30 +166,12 @@ def _serve_request(ctx: Tick, key: str, request: dict) -> None:
     if ctx.state.get_record(FEEDBACK_CASES, run_id) is None:
         number = _recover(ctx, case_id, run_id)
         if number is None:
+            title = sendable(f"Feedback on case {case_id} run {run_id} ({request['outcome']})")[:TITLE_LIMIT]
             number = ctx.forge.create_issue(
-                title=f"Feedback on case {case_id} run {run_id} ({request['outcome']})",
-                body=_first_line(case_id, run_id) + "\n" + _summary(request), label=FEEDBACK_LABEL)["number"]
+                title=title, body=sendable(_first_line(case_id, run_id) + "\n" + _summary(request)),
+                label=FEEDBACK_LABEL)["number"]
         _record_run(ctx, request, number)
     ctx.state.drop_record_if(FEEDBACK_REQUESTS, key, request)
-
-
-def _fail_request(ctx: Tick, key: str, request: dict, failure: ForgeError) -> None:
-    """A forge call of a request failed. An unreachable forge (transport fault, 5xx) counts for nothing; a
-    refusal counts, and at the ceiling the request is kept apart with its reason (A4/A8)."""
-    case_id = request.get("case_id", key)
-    if not failure.refused:
-        _logger.error(f"feedback: opening the issue of case {case_id} failed, retried next tick: {failure}")
-        return
-    attempts = int(request.get("attempts", 0)) + 1
-    if attempts >= MAX_ATTEMPTS:
-        _logger.error(f"feedback: the request of case {case_id} was refused {attempts} times ({failure}); "
-                      "set aside")
-        ctx.state.put_record(f"{FEEDBACK_REQUESTS}/failed", key,
-                             {**request, "attempts": attempts, "failed": f"refused {attempts} times: {failure}"})
-        ctx.state.drop_record_if(FEEDBACK_REQUESTS, key, request)  # a newer request stays queued
-        return
-    _logger.error(f"feedback: the request of case {case_id} was refused (attempt {attempts}/{MAX_ATTEMPTS}): {failure}")
-    ctx.state.replace_record_if(FEEDBACK_REQUESTS, key, request, {**request, "attempts": attempts})
 
 
 def _open_requests(ctx: Tick) -> None:
@@ -185,9 +182,10 @@ def _open_requests(ctx: Tick) -> None:
         try:
             _serve_request(ctx, key, request)
         except ForgeError as e:
-            _fail_request(ctx, key, request, e)
-        except UnicodeEncodeError as e:  # text the forge cannot be sent: a refusal, counted, never a wedge
-            _fail_request(ctx, key, request, ForgeError(f"the request holds text that is not UTF-8: {e}", status=400))
+            # Never given up: the text is the host's own and always sendable, so a failure is the forge's state
+            # (down, throttling, or a bot not yet granted issues), and the request waits for it (ruling 2026-11-10: no refusal ceiling).
+            _logger.error(f"feedback: opening the issue of case {request.get('case_id', key)} failed, "
+                          f"retried next tick: {e}")
 
 
 # ------------------------------------------------------------------ step 2: read
@@ -211,22 +209,22 @@ def _queue_comment(ctx: Tick, run: dict, issue: dict, c: dict) -> None:
         "run_id": run["run_id"], "outcome": run["outcome"], "lookups": run["lookups"]})
 
 
-def _read_issue(ctx: Tick, run: dict) -> None:
+def _read_issue(ctx: Tick, run: dict, comments: list[dict]) -> bool:
+    """Read the listed `comments` of the run's issue. False when the issue could not be read (retried next tick)."""
     number = run["issue"]
     try:
         issue = ctx.forge.get_issue(number)
-        comments = ctx.forge.list_comments(number)
     except ForgeError as e:
         if e.status == 404:
             _logger.warning(f"feedback: issue {number} of case {run['case_id']} is gone from the forge; "
                             "read as closed, nothing to read")
-        else:
-            _logger.error(f"feedback: reading issue {number} failed, position kept: {e}")
-        return
+            return True
+        _logger.error(f"feedback: reading issue {number} failed, position kept: {e}")
+        return False
     position = (ctx.state.get_record(FEEDBACK_POSITIONS, str(number)) or {}).get("last", 0)
     new = sorted((c for c in comments if c["id"] > position), key=lambda c: c["id"])
     if not new:
-        return
+        return True
     skipped: set[str] = set()
     for c in _readable(issue, new):
         if c["user"]["login"] in (ctx.eligible or ()):
@@ -236,8 +234,57 @@ def _read_issue(ctx: Tick, run: dict) -> None:
     if skipped:
         _logger.info(f"feedback: issue {number}: skipped comments by accounts that may not merge: {sorted(skipped)}")
     ctx.state.put_record(FEEDBACK_POSITIONS, str(number), {"last": new[-1]["id"]})
+    return True
+
+
+def _issue_number(comment: dict) -> int | None:
+    """The issue a repository comment is on, from its `issue_url` (a PR's comment carries none)."""
+    tail = str(comment.get("issue_url") or "").rstrip("/").rsplit("/", 1)[-1]
+    return int(tail) if tail.isdecimal() else None
+
+
+def _catch_up(ctx: Tick, run_id: str, run: dict) -> bool:
+    """A newly recorded issue's first read lists its own comments whole: a comment written before the tick that
+    recorded it (an issue made, its reply lost, recovered later) may already be behind the repository cursor."""
+    try:
+        comments = ctx.forge.list_comments(run["issue"])
+    except ForgeError as e:
+        if e.status != 404:
+            _logger.error(f"feedback: reading issue {run['issue']} failed, position kept: {e}")
+            return False
+        comments = []
+    if not _read_issue(ctx, run, comments):
+        return False
+    ctx.state.replace_record_if(FEEDBACK_CASES, run_id, run, {**run, "listed": True})
+    return True
 
 
 def _read_comments(ctx: Tick) -> None:
-    for _run_id, run in sorted(ctx.state.records(FEEDBACK_CASES).items()):
-        _read_issue(ctx, run)
+    """Read the comments made since the last tick, in one repository listing: only issues with new comments are
+    looked at, so the work follows the comments, not every issue the tenant ever had. The cursor is the forge's own
+    time of the newest comment read, and moves only when every issue named was read."""
+    cursor = ctx.state.get_record(FEEDBACK_CURSOR, "comments") or {}
+    since = None
+    if cursor.get("since"):
+        since = (_forge_time(cursor["since"]) - COMMENT_OVERLAP).isoformat().replace("+00:00", "Z")
+    try:
+        listed = ctx.forge.list_repo_comments(since=since)
+    except ForgeError as e:
+        _logger.error(f"feedback: listing the repository's comments failed, read next tick: {e}")
+        return
+    by_issue: dict[int, list[dict]] = {}
+    for c in listed:
+        if (number := _issue_number(c)) is not None:
+            by_issue.setdefault(number, []).append(c)
+    runs = {run["issue"]: (run_id, run) for run_id, run in ctx.state.records(FEEDBACK_CASES).items()}
+    read_all = True
+    for number in sorted(set(by_issue) & set(runs)):
+        if runs[number][1].get("listed"):
+            read_all = _read_issue(ctx, runs[number][1], by_issue[number]) and read_all
+    for _number, (run_id, run) in sorted(runs.items()):
+        if not run.get("listed"):
+            read_all = _catch_up(ctx, run_id, run) and read_all
+    stamps = [_forge_time(c.get("updated_at") or c["created_at"]) for c in listed]
+    if read_all and stamps:
+        newest = max(stamps).isoformat().replace("+00:00", "Z")
+        ctx.state.put_record(FEEDBACK_CURSOR, "comments", {"since": newest})

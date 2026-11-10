@@ -1431,16 +1431,17 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                     elif ns.no_learn:
                         _logger.info("--no-learn set; not enqueuing for curation")
                     else:
-                        # Beside curation, under its own predicate: a feedback issue is wanted
-                        # for the escalated endings the learning gate refuses (#1414 F1).
+                        if enqueue_curation(run, started.alert, tenant=started.accepted,
+                                            truncated_by=summary.get("truncated_by")):
+                            _logger.info("enqueued for catalog curation")
+                        # After curation, under its own predicate: a feedback issue is wanted
+                        # for the escalated endings the learning gate refuses (#1414 F1). It
+                        # never raises, so it cannot cost the run its curation or its page.
                         enqueue_feedback(
                             run, started.alert, tenant=started.tenant,
                             truncated_by=summary.get("truncated_by"),
                             closed_before_cut=summary.get("closed_before_cut") is True,
                             run_state=run_state)
-                        if enqueue_curation(run, started.alert, tenant=started.accepted,
-                                            truncated_by=summary.get("truncated_by")):
-                            _logger.info("enqueued for catalog curation")
 
                 _post_steps(started, summary, visualize=visualize, update_ticket=ns.update_ticket,
                             operator_steps=ticket_and_curation)
