@@ -301,7 +301,11 @@ class TenantDelivery:
         url = self.repository.open_pr(branch=batch.branch, title=title, body=body)
         return Delivered(status=DeliveryStatus.OPENED, url=url)
 
-    def finish(self, batch: Batch) -> Delivered:
+    def _body(self, tip: str, from_commit: bool) -> str | None:
+        """The PR body the tip commit's message holds, when the lane's PRs are described by it (#1414 A2)."""
+        return self.repository.commit_message(tip) if from_commit else None
+
+    def finish(self, batch: Batch, *, body_from_commit: bool = False) -> Delivered:
         """Deliver the batch: `nothing to deliver` when it made no commit (it has no branch);
         otherwise its PR's status when the forge has one, or its branch pushed and a PR
         opened. A branch moved from the commit-maker's last commit, or holding any commit it
@@ -320,10 +324,10 @@ class TenantDelivery:
                 line.batch,
                 tip,
                 title=_batch_title(batch.id),
-                body=_batch_body(line.batch.branch, line.batch.base),
+                body=self._body(tip, body_from_commit) or _batch_body(line.batch.branch, line.batch.base),
             )
 
-    def deliver(self, batch_id: str) -> Delivered:
+    def deliver(self, batch_id: str, *, body_from_commit: bool = False) -> Delivered:
         """Deliver a batch's branch from any later delivery (its draft discarded, its push or
         PR request failed before): the batch is the one the commit-maker's record says made
         the branch's tip. `nothing to deliver` when the clone holds no such branch; refused
@@ -344,7 +348,7 @@ class TenantDelivery:
                 batch,
                 tip,
                 title=_batch_title(batch_id),
-                body=_batch_body(branch, batch.base),
+                body=self._body(tip, body_from_commit) or _batch_body(branch, batch.base),
             )
 
     def revert(self, lesson_path: str, lesson_name: str) -> Delivered:

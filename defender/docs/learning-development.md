@@ -20,7 +20,7 @@ and accumulates until the **lessons curator** folds it into `defender/lessons/`;
 lesson before it commits (#1166 deleted the same-case forward check; #397). A finding about the WORLD — an invented field shape, a story the overlay never backed, a
 family that failed to discriminate — lands on `_pending/questioner_findings.jsonl` and is folded by
 the **questioner curator** into `defender/lessons-questioner/`, which the questioner reads back when
-it authors the next family. Both curators run inside one drain tick.
+it authors the next family. A third channel, `_pending/feedback_lessons.jsonl` (#1414 D11), carries a person's feedback instructions, one row per comment id, to the **feedback curator**, which folds them into `defender/lessons/` too, woken by any one row. All run inside one drain tick.
 Each worker commits from its own git worktree off `origin/main`, one PR per batch — the loop is
 the sole committer, and spawned agents run no git. Lessons feed back into the runtime three times: at
 PLAN time via `defender-lessons`, on every write that moves the investigation's open set via

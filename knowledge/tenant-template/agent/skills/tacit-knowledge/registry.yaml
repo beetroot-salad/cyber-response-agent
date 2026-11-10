@@ -1,8 +1,11 @@
 # The tacit-knowledge registry: the estate's authored record of sanctioned patterns.
 #
-# HUMAN-EDITED ONLY. Nothing an investigation can reach writes this file. The commit or pull
-# request that adds an entry IS the sign-off, and `git log` on this file is the audit trail. A
-# registry populated from the agent's own closes would be the system vouching for itself.
+# EDITED BY PEOPLE, OR DRAFTED FROM FEEDBACK AND MERGED BY ONE. Nothing an investigation can reach
+# writes this file. An entry arrives either by a commit or pull request a person writes, or as a
+# pull request the product drafts from a comment a person made on a feedback issue (it copies what
+# the run looked up, never widens it). Either way the merge IS the sign-off, and `git log` on this
+# file is the audit trail. A registry populated from the agent's own closes would be the system
+# vouching for itself.
 #
 # Nothing here is consulted until the tenant's `settings/verb-grants.yaml` grants `lookup` to
 # gather.

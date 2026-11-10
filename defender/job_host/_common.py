@@ -58,7 +58,7 @@ def _box_start(session: Session, fields: dict[str, Any], *, registry: Registry) 
     return {"handle": handle, "clock_file": str(clock) if clock is not None else None}
 
 
-def _box(session: Session, handle: object) -> Box:
+def _session_box(session: Session, handle: object) -> Box:
     with session.lock:
         found = session.boxes.get(handle) if isinstance(handle, str) else None
     if found is None:
@@ -69,7 +69,7 @@ def _box(session: Session, handle: object) -> Box:
 def _box_exec(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     from defender.box import RELAY_LOST, relay_exec
 
-    box = _box(session, fields["handle"])
+    box = _session_box(session, fields["handle"])
     frame, cwd = fields["frame"], fields.get("cwd", DEFAULT_CWD)
     timeout = fields.get("timeout", DEFAULT_EXEC_TIMEOUT)
     if not isinstance(frame, bytes) or not isinstance(cwd, str) or not cwd.startswith("/"):
@@ -86,7 +86,7 @@ def _box_exec(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
 def _box_stop(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     from defender.box import relay_stop
 
-    box = _box(session, fields["handle"])
+    box = _session_box(session, fields["handle"])
     with box.lock:
         if box.stopped is None:
             answer = relay_stop(box.executor, session.docker)

@@ -200,7 +200,7 @@ STAT_LIMIT = 64 * 1024
 
 # --- who is one of the container's processes (H9) --------------------------------------------------------------------
 
-def _ask(docker: Any, argv: list[str]) -> str:
+def _docker_stdout(docker: Any, argv: list[str]) -> str:
     try:
         done = docker(argv)
     except (OSError, subprocess.SubprocessError) as e:
@@ -229,9 +229,9 @@ def container_processes(session: Session) -> set[int]:
     """The container's processes as this host sees them: its init (`docker inspect -f {{.State.Pid}}`) and what
     `docker top` lists, with every descendant of each."""
     name = session.container
-    roots = {int(w) for w in _ask(session.docker, ["docker", "inspect", "-f", "{{.State.Pid}}", name]).split()
+    roots = {int(w) for w in _docker_stdout(session.docker, ["docker", "inspect", "-f", "{{.State.Pid}}", name]).split()
              if w.isdigit() and int(w) > 0}
-    roots |= {int(w) for w in _ask(session.docker, ["docker", "top", name, "-o", "pid"]).split() if w.isdigit()}
+    roots |= {int(w) for w in _docker_stdout(session.docker, ["docker", "top", name, "-o", "pid"]).split() if w.isdigit()}
     if not roots:
         return set()
     tree, found, todo = _process_children(), set(), list(roots)

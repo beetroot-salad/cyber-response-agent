@@ -547,6 +547,11 @@ jobs:
       - name: Agent retries fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_agent_retries.py
 
+      # Run-ending precedence (#1465): only investigation/run_endings.py orders the endings a
+      # run can take; no site reads a group with its own override list. No baseline.
+      - name: Run-ending order fence (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_run_endings.py
+
       # Scrub order (#540): the box lifecycle scrubs the run folder before any reader of it, no
       # handler swallows the taint signal, and the bash tool has no in-process fallback.
       - name: Scrub-order fence (empty allow-list)

@@ -53,6 +53,20 @@ upgrading a worker:
 `run.py --job` is now only a job container's entry. From a host shell it does nothing and exits non-zero. Queue the
 investigation for the worker instead, or run it by hand with `run.py <alert> --tenant <id>`, which is unchanged.
 
+## Upgrade from before #1414
+
+Feedback issues on the tenant's Forgejo repository need the bot to write issues, labels and comments. Run
+migrations (revision `0011_merge_eligibility`), then rotate each existing tenant's forge credential once
+(`POST /admin/tenants/<T>/rotate-forge-credential`): only an integration created or rotated by this code is granted
+`write:issue`. Until a tenant rotates, its issue calls are refused (403) and logged every feedback tick; its
+open-issue requests and replies wait in the queue and are all served on the first tick after the rotation. Nothing is
+given up. The first feedback tick after the upgrade lists each existing feedback issue's comments once; after
+that, a tick reads only the issues the forge lists new comments on.
+
+The management service reads each active tenant's merge whitelist when its record is older than 20 s, and the feedback
+tick reads no comments from a record older than `LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE` (default 60 s). Keep that bound
+well above 20 s, or the tick will find the record stale between the service's reads.
+
 ## Upgrade from before #1345
 
 The tenant's alert mapping lives in the database; nothing reads `settings/alert-mapping.yaml` any more. After migration

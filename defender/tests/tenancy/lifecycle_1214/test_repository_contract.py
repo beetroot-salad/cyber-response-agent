@@ -21,6 +21,9 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime as dt
+import json
+import subprocess
+import sys
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -326,6 +329,125 @@ async def test_offboard_from_any_other_state_is_a_conflict_and_changes_nothing(s
     before = _values(await store.repo.tenant(T1))
     await _refused(store.repo.request_offboard(T1, now=NOW), "Conflict")
     assert _values(await store.repo.tenant(T1)) == before
+
+
+# --- #1360: the tenancy `offboard` operation ---------------------------------------------------------------------
+
+REPO = Path(__file__).resolve().parents[4]
+#: Imports the door and the models by path (`-I` ignores PYTHONPATH), optionally the PostgreSQL repository, and reports
+#: what the operation is and whether the PostgreSQL repository module ended up loaded. Driver modules (psycopg, asyncpg)
+#: are not asserted on: nothing shows the probe would see them load, so such a check would pass vacuously.
+_LOADS = """
+import inspect, json, sys
+sys.path.insert(0, sys.argv[1])
+import defender.tenancy as door
+import defender.tenancy.models as models
+if sys.argv[2] == "with-repository":
+    import defender.tenancy.postgres
+loaded = sorted(m for m in sys.modules if m == "defender.tenancy.postgres")
+print(json.dumps({"same": door.offboard is models.offboard, "async": inspect.iscoroutinefunction(door.offboard),
+                  "loaded": loaded}))
+"""
+
+
+def _probe(mode: str) -> dict[str, Any]:
+    proc = subprocess.run([sys.executable, "-I", "-c", _LOADS, str(REPO), mode], capture_output=True, text=True,
+                          check=False, timeout=180)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout.splitlines()[-1])
+
+
+def test_1360_offboard_is_an_async_operation_of_the_tenancy_door_and_models_that_does_not_load_the_postgres_repository():
+    """`defender.tenancy.offboard` is `defender.tenancy.models.offboard`, a coroutine function, and importing them does
+    not load the PostgreSQL repository; the probe does see it when it is imported (the positive control). (#1360 D1, D6a)"""
+    found = _probe("door")
+    assert (found["same"], found["async"], found["loaded"]) == (True, True, [])
+    assert "defender.tenancy.postgres" in _probe("with-repository")["loaded"]
+
+
+@pytest.fixture
+async def engine(pg_store) -> AsyncIterator[Any]:
+    from defender.database import async_engine
+
+    engine = async_engine(pg_store.dsn, max_connections=2)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@contextlib.asynccontextmanager
+async def _executor(engine: Any, kind: str) -> AsyncIterator[Any]:
+    """A transaction on `engine`, handed over as a Core connection or an ORM session; committed on a clean exit."""
+    if kind == "connection":
+        async with engine.begin() as connection:
+            yield connection
+    else:
+        from defender.database import sessions
+
+        async with sessions(engine)() as session, session.begin():
+            yield session
+
+
+class _Abandon(Exception):
+    pass
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("kind", ["connection", "session"])
+@pytest.mark.parametrize("name", ["creating", "creating-failed", "active", "rotating-failed"])
+async def test_1360_offboard_moves_the_tenant_on_a_connection_or_a_session_like_request_offboard(pg_store, engine, kind, name):
+    """`offboard(executor, tenant)` leaves what `request_offboard` leaves, returns a record that outlives the executor,
+    and touches no other tenant. (#1360 D1, D6a)"""
+    from defender.tenancy import offboard
+
+    await pg_store.seed(T1, ALL_ROWS[name])
+    await pg_store.seed(T2, ALL_ROWS[name])
+    before = _values(await pg_store.repo.tenant(T1))
+    async with _executor(engine, kind) as executor:
+        record = await offboard(executor, T1)
+    assert _job(record) == ("offboarding", "offboard", "offboard", "service", None)
+    assert (record.id, record.created_at) == (T1, before["created_at"])
+    assert _values(await pg_store.repo.tenant(T1)) == _values(record)
+    assert _job(await pg_store.repo.tenant(T2)) == ALL_ROWS[name]
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("kind", ["connection", "session"])
+async def test_1360_offboard_is_part_of_the_callers_transaction_and_a_rollback_takes_it_back(pg_store, engine, kind):
+    """Nothing is visible to another connection before the caller commits, and the caller's rollback leaves the tenant
+    as it was; a commit (the case above) keeps it. (#1360 D1, D6a)"""
+    from defender.tenancy import offboard
+
+    async def abandoned() -> None:
+        async with _executor(engine, kind) as executor:
+            await offboard(executor, T1)
+            assert _job(await pg_store.repo.tenant(T1)) == ACTIVE, "the operation committed on its own"
+            raise _Abandon
+
+    await pg_store.seed(T1, ACTIVE)
+    with pytest.raises(_Abandon):
+        await abandoned()
+    assert _job(await pg_store.repo.tenant(T1)) == ACTIVE
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("kind", ["connection", "session"])
+@pytest.mark.parametrize("name", ["offboarding", "offboarding-failed", "offboarded", "deleting", "absent"])
+async def test_1360_offboard_refuses_what_request_offboard_refuses_with_tenancys_own_errors(pg_store, engine, kind, name):
+    """An absent tenant is `NotFound`, any state but `creating`/`active` a `Conflict`; the row stays. (#1360 D1, D6a)"""
+    from defender.tenancy import Conflict, NotFound, offboard
+
+    if name != "absent":
+        await pg_store.seed(T1, ALL_ROWS[name])
+    await pg_store.seed(T2, ACTIVE)
+    before = None if name == "absent" else _values(await pg_store.repo.tenant(T1))
+    with pytest.raises(NotFound if name == "absent" else Conflict):
+        async with _executor(engine, kind) as executor:
+            await offboard(executor, ABSENT if name == "absent" else T1)
+    after = await pg_store.repo.tenant(T1)
+    assert (None if after is None else _values(after)) == before
+    assert _job(await pg_store.repo.tenant(T2)) == ACTIVE
 
 
 # --- request_rotate ---------------------------------------------------------------------------------

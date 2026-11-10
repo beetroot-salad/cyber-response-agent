@@ -9,7 +9,7 @@ from typing import Any
 from fastapi.routing import APIRoute
 
 from defender.api.app import create_app
-from defender.api.fakes import InMemorySecrets, InMemoryStore, StubArtifactLinks, StubSystemChecker
+from defender.api.fakes import InMemoryOffboarding, InMemorySecrets, InMemoryStore, StubArtifactLinks, StubSystemChecker
 from defender.api.ports import ApiDeps
 from defender.tests.support.api._identity1306 import FRONTEND_ORIGIN, T1
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -52,6 +52,7 @@ def route_table_deps() -> ApiDeps:
     return ApiDeps(
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store, writes=store,
         secrets=InMemorySecrets(), checker=StubSystemChecker(), artifact_links=StubArtifactLinks(),
+        offboarding=InMemoryOffboarding(None, store, lambda: None),  # type: ignore[arg-type]
         identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None)  # type: ignore[arg-type]
 
 
