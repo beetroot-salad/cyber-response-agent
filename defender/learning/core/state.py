@@ -62,6 +62,15 @@ def _join_record(folder: str, name: str) -> str:
 
 
 _QUEUE = "author-queue"
+#: #1414: run end's open-issue requests, one file per case, and the feedback drain's keyed records.
+FEEDBACK_REQUESTS = "feedback-issue-queue"
+FEEDBACK_CASES = "feedback-cases"
+#: Per issue, the ids of every comment the feedback tick has judged: taken in or passed over.
+FEEDBACK_SEEN = "feedback-seen"
+#: The forge time of the newest comment the feedback tick has read (one record, `comments`).
+FEEDBACK_CURSOR = "feedback-cursor"
+FEEDBACK_ITEMS = "feedback-items"
+FEEDBACK_DECISIONS = "feedback-decisions"
 _INFLIGHT = _join_record(_QUEUE, "inflight")
 _FAILED = _join_record(_QUEUE, "failed")
 _DELIVERY = "_pending_delivery"
@@ -81,6 +90,7 @@ class LockRole:
 
 
 REPO_LOCK = LockRole("repo", "_author.lock", _flock.SLOW_POLL)
+FEEDBACK_DRAIN_LOCK = LockRole("feedback-drain", ".feedback-drain.lock", _flock.FAST_POLL)
 AUTHOR_DRAIN_LOCK = LockRole("author-drain", ".author-drain.lock", _flock.FAST_POLL)
 LEAD_AUTHOR_DRAIN_LOCK = LockRole("lead-author-drain", ".lead-author-drain.lock", _flock.FAST_POLL)
 LEAD_QUEUE_LOCK = LockRole("lead-queue", _join_record(_PENDING_LEADS, ".lock"), _flock.FAST_POLL)
@@ -146,6 +156,21 @@ QUESTIONER_FINDINGS = Channel(
     id_key="finding_id",
     reads_on_append=True,
     report=_join_record(_PENDING, "questioner_findings.skip_report.log"),
+)
+#: #1414 D11: a person's feedback instructions, queued by the feedback tick for the lessons author's
+#: feedback curator. Rows are keyed by comment id (a decimal string); the lesson that comes of one cites it
+#: under `source_finding_ids` like any lesson cites its source row (`config.provenance_field`).
+FEEDBACK_LESSONS = Channel(
+    name="feedback_lessons",
+    queue=_join_record(_PENDING, "feedback_lessons.jsonl"),
+    consumed=_join_record(_PENDING, "feedback_lessons.consumed.jsonl"),
+    deadletter=_join_record(_PENDING, "feedback_lessons.deadletter.jsonl"),
+    stuck=_join_record(_PENDING, "feedback_lessons.stuck.jsonl"),
+    append_lock=_join_record(_PENDING, ".feedback_lessons.lock"),
+    drain_role=CURATOR_DRAIN_LOCK,
+    id_key="comment_id",
+    reads_on_append=True,
+    report=_join_record(_PENDING, "feedback_lessons.skip_report.log"),
 )
 
 
@@ -673,6 +698,54 @@ class LearningState:
         except OSError as failed:
             raise OSError(failed.errno, failed.strerror, self._abs(name)) from failed
         _logger.info(f"enqueued for curation: {self._abs(name)}")
+
+    def enqueue_feedback_issue(self, case_id: str, spec: dict) -> None:
+        """File the open-issue request `spec` for a run of `case_id` (#1414 F1): one file per run, so a rerun of the
+        case never replaces an earlier run's request (one issue per run)."""
+        name = f"{FEEDBACK_REQUESTS}/{case_id}--{spec['run_id']}.json"
+        try:
+            self._write(name, json.dumps(spec) + "\n", "replace")
+        except OSError as failed:
+            raise OSError(failed.errno, failed.strerror, self._abs(name)) from failed
+        _logger.info(f"enqueued an open-issue request: {self._abs(name)}")
+
+    # -- #1414: keyed JSON records of the feedback drain ----------------------------------------
+
+    def put_record(self, folder: str, key: str, spec: dict) -> None:
+        self._write(f"{folder}/{key}.json", json.dumps(spec) + "\n", "replace")
+
+    def get_record(self, folder: str, key: str) -> dict | None:
+        text, _present = self._read(f"{folder}/{key}.json")
+        if text is None:
+            return None
+        value, why = load_json_artifact(text)
+        return value if why is None and isinstance(value, dict) else None
+
+    def records(self, folder: str) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for name in self._json_names(folder):
+            key = name.removesuffix(".json")
+            if (spec := self.get_record(folder, key)) is not None:
+                out[key] = spec
+        return out
+
+    def drop_record(self, folder: str, key: str) -> None:
+        with contextlib.suppress(OSError):
+            self._unlink(f"{folder}/{key}.json")
+
+    def drop_record_if(self, folder: str, key: str, served: dict) -> bool:
+        """Drop the record only while it is still `served`: a newer one filed meanwhile survives. False then."""
+        if self.get_record(folder, key) != served:
+            return False
+        self.drop_record(folder, key)
+        return True
+
+    def replace_record_if(self, folder: str, key: str, served: dict, spec: dict) -> bool:
+        """Write `spec` over the record only while it is still `served`; a newer record is left alone."""
+        if self.get_record(folder, key) != served:
+            return False
+        self.put_record(folder, key, spec)
+        return True
 
     def _json_names(self, folder: str) -> list[str]:
         """The `*.json` record names directly in `folder`, of every kind (an entry at a record

@@ -68,6 +68,7 @@ from defender import tenancy  # noqa: E402
 from defender.records.formats import Episode  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.investigation import driver  # noqa: E402
+from defender.investigation.run_state import RunState  # noqa: E402
 from defender import providers  # noqa: E402
 from defender.records import run_end  # noqa: E402
 from defender.tenancy import run_knowledge  # noqa: E402
@@ -386,6 +387,8 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     #: The run clock's start when it is not the source's own (`--as-of`, #1347 O5); `None`
     #: on an ordinary run and on a world, whose clock is its branch point's.
     clock_origin: datetime | None = None,
+    #: The run's live state (#1414), handed to the investigation when the caller built one.
+    run_state: Any = None,
     #: The credential proxy's address and the run's read token (#1163); `None` when the run has
     #: no `http-proxy` system.
     access: RequestAccess | None = None,
@@ -405,6 +408,8 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     # verdict; read here only for a direct caller, whose run the driver judges.
     roster = systems.roster if systems is not None else read_roster(adapters_under(defender_dir))
     held: dict[str, Any] = {} if job_facts is None else {"review_state": job_facts.review_state}
+    if run_state is not None:
+        held["run_state"] = run_state
     if world is not None:
         if episode is None:
             # The world's ledger is written through the episode `main` holds; there is no path
@@ -525,6 +530,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: the box started (r7 D-ad) and its `scrub_verified` once the teardown and scrub returned.
     #: `None` off the job lane.
     job_facts: _JobEndFacts | None = None,
+    #: The run's live state (#1414), built by `main`, handed to the investigation.
+    run_state: Any = None,
 ) -> dict[str, Any]:
     """Start the box, run the investigation inside it, and reap both on every exit
     (`box_mod.stop_and_scrub` owns the stop/scrub ordering and rules).
@@ -563,6 +570,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     keywords: dict[str, Any] = {} if job_facts is None else {"job_facts": job_facts}
     keywords |= _access_kwargs(access)
     keywords |= {} if clock_origin is None else {"clock_origin": clock_origin}
+    keywords |= {} if run_state is None else {"run_state": run_state}
     investigation_ok = False
     # A run its box ended (#1421) returns normally, but its failure is in flight all the same: a
     # teardown fault on it is logged, never raised over the ending.
@@ -1392,6 +1400,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     visualize: Callable[..., None] = _run.visualize,
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
+    enqueue_feedback: Callable[..., bool] = _run.enqueue_feedback_issue,
     preflight: Callable[..., int] = preflight_role_models,
     materialize: Callable[..., Run] = _materialize_run,
     oracle: Any = None,
@@ -1457,8 +1466,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                 _logger.info(f"run_dir={run_dir} model={started.model}")
                 _announce_provenance(run_dir)
 
+                run_state = RunState(run_dir, run_dir.name)
                 try:
-                    summary = lifecycle(**started.lifecycle_kwargs(ns))
+                    summary = lifecycle(**started.lifecycle_kwargs(ns), run_state=run_state)
                 except (ServingAbort, BaseExceptionGroup) as escaped:
                     return _unservable_exit(escaped, world=world, episode=episode)
 
@@ -1484,9 +1494,18 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                     skipped = _not_curated(started, no_learn=ns.no_learn)
                     if skipped is not None:
                         _logger.info(skipped)
-                    elif enqueue_curation(run, started.alert, tenant=started.accepted,
-                                          truncated_by=summary.get("truncated_by")):
-                        _logger.info("enqueued for catalog curation")
+                    else:
+                        if enqueue_curation(run, started.alert, tenant=started.accepted,
+                                            truncated_by=summary.get("truncated_by")):
+                            _logger.info("enqueued for catalog curation")
+                        # After curation, under its own predicate: a feedback issue is wanted
+                        # for the escalated endings the learning gate refuses (#1414 F1). It
+                        # never raises, so it cannot cost the run its curation or its page.
+                        enqueue_feedback(
+                            run, started.alert, tenant=started.tenant,
+                            truncated_by=summary.get("truncated_by"),
+                            closed_before_cut=summary.get("closed_before_cut") is True,
+                            run_state=run_state)
 
                 _post_steps(started, summary, visualize=visualize, update_ticket=ns.update_ticket,
                             operator_steps=ticket_and_curation)

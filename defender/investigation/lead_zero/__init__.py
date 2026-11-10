@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from defender.box import BoxEnding
 from defender._io import read_text_utf8
 from defender.records import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill, count_call
@@ -17,7 +16,9 @@ from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.systems import circuit_breaker, system_status
 from defender import providers
 from defender.records import run_end
-from defender._exception_groups import carried, carried_unless_overridden
+from defender.investigation.run_endings import (
+    LEAD_ZERO_PROPAGATES, carries_box_ending, ending_in,
+)
 from defender.investigation.run_state import RunState
 from defender.systems.verb_grant import GrantError, VerbGrant
 from ._spec import (
@@ -337,12 +338,10 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
             asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, SystemExit):
         raise
     except Exception as e:  # noqa: BLE001 — the lead's own dispatch must never break the run
-        if carried(e, BoxEnding) is not None:
-            raise  # the box is unusable or its fence tripped (#1421): the run ends by name
-        if carried_unless_overridden(e, providers.ProviderDown, (BudgetKill, circuit_breaker.RunAborted)):
-            raise  # a provider that stayed down, inside a group (#1243)
-        if carried_unless_overridden(e, providers.ProviderRejected, (BudgetKill, circuit_breaker.RunAborted)):
-            raise  # a model whose setup is broken, inside a group (#1243 r3)
+        if carries_box_ending(e) or ending_in(e, LEAD_ZERO_PROPAGATES) is not None:
+            # The box, a provider that stayed down or a model with a broken setup, inside a group:
+            # the run ends by name.
+            raise
         _logger.warning(f"correlation lead dispatch failed ({type(e).__name__}); naming it")
         return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
     if not ends:

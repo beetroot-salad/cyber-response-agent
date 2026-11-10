@@ -78,7 +78,9 @@ def existing_finding_ids(cfg: Any) -> set[str]:
     ):
         sids = lesson.fm.get(field) or []  # lint-lesson-text: ok — ids compared as set members, never printed
         if isinstance(sids, list):
-            ids.update(sid for sid in sids if isinstance(sid, str))
+            # A numeric id (a feedback comment id, #1414) is read by YAML as an int.
+            ids.update(str(sid) for sid in sids
+                       if isinstance(sid, (str, int)) and not isinstance(sid, bool))
     return ids
 
 
@@ -282,9 +284,9 @@ def write_disposition_report(
         return
     counts = " ".join(f"{label}={len(rows)}" for label, rows in groups.items())
     ids = " ".join(
-        f"{label}_ids={[r.get('finding_id') for r in rows]}" for label, rows in groups.items())
+        f"{label}_ids={[r.get(channel.id_key) for r in rows]}" for label, rows in groups.items())
     reasons = "".join(
         f" {label}_reasons={why}" for label, rows in groups.items()
-        if (why := {r.get("finding_id"): r["held_reason"] for r in rows if "held_reason" in r}))
+        if (why := {r.get(channel.id_key): r["held_reason"] for r in rows if "held_reason" in r}))
     state.disposition_report(
         channel, f"{now_iso()} batch={batch_id} {counts} {ids}{reasons}\n")
