@@ -43,7 +43,13 @@ VULTURE_ARGS = [
     "--exclude", "defender/.venv,defender/tests,defender/skills/invlang/schema.py",
     # event_time is the alert mapping's entry in its wire model and its table: read through pydantic and SQLAlchemy.
     # `program_kind` is a column no code reads: it is always 'program', and its composite foreign key (to users' id and kind) is what it is for.
-    "--ignore-names", "key_field,key_value,event_time,program_kind",
+    # #1366 K2/O2: `DISPLAY_NAME` and `EXAMPLE` are catalog declarations read cold (AST, `systems.catalog` and
+    # lint_catalog_declarations), never by attribute. `written_at` is a version row's audit column (P3, R9): written by
+    # the store's inserts, read by no code. `add_records` is the memory twin's public seeder beside `add_generation`
+    # (R10: planting helpers seed records with it). `_adapters_at_run_start` is the driver's run-start read the
+    # one-roster-read tests drive directly (production calls `_run_start_reads`).
+    "--ignore-names", "key_field,key_value,event_time,program_kind,DISPLAY_NAME,EXAMPLE,written_at,add_records,"
+                      "_adapters_at_run_start",
     # pydantic calls its validators by decorator registration, never by name.
     "--ignore-decorators", "@field_validator,@model_validator",
 ]
