@@ -21,6 +21,7 @@ from defender import box as box_mod
 from defender._paths import process_defender_dir
 from defender._text import one_line
 from defender.learning.author import drain
+from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.learning.core.lane_trees import open_drain_trees
 from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.core.pitfalls_disposition import PitfallsDisposition
@@ -162,13 +163,19 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
 
 
 #: The faults `_drain_one_curator` lets out of a curator rather than containing to its channel:
-#: a `RETIRE_SET` fault; a `BoxFault`, since a box that won't start or stop halts the batch as it
+#: a `RETIRE_SET` fault; a `BoxFault` or `RunTainted`, since a box that won't start or stop (or a tainted tree) halts the batch as it
 #: halts the lead-author lane (#1195 O4, O5); and an interrupt, since swallowing it would record
 #: Ctrl-C as a curator fault, run the sibling curator, and go on to commit, push and open a PR
 #: for the batch the operator asked to stop.
 _HALTING: tuple[type[BaseException], ...] = (
-    *drain.RETIRE_SET, box_mod.BoxFault, KeyboardInterrupt, Stop,
+    *drain.RETIRE_SET, box_mod.BoxFault, box_mod.RunTainted, KeyboardInterrupt, Stop,
 )
+
+#: What the lead-author lane's steps let out rather than contain to the claim's items: the systemic faults (no
+#: item caused them, so none is charged: a misconfigured step, a box that will not run, a tainted tree), an
+#: interrupt and the store's stop. A `RETIRE_SET` fault (an `AuthorError`) is one claim's failure: contained,
+#: its items take what the batch's commits show.
+_LEAD_HALTING: tuple[type[BaseException], ...] = (*SYSTEMIC_FAULTS, KeyboardInterrupt, Stop)
 
 
 
@@ -375,7 +382,7 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
             try:
                 run_lead_author(paths, None, run, box=box, on_done=done.append, batch=batch,
                                 items=[(kind, key, payload)], feedback=feedback, outcomes=outcomes)
-            except _HALTING:
+            except _LEAD_HALTING:
                 raise
             except (_LeadAuthorRetry, DeliveryRefused, Exception) as e:  # noqa: BLE001 — contained to this request
                 _logger.warning(f"lead_author_drain: request {key}: {type(e).__name__}: {one_line(str(e))}")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
@@ -389,13 +396,16 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
         try:
             run_pitfalls(paths, None, box=box, on_curated=curated.append, batch=batch, items=pitfalls,
                          feedback=feedback, outcomes=outcomes)
-        except _HALTING:
+        except _LEAD_HALTING:
             raise
         except Exception as e:  # noqa: BLE001 — contained: the pitfalls take their fates below
             _logger.error(f"lead_author_drain: pitfalls curation error: {e!r}")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     committed = set(curated[-1].committed_ids) if curated else set()
+    declined = set(curated[-1].held_ids) if curated else set()
     for kind, key, _payload in pitfalls:
-        if key not in committed:
+        if key in declined:
+            outcomes.setdefault((kind, key), Outcome.declined())
+        elif key not in committed:
             outcomes.setdefault((kind, key), Outcome.waiting())
 
 
@@ -406,7 +416,8 @@ def _run_of(payload: dict, tenant: Tenant | None) -> Run | Exception:
 
     try:
         address = RunAddress(payload["tenant_id"], payload["run_id"])
-    except (KeyError, TypeError, ValueError) as unreadable:
+    except (KeyError, TypeError, ValueError, TenantRefused, RunRefused) as unreadable:
+        # A missing, null or mistyped field is a request that names no run (the address checks each field).
         return TenantRefused(f"the request names no run: {unreadable}")
     if tenant is None or str(tenant.id) != str(address.tenant_id):
         return TenantRefused(f"tenant {address.tenant_id} is not the drain's accepted tenant")
