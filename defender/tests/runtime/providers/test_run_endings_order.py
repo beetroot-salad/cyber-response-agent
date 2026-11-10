@@ -44,7 +44,7 @@ DOWN_END = (run_end.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")
 REJECTED_END = (run_end.TRUNCATED_BY_PROVIDER_REJECTED, "ProviderRejected")
 
 
-@pytest.mark.parametrize("exc, expected", [
+@pytest.mark.parametrize(("exc", "expected"), [
     (LOST, BOX_LOST),
     (DOWN, DOWN_END),
     (REFUSED, REJECTED_END),
@@ -101,7 +101,7 @@ def test_a_gather_lead_stamps_only_a_box_ending_or_an_outage_on_the_way_up():
     assert endings.ending_in(_group(LEDGER, REFUSED), stamped) is None
 
 
-@pytest.mark.parametrize("exc, propagates", [
+@pytest.mark.parametrize(("exc", "propagates"), [
     (_group(LOST, KILL), True),  # a box ending is let through even beside a kill
     (_group(LOST, SERVING), True),
     (_group(DOWN, REFUSED), True),
@@ -130,5 +130,7 @@ def test_the_box_ending_logs_its_own_words_and_a_refusal_keeps_its_traceback(cap
     box, down, refusal = caplog.records
     assert box.getMessage() == "box gone"
     assert down.getMessage().endswith("; ending the run")
-    assert refusal.getMessage().endswith("; stopping") and refusal.exc_info is not None
-    assert box.exc_info is None and down.exc_info is None
+    assert refusal.getMessage().endswith("; stopping")
+    assert refusal.exc_info is not None
+    assert box.exc_info is None
+    assert down.exc_info is None
