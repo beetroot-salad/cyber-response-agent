@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import datetime as dt
+import json
 import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -122,13 +123,14 @@ def proxied_runs(tmp_path: Path, data_root: Path) -> Iterator[Callable[..., tupl
         up.replies[f"/{A.ELASTIC_EVENTS}/_search"] = (
             200, {"Content-Type": "application/json"},
             b'{"hits": {"total": {"value": 0}, "hits": []}}')
-        with A.elastic_proxied(tmp_path / "px", data_root, up.url) as (proxied, _tap):
+        with A.elastic_proxied(tmp_path / "px", data_root, up.url) as (proxied, tap):
             def run(name: str, flags: list[str]) -> tuple[C.Launched, Seen]:
                 seen = Seen()
                 out = launch(tmp_path / name, flags, registry_cls=wired_registry(seen, proxied))
                 return out, seen
 
             run.upstream = up  # type: ignore[attr-defined]
+            run.tap = tap  # type: ignore[attr-defined]
             yield run
 
 
@@ -302,3 +304,85 @@ def test_an_as_of_run_writes_nothing_about_the_freeze_into_its_run_dir(tmp_path)
     named = {name: m.group() for name, t in text.items()
              if name in plain and (m := FREEZE_WORDS.search(t)) and not FREEZE_WORDS.search(plain[name])}
     assert not named, f"a file of the --as-of run names the freeze: {named}"
+
+
+#: The only per-run differences the differential below forgives, each named so a reviewer can see
+#: what is allowed to differ: the run id and paths, the random ids and untrusted-text nonces a run
+#: mints, the run-clock stamps (compared as seconds from the run's own origin), the provenance
+#: wall-time start (checked against T in its own test), measured durations and the hash of a log
+#: line holding a random id, and every timestamp in the trace and wire
+#: logs (the A9 note exempts them). Nothing else, and nothing about requests.
+INSTANT = re.compile(r"\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?")
+NONCE = re.compile(r"run-[0-9a-f]{16}")
+RANDOM_ID = re.compile(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
+#: Durations the clock of the machine measures, and the hash of a log line that holds a random id.
+MEASURED = re.compile(r'("duration(?:_api)?_ms": )[0-9.]+|("wire_sha": ")[0-9a-f]{64}')
+WALL_START = re.compile(r'"started_at": "[^"]*"')
+STAMP_EXEMPT = ("tool_trace.jsonl", "wire_logs/")
+
+
+def as_instant(raw: str) -> dt.datetime | None:
+    try:
+        parsed = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.UTC)
+
+
+def normalised(name: str, text: str, *, origin: dt.datetime, swaps: dict[str, str]) -> str:
+    """`text` of run-dir file `name` with only the allowlisted per-run differences replaced."""
+    for raw, mark in swaps.items():
+        text = text.replace(raw, mark)
+    text = RANDOM_ID.sub("<ID>", NONCE.sub("<NONCE>", text))
+    if name == "provenance.json":
+        text = WALL_START.sub('"started_at": "<WALL>"', text)
+    text = MEASURED.sub(lambda m: f"{m.group(1) or m.group(2)}<MEASURED>", text)
+    exempt = name.startswith(STAMP_EXEMPT)
+
+    def stamp(m: re.Match) -> str:
+        moved = as_instant(m.group())
+        if exempt:
+            return "<STAMP>"
+        if moved is None or not 0 <= (moved - origin).total_seconds() <= 3600:
+            return m.group()
+        return f"<RUN-CLOCK+{(moved - origin).total_seconds():g}s>"
+
+    return INSTANT.sub(stamp, text)
+
+
+def what_the_proxy_and_upstream_saw(run: Any, since: tuple[int, int, int]) -> dict[str, Any]:
+    """Every adapter-to-proxy request (method, path, all headers, JSON body) and every request
+    the upstream then got (method, path, all headers, body), since the marks in `since`."""
+    tap, up = run.tap, run.upstream
+    return {
+        "to_proxy": tap.requests[since[0]:],
+        "to_proxy_bodies": [json.loads(b) for b in tap.bodies[since[1]:]],
+        "to_upstream": [(s.method, s.path, sorted(s.headers.items()), s.body) for s in up.seen[since[2]:]],
+    }
+
+
+def test_an_as_of_run_differs_from_an_ordinary_run_in_nothing_but_the_allowlisted_stamps(tmp_path, data_root):
+    """P7/P4: one ordinary and one --as-of run send the proxy and the upstream the same requests
+    (every header and body) and write the same run-dir files byte for byte, bar the named allowlist."""
+    swept: dict[str, dict[str, Any]] = {}
+    files: dict[str, dict[str, str]] = {}
+    with proxied_runs(tmp_path, data_root) as run:
+        for name, flags, origin in (("ordinary", [], C.ARM_START), ("frozen", ["--as-of", AS_OF_Z], AS_OF)):
+            marks = (len(run.tap.requests), len(run.tap.bodies), len(run.upstream.seen))
+            out, _seen = run(name, flags)
+            assert out.exit == 0, f"{name}: exit={out.exit} refusal={out.refusal}"
+            swept[name] = what_the_proxy_and_upstream_saw(run, marks)
+            swaps = {str(out.run_dir): "<RUN-DIR>", str(out.run_id): "<RUN-ID>", str(tmp_path / name): "<TMP>"}
+            files[name] = {n: normalised(n, t, origin=origin, swaps=swaps) for n, t in run_files(out.run_dir).items()}
+
+    assert swept["ordinary"]["to_proxy_bodies"], "the ordinary run's query never reached the proxy"
+    for part in swept["ordinary"]:
+        assert swept["frozen"][part] == swept["ordinary"][part], (
+            f"{part} of the --as-of run differs from an ordinary run's:\n"
+            f"{swept['frozen'][part]}\nvs\n{swept['ordinary'][part]}")
+    assert set(files["frozen"]) == set(files["ordinary"]), sorted(set(files["frozen"]) ^ set(files["ordinary"]))
+    assert len(files["ordinary"]) > 5, "the walk read too few files to mean anything"
+    differing = sorted(n for n in files["ordinary"] if files["frozen"][n] != files["ordinary"][n])
+    assert not differing, {
+        n: next((a, b) for a, b in zip(files["frozen"][n].splitlines(), files["ordinary"][n].splitlines(), strict=False)
+                if a != b) for n in differing}
