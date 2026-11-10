@@ -414,7 +414,8 @@ def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overla
           whole: bool = False, location: str = REPO_LOCATION) -> Copy:
     """Make the frozen cluster hold exactly this variant. A clean marker for the variant is
     trusted unless `whole` (make-a-case always restores, D23); anything else discards the node and
-    its data and restores the whole snapshot into a fresh node (D25). The node's clock reads T
+    its data and restores the whole snapshot into a fresh node (D25), once the snapshot's UUID has
+    been checked on the node that is there (A2: a refusal leaves the old copy untouched). The node's clock reads T
     whenever it starts (D15 revised)."""
     check_freeze(freeze, freeze_id)
     vid = variant_id(freeze_id, overlay)
@@ -423,6 +424,11 @@ def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overla
         tallies = {n: int(t) for n, t in marker["tallies"].items()}   # type: ignore[index]
         restored = False
     else:
+        if ops.node_exists():
+            # A2 under D25: the snapshot must be the freeze's before the copy there is discarded.
+            ops.ensure_node(freeze["T"], clock)
+            wait_for_cluster(es, clock, "the node start")
+            register_repository(es, freeze, location)
         mark_dirty(ops, freeze_id, overlay)   # before the wipe: a crash from here leaves no trusted copy
         ops.fresh_node(freeze["T"], clock)
         wait_for_cluster(es, clock, "the node start")

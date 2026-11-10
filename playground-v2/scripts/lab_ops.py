@@ -338,15 +338,34 @@ class LabOps:
                     "-v", f"{CLOCK_DIR}:{NODE_CLOCK_DIR}:ro",
                     "--memory", "3g", self.es_image)
 
+    def _node_state(self) -> str | None:
+        """`true` / `false` (running or not) for the node container, None when there is none."""
+        proc = self._inner("inspect", "-f", "{{.State.Running}}", ES_CONTAINER, check=False)
+        return _text(proc.stdout).strip() if proc.returncode == 0 else None
+
+    def node_exists(self) -> bool:
+        """A frozen node container exists (running or stopped): there is a copy to keep."""
+        self.ensure_engine()
+        return self._node_state() is not None
+
     def ensure_node(self, as_of: Any = None, clock: Any = None) -> None:
         """The engine, and a frozen node running on the data it has. Idempotent: a running node is
-        left alone; a stopped or missing one is started anew, its clock reading `as_of` at its start
-        (without `as_of` the offset file keeps what it holds). A teardown stops the node, so this
-        comes before the first request to the cluster."""
+        left alone; a stopped one is started again (the same container and data), a missing one is
+        created; either way its clock reads `as_of` at its start (without `as_of` the offset file
+        keeps what it holds). A teardown stops the node, so this comes before the first request to
+        the cluster."""
         self.mount_node_cert()
-        running = self._inner("inspect", "-f", "{{.State.Running}}", ES_CONTAINER, check=False)
-        if running.returncode != 0 or _text(running.stdout).strip() != "true":
+        state = self._node_state()
+        if state == "true":
+            return
+        if state is None:
             self._start_node(as_of, clock)
+            return
+        if as_of is None:
+            self._write_offset(None)
+        else:
+            self.set_clock(as_of, clock)
+        self._inner("start", ES_CONTAINER)
 
     def fresh_node(self, as_of: Any, clock: Any = None) -> None:
         """D25: discard the node container and its data volume and start a new, empty node whose
@@ -578,8 +597,9 @@ class LabOps:
     def fire(self, scenario: str, lock_token: str) -> dict:
         runner = _load_module("attack_runner", PLAYGROUND / "attacks" / "runner.py")
         from chaos import lock
+        runs_dir = _configured_dir("V2_ATTACK_RUNS_DIR", "the attack runs would land in the repository")
         catalog = runner.load_catalog()
-        run_id, _, _ = runner.run_scenario(catalog[scenario], 42, {}, False,
+        run_id, _, _ = runner.run_scenario(catalog[scenario], 42, {}, False, runs_dir=runs_dir,
                                            lock_store=lock.DockerLockStore(run=self._run, context=self.context),
                                            lock_token=lock_token)
         return {"run_id": run_id}
