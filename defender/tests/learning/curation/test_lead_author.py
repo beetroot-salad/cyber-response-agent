@@ -22,7 +22,6 @@ from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests.support.learning.core._store1278 import call, migrated_database, world  # noqa: F401 — fixtures the store arm needs
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
 from defender.tests.support.learning.curation import _curator1134 as C
-from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.learning.curation._lead_author_1134 import repo_skills, skills_view
 from defender.tests.support.learning.core._state1135 import curation_run_dir, curation_tenant, run_of
 from defender.tests.support.shared._locations_1210 import location_path
@@ -60,8 +59,19 @@ def _lane(tmp_path: Path, files: dict[str, str] | None = None, *, tenant=None) -
 def _deps(lane: C.DraftLane, **overrides):
     """Real lead-author deps over the lane's draft, leaf collaborators overridden by keyword."""
     deps = lead_author.build_lead_author_deps(
-        lane.paths, state=open_state(lane.paths), trees=C.draft_trees(lane), batch=lane.batch)
+        lane.paths, trees=C.draft_trees(lane), batch=lane.batch, file_pitfalls=_PitfallSink())
     return replace(deps, **overrides) if overrides else deps
+
+
+class _PitfallSink:
+    """The `file_pitfalls` seam (#1278: the run's pitfalls go to the learning store; here they are kept in `filed`)."""
+
+    def __init__(self) -> None:
+        self.filed: list[dict] = []
+
+    def __call__(self, rows: list[dict]) -> int:
+        self.filed.extend(rows)
+        return len(rows)
 
 
 def _executed_lead(**kw):
@@ -934,19 +944,15 @@ def test_run_collects_general_failure_before_early_return(tmp_path: Path):
     _write_lead_meta(run_dir, "l-001", "probe")
     _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")
 
-    from defender.learning.core.state import PITFALLS  # the file queue: #1278 deletes it (stale-test census)
-
     assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
-    queue = location_path(deps.paths.state_root) / PITFALLS.queue
-    rows = [json.loads(ln) for ln in queue.read_text().splitlines()]
+    rows = deps.file_pitfalls.filed
     assert [r["query_id"] for r in rows] == ["elastic.esql"]
     assert rows[0]["error_class"] == "agent-fixable"
     assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
 
     (run_dir / "lead_author" / "done").unlink()
     assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
-    rows2 = [json.loads(ln) for ln in queue.read_text().splitlines()]
-    assert len(rows2) == 1
+    assert len(deps.file_pitfalls.filed) == 1, "the sentinel keeps a rerun from filing the run's pitfalls twice"
 
 
 def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(tmp_path: Path):
