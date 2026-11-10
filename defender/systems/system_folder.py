@@ -32,7 +32,7 @@ def folder_of_bytes(system: str, *, config: bytes | None, access: bytes | None, 
     faults: list[str] = []
     settings: dict[str, str] = {}
     if config is not None:
-        text = _text(config)
+        text = _utf8(config)
         if text is None:
             faults.append(f"{locator.part(system, 'settings')}: is not UTF-8 text")
         else:
@@ -48,7 +48,7 @@ def folder_of_bytes(system: str, *, config: bytes | None, access: bytes | None, 
                 seen.add(key)
     declaration = ""
     if access is not None:
-        text = _text(access)
+        text = _utf8(access)
         if text is None:
             faults.append(f"{locator.part(system, 'access')}: is not UTF-8 text")
         else:
@@ -78,7 +78,7 @@ def config_text(settings: Mapping[str, str]) -> str:
     return "".join(f'{key}="{value}"\n' for key, value in sorted(settings.items()))
 
 
-def _text(data: bytes) -> str | None:
+def _utf8(data: bytes) -> str | None:
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:

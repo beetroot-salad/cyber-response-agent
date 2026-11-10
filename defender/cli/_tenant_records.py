@@ -40,15 +40,15 @@ def author(command: str) -> str:
     return f"tenant.py {command}"
 
 
-def _say(message: object) -> None:
+def say(message: object) -> None:
+    """A refusal or a note, as every `tenant.py` subcommand prints it: `[tenant.py] <message>` on stderr."""
     print(f"[tenant.py] {message}", file=sys.stderr)
 
 
-def _now() -> _dt.datetime:
-    return _dt.datetime.now(_dt.UTC)
+_say = say
 
 
-def _dsn() -> str | None:
+def _records_dsn() -> str | None:
     """The records' database (`DEFENDER_DATABASE_DSN`), or a printed refusal and None."""
     variable = tenancy.database_address_variable()
     dsn = os.environ.get(variable, "")
@@ -62,7 +62,7 @@ def _store_call(dsn: str, call: Callable[[Any], Any]) -> Any:
     from defender.system_records import open_store
 
     async def go() -> Any:
-        store = open_store(dsn, clock=_now)
+        store = open_store(dsn, clock=lambda: _dt.datetime.now(_dt.UTC))
         try:
             return await call(store)
         finally:
@@ -199,7 +199,7 @@ def run_import(admitted: Any, *, dry_run: bool) -> int:
     if dry_run:
         print(f"the import of tenant {tenant.id} would write {what}; nothing was written (dry run)")
         return 0
-    dsn = _dsn()
+    dsn = _records_dsn()
     if dsn is None:
         return 1
     done, _ = _written(dsn, lambda store: store.import_tenant(tenant.id, records, author=author("import")))
@@ -219,7 +219,7 @@ def run_set_system(admitted: Any, system: str, folder: Path, *, replaces: int, d
     adapter of that id), enabled unless `--disabled`."""
     from defender.systems.system_folder import read_folder
 
-    dsn = _dsn()
+    dsn = _records_dsn()
     if dsn is None:
         return 1
     read = read_folder(folder, system, locator=RECORDS)
@@ -238,7 +238,7 @@ def run_set_system(admitted: Any, system: str, folder: Path, *, replaces: int, d
 
 
 def run_delete_system(admitted: Any, system: str, *, replaces: int) -> int:
-    dsn = _dsn()
+    dsn = _records_dsn()
     if dsn is None:
         return 1
     done, _ = _written(dsn, lambda store: store.delete_system(admitted.tenant.id, system, replaces=replaces,
@@ -267,7 +267,7 @@ def _case_of_file(file: Path) -> Any:
 
 
 def run_set_case(admitted: Any, file: Path, *, replaces: int) -> int:
-    dsn = _dsn()
+    dsn = _records_dsn()
     if dsn is None:
         return 1
     parsed = _case_of_file(file)
@@ -283,7 +283,7 @@ def run_set_case(admitted: Any, file: Path, *, replaces: int) -> int:
 
 
 def run_delete_case(admitted: Any, *, replaces: int) -> int:
-    dsn = _dsn()
+    dsn = _records_dsn()
     if dsn is None:
         return 1
     done, _ = _written(dsn, lambda store: store.delete_case(admitted.tenant.id, replaces=replaces,
@@ -318,10 +318,10 @@ def run_systems(admitted: Any, *, export: Path | None, secrets: Any) -> int:
     if export is not None:
         for system, record in sorted(records.systems.items()):
             folder = Path(export) / system
-            folder.mkdir(parents=True, exist_ok=True)
-            if record.settings:
-                (folder / "config.env").write_text(config_text(record.settings), encoding="utf-8")
-            (folder / "access.yaml").write_text(record.access, encoding="utf-8")
+            folder.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the operator names this folder on its own host; no box writes it
+            files = {"access.yaml": record.access, **({"config.env": config_text(record.settings)} if record.settings else {})}
+            for name, text in files.items():
+                (folder / name).write_text(text, encoding="utf-8")  # lint-unguarded-tree-write: ok — the operator's export folder
         print(f"wrote {len(records.systems)} system folder(s) under {export}")
         return 0
     for system, record in sorted(records.systems.items()):
@@ -433,6 +433,6 @@ def operator_secrets(token_file: Path | None, *, mount: str) -> Any:
     return OpenBaoSecrets(addr=DEPLOYMENT_ISSUER.openbao_url, token=token, mount=mount)
 
 
-__all__ = ["IMPORT_COMMAND", "NOT_IMPORTED", "author", "catalog", "import_candidate", "operator_secrets",
+__all__ = ["IMPORT_COMMAND", "NOT_IMPORTED", "author", "catalog", "import_candidate", "operator_secrets", "say",
            "run_delete_case", "run_delete_system", "run_import", "run_set_case", "run_set_credentials",
            "run_set_system", "run_systems"]

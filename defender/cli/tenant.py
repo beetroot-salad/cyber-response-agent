@@ -136,8 +136,7 @@ _COMMITTED_READ_TIMEOUT = 15
 _CANNOT_VERIFY = "cannot verify .tenant-id is committed"
 
 
-def _say(message: object) -> None:
-    print(f"[tenant.py] {message}", file=sys.stderr)
+_say = _tenant_records.say
 
 
 @dataclasses.dataclass(frozen=True)
