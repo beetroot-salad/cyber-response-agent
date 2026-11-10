@@ -79,9 +79,6 @@ temp/
 !**/runs/.gitkeep
 
 # Defender learning-loop ephemeral state — never committed.
-defender/learning/_pending/
-defender/learning/_pending_leads/
-defender/learning/_pending_pitfalls/
 defender/learning/_pending_delivery/
 defender/learning/_author.lock
 defender/learning/author-queue/
@@ -97,7 +94,7 @@ defender/learning/.learn-drain.lock
 # collision the lock was added for. Every sibling above survives that clean by being ignored.
 # NOT `ClaimGit.reset` (via `drains._claim_git`): its two call sites both receive `wt_paths`, and
 # `LoopPaths.with_repo_root` pins `state_dir` to the MAIN tree's state root — so its clean
-# runs inside `.worktrees/<slug>-<batch>` and cannot reach anything under `state_root`.
+# runs inside `.worktrees/<slug>-<batch>` and cannot reach anything under the main tree's learning state.
 defender/learning/run-cycle-locks/
 defender/learning/runs/
 defender/learning/eval/results/

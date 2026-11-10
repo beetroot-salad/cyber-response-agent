@@ -452,7 +452,7 @@ class Oracle:
 
     def __post_init__(self) -> None:
         self._conversation: list[Any] = []
-        self._pending: list[Any] = []
+        self._pending: list[Any] = []  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
         self._in_conversation = 0
         self._failures: list[str] = []
         #: The python box of the attempt running now, if it has one (`close` stops it).
@@ -620,7 +620,7 @@ class Oracle:
         together pass `_PROMPT_BUDGET` (`_conversation_size`): the conversation then restarts
         from its prefix."""
         size = sum(_conversation_size(message.parts) for message in self._conversation)
-        return size + _conversation_size([*self._pending, *extra]) > _PROMPT_BUDGET
+        return size + _conversation_size([*self._pending, *extra]) > _PROMPT_BUDGET  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
 
     def _start_call(self, call: tuple[str, str, dict], base: Any, *, fixed: bool = False,
                     live: bool = False) -> None:
@@ -644,7 +644,7 @@ class Oracle:
             _base_text(base)]))
         if (self._conversation and self._in_conversation < self.restart_after
                 and not self._oversized(turn)):
-            self._pending = [*self._pending, turn]
+            self._pending = [*self._pending, turn]  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
             return
         self._conversation = []
         self._in_conversation = 0
@@ -677,7 +677,7 @@ class Oracle:
             "A new call to serve.", *framing,
             _framed(f"The call ({system}.{verb}) params", dict(params), params_cap),
             _base_text(base, base_cap)])))
-        self._pending = parts
+        self._pending = parts  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
 
     def _attempt(self, call: tuple[str, str, dict], base: Any, real: Callable[[], RealData], *,  # noqa: PLR0913 — `serve`'s call plus its pre-branch framing and gate
                  first: bool, fixed: bool = False, live: bool = False,
@@ -702,9 +702,9 @@ class Oracle:
                    box=box, gate=gate, live=live, fixed=fixed)
         # A verdict already handed over as a tool's result leaves nothing pending: the
         # conversation then ends on that request, and the run continues from it.
-        history = [*self._conversation, *([ModelRequest(parts=self._pending)]
-                                          if self._pending else [])]
-        self._pending = []
+        history = [*self._conversation, *([ModelRequest(parts=self._pending)]  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
+                                          if self._pending else [])]  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
+        self._pending = []  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
         held: list[list[Any]] = [history]
 
         async def attempt() -> tuple[bool, Any]:
@@ -784,7 +784,7 @@ class Oracle:
         from pydantic_ai.messages import UserPromptPart
 
         verdict = f"Attempt failed: {text}."
-        self._pending.append(UserPromptPart(content=verdict))
+        self._pending.append(UserPromptPart(content=verdict))  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
         return verdict
 
     # -- tools --------------------------------------------------------------------------------

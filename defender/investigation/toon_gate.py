@@ -40,7 +40,7 @@ DEFAULT_MAX_NODES = 100_000
 #: An operator default (the value corpus measurements were taken at), not a contract.
 DEFAULT_MAX_PERCENT = 85
 
-#: The ceiling on in-flight `after_tool_execute` hand-offs. See `ToonGateCapability._pending`.
+#: The ceiling on in-flight `after_tool_execute` hand-offs. See `ToonGateCapability._pending`.  # lint-stale-ref: ok — unrelated in-flight hand-off map, not the retired learning queue
 _MAX_PENDING = 64
 
 #: Control-flow exceptions the encoder/decoder guard must never swallow.
@@ -250,7 +250,7 @@ class ToonGateCapability(AbstractCapability[Any]):
         #: Bounded (oldest evicted first): an outer capability may raise after this gate
         #: returned, so `after_tool_execute` never runs and the entry, which pins the original
         #: payload, would otherwise leak.
-        self._pending: dict[str, tuple[str, dict | None, Any]] = {}
+        self._pending: dict[str, tuple[str, dict | None, Any]] = {}  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
 
     def bind_native_toolset(self, toolset: Any) -> None:
         """Bind the agent's native function toolset right after `Agent(...)` construction;
@@ -288,13 +288,13 @@ class ToonGateCapability(AbstractCapability[Any]):
             raise ModelRetry(_frame(e.message, "untrusted")) from e
         text, metadata, content = self._gate(call.tool_name, call.tool_call_id, result)
         if metadata is not None or content is not None:
-            while len(self._pending) >= _MAX_PENDING:
-                self._pending.pop(next(iter(self._pending)))
-            self._pending[call.tool_call_id] = (text, metadata, content)
+            while len(self._pending) >= _MAX_PENDING:  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
+                self._pending.pop(next(iter(self._pending)))  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
+            self._pending[call.tool_call_id] = (text, metadata, content)  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
         return text
 
     async def after_tool_execute(self, ctx, *, call, tool_def, args, result, **_):  # noqa: ANN001, ANN003
-        pending = self._pending.pop(call.tool_call_id, None)
+        pending = self._pending.pop(call.tool_call_id, None)  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
         if pending is None:
             return result
         text, metadata, content = pending
