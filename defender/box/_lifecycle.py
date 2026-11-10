@@ -44,7 +44,7 @@ from ._docker import BoxStartConflict, Create, claim_label, DockerFn, START_TOKE
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._host_env import provider_scrubbed_environ
 from ._spec import DEFAULT_SPEC, _HostTransport, _text
-from ._spec import _DockerTransport
+from ._spec import _DockerTransport, RelayRequest, RelayTransport
 
 _logger = logging.getLogger(__name__)
 
@@ -867,9 +867,12 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     write_verdict: Callable[[dict], None] | None = None,
     tenant_id: TenantId | None = None, staged_token: Path | None = None,
     require_sandbox: bool = False, start_token: str | None = None,
-    running_wait: float = 30.0,
+    running_wait: float = 30.0, relay: RelayRequest | None = None,
 ) -> BoxExecutor:
-    """Start the run's box. `require_sandbox` refuses the unsandboxed opt-out whatever the
+    """Start the run's box. `relay` is a job container's socket client (#1170 A4): the run box is then started by the
+    per-job host helper (`box.start` of the `shell` kind at the run's id), which derives every mount, name and label
+    from its claim, so every other argument is the helper's to decide and is not sent; the box comes back reached
+    through `RelayTransport`, and a refused or unanswered start is a `BoxFault`. `require_sandbox` refuses the unsandboxed opt-out whatever the
     environment says (#1342 R2: a job-lane run never degrades to host execution).
     `tenant_agent` is the run's agent half (its run copy's `stage/agent/`, #1108 P4), bound
     read-only at the model view's `/agent`; `staged_token` is the startup token beside it in the
@@ -883,6 +886,11 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     `BoxRuns.run`, attach, #1344 amendment 2).
     The tenant arguments are illegal with a `BoxRequest`, which carries its own mounts (and its
     own `tenant_id`)."""
+    if relay is not None:
+        if isinstance(run_dir_or_request, BoxRequest):
+            raise TypeError("start_box(request, relay=…) is not served: a relayed box is started by its helper, "
+                            "which decides its shape; ask relay_start for a box of another kind")
+        return relay_start(relay, "shell", Path(run_dir_or_request).name)
     if isinstance(run_dir_or_request, BoxRequest):
         request = run_dir_or_request
         # `is not None`, not a comparison with the env-resolved DEFAULT_SPEC. The env is not
@@ -967,6 +975,11 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
     ends the box's input, so the box stops on its own)."""
     if not box.name:
         return
+    relayed = getattr(box, "transport", None)
+    if isinstance(relayed, RelayTransport):
+        # A box reached over the job socket (#1170 A4): its helper holds the daemon and proves the stop.
+        relayed.stop()
+        return
     try:
         reason = _remove_container(docker or _carried_docker(box), box.name)
     finally:
@@ -977,6 +990,25 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
         raise BoxFault(f"could not tear down the box {box.name}: {reason}")
     if box.clock_file is not None:
         remove_clock(box.clock_file)
+
+
+def relay_start(relay: RelayRequest, kind: str, ident: str) -> BoxExecutor:
+    """A box of `kind` (`shell`, `oracle`, `batch`) for the id `ident`, started by the per-job host helper over the
+    job socket (#1170 A4, O9: the request names only the kind and an id the helper minted). The executor reaches it
+    through `RelayTransport`; its run clock file, when the helper made one, is the job's to write (it lies in the
+    tenant's folder, mounted at its own path). A refusal, or a helper that cannot be reached, is a `BoxFault` naming
+    it; nothing runs elsewhere."""
+    try:
+        answer = relay("box.start", kind=kind, id=ident)
+    except Exception as refused:  # noqa: BLE001 — a refused or unanswered start is this one fault
+        raise BoxFault(f"the helper did not start the {kind} box for {ident}: {type(refused).__name__}: "
+                       f"{refused}") from refused
+    handle = answer.get("handle") if isinstance(answer, dict) else None
+    if not isinstance(handle, str) or not handle:
+        raise BoxFault(f"the helper's answer to the {kind} box start for {ident} names no handle")
+    clock = answer.get("clock_file")
+    return BoxExecutor(transport=RelayTransport(relay, handle), name=handle,
+                       clock_file=Path(clock) if isinstance(clock, str) and clock else None)
 
 
 def _carried_docker(box: object) -> DockerFn:

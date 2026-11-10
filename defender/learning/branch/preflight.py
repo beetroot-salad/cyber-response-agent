@@ -303,15 +303,17 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any,
 
     env = run_env(_DEFENDER_DIR, Path(episode_dir))
     env["DEFENDER_RUNS_BASE"] = source.runs_base_export()
+    # The token is asked of its source inside each verb's call, so a pass that nears its end is asked for afresh
+    # (O6: inside a job container the helper signs each one).
     proxied = ({} if access is None
-               else {"proxy_url": access.proxy_url, "request_token": access.token()})
+               else {"proxy_url": access.proxy_url, "token_source": access.token})
     return VerbContext(defender_dir=_DEFENDER_DIR, run_dir=Path(episode_dir), env=env,
                        capture=None, tenant=tenant, **proxied)
 
 
 def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any], *, signer: Any,  # noqa: PLR0913 — the pass's identity plus the operator's seams
                       proxy_url: str | None, issuer_transport: Any,
-                      directory: Any) -> RequestAccess | None:
+                      directory: Any, container: Any = None, job_id: str | None = None) -> RequestAccess | None:
     """A read token over the `http-proxy` systems the source run's replayable calls reach (H12),
     signed in this process as the run does (A11, A24'), with the source run as its investigation;
     `None` when no replayed call reaches one. With no `signer` injected, the tenant's own
@@ -321,6 +323,12 @@ def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any],
                       if isinstance(tenant.access.get(call.system), AccessDeclaration)})
     if not proxied:
         return None
+    if container is not None:
+        # Inside a job container (#1170 O5, O6): the per-job host helper signs every pass, for the learning job's own
+        # id and the read grant it computed; asked afresh as each nears its end, never one long pass.
+        if job_id is None:
+            raise ConfigFault("pre-flight in a job container needs the learning job's id to ask its passes for")
+        return container.access(job_id)
     if directory is None:
         raise ConfigFault("no tenant records were handed to pre-flight to sign its read token with")
     signer, address = signing_access(tenant.tenant_id, directory=directory, signer=signer,
@@ -338,7 +346,8 @@ def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any],
 def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
     episode: Episode, *, source: Run, roster: Any, tenant: RunTenant, oracle: Any = None,
     verifier: Any = None, signer: Any = None, proxy_url: str | None = None,
-    issuer_transport: Any = None, directory: Any = None, **knobs: Any,
+    issuer_transport: Any = None, directory: Any = None, container: Any = None, job_id: str | None = None,
+    **knobs: Any,
 ) -> dict[str, Any]:
     """`Step.PREFLIGHT`: replay every original call through each fact world's oracle and
     verifier, and write the episode's write-once outcome record (`outcome.write_outcome`)."""
@@ -399,12 +408,16 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
     # The oracle's knobs, settled once for every world of the pass: `knobs` over the process's
     # knobs. Each world's serving is built from them in its own thread (`calibrate`).
     box = knobs.pop("box", None)
+    if box is None and container is not None and job_id is not None:
+        # Inside a job container the oracle's boxes are the helper's to start (#1170 O2, C21), for the job's own id.
+        box = container.box_factory("oracle", job_id)
     restart_after = knobs.pop("restart_after", DEFAULT_RESTART_AFTER)
     settings = oracle_settings_with(**knobs)
     limiter = RateLimiter(settings.rate)
     try:
         access = _preflight_access(source, tenant, replayable, signer=signer, proxy_url=proxy_url,
-                                   issuer_transport=issuer_transport, directory=directory)
+                                   issuer_transport=issuer_transport, directory=directory,
+                                   container=container, job_id=job_id)
     except AdapterFault as unsigned:
         return record(REFUSED, f"the read token for the credential proxy cannot be signed: "
                                f"{unsigned.detail}", environment=True)

@@ -9,6 +9,8 @@ Split into these modules:
   * `_docker`    — talking to the daemon: naming, env, status, reaping, mount shapes.
   * `_lifecycle` — start, stop, scrub, and the faults each step can raise.
   * `_ending`    — the box failures that end a run by name (#1421).
+  * `_relay`     — the per-job host helper's side of a box reached over the job socket (#1170 A4);
+                       the job's side is `_spec.RelayTransport`.
 
 Every name below is a re-export; the runtime imports the box through this module.
 """
@@ -67,6 +69,7 @@ from ._spec import (
     DEFAULT_SPEC,
     Mount,
     MountKind,
+    RelayTransport,
     Transport,
     _DockerTransport,
     _HostTransport,
@@ -131,6 +134,8 @@ from ._docker import (
     resolve_rootfs,
 )
 from ._host_env import provider_scrubbed_environ, run_env
+from ._relay import RELAY_LOST, relay_exec, relay_stop
+from ._clock import clock_dir
 from ._lifecycle import (
     _check_mount_sentinel,
     _create_argv,
@@ -147,6 +152,7 @@ from ._lifecycle import (
     _start_boxed_request,
     BoxRuns,
     box_for_run,
+    relay_start,
     start_box,
     stop_and_scrub,
     stop_box,
@@ -191,6 +197,8 @@ __all__ = [
     "RESPONSE_MAGIC",
     "RUN_ID_ALLOWED",
     "RawExec",
+    "RELAY_LOST",
+    "RelayTransport",
     "RunTainted",
     "START_TOKEN_LABEL",
     "TENANT_LABEL",
@@ -259,6 +267,7 @@ __all__ = [
     "Rootfs",
     "build_remedy",
     "carries_build_remedy",
+    "clock_dir",
     "container_name",
     "contextlib",
     "dataclass",
@@ -273,6 +282,9 @@ __all__ = [
     "os",
     "re",
     "read_text_soft",
+    "relay_exec",
+    "relay_start",
+    "relay_stop",
     "require_image",
     "resolve_rootfs",
     "scrub",

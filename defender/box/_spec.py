@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Literal, NoReturn, Protocol, runtime_checkable
+from typing import Any, ClassVar, Literal, NoReturn, Protocol, runtime_checkable
 
 from defender._model import model
 from defender.execution import bash_exec
@@ -234,8 +234,9 @@ class BoxExecutor:
 
     @property
     def sandboxed(self) -> bool:
-        # Derived, never settable: only a confining transport may claim the boundary.
-        return isinstance(self.transport, _DockerTransport)
+        # Derived, never settable: only a confining transport may claim the boundary. A box reached over the job
+        # socket (#1170 A4) is confined by construction: the helper started it, and a relay is never host execution.
+        return isinstance(self.transport, (_DockerTransport, RelayTransport))
 
     def run_parsed(
         self, pipelines: Sequence[bash_exec.Pipeline], *,
@@ -244,6 +245,8 @@ class BoxExecutor:
         self._refuse()
         self._sync_clock()
         frame = encode_request(pipelines)
+        if isinstance(self.transport, RelayTransport):
+            return self._exchange_relayed(frame, command=command, cwd=cwd, timeout=timeout)
         if self.sandboxed:
             return self._exchange_boxed(frame, command=command, cwd=cwd, timeout=timeout)
         return self._exchange_unboxed(frame, command=command, cwd=cwd, timeout=timeout)
@@ -317,6 +320,40 @@ class BoxExecutor:
             f"({said}); it is unusable"), command, cause=failure)
         raise AssertionError("unreachable")  # pragma: no cover — `_end` always raises
 
+    def _exchange_relayed(self, frame: bytes, *, command: str, cwd: Path, timeout: float) -> BoxResult:
+        """One exchange over the job socket (#1170 A4): the helper, which holds the daemon, has already classified it
+        by #1421's rules, so its answer is mapped to today's outcome here. Only `ok` with a frame that decodes is a
+        result; `timeout` is the timeout and leaves the box usable; `output-limit` and `lost` end the box. Anything
+        else (a refusal, a helper that cannot be reached, an answer or frame outside the vocabulary) is a lost box:
+        the box ends with its helper, so no answer is a loss, never a result."""
+        relay = self.transport
+        assert isinstance(relay, RelayTransport)
+        try:
+            answer = relay.exchange(frame, cwd=cwd, timeout=timeout)
+        except Exception as unreached:  # noqa: BLE001 — every failure to get an answer is the same loss
+            self._end(BoxLost(
+                f"the box {self.name} could not be reached through its helper ({type(unreached).__name__}: "
+                f"{unreached}); it is unusable"), command, cause=unreached)
+        result = answer.get("result") if isinstance(answer, dict) else None
+        if result == "ok":
+            got = answer.get("frame")
+            try:
+                if not isinstance(got, bytes):
+                    raise BoxFault("the helper's ok answer carries no response frame")
+                return decode_response(got)
+            except BoxFault as unreadable:
+                self._end(BoxLost(f"the box {self.name}'s answer through its helper is not a response frame "
+                                  f"({unreadable}); it is unusable"), command, cause=unreadable)
+        if result == "timeout":
+            raise subprocess.TimeoutExpired(command, timeout)
+        if result == "output-limit":
+            self._end(BoxOutputLimitExceeded(), command)
+        if result == "lost":
+            self._end(BoxLost(f"the box {self.name} is not running or did not answer as its helper does "
+                              f"(its helper says: {answer.get('class')!r}); it can run no command"), command)
+        self._end(BoxLost(f"the box {self.name}'s helper answered outside its vocabulary "
+                          f"({type(answer).__name__} {result!r}); it is unusable"), command)
+
     def _status(self) -> str | None:
         """The box's status, asked once; `None` for no answer or a fault asking."""
         if self.docker is None:
@@ -333,11 +370,15 @@ class BoxExecutor:
         self._refusing = ending.exit_class
         _logger.error(f"the box {self.name} ended the run ({ending.exit_class}) while running "
                       f"{command!r}")
-        # The lifecycle owns the daemon and proof that every box process has stopped.
+        # The lifecycle owns the daemon and proof that every box process has stopped; a relayed box's proof is its
+        # helper's (`box.stop`).
         from ._lifecycle import BoxRuns
 
         try:
-            BoxRuns(self).stop()
+            if isinstance(self.transport, RelayTransport):
+                self.transport.stop()
+            else:
+                BoxRuns(self).stop()
         except Exception as cleanup:
             ending.add_note(f"could not confirm the box stopped: {cleanup}")
             raise ending from cleanup
@@ -398,6 +439,42 @@ class _DockerTransport:
             ],
             frame, timeout=timeout, popen=self.popen,
         )
+
+
+#: The relay's request client: `request(name, **fields) -> dict`, the job's socket client bound to its socket
+#: (`job_socket.ask`), raising for a refusal or a socket that is gone.
+RelayRequest = Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class RelayTransport:
+    """The confining transport of a box reached over the job socket (#1170 A4): the box was started by the per-job
+    host helper, which holds the daemon and answers each frame already classified (`box.exec`) and proves each stop
+    (`box.stop`). `handle` is the box's handle, as the helper's `box.start` answered it. The job's executor keeps the
+    refusal latch, readmit, the run clock and the typed endings; nothing here talks to a daemon."""
+
+    request: RelayRequest = field(compare=False, repr=False)
+    handle: str
+
+    def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> RawExec:
+        raise BoxFault("a relayed box is reached through BoxExecutor.run_parsed, never as a raw transport")
+
+    def exchange(self, frame: bytes, *, cwd: Path, timeout: float) -> Any:
+        """The helper's answer to one frame: the command's timeout goes as given (the executor's own; no ceiling)."""
+        return self.request("box.exec", handle=self.handle, frame=frame, cwd=str(cwd), timeout=timeout)
+
+    def stop(self) -> None:
+        """Stop the box through its helper, proven: `BoxFault` (the helper's reason, or why it could not be asked)
+        unless the helper answers `stopped`."""
+        try:
+            answer = self.request("box.stop", handle=self.handle)
+        except Exception as unreached:  # noqa: BLE001 — a stop that cannot be asked is a stop not proven
+            raise BoxFault(f"could not ask the helper to stop the box {self.handle}: "
+                           f"{type(unreached).__name__}: {unreached}") from unreached
+        if isinstance(answer, dict) and answer.get("result") == "stopped":
+            return
+        reason = answer.get("reason") if isinstance(answer, dict) else None
+        raise BoxFault(f"the helper could not prove the box {self.handle} stopped: {reason or answer!r}")
 
 
 @dataclass(frozen=True)

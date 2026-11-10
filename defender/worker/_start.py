@@ -10,7 +10,8 @@ The copy is one folder on the data mount (`<data root>/.defender-code`), with th
 shape: `defender/` inside it beside a marker file, `.defender-code-copy.json` (`{"commit": ...}`),
 which children stamp as the build commit (`records` reads the marker before asking git). Replaced
 whole at every start: no `.venv`, no bytecode, every file and folder without write bits. Box mounts
-need a path the Docker daemon can see; baked image code is on none.
+need a path the Docker daemon can see; baked image code is on none. Job containers mount this copy
+read-only (#1170 A7), so it carries no `.env`.
 
 The copy is built in place, not in a staging folder renamed over it: the lock already keeps every
 other worker out, no child starts before the copy is whole, and a rename would pull a tree out from
@@ -47,8 +48,9 @@ DEFAULT_LEARNING_CHECK_SECONDS = 300
 MARKER = CODE_COPY_MARKER
 COPY_NAME = ".defender-code"
 LOCK_NAME = ".defender-worker.lock"
-#: What a copy never carries: the virtual environment, bytecode and tool caches.
-_LEFT_OUT = (".venv", "__pycache__", "*.pyc", ".pytest_cache", ".mypy_cache", ".ruff_cache")
+#: What a copy never carries: the virtual environment, bytecode and tool caches, and any env file (the
+#: copy is what a job container mounts, #1170 A7: it holds no secret).
+_LEFT_OUT = (".venv", "__pycache__", "*.pyc", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".env", ".env.*")
 _NO_WRITE = ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
 
 

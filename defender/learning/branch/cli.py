@@ -78,6 +78,7 @@ from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import seams
 from defender.learning.branch import timing as timing_mod
 from defender.learning.branch.steps import Step
+from defender.learning.branch.container import JobContainer
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.ledger import Ledger, LedgerError
@@ -637,6 +638,36 @@ def launch_job(  # noqa: PLR0913 — the job's identity plus the launcher's seam
     return _launch(ns, lane=lane, preflight=preflight, **seams)
 
 
+class _ContainerAdmitted:
+    """The tenant of a launch inside a job container (#1170): accepted by the folder rules alone. The per-job host
+    helper holds the tenant's host lock and admitted it before the container started (P-C), so no lock is taken, no
+    record read and no database opened here; it has no tenant records (`directory` None)."""
+
+    directory: Any = None
+
+    def __init__(self, tenant: Tenant) -> None:
+        self.tenant = tenant
+
+    def __enter__(self) -> _ContainerAdmitted:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+
+def _admitted(data_root: Any, tenant_id: TenantId, *, directory: Any, container: JobContainer | None) -> Any:
+    """The launch's tenant: the one host acceptance for an operator's launch (lock, records, folder rules); inside a
+    job container the folder rules alone (`_ContainerAdmitted`)."""
+    from defender.systems import run_tenant as run_tenant_mod
+
+    box_mounted = (tenancy.box_mounted_episodes(data_root, tenant_id),)
+    if container is None:
+        return run_tenant_mod.host_tenant(data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
+                                          box_mounted=box_mounted)
+    return _ContainerAdmitted(tenancy.accept_tenant(data_root, tenant_id, defender_dir=_DEFENDER_DIR,
+                                                    box_mounted=box_mounted))
+
+
 def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, then the episode, in order
     ns: argparse.Namespace, *, lane: JobLaneHooks | None, spawn: Any = None, questioner: Any = None,
     preflight: Callable[..., int], render_page: PageRenderer | None = None, judge: Any = None,
@@ -644,6 +675,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     live_tree: Callable[[], formats.RunProvenance] | None = None,
     oracle: Any = None, verifier: Any = None, roster: Any = None, directory: Any = None,
     signer: Any = None, proxy_url: str | None = None, issuer_transport: Any = None,
+    container: JobContainer | None = None,
 ) -> int:
     # Injected seams are resolved once and threaded inward non-`None`, so no two frames can
     # disagree about which preflight, roster or model an episode used.
@@ -667,9 +699,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     from defender.systems import run_tenant as run_tenant_mod
 
     try:
-        admitted = run_tenant_mod.host_tenant(
-            data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
-            box_mounted=(tenancy.box_mounted_episodes(data_root, tenant_id),))
+        admitted = _admitted(data_root, tenant_id, directory=directory, container=container)
     except TenantRefused as refusal:
         raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
                      brief=f"the job's tenant was refused ({type(refusal).__name__})",
@@ -753,7 +783,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
                     verifier=verifier, roster=roster, started=started,
                     knowledge_commit=pinned.commit, render_page=render_page,
                     signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
-                    directory=admitted.directory, lane=lane)
+                    directory=admitted.directory, lane=lane, container=container)
             except SystemExit:
                 raise
             except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
@@ -774,6 +804,7 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer | None,
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
     issuer_transport: Any = None, directory: Any = None, lane: JobLaneHooks | None = None,
+    container: JobContainer | None = None,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
 
@@ -816,7 +847,8 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
         record = preflight_replay(episode, source=source, roster=roster, tenant=tenant,
                                   oracle=oracle, verifier=verifier, signer=signer,
                                   proxy_url=proxy_url, issuer_transport=issuer_transport,
-                                  directory=directory)
+                                  directory=directory, container=container,
+                                  job_id=None if lane is None else lane.job_id)
     if record["outcome"] != ACCEPTED:
         _logger.info(f"episode {episode_id}: {record['outcome']} before any sibling started "
                      f"({record['reason']})")

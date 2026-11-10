@@ -17,6 +17,7 @@ from typing import Any
 from defender._io import guarded_mkdir, read_bytes_capped, write_guarded
 
 from . import _lifecycle
+from ._docker import DockerFn
 from ._spec import CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 
 #: The checkout: the request's workdir (the host reads its image recipe) and the in-box path the
@@ -48,10 +49,11 @@ class BoxStartRefused(RuntimeError):
     """The oracle's box did not start sandboxed."""
 
 
-def _make_runner() -> Path:
-    """A fresh folder holding copies of `RUNNER_FILES` under their checkout-relative paths:
-    the whole tree the box's bind at the checkout's path exposes."""
-    runner = Path(tempfile.mkdtemp(prefix="defender-oracle-runner-"))
+def _make_runner(folder: Path | None = None) -> Path:
+    """A fresh folder (under `folder`, else the host's temporary folder) holding copies of
+    `RUNNER_FILES` under their checkout-relative paths: the whole tree the box's bind at the
+    checkout's path exposes."""
+    runner = Path(tempfile.mkdtemp(prefix="defender-oracle-runner-", dir=folder))
     try:
         for rel in RUNNER_FILES:
             dest = runner / rel
@@ -79,12 +81,17 @@ def oracle_box_request(scratch: Path, runner: Path, *, env: Mapping[str, str],
     )
 
 
-def start_oracle_box(*, env: Mapping[str, str], tenant_id: str) -> Any:
+def start_oracle_box(*, env: Mapping[str, str], tenant_id: str, folder: Path | None = None,
+                     docker: DockerFn | None = None) -> Any:
     """Start the oracle's sandboxed box for `tenant_id`; `env` is the process environment handed
-    in (its `PATH` finds the `docker` binary, its box knobs size the container)."""
-    runner = _make_runner()
+    in (its `PATH` finds the `docker` binary, its box knobs size the container). `folder` is
+    where its runner and scratch folders are made (#1170 C21: a per-claim folder under the data
+    root, for a job's helper), else the host's temporary folder. `docker` is the docker seam the
+    box is started and run through, used as given (a job's helper passes its own); None, the
+    real one with `env`'s `PATH`."""
+    runner = _make_runner(folder)
     try:
-        scratch = Path(tempfile.mkdtemp(prefix="defender-oracle-"))
+        scratch = Path(tempfile.mkdtemp(prefix="defender-oracle-", dir=folder))
     except BaseException:
         shutil.rmtree(runner, ignore_errors=True)
         raise
@@ -96,12 +103,14 @@ def start_oracle_box(*, env: Mapping[str, str], tenant_id: str) -> Any:
     request = oracle_box_request(scratch, runner, env=env, tenant_id=tenant_id)
     path = env.get("PATH")
 
-    def docker(argv: Any, **kw: Any) -> Any:
+    def on_path(argv: Any, **kw: Any) -> Any:
         merged = dict(kw.pop("env", None) or os.environ)
         if path:
             merged["PATH"] = path
         return _lifecycle.run_docker(argv, env=merged, **kw)
 
+    if docker is None:
+        docker = on_path
     try:
         # The one entry for a `BoxRequest`; the request requires a sandbox, so a start fault
         # raises whatever the operator's opt-out says.

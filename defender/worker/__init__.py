@@ -2,9 +2,9 @@
 child processes, on one set of slots, and records how each ended. `python -m defender.worker` is its
 deployed start (#1344 O15).
 
-Above the store (`defender.jobs`) and below the run entry and the learning entries, which it never
-imports: each is a child process, `run.py --job <id> --tenant <T> --parent-pid <pid>`, and the job
-entry and post-step modules of `defender.learning.branch`."""
+Above the store (`defender.jobs`) and below the job entries, which it never imports: every job is one
+child process, the per-job host helper `python -m defender.job_host --kind <investigation|learning|post-step>
+[--job <id>] --tenant <T> [--source <run>] --parent-pid <pid>` (#1170), which starts the job's container."""
 from __future__ import annotations
 
 from ._containers import Containers, DockerContainers

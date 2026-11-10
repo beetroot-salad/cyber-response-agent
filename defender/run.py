@@ -53,15 +53,14 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _log  # noqa: E402
-from defender.records.formats import ALERT_MAPPING_MISSING, AlertMapping, DataRoot, RunsBase, TenantId  # noqa: E402
+from defender.records.formats import AlertMapping, DataRoot, RunsBase  # noqa: E402
 from defender.records import formats  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
-from defender._parent_tie import require_parent, tie_to_parent  # noqa: E402
+from defender import job_socket  # noqa: E402
 from defender.records import Run  # noqa: E402
 from defender.records import job_facts, job_lane  # noqa: E402
 from defender.records.job_facts import BOX_STARTED as _BOX_STARTED  # noqa: E402 — `lifecycle`'s `job_facts` keyword shadows the module
-from defender.records.job_lane import Launched  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender import tenancy  # noqa: E402
 from defender.records.formats import Episode  # noqa: E402
@@ -487,6 +486,9 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: the box started (r7 D-ad) and its `scrub_verified` once the teardown and scrub returned.
     #: `None` off the job lane.
     job_facts: _JobEndFacts | None = None,
+    #: A job container's socket client (#1170 A4): the box is started by the job's host helper and
+    #: reached over the socket (`box.start_box(..., relay=)`); `None` off the job lane.
+    relay: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Start the box, run the investigation inside it, and reap both on every exit
     (`box_mod.stop_and_scrub` owns the stop/scrub ordering and rules).
@@ -503,10 +505,10 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     # The startup token of the run copy's stage (#1108 P4, U9): the `RunTenant` run start builds
     # over its run copy carries it, and `start_box` checks the stage and reads it back. A run box
     # is never started over a tenant with no run copy (`start_box` refuses one).
-    token = getattr(tenant, "stage_token", None)
-    staged: dict[str, Any] = {} if token is None else {"staged_token": token}
-    if start_token is not None:
-        staged["start_token"] = start_token
+    # A job's box is started by its host helper over the job socket (`relay`, #1170 A4).
+    staged: dict[str, Any] = {name: value for name, value in (
+        ("staged_token", getattr(tenant, "stage_token", None)), ("start_token", start_token), ("relay", relay))
+        if value is not None}
     if not job_lane:
         box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent,
                         tenant_id=tenant.tenant_id, write_verdict=write_verdict, **staged)
@@ -608,10 +610,8 @@ class _TokenMint:
         A20). A run that needs only the write-back token goes on instead (R4): it mints nothing
         and the record step says why. The signer is the tenant's own
         (`credential_proxy.request_signer`, r8.5) unless one is injected."""
-        proxied = {name for name, found in tenant.access.items()
-                   if isinstance(found, AccessDeclaration) and name not in systems.down}
         # A branched run is a run (#1449): a world reads its granted systems on a run's terms.
-        reads = tuple(sorted(system_status.granted_systems(tenant.grants) & proxied))
+        reads = _run.proxied_reads(tenant, down=systems.down)
         # The write-back token is for a case system run start judged sound (`case`), reached
         # through the proxy; a case system with bad settings is told so by the record step.
         # A world never gets one: `--update-ticket` with `--episode` is refused before this
@@ -669,29 +669,15 @@ class _TokenMint:
         return {"request_token": token, "proxy_url": self._proxy_url or ""}
 
 
-def _resolve_run_tenant(
-    tenant: tenancy.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
-    copy: run_knowledge.RunCopy | None = None,
-) -> RunTenant:
-    """The accepted tenant ready to run — its grants and lead-zero dispatch from run start's
-    readiness function, over the run's own copy of its knowledge (#1108 P4, O-B: settings,
-    catalog and lessons from one export) — or the refusal, before the run dir, the box and any
-    model call, so tenant misconfiguration fails early. Refusals name the file to edit.
-
-    `dispatches_lead_zero` is False for an `--episode` sibling, which dispatches no turn-0
-    lead. Without `copy` (a direct caller), the record is resolved over the tenant's own
-    folder. `defender_dir` is not read: the code tree holds no tenant knowledge (O1)."""
-    from defender.systems import run_tenant as run_tenant_mod
-
-    del defender_dir
-    roots = ({} if copy is None else
-             {"agent_root": copy.agent, "settings_root": copy.settings,
-              "stage_token": copy.token})
-    try:
-        return run_tenant_mod.run_tenant_for(
-            tenant, dispatches_lead_zero=dispatches_lead_zero, **roots)
-    except run_tenant_mod.TenantRefused as refusal:
-        sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
+# Run setup's host half lives in `run_common` (#1170 A6): the per-job host helper runs it for a job, and the
+# operator command runs it here, beside its run half.
+_resolve_run_tenant = _run.resolve_run_tenant
+_publish_report = _run.publish_report
+PublishLaunch = _run.PublishLaunch
+_knowledge_source = _run.knowledge_source
+_copy_knowledge = _run.copy_knowledge
+_write_knowledge_record = _run.write_knowledge_record
+_read_alert_mapping = _run.read_alert_mapping
 
 
 def _family_pin(ns: argparse.Namespace, pin: str | None, episode: Any) -> str | None:
@@ -727,125 +713,21 @@ def _knowledge_pin(ns: argparse.Namespace) -> str | None:
         sys.exit(f"[run.py] {refused}")
 
 
-def _publish_report(
-    publish: PublishLaunch | None, tenant: tenancy.Tenant, data_root: DataRoot,
-    records: tenancy.TenantDirectory,
-) -> run_knowledge.PublishReport:
-    """The launch-time publish's outcome (#1108 P4, U7): the child is handed identifiers only
-    — the tenant id and the data root (O8: no login material passes through the run process)
-    — and its one report line is read back. The real launcher never raises and records every
-    outcome itself in the tenant records; a seam that raises is U11's `stale:operator`, never
-    fresh, recorded by the same recorder the launcher uses."""
-    try:
-        launch = publish if publish is not None else _default_publish(records)
-        with _stopped_by_sigterm():
-            line = launch(tenant.id, data_root=tenancy.data_root_for_child(data_root))
-    except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
-        from defender.tenancy import record_report
-
-        line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
-        record_report(records, tenant.id, line, by="launch-time publish")
-    return run_knowledge.read_publish_report(line)
-
-
-@contextlib.contextmanager
-def _stopped_by_sigterm() -> Iterator[None]:
-    """While the launch-time publish runs, a SIGTERM (teardown stopping this run) unwinds this
-    process as `SystemExit(128 + SIGTERM)`, so the run never goes on past its publish. The real
-    launcher holds the signal back while its child runs: it stops the child by its one rule (a
-    child that took the tenant lock is waited for, never signalled), kills its process group (its own session, which
-    no signal to this process reaches) and only then delivers the signal here (#1379 r3). The
-    handler found is put back after. Only in the main thread, the one a handler runs in."""
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-
-    def stop(signum: int, _frame: object) -> None:
-        raise SystemExit(128 + signum)
-
-    previous = signal.signal(signal.SIGTERM, stop)
-    try:
-        yield
-    finally:
-        signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
-
-
-class PublishLaunch(Protocol):
-    """The launch-time publish run start calls (`publish_launch.launch_publish`, or an in-process
-    caller's stand-in): typed, so the tenant id reaches the records it writes as a `TenantId`."""
-
-    def __call__(self, tenant_id: TenantId, *, data_root: Path) -> object: ...
-
-
-def _default_publish(records: tenancy.TenantDirectory) -> PublishLaunch:
-    """The real launch-time publish: a separate child process (O-BUDGET, P-3), whose outcomes
-    only the launcher sees are recorded through this run's tenant records."""
-    from defender.investigation.publish_launch import launch_publish as real
-
-    return functools.partial(real, directory=records)
-
-
-def _knowledge_source(
-    tenant: tenancy.Tenant, *, pin: str | None, publish: PublishLaunch | None,
-    data_root: DataRoot, records: tenancy.TenantDirectory,
-) -> run_knowledge.KnowledgeSource:
-    """Which export this run reads and why: the pinned one (no publish), else `current` after
-    the launch-time publish — or the refusal before the box (O-A, O9)."""
-    report = None if pin is not None else _publish_report(publish, tenant, data_root, records)
-    try:
-        source = run_knowledge.resolve_source(tenant, report=report, pinned=pin)
-    except run_knowledge.KnowledgeRefused as refused:
-        sys.exit(f"[run.py] {refused}")
-    if source.kind == run_knowledge.STALE:
-        _logger.warning(f"knowledge is stale ({source.stale_kind}): the run reads the last "
-                        f"published snapshot {source.commit[:12]}; the publish said: "
-                        f"{source.reason}")
-    return source
-
-
-def _copy_knowledge(tenant: tenancy.Tenant, source: run_knowledge.KnowledgeSource,
-                    run_id: str) -> run_knowledge.RunCopy:
-    """The run's own copy of its export (U9), or the refusal before the box."""
-    try:
-        copy = run_knowledge.copy_for_run(tenant, source, run_id)
-    except (run_knowledge.KnowledgeRefused, OSError) as refused:
-        sys.exit(f"[run.py] the run's knowledge could not be copied: {refused}")
-    try:
-        tenancy.check_run_settings(copy.settings)
-    except TenantRefused as refused:
-        copy.remove()
-        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
-    return copy
-
-
-def _early_run(ns: argparse.Namespace, accepted: tenancy.Tenant, world: Any,
-               episode_runs: Any, *, launch: Launched | None = None) -> Run:
+def _early_run(ns: argparse.Namespace, accepted: tenancy.Tenant, world: Any, episode_runs: Any) -> Run:
     """The run's handle, settled before its knowledge is copied (the copy is named by its id) and
-    handed to setup whole (#1279 rev 6): a sibling's arm from its episode's roster, a job's at
-    its checked launch record's id (#1342), else a fresh one the tenant's runs repository mints.
-    No caller names the id (A3); nothing is made on disk for an arm or a job, and only the
-    natural runs container for an ordinary run."""
+    handed to setup whole (#1279 rev 6): a sibling's arm from its episode's roster, else a fresh one
+    the tenant's runs repository mints. No caller names the id (A3); nothing is made on disk for an
+    arm, and only the natural runs container for an ordinary run. (A job's run is made at its
+    launch record's id by its host helper, #1170 A6.)"""
     from defender.records import RunRefused
 
     try:
         if world is not None:
             return episode_runs.create(episode_runs.arm_id(world.world_id))
-        if launch is not None:
-            return accepted.runs_repository().launched(launch)
         return accepted.runs_repository().create()
     except (RunRefused, TenantRefused) as refused:
         where = f"--episode {ns.episode}: " if world is not None else ""
         sys.exit(f"[run.py] {where}{refused}")
-
-def _write_knowledge_record(run_dir: Path, source: run_knowledge.KnowledgeSource) -> None:
-    """The host-held knowledge-source record beside the run dir (U12): what every reader of
-    the run's knowledge status reads. A run that cannot write it does not start: a missing
-    record would read as unreadable everywhere (OD22')."""
-    path = RunPaths(run_dir).knowledge_source()
-    try:
-        run_knowledge.write_host_record(path, source)
-    except OSError as e:
-        sys.exit(f"[run.py] could not write the run's knowledge record {path}: {e}")
 
 
 def _run_roster(defender_dir: Path) -> RosterRead:
@@ -977,7 +859,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
 def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     alert: Path, *, tenant: tenancy.Tenant, model: str | None, run: Run | None = None,
     world: Any = None, mapping: AlertMapping | None = None,
-    knowledge: run_knowledge.KnowledgeSource | None = None, launch: Launched | None = None,
+    knowledge: run_knowledge.KnowledgeSource | None = None,
 ) -> Run:
     """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
     handle, stamped with code, model, the request's tenant and (for a sibling) the manifest's
@@ -989,7 +871,7 @@ def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     """
     try:
         run = _run.materialize_run(alert, run=run, tenant=tenant, model=model, world=world,
-                                   mapping=mapping, knowledge=knowledge, launch=launch)
+                                   mapping=mapping, knowledge=knowledge)
     except TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run
@@ -1041,16 +923,12 @@ def _open_episode_runs(ns: argparse.Namespace, accepted: tenancy.Tenant) -> Any:
         sys.exit(f"[run.py] --episode {ns.episode} for tenant {accepted.id!r}: {refused}")
 
 
-def _case_input(ns: argparse.Namespace, world: Any, episode_runs: Any, *,
-                launch: Launched | None = None) -> Path:
+def _case_input(ns: argparse.Namespace, world: Any, episode_runs: Any) -> Path:
     """The alert this run investigates: a sibling's from its world (the source run's alert,
-    screened before the preflight like other argument errors), a job's alert file beside its
-    launch record, else the operator's. The run's id is no input: setup mints it, or for an arm
-    reads the one its episode's roster holds, or for a job the one its launch record names."""
+    screened before the preflight like other argument errors), else the operator's. The run's id
+    is no input: setup mints it, or for an arm reads the one its episode's roster holds."""
     if world is not None:
         return _screened_source_alert(episode_runs.episode)
-    if launch is not None:
-        return launch.alert
     return ns.alert.resolve()
 
 
@@ -1079,6 +957,13 @@ class _PreflightRefused(Exception):  # noqa: N818 — named for what it reports
         self.rc = rc
 
 
+class _ReadAccess(Protocol):
+    """A run's read access for its lifecycle: `access=` when the run reads through the credential
+    proxy, nothing otherwise."""
+
+    def access_kwargs(self) -> dict[str, RequestAccess]: ...
+
+
 @dataclasses.dataclass(frozen=True)
 class _Started:
     """What run setup hands the lifecycle and the post-steps: the run made, its tenant (accepted
@@ -1095,8 +980,9 @@ class _Started:
     systems: RunSystems
     seams: dict[str, Any]
     alert: Path
-    #: The run's request-token signer (#1163), built at setup on both lanes (#1342 R6-8).
-    minting: _TokenMint
+    #: Where the run's read pass comes from (#1163): the operator run's own signer (`_TokenMint`,
+    #: #1342 R6-8), or in a job container its host helper (`_HelperPass`, #1170 H2).
+    minting: _ReadAccess
     #: The case system's verdict, judged once at setup when the run records its case
     #: (`--update-ticket`); `None` otherwise.
     case: case_system.CaseTarget | case_system.CaseSettingsFault | None = None
@@ -1120,22 +1006,10 @@ def _acceptance_args(ns: argparse.Namespace, data_root: DataRoot) -> dict[str, A
             "clone_tree": False}
 
 
-def _read_alert_mapping(records: Any, tenant_id: Any) -> AlertMapping:
-    """The tenant's alert mapping from its records, or a `[run.py]` refusal: none saved (the wording `records` owns,
-    naming how to set one) or the records could not be reached (#1345 O4)."""
-    try:
-        mapping = records.alert_mapping(tenant_id)
-    except TenantRefused as refused:
-        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
-    if mapping is None:
-        sys.exit(f"[run.py] this run's tenant cannot be used: {ALERT_MAPPING_MISSING}")
-    return mapping
-
 
 @contextlib.contextmanager
 def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its lane and the seams setup reaches
     ns: argparse.Namespace, data_root: DataRoot, admitted: Admitted, *,
-    launch: Launched | None,
     preflight: Callable[..., int],
     materialize: Callable[..., Run],
     oracle: Any,
@@ -1146,7 +1020,9 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
     proxy_url: str | None = None,
     issuer_transport: Any = None,
 ) -> Iterator[_Started]:
-    """Run setup, shared by the operator run and the job entry (#1342 M3), for the tenant the
+    """The operator command's run setup, both halves in one process (#1342 M3; a job's are split
+    between its host helper and its container, #1170 A6, sharing `run_common`'s host half and this
+    module's run-half steps), for the tenant the
     entry's own host acceptance admitted (`admitted`, r6 R6-3: the entry holds it and releases
     it; setup never accepts a tenant): a sibling's episode door opened, the knowledge published
     and copied, the tenant resolved and its systems judged, the preflight, the run made and
@@ -1154,11 +1030,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
     `_PreflightRefused`). Yields the started run, holding the episode door and the knowledge copy
     until the block ends (the post-steps included); the copy is removed however it ends.
 
-    `launch` is a job's checked launch record: the run is made at its id from its alert file,
-    and there is no operator alert path to look at.
-
-    `signer`, `proxy_url` and `issuer_transport` are the credential proxy's seams (#1163), the
-    operator's; the job entry passes none and signs with the production defaults (#1342 R6-8)."""
+    `signer`, `proxy_url` and `issuer_transport` are the credential proxy's seams (#1163)."""
     records = admitted.directory
     accepted = admitted.tenant
     pin = _knowledge_pin(ns)
@@ -1190,15 +1062,14 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
         # The one refusal knowable without the run's knowledge, made before the launch-time
         # publish spends up to its budget on the issuer and the forge: an ordinary run's alert
         # file is not there (looked at, not read). The tenant's readiness and the billable role
-        # preflight are judged over the run's own copy of its knowledge, so they follow it. A
-        # job's alert file was looked at by its launch check.
-        if launch is None and world is None and not ns.alert.is_file():
+        # preflight are judged over the run's own copy of its knowledge, so they follow it.
+        if world is None and not ns.alert.is_file():
             sys.exit(f"alert not found: {ns.alert.resolve()}")
 
         # #1108 P4 (flow 3): the knowledge this run reads — the launch-time publish's outcome
         # (or the pin), one export — copied into the run's own folder, named by its run id,
         # before anything reads it. The copy is the run's alone and is removed when it ends.
-        early = _early_run(ns, accepted, world, episode_runs, launch=launch)
+        early = _early_run(ns, accepted, world, episode_runs)
         knowledge = _knowledge_source(accepted, pin=pin, publish=publish, data_root=data_root,
                                       records=records)
         copy = _copy_knowledge(accepted, knowledge, early.run_dir.name)
@@ -1219,7 +1090,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
                 tenant, defender_dir=DEFENDER_DIR,
                 roster=roster if roster is not None else _run_roster(DEFENDER_DIR),
                 known_ids=known_ids)
-            # The request tokens' signer, over the systems just judged, on both lanes (#1342
+            # The request tokens' signer, over the systems just judged (#1342
             # R6-8): a configuration that cannot sign them refuses here, before the run is made;
             # nothing is signed until a call or a ticket leg asks (r7 A20).
             # The case system the record step will comment through, judged once here by run
@@ -1243,16 +1114,13 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             # The input is read after the tenant check and the role preflight: a tenant the check
             # refuses is told so before anything about its input is — save that an ordinary
             # run's alert file is absent, refused above before the publish spends anything.
-            alert = _case_input(ns, world, episode_runs, launch=launch)
+            alert = _case_input(ns, world, episode_runs)
 
             # The handle, not just its directory: the post-run step saves the run page through it.
             # The stamp records the export copied (O-B).
             if world is not None:
                 run = materialize(alert, run=early, tenant=accepted, model=model, world=world,
                                   knowledge=knowledge)
-            elif launch is not None:
-                run = materialize(alert, run=early, tenant=accepted, model=model,
-                                  mapping=mapping, knowledge=knowledge, launch=launch)
             else:
                 run = materialize(alert, run=early, tenant=accepted, model=model,
                                   mapping=mapping, knowledge=knowledge)
@@ -1322,9 +1190,23 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
         _logger.warning("the run page was not saved", exc_info=True)
 
 
+def _curate(started: _Started, summary: dict[str, Any], *, ns: argparse.Namespace,
+            enqueue_curation: Callable[..., bool]) -> None:
+    """The operator run's curation enqueue, its failure never the run's: a sibling's evidence was
+    staged on purpose, so it never feeds the catalog, and `--no-learn` asks for none."""
+    if started.world is not None:
+        _logger.info("--episode: a sibling world is not enqueued for curation")
+    elif ns.no_learn:
+        _logger.info("--no-learn set; not enqueuing for curation")
+    elif enqueue_curation(started.run, started.alert, tenant=started.accepted,
+                          truncated_by=summary.get("truncated_by")):
+        _logger.info("enqueued for catalog curation")
+
+
 def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     argv: list[str],
     *,
+    environ: Mapping[str, str] | None = None,
     lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
     visualize: Callable[..., None] = _run.visualize,
     ticket_writer: Any = _default_ticket_writer,
@@ -1355,6 +1237,10 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     passes none and reads them from `DEFENDER_DATABASE_DSN`. The run's tenant must be `active`
     there, with its forge wiring recorded, before anything else of it is read.
 
+    `environ` is the process's environment (`None`: `os.environ`): with a job socket in it the
+    command is a learning sibling inside its job container (#1170 A6), whose tenant its job's host
+    helper admitted and holds, and which gets its run folder, knowledge copy and pass from it.
+
     `signer`, `proxy_url` and `issuer_transport` are the operator's seams for the credential
     proxy (#1163): the request-token signer (else the tenant's own sign login, over `directory`'s
     live generation, through `issuer_transport` when given), and the proxy's address (else
@@ -1365,6 +1251,11 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     # Undrivable dependencies (credentialed lifecycle, HTML render, ticket endpoint) are
     # injection seams defaulting to production.
     ns = parse_args(argv)
+    request = job_socket.from_environ(os.environ if environ is None else environ)
+    if request is not None:
+        # In a job container (#1170 A6): only a learning sibling runs here, its host half its job's helper's.
+        return _sibling_in_container(ns, request, lifecycle=lifecycle, visualize=visualize, preflight=preflight,
+                                     roster=roster, oracle=oracle, verifier=verifier)
     # Bound under its production name so the curation lane is visibly reached from here.
     enqueue_curation = enqueue
 
@@ -1377,7 +1268,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
     try:
-        with admitted, _set_up(ns, data_root, admitted, launch=None, preflight=preflight,
+        with admitted, _set_up(ns, data_root, admitted, preflight=preflight,
                                materialize=materialize, oracle=oracle, verifier=verifier,
                                roster=roster, publish=publish, signer=signer, proxy_url=proxy_url,
                                issuer_transport=issuer_transport) as started:
@@ -1410,22 +1301,17 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                         # minted on that verdict — and only for a run that will comment.
                         truncated_by = summary.get("truncated_by")
                         closed_before_cut = summary.get("closed_before_cut") is True
-                        token = (started.minting.write_back()
-                                 if _default_ticket_writer.comments_on(truncated_by, closed_before_cut) else {})
+                        minting = started.minting  # the operator's own signer: `_set_up` builds a `_TokenMint`
+                        token = (minting.write_back()
+                                 if isinstance(minting, _TokenMint)
+                                 and _default_ticket_writer.comments_on(truncated_by, closed_before_cut) else {})
                         ticket_writer.record_case_ticket(
                             run, tenant=tenant, defender_dir=DEFENDER_DIR,
                             env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent),
                             truncated_by=truncated_by, closed_before_cut=closed_before_cut,
                             case=started.case, **token)
 
-                    # A sibling's evidence was staged on purpose, so it must never feed the catalog.
-                    if world is not None:
-                        _logger.info("--episode: a sibling world is not enqueued for curation")
-                    elif ns.no_learn:
-                        _logger.info("--no-learn set; not enqueuing for curation")
-                    elif enqueue_curation(run, started.alert, tenant=started.accepted,
-                                          truncated_by=summary.get("truncated_by")):
-                        _logger.info("enqueued for catalog curation")
+                    _curate(started, summary, ns=ns, enqueue_curation=enqueue_curation)
 
                 _post_steps(started, summary, visualize=visualize, update_ticket=ns.update_ticket,
                             operator_steps=ticket_and_curation)
@@ -1434,19 +1320,17 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
         return refused.rc
 
 
-# -- the job lane (#1342) --------------------------------------------------------------------------
+# -- the job lane (#1342; in its job container, #1170 A4-A6) ------------------------------------------
 
 def parse_job_args(argv: list[str]) -> argparse.Namespace:
-    """The job entry's arguments: `--job <id> --tenant <T> --parent-pid <pid>` and nothing else.
-    The id is the investigation's (its launch record names it); the data root comes from
-    `DEFENDER_DATA_ROOT`. The namespace carries the operator run's other arguments at their
-    defaults, so run setup reads one shape: a job has no alert path, episode, model override,
-    knowledge pin, ticket or learning flag."""
-    p = argparse.ArgumentParser(description="Run one queued investigation (the job lane).")
+    """The job entry's arguments: `--job <id> --tenant <T>` and nothing else (#1170 A5: the job's
+    death tie is its stdin, not a parent pid). The id is the investigation's (its launch record
+    names it); the data root comes from `DEFENDER_DATA_ROOT`. The namespace carries the operator
+    run's other arguments at their defaults, so the run half reads one shape: a job has no alert
+    path, episode, model override, knowledge pin, ticket or learning flag."""
+    p = argparse.ArgumentParser(description="Run one queued investigation in its job container (the job lane).")
     p.add_argument("--job", required=True, help="the investigation id its launch record names")
     p.add_argument("--tenant", required=True, help="the tenant the investigation belongs to")
-    p.add_argument("--parent-pid", required=True, type=int,
-                   help="the worker that started this process; exit at once under any other")
     ns = p.parse_args(argv)
     for name, default in (("alert", None), ("episode", None), ("world", None), ("no_learn", False),
                           ("update_ticket", False), ("model", None), ("knowledge_commit", None)):
@@ -1463,6 +1347,20 @@ def _interrupt_on_sigterm() -> None:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, on_term)
+
+
+def _terminate_on_stdin_eof() -> None:
+    """The container's death tie (#1170 A5): the job's host helper holds this process's stdin, and
+    when it is gone the pipe reads end of file, which is this process's SIGTERM (the same one
+    `_interrupt_on_sigterm` turns into the run's unwind). Read on a daemon thread, so the run never
+    waits on it; whatever arrives on stdin before the end is discarded."""
+    def watch() -> None:
+        with contextlib.suppress(OSError):
+            while os.read(0, 4096):
+                pass
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=watch, name="stdin-death-tie", daemon=True).start()
 
 
 class _JobFacts:
@@ -1504,68 +1402,301 @@ class _JobFacts:
         return False
 
 
-def _check_launch(lane: job_lane.JobLane, job: str) -> Launched:
-    """The job's launch record, checked by the job lane's door, or the refusal naming it."""
+class _HelperPass:
+    """A job's read pass, asked of its host helper over the job socket (#1170 O5, O6, H2): the
+    helper signs it (the job holds no sign login) for this run's id, the grant and the lifetime it
+    decided. Asked when a call first needs one, and asked again once the held one is within the
+    reuse margin of its expiry, as the operator run's own signer reuses its token (r7 A20). A
+    refusal (the job fenced, the helper signalled) or a helper that is gone is the asking call's
+    `AdapterFault`; nothing is retried here."""
+
+    def __init__(self, request: Callable[..., dict[str, Any]], *, run_id: str, proxy_url: str,
+                 granted: bool) -> None:
+        self._request = request
+        self._run_id = run_id
+        self._proxy_url = proxy_url
+        self._granted = granted
+        self._held: tuple[str, float] | None = None
+        self._holding = threading.Lock()
+
+    def _token(self) -> str:
+        with self._holding:
+            if self._held is None or self._held[1] - TOKEN_REUSE_MARGIN_SEC <= time.time():
+                try:
+                    answer = self._request("pass", id=self._run_id)
+                    self._held = (str(answer["token"]), float(answer["expires_at"]))
+                except job_socket.Refused as refused:
+                    raise AdapterFault(f"the job's host helper refused a pass ({refused.code}): {refused}") from None
+                except (OSError, ValueError, KeyError, TypeError) as lost:
+                    raise AdapterFault(f"no pass from the job's host helper: {type(lost).__name__}: {lost}") from None
+            return self._held[0]
+
+    def access_kwargs(self) -> dict[str, RequestAccess]:
+        return _access_kwargs(RequestAccess(self._proxy_url, self._token) if self._granted else None)
+
+
+def _launch_facts(request: Callable[..., dict[str, Any]], ns: argparse.Namespace) -> dict[str, Any]:
+    """The helper's launch facts for this job (#1170 A6), or the refusal naming why there are none or
+    why they are not this job's: the helper admitted the tenant, checked the launch record, read the
+    alert mapping, ran the publish and made the run folder and its knowledge copy before this
+    container started, and says so here."""
     try:
-        return lane.check_launch(job)
-    except job_lane.JobLaneRefused as refused:
-        sys.exit(f"[run.py] {refused}")
+        launch = request("launch")
+    except job_socket.Refused as refused:
+        sys.exit(f"[run.py] job {ns.job}: the job's host helper refused its launch facts ({refused.code}): {refused}")
+    except (OSError, ValueError) as lost:
+        sys.exit(f"[run.py] job {ns.job}: the job's host helper did not answer for its launch facts: "
+                 f"{type(lost).__name__}: {lost}")
+    said = {key: launch.get(key) for key in ("kind", "tenant", "job")}
+    if said != {"kind": "investigation", "tenant": ns.tenant, "job": ns.job}:
+        sys.exit(f"[run.py] job {ns.job}: the job's launch facts are not this investigation's: {said}")
+    if launch.get("tenant_state") != "active":
+        sys.exit(f"[run.py] job {ns.job}: this run's tenant cannot be used: it is {launch.get('tenant_state')!r}")
+    return launch
+
+
+def _container_tenant(ns: argparse.Namespace, data_root: DataRoot) -> tenancy.Tenant:
+    """The job's tenant inside its container: the folder rules only, over its own tenant folder (the
+    one the container mounts), as run start judges them (`clone_tree=False`). No host lock and no
+    admission: the job's host helper holds the one and ran the other, and their verdict is in the
+    launch facts (#1170 A6, C19)."""
+    try:
+        return tenancy.accept_tenant(data_root, ns.tenant, defender_dir=DEFENDER_DIR, clone_tree=False)
+    except TenantRefused as refused:
+        sys.exit(f"[run.py] job {ns.job}: this run's tenant cannot be used: {refused}")
+
+
+def _helper_made(ns: argparse.Namespace, accepted: tenancy.Tenant,
+                 launch: Mapping[str, Any]) -> tuple[Run, run_knowledge.RunCopy]:
+    """The run folder and its knowledge copy the job's host helper made at the job's id (#1170 A6):
+    opened, never made. The launch facts must name the same two places."""
+    from defender.records import RunId, RunRefused
+
+    copy = run_knowledge.RunCopy(accepted.run_knowledge / ns.job)
+    try:
+        run = accepted.runs_repository().open(RunId.parse(ns.job))
+    except (RunRefused, TenantRefused) as refused:
+        sys.exit(f"[run.py] job {ns.job}: its run folder cannot be opened: {refused}")
+    for what, made, said in (("run folder", run.run_dir, launch.get("run_dir")),
+                             ("knowledge copy", copy.root, launch.get("run_copy"))):
+        if str(made) != str(said):
+            sys.exit(f"[run.py] job {ns.job}: the helper's {what} {said!r} is not this job's {made}")
+    return run, copy
+
+
+def _set_up_in_container(  # noqa: PLR0913 — the request, its launch facts, the socket and the run half's seams
+    ns: argparse.Namespace, data_root: DataRoot, launch: Mapping[str, Any],
+    request: Callable[..., dict[str, Any]], *, preflight: Callable[..., int], roster: Any,
+) -> _Started:
+    """A job's run half (#1170 A6; #1342 M3's second half): the tenant judged by the folder rules,
+    resolved over the copy its helper made, its systems judged once, the preflight, the run its
+    helper made opened and announced — or the refusal (`SystemExit` naming it; `_PreflightRefused`).
+    Its read pass comes from the helper, asked when a call needs it."""
+    accepted = _container_tenant(ns, data_root)
+    run, copy = _helper_made(ns, accepted, launch)
+    tenant = _resolve_run_tenant(accepted, dispatches_lead_zero=True, copy=copy)
+    systems = _judge_start(tenant, defender_dir=DEFENDER_DIR,
+                           roster=roster if roster is not None else _run_roster(DEFENDER_DIR))
+    passes = _HelperPass(request, run_id=ns.job, proxy_url=str(launch.get("proxy_url") or ""),
+                         granted=bool(launch.get("grant")))
+    model = driver.resolve_main_model(ns.model)
+    rc = preflight(ns.model)
+    if rc:
+        raise _PreflightRefused(rc)
+    # The run's id, announced as the first line of stdout (#1279 O5), before the box exists.
+    print(f"run_id={run.run_dir.name}", flush=True)
+    return _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=None, episode=None,
+                    systems=systems, seams={}, alert=RunPaths(run.run_dir).alert, minting=passes)
 
 
 def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection seams
     argv: list[str],
     *,
+    environ: Mapping[str, str] | None = None,
     lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
     visualize: Callable[..., None] = _run.visualize,
     preflight: Callable[..., int] = preflight_role_models,
-    materialize: Callable[..., Run] = _materialize_run,
     roster: Any = None,
-    publish: PublishLaunch | None = None,
 ) -> int:
-    """The job entry (#1342): `run.py --job <id> --tenant <T> --parent-pid <pid>`, the worker's
-    child. The job composition: tied to its worker first, then the job lane's door opened before
-    the tenant is accepted, then the operator run's setup, lifecycle and post-steps — with no
-    ticket and no curation (M4: neither is a parameter), and a box that never degrades to host
-    execution (R2). The job-end record is written however it ends. Its tenant records are read
-    from `DEFENDER_DATABASE_DSN` (#1214, r6 R6-2): the job's tenant must be `active` there, and
-    the acceptance is held until the job-end record is written (R6-6)."""
-    tie_to_parent()  # die with the worker (#1342 O7), before anything else
+    """The job entry (#1342), inside its job container only (#1170 A6): `run.py --job <id> --tenant
+    <T>`, the process the job's host helper starts. `environ` is the container's environment
+    (`None`: this process's): the job socket it names is the helper's door, and without one the
+    entry does nothing (host mode is retired). The job composition: the job lane's door, then the
+    run half (its host half is the helper's: admission, launch check, alert mapping, publish, run
+    copy, read grant, run folder), the lifecycle with its box started by the helper over the socket,
+    and the post-steps — with no ticket and no curation (M4: neither is a parameter), no database,
+    no host lock and no signer, and a box that never degrades to host execution (R2). The job-end
+    record is written however it ends, while the helper still holds the tenant (R6-6). Signals and
+    the stdin death tie are the process's (`serve_job`)."""
     ns = parse_job_args(argv)
-    require_parent(ns.parent_pid, who="run.py")
-    _interrupt_on_sigterm()
+    request = job_socket.from_environ(os.environ if environ is None else environ)
+    if request is None:
+        print(f"[run.py] job {ns.job}: no job socket ({job_socket.SOCKET_ENV} is unset): the job entry runs "
+              "only inside its job container, started by its host helper; nothing was done", file=sys.stderr)
+        return 2
     data_root = _request_data_root(ns)
     try:
         lane = job_lane.JobLane.open(data_root, ns.tenant)
     except job_lane.JobLaneRefused as refused:
         sys.exit(f"[run.py] job {ns.job}: {refused}")
     try:
-        # The acceptance's scope is opened first, so it closes last: the tenant stays held (this
-        # process a recorded holder) until the job-end record is written (r6 R6-6).
-        with contextlib.ExitStack() as held, lane, _JobFacts(lane, ns.job) as facts:
-            launch = _check_launch(lane, ns.job)
-            # The job's host acceptance (r6 R6-1, R6-3), after the door and the launch check, so a
-            # refusal (not active, no wiring, unreachable records, the folder rules) is recorded
-            # `setup: refused`.
-            try:
-                admitted = host_tenant(data_root, ns.tenant, **_acceptance_args(ns, data_root))
-            except TenantRefused as refused:
-                sys.exit(f"[run.py] job {ns.job}: this run's tenant cannot be used: {refused}")
-            held.enter_context(admitted)
-            with _set_up(ns, data_root, admitted, launch=launch, preflight=preflight,
-                         materialize=materialize, oracle=None, verifier=None, roster=roster,
-                         publish=publish) as started:
-                facts.setup = job_facts.SETUP_DONE
-                run = started.run
-                with _log.run_context(run.run_dir.name, started.tenant.tenant_id, logger=_logger):
-                    _logger.info(f"run_dir={run.run_dir} model={started.model}")
-                    _announce_provenance(run.run_dir)
-                    summary = lifecycle(**started.lifecycle_kwargs(ns), job_lane=True,
-                                        start_token=launch.record.box_token,
-                                        job_facts=facts.held)
-                    _post_steps(started, summary, visualize=visualize, update_ticket=False)
-                    return _exit_code(summary)
+        with lane, _JobFacts(lane, ns.job) as facts:
+            launch = _launch_facts(request, ns)
+            started = _set_up_in_container(ns, data_root, launch, request, preflight=preflight, roster=roster)
+            facts.setup = job_facts.SETUP_DONE
+            run = started.run
+            with _log.run_context(run.run_dir.name, started.tenant.tenant_id, logger=_logger):
+                _logger.info(f"run_dir={run.run_dir} model={started.model}")
+                _announce_provenance(run.run_dir)
+                token = launch.get("box_token")
+                summary = lifecycle(**started.lifecycle_kwargs(ns), job_lane=True, job_facts=facts.held,
+                                    relay=request, **({"start_token": token} if token else {}))
+                # The page is saved in the run's own folder only: the helper copies it to the shared
+                # publish folder once this container has exited (#1170 A10).
+                _post_steps(started, summary, visualize=functools.partial(visualize, mirror=False),
+                            update_ticket=False)
+                return _exit_code(summary)
     except _PreflightRefused as refused:
         return refused.rc
+
+
+def serve_job(  # noqa: PLR0913 — the entries' inputs plus their injection seams
+    argv: list[str],
+    *,
+    lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
+    visualize: Callable[..., None] = _run.visualize,
+    preflight: Callable[..., int] = preflight_role_models,
+    roster: Any = None,
+) -> int:
+    """`run.py` as a job container's process (#1170 A5, A6): its command line, `--job <id> --tenant
+    <T>` for an investigation (`job_main`) or a learning sibling's `--tenant <T> --episode <id>
+    --world <label>` (`main`), with the process's own wiring around it. The first SIGTERM is the
+    run's `KeyboardInterrupt` and later ones are ignored (#1342 O7); end of file on stdin, the job's
+    host helper gone, is that SIGTERM (A5). Without a job socket in its environment it does nothing."""
+    if job_socket.from_environ(os.environ) is None:
+        print(f"[run.py] no job socket ({job_socket.SOCKET_ENV} is unset): a job container's entry runs only "
+              "inside its job container, started by its host helper; nothing was done", file=sys.stderr)
+        return 2
+    _interrupt_on_sigterm()
+    _terminate_on_stdin_eof()
+    try:
+        if any(a == "--job" or a.startswith("--job=") for a in argv):
+            return job_main(argv, environ=os.environ, lifecycle=lifecycle, visualize=visualize,
+                            preflight=preflight, roster=roster)
+        return main(argv, environ=os.environ, lifecycle=lifecycle, visualize=visualize, preflight=preflight,
+                    roster=roster)
+    except KeyboardInterrupt:
+        # Stopped (SIGTERM or the helper gone): the run unwound through its teardown, and a job's
+        # end record is written; the process says it was terminated.
+        return 128 + signal.SIGTERM
+
+
+# -- a learning sibling in its job container (#1170 A6, #1449) ---------------------------------------
+
+def _sibling_launch(request: Callable[..., dict[str, Any]], ns: argparse.Namespace) -> dict[str, Any]:
+    """The learning job's launch facts, as its host helper answers them to the sibling: the job's own
+    (its episode is the learning job's id, never `--source`), the tenant active."""
+    try:
+        launch = request("launch")
+    except job_socket.Refused as refused:
+        sys.exit(f"[run.py] --episode {ns.episode}: the job's host helper refused its launch facts "
+                 f"({refused.code}): {refused}")
+    except (OSError, ValueError) as lost:
+        sys.exit(f"[run.py] --episode {ns.episode}: the job's host helper did not answer for its launch facts: "
+                 f"{type(lost).__name__}: {lost}")
+    said = {key: launch.get(key) for key in ("kind", "tenant", "job")}
+    if said != {"kind": "learning", "tenant": ns.tenant, "job": ns.episode}:
+        sys.exit(f"[run.py] --episode {ns.episode}: this job container's launch facts are not this sibling's "
+                 f"learning job's: {said}")
+    if launch.get("tenant_state") != "active":
+        sys.exit(f"[run.py] this run's tenant cannot be used: it is {launch.get('tenant_state')!r}")
+    return launch
+
+
+def _sibling_made(request: Callable[..., dict[str, Any]], ns: argparse.Namespace, accepted: tenancy.Tenant,
+                  episode_runs: Any, world: Any) -> tuple[Run, run_knowledge.RunCopy]:
+    """The sibling's run and knowledge copy, made by the job's host helper (`copy.make`, #1170 A6, C20):
+    its id the episode roster's for this world, its folder materialized there (input and stamp), its
+    copy owned by the helper. Opened here, never made: the id, the folder and the copy must be the ones
+    this sibling's own roster and tenant name."""
+    from defender.records import RunRefused
+
+    try:
+        made = request("copy.make", world=world.world_id)
+    except job_socket.Refused as refused:
+        sys.exit(f"[run.py] --episode {ns.episode}: the job's host helper refused the sibling's run "
+                 f"({refused.code}): {refused}")
+    except (OSError, ValueError) as lost:
+        sys.exit(f"[run.py] --episode {ns.episode}: the job's host helper did not make the sibling's run: "
+                 f"{type(lost).__name__}: {lost}")
+    try:
+        run = episode_runs.open(episode_runs.arm_id(world.world_id))
+    except (RunRefused, TenantRefused) as refused:
+        sys.exit(f"[run.py] --episode {ns.episode}: the sibling's run cannot be opened: {refused}")
+    copy = run_knowledge.RunCopy(accepted.run_knowledge / run.run_dir.name)
+    for what, ours, said in (("run id", run.run_dir.name, made.get("run")), ("run folder", run.run_dir, made.get("run_dir")),
+                             ("knowledge copy", copy.root, made.get("path"))):
+        if str(ours) != str(said):
+            sys.exit(f"[run.py] --episode {ns.episode}: the helper's {what} {said!r} is not this sibling's {ours}")
+    return run, copy
+
+
+def _sibling_in_container(  # noqa: PLR0913 — the request, the socket and the sibling's seams
+    ns: argparse.Namespace, request: Callable[..., dict[str, Any]], *, lifecycle: Callable[..., dict[str, Any]],
+    visualize: Callable[..., None], preflight: Callable[..., int], roster: Any, oracle: Any, verifier: Any,
+) -> int:
+    """`run.py --tenant <T> --episode <id> --world <label>` inside its learning job's container (#1170
+    A6, #1449): the sibling's run half. Its tenant judged by the folder rules (the job's helper holds
+    the lock and ran the admission), its episode door opened, its world resumed, its run (id, folder
+    with input and stamp) and copy made by the helper at the family's knowledge, its
+    systems judged, its preflight, the run its helper made announced, its lifecycle with its box over
+    the socket and a read pass from the helper, then the shared post-steps. No database, host lock, publish
+    or signer; no curation (a sibling never feeds the catalog)."""
+    from defender.records.formats import family_identities
+
+    if ns.episode is None:
+        sys.exit("[run.py] inside a job container `run.py` runs a learning sibling only (`--tenant --episode "
+                 "--world`); an alert is investigated by its own job (`--job`)")
+    launch = _sibling_launch(request, ns)
+    data_root = _request_data_root(ns)
+    try:
+        accepted = tenancy.accept_tenant(data_root, ns.tenant, defender_dir=DEFENDER_DIR,
+                                         box_mounted=_sibling_box_mounted(ns, data_root), clone_tree=False)
+    except TenantRefused as refused:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+    episode_runs = _open_episode_runs(ns, accepted)
+    with episode_runs:
+        episode = episode_runs.episode
+        world = _resume_target(ns, episode=episode, tenant=lambda: None, arm_ids=episode_runs.arm_ids)
+        source = _open_world_source(accepted.runs_repository(), world)
+        run, copy = _sibling_made(request, ns, accepted, episode_runs, world)
+        _family_pin(ns, _knowledge_pin(ns), episode)  # a `--knowledge-commit` naming another export refuses
+        tenant = _resolve_run_tenant(accepted, dispatches_lead_zero=False, copy=copy)
+        systems = _judge_start(tenant, defender_dir=DEFENDER_DIR,
+                               roster=roster if roster is not None else _run_roster(DEFENDER_DIR),
+                               known_ids=family_identities(world.family, world.arm_ids))
+        passes = _HelperPass(request, run_id=run.run_dir.name, proxy_url=str(launch.get("proxy_url") or ""),
+                             granted=bool(launch.get("grant")))
+        model = driver.resolve_main_model(ns.model)
+        rc = preflight(ns.model, branching=True)
+        if rc:
+            return rc
+        seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source,
+                             tenant_id=str(tenant.tenant_id))
+        alert = _screened_source_alert(episode)
+        print(f"run_id={run.run_dir.name}", flush=True)
+        started = _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world, episode=episode,
+                           systems=systems, seams=seams, alert=alert, minting=passes)
+        with _log.run_context(run.run_dir.name, tenant.tenant_id, logger=_logger):
+            _logger.info(f"run_dir={run.run_dir} model={model}")
+            _announce_provenance(run.run_dir)
+            try:
+                summary = lifecycle(**started.lifecycle_kwargs(ns), job_lane=True, relay=request)
+            except (ServingAbort, BaseExceptionGroup) as escaped:
+                return _unservable_exit(escaped, world=world, episode=episode)
+            _logger.info("--episode: a sibling world is not enqueued for curation")
+            _post_steps(started, summary, visualize=functools.partial(visualize, mirror=False), update_ticket=False)
+            return _exit_code(summary)
 
 
 #: A sibling whose world went unservable exits with this (its world record says why).
@@ -1640,4 +1771,6 @@ def _record_unservable_world(episode: Episode, world: Any, abort: ServingAbort) 
 if __name__ == "__main__":
     _log.configure_from_env()
     _argv = sys.argv[1:]
-    sys.exit(job_main(_argv) if any(a == "--job" or a.startswith("--job=") for a in _argv) else main(_argv))
+    # In a job container (its job socket set, #1170 A6) `run.py` is the container's process; elsewhere the
+    # operator command. A host shell's `run.py --job` is therefore refused by the operator's arguments.
+    sys.exit(serve_job(_argv) if job_socket.SOCKET_ENV in os.environ else main(_argv))

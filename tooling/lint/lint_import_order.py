@@ -47,9 +47,10 @@ LABEL = "lint_import_order"
 #: Bottom to top. A pair with no imports either way is ordered arbitrarily; swap it when an import
 #: first needs the other direction.
 ORDER = (
-    "lazy_door", "kit", "configuration", "execution", "_filesystem", "_flat", "providers", "records", "database",
-    "tenancy", "identity", "jobs", "migrations", "knowledge", "credential_proxy", "box", "integrations", "systems", "hooks",
-    "skills", "investigation", "learning", "presentation", "run_common", "agents", "worker", "run", "lifecycle", "cli", "api",
+    "lazy_door", "kit", "configuration", "execution", "_filesystem", "_flat", "job_socket", "providers", "records",
+    "database", "tenancy", "identity", "jobs", "migrations", "knowledge", "credential_proxy", "box", "integrations",
+    "systems", "hooks", "skills", "investigation", "learning", "presentation", "run_common", "agents", "job_host",
+    "worker", "run", "lifecycle", "cli", "api",
 )
 _RANK = {node: rank for rank, node in enumerate(ORDER)}
 
