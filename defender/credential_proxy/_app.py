@@ -59,7 +59,15 @@ from defender.kit.proxy_client import PROXY_PATH, REPLY_CONTENT_TYPE, FinalRecor
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
 from defender.kit.access import (
     CALLER_GRACE_SEC, HEADER, OAUTH_CLIENT_CREDENTIALS, PROXY_OVERHEAD_SEC, AccessDeclaration, Auth)
-from defender.kit.faults import ConfigFault, TransportFault
+from defender.kit.faults import (
+    ORIGIN_ACCESS,
+    ORIGIN_REQUEST,
+    ORIGIN_SETUP,
+    PROXY_LABELS,
+    AdapterFault,
+    ConfigFault,
+    TransportFault,
+)
 from defender.kit.tls import trust_of_ca
 from defender.kit.verbs import is_system_name
 from defender.records.formats import TenantRefused
@@ -188,12 +196,16 @@ class _Trail:
         return {"time": _clock.now_iso(), **record, "fault": fault}
 
 
-def _refused_answer(fault: str, detail: str, *, system_side: bool = False) -> FinalRecord:
+def _refused_answer(fault: str, detail: str, *, origin: str | None,
+                    system_side: bool = False) -> FinalRecord:
     """A refusal with no system status, and no body that counts. `system_side` marks the one kind
     that is the target system's (its call failed, #1404); unmarked, the refusal is the proxy's
-    own."""
+    own and carries the label of whose failure it is (#1363 O4): `origin`, or `access` when
+    the refusal came from somewhere that names none (a port's plain fault, the catch-all)."""
+    label = None if system_side else (origin if origin in PROXY_LABELS else ORIGIN_ACCESS)
     return FinalRecord(status=None, headers={}, fault=fault, detail=detail,
-                       system_side=system_side, sent=False, body_whole=False, reader_fault=False)
+                       system_side=system_side, sent=False, body_whole=False, reader_fault=False,
+                       origin=label)
 
 
 class _Proxy:
@@ -221,23 +233,24 @@ class _Proxy:
             answer = self._proxied(authorization, raw, send, trail,
                                    time.monotonic() if arrived is None else arrived)
         except Refused as refused:
-            answer = _refused_answer(refused.fault, refused.detail,
+            answer = _refused_answer(refused.fault, refused.detail, origin=refused.origin,
                                      system_side=refused.system_side)
         except ConfigFault as fault:
-            answer = _refused_answer(CONFIG, fault.detail)
+            answer = _refused_answer(CONFIG, fault.detail, origin=fault.origin)
         except TransportFault as fault:
-            answer = _refused_answer(TRANSPORT, fault.detail)
+            answer = _refused_answer(TRANSPORT, fault.detail, origin=fault.origin)
         except Exception as e:  # noqa: BLE001 — A9: a request that cannot be processed is still classified and audited
             # r7 A18: nobody foresaw it, so nobody can say a retry fails too
             _logger.error("a request could not be processed (%s)", type(e).__name__)
-            answer = _refused_answer(TRANSPORT, "the request could not be processed")
+            answer = _refused_answer(TRANSPORT, "the request could not be processed",
+                                     origin=ORIGIN_ACCESS)
         try:
             self.deps.audit.record(trail.entry(answer.fault))
         except Exception as e:  # noqa: BLE001 — A13: any failure to audit fails the request closed
             _logger.error("the audit record could not be written (%s: %s); the answer is "
                           "withheld", type(e).__name__, e)
             answer = _refused_answer(TRANSPORT, "the proxy's audit could not be written; the "
-                                                "answer is withheld")
+                                                "answer is withheld", origin=ORIGIN_ACCESS)
         # Decided once, at the one send boundary (`_sent`), whatever answer follows (#1374).
         return dataclasses.replace(answer, sent=trail.sent)
 
@@ -256,20 +269,20 @@ class _Proxy:
         claims = self._verified(authorization)
         trail.tenant, trail.investigation = claims.tenant, claims.investigation
         if not is_system_name(asked.system):
-            raise Refused(CONFIG, f"{asked.system[:80]!r} is not a system name")
+            raise Refused(CONFIG, f"{asked.system[:80]!r} is not a system name", origin=ORIGIN_REQUEST)
         mode = claims.grant.get(asked.system)
         if mode is None:
-            raise Refused(CONFIG, f"the request token does not grant {asked.system}")
+            raise Refused(CONFIG, f"the request token does not grant {asked.system}", origin=ORIGIN_REQUEST)
         export = self._current_export(claims.tenant)
         trail.commit = export.commit
-        declaration = tenancy.read_export_access(export.path, asked.system)
+        declaration = self._declared(export, asked.system)
         target = locate(declaration, asked.url)
         trail.path = target.path[:_AUDIT_PATH_CAP]
         check_route(declaration, asked.system, asked.method, target.path, mode)
         headers = _forwarded(asked.headers, declaration.auth)
-        creds = self.deps.store.read(claims.tenant, asked.system)
+        creds = self._stored(claims.tenant, asked.system)
         if creds is None:
-            raise Refused(CONFIG, f"no credential set is stored for {asked.system}")
+            raise Refused(CONFIG, f"no credential set is stored for {asked.system}", origin=ORIGIN_SETUP)
         check_fit(declaration.auth, creds, asked.system)
         trust = self._trust_of(declaration)
         access_token = None
@@ -293,32 +306,59 @@ class _Proxy:
     def _verified(self, authorization: str | None) -> Claims:
         scheme, _, token = (authorization or "").partition(" ")
         if scheme != "Bearer" or not token:
-            raise Refused(CONFIG, "the request carries no bearer request token")
-        payload, signature, claims = split_token(token)
-        if not self.deps.verifier.verify(payload, signature, tenant_id=claims.tenant):
+            raise Refused(CONFIG, "the request carries no bearer request token", origin=ORIGIN_ACCESS)
+        try:
+            payload, signature, claims = split_token(token)
+            signed = self.deps.verifier.verify(payload, signature, tenant_id=claims.tenant)
+        except AdapterFault as fault:
+            # A token that does not parse, or a verifier that cannot answer: our access as a
+            # whole, whatever the fault's class (#1363 B3: labelled at the call site).
+            fault.origin = fault.origin or ORIGIN_ACCESS
+            raise
+        if not signed:
             raise Refused(CONFIG, "the request token's signature is not valid for the tenant "
-                                  "it names")
+                                  "it names", origin=ORIGIN_ACCESS)
         if claims.exp <= time.time():
-            raise Refused(CONFIG, "the request token has expired")
+            raise Refused(CONFIG, "the request token has expired", origin=ORIGIN_ACCESS)
         return claims
+
+    def _declared(self, export: tenancy.TenantExport, system: str) -> AccessDeclaration:
+        """The published declaration for `system`. A system with no usable declaration in the
+        export is our setup for that one system (#1363 B3: labelled here, since
+        `tenancy.read_export_access` is not the proxy's alone)."""
+        try:
+            return tenancy.read_export_access(export.path, system)
+        except AdapterFault as fault:
+            fault.origin = ORIGIN_SETUP
+            raise
+
+    def _stored(self, tenant_id: str, system: str) -> CredentialSet | None:
+        """The credential set stored for `system`. The store labels its own per-system causes
+        (`setup`); a fault it raises with no label is the store as a whole being unusable
+        (OpenBao unreachable, or refusing the proxy): our access, whatever its class."""
+        try:
+            return self.deps.store.read(tenant_id, system)
+        except AdapterFault as fault:
+            fault.origin = fault.origin or ORIGIN_ACCESS
+            raise
 
     def _current_export(self, tenant_id: str) -> tenancy.TenantExport:
         # The id is checked here too, not only by the verifier: no path is built from a claim
         # that is not a canonical tenant UUID (A26).
         if not tenancy.is_valid_tenant_id(tenant_id):
-            raise Refused(CONFIG, "the request token names no tenant id")
+            raise Refused(CONFIG, "the request token names no tenant id", origin=ORIGIN_ACCESS)
         try:
             exports = tenancy.tenant_exports(self._root, tenant_id)
         except TenantRefused as refused:
-            raise Refused(CONFIG, f"tenant {tenant_id}: {refused}") from None
+            raise Refused(CONFIG, f"tenant {tenant_id}: {refused}", origin=ORIGIN_ACCESS) from None
         if not exports.is_dir() or exports.is_symlink():
             raise Refused(CONFIG, f"tenant {tenant_id} has no exports folder under the proxy's data "
-                                  "root")
+                                  "root", origin=ORIGIN_ACCESS)
         try:
             return tenancy.current_export_at(exports, tenant_id)
         except tenancy.DeliveryRefused as refused:
             _logger.warning("tenant %s: %s", tenant_id, refused)
-            raise Refused(CONFIG, f"tenant {tenant_id} has no published export to apply") from None
+            raise Refused(CONFIG, f"tenant {tenant_id} has no published export to apply", origin=ORIGIN_ACCESS) from None
 
     def _sent(self, asked: _Asked, target: Target,  # noqa: PLR0913 — one call's state
               headers: dict[str, str], send: Sink,
@@ -387,7 +427,8 @@ def _record_of_reply(system: str, reply: StreamedReply) -> FinalRecord:
             continue
         shown[name] = f"{shown[name]}, {value}" if name in shown else value
     return FinalRecord(status=status, headers=shown, fault=fault, detail=detail,
-                       system_side=False, sent=True, body_whole=withheld is None, reader_fault=False)
+                       system_side=False, sent=True, body_whole=withheld is None, reader_fault=False,
+                       origin=None)
 
 
 def _broken_reply(system: str, status: int, why: str, *, reader_fault: bool = False) -> FinalRecord:
@@ -396,7 +437,7 @@ def _broken_reply(system: str, status: int, why: str, *, reader_fault: bool = Fa
     body counts."""
     return FinalRecord(status=status, headers={}, fault=TRANSPORT, system_side=False, sent=True,
                        detail=f"{system} answered {status} but its reply did not arrive whole ({why})",
-                       body_whole=False, reader_fault=reader_fault)
+                       body_whole=False, reader_fault=reader_fault, origin=None)
 
 
 def _fault_of(status: int) -> str | None:
@@ -413,37 +454,37 @@ def _fault_of(status: int) -> str | None:
 
 def _parse_request(raw: bytes | _Unread) -> _Asked:  # noqa: C901 — one flat shape check
     if raw is _Unread.TOO_LARGE:
-        raise Refused(CONFIG, f"the request is over {MAX_REQUEST_BYTES} bytes")
+        raise Refused(CONFIG, f"the request is over {MAX_REQUEST_BYTES} bytes", origin=ORIGIN_REQUEST)
     if raw is _Unread.TOO_SLOW:
-        raise Refused(TRANSPORT, "the request did not arrive in time")
+        raise Refused(TRANSPORT, "the request did not arrive in time", origin=ORIGIN_REQUEST)
     if raw is _Unread.PEER_LEFT:
-        raise Refused(TRANSPORT, "the caller left before its request arrived")
+        raise Refused(TRANSPORT, "the caller left before its request arrived", origin=ORIGIN_REQUEST)
     try:
         doc = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError):
-        raise Refused(CONFIG, "the request body is not JSON within the parser's depth") from None
+        raise Refused(CONFIG, "the request body is not JSON within the parser's depth", origin=ORIGIN_ACCESS) from None
     if not isinstance(doc, dict) or not set(doc) <= _REQUEST_KEYS or not {
             "system", "method", "url"} <= set(doc):
-        raise Refused(CONFIG, f"the request must be an object of {sorted(_REQUEST_KEYS)}")
+        raise Refused(CONFIG, f"the request must be an object of {sorted(_REQUEST_KEYS)}", origin=ORIGIN_ACCESS)
     system, method, url = doc["system"], doc["method"], doc["url"]
     headers, body = doc.get("headers") or {}, doc.get("body")
     if not all(isinstance(v, str) for v in (system, method, url)):
-        raise Refused(CONFIG, "the request's system, method and url must be text")
+        raise Refused(CONFIG, "the request's system, method and url must be text", origin=ORIGIN_ACCESS)
     if not isinstance(headers, dict):
-        raise Refused(CONFIG, "the request's headers must be an object")
+        raise Refused(CONFIG, "the request's headers must be an object", origin=ORIGIN_ACCESS)
     for name, value in headers.items():
         if not _HEADER_NAME.fullmatch(name) or not isinstance(value, str) or not value.isascii() or any(
                 ch in value for ch in "\r\n\0"):
-            raise Refused(CONFIG, f"the request header {name[:80]!r} is not a header")
+            raise Refused(CONFIG, f"the request header {name[:80]!r} is not a header", origin=ORIGIN_ACCESS)
     if body is not None and not isinstance(body, str):
-        raise Refused(CONFIG, "the request's body must be text or null")
+        raise Refused(CONFIG, "the request's body must be text or null", origin=ORIGIN_ACCESS)
     timeout = doc.get("timeout_sec")
     if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, int | float)
                                 or not math.isfinite(timeout) or timeout <= 0):
-        raise Refused(CONFIG, "the request's timeout_sec must be a positive number")
+        raise Refused(CONFIG, "the request's timeout_sec must be a positive number", origin=ORIGIN_ACCESS)
     if not _encodable(system, method, url, body, *headers.values()):
         # a lone surrogate: a malformed request, not one a retry could send (r7 A18)
-        raise Refused(CONFIG, "the request holds text that is not valid Unicode")
+        raise Refused(CONFIG, "the request holds text that is not valid Unicode", origin=ORIGIN_ACCESS)
     return _Asked(system=system, method=method, url=url, headers=headers, body=body,
                   timeout_sec=timeout)
 
@@ -468,7 +509,7 @@ def _forwarded(headers: Mapping[str, str], auth: Auth) -> dict[str, str]:
             continue
         if lowered in _CREDENTIAL_HEADERS or lowered in own:
             raise Refused(CONFIG, f"the request carries its own {name} header; the proxy "
-                                  "applies the declared credential")
+                                  "applies the declared credential", origin=ORIGIN_ACCESS)
         sent[name] = value
     return sent
 
