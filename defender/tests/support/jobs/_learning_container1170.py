@@ -210,9 +210,14 @@ def start_box(*a, **k):
         mark("interrupted", type(e).__name__)
         raise
 box.start_box = start_box
-sys.argv = ["run.py", *sys.argv[2:]]
+# Imported, not run as `__main__`: run.py's venv re-exec guard fires only under `__main__`, and a re-exec would drop
+# the patch above. The lines below are run.py's own `__main__` block.
+argv = sys.argv[2:]
+sys.argv = ["run.py", *argv]
 try:
-    runpy.run_module("defender.run", run_name="__main__")
+    from defender import _log, job_socket, run as R
+    _log.configure_from_env()
+    sys.exit(R.serve_job(argv) if job_socket.SOCKET_ENV in os.environ else R.main(argv))
 finally:
     mark("unwound")
 '''
