@@ -71,7 +71,7 @@ that need to match `elastic_adapter.py`:
   the `VERBS` registry's annotations are the authoritative surface (per the
   memory-recorded discipline in the elastic SKILL).
 
-Settings at the tenant's `$DEFENDER_DATA_ROOT/<tenant>/knowledge/settings/systems/{system}/`:
+Settings are the system's record (#1366: the operator stores a folder with `tenant.py set-system`):
 `access.yaml` names the system's base and auth (the credential proxy reaches it there), and
 `config.env` holds only the keys the adapter reads, e.g. `{SYSTEM}_TIMEOUT_SEC=10`. A host is a
 verb parameter, never a setting, and the base is never a `config.env` key. The adapter reads
