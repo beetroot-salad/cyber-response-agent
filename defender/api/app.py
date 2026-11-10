@@ -865,8 +865,9 @@ async def resume_tenant(deps: Deps, caller: Admin, tenant_id: AdminTenant) -> Te
 
 @admin.post("/tenants/{tenant_id}/offboard", status_code=status.HTTP_202_ACCEPTED, responses=responses(409))
 async def offboard_tenant(deps: Deps, caller: Admin, tenant_id: AdminTenant) -> TenantItem:
-    """End access at once and queue the teardown, replacing any pending action."""
-    record = await deps.tenants.request_offboard(tenant_id, now=deps.identity.now())
+    """End access at once, end the tenant's queued and running jobs, and queue the teardown, replacing any pending
+    action: one change through the offboarding port."""
+    record = await deps.offboarding.offboard_tenant(tenant_id, actor=caller.user.id)
     audit.emit("tenant.offboard", actor=caller.user.id, tenant_id=record.id, target=record.id)
     return _tenant_item(record)
 

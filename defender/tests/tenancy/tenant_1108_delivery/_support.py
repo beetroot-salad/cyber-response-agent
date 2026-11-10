@@ -218,6 +218,20 @@ def configured_origin(clone):
     return origin
 
 
+def _forge_now():
+    """Forgejo's timestamp for now (RFC 3339, UTC, seconds)."""
+    import datetime as dt
+
+    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _iso(text):
+    """A forge timestamp as an aware instant."""
+    import datetime as dt
+
+    return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
 class ForgeHTTP:
     """Boundary fake: replies from the observed Forgejo schema, records actual requests."""
 
@@ -241,6 +255,26 @@ class ForgeHTTP:
         self.every_page = None
         self.link = None
         self._rows = []
+        # #1414: issues, issue comments, labels, `main`'s protection rule and the organisation's teams, in
+        # Forgejo's API shapes. Served from injected state; every request is recorded in `requests`.
+        #: The login the token authenticates as: what Forgejo records as `user.login` on what it creates.
+        self.login = "bot"
+        self.issues = []
+        self.issue_comments = {}
+        self.labels = []
+        #: `main`'s branch_protections rule as the lifecycle stores it (`lifecycle/_service.py` `_protect_main`).
+        self.protection_rule = {"rule_name": "main", "branch_name": "main", "enable_push": False,
+                                "enable_merge_whitelist": True, "merge_whitelist_usernames": [],
+                                "merge_whitelist_teams": ["Owners"]}
+        #: team name -> member logins, for the owning organisation.
+        self.team_members = {"Owners": []}
+        #: A predicate over a request: when it answers true, the forge APPLIES the request and the reply
+        #: is lost on the way back (`httpx.ReadError`), the fault a retried create meets.
+        self.lose_reply = None
+        #: A function of a request giving a ready `httpx.Response` (a 5xx, a 422) or None, to refuse it
+        #: without applying it; checked beside `fault`, which raises a transport error instead.
+        self.respond = None
+        self._ids = 900
         self.client = httpx.Client(transport=httpx.MockTransport(self.reply))
 
     @property
@@ -279,8 +313,13 @@ class ForgeHTTP:
         fault = self.fault(request) if self.fault is not None else None
         if fault is not None:
             raise fault
+        refused = self.respond(request) if self.respond is not None else None
+        if refused is not None:
+            return refused
         api = self.api if self.api is not None else _api(ORIGIN)
         path = request.url.path.lower()  # Forgejo resolves owner and repository without case
+        if self._ours(request) and (teams := self._org_answer(request, path, api)) is not None:
+            return teams
         if not self._ours(request) or not (path == api or path.startswith(api + "/")):
             self.foreign.append(request)
             return httpx.Response(404, json={"message": "not this forge's repository"})
@@ -304,7 +343,147 @@ class ForgeHTTP:
             return httpx.Response(200, json=found[0]) if found else httpx.Response(404, json={})
         if rest == "/pulls" and request.method == "POST":
             return self._create(json.loads(request.content))
+        answered = self._issue_answer(request, rest)
+        if answered is not None:
+            return self._delivered(request, answered)
         raise AssertionError(f"unexpected HTTP boundary: {request.method} {request.url}")
+
+    # -- #1414: issues, comments, labels, the protection rule, team members --------------------
+    def _next_id(self):
+        self._ids += 1
+        return self._ids
+
+    def _delivered(self, request, response):
+        if self.lose_reply is not None and self.lose_reply(request):
+            raise httpx.ReadError("the reply was lost after the forge applied the request", request=request)
+        return response
+
+    def _user(self, login):
+        return {"login": login, "id": sum(map(ord, login))}
+
+    def add_issue(self, *, title, body, user, labels=(), state="open"):
+        """An issue as Forgejo stores it (`labels` by name; each must already be a repository label)."""
+        number = self._next_id()
+        by_name = {label["name"]: label for label in self.labels}
+        issue = {"number": number, "id": number, "title": title, "body": body, "state": state,
+                 "user": self._user(user), "labels": [by_name[n] for n in labels],
+                 "created_at": _forge_now(), "closed_at": None, "pull_request": None,
+                 "html_url": f"http://forge.invalid:3000/tenants/blue/issues/{number}"}
+        self.issues.append(issue)
+        self.issue_comments[number] = []
+        return issue
+
+    def add_label(self, name):
+        label = {"id": self._next_id(), "name": name, "color": "#ededed"}
+        self.labels.append(label)
+        return label
+
+    def add_comment(self, number, *, user, body, created_at=None):
+        """A comment on issue `number` as Forgejo stores it (dated now unless `created_at`)."""
+        created_at = created_at or _forge_now()
+        comment = {"id": self._next_id(), "body": body, "user": self._user(user),
+                   "created_at": created_at, "updated_at": created_at,
+                   "issue_url": f"http://forge.invalid:3000/tenants/blue/issues/{number}",
+                   "html_url": f"http://forge.invalid:3000/tenants/blue/issues/{number}#issuecomment-{self._ids}"}
+        self.issue_comments[number].append(comment)
+        return comment
+
+    def set_issue_state(self, number, state, *, at=None):
+        """Close or reopen an issue as Forgejo records it: `closed_at` is set on a close (to `at`, else now), cleared on a reopen."""
+        [issue] = [i for i in self.issues if i["number"] == number]
+        issue["state"] = state
+        issue["closed_at"] = (at or _forge_now()) if state == "closed" else None
+
+    def remove_issue(self, number):
+        """The issue is gone: it and its comments are no longer served (a 404)."""
+        self.issues = [i for i in self.issues if i["number"] != number]
+        self.issue_comments.pop(number, None)
+
+    def remove_comment(self, number, comment_id):
+        self.issue_comments[number] = [c for c in self.issue_comments[number] if c["id"] != comment_id]
+
+    def _paged(self, request, rows):
+        """One page of `rows` as Forgejo serves a list: `page`/`limit` honoured (limit capped at `page_size`),
+        `X-Total-Count` always, `Link rel=next` while more remain."""
+        page = int(request.url.params.get("page") or "1")
+        size = min(int(request.url.params.get("limit") or self.page_size), self.page_size)
+        headers = {"X-Total-Count": str(len(rows))}
+        if page * size < len(rows):
+            headers["Link"] = f'<{LINK_ROOT}{request.url.path}?page={page + 1}>; rel="next"'
+        return httpx.Response(200, json=rows[(page - 1) * size:page * size], headers=headers)
+
+    def comments_on(self, number, *, by=None):
+        return [c for c in self.issue_comments.get(number, []) if by is None or c["user"]["login"] == by]
+
+    def issue_creates(self):
+        return [json.loads(r.content) for r in self.requests
+                if r.method == "POST" and r.url.path.lower().endswith("/issues")]
+
+    def _issue_answer(self, request, rest):
+        method, params = request.method, request.url.params
+        parts = rest.strip("/").split("/")
+        if rest == "/labels" and method == "GET":
+            return self._paged(request, self.labels)
+        if rest == "/labels" and method == "POST":
+            return httpx.Response(201, json=self.add_label(json.loads(request.content)["name"]))
+        if rest == "/branch_protections/main" and method == "GET":
+            return httpx.Response(200, json=self.protection_rule)
+        if rest == "/issues" and method == "POST":
+            body = json.loads(request.content)
+            names = {label["id"]: label["name"] for label in self.labels}
+            if any(i not in names for i in body.get("labels") or []):
+                return httpx.Response(422, json={"message": "label does not exist"})
+            return httpx.Response(201, json=self.add_issue(
+                title=body["title"], body=body.get("body", ""), user=self.login,
+                labels=[names[i] for i in body.get("labels") or []]))
+        if rest == "/issues" and method == "GET":
+            rows = [i for i in self.issues
+                    if (params.get("state") or "open") in ("all", i["state"])
+                    and all(n in {label["name"] for label in i["labels"]}
+                            for n in filter(None, (params.get("labels") or "").split(",")))
+                    and params.get("created_by") in (None, i["user"]["login"])]
+            return self._paged(request, rows)
+        if rest == "/issues/comments" and method == "GET":
+            # Every issue comment of the repository, oldest first, `since` (an ISO time) on `updated_at`, inclusive.
+            since = params.get("since")
+            rows = sorted((c for cs in self.issue_comments.values() for c in cs), key=lambda c: c["id"])
+            if since:
+                rows = [c for c in rows if _iso(c["updated_at"]) >= _iso(since)]
+            return self._paged(request, rows)
+        if parts[0] == "issues" and len(parts) in (2, 3):
+            return self._one_issue_answer(request, parts)
+        return None
+
+    def _one_issue_answer(self, request, parts):
+        """`GET /issues/{n}`, and `GET`/`POST /issues/{n}/comments`."""
+        found = [i for i in self.issues if str(i["number"]) == parts[1]]
+        if not found:
+            return httpx.Response(404, json={"message": "issue does not exist"})
+        number = found[0]["number"]
+        if len(parts) == 2 and request.method == "GET":
+            return httpx.Response(200, json=found[0])
+        if parts[2:] == ["comments"] and request.method == "GET":
+            return self._paged(request, self.issue_comments[number])
+        if parts[2:] == ["comments"] and request.method == "POST":
+            return httpx.Response(201, json=self.add_comment(
+                number, user=self.login, body=json.loads(request.content)["body"]))
+        return None
+
+    def _org_answer(self, request, path, api):
+        """`GET /orgs/{owner}/teams` and `GET /teams/{id}/members` for the repository's owner."""
+        if request.method != "GET":
+            return None
+        owner = api.split("/")[4]
+        names = sorted(self.team_members)
+        if path == f"/api/v1/orgs/{owner}/teams":
+            return httpx.Response(200, json=[{"id": 500 + n, "name": name} for n, name in enumerate(names)])
+        prefix = "/api/v1/teams/"
+        if path.startswith(prefix) and path.endswith("/members"):
+            index = int(path[len(prefix):].split("/")[0]) - 500
+            if not 0 <= index < len(names):
+                return httpx.Response(404, json={})
+            return httpx.Response(200, json=[self._user(m) for m in self.team_members[names[index]]])
+        return None
 
     def _listing(self, request):
         params = request.url.params
@@ -338,7 +517,11 @@ class ForgeHTTP:
             if sha is None:
                 return httpx.Response(422, json={"message": f"no branch {body['head']}"})
         number = max([6, *(row["number"] for row in self.prs)]) + 1
-        row = self.add_pr(pr_row(number, body["head"], sha=sha))
+        row = pr_row(number, body["head"], sha=sha)
+        row["user"] = {"login": self.login}  # #1414 P6/A2: who opened it, as the listing shows
+        if "body" in body:  # #1414 P6: a PR body is read back from the listing
+            row["body"] = body["body"]
+        row = self.add_pr(row)
         return httpx.Response(201, json=row)
 
     @property
