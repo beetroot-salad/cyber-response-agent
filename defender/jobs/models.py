@@ -63,6 +63,7 @@ class InvestigationRow(Base, kw_only=True):
         UniqueConstraint("tenant_id", "alert_id", "request_key", "attempt"),
         CheckConstraint(f"stage IN ({_quoted(STAGES)})", name="stage"),
         CheckConstraint("stage <> 'running' OR lease_expires_at IS NOT NULL", name="running_has_a_lease"),
+        CheckConstraint("NOT cost_is_lower_limit OR cost_usd IS NOT NULL", name="lower_limit_has_a_cost"),
         Index("investigations_one_live_per_alert", "tenant_id", "alert_id", unique=True,
               postgresql_where=text(f"stage IN ({_quoted(LIVE)})")),
         {"schema": SCHEMA},
@@ -80,6 +81,9 @@ class InvestigationRow(Base, kw_only=True):
     disposition: Mapped[str | None] = mapped_column(Text, default=None)
     #: Null only when unknown (a cost read that faulted); 0 until the end.
     cost_usd: Mapped[float | None] = mapped_column(Float, default=None)
+    #: True when the cost is only a lower limit ("at least": spend may be missing from it, #1377 S2);
+    #: never true beside a null cost (the table's check).
+    cost_is_lower_limit: Mapped[bool] = mapped_column(Boolean, default=False)
     #: The API's mapped shape (`status`, `commit`, `stale_kind`), or null.
     knowledge: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True), default=None)
     failure_reason: Mapped[str | None] = mapped_column(Text, default=None)
@@ -196,6 +200,7 @@ class InvestigationRecord:
     finished_at: _dt.datetime | None
     disposition: str | None
     cost_usd: float | None
+    cost_is_lower_limit: bool
     knowledge: dict[str, Any] | None
     failure_reason: str | None
     failure_message: str | None
@@ -273,9 +278,25 @@ def stored_alert(row: AlertRow) -> StoredAlert:
         description=row.description, raw=bytes(row.raw))
 
 
+def is_terminal(stage: str) -> bool:
+    """Whether `stage` is one a row ends in (the one place that tests membership of `TERMINAL`)."""
+    return stage in TERMINAL
+
+
+def reads_at_least(row: InvestigationRow) -> bool:
+    """Whether a record's cost reads "at least": the holder's stored mark, or a row that ended after it started with a cost
+    and no final figure from its holder (cancelled or taken over mid-run, a copy that may be short). Derived on read, so
+    ending a row never writes the mark and rows from before the column read the same way (#1377 B1, B2, B3)."""
+    if row.cost_is_lower_limit:
+        return True
+    return (is_terminal(row.stage) and row.started_at is not None and row.accounting_written_at is None
+            and row.cost_usd is not None)
+
+
 def investigation_record(row: InvestigationRow) -> InvestigationRecord:
     return InvestigationRecord(
         investigation_id=row.id, tenant_id=row.tenant_id, alert_id=row.alert_id, request_key=row.request_key,
         attempt=row.attempt, stage=row.stage, created_at=row.created_at, started_at=row.started_at,
         finished_at=row.finished_at, disposition=row.disposition, cost_usd=row.cost_usd,
+        cost_is_lower_limit=reads_at_least(row),
         knowledge=row.knowledge, failure_reason=row.failure_reason, failure_message=row.failure_message)

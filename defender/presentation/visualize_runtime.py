@@ -70,30 +70,32 @@ def render_runtime_investigation(
     return (section("sec-investigation", "defender", "Investigation", subtitle, "".join(blocks)), phases)
 
 
+_PS_SEP = '<span class="ps-sep">·</span>'
+
+
 def _phase_stats_html(stats: dict, wall: dict | None = None) -> str:
     if not stats:
         return ""
-    pieces = [f'<span class="ps-cost">${stats["cost"]:.4f}</span>']
-    if stats.get("gather_cost"):
-        pieces.append(f'<span class="ps-gather">(incl gather ${stats["gather_cost"]:.4f})</span>')
+    segments: list[str] = []
+    # No cost (an unreadable ledger, #1377 r7.2 P1): the line shows no dollars, its counts stay.
+    if stats.get("cost") is not None:
+        cost = f'<span class="ps-cost">${stats["cost"]:.4f}</span>'
+        if stats.get("gather_cost"):
+            cost += f'<span class="ps-gather">(incl gather ${stats["gather_cost"]:.4f})</span>'
+        segments.append(cost)
     if wall and wall.get("duration_sec"):
-        pieces += [
-            '<span class="ps-sep">·</span>',
-            f'<span class="ps-wall">{fmt_duration(wall["duration_sec"] * 1000)}</span>',
-        ]
-    pieces += ['<span class="ps-sep">·</span>', f'<span>{stats["turns"]} turn(s)</span>']
+        segments.append(f'<span class="ps-wall">{fmt_duration(wall["duration_sec"] * 1000)}</span>')
+    segments.append(f'<span>{stats["turns"]} turn(s)</span>')
     tc = stats.get("tool_counts") or {}
     if tc:
         hist = " ".join(f"{name}×{count}" for name, count in sorted(tc.items(), key=lambda kv: -kv[1]))
-        pieces += ['<span class="ps-sep">·</span>', f'<span class="ps-hist">{esc(hist)}</span>']
+        segments.append(f'<span class="ps-hist">{esc(hist)}</span>')
     else:
-        pieces += ['<span class="ps-sep">·</span>', f'<span>{stats["tool_calls"]} tool call(s)</span>']
-    pieces += [
-        '<span class="ps-sep">·</span>',
+        segments.append(f'<span>{stats["tool_calls"]} tool call(s)</span>')
+    segments.append(
         f'<span class="ps-tok">in {stats["in"]:,} / out {stats["out"]:,}'
-        f' / cache_r {stats["cache_r"]:,} / cache_w {stats["cache_w"]:,}</span>',
-    ]
-    return f'<div class="phase-stats">{"".join(pieces)}</div>'
+        f' / cache_r {stats["cache_r"]:,} / cache_w {stats["cache_w"]:,}</span>')
+    return f'<div class="phase-stats">{_PS_SEP.join(segments)}</div>'
 
 
 

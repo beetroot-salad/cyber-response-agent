@@ -29,7 +29,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 # Production names: a missing name is the expected red.
 from defender.identity import SignInRefused, SignInUnavailable, VerifiedProgramToken
 from defender.identity.keycloak import KeycloakPrograms
-from defender.tests.identity.test_1306_keycloak_adapter import Seen, Signer, _AsyncOnly, _b64
+from defender.tests.identity.test_identity_keycloak_adapter import Seen, Signer, _AsyncOnly, _b64
 
 pytestmark = pytest.mark.anyio
 

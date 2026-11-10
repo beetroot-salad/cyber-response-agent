@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import logging
 import re
 import sys
@@ -38,6 +39,7 @@ from defender.presentation.visualize_data import (
     tool_usage,
     transcript_phase_map,
 )
+from defender._agent_role import AGENT_KINDS, CORRELATION_KIND, GATHER_KIND, MAIN_KIND, REVIEW_KIND
 from defender.presentation.visualize_primitives import (
     ASSETS,
     CSS,
@@ -65,7 +67,24 @@ _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from defender.records import Run
+    from defender.records.session_store import LedgerRead
     from defender.tenancy import Tenant
+
+@dataclasses.dataclass(frozen=True)
+class LedgerCost:
+    """The run's cost as the page shows it: the ledger's one read (`None` when there is none to read).
+    Its total is "at least" exactly when the read is not complete (#1377 r7.3 T1)."""
+
+    read: LedgerRead | None
+
+    @property
+    def total(self) -> float | None:
+        return None if self.read is None else self.read.total
+
+    @property
+    def lower_limit(self) -> bool:
+        return self.read is not None and not self.read.complete
+
 
 #: What the dev-only copy did: landed, was not attempted (not a `dev` deployment), or failed.
 CopyOutcome = Literal["copied", "skipped", "failed"]
@@ -75,16 +94,31 @@ def render_page(run: Run, *, update_ticket: bool = False) -> str:
     """This run's page, generated and returned — nothing is written, and nothing here knows
     where the page goes: the post-run step saves it as the run's record (#1110).
     `update_ticket` is `run.py`'s own `--update-ticket` (#1107 O6), handed through to the page.
+    The page's cost is the run's spend ledger, never the run file's result line, which the box can
+    rewrite (#1377 r6 S5), and reads "at least" when the ledger is not complete (r7.3 T1): the page
+    is handed nothing else, so a re-render reads what the run's first render read.
 
-    The store resolve is a precondition, not a data dependency: nothing on the page reads the
-    session store, but a run dir copied without its store pointer would otherwise render a
+    The store must resolve: a run dir copied without its store pointer would otherwise render a
     complete-looking page for a run whose record cannot be found. It fails before a page exists.
     """
+    cost = _ledger_cost(run)
+    return render_runtime_page(run.run_dir, update_ticket=update_ticket, cost=cost)
+
+
+def _ledger_cost(run: Run) -> LedgerCost:
+    """The run's spend from its ledger, through the read the worker and the run file use (#1377 r7 S5).
+    The store must resolve (a run dir copied without its store pointer fails before a page exists); a
+    ledger that cannot be read (a row of an unknown agent id, or no ledger table, included) leaves the
+    cost unknown (r7.4 R1)."""
     from defender.records import session_store as ss
 
-    with ss.open_store_for_read(ss.resolve_store_path(run)):
-        pass
-    return render_runtime_page(run.run_dir, update_ticket=update_ticket)
+    with ss.open_store_for_read(ss.resolve_store_path(run)) as store:
+        try:
+            read = ss.read_ledger(store, str(run.id))
+        except Exception:  # noqa: BLE001 — an unreadable ledger is an unknown cost, never a failed page
+            _logger.warning("the spend ledger of %s could not be read; the page's cost is unknown", run.run_dir, exc_info=True)
+            return LedgerCost(None)
+    return LedgerCost(read)
 
 
 def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False) -> CopyOutcome:
@@ -233,6 +267,10 @@ def render_runtime_headline(
 """
 
 
+#: The cost bar's segment colour per requesting agent kind (#1377 r7 S6).
+_KIND_COLOR = {MAIN_KIND: "#58a6ff", GATHER_KIND: "#3fb950", CORRELATION_KIND: "#a371f7", REVIEW_KIND: "#f0883e"}
+
+
 def render_runtime_metrics(
     attribution: dict[str, dict],
     phase_order: list[str],
@@ -241,11 +279,11 @@ def render_runtime_metrics(
     totals: dict,
     health: dict,
 ) -> str:
-    # The dict collapses repeated phase names into one bucket, in first-appearance order.
-    cost_bar = _phase_bar(
-        {ph: (attribution.get(ph) or {}).get("cost", 0.0) for ph in phase_order},
-        lambda v: f"${v:.3f}",
-    )
+    # The cost bar is the ledger by requesting agent kind (#1377 r7 S6): only the kinds that spent, so it adds up
+    # to the headline by construction; no bar when the cost is unknown. Per-phase cost stays on the phase lines.
+    by_kind = totals.get("by_kind") or {}
+    cost_bar = _phase_bar({kind: by_kind[kind] for kind in AGENT_KINDS if by_kind.get(kind, 0.0) > 5e-7},
+                          lambda v: f"${v:.4f}", color=lambda kind: _KIND_COLOR[kind], empty="(no spend by agent)")
     wall_bar = _phase_bar(
         {ph: (wall_times.get(ph) or {}).get("duration_sec", 0.0) for ph in phase_order},
         lambda v: fmt_duration(v * 1000),
@@ -276,15 +314,16 @@ def render_runtime_metrics(
   <h3>tool usage</h3>
   {tools_html}
   <div class="me-foot">{esc(foot)}</div>"""
-    return section("sec-metrics", "defender", "Metrics", "— per-phase cost / wall + tool usage", body)
+    return section("sec-metrics", "defender", "Metrics", "— cost by agent kind / wall by phase + tool usage", body)
 
 
 
 
-def _phase_bar(values: dict[str, float], fmt) -> str:
+def _phase_bar(values: dict[str, float], fmt, *, color=None, empty: str = "(no per-phase attribution)") -> str:
+    """One segment per positive value; `color` names a segment's colour from its key (default: its phase verb's)."""
     total = sum(v for v in values.values() if v and v > 0)
     if total <= 0:
-        return '<div class="empty">(no per-phase attribution)</div>'
+        return f'<div class="empty">{esc(empty)}</div>'
     segs: list[str] = []
     # One segment per bucket (the dict's keys), so widths sum to 100%.
     for ph, v in values.items():
@@ -301,7 +340,7 @@ def _phase_bar(values: dict[str, float], fmt) -> str:
         else:
             inner = ""
         segs.append(
-            f'<div class="cb-seg" style="width:{pct:.4f}%;background:{phase_color(verb)}" '
+            f'<div class="cb-seg" style="width:{pct:.4f}%;background:{color(ph) if color else phase_color(verb)}" '
             f'title="{esc(title)}">{inner}</div>'
         )
     return "".join(segs)
@@ -337,9 +376,8 @@ RUNTIME_JS = read_text_utf8(ASSETS / "runtime.js")
 
 
 
-def _stats(events: list[dict]) -> tuple[int, int, float]:
+def _stats(events: list[dict]) -> tuple[int, int]:
     n_events = len(events)
-    cost = sum(e.get("total_cost_usd") or 0 for e in events if e.get("type") == "result")
     n_tool_calls = sum(
         1
         for e in events
@@ -347,7 +385,7 @@ def _stats(events: list[dict]) -> tuple[int, int, float]:
         for blk in (e.get("message") or {}).get("content", [])
         if isinstance(blk, dict) and blk.get("type") == "tool_use"
     )
-    return n_events, n_tool_calls, cost
+    return n_events, n_tool_calls
 
 
 def _render_policy_denials_section(run_dir: Path) -> str:
@@ -440,15 +478,26 @@ def _display_facts(run_dir: Path) -> list[str]:
     return parts
 
 
-def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
+def _headline_cost(cost: LedgerCost) -> str:
+    """The headline's cost. The spend ledger's total (#1377 r6 S5), "at least" when its read is not
+    complete (r7.3 T1), never the run file's result line, which the box can rewrite; a ledger that
+    cannot be read reads "unknown" (r7.2 P1, r7.4 R1)."""
+    if cost.total is not None:
+        return f'{"at least " if cost.lower_limit else ""}${cost.total:.4f}'
+    return "unknown"
+
+
+def render_runtime_page(run_dir: Path, *, cost: LedgerCost, update_ticket: bool = False) -> str:
     """The run's page. `update_ticket` is run.py's own `--update-ticket`, handed in as an argument
     and read from no file in the run dir (the box can write every one of them): only a run that
     was started with it has a ticket line, so a receipt an earlier attempt left, or one the box
-    planted, shows nothing on a run that never meant to write a ticket."""
+    planted, shows nothing on a run that never meant to write a ticket.
+
+    `cost` is the ledger's one read, required: every dollar on the page comes from it (#1377 r7.2 P1)."""
     case_id = run_dir.name
     events = read_jsonl_rows(RunPaths(run_dir).tool_trace)
     messages = load_messages(run_dir)
-    _, n_tool_calls, result_total = _stats(events)
+    _, n_tool_calls = _stats(events)
     report = parse_report(run_dir)
     leads = sorted(lead_repository.joined(run_dir), key=_lead_sort_key)
 
@@ -460,19 +509,22 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     phase_keys = list(dict.fromkeys(phase_order))
     tags = tag_events_by_phase(events, phase_order)
 
-    attribution = phase_attribution(events, phase_order, tags)
-    main_total = sum(b["cost"] for b in attribution.values())
-    gather_by_phase, gather_total = gather_cost_by_phase(
-        run_dir, events, tags, phase_order, main_total, result_total, messages
-    )
+    # The informational figures (phase lines, by-model strip, review lenses) price the request log at each
+    # agent's requested model, through the ledger's one read (#1377 r7.1 C). With no readable ledger they
+    # carry no dollars at all (r7.2 P1): nothing on the page prices at a reported name.
+    ledger = cost.read
+    main_price = None if ledger is None else (lambda usage: ledger.price(MAIN_KIND, usage))
+    attribution = phase_attribution(events, phase_order, tags, price=main_price)
+    main_total = sum(b["cost"] or 0.0 for b in attribution.values())
+    gather_by_phase, _gather_total = gather_cost_by_phase(run_dir, events, tags, phase_order, messages, ledger)
     # `phase_keys`: iterating `phase_order` would add a repeated bucket's gather cost twice.
-    for ph in phase_keys:
-        attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
-        attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
+    if ledger is not None:
+        for ph in phase_keys:
+            attribution[ph]["gather_cost"] = gather_by_phase.get(ph, 0.0)
+            attribution[ph]["cost"] += gather_by_phase.get(ph, 0.0)
     # Review spend is totalled but not attributed to a phase: the investigator is never in the
     # gate.
-    review_by_lens = review_cost_by_lens(run_dir, messages)
-    review_total = sum(review_by_lens.values())
+    review_by_lens = review_cost_by_lens(run_dir, messages, ledger)
     wall_times = phase_wall_times(events, tags, phase_order)
     g_wall_to, g_wall_from = gather_wall_by_phase(
         run_dir, events, tags, phase_order, messages
@@ -493,18 +545,18 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     md = run_metadata(run_dir, events, messages)
 
     wall_ms = sum(e.get("duration_ms") or 0 for e in events if e.get("type") == "result")
-    main_model = md["models"][0] if md["models"] else "main"
-    by_model = {main_model: main_total}
-    for by_model_costs in (
-        gather_cost_by_model(run_dir, messages), review_cost_by_model(run_dir, messages),
-    ):
-        for model, cost in by_model_costs.items():
-            by_model[model] = by_model.get(model, 0.0) + cost
-    # `result_total` (main session only) is the fallback when there are no phases; subagent
-    # and review costs are added either way.
+    # The by-model strip is keyed by requested model, from the ledger; with none readable it is empty (r7.2 P1).
+    by_model: dict[str, float] = {}
+    if ledger is not None:
+        by_model[ledger.requested.get(MAIN_KIND, "") or "main"] = main_total
+        for by_model_costs in (
+            gather_cost_by_model(run_dir, messages, ledger), review_cost_by_model(run_dir, messages, ledger),
+        ):
+            for model, spent in by_model_costs.items():
+                by_model[model] = by_model.get(model, 0.0) + spent
+    # The bar is the ledger by agent kind (r7 S6); none without a readable ledger.
     totals = {
-        "cost": (main_total + gather_total if phase_order else result_total) + review_total,
-        "review_cost": review_total,
+        "by_kind": {} if ledger is None else ledger.by_kind(),
         "wall_ms": wall_ms,
         "by_model": by_model,
         "tool_calls": n_tool_calls,
@@ -520,14 +572,8 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     leads_html, n_leads = render_runtime_leads_queries(run_dir, leads)
     review_html, n_reviewed = render_review_gate(run_dir, report, review_by_lens)
 
-    # The review is a named term inside the total, so an operator can separate it.
-    review_note = (
-        f'<span class="ts-review">(incl review ${totals["review_cost"]:.4f})</span>'
-        if totals["review_cost"] else ""
-    )
     stats_html = (
-        f'<span class="ts-cost">${totals.get("cost", 0.0):.4f}</span>'
-        f"{review_note}"
+        f'<span class="ts-cost">{_headline_cost(cost)}</span>'
         f'<span class="ts-sep">·</span>'
         f'<span class="ts-wall">{fmt_duration(wall_ms)}</span>'
     )

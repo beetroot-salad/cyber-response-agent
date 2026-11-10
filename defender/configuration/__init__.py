@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         PRICING as PRICING,
         UnknownModel as UnknownModel,
         billed_usage as billed_usage,
+        is_priced as is_priced,
         model_key as model_key,
         usage_cost as usage_cost,
     )
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
     **dict.fromkeys(("FatalConfigError", "env_bool", "env_choice", "env_int", "env_str",), "_env"),
-    **dict.fromkeys(("PRICING", "UnknownModel", "billed_usage", "model_key", "usage_cost",), "_pricing"),
+    **dict.fromkeys(("PRICING", "UnknownModel", "billed_usage", "is_priced", "model_key", "usage_cost",), "_pricing"),
 }
 
 __getattr__ = lazy_door(globals(), _HOMES)

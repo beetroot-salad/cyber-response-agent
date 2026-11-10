@@ -31,7 +31,7 @@ from defender.tests.learning.branch.test_1344_job_lane import (
     names_the_refusal_not_its_text,
     run_entry,
 )
-from defender.tests.learning.branch.test_947_triplet_launcher import _BASE, _calls
+from defender.tests.learning.branch.test_triplet_launcher import _BASE, _calls
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -287,7 +287,7 @@ class _ProxiedEstate(S.Estate):
 
 
 def _refused_before_the_first_sibling(tmp_path, monkeypatch, cause: str):
-    from defender.tests.learning.oracle.live_contracts.test_1224_preflight_and_outcome import _family
+    from defender.tests.learning.oracle.live_contracts.test_preflight_and_outcome import _family
 
     if cause == _QUESTIONER_UNUSABLE:
         return run_entry(tmp_path, questioner=Watch("worlds: [unclosed, {facts: "))

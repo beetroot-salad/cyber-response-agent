@@ -170,7 +170,7 @@ class InMemoryStore:
             raise UnknownReference(f"no alert {alert_id!r}")
         investigation = Investigation(
             investigation_id=self._mint(InvestigationId), alert_id=alert_id, status="queued",
-            request_key=client_request_id, attempt=1, cost_usd=0.0, created_at=self._clock(),
+            request_key=client_request_id, attempt=1, cost_usd=0.0, cost_is_lower_limit=False, created_at=self._clock(),
         )
         return self.add_investigation(tenant_id, investigation), True
 

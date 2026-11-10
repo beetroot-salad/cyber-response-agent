@@ -87,6 +87,19 @@ def model_key(model: str) -> str:
         ) from None
 
 
+def is_priced(model: object) -> bool:
+    """Whether a pricing row prices `model`: the one "is this model priced" rule (#1377 r7.1 D).
+    An empty or non-string name is never priced, unlike `model_key`'s absorbed empty case:
+    billing an unnamed model at some rate would invent a figure."""
+    if not (isinstance(model, str) and model):
+        return False
+    try:
+        model_key(model)
+    except UnknownModel:
+        return False
+    return True
+
+
 def billed_usage(usage: Any) -> dict[str, int]:
     """A pydantic-ai `Usage` as the four token counts `usage_cost` bills: the one rule from a
     provider's usage to cost inputs. pydantic-ai's `input_tokens` already includes the cache

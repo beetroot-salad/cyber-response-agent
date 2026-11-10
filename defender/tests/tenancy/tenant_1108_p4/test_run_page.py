@@ -2,7 +2,7 @@
 commit used, read from the host record beside the run dir (fresh and pinned runs carry none; a
 stamp the box rewrites changes nothing); the lesson-history section is gone (O-U6).
 
-Entry: a real hermetic run driven through the replay harness (`test_922_renderer.driven_run`),
+Entry: a real hermetic run driven through the replay harness (`test_transcript_renderer.driven_run`),
 its page saved by the real post-run step (`run_common.visualize`) and read back. The host record
 is planted with `test_stale_visibility.write_host_record`, and the stamp carries its
 informational view (no reason) unless a test plays the box rewriting it.
@@ -39,7 +39,7 @@ HOSTILE_REASON = 'forge said <img src=x onerror="alert(1)"> & left "main" unprot
 def _page(run_dir: Path) -> str:
     """Save the run's page through the real post-run step and read it back."""
     from defender import run_common
-    from defender.tests.e2e.test_922_renderer import tenant_run
+    from defender.tests.e2e.test_transcript_renderer import tenant_run
     from defender.tests.support.shared.contracts._data_root_1078 import (
         current_data_root,
         set_up_tenant,
@@ -68,7 +68,7 @@ def _visible(page: str) -> str:
 
 @pytest.fixture
 def run_dir(tmp_path):
-    from defender.tests.e2e.test_922_renderer import MARKER, driven_run
+    from defender.tests.e2e.test_transcript_renderer import MARKER, driven_run
 
     _TMP_ROOTS[:] = [str(tmp_path.parent), html.escape(str(tmp_path.parent))]
     driven = driven_run(tmp_path)

@@ -1,7 +1,7 @@
 """Role-scoped session projections."""
 from __future__ import annotations
 import sqlite3
-from dataclasses import dataclass
+
 from typing import Any
 from pydantic_ai.messages import (
     ModelResponse,
@@ -85,6 +85,12 @@ def branch_point(store: Any, session_id: str) -> int | None:
 
 
 
+def has_session(store: Any, session_id: str) -> bool:
+    """Whether the store holds a session with this id."""
+    return store.connection.execute(
+        "SELECT 1 FROM session WHERE session_id = ?", (session_id,)).fetchone() is not None
+
+
 def main_session_id(store: Any, *, agent_id: str = "main") -> str:
     """The root-of-lineage session for `agent_id`. Forks inherit `agent_id`, so ordering
     cannot pick the right one; raises unless exactly one root matches."""
@@ -96,47 +102,6 @@ def main_session_id(store: Any, *, agent_id: str = "main") -> str:
         raise ValueError(
             f"expected exactly one root-of-lineage {agent_id!r} session; found {len(rows)}")
     return rows[0][0]
-
-
-
-
-# the session list
-
-@dataclass(frozen=True)
-class SessionRow:
-    """One session of a store: its id, the session it was forked from (`None` for a root of
-    lineage) and its agent."""
-
-    session_id: str
-    parent_session_id: str | None
-    agent_id: str | None
-
-
-def list_sessions(store: Any) -> list[SessionRow]:
-    """Every session in the store, in id order: main, lead zero, each gather lead and every fork."""
-    _check_schema_version(store)
-    rows = store.connection.execute(
-        "SELECT session_id, parent_session_id, agent_id FROM session ORDER BY session_id",
-    ).fetchall()
-    return [SessionRow(session_id=r[0], parent_session_id=r[1], agent_id=r[2]) for r in rows]
-
-
-def own_responses(store: Any, session_id: str) -> list[ModelResponse]:
-    """The model responses `session_id` itself wrote, in row order: never the prefix a fork
-    inherited (those rows are its parent's), and never a host-synthesized response, which no
-    model request produced. Each row is read once, whichever paths reach it, so a sum over every
-    session's own responses counts each model request exactly once."""
-    _check_schema_version(store)
-    ids = [r[0] for r in store.connection.execute(
-        "SELECT id FROM message WHERE session_id = ? AND kind = 'response' AND synthesized = 0 "
-        "ORDER BY id", (session_id,),
-    ).fetchall()]
-    if not ids:
-        return []
-    payloads = _fetch_payloads(store.connection, ids)
-    _require_resolved(ids, payloads)
-    messages = [_message_from_payload(payloads[i]) for i in ids]
-    return [m for m in messages if isinstance(m, ModelResponse)]
 
 
 

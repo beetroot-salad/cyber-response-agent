@@ -263,9 +263,9 @@ def _history_unreadable(refusal: BaseException) -> JobEnding:
 
 
 def _family_cost(view: EpisodeRuns, world_ids: Sequence[str]) -> float:
-    """What the siblings of `world_ids` have cost: each one's own session in the shared
-    database and every session forked from it (`records.job_lane.sibling_cost`). A sibling with
-    no session pointer, or none naming its own session, spent nothing that can be read yet."""
+    """What the siblings of `world_ids` have cost: each one's own spend ledger in the database they
+    share, read under its run id (`records.job_lane.sibling_cost`, #1377 r7.5). A sibling with no
+    session pointer, or none naming its own session, spent nothing that can be read yet."""
     ids = view.arm_ids()
     if ids is None:
         raise CostUnreadable("the episode's arm roster is gone")
@@ -284,7 +284,7 @@ def _family_cost(view: EpisodeRuns, world_ids: Sequence[str]) -> float:
             if session_id is None or not database.is_file():
                 continue
             with session_store.open_store_for_read(database) as store:
-                total += sibling_cost(store, session_id)
+                total += sibling_cost(store, str(arm.id))
     return total
 
 

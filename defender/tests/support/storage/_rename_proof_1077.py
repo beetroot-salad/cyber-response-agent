@@ -1,6 +1,6 @@
 """The archive round trip, addressed ONLY through the owners' accessors (#1077).
 
-The payload `test_1077_rename_proof.py` runs in a subprocess (`python -m
+The payload `test_rename_proof.py` runs in a subprocess (`python -m
 defender.tests.support.storage._rename_proof_1077 <work dir>`) against a tree whose owner modules
 had every record name rewritten. Nothing here spells a record name, so a module it drives that
 does spell one stops finding its file: the gate proves no module SAYS a name; this proves none

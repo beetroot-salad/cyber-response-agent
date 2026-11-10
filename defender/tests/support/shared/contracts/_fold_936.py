@@ -1,6 +1,6 @@
 """#936's fixture documents, lesson selectors and record reader, shared by
-`test_936_fold_lessons_push.py` (e2e, drives the real driver) and
-`test_936_lessons_loaded_rows.py` (unit). A helper rather than one importing the other:
+`test_fold_lessons_push.py` (e2e, drives the real driver) and
+`test_lessons_loaded_rows.py` (unit). A helper rather than one importing the other:
 importing a collected test module loads it twice in one session.
 """
 from __future__ import annotations

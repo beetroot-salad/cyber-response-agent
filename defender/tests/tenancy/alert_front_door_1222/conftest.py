@@ -18,7 +18,7 @@ def _configured_roots_1222(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 def _checkout_corpus_1222(tmp_path: Path, request: pytest.FixtureRequest):
     """Lesson tests run the real product from an isolated checkout copy (holding no lessons)."""
     if request.module.__name__.rsplit(".", 1)[-1] not in {
-            "test_1222_lessons_and_corpus", "test_1222_signature_sinks"}:
+            "test_lessons_and_corpus", "test_signature_sinks"}:
         yield
         return
     from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S

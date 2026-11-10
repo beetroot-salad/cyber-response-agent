@@ -20,6 +20,7 @@ from pydantic_ai.exceptions import UsageLimitExceeded  # noqa: E402
 from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
+from pydantic_ai.models.wrapper import WrapperModel  # noqa: E402
 
 from defender.investigation import challenge_gate, driver, observe  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
@@ -62,9 +63,16 @@ def logger(tmp_path):
 
 def test_build_agent_core_threads_def_model_and_effort_to_make_model(logger):
     """`build_agent_core` calls `make_model(defn.model(), defn.effort)` (the def's thunk) and puts
-    the returned model and settings on the Agent."""
+    the returned model and settings on the Agent. r7.3 T3: the agent's model may be a spend-recording wrapper
+    around the made model, so it is, or wraps (`WrapperModel.wrapped`), exactly the object `make_model` returned."""
     sentinel = {"SENTINEL": "s"}
-    fake, calls = _capture_make_model(settings=sentinel)
+    inner_fake, calls = _capture_make_model(settings=sentinel)
+    built: list[BuiltModel] = []
+
+    def fake(model, effort):
+        built.append(inner_fake(model, effort))
+        return built[-1]
+
     defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.3", effort="low")
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
@@ -72,7 +80,12 @@ def test_build_agent_core_threads_def_model_and_effort_to_make_model(logger):
             agent_id="main", make_model=fake,
         )
     assert calls == [("glm-5.3", "low")]
-    assert isinstance(agent.model, FunctionModel)
+    assert len(built) == 1
+    made = built[0].model
+    inner = agent.model
+    while inner is not made and isinstance(inner, WrapperModel):
+        inner = inner.wrapped
+    assert inner is made, "the agent's model is not the model make_model returned"
     assert agent.model_settings == {**sentinel, "openai_prompt_cache_key": "main"}
 
 
