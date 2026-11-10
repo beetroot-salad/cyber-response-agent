@@ -53,7 +53,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from defender.records.formats import AlertMapping, TenantId
-    from defender.tenancy.models import ForgeWiring, Generation, TenantRecord
+    from defender.tenancy.models import ForgeWiring, Generation, MergeEligibility, TenantRecord
 
 #: The first key of every tenant lock: a fixed int4 naming tenancy's advisory locks.
 LOCK_NAMESPACE = 1214
@@ -140,6 +140,10 @@ class TenantRepository(Protocol):
         """The tenant's alert mapping (#1345), None until one is saved. Read here, written only by the jobs
         store's replace."""
         ...
+    async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
+        """Who may merge into the tenant's `main`, as the management service last read it (#1414 D13); None when no read
+        has succeeded yet (never an empty record standing for it)."""
+        ...
 
     # --- requests (the API)
     async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
@@ -157,6 +161,9 @@ class TenantRepository(Protocol):
         ...
 
     # --- host processes
+    async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:
+        """Replace the tenant's merge-eligibility record whole (#1414 D13); `ValueError` for an unknown tenant."""
+        ...
     async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
         """Replace the tenant's publish outcome with what the report `line` states (`fresh <commit>`,
         `stale:transient <why>`, `stale:operator <why>`, `misconfigured <why>`)."""

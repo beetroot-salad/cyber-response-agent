@@ -67,6 +67,7 @@ from defender import tenancy  # noqa: E402
 from defender.records.formats import Episode  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.investigation import driver  # noqa: E402
+from defender.investigation.run_state import RunState  # noqa: E402
 from defender import providers  # noqa: E402
 from defender.records import run_end  # noqa: E402
 from defender.tenancy import run_knowledge  # noqa: E402
@@ -352,6 +353,8 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     #: A job's facts holder (#1342 r5 C2): the driver keeps its review state in the holder's
     #: dict, so the job entry reads the close however the run ends. `None` off the job lane.
     job_facts: _JobEndFacts | None = None,
+    #: The run's live state (#1414), handed to the investigation when the caller built one.
+    run_state: Any = None,
     #: The credential proxy's address and the run's read token (#1163); `None` when the run has
     #: no `http-proxy` system.
     access: RequestAccess | None = None,
@@ -362,15 +365,17 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     Passes `verbs=` explicitly: `run_investigation`'s fallback registry deliberately does not
     enable lead-0, which hermetic tests rely on.
 
-    On the resume path the production registry is never constructed: a sibling's queries must
-    be answered from the primed recording and staged corpus, and a module registry beside them
-    would route uncaptured keys to real adapters. The two registries are built in separate
-    arms of one `if` so both can never exist.
+    On the resume path the production registry is never constructed: a sibling's queries are
+    served by its world registry (the primed recording, else one live read through the run's
+    proxy access, #1449), and a module registry beside it would route keys around the oracle.
+    The two registries are built in separate arms of one `if` so both can never exist.
     """
     # The roster `main` judged, handed down to the registry and `run_investigation` with its
     # verdict; read here only for a direct caller, whose run the driver judges.
     roster = systems.roster if systems is not None else read_roster(adapters_under(defender_dir))
     held: dict[str, Any] = {} if job_facts is None else {"review_state": job_facts.review_state}
+    if run_state is not None:
+        held["run_state"] = run_state
     if world is not None:
         if episode is None:
             # The world's ledger is written through the episode `main` holds; there is no path
@@ -416,6 +421,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
                 defender_dir=defender_dir, model_name=model_name,
                 model_override=model_override, box=box, verbs=verbs, roster=roster,
                 systems=systems, resume=resume, tenant=tenant, source_run=source, **held,
+                **_access_kwargs(access),
             )
         finally:
             verbs.close()
@@ -486,6 +492,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: the box started (r7 D-ad) and its `scrub_verified` once the teardown and scrub returned.
     #: `None` off the job lane.
     job_facts: _JobEndFacts | None = None,
+    #: The run's live state (#1414), built by `main`, handed to the investigation.
+    run_state: Any = None,
 ) -> dict[str, Any]:
     """Start the box, run the investigation inside it, and reap both on every exit
     (`box_mod.stop_and_scrub` owns the stop/scrub ordering and rules).
@@ -523,6 +531,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     # has one: a seam that predates either is not handed a keyword it has no use for.
     keywords: dict[str, Any] = {} if job_facts is None else {"job_facts": job_facts}
     keywords |= _access_kwargs(access)
+    keywords |= {} if run_state is None else {"run_state": run_state}
     investigation_ok = False
     # A run its box ended (#1421) returns normally, but its failure is in flight all the same: a
     # teardown fault on it is logged, never raised over the ending.
@@ -609,10 +618,12 @@ class _TokenMint:
         (`credential_proxy.request_signer`, r8.5) unless one is injected."""
         proxied = {name for name, found in tenant.access.items()
                    if isinstance(found, AccessDeclaration) and name not in systems.down}
-        reads = () if world is not None else tuple(sorted(
-            system_status.granted_systems(tenant.grants) & proxied))
+        # A branched run is a run (#1449): a world reads its granted systems on a run's terms.
+        reads = tuple(sorted(system_status.granted_systems(tenant.grants) & proxied))
         # The write-back token is for a case system run start judged sound (`case`), reached
         # through the proxy; a case system with bad settings is told so by the record step.
+        # A world never gets one: `--update-ticket` with `--episode` is refused before this
+        # (`_resume_target`); `world is None` is the mint's own guard behind that refusal (#1449).
         named = case.system if isinstance(case, case_system.CaseTarget) else None
         written = named if (world is None and ns.update_ticket
                                 and isinstance(tenant.access.get(named or ""), AccessDeclaration)) else None
@@ -1326,6 +1337,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     visualize: Callable[..., None] = _run.visualize,
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
+    enqueue_feedback: Callable[..., bool] = _run.enqueue_feedback_issue,
     preflight: Callable[..., int] = preflight_role_models,
     materialize: Callable[..., Run] = _materialize_run,
     oracle: Any = None,
@@ -1391,8 +1403,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                 _logger.info(f"run_dir={run_dir} model={started.model}")
                 _announce_provenance(run_dir)
 
+                run_state = RunState(run_dir, run_dir.name)
                 try:
-                    summary = lifecycle(**started.lifecycle_kwargs(ns))
+                    summary = lifecycle(**started.lifecycle_kwargs(ns), run_state=run_state)
                 except (ServingAbort, BaseExceptionGroup) as escaped:
                     return _unservable_exit(escaped, world=world, episode=episode)
 
@@ -1420,9 +1433,18 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                         _logger.info("--episode: a sibling world is not enqueued for curation")
                     elif ns.no_learn:
                         _logger.info("--no-learn set; not enqueuing for curation")
-                    elif enqueue_curation(run, started.alert, tenant=started.accepted,
-                                          truncated_by=summary.get("truncated_by")):
-                        _logger.info("enqueued for catalog curation")
+                    else:
+                        if enqueue_curation(run, started.alert, tenant=started.accepted,
+                                            truncated_by=summary.get("truncated_by")):
+                            _logger.info("enqueued for catalog curation")
+                        # After curation, under its own predicate: a feedback issue is wanted
+                        # for the escalated endings the learning gate refuses (#1414 F1). It
+                        # never raises, so it cannot cost the run its curation or its page.
+                        enqueue_feedback(
+                            run, started.alert, tenant=started.tenant,
+                            truncated_by=summary.get("truncated_by"),
+                            closed_before_cut=summary.get("closed_before_cut") is True,
+                            run_state=run_state)
 
                 _post_steps(started, summary, visualize=visualize, update_ticket=ns.update_ticket,
                             operator_steps=ticket_and_curation)

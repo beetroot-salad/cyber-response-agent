@@ -9,6 +9,7 @@ Identity's memberships refer to `tenants`; nothing here refers to identity."""
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as _dt
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -215,3 +216,28 @@ class AlertMappingRow(Base, kw_only=True):
     def of(cls, tenant_id: TenantId, mapping: AlertMapping) -> AlertMappingRow:
         """The row for `mapping` (entries it does not map are null)."""
         return cls(tenant_id=tenant_id, **{k: mapping.path_of(k) for k in MAPPING_KEYS})
+
+
+@dataclasses.dataclass(frozen=True)
+class MergeEligibility:
+    """Who may merge into the tenant's `main`, as of the management service's latest read (#1414 D13): the logins of the
+    merge whitelist's users and its teams' members, no generation's bot among them, and the instant it was read."""
+
+    logins: frozenset[str]
+    read_at: _dt.datetime
+
+
+class MergeEligibilityRow(Base, kw_only=True):
+    """The tenant's latest merge-eligibility record (#1414 D13): at most one row, absent until the first successful read,
+    replaced whole by each later one and never deleted. An empty `logins` is a record (a whitelist nobody is on)."""
+
+    __tablename__ = "merge_eligibility"
+    __table_args__ = {"schema": SCHEMA}
+
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
+    logins: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    read_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+
+    def as_record(self) -> MergeEligibility:
+        """The record the row holds, its time an instant in UTC."""
+        return MergeEligibility(logins=frozenset(self.logins), read_at=self.read_at.astimezone(_dt.UTC))
