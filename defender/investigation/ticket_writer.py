@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault, UpstreamFault
-from defender.kit.settings import config_pointer
+from defender.kit.settings import locator_of
 from defender.kit.verbs import CaseComments
 from defender.records import Run, RunPaths, formats, run_end
 from defender.systems import case_system
@@ -187,7 +187,7 @@ def _fault_reason(fault: AdapterFault, *, tenant: RunTenant, system: str) -> str
     if isinstance(fault, TransportFault):
         return f"the store could not be reached: {detail}"
     if isinstance(fault, ConfigFault):
-        return f"{config_pointer(system)}: {detail}"
+        return f"{locator_of(tenant).part(system, 'settings')}: {detail}"  # #1366 DC6: the record, not a file
     return f"the write was refused before it was sent: {detail}"
 
 
