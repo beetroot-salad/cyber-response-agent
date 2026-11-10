@@ -10,7 +10,6 @@ import pytest
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tooling.layout_contracts import _spec1080 as S
-from defender.tests.support.learning.core import _state1135
 
 GOLDEN = "pages"
 
@@ -25,7 +24,6 @@ def _tmp_roots(tmp_path, monkeypatch):
     `tmp_path`, so no episode this file builds or launches lands in the checkout."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 _USAGE = {"input_tokens": 1000, "output_tokens": 2000, "cache_creation_input_tokens": 300,

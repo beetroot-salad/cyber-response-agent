@@ -21,11 +21,11 @@ import yaml
 from defender.records._episode_paths import LAYOUT
 from defender.records import WIRE_LOG_NAMES
 from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage import test_1133_rev3 as R
 from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.core._state1135 import env_state
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 #: An episode id is a uuid4 (`fixture_uuid` of a readable label).
@@ -338,7 +338,7 @@ def grade(tmp_path: Path, ep: Path, judge: ScriptedJudge) -> Any:
     """The judge pass, or the refusal it raised."""
     try:
         return J.grade_at(
-            ep, judge=judge, draws=2, state=env_state())
+            ep, judge=judge, draws=2, store=MemoryStore())
     except Exception as refused:  # noqa: BLE001 — the refusal is the observation
         return refused
 
