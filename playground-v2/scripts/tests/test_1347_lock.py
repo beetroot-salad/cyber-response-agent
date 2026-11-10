@@ -342,9 +342,9 @@ def _run_multi(runner, tmp_path, store, exec_fn, token=None):
 @pytest.mark.parametrize("k", [1, 2])
 def test_a_capture_taking_the_lock_between_two_steps_stops_the_runner_before_the_next_step(runner, lock, tmp_path, k):
     """O10 tightened (r6.4.4): the lock is free when the run starts; a capture takes it between step k and step
-    k+1 (k >= 1). The runner re-checks before every step, so step k+1 never runs; the error names that step (the
-    runner's own convention, `step <index>` from 0, as its failure message says); steps 1..k are not undone (no
-    other command runs, and the run record lists them); the capture still holds the lock."""
+    k+1 (k >= 1). The runner re-checks before every step, so step k+1 never runs; the error identifies that step
+    (r6.4.4 settlement: its position from 0 or from 1, or its command; the format is not fixed); steps 1..k are not
+    undone (no other command runs, and the run record lists them); the capture still holds the lock."""
     store, ran, capture = _store(), [], {}
 
     def exec_fn(host, cmd, user, dry_run):
@@ -357,9 +357,40 @@ def test_a_capture_taking_the_lock_between_two_steps_stops_the_runner_before_the
         _run_multi(runner, tmp_path, store, exec_fn)
 
     assert ran == STEPS[:k], ran
-    assert re.search(rf"\bstep {k}\b", str(refused.value)), refused.value
+    assert _names_the_step(str(refused.value), k, STEPS[k]), refused.value
     metas = list((tmp_path / "runs").glob("*/meta.json"))
     assert len(metas) == 1 and [s["cmd"] for s in json.loads(metas[0].read_text())["steps"]] == STEPS[:k]
+    assert json.loads(store.records[lock.CAPTURE])["token"] == capture["token"]
+
+
+def _names_the_step(message: str, index: int, cmd: str) -> bool:
+    """The refusal identifies the step it stopped before: its 0-based or 1-based position, or its command."""
+    return bool(re.search(rf"\bstep {index}\b|\bstep {index + 1}\b", message)) or cmd in message
+
+
+@pytest.mark.parametrize("k", [1, 2])
+def test_a_capture_taking_the_lock_between_two_repeats_stops_the_runner_before_the_next_repeat(
+        runner, lock, tmp_path, k):
+    """O10 tightened (r6.4.4 settlement: every execution of a step is re-checked, each repeat included): one step
+    repeated three times (`repeat: 3`); a capture takes the lock after repeat k. Repeat k+1 never runs, the refusal
+    identifies the step, the repeats done stay in the run record, and the capture still holds the lock."""
+    store, ran, capture = _store(), [], {}
+    repeated = {**SCENARIO, "id": "repeated-step", "steps": [{"cmd": "echo again", "repeat": 3}]}
+
+    def exec_fn(host, cmd, user, dry_run):
+        ran.append(cmd)
+        if len(ran) == k:
+            capture["token"] = lock.take(store, lock.CAPTURE)     # between repeat k and repeat k+1
+        return 0, "", ""
+
+    with pytest.raises((SystemExit, lock.LockError)) as refused:
+        runner.run_scenario(repeated, 42, {}, False, "none", runs_dir=tmp_path / "runs", chaos="none",
+                            exec_fn=exec_fn, post_cr=lambda body: (0, {}), lock_store=store)
+
+    assert ran == ["echo again"] * k, ran
+    assert _names_the_step(str(refused.value), 0, "echo again"), refused.value
+    metas = list((tmp_path / "runs").glob("*/meta.json"))
+    assert len(metas) == 1 and len(json.loads(metas[0].read_text())["steps"]) == k
     assert json.loads(store.records[lock.CAPTURE])["token"] == capture["token"]
 
 
@@ -494,7 +525,9 @@ def _overlay_pushes(seam):
 def test_chaos_activate_stops_before_the_next_change_when_the_lock_is_taken_between_two(lock, tmp_path):
     """O10 tightened (r6.4.4): `activate` re-checks the capture lock right before it applies each change. A
     two-host profile; the lock is free at the start and a capture takes it right after the first host's overlay
-    is pushed. The second host's overlay is never pushed, and the refusal is the lock's."""
+    is pushed. The second host's overlay is never pushed, and the refusal is the lock's. r6.4.4 settlement: a
+    refused activate keeps its all-or-nothing rule, so the first host's overlay is restored after its push (put
+    back to its before-state, here none: deleted) and the ledger holds no record that is not reverted."""
     from chaos import ctl
     fakes, profiles = _two_host_flip(tmp_path)
     store = _store()
@@ -517,6 +550,14 @@ def test_chaos_activate_stops_before_the_next_change_when_the_lock_is_taken_betw
         chain.append(e)
         e = e.__cause__ or e.__context__
     assert any(isinstance(x, lock.LockError) for x in chain), repr(refused.value)
+    first = _overlay_pushes(seam)[0]
+    pushed_at = next(i for i, c in enumerate(seam.calls) if c["method"] == "POST" and c["path"] == first)
+    restored = [c for c in seam.calls[pushed_at + 1:] if c["path"] == first and c["method"] in ("DELETE", "PUT")]
+    assert restored and restored[-1]["method"] == "DELETE", seam.calls[pushed_at:]
+    from chaos.ledger import read_records
+    ledger = tmp_path / "ledger"
+    left = [r for r in (read_records(ledger) if ledger.exists() else []) if not r.get("reverted_at")]
+    assert left == [], left
 
 
 def test_chaos_activate_with_the_captures_token_applies_every_change(lock, tmp_path):
