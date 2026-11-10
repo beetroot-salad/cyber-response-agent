@@ -64,10 +64,11 @@ def clock() -> Clock:
     return Clock()
 
 
-def _access(tmp_path, data_root, signer: A.MarkedSigner, clock: Clock) -> Any:
-    """The read access of a run's mint (`identity` and `ticket` on `http-proxy`), the holder's clock the test's."""
+def _access(tmp_path, data_root, signer: A.MarkedSigner, clock: Clock, **seams: Any) -> Any:
+    """The read access of a run's mint (`identity` and `ticket` on `http-proxy`), the holder's clock the test's.
+    `seams` (the owner's `on_fault=` callback, an agent-chosen name) are handed to the mint as given."""
     R._plant(data_root, proxy=("identity", "ticket"))
-    return R._mint_for(tmp_path, data_root, signer, world=None, clock=clock).access_kwargs()["access"]
+    return R._mint_for(tmp_path, data_root, signer, world=None, clock=clock, **seams).access_kwargs()["access"]
 
 
 def _exp(signer: A.MarkedSigner, n: int) -> float:
@@ -244,6 +245,38 @@ def test_h9_a_fault_that_is_not_process_wide_access_does_not_lose_it(tmp_path, d
     assert len(signer.payloads) == 2
 
 
+def test_h9b_a_setup_fault_is_not_lost_access_but_reaches_the_owner(tmp_path, data_root, clock):
+    """A reported `setup` fault leaves the holder serving and calls its owner's callback once with the fault.
+    Controls: h8, h9. #1363 O5, B1"""
+    signer, told = A.MarkedSigner(), []
+    access = _access(tmp_path, data_root, signer, clock, on_fault=told.append)
+    first = access.token()
+    fault = TransportFault("no credential set is stored for identity")
+    fault.origin = "setup"
+    access.report(fault)
+    assert told == [fault], "the owner's callback was not called once with the setup fault"
+    assert access.token() == first
+    clock.now += TOKEN_SEC
+    assert access.token() != first, "a setup fault stopped the holder signing"
+    assert len(signer.payloads) == 2
+    access.report(_lost("the credential proxy answered nothing"))
+    assert told[-1].origin == "access" and len(told) == 2, "positive control: an access fault reaches the owner too"
+
+
+def test_h11_a_shut_holder_raises_for_every_ask_and_asks_the_signer_nothing(tmp_path, data_root, clock):
+    """A shut holder raises for every ask and never asks the signer. Control: h2. #1363 O6, B1"""
+    signer = SwitchSigner()
+    access = _access(tmp_path, data_root, signer, clock)
+    assert access.token(), "positive control: the open holder signs"
+    asked = signer.asked
+    access.shut()
+    for moved in (0, 5 * TOKEN_SEC):
+        clock.now += moved
+        with pytest.raises(AdapterFault):
+            access.token()
+    assert signer.asked == asked, "a shut holder asked the signer"
+
+
 def test_h10_the_holder_shows_no_token_in_any_repr(tmp_path, data_root, clock):
     """After a token is signed, neither the access nor anything it holds shows the token in its repr or str. O10"""
     signer = A.MarkedSigner()
@@ -254,3 +287,52 @@ def test_h10_the_holder_shows_no_token_in_any_repr(tmp_path, data_root, clock):
     assert "proxy.invalid" in " ".join(shown), "positive control: the address shows"
     for text in shown:
         assert A.SIGNATURE_CANARY not in text, "the request token shows in a repr (O10)"
+
+
+class RecordingHolder:
+    """An access holder double: hands out one live token and records every `report` (it applies no policy)."""
+
+    def __init__(self, token: str) -> None:
+        self._token, self.reports = token, []
+
+    def token(self) -> str:
+        return self._token
+
+    def report(self, fault: AdapterFault) -> None:
+        self.reports.append(fault)
+
+
+@pytest.mark.parametrize(("case", "origin", "reported"), [
+    ("system-answered-401", "system", False),
+    ("token-does-not-grant-the-system", "request", False),
+    ("no-credential-set-stored", "setup", True),
+    ("expired-token", "access", True),
+], ids=["system", "request", "setup", "access"])
+def test_h12_the_client_reports_to_the_holder_exactly_the_setup_and_access_faults_it_raises(
+        tmp_path, data_root, case, origin, reported):
+    """A real call with a holder in the verb context reports its fault to it for `setup` (naming the system) and
+    `access`, not for `system` or `request`. #1363 O5, B1"""
+    from datetime import timedelta
+
+    from defender.integrations import identity_adapter
+    from defender.tests.integrations.credential_proxy_1163 import _harness as H
+    from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+    from defender.tests.integrations.credential_proxy_1163 import test_query_flow as Q
+
+    grant = {("cmdb", "r")} if case == "token-does-not-grant-the-system" else {("identity", "r")}
+    with H.upstream() as up, Q._published(tmp_path, data_root, up) as t:
+        up.replies[f"{Q.API}/users/dev.dana"] = (401, {}, b'{"detail": "who are you"}')
+        holder = RecordingHolder(T.token(t.tenant_id, grant,
+                                         expires_in=timedelta(minutes=-1) if case == "expired-token" else timedelta(hours=1)))
+        with A.proxy_for(t, Q._store(t, empty=case == "no-credential-set-stored")) as (url, tap):
+            ctx = A.ctx_for(tmp_path, T.run_record(t), url, None, access=holder)
+            with pytest.raises(AdapterFault) as raised:
+                identity_adapter.get_user(ctx, user="dev.dana")
+    assert raised.value.origin == origin, "positive control: the call failed with the origin this case plants"
+    assert len(tap.tokens) == 1, "positive control: the holder's token was what the proxy was sent"
+    assert len(holder.reports) == (1 if reported else 0), (origin, holder.reports)
+    if reported:
+        (seen,) = holder.reports
+        assert seen.origin == origin and seen.detail == raised.value.detail
+        if origin == "setup":
+            assert getattr(seen, "system", None) == "identity", "the setup fault does not say whose setup failed"

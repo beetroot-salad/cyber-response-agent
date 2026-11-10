@@ -384,10 +384,12 @@ def never_connected(detail: str = "the system refused the connection") -> dict[s
     return {"proxy_fault": "TransportFault", "detail": detail, "sent": False, "system_side": True}
 
 
-def proxy_refused(fault: str, detail: str) -> dict[str, Any]:
-    """The proxy's own refusal (no status, never sent): e.g. a route the declaration does not
-    allow (`ConfinementFault`) or no stored credential (`ConfigFault`)."""
-    return {"proxy_fault": fault, "detail": detail, "sent": False, "system_side": False}
+def proxy_refused(fault: str, detail: str, origin: str) -> dict[str, Any]:
+    """The proxy's own refusal (no status, never sent) and the label it puts on it (#1363 O4): `request` for a
+    route the declaration does not allow (`ConfinementFault`), `setup` for no stored credential (`ConfigFault`).
+    Required, as a refusal with no label reads as `access`."""
+    assert origin in ("request", "setup"), f"a refusal that is not one call's or one system's setup: {origin!r}"
+    return {"proxy_fault": fault, "detail": detail, "sent": False, "system_side": False, "origin": origin}
 
 
 #: How the real proxy classifies a status the system answered (`credential_proxy._app`).

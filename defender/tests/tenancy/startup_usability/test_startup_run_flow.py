@@ -762,7 +762,9 @@ def test_1363_control_a_transport_fault_not_ours_is_still_a_charged_failed_call(
 
     assert run.failures(CONFIGURED) == {CONFIGURED: 1}, run.breaker
     assert run.calls_to(CONFIGURED) == [f"{CONFIGURED}.lookup", f"{CONFIGURED}.health-check"]
-    assert "our setup" not in run.lead_answer("l-001", 0).lower()
+    told = run.lead_answer("l-001", 0).lower()
+    assert "our setup" not in told
+    assert "credential proxy" not in told, "the positive cases' needle appeared for a fault that is not ours"
 
 
 class _AtFirstRequest:

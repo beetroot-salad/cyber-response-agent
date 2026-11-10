@@ -641,7 +641,7 @@ def test_p1_r7_3_a_job_end_record_is_exactly_its_five_facts_and_names_no_spend_f
         assert job_lane.JobEnd.parse(unreadable) is None, unreadable
 
 
-_CUT_SHORT_WORDS = sorted({*run_end.TRUNCATED_BY_VALUES, "box-lost", "box-output-limit"})
+_CUT_SHORT_WORDS = sorted({*run_end.TRUNCATED_BY_VALUES, "box-lost", "box-output-limit", "proxy-access"})  # #1363 B6: named, not only derived
 
 
 @pytest.mark.parametrize(("cut_short", "verified"), [(word, True) for word in _CUT_SHORT_WORDS] + [

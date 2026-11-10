@@ -829,11 +829,11 @@ def test_1363_o7_the_mark_belongs_to_the_serving_not_to_the_oracle(tmp_path):
 @pytest.mark.parametrize("origin", OUR_ORIGINS)
 def test_1363_o7_a_sibling_whose_oracle_gave_up_after_our_failures_exits_proxy_access_with_no_world_record(
         tmp_path, monkeypatch, caplog, origin):
-    """World b's oracle gives up after its side query failed with `setup` or `access`: the sibling writes no world
-    record, exits proxy-access's code and logs the cause (and, for setup, the system). #1363 O7, D11, G37."""
+    """World b's oracle gives up after its side query failed with `setup` or `access`: no world record, proxy-access's
+    exit code, the cause and the system logged, the run-end record left as written. #1363 O7, D11, G37."""
     import logging
 
-    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.DEBUG)
     est = S.estate(tmp_path)
     ep = _sibling_episode(tmp_path, monkeypatch, est)
     est.answer("idp", "query", BOB, BOB_ROWS)
@@ -847,10 +847,18 @@ def test_1363_o7_a_sibling_whose_oracle_gave_up_after_our_failures_exits_proxy_a
     assert est.calls("edr", "query"), "positive control: the oracle's side query was made"
     assert sib.rc == P.PROXY_ACCESS_EXIT, f"a sibling that lost access exited {sib.rc!r}, not proxy-access's code"
     assert sib.record("b") is None, "lost access was recorded as the world's own unservability"
-    logged = "\n".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+    logged = "\n".join(r.getMessage() for r in caplog.records)
     assert OURS in logged, "the cause was not logged"
-    if origin == "setup":
-        assert "edr" in logged, "the system whose setup failed was not logged"
+    assert "edr" in logged, "the system the failed lookup went to was not logged"
+    # The driver's `finally` wrote the run-end record before the exit decision; it is not rewritten, so
+    # `proxy-access` is not stamped on it (the replay harness writes none: then there is nothing to rewrite).
+    from defender.records import run_end
+
+    sidecar = run_end.sidecar_path(sib.run.run_dir)
+    if sidecar.exists():
+        stamped = run_end.parse_record(json.loads(sidecar.read_text(encoding="utf-8")))
+        assert stamped is None or stamped.truncated_by != "proxy-access", \
+            "the sibling's exit rewrote the run-end record"
 
 
 def test_1363_o7_control_a_sibling_whose_oracle_gave_up_after_the_systems_failure_keeps_the_unservable_record(
