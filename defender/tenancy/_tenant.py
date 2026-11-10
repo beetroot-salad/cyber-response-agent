@@ -18,6 +18,7 @@ from defender.records.formats import (
     EpisodesRoot,
     LearningRoot,
     WorktreesRoot,
+    ScratchRoot,
     ExportsRoot,
     DraftsRoot,
     KnowledgeLock,
@@ -106,8 +107,12 @@ class _TenantLayout:
         return self.tenant_root / "learning"
 
     @property
+    def scratch(self) -> Path:
+        return self.tenant_root / "scratch"
+
+    @property
     def worktrees(self) -> Path:
-        return self.learning / "worktrees"
+        return self.scratch / "worktrees"
 
     @property
     def knowledge(self) -> Path:
@@ -264,7 +269,15 @@ class Tenant(RecordTenant):
         return LearningRoot(self._layout.learning)
 
     @property
+    def scratch(self) -> ScratchRoot:
+        """Host-made working folders below the tenant's folder that no box mounts and no reader
+        serves: the batch worktrees and the learning curators' call folders (#1278 A1, A2 D10)."""
+        return ScratchRoot(self._layout.scratch)
+
+    @property
     def worktrees(self) -> WorktreesRoot:
+        """The batch worktrees, in the tenant's scratch location beside the curators' call
+        folders (#1278 A2 D10)."""
         return WorktreesRoot(self._layout.worktrees)
 
     @property

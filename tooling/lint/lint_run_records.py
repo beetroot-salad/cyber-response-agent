@@ -236,7 +236,7 @@ _EXPORT_READER = "tenancy/_exports.py"
 RECORD_LOCATION_NAMES = frozenset({
     "tenant_root", "row_path", "runs", "sessions", "episodes", "learning", "worktrees",
     "data_root", "runs_base", "trust_root", "sessions_dir", "runs_legacy", "episodes_legacy",
-    "exports", "drafts", "knowledge_lock", "commit_record",
+    "exports", "drafts", "knowledge_lock", "commit_record", "scratch",
 })
 # Keys are (location role, module), values are exact qualified functions, not module exemptions.
 CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
@@ -251,6 +251,8 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("commit_record", _RECORD_OWNER): frozenset({"_record_made", "_Record.read"}),
     # #1278 cutover: the batch worktrees leave the learning folder for the tenant's worktrees location (A2 D10).
     ("worktrees_root", "learning/store/_import.py"): frozenset({"cut_over_learning_state"}),
+    # #1278 A1: the curators' call folders, made in the tenant's scratch location by their one owner.
+    ("scratch_root", "learning/call_folders.py"): frozenset({"call_folder"}),
     # #1278: the learning store's `commit_record` verb (its commit-maker rows), read where a tick or a
     # revert reads what the commit-maker made — the store's record, not the tenant's file record.
     ("commit_record", "learning/author/version_control/store_delivery.py"): frozenset({"revert_lesson"}),
@@ -264,6 +266,7 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
 _ATTRIBUTE_ROLES = {
     "exports": "exports_root", "drafts": "drafts_root", "knowledge_lock": "knowledge_lock",
     "commit_record": "commit_record", "data_root": "data_root", "worktrees": "worktrees_root",
+    "scratch": "scratch_root",
 }
 _ROOT_OVERRIDE_METHODS = frozenset({
     "run_end_sidecar", "scrub_verdict", "ticket_write", "call_join", "ticket_comments",

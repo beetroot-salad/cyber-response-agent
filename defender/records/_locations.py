@@ -121,6 +121,18 @@ def unwrap_worktrees_root(location: WorktreesRoot) -> Path:
     return location._record_location_path
 
 
+class ScratchRoot(_Location):
+    """The opaque tenant scratch location: host-made working folders no box mounts and no
+    reader serves (the batch worktrees, the learning curators' call folders, #1278 A1/D10)."""
+    __slots__ = ()
+
+
+def unwrap_scratch_root(location: ScratchRoot) -> Path:
+    if not isinstance(location, ScratchRoot):
+        raise TypeError("expected ScratchRoot")
+    return location._record_location_path
+
+
 class ExportsRoot(_Location):
     """The opaque exports root location."""
     __slots__ = ()
