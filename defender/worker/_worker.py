@@ -1023,8 +1023,9 @@ class Worker:
         if holder is None:
             holder = uuid.uuid4().hex
             if not await self._store.hold_learning_check(tenant, holder):
-                _logger.info("learning job %s: a post-step of its tenant is running; the tenant is checked "
-                             "again once it ends, and this job's findings with it", job)
+                _logger.info("learning job %s: no post-step started: another post-step of its tenant is running "
+                             "(the tenant is checked again once it ends, and this job's findings with it), or the "
+                             "tenant is being removed (nothing new starts for it)", job)
                 return
         held = Held(_PostStepOf(tenant, job), kind=POST_STEP, check_holder=holder)
         key = f"{POST_STEP}:{job if job is not None else 'tenant:' + tenant}"

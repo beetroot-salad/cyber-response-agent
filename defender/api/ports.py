@@ -8,7 +8,7 @@ from contextlib import AbstractAsyncContextManager
 from typing import Literal, Protocol
 
 from defender._model import model
-from defender.tenancy import TenantRepository
+from defender.tenancy import TenantRecord, TenantRepository
 from defender.identity import IdentityService
 # The store's refusals are the API's: one class each, so the store's raise is the API's answer
 # with no mapping between them (#1342).
@@ -237,6 +237,16 @@ class ArtifactLinks(Protocol):
         ...
 
 
+class Offboarding(Protocol):
+    """The one operation behind the administrator's offboard request (#1360 D6): the tenant moves to `offboarding` and
+    every queued or running job of it ends, as one change. `NotFound` for an absent tenant, `Conflict` for one that
+    is not `creating` or `active` (tenancy's refusals; the routes answer both); a failure leaves tenant and jobs as
+    they were. Not `Writes`: that is a per-tenant transaction acting as a user."""
+
+    async def offboard_tenant(self, tenant_id: TenantId, *, actor: UserId) -> TenantRecord:
+        ...
+
+
 @dataclasses.dataclass(frozen=True)
 class ApiDeps:
     """Everything `create_app` wires the routes to. Plain wiring, not a boundary type: the
@@ -258,3 +268,5 @@ class ApiDeps:
     secrets: SecretStore
     checker: SystemChecker
     artifact_links: ArtifactLinks
+    #: The offboard request's one write: the tenant transition and the ending of its jobs (#1360 D6).
+    offboarding: Offboarding

@@ -37,7 +37,7 @@ from defender.tests.support.jobs._jobs1342 import (
     register_tenant,
     row,
 )
-from defender.tests.support.shared._pglocks1339 import until_blocked
+from defender.tests.support.shared._pglocks1339 import blocked, until, until_blocked
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.tenancy._mapping1345 import assert_missing_wording_names_verb_and_route, mapping_value
 
@@ -67,8 +67,8 @@ def unmapped_dsn(migrated_database: str) -> str:
 
 # --- machinery: SQL plants, locks, a clock the test moves ------------------------------------------
 
-def _plant_alert(dsn: str, *, tenant: str = T1, ticket: str = "P-1", vendor: str = "elastic") -> str:
-    alert_id = str(uuid.uuid4())
+def _plant_alert(dsn: str, *, tenant: str = T1, ticket: str = "P-1", vendor: str = "elastic", alert_id: str | None = None) -> str:
+    alert_id = alert_id or str(uuid.uuid4())
     execute(dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, "
                  "received_at, title, description, raw) VALUES (%s, %s, %s, %s, %s, %s, %s, 't', 'd', %s)",
             (alert_id, tenant, vendor, ticket, NOW, NOW, NOW, b"{}"))
@@ -2745,3 +2745,943 @@ async def test_b1_b11_every_store_write_dates_its_lease_by_the_database_clock_an
 
         created, _ = await store.create_investigation(T1, created_alert, "k-new", actor="u-1")
         assert _created_at(dsn, created.investigation_id) == instant
+
+
+# --- #1360: offboarding ends the tenant's jobs (O3, O4, O5) ---------------------------------------------------------
+
+OFFBOARDED = "tenant_offboarded"
+#: What the tenant row reads after the transition (the same four-and-failure `request_offboard` leaves).
+OFFBOARDING = ("offboarding", "offboard", "offboard", "service", None)
+STALL_KEY = 1360
+
+
+def _offboard(store: Any, tenant: str, *, actor: str) -> Any:
+    return store.offboard_tenant(tenant, actor=actor)
+
+
+def _learning(dsn: str, job_id: str) -> dict[str, Any]:
+    cols = ("status", "reason", "message", "finished_at", "lease_expires_at")
+    found = execute(dsn, f"SELECT {', '.join(cols)} FROM jobs.learning_jobs WHERE id = %s", (job_id,))  # noqa: S608
+    return dict(zip(cols, found[0], strict=True))
+
+
+def _live_of(dsn: str, tenant: str) -> int:
+    return (_count(dsn, "investigations", f"tenant_id = '{tenant}' AND stage IN ('queued', 'running')")
+            + _count(dsn, "learning_jobs", f"tenant_id = '{tenant}' AND status IN ('queued', 'running')"))
+
+
+def _job_rows(dsn: str) -> dict[str, Any]:
+    """Every row of both job tables, whole (the database's own JSON), by id."""
+    return dict(execute(dsn, "SELECT id, to_jsonb(i) FROM jobs.investigations i "
+                             "UNION ALL SELECT id, to_jsonb(l) FROM jobs.learning_jobs l"))
+
+
+def _tenant_json(dsn: str, tenant: str) -> Any:
+    return execute(dsn, "SELECT to_jsonb(t) FROM tenancy.tenants t WHERE id = %s", (tenant,))[0][0]
+
+
+def _auto_job_of(dsn: str, investigation: str) -> str:
+    return str(execute(dsn, "SELECT id FROM jobs.learning_jobs WHERE investigation_id = %s", (investigation,))[0][0])
+
+
+async def _live_jobs(dsn: str, store: Any) -> dict[str, Any]:
+    """T1: a queued and a running investigation; a handed-back, a running and a queued learning job (and the three
+    completed investigations they follow). T2: one queued investigation and one queued learning job."""
+    from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
+
+    handed_parent = await completed_investigation(store, ticket="L-1")
+    handed = _auto_job_of(dsn, handed_parent)
+    assert (await store.claim_learning_job()).record.learning_job_id == handed
+    assert await store.hand_back_learning_job(T1, handed) is not None
+    # The hand-back stamped `finished_at` with the fixed clock's NOW: move it back, so the offboard's overwrite with "now" is observable.
+    execute(dsn, "UPDATE jobs.learning_jobs SET finished_at = %s WHERE id = %s", (NOW - HOUR, handed))
+    running_parent = await completed_investigation(store, ticket="L-2")
+    running_job = _auto_job_of(dsn, running_parent)
+    assert (await store.claim_learning_job()).record.learning_job_id == running_job
+    parents = [handed_parent, running_parent]
+    parents.append(await completed_investigation(store, ticket="L-3"))
+    other_parent = await completed_investigation(store, ticket="L-9", tenant=T2)
+    running_alert, queued_alert = await an_alert(store, T1, ticket="R-1"), await an_alert(store, T1, ticket="Q-1")
+    running, _ = await store.create_investigation(T1, running_alert.alert_id, "k-run", actor="u-1")
+    assert (await store.claim()).record.investigation_id == running.investigation_id
+    queued, _ = await store.create_investigation(T1, queued_alert.alert_id, "k-q", actor="u-1")
+    other_alert = await an_alert(store, T2, ticket="Q-9")
+    other, _ = await store.create_investigation(T2, other_alert.alert_id, "k-q", actor="u-2")
+    return {"investigations": [queued.investigation_id, running.investigation_id], "completed": parents,
+            "learning": [handed, running_job, _auto_job_of(dsn, parents[2])], "running_job": running_job,
+            "running": running.investigation_id, "other_investigation": other.investigation_id,
+            "other_learning": _auto_job_of(dsn, other_parent)}
+
+
+def _assert_ended(dsn: str, jobs: dict[str, Any]) -> None:
+    for inv in jobs["investigations"]:
+        stored = row(dsn, inv)
+        assert (stored["stage"], stored["failure_reason"], stored["finished_at"]) == ("aborted", OFFBOARDED, NOW), inv
+        assert lease_left(dsn, inv) is None
+        assert "offboard" in (stored["failure_message"] or "").lower(), "the ending does not say the tenant was offboarded"
+    for job in jobs["learning"]:
+        stored = _learning(dsn, job)
+        assert (stored["status"], stored["reason"], stored["finished_at"], stored["lease_expires_at"]) == (
+            "skipped", OFFBOARDED, NOW, None), job
+        assert "offboard" in (stored["message"] or "").lower(), "the ending does not say the tenant was offboarded"
+
+
+async def test_1360_o3_the_offboard_commit_ends_every_live_job_of_the_tenant_and_no_other(dsn):
+    """Queued/running investigations -> aborted/tenant_offboarded; queued/running/handed-back learning jobs ->
+    skipped/tenant_offboarded; every other row and tenant untouched; the holders' later writes still work. (#1360 O3, D3)"""
+    async with job_store(dsn) as store:
+        jobs = await _live_jobs(dsn, store)
+        held = {jobs["running"], jobs["running_job"]}
+        assert set(await store.renew(held)) == held, "premise: both are renewable before the offboard"
+        before, other_tenant = _job_rows(dsn), _tenant_json(dsn, T2)
+        record = await _offboard(store, T1, actor="admin-1")
+        renewed = await store.renew(held)
+        accounted = await store.write_accounting(T1, jobs["running"], cost_usd=0.5, knowledge=None)
+
+    assert (record.id, record.state, record.pending_action, record.step, record.step_actor, record.failure) == (T1, *OFFBOARDING)
+    assert _tenant_json(dsn, T1)["state"] == "offboarding"
+    assert _tenant_json(dsn, T2) == other_tenant
+    _assert_ended(dsn, jobs)
+    assert _live_of(dsn, T1) == 0
+    ended = {*jobs["investigations"], *jobs["learning"]}
+    after = _job_rows(dsn)
+    assert set(after) == set(before)
+    assert ended < set(before)
+    assert {i for i in before if after[i] != before[i]} == ended, "a row that was not live changed, or a live one did not"
+    assert {jobs["other_investigation"], jobs["other_learning"], *jobs["completed"]} <= set(before) - ended
+    assert renewed == [], "the holder's renewal still covers a row the offboard ended"
+    assert accounted is not None, "the holder's final accounting is refused on a row the offboard ended"
+
+
+async def test_1360_o3_a_creating_tenant_is_offboarded_too_and_its_jobs_end(dsn):
+    """A tenant still `creating` moves to `offboarding` and its live job ends like an active tenant's. (#1360 O3, D7)"""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        queued, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        move_tenant(dsn, T1, state="creating")
+        record = await _offboard(store, T1, actor="admin-1")
+
+    assert (record.state, record.pending_action, record.step, record.step_actor) == OFFBOARDING[:4]
+    assert _tenant_json(dsn, T1)["state"] == "offboarding"
+    _assert_ended(dsn, {"investigations": [queued.investigation_id], "learning": []})
+
+
+@pytest.mark.parametrize("state", ["absent", "offboarding", "offboarded"])
+async def test_1360_o3_a_tenant_that_cannot_be_offboarded_is_refused_and_no_job_row_or_audit_changes(dsn, caplog, state):
+    """An absent tenant is tenancy's `NotFound`; an offboarding or offboarded one its `Conflict`; nothing changes
+    and nothing is audited, while another tenant's offboard (control) ends its jobs and audits them. (#1360 O3, D1)"""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+    from defender.tenancy import Conflict, NotFound
+
+    async with job_store(dsn) as store:
+        jobs = await _live_jobs(dsn, store)
+        target = str(uuid.uuid4()) if state == "absent" else T1
+        if state != "absent":
+            move_tenant(dsn, T1, state=state)  # its live rows stay: a refusal must not tidy them
+        before = (_job_rows(dsn), _tenant_json(dsn, T1))
+        audit = JobsAudit(caplog)
+        mark = len(audit.events())
+        with pytest.raises(NotFound if state == "absent" else Conflict):
+            await _offboard(store, target, actor="admin-1")
+        assert (_job_rows(dsn), _tenant_json(dsn, T1)) == before
+        assert audit.events()[mark:] == []
+
+        await _offboard(store, T2, actor="admin-1")  # control: the same call for an active tenant
+    assert row(dsn, jobs["other_investigation"])["failure_reason"] == OFFBOARDED
+    assert {(e.action, e.tenant_id) for e in audit.events()[mark:]} == {
+        ("investigation.cancel", T2), ("learning_job.finish", T2)}
+
+
+class _EndedAtEmit(logging.Handler):
+    """On each audit event, reads the stage or status of the job it names from a separate connection."""
+
+    def __init__(self, dsn: str) -> None:
+        super().__init__(logging.DEBUG)
+        self.dsn = dsn
+        self.seen: list[tuple[str, str | None]] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        target = getattr(record, "target", None)
+        found = execute(self.dsn, "SELECT stage FROM jobs.investigations WHERE id = %s "
+                                  "UNION ALL SELECT status FROM jobs.learning_jobs WHERE id = %s", (target, target))
+        self.seen.append((record.action, found[0][0] if found else None))
+
+
+async def test_1360_o5_each_ended_job_is_audited_with_the_admin_and_the_reason_unlike_a_user_cancel(dsn, caplog):
+    """One ending event per ended job after the commit, actor the offboarding admin, `reason=tenant_offboarded`; a
+    user's cancel of another tenant's job stays `cancelled`. (#1360 O5, Flow 1 audit)"""
+    async with job_store(dsn) as store:
+        jobs = await _live_jobs(dsn, store)
+        audit = JobsAudit(caplog)
+        mark = len(audit.events())
+        seen = _EndedAtEmit(dsn)
+        logging.getLogger(JOBS_AUDIT).addHandler(seen)
+        try:
+            await _offboard(store, T1, actor="admin-1")
+        finally:
+            logging.getLogger(JOBS_AUDIT).removeHandler(seen)
+        await store.cancel_investigation(T2, jobs["other_investigation"], actor="u-2")
+
+    events = [e for e in audit.events()[mark:] if e.tenant_id == T1]
+    assert sorted((e.action, e.actor, e.target) for e in events) == sorted(
+        [("investigation.cancel", "admin-1", inv) for inv in jobs["investigations"]]
+        + [("learning_job.finish", "admin-1", job) for job in jobs["learning"]])
+    for event in events:
+        assert f"reason={OFFBOARDED}" in (event.detail or ""), event
+        if event.action == "learning_job.finish":
+            assert event.detail == f"status=skipped reason={OFFBOARDED}"
+    assert sorted(seen.seen) == sorted([("investigation.cancel", "aborted")] * 2 + [("learning_job.finish", "skipped")] * 3), \
+        "an ending was announced before its row was committed"
+    cancel = row(dsn, jobs["other_investigation"])
+    assert cancel["failure_reason"] == "cancelled" != OFFBOARDED
+
+
+# --- Flow 1: the repeat until a fresh read finds no live row -----------------------------------------------------
+
+@asynccontextmanager
+async def _holding_advisory(dsn: str) -> AsyncIterator[None]:
+    """The session advisory lock a stalled insert waits for (`_stall_inserts`), released on exit."""
+    import psycopg
+
+    async with await psycopg.AsyncConnection.connect(dsn, autocommit=True) as conn:
+        await conn.execute("SELECT pg_advisory_lock(%s)", (STALL_KEY,))
+        try:
+            yield
+        finally:
+            await conn.execute("SELECT pg_advisory_unlock(%s)", (STALL_KEY,))
+
+
+def _stall_inserts(dsn: str, table: str, when: str) -> None:
+    """A real fault: an insert into `jobs.<table>` matching `when` waits for the advisory lock, so the transaction making
+    it keeps the row locks it already took until the test lets go (a take-over or a finish caught mid-flight)."""
+    execute(dsn, "CREATE FUNCTION jobs.stall_1360() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                 f"PERFORM pg_advisory_xact_lock({STALL_KEY}); RETURN NEW; END $$")
+    execute(dsn, f"CREATE TRIGGER stall_1360 BEFORE INSERT ON jobs.{table} FOR EACH ROW WHEN ({when}) "  # noqa: S608
+                 "EXECUTE FUNCTION jobs.stall_1360()")
+
+
+@asynccontextmanager
+async def _holding_row(dsn: str, table: str, row_id: str) -> AsyncIterator[None]:
+    import psycopg
+
+    async with await psycopg.AsyncConnection.connect(dsn) as conn:
+        await conn.execute(f"SELECT id FROM jobs.{table} WHERE id = %s FOR UPDATE", (row_id,))  # noqa: S608
+        try:
+            yield
+        finally:
+            await conn.commit()
+
+
+@pytest.mark.parametrize("overlap", ["take_over_investigation", "take_over_learning", "finish"])
+async def test_1360_o3_a_row_a_take_over_or_a_finish_inserts_while_the_offboard_waits_is_ended_too(dsn, caplog, overlap):
+    """The offboard waits for a take-over's lapsed row or a finish's investigation; the retry or auto learning job that
+    transaction commits is ended too, and the only live row it first met ends as it was. (#1360 O3, Flow 1 step 3)
+
+    The `finish` case guards that the auto learning job the finish queued is ended; it passes with a single pass, so it
+    does not test step 3's repeat (the cap test and the cases that insert a row on every ending do)."""
+    from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
+
+    async with job_store(dsn) as store:
+        if overlap == "take_over_learning":
+            parent = await completed_investigation(store, ticket="S-1")
+            job = _auto_job_of(dsn, parent)
+            assert (await store.claim_learning_job()).record.learning_job_id == job
+            execute(dsn, "UPDATE jobs.learning_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = %s", (job,))
+            _stall_inserts(dsn, "learning_jobs", "NEW.attempt > 1")
+            work, first = store.take_over(), job
+        else:
+            alert = await an_alert(store, T1, ticket="S-1")
+            inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+            assert (await store.claim()).record.investigation_id == inv.investigation_id
+            if overlap == "take_over_investigation":
+                lapse_lease(dsn, inv.investigation_id)
+                _stall_inserts(dsn, "investigations", "NEW.attempt > 1")
+                work = store.take_over()
+            else:
+                _stall_inserts(dsn, "learning_jobs", "true")
+                work = store.finish(T1, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
+            first = inv.investigation_id
+        audit = JobsAudit(caplog)
+        mark = len(audit.events())
+        async with _holding_advisory(dsn):
+            started = asyncio.ensure_future(work)
+            await until_blocked(dsn, 1)  # the take-over or finish holds its row and waits to insert
+            offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+            await until_blocked(dsn, 2)  # the offboard waits for that row
+        await asyncio.wait_for(asyncio.gather(started, offboard), 10)
+
+    assert _live_of(dsn, T1) == 0
+    admin = [(e.action, e.target) for e in audit.events()[mark:] if e.actor == "admin-1"]
+    if overlap == "finish":
+        assert row(dsn, first)["stage"] == "completed"
+        [auto] = execute(dsn, "SELECT id FROM jobs.learning_jobs")
+        ended, expected = _learning(dsn, auto[0]), [("learning_job.finish", auto[0])]
+        assert (ended["status"], ended["reason"], ended["finished_at"]) == ("skipped", OFFBOARDED, NOW)
+    elif overlap == "take_over_investigation":
+        assert (row(dsn, first)["stage"], row(dsn, first)["failure_reason"]) == ("failed", "lease_lapsed")
+        [retry] = execute(dsn, "SELECT id FROM jobs.investigations WHERE attempt = 2")
+        stored = row(dsn, retry[0])
+        assert (stored["stage"], stored["failure_reason"], stored["finished_at"]) == ("aborted", OFFBOARDED, NOW)
+        expected = [("investigation.cancel", retry[0])]
+    else:
+        assert (_learning(dsn, first)["status"], _learning(dsn, first)["reason"]) == ("failed", "lease_lapsed")
+        [retry] = execute(dsn, "SELECT id FROM jobs.learning_jobs WHERE attempt = 2")
+        ended = _learning(dsn, retry[0])
+        assert (ended["status"], ended["reason"], ended["finished_at"]) == ("skipped", OFFBOARDED, NOW)
+        expected = [("learning_job.finish", retry[0])]
+    assert admin == expected, "the offboard ended a row other than the one the overlapping transaction inserted"
+
+
+async def test_1360_o3_an_offboard_that_locks_the_investigation_first_leaves_the_finish_nothing_to_end_or_queue(dsn):
+    """The offboard holds the running row first: it ends `aborted`, the finish changes nothing and queues no learning
+    job. (#1360 O3, Flow 1 scenario)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        assert (await store.claim()).record.investigation_id == inv.investigation_id
+        async with _holding_row(dsn, "investigations", inv.investigation_id):
+            offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+            await until_blocked(dsn, 1)
+            finished = asyncio.ensure_future(
+                store.finish(T1, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0))
+            await until_blocked(dsn, 2)
+        await asyncio.wait_for(offboard, 10)
+        assert await asyncio.wait_for(finished, 10) is None
+
+    assert (row(dsn, inv.investigation_id)["stage"], row(dsn, inv.investigation_id)["failure_reason"]) == ("aborted", OFFBOARDED)
+    assert _count(dsn, "learning_jobs") == 0
+
+
+#: Every shape a live row of the tenant can have when the offboard meets it (O3: queued or running, of either kind, the
+#: handed-back learning job included): `lapsed` is a running row whose worker died and that nobody has taken over yet.
+_LIVE_SHAPES = [("investigation", "queued"), ("investigation", "running"), ("investigation", "lapsed"),
+                ("learning", "queued"), ("learning", "running"), ("learning", "lapsed"), ("learning", "handed_back")]
+
+
+def _plant_queued(dsn: str, kind: str) -> str:
+    """One queued row of T1 of `kind`, committed on its own connection, as a derived insert (a take-over's retry, a
+    finish's auto learning job) leaves it: it refers to the tenant only by its foreign key."""
+    alert = _plant_alert(dsn, ticket=f"Z-{uuid.uuid4()}")
+    if kind == "investigation":
+        return _plant_investigation(dsn, tenant=T1, alert_id=alert, key="k-late", attempt=1, stage="queued")
+    parent = _plant_investigation(dsn, tenant=T1, alert_id=alert, key="k", attempt=1, stage="completed")
+    job = str(uuid.uuid4())
+    execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
+                 "status, created_at, sibling_cost_usd, findings_count, publish_state) "
+                 "VALUES (%s, %s, %s, %s, 'k-late', 1, 'explicit', 'queued', %s, 0, 0, 'none')", (job, T1, alert, parent, NOW))
+    return job
+
+
+async def _into_shape(dsn: str, store: Any, kind: str, shape: str, row_id: str) -> None:
+    """Bring the queued row to `shape` the way the system does: the store's own claim (a worker that still reads the
+    tenant `active`) and hand-back, and a lease lapsed by the database's clock (the worker died; no take-over ran yet)."""
+    if shape == "queued":
+        return
+    if kind == "investigation":
+        assert (await store.claim()).record.investigation_id == row_id, "premise: the claim took the row being shaped"
+    else:
+        assert (await store.claim_learning_job()).record.learning_job_id == row_id, "premise: the claim took the row being shaped"
+    if shape == "lapsed":
+        table = "investigations" if kind == "investigation" else "learning_jobs"
+        execute(dsn, f"UPDATE jobs.{table} SET lease_expires_at = now() - interval '1 second' WHERE id = %s", (row_id,))  # noqa: S608
+    elif shape == "handed_back":
+        assert await store.hand_back_learning_job(T1, row_id) is not None, "premise: the running job was handed back"
+
+
+@pytest.mark.parametrize("arrives", ["at_start", "behind_a_held_row"])
+@pytest.mark.parametrize(("kind", "shape"), _LIVE_SHAPES, ids=[f"{kind}-{shape}" for kind, shape in _LIVE_SHAPES])
+async def test_1360_o3_every_live_shape_of_either_kind_ends_whether_there_at_the_start_or_arriving_while_the_offboard_waits(
+        dsn, kind, shape, arrives):
+    """The tenant's one other live job is a running job of the same kind a raw connection holds, so the offboard waits on
+    it. A row of each live shape is there before the offboard starts, or is committed (queued, then claimed, lapsed or
+    handed back as the system does it) while the offboard waits, after its statement for that kind was taken, as a
+    derived row arrives (a retry or an auto job, which only a live row of its own kind's parent chain can insert, so
+    it arrives while that kind is being ended): either way the commit leaves the tenant no queued or running row, that
+    row ends with the offboarding's reason, and the take-over and both claims that run next find nothing of the
+    tenant to fail, retry or start. A lapsed running row is live until it ends; leaving it to the take-over queues a
+    retry for a tenant being removed. (#1360 O3, O4 invariant, Flow 1 step 3 fresh read, as amended by D3)"""
+    held = str(uuid.uuid4())
+    _plant_running_pair(dsn, [held] if kind == "investigation" else [], [held] if kind == "learning" else [])
+    table = "investigations" if kind == "investigation" else "learning_jobs"
+    async with job_store(dsn) as store:
+        if arrives == "at_start":
+            late = _plant_queued(dsn, kind)
+            await _into_shape(dsn, store, kind, shape, late)
+        async with _holding_row(dsn, table, held):
+            offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+            try:
+                await until_blocked(dsn, 1)  # the offboard waits for the held row
+                if arrives == "behind_a_held_row":
+                    late = _plant_queued(dsn, kind)
+                    await _into_shape(dsn, store, kind, shape, late)
+            except BaseException:
+                offboard.cancel()
+                raise
+        await asyncio.wait_for(offboard, 20)
+
+        assert _live_of(dsn, T1) == 0, f"a {shape} {kind} row of the offboarding tenant is still live"
+        for ended in (late, held):
+            if kind == "investigation":
+                assert (row(dsn, ended)["stage"], row(dsn, ended)["failure_reason"]) == ("aborted", OFFBOARDED)
+            else:
+                assert (_learning(dsn, ended)["status"], _learning(dsn, ended)["reason"]) == ("skipped", OFFBOARDED)
+        taken = await store.take_over()
+        claimed, learning_claimed = await store.claim(), await store.claim_learning_job()
+    assert taken == [], "the take-over found a running row of the offboarding tenant to fail and retry"
+    assert (claimed, learning_claimed) == (None, None), "a claim started a job of the offboarding tenant"
+    assert _live_of(dsn, T1) == 0
+
+
+def _reinsert_on_end(dsn: str, kind: str, *, up_to: int) -> None:
+    """A real fault: ending a live row of `kind` inserts a fresh queued row for the same alert (investigation), or the
+    same investigation (learning job), while fewer than `up_to` such rows exist: a late writer the offboard keeps meeting."""
+    table, family, live, ended, reset = (
+        ("investigations", "alert_id", "('queued', 'running')", "NEW.stage = 'aborted'", "stage")
+        if kind == "investigation" else
+        ("learning_jobs", "investigation_id", "('queued', 'running')", "NEW.status = 'skipped'", "status"))
+    fresh = (", 'attempt', 1, 'stage', 'queued', 'started_at', NULL, 'finished_at', NULL, 'failure_reason', NULL, "
+             "'failure_message', NULL, 'lease_expires_at', NULL, 'accounting_written_at', NULL"
+             if kind == "investigation" else
+             ", 'attempt', 1, 'status', 'queued', 'started_at', NULL, 'finished_at', NULL, 'reason', NULL, "
+             "'message', NULL, 'lease_expires_at', NULL, 'publish_state', 'none'")
+    execute(dsn, "CREATE FUNCTION jobs.again_1360() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "  # noqa: S608
+                 f"IF (SELECT count(*) FROM jobs.{table} WHERE {family} = NEW.{family}) < {up_to} THEN "
+                 f"INSERT INTO jobs.{table} SELECT * FROM jsonb_populate_record(NULL::jobs.{table}, to_jsonb(NEW) || "
+                 f"jsonb_build_object('id', gen_random_uuid(), 'request_key', gen_random_uuid()::text{fresh})); "
+                 "END IF; RETURN NULL; END $$")
+    execute(dsn, f"CREATE TRIGGER again_1360 AFTER UPDATE ON jobs.{table} FOR EACH ROW "  # noqa: S608
+                 f"WHEN (OLD.{reset} IN {live} AND {ended}) EXECUTE FUNCTION jobs.again_1360()")
+
+
+async def _one_live_job(dsn: str, store: Any, kind: str) -> None:
+    if kind == "investigation":
+        await store.create_investigation(T1, _plant_alert(dsn), "k1", actor="u-1")
+        return
+    from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
+
+    await completed_investigation(store, ticket="D-1")
+
+
+@pytest.mark.parametrize("kind", ["investigation", "learning"])
+async def test_1360_d8_a_live_row_inserted_again_on_every_pass_rolls_the_whole_offboard_back_and_fails_loudly(dsn, caplog, kind):
+    """Every ending inserts a new live row: past the cap the transaction rolls back (tenant and every job row as they
+    were, nothing audited) and the call raises something other than a tenancy refusal. (#1360 D8)"""
+    from defender.jobs import Conflict as JobsConflict
+    from defender.tenancy import Conflict, NotFound
+
+    async with job_store(dsn) as store:
+        await _one_live_job(dsn, store, kind)
+        _reinsert_on_end(dsn, kind, up_to=10**9)
+        before, tenant = _job_rows(dsn), _tenant_json(dsn, T1)
+        audit = JobsAudit(caplog)
+        mark = len(audit.events())
+        with pytest.raises(Exception) as failed:  # noqa: PT011
+            await asyncio.wait_for(_offboard(store, T1, actor="admin-1"), 60)
+        assert not isinstance(failed.value, (TimeoutError, StopIteration, NotFound, Conflict, JobsConflict)), repr(failed.value)
+        assert _job_rows(dsn) == before
+        assert _tenant_json(dsn, T1) == tenant
+        assert audit.events()[mark:] == []
+
+        execute(dsn, f"DROP TRIGGER again_1360 ON jobs.{'investigations' if kind == 'investigation' else 'learning_jobs'}")
+        await _offboard(store, T1, actor="admin-1")  # control: the same call, once nothing is inserted behind it
+    assert _live_of(dsn, T1) == 0
+    assert _tenant_json(dsn, T1)["state"] == "offboarding"
+
+
+@pytest.mark.parametrize("kind", ["investigation", "learning"])
+async def test_1360_d8_a_row_inserted_once_costs_a_second_pass_and_the_offboard_still_ends_everything(dsn, kind):
+    """Control for the cap: the first ending inserts one more live row, the second inserts none; both are ended and the
+    offboard commits. (#1360 D8, Flow 1 step 3)"""
+    async with job_store(dsn) as store:
+        await _one_live_job(dsn, store, kind)
+        _reinsert_on_end(dsn, kind, up_to=2)
+        await asyncio.wait_for(_offboard(store, T1, actor="admin-1"), 60)
+
+    table, column = ("investigations", "stage") if kind == "investigation" else ("learning_jobs", "status")
+    ended = "aborted" if kind == "investigation" else "skipped"
+    assert _count(dsn, table, f"{column} = '{ended}'") == 2
+    assert _live_of(dsn, T1) == 0
+    assert _tenant_json(dsn, T1)["state"] == "offboarding"
+
+
+async def test_1360_o3_a_job_the_database_refuses_to_end_takes_the_tenant_transition_back_with_it(dsn):
+    """A learning job cannot be ended: the offboard fails, the tenant stays `active` and no investigation it had
+    already ended stays ended; without the fault the same call commits all of it. (#1360 O3, D1 one transaction)"""
+    from defender.tenancy import Conflict, NotFound
+
+    async with job_store(dsn) as store:
+        jobs = await _live_jobs(dsn, store)
+        execute(dsn, "CREATE FUNCTION jobs.refuse_1360() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                     "RAISE EXCEPTION 'cannot end this job'; END $$")
+        execute(dsn, "CREATE TRIGGER refuse_1360 BEFORE UPDATE ON jobs.learning_jobs FOR EACH ROW "
+                     "WHEN (NEW.status = 'skipped') EXECUTE FUNCTION jobs.refuse_1360()")
+        before, tenant = _job_rows(dsn), _tenant_json(dsn, T1)
+        with pytest.raises(Exception) as failed:  # noqa: PT011
+            await _offboard(store, T1, actor="admin-1")
+        assert not isinstance(failed.value, (NotFound, Conflict)), repr(failed.value)
+        assert _job_rows(dsn) == before
+        assert _tenant_json(dsn, T1) == tenant
+
+        execute(dsn, "DROP TRIGGER refuse_1360 ON jobs.learning_jobs")
+        await _offboard(store, T1, actor="admin-1")
+    assert _tenant_json(dsn, T1)["state"] == "offboarding"
+    _assert_ended(dsn, jobs)
+
+
+def _plant_running_pair(dsn: str, investigation_ids: list[str], job_ids: list[str]) -> None:
+    """Running investigations and running learning jobs of T1 with the given ids, inserted in the order given. The alerts
+    and parents they hang on are inserted in that same order with ids ascending in it, so any scan (table order or a
+    unique index, which reads ascending) meets the rows in the order given."""
+    for inv, alert_id in zip(investigation_ids, sorted(str(uuid.uuid4()) for _ in investigation_ids), strict=True):
+        execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
+                     "started_at, cost_usd, cost_is_lower_limit, lease_expires_at) "
+                     "VALUES (%s, %s, %s, 'k', 1, 'running', %s, %s, 0, false, now() + interval '30 seconds')",
+                (inv, T1, _plant_alert(dsn, ticket=f"W-{inv}", alert_id=alert_id), NOW, NOW))
+    alerts, parents = (sorted(str(uuid.uuid4()) for _ in job_ids) for _ in range(2))
+    for job, alert_id, parent_id in zip(job_ids, alerts, parents, strict=True):
+        alert = _plant_alert(dsn, ticket=f"V-{job}", alert_id=alert_id)
+        parent = _plant_investigation(dsn, tenant=T1, alert_id=alert, key="k", attempt=1, stage="completed")
+        execute(dsn, "UPDATE jobs.investigations SET id = %s WHERE id = %s", (parent_id, parent))
+        parent = parent_id
+        execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
+                     "status, created_at, started_at, lease_expires_at, sibling_cost_usd, findings_count, publish_state) "
+                     "VALUES (%s, %s, %s, %s, 'k', 1, 'explicit', 'running', %s, %s, now() + interval '30 seconds', 0, 0, 'none')",
+                (job, T1, alert, parent, NOW, NOW))
+
+
+@pytest.mark.parametrize("kind", ["investigations", "learning_jobs"])
+async def test_1360_flow1_an_offboard_and_a_renewal_of_several_of_the_tenants_running_rows_do_not_deadlock(dsn, kind):
+    """The real `renew` of several running rows and the real `offboard_tenant` of their tenant, the table holding the
+    rows in the opposite physical order to their ids and a held middle row making the two overlap: both lock several
+    rows, so both must take them in id order, and neither fails with a deadlock. (#1360 Flow 1 lock order, D9)"""
+    import psycopg
+
+    ids = sorted(str(uuid.uuid4()) for _ in range(6))
+    table = f"jobs.{kind}"
+    _plant_running_pair(dsn, ids[::-1] if kind == "investigations" else [], ids[::-1] if kind == "learning_jobs" else [])
+    heap = [row[0] for row in execute(dsn, f"SELECT id::text FROM {table} WHERE id = ANY(%s::uuid[]) ORDER BY ctid", (ids,))]  # noqa: S608
+    assert heap == ids[::-1]  # the setup: a scan in table order meets the high ids first, against id order
+
+    async with job_store(dsn) as store, await psycopg.AsyncConnection.connect(dsn) as holder:
+        await holder.execute(f"SELECT 1 FROM {table} WHERE id = %s FOR UPDATE", (ids[3],))  # noqa: S608
+        renewal = asyncio.ensure_future(store.renew(set(ids)))
+        offboard = None
+        try:
+            await until_blocked(dsn, 1)  # the renewal has taken what it can and waits for the held middle row
+            offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+            await until_blocked(dsn, 2)  # and the offboard overlaps it: the contention is real before the holder lets go
+            await holder.commit()
+            outcomes = await asyncio.wait_for(asyncio.gather(renewal, offboard, return_exceptions=True), 20)
+        finally:
+            for pending in (renewal, offboard):
+                if pending is not None:
+                    pending.cancel()
+
+    renewed, offboarded = outcomes
+    assert not isinstance(renewed, BaseException), f"renew failed: {renewed!r}"
+    assert not isinstance(offboarded, BaseException), f"offboard failed: {offboarded!r}"
+    assert sorted(renewed) == ids  # the renewal was already under way, so it covered every row it held
+    assert _live_of(dsn, T1) == 0
+    if kind == "investigations":
+        assert _count(dsn, "investigations", "stage = 'aborted' AND failure_reason = 'tenant_offboarded'") == 6
+    else:
+        assert _count(dsn, "learning_jobs", "status = 'skipped' AND reason = 'tenant_offboarded'") == 6
+
+
+async def _lock_in_id_order(conn: Any, table: str, row_ids: list[str]) -> None:
+    """Lock the rows one after another, lowest id first, in the connection's open transaction."""
+    for row_id in row_ids:
+        await conn.execute(f"SELECT 1 FROM {table} WHERE id = %s FOR UPDATE", (row_id,))  # noqa: S608
+
+
+@pytest.mark.parametrize("target", ["renew", "offboard"])
+@pytest.mark.parametrize("kind", ["investigations", "learning_jobs"])
+async def test_1360_flow1_each_side_locks_rows_in_id_order_against_a_counterpart_that_does(dsn, kind, target):
+    """Anchor for D9, one side at a time: a raw connection that locks the tenant's rows strictly in id order (the low
+    half now, the high half once the real operation has started and waited) against the real `renew` or the real
+    `offboard_tenant`, the table holding the rows in the opposite physical order. An operation that takes its rows in
+    id order waits on the first low row holding nothing, so the counterpart finishes and nothing deadlocks; one that
+    scans in table order takes the high rows first and the two wait on each other. (#1360 Flow 1 lock order, D9)"""
+    import psycopg
+
+    ids = sorted(str(uuid.uuid4()) for _ in range(6))
+    table = f"jobs.{kind}"
+    _plant_running_pair(dsn, ids[::-1] if kind == "investigations" else [], ids[::-1] if kind == "learning_jobs" else [])
+    heap = [row[0] for row in execute(dsn, f"SELECT id::text FROM {table} WHERE id = ANY(%s::uuid[]) ORDER BY ctid", (ids,))]  # noqa: S608
+    assert heap == ids[::-1]  # the setup: a scan in table order meets the high ids first, against id order
+
+    async with job_store(dsn) as store, await psycopg.AsyncConnection.connect(dsn) as counterpart:
+        await _lock_in_id_order(counterpart, table, ids[:3])
+        operation = asyncio.ensure_future(store.renew(set(ids)) if target == "renew" else _offboard(store, T1, actor="admin-1"))
+        rest = None
+        try:
+            await until_blocked(dsn, 1)  # the operation has taken what it will before the rows the counterpart holds
+            rest = asyncio.ensure_future(_lock_in_id_order(counterpart, table, ids[3:]))
+            await asyncio.wait({operation, rest}, timeout=20, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait({rest}, timeout=20)  # whichever was chosen the victim, the other goes on
+            assert rest.done(), "the counterpart is stuck, and neither side was ended by the server"
+            counterpart_out = rest.exception()
+            await (counterpart.rollback() if counterpart_out else counterpart.commit())
+            outcome = (await asyncio.wait_for(asyncio.gather(operation, return_exceptions=True), 20))[0]
+        finally:
+            for pending in (operation, rest):
+                if pending is not None:
+                    pending.cancel()
+
+    assert counterpart_out is None, f"the id-ordered counterpart failed: {counterpart_out!r}"
+    assert not isinstance(outcome, BaseException), f"{target} failed: {outcome!r}"
+    if target == "renew":
+        assert sorted(outcome) == ids
+    else:
+        assert _live_of(dsn, T1) == 0
+
+
+async def test_1360_flow1_an_offboard_and_a_renewal_over_both_tables_take_investigations_before_learning_jobs(dsn):
+    """One renewal of running investigations and running learning jobs of a tenant, the held row a middle investigation:
+    the renewal holds the investigations below it and waits, then needs the learning jobs. An offboard that took the
+    learning jobs first would hold what the renewal needs next while waiting for what the renewal holds; the table order
+    (investigations, then learning jobs) is part of D9, so neither side fails with a deadlock and the offboard ends
+    every live row of both kinds. (#1360 Flow 1 lock order, D9 as amended by r3.2)"""
+    import psycopg
+
+    inv_ids = sorted(str(uuid.uuid4()) for _ in range(6))
+    job_ids = sorted(str(uuid.uuid4()) for _ in range(6))
+    _plant_running_pair(dsn, inv_ids[::-1], job_ids[::-1])
+
+    async with job_store(dsn) as store, await psycopg.AsyncConnection.connect(dsn) as holder:
+        await holder.execute("SELECT 1 FROM jobs.investigations WHERE id = %s FOR UPDATE", (inv_ids[3],))
+        renewal = asyncio.ensure_future(store.renew({*inv_ids, *job_ids}))
+        offboard = None
+        try:
+            await until_blocked(dsn, 1)  # the renewal waits for the held middle investigation
+            offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+            await until_blocked(dsn, 2)  # and the offboard waits behind what the renewal holds
+            await holder.commit()
+            outcomes = await asyncio.wait_for(asyncio.gather(renewal, offboard, return_exceptions=True), 20)
+        finally:
+            for pending in (renewal, offboard):
+                if pending is not None:
+                    pending.cancel()
+
+    renewed, offboarded = outcomes
+    assert not isinstance(renewed, BaseException), f"renew failed: {renewed!r}"
+    assert not isinstance(offboarded, BaseException), f"offboard failed: {offboarded!r}"
+    assert sorted(renewed) == sorted([*inv_ids, *job_ids])
+    assert _live_of(dsn, T1) == 0
+    assert _count(dsn, "investigations", "stage = 'aborted' AND failure_reason = 'tenant_offboarded'") == 6
+    assert _count(dsn, "learning_jobs", "status = 'skipped' AND reason = 'tenant_offboarded'") == 6
+
+
+#: Each locker of the order (tenant row, then investigations by id, then learning jobs by id) and each point at which it
+#: takes a lock: the offboard and the renewal at their rows, the two outside creates at the tenant row and the alert.
+_FOOTPRINT = [("offboard", "tenant"), ("offboard", "investigation"), ("offboard", "learning"),
+              ("renew", "investigation"), ("renew", "learning"),
+              ("create_investigation", "tenant"), ("create_investigation", "alert"),
+              ("create_learning_job", "tenant"), ("create_learning_job", "alert")]
+
+
+async def _got_at_once(conn: Any, table: str, row_id: str, mode: str) -> bool:
+    """Whether `FOR <mode> NOWAIT` on the row got its lock at once, on an autocommit connection (so released at once)."""
+    import psycopg
+
+    try:
+        await conn.execute(f"SELECT 1 FROM {table} WHERE id = %s FOR {mode} NOWAIT", (row_id,))  # noqa: S608
+    except psycopg.errors.LockNotAvailable:
+        return False
+    return True
+
+
+@pytest.mark.parametrize(("locker", "at"), _FOOTPRINT, ids=[f"{locker}-at-{at}" for locker, at in _FOOTPRINT])
+async def test_1360_flow1_flow2_a_locker_held_up_at_any_point_holds_what_comes_before_it_in_the_order_and_nothing_after(
+        dsn, locker, at):
+    """One order for every transaction that locks several of these rows: the tenant row, then investigations by id, then
+    learning jobs by id (Flow 1 lock order; D9 as amended by r3.2; Flow 2: an outside create takes the tenant row, with
+    a share lock, before any other lock). The real locker is held up at one point by a raw connection holding that row
+    (an outside create's share lock, a middle job row, an offboard's update of the tenant row, the alert); while it
+    waits, NOWAIT probes find every row it takes earlier in the order held, every row it takes later free, and the
+    tenant row open to `FOR KEY SHARE`, the lock a derived insert's foreign key takes, which neither the offboard's
+    update nor a create's share lock may block. (#1360 Flow 1, Flow 2, D9)"""
+    import psycopg
+
+    from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
+
+    tenant = ("tenancy.tenants", T1)
+    inv_ids, job_ids = (sorted(str(uuid.uuid4()) for _ in range(4)) for _ in range(2))
+    invs = [("jobs.investigations", i) for i in inv_ids]
+    jobs = [("jobs.learning_jobs", j) for j in job_ids]
+    async with job_store(dsn) as store:
+        if locker in ("offboard", "renew"):
+            _plant_running_pair(dsn, inv_ids[::-1], job_ids[::-1])  # a scan in table order meets the high ids first
+
+            def operation() -> Any:
+                return _offboard(store, T1, actor="admin-1") if locker == "offboard" else store.renew({*inv_ids, *job_ids})
+            hold, mode = {"tenant": (tenant, "SHARE"), "investigation": (invs[2], "UPDATE"), "learning": (jobs[2], "UPDATE")}[at]
+            earlier = {"tenant": [], "investigation": invs[:2], "learning": invs + jobs[:2]}[at]
+            earlier = ([tenant] if locker == "offboard" and at != "tenant" else []) + earlier
+            later = {"tenant": invs + jobs, "investigation": invs[3:] + jobs, "learning": jobs[3:]}[at]
+        else:
+            if locker == "create_investigation":
+                alert = (await an_alert(store, T1, ticket="N-1")).alert_id
+
+                def operation() -> Any:
+                    return store.create_investigation(T1, alert, "k-new", actor="u-1")
+            else:
+                done = await completed_investigation(store, ticket="C-1")
+                alert = str(execute(dsn, "SELECT alert_id FROM jobs.investigations WHERE id = %s", (done,))[0][0])
+
+                def operation() -> Any:
+                    return store.create_learning_job(T1, done, "c-1", actor="u-1")
+            alert_row = ("jobs.alerts", alert)
+            hold, mode = {"tenant": (tenant, "NO KEY UPDATE"), "alert": (alert_row, "UPDATE")}[at]
+            earlier, later = {"tenant": ([], [alert_row]), "alert": ([tenant], [])}[at]
+
+        async with await psycopg.AsyncConnection.connect(dsn) as holder, \
+                await psycopg.AsyncConnection.connect(dsn, autocommit=True) as probe:
+            await holder.execute(f"SELECT 1 FROM {hold[0]} WHERE id = %s FOR {mode}", (hold[1],))  # noqa: S608
+            pending = asyncio.ensure_future(operation())
+            try:
+                await until_blocked(dsn, 1)  # the locker waits at the held row
+                free_earlier = [r for r in earlier if await _got_at_once(probe, *r, "UPDATE")]
+                held_later = [r for r in later if not await _got_at_once(probe, *r, "UPDATE")]
+                key_share = await _got_at_once(probe, *tenant, "KEY SHARE")
+                await holder.commit()
+                await asyncio.wait_for(pending, 20)
+            finally:
+                pending.cancel()
+
+    assert free_earlier == [], f"{locker}, waiting at the {at}, does not hold what comes before it in the order"
+    assert held_later == [], f"{locker}, waiting at the {at}, already holds what comes after it in the order"
+    assert key_share, f"{locker}, waiting at the {at}, blocks a foreign key's key-share lock on the tenant row"
+
+
+async def test_1360_d3_a_retry_committed_while_the_offboard_waits_is_ended_before_any_learning_job_is_locked(dsn):
+    """A take-over is failing T's lapsed running investigation and inserting its retry when the offboard starts; the
+    offboard waits for it, the retry commits behind the offboard's statement, and T's two running learning jobs come
+    next, the higher one held by a raw connection. While the offboard waits at that learning job (it already holds the
+    lower one), the retry, still live as committed, is already locked by it: investigations are ended until a fresh read
+    finds none, and only then learning jobs, so no investigation is locked after a learning job is held. A worker then
+    claims what it can and renews it with the lower learning job, as one renewal does, investigations first; the two
+    finish without a deadlock and the offboard ends everything. An offboard that went back to investigations after
+    holding learning jobs would find the retry free here, and then wait for the renewal that waits for it. (#1360 D3,
+    Flow 1 step 3, D9)"""
+    import psycopg
+
+    low, high = sorted(str(uuid.uuid4()) for _ in range(2))
+    _plant_running_pair(dsn, [], [low, high])
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1, ticket="S-1")
+        lapsed, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        assert (await store.claim()).record.investigation_id == lapsed.investigation_id
+        lapse_lease(dsn, lapsed.investigation_id)
+        _stall_inserts(dsn, "investigations", "NEW.attempt > 1")
+        offboard = renewal = None
+        async with await psycopg.AsyncConnection.connect(dsn) as holder, \
+                await psycopg.AsyncConnection.connect(dsn, autocommit=True) as probe:
+            await holder.execute("SELECT 1 FROM jobs.learning_jobs WHERE id = %s FOR UPDATE", (high,))
+
+            async def waits_at_high() -> bool:
+                found = await probe.execute("SELECT count(*) FROM pg_stat_activity WHERE %s = ANY(pg_blocking_pids(pid))",
+                                            (holder.info.backend_pid,))
+                return (await found.fetchone())[0] == 1
+            try:
+                async with _holding_advisory(dsn):
+                    take_over = asyncio.ensure_future(store.take_over())
+                    await until_blocked(dsn, 1)  # the take-over holds the lapsed row and waits to insert its retry
+                    offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+                    await until_blocked(dsn, 2)  # the offboard waits for the lapsed row
+                await asyncio.wait_for(take_over, 10)
+                [(retry,)] = execute(dsn, "SELECT id::text FROM jobs.investigations WHERE attempt = 2")
+                await until(waits_at_high)  # the offboard has reached the learning jobs and waits at the held one
+                retry_free = await _got_at_once(probe, "jobs.investigations", retry, "UPDATE")
+                low_free = await _got_at_once(probe, "jobs.learning_jobs", low, "UPDATE")
+                claimed = await store.claim()
+                held = {low} | ({claimed.record.investigation_id} if claimed is not None else set())
+                renewal = asyncio.ensure_future(store.renew(held))
+                await until_blocked(dsn, 2)  # the renewal waits for the learning job the offboard holds
+                await holder.commit()
+                outcomes = await asyncio.wait_for(asyncio.gather(offboard, renewal, return_exceptions=True), 30)
+            finally:
+                for pending in (offboard, renewal):
+                    if pending is not None:
+                        pending.cancel()
+
+    offboarded, renewed = outcomes
+    assert not isinstance(offboarded, BaseException), f"offboard failed: {offboarded!r}"
+    assert not isinstance(renewed, BaseException), f"renew failed: {renewed!r}"
+    assert not low_free, "premise: the offboard holds the lower learning job while it waits at the higher one"
+    assert not retry_free, "the offboard holds a learning job and has yet to lock a live investigation: it takes it after"
+    assert _live_of(dsn, T1) == 0
+    assert (row(dsn, retry)["stage"], row(dsn, retry)["failure_reason"]) == ("aborted", OFFBOARDED)
+
+
+# --- O4: no job is created for an offboarding or offboarded tenant -----------------------------------------------
+
+@pytest.mark.parametrize("state", ["offboarding", "offboarded"])
+async def test_1360_o4_an_outside_create_for_an_offboarding_or_offboarded_tenant_is_refused_and_inserts_nothing(dsn, state):
+    """create_investigation and create_learning_job refuse such a tenant with a conflict naming its state; the other
+    tenant's creates succeed. (#1360 O4, D7)"""
+    from defender.jobs import Conflict
+    from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    async with job_store(dsn) as store:
+        done = await completed_investigation(store, ticket="C-1")
+        other_done = await completed_investigation(store, ticket="C-9", tenant=T2)
+        alert, other_alert = await an_alert(store, T1, ticket="N-1"), await an_alert(store, T2, ticket="N-9")
+        move_tenant(dsn, T1, state=state)
+        before = _job_rows(dsn)
+        with pytest.raises(Conflict, match=state):
+            await store.create_investigation(T1, alert.alert_id, "k-new", actor="u-1")
+        with pytest.raises(Conflict, match=state):
+            await store.create_learning_job(T1, done, "c-1", actor="u-1")
+        assert _job_rows(dsn) == before
+        assert (await store.create_investigation(T2, other_alert.alert_id, "k-new", actor="u-2"))[1] is True
+        assert (await store.create_learning_job(T2, other_done, "c-1", actor="u-2"))[1] is True
+
+
+async def test_1360_o4_a_creating_tenant_is_not_refused_by_its_state(dsn):
+    """A `creating` tenant that has a mapping still creates both kinds of job. (#1360 O4, D7)"""
+    from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    async with job_store(dsn) as store:
+        done = await completed_investigation(store, ticket="C-1")
+        alert = await an_alert(store, T1, ticket="N-1")
+        move_tenant(dsn, T1, state="creating")
+        assert (await store.create_investigation(T1, alert.alert_id, "k-new", actor="u-1"))[1] is True
+        assert (await store.create_learning_job(T1, done, "c-1", actor="u-1"))[1] is True
+
+
+async def test_1360_o4_a_creating_tenant_without_a_mapping_is_still_refused_for_the_mapping_not_the_state(unmapped_dsn):
+    """#1345 D2 stands: such a tenant's create is the mapping-missing conflict, word for word. (#1360 O4, D7)"""
+    from defender.jobs import Conflict
+    from defender.records.formats import ALERT_MAPPING_MISSING
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    dsn = unmapped_dsn
+    alert = _plant_alert(dsn)
+    move_tenant(dsn, T1, state="creating")
+    async with job_store(dsn) as store:
+        with pytest.raises(Conflict) as refused:
+            await store.create_investigation(T1, alert, "k1", actor="u-1")
+        assert str(refused.value) == ALERT_MAPPING_MISSING
+        await store.put_alert_mapping(T1, mapping_value({}), actor="u-1")  # control: the same tenant, once it has one
+        assert (await store.create_investigation(T1, alert, "k1", actor="u-1"))[1] is True
+
+
+async def test_1360_o4_an_offboarding_tenant_still_gets_a_replay_a_live_row_and_an_unknown_reference_not_a_state_conflict(dsn):
+    """The refusal comes only when a new row would be inserted: a replayed request, a live row and an unknown alert or
+    investigation answer as before. (#1360 O4, D7)"""
+    from defender.jobs import Conflict, UnknownReference
+    from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    async with job_store(dsn) as store:
+        done = await completed_investigation(store, ticket="C-1", key="kc")
+        theirs = await completed_investigation(store, ticket="C-9", key="kc", tenant=T2)
+        explicit, _ = await store.create_learning_job(T1, done, "c-1", actor="u-1")
+        ended_alert = await an_alert(store, T1, ticket="E-1")
+        live_alert = await an_alert(store, T1, ticket="L-1")
+        new_alert = await an_alert(store, T1, ticket="N-1")
+        ended, _ = await store.create_investigation(T1, ended_alert.alert_id, "k-ended", actor="u-1")
+        await store.cancel_investigation(T1, ended.investigation_id, actor="u-1")
+        live, _ = await store.create_investigation(T1, live_alert.alert_id, "k-live", actor="u-1")
+        move_tenant(dsn, T1, state="offboarding")
+        before = _job_rows(dsn)
+
+        replayed = await store.create_investigation(T1, ended_alert.alert_id, "k-ended", actor="u-1")
+        answered = await store.create_investigation(T1, live_alert.alert_id, "k-other", actor="u-1")
+        job = await store.create_learning_job(T1, done, "c-1", actor="u-1")
+        assert (replayed[0].investigation_id, replayed[1]) == (ended.investigation_id, False)
+        assert (answered[0].investigation_id, answered[1]) == (live.investigation_id, False)
+        assert (job[0].learning_job_id, job[1]) == (explicit.learning_job_id, False)
+        with pytest.raises(UnknownReference):
+            await store.create_investigation(T1, str(uuid.uuid4()), "k1", actor="u-1")
+        with pytest.raises(UnknownReference):
+            await store.create_learning_job(T1, theirs, "c-1", actor="u-1")
+        assert _job_rows(dsn) == before
+        with pytest.raises(Conflict, match="offboarding"):  # control: a request that would insert
+            await store.create_investigation(T1, new_alert.alert_id, "k-new", actor="u-1")
+
+
+async def test_1360_o4_an_absent_tenant_is_an_unknown_reference_like_an_absent_alert(dsn):
+    """A create naming a tenant with no row answers `UnknownReference`, as for an alert or investigation that is
+    absent, and inserts nothing. (#1360 O4, D7)"""
+    from defender.jobs import UnknownReference
+    from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
+
+    absent = str(uuid.uuid4())
+    async with job_store(dsn) as store:
+        done = await completed_investigation(store, ticket="C-1")
+        alert = await an_alert(store, T1, ticket="N-1")
+        before = _job_rows(dsn)
+        for name, args in (("create_investigation", (absent, alert.alert_id, "k")),
+                           ("create_investigation", (T1, str(uuid.uuid4()), "k")),  # control: the absent alert
+                           ("create_learning_job", (absent, done, "c-1")),
+                           ("create_learning_job", (T1, str(uuid.uuid4()), "c-1"))):  # control: the absent investigation
+            with pytest.raises(UnknownReference):
+                await getattr(store, name)(*args, actor="u-1")
+        assert _job_rows(dsn) == before
+
+
+@pytest.mark.parametrize("kind", ["investigation", "learning"])
+async def test_1360_o4_a_create_that_meets_an_uncommitted_offboard_waits_and_then_refuses(dsn, kind):
+    """The create reads the tenant's state under a share lock inside its transaction: it waits for the offboard's
+    commit, then refuses, inserting nothing. (#1360 O4, Flow 2)"""
+    import psycopg
+
+    from defender.jobs import Conflict
+    from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
+
+    async with job_store(dsn) as store:
+        done = await completed_investigation(store, ticket="C-1")
+        alert = await an_alert(store, T1, ticket="N-1")
+        before = _job_rows(dsn)
+        async with await psycopg.AsyncConnection.connect(dsn) as conn:
+            await conn.execute("UPDATE tenancy.tenants SET state = 'offboarding', pending_action = 'offboard', "
+                               "step = 'offboard', step_actor = 'service' WHERE id = %s", (T1,))
+            pending = asyncio.ensure_future(
+                store.create_investigation(T1, alert.alert_id, "k1", actor="u-1") if kind == "investigation"
+                else store.create_learning_job(T1, done, "c-1", actor="u-1"))
+
+            async def waiting_or_done() -> bool:
+                return pending.done() or await blocked(dsn) == 1
+            await until(waiting_or_done)
+            assert not pending.done(), "the create answered without waiting for the tenant row"
+            await conn.commit()
+        with pytest.raises(Conflict, match="offboarding"):
+            await asyncio.wait_for(pending, 10)
+    assert _job_rows(dsn) == before
+
+
+@pytest.mark.parametrize("kind", ["investigation", "learning"])
+async def test_1360_o4_an_offboard_that_meets_an_uncommitted_create_waits_for_it_and_ends_the_row_it_inserted(dsn, kind):
+    """The create holds the tenant's share lock before any other (here it waits at the alert): the offboard waits for it,
+    then ends the row the create inserted. (#1360 O4, Flow 2)"""
+    from defender.tests.jobs.test_1344_learning_jobs import completed_investigation
+
+    async with job_store(dsn) as store:
+        done = await completed_investigation(store, ticket="C-1")
+        alert = await an_alert(store, T1, ticket="N-1")
+        held = alert.alert_id if kind == "investigation" else execute(
+            dsn, "SELECT alert_id FROM jobs.investigations WHERE id = %s", (done,))[0][0]
+        before = _job_rows(dsn)
+        async with holding_alert(dsn, held):
+            create = asyncio.ensure_future(
+                store.create_investigation(T1, alert.alert_id, "k1", actor="u-1") if kind == "investigation"
+                else store.create_learning_job(T1, done, "c-1", actor="u-1"))
+            await until_blocked(dsn, 1)  # at the alert, holding the tenant's share lock
+            offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
+            await until_blocked(dsn, 2)  # the offboard waits for the create
+        created, _ = await asyncio.wait_for(create, 10)
+        await asyncio.wait_for(offboard, 10)
+
+    new = created.investigation_id if kind == "investigation" else created.learning_job_id
+    assert new not in before
+    assert _live_of(dsn, T1) == 0
+    if kind == "investigation":
+        assert (row(dsn, new)["stage"], row(dsn, new)["failure_reason"]) == ("aborted", OFFBOARDED)
+    else:
+        assert (_learning(dsn, new)["status"], _learning(dsn, new)["reason"]) == ("skipped", OFFBOARDED)

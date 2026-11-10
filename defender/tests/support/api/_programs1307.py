@@ -46,7 +46,7 @@ from defender.api.app import create_app
 
 if TYPE_CHECKING:
     from defender.identity import VerifiedProgramToken
-from defender.api.fakes import InMemorySecrets, InMemoryStore, StubArtifactLinks, StubSystemChecker  # noqa: F401
+from defender.api.fakes import InMemoryOffboarding, InMemorySecrets, InMemoryStore, StubArtifactLinks, StubSystemChecker  # noqa: F401
 from defender.api.ports import ApiDeps
 
 # Production names #1307 must supply. Kept in this one block so a missing name is one ImportError.
@@ -402,6 +402,7 @@ class ProgramsWorld(World):
             lessons=self.store, systems=self.store, writes=self.store,
             secrets=InMemorySecrets(), checker=StubSystemChecker(),
             artifact_links=StubArtifactLinks(),
+            offboarding=InMemoryOffboarding(self.tenants, self.store, self.clock),
             identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants,
         ))
 

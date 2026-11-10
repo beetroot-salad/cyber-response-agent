@@ -259,24 +259,32 @@ def test_a_cleartext_issuer_or_openbao_address_is_refused(tmp_path, data_root, n
 
 # --- O4: link guards at teardown ----------------------------------------------------------------------
 
-def test_teardown_unlinks_a_link_at_the_tenant_folder_or_secrets_folder_and_leaves_its_target(world, tmp_path):
-    """A link standing where `<data root>/<T>` and `<secrets>/<T>` are is removed as a link; the directories it points to
-    keep their contents (O4: teardown removes the tenant's, nothing else's)."""
+@pytest.mark.parametrize("target", ["folder", "secrets", "publish"])
+def test_teardown_unlinks_a_link_at_any_of_its_three_targets_and_leaves_its_target(world, tmp_path, monkeypatch, target):
+    """A link standing where `<data root>/<T>`, `<secrets>/<T>` or the dev output `<publish root>/<T>` is, is removed as
+    a link; the directory it points to keeps its contents (O4: teardown removes the tenant's, nothing else's; #1360
+    Flow 4: a link unlinked rather than followed, for all three targets)."""
+    from defender.configuration import _env, publish_root
+
+    published = tmp_path / "published"
+    published.mkdir()
+    monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
+    monkeypatch.setenv(publish_root.PUBLISH_DIR_ENV, str(published))
     tenant = world.active_tenant()
-    folder, secrets = world.data_root / tenant, world.live(tenant).host_secret_file.parent
-    witnesses = {}
-    for name, link in (("folder", folder), ("secrets", secrets)):
-        witnesses[name] = tmp_path / f"witness-{name}"
-        witnesses[name].mkdir()
-        (witnesses[name] / "keep.txt").write_text("mine", encoding="utf-8")
-        shutil.rmtree(link)
-        link.symlink_to(witnesses[name])
+    links = {"folder": world.data_root / tenant, "secrets": world.live(tenant).host_secret_file.parent,
+             "publish": published / tenant}
+    links["publish"].mkdir()
+    link, witness = links[target], tmp_path / "witness"
+    witness.mkdir()
+    (witness / "keep.txt").write_text("mine", encoding="utf-8")
+    shutil.rmtree(link)
+    link.symlink_to(witness)
     assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "offboarded"
-    for name, link in (("folder", folder), ("secrets", secrets)):
-        assert (witnesses[name] / "keep.txt").read_text(encoding="utf-8") == "mine", f"the {name} link was followed"
-        assert not link.is_symlink() and not link.exists()
+    kept = witness / "keep.txt"
+    assert kept.is_file() and kept.read_text(encoding="utf-8") == "mine", f"the {target} link was followed"
+    assert not link.is_symlink() and not link.exists()
 
 
 # --- F-6: exactly the repository write scope ----------------------------------------------------------

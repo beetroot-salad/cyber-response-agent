@@ -182,7 +182,7 @@ class InMemoryTenantRepository:
         with self._mutex:
             row = self._row(tenant_id)
             return self._request(
-                tenant_id, row.state in ("creating", "active"), f"a tenant {row.state} cannot be offboarded",
+                tenant_id, row.state in ("creating", "active"), "only a creating or active tenant can be offboarded",
                 state="offboarding", pending_action="offboard", step="offboard", step_actor=SERVICE, failure=None)
 
     async def request_rotate(self, tenant_id: TenantId) -> TenantRecord:

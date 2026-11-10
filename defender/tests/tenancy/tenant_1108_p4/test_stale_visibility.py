@@ -570,7 +570,7 @@ def _client(*investigations: Any) -> Any:
     from fastapi.testclient import TestClient
 
     from defender.api.app import create_app
-    from defender.api.fakes import (InMemorySecrets, InMemoryStore, StubArtifactLinks,
+    from defender.api.fakes import (InMemoryOffboarding, InMemorySecrets, InMemoryStore, StubArtifactLinks,
                                     StubSystemChecker)
     from defender.api.ports import ApiDeps
     from defender.identity import Bootstrap, IdentityService, InMemoryIdentityRepository
@@ -599,7 +599,7 @@ def _client(*investigations: Any) -> Any:
         identity=identity, tenants=tenants, frontend_origin=_ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
         writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks())
+        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, now))
     return TestClient(create_app(deps), base_url="https://testserver")
 
 

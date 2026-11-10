@@ -13,10 +13,12 @@ import asyncio
 import base64
 import contextlib
 import datetime as _dt
+import errno
 import logging
 import os
 import shutil
 import subprocess
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -293,15 +295,45 @@ class HostActor(Actor):
         if isinstance(root, Path):
             targets.append(root / tenant)
         for target in targets:
-            _remove_tree(target)
+            _remove_tree(target, wait=self._config.teardown_wait)
 
 
-def _remove_tree(target: Path) -> None:
-    """Remove `target` without following it: a link is unlinked, a directory removed whole."""
+#: Seconds between removal passes of a folder that keeps filling (#1360 O1).
+_PASS_PAUSE = 0.05
+
+
+def _remove_tree(target: Path, *, wait: float) -> None:
+    """Remove `target` without following it: a link is unlinked, a directory removed whole.
+
+    The job worker takes no host lock (#1342 r6), so a job it already claimed can still create a file in
+    the folder while it is being removed, and that pass fails "directory not empty"; a job that removes
+    a file the pass had already listed (a database's journal files, say) makes it fail "no such file". Either pass is run
+    again, for up to `wait` seconds from the first failed pass, until the folder is gone (#1360 O1); a folder still being added to
+    after that fails the step naming what is in it (O2). Any other failure ends the step at once."""
     if target.is_symlink() or target.is_file():
         target.unlink()
-    elif target.is_dir():
-        shutil.rmtree(target)
+        return
+    deadline = None  # starts at the first failed pass: a long first pass is not a writer that keeps adding
+    while target.is_dir():
+        try:
+            shutil.rmtree(target)
+        except OSError as fault:
+            if fault.errno not in (errno.ENOTEMPTY, errno.ENOENT):
+                raise
+            deadline = time.monotonic() + wait if deadline is None else deadline
+            if time.monotonic() >= deadline:
+                raise StepFailed(f"{target} was still being added to after {wait:g}s of removing it; "
+                                 f"left in it: {_left_in(target)}") from fault
+            time.sleep(_PASS_PAUSE)  # not a tight loop against the writer it is waiting out
+
+
+def _left_in(folder: Path) -> str:
+    """The first few names in `folder`, for a failure text."""
+    try:
+        names = sorted(entry.name for entry in os.scandir(folder))
+    except OSError:
+        return "(unreadable)"
+    return ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "") if names else "(nothing)"
 
 
 def _read_secret(path: Path) -> str:

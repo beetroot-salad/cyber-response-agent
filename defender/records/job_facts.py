@@ -12,3 +12,8 @@ BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED = "not_started", "start_failed", 
 #: The reasons only the worker records on a learning job (#1344; no end record carries them).
 EXPIRED, EXITED_WITHOUT_RESULT, WORKER_ERROR, LEASE_LAPSED, RETRY_CAP = (
     "expired", "exited_without_result", "worker_error", "lease_lapsed", "retry_cap")
+
+#: Why an offboard ended a job (#1360 O5), and the sentence it records beside it: the reason is the offboarding's own,
+#: distinct from a user's cancel and from a worker fault. One place, so the store and the API's dev fake agree.
+TENANT_OFFBOARDED = "tenant_offboarded"
+OFFBOARD_MESSAGE = "its tenant was offboarded"
