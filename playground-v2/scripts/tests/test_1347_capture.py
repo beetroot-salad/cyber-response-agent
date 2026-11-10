@@ -22,8 +22,10 @@ outer edge, as the make-a-case and launcher tests do (`_rig_docker.RigDocker`):
 * docker, through `run=` (and `subprocess.run` itself, for the attack runner `fire` loads, which calls docker
   directly): the live lab on `soc-playground` holds the role hosts of the committed `hosts/inventory.yaml` (each
   answering `ps` with its own process tree and holding its own `/var/log` and `/var/lib/elastic-agent`
-  volumes), the live stubs (each serving its own state), the alert-ticket watcher, and the live Elasticsearch
-  container, which holds `chaos.lock`'s store and answers the chaos seam's curl from the live cluster;
+  volumes), the live stubs (each serving its own state), the alert-ticket watcher, the live Elasticsearch
+  container, which answers the chaos seam's curl from the live cluster, and the lab's DNS resolver (`unbound`);
+  `chaos.lock`'s store lives in whichever of those `chaos.lock.LOCK_CONTAINER` names (`rig.lock_box`), each
+  answering `flock` as its image does (the Elasticsearch image has none);
 * the live cluster (`rig.es`, a `FakeES` whose repository holds `rig.snapshots`), reached through the real
   chaos seam (`chaos.ctl.DockerExecSeam` over the rig docker);
 * the scratch cluster the verification restore starts on the lab server (`lab-verify-es`), answering from
@@ -61,7 +63,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-from _lab_fakes import CONTEXT, LAB_OPS, RULES_PART, FakeClock, FakeES, Journal, config_env, instant, load_script, sha
+from _lab_fakes import (CONTEXT, LAB_OPS, RULES_PART, FakeClock, FakeES, Journal, config_env, deploy_lab_services,
+                        instant, load_script, lock_box, sha)
 from _rig_docker import RigDocker
 from chaos import ledger, lock
 from chaos.ctl import DockerExecSeam
@@ -336,8 +339,8 @@ class Rig:
 
     def _deployed(self) -> None:
         d = self.docker
-        self.live_es = d.existing(CONTEXT, lock.LOCK_CONTAINER, "docker.elastic.co/elasticsearch/elasticsearch:9.3.3",
-                                  cluster=self.es, env={"ELASTIC_PASSWORD": "live-elastic"})
+        self.live_es = deploy_lab_services(d, cluster=self.es, env={"ELASTIC_PASSWORD": "live-elastic"})
+        self.lock_box = lock_box(d, lock.LOCK_CONTAINER)
         d.existing(CONTEXT, WATCHER, "alert-ticket-watcher")
         for host in HOSTS:
             mounts = []
@@ -416,14 +419,14 @@ class Rig:
         return None
 
     def lock_record(self) -> str | None:
-        data = self.docker.read_file(self.live_es, LOCK_FILE)
+        data = self.docker.read_file(self.lock_box, LOCK_FILE)
         return None if data is None else data.decode()
 
     def lock_held(self) -> bool:
         return self.lock_record() is not None
 
     def set_lock(self, record: str) -> None:
-        store, key, _ro = self.docker.resolve(self.live_es, LOCK_FILE)
+        store, key, _ro = self.docker.resolve(self.lock_box, LOCK_FILE)
         self.docker.stores.setdefault(store, {})[key] = record.encode()
 
     def watcher_running(self) -> bool:

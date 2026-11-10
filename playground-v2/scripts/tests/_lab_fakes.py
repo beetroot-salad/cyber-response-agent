@@ -19,7 +19,11 @@ FakeClock, FakeES, sha, canonical_digest, instant, seconds. Added (r6.4.1):
   pipelines (`drop` with the data-drop Painless condition, `rename`, `remove`), `_cat/indices`,
   `_cluster/health`. Anything else raises NotImplementedError so a gap is loud, not silent.
   Data-stream membership is by backing-index name only (deferred verification item 7).
-* `World`: the documents a snapshot holds (auth, syslog, nginx events; alerts with ancestry).
+* `World`: the documents a snapshot holds (auth, syslog, nginx events; alerts with ancestry). An ancestor
+  has the live lab's form (recorded from the lab on 2026-11-10, #1347 live check 10): `{"id", "type":
+  "event", "index", "depth"}`, where `index` is the PATTERN the rule searched (`logs-system.auth-*`), not
+  the concrete backing index; the world mixes in a concrete one too. An ancestor reaches the event `id` in
+  index `n` when `index` is `n` or a pattern matching `n` or `n`'s data stream (`ancestor_reaches`).
 * `LabRig`: a freeze + parts + case dir + cluster + the REAL lab layer wired together on a tmp path.
 
 Added (r6.4.2, repairs after attack batch 1):
@@ -593,7 +597,8 @@ class FakeCluster(FakeES):
             docs = self.indices[n]["docs"]
             for i, d in (docs.items() if keys else sorted(docs.items())):
                 if _matches(body.get("query"), d["_source"], i):
-                    hit = {"_index": n, "_id": i, "_source": copy.deepcopy(d["_source"])}
+                    # the stored source by reference: only the page returned is copied (fast over a bulk index)
+                    hit = {"_index": n, "_id": i, "_source": d["_source"]}
                     if body.get("version"):
                         hit["_version"] = d["_version"]
                     hits.append(hit)
@@ -616,7 +621,7 @@ class FakeCluster(FakeES):
         else:
             self._order.shuffle(hits)
         tracked = body.get("track_total_hits", self.MAX_RESULT_WINDOW)
-        page = hits[start:start + size]
+        page = [{**h, "_source": copy.deepcopy(h["_source"])} for h in hits[start:start + size]]
         if tracked is False:
             return {"hits": {"hits": page}}      # ES leaves the total out
         limit = None if tracked is True else int(tracked)
@@ -740,13 +745,16 @@ def alert_doc(uuid: str, at: str, *, status: str = "open", ancestors: tuple = ()
     return doc
 
 
+AUTH_RULE_PATTERN, SYSLOG_RULE_PATTERN = "logs-system.auth-*", "logs-system.syslog-*"   # as live ancestors carry
+
 ALERT_DOCS = {a["kibana.alert.uuid"]: a for a in [
-    alert_doc("young", "2026-10-20T08:10:00Z", ancestors=(("auth-25", AUTH),), port=40025),
+    alert_doc("young", "2026-10-20T08:10:00Z", ancestors=(("auth-25", AUTH_RULE_PATTERN),), port=40025),
+    # the concrete backing index, as an ancestor may also name it
     alert_doc("derived-in", "2026-10-20T08:30:00Z", ancestors=(("auth-27", AUTH),), port=40027),
     # in the span by its own time, but its source event (06:00) is before it: not derived from the span
-    alert_doc("derived-pre", "2026-10-20T07:30:00Z", ancestors=(("auth-12", AUTH),), port=40012),
+    alert_doc("derived-pre", "2026-10-20T07:30:00Z", ancestors=(("auth-12", AUTH_RULE_PATTERN),), port=40012),
     # derived from a span event of another dataset that carries the renamed field too
-    alert_doc("syslog-alert", "2026-10-20T08:00:00Z", ancestors=(("syslog-20", SYSLOG),), port=41000),
+    alert_doc("syslog-alert", "2026-10-20T08:00:00Z", ancestors=(("syslog-20", SYSLOG_RULE_PATTERN),), port=41000),
     alert_doc("edge", "2026-10-20T03:00:00Z"),                       # exactly max_age old
     alert_doc("at-T", T),
     alert_doc("old", "2026-10-20T02:59:59Z"),                        # older than max_age
@@ -804,12 +812,24 @@ def counts_of(state: dict) -> dict[str, int]:
     return {n: len(docs) for n, docs in state.items()}
 
 
-def expected_variant(mutation: dict | None, span_start: str = SPAN_START) -> dict:
+def ancestor_reaches(ancestor: dict, index: str, doc_id: str) -> bool:
+    """Whether a `kibana.alert.ancestors` entry names the event `doc_id` held in `index`: same id, and its
+    `index` is that index or a pattern (the rule's) matching it or its data stream."""
+    named = str(ancestor.get("index", ""))
+    stream = STREAMS.get(index)
+    return ancestor.get("id") == doc_id and (named == index or fnmatch.fnmatchcase(index, named)
+                                              or bool(stream and fnmatch.fnmatchcase(stream, named)))
+
+
+def expected_variant(mutation: dict | None, span_start: str = SPAN_START, *, extra_alerts: dict | None = None) -> dict:
     """The end state of the variant "base overlay + one stored-state mutation over [span_start, T]",
     for any span and any processor (`expected_copy` fixes the two committed ones). In-span documents
     of the mutation's dataset are exactly what the verbatim processor outputs (`run_processors`);
-    a schema-drift also rewrites the alerts whose ancestry reaches such a document."""
+    a schema-drift also rewrites the alerts whose ancestry reaches such a document (`ancestor_reaches`).
+    `extra_alerts` (`{uuid: doc}`, at or before T, version 1) are the ones `LabRig(extra_alerts=)` adds."""
     state = expected_copy("none")
+    for uuid, doc in (extra_alerts or {}).items():
+        state[ALERTS][f"id-{uuid}"] = (1, copy.deepcopy(doc))
     if mutation is None or mutation["kind"] not in ("data-drop", "schema-drift"):
         return state
     start, end, hit = instant(span_start), instant(T), set()
@@ -826,7 +846,7 @@ def expected_variant(mutation: dict | None, span_start: str = SPAN_START) -> dic
                     docs[doc_id] = (version, out)
     if mutation["kind"] == "schema-drift":
         for doc_id, (version, source) in list(state[ALERTS].items()):
-            if any((a["index"], a["id"]) in hit for a in source["kibana.alert.ancestors"]):
+            if any(ancestor_reaches(a, index, event) for a in source["kibana.alert.ancestors"] for index, event in hit):
                 state[ALERTS][doc_id] = (version, run_processors([mutation["processor"]], source))
     return state
 
@@ -866,6 +886,29 @@ TENANT_HOSTS = ["elasticsearch", "soc-playground"]
 FROZEN_ENDPOINT = "10.99.0.1:19200"
 FROZEN_AUDIT, LIVE_AUDIT = "/audit/frozen-proxy.jsonl", "/audit/proxy.jsonl"
 LAB_OPS = Path(__file__).resolve().parents[1] / "lab_ops.py"
+# The live lab's always-on services a rig deploys, by container name, with the images compose.yml gives them: the
+# live Elasticsearch (RHEL minimal: no `flock`) and the lab's DNS resolver (alpine/busybox: `flock` and `grep`).
+# `chaos.lock`'s store lives in whichever one `chaos.lock.LOCK_CONTAINER` names (`lock_box`): a rig deploys the lab,
+# never a container made to suit the lock store.
+LIVE_ES_IMAGE = "docker.elastic.co/elasticsearch/elasticsearch:9.3.3"
+LAB_IMAGES = {"elasticsearch": LIVE_ES_IMAGE, "unbound": "soc-playground/unbound:local"}
+
+
+def deploy_lab_services(docker, *, cluster: Any = None, env: dict | None = None):
+    """The live lab's services on the rig docker, running: the live Elasticsearch (answering from `cluster`, with
+    `env`) and the DNS resolver. Returns the live Elasticsearch container."""
+    es = docker.existing(CONTEXT, "elasticsearch", LAB_IMAGES["elasticsearch"], cluster=cluster, env=env)
+    for name, image in LAB_IMAGES.items():
+        if name != "elasticsearch":
+            docker.existing(CONTEXT, name, image)
+    return es
+
+
+def lock_box(docker, lock_container: str):
+    """The deployed lab container `chaos.lock.LOCK_CONTAINER` names, which holds the lock records."""
+    box = docker.containers.get((CONTEXT, lock_container))
+    assert box is not None, f"the lab deploys no container {lock_container!r} (chaos.lock.LOCK_CONTAINER)"
+    return box
 
 
 def tar_bytes(members: dict[str, bytes]) -> bytes:
@@ -1010,8 +1053,7 @@ class LabRig:
         certs = docker.volume(CONTEXT, CERTS_VOLUME)
         certs.update({"elasticsearch/elasticsearch.crt": b"crt", "elasticsearch/elasticsearch.key": b"key",
                       "ca/ca.crt": b"ca"})
-        docker.existing(CONTEXT, "elasticsearch", "docker.elastic.co/elasticsearch/elasticsearch:9.3.3",
-                        cluster=docker.live_cluster, env={"ELASTIC_PASSWORD": "live-elastic"})
+        deploy_lab_services(docker, cluster=docker.live_cluster, env={"ELASTIC_PASSWORD": "live-elastic"})
         docker.existing(DEPLOY, "response-credential-proxy", "credential-proxy",
                         mounts=[("/proxy", "store", ("vol", DEPLOY, "proxy-config", 0), True)])
         docker.stores[("vol", DEPLOY, "proxy-config", 0)] = {"config.json": b"{}"}
