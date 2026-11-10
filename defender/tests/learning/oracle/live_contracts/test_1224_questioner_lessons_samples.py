@@ -223,7 +223,7 @@ def _grade(tmp_path: Path, judge: _ScopedJudge) -> tuple[Any, Path]:
     paths = W.loop_paths(tmp_path)
     ep = S.judged_episode(tmp_path)
     S.samples_record(ep, _default_samples(S.SYSTEMS))
-    J.grade_at(ep, judge=judge, state=W.learning_state(paths), draws=1,
+    J.grade_at(ep, judge=judge, store=W.findings_store(paths), draws=1,
                git_show=J.FakeGitShow())
     return paths, ep
 
