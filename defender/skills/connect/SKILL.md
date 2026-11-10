@@ -181,9 +181,8 @@ Step 6 validates it and proposes it to the tenant's repo.
 
 `<handoff>/{system}/config.env` and `<handoff>/{system}/access.yaml` — the **handoff**: a
 folder outside both repos that you give the operator, never a file in the tenant's repo or in
-this one. A tenant's systems are records in the database that only the operator writes
-(`tenant.py set-system`, which takes exactly this folder); nothing reads a tenant's
-`settings/systems/` any more. `config.env` holds exactly the keys the adapter reads (its
+this one: the operator stores it as the system's record (`tenant.py set-system`).
+`config.env` holds exactly the keys the adapter reads (its
 `REQUIRED_CONFIG_KEYS`, prefixed; any other key is refused by name), and `access.yaml` the
 system's base, auth scheme and routes (`adapter.md` → "Access declaration"). A secret is never
 in either file.

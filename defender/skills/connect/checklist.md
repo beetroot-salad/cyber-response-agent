@@ -34,7 +34,7 @@ severity — a WARN is a judgment call left to you, not a cleared bar:
 
 **WARN** (exit 0 — surfaced, not enforced):
 
-- no `--handoff` given (the handoff is then not judged);
+- no `--handoff` given;
 - no `execution.md` (or one still inlined as a `## Execution` section in
   `SKILL.md` — split it, per `docs/system-skill-shape.md`);
 - no seed query templates at all. They grow post-merge, so this is not a

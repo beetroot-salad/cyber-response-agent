@@ -51,7 +51,8 @@ per-generation path `<tenant>/<system>/g<N>`. Once:
    the clone), then `python3 defender/cli/tenant.py import <tenant-id> --dry-run`, fix every file
    it names in the tenant's repo, publish again, and `tenant.py import <tenant-id>`. It runs once
    per tenant, writes every system and the case record at version 1, credential generation 1, and
-   copies no credential. Runs and `tenant check` of a tenant not imported are refused, naming it.
+   copies no credential. Until then the tenant's runs are refused and `tenant check` reports it,
+   each naming the import.
 3. Per system, at generation 1: `tenant.py set-credentials <tenant-id> <system> <file> --for-version 1
    --token-file <operator token file>` (the file is JSON `{"kind": ..., "fields": {...}}`). The set
    at the old path `<tenant>/<system>` is never read again; until this is done the proxy refuses the

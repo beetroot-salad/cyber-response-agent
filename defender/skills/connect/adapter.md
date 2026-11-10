@@ -199,9 +199,9 @@ record carries one: without it the store refuses the record. It holds
 never a `config.env` key), `auth` (its `scheme` — `bearer`, `header`, `basic` or
 `oauth-client-credentials` — and the credential *field name* the scheme reads, never
 a value), and the `reads` / `writes` routes the adapter calls (`{method, path}`).
-The proxy refuses any request outside them. Export a sibling's
-(`tenant.py systems <tenant> --export <dir>` writes each system's folder; ticket's is a
-worked one) and change the base, scheme and routes.
+The proxy refuses any request outside them. Ask the operator for a
+sibling's (`tenant.py systems <tenant> --export <dir>` writes each system's folder;
+ticket's is a worked one) and change the base, scheme and routes.
 
 ## Credentials
 
