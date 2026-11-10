@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import functools
+
 import logging
 import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
-from defender.knowledge import CATALOG, CATALOG_SCHEMA_NAME, SKILLS, KnowledgePaths
+from defender.knowledge import CATALOG, CATALOG_SCHEMA_NAME, REDUCER_PITFALLS, SKILLS, KnowledgePaths
 from defender._model import model
 from defender._paths import adapters_under, process_defender_dir
 from defender.learning.core import config
@@ -111,6 +113,10 @@ def _skill_write_lanes(skills_dir: Path, systems: tuple[str, ...]) -> tuple[re.P
             # the union of both commit scopes. The lead author's commit gate still refuses
             # `execution.md`.
             rf"(?:{sys_alt})/execution\.md",
+            # L6 — the pitfalls curator's reducer surface (`knowledge.REDUCER_PITFALLS`), the one
+            # literal its commit gate admits beyond a declared system's `execution.md`. The lead
+            # author's commit gate refuses it (no catalog or declared-system scope holds it).
+            re.escape(REDUCER_PITFALLS.removeprefix(f"{SKILLS}/")),
         )
     )
 
@@ -206,6 +212,13 @@ def _run_lead_author_pydantic(
         wiring=wiring, ctx=ctx, deps=deps,
         make_model=make_model, require_output=False,
     )
+
+
+def run_author_for(make_model: MakeModel | None) -> Callable[..., str]:
+    """The lead-lane stage's runner over `make_model` (`None`: the stage's own default model)."""
+    if make_model is None:
+        return _run_lead_author_pydantic
+    return functools.partial(_run_lead_author_pydantic, make_model=make_model)
 
 
 def run_author_stage(

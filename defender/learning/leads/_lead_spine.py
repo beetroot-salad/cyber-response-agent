@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Callable, Mapping
+from typing import Any
 from pathlib import Path
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
@@ -21,7 +22,7 @@ from defender.learning.leads.path_validation import SKILLS_PREFIX
 _logger = logging.getLogger(__name__)
 
 
-def _spawn_author_agent(
+def _spawn_author_agent(  # noqa: PLR0913 — one spawn's prompt, tree, folder, label, salt and seams
     *,
     system_prompt_file: Path,
     batch_id: str,
@@ -31,10 +32,13 @@ def _spawn_author_agent(
     log_label: str,
     salt: str,
     box=None,
+    make_model: Callable[..., Any] | None = None,
 ) -> int:
     """Spawn one lead-lane curator over the lane's tree at `repo_root` (a batch draft's root):
-    the stage writes the `agent/` root it holds (#1108 P4 O7)."""
+    the stage writes the `agent/` root it holds (#1108 P4 O7). `make_model` is the stage's model
+    seam (`None`: its own default)."""
     from defender.learning.leads import lead_author_engine
+
     # Every knob is read at spawn: each is env-backed, and a default would freeze it at import.
     return lead_author_engine.run_author_stage(
         wiring=_loop_config.StageWiring.for_batch(
@@ -54,6 +58,7 @@ def _spawn_author_agent(
         ),
         log_label=log_label,
         log=_logger,
+        run_author=lead_author_engine.run_author_for(make_model),
     )
 
 

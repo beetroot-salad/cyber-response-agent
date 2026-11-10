@@ -577,7 +577,7 @@ def _invoke_pitfalls(  # noqa: PLR0913 — the pitfalls step's call shape, plus 
         rc = _run_curator_module(
             "pitfalls_curator",
             lambda mod: mod.run_pitfalls(
-                paths=paths, state=state, trees=trees, batch=batch, box=box,
+                paths=paths, trees=trees, batch=batch, box=box,
                 on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
                 git_timeout=git_timeout, **_store_kw(items, feedback, outcomes, make_model),
             ),
