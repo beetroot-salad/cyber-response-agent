@@ -150,8 +150,8 @@ def _the_learning_store_is_reached_not_used(monkeypatch) -> None:
     def opened_store():
         yield Unreached()
 
-    monkeypatch.setattr(store_tick, "opened_store", opened_store)
-    monkeypatch.setattr(drains, "opened_store", opened_store)
+    monkeypatch.setattr(store_tick, "opened_store", opened_store)  # lint-monkeypatch: ok — the host entry opens its store through this module-level door; no seam carries a stand-in store to it
+    monkeypatch.setattr(drains, "opened_store", opened_store)  # lint-monkeypatch: ok — the drain opens its store through this module-level door; no seam carries a stand-in store to it
 
 
 # --- run start -------------------------------------------------------------------------------------

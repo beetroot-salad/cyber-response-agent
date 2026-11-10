@@ -860,5 +860,5 @@ def install_launcher_store(monkeypatch: Any) -> Any:
 
     store = MemoryStore()
     monkeypatch.setenv(database_address_variable(), "postgresql://stand-in/unused")
-    monkeypatch.setattr("defender.learning.store.blocking", lambda dsn: contextlib.nullcontext(store))  # noqa: ARG005
+    monkeypatch.setattr("defender.learning.store.blocking", lambda dsn: contextlib.nullcontext(store))  # noqa: ARG005  # lint-monkeypatch: ok — the store opener is a module-level door the entrypoints under test reach themselves; no seam carries a stand-in store to them
     return store

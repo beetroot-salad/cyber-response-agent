@@ -362,7 +362,7 @@ def _spy_build(monkeypatch, repo: Path, seen: list[list[str]], *,
             raise fault
         return real(*a, **kw)
 
-    monkeypatch.setattr(lessons_run, "build_author_config", spy)
+    monkeypatch.setattr(lessons_run, "build_author_config", spy)  # lint-monkeypatch: ok — a recording wrapper around the real builder; no seam reports the config the drain builds for the call
 
 
 def _held_roots(paths: LoopPaths) -> list[str]:
