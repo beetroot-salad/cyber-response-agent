@@ -91,15 +91,17 @@ def validate_answer(answer: Any, item: dict) -> dict:
     review_by = _review_by(answer, comment_day(item))
     instruction, reason = _answer_text(answer, "instruction"), _answer_text(answer, "reason")
     asked_without_lookups = isinstance(answer.get("approve"), list) and answer["approve"] and not lookups
+    # "No change" means the comment led to nothing; an approval that cannot be met over a run with no lookup is its
+    # own line, so a comment that still hands on an instruction is never answered "no change" (ruling 2026-11-10).
+    unapprovable = NO_LOOKUP if asked_without_lookups else None
     no_change = None
-    if asked_without_lookups:
-        no_change = NO_LOOKUP
-    elif not approved and not instruction:
-        no_change = reason or "nothing to learn"
+    if not approved and not instruction:
+        no_change = unapprovable or reason or "nothing to learn"
+        unapprovable = None
     return {"approved": [{"index": i, "lookup": lookups[i],
                           "id": f"fb-{item['issue']}-{item['comment_id']}-{n}", "settled": None}
                          for n, i in enumerate(approved, 1)],
-            "review_by": review_by, "instruction": instruction, "no_change": no_change}
+            "review_by": review_by, "instruction": instruction, "no_change": no_change, "unapprovable": unapprovable}
 
 
 def _record_decision(state: LearningState, item: dict, made: dict) -> dict:

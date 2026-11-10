@@ -184,8 +184,10 @@ def test_1414_a_lessons_row_that_faulted_after_the_decision_is_written_once_late
     assert S.lessons_rows(fb.paths) == [row], "positive control: a present row was duplicated"
 
 
-def test_1414_a_framing_run_with_no_lookups_records_a_no_change_and_still_sends_the_instruction(fb):
-    """An approval over a run with no captured lookups is not refused: the host records its own no-change reason, and the instruction goes to lessons. A9."""
+def test_1414_a_framing_run_with_no_lookups_says_no_entry_and_still_sends_the_instruction(fb):
+    """An approval over a run with no captured lookups is not refused: the reply says why no entry can be written, the
+    instruction goes to lessons, and the reply never also says "no change" (A9; ruling 2026-11-10: "no change" only
+    when the comment led to nothing)."""
     instruction = "check the VPN log first"
     number, comment = _scene(fb, "case-nolookups", lookups=[], body=instruction)
     decider = S.Decider({comment["id"]: S.answer(approve=(0,), instruction=instruction)})
@@ -194,8 +196,10 @@ def test_1414_a_framing_run_with_no_lookups_records_a_no_change_and_still_sends_
         assert fb.tick(decider) == 0
     assert decider.decided == [comment["id"]], "the answer was refused instead of recorded"
     [reply] = fb.replies(number, comment["id"])
-    assert "no change" in reply["body"].lower()
+    assert "no change" not in reply["body"].lower(), "the reply both handed on the instruction and said no change"
     assert "the run made no registry lookup this could approve" in reply["body"]
+    assert "lessons author" in reply["body"]
+    assert [r["comment_id"] for r in S.lessons_rows(fb.paths)] == [str(comment["id"])]
     assert "could not be processed" not in reply["body"]
     assert _drafts(fb) == {}
     [row] = S.lessons_rows(fb.paths)

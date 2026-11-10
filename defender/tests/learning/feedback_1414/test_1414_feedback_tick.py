@@ -630,7 +630,7 @@ def test_1414_an_issue_made_but_not_recorded_and_closed_before_the_redo_is_not_m
 _BLOCKED_WRITES = [
     pytest.param(S.STATE_CASES_FOLDER, "open", id="cases-open"),
     pytest.param(S.STATE_ITEMS_FOLDER, "read", id="items-read"),
-    pytest.param(S.STATE_POSITIONS_FOLDER, "read", id="positions-read"),
+    pytest.param(S.STATE_SEEN_FOLDER, "read", id="seen-read"),
     pytest.param(S.STATE_CURSOR_FOLDER, "read", id="cursor-read"),
     pytest.param(S.STATE_PENDING_FOLDER, "read", id="pending-read"),
     pytest.param(S.STATE_ITEMS_FOLDER, "first-comment", id="items-first-comment"),
@@ -755,3 +755,105 @@ def test_1414_the_forge_is_listed_for_recovery_once_a_tick_however_many_requests
     listings = [r for r in fb.forge.requests[asked:] if r.method == "GET" and r.url.path.endswith("/issues")]
     assert len({r.url.params.get("page") for r in listings}) == len(listings), "a page of the listing was asked twice"
     assert all(len(fb.issues(f"case-new-{n}")) == 1 for n in range(4))
+
+
+def test_1414_a_comment_the_forge_lists_late_under_a_lower_id_is_still_read(fb):
+    """Two comments made together: the one with the higher id is listed first, the lower one only on a later tick. Both
+    are decided once: a comment is new while no record of it is held, never by a highest-id mark (ruling 2026-11-10)."""
+    number = fb.opened("case-late")
+    early = fb.forge.add_comment(number, user=OWNER, body="first")
+    late = fb.forge.add_comment(number, user=NAMED, body="second")
+    fb.forge.remove_comment(number, early["id"])  # not yet visible to a listing
+    decider = S.Decider()
+    assert fb.tick(decider) == 0
+    assert decider.decided == [late["id"]], "premise: only the later id was listed"
+    fb.forge.issue_comments[number].insert(0, early)
+    assert fb.tick(decider) == 0
+    assert sorted(decider.decided) == sorted([early["id"], late["id"]]), "the late-listed comment was never read"
+    assert fb.tick(decider) == 0
+    assert len(decider.decided) == 2, "a comment was decided twice"
+
+
+def test_1414_a_failed_issue_listing_serves_no_request_and_makes_no_second_issue(fb):
+    """Two runs whose issues the forge holds but no record names (their creates' replies were lost). A listing of the
+    feedback issues that fails partway serves no request that tick; the next tick recovers both, making none. A6."""
+    runs = {case: S.run_id_of(fb.request(case)) for case in ("case-lost-a", "case-lost-b")}
+    if not any(label["name"] == S.FEEDBACK_LABEL for label in fb.forge.labels):
+        fb.forge.add_label(S.FEEDBACK_LABEL)
+    for case, run_id in runs.items():
+        fb.forge.add_issue(title=f"Feedback on case {case} run {run_id}", user=fb.bot, labels=[S.FEEDBACK_LABEL],
+                           body=f"<!-- defender-feedback case:{case} run:{run_id} -->\nsummary")
+    failing = {"left": 1}
+
+    def once(r):
+        if r.method == "GET" and r.url.path.endswith("/issues") and failing["left"]:
+            failing["left"] -= 1
+            return httpx.Response(503, json={})
+        return None
+
+    fb.forge.respond = once
+    assert fb.tick(S.Decider()) == 0
+    fb.forge.respond = None
+    assert fb.forge.issue_creates() == [], "a request was served from a failed listing"
+    assert len(S.open_issue_requests(fb.paths)) == 2
+    assert fb.tick(S.Decider()) == 0
+    assert fb.forge.issue_creates() == [], "a run whose issue the forge holds got a second one"
+    assert S.open_issue_requests(fb.paths) == {}
+
+
+def test_1414_a_registry_on_main_that_is_not_utf8_stops_the_draft_but_never_the_replies(fb, caplog):
+    """A failure of any kind in one step is logged and the next step runs: a registry file on `main` that is not
+    UTF-8 stops drafting, and a comment that needs no entry is still replied to (ruling 2026-11-10: steps isolated)."""
+    fb.t.merge({S.REGISTRY: b"entries:\n  - id: \xff\n"})
+    approving = fb.opened("case-approves")
+    thanking = fb.opened("case-thanks")
+    approval = fb.forge.add_comment(approving, user=OWNER, body="expected: the nightly backup")
+    thanks = fb.forge.add_comment(thanking, user=OWNER, body="thanks")
+    decider = S.Decider({approval["id"]: S.answer(approve=(0,)), thanks["id"]: S.answer(reason="a thanks")})
+    with caplog.at_level(logging.ERROR):
+        for _ in range(2):
+            assert fb.tick(decider) == 0
+    assert len(fb.replies(thanking, thanks["id"])) == 1, "a broken draft step cost an unrelated reply"
+    assert fb.replies(approving, approval["id"]) == [], "a reply was posted before its entry was judged"
+    assert any("drafting" in r.getMessage() for r in caplog.records), "the failed draft is not logged"
+
+
+def test_1414_a_records_outage_skips_the_tick(fb, caplog):
+    """The tenant records unreachable (a database blip) is an outage: the tick is skipped with a warning, as the other
+    drains skip theirs, and the next tick serves what waited."""
+    from defender.tenancy import RecordsUnreachable
+
+    class Down:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def merge_eligibility(self, _tenant):
+            raise RecordsUnreachable("the database is down")
+
+    fb.request("case-outage")
+    with caplog.at_level(logging.WARNING):
+        assert fb.tick(S.Decider(), directory=Down(fb.t.directory)) == 0
+    assert any("outage" in r.getMessage() for r in caplog.records)
+    assert fb.issues("case-outage") == []
+    assert fb.tick(S.Decider()) == 0
+    assert len(fb.issues("case-outage")) == 1
+
+
+def test_1414_a_closed_issue_with_no_close_time_keeps_its_comments_for_later(fb):
+    """A forge that shows an issue closed with no `closed_at` cannot say which comments came before the close: none is
+    read or dropped, and once the forge shows the close time, those before it are read. D12."""
+    number = fb.opened("case-no-close-time")
+    comment = fb.forge.add_comment(number, user=OWNER, body="expected")
+    fb.forge.set_issue_state(number, "closed")
+    [issue] = [i for i in fb.forge.issues if i["number"] == number]
+    closed_at, issue["closed_at"] = issue["closed_at"], None
+    decider = S.Decider()
+    for _ in range(2):
+        assert fb.tick(decider) == 0
+    assert decider.decided == []
+    issue["closed_at"] = closed_at
+    assert fb.tick(decider) == 0
+    assert decider.decided == [comment["id"]]

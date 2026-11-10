@@ -65,7 +65,8 @@ _QUEUE = "author-queue"
 #: #1414: run end's open-issue requests, one file per case, and the feedback drain's keyed records.
 FEEDBACK_REQUESTS = "feedback-issue-queue"
 FEEDBACK_CASES = "feedback-cases"
-FEEDBACK_POSITIONS = "feedback-positions"
+#: Per issue, the ids of every comment the feedback tick has judged: taken in or passed over.
+FEEDBACK_SEEN = "feedback-seen"
 #: The forge time of the newest comment the feedback tick has read (one record, `comments`).
 FEEDBACK_CURSOR = "feedback-cursor"
 FEEDBACK_ITEMS = "feedback-items"

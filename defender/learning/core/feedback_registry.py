@@ -27,7 +27,6 @@ from defender.systems import tacit_registry
 _logger = logging.getLogger(__name__)
 
 REGISTRY = "agent/skills/tacit-knowledge/registry.yaml"
-FEEDBACK_PREFIX = "feedback/"
 _NAMED_LINE = re.compile(r"^(?:drafted|covered): (fb-\d+-\d+-\d+)", re.M)
 _COVERED_LINE = re.compile(r"^covered: (fb-\d+-\d+-\d+) by (\S+)", re.M)
 _TOP_KEY = re.compile(r"^([A-Za-z_][\w-]*)[ \t]*:")
@@ -171,12 +170,12 @@ def _settle(state: LearningState, decision: dict, approved: dict, how: dict) -> 
     state.put_record(FEEDBACK_DECISIONS, str(decision["comment_id"]), decision)
 
 
-def feedback_prs(forge: Any, bots: frozenset[str]) -> dict[str, Any]:
-    """Entry id -> the PR that names it, among PRs the tenant's bot opened under the feedback prefix (P6/A2);
-    open beats merged beats closed."""
+def feedback_prs(forge: Any, bots: frozenset[str], prefix: str) -> dict[str, Any]:
+    """Entry id -> the PR that names it, among PRs the tenant's bot opened under the feedback lane's branch
+    `prefix` (the delivery's own, P6/A2); open beats merged beats closed."""
     found: dict[str, Any] = {}
     for pr in forge.pull_requests():
-        if not pr.branch.startswith(FEEDBACK_PREFIX) or pr.author not in bots:
+        if not pr.branch.startswith(prefix) or pr.author not in bots:
             continue
         for eid in _NAMED_LINE.findall(pr.body):
             if eid not in found or _RANK[pr.status] < _RANK[found[eid].status]:
@@ -184,12 +183,14 @@ def feedback_prs(forge: Any, bots: frozenset[str]) -> dict[str, Any]:
     return found
 
 
-def settle_from_prs(state: LearningState, forge: Any, bots: frozenset[str]) -> None:
-    """Settle every entry a bot feedback PR already names: `covered` when its body lists it so, else `drafted`."""
-    named = feedback_prs(forge, bots)
-    if not named:
+def settle_from_prs(state: LearningState, forge: Any, bots: frozenset[str], prefix: str) -> None:
+    """Settle every entry a bot feedback PR already names: `covered` when its body lists it so, else `drafted`.
+    With no entry unsettled, the PRs are not listed."""
+    unsettled = _unsettled(state)
+    if not unsettled:
         return
-    for decision, approved in _unsettled(state):
+    named = feedback_prs(forge, bots, prefix)
+    for decision, approved in unsettled:
         pr = named.get(approved["id"])
         if pr is None:
             continue
@@ -237,14 +238,14 @@ def draft(state: LearningState, delivery: Any, bots: frozenset[str], drains: Any
     forge = delivery.repository.forge
     try:
         clear = drains._deliver_pending(state, delivery, label)
-        settle_from_prs(state, forge, bots)
-        if not clear or delivery.open_pr_exists() or not _unsettled(state):
+        settle_from_prs(state, forge, bots, delivery.branch_prefix)
+        if not clear or not _unsettled(state) or delivery.open_pr_exists():
             return
         text, main_entries = main_registry(delivery)
         drafts, within = _judge(state, text, main_entries)
         if drafts:
             _start_and_land(state, delivery, drains, text, drafts, within)
-            settle_from_prs(state, forge, bots)
+            settle_from_prs(state, forge, bots, delivery.branch_prefix)
     except (ForgeError, DeliveryRefused) as e:
         _logger.error(f"feedback: the registry batch could not be made: {e}")
     except ShapeRefused as e:
@@ -284,6 +285,8 @@ def _describe_settlement(entry_id: str, approved: dict, decision: dict) -> str:
 
 def reply_text(decision: dict) -> str:
     lines = [_describe_settlement(a["id"], a, decision) for a in decision["approved"]]
+    if decision.get("unapprovable"):
+        lines.append(f"No registry entry: {decision['unapprovable']}.")
     if decision.get("instruction"):
         lines.append("Your instruction was handed to the lessons author.")
     if decision.get("no_change"):
@@ -299,13 +302,13 @@ def _mark_replied(state: LearningState, decision: dict) -> None:
 
 def _reply_is_on_issue(forge: Any, seen: dict[int, str], bots: frozenset[str], decision: dict) -> bool:
     """Make sure `decision`'s reply is on its issue; False while its outcome does not exist yet."""
+    if not all(a["settled"] for a in decision["approved"]):
+        return False  # the reply is posted only once its outcome exists, so none can be on the issue yet
     number = decision["issue"]
     if number not in seen:
         seen[number] = "\n".join(marker_head(c["body"]) for c in forge.list_comments(number) if c["user"]["login"] in bots)
     if marker(decision["comment_id"]) in seen[number]:
         return True
-    if not all(a["settled"] for a in decision["approved"]):
-        return False
     # A failure raises and is retried next tick, never given up: the text is the host's own and always sendable,
     # so a failure is the forge's state (down, throttling, a bot not yet granted issues), not the reply's (ruling 2026-11-10: no refusal ceiling).
     forge.create_comment(number, reply_text(decision))

@@ -400,8 +400,10 @@ def _enqueue_feedback_issue(
     run_state: Any = None,
     fixtures_dir: Path = HELD_OUT_FIXTURES,
 ) -> bool:
-    """`enqueue_feedback_issue`'s work. The learning gate's refusals apply except its truncation
-    arm (the escalated outcomes are truncations); a run that ended silently opens nothing."""
+    """`enqueue_feedback_issue`'s work. The learning gate's refusals apply except two arms: its
+    truncation arm (the escalated outcomes are truncations) and its unsandboxed arm
+    (`unsandboxed_ok`: a contract test asks for a request from a run with no box, an open human
+    decision on PR #1463). A run that ended silently opens nothing."""
     from defender.investigation import ticket_writer
     from defender.investigation.record_query import captured_lookups
     from defender.tenancy import feedback_setting

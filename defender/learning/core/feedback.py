@@ -22,9 +22,10 @@ from defender.learning.core.config import FEEDBACK_DRAIN_LABEL, LoopPaths
 from defender.learning.core.state import (
     FEEDBACK_CASES,
     FEEDBACK_CURSOR,
+    FEEDBACK_DECISIONS,
     FEEDBACK_ITEMS,
-    FEEDBACK_POSITIONS,
     FEEDBACK_REQUESTS,
+    FEEDBACK_SEEN,
     LearningState,
 )
 
@@ -37,7 +38,7 @@ DEFAULT_ELIGIBILITY_MAX_AGE = dt.timedelta(seconds=60)
 #: The longest issue title the forge takes; the host's own title is cut to it, so it is never refused for length.
 TITLE_LIMIT = 255
 #: How far back of the last comment read each tick asks again: a comment the forge dated just before it but
-#: listed only later is still found. Positions drop what was already read.
+#: listed only later is still found. A comment already recorded (an item or a decision) is not read twice.
 COMMENT_OVERLAP = dt.timedelta(seconds=60)
 #: How far ahead of this host's clock the service's record may be dated and still count as fresh.
 CLOCK_SKEW = dt.timedelta(seconds=5)
@@ -122,20 +123,35 @@ def tick(paths: LoopPaths, state: LearningState, open_delivery: Callable[[], Any
          *, decide: Callable[..., dict], eligibility_max_age: dt.timedelta | None = None) -> int:
     from defender.learning.core import drains
 
+    from defender.tenancy import RecordsUnreachable
+
     tenant = paths.tenant
     assert tenant is not None, "the feedback tick runs for one selected tenant"
-    bots = frozenset(g.bot_login for g in records.generations(tenant.id))
     with open_delivery() as opened:
+        try:
+            bots = frozenset(g.bot_login for g in records.generations(tenant.id))
+            eligible = _eligible_logins(records, tenant.id, eligibility_bound(eligibility_max_age), bots)
+        except RecordsUnreachable as down:
+            raise drains._Refused(f"the tenant {tenant.id}'s records could not be read: {down}", transient=True) from None
         delivery = dataclasses.replace(opened, branch_prefix=drains._branch_prefix(FEEDBACK_DRAIN_LABEL))
-        ctx = Tick(state, delivery.repository.forge, bots, str(tenant.id))
-        ctx.eligible = _eligible_logins(records, tenant.id, eligibility_bound(eligibility_max_age), bots)
-        _open_requests(ctx)
+        ctx = Tick(state, delivery.repository.forge, bots, str(tenant.id), eligible)
+        _isolated_step("opening issues", lambda: _open_requests(ctx))
         if ctx.eligible is not None:
-            _read_comments(ctx)
-            feedback_decide.decide_items(ctx.state, decide)
-        feedback_registry.draft(ctx.state, delivery, bots, drains)
-        feedback_registry.reply(ctx.state, ctx.forge, bots)
+            _isolated_step("reading comments", lambda: _read_comments(ctx))
+            _isolated_step("deciding comments", lambda: feedback_decide.decide_items(ctx.state, decide))
+        _isolated_step("drafting registry entries", lambda: feedback_registry.draft(ctx.state, delivery, bots, drains))
+        _isolated_step("replying", lambda: feedback_registry.reply(ctx.state, ctx.forge, bots))
     return 0
+
+
+def _isolated_step(name: str, run: Callable[[], None]) -> None:
+    """One step of the tick. Every step is a redo from what the forge and the records show (P5), so a failure of
+    any kind is logged and the next step still runs: a broken registry file stops the draft, never the replies
+    (ruling 2026-11-10: steps are isolated)."""
+    try:
+        run()
+    except Exception as e:  # noqa: BLE001 — one step's failure never costs the tick its other steps
+        _logger.error(f"feedback: {name} failed, retried next tick: {e!r}", exc_info=True)
 
 
 # ------------------------------------------------------------------ step 1: open
@@ -143,15 +159,20 @@ def tick(paths: LoopPaths, state: LearningState, open_delivery: Callable[[], Any
 def _recover(ctx: Tick, case_id: str, run_id: str) -> int | None:
     """The run's issue when the forge holds one this host made but never recorded: labelled, created by one of
     the tenant's bots (any generation), open or closed, whose first line is exactly the host's own for this run.
-    The forge is listed once per tick, the first time a request has no record; an issue made later this tick is
-    recorded by the tick that made it."""
-    if ctx.made is None:
-        ctx.made = {}
-        for bot in sorted(ctx.bots):
-            for issue in ctx.forge.list_issues(label=FEEDBACK_LABEL, created_by=bot, state="all"):
-                if issue["user"]["login"] in ctx.bots:
-                    ctx.made.setdefault((issue.get("body") or "").split("\n")[0], issue["number"])
+    Read from the index `_open_requests` made before serving any request."""
+    assert ctx.made is not None, "the issue index is read before any request is served"
     return ctx.made.get(_first_line(case_id, run_id))
+
+
+def _issue_index(ctx: Tick) -> dict[str, int]:
+    """First line -> number of every feedback issue a tenant bot made, read whole or not at all: a listing that
+    fails raises, and no request is served from part of one."""
+    made: dict[str, int] = {}
+    for bot in sorted(ctx.bots):
+        for issue in ctx.forge.list_issues(label=FEEDBACK_LABEL, created_by=bot, state="all"):
+            if issue["user"]["login"] in ctx.bots:
+                made.setdefault((issue.get("body") or "").split("\n")[0], issue["number"])
+    return made
 
 
 def _record_run(ctx: Tick, request: dict, number: int) -> None:
@@ -175,7 +196,17 @@ def _serve_request(ctx: Tick, key: str, request: dict) -> None:
 
 
 def _open_requests(ctx: Tick) -> None:
-    for key, request in sorted(ctx.state.records(FEEDBACK_REQUESTS).items()):
+    """Serve every queued request. When any has no record yet, the forge's feedback issues are listed first, whole:
+    a listing that fails leaves every request queued for the next tick (a request is never served from part of it,
+    which could make a second issue for a run whose first was never recorded)."""
+    requests = sorted(ctx.state.records(FEEDBACK_REQUESTS).items())
+    if any(ctx.state.get_record(FEEDBACK_CASES, r.get("run_id", "")) is None for _, r in requests):
+        try:
+            ctx.made = _issue_index(ctx)
+        except ForgeError as e:
+            _logger.error(f"feedback: listing the feedback issues failed, every request waits for the next tick: {e}")
+            return
+    for key, request in requests:
         if request.get("tenant_id") != ctx.tenant_id:
             _logger.error(f"feedback: request {key} names another tenant; left")
             continue
@@ -195,10 +226,7 @@ def _readable(issue: dict, new: list[dict]) -> list[dict]:
     the close, or in the same second as it, on a closed one (D12: as the tick observes it)."""
     if issue["state"] == "open":
         return new
-    closed_at = issue.get("closed_at")
-    if not closed_at:
-        return []
-    return [c for c in new if _forge_time(c["created_at"]) <= _forge_time(closed_at)]
+    return [c for c in new if _forge_time(c["created_at"]) <= _forge_time(issue["closed_at"])]
 
 
 def _queue_comment(ctx: Tick, run: dict, issue: dict, c: dict) -> None:
@@ -221,8 +249,15 @@ def _read_issue(ctx: Tick, run: dict, comments: list[dict]) -> bool:
             return True
         _logger.error(f"feedback: reading issue {number} failed, position kept: {e}")
         return False
-    position = (ctx.state.get_record(FEEDBACK_POSITIONS, str(number)) or {}).get("last", 0)
-    new = sorted((c for c in comments if c["id"] > position), key=lambda c: c["id"])
+    if issue["state"] != "open" and not issue.get("closed_at"):
+        _logger.error(f"feedback: issue {number} is closed with no close time; its comments are read once the forge "
+                      "shows one")
+        return False
+    # A comment is judged once, by its id: taken in, or passed over (by an account that may not merge, or written
+    # after the close, which a reopen does not revive). No high-water mark, so a comment the forge lists late, under
+    # a lower id than one already judged, is still read (ruling 2026-11-10: comments judged by id).
+    seen = set((ctx.state.get_record(FEEDBACK_SEEN, str(number)) or {}).get("ids", []))
+    new = sorted((c for c in comments if c["id"] not in seen and _no_item_or_decision(ctx, c)), key=lambda c: c["id"])
     if not new:
         return True
     skipped: set[str] = set()
@@ -233,8 +268,15 @@ def _read_issue(ctx: Tick, run: dict, comments: list[dict]) -> bool:
             skipped.add(c["user"]["login"])
     if skipped:
         _logger.info(f"feedback: issue {number}: skipped comments by accounts that may not merge: {sorted(skipped)}")
-    ctx.state.put_record(FEEDBACK_POSITIONS, str(number), {"last": new[-1]["id"]})
+    ctx.state.put_record(FEEDBACK_SEEN, str(number), {"ids": sorted(seen | {c["id"] for c in new})})
     return True
+
+
+def _no_item_or_decision(ctx: Tick, comment: dict) -> bool:
+    """No queued item and no decision is recorded for the comment (one queued before its issue's judged ids were
+    written, by a tick that died between the two)."""
+    key = str(comment["id"])
+    return ctx.state.get_record(FEEDBACK_ITEMS, key) is None and ctx.state.get_record(FEEDBACK_DECISIONS, key) is None
 
 
 def _issue_number(comment: dict) -> int | None:
