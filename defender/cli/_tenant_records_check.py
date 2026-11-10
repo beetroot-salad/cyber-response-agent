@@ -12,7 +12,8 @@ record store already makes, asked again over the tenant's current records:
   record is disabled is granted but disabled; an ungranted unrecorded system is silent; a grant on a system the catalog
   lacks is the census's phantom, as today;
 - the case record judged as run start judges it (`case_system.judge_case_system`, C3) over the tenant's systems (O1);
-- each record's credentials at its current generation, asked of the operator's secret store (R13);
+- each record's credentials at its current generation, asked of the operator's secret store when the caller holds a
+  login for it (R13);
 - the grant census over the tenant's own systems (`census_findings`, O1);
 - the retired `settings/systems/` folder and `settings/case-record.yaml` left in the repo (`leftover_findings`, O9):
   reported, never opened."""
@@ -135,14 +136,12 @@ def _case_findings(records: TenantRecords, catalog: Catalog, *, agent: Path, def
 
 
 def credential_findings(tenant_id: object, records: TenantRecords, secrets: Any) -> list[str]:
-    """R13: each recorded system with no credential set at its record's current generation. With no secret store login
-    nothing could be asked: that is one finding saying so (a check that could not judge is a finding)."""
+    """R13: each recorded system with no credential set at its record's current generation, asked of `secrets` (the
+    operator's OpenBao login). With none (`check` given no login) the question is not asked and nothing is reported:
+    the caller that holds a login hands it in."""
     systems = sorted(records.systems.items())
-    if not systems:
+    if not systems or secrets is None:
         return []
-    if secrets is None:
-        return [f"the credentials of {', '.join(s for s, _ in systems)} were not checked: give the operator's OpenBao "
-                "token so `check` can ask whether each has credentials at its current generation"]
     lines: list[str] = []
     for system, record in systems:
         try:
