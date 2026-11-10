@@ -197,6 +197,7 @@ def build_lead_author_deps(  # noqa: PLR0913 — the lane's seams, plus where it
     paths: _loop_config.LoopPaths, *, state: LearningState | None, trees: DrainTrees,
     batch: Any = None, git_timeout: float = GIT_TIMEOUT_SECONDS,
     file_pitfalls: Callable[[list[dict]], int] | None = None,
+    make_model: Callable[..., Any] | None = None,
 ) -> LeadAuthorDeps:
     """The lane's seams over `batch`'s draft (#1108 P4 O7, OD16), reading and writing `skills/`
     through `trees`, the lane's held mounts (`open_drain_trees`): `trees` must hold the draft's
@@ -213,11 +214,14 @@ def build_lead_author_deps(  # noqa: PLR0913 — the lane's seams, plus where it
         root, skills_dir, base = paths.repo_root, paths.skills_dir, None
     skills = lane_skills(trees, paths, skills_dir=skills_dir)
     systems = declared_systems(paths.repo_root, agent=base)
+    invoke_kw: dict[str, Any] = {"repo_root": root}
+    if make_model is not None:
+        invoke_kw["spawn"] = functools.partial(_spawn_author_agent, make_model=make_model)
     return LeadAuthorDeps(
         paths=paths,
         state=state,
         systems=systems,
-        invoke_agent=functools.partial(invoke_agent, repo_root=root),
+        invoke_agent=functools.partial(invoke_agent, **invoke_kw),
         extract=extract,
         synthesize=synthesize_drafts,
         build_handoff=functools.partial(
@@ -298,19 +302,40 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
 
 
 def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the run, its held lock and trees, and its seams
-    run: Run, *, paths: _loop_config.LoopPaths, state: LearningState, trees: DrainTrees,
+    run: Run, *, paths: _loop_config.LoopPaths, state: LearningState | None, trees: DrainTrees,
     box: Any = None, on_done: DoneSink, git_timeout: float = GIT_TIMEOUT_SECONDS,
     batch: Any = None, deps: LeadAuthorDeps | None = None,
+    items: Any = None, feedback: str | None = None,  # noqa: ARG001 — the drain's store seam; the run names its own leads
+    outcomes: dict[tuple[str, str], Any] | None = None,  # noqa: ARG001 — the drain decides a served request's fate
+    make_model: Callable[..., Any] | None = None,
 ) -> int:
-    """`run` for a caller that already holds the per-author queue lock (the drain holds it for
-    its whole tick, since it defers the done sentinel) and the lane's held mounts, `trees` (the
-    drain's work step opens them over `batch`'s draft). Never skips. `run` is the run the drain
-    opened from the claim's address; `deps` given are used as built, else they are built over
-    `batch`."""
+    """`run` for a caller that already holds the lane (the drain: its store claim, #1278; or the
+    per-author queue lock of a file-state caller) and the lane's held mounts, `trees` (the drain's
+    work step opens them over `batch`'s draft). Never skips. `run` is the run the drain opened from
+    the claim's address; `deps` given are used as built, else they are built over `batch`, the
+    run's pitfalls filed in the learning store when no learning state is handed (O10), and
+    `make_model` the spawn's model seam."""
     if deps is None:
-        deps = build_lead_author_deps(paths, state=state, trees=trees, batch=batch,
-                                      git_timeout=git_timeout)
+        deps = build_lead_author_deps(
+            paths, state=state, trees=trees, batch=batch, git_timeout=git_timeout,
+            file_pitfalls=_store_pitfalls(paths) if state is None else None, make_model=make_model)
     return _run_locked(Path(run.run_dir), deps, box=box, on_done=on_done)
+
+
+def _store_pitfalls(paths: _loop_config.LoopPaths) -> Callable[[list[dict]], int]:
+    """Where a run served over the learning store files the pitfalls it collects: the selected
+    tenant's pitfall items (`LearningStore.add_pitfall`, through the store's sync facade)."""
+    if paths.tenant is None:
+        raise LeadAuthorError("lead-author refused: no tenant is selected to file the run's pitfalls for")
+    tenant_id = str(paths.tenant.id)
+
+    def file_pitfalls(rows: list[dict]) -> int:
+        from defender.learning.core.store_tick import opened_store
+
+        with opened_store() as store:
+            return sum(1 for row in rows if store.add_pitfall(tenant_id, row))
+
+    return file_pitfalls
 
 
 def _run_locked(  # noqa: C901 — one served run, its pitfalls filed where the deps say

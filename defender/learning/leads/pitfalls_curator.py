@@ -131,6 +131,7 @@ def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> li
 
 def _invoke_pitfalls_agent(  # noqa: PLR0913 — the spawn's handoffs, its folder, its tree and its seams
     handoffs: list[dict], *, run_dir: Path, repo_root: Path,
+    state: Any = None,  # noqa: ARG001 — the `invoke` seam's call shape; nothing is read through it (#1278)
     spawn: Callable[..., int] = _spawn_author_agent,
     salt: str | None = None,
     box=None,
@@ -526,6 +527,7 @@ def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface
     *,
     paths: _loop_config.LoopPaths,
     trees: DrainTrees,
+    state: Any = None,
     batch: Any = None,
     invoke: Callable[..., int] | None = None,
     box=None,
@@ -543,7 +545,8 @@ def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface
     `outcomes` is filled with the fates decided here: a row with no id is dead, a row no declared
     surface can teach is skipped naming its system. The pitfalls the commit took are handed to
     `on_curated` (they stay in the batch); the rest are left unnamed (the drain returns them to
-    waiting). `feedback` is a replacement's framed review text (H13)."""
+    waiting). `feedback` is a replacement's framed review text (H13). `state` is only handed on to
+    an injected `invoke` (the seam's call shape); nothing reads through it."""
     outcomes = outcomes if outcomes is not None else {}
     root = Path(batch.draft_root) if batch is not None else paths.repo_root
     lane_skills(trees, paths, skills_dir=root / SKILLS_PREFIX if batch is not None else None)
@@ -610,10 +613,12 @@ def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface
     # The call's own folder (#1278 A1), made before the box runs; the box runs for the spawn only,
     # and is stopped before the gate reads what it wrote (#1195).
     run_dir = call_folder(batch.tenant, str(batch.id), "pitfalls", 1, make=True)
+    spawn_call = invoke or partial(_invoke_pitfalls_agent, run_dir=run_dir, feedback=feedback,
+                                   make_model=make_model)
     with _box.box_for_run(box) as run_box:
-        rc = (invoke or _invoke_pitfalls_agent)(
-            handoffs, run_dir=run_dir, repo_root=root, box=run_box, feedback=feedback,
-            make_model=make_model)
+        # The `invoke` seam keeps its call shape (`state` is whatever the caller handed, `None` over
+        # the learning store).
+        rc = spawn_call(handoffs, state=state, repo_root=root, box=run_box)
     if rc != 0:
         # Not raised: an `AuthorError` halts the drain's tick, and a stage fault is this curation's
         # alone. The claim's items take what the batch's commits show (the draft is reset by the
