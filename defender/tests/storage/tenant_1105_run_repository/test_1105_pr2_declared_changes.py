@@ -7,7 +7,6 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import copy
 import json
-import contextlib
 import os
 import shutil
 from pathlib import Path
@@ -18,6 +17,7 @@ from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 from defender.tests.support.tenancy import _host1214 as HH
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 
 
 RID_R1 = fixture_uuid('pr2-dc8-r1')
@@ -72,7 +72,9 @@ def test_dc1_a_source_under_a_linked_runs_folder_is_refused(tmp_path):
     assert _launched(control), f"the control did not launch: {control.message!r}"
 
 
-def test_dc2_the_judges_prompt_carries_no_sibling_view_or_tally(tmp_path):
+@pytest.mark.postgres
+def test_dc2_the_judges_prompt_carries_no_sibling_view_or_tally(tmp_path, monkeypatch, migrated_database):
+    P.reach_launch_store(migrated_database, monkeypatch)  # the judge pass inserts into the learning store (#1278)
     est, src = P.launch_source(tmp_path)
     prior = src.parent / "20260101t000000z-prior-trial"
     prior.mkdir()
@@ -93,11 +95,13 @@ def test_dc2_the_judges_prompt_carries_no_sibling_view_or_tally(tmp_path):
         assert prior.name not in prompt, "a same-alert prior run reached the judge"
 
 
-def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog):
+@pytest.mark.postgres
+def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog, monkeypatch, migrated_database):
     import yaml
 
     from defender.tests.support.learning.judge import _judge_921 as J
 
+    P.reach_launch_store(migrated_database, monkeypatch)  # the judge pass inserts into the learning store (#1278)
     est, src = P.launch_source(tmp_path)
     natural = H.make_run(src.parent, "b")
     (natural / "report.md").write_text(P.T.report_text("benign"), encoding="utf-8")
@@ -314,13 +318,17 @@ def test_dc7_the_run_page_refuses_a_linked_run_folder(tmp_path):
     assert (src / "runtime.html").is_file(), ok.said
 
 
-def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tenant):
+@pytest.mark.postgres
+def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tenant, monkeypatch, migrated_database):
+    """#1278: the request run end files is a row of the learning store (payload `{case_id, tenant_id, run_id}`)."""
     from defender.box import _scrub as scrub
     from defender.learning.core.config import LoopPaths
     from defender.tenancy._tenant import requested_tenant
+    from defender.tests.support.sandbox._curation_store1278 import reach_store
+    from defender.tests.support.sandbox._spec791 import curation_requests
 
     tenant = requested_tenant(fixture_data_root(location_path(P.data_root)()), d9_tenant)
-    location_path(tenant.learning).mkdir(exist_ok=True)
+    reach_store(migrated_database, monkeypatch, tenant)
     alert = H.alert_file(tmp_path / "in")
     rec = P.SiblingRecorder()
 
@@ -342,8 +350,7 @@ def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tena
     run_dir = rec.run_dir
     assert run_dir is not None
     assert run_dir.parent == location_path(P.data_root)() / d9_tenant / "runs"
-    queue = location_path(LoopPaths.for_tenant(tenant).state_root) / "author-queue"
-    rows = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(queue.glob("*.json"))]
+    rows = list(curation_requests(LoopPaths.for_tenant(tenant)).values())
     assert len(rows) == 1, rows
     row = rows[0]
     assert set(row) == {"case_id", "tenant_id", "run_id"}, f"the row is {row!r}"
@@ -382,56 +389,35 @@ def test_dc8_the_drain_rehydrates_the_row_in_its_own_tenant(tmp_path):
     assert P.dead_letter(u_paths, "case-u") is None
 
 
-class _Enough(BaseException):
-    """Ends a drain that keeps handing out a row it never consumes (this lane double leaves the row queued)."""
+# retired: the `_BoundedLane` (a lane double that left its row queued, so the old drain handed it out again until
+# interrupted): the claim loop is one pass over the claim's items (design D1), so a row is handed out at most once per tick.
 
 
-class _BoundedLane(P.Lane):
-    def __call__(self, *args: object, **kw: object) -> None:
-        super().__call__(*args, **kw)
-        if len(self.handed) >= 3:
-            raise _Enough
-
-
-#: U's records, as the row of T's queue that names U finds them (T is active in each): every state a tenant can be in, a
-#: tenant that is placed on disk and one that is not, and no row at all.
-U_RECORDS = {
-    "active": ("active", True),
-    "active and unplaced": ("active", False),
-    "creating": ("creating", True),
-    "offboarding": ("offboarding", True),
-    "offboarded": ("offboarded", True),
-    "no row": (None, True),
-}
-
-
-@pytest.mark.parametrize("u_records", list(U_RECORDS))
-def test_dc8_c10_a_row_naming_another_tenant_is_dead_lettered_on_the_first_tick(tmp_path, u_records):
-    """C10: a row naming another tenant is dead-lettered at once, naming both, uncounted and never served, whatever the
-    other tenant's state or place; the drain's own row beside it is served and the drain accepts nothing."""
-    state, placed = U_RECORDS[u_records]
+@pytest.mark.parametrize("placed", [True, False], ids=["other tenant placed", "other tenant not placed"])
+def test_dc8_c10_a_row_naming_another_tenant_is_never_served_and_the_drain_accepts_none(tmp_path, placed):
+    """C10: a row naming another tenant is refused at the drain's door, whether that tenant is placed on disk or not:
+    it is never served, nor handed to its own run, and the drain accepts nothing; the drain's own row beside it is served.
+    #1278 update: the old drain dead-lettered the row at once, naming both tenants, uncounted. A crossed row is now one
+    the drain cannot open (`drains._run_of` -> `TenantRefused`), not a dead one: it stays `waiting` in the store, which
+    counts the attempt and holds it at its ceiling (design D8, `store_1278/test_store_1278.py::test_d8_*`); only a run that
+    is gone is dead (`artifact-missing`). The drain no longer reads the other tenant's state (it never needed to)."""
     t, u, t_paths, _u_paths = _drain_scene(tmp_path)
     if not placed:
         shutil.rmtree(Path(location_path(u.runs)).parent)
     H.make_run(location_path(t.runs), RID_R2)
-    root = location_path(P.data_root)()
-    directory = P.records_with(root, {H.T_ID: "active", **({H.U_ID: state} if state else {})})
     P.queue_row(t_paths, "case-crossed", {"case_id": "case-crossed", "tenant_id": H.U_ID, "run_id": RID_R1})
     P.queue_row(t_paths, "case-own", {"case_id": "case-own", "tenant_id": H.T_ID, "run_id": RID_R2})
-    lane = _BoundedLane()
-    with contextlib.suppress(_Enough), HH.acceptance_calls() as ticks:
-        P.drain(t_paths, lane, directory=directory)
+    lane = P.Lane()
+    with HH.acceptance_calls() as ticks:
+        P.drain(t_paths, lane)
     assert lane.run_dirs == [Path(location_path(t.runs)) / RID_R2], (
         f"control: only T's own row is served (its run RID_R2, which only T holds); the drain served {lane.run_dirs}")
     assert (ticks["accepted"], ticks["built"]) == (0, 0), f"the drain accepted a tenant itself: {ticks.counts}"
-    letter = P.dead_letter(t_paths, "case-crossed")
-    assert letter is not None, "the crossed row was not dead-lettered on the first tick"
-    reason = str(letter.get("failed", ""))
-    assert H.T_ID in reason, f"the reason does not name the drain's tenant: {reason!r}"
-    assert H.U_ID in reason, f"the reason does not name the row's tenant: {reason!r}"
-    assert letter.get("attempts", 0) == 0, f"the dead letter carries counted attempts: {letter!r}"
-    assert not P.still_queued(t_paths, "case-crossed"), "the crossed row is still queued"
+    assert P.fate_name(t_paths, "case-crossed") == "waiting", "the crossed row was decided, not left to the store's ceiling"
+    assert P.dead_letter(t_paths, "case-crossed") is None, "the crossed row was dead-lettered, not left waiting"
+    assert P.still_queued(t_paths, "case-crossed"), "the crossed row left the queue"
     assert P.dead_letter(t_paths, "case-own") is None
+    assert not P.still_queued(t_paths, "case-own"), "the drain's own row was not served"
 
 
 def test_dc8_a_drain_without_an_accepted_tenant_serves_nothing_and_accepts_none(tmp_path):
@@ -446,6 +432,7 @@ def test_dc8_a_drain_without_an_accepted_tenant_serves_nothing_and_accepts_none(
         P.drain(anonymous, lane)
     assert lane.run_dirs == [], f"a drain with no accepted tenant served {lane.run_dirs}"
     assert (ticks["accepted"], ticks["built"]) == (0, 0), f"the drain accepted a tenant itself: {ticks.counts}"
+    assert P.still_queued(anonymous, "case-t"), "the refused row was decided"
     # Positive control: the same row, drained through the tenant's own paths, is served.
     P.queue_row(t_paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
     served = P.Lane()
@@ -453,14 +440,17 @@ def test_dc8_a_drain_without_an_accepted_tenant_serves_nothing_and_accepts_none(
     assert served.run_dirs == [Path(location_path(t.runs)) / RID_R1], f"control: {served.run_dirs}"
 
 
-def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch, capsys):
-    """With no data root the drain command is refused at its host acceptance, before it claims anything: its rows stay
-    queued, uncounted and not dead-lettered (r10 A1: the data root is judged at acceptance, step 2)."""
+@pytest.mark.postgres
+def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch, capsys, migrated_database):
+    """With no data root the drain command is refused at its host acceptance, before it claims anything: its request stays
+    waiting in the store, with no attempt charged and not dead (r10 A1: the data root is judged at acceptance, step 2)."""
     from defender.learning.core import cli
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 
     t, _u, t_paths, _u_paths = _drain_scene(tmp_path)
-    P.queue_row(t_paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
+    case = {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1}
+    P.store_tick_scene(migrated_database, monkeypatch, H.T_ID)
+    P.file_request(migrated_database, H.T_ID, "case-t", case)
     root = os.environ[P.DATA_ROOT_ENV]
     monkeypatch.delenv(P.DATA_ROOT_ENV)
     argv = ["loop.py", "--lead-author-drain", "--tenant", H.T_ID]
@@ -468,10 +458,11 @@ def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypa
         cli.main(argv, directory=directory_for_argv(argv))
     assert refused.value.code not in (0, None)
     assert P.DATA_ROOT_ENV in capsys.readouterr().err, "the refusal does not name the data root"
-    assert P.dead_letter(t_paths, "case-t") is None
-    assert P.still_queued(t_paths, "case-t")
-    # Positive control: the refusal was the missing root. With the root back, the same queue serves the row.
+    item = P.store_items(migrated_database, H.T_ID, "curation_request")["case-t"]
+    assert (item.status, item.attempts) == ("waiting", 0), f"the refused command claimed or decided the request: {item}"
+    # Positive control: the refusal was the missing root. With the root back, the same request is served by a drain.
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
+    P.queue_row(t_paths, "case-t", case)
     lane = P.Lane()
     P.drain(t_paths, lane)
     assert lane.run_dirs == [Path(location_path(t.runs)) / RID_R1], f"the restored root served {lane.run_dirs}"
