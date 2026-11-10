@@ -18,7 +18,7 @@ FakeClock, FakeES, sha, canonical_digest, instant, seconds. Added (r6.4.1):
   `_delete_by_query`, `_reindex` (pipeline, version_type external, op_type create), ingest
   pipelines (`drop` with the data-drop Painless condition, `rename`, `remove`), `_cat/indices`,
   `_cluster/health`. Anything else raises NotImplementedError so a gap is loud, not silent.
-  Data-stream membership is by backing-index name only (deferred verification item 7).
+  Data-stream membership is the `streams` map (backing index -> stream), answered by `GET /_data_stream/<expr>`; r6.4.5: `_update_by_query` (pipeline, in place, `_version` + 1, drop = noop), per-index `index.default_pipeline`/`index.final_pipeline` settings (`GET/PUT /_settings`, `null` removes), refusal of any `_reindex` write into a backing index (400 per document), `ingest_runs`/`put_pipelines`/`refused` logs.
 * `World`: the documents a snapshot holds (auth, syslog, nginx events; alerts with ancestry). An ancestor
   has the live lab's form (recorded from the lab on 2026-11-10, #1347 live check 10): `{"id", "type":
   "event", "index", "depth"}`, where `index` is the PATTERN the rule searched (`logs-system.auth-*`), not
@@ -201,12 +201,14 @@ class FakeES:
         self.journal, self.answers, self.fail = journal, dict(answers or {}), fail
         self.route = route
         self.requests: list[tuple[str, str, Any]] = []
+        self.query: dict[str, list[str]] = {}
 
     def es_request(self, method: str, path: str, body: Any = None) -> Any:
         path = path if path.startswith("/") else "/" + path  # one spelling for every reader below
         self.requests.append((method, path, body))
         self.journal.append(("es", (method, path)))
         key = (method, path.split("?", 1)[0])
+        self.query = parse_qs(path.split("?", 1)[1], keep_blank_values=True) if "?" in path else {}   # for `route`
         if "?" in path and key[1].endswith("/_search"):
             body = self._with_search_params(body, path.split("?", 1)[1])     # real ES reads these from the URL too
         if self.fail is not None and self.fail(method, key[1], body):   # faults match and report on the query-stripped path
@@ -383,10 +385,11 @@ class FakeCluster(FakeES):
                  fail: Callable[[str, str, Any], bool] | None = None,
                  observe: Callable[[], Any] | None = None,
                  clock: "FakeClock | None" = None, latency: dict[str, timedelta] | None = None,
-                 up: bool = True) -> None:
+                 up: bool = True, settings: dict[str, dict] | None = None) -> None:
         super().__init__(journal, fail=fail, route=self._dispatch)
         self.repo, self.snapshot, self.snapshot_uuid = repo, snapshot, snapshot_uuid
         self.content, self.stream_of, self.observe = content, dict(streams), observe
+        self.content_settings = copy.deepcopy(settings or {})   # r6.4.5: `{index: {flat setting: value}}` the snapshot holds
         self.indices: dict[str, dict] = {}
         self.repos: dict[str, Any] = {}
         self.pipelines: dict[str, dict] = {}
@@ -399,6 +402,11 @@ class FakeCluster(FakeES):
         # whatever restores the index.
         self.nested: dict[str, int] = {}
         self.mutations: list[dict] = []
+        # r6.4.5: every ingest pipeline a write ran, `(pipeline, index)`; every pipeline PUT, `(name, body)`; every
+        # document a write refused or failed, `(index, id, reason)`.
+        self.ingest_runs: list[tuple[str, str]] = []
+        self.put_pipelines: list[tuple[str, dict]] = []
+        self.refused: list[tuple[str, str, str]] = []
         self.lifecycle_deletes: list[str] = []      # the stream of every lifecycle DELETE, in order
         self.returned: list[tuple[int, str]] = []     # (request number, index) of every document a search returned
         self.restores = 0
@@ -440,7 +448,7 @@ class FakeCluster(FakeES):
     def _index(self, name: str) -> dict:
         if name not in self.indices:
             self._uuids += 1
-            self.indices[name] = {"uuid": f"uuid-{name}-{self._uuids}", "docs": {}, "closed": False}
+            self.indices[name] = {"uuid": f"uuid-{name}-{self._uuids}", "docs": {}, "closed": False, "settings": {}}
         return self.indices[name]
 
     def _note(self, kind: str, target: str) -> None:
@@ -497,7 +505,9 @@ class FakeCluster(FakeES):
                 return self._reindex(body)
             if seg[0] == "_ingest" and seg[1] == "pipeline":
                 return self._pipeline(method, seg[2] if len(seg) > 2 else None, body)
-            if any(s in path for s in ("/_refresh", "/_flush", "/_settings", "/_security", "/_cluster/settings")):
+            if seg[-1] == "_settings" or (len(seg) >= 2 and seg[-2] == "_settings"):
+                return self._settings(method, seg, body)
+            if any(s in path for s in ("/_refresh", "/_flush", "/_security", "/_cluster/settings")):
                 return ack
             if method == "DELETE" and len(seg) == 1:
                 names = self._expand(seg[0], streams=False, closed=True)
@@ -518,6 +528,8 @@ class FakeCluster(FakeES):
                 return {"count": sum(len(self.indices[n]["docs"]) for n in self._expand(seg[0]))}
             if len(seg) == 2 and seg[1] == "_search":
                 return self._search(seg[0], body or {})
+            if len(seg) == 2 and seg[1] == "_update_by_query" and method == "POST":
+                return self._update_by_query(seg[0], body or {})
             if len(seg) == 2 and seg[1] == "_delete_by_query":
                 return self._delete_by_query(seg[0], body or {})
         except FakeGap as gap:
@@ -586,6 +598,7 @@ class FakeCluster(FakeES):
         for n in names:
             self.indices.pop(n, None)
             self._index(n)["docs"] = copy.deepcopy(self.content[n])
+            self.indices[n]["settings"] = copy.deepcopy(self.content_settings.get(n, {}))
         self.restores += 1
         self._took("restore")
         return {"snapshot": {"snapshot": self.snapshot, "indices": names,
@@ -668,6 +681,7 @@ class FakeCluster(FakeES):
     def _pipeline(self, method: str, name: str | None, body: Any) -> Any:
         if method == "PUT":
             self.pipelines[name] = body or {}
+            self.put_pipelines.append((name, copy.deepcopy(body or {})))
             return {"acknowledged": True}
         if method == "DELETE":
             if name not in self.pipelines:
@@ -678,41 +692,158 @@ class FakeCluster(FakeES):
             return {n: p for n, p in self.pipelines.items() if name in (None, n)}
         raise FakeGap(f"pipeline {method}")
 
+    # -- r6.4.5: ingest, index settings, in-place rewrites ---------------------------------------------------
+
+    def _settings(self, method: str, seg: list[str], body: Any) -> Any:
+        """`GET /<index>/_settings[/<names>]?flat_settings=true` answers `{index: {"settings": {...}}}` for SET values
+        only (an index with none of the names set is absent). `PUT /<index>/_settings` (flat or nested keys) sets
+        values; a `null` removes the setting."""
+        if seg[0] == "_settings":
+            expr, names = "_all", seg[1] if len(seg) > 1 else "*"
+        else:
+            expr, names = seg[0], seg[2] if len(seg) > 2 else "*"
+        expr = "*" if expr == "_all" else expr
+        if method == "GET":
+            if self.query.get("flat_settings") != ["true"] or set(self.query) - {"flat_settings", "expand_wildcards"}:
+                raise FakeGap(f"GET _settings with query {self.query}")
+            out = {}
+            for n in self._expand(expr, closed=True):
+                held = {k: v for k, v in self.indices[n]["settings"].items()
+                        if any(fnmatch.fnmatchcase(k, w if w.startswith("index.") or w == "*" else "index." + w)
+                               for w in names.split(","))}
+                if held:
+                    out[n] = {"settings": held}
+            return out
+        if method == "PUT":
+            if self.query and set(self.query) - {"expand_wildcards"}:
+                raise FakeGap(f"PUT _settings with query {self.query}")
+
+            def flat(prefix: str, node: Any):
+                if isinstance(node, dict):
+                    for k, v in node.items():
+                        yield from flat(f"{prefix}.{k}" if prefix else k, v)
+                else:
+                    yield (prefix if prefix.startswith("index.") else "index." + prefix), node
+            changes = dict(flat("", body or {}))
+            targets = self._expand(expr, closed=True)
+            self._note("settings", expr)
+            for n in targets:
+                for k, v in changes.items():
+                    if v is None:
+                        self.indices[n]["settings"].pop(k, None)
+                    else:
+                        self.indices[n]["settings"][k] = v
+            return {"acknowledged": True}
+        raise FakeGap(f"{method} _settings")
+
+    def _ingest(self, index: str, request_pipeline: str | None, source: dict) -> dict | None:
+        """What a write into `index` does to `source`: the request's pipeline if given, else the index's
+        `index.default_pipeline` (`_none` = none), then ALWAYS the index's `index.final_pipeline` unless `_none`.
+        None = a pipeline dropped it. A pipeline the cluster does not hold fails the document (`IngestFailure`)."""
+        settings = self.indices[index]["settings"] if index in self.indices else {}
+        first = request_pipeline if request_pipeline is not None else settings.get("index.default_pipeline", "_none")
+        names = [n for n in (first, settings.get("index.final_pipeline", "_none")) if n != "_none"]
+        doc = source
+        for name in names:
+            if name not in self.pipelines:
+                raise IngestFailure(f"pipeline with id [{name}] does not exist")
+            self.ingest_runs.append((name, index))
+            try:
+                doc = run_processors(self.pipelines[name].get("processors", []), doc)
+            except RuntimeError as err:
+                raise IngestFailure(str(err)) from None
+            if doc is None:
+                return None
+        return copy.deepcopy(doc)
+
+    def _refuse(self, index: str, doc_id: str, reason: str, kind: str = "illegal_argument_exception") -> dict:
+        self.refused.append((index, doc_id, reason))
+        return {"index": index, "id": doc_id, "status": 400, "cause": {"type": kind, "reason": reason}}
+
     def _reindex(self, body: dict) -> Any:
         source, dest = body["source"], body["dest"]
         if body.get("script") or source.get("script"):
             raise FakeGap("reindex script")
         sources = source["index"] if isinstance(source["index"], str) else ",".join(source["index"])
         pipeline = dest.get("pipeline")
-        processors = None
-        if pipeline is not None:
-            if pipeline not in self.pipelines:
-                raise RuntimeError(f"pipeline with id [{pipeline}] does not exist")
-            processors = self.pipelines[pipeline].get("processors", [])
-        self._note("reindex", f"{sources}->{dest['index']}")
+        target_name = dest["index"]
+        if target_name in set(self.stream_of.values()):
+            raise FakeGap(f"reindex into the data stream [{target_name}]")
+        self._note("reindex", f"{sources}->{target_name}")
         total = created = 0
+        failures: list[dict] = []
         for n in self._expand(sources):
-            if n == dest["index"]:
+            if n == target_name:
                 raise RuntimeError("reindex cannot write into an index its reading from")
             for i, d in sorted(self.indices[n]["docs"].items()):
                 if not _matches(source.get("query"), d["_source"], i):
                     continue
                 total += 1
-                out = d["_source"] if processors is None else run_processors(processors, d["_source"])
+                if target_name in self.stream_of:      # a data stream's backing index: no direct write, per document
+                    reason = ("index request with op_type=create targeting backing indices is disallowed, target "
+                              "corresponding data stream instead" if dest.get("op_type") == "create" else
+                              "index request with op_type=index and no if_primary_term and if_seq_no set targeting "
+                              "backing indices is disallowed")
+                    failures.append(self._refuse(target_name, i, reason))
+                    break
+                try:
+                    out = self._ingest(target_name, pipeline, d["_source"])
+                except IngestFailure as err:
+                    failures.append(self._refuse(target_name, i, str(err)))
+                    break
                 if out is None:
                     continue
-                target = self._index(dest["index"])["docs"]
+                target = self._index(target_name)["docs"]
                 existing = target.get(i)
                 external = dest.get("version_type") == "external"
                 if (dest.get("op_type") == "create" and existing) or (
                         external and existing and existing["_version"] >= d["_version"]):
                     raise RuntimeError(f"version_conflict_engine_exception [{i}]")
                 version = d["_version"] if external else (existing["_version"] + 1 if existing else 1)
-                target[i] = {"_source": copy.deepcopy(out), "_version": version}
+                target[i] = {"_source": out, "_version": version}
                 created += 1
+            if failures:
+                break
         self._took("reindex")
         return {"total": total, "created": created, "updated": 0, "deleted": 0,
-                "version_conflicts": 0, "failures": []}
+                "version_conflicts": 0, "failures": failures}
+
+    def _update_by_query(self, expr: str, body: dict) -> Any:
+        """The query's documents go through the request's `pipeline` (else the index's default), then the index's
+        final pipeline, IN PLACE: `_id` and `_index` kept, `_version` + 1; a document a pipeline drops is a noop
+        (kept, not deleted). Works on a backing index."""
+        extra = set(self.query) - {"pipeline", "conflicts", "refresh", "wait_for_completion"}
+        if extra:
+            raise FakeGap(f"_update_by_query parameter {sorted(extra)}")
+        pipeline = (self.query.get("pipeline") or [None])[-1]
+        if body.get("script"):
+            raise FakeGap("_update_by_query script")
+        self._note("update_by_query", expr)
+        total = updated = noops = 0
+        failures: list[dict] = []
+        for n in self._expand(expr):
+            docs = self.indices[n]["docs"]
+            for i in [i for i, d in sorted(docs.items()) if _matches(body.get("query"), d["_source"], i)]:
+                total += 1
+                try:
+                    out = self._ingest(n, pipeline, docs[i]["_source"])
+                except IngestFailure as err:
+                    failures.append(self._refuse(n, i, str(err)))
+                    break
+                if out is None:
+                    noops += 1
+                    continue
+                docs[i] = {"_source": out, "_version": docs[i]["_version"] + 1}
+                updated += 1
+            if failures:
+                break
+        self._took("update_by_query")
+        return {"total": total, "updated": updated, "noops": noops, "deleted": 0, "version_conflicts": 0,
+                "failures": failures}
+
+
+class IngestFailure(Exception):
+    """A document an ingest pipeline fails (HTTP 400 for that document)."""
 
 
 # -- the world a snapshot holds ---------------------------------------------------------------------
@@ -806,6 +937,21 @@ ALERT_DOCS = {a["kibana.alert.uuid"]: a for a in [
 ALERT_VERSIONS = {"young": 3, "derived-in": 2}      # alerts are updated by workflow: _version is not 1
 
 
+# r6.4.5: what the snapshot holds of the pipeline settings, per index (set values only). Live, a backing index carries
+# the integration's default pipeline and `.fleet_final_pipeline-1`; the frozen cluster does not hold those pipelines
+# (restored without global state), so a write that runs one fails. A mix: both set, one set, both explicitly `_none`,
+# none (the alerts index).
+FLEET_FINAL = ".fleet_final_pipeline-1"
+WORLD_SETTINGS = {
+    DEDUP_OLD: {"index.default_pipeline": "_none", "index.final_pipeline": "_none"},
+    DEDUP: {"index.default_pipeline": "logs-system.auth-1.2.0"},
+    AUTH: {"index.default_pipeline": "logs-system.auth-1.6.4", "index.final_pipeline": FLEET_FINAL},
+    SYSLOG: {"index.default_pipeline": "logs-system.syslog-1.6.4", "index.final_pipeline": FLEET_FINAL},
+    NGINX: {"index.default_pipeline": "logs-nginx.access-1.0.0", "index.final_pipeline": FLEET_FINAL},
+    DECOY: {"index.default_pipeline": "logs-system.auth-1.6.4", "index.final_pipeline": FLEET_FINAL},
+}
+
+
 def world_content() -> dict[str, dict[str, dict]]:
     """What the snapshot holds: `{index: {id: {"_source", "_version"}}}`, flat dotted keys."""
     def event(i, minute, dataset, message, **extra):
@@ -851,15 +997,17 @@ def expected_copy(kind: str) -> dict[str, dict[str, tuple[int, dict]]]:
             if run_processors([DATA_DROP["processor"]], state[SYSLOG][i][1]) is None:
                 del state[SYSLOG][i]
     elif kind == "drift":
-        def drift(source):
+        def drift(entry):      # r6.4.5: rewritten in place by an update-by-query: the processor's change, _version + 1
+            version, source = entry
             source["source.port_no"] = source.pop("source.port")
+            return version + 1, source
 
         for i in AUTH_IN_SPAN:
-            drift(state[AUTH][i][1])
+            state[AUTH][i] = drift(state[AUTH][i])
         for i in DEDUP_IN_SPAN:
-            drift(state[DEDUP][i][1])
+            state[DEDUP][i] = drift(state[DEDUP][i])
         for u in ("young", "derived-in", "derived-dedup", "derived-dedup-pattern"):
-            drift(state[ALERTS][f"id-{u}"][1])
+            state[ALERTS][f"id-{u}"] = drift(state[ALERTS][f"id-{u}"])
     return state
 
 
@@ -919,12 +1067,12 @@ def expected_variant(mutation: dict | None, span_start: str = SPAN_START, *, ext
                 out = run_processors([mutation["processor"]], source)
                 if out is None:
                     del docs[doc_id]
-                else:
-                    docs[doc_id] = (version, out)
+                else:      # r6.4.5: a drift's rewrite reads _version + 1; a data-drop never writes a survivor
+                    docs[doc_id] = (version + (mutation["kind"] == "schema-drift"), out)
     if mutation["kind"] == "schema-drift":
         for doc_id, (version, source) in list(state[ALERTS].items()):
             if any(ancestor_reaches(a, index, event) for a in source["kibana.alert.ancestors"] for index, event in hit):
-                state[ALERTS][doc_id] = (version, run_processors([mutation["processor"]], source))
+                state[ALERTS][doc_id] = (version + 1, run_processors([mutation["processor"]], source))
     return state
 
 
@@ -1073,9 +1221,9 @@ class LabRig:
         self.cluster = FakeCluster(self.journal, repo=REPO, snapshot=SNAP, snapshot_uuid=snapshot_uuid,
                                    content=content, streams=STREAMS, fail=fail,
                                    observe=lambda: copy.deepcopy(self.marker()),
-                                   clock=self.clock, latency=latency)
+                                   clock=self.clock, latency=latency, settings=WORLD_SETTINGS)
         self.live = FakeCluster(Journal(), repo=REPO, snapshot=SNAP, snapshot_uuid=snapshot_uuid,
-                                content=content, streams=STREAMS)
+                                content=content, streams=STREAMS, settings=WORLD_SETTINGS)
         for name, docs in content.items():
             self.live._index(name)
             for doc_id, d in docs.items():

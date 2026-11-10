@@ -91,7 +91,7 @@ def _no_lab_traffic(rig):
 
 
 def _mutating(rig):
-    return [m for m in rig.cluster.mutations if m["kind"] in ("delete_by_query", "reindex")]
+    return [m for m in rig.cluster.mutations if m["kind"] in ("delete_by_query", "reindex", "update_by_query")]
 
 
 # -- a scored launch ------------------------------------------------------------------------------
@@ -223,9 +223,10 @@ def test_a_data_drop_removes_the_processors_victims_from_the_span_and_nothing_ou
     assert state[ALERTS] == expected_copy("none")[ALERTS]
 
 
-def test_a_schema_drift_rewrites_span_events_and_the_alerts_derived_from_them_keeping_versions(tmp_path):
+def test_a_schema_drift_rewrites_span_events_and_the_alerts_derived_from_them_one_version_higher(tmp_path):
     """A3/D22: in-span auth documents (both bound documents) and the alerts whose ancestry reaches
-    an in-span auth event carry the renamed field with _id and _version kept; an alert in the span by
+    an in-span auth event carry the renamed field with _id and _index kept and _version exactly one higher (r6.4.5: the in-place
+    rewrite replaces "_version kept", the named gap); an alert in the span by
     its own time but derived from an earlier event, and one derived from another dataset, are verbatim."""
     rig = LabRig(tmp_path)
     rig.write_expected_case("drift")
@@ -235,10 +236,10 @@ def test_a_schema_drift_rewrites_span_events_and_the_alerts_derived_from_them_ke
     for doc_id in AUTH_IN_SPAN:
         version, source = state[AUTH][doc_id]
         assert "source.port" not in source and source["source.port_no"] == base[AUTH][doc_id][1]["source.port"]
-        assert version == base[AUTH][doc_id][0]
-    assert state[AUTH]["auth-20"][0] == 2, "a document's _version survives the rewrite"
+        assert version == base[AUTH][doc_id][0] + 1
+    assert state[AUTH]["auth-20"][0] == 3, "a rewritten document reads one version higher (it was 2)"
     assert state[AUTH]["auth-17"] == base[AUTH]["auth-17"]
-    assert state[ALERTS]["id-young"][0] == 3 and "source.port_no" in state[ALERTS]["id-young"][1]
+    assert state[ALERTS]["id-young"][0] == 4 and "source.port_no" in state[ALERTS]["id-young"][1]
     assert state[ALERTS]["id-derived-pre"] == base[ALERTS]["id-derived-pre"]
     assert state[ALERTS]["id-syslog-alert"] == base[ALERTS]["id-syslog-alert"]
 
@@ -311,7 +312,7 @@ def test_the_copy_state_marker_is_dirty_from_before_the_first_change_until_the_v
     for entry in rig.cluster.mutations:
         marker = entry["observed"]
         assert marker is None or marker["dirty"] is True, entry
-        if entry["kind"] in ("delete_by_query", "reindex"):
+        if entry["kind"] in ("delete_by_query", "reindex", "update_by_query"):
             assert marker is not None and marker["dirty"] is True, entry
     assert is_clean_marker(rig.marker()), rig.marker()     # D25: the marker keeps the variant id and tallies
 
@@ -324,7 +325,7 @@ def test_the_launch_checks_the_copy_after_the_overlays_and_only_then_runs_the_ag
     rig.launch()
     j = rig.journal
 
-    last_overlay = max(i for i, m in enumerate(j) if m[0] == "es" and m[1][1] in ("/_reindex",)
+    last_overlay = max(i for i, m in enumerate(j) if m[0] == "es" and m[1][1] in ("/_reindex",) or m[0] == "es" and m[1][1].endswith("/_update_by_query")
                        or m[0] == "es" and m[1][1].endswith("/_delete_by_query"))
     health = rig.es_at(lambda m, p: p == "/_cluster/health")
     counts = rig.es_at(lambda m, p: p.endswith("/_count") or p.startswith("/_cat/indices"))
@@ -431,7 +432,7 @@ def test_another_variant_restores_the_whole_snapshot_leaving_no_residue_of_the_l
 def test_an_overlay_that_died_midway_leaves_a_dirty_marker_and_the_next_launch_restores_it_all(tmp_path):
     """A4: the failed launch leaves no clean marker; the next launch restores the whole snapshot
     over the half-changed copy and ends valid."""
-    rig = LabRig(tmp_path, fail=_once(lambda m, p, b: p.startswith("/_reindex")))
+    rig = LabRig(tmp_path, fail=_once(lambda m, p, b: p.endswith("/_update_by_query")))
     rig.write_expected_case("drift")
     with pytest.raises(Exception):
         rig.launch()
@@ -665,13 +666,13 @@ def test_a_restore_that_returns_other_documents_than_the_freeze_recorded_is_stal
 
 
 def _launch_failures():
-    def reindex(m, p, b):
-        return p.startswith("/_reindex")
+    def rewrite(m, p, b):      # r6.4.5: a schema-drift rewrites in place (the launch tests below use drift)
+        return p.endswith("/_update_by_query")
 
     return [
         pytest.param({"fail": lambda m, p, b: p.endswith("/_restore")}, None, "/_restore", id="restore"),
         pytest.param({"fail": lambda m, p, b: p.endswith("/_delete_by_query")}, None, "/_delete_by_query", id="base-overlay"),
-        pytest.param({"fail": reindex}, None, "/_reindex", id="fault-overlay"),
+        pytest.param({"fail": rewrite}, None, "/_update_by_query", id="fault-overlay"),
         pytest.param({}, "marker-write", None, id="marker"),
         pytest.param({}, "stub-start", None, id="stubs"),
         pytest.param({}, "node-start", None, id="node-start"),
@@ -1648,7 +1649,7 @@ def test_the_offset_is_rewritten_to_T_minus_now_as_the_last_lab_step_and_the_nod
     step = 1
     rig = LabRig(tmp_path, clock_step=step, latency={
         "restore": timedelta(minutes=6), "delete_by_query": timedelta(seconds=90),
-        "reindex": timedelta(minutes=2), "search": timedelta(seconds=5)})
+        "reindex": timedelta(minutes=2), "update_by_query": timedelta(minutes=2), "search": timedelta(seconds=5)})
     rig.write_expected_case("drift")
     rig.launch()
     run_j = rig.journal.first("run")
@@ -1680,7 +1681,7 @@ def test_a_launch_never_restarts_the_frozen_node_for_its_clock(tmp_path):
         rig.launch()
         run_j = rig.journal.last("run")
         es = [i for i, (op, _d) in enumerate(rig.journal) if op == "es" and i >= mark]
-        mutating = [i for i in es if rig.journal[i][1][1].endswith(("/_delete_by_query", "/_reindex", "/_restore"))]
+        mutating = [i for i in es if rig.journal[i][1][1].endswith(("/_delete_by_query", "/_reindex", "/_update_by_query", "/_restore"))]
         ready = max(mutating) if mutating else min(es)
         names = _node_names(rig)
         touched = [(i, d) for i, (op, d) in enumerate(rig.journal)
