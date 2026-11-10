@@ -11,6 +11,7 @@ comment (an Atlassian Document Format body), `yes` is the Jira Service Managemen
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 # Workspace root on sys.path so `defender.*` namespace imports resolve when the verb registry
@@ -24,32 +25,57 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
 from defender.kit.verbs import CaseComments, VerbContext
 from defender.kit import transport
 from defender.kit.faults import ConfigFault, TransportFault
+from defender.kit.settings import locator_of
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.kit.verbs import TenantRecord, Verb  # noqa: F401 — named by the VERBS type comment
 
 SYSTEM = "jira"
 PREFIX = "JIRA"
+DISPLAY_NAME = "Jira"
+#: A real system's adapter, not a lab stub (#1366 O2).
+EXAMPLE = False
 
 #: The transport template plus the one Jira-specific key. Required, no default.
 REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "SERVICE_DESK")
+#: No setting goes in a request path.
+PATH_KEYS: tuple[str, ...] = ()
 
 _SERVICE_DESK_VALUES = ("yes", "no")
+#: The comment route of each API, relative to the base: Service Management's request comment, and
+#: Jira Cloud's issue comment (REST v3).
+_DESK_ROUTE = ("POST", "/rest/servicedeskapi/request/*/comment")
+_CLOUD_ROUTE = ("POST", "/rest/api/3/issue/*/comment")
 #: The one page the host's read-back asks for (#1374).
 _READ_PAGE = 100
 #: Document-format nodes whose children run on one line; every other node's children are lines.
 _ADF_LINES = ("paragraph", "heading")
 
 
+def _service_desk(settings: Mapping[str, str]) -> bool:
+    """Whether the prefixed `settings` name a Service Management project, or the `ConfigFault`."""
+    value = settings.get(f"{PREFIX}_SERVICE_DESK")
+    if value not in _SERVICE_DESK_VALUES:
+        raise ConfigFault(
+            f"{PREFIX}_SERVICE_DESK must be 'yes' or 'no' (lowercase), got {value!r}")
+    return value == "yes"
+
+
+def comment_route(settings: Mapping[str, str]) -> tuple[str, str]:  # lint-dup: ok — every case-recording adapter declares its comment route under this one name (#1366 C1)
+    """The route `add_case_comment` sends (#1366 C1), from the record's prefixed `settings`: the
+    request comment of Service Management, else Jira Cloud's issue comment."""
+    return _DESK_ROUTE if _service_desk(settings) else _CLOUD_ROUTE
+
+
 def _jira_settings(tenant: TenantRecord) -> tuple[dict[str, str], bool]:
     """The system's config over the run's record and whether it is a Service Management project,
     or the `ConfigFault` for why the system is unusable."""
     config = transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
-    value = config["SERVICE_DESK"]
-    if value not in _SERVICE_DESK_VALUES:
-        raise ConfigFault(
-            f"{PREFIX}_SERVICE_DESK must be 'yes' or 'no' (lowercase), got {value!r}")
-    return config, value == "yes"
+    try:
+        desk = _service_desk(transport.record_entry(tenant, SYSTEM))
+    except ConfigFault as fault:
+        raise ConfigFault(f"{locator_of(tenant).part(SYSTEM, 'settings')}: {fault}") from None
+    return config, desk
 
 
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
@@ -77,14 +103,9 @@ def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  #
     path segment, so it cannot reshape the request. Faults are the shared classes: a 4xx is an
     `UpstreamFault` carrying the status."""
     config, service_desk = _jira_settings(ctx.tenant)
-    if service_desk:
-        path = "/rest/servicedeskapi/request/{key}/comment"
-        payload: dict = {"body": body, "public": False}
-    else:
-        path = "/rest/api/3/issue/{key}/comment"
-        payload = {"body": _adf(body)}
-    transport.host_write(ctx, SYSTEM, "POST", path, {"key": transport.CaseKey(key)}, body=payload,
-                    timeout_sec=transport.timeout_of(config))
+    payload = {"body": body, "public": False} if service_desk else {"body": _adf(body)}
+    transport.comment_write(ctx, SYSTEM, comment_route(transport.record_entry(ctx.tenant, SYSTEM)),
+                            key=key, body=payload, timeout_sec=transport.timeout_of(config))
     return _issue_link(ctx, key)
 
 

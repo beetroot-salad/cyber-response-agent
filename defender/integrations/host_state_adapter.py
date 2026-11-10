@@ -37,8 +37,14 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 
 SYSTEM = "host-state"
 PREFIX = "HOST_STATE"
-#: host-state reads no config.env key: its base is its declaration's, its timeouts constants.
+#: host-state reads no settings key: its base is its declaration's, its timeouts constants.
 REQUIRED_CONFIG_KEYS: tuple[str, ...] = ()
+#: No setting goes in a request path.
+PATH_KEYS: tuple[str, ...] = ()
+#: The system's name in the catalog listing (#1366 O2).
+DISPLAY_NAME = "Host state (lab)"
+#: A lab stub (#1366 O2): an example adapter, not a real system's.
+EXAMPLE = True
 DEFAULT_TIMEOUT_SEC = 15
 PACKAGES_TIMEOUT_SEC = 30
 HEALTH_TIMEOUT_SEC = 10

@@ -18,11 +18,19 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 
 SYSTEM = "threat-intel"
 PREFIX = "THREAT_INTEL"
+#: The system's name in the catalog listing (#1366 O2).
+DISPLAY_NAME = "Threat intelligence (lab)"
+#: A lab stub (#1366 O2): an example adapter, not a real system's.
+EXAMPLE = True
+#: The keys its settings hold (prefix stripped): the transport's template, required, no default.
+REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE,)
+#: No setting goes in a request path.
+PATH_KEYS: tuple[str, ...] = ()
 VERDICTS = ("benign", "suspicious", "malicious", "unknown")
 
 
 def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
-    return transport.load_config(ctx, SYSTEM, PREFIX)
+    return transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
 
 
 def _timeout(ctx: VerbContext) -> int:  # lint-dup: ok — per-module alias over the shared transport.timeout_of
@@ -33,7 +41,7 @@ def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adap
     """This system's settings check (#1256 O-5): every `ConfigFault` a verb here can raise —
     `_config`'s keys and the access declaration — raised over the run's record, or None when
     the system is usable."""
-    transport.check_settings_of(tenant, SYSTEM, PREFIX)
+    transport.check_settings_of(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
 
 
 def health_check(ctx: VerbContext) -> dict:

@@ -4,7 +4,9 @@ reads `config.env` from disk stays in `tenancy.tenant_settings`."""
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Literal, Protocol
 
 from defender.kit.faults import ConfigFault
 
@@ -37,6 +39,79 @@ def pointer_to(rel: str) -> str:
 def config_pointer(system: str) -> str:
     """`pointer_to` for `system`'s `config.env`."""
     return pointer_to(f"systems/{system}/config.env")
+
+
+#: The two parts of a system's record a fault can be about (#1366 DC6): its settings and its
+#: access declaration.
+Part = Literal["settings", "access"]
+
+#: The file each part was held in, in a folder of the retired layout or a connect handoff.
+PART_FILES: Mapping[str, str] = MappingProxyType({"settings": "config.env", "access": "access.yaml"})
+
+
+class Locator(Protocol):
+    """How a fault names where the thing at fault is held (#1366 DC6): a stored record names the
+    record ("system cmdb settings"), a folder handed in (the import's export, connect's handoff)
+    names the file. Every settings fault an adapter or the record judgement raises asks the
+    locator of the tenant record it judges, so one judgement prints one sentence in both places
+    and only the locator differs."""
+
+    def system(self, system: str) -> str:
+        """The whole of `system`'s record or folder."""
+        ...
+
+    def part(self, system: str, part: Part) -> str:
+        """`system`'s settings or its access declaration."""
+        ...
+
+    def case(self) -> str:
+        """The tenant's case record."""
+        ...
+
+
+@dataclass(frozen=True)
+class RecordLocator:
+    """The locator of a tenant's stored records: `system <s>`, `system <s> settings`, `system <s>
+    access`, `the case record`. The default of every tenant record that carries none."""
+
+    def system(self, system: str) -> str:
+        return f"system {system}"
+
+    def part(self, system: str, part: Part) -> str:
+        return f"system {system} {part}"
+
+    def case(self) -> str:
+        return "the case record"
+
+
+@dataclass(frozen=True)
+class FolderLocator:
+    """The locator of a settings folder of the retired layout (`<shown>systems/<s>/config.env`,
+    `<shown>case-record.yaml`): the import's candidate, read from the tenant's published export,
+    names the file an operator fixes there. `shown` is how the folder is named, never a host path
+    unless the caller means one (connect's handoff names the folder it was given)."""
+
+    shown: str = SETTINGS_POINTER
+
+    def system(self, system: str) -> str:
+        return f"{self.shown}systems/{system}/"
+
+    def part(self, system: str, part: Part) -> str:
+        return f"{self.shown}systems/{system}/{PART_FILES[part]}"
+
+    def case(self) -> str:
+        return f"{self.shown}case-record.yaml"
+
+
+#: The stored records' locator (`RecordLocator`), shared.
+RECORDS: Locator = RecordLocator()
+
+
+def locator_of(tenant: object) -> Locator:
+    """The locator a tenant record carries (`tenant.locator`), else the stored records' one: every
+    tenant a run or a judgement holds is built from records (#1366 R10)."""
+    found = getattr(tenant, "locator", None)
+    return found if found is not None else RECORDS
 
 
 def is_blank(value: str) -> bool:
@@ -77,12 +152,19 @@ def system_prefix(system: str) -> str:
 
 __all__ = [
     "NOT_CONFIGURED",
+    "PART_FILES",
     "PLACEHOLDER",
+    "RECORDS",
     "SETTINGS_POINTER",
     "ConfigAbsent",
+    "FolderLocator",
+    "Locator",
+    "Part",
+    "RecordLocator",
     "SystemConfig",
     "config_pointer",
     "is_blank",
+    "locator_of",
     "pointer_to",
     "system_prefix",
 ]
