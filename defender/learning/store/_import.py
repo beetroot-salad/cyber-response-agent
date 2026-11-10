@@ -528,6 +528,8 @@ async def import_learning_state(store: LearningStore, tid: str, root: Path, *, d
 
 async def _write(store: LearningStore, tid: str, batches: list[_Batch], items: list[_Item],
                  commits: list[_Commit]) -> None:
+    """One transaction. A commit row is linked to the imported batch that shares its branch (so the revert lookup and
+    the merge reading see an open PR's history as theirs); history whose batch is not imported has no batch."""
     tenant = TenantId(tid)
     async with store._sessions.begin() as s:
         await store._require_active(s, tid)
@@ -546,7 +548,7 @@ async def _write(store: LearningStore, tid: str, batches: list[_Batch], items: l
         for c in commits:
             row_id = str(uuid.uuid4())
             await s.execute(_C.insert().values(
-                id=row_id, tenant_id=tenant, batch_id=None, commit=c.commit, branch=c.branch, base=c.base,
+                id=row_id, tenant_id=tenant, batch_id=ids.get(c.branch), commit=c.commit, branch=c.branch, base=c.base,
                 start=c.start, reverts=c.reverts, created_at=func.clock_timestamp()))
             for ordinal, (path, before, after) in enumerate(c.changes):
                 await s.execute(_CC.insert().values(commit_row=row_id, ordinal=ordinal, tenant_id=tenant, path=path,

@@ -121,6 +121,13 @@ class Outcome:
         attempt forgiven), and at the ceiling it is dead."""
         return cls("declined")
 
+    @classmethod
+    def kept(cls) -> Outcome:
+        """The curator took the item into the batch's commit: it stays in the batch until the PR is decided. The
+        lead lane names its kept items this way, so that an item it does not name goes back to waiting (P3); the
+        store applies it as no change."""
+        return cls("kept")
+
 
 Outcomes = Mapping[tuple[str, str], Outcome]
 
@@ -229,6 +236,14 @@ def _refuse_nul(value: Any) -> None:
         raise ItemRefused("a NUL character cannot be stored")
 
 
+def _refuse_unkeyed(row: Mapping[str, Any]) -> None:
+    """A finding's key is its `finding_id` as the judge made it: a string with something in it. A missing, null,
+    numeric or empty one would be keyed `'None'`, `'5'` or `''`, and a later row could collide with the made-up key."""
+    key = row.get("finding_id")
+    if not isinstance(key, str) or not key.strip():
+        raise ItemRefused(f"a finding row carries no string finding_id (got {key!r})")
+
+
 def _superseded(item: Any) -> Any:
     """The test that a request returning to waiting has a fresher one waiting for its case."""
     other = _I.alias()
@@ -299,11 +314,12 @@ class LearningStore:
             raise ValueError(f"not a findings kind: {kind}")
         for row in rows:
             _refuse_nul(row)
+            _refuse_unkeyed(row)
         added = 0
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
             for row in rows:
-                added += await self._insert_item(s, tenant, kind, str(row["finding_id"]), dict(row), source_run=run_id)
+                added += await self._insert_item(s, tenant, kind, row["finding_id"], dict(row), source_run=run_id)
         return added, len(rows) - added
 
     async def add_pitfall(self, tenant: str, row: Mapping[str, Any]) -> bool:
@@ -568,6 +584,15 @@ class LearningStore:
             await self._give_back(s, held.tenant_id, row, forgive=True, hold=False)
             await self._end(s, held.batch_id, "abandoned", reason="stopped", token=held.token + 1)
 
+    async def abandon_crashed(self, held: Held) -> None:
+        """The holder's own crash with nothing on any branch: the batch ends abandoned and its items return as a recovery
+        abandon returns them (the attempt counted; held for a person at the ceiling, never dead), without waiting for
+        the lease to lapse."""
+        async with self._sessions.begin() as s:
+            row = await self._guard(s, held)
+            await self._give_back(s, held.tenant_id, row, forgive=False, hold=False)
+            await self._end(s, held.batch_id, "abandoned", reason="its holder crashed", token=held.token + 1)
+
     async def expire_own(self, held: Held) -> None:
         """A clean stop that leaves commits on the branch: end the lease now so a takeover need not wait for it."""
         async with self._sessions.begin() as s:
@@ -681,6 +706,8 @@ class LearningStore:
         named = dict(outcomes)
         for (kind, key), out in named.items():
             where = [*mine, _I.c.kind == kind, _I.c.item_key == key]
+            if out.name == "kept":
+                continue
             if out.name == "waiting":
                 values: dict[str, Any] = self._waiting()
             elif out.name == "deferred":
@@ -738,8 +765,14 @@ class LearningStore:
         if hold:
             await s.execute(update(_I).where(*mine).values(status="held", reason=reason, updated_at=func.now()))
         elif row.replaces is not None and row.phase == "working":
-            await s.execute(update(_I).where(*mine).values(batch_id=row.replaces, attempts=attempts,
-                                                           updated_at=func.now()))
+            # Back to the batch it replaces, still due; but the claim counted an attempt, and an item at the ceiling
+            # is held where it is for a person, so a replacement that keeps failing cannot be claimed without bound (O7).
+            ceiling = false() if forgive else _I.c.attempts >= self.max_attempts
+            await s.execute(update(_I).where(*mine).values(
+                status=case((ceiling, "held"), else_=_I.c.status),
+                reason=case((ceiling, f"reached the attempt ceiling ({self.max_attempts})"), else_=_I.c.reason),
+                batch_id=case((ceiling, _I.c.batch_id), else_=row.replaces), attempts=attempts,
+                updated_at=func.now()))
         elif forgive:
             await s.execute(update(_I).where(*mine).values(**_to_waiting(), attempts=attempts, updated_at=func.now()))
         else:
