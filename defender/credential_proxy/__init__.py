@@ -24,6 +24,9 @@ if TYPE_CHECKING:
     from defender.credential_proxy._credentials import (
         CredentialSet as CredentialSet,
     )
+    from defender.credential_proxy._helper_pass import (
+        helper_access as helper_access,
+    )
     from defender.credential_proxy._launcher import (
         TenantRequestSigner as TenantRequestSigner,
         request_signer as request_signer,
@@ -47,6 +50,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("PROXY_PATH", "ProxyDeps", "create_app", "create_app_from_config",), "_app"),
     **dict.fromkeys(("AUDIT_KEYS", "FileAuditSink",), "_audit"),
     **dict.fromkeys(("CredentialSet",), "_credentials"),
+    **dict.fromkeys(("helper_access",), "_helper_pass"),
     **dict.fromkeys(("TenantRequestSigner", "request_signer", "signing_access",), "_launcher"),
     **dict.fromkeys(("OpenBaoSecrets", "OpenBaoStore", "TransitVerifier", "store_policies", "transit_key_for",), "_openbao"),
     **dict.fromkeys(("PASS_LIFETIME_SEC", "PASS_REUSE_MARGIN_SEC", "mint_request_token",), "_tokens"),

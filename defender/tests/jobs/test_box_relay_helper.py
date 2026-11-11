@@ -265,6 +265,64 @@ def test_a4_box_stop_that_cannot_be_proven_is_a_teardown_fault_with_a_reason(sce
     assert seen["answer"]["reason"]
 
 
+# --- A4: a lane's windows over the relay (`box.halt`, `box.window`) -----------------------------------------------------
+
+def test_a4_box_halt_stops_the_box_proven_and_keeps_it_for_a_later_window(scene):
+    """`box.halt` is `docker stop -t 0` with the status as proof, and leaves the box to the job: no removal, and a later
+    `box.stop` still asks the daemon. Control: a halt the daemon cannot prove is a fault with a reason."""
+    docker = R.RelayDocker()
+    seen: dict = {}
+
+    def removals() -> int:
+        return len([c for c in docker.calls if c[1:3] == ["rm", "-f"]])
+
+    def asks(c, h, got):
+        docker.put("exited")
+        seen["halt"] = c.request("box.halt", handle=h)
+        seen["removed_after_halt"] = removals()
+        seen["stop"] = c.request("box.stop", handle=h)
+        seen["halt_after_stop"] = c.request("box.halt", handle=h)
+        seen["window_after_stop"] = c.request("box.window", handle=h)
+
+    _run(scene, docker, asks)
+    assert seen["halt"] == R.STOPPED
+    assert seen["removed_after_halt"] == 0, "box.halt removed the box the job keeps for its next window"
+    assert seen["stop"] == R.STOPPED
+    assert seen["halt_after_stop"] == R.STOPPED, "a removed box's halt is its removal's proof"
+    assert seen["window_after_stop"]["result"] == "fault", "a removed box was started for a window"
+
+    broken = R.RelayDocker()
+
+    def unproven(c, h, got):
+        broken.put("running")
+        seen["unproven"] = c.request("box.halt", handle=h)
+
+    _run(scene, broken, unproven)
+    assert seen["unproven"]["result"] == "fault", seen["unproven"]
+    assert seen["unproven"]["reason"]
+
+
+def test_a4_box_window_on_a_box_that_is_not_stopped_is_a_fault_and_the_box_is_halted(scene):
+    """A window starts only a stopped (`exited`) box, as a daemon-backed lane's window does: on a running box `box.window`
+    answers a fault naming its status, and the helper stops the box best-effort."""
+    docker = R.RelayDocker()
+    seen: dict = {}
+
+    def stops() -> int:
+        return len([c for c in docker.calls if c[1:2] == ["stop"] and "-t" in c])
+
+    def asks(c, h, got):
+        docker.put("running")
+        before = stops()
+        seen["window"] = c.request("box.window", handle=h)
+        seen["stopped"] = stops() - before
+
+    _run(scene, docker, asks)
+    assert seen["window"]["result"] == "fault", seen["window"]
+    assert "'running'" in seen["window"]["reason"]
+    assert seen["stopped"] == 1
+
+
 # --- B10: the run box's attached starter lives in the helper ------------------------------------------------------------
 
 def test_b10_the_run_boxs_attached_starter_is_held_by_the_helper_and_ends_when_the_helper_does(scene):

@@ -2,8 +2,10 @@
 
 The per-job host helper holds the daemon, so it classifies each exchange where the daemon is and answers the job's
 `box.exec` with one word: `ok` (the command's frame, or the kill line when the in-box helper was killed), `output-limit`,
-`timeout`, or `lost` with its class; and the job's `box.stop` with proof the box stopped, or a fault with the reason. The
-job's executor (`RelayTransport`, `_spec.py`) keeps the refusal latch, readmit, the run clock and the typed endings.
+`timeout`, or `lost` with its class; the job's `box.stop` (remove the box) and `box.halt` (stop it, kept for a later
+window) with proof the box stopped, and `box.window` (start the stopped box for one window, its attached start held
+here) with proof it runs, or a fault with the reason. The job's executor (`RelayTransport`, `_spec.py`) keeps the
+refusal latch, readmit, the run clock and the typed endings.
 
 A clean frame is the result whatever its code (no status asked); the output fence is `output-limit`; otherwise the
 status is asked once and the exchange is classified by the one rule the job's own executor uses (`classify_unframed`):
@@ -32,6 +34,7 @@ OUTPUT_LIMIT: dict[str, Any] = {"result": "output-limit"}
 TIMEOUT: dict[str, Any] = {"result": "timeout"}
 RELAY_LOST: dict[str, Any] = {"result": "lost", "class": TRUNCATED_BY_BOX_LOST}
 STOPPED: dict[str, Any] = {"result": "stopped"}
+OPENED: dict[str, Any] = {"result": "open"}
 
 
 def relay_exec(box: BoxExecutor, docker: DockerFn, frame: bytes, *, cwd: str, timeout: float) -> dict[str, Any]:
@@ -67,13 +70,34 @@ def relay_exec(box: BoxExecutor, docker: DockerFn, frame: bytes, *, cwd: str, ti
     return dict(RELAY_LOST)
 
 
-def relay_stop(box: BoxExecutor, docker: DockerFn) -> dict[str, Any]:
+def relay_window(runs: BoxRuns) -> dict[str, Any]:
+    """Open one window on a box this helper started (`box.window`): `runs` (the helper's own handle on it, which holds
+    the attached start until the window's `relay_halt` or the helper's end) starts the stopped box attached and proves
+    it running. Answers `open`, or `fault` with the reason."""
+    try:
+        runs.open_window()
+    except BoxFault as refused:
+        return {"result": "fault", "reason": str(refused)}
+    return dict(OPENED)
+
+
+def relay_halt(runs: BoxRuns) -> dict[str, Any]:
+    """Stop a box this helper started and keep it for a later window (`box.halt`), proven, ending the window `runs`
+    holds. Answers `stopped`, or `fault` with the reason."""
+    try:
+        runs.stop()
+    except BoxFault as unproven:
+        return {"result": "fault", "reason": str(unproven)}
+    return dict(STOPPED)
+
+
+def relay_stop(box: BoxExecutor, docker: DockerFn, runs: BoxRuns | None = None) -> dict[str, Any]:
     """Stop `box`, proven, then remove it and end its attached start. The proof is the box showing stopped after
     `docker stop -t 0` (`BoxRuns.stop`), or, failing that, the box gone once removed (`docker rm -f`), asked of a
     daemon that must answer: a removed box runs nothing, as the job's own `stop_box` takes it. Answers `stopped`, or
     `fault` with the reason when neither proof holds."""
     try:
-        BoxRuns(box).stop()
+        (runs if runs is not None else BoxRuns(box)).stop()
     except BoxFault as unproven:
         try:
             stop_box(box, docker=docker)

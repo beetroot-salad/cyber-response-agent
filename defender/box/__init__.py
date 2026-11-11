@@ -135,7 +135,7 @@ from ._docker import (
     resolve_rootfs,
 )
 from ._host_env import provider_scrubbed_environ, run_env
-from ._relay import RELAY_LOST, relay_exec, relay_stop
+from ._relay import RELAY_LOST, relay_exec, relay_halt, relay_stop, relay_window
 from ._clock import clock_dir
 from ._lifecycle import (
     _check_mount_sentinel,
@@ -286,8 +286,10 @@ __all__ = [
     "re",
     "read_text_soft",
     "relay_exec",
+    "relay_halt",
     "relay_start",
     "relay_stop",
+    "relay_window",
     "require_image",
     "resolve_rootfs",
     "run_lane_sources",

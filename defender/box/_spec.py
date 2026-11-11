@@ -397,15 +397,12 @@ class BoxExecutor:
         self._refusing = ending.exit_class
         _logger.error(f"the box {self.name} ended the run ({ending.exit_class}) while running "
                       f"{command!r}")
-        # The lifecycle owns the daemon and proof that every box process has stopped; a relayed box's proof is its
-        # helper's (`box.stop`).
+        # The box's own lifecycle proves every box process has stopped: its daemon's, or for a relayed box its
+        # helper's (`box.halt`).
         from ._lifecycle import BoxRuns
 
         try:
-            if isinstance(self.transport, RelayTransport):
-                self.transport.stop()
-            else:
-                BoxRuns(self).stop()
+            BoxRuns(self).stop()
         except Exception as cleanup:
             ending.add_note(f"could not confirm the box stopped: {cleanup}")
             raise ending from cleanup
@@ -490,18 +487,36 @@ class RelayTransport:
         """The helper's answer to one frame: the command's timeout goes as given (the executor's own; no ceiling)."""
         return self.request("box.exec", handle=self.handle, frame=frame, cwd=str(cwd), timeout=timeout)
 
-    def stop(self) -> None:
-        """Stop the box through its helper, proven: `BoxFault` (the helper's reason, or why it could not be asked)
-        unless the helper answers `stopped`."""
+    # The box's lifecycle (`_lifecycle.BoxLifecycle`), each step asked of the helper that holds its daemon.
+
+    @property
+    def managed(self) -> bool:
+        return True
+
+    def halt(self) -> None:
+        """Stop the box, proven, and keep it for a later window (`box.halt`): the helper stops it and ends the window it
+        holds. `BoxFault` (the helper's reason, or why it could not be asked) unless the helper answers `stopped`."""
+        self._proven("box.halt", "stopped", ask="stop", proof="stopped")
+
+    def open_window(self, hold: Callable[[subprocess.Popen[bytes]], None]) -> None:  # noqa: ARG002 — the helper holds it
+        """Start the stopped box for one window (`box.window`): the helper starts it attached and holds the attached
+        start until the window's `halt`, or its own end. `BoxFault` unless the helper answers `open`."""
+        self._proven("box.window", "open", ask="start", proof="running")
+
+    def teardown(self) -> None:
+        """Remove the box for good (`box.stop`): `BoxFault` unless the helper answers `stopped`."""
+        self._proven("box.stop", "stopped", ask="stop", proof="stopped")
+
+    def _proven(self, request: str, word: str, *, ask: str, proof: str) -> None:
         try:
-            answer = self.request("box.stop", handle=self.handle)
-        except Exception as unreached:  # noqa: BLE001 — a stop that cannot be asked is a stop not proven
-            raise BoxFault(f"could not ask the helper to stop the box {self.handle}: "
+            answer = self.request(request, handle=self.handle)
+        except Exception as unreached:  # noqa: BLE001 — a step that cannot be asked is a step not proven
+            raise BoxFault(f"could not ask the helper to {ask} the box {self.handle}: "
                            f"{type(unreached).__name__}: {unreached}") from unreached
-        if isinstance(answer, dict) and answer.get("result") == "stopped":
+        if isinstance(answer, dict) and answer.get("result") == word:
             return
         reason = answer.get("reason") if isinstance(answer, dict) else None
-        raise BoxFault(f"the helper could not prove the box {self.handle} stopped: {reason or answer!r}")
+        raise BoxFault(f"the helper could not prove the box {self.handle} {proof}: {reason or answer!r}")
 
 
 @dataclass(frozen=True)

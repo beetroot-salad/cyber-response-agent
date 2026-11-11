@@ -13,7 +13,10 @@ from __future__ import annotations
 import base64
 import functools
 import json
+import logging
 import math
+import os
+import signal
 import socket as _socket
 import struct
 import threading
@@ -23,8 +26,8 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
-    "IMAGE_ENV", "JOB_LABEL", "MAX_MESSAGE", "SOCKET_ENV", "PassHolder", "Refused", "ask", "from_environ",
-    "read_message", "write_message",
+    "FORGE_TOKEN_CAP", "IMAGE_ENV", "JOB_LABEL", "MAX_MESSAGE", "SOCKET_ENV", "PassHolder", "Refused", "ask",
+    "from_environ", "read_message", "sigterm_on_stdin_eof", "write_message",
 ]
 
 #: The in-container variable naming the job socket's path (the same path inside and on the host: the socket's folder is
@@ -35,6 +38,10 @@ SOCKET_ENV = "DEFENDER_JOB_SOCKET"
 JOB_LABEL = "defender.job"
 #: The setting naming the job container's image (#1170 A7).
 IMAGE_ENV = "DEFENDER_JOB_IMAGE"
+
+#: The longest validity a forge token is asked for and minted (C25: the network timeout, 120 s, plus 30 s of skew): the
+#: container clamps its ask to it and the helper refuses past it.
+FORGE_TOKEN_CAP = 150.0
 
 #: The largest message either side reads: a box frame is at most the box output limit (64 MiB), base64 adds a third.
 MAX_MESSAGE = 96 * 1024 * 1024
@@ -160,3 +167,24 @@ class PassHolder:
                 answer = self._ask("pass", id=self._ident)
                 self._held = (str(answer["token"]), float(answer["expires_at"]))
             return self._held[0]
+
+
+def sigterm_on_stdin_eof() -> threading.Thread:
+    """The container's death tie (#1170 A5): the per-job host helper holds this process's stdin, so at its end (EOF,
+    or a stdin that cannot be read) this process is sent SIGTERM and its entry unwinds exactly as on the helper's stop.
+    Read on a daemon thread, so the entry never waits on it; whatever arrives on stdin before the end is discarded.
+    Only a container process's own entry point calls this (never an in-process caller, whose stdin is not the
+    helper's)."""
+
+    def watch() -> None:
+        try:
+            while os.read(0, 65536):
+                pass
+        except OSError as unreadable:
+            logging.getLogger(__name__).warning(
+                "the job container's stdin cannot be read (%r); ending as on SIGTERM", unreadable)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    thread = threading.Thread(target=watch, name="stdin-eof", daemon=True)
+    thread.start()
+    return thread

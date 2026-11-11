@@ -7,28 +7,27 @@ answers the rest over the job socket (`job_socket`). This module is that side's 
 
 - `JobContainer.of(environ, ...)`: the job's client and its `launch` facts; `NotInContainer` outside a job container
   (a host shell: the entry then does nothing, A6);
-- `JobContainer.access(id)`: a read pass for an id the helper minted, held by `job_socket.PassHolder` and asked
-  afresh whenever the one held is within the reuse margin (O5, O6: no single long pass);
+- `JobContainer.access(id)`: a read pass for an id the helper minted (`credential_proxy.helper_access`, the
+  investigation entry's too): asked afresh within the reuse margin (O5, O6: no single long pass), and a refusal or a
+  helper that is gone the asking call's `AdapterFault`;
 - `JobContainer.box(kind, id)`: a box the helper starts (O9: the request names a kind and an id, never a path);
 - `JobContainer.materialised_export(commit)`: the export of a commit, materialised by the helper (the container
   writes no export and takes no knowledge lock, P-A);
 - `JobContainer.records()` / `.forge_credential()`: the post-step's drain's tenant records (its publish outcomes
   written by the helper, `record.*`) and forge credential (tokens minted by the helper, `forge.token`), so the drain
   runs unchanged with no database login and no forge login (O3, O4);
-- `sigterm_on_stdin_eof()`: the container's death tie (A5): the helper holds the container's stdin, so its end is
-  this process's SIGTERM."""
+- `sigterm_on_stdin_eof()`: the container's death tie (A5), `job_socket`'s, re-exported for learning's entries."""
 from __future__ import annotations
 
 import logging
 import os
-import signal
-import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from defender import job_socket
-from defender.credential_proxy import PASS_REUSE_MARGIN_SEC
+from defender.job_socket import sigterm_on_stdin_eof
+from defender.credential_proxy import helper_access
 from defender.kit.access import RequestAccess
 
 _logger = logging.getLogger(__name__)
@@ -94,8 +93,7 @@ class JobContainer:
         again within the margin); None when the helper's launch facts name no proxy (an empty grant)."""
         if self.proxy_url is None:
             return None
-        held = job_socket.PassHolder(self.ask, str(ident), margin=PASS_REUSE_MARGIN_SEC)
-        return RequestAccess(self.proxy_url, held.token)
+        return helper_access(self.ask, str(ident), self.proxy_url)
 
     def box(self, kind: str, ident: str) -> Any:
         """A box of `kind` for `ident`, started by the helper (`box.relay_start`); a refusal is the box's `BoxFault`."""
@@ -125,20 +123,16 @@ class JobContainer:
         return _SocketForgeCredential(self.ask, str(self.launch.get("tenant")))
 
 
-#: The longest validity the helper mints a forge token for (C25).
-FORGE_TOKEN_CAP = 150.0
-
-
 @dataclass(frozen=True)
 class _SocketForgeCredential:
     """The tenant's forge credential inside the container (O4): each token asked of the helper (`forge.token`),
-    for at most `FORGE_TOKEN_CAP` seconds; the helper holds the forge login."""
+    for at most `job_socket.FORGE_TOKEN_CAP` seconds; the helper holds the forge login."""
 
     ask: Callable[..., dict[str, Any]] = field(repr=False)
     tenant_id: str
 
     def token(self, *, min_validity: float = 0.0) -> str:
-        return str(self.ask("forge.token", min_validity=min(float(min_validity), FORGE_TOKEN_CAP))["token"])
+        return str(self.ask("forge.token", min_validity=min(float(min_validity), job_socket.FORGE_TOKEN_CAP))["token"])
 
     def close(self) -> None:
         return None
@@ -187,21 +181,3 @@ class _SocketRecords:
 
     async def close(self) -> None:
         return None
-
-
-def sigterm_on_stdin_eof() -> threading.Thread:
-    """Watch this process's stdin, the per-job host helper's end of the container (A5): at its end (EOF, or a stdin
-    that cannot be read) send this process SIGTERM, so the entry unwinds exactly as on the helper's stop. Only a
-    process's own entry point calls this (never an in-process caller, whose stdin is not the helper's)."""
-
-    def watch() -> None:
-        try:
-            while os.read(0, 65536):
-                pass
-        except OSError as unreadable:
-            _logger.warning(f"the job container's stdin cannot be read ({unreadable!r}); ending as on SIGTERM")
-        os.kill(os.getpid(), signal.SIGTERM)
-
-    thread = threading.Thread(target=watch, name="stdin-eof", daemon=True)
-    thread.start()
-    return thread

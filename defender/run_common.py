@@ -242,17 +242,8 @@ def visualize(run: Run, *, tenant: tenancy.Tenant, update_ticket: bool = False, 
         raise VisualizeFailed("the renderer could not be loaded") from e
     if mirror:
         vr.publish_page(run, tenant=tenant, update_ticket=update_ticket)
-        return
-    try:
-        page = vr.render_page(run, update_ticket=update_ticket)
-    except Exception as e:
-        raise VisualizeFailed(f"the page for {run.run_dir} could not be rendered") from e
-    record = run.observability.runtime_html
-    try:
-        record.write(page)
-    except Exception as e:
-        raise VisualizeFailed(f"the page record {record.path} could not be saved") from e
-    _logger.info("saved the run page as %s", record.path)
+    else:
+        vr.save_page(run, update_ticket=update_ticket)
 
 
 def cross_check_tables(run_dir: Path) -> None:

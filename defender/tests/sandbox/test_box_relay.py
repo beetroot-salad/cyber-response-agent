@@ -1,5 +1,6 @@
 """#1170 A4: the job-side box over the relay. A box reached over the job socket is sandboxed by construction, every command goes over
-the relay, and each of the helper's answers becomes today's typed ending (#1421); the stop goes through `box.stop`. Fakes enter at
+the relay, and each of the helper's answers becomes today's typed ending (#1421); an ending's stop goes through `box.halt` (the box kept for a later window, as the operator lane's
+ending keeps it), its teardown through `box.stop`. Fakes enter at
 the job's socket client (`ScriptedHelper`); the helper's own classification is `jobs/test_box_relay_helper.py`."""
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from defender.tests.support.jobs._box_relay import (
     LOST,
     OUTPUT_LIMIT,
     STOP_FAULT,
+    WINDOW_FAULT,
     TIMEOUT,
     ScriptedHelper,
     ok,
@@ -86,7 +88,7 @@ def test_a4_a_command_s_own_exit_inside_the_frame_is_its_result_whatever_the_cod
     """Control for the kill line: only the helper's own `ok` kill line is the killed result, a frame's code is the command's. (A4)"""
     helper = ScriptedHelper(ok(rc, b"o\n", b"e\n"))
     assert _ask(relay_executor(helper)) == box.BoxResult(rc=rc, out=b"o\n", err=b"e\n")
-    assert helper.asked("box.stop") == []
+    assert helper.asked("box.halt") == []
 
 
 @pytest.mark.parametrize("value", [0.5, 7.25, 120, 901, 3600, 86400.5])
@@ -103,7 +105,7 @@ def test_a4_the_helper_s_kill_line_is_a_result_the_run_goes_on_from_and_the_box_
     executor = relay_executor(helper)
     assert _ask(executor) == box.BoxResult(rc=-9, out=b"", err=KILLED_LINE)
     assert _ask(executor).out == b"next\n"
-    assert helper.asked("box.stop") == []
+    assert helper.asked("box.halt") == []
 
 
 def test_a4_a_timeout_answer_is_the_timeout_and_the_box_stays_usable():
@@ -114,7 +116,7 @@ def test_a4_a_timeout_answer_is_the_timeout_and_the_box_stays_usable():
         with pytest.raises(subprocess.TimeoutExpired):
             _ask(executor)
     assert len(helper.asked("box.exec")) == 2
-    assert helper.asked("box.stop") == []
+    assert helper.asked("box.halt") == []
 
 
 @pytest.mark.parametrize(("answer", "ending", "word"), [
@@ -122,18 +124,18 @@ def test_a4_a_timeout_answer_is_the_timeout_and_the_box_stays_usable():
     (LOST, box.BoxLost, TRUNCATED_BY_BOX_LOST),
 ], ids=["output-limit", "lost"])
 def test_a4_an_ending_answer_raises_its_typed_ending_stops_the_box_through_the_relay_and_refuses_every_later_command(answer, ending, word):
-    """The ending's class, one `box.stop` for the handle, and no further `box.exec`. (A4, #1421 O8)"""
+    """The ending's class, one `box.halt` for the handle, and no further `box.exec`. (A4, #1421 O8)"""
     helper = ScriptedHelper(answer, ok(0, b"must not run\n"))
     executor = relay_executor(helper)
     with pytest.raises(ending) as first:
         _ask(executor)
     assert first.value.exit_class == word
-    assert helper.asked("box.stop") == [{"handle": HANDLE}]
+    assert helper.asked("box.halt") == [{"handle": HANDLE}]
     for _ in range(2):
         with pytest.raises(ending):
             _ask(executor)
     assert len(helper.asked("box.exec")) == 1, "a refused box was asked to run another command"
-    assert len(helper.asked("box.stop")) == 1
+    assert len(helper.asked("box.halt")) == 1
 
 
 def test_a4_readmit_lifts_a_lost_box_s_refusal_but_not_the_output_limit_s():
@@ -208,12 +210,12 @@ def test_a4_an_ok_answer_whose_frame_does_not_decode_is_a_lost_box_like_any_othe
     with pytest.raises(box.BoxLost) as first:
         _ask(executor)
     assert first.value.exit_class == TRUNCATED_BY_BOX_LOST
-    assert helper.asked("box.stop") == [{"handle": HANDLE}]
+    assert helper.asked("box.halt") == [{"handle": HANDLE}]
     for _ in range(2):
         with pytest.raises(box.BoxLost):
             _ask(executor)
     assert len(helper.asked("box.exec")) == 1, "a box whose answer could not be read was asked to run another command"
-    assert len(helper.asked("box.stop")) == 1
+    assert len(helper.asked("box.halt")) == 1
 
 
 def test_a4_a_stop_the_helper_proves_returns_and_one_it_cannot_is_a_teardown_fault():
@@ -251,7 +253,7 @@ def test_a4_the_scrub_gate_over_a_relay_box_walks_the_tree_only_when_the_helper_
 
 
 def test_o11_a_box_exec_the_helper_refuses_is_a_lost_box_with_todays_class_and_the_box_is_stopped_once():
-    """The helper's refusal (`job_host.Refused`) of a command is no result: the box ends `box-lost`, stopped through the relay once, and later commands are refused unasked. (O11, A4, #1421)"""
+    """The helper's refusal (`job_host.Refused`) of a command is no result: the box ends `box-lost`, halted through the relay once, and later commands are refused unasked. (O11, A4, #1421)"""
     from defender import job_host
 
     helper = ScriptedHelper(job_host.Refused("no such handle"), ok(0, b"must not run\n"))
@@ -259,7 +261,81 @@ def test_o11_a_box_exec_the_helper_refuses_is_a_lost_box_with_todays_class_and_t
     with pytest.raises(box.BoxLost) as first:
         _ask(executor)
     assert first.value.exit_class == TRUNCATED_BY_BOX_LOST
-    assert helper.asked("box.stop") == [{"handle": HANDLE}]
+    assert helper.asked("box.halt") == [{"handle": HANDLE}]
     with pytest.raises(box.BoxLost):
         _ask(executor)
     assert len(helper.asked("box.exec")) == 1
+
+
+# --- a lane's windows over the relay (review finding: `BoxRuns` on a relayed box) -------------------------------------
+
+
+def test_a4_a_lanes_handle_on_a_relayed_box_stops_and_opens_its_windows_through_the_helper():
+    """`BoxRuns` over a relayed box (the drain's batch box, an oracle's box in a job container): its stop is `box.halt`, each
+    window a `box.window` then a `box.halt`, and no daemon is asked for. Control: the box's teardown stays `box.stop`."""
+    helper = ScriptedHelper(ok(0, b"inside\n"))
+    executor = relay_executor(helper)
+    runs = box.BoxRuns(executor)
+    runs.stop()
+    for _ in range(2):
+        with runs.run() as inside:
+            assert inside is executor
+            assert _ask(inside).out == b"inside\n"
+    assert [n for n, _f in helper.calls] == [
+        "box.halt", "box.window", "box.exec", "box.halt", "box.window", "box.exec", "box.halt"]
+    assert all(f == {"handle": HANDLE} for n, f in helper.calls if n != "box.exec")
+    box.stop_box(executor)
+    assert helper.asked("box.stop") == [{"handle": HANDLE}]
+
+
+def test_a4_a_window_the_helper_cannot_open_is_a_box_fault_nothing_runs_and_the_box_is_halted():
+    """A `box.window` fault: nothing inside the window runs, and the box gets a best-effort `box.halt`. Control: an unreachable
+    helper for the window is the same `BoxFault`."""
+    for window in (WINDOW_FAULT, ConnectionResetError("gone")):
+        helper = ScriptedHelper(window=window)
+        entered: list[bool] = []
+        with pytest.raises(box.BoxFault, match="start"), box.BoxRuns(relay_executor(helper)).run():
+            entered.append(True)
+        assert entered == []
+        assert helper.asked("box.exec") == []
+        assert helper.asked("box.halt") == [{"handle": HANDLE}]
+
+
+def test_a4_a_window_over_the_relay_readmits_a_box_an_earlier_window_lost_but_not_a_fenced_one():
+    """A proven `box.window` lifts a loss found in an earlier window, as a daemon-backed window does (#1421 decision 4); the
+    fence's refusal stays."""
+    lost = ScriptedHelper(LOST, ok(0, b"again\n"))
+    executor = relay_executor(lost)
+    runs = box.BoxRuns(executor)
+    with pytest.raises(box.BoxLost), runs.run():
+        _ask(executor)
+    with runs.run():
+        assert _ask(executor).out == b"again\n"
+
+    fence = ScriptedHelper(OUTPUT_LIMIT, ok())
+    fenced = relay_executor(fence)
+    runs = box.BoxRuns(fenced)
+    with pytest.raises(box.BoxOutputLimitExceeded), runs.run():
+        _ask(fenced)
+    with pytest.raises(box.BoxOutputLimitExceeded), runs.run():
+        _ask(fenced)
+    assert len(fence.asked("box.exec")) == 1
+
+
+def test_a4_a_halt_the_helper_cannot_prove_is_a_box_fault_naming_its_reason():
+    """`BoxRuns.stop` over the relay (an oracle attempt's cancel): `stopped` returns, a fault is the helper's reason."""
+    box.BoxRuns(relay_executor(ScriptedHelper())).stop()
+    with pytest.raises(box.BoxFault, match="could not stop the box"):
+        box.BoxRuns(relay_executor(ScriptedHelper(halt=STOP_FAULT))).stop()
+
+
+def test_a4_an_oracle_attempts_cancel_over_the_relay_halts_its_box_through_the_helper():
+    """The oracle attempt's `cancel` on a box from `JobContainer.box('oracle', …)` asks `box.halt`, never a daemon."""
+    from defender.learning.branch.estate._oracle_attempt import _AttemptBox
+
+    helper = ScriptedHelper()
+    attempt = _AttemptBox(lambda: relay_executor(helper))
+    attempt.get()
+    attempt.cancel()
+    assert helper.asked("box.halt") == [{"handle": HANDLE}]
+    assert helper.asked("box.stop") == []

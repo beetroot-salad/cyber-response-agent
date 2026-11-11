@@ -2,12 +2,13 @@
 
 Job side: `box.RelayTransport(request, handle)` is the confining transport (`BoxExecutor.sandboxed` is true over it); `request(name,
 **fields) -> dict` is the job's socket client (`job_host.ask` bound to the socket; it raises `OSError` for a socket that is gone).
-`box.stop_box(executor)` over a relay executor asks `box.stop` instead of a daemon the job lacks.
+`box.stop_box(executor)` over a relay executor asks `box.stop` instead of a daemon the job lacks; an ending's stop and a lane's
+`BoxRuns` ask `box.halt` (stopped, kept for a later window) and `box.window` (one window's start).
 
 Wire. `box.exec(handle, frame, cwd, timeout)` answers `{"result": "ok", "frame": <response frame bytes>}` (a command's result, or
 the kill line as the response frame of `BoxResult(-9, b"", KILLED_LINE)`), `{"result": "output-limit"}`, `{"result": "timeout"}`
-or `{"result": "lost", "class": "box-lost"}`. `box.stop(handle)` answers `{"result": "stopped"}` or `{"result": "fault",
-"reason": str}`.
+or `{"result": "lost", "class": "box-lost"}`. `box.stop(handle)` and `box.halt(handle)` answer `{"result": "stopped"}` or
+`{"result": "fault", "reason": str}`; `box.window(handle)` answers `{"result": "open"}` or a fault.
 
 Helper side: `RelayDocker` is slice A's `ContainerStandIn` plus what the #1421 matrix needs of a daemon (a status that is gone,
 mute or raising; a `docker exec` that is any process, or fails to run)."""
@@ -31,6 +32,8 @@ TIMEOUT = {"result": "timeout"}
 LOST = {"result": "lost", "class": TRUNCATED_BY_BOX_LOST}
 STOPPED = {"result": "stopped"}
 STOP_FAULT = {"result": "fault", "reason": "could not stop the box"}
+OPENED = {"result": "open"}
+WINDOW_FAULT = {"result": "fault", "reason": "the box did not start"}
 HANDLE = "handle-1170"
 
 
@@ -43,11 +46,14 @@ KILLED = {"result": "ok", "frame": box.encode_response(box.BoxResult(rc=-9, out=
 
 class ScriptedHelper:
     """The job's `request(name, **fields)`: `box.exec` is answered from `execs` (a dict is an answer, an exception is raised,
-    the last repeats), `box.stop` from `stop`. Every ask is kept in `calls`."""
+    the last repeats), `box.stop` from `stop`, `box.halt` from `halt` (`stop` unless given) and `box.window` from `window`.
+    Every ask is kept in `calls`."""
 
-    def __init__(self, *execs: Any, stop: Any = STOPPED) -> None:
+    def __init__(self, *execs: Any, stop: Any = STOPPED, halt: Any = None, window: Any = None) -> None:
         self._execs = list(execs) or [ok()]
         self._stop = stop
+        self._halt = stop if halt is None else halt
+        self._window = OPENED if window is None else window
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def __call__(self, name: str, **fields: Any) -> Any:
@@ -57,6 +63,10 @@ class ScriptedHelper:
             got = self._execs[min(n - 1, len(self._execs) - 1)]
         elif name == "box.stop":
             got = self._stop
+        elif name == "box.halt":
+            got = self._halt
+        elif name == "box.window":
+            got = self._window
         else:
             raise AssertionError(f"the job asked the helper for {name!r}, which a box executor has no business asking")
         if isinstance(got, BaseException):

@@ -15,10 +15,10 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from defender._io import read_bytes_capped
+from defender import tenancy
 from defender.job_socket import Refused, read_message, write_message
 
-from ._container import STAT_LIMIT, container_processes, owner
+from ._container import container_processes, owner
 from ._session import Registry, Session
 
 _logger = logging.getLogger(__name__)
@@ -26,15 +26,6 @@ _logger = logging.getLogger(__name__)
 _PEERCRED = struct.Struct("3i")
 #: Seconds a connection may take to send its request.
 _REQUEST_WAIT = 30.0
-
-
-def _process_start(pid: int) -> str | None:
-    try:
-        stat = read_bytes_capped(Path(f"/proc/{pid}/stat"), limit=STAT_LIMIT).decode("utf-8", "replace")
-    except OSError:
-        return None
-    fields = stat[stat.rindex(")") + 2:].split()
-    return fields[19] if len(fields) > 19 else None
 
 
 class Server:
@@ -82,7 +73,10 @@ class Server:
     def _peer_ok(self, pid: int) -> bool:
         if pid <= 0:
             return False
-        start = _process_start(pid)
+        start = tenancy.process_start(pid)
+        if start is None:
+            # No such live process (gone, or a zombie): nothing to recognise it by.
+            return False
         with self._peers_lock:
             if pid in self._peers and self._peers[pid] == start:
                 return True

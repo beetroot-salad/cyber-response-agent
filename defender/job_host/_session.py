@@ -25,6 +25,9 @@ from defender.records.formats import TenantId
 
 #: The job kinds the helper is started for (the worker's three).
 KINDS = ("investigation", "learning", "post-step")
+#: The exit statuses of a `docker run` that never ran the job: docker's own failure (an image missing, a runtime
+#: refused, 125), a command it could not invoke (126) or find (127). Every kind's after-the-container hook reads them.
+DOCKER_DID_NOT_RUN = frozenset({125, 126, 127})
 
 
 class SetupRefused(Exception):
@@ -89,6 +92,17 @@ class Box:
     ident: str
     stopped: dict[str, Any] | None = None
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    #: The helper's own window handle on the box (`box.BoxRuns`), made at the job's first `box.window` or `box.halt`:
+    #: it holds an open window's attached start between the job's requests.
+    windows: Any = field(default=None, repr=False)
+
+    def window_handle(self) -> Any:
+        """The box's window handle, made once (call under `lock`)."""
+        if self.windows is None:
+            from defender.box import BoxRuns
+
+            self.windows = BoxRuns(self.executor)
+        return self.windows
 
 
 @dataclass
@@ -118,6 +132,9 @@ class Session:
     minted: set[str] = field(default_factory=set)
     prepared: Prepared | None = None
     boxes: dict[str, Box] = field(default_factory=dict)
+    #: The (box kind, id) pairs whose start is under way: reserved under `lock` before the start, so two concurrent
+    #: starts of one run's box cannot both pass the one-box-per-id check.
+    starting: set[tuple[str, str]] = field(default_factory=set)
     container: str = ""
     #: The tenant's folder, from the tenant the kind's `prepare` accepted (`tenancy.job_tenant_folder`): the job
     #: container's tenant bind (O1) and the folder every path the helper derives is confined to (H10). None until

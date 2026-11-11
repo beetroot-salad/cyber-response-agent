@@ -46,10 +46,11 @@ from typing import TYPE_CHECKING, Any
 
 from defender import _io
 from defender.credential_proxy import PASS_LIFETIME_SEC
+from defender import job_socket
 from defender.job_socket import Refused
 
-from ._common import answer_pass, first_pass, grant, settle_knowledge, start_run_box
-from ._session import HandBack, KindSpec, Prepared, Registry, Session, SetupRefused
+from ._common import answer_pass, first_pass, grant, mirror_run_page, settle_knowledge, start_run_box
+from ._session import DOCKER_DID_NOT_RUN, HandBack, KindSpec, Prepared, Registry, Session, SetupRefused
 
 if TYPE_CHECKING:
     from defender.records.formats import Episode
@@ -59,12 +60,9 @@ _logger = logging.getLogger(__name__)
 LEARNING, POST_STEP = "learning", "post-step"
 #: How long a learning job's helper waits for the tenant's host lock before handing the job back (C24).
 LOCK_WAIT_SECONDS = 30.0
-#: The longest validity a forge token is asked for (C25: the network timeout, 120 s, plus 30 s of skew).
-FORGE_TOKEN_CAP = 150.0
 #: Where under the data root each claim's scratch folder lives (oracle boxes' binds): outside
 #: every tenant's folder, the job socket's folder and host `/tmp` (C21).
 SCRATCH = ".job-scratch"
-_DOCKER_DID_NOT_RUN = frozenset({125, 126, 127})
 _COMMIT = re.compile(r"[0-9a-f]{40}([0-9a-f]{24})?")
 
 
@@ -165,6 +163,10 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
                                settings_root=export / run_knowledge.SETTINGS_HALF)
     except (TenantRefused, Refused) as refused:
         raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
+    # The grant is the launch export's, not the family's pinned commit (which the container settles later): the proxy
+    # serves a system only by its declaration in the tenant's `current` export, and this helper holds the tenant's
+    # lock for the whole job, so no publish moves `current` under it. A grant from an older pin could only add systems
+    # the proxy refuses, and would miss none it serves.
     reads = grant(ready)
     passes = first_pass(session, accepted, records, reads)
     cleanup = contextlib.ExitStack()
@@ -259,20 +261,48 @@ def _post_step_end(session: Session, cause: str) -> None:
 
 
 def _learning_exited(session: Session, rc: int) -> None:
-    """A `docker run` that never ran the job (and so left no end record) is the learning entry's start failure."""
+    """After the container: a `docker run` that never ran the job (and so left no end record) is the learning entry's
+    start failure; otherwise each sibling's run page, left in its run folder, is copied to the tenant's publish area
+    (A10), as an investigation's is."""
     from defender.records import job_lane
 
-    if rc not in _DOCKER_DID_NOT_RUN:
+    if rc in DOCKER_DID_NOT_RUN:
+        try:
+            with job_lane.JobLane.open(session.root, session.tenant_id) as lane:
+                written = lane.read_learning_end(str(session.job_id)) is not None
+        except (OSError, job_lane.JobLaneRefused):
+            written = False
+        if not written:
+            sys.stderr.write(f"[job_host] learning job {session.job_id}: the job container did not start (docker "
+                             f"exit {rc}); the job ran nowhere\n")
+            _learning_end(session, "start-failed")
+            return
+    state = session.prepared.state if session.prepared is not None else None
+    if isinstance(state, _Learning):
+        _mirror_sibling_pages(session, state)
+
+
+def _mirror_sibling_pages(session: Session, state: _Learning) -> None:
+    """Each sibling's run page, opened in the job's episode by its id and copied (`mirror_run_page`). A sibling whose
+    run cannot be opened is logged and skipped: the copy is the dev view's, never the job's outcome."""
+    from defender.records import RunId, RunRefused
+    from defender.records.formats import TenantRefused
+
+    with session.lock:
+        runs = list(state.siblings)
+    if not runs:
         return
     try:
-        with job_lane.JobLane.open(session.root, session.tenant_id) as lane:
-            written = lane.read_learning_end(str(session.job_id)) is not None
-    except (OSError, job_lane.JobLaneRefused):
-        written = False
-    if not written:
-        sys.stderr.write(f"[job_host] learning job {session.job_id}: the job container did not start (docker "
-                         f"exit {rc}); the job ran nowhere\n")
-        _learning_end(session, "start-failed")
+        with state.tenant.runs_repository().episode(str(session.job_id)) as view:
+            for run in runs:
+                try:
+                    handle = view.open(RunId.parse(run))
+                except (RunRefused, TenantRefused, ValueError, OSError) as refused:
+                    _logger.warning("the run page of sibling %s was not copied: %s", run, refused)
+                    continue
+                mirror_run_page(handle, state.tenant)
+    except (FileNotFoundError, RunRefused, TenantRefused, ValueError, OSError) as refused:
+        _logger.warning("no sibling run page was copied: the job's episode cannot be read: %s", refused)
 
 
 # --- the learning job's requests ------------------------------------------------------------------------------------------
@@ -481,8 +511,9 @@ def _drain_credential(session: Session, state: _PostStep) -> Any:
 def _forge_token(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     validity = fields["min_validity"]
     if isinstance(validity, bool) or not isinstance(validity, (int, float)) or not math.isfinite(validity) \
-            or not 0 <= validity <= FORGE_TOKEN_CAP:
-        raise Refused(f"forge.token's min_validity is a number of seconds from 0 to {FORGE_TOKEN_CAP:.0f}",
+            or not 0 <= validity <= job_socket.FORGE_TOKEN_CAP:
+        raise Refused(f"forge.token's min_validity is a number of seconds from 0 to "
+                      f"{job_socket.FORGE_TOKEN_CAP:.0f}",
                       "bad-fields")
     state = _state(session, _PostStep)
     try:

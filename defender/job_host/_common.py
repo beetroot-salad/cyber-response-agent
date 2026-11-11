@@ -1,23 +1,29 @@
-"""The requests every job kind is answered: `launch`, and a box's `box.start`, `box.exec` and `box.stop` (#1170 A1,
-A4, O8-O10).
+"""The requests every job kind is answered: `launch`, and a box's `box.start`, `box.exec`, `box.window`, `box.halt`
+and `box.stop` (#1170 A1, A4, O8-O10).
 
 `box.start(kind, id)` names a box kind and an id this helper minted; the box's shape (mounts, name, labels, host
 paths) is the starter's, registered per job kind and box kind (O9), so a request carrying anything else is refused by
 its fields. The box is started by this helper, under the tenant's shared lock it holds (O8), and answered by an opaque
-handle. `box.exec` and `box.stop` relay to it under the box package's daemon-facing rules (`box.relay_exec`,
-`box.relay_stop`, A4); both are still answered once the helper is signalled, so the job can unwind (A1)."""
+handle. `box.exec`, `box.window` (one agent run's window, its attached start held here), `box.halt` (stopped, kept
+for a later window) and `box.stop` (removed) relay to it under the box package's daemon-facing rules (`box.relay_*`,
+A4), so a lane's windows work the same whichever side holds the daemon; all but `box.window` are still answered once
+the helper is signalled, so the job can unwind (A1)."""
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import secrets
 import signal
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender.job_socket import Refused
 
 from ._session import KINDS, Box, PassMint, Registry, Session, SetupRefused, StartFailed
+
+if TYPE_CHECKING:
+    from defender.records import Run
 
 _logger = logging.getLogger(__name__)
 
@@ -37,18 +43,28 @@ def _box_start(session: Session, fields: dict[str, Any], *, registry: Registry) 
         raise Refused(f"a {session.kind} job is started no {box_kind!r} box", "not-for-kind")
     ident = session.require_minted(ident)
     with session.lock:
-        # One run box per id (its name is the run's); a learning job's pre-flight runs several oracle boxes at once.
-        if box_kind == "shell" and any(b.ident == ident and b.kind == box_kind and b.stopped is None
-                                       for b in session.boxes.values()):
-            raise Refused(f"a {box_kind} box for {ident} is already running", "box-start")
+        # One run box per id (its name is the run's), reserved here before the start so a concurrent start of the same
+        # id is refused; a learning job's pre-flight runs several oracle boxes at once.
+        if box_kind == "shell":
+            if (box_kind, ident) in session.starting or any(
+                    b.ident == ident and b.kind == box_kind and b.stopped is None for b in session.boxes.values()):
+                raise Refused(f"a {box_kind} box for {ident} is already running", "box-start")
+            session.starting.add((box_kind, ident))
     from defender.box import BoxFault
 
+    reserved = (box_kind, ident)
     try:
         executor = starter(session, ident)
-    except BoxFault as fault:
-        raise Refused(f"the {box_kind} box for {ident} did not start: {fault}", "box-start") from None
+    except BaseException as fault:
+        with session.lock:
+            session.starting.discard(reserved)
+        if isinstance(fault, BoxFault):
+            raise Refused(f"the {box_kind} box for {ident} did not start: {fault}", "box-start") from None
+        raise
     handle = secrets.token_hex(16)
     with session.lock:
+        # Released and registered under one hold of the lock, so no start of the same id slips between the two.
+        session.starting.discard(reserved)
         session.boxes[handle] = Box(executor, box_kind, ident)
         late = session.signalled.is_set()
     if late:
@@ -83,13 +99,37 @@ def _box_exec(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     return relay_exec(box.executor, session.docker, frame, cwd=cwd, timeout=float(timeout))
 
 
+def _box_window(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
+    """One agent run's window on a stopped box (#1344 amendment 2 over the relay): started attached by this helper,
+    which holds the attached start until the job's `box.halt` or this helper's end, so the box runs no longer than
+    either the window or the helper."""
+    from defender.box import relay_window
+
+    box = _session_box(session, fields["handle"])
+    with box.lock:
+        if box.stopped is not None:
+            return {"result": "fault", "reason": f"the {box.kind} box for {box.ident} is removed"}
+        return relay_window(box.window_handle())
+
+
+def _box_halt(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
+    """The box stopped, proven, and kept for a later window; its window's attached start ended."""
+    from defender.box import relay_halt
+
+    box = _session_box(session, fields["handle"])
+    with box.lock:
+        if box.stopped is not None:
+            return dict(box.stopped)
+        return relay_halt(box.window_handle())
+
+
 def _box_stop(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     from defender.box import relay_stop
 
     box = _session_box(session, fields["handle"])
     with box.lock:
         if box.stopped is None:
-            answer = relay_stop(box.executor, session.docker)
+            answer = relay_stop(box.executor, session.docker, box.windows)
             if answer.get("result") == "stopped":
                 box.stopped = answer
             return answer
@@ -123,11 +163,30 @@ def stop_boxes(session: Session) -> None:
         with box.lock:
             if box.stopped is not None:
                 continue
+            if box.windows is not None:
+                # A window the job left open: its attached start is this helper's to end.
+                with contextlib.suppress(BoxFault):
+                    box.windows.stop()
             try:
                 stop_box(box.executor, docker=session.docker)
             except BoxFault as leftover:
                 _logger.warning("the %s box for %s was not removed: %s", box.kind, box.ident, leftover)
             box.stopped = {"result": "stopped"}
+
+
+def mirror_run_page(run: Run, tenant: Any) -> None:
+    """After the container: the run page a job saved in its run folder (`run`, a run handle), copied to the tenant's
+    shared publish folder (A10). The job never reaches that folder; this is every kind's one copy (an investigation's
+    run, each of a learning job's siblings). No page is no copy; the copy itself never raises."""
+    from defender.presentation.visualize_run import mirror_page
+
+    try:
+        page = run.observability.runtime_html.read()
+    except Exception:  # noqa: BLE001 — no page is no copy; the run's own records say why
+        _logger.warning("the run page of %s could not be read", run.run_dir, exc_info=True)
+        return
+    if page:
+        mirror_page(page, run.run_dir.name, tenant)
 
 
 def settle_knowledge(session: Session, accepted: Any, records: Any) -> Any:
@@ -192,4 +251,6 @@ def register_common(registry: Registry) -> None:
                  required=("kind", "id"))
     registry.add("box.exec", kinds=KINDS, handler=_box_exec, required=("handle", "frame"),
                  optional=("cwd", "timeout"), after_signal=True)
+    registry.add("box.window", kinds=KINDS, handler=_box_window, required=("handle",))
+    registry.add("box.halt", kinds=KINDS, handler=_box_halt, required=("handle",), after_signal=True)
     registry.add("box.stop", kinds=KINDS, handler=_box_stop, required=("handle",), after_signal=True)

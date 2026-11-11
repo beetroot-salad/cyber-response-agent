@@ -79,6 +79,7 @@ from datetime import UTC, datetime  # noqa: E402
 from defender.credential_proxy import (  # noqa: E402
     PASS_LIFETIME_SEC,
     PASS_REUSE_MARGIN_SEC,
+    helper_access,
     mint_request_token,
     signing_access,
 )
@@ -1396,20 +1397,6 @@ def _interrupt_on_sigterm() -> None:
     signal.signal(signal.SIGTERM, on_term)
 
 
-def _terminate_on_stdin_eof() -> None:
-    """The container's death tie (#1170 A5): the job's host helper holds this process's stdin, and
-    when it is gone the pipe reads end of file, which is this process's SIGTERM (the same one
-    `_interrupt_on_sigterm` turns into the run's unwind). Read on a daemon thread, so the run never
-    waits on it; whatever arrives on stdin before the end is discarded."""
-    def watch() -> None:
-        with contextlib.suppress(OSError):
-            while os.read(0, 4096):
-                pass
-        os.kill(os.getpid(), signal.SIGTERM)
-
-    threading.Thread(target=watch, name="stdin-death-tie", daemon=True).start()
-
-
 class _JobFacts:
     """The job-end record's facts (#1342 O8), each set as it becomes true, and the record
     written create-only when the block exits, however it exits (`__exit__` records and swallows
@@ -1452,46 +1439,35 @@ class _JobFacts:
 class _HelperPass:
     """A job's read pass, asked of its host helper over the job socket (#1170 O5, O6, H2): the
     helper signs it (the job holds no sign login) for this run's id, the grant and the lifetime it
-    decided; held by `job_socket.PassHolder`, which asks again once the held one is within the
-    reuse margin of its expiry, as the operator run's own signer reuses its token (r7 A20). A
-    refusal (the job fenced, the helper signalled) or a helper that is gone is the asking call's
-    `AdapterFault`; nothing is retried here."""
+    decided (`credential_proxy.helper_access`, the one in-container pass, which a learning sibling's
+    pre-flight uses too)."""
 
     def __init__(self, request: Callable[..., dict[str, Any]], *, run_id: str, proxy_url: str,
                  granted: bool) -> None:
-        self._held = job_socket.PassHolder(request, run_id, margin=TOKEN_REUSE_MARGIN_SEC)
-        self._proxy_url = proxy_url
-        self._granted = granted
-
-    def _token(self) -> str:
-        try:
-            return self._held.token()
-        except job_socket.Refused as refused:
-            raise AdapterFault(f"the job's host helper refused a pass ({refused.code}): {refused}") from None
-        except (OSError, ValueError, KeyError, TypeError) as lost:
-            raise AdapterFault(f"no pass from the job's host helper: {type(lost).__name__}: {lost}") from None
+        self._access = helper_access(request, run_id, proxy_url) if granted else None
 
     def access_kwargs(self) -> dict[str, RequestAccess]:
-        return _access_kwargs(RequestAccess(self._proxy_url, self._token) if self._granted else None)
+        return _access_kwargs(self._access)
 
 
-def _launch_facts(request: Callable[..., dict[str, Any]], ns: argparse.Namespace) -> dict[str, Any]:
+def _launch_facts(request: Callable[..., dict[str, Any]], *, kind: str, tenant: str, job: str,
+                  label: str) -> dict[str, Any]:
     """The helper's launch facts for this job (#1170 A6), or the refusal naming why there are none or
-    why they are not this job's: the helper admitted the tenant, checked the launch record, read the
-    alert mapping, ran the publish and made the run folder and its knowledge copy before this
-    container started, and says so here."""
+    why they are not this job's (`kind`, `tenant`, `job`; `label` names the caller in each refusal):
+    the helper admitted the tenant and ran the publish before this container started, and says so
+    here. An investigation's job is its own id; a learning sibling's, its learning job's (its episode)."""
     try:
         launch = request("launch")
     except job_socket.Refused as refused:
-        sys.exit(f"[run.py] job {ns.job}: the job's host helper refused its launch facts ({refused.code}): {refused}")
+        sys.exit(f"[run.py] {label}: the job's host helper refused its launch facts ({refused.code}): {refused}")
     except (OSError, ValueError) as lost:
-        sys.exit(f"[run.py] job {ns.job}: the job's host helper did not answer for its launch facts: "
+        sys.exit(f"[run.py] {label}: the job's host helper did not answer for its launch facts: "
                  f"{type(lost).__name__}: {lost}")
     said = {key: launch.get(key) for key in ("kind", "tenant", "job")}
-    if said != {"kind": "investigation", "tenant": ns.tenant, "job": ns.job}:
-        sys.exit(f"[run.py] job {ns.job}: the job's launch facts are not this investigation's: {said}")
+    if said != {"kind": kind, "tenant": tenant, "job": job}:
+        sys.exit(f"[run.py] {label}: this job container's launch facts are not this {kind} job's: {said}")
     if launch.get("tenant_state") != "active":
-        sys.exit(f"[run.py] job {ns.job}: this run's tenant cannot be used: it is {launch.get('tenant_state')!r}")
+        sys.exit(f"[run.py] {label}: this run's tenant cannot be used: it is {launch.get('tenant_state')!r}")
     return launch
 
 
@@ -1576,7 +1552,8 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
         sys.exit(f"[run.py] job {ns.job}: {refused}")
     try:
         with lane, _JobFacts(lane, ns.job) as facts:
-            launch = _launch_facts(request, ns)
+            launch = _launch_facts(request, kind="investigation", tenant=ns.tenant, job=ns.job,
+                                    label=f"job {ns.job}")
             started = _set_up_in_container(ns, data_root, launch, request, preflight=preflight, roster=roster)
             facts.setup = job_facts.SETUP_DONE
             run = started.run
@@ -1612,7 +1589,7 @@ def serve_job(  # noqa: PLR0913 — the entries' inputs plus their injection sea
               "inside its job container, started by its host helper; nothing was done", file=sys.stderr)
         return 2
     _interrupt_on_sigterm()
-    _terminate_on_stdin_eof()
+    job_socket.sigterm_on_stdin_eof()
     try:
         if any(a == "--job" or a.startswith("--job=") for a in argv):
             return job_main(argv, environ=os.environ, lifecycle=lifecycle, visualize=visualize,
@@ -1626,26 +1603,6 @@ def serve_job(  # noqa: PLR0913 — the entries' inputs plus their injection sea
 
 
 # -- a learning sibling in its job container (#1170 A6, #1449) ---------------------------------------
-
-def _sibling_launch(request: Callable[..., dict[str, Any]], ns: argparse.Namespace) -> dict[str, Any]:
-    """The learning job's launch facts, as its host helper answers them to the sibling: the job's own
-    (its episode is the learning job's id, never `--source`), the tenant active."""
-    try:
-        launch = request("launch")
-    except job_socket.Refused as refused:
-        sys.exit(f"[run.py] --episode {ns.episode}: the job's host helper refused its launch facts "
-                 f"({refused.code}): {refused}")
-    except (OSError, ValueError) as lost:
-        sys.exit(f"[run.py] --episode {ns.episode}: the job's host helper did not answer for its launch facts: "
-                 f"{type(lost).__name__}: {lost}")
-    said = {key: launch.get(key) for key in ("kind", "tenant", "job")}
-    if said != {"kind": "learning", "tenant": ns.tenant, "job": ns.episode}:
-        sys.exit(f"[run.py] --episode {ns.episode}: this job container's launch facts are not this sibling's "
-                 f"learning job's: {said}")
-    if launch.get("tenant_state") != "active":
-        sys.exit(f"[run.py] this run's tenant cannot be used: it is {launch.get('tenant_state')!r}")
-    return launch
-
 
 def _sibling_made(request: Callable[..., dict[str, Any]], ns: argparse.Namespace, accepted: tenancy.Tenant,
                   episode_runs: Any, world: Any) -> tuple[Run, run_knowledge.RunCopy]:
@@ -1693,7 +1650,8 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
     if ns.episode is None:
         sys.exit("[run.py] inside a job container `run.py` runs a learning sibling only (`--tenant --episode "
                  "--world`); an alert is investigated by its own job (`--job`)")
-    launch = _sibling_launch(request, ns)
+    launch = _launch_facts(request, kind="learning", tenant=ns.tenant, job=ns.episode,
+                            label=f"--episode {ns.episode}")
     data_root = _request_data_root(ns)
     try:
         accepted = tenancy.accept_tenant(data_root, ns.tenant, defender_dir=DEFENDER_DIR,

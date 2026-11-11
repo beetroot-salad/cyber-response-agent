@@ -18,23 +18,17 @@ import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender.job_socket import Refused
 
-from ._common import answer_pass, first_pass, grant, settle_knowledge, start_run_box
-from ._session import KindSpec, Prepared, Registry, Session, SetupRefused
-
-if TYPE_CHECKING:
-    from defender.records import Run
+from ._common import answer_pass, first_pass, grant, mirror_run_page, settle_knowledge, start_run_box
+from ._session import DOCKER_DID_NOT_RUN, KindSpec, Prepared, Registry, Session, SetupRefused
 
 _logger = logging.getLogger(__name__)
 
 KIND = "investigation"
-#: The exit statuses of a `docker run` that never ran the job: docker's own failure (an image missing, a runtime
-#: refused, 125), a command it could not invoke (126) or find (127).
-_DOCKER_DID_NOT_RUN = frozenset({125, 126, 127})
 
 
 @dataclass
@@ -157,7 +151,7 @@ def _exited(session: Session, rc: int) -> None:
     from defender.records import job_lane
 
     state = session.prepared.state if session.prepared is not None else None
-    if rc in _DOCKER_DID_NOT_RUN:
+    if rc in DOCKER_DID_NOT_RUN:
         try:
             with job_lane.JobLane.open(session.root, session.tenant_id) as lane:
                 written = lane.read_job_end(session.job_id) is not None
@@ -169,20 +163,7 @@ def _exited(session: Session, rc: int) -> None:
             end(session, "start-failed")
             return
     if isinstance(state, _State):
-        _copy_page(state.run, state.tenant)
-
-
-def _copy_page(run: Run, tenant: Any) -> None:
-    """The run page the container saved in its run folder, copied to the shared publish folder (A10)."""
-    from defender.presentation.visualize_run import mirror_page
-
-    try:
-        page = run.observability.runtime_html.read()
-    except Exception:  # noqa: BLE001 — no page is no copy; the run's own records say why
-        _logger.warning("the run page of %s could not be read", run.run_dir, exc_info=True)
-        return
-    if page:
-        mirror_page(page, run.run_dir.name, tenant)
+        mirror_run_page(state.run, state.tenant)
 
 
 def _run_box(session: Session, ident: str) -> Any:
