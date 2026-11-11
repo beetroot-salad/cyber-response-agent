@@ -43,6 +43,7 @@ from defender.lifecycle._job import (
 )
 from defender.lifecycle._teardown import Containers, stop_containers, take_exclusive
 from defender.lifecycle.config import LifecycleConfig
+from defender.records.formats import unwrap_learning_root
 from defender.tenancy import FenceMissed, Generation, HeldTenant, TenantRepository, host_lock
 
 _logger = logging.getLogger(__name__)
@@ -57,6 +58,9 @@ _PROBE = base64.b64encode(b"defender install sign proof").decode("ascii")
 
 Git = Callable[..., subprocess.CompletedProcess[str]]
 Publish = Callable[..., str]
+#: How the host reaches a tenant's forge and clone for the learning import: `tenant id -> TenantDelivery` (or a context
+#: manager yielding one, closed after the import).
+OpenDelivery = Callable[[str], Any]
 
 
 class HostActor(Actor):
@@ -70,15 +74,17 @@ class HostActor(Actor):
 
     def __init__(self, tenants: TenantRepository, *, forge: httpx.AsyncClient,  # noqa: PLR0913 — the pinned constructor
                  openbao_login: httpx.AsyncClient, git: Git, publish: Publish, config: LifecycleConfig,
-                 clock: Callable[[], _dt.datetime], containers: Containers = stop_containers) -> None:
+                 clock: Callable[[], _dt.datetime], containers: Containers = stop_containers,
+                 open_delivery: OpenDelivery | None = None) -> None:
         super().__init__(tenants, clock=clock)
         self._forge, self._bao, self._git, self._publish = forge, openbao_login, git, publish
+        self._open_delivery = open_delivery
         self._config, self._containers = config, containers
         self._root: Path = config.data_root
 
     def steps(self) -> Mapping[str, Step]:
         return {"install": self._install, "prepare": self._prepare, "remove_old_file": self._remove_old_file,
-                "teardown": self._teardown}
+                "teardown": self._teardown, "import": self._import_learning, "cutover": self._cut_over_learning}
 
     def _tenant_secrets(self, tenant: str) -> Path:
         return self._config.secrets_dir / tenant
@@ -300,6 +306,57 @@ class HostActor(Actor):
             raise FenceMissed(f"the tenant's learning batch is still held: {busy}") from None
         finally:
             await store.close()
+
+    # --- the learning-state cutover (#1278 Migration) -----------------------------------------------
+
+    async def _import_learning(self, held: HeldTenant) -> None:
+        """Under the exclusive host lock (nothing of the tenant is running): the tenant's file learning state and its
+        open PRs go into the learning store in one transaction. A record the import will not guess, or a store that
+        cannot be reached, fails the step naming it; nothing is written and no file is touched. A folder already gone
+        was cut over before: nothing to import."""
+        from defender.learning.store import ImportRefused, LearningStore, import_learning_state
+
+        async with self._host_lock(held.tenant_id, exclusive=True):
+            with self._delivery(held.tenant_id) as delivery:
+                root = unwrap_learning_root(delivery.tenant.learning)
+                if _io.entry_present(root):
+                    store = LearningStore(self._learning_dsn())
+                    try:
+                        await import_learning_state(store, held.tenant_id, root, delivery=delivery)
+                    except ImportRefused as refused:
+                        raise StepFailed(f"the learning state was not imported: {refused}") from refused
+                    finally:
+                        await store.close()
+            step, actor = next_step(held)
+            await held.commit(step=step, actor=actor)
+
+    async def _cut_over_learning(self, held: HeldTenant) -> None:
+        """Under the exclusive host lock: the learning folder is retired (worktrees moved, the rest removed). Only ever
+        reached after the import committed; a link the cutover will not follow fails the step, resumed here."""
+        from defender.learning.store import ImportRefused, cut_over_learning_state
+
+        async with self._host_lock(held.tenant_id, exclusive=True):
+            with self._delivery(held.tenant_id) as delivery:
+                tenant = delivery.tenant
+            try:
+                await asyncio.to_thread(cut_over_learning_state, tenant, unwrap_learning_root(tenant.learning))
+            except ImportRefused as refused:
+                raise StepFailed(f"the learning folder was not cut over: {refused}") from refused
+            step, actor = next_step(held)
+            await held.commit(step=step, actor=actor, pending_action=None)
+
+    @staticmethod
+    def _learning_dsn() -> str:
+        dsn = os.environ.get("DEFENDER_DATABASE_DSN")
+        if not dsn:
+            raise StepFailed("the learning store cannot be reached: DEFENDER_DATABASE_DSN is not set")
+        return dsn
+
+    def _delivery(self, tenant_id: str) -> contextlib.AbstractContextManager[Any]:
+        if self._open_delivery is None:
+            raise StepFailed("the host has no way to reach the tenant's forge for the learning import")
+        opened = self._open_delivery(tenant_id)
+        return opened if hasattr(opened, "__enter__") else contextlib.nullcontext(opened)
 
     def _remove_tenant_files(self, tenant: str) -> None:
         targets = [self._root / tenant, self._tenant_secrets(tenant)]

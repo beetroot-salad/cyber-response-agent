@@ -549,12 +549,12 @@ def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface
     if not rows:
         _logger.info("pitfalls: no keyed pitfall in the claim — nothing to curate")
         return 0
-    # The store's claim already decided there is work, by the pitfalls arrival rule over mistakes. A claim whose rows
-    # collapse into fewer mistakes than the rule needs (a looping lead's repeats) is one lesson wearing many hats:
-    # it is not curated. A claim of distinct mistakes is the claim's own call (the rule counted them).
+    # The pitfalls arrival rule, strictly: the claim runs a curator only over the threshold's distinct mistakes. The
+    # store's claim counted them in SQL; a claim whose rows collapse into fewer mistakes (a looping lead's repeats)
+    # is one lesson wearing many hats and is not curated.
     records = _loop_persist.merge_pitfalls(rows)
     threshold = _loop_config.pitfalls_threshold()
-    if len(records) < len(rows) and not _loop_persist.pitfalls_lane_is_open(records, threshold):
+    if not _loop_persist.pitfalls_lane_is_open(records, threshold):
         _logger.info(
             f"pitfalls claim below threshold (n={len(records)} distinct mistake(s) "
             f"in {len(rows)} row(s), threshold={threshold}) — skipping curation"

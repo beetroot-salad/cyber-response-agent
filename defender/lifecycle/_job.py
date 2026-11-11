@@ -38,6 +38,8 @@ NEXT: Mapping[str, Mapping[str, tuple[str | None, str | None]]] = {
         "sweep": ("retire", SERVICE), "retire": ("remove_old_file", HOST), "remove_old_file": (None, None)},
     "offboard": {"offboard": ("teardown", HOST), "teardown": ("finish", SERVICE), "finish": ("delete_repo", SERVICE)},
     "delete_repo": {"delete_repo": (None, None)},
+    #: #1278: the tenant's file learning state goes into the learning store, then its folder is retired.
+    "learning_cutover": {"import": ("cutover", HOST), "cutover": (None, None)},
 }
 #: The longest failure text recorded.
 _FAILURE_LIMIT = 600

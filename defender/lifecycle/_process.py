@@ -87,6 +87,17 @@ def integration_runner(container: str) -> Callable[[Sequence[str]], subprocess.C
     return run
 
 
+def learning_delivery(config: LifecycleConfig, directory: Any) -> Callable[[str], Any]:
+    """How the host actor reaches a tenant's forge and clone for the learning import (#1278 Migration): `tenant id` ->
+    a context manager yielding the tenant's delivery (its recorded forge wiring and forge credential), which closes
+    what it made."""
+    from defender.learning.author.version_control.publish import delivery_for_cutover
+
+    def open_for(tenant_id: str) -> Any:
+        return delivery_for_cutover(tenant_id, data_root=config.data_root, directory=directory)
+    return open_for
+
+
 def forge_admin(config: LifecycleConfig) -> httpx.AsyncClient:
     """The management service's forge client: the admin token on every call."""
     return internal_async_client(trust=tls_trust(), base_url=config.forge_url, timeout=CALL_TIMEOUT,

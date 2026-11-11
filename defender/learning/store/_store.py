@@ -179,6 +179,9 @@ class BatchView:
     reason: str | None
     created_at: _dt.datetime
     ended_at: _dt.datetime | None
+    #: The database's own reading: working, and its lease and grace have run out. The one lapse test (O1, P6);
+    #: no host reads a clock of its own for it.
+    lapsed: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -218,11 +221,20 @@ def _view(row: Any) -> BatchView:
         start=row.start, phase=row.phase, outcome=row.outcome, lease_owner=row.lease_owner,
         lease_expiry=row.lease_expiry, token=row.fencing_token, cancel_requested=row.cancel_requested,
         pr_number=row.pr_number, replaces=row.replaces, generation=row.generation, refusals=row.refusals,
-        last_checked=row.last_checked, reason=row.reason, created_at=row.created_at, ended_at=row.ended_at)
+        last_checked=row.last_checked, reason=row.reason, created_at=row.created_at, ended_at=row.ended_at,
+        lapsed=bool(getattr(row, "lapsed", False)))
 
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:32]
+
+
+def mistake_key_of(row: Mapping[str, Any], item_key: str) -> str:
+    """The identity of a pitfall's mistake (its owner and diagnosis; a diagnosis-less failure is its own mistake),
+    stored on the row so the store's claim counts distinct mistakes in SQL. The one definition the queue's merge uses."""
+    from defender.learning.core.persist import pitfall_key
+
+    return _digest(list(pitfall_key({**row, "pitfall_id": item_key})))
 
 
 def _has_nul(value: Any) -> bool:
@@ -287,6 +299,15 @@ class LearningStore(FeedbackVerbs):
     def _in(self, seconds: float) -> Any:
         return func.now() + literal(_dt.timedelta(seconds=seconds))
 
+    def _lapsed(self) -> Any:
+        """The one test of "lapsed", judged by the database's clock: a working batch whose lease and grace have run
+        out. Every recovery path (takeover, recovery abandon, offboarding, the tick's selection) uses it."""
+        return and_(_B.c.phase == "working", _B.c.lease_expiry.is_not(None),
+                    func.now() > _B.c.lease_expiry + literal(_dt.timedelta(seconds=self.grace)))
+
+    async def _is_lapsed(self, s: AsyncSession, row: Any) -> bool:
+        return bool((await s.execute(select(self._lapsed()).where(_B.c.id == row.id))).scalar_one())
+
     async def _require_active(self, s: AsyncSession, tenant: str) -> None:
         """The tenant is active, held so for this transaction (a share lock keeps the offboarding's update behind it)."""
         state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == TenantId(tenant))
@@ -331,7 +352,7 @@ class LearningStore(FeedbackVerbs):
         """Queue one pitfall occurrence; a repeated pitfall id is ignored, a keyless row is keyed by its digest."""
         _refuse_nul(row)
         key = str(row["pitfall_id"]) if row.get("pitfall_id") else _digest(dict(row))
-        mistake = _digest([row.get("system"), row.get("stderr_digest")])
+        mistake = mistake_key_of(row, key)
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
             return bool(await self._insert_item(s, tenant, "pitfall", key, dict(row), source_run=_str_or_none(row.get("source_run")),
@@ -384,7 +405,7 @@ class LearningStore(FeedbackVerbs):
 
     async def batches(self, tenant: str) -> list[BatchView]:
         async with self._sessions() as s:
-            rows = (await s.execute(select(_B).where(_B.c.tenant_id == TenantId(tenant))
+            rows = (await s.execute(select(_B, self._lapsed().label("lapsed")).where(_B.c.tenant_id == TenantId(tenant))
                                     .order_by(_B.c.created_at, _B.c.id))).all()
         return [_view(r) for r in rows]
 
@@ -408,8 +429,7 @@ class LearningStore(FeedbackVerbs):
         """Start a working batch on `lane` over what is due, in one transaction (P2'); `None` when nothing is due.
 
         A replacement due (items still in a batch that closed with feedback) goes first and takes only those items;
-        otherwise every waiting item of each kind at or over its threshold (pitfalls: `pitfalls_lane_is_open`, which counts
-        mistakes, not rows)."""
+        otherwise every waiting item of each kind at or over its threshold (pitfalls: distinct `mistake_key`s, not rows)."""
         if lane not in LANES:
             raise ValueError(f"not a lane: {lane}")
         kinds = [k for k, ln in LANE_OF.items() if ln == lane]
@@ -455,17 +475,12 @@ class LearningStore(FeedbackVerbs):
 
     async def _claim_due(self, s: AsyncSession, tenant: str, lane: str, kinds: list[str], owner: str,
                          thresholds: Mapping[str, int]) -> Held | None:
+        # One arrival rule (A2 D8): rows, but a pitfall counts its distinct mistakes (`mistake_key`), in SQL.
+        tid = TenantId(tenant)
         counts: dict[str, int] = dict((await s.execute(
-            select(_I.c.kind, func.count()).where(_I.c.tenant_id == TenantId(tenant), _I.c.kind.in_(kinds),
-                                                  _I.c.status == "waiting").group_by(_I.c.kind))).all())
+            select(_I.c.kind, func.count(func.distinct(case((_I.c.kind == "pitfall", _I.c.mistake_key), else_=_I.c.item_key))))  # lint-half-table: ok — the pitfall's own distinct-mistake count, not its lane
+            .where(_I.c.tenant_id == tid, _I.c.kind.in_(kinds), _I.c.status == "waiting").group_by(_I.c.kind))).all())
         due = [k for k in kinds if counts.get(k, 0) > 0 and counts[k] >= max(1, thresholds.get(k, 1))]
-        if "pitfall" in due:  # rows repeat a mistake: the pitfalls arrival rule counts mistakes, not rows
-            from defender.learning.core.persist import merge_pitfalls, pitfalls_lane_is_open
-
-            payloads = [r.payload for r in (await s.execute(select(_I.c.payload).where(
-                _I.c.tenant_id == TenantId(tenant), _I.c.kind == "pitfall", _I.c.status == "waiting"))).all()]  # lint-half-table: ok — the pitfall's own distinct-mistake threshold, not its lane
-            if not pitfalls_lane_is_open(merge_pitfalls(payloads), max(1, thresholds.get("pitfall", 1))):
-                due.remove("pitfall")
         if not due:
             return None
         return await self._new_batch(s, tenant, lane, "author", owner, due, generation=0, replaces=None,
@@ -515,9 +530,7 @@ class LearningStore(FeedbackVerbs):
         """Fence a working batch whose lease and grace have run out and become its holder (O1, P6)."""
         async with self._sessions.begin() as s:
             row = await self._batch(s, tenant, batch_id)
-            lapsed = (await s.execute(select(func.now() > row.lease_expiry + literal(_dt.timedelta(seconds=self.grace)))
-                                      )).scalar_one() if row.lease_expiry is not None else False
-            if row.phase != "working" or not lapsed:
+            if not await self._is_lapsed(s, row):
                 raise NotLapsed(batch_id)
             token = row.fencing_token + 1
             await s.execute(update(_B).where(_B.c.id == row.id).values(
@@ -622,9 +635,7 @@ class LearningStore(FeedbackVerbs):
                     await self._give_back(s, tenant, row, forgive=False, hold=True, reason="abandoned by a person")
                     await self._end(s, row.id, "abandoned", reason="abandoned by a person", token=row.fencing_token + 1)
                 return
-            lapsed = row.lease_expiry is not None and (await s.execute(select(
-                func.now() > row.lease_expiry + literal(_dt.timedelta(seconds=self.grace))))).scalar_one()
-            if row.phase != "working" or not lapsed:
+            if not await self._is_lapsed(s, row):
                 raise NotLapsed(batch_id)
             await self._give_back(s, tenant, row, forgive=False, hold=False)
             await self._end(s, row.id, "abandoned", reason="its holder was lost", token=row.fencing_token + 1)

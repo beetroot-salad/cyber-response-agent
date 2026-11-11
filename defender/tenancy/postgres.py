@@ -39,6 +39,7 @@ from defender.tenancy.repository import (
     ALL,
     KEEP,
     LOCK_NAMESPACE,
+    HOST,
     SERVICE,
     Conflict,
     FenceMissed,
@@ -165,6 +166,12 @@ class PostgresTenantRepository:
             tenant_id, (_T.c.state == "active") & _T.c.pending_action.is_(None),
             "only an active tenant with nothing pending can rotate",
             pending_action="rotate", step="names", step_actor=SERVICE)
+
+    async def request_learning_cutover(self, tenant_id: TenantId) -> TenantRecord:
+        return await self._request(
+            tenant_id, (_T.c.state == "active") & _T.c.pending_action.is_(None),
+            "only an active tenant with nothing pending can have its learning state cut over",
+            pending_action="learning_cutover", step="import", step_actor=HOST)
 
     # --- host processes --------------------------------------------------------------------------
     async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:

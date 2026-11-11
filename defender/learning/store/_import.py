@@ -35,6 +35,7 @@ from ._store import (
     ItemRefused,
     LearningStore,
     _digest,
+    mistake_key_of,
     _refuse_nul,
     _str_or_none,
     lanes_of_branch,
@@ -227,7 +228,7 @@ def _new_item(kind: str, key: str, row: dict[str, Any], status: str, reason: str
                  counters={c: _counter(row.get(c)) for c in _COUNTERS})
     if kind == "pitfall":  # lint-half-table: ok — the pitfall's own row shape (mistake key), not its lane
         item.source_run = _str_or_none(row.get("source_run"))
-        item.mistake_key = _digest([row.get("system"), row.get("stderr_digest")])
+        item.mistake_key = mistake_key_of(row, key)
     else:
         item.source_run = _str_or_none(row.get("run_id"))
     return item

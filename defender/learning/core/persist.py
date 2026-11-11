@@ -127,17 +127,8 @@ def merge_pitfalls(rows: list[dict]) -> list[dict]:
 
 def pitfalls_lane_is_open(records: list[dict], threshold: int) -> bool:
     """The one arrival condition, shared by the store's claim and wake gate and `pitfalls_curator.run_pitfalls`' tick
-    gate: the lane has work only when mistakes, not rows, reach the threshold.
+    gate: the lane has work only when distinct mistakes, not rows, reach the threshold.
 
-    True when the distinct count of merged records reaches the threshold, or when some reducer
-    record (`is_reducer_row`, so routing and gating agree) has `occurrences >= threshold` on
-    its own.
-
-    The second disjunct exists because the count alone is anti-correlated with evidence on the
-    reducer lane: one unchanging error across many attempts is one merged record, while N
-    diagnosis-less failures are N records. Those key per row (`(owner, "\\x00" + pitfall_id)`),
-    so they can never satisfy the disjunct.
-    """
-    if len(records) >= threshold:
-        return True
-    return any(is_reducer_row(r) and _occurrences(r) >= threshold for r in records)
+    Strict, with no second route: one unchanging error repeated past the threshold is one merged record and
+    opens nothing, reducer rows included (#1278 ruling; the store counts the same thing in SQL by `mistake_key`)."""
+    return len(records) >= max(1, threshold)
