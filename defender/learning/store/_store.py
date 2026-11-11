@@ -29,6 +29,8 @@ from defender.tenancy.models import TenantRecord
 
 from defender.jobs.learning_models import (
     AUTHOR_LANE,
+    AUTHORING_KINDS,
+    FEEDBACK_LANE,
     LANE_OF,
     LANES,
     LEAD_LANE,
@@ -37,6 +39,8 @@ from defender.jobs.learning_models import (
     CommitRow,
     WorkItemRow,
 )
+
+from ._feedback import FeedbackVerbs
 
 #: A lease must outlast the worker's 30 s stop grace (#1081), so a brief database blip costs no authoring run.
 DEFAULT_LEASE_SECONDS = 120.0
@@ -47,7 +51,7 @@ DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_GENERATION_CEILING = 3
 DEFAULT_REFUSAL_CEILING = 3
 
-BRANCH_PREFIX = {AUTHOR_LANE: "lessons/", LEAD_LANE: "lead-author/"}
+BRANCH_PREFIX = {AUTHOR_LANE: "lessons/", LEAD_LANE: "lead-author/", FEEDBACK_LANE: "feedback/"}
 REVERT_PREFIX = "lessons/revert-"
 
 _I = cast(Table, WorkItemRow.__table__)
@@ -261,8 +265,9 @@ def _to_waiting() -> dict[str, Any]:
             "reason": case((sup, "superseded by a later run"), else_=_I.c.reason)}
 
 
-class LearningStore:
-    """Async store over PostgreSQL schema `learning`; tenant id is the first argument of every verb."""
+class LearningStore(FeedbackVerbs):
+    """Async store over PostgreSQL schema `learning`; tenant id is the first argument of every verb (a holder's verb
+    takes its proof instead). #1414's feedback verbs are `FeedbackVerbs` (A4)."""
 
     def __init__(self, dsn: str, *, lease: float = DEFAULT_LEASE_SECONDS, grace: float = DEFAULT_GRACE_SECONDS,
                  renew_every: float = DEFAULT_RENEW_SECONDS, max_attempts: int = DEFAULT_MAX_ATTEMPTS,
@@ -424,7 +429,7 @@ class LearningStore:
     async def _refuse_if_busy(self, s: AsyncSession, tenant: str, lane: str) -> None:
         busy = (await s.execute(select(_B.c.id).where(
             _B.c.tenant_id == TenantId(tenant), _B.c.lane == lane,
-            or_(_B.c.phase == "working", and_(_B.c.kind == "author", _B.c.phase != "ended"),
+            or_(_B.c.phase == "working", and_(_B.c.kind.in_(AUTHORING_KINDS), _B.c.phase != "ended"),
                 and_(true() if lane == AUTHOR_LANE else false(), _B.c.kind == "revert", _B.c.phase == "in_review"))).limit(1))).first()
         if busy is not None:
             raise LaneBusy(lane)
@@ -632,10 +637,12 @@ class LearningStore:
                 .values(**_to_waiting(), attempts=0, deferrals=0, updated_at=func.now()))
 
     async def request_cancel(self, tenant: str) -> None:
-        """Offboarding: tell the tenant's working holders to stop (their next renewal is a `Stop`)."""
+        """Offboarding: tell the tenant's working holders, and its feedback tick, to stop (their next renewal is a
+        `Stop`)."""
         async with self._sessions.begin() as s:
             await s.execute(update(_B).where(_B.c.tenant_id == TenantId(tenant), _B.c.phase == "working")
                             .values(cancel_requested=True))
+            await self._cancel_feedback_tick(s, tenant)
 
     # -- reconcile (no holder) -----------------------------------------------------------------------------
 
@@ -789,9 +796,10 @@ class LearningStore:
             fencing_token=token))
 
     async def offboard(self, tenant: str, *, wait: float) -> None:
-        """Offboarding's learning step (O6): tell working holders to stop, end the ones whose lease lapsed past grace,
-        and purge once none is left. A live holder still renewing at `wait` seconds is `LaneBusy`: the step fails and
-        is retried (G-T2); nothing is purged under a live lease."""
+        """Offboarding's learning step (O6): tell working holders (and the feedback tick) to stop, end the batches whose
+        lease lapsed past grace, and purge once none is left and no feedback tick holds its lease. A live holder still
+        renewing at `wait` seconds is `LaneBusy`: the step fails and is retried (G-T2); nothing is purged under a live
+        lease."""
         import asyncio
         import time
 
@@ -809,7 +817,8 @@ class LearningStore:
             async with self._sessions() as s:
                 left = (await s.execute(select(_B.c.id).where(
                     _B.c.tenant_id == TenantId(tenant), _B.c.phase == "working").limit(1))).first()
-            if left is None:
+                ticking = await self._feedback_lease_live(s, tenant)
+            if left is None and not ticking:
                 await self.purge(tenant)
                 return
             if time.monotonic() >= deadline:
@@ -820,6 +829,7 @@ class LearningStore:
         """Offboarding's last step: every row of the tenant."""
         t = TenantId(tenant)
         async with self._sessions.begin() as s:
+            await self._purge_feedback(s, tenant)
             await s.execute(delete(_CC).where(_CC.c.tenant_id == t))
             await s.execute(delete(_C).where(_C.c.tenant_id == t))
             await s.execute(delete(_I).where(_I.c.tenant_id == t))
@@ -827,10 +837,12 @@ class LearningStore:
 
 
 def lanes_of_branch(branch: str) -> tuple[str, ...]:
-    """The corpora a batch on `branch` writes (`DrainLabel.lanes`): the lead lane's for its prefix, else the author
-    lane's (a revert's included: it undoes an author-lane change)."""
-    from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL
+    """The corpora a batch on `branch` writes (`DrainLabel.lanes`): the lead lane's or the feedback lane's for its
+    prefix, else the author lane's (a revert's included: it undoes an author-lane change)."""
+    from defender.learning.core.config import AUTHOR_DRAIN_LABEL, FEEDBACK_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL
 
+    if branch.startswith(BRANCH_PREFIX[FEEDBACK_LANE]):
+        return FEEDBACK_DRAIN_LABEL.lanes
     return (LEAD_AUTHOR_DRAIN_LABEL if branch.startswith(BRANCH_PREFIX[LEAD_LANE]) else AUTHOR_DRAIN_LABEL).lanes
 
 

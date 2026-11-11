@@ -1,12 +1,13 @@
-"""The learning store (#1278): work items, batches and the commit-maker's record.
+"""The learning store (#1278): work items, batches and the commit-maker's record; #1414's feedback records (A4:
+issues, comments, the feedback tick's lease and cursor).
 
 Revision ID: 0012_learning_store
 Revises: 0011_merge_eligibility
 
 No backfill here: a tenant's file state is imported once, at its cutover (`import_learning_state`). Every
 value is set by the store in Python (no server defaults). The rules the data holds on its own (one item per
-key, one waiting request per case, one open author batch and one working batch per lane) are constraints and
-partial unique indexes.
+key, one waiting request per case, one open authoring batch and one working batch per lane, one run per feedback
+issue) are constraints and partial unique indexes.
 """
 import sqlalchemy as sa
 from alembic import op
@@ -15,7 +16,7 @@ revision = "0012_learning_store"
 down_revision = "0011_merge_eligibility"
 
 SCHEMA = "learning"
-KINDS = "'finding', 'questioner_finding', 'pitfall', 'curation_request'"
+KINDS = "'finding', 'questioner_finding', 'pitfall', 'curation_request', 'feedback_instruction'"
 STATUSES = "'waiting', 'in_batch', 'held', 'published', 'skipped', 'dead'"
 
 
@@ -52,8 +53,8 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_batches")),
         sa.ForeignKeyConstraint(["tenant_id"], tenant, name=op.f("fk_batches_tenant_id_tenants")),
         sa.ForeignKeyConstraint(["replaces"], [f"{SCHEMA}.batches.id"], name=op.f("fk_batches_replaces_batches")),
-        sa.CheckConstraint("kind IN ('author', 'revert')", name=op.f("ck_batches_kind")),
-        sa.CheckConstraint("lane IN ('author', 'lead_author')",  # lint-run-records: ok — the lane's database value
+        sa.CheckConstraint("kind IN ('author', 'revert', 'registry')", name=op.f("ck_batches_kind")),
+        sa.CheckConstraint("lane IN ('author', 'lead_author', 'feedback')",  # lint-run-records: ok — the lane's database value
                            name=op.f("ck_batches_lane")),
         sa.CheckConstraint("phase IN ('working', 'in_review', 'needs_person', 'ended')", name=op.f("ck_batches_phase")),
         sa.CheckConstraint("outcome IS NULL OR outcome IN ('merged', 'closed', 'abandoned')",
@@ -64,7 +65,7 @@ def upgrade() -> None:
         sa.CheckConstraint("phase <> 'in_review' OR pr_number IS NOT NULL", name=op.f("ck_batches_in_review_has_a_pr")),
         schema=SCHEMA)
     op.create_index("batches_one_open_author_per_lane", "batches", ["tenant_id", "lane"], unique=True, schema=SCHEMA,
-                    postgresql_where=sa.text("kind = 'author' AND phase <> 'ended'"))
+                    postgresql_where=sa.text("kind IN ('author', 'registry') AND phase <> 'ended'"))
     op.create_index("batches_one_working_per_lane", "batches", ["tenant_id", "lane"], unique=True, schema=SCHEMA,
                     postgresql_where=sa.text("phase = 'working'"))
     op.create_table(
@@ -124,4 +125,56 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], tenant, name=op.f("fk_commit_changes_tenant_id_tenants")),
         sa.ForeignKeyConstraint(["commit_row"], [f"{SCHEMA}.commits.id"],
                                 name=op.f("fk_commit_changes_commit_row_commits")),
+        schema=SCHEMA)
+    _feedback_tables(tenant)
+
+
+def _feedback_tables(tenant: list[str]) -> None:
+    """#1414's feedback records (A4): one row per run whose issue is owed or recorded, one per comment taken in, and
+    the tenant's feedback tick (its comment cursor and lease)."""
+    op.create_table(
+        "feedback_issues",
+        sa.Column("tenant_id", sa.Uuid(as_uuid=False), nullable=False),
+        sa.Column("run_id", sa.Text(), nullable=False),
+        sa.Column("case_id", sa.Text(), nullable=False),
+        sa.Column("outcome", sa.Text(), nullable=False),
+        sa.Column("lookups", sa.dialects.postgresql.JSONB(), nullable=False),
+        sa.Column("issue_number", sa.Integer(), nullable=True),
+        sa.Column("listed", sa.Boolean(), nullable=False),
+        sa.Column("judged_comment_ids", sa.dialects.postgresql.JSONB(), nullable=False),
+        _time("requested_at", nullable=False),
+        _time("recorded_at"),
+        sa.PrimaryKeyConstraint("tenant_id", "run_id", name=op.f("pk_feedback_issues")),
+        sa.ForeignKeyConstraint(["tenant_id"], tenant, name=op.f("fk_feedback_issues_tenant_id_tenants")),
+        schema=SCHEMA)
+    op.create_index("feedback_issues_one_run_per_issue", "feedback_issues", ["tenant_id", "issue_number"], unique=True,
+                    schema=SCHEMA, postgresql_where=sa.text("issue_number IS NOT NULL"))
+    op.create_table(
+        "feedback_comments",
+        sa.Column("tenant_id", sa.Uuid(as_uuid=False), nullable=False),
+        sa.Column("comment_id", sa.BigInteger(), nullable=False),
+        sa.Column("run_id", sa.Text(), nullable=False),
+        sa.Column("author", sa.Text(), nullable=False),
+        sa.Column("created", sa.Text(), nullable=False),
+        sa.Column("body", sa.Text(), nullable=False),
+        sa.Column("issue_url", sa.Text(), nullable=False),
+        sa.Column("attempts", sa.Integer(), nullable=False),
+        sa.Column("decision", sa.dialects.postgresql.JSONB(), nullable=True),
+        sa.Column("settled", sa.Boolean(), nullable=False),
+        sa.PrimaryKeyConstraint("tenant_id", "comment_id", name=op.f("pk_feedback_comments")),
+        sa.ForeignKeyConstraint(["tenant_id"], tenant, name=op.f("fk_feedback_comments_tenant_id_tenants")),
+        sa.ForeignKeyConstraint(["tenant_id", "run_id"], [f"{SCHEMA}.feedback_issues.tenant_id",
+                                                          f"{SCHEMA}.feedback_issues.run_id"],
+                                name=op.f("fk_feedback_comments_tenant_id_run_id_feedback_issues")),
+        schema=SCHEMA)
+    op.create_table(
+        "feedback_tick",
+        sa.Column("tenant_id", sa.Uuid(as_uuid=False), nullable=False),
+        _time("comments_since"),
+        sa.Column("lease_owner", sa.Text(), nullable=True),
+        _time("lease_expiry"),
+        sa.Column("fencing_token", sa.Integer(), nullable=False),
+        sa.Column("cancel_requested", sa.Boolean(), nullable=False),
+        sa.PrimaryKeyConstraint("tenant_id", name=op.f("pk_feedback_tick")),
+        sa.ForeignKeyConstraint(["tenant_id"], tenant, name=op.f("fk_feedback_tick_tenant_id_tenants")),
         schema=SCHEMA)
