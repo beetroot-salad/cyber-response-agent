@@ -349,26 +349,22 @@ def _answered(status: int) -> tuple[int, dict, bytes]:
     return status, {"Content-Type": "application/json"}, b'{"error": {"reason": "no privilege"}}'
 
 
+_ES_IN_PATTERN = {"query": f"FROM {A.ELASTIC_EVENTS} | LIMIT 1"}
+
+
 @pytest.mark.parametrize(("verb", "kw", "path", "status", "fault"), [
-    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 401, ConfigFault,
-                 id="esql-401"),
-    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 403, UpstreamFault,
-                 id="esql-403-role-lacks-the-index"),
-    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 503, TransportFault,
-                 id="esql-503"),
+    pytest.param("esql", _ES_IN_PATTERN, "/_query", 401, ConfigFault, id="esql-401"),
+    pytest.param("esql", _ES_IN_PATTERN, "/_query", 403, ConfigFault, id="esql-403-is-setup"),
+    pytest.param("esql", _ES_IN_PATTERN, "/_query", 503, TransportFault, id="esql-503"),
     pytest.param("query", {"native_query": "*"}, f"/{A.ELASTIC_EVENTS}/_search", 403,
                  ConfigFault, id="query-403"),
     pytest.param("alerts", {"native_query": "*"}, f"/{A.ELASTIC_ALERTS}/_search", 403,
                  ConfigFault, id="alerts-403"),
-    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 403,
-                 UpstreamFault, id="esql-403"),
 ])
 def test_1391_o3_elastic_faults_follow_the_proxys_classification(
         tmp_path, data_root, verb, kw, path, status, fault):
-    """ES|QL `FROM .security-7` passes the adapter and is sent; 401 and 5xx come back as
-    ConfigFault and TransportFault. A 403 on `query`/`alerts` (whose index is confined to the
-    configured ones) is a setup fault (ConfigFault); on `esql`, which names its own indexes, it
-    is the agent's (UpstreamFault). #1391 O3, D8, D11; PR #1409 review (human decision)."""
+    """401/5xx follow the proxy's classification and a 403 is a setup fault naming `read`, on `esql`
+    too now its sources are confined (A6). #1391 O3, D8, D11; #1347 O2a."""
     with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, _tap):
         up.replies[path] = _answered(status)
         with pytest.raises(AdapterFault) as raised:
@@ -381,6 +377,22 @@ def test_1391_o3_elastic_faults_follow_the_proxys_classification(
     assert getattr(raised.value, "origin", None) == "system"
     assert raised.value.proxy_own is False
     assert [s.path.split("?")[0] for s in up.seen] == [path]
+
+
+def test_1347_a6_a_query_off_the_allow_list_is_refused_by_confinement_so_elastic_is_never_marked_down(
+        tmp_path, data_root):
+    """#1347 A6 revised (r6.4.4), finding 2: `RERANK` on the events pattern needs privileges the read-only role
+    lacks, so Elasticsearch would answer 403, which is a setup fault (ConfigFault) and marks the system down for
+    the run. Off the allow-list, it is a ConfinementFault (the agent's, not setup) before anything is sent: no
+    request, and not a ConfigFault, so `query_tool` never marks Elasticsearch down. The 403 stays a setup fault
+    for an allowed query (`esql-403-is-setup` above)."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, tap):
+        up.replies["/_query"] = _answered(403)
+        with pytest.raises(AdapterFault) as raised:
+            elastic_adapter.VERBS["esql"](ctx, query=f'FROM {A.ELASTIC_EVENTS} | RERANK "q" ON message')
+
+    assert type(raised.value) is ConfinementFault, raised.value
+    assert (list(tap.tokens), list(up.seen)) == ([], [])
 
 
 @pytest.mark.parametrize(("verb", "kw", "path"), [

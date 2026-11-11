@@ -35,13 +35,13 @@ identity migration in
 Run every tool here as a module from the repository root (`defender/.venv/bin/python -m evaluations.held_out ...`); by filename it fails with `No module named 'defender'`.
 
 ```bash
-# Primary: score against ground truth. It walks fixtures/held_out/ and finds each
-# fixture's run through the held-out index F you name (outside every runs and episodes
-# tree), one {"slug", "run_id"} row per run, which you append yourself. run.py's first
-# stdout line names the run id: run_id=<uuid>. A run that crashes before it leaves no row,
-# and the slug's older row (if any) is scored instead. Pin every run of one index to one
-# knowledge revision (--knowledge-commit K, #1108 P4) so its scores are comparable.
-python3 defender/run.py evaluations/fixtures/held_out/<slug>/alert.json --tenant "$TENANT_ID" --no-learn --knowledge-commit K
+# Primary: score against ground truth. It walks fixtures/held_out/ (a labelled fixture is a
+# case only with a case.yaml naming its freeze) and finds each case's run through the held-out
+# index F you name (outside every runs and episodes tree). The lab's launcher writes the rows;
+# a row counts only when its `binding` equals evaluations.held_out.binding(freeze, case) of the
+# case as it stands now. A case with no counting row, or a stale one, is listed, left out of the
+# accuracy, and makes the report incomplete (non-zero exit). The report gives each case's age
+# band at T (under 1 h, 1-3 h, 3-6 h).
 python3 -m evaluations.held_out "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 ```
 

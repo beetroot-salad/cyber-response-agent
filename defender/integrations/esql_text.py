@@ -1,12 +1,15 @@
 """ES|QL text mechanics — the small set of string facts about the query language.
 
 One home, so every caller treats a `|` inside a string literal as data: two copies of "split on
-`|`" is how one learns about quoting and the other does not. Its caller is
-`evaluations/oracle_golden/controls.py` (placing a window clause). Lives beside the adapters,
-where vendor-named knowledge is allowed.
+`|`" is how one learns about quoting and the other does not. Callers are
+`evaluations/oracle_golden/controls.py` (placing a window clause), the Elastic adapter's ES|QL
+confinement and the chaos guard (`sources`: what a query reads, #1347 A5). Lives beside the
+adapters, where vendor-named knowledge is allowed.
 """
 
 from __future__ import annotations
+
+import re
 
 COMMAND_SEP = "|"
 
@@ -44,3 +47,151 @@ def split_first_command(query: str) -> tuple[str, str]:
     if not offsets:
         return query, ""
     return query[: offsets[0]], query[offsets[0]:]
+
+
+# the sources a query reads (#1347 A5/A6)
+
+_TOKEN = re.compile(r'''
+    (?P<ws>\s+)
+  | (?P<line>//[^\r\n]*)
+  | (?P<string>"(?:[^"\\]|\\.)*")
+  | (?P<tick>`(?:[^`]|``)*`)
+  | (?P<sep>\|)
+  | (?P<comma>,)
+  | (?P<paren>[()])
+  | (?P<word>(?:(?!/\*|//)[^\s|,"()`])+)
+''', re.VERBOSE | re.DOTALL)
+
+#: The commands a query may start with, and what follows each (A6 revised, #1347 r6.4.4). The lists
+#: are allow-lists: any other command, known to ES|QL or not, makes the query unreadable. Adding one is
+#: a reviewed change with a test.
+_FIRST_COMMANDS = frozenset({"FROM", "TS", "ROW", "SHOW"})
+_LATER_COMMANDS = frozenset({
+    "WHERE", "EVAL", "STATS", "KEEP", "DROP", "RENAME", "SORT", "LIMIT", "DISSECT", "GROK", "MV_EXPAND",
+})
+
+#: Three `"` in a row: a triple-quoted string, or text whose quoting another lexer may read otherwise.
+_QUOTE_RUN = '"""'
+
+_Token = tuple[str, str]
+
+
+def _block_comment_end(query: str, start: int) -> int:
+    """Offset past the (nesting) block comment opening at `start`, or -1 if it never closes."""
+    depth, i = 0, start
+    while i < len(query):
+        if query.startswith("/*", i):
+            depth, i = depth + 1, i + 2
+        elif query.startswith("*/", i):
+            depth, i = depth - 1, i + 2
+            if depth == 0:
+                return i
+        else:
+            i += 1
+    return -1
+
+
+def _tokens(query: str) -> list[_Token] | None:
+    """The query's tokens without whitespace or comments, or `None` where the text does not
+    tokenize (an unterminated string or comment) or holds a run of three `"` anywhere outside a
+    backtick-quoted name (in a string, a comment or between tokens)."""
+    out: list[_Token] = []
+    outside_names: list[str] = []
+    i = 0
+    while i < len(query):
+        if query.startswith("/*", i):
+            end = _block_comment_end(query, i)
+            if end < 0:
+                return None
+            outside_names.append(query[i:end])
+            i = end
+            continue
+        m = _TOKEN.match(query, i)
+        if m is None:
+            return None
+        i = m.end()
+        # a name stands in as one non-quote character, so quotes on either side never join across it
+        outside_names.append("x" if m.lastgroup == "tick" else m.group())
+        if m.lastgroup not in ("ws", "line"):
+            out.append((str(m.lastgroup), m.group()))
+    return None if _QUOTE_RUN in "".join(outside_names) else out
+
+
+def _commands(tokens: list[_Token]) -> list[list[_Token]] | None:
+    """The tokens split at command separators; `None` if a command is empty."""
+    commands: list[list[_Token]] = [[]]
+    for token in tokens:
+        if token[0] == "sep":
+            commands.append([])
+        else:
+            commands[-1].append(token)
+    return None if any(not c for c in commands) else commands
+
+
+def _index_name(token: _Token) -> str | None:
+    """The index expression a source token names, or `None` if it is not a plain local one
+    (a subquery, a remote `cluster:index`, an escaped name)."""
+    kind, text = token
+    if kind == "string":
+        text = text[1:-1]
+    elif kind != "word":
+        return None
+    return None if not text or ":" in text or "\\" in text else text
+
+
+def _from_sources(rest: list[_Token]) -> list[str] | None:
+    """The comma list after `FROM` / `TS`, up to an optional `METADATA` clause."""
+    found: list[str] = []
+    i = 0
+    while True:
+        name = _index_name(rest[i]) if i < len(rest) else None
+        if name is None:
+            return None
+        found.append(name)
+        i += 1
+        if i == len(rest) or (rest[i][0] == "word" and rest[i][1].upper() == "METADATA"):
+            return found
+        if rest[i][0] != "comma":
+            return None
+        i += 1
+
+
+def _later_command_sources(command: list[_Token]) -> list[str] | None:
+    """What an allowed command after the first reads: its `LOOKUP JOIN` index, nothing for the
+    rest; `None` for any command off the allow-list."""
+    head, rest = command[0], command[1:]
+    if head[0] != "word":
+        return None
+    keyword = head[1].upper()
+    if keyword == "LOOKUP":
+        joined = bool(rest) and rest[0][0] == "word" and rest[0][1].upper() == "JOIN"
+        name = _index_name(rest[1]) if joined and len(rest) > 1 else None
+        return None if name is None else [name]
+    return [] if keyword in _LATER_COMMANDS else None
+
+
+def _first_command_sources(command: list[_Token]) -> list[str] | None:
+    head, rest = command[0], command[1:]
+    keyword = head[1].upper() if head[0] == "word" else ""
+    if keyword not in _FIRST_COMMANDS:
+        return None
+    return _from_sources(rest) if keyword in ("FROM", "TS") else []
+
+
+def sources(query: str) -> list[str] | None:
+    """The index expressions this ES|QL query reads, in order: the `FROM` / `TS` list and every
+    `LOOKUP JOIN` index, quotes removed, comments and string literals ignored. `[]` means it
+    reads no index (`ROW`, `SHOW`); `None` means it cannot be read with confidence (a command off
+    the allow-list, such as ENRICH or FORK; a subquery; a remote cluster; any run of three `"`
+    outside a backtick name; unparsable text), and the caller must fail closed."""
+    tokens = _tokens(query)
+    commands = _commands(tokens) if tokens else None
+    if commands is None:
+        return None
+    found = _first_command_sources(commands[0])
+    for command in commands[1:]:
+        later = _later_command_sources(command)
+        if found is None or later is None:
+            return None
+        found += later
+    return found
