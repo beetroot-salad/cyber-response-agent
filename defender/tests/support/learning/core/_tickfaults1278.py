@@ -225,7 +225,7 @@ class PushSpy:
                 raise error()
             real(repo, commit, branch)
 
-        monkeypatch.setattr(GitRepository, "push", push)
+        monkeypatch.setattr(GitRepository, "push", push)  # lint-monkeypatch: ok — a counting, failing wrapper of the one push that runs the real push otherwise; the tick builds its repository itself, so no seam carries it
 
     def timeouts(self) -> list[float]:
         return [float(e.rsplit("=", 1)[1]) for e in self.cast.events() if e.startswith("push ")]
