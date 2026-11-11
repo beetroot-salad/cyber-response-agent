@@ -67,7 +67,8 @@ def _requests(paths) -> dict[str, dict]:
 
     tid = str(paths.tenant.id)
     rows = S.store_call(os.environ["DEFENDER_DATABASE_DSN"], "feedback_issues", tid)
-    return {r.run_id: {"case_id": r.case_id, "run_id": r.run_id, "outcome": r.outcome, "lookups": list(r.lookups)}
+    return {r.run_id: {"tenant_id": str(r.tenant_id), "case_id": r.case_id, "run_id": r.run_id,
+                       "outcome": r.outcome, "lookups": list(r.lookups)}
             for r in rows if r.issue_number is None}
 
 

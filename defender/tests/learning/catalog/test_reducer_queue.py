@@ -256,26 +256,32 @@ def _offer(threshold_lane, w, spawn: Spawn) -> Claim:
 
 
 @pytest.mark.postgres
-def test_the_threshold_gates_on_a_records_own_occurrences(world, threshold_lane, monkeypatch):  # noqa: F811 — the imported fixture
-    """Three occurrences of one reducer mistake wake the threshold_lane at threshold 3, and the claim's curator is handed the one record."""
+def test_the_threshold_counts_distinct_reducer_mistakes_not_a_records_own_occurrences(world, threshold_lane, monkeypatch):  # noqa: F811 — the imported fixture
+    """Strict rule, no reducer route (#1278 ruling): three occurrences of one reducer mistake are one mistake and do not wake the lane at
+    threshold 3; three distinct reducer mistakes do, and the curator is handed all three records."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     queue_pitfalls(world, *[shim_row(f"r:l-003:{i}") for i in range(3)])
+    assert lead_wakes(world) is False, "three rows of one reducer mistake woke the drain"
 
-    assert lead_wakes(world) is True, "the drain never wakes for it"
+    queue_pitfalls(world, shim_row("r:l-004:0", digest="exit=1; a second error"), shim_row("r:l-005:0", digest="exit=1; a third error"))
+    assert lead_wakes(world) is True, "the drain never wakes for three distinct reducer mistakes"
     spawn = Spawn(None)
     _offer(threshold_lane, world, spawn)
     [reducer] = by_surface(spawn.handoffs)["reducer"]
-    assert reducer["failures"][0]["occurrences"] == 3
+    assert sorted(f["occurrences"] for f in reducer["failures"]) == [1, 1, 3]
 
 
 @pytest.mark.postgres
 def test_the_motivating_incident_reaches_the_curator_alone(world, threshold_lane, monkeypatch):  # noqa: F811 — the imported fixture
-    """Eight failed reduces of one diagnosis wake the threshold_lane at threshold 3 and reach the curator as one reducer record."""
+    """Eight failed reduces of one diagnosis are one mistake and wake nothing alone at threshold 3; with two more distinct reducer
+    mistakes the lane wakes and the curator is handed the reducer surface alone, the eight-occurrence record first."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     queue_pitfalls(world, *collect_general_failures(
         [shim_lead(sql=f"SELECT unnest(data, {i})", query_index=i) for i in range(8)],
         Path("reviewer-measure-0807-b"), catalog=[]))
+    assert lead_wakes(world) is False, "eight reduces of one diagnosis woke the drain"
 
+    queue_pitfalls(world, shim_row("r:l-004:0", digest="exit=1; a second error"), shim_row("r:l-005:0", digest="exit=1; a third error"))
     assert lead_wakes(world) is True
     spawn = Spawn(None)
     _offer(threshold_lane, world, spawn)

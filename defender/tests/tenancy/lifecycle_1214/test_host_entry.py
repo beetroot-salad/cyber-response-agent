@@ -653,7 +653,10 @@ def _units(rel: str, tree: ast.Module) -> list[tuple[str, bool, list[ast.AST]]]:
 A3_ENTRIES = frozenset({("learning/author/version_control/publish.py", "publish_for_run"),
                         ("learning/author/version_control/publish.py", "publish_child_main"),
                         ("investigation/publish_launch.py", "launch_publish"),
-                        ("skills/connect/validate_scaffold.py", "main")})
+                        ("skills/connect/validate_scaffold.py", "main"),
+                        # The lifecycle job's cutover import needs the forge reads of a tenant it accepts by the folder
+                        # rules inside the lifecycle process (#1278): its one opener, like the publish entries above.
+                        ("learning/author/version_control/publish.py", "delivery_for_cutover")})
 
 
 def _is_barrier(rel: str, name: str) -> bool:

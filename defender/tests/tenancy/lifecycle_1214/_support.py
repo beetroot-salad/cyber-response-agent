@@ -30,7 +30,9 @@ from __future__ import annotations
 import dataclasses
 import datetime as _dt
 import uuid
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -161,6 +163,38 @@ class LifecycleWorld(World):
     def directory(self) -> Any:
         """The host's synchronous view of this world's tenant repository."""
         return TenantDirectory(lambda: self.tenants)
+
+
+class _NoStore:
+    """Where no test server is configured: offboarding's store call, which has nothing to purge."""
+
+    def __init__(self, dsn: str) -> None:
+        self.dsn = dsn
+
+    async def offboard(self, tenant: str, *, wait: float) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+@contextmanager
+def learning_database(monkeypatch: Any) -> Iterator[None]:
+    """The lifecycle world's learning database (#1278 O6): offboarding purges the tenant's learning rows and refuses where
+    `DEFENDER_DATABASE_DSN` is unset. A migrated database of its own where the test server is configured, else a store
+    stand-in that purges nothing. A case that tests the unset refusal deletes the variable itself."""
+    from defender.tests.support.shared import _postgres1339 as pg
+
+    if os.environ.get(pg.DSN_ENV):
+        with pg.database(migrated=True) as dsn:
+            monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)
+            yield
+        return
+    import defender.learning.store as store
+
+    monkeypatch.setattr(store, "LearningStore", _NoStore)  # lint-monkeypatch: ok — the host actor imports the store inside its offboarding step; no seam carries one in
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", "postgresql://stand-in/none")
+    yield
 
 
 def tenant_ids(response: Any) -> list[str]:

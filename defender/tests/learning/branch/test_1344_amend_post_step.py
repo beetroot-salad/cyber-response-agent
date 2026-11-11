@@ -18,6 +18,7 @@ from defender.learning.branch import post_step
 from defender.records.job_lane import post_step_key
 from defender.tests.learning.branch.test_1344_post_step import (  # noqa: F401 — store_dsn is the module's autouse fixture
     _job_episode, _learning_paths, _queue, hand_pending, store_dsn)
+from defender.tests.learning.feedback_1414 import _lessons1414 as L
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, LEAD_LANE, ONE, call, finding, lapse_lease
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -145,6 +146,7 @@ _SCENARIOS = {
     "due_replacement": _closed_with_feedback,
     "merged_and_nothing_else": _merged,
     "lead_batch_closed_with_words": _lead_rejected,  # a lead replacement is operator-only: Wake does not count it (D9)
+    "one_feedback_instruction_item": lambda dsn, t: L.instruct(dsn, t, 101),  # threshold 1, below the judge's 5 (A4 Wake)
     "pitfalls_at_threshold": _pitfalls,  # the lead lane is operator-only: nothing a post-step can act on (D9)
 }
 
@@ -152,6 +154,7 @@ _SCENARIOS = {
 @pytest.mark.parametrize(("scenario", "waiting"), [
     ("items_at_threshold", True), ("lapsed_lease", True), ("overdue_check", True), ("due_replacement", True),
     ("fresh_check_in_review", True), ("live_working_batch", True),
+    ("one_feedback_instruction_item", True),
     ("below_threshold", False), ("merged_and_nothing_else", False), ("pitfalls_at_threshold", False),
     ("lead_batch_closed_with_words", False)])
 def test_wake_the_post_step_says_work_waits_exactly_when_the_stores_state_gives_it_something_to_do(
@@ -183,6 +186,9 @@ def _lane_batch(dsn: str, tenant: str, lane: str, phase: str) -> None:
     """One batch of `lane` in `phase`, built with the store's own verbs (a revert batch has no items)."""
     if lane == "revert":
         claim = call(dsn, "claim_revert", tenant, owner="reverter")
+    elif lane == "feedback":  # the feedback lane's batches are registry batches, made under the lane's tick lock (A4)
+        held = call(dsn, "begin_feedback_tick", tenant, owner="host-a")
+        claim = call(dsn, "claim_registry", held)
     elif lane == LEAD_LANE:
         call(dsn, "add_pitfall", tenant, {"schema_version": 1, "pitfall_id": "p0", "source_run": "r", "system": "elastic",
                                           "query_id": "elastic.esql", "goal": "g", "executed_query": "x",
@@ -195,9 +201,11 @@ def _lane_batch(dsn: str, tenant: str, lane: str, phase: str) -> None:
         call(dsn, "in_review", claim, 7, {})
     if phase == "needs_person":
         call(dsn, "needs_person", tenant, claim.batch_id, "a person is needed")
+    if lane == "feedback":
+        call(dsn, "end_feedback_tick", held)
 
 
-WAKE_LANES = ("author", "lead_author", "revert")
+WAKE_LANES = ("author", "lead_author", "revert", "feedback")
 WAKE_PHASES = ("working", "in_review", "needs_person")
 
 
@@ -210,7 +218,7 @@ def test_wake_a_batch_of_any_lane_in_any_phase_but_ended_keeps_the_tenants_check
     from defender.tests.support.learning.core._store1278 import DSN_ENV
 
     if gate == "finds_nothing":
-        monkeypatch.setattr(drains, "author_work_waiting", lambda _paths: False)
+        monkeypatch.setattr(drains, "author_work_waiting", lambda _paths: False)  # lint-monkeypatch: ok — the gate answers "nothing" while the store still holds a batch: the post-step reads that function by module attribute and no seam carries it
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "5")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")

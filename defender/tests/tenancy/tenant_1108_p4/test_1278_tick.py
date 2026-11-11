@@ -270,9 +270,9 @@ def test_a_claim_the_store_refuses_ends_the_tick_at_zero_with_nothing_changed(wo
         raise raised("refused for the test")
 
     before = _snapshot(w)
-    monkeypatch.setattr(LearningStore, "claim", claim)
+    monkeypatch.setattr(LearningStore, "claim", claim)  # lint-monkeypatch: ok — the store refuses at the claim, the point under test; the tick opens its own store, so no seam carries one
     rc = tick()
-    monkeypatch.setattr(LearningStore, "claim", real)
+    monkeypatch.setattr(LearningStore, "claim", real)  # lint-monkeypatch: ok — puts back the real claim after the refusing one above
 
     assert refused, "the tick never reached the claim, so the refusal was not what it met"
     assert (rc, writer.served) == (0, []), critical_text(caplog)

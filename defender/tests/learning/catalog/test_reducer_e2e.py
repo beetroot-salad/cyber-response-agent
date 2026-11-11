@@ -91,7 +91,13 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
     records = persist.merge_pitfalls(claim.rows)
     assert [r["occurrences"] for r in records] == [3]
 
-    # the curation tick: the handoff names the surface, and the commit carries it
+    # the strict arrival rule (#1278 ruling): three failures of one diagnosis are one mistake, under threshold 3
+    idle = Spawn(None)
+    assert tick(lane, idle, claim) == 0
+    assert idle.calls == [], "one reducer mistake repeated three times reached the curator at threshold 3"
+
+    # the curation tick, at the one mistake the claim holds: the handoff names the surface, and the commit carries it
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     spawn = Spawn(_curate_addon("keep the unnest argument a LIST"))
     assert tick(lane, spawn, claim) == 0
 

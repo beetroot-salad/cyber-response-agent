@@ -505,10 +505,10 @@ def test_a_tenant_that_stops_being_active_is_never_claimed_for_and_its_item_keep
             move_tenant(dsn, t.tenant_id, state=answer)
         return rows
 
-    monkeypatch.setattr(LearningStore, "work", work_then_the_tenant_changes)
+    monkeypatch.setattr(LearningStore, "work", work_then_the_tenant_changes)  # lint-monkeypatch: ok — a wrapper of the tick's own store read that changes the tenant right after it, the only point that orders "read" before "claim"; the real read runs
     for _ in range(3):  # repeated ticks: a set-aside item must not wear out
         _lead_tick(t, tmp_path, steps)
-    monkeypatch.setattr(LearningStore, "work", real_work)
+    monkeypatch.setattr(LearningStore, "work", real_work)  # lint-monkeypatch: ok — puts back the real read after the wrapper above
 
     assert flipped, "the tick never reached the point where the tenant changed, so nothing was tested"
     assert steps.served == [], "a step was served for a tenant no longer active"
