@@ -327,6 +327,8 @@ class RigDocker(FakeDocker):
             return self._volume_cmd(rest, scope)
         if verb in ("network", "build", "version", "load", "pull", "tag"):
             return 0, "", ""
+        if verb == "cp" and rest[:2] == ["-a", "-"] and len(rest) == 3:
+            return 0, "", ""    # a tar streamed into a container (#1391: a replica image's overlay)
         if verb == "commit":
             return self._commit(rest, scope)
         if verb == "image":

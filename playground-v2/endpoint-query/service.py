@@ -28,6 +28,7 @@ Status table (r4, r6): host not served 404; served but not running 503; a comman
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -67,39 +68,22 @@ class Docker(Protocol):
 # -- the Docker Engine API over its unix socket (no CLI in the image) ------------------------------
 
 
-def _read_all(sock: socket.socket) -> bytes:
-    chunks, size = [], 0
-    while chunk := sock.recv(65536):
-        chunks.append(chunk)
-        size += len(chunk)
-        if size > MAX_OUTPUT + 65536:
-            raise Unavailable("the daemon's answer is too large")
-    return b"".join(chunks)
+class _UnixConnection(http.client.HTTPConnection):
+    """The stdlib HTTP client over the daemon's unix socket."""
 
+    def __init__(self, path: str) -> None:
+        super().__init__("docker", timeout=EXEC_TIMEOUT_S)
+        self.unix_path = path
 
-def parse_response(raw: bytes) -> tuple[int, dict[str, str], bytes]:
-    """Status, headers (lower-cased) and body of a whole `Connection: close` HTTP/1.1 response,
-    de-chunked when chunked."""
-    head, sep, body = raw.partition(b"\r\n\r\n")
-    if not sep:
-        raise Unavailable("the daemon sent no complete response")
-    lines = head.decode("latin-1").split("\r\n")
-    status = int(lines[0].split(" ", 2)[1])
-    headers = {}
-    for line in lines[1:]:
-        name, _, value = line.partition(":")
-        headers[name.strip().lower()] = value.strip()
-    if headers.get("transfer-encoding", "").lower() == "chunked":
-        out, rest = bytearray(), body
-        while True:
-            size_line, _, rest = rest.partition(b"\r\n")
-            size = int(size_line.split(b";")[0].strip() or b"0", 16)
-            if size == 0:
-                break
-            out += rest[:size]
-            rest = rest[size + 2:]
-        body = bytes(out)
-    return status, headers, body
+    def connect(self) -> None:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        try:
+            sock.connect(self.unix_path)
+        except OSError:
+            sock.close()
+            raise
+        self.sock = sock
 
 
 def demux(stream: bytes) -> tuple[bytes, bytes]:
@@ -118,19 +102,19 @@ class SocketDocker:
         self.path = path
 
     def _call(self, method: str, url: str, body: Any = None) -> tuple[int, bytes]:
-        data = json.dumps(body).encode() if body is not None else b""
-        request = (f"{method} {url} HTTP/1.1\r\nHost: docker\r\nConnection: close\r\n"
-                   f"Content-Type: application/json\r\nContent-Length: {len(data)}\r\n\r\n").encode() + data
+        data = json.dumps(body).encode() if body is not None else None
+        conn = _UnixConnection(self.path)
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-                sock.settimeout(EXEC_TIMEOUT_S)
-                sock.connect(self.path)
-                sock.sendall(request)
-                raw = _read_all(sock)
-        except OSError as exc:
+            conn.request(method, url, body=data, headers={"Content-Type": "application/json", "Connection": "close"})
+            reply = conn.getresponse()
+            payload = reply.read(MAX_OUTPUT + 65536 + 1)
+        except (OSError, http.client.HTTPException) as exc:
             raise Unavailable(f"docker daemon: {type(exc).__name__}: {exc}") from exc
-        status, _, payload = parse_response(raw)
-        return status, payload
+        finally:
+            conn.close()
+        if len(payload) > MAX_OUTPUT + 65536:
+            raise Unavailable("the daemon's answer is too large")
+        return reply.status, payload
 
     def inspect(self, name: str) -> dict | None:
         status, payload = self._call("GET", f"/containers/{quote(name, safe='')}/json")

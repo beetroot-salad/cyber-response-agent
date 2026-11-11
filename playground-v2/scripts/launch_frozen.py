@@ -121,6 +121,11 @@ def verify(case_dir: Path, freezes_dir: Path, parts_dir: Path, reference: bool) 
         bound = binding(freeze, case)
     except (frozen_copy.CopyRefused, TypeError, ValueError) as exc:
         raise LaunchRefused(str(exc)) from exc
+    from lab_ops import LabOps, LabOpsError
+    try:
+        LabOps.check_host_parts(freeze)
+    except LabOpsError as exc:
+        raise LaunchRefused(str(exc)) from exc
     return case, freeze, {"binding": bound}, alert_uuid_of(case_dir / "alert.json")
 
 

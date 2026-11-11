@@ -1166,6 +1166,7 @@ services:
     image: soc-playground/endpoint-query:local
     container_name: endpoint-query
     command: ["--hosts", "/etc/endpoint-query/hosts.txt", "--inspectable", "/etc/endpoint-query/hosts.txt"]
+    init: true    # PID 1 then answers `docker stop` at once
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:

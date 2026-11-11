@@ -97,3 +97,13 @@ def test_es_init_writes_the_defender_read_only_user_in_a_script_that_still_parse
     script = argv[2].replace("$$", "$")
     assert "/_security/user/defender-readonly" in script and '\\"monitor\\"' in script
     assert subprocess.run(["bash", "-n", "-c", script]).returncode == 0
+
+
+def test_the_rotation_proves_compose_loads_before_it_changes_any_password():
+    """A compose that cannot load (a required variable missing) must stop the rotation before
+    Elasticsearch's passwords change, or Kibana and Fleet are left on the old ones."""
+    script = (PLAYGROUND / "infra" / "bin" / "rotate-elastic-secrets.sh").read_text()
+    lines = [line.strip() for line in script.splitlines() if not line.strip().startswith("#")]
+    check = next(i for i, line in enumerate(lines) if "compose config -q" in line)
+    first_change = next(i for i, line in enumerate(lines) if line.startswith("es_set_password "))
+    assert check < first_change

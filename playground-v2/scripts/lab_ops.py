@@ -12,7 +12,7 @@ reached with `docker --context <context> exec lab-engine docker ...`; its daemon
 socket only. Inside it (network `lab`): the frozen Elasticsearch (`elasticsearch`, the live image,
 the live node's certificate mounted from the lab's certs volume, `LD_PRELOAD` of the D15 wall-clock
 shim reading its offset from a file on the engine's state volume), the five stubs loaded from the freeze's dump and pinned at T, and the
-frontend: the lab's edge program (`edge/edge.py`, the same one live runs, key check off: the engine
+frontend: the lab's edge (nginx, rules rendered by `edge/render.py`, the same image live runs, key check off: the engine
 is reached only through the operator's SSH forward), publishing every port of `lab-surface.json`
 on the engine's loopback and admitting only the declared surface, so a frozen run cannot read the
 case's chaos overlay through `GET /admin/overlay`. The *frozen proxy* is a second container on the
@@ -20,14 +20,15 @@ deployment network (next to the live credential proxy), the product's proxy prog
 with its own audit file and a resolver (`--add-host`) mapping the tenant's declared host names to
 the ssh-forwarded endpoint of that frontend.
 
-Host state (#1391 r6 O9): `serve_hosts` builds one inert replica per host the freeze committed
-(`image-<host>.tar`), named as the host, with no network, an idle entrypoint and no healthcheck;
-its `/var/log` and `/var/lib/elastic-agent` copies and its captured process tree mounted
-read-only, and today's `ps` shim (`hosts/base/ps-shim`) mounted as `ps` on its PATH, so the
-process list is the tree captured at T. The lab's endpoint-query service then answers host-state
-for those hosts, with nothing inspectable (`container-inspect` is #1347's named gap). Images and
-extracted parts are cached in the engine by the part's sha256 (a part loaded or extracted only
-once, an interrupted extract never a cache hit); `purge_host_cache` removes a freeze's.
+Host state (#1391 r6 O9): `serve_hosts` runs one inert replica per host the freeze committed
+(`image-<host>.tar`), named as the host, with no network, a read-only root and no healthcheck.
+Each runs one image built from the committed host image with its `/var/log` and
+`/var/lib/elastic-agent` copies in place, its captured process tree, today's `ps` shim
+(`hosts/base/ps-shim`) as `ps` on its PATH (so the process list is the tree captured at T) and an
+idle entrypoint. The image is tagged by a digest of all of those inputs and committed only once
+complete, so its tag is the whole cache. The lab's endpoint-query service then answers host-state
+for those hosts, with nothing inspectable (`container-inspect` is #1347's named gap).
+`purge_host_cache` removes a freeze's images.
 
 Every restore goes into a fresh node (D25): the node container and its data volume
 (`frozen-es-data`) are discarded and a new node starts empty; the copy-state marker lives on the
@@ -108,9 +109,9 @@ FRONTEND = "frontend"                     # the engine's one edge container, eve
 EDGE_IMAGE = "soc-playground/edge:local"
 QUERY_IMAGE = "soc-playground/endpoint-query:local"
 PS_SHIM = PLAYGROUND / "hosts" / "base" / "ps-shim"
-HOST_SHIM_DIR = "/lab/hostshim"           # in the engine's own filesystem: today's shim, bound into replicas
 QUERY_DIR = "/lab/endpoint-query"         # in the engine: the service's host lists
-HOST_PARTS_DIR = f"{STATE_DIR}/host-parts"   # `<key>.done`: a part's extract finished
+#: Bumped when `_replica_image` builds differently: every replica image is then rebuilt.
+REPLICA_RECIPE = "replica-v1"
 REPLICA_TREE_DIR = "/lab/tree"            # in a replica: its captured process tree
 READONLY_PASSWORD_ENV = "V2_DEFENDER_READONLY_PASSWORD"
 PROXY_PORT = 8411
@@ -263,20 +264,17 @@ class LabOps:
                     f"/out/{SHIM_FILE}")
         self._shim_ready = True
 
-    def _ensure_image(self, image: str) -> None:
-        if self._inner("image", "inspect", image, check=False).returncode == 0:
-            return
-        saved = self._outer("save", image).stdout
-        self._inner("load", input=saved)
-
-    def _ensure_current_image(self, image: str) -> None:
-        """`image` in the engine as the lab server has it now: reloaded when the ids differ (a
-        lab-built `:local` image changes under the same tag; an old copy would keep serving the
-        old surface or argv)."""
-        want = _text(self._outer("image", "inspect", "-f", "{{.Id}}", image).stdout).strip()
+    def _ensure_image(self, image: str, *, current: bool = False) -> None:
+        """`image` in the engine, copied from the lab server when absent. `current`: also when the
+        ids differ (a lab-built `:local` image changes under the same tag; an old copy would keep
+        serving the old surface or argv)."""
         have = self._inner("image", "inspect", "-f", "{{.Id}}", image, check=False)
-        if have.returncode == 0 and _text(have.stdout).strip() == want:
-            return
+        if have.returncode == 0:
+            if not current:
+                return
+            want = _text(self._outer("image", "inspect", "-f", "{{.Id}}", image).stdout).strip()
+            if _text(have.stdout).strip() == want:
+                return
         saved = self._outer("save", image).stdout
         self._inner("load", input=saved)
 
@@ -551,7 +549,7 @@ class LabOps:
         """The lab's edge program as the frozen copy's one frontend, every port of SURFACE, key
         check off (#1391 r6 L1): the same declared-surface rule as live. The per-port forwarders
         an older launcher started are removed first (they hold the same ports)."""
-        self._ensure_current_image(EDGE_IMAGE)
+        self._ensure_image(EDGE_IMAGE, current=True)
         self._inner("rm", "-f", FRONTEND, *(f"frontend-{p}" for p in FRONTEND_PORTS), check=False)
         ports = [a for p in FRONTEND_PORTS for a in ("-p", f"{p}:{p}")]
         self._inner("run", "-d", "--name", FRONTEND, "--network", ENGINE_NETWORK, *ports,
@@ -578,22 +576,34 @@ class LabOps:
         return {"image": f"image-{host}.tar", "tree": f"proc-tree-{host}.txt",
                 **{mount: f"volume-{host}{mount.replace('/', '-')}.tar" for mount in HOST_VOLUMES}}
 
-    def serve_hosts(self, parts: Any, freeze: dict) -> list[str]:
-        """Inert replicas of the freeze's hosts and the endpoint-query service over them, in the
-        engine. A freeze with no host image, or a host missing any of its parts, is refused: an
-        empty host list would answer every host-state call with a quiet 404."""
-        parts = Path(parts)
-        hosts = self.frozen_hosts(freeze)
+    @classmethod
+    def check_host_parts(cls, freeze: dict) -> list[str]:
+        """The freeze's hosts, or LabOpsError: a freeze with no host, or a host missing any of its
+        parts, cannot serve host-state (an empty host list would answer every call with a quiet
+        404). Needs no engine: the launcher asks before it takes the lock."""
+        hosts = cls.frozen_hosts(freeze)
         if not hosts:
             raise LabOpsError("the freeze captured no host (no host image): host-state cannot be served")
-        missing = [n for h in hosts for n in self.host_parts(h).values() if n not in freeze["parts"]]
+        missing = [n for h in hosts for n in cls.host_parts(h).values() if n not in freeze["parts"]]
         if missing:
             raise LabOpsError(f"the freeze lacks host parts {missing}: host-state cannot be served")
+        return hosts
+
+    def serve_hosts(self, parts: Any, freeze: dict) -> list[str]:
+        """Inert replicas of the freeze's hosts and the endpoint-query service over them, in the
+        engine. Each replica runs one image holding everything it serves (`_replica_image`), so the
+        image's tag is the whole cache: it exists complete or not at all."""
+        parts = Path(parts)
+        hosts = self.check_host_parts(freeze)
         self.ensure_engine()
-        self._engine("sh", "-c", f"mkdir -p {HOST_SHIM_DIR} && cat > {HOST_SHIM_DIR}/ps && "
-                                 f"chmod 0755 {HOST_SHIM_DIR}/ps", input=PS_SHIM.read_bytes())
+        listed = self._inner("image", "ls", "--format", "{{.Repository}}:{{.Tag}}", "frozen-host/*", check=False)
+        present = set(_text(listed.stdout).split()) if listed.returncode == 0 else set()
+        images = {h: self._replica_image(parts, freeze["parts"], h, present) for h in hosts}
+        self._inner("rm", "-f", *hosts, check=False)
         for host in hosts:
-            self._replica(parts, freeze["parts"], host)
+            self._inner("run", "-d", "--name", host, "--hostname", host, "--network", "none", "--no-healthcheck",
+                        "--read-only", "--tmpfs", "/tmp", images[host])
+            self._replicas.append(host)
         self._start_query(hosts)
         return hosts
 
@@ -601,75 +611,98 @@ class LabOps:
     def _key(sha: str) -> str:
         return str(sha)[:16]
 
-    def _host_image(self, parts: Path, digests: dict, host: str) -> str:
-        """The host's committed image in the engine, tagged by its part's digest. The saved image
-        carries `local/<host>:latest` (every freeze's does), so it is retagged and that tag dropped:
-        a tag alone would serve another freeze's host."""
-        name = self.host_parts(host)["image"]
-        tag = f"frozen-host/{host}:{self._key(digests[name])}"
-        if self._inner("image", "inspect", tag, check=False).returncode != 0:
-            with open(parts / name, "rb") as fh:
+    @classmethod
+    def replica_tag(cls, digests: dict, host: str) -> str:
+        """The replica image's tag: a digest of every input it is built from (the host's parts,
+        today's `ps` shim, the recipe), so a changed shim or part builds a new image."""
+        named = cls.host_parts(host)
+        h = hashlib.sha256(f"{REPLICA_RECIPE}\n".encode())
+        for kind in ("image", "tree", *HOST_VOLUMES):
+            h.update(f"{kind}={digests[named[kind]]}\n".encode())
+        h.update(hashlib.sha256(PS_SHIM.read_bytes()).hexdigest().encode())
+        return f"frozen-host/{host}:{h.hexdigest()[:16]}"
+
+    def _replica_image(self, parts: Path, digests: dict, host: str, present: set[str]) -> str:
+        """The host's replica image, built once per input digest: the committed host image, its
+        volume copies in place of what the image holds at those paths, its captured tree, today's
+        shim as `ps`, and an idle entrypoint. Committed under its tag only once complete, so an
+        interrupted build leaves no tag and is redone."""
+        tag = self.replica_tag(digests, host)
+        if tag in present:
+            return tag
+        named = self.host_parts(host)
+        base = f"frozen-host-base/{host}:{self._key(digests[named['image']])}"
+        if self._inner("image", "inspect", base, check=False).returncode != 0:
+            with open(parts / named["image"], "rb") as fh:
                 self._inner("load", stdin=fh)
-            self._inner("tag", f"local/{host}:latest", tag)
+            self._inner("tag", f"local/{host}:latest", base)
             self._inner("image", "rm", f"local/{host}:latest", check=False)
+        build = f"frozen-build-{host}"
+        self._inner("rm", "-f", build, check=False)
+        clear = " ".join(HOST_VOLUMES)
+        self._inner("run", "--name", build, "--network", "none", "--entrypoint", "sh", base, "-c",
+                    f"rm -rf {clear} && mkdir -p {clear} {REPLICA_TREE_DIR}")
+        overlay = self._overlay(parts, named, host)
+        try:
+            with open(overlay, "rb") as fh:
+                self._inner("cp", "-a", "-", f"{build}:/", stdin=fh)
+        finally:
+            os.unlink(overlay)
+        self._inner("commit", '--change=ENTRYPOINT ["sleep"]', '--change=CMD ["infinity"]',
+                    f"--change=ENV V2_PS_SHIM_TREE={REPLICA_TREE_DIR}/tree.txt", "--change=HEALTHCHECK NONE",
+                    build, tag)
+        self._inner("rm", "-f", build, check=False)
         return tag
 
-    def _part_volume(self, parts: Path, name: str, digest: str, image: str) -> str:
-        """A volume holding `name`'s content (a tar extracted; a file as `tree.txt`), filled once
-        per part digest. `done` is written on the engine's state volume only after the fill, so an
-        interrupted fill is redone, and no marker lands in the host's own files."""
-        key = self._key(digest)
-        volume, done = f"frozen-part-{key}", f"{HOST_PARTS_DIR}/{key}.done"
-        if self._engine("test", "-f", done, check=False).returncode == 0:
-            return volume
-        self._inner("volume", "rm", "-f", volume, check=False)
-        fill = (["--entrypoint", "tar", image, "-x", "-C", "/dst"] if name.endswith(".tar")
-                else ["--entrypoint", "sh", image, "-c", "cat > /dst/tree.txt"])
-        with open(parts / name, "rb") as fh:
-            self._inner("run", "--rm", "-i", "--network", "none", "-v", f"{volume}:/dst", *fill, stdin=fh)
-        self._engine("sh", "-c", f"mkdir -p {HOST_PARTS_DIR} && printf done > {done}")
-        return volume
-
-    def _replica(self, parts: Path, digests: dict, host: str) -> None:
-        named = self.host_parts(host)
-        image = self._host_image(parts, digests, host)
-        tree = self._part_volume(parts, named["tree"], digests[named["tree"]], image)
-        mounts = [a for mount in HOST_VOLUMES for a in (
-            "-v", f"{self._part_volume(parts, named[mount], digests[named[mount]], image)}:{mount}:ro")]
-        self._inner("rm", "-f", host, check=False)
-        self._inner("run", "-d", "--name", host, "--hostname", host, "--network", "none", "--no-healthcheck",
-                    "--entrypoint", "sleep", "-e", f"V2_PS_SHIM_TREE={REPLICA_TREE_DIR}/tree.txt",
-                    "-v", f"{tree}:{REPLICA_TREE_DIR}:ro", *mounts,
-                    "-v", f"{HOST_SHIM_DIR}/ps:/usr/local/bin/ps:ro", image, "infinity")
-        self._replicas.append(host)
+    @staticmethod
+    def _overlay(parts: Path, named: dict, host: str) -> str:
+        """One tar rooted at `/`: each volume copy under its mount, the tree, today's shim."""
+        fd, path = tempfile.mkstemp(prefix=f"replica-{host}.", suffix=".tar")
+        with os.fdopen(fd, "wb") as out, tarfile.open(fileobj=out, mode="w|") as tar:
+            for mount in HOST_VOLUMES:
+                with tarfile.open(parts / named[mount], mode="r|") as src:
+                    for member in src:
+                        rel = os.path.normpath(member.name.lstrip("/"))
+                        if rel.startswith(".."):
+                            raise LabOpsError(f"{named[mount]} has a member outside its mount: {member.name!r}")
+                        member.name = mount.lstrip("/") if rel == "." else f"{mount.lstrip('/')}/{rel}"
+                        if member.islnk():      # a hard link names another member: move it alike
+                            target = os.path.normpath(member.linkname.lstrip("/"))
+                            if target.startswith(".."):
+                                raise LabOpsError(f"{named[mount]} links outside its mount: {member.linkname!r}")
+                            member.linkname = f"{mount.lstrip('/')}/{target}"
+                        tar.addfile(member, src.extractfile(member) if member.isfile() else None)
+            for arcname, source, mode in ((f"{REPLICA_TREE_DIR.lstrip('/')}/tree.txt", parts / named["tree"], 0o644),
+                                          ("usr/local/bin/ps", PS_SHIM, 0o755)):
+                info = tarfile.TarInfo(arcname)
+                info.size, info.mode = source.stat().st_size, mode
+                with open(source, "rb") as fh:
+                    tar.addfile(info, fh)
+        return path
 
     def _start_query(self, hosts: list[str]) -> None:
         """The lab's endpoint-query service on the engine's daemon: the freeze's hosts, nothing
         inspectable (#1347's container-inspect gap; a replica's image name would tell the copy)."""
-        self._ensure_current_image(QUERY_IMAGE)
+        self._ensure_image(QUERY_IMAGE, current=True)
         self._engine("sh", "-c", f"mkdir -p {QUERY_DIR} && cat > {QUERY_DIR}/hosts.txt && "
                                  f"printf '' > {QUERY_DIR}/inspectable.txt", input="\n".join(hosts) + "\n")
         self._inner("rm", "-f", HOST_STATE_SERVICE, check=False)
-        self._inner("run", "-d", "--name", HOST_STATE_SERVICE, "--hostname", HOST_STATE_SERVICE,
+        self._inner("run", "-d", "--init", "--name", HOST_STATE_SERVICE, "--hostname", HOST_STATE_SERVICE,
                     "--network", ENGINE_NETWORK, "-v", "/var/run/docker.sock:/var/run/docker.sock",
                     "-v", f"{QUERY_DIR}:/etc/endpoint-query:ro", QUERY_IMAGE,
                     "--hosts", "/etc/endpoint-query/hosts.txt", "--inspectable", "/etc/endpoint-query/inspectable.txt")
 
     def purge_host_cache(self, freeze: dict) -> None:
-        """Remove a freeze's cached host images and extracted parts from the engine (no automatic
-        eviction). A part another freeze shares (same digest) goes too; it is refilled on demand."""
+        """Remove a freeze's replica images and the host images they were built from (no automatic
+        eviction). A base image another freeze shares goes too; it is reloaded on demand."""
         self.ensure_engine()
         for host in self.frozen_hosts(freeze):
-            for kind, name in self.host_parts(host).items():
-                digest = freeze["parts"].get(name)
-                if digest is None:
-                    continue
-                key = self._key(digest)
-                if kind == "image":
-                    self._inner("image", "rm", f"frozen-host/{host}:{key}", check=False)
-                else:
-                    self._inner("volume", "rm", "-f", f"frozen-part-{key}", check=False)
-                    self._engine("rm", "-f", f"{HOST_PARTS_DIR}/{key}.done", check=False)
+            named = self.host_parts(host)
+            if all(n in freeze["parts"] for n in named.values()):
+                self._inner("image", "rm", self.replica_tag(freeze["parts"], host), check=False)
+            if named["image"] in freeze["parts"]:
+                self._inner("image", "rm", f"frozen-host-base/{host}:{self._key(freeze['parts'][named['image']])}",
+                            check=False)
 
     def content_digest(self, indices: list[str]) -> str:
         """sha256 over every document of the named `indices` (the ones the overlays touched) in the
@@ -702,7 +735,7 @@ class LabOps:
 
     def teardown(self) -> None:
         """Stop the proxy, the frontend, the stubs, the replicas and the endpoint-query service; the
-        frozen cluster and its data stay, and so do the cached host images and parts."""
+        frozen cluster and its data stay, and so do the cached host images."""
         self._exec(["docker", *(["--context", self.proxy_context] if self.proxy_context else []),
                     "rm", "-f", FROZEN_PROXY], check=False)
         names = [FRONTEND, *(f"frontend-{p}" for p in FRONTEND_PORTS), *STUBS, HOST_STATE_SERVICE,

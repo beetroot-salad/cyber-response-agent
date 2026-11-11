@@ -11,7 +11,7 @@ import importlib.util
 import json
 import sys
 import threading
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.error import HTTPError
@@ -155,12 +155,89 @@ def test_a_daemon_that_cannot_answer_is_unavailable():
     assert service.answer("GET", "/hosts/web-1/processes")[0] == 503
 
 
-def test_the_docker_stream_is_demultiplexed_and_a_chunked_answer_dechunked():
-    frame = lambda kind, data: bytes([kind, 0, 0, 0]) + len(data).to_bytes(4, "big") + data  # noqa: E731
-    assert eq.demux(frame(1, b"out-a") + frame(2, b"err") + frame(1, b"out-b")) == (b"out-aout-b", b"err")
-    raw = (b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: x\r\n\r\n"
-           b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
-    assert eq.parse_response(raw) == (200, {"transfer-encoding": "chunked", "content-type": "x"}, b"hello world")
+def _frame(kind, data):
+    return bytes([kind, 0, 0, 0]) + len(data).to_bytes(4, "big") + data
+
+
+def test_the_docker_stream_is_demultiplexed():
+    assert eq.demux(_frame(1, b"out-a") + _frame(2, b"err") + _frame(1, b"out-b")) == (b"out-aout-b", b"err")
+
+
+@pytest.fixture
+def daemon(tmp_path):
+    """A Docker Engine API on a unix socket: inspect answered chunked, exec start as a raw stream
+    read to close (the daemon's shapes), anything unknown 404."""
+    import socketserver
+
+    path = str(tmp_path / "docker.sock")
+    seen = []
+
+    class H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *a):
+            pass
+
+        def address_string(self):
+            return "unix"
+
+        def _send(self, status, body, *, chunked=False, raw=False):
+            self.send_response(status)
+            if chunked:
+                self.send_header("Transfer-Encoding", "chunked")
+            elif not raw:
+                self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if chunked:
+                for piece in (body[:5], body[5:]):
+                    self.wfile.write(f"{len(piece):x}\r\n".encode() + piece + b"\r\n")
+                self.wfile.write(b"0\r\n\r\n")
+            else:
+                self.wfile.write(body)
+            self.close_connection = True
+
+        def do_GET(self):
+            seen.append(("GET", self.path))
+            if self.path == "/containers/web-1/json":
+                self._send(200, json.dumps({"Name": "/web-1", "State": {"Running": True}}).encode(), chunked=True)
+            elif self.path == "/exec/E1/json":
+                self._send(200, b'{"ExitCode": 3}')
+            else:
+                self._send(404, b'{"message": "no such container"}')
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen.append(("POST", self.path, body))
+            if self.path == "/containers/web-1/exec":
+                self._send(201, b'{"Id": "E1"}')
+            elif self.path == "/exec/E1/start":
+                self._send(200, _frame(1, b"line-1\n") + _frame(2, b"warn") + _frame(1, b"line-2\n"), raw=True)
+            else:
+                self._send(404, b"{}")
+
+    class S(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+        daemon_threads = True
+
+    server = S(path, H)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield path, seen
+    server.shutdown()
+
+
+def test_the_socket_client_speaks_the_daemons_shapes(daemon):
+    path, seen = daemon
+    docker = eq.SocketDocker(path)
+    assert docker.running("web-1") is True
+    assert docker.running("nope") is None
+    assert docker.exec("web-1", ["ps", "-ef"]) == (3, b"line-1\nline-2\n", b"warn")
+    assert ("POST", "/containers/web-1/exec",
+            {"AttachStdout": True, "AttachStderr": True, "Tty": False, "Cmd": ["ps", "-ef"]}) in seen
+
+
+def test_a_daemon_that_is_not_there_is_unavailable(tmp_path):
+    with pytest.raises(eq.Unavailable):
+        eq.SocketDocker(str(tmp_path / "absent.sock")).running("web-1")
 
 
 # -- the product adapter against the service -------------------------------------------------------
