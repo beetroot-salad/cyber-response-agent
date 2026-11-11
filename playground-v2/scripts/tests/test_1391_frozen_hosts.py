@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import io
+import shlex
 import subprocess
 import tarfile
 from pathlib import Path
@@ -49,14 +50,37 @@ class Docker:
         return subprocess.CompletedProcess(argv, rc, stdout=out, stderr="")
 
     def inner(self, verb):
-        """The engine's own docker commands of `verb` (after `exec [-i] lab-engine docker`)."""
+        """The engine's own docker commands of `verb`: `exec [-i] lab-engine docker ...`, or one
+        command of an engine script (`exec lab-engine sh -c '...; docker ... && docker ...'`)."""
         found = []
         for argv, data in self.calls:
-            if "docker" in argv[3:] and lab_ops.ENGINE in argv:
+            if lab_ops.ENGINE not in argv:
+                continue
+            if "docker" in argv[3:]:
                 rest = argv[argv.index("docker", 3) + 1:]
                 if rest and rest[0] == verb:
                     found.append((rest, data))
+            elif argv[-2:-1] == ["-c"]:
+                for words in self.script_commands(argv[-1]):
+                    if words[:2] == ["docker", verb]:
+                        found.append((words[1:], None))
         return found
+
+    @staticmethod
+    def script_commands(script):
+        lex = shlex.shlex(script, posix=True, punctuation_chars=";&|<>")
+        lex.whitespace_split = True
+        commands, words = [], []
+        for token in lex:
+            if token in (";", "&&", "||"):
+                commands.append(words)
+                words = []
+            else:
+                words.append(token)
+        return [*commands, words]
+
+    def engine_execs(self):
+        return [argv for argv, _ in self.calls if lab_ops.ENGINE in argv and "exec" in argv]
 
 
 def _tar(files):
@@ -275,3 +299,20 @@ def test_the_launcher_refuses_a_freeze_without_complete_host_parts_before_any_la
     assert type(caught.value).__name__ == "LaunchRefused"
     assert rig.docker.calls == [] and not rig.cluster.requests
     assert "frozen-engine" not in rig.store.records
+
+
+def test_serving_cached_hosts_takes_the_same_round_trips_whatever_the_host_count(parts):
+    """Each engine call is a round trip over the lab's SSH context: the replica starts, the
+    host lists and the service start are one exec, so a cached launch costs the same for 1 host
+    as for many."""
+    counts = {}
+    for hosts in (HOSTS[:1], HOSTS):
+        f = freeze(hosts=hosts)
+        docker = Docker(cached={lab_ops.LabOps.replica_tag(f["parts"], h) for h in hosts})
+        lab_ops.LabOps(run=docker).serve_hosts(parts, f)
+        counts[len(hosts)] = len(docker.calls)
+        batch = [a for a in docker.engine_execs() if a[-2:-1] == ["-c"] and "docker run" in a[-1]]
+        assert len(batch) == 1, "the starts are not one exec"
+        started = {w[w.index("--name") + 1] for w in Docker.script_commands(batch[0][-1]) if w[:2] == ["docker", "run"]}
+        assert started == {*hosts, lab_ops.HOST_STATE_SERVICE}
+    assert counts[1] == counts[len(HOSTS)], counts

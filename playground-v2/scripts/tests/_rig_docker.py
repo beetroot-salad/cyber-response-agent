@@ -1202,6 +1202,12 @@ class RigDocker(FakeDocker):
                 st["err"] += b"sh: line 1: flock: command not found\n"
                 return 127
             return self._flock(c, words, stdin, env, st)
+        if words and words[0] == "docker" and c.engine and not redirects:
+            # the engine's own docker CLI inside an engine script (#1391: the replicas started in one exec)
+            rc, o, e = self._docker(words, f"{c.scope}/{c.name}", b"")
+            st["out"] += o if isinstance(o, bytes) else o.encode()
+            st["err"] += e if isinstance(e, bytes) else e.encode()
+            return rc
         if words and words[0] == "exit":
             raise _Exit(int(words[1]) if len(words) > 1 else st["rc"])
         if words[:2] == ["set", "-C"] or words[:3] == ["set", "-o", "noclobber"]:

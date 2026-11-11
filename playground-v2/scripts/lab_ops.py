@@ -608,12 +608,17 @@ class LabOps:
         listed = self._inner("image", "ls", "--format", "{{.Repository}}:{{.Tag}}", "frozen-host/*", check=False)
         present = set(_text(listed.stdout).split()) if listed.returncode == 0 else set()
         images = {h: self._replica_image(parts, freeze["parts"], h, present) for h in hosts}
-        self._inner("rm", "-f", *hosts, check=False)
-        for host in hosts:
-            self._inner("run", "-d", "--name", host, "--hostname", host, "--network", "none", "--no-healthcheck",
-                        "--read-only", "--tmpfs", "/tmp", images[host])
-            self._replicas.append(host)
-        self._start_query(hosts)
+        self._ensure_image(QUERY_IMAGE, current=True)
+        # One exec for every start, whatever the host count: each `_inner` is a round trip over the
+        # lab's SSH context. `;` after the removal (a missing container is not an error), `&&`
+        # after, so the first failed start fails the whole exec.
+        starts = [["docker", "run", "-d", "--name", h, "--hostname", h, "--network", "none", "--no-healthcheck",
+                   "--read-only", "--tmpfs", "/tmp", images[h]] for h in hosts]
+        steps = [f"mkdir -p {QUERY_DIR}", f"cat > {QUERY_DIR}/hosts.txt", f"printf '' > {QUERY_DIR}/inspectable.txt",
+                 *(shlex.join(a) for a in [*starts, self._query_start()])]
+        script = shlex.join(["docker", "rm", "-f", *hosts, HOST_STATE_SERVICE]) + "; " + " && ".join(steps)
+        self._replicas.extend(hosts)
+        self._engine("sh", "-c", script, input="\n".join(hosts) + "\n")
         return hosts
 
     @staticmethod
@@ -674,17 +679,14 @@ class LabOps:
                 tar.addfile(info, io.BytesIO(data))
         return buf.getvalue()
 
-    def _start_query(self, hosts: list[str]) -> None:
-        """The lab's endpoint-query service on the engine's daemon: the freeze's hosts, nothing
-        inspectable (#1347's container-inspect gap; a replica's image name would tell the copy)."""
-        self._ensure_image(QUERY_IMAGE, current=True)
-        self._engine("sh", "-c", f"mkdir -p {QUERY_DIR} && cat > {QUERY_DIR}/hosts.txt && "
-                                 f"printf '' > {QUERY_DIR}/inspectable.txt", input="\n".join(hosts) + "\n")
-        self._inner("rm", "-f", HOST_STATE_SERVICE, check=False)
-        self._inner("run", "-d", "--init", "--name", HOST_STATE_SERVICE, "--hostname", HOST_STATE_SERVICE,
-                    "--network", ENGINE_NETWORK, "-v", "/var/run/docker.sock:/var/run/docker.sock",
-                    "-v", f"{QUERY_DIR}:/etc/endpoint-query:ro", QUERY_IMAGE,
-                    "--hosts", "/etc/endpoint-query/hosts.txt", "--inspectable", "/etc/endpoint-query/inspectable.txt")
+    @staticmethod
+    def _query_start() -> list[str]:
+        """The lab's endpoint-query service on the engine's daemon: the freeze's hosts (`hosts.txt`),
+        nothing inspectable (#1347's container-inspect gap; a replica's image name would tell the copy)."""
+        return ["docker", "run", "-d", "--init", "--name", HOST_STATE_SERVICE, "--hostname", HOST_STATE_SERVICE,
+                "--network", ENGINE_NETWORK, "-v", "/var/run/docker.sock:/var/run/docker.sock",
+                "-v", f"{QUERY_DIR}:/etc/endpoint-query:ro", QUERY_IMAGE,
+                "--hosts", "/etc/endpoint-query/hosts.txt", "--inspectable", "/etc/endpoint-query/inspectable.txt"]
 
     def purge_host_cache(self, freeze: dict) -> list[str]:
         """Remove a freeze's host images and every replica image built from them, whatever shim or
