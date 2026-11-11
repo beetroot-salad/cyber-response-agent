@@ -38,7 +38,7 @@ from defender.learning.leads._lead_spine import (
 )
 from defender.learning.leads.declared_systems import (
     ADAPTERS_REL,
-    adapter_declared_systems,
+    lane_names,
     lane_systems,
     with_platform_systems,
 )
@@ -136,8 +136,10 @@ def _invoke_pitfalls_agent(
     spawn: Callable[..., int] = _spawn_author_agent,
     salt: str | None = None,
     box=None,
-    systems: tuple[str, ...] | None = None,
+    systems: tuple[str, ...],
 ) -> int:
+    """Spawn the pitfalls curator over the draft at `repo_root` for `handoffs`, its write lanes
+    drawn over `systems`: the lane's handed systems (#1366 O1, R16), required."""
     stage_salt = salt if salt is not None else uuid4().hex
     learning_run_dir = state.stage_dir(_loop_config.LEAD_AUTHOR_DRAIN_LABEL)
     view = draft_view(learning_run_dir, repo_root)
@@ -155,7 +157,7 @@ def _invoke_pitfalls_agent(
         repo_root=repo_root,
         learning_run_dir=learning_run_dir,
         log_label="pitfalls curator",
-        salt=stage_salt, box=box, **({} if systems is None else {"systems": systems}),
+        salt=stage_salt, box=box, systems=systems,
     )
 
 
@@ -425,21 +427,25 @@ def _pitfalls_commit_message(changed: list[str]) -> str:
     )
 
 
-def _require_adapter_declared_systems(repo_root: Path, tenant: Any = None, directory: Any = None) -> frozenset[str]:
+def _require_adapter_declared_systems(
+    repo_root: Path, tenant: Any = None, directory: Any = None, *, systems: Any = None,
+) -> frozenset[str]:
     """The systems the pitfalls lane admits, resolved once at the lane's own boundary — refusing
     loudly rather than spending an empty set as an ordinary per-row membership "no" — plus the
-    platform-served names: the tenant's (#1366 O1: its current enabled records the checkout's
-    catalog carries) when the lane is handed the tenant records, else the adapter half alone."""
-    tenants = lane_systems(repo_root, tenant, directory)
-    systems = adapter_declared_systems(repo_root) if tenants is None else tenants - PLATFORM_SERVED.keys()
-    if not systems:
+    platform-served names. They are handed, never defaulted (#1366 O1, R16,
+    `declared_systems.lane_systems`): the tenant's (its current enabled records the checkout's
+    catalog carries), or the whole catalog from a caller with no tenant."""
+    handed = lane_systems(repo_root, tenant, directory, systems=systems)
+    declared = lane_names(handed) - PLATFORM_SERVED.keys()
+    if not declared:
         message = (
-            f"pitfalls curation refused: {repo_root / ADAPTERS_REL} declares no systems; "
-            "refusing to run the pitfalls lane against an empty declared set"
+            f"pitfalls curation refused: {repo_root / ADAPTERS_REL} declares no systems for the "
+            "lane (it carries none, or the tenant's records name none it carries); refusing to run "
+            "the pitfalls lane against an empty declared set"
         )
         _logger.error(message)
         raise LeadAuthorError(message)
-    return with_platform_systems(systems)
+    return with_platform_systems(declared)
 
 
 def _split_batch_by_membership(
@@ -518,18 +524,20 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
     directory: Any = None,
+    systems: Any = None,
 ) -> int:
     """One curation tick over the pitfalls queue, into `batch`'s draft (#1108 P4 O7): the claim
     is the draft against the batch's base, judged by the lane's gate and committed by the
     batch's commit-maker. `paths` names the product checkout (adapters) and the learning state;
-    `git_timeout` is kept for the drain's call shape (the lane runs no git)."""
+    `git_timeout` is kept for the drain's call shape (the lane runs no git). The lane's systems
+    are handed (#1366 R16): `systems`, else the tenant's from its records (`directory`)."""
     # An entry point on its own (by hand) opens the handle; the drain hands its own in.
     if state is None:
         with LearningState.open(paths) as own:
             return run_pitfalls(
                 paths=paths, state=own, trees=trees, batch=batch, invoke=invoke, box=box,
                 on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
-                git_timeout=git_timeout, directory=directory)
+                git_timeout=git_timeout, directory=directory, systems=systems)
     root = Path(batch.draft_root) if batch is not None else paths.repo_root
     lane_skills(trees, paths, skills_dir=root / SKILLS_PREFIX if batch is not None else None)
     rows = _loop_persist.read_pitfalls(state)
@@ -550,7 +558,7 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     repo_root = paths.repo_root
     # The worktree's sources, not the process's checkout: this run commits into `repo_root`.
     # Resolved once, before the agent is spawned.
-    systems = _require_adapter_declared_systems(repo_root, paths.tenant, directory)
+    systems = _require_adapter_declared_systems(repo_root, paths.tenant, directory, systems=systems)
     handoffs = _build_pitfalls_handoffs(records, systems=systems)
     # One derivation of "was the reducer surface offered this tick", read by the commit gate,
     # the partition and the hold's ceiling.

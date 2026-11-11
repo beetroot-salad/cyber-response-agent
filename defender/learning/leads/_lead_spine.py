@@ -31,10 +31,11 @@ def _spawn_author_agent(  # noqa: PLR0913 — one spawn's whole context, the ten
     log_label: str,
     salt: str,
     box=None,
-    systems: tuple[str, ...] | None = None,
+    systems: tuple[str, ...],
 ) -> int:
     """Spawn one lead-lane curator over the lane's tree at `repo_root` (a batch draft's root):
-    the stage writes the `agent/` root it holds (#1108 P4 O7)."""
+    the stage writes the `agent/` root it holds (#1108 P4 O7), its write lanes drawn over
+    `systems`, the lane's handed systems (#1366 R16: required, never the bound tree's)."""
     from defender.learning.leads import lead_author_engine
     # Every knob is read at spawn: each is env-backed, and a default would freeze it at import.
     return lead_author_engine.run_author_stage(

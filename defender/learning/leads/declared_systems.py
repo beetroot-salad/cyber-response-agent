@@ -23,6 +23,7 @@ from defender.kit.verbs import is_system_name
 ADAPTERS_REL = DefenderPaths.adapters_rel
 
 if TYPE_CHECKING:
+    from defender.systems.catalog import Catalog, TenantSystems
     from defender.tenancy import Tenant, TenantDirectory
     from defender.tenancy.models import TenantRecords
 
@@ -128,18 +129,53 @@ def tenant_systems_under(repo_root: Path, records: TenantRecords) -> frozenset[s
     whose adapter the product checkout at `repo_root` carries, plus the platform-served names.
     The tenant's committed `execution.md` markers declare nothing here: the records decide. An
     unreadable adapter source raises `AdaptersUnreadable`."""
+    return lane_names(tenant_systems_of(repo_root, records))
+
+
+def lane_systems(
+    repo_root: Path, tenant: Tenant | None, directory: TenantDirectory | None, *,
+    systems: TenantSystems | Catalog | None = None,
+) -> TenantSystems | Catalog:
+    """The systems a lead lane is handed (#1366 O1, DC7, R16), never defaulted: `systems` when the
+    caller built them (the tenant's, or the whole `Catalog` from a caller with no tenant), else
+    the tenant's built once here from its current records (`directory`) over the catalog of the
+    product checkout at `repo_root`. A lane with neither is refused (`LeadAuthorError`): a tenant
+    whose records were not handed is never given the checkout's adapters instead, and a caller
+    with no tenant says so by handing the catalog."""
+    if systems is not None:
+        return systems
+    if tenant is None:
+        raise LeadAuthorError(
+            "declared_systems: the lane was handed no systems and has no tenant: a caller with no "
+            "tenant hands the whole catalog (`systems=Catalog(...)`) explicitly")
+    if directory is None:
+        raise LeadAuthorError(
+            f"declared_systems: tenant {tenant.id}'s lane was handed neither its systems nor its "
+            "records: its systems are its current records', never the checkout's adapters")
+    return tenant_systems_of(repo_root, directory.current_records(tenant.id))
+
+
+def tenant_systems_of(repo_root: Path, records: TenantRecords) -> TenantSystems:
+    """A tenant's systems (`TenantSystems`) from its current `records` over the catalog of the
+    product checkout at `repo_root`. An unreadable adapter source raises `AdaptersUnreadable`."""
     from defender.systems.catalog import Catalog, TenantSystems
 
-    return frozenset(TenantSystems.of(records, Catalog(read_adapters(repo_root / ADAPTERS_REL))).systems)
+    return TenantSystems.of(records, Catalog(read_adapters(repo_root / ADAPTERS_REL)))
 
 
-def lane_systems(repo_root: Path, tenant: Tenant | None, directory: TenantDirectory | None) -> frozenset[str] | None:
-    """The tenant's systems for a lane handed the tenant records (`directory`) and its tenant
-    (`tenant`, the drain's accepted one): `tenant_systems_under` over its current records; `None`
-    when it has neither (a scene with no tenant: the checkout and the markers decide)."""
-    if directory is None or tenant is None:
-        return None
-    return tenant_systems_under(repo_root, directory.current_records(tenant.id))
+def checkout_catalog(repo_root: Path) -> Catalog:
+    """The whole catalog of the product checkout at `repo_root`, for a lane caller with no tenant
+    (R16: it hands this explicitly). An unreadable adapter source raises `AdaptersUnreadable`."""
+    from defender.systems.catalog import Catalog
+
+    return Catalog(read_adapters(repo_root / ADAPTERS_REL))
+
+
+def lane_names(systems: TenantSystems | Catalog) -> frozenset[str]:
+    """The names a lane handed `systems` admits: every system of the tenant (its enabled
+    catalog-backed records and the platform-served ones), or, from a caller with no tenant, every
+    system of the whole catalog."""
+    return frozenset(systems.roster.systems)
 
 
 def adapter_declared_systems(repo_root: Path) -> frozenset[str]:

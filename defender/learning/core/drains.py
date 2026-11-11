@@ -63,6 +63,7 @@ if TYPE_CHECKING:
 
     from defender.learning.author.version_control import Batch, TenantDelivery
     from defender.learning.author.version_control.auth import ForgeCredential
+    from defender.systems.catalog import Catalog, TenantSystems
     from defender.systems.run_tenant import Admitted
     from defender.tenancy import Tenant, TenantDirectory
 
@@ -77,13 +78,17 @@ def _invoke_lead_author(  # noqa: PLR0913 — the work step's call shape plus it
     paths: LoopPaths, state: LearningState, run: Run, *, label: DrainLabel,
     batch: Batch | None = None, box: Any = None, on_done: Callable[[str | None], None],
     git_timeout: float = GIT_TIMEOUT_SECONDS, directory: TenantDirectory | None = None,
+    systems: TenantSystems | Catalog | None = None,
 ) -> None:
     """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
     `lead_author_drain`): the held roots of its writable mounts — the lanes of `batch`'s draft —
     are opened here, with the batch's box stopped, and closed when the claim's serve returns or
     raises (#1134 A3, #1108 P4). A fault holding them propagates as itself, never as a
     swallowed transient. With no `batch` (a checkout-shaped scene), the label's trees over
-    `paths` are held, and the curator refuses at its commit (it commits only into a batch)."""
+    `paths` are held, and the curator refuses at its commit (it commits only into a batch).
+    The lane's systems are handed (#1366 R16): the tenant's from its records (`directory`, bound
+    in by `lead_author_drain`), or `systems` as built; with neither the lane refuses
+    (`declared_systems.lane_systems`)."""
     from defender.learning.leads.lead_extraction import LeadAuthorError
 
     _logger.info("step=lead-author")
@@ -95,7 +100,7 @@ def _invoke_lead_author(  # noqa: PLR0913 — the work step's call shape plus it
             "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             lambda mod: mod.run_under_held_queue_lock(
                 run, paths=paths, state=state, trees=trees, box=box, on_done=on_done,
-                git_timeout=git_timeout, batch=batch, directory=directory,
+                git_timeout=git_timeout, batch=batch, directory=directory, systems=systems,
             ),
         )
     if rc not in (0, None):
@@ -575,8 +580,10 @@ def _invoke_pitfalls(  # noqa: PLR0913 — the work step's call shape plus its b
     box: Any = None, on_curated: Callable[[PitfallsDisposition], None],
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS, directory: TenantDirectory | None = None,
+    systems: TenantSystems | Catalog | None = None,
 ) -> int:
-    """The lead-author lane's default pitfalls work step: as `_invoke_lead_author`, the held roots
+    """The lead-author lane's default pitfalls work step: as `_invoke_lead_author` (its systems
+    handed the same way), the held roots
     of the `label` lane's writable mounts in `batch`'s draft are opened here and closed when the
     curation returns or raises (#1134 A3). With no `batch` (a checkout-shaped scene), the
     label's trees over `paths` are held, and the curation refuses any commit."""
@@ -587,7 +594,7 @@ def _invoke_pitfalls(  # noqa: PLR0913 — the work step's call shape plus its b
             lambda mod: mod.run_pitfalls(
                 paths=paths, state=state, trees=trees, batch=batch, box=box,
                 on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
-                git_timeout=git_timeout, directory=directory,
+                git_timeout=git_timeout, directory=directory, systems=systems,
             ),
         )
     return rc if rc is not None else 0

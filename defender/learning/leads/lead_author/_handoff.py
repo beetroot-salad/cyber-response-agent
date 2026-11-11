@@ -270,13 +270,13 @@ def invoke_agent(
     spawn: Callable[..., int] = _spawn_author_agent,
     salt: str | None = None,
     box: Any = None,
-    systems: tuple[str, ...] | None = None,
+    systems: tuple[str, ...],
 ) -> int:
     """Spawn the lead author over the lane's tree at `repo_root` (a batch draft's root, holding
     the `agent/` its paths name, #1108 P4 OD6). The context names each folder as the model sees
     it (`draft_view`); handoff paths stay relative to the draft root (`agent/...`). `systems` are
-    the tenant's (#1366 O1), the lanes its write and `rm` shapes are drawn over; `None` when the
-    lane names no tenant."""
+    the lane's handed systems (#1366 O1, R16: the tenant's, or the whole catalog's for a caller
+    with no tenant), the lanes its write and `rm` shapes are drawn over; required."""
     pending_drafts = pending_drafts or []
     view = draft_view(run_dir, repo_root)
     stage_salt = salt if salt is not None else uuid4().hex
@@ -303,5 +303,5 @@ def invoke_agent(
         repo_root=repo_root,
         learning_run_dir=run_dir,
         log_label="lead author",
-        salt=stage_salt, box=box, **({} if systems is None else {"systems": systems}),
+        salt=stage_salt, box=box, systems=systems,
     )
