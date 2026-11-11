@@ -223,6 +223,67 @@ def test_1363_o7_a_sibling_world_ending_proxy_access_exits_8(tmp_path: Path, mon
         assert d.rc == rc, f"a sibling world that ended {ends} exited {d.rc!r}, not {rc}"
 
 
+def _proxied_sibling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lifecycle: Any) -> tuple[Path, int | None]:
+    """World `b`'s sibling through `run.main --episode` over a tenant whose `cmdb` is declared on the
+    credential proxy, so the run holds its access holder and hands it to the lifecycle seam as `access=`.
+    `lifecycle` is the seam (it drives nothing real). Returns the episode and the exit status."""
+    import os
+
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.integrations.credential_proxy_1163 import _harness as H
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+
+    ep = P.sibling_episode(tmp_path, monkeypatch)
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    folder = root / P.SIBLING_TENANT / "knowledge"
+    for rel, text in H.access_files("cmdb", H.declaration("http://x.invalid/api"),
+                                    env=A.env_text("cmdb")).items():
+        (folder / rel).write_text(text, encoding="utf-8")
+    records = A.Records(root, {P.SIBLING_TENANT: [A.generation(P.SIBLING_TENANT, tmp_path / "secrets",
+                                                               sign_role_id="sign-role", sign_secret="sign-secret")]})
+    argv = ["--episode", ep.name, "--world", P.SIBLING_WORLD, "--tenant", P.SIBLING_TENANT, "--no-learn"]
+    try:
+        rc = run_mod.main(argv, directory=records.directory, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
+                          preflight=lambda *_a, **_k: 0, ticket_writer=S.NoTicket(), publish=in_process_publish(),
+                          signer=H.FakeSigner(), proxy_url="http://proxy.invalid")
+    except SystemExit as exit_:
+        rc = exit_.code if isinstance(exit_.code, int) else 1
+    return ep, rc
+
+
+@pytest.mark.parametrize("lost", [False, True], ids=["control-access-kept", "access-lost"])
+def test_1363_d11_a_sibling_whose_access_was_lost_while_its_oracle_gave_up_on_text_exits_proxy_access_with_no_world_record(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lost: bool) -> None:
+    """The sibling's holder met an `access` fault (reported through the lifecycle seam) and the oracle then gave
+    up with no lookup of its own failing (`our_fault` false): no world record, proxy-access's exit code. Control:
+    the same give-up with the holder kept ends `oracle unservable` with its record and `UNSERVABLE_EXIT`.
+    #1363 O7, D11."""
+    from defender.learning.branch.estate.oracle import OracleUnservable
+
+    held: list[Any] = []
+
+    def lifecycle(**kw: Any) -> dict:
+        held.append(kw.get("access"))
+        if lost:
+            fault = TransportFault("PROXY-ACCESS-1363: the request token has expired")
+            fault.origin = "access"
+            kw["access"].report(fault)
+        raise OracleUnservable("retries", ("cmdb", "get-host", {"host": "web-1"}), "text only", our_fault=False)
+
+    ep, rc = _proxied_sibling(tmp_path, monkeypatch, lifecycle)
+
+    assert held, "premise: the run handed its lifecycle an access holder"
+    assert held[0] is not None, "premise: the run handed its lifecycle an access holder"
+    records = {p.stem: p.read_text(encoding="utf-8") for p in ep.rglob("world_records/*.yaml")}
+    world = T.world_id(ep, P.SIBLING_WORLD)
+    if lost:
+        assert rc == PROXY_ACCESS_EXIT, f"a sibling that lost its access exited {rc!r}"
+        assert world not in records, f"lost access was recorded as the world's own unservability: {sorted(records)}"
+    else:
+        assert rc == run_mod.UNSERVABLE_EXIT, rc
+        assert world in records, f"control: the ordinary give-up wrote no world record: {sorted(records)}"
+
+
 def test_1363_d6_a_sibling_exiting_proxy_access_did_not_finish_at_the_launcher(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The launcher records the world that exited 8 as `did not finish`, as for any non-zero exit; the
@@ -281,6 +342,9 @@ REQUEST_CASES = [pytest.param(kind, detail, id=name) for name, (kind, detail) in
     pytest.param(TransportFault, CUT, id="transport"),
     pytest.param(ConfinementFault, "REQCUT-1363: GET /x is not a declared route", id="confinement"),
 ]
+#: The note line a repeated identical call's result carries (`record_query.repeat_note`): the failed-call wording
+#: says it "failed the same way", the other one says it "returned the same payload".
+REPEAT_NOTE = re.compile(r"\[record_query\] REPEAT[^\n]*")
 #: What an agent must never be told about a request that was only cut or malformed.
 WRONG_STORY = re.compile(r"unreachable|not configured|credential proxy", re.IGNORECASE)
 
@@ -372,9 +436,9 @@ def test_1363_o7a_each_request_fault_is_one_warning_naming_system_origin_and_det
     assert defects == [], f"a request fault was logged as the adapter's defect: {[r.getMessage() for r in defects]}"
 
 
-def _repeat_observed(tmp_path: Path, origin: str, kind: type[AdapterFault]) -> tuple[int, int, int, list[int]]:
+def _repeat_observed(tmp_path: Path, origin: str, kind: type[AdapterFault]) -> tuple[int, int, int, list[int], list[tuple[int, str]]]:
     """Four identical failing calls: (backend calls, repeat-trip rows, the lead's requests, the exit codes of
-    its cmdb rows)."""
+    its cmdb rows, (the lead request, the repeat note line) for each tool result carrying one)."""
     same = S.query("cmdb", "get-host", {"host": "web-1"})
     d = S.run_alert(
         tmp_path, main=[S.gather(LEAD, "cmdb"), S.text(S.DONE)],
@@ -382,8 +446,10 @@ def _repeat_observed(tmp_path: Path, origin: str, kind: type[AdapterFault]) -> t
         backend=S.Backend(fault=T.Fault(fail_on=("cmdb.get-host",)), exc=_proxied_fault(origin, kind, CUT)))
     assert d.raised is None, d.raised
     trips = [r for r in d.rows if r.get("query_id") == REPEAT_TRIP_QUERY_ID]
+    noted = [(i, found.group(0)) for i, request in enumerate(d.router.seen(LEAD)) for t in request.tool_returns
+             if (found := REPEAT_NOTE.search(t))]
     return (len(d.backend.rec.calls), len(trips), d.router.requests(LEAD),
-            [r.get("exit_code") for r in _cmdb_rows(d)])
+            [r.get("exit_code") for r in _cmdb_rows(d)], noted)
 
 
 def test_1363_o7a_the_repeat_guard_is_unchanged_the_third_identical_request_fault_dead_ends_the_lead(
@@ -397,3 +463,6 @@ def test_1363_o7a_the_repeat_guard_is_unchanged_the_third_identical_request_faul
     assert cut[:3] == control[:3], f"request faults are counted by the guard differently: {cut} vs control {control}"
     assert cut[3][:2] == [RC.REQUEST_CUT_EXIT] * 2, cut
     assert cut[3][2:] == control[3][2:], f"the trip row differs from the control's: {cut} vs {control}"
+    assert control[4], f"control: no tool result carried the repeat note: {control}"
+    assert all("failed the same way" in note for _, note in control[4]), f"control: the repeat note: {control}"
+    assert cut[4] == control[4], f"the repeat note reached the lead differently for a request fault: {cut} vs control {control}"

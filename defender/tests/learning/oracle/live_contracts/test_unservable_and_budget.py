@@ -780,11 +780,16 @@ def test_1363_o8_a_verifiers_lookup_failing_on_our_side_fails_the_attempt(tmp_pa
     assert run.rows_for("idp", "user:alice") == []
 
 
-@pytest.mark.parametrize(("origin", "ours"), [("setup", True), ("access", True), ("system", False), (None, False)],
-                         ids=["setup", "access", "control-system", "control-unlabelled"])
-def test_1363_o7_the_give_up_says_whether_an_attempt_failed_our_way(tmp_path, origin, ours):
+#: Every origin a fault can carry (`kit.faults.ORIGINS`), and no label at all.
+EVERY_ORIGIN = ["system", "request", "setup", "access", None]
+
+
+@pytest.mark.parametrize("origin", EVERY_ORIGIN, ids=lambda o: f"origin-{o}")
+def test_1363_o7_the_give_up_says_whether_an_attempt_failed_our_way(tmp_path, origin):
     """`OracleUnservable.our_fault` is true exactly when an attempt of the serving failed with `setup` or
-    `access`; a system's own failure, labelled or not, leaves it false. #1363 O7."""
+    `access`; a system's own failure, a request of this call that was cut, or no label, leaves it false.
+    #1363 O7."""
+    ours = origin in OUR_ORIGINS
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.fail("edr", "query", HOST_DB1, fault="TransportFault", detail=OURS, origin=origin)
@@ -1021,6 +1026,44 @@ def test_conc_15_calls_issued_after_the_sibling_is_unservable(tmp_path):
     assert _served_rows(ep, "b", "user:bob") == []
     assert _cached(ep, "b", "user:bob") == []
     assert _cached(ep, "b", "user:carol") == []
+
+
+def test_1363_o7_calls_issued_after_a_give_up_marked_ours_carry_the_same_mark_and_cause(tmp_path):
+    """After a give-up whose attempt failed our way, every later call raises `OracleUnservable` carrying the same
+    `our_fault` and `our_cause`; after an ordinary first give-up the later ones stay unmarked. #1363 O7."""
+    U = S.unservable_cls()
+
+    def later_give_ups(root, *, ours):
+        est = S.estate(root)
+        est.answer("idp", "query", ALICE, ALICE_ROWS)
+        est.answer("idp", "query", BOB, BOB_ROWS)
+        if ours:
+            _lost_edr(est, "access")
+        o = S.oracle(_explore(), then=S.text_only("no")) if ours else S.oracle(then=S.text_only("no"))
+        reg = S.world_registry(S.episode_v2(root), "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=1)
+        ctx = est.ctx(root / "inv")
+        with pytest.raises(U) as first:
+            S.call(reg, "idp", "query", ctx, q="user:alice")
+        asked = o.requests
+        later = []
+        for who in ("user:bob", "user:alice", "user:bob"):
+            with pytest.raises(U) as again:
+                S.call(reg, "idp", "query", ctx, q=who)
+            later.append(again.value)
+        assert o.requests == asked, "premise: the later calls got no oracle turn"
+        return first.value, later, est
+
+    first, later, est = later_give_ups(tmp_path / "ours", ours=True)
+    assert _our_fault(first) is True, "premise: the first give-up is marked ours"
+    assert first.our_cause, "premise: the first give-up carries its cause"
+    assert est.calls("edr", "query"), "premise: a side query reached the adapter"
+    assert [_our_fault(u) for u in later] == [True] * 3, "a later give-up lost the ours mark"
+    assert [u.our_cause for u in later] == [first.our_cause] * 3, [u.our_cause for u in later]
+
+    first, later, _est = later_give_ups(tmp_path / "plain", ours=False)
+    assert _our_fault(first) is not True, "premise: an ordinary give-up is unmarked"
+    assert [_our_fault(u) for u in later] == [False] * 3, [_our_fault(u) for u in later]
+    assert [u.our_cause for u in later] == [None] * 3
 
 
 def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
