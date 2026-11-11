@@ -147,3 +147,23 @@ def test_a_nul_anywhere_in_a_row_refuses_the_whole_append_and_queues_nothing(cha
 
     assert _queued(dsn, channel) == [], "nothing of the refused job was inserted"
     assert _append(dsn, append, [good]) == (1, 0), "control: the good row alone is queued"
+
+
+@pytest.mark.parametrize("hostile", ["defender", "world"])
+@pytest.mark.parametrize("extra", [
+    pytest.param({"extra": {"deeper": [{"x": _NUL}]}}, id="nested value"),
+    pytest.param({_NUL: "v"}, id="key"),
+])
+def test_a_nul_in_one_channels_row_refuses_the_commits_rows_of_the_other_channel_too(dsn, hostile, extra):
+    """One commit's defender and world rows are one job: a NUL in either refuses both, nothing of either is queued. (input 10, second kind)"""
+    defender, world = queue_row(finding_id="episode/b/0/0"), world_row(finding_id="episode/b/1/0")
+    if hostile == "defender":
+        defender = {**defender, **extra}
+    else:
+        world = {**world, **extra}
+
+    with blocking(dsn) as store, pytest.raises(JudgeRefused):
+        enqueue.enqueue_report("episode", {"world": "b"}, state=enqueue.StoreFindings(store, TENANT, "run-1241"),
+                               drawn=enqueue.DrawnRows(defender=[defender], world=[world]))
+
+    assert (_queued(dsn, FINDINGS), _queued(dsn, QUESTIONER_FINDINGS)) == ([], [])
