@@ -1612,6 +1612,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     # its id, so it is found as the ONE new folder there.
     tenant_id = src.parent.parent.name
     seams.setdefault("directory", est.directory(tenant_id=tenant_id))  # C9: one seeded active directory, the estate's records
+    R.assert_records_within_roster(seams["directory"], tenant_id, seams["roster"])  # the roster stands for the catalog
     root = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "episodes"
     before = {p.name for p in root.iterdir()} if root.is_dir() else set()
     try:

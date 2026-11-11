@@ -5,6 +5,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
+import dataclasses
 import importlib
 import re
 import sys
@@ -17,6 +18,7 @@ import pytest
 from defender._paths import adapters_under
 from defender.systems.verbs import read_roster
 from defender.cli import policy_cli
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
@@ -276,6 +278,15 @@ def _planted_tree(root: Path, adapters: dict[str, str]) -> Path:
     return tree
 
 
+def _over(tenant: S.Planted, tree: Path) -> S.Planted:
+    """`tenant` whose records are those of its planted systems that `tree`'s adapters implement. The injected roster
+    stands for the catalog (the tenant's systems are that roster intersected with its records), and a record naming an
+    adapter the roster lacks is a removed-adapter refusal (R12), which would come before the breakage under test."""
+    served = read_roster(adapters_under(tree)).adapter_files
+    spec = R.derive(tenant.settings)
+    return dataclasses.replace(tenant, records=R.without(spec, *(s for s in spec.systems if s not in served)))
+
+
 def _tree_with_broken_elastic(root: Path) -> Path:
     """`_planted_tree` with the well-formed `_PLANTED_CMDB` and the unimportable elastic."""
     return _planted_tree(root, {"cmdb": _PLANTED_CMDB, "elastic": _BROKEN_ELASTIC})
@@ -311,7 +322,7 @@ def test_o6_lead_on_a_system_whose_adapter_is_broken_ends_down_at_start(tmp_path
     tree = _tree_with_broken_elastic(tmp_path / "planted")
     # Run start judges the tree the run reads (`roster=`, as production's one DEFENDER_DIR):
     # the lifecycle hands run.py's judgement on to the driver, so it must be this tree's.
-    broken = scene.run("adapter-broken", defender_dir=tree, backend=_backend(),
+    broken = scene.run("adapter-broken", defender_dir=tree, backend=_backend(), tenant=_over(scene.tenant, tree),
                        roster=read_roster(adapters_under(tree)),
                        main=S.closing_main_turns("inconclusive"),
                        leads={S.L3: [_q(1), _q(2), S.text("FD1256-BROKEN-NARRATION")]})
@@ -759,7 +770,7 @@ def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one_through_r
     repaired_root = tmp_path / "repaired"
     repaired = _planted_tree(repaired_root,
                              {"cmdb": _PLANTED_CMDB, "elastic": _NOT_CONFIGURED_ELASTIC})
-    ran = S.run_alert(tmp_path / "run-repaired", alert=_alert(), tenant=tenant,
+    ran = S.run_alert(tmp_path / "run-repaired", alert=_alert(), tenant=_over(tenant, repaired),
                       backend=_backend(), defender_dir=repaired,
                       roster=read_roster(adapters_under(repaired)))
     assert ran.refusal is None, (
@@ -772,7 +783,7 @@ def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one_through_r
     mixed_root = tmp_path / "mixed"
     mixed = _planted_tree(mixed_root, {"cmdb": _CRASHING_CMDB, "elastic": _NOT_CONFIGURED_ELASTIC})
     before = _runs_entries(tenant)
-    d = S.run_alert(tmp_path / "run-mixed", alert=_alert(), tenant=tenant, backend=_backend(),
+    d = S.run_alert(tmp_path / "run-mixed", alert=_alert(), tenant=_over(tenant, mixed), backend=_backend(),
                     defender_dir=mixed, roster=read_roster(adapters_under(mixed)))
     text = _refusal_text(d, tenant)
     _assert_names_each(text, (("cmdb", CRASH_MARK), ("elastic", ELASTIC_PLANTED_KEY)),

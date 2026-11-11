@@ -16,7 +16,9 @@ import pytest
 from defender._io import read_jsonl_rows
 from defender.kit.settings import NOT_CONFIGURED, SystemConfig
 from defender.kit.faults import ConfigFault
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T6
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.systems import system_status
 from defender.systems.verb_grant import GrantError
@@ -791,7 +793,13 @@ def test_a_missing_granted_system_refuses_before_checks_or_run_creation(tmp_path
 
     rec = S.RunRecorder(tmp_path / "run")
     alert = S.plant_alert(tmp_path / "alert.json")
-    rc, refused = S.drive_run(S.run_argv(alert, data_root), rec, roster=roster)
+    argv = S.run_argv(alert, data_root)
+    # The injected roster stands for the catalog (cmdb and identity alone), so the tenant's records are those two: stated, not
+    # the fixture's seven (a record naming an adapter the roster lacks is a removed-adapter refusal, R12, which would
+    # come before the grant refusal this test is about).
+    directory = directory_for_argv(argv, records=R.bare_records("cmdb", "identity"))
+    R.assert_records_within_roster(directory, S.PLAYGROUND_ID, roster)
+    rc, refused = S.drive_run(argv, rec, roster=roster, directory=directory)
     assert rc is None
     assert isinstance(refused, SystemExit)
     assert refused.code != 0

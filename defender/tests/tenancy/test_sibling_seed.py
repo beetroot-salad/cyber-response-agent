@@ -141,8 +141,10 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None,
         # The request names the tenant whose `<root>/<T>/runs/<run id>` the source sits at,
         # and the source by its id.
         argv = ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID)]
+        directory = directory_for_argv(argv, records=records)
+        R.assert_records_within_roster(directory, src.parent.parent.name, roster)  # the roster stands for the catalog
         outcome = T.mod("cli.learning.branch").main(
-            argv, directory=directory_for_argv(argv, records=records),
+            argv, directory=directory,
             spawn=spawn, questioner=O.questioner_for() if questioner is None else questioner,
             preflight=O.no_preflight,
             live_tree=P.source_capture(tenant_id=stamp_tenant), roster=roster,
