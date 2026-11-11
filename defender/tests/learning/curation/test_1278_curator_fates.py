@@ -305,7 +305,7 @@ def test_d9_a_rejected_pr_no_longer_loses_the_pitfalls_it_carried(lead, caplog):
     call(w.dsn, "add_pitfall", w.t.tenant_id, _pitfall("p4-run:1"))
     _lead_tick(w, ScriptedModel(pitfalls=Reply({_reducer_path(): _reducer_note()})))
     batch = _only_batch(w)
-    w.t.forge.scopes = {"write:repository", "read:issue"}  # the reconcile reads the PR's comments too (H2)
+    w.t.forge.scopes = {"write:repository", "write:issue"}  # the reconcile reads the PR's comments too (H2)
     close_on_remote(w.t.p3, batch.branch)
 
     author = ScriptedModel()
@@ -371,7 +371,7 @@ _WORDS = ("cite the alert rule, not the host", "wrong lane")
 
 def _closed_with_words(w, branch: str, number: int) -> None:
     """A person asks for changes and closes the PR with a comment."""
-    w.t.forge.scopes = {"write:repository", "read:issue"}
+    w.t.forge.scopes = {"write:repository", "write:issue"}
     w.t.forge.comments[number] = [comment_row(501, "analyst", _WORDS[0])]
     w.t.forge.reviews[number] = [review_row(651, "owner", "REQUEST_CHANGES", body=_WORDS[1])]
     close_on_remote(w.t.p3, branch)

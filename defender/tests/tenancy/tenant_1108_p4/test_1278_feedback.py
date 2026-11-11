@@ -56,7 +56,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
 
 pytestmark = pytest.mark.postgres
 
-READ_ISSUE = {"write:repository", "read:issue"}
+READ_ISSUE = {"write:repository", "write:issue"}  # the integration's scopes (A4); `read:issue` alone also reads
 #: How long the forked post-step may take to end after its stop.
 STOP_BOUND = 30.0
 
@@ -581,8 +581,9 @@ def test_replacement_the_generation_ceiling_holds_the_items(world, caplog):
 # --- A2 H15: refusals and unknowns ---------------------------------------------------------------------
 
 
-def test_h15_a_closed_prs_refused_comment_read_is_unknown_not_no_feedback(world, caplog):
-    """Without `read:issue` the comment read is 403: the closed PR's batch stays unresolved, its item not held; with it, held. (C23, Feedback)"""
+@pytest.mark.parametrize("grant", ["write:issue", "read:issue"])
+def test_h15_a_closed_prs_refused_comment_read_is_unknown_not_no_feedback(world, caplog, grant):
+    """With neither issue scope the comment read is 403: the closed PR's batch stays unresolved, its item not held; with `write:issue` (A4) or `read:issue`, held. (C23, Feedback)"""
     w = world
     w.t.forge.scopes = {"write:repository"}
     w.seed("f1")
@@ -594,7 +595,7 @@ def test_h15_a_closed_prs_refused_comment_read_is_unknown_not_no_feedback(world,
     assert _end(w, batch_id) == ("in_review", None)
     assert w.statuses() == {"f1": "in_batch"}
 
-    w.t.forge.scopes.add("read:issue")
+    w.t.forge.scopes.add(grant)
     tick(w, FeedbackCurator())
     assert w.statuses() == {"f1": "held"}, "control: the same close, read in full, holds the item"
 

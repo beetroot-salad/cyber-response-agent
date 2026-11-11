@@ -265,7 +265,7 @@ def test_flow4_a_retained_batch_whose_pr_was_closed_is_delivered_as_closed_and_n
     # Tick 3 reconciles the takeover's record against the forge: with no words left on the closed PR
     # the batch ends `closed`, its item held for a person (H2), and still nothing is pushed or opened.
     [recorded] = batches(world.dsn, t.tenant_id)
-    t.forge.scopes = {"write:repository", "read:issue"}  # the bot's token reads the PR's words (H7)
+    t.forge.scopes = {"write:repository", "write:issue"}  # the bot's token reads the PR's words (H7)
     t.forge.reviews[recorded.pr_number], t.forge.comments[recorded.pr_number] = [], []
     caplog.clear()
     with caplog.at_level(logging.INFO):
