@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.learning.core.config import pitfalls_threshold
 from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
 from defender.learning.leads.lead_extraction import LeadAuthorError  # type: ignore[import-not-found]
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
@@ -25,6 +26,8 @@ from defender.tests.support.learning.curation import _curator1134 as C
 
 
 DECLARED = frozenset({"elastic", "wazuh"})
+#: The pitfalls arrival threshold the curator is run under: a claim holds at least this many distinct mistakes.
+THRESHOLD = pitfalls_threshold()
 
 
 def _lane(tmp_path: Path, files: dict[str, str] | None = None, *,
@@ -78,10 +81,10 @@ def _run(lane: C.DraftLane, items, claim: _Claim, invoke) -> int:
 
 def _tick(lane: C.DraftLane, edit, *, systems: tuple[str, ...] = ("elastic",),
           invoke=None) -> tuple[int, _Claim]:
-    """One real pitfalls claim over the draft: two distinct claimed mistakes per system in `systems`, the spawn
-    faked as `edit(<the draft's agent/skills>)` (it runs no git)."""
+    """One real pitfalls claim over the draft: `THRESHOLD` distinct claimed mistakes per system in `systems` (the lane
+    opens only on that many, #1278 ruling), the spawn faked as `edit(<the draft's agent/skills>)` (it runs no git)."""
     items = [it for k, system in enumerate(systems)
-             for it in _pitfall_items(2, system=system, start=2 * k)]
+             for it in _pitfall_items(THRESHOLD, system=system, start=THRESHOLD * k)]
 
     def agent(handoffs, **_kw):
         edit(lane.skills_dir)
@@ -168,7 +171,7 @@ def test_run_pitfalls_commits_the_fold_and_reports_the_claims_pitfalls_as_taken(
         assert handoffs[0]["system"] == "elastic"
         assert handoffs[0]["path"].endswith("skills/elastic/execution.md")
         assert not handoffs[0]["path"].startswith("defender/")
-        assert len(handoffs[0]["failures"]) == 2
+        assert len(handoffs[0]["failures"]) == THRESHOLD
         p = lane.skills_dir / "elastic" / "execution.md"
         p.write_text("# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n")
         return 0
@@ -178,7 +181,7 @@ def test_run_pitfalls_commits_the_fold_and_reports_the_claims_pitfalls_as_taken(
     assert lane.landed() == ["agent/skills/elastic/execution.md"]
     assert "execution.md pitfalls" in lane.message()
     [taken] = claim.curated
-    assert set(taken.committed_ids) == {"r:l-000:0", "r:l-001:0"}
+    assert set(taken.committed_ids) == {f"r:l-{i:03d}:0" for i in range(THRESHOLD)}
     assert taken.sha == lane.tip()
     assert claim.outcomes == {}
 
@@ -189,7 +192,7 @@ def test_run_pitfalls_no_edit_claim_still_reports_its_pitfalls_taken(tmp_path: P
     assert rc == 0
     assert lane.commits() == []
     [taken] = claim.curated
-    assert set(taken.committed_ids) == {"r:l-000:0", "r:l-001:0"}
+    assert set(taken.committed_ids) == {f"r:l-{i:03d}:0" for i in range(THRESHOLD)}
     assert taken.sha is None
     assert claim.outcomes == {}
 
@@ -222,6 +225,30 @@ def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(
     rc, _ = _tick(control, lambda sk: (sk / "elastic" / "execution.md").write_text("# e\n"))
     assert rc == 0
     assert control.landed() == ["agent/skills/elastic/execution.md"]
+
+
+@pytest.mark.parametrize(("distinct", "rows", "runs"), [
+    pytest.param(1, THRESHOLD, False, id="one mistake repeated to the threshold"),
+    pytest.param(THRESHOLD - 1, THRESHOLD - 1, False, id="one mistake short of the threshold"),
+    pytest.param(THRESHOLD - 1, THRESHOLD + 2, False, id="one mistake short, rows past the threshold"),
+    pytest.param(THRESHOLD, THRESHOLD, True, id="the threshold's mistakes"),
+    pytest.param(THRESHOLD, THRESHOLD + 2, True, id="the threshold's mistakes, repeated"),
+])
+def test_the_pitfalls_curator_runs_only_for_the_thresholds_distinct_mistakes(tmp_path: Path, distinct, rows, runs):
+    """A claim under the threshold in mistakes is not curated however many rows it holds; the same guard as the store's claim. (input 56, ruling)"""
+    lane = _lane(tmp_path)
+    items = [("pitfall", f"r:l-{i:03d}:0", {**_pitfall_items(1, start=i % distinct)[0][2], "pitfall_id": f"r:l-{i:03d}:0"})
+             for i in range(rows)]
+    called: list[int] = []
+
+    def agent(handoffs, **_kw):
+        called.append(len(handoffs))
+        return 0
+
+    rc = _run(lane, items, _Claim(), agent)
+
+    assert rc == 0
+    assert bool(called) is runs
 
 
 def test_run_pitfalls_all_systemless_skips_the_claim_without_spawn(tmp_path: Path):
