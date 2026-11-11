@@ -4,7 +4,8 @@
 One reader for all four, so a folder means the same thing wherever it is handed in. A record holds exactly what the
 folder says: every `KEY=value` line of `config.env` is a setting, and a line a parser could ignore or override (an
 `export` line, a key set twice) is refused rather than dropped, so a value on such a line never becomes, or hides
-behind, a stored setting. A missing `config.env` is no settings and a missing `access.yaml` is no declaration: what
+behind, a stored setting. Each part is held to the one settings-file size (`SETTINGS_MAX_BYTES`) at every door, so the
+import cannot store what `set-system` refuses. A missing `config.env` is no settings and a missing `access.yaml` is no declaration: what
 that leaves unusable is the record judgement's to say (`record_judgement`), not the reader's. Faults name the folder's
 parts through the caller's locator (DC6): the record's words for `set-system`, the file for the import and connect."""
 from __future__ import annotations
@@ -14,7 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from defender.kit.settings import PART_FILES, Locator
-from defender.tenancy.tenant_settings import assignments, read_regular_bytes
+from defender.tenancy.tenant_settings import SETTINGS_MAX_BYTES, assignments, read_regular_bytes
 
 
 @dataclasses.dataclass(frozen=True)
@@ -31,28 +32,20 @@ def folder_of_bytes(system: str, *, config: bytes | None, access: bytes | None, 
     """The folder whose `config.env` and `access.yaml` hold `config` and `access` (None: the file is absent)."""
     faults: list[str] = []
     settings: dict[str, str] = {}
-    if config is not None:
-        text = _utf8(config)
-        if text is None:
-            faults.append(f"{locator.part(system, 'settings')}: is not UTF-8 text")
-        else:
-            seen: set[str] = set()
-            for key, value, exported in assignments(text):
-                if exported:
-                    faults.append(f"{locator.part(system, 'settings')}: `export {key}` is an export line; a setting is a "
-                                  "plain KEY=value line")
-                elif key in seen:
-                    faults.append(f"{locator.part(system, 'settings')}: {key} is set more than once; set each key once")
-                else:
-                    settings[key] = value
-                seen.add(key)
-    declaration = ""
-    if access is not None:
-        text = _utf8(access)
-        if text is None:
-            faults.append(f"{locator.part(system, 'access')}: is not UTF-8 text")
-        else:
-            declaration = text
+    where = locator.part(system, "settings")
+    text = _text(config, where, faults)
+    if text is not None:
+        seen: set[str] = set()
+        for key, value, exported in assignments(text):
+            if exported:
+                faults.append(f"{where}: `export {key}` is an export line; each setting of system {system} is a plain "
+                              "KEY=value line")
+            elif key in seen:
+                faults.append(f"{where}: {key} is set more than once; set each key of system {system} once")
+            else:
+                settings[key] = value
+            seen.add(key)
+    declaration = _text(access, locator.part(system, "access"), faults) or ""
     return SystemFolder(settings=settings, access=declaration, faults=tuple(faults))
 
 
@@ -78,10 +71,18 @@ def config_text(settings: Mapping[str, str]) -> str:
     return "".join(f'{key}="{value}"\n' for key, value in sorted(settings.items()))
 
 
-def _utf8(data: bytes) -> str | None:
+def _text(data: bytes | None, where: str, faults: list[str]) -> str | None:
+    """`data` as text, or None: absent, or a fault (naming `where`) appended for a part over the settings-file size or
+    not UTF-8 text."""
+    if data is None:
+        return None
+    if len(data) > SETTINGS_MAX_BYTES:
+        faults.append(f"{where}: is larger than {SETTINGS_MAX_BYTES} bytes, the size of any settings file")
+        return None
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
+        faults.append(f"{where}: is not UTF-8 text")
         return None
 
 
