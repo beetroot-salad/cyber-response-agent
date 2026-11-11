@@ -13,6 +13,7 @@ from sqlalchemy import Table, insert, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from defender.database import async_engine
+from defender.kit.faults import ConfigFault
 from defender.records.formats import TenantId
 from defender.tenancy import parse_access
 from defender.tenancy.models import (CaseRecord, CaseVersionRow, RecordsMark, SystemRecord, SystemVersionRow, TenantRecords,
@@ -106,13 +107,21 @@ class RecordStore:
     @staticmethod
     def _generation(system: str, rows: list[Any], access: str) -> int:
         """P5, R4, K4: the first version is 1; a re-create after a delete is the highest ever + 1; otherwise the current
-        generation, one higher when the base, the CA or the auth block differs, compared as parsed values."""
+        generation, one higher when the base, the CA or the auth block differs, compared as parsed values. Unchanged
+        access text keeps the generation without a parse; an access, old or new, that does not parse cannot be shown to
+        name the same upstream, so it takes a new generation (a new access that does not parse is the judge's
+        refusal besides)."""
         if not rows:
             return 1
         top = max(r.credential_generation for r in rows)
         if rows[-1].deleted:
             return top + 1
-        was, now = parse_access(rows[-1].access, system=system), parse_access(access, system=system)
+        if rows[-1].access == access:
+            return top
+        try:
+            was, now = parse_access(rows[-1].access, system=system), parse_access(access, system=system)
+        except ConfigFault:
+            return top + 1
         return top if (was.base, was.ca, was.auth) == (now.base, now.ca, now.auth) else top + 1
 
     # --- writes -----------------------------------------------------------------------------------------------------
@@ -126,15 +135,10 @@ class RecordStore:
             rows = history.get(system, [])
             self._check_replaces(system, rows, replaces)
             custom = adapter if isinstance(adapter, tuple) else None
+            generation = self._generation(system, rows, access)
             candidate = SystemRecord(system_id=system, version=len(rows) + 1, adapter_id="" if custom else str(adapter),
                                      enabled=enabled, settings=dict(settings), access=access, custom_ref=custom,
-                                     credential_generation=0)
-            # The judge needs the generation only to compare; access that does not parse is the judge's refusal.
-            try:
-                generation = self._generation(system, rows, access)
-            except Exception:
-                generation = rows[-1].credential_generation if rows else 1
-            candidate = SystemRecord(**{**candidate.__dict__, "credential_generation": generation})
+                                     credential_generation=generation)
             after = self._current(history) | {system: candidate}
             case = self._current_case(await self._case_history(conn, tenant))
             self._refuse_if_faulty(TenantRecords(imported=True, systems=after, case=case),

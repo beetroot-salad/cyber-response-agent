@@ -1075,6 +1075,21 @@ def test_1366_p5_the_generation_rises_on_a_change_of_base_ca_or_any_auth_field_a
 
 
 @pytest.mark.postgres
+def test_1366_p5_a_stored_access_that_no_longer_parses_gives_the_next_write_a_new_generation(imported_op):
+    """identity's stored access stops parsing (as a later, stricter rule would leave it); a write naming another base
+    cannot be shown to reach the same upstream, so it takes generation 2, and the set stored at g1 is not offered to the
+    new base. (#1366 P5, R4, K4)"""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    op = imported_op
+    execute(op.dsn, "UPDATE tenancy.system_versions SET access = %s WHERE tenant_id = %s AND system_id = 'identity'",
+            ("access: no-longer-valid\n", op.tid))
+    rc, said = op.set_system("identity", replaces=1, config=IDENTITY, access=R.bearer_access("http://elsewhere:9005"))
+    assert rc == 0, said
+    assert op.numbers("identity") == [(1, 1, False), (2, 2, False)]
+
+
+@pytest.mark.postgres
 def test_1366_p5_a_settings_change_alone_keeps_the_generation(imported_op):
     """A new timeout keeps identity at generation 1. (#1366 P5)"""
     assert imported_op.set_system("identity", replaces=1, config={"IDENTITY_TIMEOUT_SEC": "20"},
