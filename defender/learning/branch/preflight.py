@@ -308,6 +308,8 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any,
 
     env = run_env(_DEFENDER_DIR, Path(episode_dir))
     env["DEFENDER_RUNS_BASE"] = source.runs_base_export()
+    # The token is asked of its source inside each verb's call, so a pass that nears its end is asked for afresh
+    # (O6: inside a job container the helper signs each one).
     proxied = ({} if access is None
                else {"proxy_url": access.proxy_url, "access": access})
     return VerbContext(defender_dir=_DEFENDER_DIR, run_dir=Path(episode_dir), env=env,
@@ -317,7 +319,8 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any,
 def _preflight_access(source: Run, tenant: RunTenant, reads: Sequence[str], *, signer: Any,  # noqa: PLR0913 — the pass's identity plus the operator's seams
                       proxy_url: str | None, issuer_transport: Any, directory: Any,
                       clock: Callable[[], float],
-                      on_fault: Callable[[AdapterFault], None]) -> RequestAccess | None:
+                      on_fault: Callable[[AdapterFault], None],
+                      container: Any = None, job_id: str | None = None) -> RequestAccess | None:
     """The pass's one access holder (#1363 O1), built as a run builds its own
     (`request_access`): the read token over `reads`, the run's read grant, with the source run as
     its investigation; `None` when the grant is empty. A configuration that cannot sign (no proxy
@@ -326,6 +329,12 @@ def _preflight_access(source: Run, tenant: RunTenant, reads: Sequence[str], *, s
     Curators and the author are handed none."""
     if not reads:
         return None
+    if container is not None:
+        # Inside a job container (#1170 O5, O6): the per-job host helper signs every pass, for the learning job's own
+        # id and the read grant it computed; asked afresh as each nears its end, never one long pass.
+        if job_id is None:
+            raise ConfigFault("pre-flight in a job container needs the learning job's id to ask its passes for")
+        return container.access(job_id, clock=clock, on_fault=on_fault)
     if directory is None:
         raise ConfigFault("no tenant records were handed to pre-flight to sign its read token with")
     signer, address = signing_access(tenant.tenant_id, directory=directory, signer=signer,
@@ -335,10 +344,36 @@ def _preflight_access(source: Run, tenant: RunTenant, reads: Sequence[str], *, s
                           on_fault=on_fault)
 
 
+def sibling_sign_check(tenant: RunTenant, *, roster: Any, signer: Any, proxy_url: str | None,  # noqa: PLR0913 — the tenant plus the operator's seams
+                       issuer_transport: Any, directory: Any) -> Callable[[], str | None]:
+    """The launcher's check before each sibling it starts in turn (#1449): why the next sibling's
+    read token cannot be signed, or None. The rule run start applies (`signing_access`: tenant
+    records only, nothing contacted), over the read grant a sibling is minted (`read_grant` over
+    the systems judged down, settled once here: a run's settings are frozen at launch). A grant
+    with nothing proxied never refuses."""
+    reads = system_status.read_grant(
+        tenant, system_status.judge_run(roster, tenant, defender_dir=_DEFENDER_DIR).down)
+
+    def check() -> str | None:
+        if not reads:
+            return None
+        if directory is None:
+            return "no tenant records were handed to the launcher to sign its siblings' tokens with"
+        try:
+            signing_access(tenant.tenant_id, directory=directory, signer=signer,
+                           proxy_url=proxy_url, transport=issuer_transport)
+        except ConfigFault as refused:
+            return refused.detail
+        return None
+
+    return check
+
+
 def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
     episode: Episode, *, source: Run, roster: Any, tenant: RunTenant, oracle: Any = None,
     verifier: Any = None, signer: Any = None, proxy_url: str | None = None,
-    issuer_transport: Any = None, directory: Any = None, **knobs: Any,
+    issuer_transport: Any = None, directory: Any = None, container: Any = None, job_id: str | None = None,
+    **knobs: Any,
 ) -> dict[str, Any]:
     """`Step.PREFLIGHT`: replay every original call through each fact world's oracle and
     verifier, and write the episode's write-once outcome record (`outcome.write_outcome`)."""
@@ -414,6 +449,9 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
     # The oracle's knobs, settled once for every world of the pass: `knobs` over the process's
     # knobs. Each world's serving is built from them in its own thread (`calibrate`).
     box = knobs.pop("box", None)
+    if box is None and container is not None and job_id is not None:
+        # Inside a job container the oracle's boxes are the helper's to start (#1170 O2, C21), for the job's own id.
+        box = container.box_factory("oracle", job_id)
     knobs_clock = knobs.pop("clock", time.time)
     restart_after = knobs.pop("restart_after", DEFAULT_RESTART_AFTER)
     settings = oracle_settings_with(**knobs)
@@ -426,7 +464,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
         access = _preflight_access(
             source, tenant, system_status.read_grant(tenant, down), signer=signer,
             proxy_url=proxy_url, issuer_transport=issuer_transport, directory=directory,
-            clock=clock, on_fault=lambda _fault: stop.set())
+            clock=clock, on_fault=lambda _fault: stop.set(), container=container, job_id=job_id)
         # Pre-flight is the gate that proves the environment before any sibling launches, so it
         # signs once now rather than at first need: a pass whose reads all come from the
         # recording would otherwise accept without ever signing.

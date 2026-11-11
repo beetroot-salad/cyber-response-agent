@@ -68,9 +68,11 @@ DESCRIPTION = ALERT_BYTES_DESCRIPTION
 
 def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: bool = True,
                     data_root: Path | None = None, generations: Any = None,
-                    alert_mapping: Mapping[str, str | None] | None = FIXTURE_ALERT_MAPPING) -> None:
-    """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6), and #1345's
-    default alert mapping saved through the store (`alert_mapping=None`: a tenant with none, for a test of absence).
+                    alert_mapping: Mapping[str, str | None] | None = FIXTURE_ALERT_MAPPING,
+                    origin: str | None = None) -> None:
+    """A `tenancy.tenants` row (default: active, forge wiring recorded, at `origin` when given) by main's #1214 helper
+    (r6), and #1345's default alert mapping saved through the store (`alert_mapping=None`: a tenant with none, for a test
+    of absence).
 
     An active tenant gets one live generation with a sign login (the fixture tenant's elastic is proxied,
     #1391 P1/D12: run start signs request tokens), unless `generations` says otherwise (`()` for none)."""
@@ -80,7 +82,7 @@ def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: 
     if generations is None:
         generations = [sign_generation(tenant_id)] if state == "active" else ()
     insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root, generations=generations,
-                         alert_mapping=alert_mapping)
+                         alert_mapping=alert_mapping, origin=origin)
 
 
 def drop_tenant(dsn: str, tenant_id: str) -> None:

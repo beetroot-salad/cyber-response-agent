@@ -1,4 +1,4 @@
-"""#1342 test entry for the job lane: `python _job_entry1342.py <mode> <commit> <marks> --job <id> --tenant <T> --parent-pid <pid>`.
+"""#1342 test entry for the job lane: `python _job_entry1342.py <mode> <commit> <marks> --job <id> --tenant <T>` as the process of a job container (#1170 A6: the job socket address in its environment, no --parent-pid).
 
 Calls the real job entry (`run.job_main`) with seams and an unboxed executor handed through the
 lifecycle's `start_box` seam (never `DEFENDER_ALLOW_UNSANDBOXED`). Marks go in `<marks>/`.
@@ -252,4 +252,4 @@ elif mode.startswith("replay"):
 else:
     lifecycle = _hold_lifecycle(closes=mode == "hold-committed")
 sys.exit(run_py.job_main(argv, lifecycle=lifecycle, preflight=lambda *a, **k: 0,
-                         visualize=lambda *a, **k: None, publish=lambda *a, **k: f"fresh {commit}"))
+                         visualize=lambda *a, **k: None))  # #1170 A6: no publish seam; the helper published

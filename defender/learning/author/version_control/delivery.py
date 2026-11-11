@@ -9,7 +9,7 @@ from __future__ import annotations
 import contextlib
 import os
 import secrets
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -65,12 +65,14 @@ def opened_delivery(  # noqa: PLR0913 — the tenant, its records, and the in-pr
     identity: ForgeCredential | None = None,
     credential_config: Any = None,
     issuer_transport: httpx.BaseTransport | None = None,
+    relay: Callable[..., dict[str, Any]] | None = None,
 ) -> Iterator[TenantDelivery]:
     """The tenant's delivery, opened against its forge wiring in the tenant records (#1214
     Flow 4): the recorded origin; `identity`, else the tenant's forge credential for `purpose`
     (`forge_credential`, minting through its live generation; `credential_config` and
     `issuer_transport` are the host's issuer configuration and an in-process stand-in transport);
-    `client`, else a new forge client. A client or credential made here is closed on exit; a
+    `client`, else a new forge client; `relay`, inside a job container, the job socket's client (#1170: the batch's
+    publish, draft and box are the per-job host helper's, `TenantDelivery.relay`). A client or credential made here is closed on exit; a
     given one stays its caller's. No wiring recorded is `TenantRefused`; a refused open,
     `DeliveryRefused` or `ForgejoAuthError`. Publish outcomes are recorded through `directory`."""
     wiring = directory.forge_wiring(tenant.id)
@@ -88,7 +90,7 @@ def opened_delivery(  # noqa: PLR0913 — the tenant, its records, and the in-pr
 
             client = owned.enter_context(httpx.Client())
         yield TenantDelivery.open(tenant, defender_dir=defender_dir, client=client,
-                                  identity=identity, origin=wiring.origin, directory=directory)
+                                  identity=identity, origin=wiring.origin, directory=directory, relay=relay)
 
 
 @dataclass(frozen=True, eq=False)
@@ -102,6 +104,10 @@ class TenantDelivery:
     #: Where this delivery's publish outcomes are recorded (`None`: an in-process caller with no
     #: tenant records records none).
     directory: TenantDirectory | None = field(default=None, repr=False)
+    #: Inside a job container (#1170 C23, A6): the job socket's client. The batch's publish and draft are then the
+    #: per-job host helper's (`batch.start`: it publishes, builds the draft and owns it), and so is its box
+    #: (`box.start` of the `batch` kind at the draft's id); this process makes no draft or owner record.
+    relay: Callable[..., dict[str, Any]] | None = field(default=None, repr=False)
 
     @property
     def network_timeout(self) -> float:
@@ -118,6 +124,7 @@ class TenantDelivery:
         origin: str,
         network_timeout: float = NETWORK_TIMEOUT,
         directory: TenantDirectory | None = None,
+        relay: Callable[..., dict[str, Any]] | None = None,
     ) -> TenantDelivery:
         with recording(directory, accepted_tenant.id, by="delivery"), _refusals():
             repository = GitRepository.open(
@@ -130,7 +137,7 @@ class TenantDelivery:
             )
             return cls(
                 tenant=accepted_tenant, defender_dir=defender_dir, repository=repository,
-                directory=directory,
+                directory=directory, relay=relay,
             )
 
     def publish(self) -> TenantExport:
@@ -151,11 +158,15 @@ class TenantDelivery:
         a reused one is caught before any box runs); publish; then, under the same lock hold,
         build the git-free draft of the export commit's `agent/` in a dot-named temporary
         under `<T>/drafts/` and rename it to `<T>/drafts/<batch_id>`. A build that fails leaves
-        nothing. No checkout is made, and the branch exists from the first commit on.
+        nothing. No checkout is made, and the branch exists from the first commit on. With a
+        `relay` the helper does all of this at an id it mints (`batch_id` is not sent).
 
         `branch` is the learning store's (#1278 D5: set at claim, never re-derived; else the
         prefix and the id), and `recorder` where each commit is recorded before its branch
-        moves (else the commit-maker keeps its commits in memory for `finish`)."""
+        moves (else the commit-maker keeps its commits in memory for `finish`); a relayed batch
+        takes both too, its commits being made in this process."""
+        if self.relay is not None:
+            return self._relayed_batch(lanes, branch=branch, recorder=recorder)
         with _refusals():
             batch_id = _one_word(batch_id, "batch id")
             declared = _lanes(lanes)
@@ -191,6 +202,37 @@ class TenantDelivery:
                 committer=CommitMaker(self.tenant, self.repository, recorder),
                 _line=line,
             )
+
+    def _relayed_batch(self, lanes: Sequence[str], *, branch: str | None,
+                       recorder: Recorder | None) -> Batch:
+        """Flow 3 done by the per-job host helper (`batch.start`): the batch over the draft it made and owns."""
+        from defender.job_socket import Refused
+
+        declared = _lanes(lanes)
+        assert self.relay is not None
+        try:
+            answer = self.relay("batch.start", lanes=list(declared))
+        except Refused as refused:
+            raise DeliveryRefused(f"the helper did not start the batch: {refused}") from None
+        except OSError as unreachable:
+            raise DeliveryRefused(f"the helper could not be asked to start the batch: {unreachable}") from None
+        batch_id = _one_word(str(answer["batch"]), "batch id")
+        commit, folder = str(answer["base"]), Path(answer["path"])
+        if folder != draft_path(self.tenant, batch_id):
+            raise DeliveryRefused(f"the helper's draft {folder} is not batch {batch_id}'s")
+        branch = branch if branch is not None else f"{self.branch_prefix}{batch_id}"
+        line = _Line(batch=_BatchKey(branch=branch, base=commit, start=secrets.token_hex(8)), lanes=declared)
+        return Batch(id=batch_id, branch=branch, export=TenantExport(commit=commit, path=Path(answer["export"])),
+                     draft_root=folder / DRAFT_STAGE, lanes=declared, tenant=self.tenant,
+                     defender_dir=self.defender_dir, repository=self.repository,
+                     committer=CommitMaker(self.tenant, self.repository, recorder), _line=line)
+
+    def start_batch_box(self, batch: Batch, *, docker: DockerFn = run_docker) -> box.BoxExecutor:
+        """The batch's box: started by the per-job host helper for the batch's id when this delivery has a `relay`,
+        else `start_box(batch.box_request())`."""
+        if self.relay is not None:
+            return box.relay_start(self.relay, "batch", batch.id)
+        return self.start_box(batch.box_request(), docker=docker)
 
     def _refuse_taken(self, batch_id: str, branch: str) -> None:
         if os.path.lexists(draft_path(self.tenant, batch_id)):

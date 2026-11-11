@@ -34,6 +34,24 @@ credential from OpenBao, sends, passes the reply on as it arrives (it does not s
 once did without, now reintroduced for customer credentials only; the design is in #1163.
 `docker exec` stays for credential-free systems and never carries a credential of ours.
 
+## Amendment (#1170): the brain runs in its tenant's job container; the isolate is reached through its helper
+
+The decision put the driver and adapters "host-side, trusted". Since #1170 the driver, its
+adapters and learning's processes run **inside a job container scoped to one tenant**, the
+child of a per-job host helper (`defender.job_host`), so a bug or a model-steered mistake in
+one tenant's job cannot reach another tenant's files, rows, credentials or jobs. The job holds
+no Docker socket, no database login and no sign or forge login.
+
+The isolate itself is unchanged: no credentials, no network, an inbound-only channel. What
+changes is who holds the daemon. The helper starts every box (it derives each mount, name and
+label from the claim and the tenant, never from the job's request), runs the start's probes,
+relays each framed command under the output limit and an upper timeout, and classifies how a
+box ends (the status query, the exit-137, deadline and lost rule, the stop: #1421's
+daemon-facing half). The job keeps the run clock, the refusal latch and the typed endings,
+and reaches its box through `box.RelayTransport`, a confining transport over the job socket,
+so a relayed box counts as sandboxed by construction and is never treated as host execution.
+The model still writes only into the box; nothing in the box can reach the job socket.
+
 ## How we got here
 
 #571 adopted Anthropic's managed-agents **brain/hands split**: the driver and LLM

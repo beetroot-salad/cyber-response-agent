@@ -2,6 +2,13 @@
 process through the job lane, keeps each row's lease alive while it holds it, and records how it
 ended.
 
+Every child is the per-job host helper (#1170 H7), `python -m defender.job_host --kind <kind> ...`: it
+does the privileged work for its one job of one tenant and starts the job's container as its own child.
+The worker spawns, supervises, stops and sweeps the helper as it did the job entry before: the helper is
+tied to the worker's pid, a stop or fence is its SIGTERM (it stops the container gracefully), and the
+kill of its group ends it and, with it, the container. The worker's start removes the job containers a
+dead worker's helpers left (`serve`).
+
 Per claimed row, as a task: a box token is minted for the claim, the tenant's state, read by the
 claim itself, must be `active` (#1342 r7 R7-1: no host lock is taken and the worker is recorded as
 no holder, so a teardown never waits for it or signals it), the launch record (carrying the token)
@@ -82,10 +89,9 @@ END_RETRY_DELAY = 1.0
 #: (#1344 amendment 1), in seconds.
 LEARNING_CHECK_INTERVAL = 300.0
 
-_RUN_PY = Path(__file__).resolve().parents[1] / "run.py"
-#: The learning children's modules (#1344), started with `-m` from the code tree's root.
-JOB_ENTRY_MODULE = "defender.cli.learning.job"
-POST_STEP_MODULE = "defender.learning.branch.post_step"
+#: The per-job host helper (#1170 H7): every job of every kind is its child, started with `-m` from the
+#: code tree's root (the worker's code copy, as `child_cwd`).
+JOB_HOST_MODULE = "defender.job_host"
 
 _FAILED, _COMPLETED, _UNPARSEABLE = "failed", "completed", "unparseable"
 _SETUP_REFUSED, _NO_REPORT, _WORKER_ERROR = "setup_refused", "no_report", "worker_error"
@@ -133,33 +139,38 @@ class _PostStepOf:
     learning_job_id: str | None
 
 
+def _helper_argv(kind: str, *, job: str | None, tenant: str, parent_pid: int, source: str | None = None) -> list[str]:
+    """`python -m defender.job_host --kind <kind> [--job <id>] --tenant <T> [--source <run>] --parent-pid <pid>`."""
+    return [sys.executable, "-m", JOB_HOST_MODULE, "--kind", kind,
+            *([] if job is None else ["--job", job]), "--tenant", tenant,
+            *([] if source is None else ["--source", source]), "--parent-pid", str(parent_pid)]
+
+
 def run_argv(launch: Launch) -> list[str]:
-    """The default child: `run.py --job <id> --tenant <T> --parent-pid <pid>`."""
-    return run_argv_in(_RUN_PY.parents[1])(launch)
+    """The default investigation child: the per-job host helper,
+    `-m defender.job_host --kind investigation --job <id> --tenant <T> --parent-pid <pid>`."""
+    return _helper_argv("investigation", job=launch.investigation_id, tenant=launch.tenant_id,
+                        parent_pid=launch.parent_pid)
 
 
 def run_argv_in(root: Path) -> Callable[[Launch], list[str]]:
-    """The investigation child of the code tree at `root` (the parent of its `defender/`)."""
-    entry = Path(root) / "defender" / "run.py"
-
-    def argv(launch: Launch) -> list[str]:
-        return [sys.executable, str(entry), "--job", launch.investigation_id,
-                "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
-    return argv
+    """The investigation child of the code tree at `root`: the same helper as `run_argv`, found as a
+    module from the working directory (the worker starts every child in its code copy, `child_cwd`),
+    so the tree is the child's working directory and not part of its command."""
+    del root  # the working directory names the tree, as for the learning children
+    return run_argv
 
 
 def job_entry_argv(launch: LearningLaunch) -> list[str]:
-    """The learning job's child: the job entry as a module, found from the working directory."""
-    return [sys.executable, "-m", JOB_ENTRY_MODULE, "--job", launch.job_id, "--tenant", launch.tenant_id,
-            "--source", launch.source_investigation_id, "--parent-pid", str(launch.parent_pid)]
+    """The learning job's child: the helper of kind `learning`, which checks `--source` inside the container."""
+    return _helper_argv("learning", job=launch.job_id, tenant=launch.tenant_id,
+                        parent_pid=launch.parent_pid, source=launch.source_investigation_id)
 
 
 def post_step_argv(launch: PostStepLaunch) -> list[str]:
-    """The post-step's child, as a module; a family-less one has no `--job`. Its pending jobs are
-    not on the command line: the worker writes them where it reads them (`_hand_pending`)."""
-    job = [] if launch.job_id is None else ["--job", launch.job_id]
-    return [sys.executable, "-m", POST_STEP_MODULE, *job, "--tenant", launch.tenant_id,
-            "--parent-pid", str(launch.parent_pid)]
+    """The post-step's child: the helper of kind `post-step`; a family-less one has no `--job`. Its
+    pending jobs are not on the command line: the worker writes them where it reads them (`_hand_pending`)."""
+    return _helper_argv("post-step", job=launch.job_id, tenant=launch.tenant_id, parent_pid=launch.parent_pid)
 
 
 def _exit_words(returncode: int) -> str:
@@ -320,12 +331,23 @@ class Worker:
         for s in signals:
             loop.add_signal_handler(s, stop.set)
         try:
+            await self._remove_leftover_job_containers()
             await self._claim_loop(stop=stop)
         finally:
             for s in signals:
                 loop.remove_signal_handler(s)
                 if previous[s] is not None:
                     signal.signal(s, previous[s])
+
+    async def _remove_leftover_job_containers(self) -> None:
+        """At start, before anything is claimed: every container carrying the job-container label
+        (`job_socket.JOB_LABEL`) is a dead helper's, since this worker is the only one on its machine and
+        its previous run's helpers died with it, claim tokens included (#1170 A5). Never an error: what
+        cannot be removed is logged, and the tenant's teardown removes it by the tenant's label."""
+        try:
+            await asyncio.to_thread(self._containers.remove_job_containers)
+        except Exception:  # noqa: BLE001 — the sweep is best effort
+            _logger.exception("the job containers a previous worker's helpers left could not all be removed")
 
     async def _claim_loop(self, *, stop: asyncio.Event | None) -> None:
         """The one claim loop of `drain` and `serve`: claim while a slot is free and no store write

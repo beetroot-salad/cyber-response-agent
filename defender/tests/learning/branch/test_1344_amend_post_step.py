@@ -7,8 +7,8 @@ leaves waiting are the learning store's (#1278): a real PostgreSQL."""
 from __future__ import annotations
 
 import json
-import re
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +17,8 @@ import pytest
 from defender.learning.branch import post_step
 from defender.records.job_lane import post_step_key
 from defender.tests.learning.branch.test_1344_post_step import (  # noqa: F401 — store_dsn is the module's autouse fixture
-    _job_episode, _learning_paths, _queue, hand_pending, store_dsn)
+    _job_episode, _learning_paths, _queue, hand_pending, post_step_in_container, store_dsn)
 from defender.tests.learning.feedback_1414 import _lessons1414 as L
-from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, LEAD_LANE, ONE, call, finding, lapse_lease
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
@@ -54,9 +53,7 @@ def test_a1_a_family_less_post_step_publishes_runs_the_gate_and_records_under_th
     seen: list[int] = []
 
     hand_pending(data_root, tenant_id, None, [ep.name])
-    post_step.main(["--tenant", tenant_id, "--parent-pid", str(os.getppid())],
-                   author_tick=lambda *_a, **_k: seen.append(len(_queue(ep))) or 0,
-                   directory=T.launcher_directory(tenant_id))
+    post_step_in_container(None, tenant_id, author_tick=lambda *_a, **_k: seen.append(len(_queue(ep))) or 0)
 
     assert seen, "the gate did not run"
     assert seen[0] > 0, "the gate ran before publishing"
@@ -73,8 +70,7 @@ def test_a1_a_family_less_post_step_with_nothing_pending_still_runs_the_gate(tmp
     ticks: list[int] = []
 
     hand_pending(data_root, tenant_id, None, [])
-    post_step.main(["--tenant", tenant_id, "--parent-pid", str(os.getppid())],
-                   author_tick=lambda *_a, **_k: ticks.append(1) or 0, directory=T.launcher_directory(tenant_id))
+    post_step_in_container(None, tenant_id, author_tick=lambda *_a, **_k: ticks.append(1) or 0)
 
     assert ticks == [1]
     assert _record_at(ep, tenant_id) == {"published": [], "refused": [], "waiting": False}  # nothing queued (amendment 3)
@@ -173,8 +169,7 @@ def test_wake_the_post_step_says_work_waits_exactly_when_the_stores_state_gives_
     _SCENARIOS[scenario](os.environ[DSN_ENV], tenant_id)
 
     hand_pending(data_root, tenant_id, None, [])
-    post_step.main(["--tenant", tenant_id, "--parent-pid", str(os.getppid())],
-                   author_tick=lambda *_a, **_k: 0, directory=T.launcher_directory(tenant_id))
+    post_step_in_container(None, tenant_id, author_tick=lambda *_a, **_k: 0)
 
     assert _record_at(ep, tenant_id) == {"published": [], "refused": [], **({} if waiting else {"waiting": False})}
 
@@ -227,8 +222,7 @@ def test_wake_a_batch_of_any_lane_in_any_phase_but_ended_keeps_the_tenants_check
     _lane_batch(os.environ[DSN_ENV], tenant_id, lane, phase)
 
     hand_pending(data_root, tenant_id, None, [])
-    post_step.main(["--tenant", tenant_id, "--parent-pid", str(os.getppid())],
-                   author_tick=lambda *_a, **_k: 0, directory=T.launcher_directory(tenant_id))
+    post_step_in_container(None, tenant_id, author_tick=lambda *_a, **_k: 0)
 
     assert _record_at(ep, tenant_id) == {"published": [], "refused": []}
 

@@ -840,7 +840,8 @@ class Tick:
                     self.author_work(self.paths, batch=batch, box=None, held=held, feedback=feedback,
                                      outcomes=outcomes)
                 else:
-                    box = (self.start_box or delivery.start_box)(batch.box_request())
+                    box = (self.start_box(batch.box_request()) if self.start_box is not None
+                           else delivery.start_batch_box(batch))
                     runs = box_mod.BoxRuns(box)
                     work_ok = False
                     try:

@@ -112,6 +112,10 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     """The job entry in-process over `_spec1224`'s fixture tenant (or `estate`, made at `tmp_path`), the source run
     holding `calls` (default: `_calls()`); every paid seam a recording double. `extra` seams (the launcher's
     `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults."""
+    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn
+    from defender.tests.support.jobs._socket_standin1170 import materialise as materialise_export
+    from defender.tests.support.jobs._socket_standin1170 import passes as helper_passes
+
     est = estate(tmp_path) if estate is not None else S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls, after_source=after_source)
     if fix_source is not None:
@@ -134,17 +138,26 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         candidates=candidates if candidates is not None else choose(T.BRANCH_MESSAGE_ID))
     if grade is not None:
         seams["grade"] = grade
+    launch: dict[str, Any] = {"kind": "learning", "job": job}
+    answers: dict[str, Any] = {"export.materialise": materialise_export(tenant)}
+    if "proxy_url" in extra:
+        # The helper signs the job's passes (#1170 O5): the launcher's signing seams become the stand-in helper's.
+        launch["proxy_url"], answers["pass"] = helper_passes(
+            tenant, extra.pop("helper_grant"), directory=extra.get("directory", seams["directory"]), proxy_url=extra.pop("proxy_url"),
+            signer=extra.pop("signer", None), transport=extra.pop("issuer_transport", None))
     seams.update(extra)
-    argv = ["--job", job, "--tenant", tenant, "--source", src.name, "--parent-pid", str(os.getppid())]
+    # In its job container (#1170 A6): no `--parent-pid`, and a job socket answering the helper's `launch` facts and the
+    # export it materialises; the helper's own answers are `tests/jobs/test_job_helper_learning.py`'s.
+    argv = ["--job", job, "--tenant", tenant, "--source", src.name]
     from defender.learning.branch import job_entry
-
     previous = signal.signal(signal.SIGTERM, _unexpected_sigterm)
     outcome: object = None
     try:
-        try:
-            outcome = job_entry.main(argv, **seams)
-        except SystemExit as stop:
-            outcome = stop.code
+        with SocketStandIn(tenant, launch=launch, answers=answers) as helper:
+            try:
+                outcome = job_entry.main(argv, environ=helper.environ(), **seams)
+            except SystemExit as stop:
+                outcome = stop.code
     finally:
         signal.signal(signal.SIGTERM, previous)
     return Ran(end=_read_json(runs / f"{job}.learning-end.json"),
@@ -743,7 +756,7 @@ def test_d5_dedup_is_by_the_store_on_both_kinds_and_holds_past_every_end(tmp_pat
                 "control: the kind still takes a new id"
 
 
-# --- O9: nothing outlives its worker ------------------------------------------------------------------
+# --- O9: nothing outlives its launcher (the entry's own tie to a worker is retired in the container, r4 A5; its EOF-as-SIGTERM and its sibling's end are `jobs/test_learning_container_entry.py`) ------------------------------------------------------------------
 
 _SIBLING = textwrap.dedent("""
     import os, sys, time
@@ -753,17 +766,10 @@ _SIBLING = textwrap.dedent("""
 _ENTRY = textwrap.dedent("""
     import os, sys
     from defender.learning.branch.cli import _default_spawn
-    from defender._parent_tie import tie_to_parent
     from defender.run import _interrupt_on_sigterm
 
-    tie_to_parent()
     _interrupt_on_sigterm()
     _default_spawn([sys.executable, "-c", sys.argv[2], sys.argv[1]], env=dict(os.environ))
-""")
-_WORKER = textwrap.dedent("""
-    import subprocess, sys, time
-    subprocess.Popen([sys.executable, "-c", sys.argv[1], *sys.argv[2:]])
-    time.sleep(600)
 """)
 
 
@@ -771,29 +777,6 @@ def child_env() -> dict[str, str]:
     """The environment of a Python child that imports `defender`: pyproject's `pythonpath` reaches only pytest's own
     `sys.path`, and CI sets none, so the checkout root is named."""
     return dict(os.environ, PYTHONPATH=str(T.DEFENDER.parent))
-
-
-class RealChild:
-    """The launcher's spawn seam over its REAL `_default_spawn`, running the test-owned sleeping child for a sibling."""
-
-    def __init__(self, pid_file: str) -> None:
-        self.pid_file = pid_file
-
-    def __call__(self, argv, *, env=None, **kw) -> int:
-        from defender.learning.branch.cli import _default_spawn
-
-        return _default_spawn([sys.executable, "-c", _SIBLING, self.pid_file], env=env, **kw)
-
-
-_JOB_ENTRY = textwrap.dedent("""
-    import sys
-    from pathlib import Path
-    from defender.tests.learning.branch.test_1344_job_lane import RealChild, run_entry
-    from defender.tests.support.learning.branch import _triplet_947
-
-    _triplet_947.PLANT_RECORDS = True  # as tests/conftest.py's autouse fixture does in-process
-    run_entry(Path(sys.argv[1]), spawn=RealChild(sys.argv[2]))
-""")
 
 
 def _running(pid: int) -> bool:
@@ -820,39 +803,20 @@ def _gone(pid: int) -> bool:
     return False
 
 
-def test_o9_a_sibling_dies_with_its_killed_worker(tmp_path):
-    """SIGKILL the worker: the entry's real tie fires and the launcher's real spawn takes the sibling with it. (O9, L-C21)"""
+def test_o9_a_sibling_dies_with_its_killed_launcher(tmp_path):
+    """SIGKILL the launcher's process: the sibling's own tie to it (the launcher's real spawn) fires and the sibling is gone. (O9, L-C21; r4 A5)"""
     pid_file = tmp_path / "sibling.pid"
-    worker = subprocess.Popen([sys.executable, "-c", _WORKER, _ENTRY, str(pid_file), _SIBLING], env=child_env())
+    launcher = subprocess.Popen([sys.executable, "-c", _ENTRY, str(pid_file), _SIBLING], env=child_env())
     sibling = None
     try:
         sibling = _await_pid(pid_file)
         assert _running(sibling), "control: the sibling is up"
-        worker.kill()
-        worker.wait()
-        assert _gone(sibling), "the sibling outlived its worker"
+        launcher.kill()
+        launcher.wait()
+        assert _gone(sibling), "the sibling outlived its launcher"
     finally:
-        worker.kill()
-        worker.wait()
-        if sibling is not None and _running(sibling):
-            os.kill(sibling, signal.SIGKILL)
-
-
-def test_o9_the_real_job_entry_takes_its_launchers_sibling_with_it_when_its_worker_is_killed(tmp_path):
-    """SIGKILL the worker above the REAL job entry: the entry's tie fires, its launcher unwinds, the sibling is gone. (O9, L-C21)"""
-    pid_file = tmp_path / "sibling.pid"
-    worker = subprocess.Popen([sys.executable, "-c", _WORKER, _JOB_ENTRY, str(tmp_path / "entry"), str(pid_file)],
-                              env=child_env())
-    sibling = None
-    try:
-        sibling = _await_pid(pid_file)
-        assert _running(sibling), "control: the sibling is up"
-        worker.kill()
-        worker.wait()
-        assert _gone(sibling), "the sibling outlived the worker above the real job entry"
-    finally:
-        worker.kill()
-        worker.wait()
+        launcher.kill()
+        launcher.wait()
         if sibling is not None and _running(sibling):
             os.kill(sibling, signal.SIGKILL)
 

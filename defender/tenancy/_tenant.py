@@ -398,6 +398,14 @@ def box_mounted_episodes(data_root: DataRoot, raw_id: object) -> EpisodesRoot:
     return EpisodesRoot(_TenantPaths(data_root, TenantId(raw_id)).episodes)
 
 
+def job_tenant_folder(tenant: Tenant) -> Path:
+    """`<data root>/<T>/` of an accepted tenant, as a plain folder: the explicit owner mount export
+    for the per-job host helper (#1170), which binds it whole into its job's container at its own
+    path (O1) and judges every path it derives below it with no link followed (H10). A join:
+    nothing is read or made."""
+    return unwrap_tenant_root(tenant.tenant_root)
+
+
 def tenant_exports(data_root: DataRoot, raw_id: object) -> Path:
     """The tenant's published exports, `<data root>/<T>/exports`, for a reader that holds no
     tenant record — the credential proxy, which is handed only the data root (#1163 A26). Judged

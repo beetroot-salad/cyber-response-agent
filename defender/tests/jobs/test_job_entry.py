@@ -1,33 +1,28 @@
-"""#1342 the child's job entry (`run.job_main`, `run.py --job`): run setup in the job lane (O6, M1, M5),
-the job-end record's facts (O8 child side, M3), the sidecar split, no outside write (M4), the job lane
-never running unsandboxed (R2), and the child's death-tie setup (O7). The tenant is a `tenancy.tenants` row (r6): a migrated database, `DEFENDER_DATABASE_DSN` set, no worker here.
-
-In-process cases drive `job_main` with the real `materialize` over a published fixture tenant, a
-planted launch record and alert file, and a lifecycle seam. Death-tie cases run `_job_entry1342.py`
-as a real child process and observe through its marks. Every wait is bounded."""
+"""#1342 the job lane's run setup and job-end record, retargeted by #1170 r4 (A6): a job is now the per-job host helper
+(`job_host.main`: launch check, admission, alert mapping, publish, run copy, run folder) and the in-container entry
+(`run.job_main`: the run half, the job-end record), run together by `_container_entry1170.enter`. The refusals of the host half
+are the helper's and still leave `setup: refused`; the run half's facts, the sidecar split, no outside write (M4) and the job
+never running unsandboxed (R2) are the entry's. The host-mode death tie (`--parent-pid`, PDEATHSIG) is retired (A5, A6): the
+container cases are in `test_job_container_entry.py`. The tenant is a `tenancy.tenants` row (r6): a migrated database; no worker here."""
 from __future__ import annotations
 
-import contextlib
-import ctypes
 import ast
+import contextlib
 import functools
 import hashlib
-import io
 import json
 import os
 import re
-import signal
 import subprocess
 import sys
-import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pytest
-
-from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, assert_missing_wording_names_verb_and_route
+from defender.tests.support.jobs._container_entry1170 import enter
+from defender.tests.support.jobs._job_helper import ContainerStandIn, helper_scene
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     AWKWARD_ALERT_BYTES,
@@ -35,36 +30,27 @@ from defender.tests.support.jobs._jobs1342 import (
     DEFENDER,
     FEFF_RICH_ALERT_BYTES,
     PADDED_ALERT_BYTES,
-    ZWNBSP_ALERT_BYTES,
     TITLE,
     WORKTREE,
-    register_tenant,
+    ZWNBSP_ALERT_BYTES,
     drop_tenant,
     restate_tenant,
     tree,
 )
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._mapping1345 import (
+    FIXTURE_ALERT_MAPPING,
+    assert_missing_wording_names_verb_and_route,
+)
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
-ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
+ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"  # the replay children of the S2 cases
 OTHER_TENANT = str(uuid.UUID(int=0x1342))
 SETTLED = {"setup": "done", "box": "started", "report_committed": True, "scrub_verified": True, "cut_short": None}
 
 
 pytestmark = [pytest.mark.postgres, pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="reads /proc/self/fd and uses prctl(PR_SET_PDEATHSIG), Linux only")]
-
-
-@pytest.fixture(autouse=True)
-def _process_state():
-    """`job_main` sets the process's parent-death signal and SIGTERM handling; give both back."""
-    libc = ctypes.CDLL(None, use_errno=True)
-    prior_signal = ctypes.c_int(0)
-    libc.prctl(2, ctypes.byref(prior_signal))  # PR_GET_PDEATHSIG
-    prior_handler = signal.getsignal(signal.SIGTERM)
-    yield
-    libc.prctl(1, prior_signal.value)  # PR_SET_PDEATHSIG
-    signal.signal(signal.SIGTERM, prior_handler)
 
 
 # --- the scene -----------------------------------------------------------------------------------
@@ -76,6 +62,8 @@ class Scene:
     runs: Path
     token: str = field(default_factory=lambda: uuid.uuid4().hex)  # the worker-minted box token (r5 C1)
     dsn: str = ""  # the database holding this tenant's record (r6)
+    helper: Any = None  # the `HelperScene` beneath (its claim, its argv)
+    work: Path = field(default_factory=Path)  # a scratch folder beside, not under, the data root
 
     def launch_doc(self, run_id: str, **over: Any) -> dict[str, Any]:
         return {"investigation_id": run_id, "tenant_id": self.t.tenant_id, "alert_id": str(uuid.uuid4()),
@@ -96,31 +84,33 @@ class Scene:
         path = self.runs / f"{run_id}.job-end.json"
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
-    def argv(self, run_id: str, parent: int | None = None) -> list[str]:
-        return ["--job", run_id, "--tenant", self.t.tenant_id,
-                "--parent-pid", str(os.getppid() if parent is None else parent)]
+    def argv(self, run_id: str) -> list[str]:
+        """The in-container entry's command line (A5, A6: no `--parent-pid`)."""
+        return ["--job", run_id, "--tenant", self.t.tenant_id]
 
 
 @contextlib.contextmanager
 def _scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, files: dict[str, Any] | None = None,
-           alert_mapping: Any = FIXTURE_ALERT_MAPPING) -> Any:
+           alert_mapping: Any = FIXTURE_ALERT_MAPPING, proxied: tuple[str, ...] = ()) -> Any:
     """The published fixture tenant (`files` written over it), active in `dsn`, with its runs container and #1345's
-    default alert mapping saved (`alert_mapping=None`: none saved, for a test of absence)."""
-    root = tmp_path / "data"
-    root.mkdir()
-    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
-    monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)  # the entry reads tenant records here (R6-2)
-    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
-    with B.run_tenant(tmp_path, root, files=files) as t:
-        register_tenant(dsn, t.tenant_id, data_root=root, alert_mapping=alert_mapping)  # active, wired to the fixture's own origin
-        runs = root / t.tenant_id / "runs"
-        runs.mkdir(exist_ok=True)
-        yield Scene(root, t, runs, dsn=dsn)
+    default alert mapping saved (`alert_mapping=None`: none saved, for a test of absence); the helper's environment (r4).
+    `proxied`: the systems left declared (default none: an empty grant; a system with no declaration is down)."""
+    with helper_scene(tmp_path, monkeypatch, dsn, proxied=proxied, files=files, alert_mapping=alert_mapping) as hs:
+        yield Scene(hs.root, hs.t, hs.runs, dsn=dsn, helper=hs, work=tmp_path)
 
 
 @pytest.fixture
 def scene(tmp_path, monkeypatch, migrated_database):
     with _scene(tmp_path, monkeypatch, migrated_database) as s:
+        yield s
+
+
+@pytest.fixture
+def declared_scene(tmp_path, monkeypatch, migrated_database):
+    """`scene` with every fixture system declared, as published: a run that gathers needs its system up."""
+    from defender.tests.support.jobs._job_helper import ALL_SYSTEMS
+
+    with _scene(tmp_path, monkeypatch, migrated_database, proxied=ALL_SYSTEMS) as s:
         yield s
 
 
@@ -160,32 +150,18 @@ def verified_lifecycle(ran: Ran, *, report_committed: bool = True):
     return _lifecycle(None, investigate=_investigate(ran, closes=report_committed))
 
 
-def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = None, materialize: Any = None,
-            visualize: Any = None, ran: Ran | None = None) -> Ran:
-    from defender import run as run_py
-
+def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = None,
+            visualize: Any = None, ran: Ran | None = None, docker: Any = None) -> Ran:
+    """The helper and the in-container entry for `run_id` (A6: no `materialize` or `publish` seam on the entry; the helper's
+    publish is answered `fresh` at the published commit and counted in `calls["publish"]`). `docker`: the helper's docker
+    (a prebuilt `ContainerStandIn`)."""
     result = Ran() if ran is None else ran
-
-    def publish(*_a: Any, **_k: Any) -> str:
-        result.calls["publish"] += 1
-        return B.fresh(s.t.commit)
-
-    seams: dict[str, Any] = {
-        "lifecycle": lifecycle if lifecycle is not None else verified_lifecycle(result),
-        "preflight": preflight if preflight is not None else (lambda *a, **k: 0),
-        "visualize": visualize if visualize is not None else (lambda *a, **k: None),
-        "publish": publish}
-    if materialize is not None:
-        seams["materialize"] = materialize
-    out, err = io.StringIO(), io.StringIO()
-    try:
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            result.rc = run_py.job_main(s.argv(run_id), **seams)
-    except SystemExit as e:
-        result.exit = e
-    except BaseException as e:  # noqa: BLE001 — kept for the assertions to name (a `KeyboardInterrupt` from a seam included, D-ad)
-        result.raised = e
-    result.out, result.err = out.getvalue(), err.getvalue()
+    got = enter(s.helper, run_id, lifecycle=lifecycle if lifecycle is not None else verified_lifecycle(result),
+                preflight=preflight if preflight is not None else (lambda *a, **k: 0),
+                visualize=visualize if visualize is not None else (lambda *a, **k: None), docker=docker)
+    result.calls["publish"] += got.helper.publishes
+    result.rc, result.exit, result.out, result.err = got.rc, got.exit, got.out, got.err
+    result.raised = got.raised if got.raised is not None else got.helper.raised
     return result
 
 
@@ -194,7 +170,9 @@ class ReaderSpies:
     the run folder, the table cross-check, the module-default page render and the renderer beneath it."""
 
     def __init__(self, monkeypatch: Any, run_dir: Path, *, any_child_of: Path | None = None) -> None:
-        from defender import run as run_py  # noqa: F401 — imported first: its seam defaults bind the real readers, never a spy
+        from defender import (
+            run as run_py,  # noqa: F401 — imported first: its seam defaults bind the real readers, never a spy
+        )
         from defender import run_common
         from defender.presentation import visualize_run
 
@@ -411,7 +389,7 @@ OVER_THE_LIMIT = 70 * 1024 * 1024
 def _tamper(scene: Scene, run_id: str, how: str) -> None:
     """Plant the launch pair with one of its two files a symlink to a valid copy, or the launch record
     padded with blanks past any size limit (still valid JSON)."""
-    elsewhere = scene.root.parent / "elsewhere"
+    elsewhere = scene.work / "elsewhere"
     elsewhere.mkdir(exist_ok=True)
     record = json.dumps(scene.launch_doc(run_id))
     scene.plant(run_id, launch=None if how.startswith("launch") else "default",
@@ -509,59 +487,66 @@ def test_m1_a_tenant_acceptance_refusal_is_recorded_as_setup_refused(scene, monk
         assert record in ran.message, f"the refusal text names the tenant's state: {ran.message!r}"
 
 
-def _acceptance_release_states(scene: Scene, monkeypatch: Any, run_id: str) -> list[tuple[bool, bool, bool]]:
-    """Make the entry's acceptance report, at its release: (job-end record written, exclusive try-once on the tenant's lock refused, this process a recorded holder). The real release runs."""
-    from defender.systems.run_tenant import Admitted
+def _lock_states(scene: Scene, run_id: str, *, preflight: Any = None) -> tuple[Ran, dict[str, Any]]:
+    """The helper and the entry for `run_id`; the state, seen from the container the moment the entry returns, of: (job-end
+    record written, an exclusive try-once on the tenant's lock refused, the helper (this process) a recorded holder); and,
+    once the helper has exited, whether that try-once succeeds."""
+    from defender import run as run_py
     from defender.tenancy import host_lock
 
-    at_release: list[tuple[bool, bool, bool]] = []
-    real_exit = Admitted.__exit__
+    seen: dict[str, Any] = {}
+    result = Ran()
 
-    def exit_recording_the_state(self: Any, *exc: object) -> None:
+    def entry(container: Any, done: Any) -> int:
+        try:
+            rc = run_py.job_main(scene.argv(run_id), environ=container.env, lifecycle=verified_lifecycle(result),
+                                 preflight=preflight or (lambda *a, **k: 0), visualize=lambda *a, **k: None)
+        except BaseException as e:  # noqa: BLE001 — kept for the case to name
+            done.raised, rc = e, 99
         fd = host_lock.acquire(scene.root, scene.t.tenant_id, exclusive=True, timeout=0)
         host_lock.release_lock(fd)
-        at_release.append((scene.job_end(run_id) is not None, fd is None,
-                           os.getpid() in [h.pid for h in host_lock.holders(scene.root, scene.t.tenant_id)]))
-        real_exit(self, *exc)
+        seen["at_return"] = (scene.job_end(run_id) is not None, fd is None,
+                             os.getpid() in [h.pid for h in host_lock.holders(scene.root, scene.t.tenant_id)])
+        return rc
 
-    monkeypatch.setattr(Admitted, "__exit__", exit_recording_the_state)  # lint-monkeypatch: ok — the acceptance's release is the only point that orders "record written" against "lock given back"; the real release runs
-    return at_release
+    got = enter(scene.helper, run_id, entry=entry)
+    result.raised = got.raised if got.raised is not None else got.helper.raised
+    fd = host_lock.acquire(scene.root, scene.t.tenant_id, exclusive=True, timeout=0)
+    host_lock.release_lock(fd)
+    seen["free_after_helper"] = fd is not None
+    return result, seen
 
 
-def test_r6_6_the_job_end_record_is_written_while_the_entry_still_holds_its_tenant_acceptance(scene, monkeypatch):
-    """When the entry's tenant acceptance ends, the job-end record is already written, and until that moment an exclusive try-once on the tenant's host lock fails and the entry is a recorded holder. (R6-6)"""
+def test_r6_6_the_job_end_record_is_written_while_the_helper_still_holds_the_tenants_lock(scene):
+    """When the entry returns, the job-end record is already written and an exclusive try-once on the tenant's lock fails with the helper a recorded holder; the lock is free once the helper has exited. (R6-6, A6, P-C)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
-    at_release = _acceptance_release_states(scene, monkeypatch, run_id)
 
-    ran = run_job(scene, run_id)
+    ran, seen = _lock_states(scene, run_id)
 
-    assert scene.job_end(run_id) == SETTLED, ran.message
-    assert at_release, "premise: the entry's acceptance ended through `with admitted:`"
-    assert at_release[-1] == (True, True, True), \
-        f"at the acceptance's release (record written, lock still held, entry a holder): {at_release}"
+    assert scene.job_end(run_id) == SETTLED, ran.raised
+    assert seen["at_return"] == (True, True, True), \
+        f"at the entry's return (record written, lock held, the helper a holder): {seen}"
+    assert seen["free_after_helper"], "the helper left the tenant's lock held"
 
 
 @pytest.mark.parametrize("how", ["preflight refuses", "setup crashes"])
-def test_r6_6_a_failed_run_also_writes_its_job_end_record_before_the_acceptance_is_given_back(scene, monkeypatch, how):
-    """After the tenant is admitted, a setup that is refused or crashes still leaves its job-end record written while the entry holds its acceptance. (R6-6)"""
+def test_r6_6_a_failed_run_also_writes_its_job_end_record_before_the_helper_gives_the_lock_back(scene, how):
+    """After the tenant is admitted, a run half that is refused or crashes still leaves its job-end record written while the helper holds the lock. (R6-6, A6)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
-    at_release = _acceptance_release_states(scene, monkeypatch, run_id)
     boom = RuntimeError("setup blew up")
 
-    def materialize(*_a: Any, **_k: Any) -> Any:
+    def crashing_preflight(*_a: Any, **_k: Any) -> Any:
         raise boom
 
-    ran = (run_job(scene, run_id, preflight=lambda *a, **k: 2) if how == "preflight refuses"
-           else run_job(scene, run_id, materialize=materialize))
+    ran, seen = _lock_states(scene, run_id, preflight=(lambda *a, **k: 2) if how == "preflight refuses" else crashing_preflight)
 
-    assert (ran.raised is boom) == (how == "setup crashes"), ran
+    assert (ran.raised is boom) == (how == "setup crashes"), ran.raised
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id)["setup"] == ("refused" if how == "preflight refuses" else "crashed")
-    assert at_release, "premise: the entry's acceptance ended through `with admitted:`"
-    assert at_release[-1] == (True, True, True), \
-        f"at the acceptance's release (record written, lock still held, entry a holder): {at_release}"
+    assert seen["at_return"] == (True, True, True), seen
+    assert seen["free_after_helper"], "the helper left the tenant's lock held"
 
 
 def _remove_working_tree(scene: Scene) -> Path:
@@ -634,10 +619,10 @@ def test_o8_a_setup_that_raises_otherwise_is_crashed_and_the_exception_reaches_t
     scene.plant(run_id)
     boom = RuntimeError("setup blew up")
 
-    def materialize(*_a: Any, **_k: Any) -> Any:
+    def crashing_preflight(*_a: Any, **_k: Any) -> Any:
         raise boom
 
-    ran = run_job(scene, run_id, materialize=materialize)
+    ran = run_job(scene, run_id, preflight=crashing_preflight)
 
     assert ran.raised is boom, ran
     assert ran.calls["lifecycle"] == 0
@@ -790,7 +775,7 @@ def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the
 
 
 def test_m3_the_main_block_calls_both_entries_with_nothing_but_the_arguments():
-    """`run.py`'s `__main__` block is exactly the log configuration, the argv read and one `sys.exit` dispatching `job_main` or `main` on that argv: no other statement, and both entries get positional arguments only, so no seam is passed from it. (M3)"""
+    """`run.py`'s `__main__` block is exactly the log configuration, the argv read and one `sys.exit` dispatching `serve_job` (the container's process wiring around `job_main`, A5) or `main` on that argv: no other statement, positional arguments only, so no seam is passed from it. (M3, A5, A6)"""
     from defender.tests.support.shared.contracts import _by_path
 
     astlib = _by_path.import_lint_lib("_astlib")
@@ -818,7 +803,7 @@ def test_m3_the_main_block_calls_both_entries_with_nothing_but_the_arguments():
     assert len(leave.value.args) == 1
     dispatch = leave.value.args[0]
     assert isinstance(dispatch, ast.IfExp)
-    for entry, name in ((dispatch.body, "job_main"), (dispatch.orelse, "main")):
+    for entry, name in ((dispatch.body, "serve_job"), (dispatch.orelse, "main")):
         assert isinstance(entry, ast.Call), ast.unparse(entry)
         assert isinstance(entry.func, ast.Name), ast.unparse(entry)
         assert entry.func.id == name, ast.unparse(entry)
@@ -830,12 +815,12 @@ def test_m3_the_main_block_calls_both_entries_with_nothing_but_the_arguments():
 
 
 def test_m3_the_two_entries_are_plain_functions_defined_in_run_py():
-    """`main` and `job_main` are undecorated: no `__wrapped__`, a code object from `run.py`, and their own names. (M3)"""
+    """`main`, `job_main` and `serve_job` are undecorated: no `__wrapped__`, a code object from `run.py`, and their own names. (M3, A6)"""
     import types
 
     from defender import run as run_py
 
-    for name in ("main", "job_main"):
+    for name in ("main", "job_main", "serve_job"):
         fn = getattr(run_py, name)
         assert type(fn) is types.FunctionType, (name, type(fn))
         assert not hasattr(fn, "__wrapped__"), f"{name} is a decorator's wrapper"
@@ -1140,6 +1125,26 @@ def test_o8_a_tainted_tree_still_raises_with_the_cut_short_fact_already_set(scen
     assert scene.job_end(run_id)["cut_short"] == "box-lost", scene.job_end(run_id)
 
 
+def _child_cmd(s: Scene, marks: Path, run_id: str, mode: str) -> list[str]:
+    return [sys.executable, str(ENTRY), mode, s.t.commit, str(marks), *s.argv(run_id)]
+
+
+def _run_child(s: Scene, marks: Path, run_id: str, mode: str, extra_env: dict[str, str]) -> subprocess.CompletedProcess:
+    """`_job_entry1342.py <mode>` as a real process in the job container of a real helper: the container's environment (the
+    socket, no database login) plus `extra_env`; what it printed and its exit status."""
+    def entry(container: Any, done: Any) -> int:
+        env = {**{k: v for k, v in container.env.items() if v is not None}, **extra_env, "PATH": os.environ["PATH"],
+               "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
+        done.extra["proc"] = subprocess.run(_child_cmd(s, marks, run_id, mode), env=env, cwd=str(WORKTREE),  # noqa: S603
+                                            capture_output=True, text=True, timeout=240, check=False,
+                                            stdin=subprocess.DEVNULL)
+        return done.extra["proc"].returncode
+
+    got = enter(s.helper, run_id, entry=entry)
+    assert got.helper.raised is None, got.helper.raised
+    return got.extra["proc"]
+
+
 def _ledger_after(scene: Scene, run_id: str) -> Any:
     """The run's ledger through the one read (`session_store.read_ledger`), from the database its session pointer names, once
     the child has exited (r7.3 T1: the ledger says for itself whether it is complete)."""
@@ -1161,12 +1166,11 @@ def test_s2_a_run_that_raises_after_a_failed_spend_write_leaves_its_ledger_unsea
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     marks = tmp_path / "marks"
-    env = {**_env(scene), "DEFENDER_MODEL": "claude-sonnet-4-6", "DEFENDER_GATHER_MODEL": "claude-haiku-4-5",
+    env = {"DEFENDER_MODEL": "claude-sonnet-4-6", "DEFENDER_GATHER_MODEL": "claude-haiku-4-5",
            "DEFENDER_REVIEW_MODEL": "kimi-k2.6"}
 
-    # A real fault: the child makes a SQLite trigger on its own spend_ledger refuse inserts from the first review call (ENTRY).
-    proc = subprocess.run(_child_cmd(scene, marks, run_id, os.getpid(), mode), env=env,  # noqa: S603
-                          cwd=str(WORKTREE), capture_output=True, text=True, timeout=240, check=False)
+    # A real fault: the child makes a SQLite trigger on its own spend_ledger refuse inserts from the first review call (ENTRY, in the job container of a real helper).
+    proc = _run_child(scene, marks, run_id, mode, env)
 
     assert proc.returncode != 0, proc.stderr[-2000:]
     if mode.endswith("-dies"):
@@ -1185,19 +1189,19 @@ def test_s2_a_run_that_raises_after_a_failed_spend_write_leaves_its_ledger_unsea
 @pytest.mark.parametrize("lead_ends", ["unseen", "refused"])
 @pytest.mark.parametrize("run_ends", ["returns", "raises"])
 def test_s2c_r7_a_failed_write_of_a_non_response_row_is_in_the_job_end_record_whatever_the_run_ends_with(
-        scene, tmp_path, lead_ends, run_ends):
+        declared_scene, tmp_path, lead_ends, run_ends):
     """Only the correlation lead's own row (its unseen or refused-400 request) is refused; MAIN's and the review's rows land.
     The ledger reads incomplete, whether the run returns its summary or raises out of the investigation: no seal follows a
     failed write of any row. (r7 S2c, r7.1 H, r7.3 T1; triage F3)"""
+    scene = declared_scene  # the correlation lead gathers: its system must be up
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     marks = tmp_path / "marks"
-    env = {**_env(scene), "DEFENDER_MODEL": "claude-sonnet-4-6", "DEFENDER_GATHER_MODEL": "claude-haiku-4-5",
+    env = {"DEFENDER_MODEL": "claude-sonnet-4-6", "DEFENDER_GATHER_MODEL": "claude-haiku-4-5",
            "DEFENDER_REVIEW_MODEL": "kimi-k2.6"}
     mode = "replay-priced-lead-fault" + ("-raises" if run_ends == "raises" else "") + f"-{lead_ends}"
 
-    proc = subprocess.run(_child_cmd(scene, marks, run_id, os.getpid(), mode), env=env,  # noqa: S603
-                          cwd=str(WORKTREE), capture_output=True, text=True, timeout=240, check=False)
+    proc = _run_child(scene, marks, run_id, mode, env)
 
     if run_ends == "raises":
         assert proc.returncode != 0, proc.stderr[-2000:]
@@ -1292,17 +1296,34 @@ def test_c2_the_holder_is_the_job_entrys_and_the_investigation_is_handed_it(scen
         kw["run"].facts.scrub_verdict.write(json.dumps({"ran": True, "reason": "walk completed"}))
         return summary()
 
-    rc = run_py.main([str(B.plant_alert(scene.root.parent / "op-alert")), "--tenant", scene.t.tenant_id],
+    rc = run_py.main([str(B.plant_alert(scene.work / "op-alert")), "--tenant", scene.t.tenant_id],
                      lifecycle=operator_lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
                      enqueue=lambda *a, **k: False, publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
     assert operator.get("job_facts") is None, "the operator path was handed a job facts holder"
 
 
-def test_c1_the_job_lanes_box_start_is_handed_the_launch_records_token_and_the_operators_is_not(scene):
-    """Each job's box start receives its own launch record's `box_token` as `start_token`; the operator path's start passes none (the box mints its own). (C1)"""
+def test_c1_the_job_lanes_box_is_started_by_the_helper_with_the_launch_records_token_and_the_operators_is_not(scene):
+    """Each job's run box is created by the helper carrying its own launch record's `box_token` as its start token (the job holds no box start of its own, A4); the operator path's start passes none (the box mints its own). (C1, A4, A6)"""
     from defender import box as box_mod
     from defender import run as run_py
+    from defender.box._lifecycle import START_TOKEN_LABEL
+    from defender.tests.support.jobs._job_helper import parse_labels
+
+    for token in (uuid.uuid4().hex, uuid.uuid4().hex):
+        run_id = str(uuid.uuid4())
+        scene.plant(run_id, launch=scene.launch_doc(run_id, box_token=token))
+        started: list[Any] = []
+
+        def start_through_the_socket(container: Any, done: Any, run_id: str = run_id, started: list[Any] = started) -> int:
+            started.append(container.request("box.start", kind="shell", id=run_id))
+            return 0
+
+        got = enter(scene.helper, run_id, entry=start_through_the_socket)
+        assert got.helper.raised is None, got.helper.raised
+        assert len(started) == 1, "control: the box start was answered"
+        creates = [parse_labels(c) for c in got.docker.creates() if "--label" in c]
+        assert [lab.get(START_TOKEN_LABEL) for lab in creates] == [token], creates
 
     def starts_into(seen: list[dict[str, Any]]) -> Any:
         def start(*_a: Any, **k: Any) -> Any:
@@ -1310,18 +1331,9 @@ def test_c1_the_job_lanes_box_start_is_handed_the_launch_records_token_and_the_o
             return box_mod.unboxed_executor()
         return start
 
-    for token in (uuid.uuid4().hex, uuid.uuid4().hex):
-        run_id = str(uuid.uuid4())
-        scene.plant(run_id, launch=scene.launch_doc(run_id, box_token=token))
-        seen: list[dict[str, Any]] = []
-        ran = Ran()
-        run_job(scene, run_id, ran=ran,
-                lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=starts_into(seen)))
-        assert [k.get("start_token") for k in seen] == [token], seen
-
     operator: list[dict[str, Any]] = []
     ran = Ran()
-    rc = run_py.main([str(B.plant_alert(scene.root.parent / "op-alert")), "--tenant", scene.t.tenant_id],
+    rc = run_py.main([str(B.plant_alert(scene.work / "op-alert")), "--tenant", scene.t.tenant_id],
                      lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=starts_into(operator)),
                      preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
                      enqueue=lambda *a, **k: False, publish=lambda *a, **k: B.fresh(scene.t.commit))
@@ -1330,18 +1342,45 @@ def test_c1_the_job_lanes_box_start_is_handed_the_launch_records_token_and_the_o
     assert not operator[0].get("start_token"), operator
 
 
-def test_m3_a_box_start_fault_is_start_failed_and_nothing_ran(scene):
-    """The box could not start (no daemon): `box: start_failed`, the investigation never ran. (M3)"""
-    from defender import box as box_mod
-    from defender.tests.e2e import _replay_harness as RH
+class _NoDaemonForBoxes(ContainerStandIn):
+    """The helper's docker with no daemon behind its box starts (`_replay_harness._no_docker_daemon`: the call cannot reach
+    one): in the job container the run box is the helper's to start (A4, A6), so its start is where the daemon is missing.
+    The job container itself (its attached `docker run`, the peer questions about it) still starts."""
 
+    def __call__(self, argv, **kw):  # noqa: ANN001 — the docker seam's own signature
+        from defender.tests.e2e import _replay_harness as RH
+
+        argv = list(argv)
+        if argv[1:2] and argv[1] in ("create", "run", "start", "inspect", "version") \
+                and not any(b.name in argv for b in self.boxes):
+            self.log.append(argv)
+            self.calls.append(argv)
+            return RH._no_docker_daemon(argv)
+        return super().__call__(argv, **kw)
+
+    def daemon_asked(self) -> int:
+        return len([c for c in self.calls if c[1:2] and c[1] in ("create", "run", "start", "inspect", "version")])
+
+
+def _real_box_start():
+    """The lifecycle's real box start (`box.start_box`, which over the job socket asks the helper's `box.start`)."""
+    from defender import box as box_mod
+
+    return box_mod.start_box
+
+
+def test_m3_a_box_start_fault_is_start_failed_and_nothing_ran(scene):
+    """The box could not start (no daemon at the helper, which starts the job's box): `box: start_failed`, the
+    investigation never ran. (M3, A4)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     ran = Ran()
-    start = functools.partial(box_mod.start_box, docker=RH._no_docker_daemon)
+    docker = _NoDaemonForBoxes()
 
-    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=start))
+    run_job(scene, run_id, ran=ran, docker=docker,
+            lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=_real_box_start()))
 
+    assert docker.daemon_asked() >= 1, "premise: the helper tried the daemon for the job's box"
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "done", "box": "start_failed",
                                      "report_committed": False, "scrub_verified": False, "cut_short": None}
@@ -1399,18 +1438,18 @@ def test_o8_a_crash_in_the_post_steps_leaves_the_facts_set_before_it(scene):
 # --- R2: the job lane never runs unsandboxed ---------------------------------------------------------
 
 def test_r2_with_the_opt_out_set_and_no_docker_a_job_is_start_failed_and_nothing_runs(scene, monkeypatch):
-    """`DEFENDER_ALLOW_UNSANDBOXED` set, no daemon: `box: start_failed` and the investigation never ran on the host. (R2)"""
-    from defender import box as box_mod
-    from defender.tests.e2e import _replay_harness as RH
-
+    """`DEFENDER_ALLOW_UNSANDBOXED` set (in the helper's environment and so the job's), no daemon at the helper that starts
+    the job's box: `box: start_failed` and the investigation never ran on the host. (R2, A4)"""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
-    start = functools.partial(box_mod.start_box, docker=RH._no_docker_daemon)
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     job = Ran()
+    docker = _NoDaemonForBoxes()
 
-    run_job(scene, run_id, ran=job, lifecycle=_lifecycle(scene, investigate=_investigate(job), start_box=start))
+    run_job(scene, run_id, ran=job, docker=docker,
+            lifecycle=_lifecycle(scene, investigate=_investigate(job), start_box=_real_box_start()))
 
+    assert docker.daemon_asked() >= 1, "premise: the helper tried the daemon for the job's box"
     assert job.calls["lifecycle"] == 0, "the job lane ran the investigation on the host"
     assert scene.job_end(run_id)["box"] == "start_failed"
 
@@ -1607,8 +1646,7 @@ def test_m4_the_job_entry_has_no_open_seam_and_refuses_a_ticket_writer(scene):
         ran = Ran()
         seams: dict[str, Any] = {
             "lifecycle": verified_lifecycle(ran), "preflight": lambda *a, **k: 0,
-            "visualize": lambda *a, **k: None, "publish": lambda *a, **k: B.fresh(scene.t.commit),
-            seam: _Tripwire()}
+            "visualize": lambda *a, **k: None, seam: _Tripwire()}
         with pytest.raises(TypeError):
             run_py.job_main(scene.argv(run_id), **seams)
         assert ran.calls["lifecycle"] == 0, f"a {seam} seam was accepted and the job ran"
@@ -1616,26 +1654,26 @@ def test_m4_the_job_entry_has_no_open_seam_and_refuses_a_ticket_writer(scene):
 
 
 def test_m4_the_job_entry_has_exactly_the_ratified_parameters_and_refuses_any_other_keyword(scene):
-    """`job_main` is `argv` and the keyword-only seams `lifecycle`, `visualize`, `preflight`, `materialize`, `roster`, `publish`; any other keyword is a `TypeError`. (M4, O11)"""
+    """`job_main` is `argv`, the keyword-only `environ` (the job socket's address) and the run half's seams `lifecycle`, `visualize`, `preflight`, `roster`: no `publish`, `materialize`, `directory` or `signer` (the host half is the helper's); any other keyword is a `TypeError`. (M4, O11, A6)"""
     import inspect
 
     from defender import run as run_py
 
     parameters = inspect.signature(run_py.job_main).parameters
-    assert list(parameters) == ["argv", "lifecycle", "visualize", "preflight", "materialize", "roster", "publish"]
+    assert list(parameters) == ["argv", "environ", "lifecycle", "visualize", "preflight", "roster"]
     main_defaults = {n: p.default for n, p in inspect.signature(run_py.main).parameters.items() if n != "argv"}
-    for seam in ("lifecycle", "visualize", "preflight", "materialize", "roster", "publish"):
+    for seam in ("lifecycle", "visualize", "preflight", "roster"):
         assert parameters[seam].default is main_defaults[seam], f"{seam}: the job entry's default is not the operator run's own"
     assert main_defaults["lifecycle"] is run_py._run_investigation_lifecycle, "the production lifecycle (D-k)"
     assert [n for n, p in parameters.items() if p.kind is inspect.Parameter.KEYWORD_ONLY] == list(parameters)[1:]
-    for extra in ("case_ticket", "ticket_writer", "enqueue", "oracle", "verifier", "update_ticket", "anything_else"):
+    for extra in ("case_ticket", "ticket_writer", "enqueue", "oracle", "verifier", "update_ticket", "anything_else",
+                  "publish", "materialize", "directory", "signer", "proxy_url", "parent_pid"):
         run_id = str(uuid.uuid4())
         scene.plant(run_id)
         ran = Ran()
         with pytest.raises(TypeError):
             run_py.job_main(scene.argv(run_id), lifecycle=verified_lifecycle(ran), preflight=lambda *a, **k: 0,
-                            visualize=lambda *a, **k: None, publish=lambda *a, **k: B.fresh(scene.t.commit),
-                            **{extra: _Tripwire()})
+                            visualize=lambda *a, **k: None, **{extra: _Tripwire()})
         assert ran.calls["lifecycle"] == 0, f"a {extra} keyword was accepted and the job ran"
 
 
@@ -1685,7 +1723,10 @@ def test_m4_the_store_check_sees_the_operator_default_enqueue(scene, tmp_path):
 
 def test_o6_sidecar_lists_split_used_within_accepted():
     """Launch and alert files are accepted only; the job-end record is used and accepted. (O6)"""
-    from defender.records._layout import ACCEPTED_SIDECAR_SUFFIXES, USED_SIDECAR_SUFFIXES
+    from defender.records._layout import (
+        ACCEPTED_SIDECAR_SUFFIXES,
+        USED_SIDECAR_SUFFIXES,
+    )
 
     assert set(USED_SIDECAR_SUFFIXES) <= set(ACCEPTED_SIDECAR_SUFFIXES)
     for suffix in (".launch.json", ".alert.json"):
@@ -1715,287 +1756,52 @@ def test_o6_runs_listing_lists_a_run_beside_launch_alert_and_job_end_files(tmp_p
     assert H.raised(t.runs_repository().list) is not None, "control: an unknown file beside the runs is refused"
 
 
-# --- the death tie, child side (O7) ------------------------------------------------------------------------
-
-def _wait(condition: Any, *, timeout: float, what: str) -> None:
-    deadline = time.monotonic() + timeout
-    while not condition():
-        if time.monotonic() > deadline:
-            raise AssertionError(f"timed out waiting for {what}")
-        time.sleep(0.05)
-
-
-def _gone(pid: int) -> bool:
-    try:
-        return "\nState:\tZ" in Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return True
+# --- the death tie, child side (O7): retired with the host-mode entry (A5, A6) --------------------------------------
+# CONFLICT (r4 A5/A6): `test_o7_a_sigterm_is_one_keyboard_interrupt...` moved to test_job_container_entry.py::
+# test_a5_eof_on_stdin_is_sigterm... (sigterm arm, plus the stdin-EOF arm that replaces the parent tie); retired:
+# `..._the_parent_check_runs_with_the_death_signal_already_set`, `..._ends_through_its_box_teardown_when_its_parent_is_killed`
+# and `..._whose_given_parent_is_not_its_parent_exits_at_once` (tie_to_parent/require_parent do not exist in a container;
+# the helper's kill is covered by test_job_helper.py's A5 real-process case); `test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record`
+# replaced by test_job_container_entry.py::test_a6_the_host_mode_job_entry_is_retired_...; the launch-check refusals it
+# touched stay below (`test_o6_setup_refuses_an_id_without_a_launch_record...`), now the helper's.
 
 
-def _child_cmd(s: Scene, marks: Path, run_id: str, parent: int, mode: str = "hold") -> list[str]:
-    return [sys.executable, str(ENTRY), mode, s.t.commit, str(marks), *s.argv(run_id, parent)]
-
-
-def _env(s: Scene) -> dict[str, str]:
-    return {**os.environ, "DEFENDER_DATA_ROOT": str(s.root), "DEFENDER_DATABASE_DSN": s.dsn,
-            "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
-
-
-@pytest.mark.parametrize(("mode", "committed"), [("hold", False), ("hold-committed", True)])
-def test_o7_a_sigterm_is_one_keyboard_interrupt_and_later_ones_do_not_interrupt_teardown(
-        scene, tmp_path, mode, committed):
-    """First SIGTERM reaches the investigation as `KeyboardInterrupt` and the box teardown runs; a second during teardown is ignored; the box start was handed the launch token; a report closed before the signal is still recorded as committed. (O7, r5 C1, C2)"""
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
-    marks = tmp_path / "marks"
-    # the parent is this process: the child is spawned directly, and `--parent-pid` is our own pid
-    proc = subprocess.Popen(_child_cmd(scene, marks, run_id, os.getpid(), mode), env=_env(scene),  # noqa: S603
-                            cwd=str(WORKTREE), stderr=subprocess.PIPE)
-    try:
-        _wait(lambda: (marks / "in-lifecycle").exists() or proc.poll() is not None, timeout=120, what="the lifecycle")
-        assert (marks / "in-lifecycle").exists(), proc.stderr.read().decode(errors="replace")[-2000:]
-        proc.send_signal(signal.SIGTERM)
-        _wait(lambda: (marks / "stop-box-started").exists(), timeout=30, what="the box teardown")
-        proc.send_signal(signal.SIGTERM)
-        time.sleep(0.5)
-        (marks / "go-on").touch()
-        proc.wait(timeout=30)
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-        proc.wait(timeout=30)
-    assert (marks / "interrupted").read_text(encoding="utf-8") == "KeyboardInterrupt"
-    assert (marks / "stop-box-done").exists(), "a second SIGTERM interrupted the teardown"
-    assert (marks / "start-token").read_text(encoding="utf-8") == scene.token, "the box start was not handed the launch token"
-    assert scene.job_end(run_id) == {"setup": "done", "box": "started", "report_committed": committed,
-                                     "scrub_verified": False, "cut_short": None}, "an interrupted run still leaves its job-end record"
-
-
-_INTERMEDIATE = """
-import subprocess, sys, time
-child = subprocess.Popen(sys.argv[2:])
-open(sys.argv[1], "w").write(str(child.pid))
-time.sleep(600)
-"""
-
-
-def test_o7_the_parent_check_runs_with_the_death_signal_already_set(scene, monkeypatch):
-    """When the check of the given parent pid runs, the process's parent-death signal is already SIGTERM. (O7)"""
-    from defender import run as run_py
-
-    libc = ctypes.CDLL(None, use_errno=True)
-    libc.prctl(1, 0)  # PR_SET_PDEATHSIG: clear, so only the entry itself can have set it
-    real, seen = run_py.require_parent, []
-
-    def observing(parent_pid: int, **kw) -> None:
-        got = ctypes.c_int(-1)
-        libc.prctl(2, ctypes.byref(got))  # PR_GET_PDEATHSIG
-        seen.append(got.value)
-        real(parent_pid, **kw)
-
-    monkeypatch.setattr(run_py, "require_parent", observing)  # lint-monkeypatch: ok — an observer of the entry's own check, no seam exists for it
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
-
-    ran = run_job(scene, run_id)
-
-    assert ran.raised is None, ran
-    assert seen == [int(signal.SIGTERM)], "the parent check ran before the death signal was set (a race with the worker's death)"
-
-
-def test_o7_a_child_ends_through_its_box_teardown_when_its_parent_is_killed(scene, tmp_path):
-    """SIGKILL the parent: the parent-death signal unwinds the child through the stop-box seam and it exits. (O7)"""
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
-    marks, pidfile = tmp_path / "marks", tmp_path / "child.pid"
-    marks.mkdir()
-    (marks / "go-on").touch()
-    script = _INTERMEDIATE.replace("subprocess.Popen(sys.argv[2:])",
-                                   "subprocess.Popen([a if a != 'PARENT' else str(__import__('os').getpid()) for a in sys.argv[2:]])")
-    parent = subprocess.Popen(  # noqa: S603
-        [sys.executable, "-c", script, str(pidfile), sys.executable, str(ENTRY), "hold", scene.t.commit,
-         str(marks), "--job", run_id, "--tenant", scene.t.tenant_id, "--parent-pid", "PARENT"],
-        env=_env(scene), cwd=str(WORKTREE))
-    child_pid = None
-    try:
-        _wait(lambda: (marks / "in-lifecycle").exists() or parent.poll() is not None, timeout=120, what="the lifecycle")
-        assert (marks / "in-lifecycle").exists(), "the child never reached its lifecycle"
-        child_pid = int(pidfile.read_text(encoding="utf-8"))
-        assert not _gone(child_pid), "control: the child is alive while its parent is"
-        parent.kill()
-        parent.wait(timeout=30)
-        _wait(lambda: _gone(child_pid), timeout=60, what="the child to exit")
-    finally:
-        if parent.poll() is None:
-            parent.kill()
-        if child_pid is not None and not _gone(child_pid):
-            os.kill(child_pid, signal.SIGKILL)
-    assert (marks / "stop-box-done").exists(), "the child did not unwind through its box teardown"
-
-
-def test_o7_a_child_whose_given_parent_is_not_its_parent_exits_at_once(scene, tmp_path):
-    """`--parent-pid` naming a live process that did not spawn it: the child exits before its lifecycle. (O7)"""
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
-    marks = tmp_path / "marks"
-    bystander = subprocess.Popen(["sleep", "300"])  # noqa: S603, S607
-    try:
-        proc = subprocess.Popen(_child_cmd(scene, marks, run_id, bystander.pid), env=_env(scene),  # noqa: S603
-                                cwd=str(WORKTREE), stderr=subprocess.DEVNULL)
-        try:
-            proc.wait(timeout=120)
-        finally:
-            if proc.poll() is None:
-                proc.kill()
-                proc.wait(timeout=30)
-    finally:
-        bystander.kill()
-        bystander.wait(timeout=30)
-    assert (marks / "pid").exists(), "premise: the entry script started"
-    assert not (marks / "in-lifecycle").exists(), "the child ran on under a foreign parent"
-    assert not (scene.runs / run_id).exists()
-
-
-# --- one real `run.py --job` on a setup refusal (no model) -------------------------------------------------------
-
-@pytest.mark.parametrize("spelling", ["two-words", "equals"])
-def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path, spelling, migrated_database):
-    """`run.py --job <id>` and `--job=<id>` with no launch record: exit 1 naming it, nothing made, the job-end record says what failed. (O6)"""
-    root = tmp_path / "data"
-    root.mkdir()
-    run_id = str(uuid.uuid4())
-    with B.run_tenant(tmp_path, root) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=root)
-        runs = root / t.tenant_id / "runs"
-        runs.mkdir(exist_ok=True)
-        proc = subprocess.run(  # noqa: S603 — the real run entry
-            [sys.executable, str(DEFENDER / "run.py"), *(["--job", run_id] if spelling == "two-words" else [f"--job={run_id}"]),
-             "--tenant", t.tenant_id, "--parent-pid", str(os.getpid())],
-            env={**os.environ, "DEFENDER_DATA_ROOT": str(root), "DEFENDER_DATABASE_DSN": migrated_database,
-                 "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"},
-            cwd=str(WORKTREE), capture_output=True, text=True, timeout=180, check=False)
-
-        assert "unrecognized arguments" not in proc.stderr, proc.stderr
-        assert proc.returncode == 1, proc.stderr[-2000:]
-        assert "launch" in proc.stderr.lower(), proc.stderr[-2000:]
-        assert not (runs / run_id).exists()
-        record = json.loads((runs / f"{run_id}.job-end.json").read_text(encoding="utf-8"))
-        assert record == {"setup": "refused", "box": "not_started", "report_committed": False,
-                          "scrub_verified": False, "cut_short": None}
-
-
-
-# --- R6-8: a job signs like an operator run (#1163 on the job lane) -----------------------------------
+# --- R6-8: a job's pass is signed like an operator run's, by the helper (A6, H2, P-B) ------------------------------------
 
 PROXY_ADDRESS = "http://proxy.invalid"
-SIGN_ROLE, SIGN_SECRET = "role-1342-sign", "secret-1342-sign"
-
-
-@pytest.fixture
-def proxied_scene(tmp_path, monkeypatch, migrated_database):
-    """A factory for a job scene whose tenant has `identity` on `http-proxy` (the declaration #1163's
-    operator-path tests plant), with a live generation holding a sign login when `sign`, and the proxy
-    address in the environment when `address`. `job_main` takes neither: the environment and the tenant's
-    records are all a worker's child has (R6-8)."""
-    from defender.kit.access import PROXY_URL_ENV
-    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
-    from defender.tests.integrations.credential_proxy_1163 import _harness as H
-    from defender.tests.support.tenancy._active1214 import insert_generation
-
-    stack = contextlib.ExitStack()
-
-    def make(*, sign: bool, address: bool) -> Scene:
-        root = tmp_path / "data"
-        root.mkdir()
-        monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
-        monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
-        monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
-        if address:
-            monkeypatch.setenv(PROXY_URL_ENV, PROXY_ADDRESS)
-        else:
-            monkeypatch.delenv(PROXY_URL_ENV, raising=False)
-        systems = {"identity": H.declaration("http://x.invalid/api")}
-        t = stack.enter_context(A.published(tmp_path / "forge", root, systems))
-        register_tenant(migrated_database, t.tenant_id, data_root=root, generations=())  # the case's own, below
-        if sign:
-            insert_generation(migrated_database, t.tenant_id, A.generation(
-                t.tenant_id, tmp_path / "secrets", sign_role_id=SIGN_ROLE, sign_secret=SIGN_SECRET))
-        runs = root / t.tenant_id / "runs"
-        runs.mkdir(exist_ok=True)
-        return Scene(root, t, runs, dsn=migrated_database)
-
-    with stack:
-        yield make
 
 
 @pytest.mark.parametrize("missing", ["no sign login", "no proxy address"])
-def test_r6_8_a_job_whose_tenant_is_proxied_but_cannot_sign_is_refused_at_setup(proxied_scene, missing):
-    """A granted `http-proxy` system and no sign login (no live generation), or no proxy address in the
-    environment: `setup: refused`, recorded and not a crash, and no run is made - the operator path's own
-    refusal (#1163 R7), on the job lane. (R6-8)"""
-    scene = proxied_scene(sign=missing != "no sign login", address=missing != "no proxy address")
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
+def test_r6_8_a_job_whose_tenant_is_proxied_but_cannot_sign_is_refused_at_setup(
+        tmp_path, monkeypatch, migrated_database, missing):
+    """CONFLICT-UPDATED (r4 A6/A3: the helper admits and signs; was: the job entry): a granted `http-proxy` system and no sign login (no live generation), or no proxy address in the environment: `setup: refused`, recorded and not a crash, and no run is made, no container started. (R6-8, A3)"""
+    from defender.kit.access import PROXY_URL_ENV
 
-    ran = run_job(scene, run_id)
+    with helper_scene(tmp_path, monkeypatch, migrated_database) as hs:
+        scene = Scene(hs.root, hs.t, hs.runs, dsn=migrated_database, helper=hs, work=tmp_path)
+        if missing == "no sign login":
+            monkeypatch.setenv(PROXY_URL_ENV, PROXY_ADDRESS)
+            execute(migrated_database, "DELETE FROM tenancy.generations WHERE tenant_id = %s", (hs.tenant,))
+        else:
+            monkeypatch.delenv(PROXY_URL_ENV, raising=False)
+        run_id = str(uuid.uuid4())
+        scene.plant(run_id)
 
-    assert ran.raised is None, f"a refusal was a crash: {ran.raised!r}"
-    assert ran.calls["lifecycle"] == 0, "a run was made for a tenant that cannot sign"
-    assert scene.job_end(run_id) == REFUSED
-    assert not (scene.runs / run_id).exists(), "the run folder was made before the refusal"
+        got = enter(hs, run_id, lifecycle=verified_lifecycle(Ran()), preflight=lambda *a, **k: 0,
+                    visualize=lambda *a, **k: None)
 
-
-def _openbao_under_httpx(monkeypatch, accounts):
-    """An OpenBao stand-in beneath the job entry: httpx's default transport (what the production signer's
-    client uses, `job_main` having no issuer seam) hands every request to it. Returns the stand-in."""
-    import httpx
-
-    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
-
-    bao = A.OpenBaoStandIn(accounts)
-    monkeypatch.setattr(httpx.HTTPTransport, "handle_request",  # lint-monkeypatch: ok — beneath the job entry, which has no issuer seam; the production signer's client reaches the default transport
-                        lambda _self, request: bao.handle_request(request))
-    return bao
+        assert got.helper.raised is None, f"a refusal was a crash: {got.helper.raised!r}"
+        assert got.raised is None, got.raised
+        assert not got.docker.job_ran, "a container was started for a tenant that cannot sign"
+        assert scene.job_end(run_id) == REFUSED
+        assert not (scene.runs / run_id).exists(), "the run folder was made before the refusal"
 
 
-def test_r6_8_a_job_whose_tenant_can_sign_gets_the_read_access_on_its_investigate_call(proxied_scene, monkeypatch):
-    """Control for the refusal: with a sign login and the address, the same job runs, and its lifecycle is
-    handed the `RequestAccess` the operator path's is: the proxy's address from the environment and a read
-    token signed, when first asked, through the tenant's own sign login at the deployment's OpenBao. (R6-8)"""
-    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
-    from defender.tests.integrations.credential_proxy_1163._target import request_access_type
-
-    scene = proxied_scene(sign=True, address=True)
-    bao = _openbao_under_httpx(monkeypatch, {SIGN_ROLE: SIGN_SECRET})
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
-    seen: list[Any] = []
-    ran = Ran()
-    inner = verified_lifecycle(ran)
-
-    def lifecycle(**kw: Any) -> dict[str, Any]:
-        access = kw.get("access")
-        seen.append(access)
-        if access is not None and callable(access.token):
-            seen.append(access.token())
-        return inner(**kw)
-
-    got = run_job(scene, run_id, lifecycle=lifecycle, ran=ran)
-
-    assert got.raised is None, got
-    assert scene.job_end(run_id) == SETTLED
-    access, token = seen
-    assert access is not None, "the job's lifecycle was handed no access: its calls carry no token"
-    assert isinstance(access, request_access_type())
-    assert access.proxy_url == PROXY_ADDRESS
-    assert A.SIGNATURE_CANARY in token, "the read token was not signed by OpenBao"
-    assert bao.logins == [(SIGN_ROLE, SIGN_SECRET)], "the token was not minted through the tenant's sign login"
-    assert len(bao.signs) == 1, "positive control: the read token was signed"
-    assert set(bao.origins) == {A.deployment_origin()}, bao.origins
-
-
-# R6-8 "no http-proxy system needs no signing" is retired with #1391: every system with network access
-# is reached through the credential proxy, so a tenant with none has no usable system.
+# CONFLICT (r4 A6, H2, P-B): `test_r6_8_a_job_whose_tenant_can_sign_gets_the_read_access_on_its_investigate_call` and the
+# OpenBao-under-httpx patch it needed are retired: no sign login exists in a job box. Its control for the refusal above lives in
+# test_job_container_entry.py::test_a6_the_entry_takes_its_pass_from_the_socket... (the lifecycle's `access` carries the proxy
+# address from the environment and the helper's pass for this tenant and investigation), and the login/origin assertions
+# (`bao.logins`, `bao.origins`, one sign) are the helper's, test_job_helper.py's O5/A3-sign cases.
 
 
 # --- #1345: run start reads the tenant's alert mapping from the database (O3, O4, O5) -------------------------
@@ -2039,7 +1845,9 @@ def test_1345_o3_a_job_derives_its_facts_from_the_tenants_database_mapping(scene
 def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_at_setup_naming_the_route(unmapped_scene):
     """No mapping row: setup refused (the job-end record the worker turns into `failed`/`setup_refused`), no
     lifecycle, no run folder; the child's own output carries `records.formats.ALERT_MAPPING_MISSING`. (#1345 O4, M2)"""
-    from defender.records.formats import ALERT_MAPPING_MISSING  # design-implied name: the one refusal wording `records` owns (r5.1)
+    from defender.records.formats import (
+        ALERT_MAPPING_MISSING,  # design-implied name: the one refusal wording `records` owns (r5.1)
+    )
 
     scene = unmapped_scene
     assert_missing_wording_names_verb_and_route(ALERT_MAPPING_MISSING)

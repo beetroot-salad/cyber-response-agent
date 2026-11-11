@@ -10,7 +10,6 @@ Reconcile and feedback are in the feedback slice's files.
 from __future__ import annotations
 
 import contextlib
-import os
 import signal
 from datetime import timedelta
 from pathlib import Path
@@ -460,14 +459,14 @@ STOP_BOUND = 30.0
 def _post_step_child(w, writer, *, how):
     """A forked child running the real post-step (a family-less one) whose tick is `author_drain` over `writer`.
     `how` is how the stop will be delivered: `cancel` sets the store's flag, `sigterm` signals the child."""
-    from defender.learning.branch import post_step
+    from defender.tests.learning.branch.test_1344_post_step import post_step_in_container
 
     w.monkeypatch.setenv(RENEW_ENV, "0.2")
 
     def body():
-        return post_step.main(["--tenant", w.t.tenant_id, "--parent-pid", str(os.getppid())],
+        return post_step_in_container(None, w.t.tenant_id,
                               author_tick=lambda _paths: author_drain(w.t, w.paths, trigger=writer, box=BoxSpy()),
-                              still_waiting=lambda _paths: False, directory=w.t.directory)
+                              still_waiting=lambda _paths: False)
     return TickChild(body, w.scratch / f"child-{how}.json")
 
 
@@ -480,16 +479,16 @@ def _stop(w, child, how):
 
 def test_control_a_sigterm_reaches_the_post_step_blocked_in_a_subprocess(world):  # noqa: F811 — the imported fixture
     """Harness control, no store: the post-step's tick blocked in `sleep` ends on SIGTERM as a KeyboardInterrupt. (Renewal and stop)"""
-    from defender.learning.branch import post_step
+    from defender.tests.learning.branch.test_1344_post_step import post_step_in_container
 
     w = world
     marker = w.scratch / "sleeper"
     block = blocked_in_subprocess(marker)
 
     def body():
-        return post_step.main(["--tenant", w.t.tenant_id, "--parent-pid", str(os.getppid())],
+        return post_step_in_container(None, w.t.tenant_id,
                               author_tick=lambda _paths: block(None) or 0,
-                              still_waiting=lambda _paths: False, directory=w.t.directory)
+                              still_waiting=lambda _paths: False)
     child = TickChild(body, w.scratch / "child-control.json")
     sleeper = int(await_file(marker))
     try:

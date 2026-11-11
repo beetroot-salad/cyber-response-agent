@@ -354,6 +354,34 @@ def test_o8_o9_the_first_command_that_finds_the_box_unusable_ends_the_run(tmp_pa
     assert result.report is None
 
 
+@pytest.mark.parametrize(("answer", "stop", "code", "named", "requests"), [
+    ("LOST", "STOPPED", 5, "box-lost", 1),
+    ("LOST", "STOP_FAULT", 5, "box-lost", 1),  # the teardown fault does not replace the ending
+    ("OUTPUT_LIMIT", "STOPPED", 6, "box-output-limit", 1),
+    ("OUTPUT_LIMIT", "STOP_FAULT", 6, "box-output-limit", 1),
+    ("KILLED", "STOPPED", 0, None, 2),  # controls: a result and a timeout leave the run going
+    ("TIMEOUT", "STOPPED", 0, None, 2),
+], ids=["lost", "lost-stop-fault", "fence", "fence-stop-fault", "control-kill-line", "control-timeout"])
+def test_a4_a_box_over_the_relay_ends_the_run_by_name_exactly_as_the_docker_exchange_does(
+        tmp_path, answer, stop, code, named, requests):
+    """The helper's answer decides the ending; the job's stop goes through `box.stop`. (A4, O8, O9; same table as the docker rows above)"""
+    from defender.tests.support.jobs import _box_relay as R
+
+    helper = R.ScriptedHelper(getattr(R, answer), stop=getattr(R, stop))
+
+    def scrub(_tree: Path, *, write_verdict) -> None:
+        write_verdict({"ran": True, "reason": "walk completed"})
+
+    lifecycle = {"start_box": lambda *_a, **_k: R.relay_executor(helper), "stop_box": box.stop_box, "scrub": scrub}
+    main = S.MainScript([S.call("bash", command=COMMAND), S.text(S.DONE)])
+    result = S.run_alert(tmp_path, main=main, box_lifecycle=lifecycle)
+    assert result.raised is None, result.raised
+    assert result.rc == code
+    assert _run_end(result).truncated_by == named
+    assert main.requests == requests
+    assert helper.asked("box.stop"), "the run was torn down without asking the helper to stop the box"
+
+
 @pytest.mark.parametrize("exchange", [EXEC_KILLED, EXEC_KILLED_WITH_BYTES, EXEC_KILLED_MID_FRAME],
                          ids=["no-bytes", "partial-bytes", "half-a-frame"])
 def test_o6_exec_137_with_the_box_running_is_a_result_and_the_run_continues(tmp_path, exchange):

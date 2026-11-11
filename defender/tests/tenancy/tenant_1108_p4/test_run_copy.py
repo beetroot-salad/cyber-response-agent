@@ -24,6 +24,8 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
+
 from defender.tests.e2e._box665 import RecordingDocker, _cp
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.tenancy.tenant_1108_p2._support import start_with
@@ -439,3 +441,32 @@ def test_r_s5_a_live_run_in_another_process_keeps_its_copy_and_a_locked_out_publ
     assert B.outcome_class(line) == "stale:transient", line
     tenant.publish()
     assert not copy.exists(), "publish did not sweep the dead owner's copy"
+
+
+# --- #1170 A6/C20: a run copy made for a job is the host helper's -----------------------------
+
+@pytest.mark.postgres
+def test_a6_a_job_run_copy_is_owned_by_its_host_helper_and_a_killed_helpers_copy_is_swept(
+        tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
+    """The copy a job's host helper makes names the helper's pid (not the test's), outlives nothing the helper
+    left alive, and once the helper is SIGKILLed the next publish sweeps it (the operator-run rows above are the
+    control: same record, same sweep, the process that made the copy)."""
+    from defender.tests.support.jobs._job_helper import ProcessHelper, helper_scene, pid_alive, until
+
+    with helper_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        inv = str(uuid.uuid4())
+        scene.plant(inv)
+        helper = ProcessHelper(scene, scene.root, scene.argv("investigation", inv, parent=os.getpid()))
+        try:
+            helper.container_pid()  # the helper got as far as its container: step 4 (the copy) is behind it
+            copies = until(lambda: list(B.run_copies(scene.t).glob("*/owner")), "the helper's run copy")
+            record = owner_record(copies[0].parent)
+            assert record.get("pid") == helper.proc.pid, record
+            assert record.get("pid") != os.getpid()
+            copy = copies[0].parent
+        finally:
+            helper.close()
+        assert not pid_alive(helper.proc.pid)
+        assert copy.is_dir(), "premise: the killed helper left its copy"
+        scene.t.publish()
+        assert not copy.exists(), "publish did not sweep the dead helper's run copy"

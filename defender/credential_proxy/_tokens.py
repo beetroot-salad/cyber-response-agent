@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from defender import tenancy
-from defender.kit.access import RequestAccess
+from defender.kit.access import TOKEN_SEC, RequestAccess
 from defender.kit.faults import AdapterFault, ConfigFault
 from defender.kit.verbs import is_system_name
 
@@ -28,6 +28,10 @@ READ_WRITE = "rw"
 MODES = (READ, READ_WRITE)
 _CLAIM_KEYS = frozenset({"tenant", "investigation", "grant", "exp"})
 _PAYLOAD = re.compile(r"[A-Za-z0-9_-]+")
+#: Seconds a read pass lives from when it is signed (#1163 r7 A20; #1170 O5): the operator run's own
+#: signer and a job's host helper both sign for this long.
+#: The access holder's own lifetime (`TOKEN_SEC`): a job's holder dates the pass it is handed by it.
+PASS_LIFETIME_SEC = TOKEN_SEC
 #: A token longer than this is not one the minter writes: refused before any decoding.
 MAX_TOKEN_CHARS = 16384
 _MAX_INVESTIGATION_CHARS = 128

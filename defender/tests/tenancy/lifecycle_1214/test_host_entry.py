@@ -567,17 +567,53 @@ def _referencing(name: str) -> set[str]:
 
 def test_the_forge_credential_has_only_the_delivery_and_publish_callers():
     """P3 census (RC-9): `forge_credential` is reached only from the delivery opener and the publish child's module."""
-    allowed = {"learning/author/version_control/delivery.py", "learning/author/version_control/publish.py"}
+    allowed = {"learning/author/version_control/delivery.py", "learning/author/version_control/publish.py",
+               # #1170 (C23, A6): the per-job host helper's drain half mints the post-step's forge credential
+               "job_host/_learning.py"}
     callers = _referencing("forge_credential")
     assert callers, "control: the provider exists and is referenced"
+    assert "job_host/_learning.py" in callers, "control: the helper's drain half reaches the provider"
+    # #1170: the drain inside its job container asks its helper (`JobContainer.forge_credential`, a method of the same
+    # name), never the provider: there it may spell the name only as a method on an object that is not the provider's
+    # package, and must not import it.
+    assert _spells_only_a_method(_production()["learning/core/drains.py"], "forge_credential",
+                                 not_on=("vc", "version_control"))
+    callers -= {"learning/core/drains.py"}
     assert {c for c in callers if not c.endswith(("version_control/__init__.py", "version_control/credential.py"))} <= allowed
+
+
+def _spells_only_a_method(tree: ast.AST, name: str, *, not_on: tuple[str, ...]) -> bool:
+    """Whether `tree` spells `name` only as an attribute on a receiver other than the `not_on` names (no import of it,
+    no bare name, no `vc.name`, no call result's attribute)."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and any(a.name == name for a in node.names):
+            return False
+        if isinstance(node, ast.Name) and node.id == name:
+            return False
+        if isinstance(node, ast.Attribute) and node.attr == name and not (
+                isinstance(node.value, ast.Name) and node.value.id not in not_on):
+            return False
+    return True
+
+
+def test_the_census_method_exemption_still_sees_the_provider():
+    """The detector can fail: an import of the provider, a bare name or a call through the provider's package is not a
+    method of the job container; `found.forge_credential()` is."""
+    for source in ("from defender.learning.author.version_control import forge_credential\n",
+                   "def f(vc):\n    return vc.forge_credential(1)\n", "x = forge_credential\n"):
+        assert not _spells_only_a_method(ast.parse(source), "forge_credential", not_on=("vc", "version_control")), source
+    assert _spells_only_a_method(ast.parse("def f(found):\n    return found.forge_credential()\n"),
+                                 "forge_credential", not_on=("vc", "version_control"))
 
 
 def test_the_publish_child_is_spawned_only_by_run_start_and_prepare():
     """P3 census (RC-9): `launch_publish` is referenced by `run.py`, the host actor's prepare, and its own module."""
-    allowed_prefixes = ("run.py", "investigation/publish_launch.py", "investigation/__init__.py", "lifecycle/")
+    allowed_prefixes = ("run.py", "investigation/publish_launch.py", "investigation/__init__.py", "lifecycle/",
+                        # #1170 (A6): run start's publish moved to the host half run start shares with the job's
+                        # helper (`run_common.default_publish`, called by `run.py` and the helper's prepare)
+                        "run_common.py")
     callers = _referencing("launch_publish")
-    assert "run.py" in callers
+    assert "run.py" in callers or "run_common.py" in callers
     assert [c for c in callers if not c.startswith(allowed_prefixes)] == []
     assert any(c.startswith("lifecycle/") for c in callers), "prepare must launch the first publish"
 
@@ -601,7 +637,8 @@ def test_no_tracked_doc_or_script_teaches_the_retired_adopt_command():
 
 def test_the_opened_delivery_is_reached_only_by_drains_and_the_connect_command():
     """P3 census (RC-9): `opened_delivery` callers are the drains, the connect command and the delivery package."""
-    allowed = ("learning/core/drains.py", "cli/tenant.py", "learning/author/version_control/")
+    allowed = ("learning/core/drains.py", "cli/tenant.py", "learning/author/version_control/",
+               "job_host/_learning.py")  # #1170 (C23): the per-job host helper opens the post-step's delivery
     assert [c for c in _referencing("opened_delivery") if not c.startswith(allowed)] == []
 
 
@@ -663,7 +700,8 @@ def _is_barrier(rel: str, name: str) -> bool:
     """The units that stop a reach from propagating to their callers: the host acceptance itself and the A3 entry units.
     A public or private helper of the host module, or a private helper of an A3 module, that reaches the raw step still
     marks whoever calls it from outside."""
-    return (rel == H.HOST_MODULE_PATH and name == H.HOST_ACCEPTANCE) or (rel, name) in A3_ENTRIES
+    return (rel == H.HOST_MODULE_PATH and name == H.HOST_ACCEPTANCE) or (rel, name) in A3_ENTRIES \
+        or (rel, name) in H.IN_BOX_ENTRIES
 
 
 def _may_reach(rel: str) -> bool:
@@ -733,13 +771,16 @@ def _reaching(production: dict[str, ast.Module]) -> set[tuple[str, str]]:
 
 
 def _offenders(reaching: set[tuple[str, str]]) -> set[tuple[str, str]]:
-    return {(rel, name) for rel, name in reaching if rel != H.RAW_LAYER and not _may_reach(rel)}
+    return {(rel, name) for rel, name in reaching
+            if rel != H.RAW_LAYER and not _may_reach(rel) and (rel, name) not in H.IN_BOX_ENTRIES}
 
 
 def test_a_function_reaches_the_raw_acceptance_only_in_the_host_acceptance_and_the_starter_covered_set():
-    """C2 (1): derived by reachability, the production functions that reach `accept_tenant` are the host acceptance and
-    the A3 set (every other entry point and wrapper takes the accepted tenant it is handed)."""
+    """C2 (1): derived by reachability, the production functions that reach `accept_tenant` are the host acceptance,
+    the A3 set and the in-box entries (#1170, covered by the helper's hold as the A3 set is by its starter's); every
+    other entry point and wrapper takes the accepted tenant it is handed."""
     reaching = _reaching(_production())
+    assert set(H.IN_BOX_ENTRIES) <= reaching, "control: each in-box entry takes its tenant by the folder rules"
     assert (H.HOST_MODULE_PATH, H.HOST_ACCEPTANCE) in reaching, "control: the host acceptance accepts the tenant"
     assert {rel for rel, _ in reaching if rel in H.A3_SET} == set(H.A3_SET), "the A3 set is exactly these modules"
     assert sorted(_offenders(reaching)) == []
@@ -831,17 +872,18 @@ def _host_calls(rel: str, tree: ast.Module) -> list[tuple[int, tuple[str, ...]]]
     return found
 
 
-def _is_command_scope(chain: tuple[str, ...]) -> bool:
-    return len(chain) == 1 and chain[0] in H.COMMAND_FUNCTIONS
+def _is_command_scope(chain: tuple[str, ...], rel: str | None = None) -> bool:
+    return len(chain) == 1 and (chain[0] in H.COMMAND_FUNCTIONS or chain[0] in H.HELPER_HOST_HALVES.get(rel or "", ()))
 
 
 def test_the_host_acceptance_is_opened_only_by_the_command_function_of_each_entry_module():
     """C2 (2): the host acceptance is called from `main` (or the launcher's `_launch`) of exactly the design's entry
-    modules, as a module-level function, never from a helper whose return would close the scope early."""
+    modules, or the per-job host helper's host half (#1170 H7), as a module-level function, never from a helper whose
+    return would close the scope early."""
     calls = {rel: found for rel, tree in _production().items()
              if rel != H.HOST_MODULE_PATH and (found := _host_calls(rel, tree))}
     assert set(calls) == set(H.ENTRY_POINT_MODULES), set(calls) ^ set(H.ENTRY_POINT_MODULES)
-    stray = {rel: [(line, chain) for line, chain in found if not _is_command_scope(chain)]
+    stray = {rel: [(line, chain) for line, chain in found if not _is_command_scope(chain, rel)]
              for rel, found in calls.items()}
     assert {rel: bad for rel, bad in stray.items() if bad} == {}
 
