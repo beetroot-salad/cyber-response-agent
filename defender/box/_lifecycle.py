@@ -981,7 +981,21 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
     daemon; a box reached over the job socket is removed by its helper, which proves it (#1170 A4)."""
     if not box.name:
         return
-    lifecycle_of(box, docker=docker).teardown()
+    try:
+        lifecycle = lifecycle_of(box, docker=docker)
+    except BaseException:
+        # A daemon that cannot be resolved still ends the box's attached start (#1170): its input closes, so the box
+        # stops on its own rather than outliving its owner's teardown.
+        _end_attached_start(box)
+        raise
+    lifecycle.teardown()
+
+
+def _end_attached_start(box: object) -> None:
+    """End the box's attached start, when this process holds one (a relayed box carries none)."""
+    starter = getattr(box, "starter", None)
+    if starter is not None:
+        _end_starter(starter)
 
 
 def relay_start(relay: RelayRequest, kind: str, ident: str) -> BoxExecutor:
@@ -1130,9 +1144,7 @@ class DockerLifecycle:
         try:
             reason = _remove_container(self._daemon, self._name)
         finally:
-            starter = getattr(box, "starter", None)
-            if starter is not None:
-                _end_starter(starter)
+            _end_attached_start(box)
         if reason is not None:
             raise BoxFault(f"could not tear down the box {self._name}: {reason}")
         clock_file = getattr(box, "clock_file", None)
