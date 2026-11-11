@@ -1564,7 +1564,7 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     _operator_composition_still_clears_records_and_enqueues(scene, tmp_path)
 
 def test_1414_a_job_run_opens_no_feedback_issue_whatever_the_setting_lists(tmp_path, monkeypatch, migrated_database):
-    """A tenant whose setting lists every outcome still gets no open-issue request from a job-lane run. F1 (#1414)."""
+    """A tenant whose setting lists every outcome still gets no `feedback_issues` row from a job-lane run (D10: no folder to look in). F1 (#1414), A4."""
     from defender.tests.learning.feedback_1414 import _spec1414 as FB
     from defender.tests.support.storage import _feedback1414 as F
 
@@ -1572,14 +1572,15 @@ def test_1414_a_job_run_opens_no_feedback_issue_whatever_the_setting_lists(tmp_p
     with _scene(tmp_path, monkeypatch, migrated_database, files=files) as scene:
         run_id = str(uuid.uuid4())
         scene.plant(run_id)
-        (scene.root / scene.t.tenant_id / "learning").mkdir()
-        before = set(tree(scene.root))
         got = run_job(scene, run_id)
 
         assert got.calls["lifecycle"] == 1, got
         assert got.raised is None, got
-        made = [k for k in set(tree(scene.root)) - before if re.search(r"feedback", k, re.IGNORECASE)]
-        assert made == [], f"the job lane left feedback state behind: {made}"
+        assert FB.store_call(migrated_database, "feedback_issues", scene.t.tenant_id) == [], \
+            "the job lane filed a feedback request"
+        assert FB.queue_open_issue(migrated_database, case_id="control", tenant_id=scene.t.tenant_id, run_id=run_id,
+                                   outcome="inconclusive", lookups=[]) is True, \
+            "control: the store takes a request for this tenant, so the emptiness above is not a database that takes none"
 
 
 def test_m4_the_job_entry_has_no_open_seam_and_refuses_a_ticket_writer(scene):

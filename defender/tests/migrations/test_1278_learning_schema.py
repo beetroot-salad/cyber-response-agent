@@ -22,7 +22,7 @@ pytestmark = pytest.mark.postgres
 
 BLUE = fixture_uuid("tenant:1278-schema-blue")
 GREEN = fixture_uuid("tenant:1278-schema-green")
-TABLES = ("work_items", "batches", "commits", "commit_changes")
+TABLES = ("work_items", "batches", "commits", "commit_changes", "feedback_issues", "feedback_comments", "feedback_tick")
 _COUNTER = itertools.count(1)
 
 
