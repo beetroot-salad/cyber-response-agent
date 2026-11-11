@@ -134,15 +134,22 @@ class PostgresTenantRepository:
         return AlertMappingRow(**rows[0]._mapping).as_mapping() if rows else None
 
     async def current_records(self, tenant_id: TenantId) -> TenantRecords:
-        if not await self._rows(select(_RM.c.tenant_id).where(_RM.c.tenant_id == tenant_id)):
-            return TenantRecords()
+        """The mark, the current systems and the current case record, read in one REPEATABLE READ transaction: one
+        snapshot, so a reader never sees one write of a pair (a system, then the case record naming it) without the
+        other."""
         latest = (select(_SV.c.system_id, func.max(_SV.c.version).label("v")).where(_SV.c.tenant_id == tenant_id)
                   .group_by(_SV.c.system_id).subquery())
-        rows = await self._rows(select(_SV).join(latest, and_(_SV.c.system_id == latest.c.system_id,
-                                                              _SV.c.version == latest.c.v))
-                                .where(_SV.c.tenant_id == tenant_id, _SV.c.deleted.is_(False)).order_by(_SV.c.system_id))
+        async with self._engine.connect() as conn:
+            conn = await conn.execution_options(isolation_level="REPEATABLE READ")
+            async with conn.begin():
+                if (await conn.execute(select(_RM.c.tenant_id).where(_RM.c.tenant_id == tenant_id))).first() is None:
+                    return TenantRecords()
+                rows = (await conn.execute(
+                    select(_SV).join(latest, and_(_SV.c.system_id == latest.c.system_id, _SV.c.version == latest.c.v))
+                    .where(_SV.c.tenant_id == tenant_id, _SV.c.deleted.is_(False)).order_by(_SV.c.system_id))).all()
+                case_rows = (await conn.execute(select(_CV).where(_CV.c.tenant_id == tenant_id)
+                                                .order_by(_CV.c.version.desc()).limit(1))).all()
         systems = {r.system_id: SystemVersionRow(**r._mapping).as_record() for r in rows}
-        case_rows = await self._rows(select(_CV).where(_CV.c.tenant_id == tenant_id).order_by(_CV.c.version.desc()).limit(1))
         case = None
         if case_rows and not case_rows[0].deleted:
             c = case_rows[0]
