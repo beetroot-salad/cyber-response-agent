@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Remove one freeze's cached host images and extracted host parts from the frozen engine (#1391
-r6 O9). A launch loads each host image and extracts each host part once per part digest and keeps
-them; nothing evicts them on its own. Run it when a freeze is retired or the engine's disk fills.
+"""Remove one freeze's cached host images from the frozen engine (#1391 r6 O9): each committed host
+image and every replica image built from it. A launch builds each once and keeps it; nothing
+evicts them on its own. Run it when a freeze is retired or the engine's disk fills. With no engine
+there is nothing to remove, and none is created.
 
     python3 playground-v2/scripts/purge_frozen_hosts.py <held_out>/freezes/<freeze-id>
 
 Take the frozen-engine lock first (`chaos/lock.py`): a launch in flight would lose its replicas'
-images. A part another freeze shares (same digest) is removed too and refilled on its next launch.
+images. A host image another freeze shares (same digest) is removed too and reloaded on its next
+launch.
 """
 from __future__ import annotations
 
@@ -28,9 +30,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("freeze_dir", type=Path)
     args = parser.parse_args(argv)
     freeze = yaml.safe_load((args.freeze_dir / "freeze.yaml").read_text())
-    hosts = LabOps.frozen_hosts(freeze)
-    LabOps.from_environment().purge_host_cache(freeze)
-    print(f"purged the cached host images and parts of {args.freeze_dir.name}: {', '.join(hosts) or 'no hosts'}")
+    removed = LabOps.from_environment().purge_host_cache(freeze)
+    print(f"{args.freeze_dir.name}: removed {len(removed)} image(s)" + "".join(f"\n  {t}" for t in removed))
     return 0
 
 

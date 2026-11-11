@@ -111,7 +111,8 @@ QUERY_IMAGE = "soc-playground/endpoint-query:local"
 PS_SHIM = PLAYGROUND / "hosts" / "base" / "ps-shim"
 QUERY_DIR = "/lab/endpoint-query"         # in the engine: the service's host lists
 #: Bumped when `_replica_image` builds differently: every replica image is then rebuilt.
-REPLICA_RECIPE = "replica-v1"
+REPLICA_RECIPE = "replica-v2"
+BASE_LABEL = "soc-playground.frozen-base"   # on a replica image: the host image it was built from
 REPLICA_TREE_DIR = "/lab/tree"            # in a replica: its captured process tree
 READONLY_PASSWORD_ENV = "V2_DEFENDER_READONLY_PASSWORD"
 PROXY_PORT = 8411
@@ -192,7 +193,8 @@ class LabOps:
                  proxy_network: str = "cyber-response-agent_devcontainer_default",
                  es_image: str = DEFAULT_ES_IMAGE, cluster_name: str = "soc-playground",
                  certs_volume: str = "soc-playground_certs", repo_dir: str = "/srv/lab/frozen-cases",
-                 readonly_user: str = "defender-readonly", poll_s: float = 5.0, ready_timeout_s: float = 300.0) -> None:
+                 readonly_user: str = "defender-readonly", poll_s: float = 5.0, ready_timeout_s: float = 300.0,
+                 lab_env_file: str | Path | None = None) -> None:
         self._run, self.context, self.proxy_context = run, context, proxy_context
         self.tenant_dir = Path(tenant_dir) if tenant_dir else None
         self.tenant_hosts, self.frozen_endpoint = list(tenant_hosts or ()), frozen_endpoint
@@ -203,6 +205,7 @@ class LabOps:
         self.es_image, self.cluster_name = es_image, cluster_name
         self.certs_volume, self.repo_dir = certs_volume, repo_dir
         self.readonly_user = readonly_user
+        self.lab_env_file = Path(lab_env_file) if lab_env_file else PLAYGROUND / ".env"
         self.poll_s, self.ready_timeout_s = poll_s, ready_timeout_s
         self._scratch: list[str] = []
         self._shim_ready = False
@@ -221,7 +224,8 @@ class LabOps:
             es_image=env.get("V2_FROZEN_ES_IMAGE", DEFAULT_ES_IMAGE),
             cluster_name=env.get("V2_FROZEN_CLUSTER_NAME", "soc-playground"),
             certs_volume=env.get("V2_FROZEN_CERTS_VOLUME", "soc-playground_certs"),
-            repo_dir=env.get("V2_FROZEN_REPO_DIR", "/srv/lab/frozen-cases"))
+            repo_dir=env.get("V2_FROZEN_REPO_DIR", "/srv/lab/frozen-cases"),
+            lab_env_file=env.get("V2_LAB_ENV_FILE"))
 
     # -- transport ---------------------------------------------------------------------------------
 
@@ -487,12 +491,20 @@ class LabOps:
     # -- credentials ------------------------------------------------------------------------------
 
     def current_password(self) -> str:
-        """The read-only user's password as the lab stores it now (read at every launch)."""
-        value = os.environ.get(READONLY_PASSWORD_ENV, "")
-        if not value:
-            raise LabOpsError(f"{READONLY_PASSWORD_ENV} is not set: the current password of the "
-                              "lab's read-only Elasticsearch user (the lab .env's, as es-init uses it)")
-        return value
+        """The read-only user's password as the lab stores it now (read at every launch): the lab
+        `.env`'s, the one es-init gives the live `defender-readonly`. Read from the file, never the
+        shell: an exported copy would override `.env` for compose too, and a rotation would then
+        put the old password back."""
+        try:
+            lines = self.lab_env_file.read_text().splitlines()
+        except OSError as exc:
+            raise LabOpsError(f"cannot read the lab .env ({self.lab_env_file}): {exc}") from exc
+        prefix = f"{READONLY_PASSWORD_ENV}="
+        values = [line[len(prefix):] for line in lines if line.startswith(prefix)]
+        if not values or not values[-1]:
+            raise LabOpsError(f"{READONLY_PASSWORD_ENV} is not set in {self.lab_env_file}: the current password "
+                              "of the lab's read-only Elasticsearch user")
+        return values[-1]
 
     def _tenant_patterns(self) -> list[str]:
         if self.tenant_dir is None:
@@ -642,43 +654,28 @@ class LabOps:
         clear = " ".join(HOST_VOLUMES)
         self._inner("run", "--name", build, "--network", "none", "--entrypoint", "sh", base, "-c",
                     f"rm -rf {clear} && mkdir -p {clear} {REPLICA_TREE_DIR}")
-        overlay = self._overlay(parts, named, host)
-        try:
-            with open(overlay, "rb") as fh:
-                self._inner("cp", "-a", "-", f"{build}:/", stdin=fh)
-        finally:
-            os.unlink(overlay)
+        for mount in HOST_VOLUMES:      # each copy as captured, unpacked by the daemon into its mount
+            with open(parts / named[mount], "rb") as fh:
+                self._inner("cp", "-a", "-", f"{build}:{mount}", stdin=fh)
+        self._inner("cp", "-a", "-", f"{build}:/", input=self._tree_and_shim(parts / named["tree"]))
         self._inner("commit", '--change=ENTRYPOINT ["sleep"]', '--change=CMD ["infinity"]',
                     f"--change=ENV V2_PS_SHIM_TREE={REPLICA_TREE_DIR}/tree.txt", "--change=HEALTHCHECK NONE",
-                    build, tag)
+                    f"--change=LABEL {BASE_LABEL}={base}", build, tag)
         self._inner("rm", "-f", build, check=False)
         return tag
 
     @staticmethod
-    def _overlay(parts: Path, named: dict, host: str) -> str:
-        """One tar rooted at `/`: each volume copy under its mount, the tree, today's shim."""
-        fd, path = tempfile.mkstemp(prefix=f"replica-{host}.", suffix=".tar")
-        with os.fdopen(fd, "wb") as out, tarfile.open(fileobj=out, mode="w|") as tar:
-            for mount in HOST_VOLUMES:
-                with tarfile.open(parts / named[mount], mode="r|") as src:
-                    for member in src:
-                        rel = os.path.normpath(member.name.lstrip("/"))
-                        if rel.startswith(".."):
-                            raise LabOpsError(f"{named[mount]} has a member outside its mount: {member.name!r}")
-                        member.name = mount.lstrip("/") if rel == "." else f"{mount.lstrip('/')}/{rel}"
-                        if member.islnk():      # a hard link names another member: move it alike
-                            target = os.path.normpath(member.linkname.lstrip("/"))
-                            if target.startswith(".."):
-                                raise LabOpsError(f"{named[mount]} links outside its mount: {member.linkname!r}")
-                            member.linkname = f"{mount.lstrip('/')}/{target}"
-                        tar.addfile(member, src.extractfile(member) if member.isfile() else None)
-            for arcname, source, mode in ((f"{REPLICA_TREE_DIR.lstrip('/')}/tree.txt", parts / named["tree"], 0o644),
+    def _tree_and_shim(tree: Path) -> bytes:
+        """A small tar rooted at `/`: the captured tree and today's shim as `ps`."""
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for arcname, source, mode in ((f"{REPLICA_TREE_DIR.lstrip('/')}/tree.txt", tree, 0o644),
                                           ("usr/local/bin/ps", PS_SHIM, 0o755)):
+                data = Path(source).read_bytes()
                 info = tarfile.TarInfo(arcname)
-                info.size, info.mode = source.stat().st_size, mode
-                with open(source, "rb") as fh:
-                    tar.addfile(info, fh)
-        return path
+                info.size, info.mode = len(data), mode
+                tar.addfile(info, io.BytesIO(data))
+        return buf.getvalue()
 
     def _start_query(self, hosts: list[str]) -> None:
         """The lab's endpoint-query service on the engine's daemon: the freeze's hosts, nothing
@@ -692,17 +689,27 @@ class LabOps:
                     "-v", f"{QUERY_DIR}:/etc/endpoint-query:ro", QUERY_IMAGE,
                     "--hosts", "/etc/endpoint-query/hosts.txt", "--inspectable", "/etc/endpoint-query/inspectable.txt")
 
-    def purge_host_cache(self, freeze: dict) -> None:
-        """Remove a freeze's replica images and the host images they were built from (no automatic
-        eviction). A base image another freeze shares goes too; it is reloaded on demand."""
+    def purge_host_cache(self, freeze: dict) -> list[str]:
+        """Remove a freeze's host images and every replica image built from them, whatever shim or
+        recipe built it (found by the label naming the host image it came from). A host image
+        another freeze shares goes too; it is reloaded on demand. No engine: nothing to remove
+        (never creates one). Returns what was removed."""
+        state = self._outer("inspect", "-f", "{{.State.Running}}", ENGINE, check=False)
+        if state.returncode != 0:
+            return []
         self.ensure_engine()
+        removed = []
         for host in self.frozen_hosts(freeze):
-            named = self.host_parts(host)
-            if all(n in freeze["parts"] for n in named.values()):
-                self._inner("image", "rm", self.replica_tag(freeze["parts"], host), check=False)
-            if named["image"] in freeze["parts"]:
-                self._inner("image", "rm", f"frozen-host-base/{host}:{self._key(freeze['parts'][named['image']])}",
-                            check=False)
+            image = self.host_parts(host)["image"]
+            if image not in freeze["parts"]:
+                continue
+            base = f"frozen-host-base/{host}:{self._key(freeze['parts'][image])}"
+            listed = self._inner("image", "ls", "--filter", f"label={BASE_LABEL}={base}",
+                                 "--format", "{{.Repository}}:{{.Tag}}", check=False)
+            for tag in [*_text(listed.stdout).split(), base]:
+                if self._inner("image", "rm", tag, check=False).returncode == 0:
+                    removed.append(tag)
+        return removed
 
     def content_digest(self, indices: list[str]) -> str:
         """sha256 over every document of the named `indices` (the ones the overlays touched) in the

@@ -29,7 +29,7 @@ sys.path.insert(0, str(HERE.parent))
 import render  # noqa: E402
 
 SURFACE = json.loads((PLAYGROUND / "lab-surface.json").read_text())
-KEY = "k3y-for-tests_0123456789"
+KEY = "0123456789abcdef" * 8   # 128 digits: the longest key the edge admits must fit nginx's map
 UPSTREAM_IMAGE = "python:3.12-slim"
 UNREACHABLE = "endpoint-query"
 
@@ -258,11 +258,20 @@ def test_elasticsearch_is_passed_through_as_bytes(lab):
         assert reply.startswith(b"echo:\x16\x03\x01 not http")
 
 
-def test_head_reports_the_upstreams_length(lab):
-    get, head = lab.send([(lab.keyed, 8001, request("GET", "/hosts/web-1")),
-                          (lab.keyed, 8001, request("HEAD", "/hosts/web-1"))])
-    assert status(head) == 200
-    assert headers(head)["content-length"] == headers(get)["content-length"] != "0"
+def test_head_is_not_admitted_since_nothing_behind_the_edge_answers_it(lab):
+    lab.reset()
+    replies = lab.send([(lab.keyed, int(spec["port"]), request("HEAD", "/hosts/web-1")) for spec in HTTP.values()])
+    assert [status(r) for r in replies] == [404] * len(HTTP)
+    assert lab.seen() == []
+
+
+def test_the_key_is_compared_whatever_its_case_but_has_no_letter_whose_case_could_differ(lab):
+    """nginx matches the key ignoring case; the entrypoint admits only lowercase hex, so another
+    casing of the key is the key itself or not a key at all (`A`-`F` are not in it)."""
+    lab.reset()
+    reply, = lab.send([(lab.keyed, 8001, request("GET", "/hosts/web-1", key=KEY.upper()))])
+    assert KEY == KEY.lower() and KEY.upper() != KEY
+    assert status(reply) == 200   # what the case-insensitive compare gives; harmless only for a hex key
 
 
 def test_an_unreachable_service_is_answered_502_not_dropped(lab):
@@ -283,8 +292,10 @@ def test_an_ambiguous_body_length_is_refused_and_not_forwarded(lab):
     assert lab.seen() == []
 
 
-@pytest.mark.parametrize("env", [[], ["-e", "V2_LAB_API_KEY="], ["-e", 'V2_LAB_API_KEY=a"b']],
-                         ids=["unset", "empty", "unquotable"])
+@pytest.mark.parametrize("env", [[], ["-e", "V2_LAB_API_KEY="], ["-e", 'V2_LAB_API_KEY=' + "a" * 31 + '"'],
+                                 ["-e", "V2_LAB_API_KEY=" + "A" * 64], ["-e", "V2_LAB_API_KEY=" + "a" * 31],
+                                 ["-e", "V2_LAB_API_KEY=" + "g" * 64], ["-e", "V2_LAB_API_KEY=" + "a" * 129]],
+                         ids=["unset", "empty", "unquotable", "uppercase", "short", "not-hex", "long"])
 def test_the_live_edge_refuses_to_start_without_a_usable_key(lab, env):
     proc = _docker("run", "--rm", *env, lab.image, check=False, timeout=60)
     assert proc.returncode == 2, (proc.stdout, proc.stderr)

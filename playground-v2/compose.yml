@@ -217,8 +217,6 @@ services:
       - KIBANA_PASSWORD=${V2_KIBANA_PASSWORD}
       - WATCHER_PASSWORD=${V2_ALERT_WATCHER_PASSWORD:?set V2_ALERT_WATCHER_PASSWORD in .env}
       - DEFENDER_PASSWORD=${V2_DEFENDER_READONLY_PASSWORD:?set V2_DEFENDER_READONLY_PASSWORD in .env}
-      - DEFENDER_EVENTS_INDEX=${V2_DEFENDER_EVENTS_INDEX:?set V2_DEFENDER_EVENTS_INDEX in .env (the lab tenant's ELASTIC_EVENTS_INDEX)}
-      - DEFENDER_ALERTS_INDEX=${V2_DEFENDER_ALERTS_INDEX:?set V2_DEFENDER_ALERTS_INDEX in .env (the lab tenant's ELASTIC_ALERTS_INDEX)}
     volumes:
       # Read-only: this one-shot only reads ca.crt, and the volume also holds
       # ca.key. `setup` is the sole writer.
@@ -246,12 +244,14 @@ services:
         printf "user = \"elastic:%s\"\ndata = {\"indices\":[{\"names\":[\".alerts-security.alerts-default*\",\".internal.alerts-security.alerts-default-*\"],\"privileges\":[\"read\"]}]}\n" "$${ELASTIC_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/role/alert_ticket_watcher | grep -q "\"role\"" || { echo "FAIL: alert_ticket_watcher role not written"; exit 1; };
         printf "user = \"elastic:%s\"\ndata = {\"password\":\"%s\",\"roles\":[\"alert_ticket_watcher\"]}\n" "$${ELASTIC_PASSWORD}" "$${WATCHER_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/alert-ticket-watcher | grep -q "\"created\"" || { echo "FAIL: alert-ticket-watcher user not written"; exit 1; };
         # The defender read-only user (#1391 r6), reached through the credential proxy: read on
-        # the two index patterns of the lab tenant (copied here; a mismatch is a loud 403 at run
-        # start) and the cluster `monitor` privilege health-check needs. The frozen engine creates
+        # every event index and the security alerts (fixed and broad: the lab holds nothing else
+        # worth hiding, and no copy of the tenant patterns can drift; the tenant patterns still
+        # narrow what the defender queries) and the cluster `monitor` privilege health-check
+        # needs. The frozen engine creates
         # the same user with the same password (scripts/lab_ops.py). No apostrophes in this
         # script: it is one single-quoted bash -c argument.
         echo "-> defender-readonly role + user";
-        printf "user = \"elastic:%s\"\ndata = {\"cluster\":[\"monitor\"],\"indices\":[{\"names\":[\"%s\",\"%s\"],\"privileges\":[\"read\"]}]}\n" "$${ELASTIC_PASSWORD}" "$${DEFENDER_EVENTS_INDEX}" "$${DEFENDER_ALERTS_INDEX}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/role/defender_readonly | grep -q "\"role\"" || { echo "FAIL: defender_readonly role not written"; exit 1; };
+        printf "user = \"elastic:%s\"\ndata = {\"cluster\":[\"monitor\"],\"indices\":[{\"names\":[\"logs-*\",\".alerts-security.alerts-default*\",\".internal.alerts-security.alerts-default-*\"],\"privileges\":[\"read\"]}]}\n" "$${ELASTIC_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/role/defender_readonly | grep -q "\"role\"" || { echo "FAIL: defender_readonly role not written"; exit 1; };
         printf "user = \"elastic:%s\"\ndata = {\"password\":\"%s\",\"roles\":[\"defender_readonly\"]}\n" "$${ELASTIC_PASSWORD}" "$${DEFENDER_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/defender-readonly | grep -q "\"created\"" || { echo "FAIL: defender-readonly user not written"; exit 1; };
         echo "-> es-init complete";
       '

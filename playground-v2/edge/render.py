@@ -1,9 +1,11 @@
 """Render the lab edge's nginx config from `lab-surface.json` (#1391 r6 L1, L3).
 
-The edge is nginx; this file owns only the rules. Per HTTP port it admits GET/HEAD on any path
-outside `/admin`, plus that port's declared writes, and refuses everything else with 404 whatever
+The edge is nginx; this file owns only the rules. Per HTTP port it admits GET on any path outside
+`/admin`, plus that port's declared writes (HEAD is not admitted: no service behind the edge
+answers it and no product adapter sends it), and refuses everything else with 404 whatever
 the key. With the key check on (live) a request must also carry `Authorization: Bearer <key>`
-(401 otherwise); the header is never forwarded. The frozen engine's frontend is the same config
+(401 otherwise); the header is never forwarded. The key is lowercase hex (the entrypoint refuses
+any other): nginx compares map keys ignoring case, which then loses nothing. The frozen engine's frontend is the same config
 with the key check off: it is reached only through the operator's SSH forward. A `passthrough`
 port (Elasticsearch) is a TCP stream: the upstream authenticates the caller itself.
 
@@ -56,13 +58,13 @@ def _http_server(name: str, spec: dict, service_port: int, key_check: bool) -> s
     for method, pattern in spec.get("writes", []):
         writes.setdefault(_write_location(pattern), set()).add(method)
     for regex, methods in writes.items():
-        allowed = "|".join(sorted({"GET", "HEAD", *methods}))
+        allowed = "|".join(sorted({"GET", *methods}))
         lines += [f"        location ~ {regex} {{",
                   f"            if ($request_method !~ ^({allowed})$) {{ return 404 '{{\"detail\":\"not served\"}}'; }}",
                   "            proxy_pass http://$edge_upstream;",
                   "        }"]
     lines += ["        location / {",
-              "            if ($request_method !~ ^(GET|HEAD)$) { return 404 '{\"detail\":\"not served\"}'; }",
+              "            if ($request_method != GET) { return 404 '{\"detail\":\"not served\"}'; }",
               "            proxy_pass http://$edge_upstream;",
               "        }",
               "    }"]
@@ -95,6 +97,7 @@ http {{
     server_tokens off;
     default_type application/json;
     client_max_body_size 1m;
+    map_hash_bucket_size 256;   # the key's map entry (`Bearer ` + up to 128 hex) must fit one bucket
     resolver {RESOLVER} valid=10s ipv6=off;
     proxy_http_version 1.1;
     proxy_set_header Connection "";

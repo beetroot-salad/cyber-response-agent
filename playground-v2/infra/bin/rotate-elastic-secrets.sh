@@ -76,7 +76,9 @@ set_var V2_KIBANA_ENCRYPTION_KEY "${NEW_KEY}"
 echo "-> recreating the services that hold these secrets in their container env"
 # Only these: a whole-stack `up` from another checkout also recreates services with relative
 # bind mounts (ticket-server's seed), which resolve against this checkout's path on the VPS.
-docker --context "${CTX}" compose up -d --build --no-deps \
+# The new read-only password is handed to compose explicitly: a copy exported in this shell
+# would otherwise win over .env and es-init would set the old one again.
+V2_DEFENDER_READONLY_PASSWORD="${NEW_DP}" docker --context "${CTX}" compose up -d --build --no-deps \
     elasticsearch es-init kibana fleet-server fleet-init fleet-host-policies fleet-outputs-reconciler
 
 echo "-> waiting for Kibana"

@@ -8,32 +8,43 @@ inventory's hosts. Frozen (#1347): the frozen engine's daemon, the freeze's host
 inspectable, so `container-inspect` answers 404 (#1347's named gap) and a replica's image name never
 leaks.
 
-Only these GET routes; anything else is 404, another method 405. Each runs one fixed command:
+Only these GET routes; anything else is 404, another method 405:
 
     GET /hosts                                         -> {"hosts": [{"name", "running"}]}
-    GET /hosts/{host}/processes                        -> {"ps_output"}   (ps_argv, by name on PATH)
-    GET /hosts/{host}/accounts                         -> {"entries"}     (cat /etc/passwd)
-    GET /hosts/{host}/accounts/{user}/authorized-keys  -> {"path", "keys"} (getent, then cat)
-    GET /hosts/{host}/files/sha256?path=...            -> {"sha256"}      (sha256sum)
-    GET /hosts/{host}/packages                         -> {"packages"}    (dpkg-query)
-    GET /containers/{id}                               -> {"name", "image"}
+    GET /hosts/{host}/processes                        -> {"ps_output"}   (ps_argv, run in the host)
+    GET /hosts/{host}/accounts                         -> {"entries"}     (/etc/passwd)
+    GET /hosts/{host}/accounts/{user}/authorized-keys  -> {"path", "keys"} (/etc/passwd, then the file)
+    GET /hosts/{host}/files/sha256?path=...            -> {"sha256"}
+    GET /hosts/{host}/packages                         -> {"packages"}    (/var/lib/dpkg/status)
+    GET /containers/{id or name}                       -> {"name", "image"}
+
+Only the process list runs a command in the host (`ps`, by name on PATH, so a frozen replica's shim
+answers; its argv is `lab-surface.json`'s, the one capture records and the shim matches). Every
+other verb reads files through the daemon's archive API: nothing starts inside the host, so the
+defender's own queries leave no process or file-access trace in the telemetry it investigates. A
+symlink is followed inside the host's filesystem, at most `MAX_LINKS` times.
+
+A host or container is named by id or name: the daemon resolves it, and the container's own name
+is then checked against the list it must be on (`--hosts`, `--inspectable`).
 
 Status table (r4, r6): host not served 404; served but not running 503; a command that fails 503
 (never 200 with empty output: a replica's `ps` shim without its tree exits non-zero); unknown user
 404; no authorized_keys file 200 with no keys; bad `user` or `path` 400; a missing file 404.
-
-`ps` runs by name so a frozen replica's shim (mounted on PATH) answers; its argv is the one
-`lab-surface.json` names, the same one capture records and the shim matches.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
+import io
 import json
 import os
+import posixpath
 import re
 import socket
 import sys
+import tarfile
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Protocol
@@ -44,6 +55,9 @@ SAFE_USERNAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9._-]{0,63}$")
 SAFE_PATH_RE = re.compile(r"^/[A-Za-z0-9_./@:+-]*$")
 MAX_OUTPUT = 8 * 1024 * 1024
 EXEC_TIMEOUT_S = 25
+EXIT_CODE_WAIT_S = 5
+MAX_LINKS = 8
+DPKG_STATUS = "/var/lib/dpkg/status"
 
 
 def ps_argv(surface_path: Path = SURFACE) -> list[str]:
@@ -55,14 +69,15 @@ class Unavailable(Exception):
 
 
 class Docker(Protocol):
-    def running(self, name: str) -> bool | None:
-        """True/False for a container's run state, None when there is no such container."""
+    def container(self, ref: str) -> dict | None:
+        """The inspect document of the container `ref` names (id, id prefix or name), or None."""
 
     def exec(self, name: str, argv: list[str]) -> tuple[int, bytes, bytes]:
         """Run `argv` in the container: (exit code, stdout, stderr)."""
 
-    def inspect(self, name: str) -> dict | None:
-        """The container's inspect document, None when there is none."""
+    def read(self, name: str, path: str) -> tuple[str, bytes | str] | None:
+        """What is at `path` in the container's filesystem, without running anything in it:
+        ("file", content), ("link", target), ("other", ""), or None when nothing is there."""
 
 
 # -- the Docker Engine API over its unix socket (no CLI in the image) ------------------------------
@@ -116,17 +131,32 @@ class SocketDocker:
             raise Unavailable("the daemon's answer is too large")
         return reply.status, payload
 
-    def inspect(self, name: str) -> dict | None:
-        status, payload = self._call("GET", f"/containers/{quote(name, safe='')}/json")
+    def container(self, ref: str) -> dict | None:
+        status, payload = self._call("GET", f"/containers/{quote(ref, safe='')}/json")
         if status == 404:
             return None
         if status != 200:
-            raise Unavailable(f"docker inspect {name}: HTTP {status}")
+            raise Unavailable(f"docker inspect {ref}: HTTP {status}")
         return json.loads(payload)
 
-    def running(self, name: str) -> bool | None:
-        doc = self.inspect(name)
-        return None if doc is None else bool(doc.get("State", {}).get("Running"))
+    def read(self, name: str, path: str) -> tuple[str, bytes | str] | None:
+        status, payload = self._call("GET", f"/containers/{quote(name, safe='')}/archive?path={quote(path, safe='')}")
+        if status == 404:
+            return None
+        if status != 200:
+            raise Unavailable(f"docker archive {name}:{path}: HTTP {status}")
+        try:
+            with tarfile.open(fileobj=io.BytesIO(payload)) as tar:
+                member = tar.next()
+                if member is None:
+                    return None
+                if member.issym():
+                    return "link", member.linkname
+                if member.isfile():
+                    return "file", tar.extractfile(member).read()
+                return "other", ""
+        except tarfile.TarError as exc:
+            raise Unavailable(f"docker archive {name}:{path}: {exc}") from exc
 
     def exec(self, name: str, argv: list[str]) -> tuple[int, bytes, bytes]:
         status, payload = self._call("POST", f"/containers/{quote(name, safe='')}/exec",
@@ -140,11 +170,16 @@ class SocketDocker:
         out, err = demux(stream)
         if len(out) > MAX_OUTPUT:
             raise Unavailable(f"{name}: output over {MAX_OUTPUT} bytes")
-        status, payload = self._call("GET", f"/exec/{exec_id}/json")
-        code = json.loads(payload).get("ExitCode") if status == 200 else None
-        if code is None:
-            raise Unavailable(f"docker exec {name}: no exit code")
-        return int(code), out, err
+        # The stream ends before the daemon records the exit: ask until it has.
+        deadline = time.monotonic() + EXIT_CODE_WAIT_S
+        while True:
+            status, payload = self._call("GET", f"/exec/{exec_id}/json")
+            doc = json.loads(payload) if status == 200 else {}
+            if not doc.get("Running") and doc.get("ExitCode") is not None:
+                return int(doc["ExitCode"]), out, err
+            if time.monotonic() > deadline:
+                raise Unavailable(f"docker exec {name}: no exit code after {EXIT_CODE_WAIT_S}s")
+            time.sleep(0.05)
 
 
 # -- the query API ---------------------------------------------------------------------------------
@@ -164,22 +199,45 @@ class Service:
     def __init__(self, docker: Docker, *, hosts: list[str], inspectable: list[str], argv: list[str]) -> None:
         self.docker, self.hosts, self.inspectable, self.ps = docker, list(hosts), set(inspectable), list(argv)
 
+    def _resolve(self, ref: str, allowed: set[str] | list[str], what: str) -> dict | None:
+        """The daemon names the container; the list then decides. None: not one we serve."""
+        doc = self.docker.container(ref)
+        if doc is None or str(doc.get("Name", "")).lstrip("/") not in allowed:
+            return None
+        return doc
+
     def _host(self, host: str) -> str:
-        if host not in self.hosts:
+        doc = self._resolve(host, self.hosts, "host")
+        if doc is None:
             raise _fail(404, f"host {host!r} is not enrolled")
-        if not self.docker.running(host):
-            raise _fail(503, f"host {host!r} is enrolled but not running")
-        return host
+        name = str(doc["Name"]).lstrip("/")
+        if not doc.get("State", {}).get("Running"):
+            raise _fail(503, f"host {name!r} is enrolled but not running")
+        return name
 
-    def _run(self, host: str, argv: list[str]) -> tuple[int, str, str]:
-        code, out, err = self.docker.exec(host, argv)
-        return code, out.decode(errors="replace"), err.decode(errors="replace")
+    def _file(self, host: str, path: str) -> bytes | None:
+        """`path`'s content in the host, symlinks followed inside its filesystem; None if absent."""
+        for _ in range(MAX_LINKS + 1):
+            found = self.docker.read(host, path)
+            if found is None:
+                return None
+            kind, data = found
+            if kind == "file":
+                return data
+            if kind != "link":
+                raise _fail(503, f"{path!r} on {host} is not a regular file")
+            path = posixpath.normpath(posixpath.join(posixpath.dirname(path), data))
+        raise _fail(503, f"{path!r} on {host}: more than {MAX_LINKS} symlinks")
 
-    def _ok(self, host: str, argv: list[str]) -> str:
-        code, out, err = self._run(host, argv)
-        if code != 0:
-            raise _fail(503, f"{argv[0]} on {host} exited {code}: {err.strip()[:300] or 'no stderr'}")
-        return out
+    def _required(self, host: str, path: str) -> str:
+        data = self._file(host, path)
+        if data is None:
+            raise _fail(503, f"{path} is missing on {host}")
+        return data.decode(errors="replace")
+
+    def _passwd(self, host: str) -> list[str]:
+        return [line for line in self._required(host, "/etc/passwd").splitlines()
+                if line and not line.startswith("#")]
 
     def answer(self, method: str, target: str) -> tuple[int, dict]:
         try:
@@ -197,25 +255,30 @@ class Service:
             raise _fail(405, "GET only")
         match segments:
             case ["hosts"]:
-                return {"hosts": [{"name": h, "running": bool(self.docker.running(h))} for h in self.hosts]}
+                listed = []
+                for h in self.hosts:
+                    doc = self.docker.container(h)
+                    listed.append({"name": h, "running": bool(doc and doc.get("State", {}).get("Running"))})
+                return {"hosts": listed}
             case ["hosts", host, "processes"]:
-                return {"ps_output": self._ok(self._host(host), self.ps)}
+                host = self._host(host)
+                code, out, err = self.docker.exec(host, self.ps)
+                if code != 0:
+                    why = err.decode(errors="replace").strip()[:300] or "no stderr"
+                    raise _fail(503, f"{self.ps[0]} on {host} exited {code}: {why}")
+                return {"ps_output": out.decode(errors="replace")}
             case ["hosts", host, "accounts"]:
-                out = self._ok(self._host(host), ["cat", "/etc/passwd"])
-                return {"entries": [line for line in out.splitlines() if line and not line.startswith("#")]}
+                return {"entries": self._passwd(self._host(host))}
             case ["hosts", host, "accounts", user, "authorized-keys"]:
                 return self._authorized_keys(host, user)
             case ["hosts", host, "files", "sha256"]:
                 return self._sha256(host, query.get("path", []))
             case ["hosts", host, "packages"]:
-                out = self._ok(self._host(host), ["dpkg-query", "-W", "-f=${Package} ${Version}\\n"])
-                return {"packages": [line for line in out.splitlines() if line.strip()]}
-            case ["containers", name]:
-                if name not in self.inspectable:
-                    raise _fail(404, f"no such container: {name}")
-                doc = self.docker.inspect(name)
+                return {"packages": dpkg_packages(self._required(self._host(host), DPKG_STATUS))}
+            case ["containers", ref]:
+                doc = self._resolve(ref, self.inspectable, "container")
                 if doc is None:
-                    raise _fail(404, f"no such container: {name}")
+                    raise _fail(404, f"no such container: {ref}")
                 return {"name": str(doc.get("Name", "")).lstrip("/"),
                         "image": str(doc.get("Config", {}).get("Image", ""))}
         raise _fail(404, "no such route")
@@ -223,20 +286,17 @@ class Service:
     def _authorized_keys(self, host: str, user: str) -> dict:
         if not SAFE_USERNAME_RE.match(user):
             raise _fail(400, f"refusing unsafe user value: {user!r}")
-        self._host(host)
-        code, out, _ = self._run(host, ["getent", "passwd", user])
-        if code != 0 or not out.strip():
+        host = self._host(host)
+        record = next((line.split(":") for line in self._passwd(host) if line.split(":", 1)[0] == user), None)
+        if record is None:
             raise _fail(404, f"user {user!r} not found on {host}")
-        fields = out.strip().split(":")
-        if len(fields) < 6:
+        if len(record) < 6 or not record[5].startswith("/"):
             raise _fail(503, f"malformed passwd record for {user!r}")
-        path = f"{fields[5]}/.ssh/authorized_keys"
-        code, out, err = self._run(host, ["cat", path])
-        if code != 0:
-            if "No such file" in err:
-                return {"path": path, "keys": []}
-            raise _fail(503, f"cat {path} on {host} exited {code}: {err.strip()[:300]}")
-        return {"path": path, "keys": [line for line in out.splitlines()
+        path = posixpath.join(record[5], ".ssh/authorized_keys")
+        data = self._file(host, path)
+        if data is None:
+            return {"path": path, "keys": []}
+        return {"path": path, "keys": [line for line in data.decode(errors="replace").splitlines()
                                        if line.strip() and not line.startswith("#")]}
 
     def _sha256(self, host: str, paths: list[str]) -> dict:
@@ -245,16 +305,27 @@ class Service:
         path = paths[0]
         if not SAFE_PATH_RE.match(path) or any(s in (".", "..") for s in path.split("/")):
             raise _fail(400, f"refusing unsafe path value: {path!r}")
-        self._host(host)
-        code, out, err = self._run(host, ["sha256sum", "--", path])
-        if code != 0:
-            if "No such file" in err:
-                raise _fail(404, f"{path!r} does not exist on {host}")
-            raise _fail(503, f"sha256sum on {host} exited {code}: {err.strip()[:300]}")
-        digest = out.split()[0] if out.strip() else ""
-        if not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise _fail(503, f"sha256sum on {host} printed no digest")
-        return {"sha256": digest}
+        host = self._host(host)
+        data = self._file(host, path)
+        if data is None:
+            raise _fail(404, f"{path!r} does not exist on {host}")
+        return {"sha256": hashlib.sha256(data).hexdigest()}
+
+
+def dpkg_packages(status: str) -> list[str]:
+    """`<package> <version>` per package dpkg knows, as `dpkg-query -W -f='${Package} ${Version}\\n'`
+    prints them: every stanza of the status file except a purged (`not-installed`) one."""
+    out = []
+    for stanza in status.split("\n\n"):
+        fields: dict[str, str] = {}
+        for line in stanza.splitlines():
+            if line and not line[0].isspace() and ":" in line:
+                key, _, value = line.partition(":")
+                fields[key] = value.strip()
+        if "Package" not in fields or fields.get("Status", "").split()[-1:] == ["not-installed"]:
+            continue
+        out.append(f"{fields['Package']} {fields.get('Version', '')}")
+    return out
 
 
 def make_handler(service: Service) -> type:

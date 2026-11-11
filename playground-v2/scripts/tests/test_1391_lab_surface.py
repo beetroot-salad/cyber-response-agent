@@ -107,3 +107,18 @@ def test_the_rotation_proves_compose_loads_before_it_changes_any_password():
     check = next(i for i, line in enumerate(lines) if "compose config -q" in line)
     first_change = next(i for i, line in enumerate(lines) if line.startswith("es_set_password "))
     assert check < first_change
+
+
+def test_the_rotation_hands_the_new_read_only_password_to_compose_over_any_exported_copy():
+    """An exported V2_DEFENDER_READONLY_PASSWORD beats .env in compose: es-init would set the old
+    one again. The rotation's `compose up` names the new value itself."""
+    script = (PLAYGROUND / "infra" / "bin" / "rotate-elastic-secrets.sh").read_text()
+    up = next(line for line in script.splitlines() if "compose up" in line and not line.lstrip().startswith("#"))
+    assert up.startswith('V2_DEFENDER_READONLY_PASSWORD="${NEW_DP}" docker'), up
+
+
+def test_the_read_only_role_reads_fixed_patterns_with_no_copy_of_the_tenants():
+    env = SERVICES["es-init"]["environment"]
+    assert not [e for e in env if "INDEX" in e], env
+    script = SERVICES["es-init"]["command"]
+    assert '\\"logs-*\\"' in script and ".alerts-security.alerts-default*" in script

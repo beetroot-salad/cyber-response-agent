@@ -28,8 +28,8 @@ class Docker:
     """Records argv and the bytes each call was handed; answers `image ls`/`image inspect` from
     what it was told is cached."""
 
-    def __init__(self, cached=()):
-        self.calls, self.cached = [], set(cached)
+    def __init__(self, cached=(), *, engine=True, labelled=()):
+        self.calls, self.cached, self.engine, self.labelled = [], set(cached), engine, dict(labelled)
 
     def __call__(self, argv, **kw):
         data = kw.get("input")
@@ -38,7 +38,10 @@ class Docker:
         self.calls.append((list(argv), data))
         rc, out = 0, ""
         if "inspect" in argv and "{{.State.Running}}" in argv:
-            out = "true"
+            rc, out = (0, "true") if self.engine else (1, "")
+        elif "image" in argv and "ls" in argv and "--filter" in argv:
+            label = argv[argv.index("--filter") + 1]
+            out = "\n".join(sorted(self.labelled.get(label, ())))
         elif "image" in argv and "ls" in argv:
             out = "\n".join(sorted(self.cached))
         elif "image" in argv and "inspect" in argv and "-f" not in argv:
@@ -132,39 +135,39 @@ def test_each_replica_runs_its_own_image_inert_networkless_and_read_only(parts):
         assert not [a for a in argv if a == "-v"], "a replica mounts nothing: its image holds it all"
 
 
-def test_a_replica_image_holds_its_volume_copies_its_tree_and_todays_shim(parts):
+def test_a_replica_image_holds_its_volume_copies_as_captured_its_tree_and_todays_shim(parts):
     docker = Docker()
-    f = freeze()
-    lab_ops.LabOps(run=docker).serve_hosts(parts, f)
-    overlays = docker.inner("cp")
-    assert len(overlays) == len(HOSTS)
+    lab_ops.LabOps(run=docker).serve_hosts(parts, freeze())
+    copies = docker.inner("cp")
+    assert len(copies) == 3 * len(HOSTS)
     shim = (lab_ops.PLAYGROUND / "hosts" / "base" / "ps-shim").read_bytes()
-    for host, (argv, data) in zip(HOSTS, overlays):
-        assert argv[:3] == ["cp", "-a", "-"] and argv[3] == f"frozen-build-{host}:/"
-        members = _members(data)
+    for host in HOSTS:
+        mine = {argv[3]: data for argv, data in copies if argv[3].startswith(f"frozen-build-{host}:")}
+        assert all(argv[:3] == ["cp", "-a", "-"] for argv, _ in copies)
+        for mount in lab_ops.HOST_VOLUMES:
+            part = parts / lab_ops.LabOps.host_parts(host)[mount]
+            assert mine[f"frozen-build-{host}:{mount}"] == part.read_bytes(), "the copy as captured, unrewritten"
+        members = _members(mine[f"frozen-build-{host}:/"])
+        assert set(members) == {"usr/local/bin/ps", "lab/tree/tree.txt"}
         assert members["usr/local/bin/ps"][1] == shim and members["usr/local/bin/ps"][0].mode == 0o755
         assert members["lab/tree/tree.txt"][1] == f"bytes of proc-tree-{host}.txt".encode()
-        for mount in lab_ops.HOST_VOLUMES:
-            rel = mount.lstrip("/")
-            log = members[f"{rel}/{host}{mount.replace('/', '-')}.log"]
-            assert log[1] == f"content of {host} {mount}".encode() and log[0].uid == 1000
-            assert members[rel][0].isdir()
 
 
-def test_a_replica_image_is_committed_idle_and_only_after_its_content_is_in(parts):
+def test_a_replica_image_is_committed_idle_labelled_and_only_after_its_content_is_in(parts):
     docker = Docker()
     f = freeze()
     lab_ops.LabOps(run=docker).serve_hosts(parts, f)
     commits = [r for r, _ in docker.inner("commit")]
     assert [c[-1] for c in commits] == [lab_ops.LabOps.replica_tag(f["parts"], h) for h in HOSTS]
-    for c in commits:
+    for host, c in zip(HOSTS, commits):
         assert {'--change=ENTRYPOINT ["sleep"]', '--change=CMD ["infinity"]', "--change=HEALTHCHECK NONE",
-                f"--change=ENV V2_PS_SHIM_TREE={lab_ops.REPLICA_TREE_DIR}/tree.txt"} <= set(c)
+                f"--change=ENV V2_PS_SHIM_TREE={lab_ops.REPLICA_TREE_DIR}/tree.txt",
+                f"--change=LABEL {lab_ops.BASE_LABEL}=frozen-host-base/{host}:{SHA[host][:16]}"} <= set(c)
     order = [(a[a.index("docker", 3) + 1], a) for a, _ in docker.calls if "docker" in a[3:]]
     for host in HOSTS:
         build = f"frozen-build-{host}"
         steps = [verb for verb, a in order if build in " ".join(a) and verb in ("run", "cp", "commit")]
-        assert steps == ["run", "cp", "commit"], (host, steps)
+        assert steps == ["run", "cp", "cp", "cp", "commit"], (host, steps)
         clear = next(a for verb, a in order if verb == "run" and build in a)
         assert all(m in clear[-1] for m in lab_ops.HOST_VOLUMES) and "--network" in clear
 
@@ -201,19 +204,6 @@ def test_the_replica_tag_follows_every_input(tmp_path, monkeypatch):
     assert lab_ops.LabOps.replica_tag(f["parts"], "web-1") != tag
 
 
-def test_a_volume_copy_reaching_outside_its_mount_is_refused(parts):
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w") as t:
-        info = tarfile.TarInfo("../etc/shadow")
-        info.size = 1
-        t.addfile(info, io.BytesIO(b"x"))
-    (parts / lab_ops.LabOps.host_parts("db-1")["/var/log"]).write_bytes(buf.getvalue())
-    docker = Docker()
-    with pytest.raises(lab_ops.LabOpsError, match="outside its mount"):
-        lab_ops.LabOps(run=docker).serve_hosts(parts, freeze())
-    assert not docker.inner("commit")
-
-
 def test_the_service_answers_the_freezes_hosts_with_nothing_inspectable(parts):
     docker = Docker()
     lab_ops.LabOps(run=docker).serve_hosts(parts, freeze())
@@ -244,13 +234,26 @@ def test_teardown_removes_the_replicas_the_service_and_the_frontend(parts):
     assert {*HOSTS, lab_ops.HOST_STATE_SERVICE, lab_ops.FRONTEND} <= removed
 
 
-def test_purge_removes_a_freezes_replica_and_host_images():
-    docker = Docker()
+def test_purge_removes_every_replica_built_from_a_freezes_host_images_whatever_built_it():
+    """Replica images built under an older shim or recipe carry the same label: they go too."""
     f = freeze()
-    lab_ops.LabOps(run=docker).purge_host_cache(f)
-    images = {r[-1] for r, _ in docker.inner("image") if r[1] == "rm"}
-    assert images == ({lab_ops.LabOps.replica_tag(f["parts"], h) for h in HOSTS}
-                      | {f"frozen-host-base/{h}:{SHA[h][:16]}" for h in HOSTS})
+    labelled = {f"label={lab_ops.BASE_LABEL}=frozen-host-base/{h}:{SHA[h][:16]}":
+                [f"frozen-host/{h}:old0old0old0old0", lab_ops.LabOps.replica_tag(f["parts"], h)] for h in HOSTS}
+    docker = Docker(labelled=labelled)
+    removed = lab_ops.LabOps(run=docker).purge_host_cache(f)
+    images = [r[-1] for r, _ in docker.inner("image") if r[1] == "rm"]
+    want = {t for tags in labelled.values() for t in tags} | {f"frozen-host-base/{h}:{SHA[h][:16]}" for h in HOSTS}
+    assert set(images) == want and set(removed) == want
+    for h in HOSTS:
+        base = f"frozen-host-base/{h}:{SHA[h][:16]}"
+        assert images.index(base) > max(images.index(t) for t in labelled[f"label={lab_ops.BASE_LABEL}={base}"]), \
+            "the host image goes after the replicas built on it"
+
+
+def test_purge_with_no_engine_removes_nothing_and_creates_none():
+    docker = Docker(engine=False)
+    assert lab_ops.LabOps(run=docker).purge_host_cache(freeze()) == []
+    assert len(docker.calls) == 1, docker.calls
 
 
 @pytest.mark.parametrize("dropped", ["all", "one"])
