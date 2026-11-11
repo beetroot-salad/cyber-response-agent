@@ -124,14 +124,6 @@ def declared_systems_over(
     return union
 
 
-def tenant_systems_under(repo_root: Path, records: TenantRecords) -> frozenset[str]:
-    """A tenant's systems for its learning lanes (#1366 O1, DC7): its current enabled records
-    whose adapter the product checkout at `repo_root` carries, plus the platform-served names.
-    The tenant's committed `execution.md` markers declare nothing here: the records decide. An
-    unreadable adapter source raises `AdaptersUnreadable`."""
-    return lane_names(tenant_systems_of(repo_root, records))
-
-
 def lane_systems(
     repo_root: Path, tenant: Tenant | None, directory: TenantDirectory | None, *,
     systems: TenantSystems | Catalog | None = None,
@@ -161,14 +153,6 @@ def tenant_systems_of(repo_root: Path, records: TenantRecords) -> TenantSystems:
     from defender.systems.catalog import Catalog, TenantSystems
 
     return TenantSystems.of(records, Catalog(read_adapters(repo_root / ADAPTERS_REL)))
-
-
-def checkout_catalog(repo_root: Path) -> Catalog:
-    """The whole catalog of the product checkout at `repo_root`, for a lane caller with no tenant
-    (R16: it hands this explicitly). An unreadable adapter source raises `AdaptersUnreadable`."""
-    from defender.systems.catalog import Catalog
-
-    return Catalog(read_adapters(repo_root / ADAPTERS_REL))
 
 
 def lane_names(systems: TenantSystems | Catalog) -> frozenset[str]:
