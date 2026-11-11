@@ -534,3 +534,89 @@ def test_1366_c3_check_judges_a_case_adapter_the_cold_read_refuses_or_whose_chec
     assert done.returncode != 0, said
     assert "Traceback" not in said, said
     assert finding, said
+
+
+# ---- round 9 (G3): the census of `check` speaks of the tenant's systems alone ---------------------------------------
+
+def _gap_rows(kind: str, verbs: list[str]) -> dict[str, dict]:
+    """The grants-table rows that give ONE system a census gap of `kind` (a field of `CensusGaps`), granting nothing (a
+    grant on an unrecorded system is the orphaned-grant finding, which R12 does say). `undecided` is a verb left out;
+    `unreasoned` a withhold with no reason; `phantom` a verb no adapter declares."""
+    if kind == "undecided":
+        return {}
+    if kind == "unreasoned":
+        return {next(v for v in verbs if v != "health-check"): {"roles": []}}
+    if kind == "phantom":
+        return {"zz-gone-verb": {"roles": [], "reason": "kept for the test: a row no adapter declares"}}
+    raise AssertionError(f"CensusGaps gained a kind, `{kind}`, this test draws no row for")
+
+
+def _loadable_kinds(tmp_path, system: str, verbs: list[str]) -> dict[str, dict]:
+    """Each gap kind's rows for `system` that the grants table's own loader accepts: a kind it refuses can never reach
+    the census through a table on disk (the loader refuses a withhold that gives no reason), so no `check` can report it
+    and the table that carries it is not a table. The test draws every kind the loader lets through, and states the rest."""
+    import dataclasses
+
+    from defender.systems.verb_dispositions import CensusGaps, DispositionError, load_dispositions
+
+    kinds: dict[str, dict] = {}
+    for f in dataclasses.fields(CensusGaps):
+        rows = _gap_rows(f.name, verbs)
+        if not rows:  # a verb left out of the table is no row at all
+            kinds[f.name] = rows
+            continue
+        probe = tmp_path / f"probe-{f.name}.yaml"
+        probe.write_text(yaml.safe_dump({"dispositions": {system: rows}}), encoding="utf-8")
+        try:
+            load_dispositions(probe)
+        except DispositionError:
+            continue
+        kinds[f.name] = rows
+    return kinds
+
+
+def _subsets(systems: list[str]) -> list[tuple[str, ...]]:
+    """The empty subset, the whole catalog, each system alone and a seeded sample of the others: records drawn from the
+    catalog, not a fixed pair."""
+    import random
+
+    drawn = random.Random(1366)
+    sample = {tuple(s for s in systems if drawn.random() < 0.5) for _ in range(6)}
+    return sorted({(), tuple(systems), *((s,) for s in systems), *sample}, key=lambda t: (len(t), t))
+
+
+_CATALOG = sorted(R.FIXTURE_SYSTEMS)  # the verb-bearing, tenant-served adapters the committed fixture records
+
+
+@pytest.mark.parametrize("kept", _subsets(_CATALOG), ids=lambda kept: "+".join(kept) or "no-records")
+def test_1366_g3_check_names_no_system_the_tenant_has_no_record_of_except_as_a_phantom_row(
+        tenants, checkout_roster, tmp_path, kept):
+    """Records drawn from any subset of the catalog (none included), against a grants table in which every system
+    WITHOUT a record carries every kind of census gap a table can hold (`CensusGaps`' fields: a verb nobody decided, a
+    row no adapter declares; a withhold with no reason is a kind the table loader refuses, so none can be drawn):
+    `check` names such a system only for the phantom row, which stays whatever the records say; it says nothing of the
+    verbs nobody decided. A recorded system still has its undecided verbs reported (the control: the census runs).
+    (#1366 R12 'ungranted rows for unrecorded systems: silent', O1)"""
+    unrecorded = [s for s in _CATALOG if s not in kept]
+    table = {"tacit-knowledge": {"health-check": {"roles": ["gather"]}, "lookup": {"roles": ["gather"]}}}
+    for system in unrecorded:
+        verbs = sorted(checkout_roster.verbs[system])
+        drawn = _loadable_kinds(tmp_path, system, verbs)
+        assert {"undecided", "phantom"} <= set(drawn), f"the kinds a table can hold shrank: {sorted(drawn)}"
+        table[system] = {verb: row for rows in drawn.values() for verb, row in rows.items()}
+        assert set(checkout_roster.verbs[system]) - set(table[system]), "premise: a verb is left undecided"
+    # no case record: one naming an unrecorded system is its own finding (the test above this one), not the census's
+    records = R.RecordsSpec({s: R.fixture_records().systems[s] for s in kept}, None)
+
+    found = _findings(tenants(records, files={"settings/verb-grants.yaml": yaml.safe_dump({"dispositions": table})}))
+
+    def naming(system: str) -> list[str]:
+        return [line for line in found
+                if re.search(rf"(?<![\w-]){re.escape(system)}(?![\w-])", re.sub(r"\S*/\S+", "", line))]
+
+    for system in unrecorded:
+        lines = naming(system)
+        assert lines, f"the phantom row of an unrecorded system is the table's finding still: {system} unnamed"
+        assert all("no adapter declares" in line for line in lines), lines
+    for system in kept:
+        assert any("decided by nobody" in line for line in naming(system)), f"{system}: the census no longer runs: {found}"

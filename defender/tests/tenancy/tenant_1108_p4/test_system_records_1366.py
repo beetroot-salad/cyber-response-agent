@@ -1355,3 +1355,103 @@ def test_1366_r7_two_tenants_may_point_at_one_base_each_keeping_its_own_record_a
     assert kv.written() == [f"{a.tid}/cmdb/g{generation}", f"{b.tid}/cmdb/g{generation}"]
     assert kv.held == {f"{a.tid}/cmdb/g{generation}": [R.credential_set({"api_key": "key-of-a"})],
                        f"{b.tid}/cmdb/g{generation}": [R.credential_set({"api_key": "key-of-b"})]}
+
+
+# --- round 9 (G4): the cover judgement is the proxy's own, over declared routes spelled any way ----------------------------
+
+#: The comment ticket's adapter sends and its declared route (K5 pins the first against the second at the proxy).
+COMMENT = ("POST", "/tickets/ABC-1/comments")
+COMMENT_ROUTE = ("POST", "/tickets/*/comments")
+
+
+def _spellings(segment: str) -> list[str]:
+    """One declared path segment, spelled other ways: a star, the literal, case changes, percent-encodings of one and of
+    every character, partial stars, empty, another literal, an encoded star."""
+    encoded = "".join(f"%{ord(c):02X}" for c in segment)
+    return [segment, "*", "**", "", "x", segment.upper(), segment.swapcase(), f"%{ord(segment[0]):02x}{segment[1:]}" if segment else "%2e",
+            encoded, encoded.lower(), segment[:1] + "*", "*" + segment[1:], segment + "*", "%2A", segment + "%20"]
+
+
+def _mutated_paths() -> list[str]:
+    """Declared paths built from the adapter's comment pattern by segment mutations: each segment alone, two segments
+    together, a trailing `/`, doubled separators."""
+    segments = COMMENT_ROUTE[1].split("/")
+    paths = {"/".join(segments)}
+    for i, segment in enumerate(segments):
+        paths |= {"/".join([*segments[:i], s, *segments[i + 1:]]) for s in _spellings(segment)}
+    for i, j in ((1, 2), (1, 3), (2, 3)):
+        for a in _spellings(segments[i])[:9]:
+            for b in _spellings(segments[j])[:9]:
+                mutated = list(segments)
+                mutated[i], mutated[j] = a, b
+                paths.add("/".join(mutated))
+    paths |= {"/".join(segments) + "/", "/".join(segments) + "//", COMMENT_ROUTE[1].replace("/", "//", 1)}
+    return sorted(paths)
+
+
+def _admitted_as(access: Any, mode: str) -> bool:
+    from defender.credential_proxy._refusal import Refused
+    from defender.credential_proxy._scope import check_route
+
+    try:
+        check_route(access, "ticket", *COMMENT, mode)
+    except Refused:
+        return False
+    return True
+
+
+def _proxy_admits(access: str) -> tuple[bool, bool]:
+    """What the proxy's own matcher does with the comment the adapter sends, under the declaration `access`: (admitted as
+    a write that a read-only token does not get, admitted through a read route). A declaration the access parser refuses
+    admits nothing."""
+    from defender.credential_proxy._tokens import READ, READ_WRITE
+    from defender.kit.faults import ConfigFault
+    from defender.tenancy import parse_access
+
+    try:
+        parsed = parse_access(access, system="ticket")
+    except ConfigFault:
+        return False, False
+    as_read = _admitted_as(parsed, READ)
+    return _admitted_as(parsed, READ_WRITE) and not as_read, as_read
+
+
+@pytest.mark.postgres
+def test_1366_g4_the_cover_judgement_accepts_a_declared_write_exactly_when_the_proxy_admits_the_comment_as_that_write(
+        imported_op):
+    """Declared write routes built from the adapter's comment pattern by segment mutations (a star, another literal,
+    case changes, percent-encodings, partial stars, empty segments, a trailing `/`): the ticket system, the case system,
+    is stored with a route exactly when the proxy's own matcher (`check_route`) admits the request the adapter sends as
+    a write that read-only tokens do not get; and a route the access parser refuses is not stored. Beside the exact
+    covering write, the same spellings declared as READ routes: whenever the proxy admits the comment through the read
+    route the write is refused (a comment is allowed only as a declared write). (#1366 C2, K4; the judgement is not a
+    second matcher)"""
+    from defender.system_records import RecordRefused
+
+    op = imported_op
+    base = "http://soc-playground:8004"
+    wrong: list[str] = []
+    version = [op.current()["ticket"].version]
+
+    async def run_through_the_door(store: Any) -> None:
+        async def stored(access: str) -> bool:
+            try:
+                await store.put_system(op.tid, "ticket", replaces=version[0], adapter="ticket", enabled=True,
+                                       settings=dict(TICKET_CONFIG), access=access, author="test door")
+            except RecordRefused:
+                return False
+            version[0] += 1
+            return True
+
+        for path in _mutated_paths():
+            access = R.declaration(base, writes=(("POST", path),))
+            if await stored(access) is not _proxy_admits(access)[0]:
+                wrong.append(f"write {path!r}: the judgement and the proxy differ on the comment as a write")
+        assert await stored(R.declaration(base, writes=(COMMENT_ROUTE,))), "control: the exact route is stored"
+        for path in _mutated_paths():
+            access = R.declaration(base, writes=(COMMENT_ROUTE,), reads=(("POST", path),))
+            if _proxy_admits(access)[1] and await stored(access):
+                wrong.append(f"read {path!r}: the proxy admits the comment through the read route, and it was stored")
+
+    _at_the_door(op, run_through_the_door)
+    assert not wrong, wrong
