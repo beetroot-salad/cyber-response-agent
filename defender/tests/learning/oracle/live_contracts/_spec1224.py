@@ -440,6 +440,13 @@ class Estate:
         kw.setdefault("records", self.records())
         return active_directory(root, tenant_id, **kw)
 
+    def launch_directory(self, tenant_id: str, roster: Any = None) -> Any:
+        """`directory()` for a launcher driven with this estate's roster (default: `self.roster()`): the records are the
+        estate's, and the roster the launcher is handed stands for the catalog they must lie within."""
+        directory = self.directory(tenant_id=tenant_id)
+        R.assert_records_within_roster(directory, tenant_id, roster if roster is not None else self.roster())
+        return directory
+
     def run_tenant(self, data_root: Path | None = None,
                    tenant_id: str = FIXTURE_TENANT) -> Any:
         return T6.run_tenant(self.place(data_root, tenant_id), records=self.records())
