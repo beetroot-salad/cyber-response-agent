@@ -980,6 +980,7 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
     `docker` when one is given, else through the docker it was created with (#1195), so the whole lifecycle reaches one
     daemon; a box reached over the job socket is removed by its helper, which proves it (#1170 A4)."""
     if not box.name:
+        _end_attached_start(box)
         return
     try:
         lifecycle = lifecycle_of(box, docker=docker)

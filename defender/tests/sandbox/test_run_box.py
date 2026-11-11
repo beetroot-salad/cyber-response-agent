@@ -507,6 +507,23 @@ def test_stop_box_ends_the_attached_starter_even_when_the_box_carries_no_docker(
     X.no_path_docker(daemon)
 
 
+def test_stop_box_of_a_box_that_names_no_container_still_ends_its_attached_starter(
+        tmp_path: Path, monkeypatch):
+    """Nothing to remove, but an attached start this process holds is still ended (#1170)."""
+    daemon, _box, _runs = _stopped(tmp_path, monkeypatch)
+    starter = subprocess.Popen(["cat"], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.PIPE)
+    try:
+        box_mod.stop_box(dataclasses.replace(X.sandboxed(""), starter=starter))
+        assert starter.poll() is not None, "the attached start still runs after the teardown"
+    finally:
+        if starter.poll() is None:
+            starter.kill()
+            starter.wait()
+    assert daemon.docker_calls() == []
+    X.no_path_docker(daemon)
+
+
 def test_stop_box_removes_the_box_and_ends_its_attached_starter(tmp_path: Path, monkeypatch):
     """The normal teardown (#1170): the box is removed through its carried docker and its
     attached start is ended with it."""
