@@ -215,9 +215,14 @@ def test_o5_a_redirect_is_the_store_refusing_not_a_comment(tmp_path, monkeypatch
     assert S.receipt(sent)["status"] == C.COMMENTED, S.receipt(sent)
 
 
+#: A stand-in case adapter declares the route its comment action sends (#1366 C1, C10): the shared cover judgement offers no
+#: comment action to an adapter that declares none, whatever else it defines. The same route the `casesys` access file carries.
+DECLARED_ROUTE = "def comment_route(settings):\n    return ('POST', '/tickets/*/comments')\n\n\n"
+
 CRASHING_CASE_ADAPTER = (
     "def check_settings(tenant):\n"
     "    raise RuntimeError(f'cannot judge {tenant.agent_root}')\n\n\n"
+    + DECLARED_ROUTE +
     "def add_case_comment(ctx, *, key, body):\n    return None\n\n\n"
     "VERBS = {}\n")
 
@@ -365,6 +370,7 @@ def _case_adapter(tmp_path: Path, read_back: str | None, *, write_raises: str = 
     (tree / "integrations" / "casesys_adapter.py").write_text(
         "from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault\n\n\n"
         "def check_settings(tenant):\n    return None\n\n\n"
+        + DECLARED_ROUTE +
         f"def {C.COMMENT_ACTION}(ctx, *, key, body):\n"
         f"    raise {write_raises}\n\n\n"
         + (read_back or "") + "\n\nVERBS = {}\n", encoding="utf-8")

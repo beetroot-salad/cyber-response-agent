@@ -4,7 +4,8 @@ from __future__ import annotations
 import pytest
 
 from defender._git import REPO_ROOT
-from defender.learning.leads.declared_systems import declared_systems
+from defender.learning.leads.declared_systems import lane_names
+from defender.systems.catalog import Catalog, TenantSystems
 from defender.systems.verbs import ModuleVerbRegistry, read_roster
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.tenancy import _tenants1106
@@ -25,9 +26,12 @@ def test_1390_name_consumers_see_the_registry_and_file_consumers_do_not():
     assert not (ADAPTERS / "tacit_knowledge_adapter.py").exists()
     assert "cmdb" in registry.systems()
     assert SYSTEM in registry.systems()
-    declared = declared_systems(REPO_ROOT)
-    assert "cmdb" in declared, "the lead-author lane's declared systems leave out the platform-served registry"
-    assert SYSTEM in declared, "the lead-author lane's declared systems leave out the platform-served registry"
+    # (#1366 R16) A lead lane is handed its systems: the whole catalog from a caller with no tenant, the tenant's own otherwise.
+    for handed in (Catalog.of_checkout(REPO_ROOT / "defender"),
+                   TenantSystems.of(_tenants1106.fixture_run_tenant().records, Catalog.of_checkout(REPO_ROOT / "defender"))):
+        declared = lane_names(handed)
+        assert "cmdb" in declared, "the lead-author lane's declared systems leave out an adapter system"
+        assert SYSTEM in declared, "the lead-author lane's declared systems leave out the platform-served registry"
 
 
 def test_1390_the_opening_prompt_lists_the_registry_among_the_systems_and_not_as_down(tmp_path):
@@ -68,7 +72,7 @@ def test_1390_a_case_record_naming_the_registry_is_refused_as_having_no_adapter(
     def refusal(system: str) -> str:
         record = SimpleNamespace(case_record=SimpleNamespace(system=system), access={}, systems={})
         with pytest.raises(CaseSettingsFault) as caught:
-            judge_case_system(record, defender_dir=REPO_ROOT / "defender")
+            judge_case_system(record, defender_dir=REPO_ROOT / "defender", roster=read_roster(ADAPTERS))  # R16: handed (no tenant: the whole catalog's)
         return str(caught.value)
 
     assert "has no adapter" not in refusal("cmdb"), "control: an adapter without the comment action is refused another way"
@@ -171,13 +175,16 @@ def test_1390_the_pitfalls_and_write_lanes_refuse_an_empty_adapters_tree(tmp_pat
 
     empty = tmp_path / "empty"
     (empty / ADAPTERS_REL).mkdir(parents=True)
+    nothing = Catalog.of_checkout(empty / "defender")  # (#1366 R16) a caller with no tenant hands the whole catalog
+    assert set(nothing.roster.systems) == {SYSTEM}, "premise: the empty tree's catalog holds only the registry's name"
     with pytest.raises(LeadAuthorError, match="declares no systems"):
-        _require_adapter_declared_systems(empty)
+        _require_adapter_declared_systems(empty, systems=nothing)
     with pytest.raises(ValueError, match="write scope is empty"):
-        _systems_or_raise(empty / "defender")
+        _systems_or_raise(tuple(nothing.roster.systems))
 
-    assert {"cmdb", SYSTEM} <= _require_adapter_declared_systems(REPO_ROOT)
-    assert {"cmdb", SYSTEM} <= set(_systems_or_raise(REPO_ROOT / "defender"))
+    whole = Catalog.of_checkout(REPO_ROOT / "defender")
+    assert {"cmdb", SYSTEM} <= _require_adapter_declared_systems(REPO_ROOT, systems=whole)
+    assert {"cmdb", SYSTEM} <= set(_systems_or_raise(tuple(whole.roster.systems)))
 
 
 _ADAPTER = '''\
