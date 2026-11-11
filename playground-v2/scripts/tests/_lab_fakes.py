@@ -836,12 +836,9 @@ class FakeCluster(FakeES):
             if not self.query.get("keep_alive"):
                 raise RuntimeError("action_request_validation_exception: Validation Failed: 1: [keep_alive] is "
                                    "missing;")
-            states = set((self.query.get("expand_wildcards") or ["open"])[-1].split(","))
             names = self._expand(seg[0])
-            if not states & {"hidden", "all"}:
-                # a wildcard does not reach hidden (dot) indices unless asked; a literal name always does
-                literal = set(seg[0].split(","))
-                names = [n for n in names if not n.startswith(".") or n in literal]
+            # live (9.3.3): `open` and `open,hidden` cover the same indices here (a visible stream brings its hidden
+            # backing indices; a dot-prefixed pattern matches dot-named ones), so the states are not modelled.
             entries, ordinal = [], 0
             for ordinal, n in enumerate(names):
                 docs = self.indices[n]["docs"]
@@ -1798,8 +1795,12 @@ class LabRig:
         # it (the docker exec carrying it never reached the node): that leak is the fault's, not the product's. A cut
         # with none open, and every run without a cut, must leave none open. The tests that fail a page through
         # `cluster.fail` (which the product answers) assert the close themselves.
-        if not getattr(self.journal, "at_trip", None):
+        at_trip = getattr(self.journal, "at_trip", None)
+        if not at_trip:
             assert not self.cluster.open_pits, f"a point-in-time was never closed: {sorted(self.cluster.open_pits)}"
+        else:
+            assert set(self.cluster.open_pits) <= set(at_trip), (
+                f"a point-in-time opened after the cut was left open: {sorted(self.cluster.open_pits)} vs {at_trip}")
         assert not self.docker.unmodelled, f"the rig docker does not model: {self.docker.unmodelled}"
 
     def launch(self, **kw):

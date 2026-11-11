@@ -119,23 +119,6 @@ def test_the_fake_refuses_what_elasticsearch_refuses_around_a_point_in_time():
         _close(cluster, "never-opened")
 
 
-def test_the_fake_point_in_time_leaves_hidden_indices_out_unless_it_is_asked_for_them():
-    cluster = _cluster()
-    cluster.put(HIDDEN, "h-0", {"@timestamp": "2026-10-20T04:00:00Z"})
-
-    def view(query):
-        pit_id = cluster.es_request("POST", f"/*/_pit?{query}")["id"]
-        out = cluster.es_request("POST", "/_search", {"pit": {"id": pit_id}, "sort": [{"_shard_doc": "asc"}],
-                                                      "size": 500})
-        _close(cluster, pit_id)
-        return {h["_index"] for h in out["hits"]["hits"]}
-
-    visible = view("keep_alive=2m")
-    assert DEDUP in visible and HIDDEN not in visible and AUTH not in visible      # AUTH is a dot-named backing index
-    both = view("keep_alive=2m&expand_wildcards=open,hidden")
-    assert {DEDUP, HIDDEN, AUTH} <= both
-
-
 def test_the_fake_tells_a_point_in_time_nobody_closed(tmp_path):
     rig = LabRig(tmp_path)
     rig.cluster.put(AUTH, "auth-00", {"@timestamp": "2026-10-20T04:00:00Z"})

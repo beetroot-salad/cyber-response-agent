@@ -79,8 +79,8 @@ REPO = "frozen-cases"
 SNAP_UUID = "dGhlLXNuYXBzaG90LXV1aWQ"
 BACKING = ".ds-logs-system.auth-default-2026.10.01-000004"
 FAILURE_STORE = ".fs-logs-system.auth-default-2026.10.01-000002"      # live 9.3: _cat/indices never lists it; _count answers
-# r6.4.7: the freeze's `elastic.data_streams` is `{stream: sorted member indices}` (backing plus failure-store), read from
-# the restored scratch cluster's `GET /_data_stream/<names>?expand_wildcards=all`; the snapshot GET gives only the names.
+# r6.4.6: the freeze's `elastic.data_streams` is `{stream: sorted member indices}` (backing plus failure-store), read from
+# the restored scratch cluster's `GET /_data_stream/<names>` (live 9.3.3 lists the same members with or without `expand_wildcards`); the snapshot GET gives only the names.
 DATA_STREAMS = {"logs-system.auth-default": sorted([BACKING, FAILURE_STORE])}
 OWN_INDEX = ".ds-ilm-history-7-2026.11.08-000001"      # the scratch node makes it for itself once it runs (live)
 COUNTS = {"logs-system.auth-2026.10": 120_400, BACKING: 5_000, FAILURE_STORE: 3,
@@ -226,8 +226,6 @@ class ScratchCluster:
         m = re.fullmatch(r"/_data_stream/([^/]+)", p)
         if m and method == "GET":
             self.rig.stream_reads.append(path)
-            if "expand_wildcards=all" not in path:
-                return {"data_streams": []}       # live: hidden / failure-store members are not listed without it
             out = []
             for name in m[1].split(","):
                 if name not in DATA_STREAMS:
@@ -607,7 +605,7 @@ def test_the_freeze_is_the_snapshots_own_indices_and_data_streams_and_never_the_
     (`.ds-ilm-history-7-...`) and `_cat/indices` leaves out failure-store indices; the freeze's `elastic.indices` are
     exactly the snapshot's (`GET _snapshot/<repo>/<snap>`: `indices`), each with its top-level count, and
     `elastic.data_streams` maps each of the snapshot's `data_streams` to its members (backing plus failure-store
-    indices), read from the restored scratch cluster with `expand_wildcards=all`."""
+    indices), read from the restored scratch cluster."""
     rig = Rig(tmp_path)
     rig.capture()
 
@@ -615,7 +613,7 @@ def test_the_freeze_is_the_snapshots_own_indices_and_data_streams_and_never_the_
     assert OWN_INDEX not in elastic["indices"] and FAILURE_STORE in elastic["indices"]
     assert elastic["indices"] == COUNTS
     assert elastic["data_streams"] == DATA_STREAMS
-    assert rig.stream_reads and all("expand_wildcards=all" in r for r in rig.stream_reads), rig.stream_reads
+    assert rig.stream_reads
     assert all(m in elastic["indices"] for ms in elastic["data_streams"].values() for m in ms)
     rig.edges_modelled()
 
