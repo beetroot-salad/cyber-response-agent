@@ -575,11 +575,11 @@ class ForgeHTTP:
                 return httpx.Response(404, json={"message": "pull request does not exist"})
             return self._paged_reviews(request, self.reviews.get(int(parts[2]), []))
         if len(parts) == 4 and parts[1] == "issues" and parts[3] == "comments" and request.method == "GET":
+            if not self._pull(parts[2]):
+                return None  # a plain issue's comments are `_one_issue_answer`'s (#1414), not a PR's
             if not self.scopes & {"write:issue", "read:issue", "all"}:
                 return httpx.Response(403, json={
                     "message": "token does not have at least one of required scope(s): [read:issue]"})
-            if not self._pull(parts[2]):
-                return httpx.Response(404, json={"message": "issue does not exist"})
             # Forgejo 17 (probe, 70 comments): comments ignore `page` and `limit` and answer the lot.
             rows = self.comments.get(int(parts[2]), [])
             return httpx.Response(200, json=rows, headers={"X-Total-Count": str(len(rows))})
