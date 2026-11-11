@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from defender.kit.faults import AdapterFault, TransportFault
+from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import test_run_start_tokens as R
 
@@ -162,6 +162,7 @@ def test_h5_a_failed_sign_is_latched_at_once_for_every_later_ask(tmp_path, data_
         assert again.value is not failed.value
         assert again.value.detail == failed.value.detail
     assert (signer.asked, signer.payloads) == (1, []), "the signer was asked again after it failed"
+    assert access.sign_failed, "the holder did not say a failed sign was why access is lost"
 
 
 def test_h6_a_re_sign_that_fails_latches_and_the_held_token_is_not_handed_out_again(tmp_path, data_root, clock):
@@ -226,6 +227,7 @@ def test_h8_an_access_fault_the_client_reports_loses_access_and_nothing_signs_af
             access.token()
         assert lost.value.detail == "the credential proxy answered nothing"
     assert len(signer.payloads) == 1, "a token was signed after access was lost"
+    assert not access.sign_failed, "a refusal the client reported was taken for a failed sign"
 
 
 @pytest.mark.parametrize("origin", ["system", "request", None])
@@ -251,11 +253,12 @@ def test_h9b_a_setup_fault_is_not_lost_access_but_reaches_the_owner(tmp_path, da
     signer, told = A.MarkedSigner(), []
     access = _access(tmp_path, data_root, signer, clock, on_fault=told.append)
     first = access.token()
-    fault = TransportFault("no credential set is stored for identity")
+    fault = ConfigFault("no credential set is stored for identity")
     fault.origin = "setup"
     fault.system = "identity"
     access.report(fault)
     assert told == [fault], "the owner's callback was not called once with the setup fault"
+    assert access.setup_faults == {"identity": "no credential set is stored for identity"}
     assert access.token() == first
     clock.now += TOKEN_SEC
     assert access.token() != first, "a setup fault stopped the holder signing"
@@ -263,6 +266,21 @@ def test_h9b_a_setup_fault_is_not_lost_access_but_reaches_the_owner(tmp_path, da
     access.report(_lost("the credential proxy answered nothing"))
     assert told[-1].origin == "access", "positive control: an access fault reaches the owner too"
     assert len(told) == 2, "positive control: an access fault reaches the owner too"
+
+
+def test_h9c_a_setup_fault_of_transport_kind_is_one_failed_call_and_is_not_recorded(tmp_path, data_root, clock):
+    """A `setup` fault of transport kind (the system's OAuth token endpoint briefly unreachable) is one failed call,
+    as a run charges it (#1363 O7): the holder records nothing and does not call its owner, so pre-flight does not
+    refuse the pass for it. Control: h9b, the configuration kind. #1363 O7, #1256 DP2"""
+    signer, told = A.MarkedSigner(), []
+    access = _access(tmp_path, data_root, signer, clock, on_fault=told.append)
+    first = access.token()
+    fault = TransportFault("identity's OAuth token endpoint is unreachable")
+    fault.origin = "setup"
+    fault.system = "identity"
+    access.report(fault)
+    assert (told, access.setup_faults, access.lost) == ([], {}, None)
+    assert access.token() == first
 
 
 def test_h11_a_shut_holder_raises_for_every_ask_and_asks_the_signer_nothing(tmp_path, data_root, clock):

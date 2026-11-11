@@ -560,6 +560,29 @@ def test_p3b_a_pass_with_no_proxy_address_is_refused_even_when_no_replayed_call_
     assert (bao.requests, tap.tokens, merged.seen) == ([], [], [])
 
 
+@pytest.mark.parametrize("sign_answer", [503, None], ids=["fails", "succeeds"])
+def test_p5c_a_pass_whose_reads_need_no_live_proxied_call_still_proves_it_can_sign(
+        tmp_path, monkeypatch, data_root, sign_answer):
+    """The source run called only unproxied systems and the oracle looks nothing up, so no read reaches the
+    proxy. Pre-flight is the gate before siblings launch, so it signs once up front all the same: a sign that
+    fails refuses the pass naming the token, before any oracle turn; one that succeeds is the only sign.
+    Control: the succeeding sign. Review of #1468 (finding 3)."""
+    oracle = S.oracle(then=S.submit(S.default_calls()[0].payload, S.EMPTY_CLAIM))
+    run, outcome, bao, tap, merged, _wt = _preflight(
+        tmp_path, monkeypatch, data_root, source="unproxied", oracle=oracle,
+        sign_script=[(0, sign_answer)])
+    assert outcome is not None, run.message
+    assert _sign_requests(bao) == 1, "pre-flight did not sign up front, or signed again"
+    assert (tap.tokens, merged.seen) == ([], []), "nothing was to be read through the proxy"
+    if sign_answer is None:
+        assert outcome["outcome"] != "refused", ("positive control: a pass that can sign is not refused", outcome)
+        return
+    assert outcome["outcome"] == "refused", ("a pass that cannot sign its token was accepted", outcome)
+    assert "cannot be signed" in outcome["reason"], outcome["reason"]
+    assert outcome["unservable_worlds"] == []
+    assert oracle.answered == 0, "calibration started though the token could not be signed"
+
+
 def test_p3c_a_tenant_with_no_recorded_sign_login_is_refused_before_any_contact(
         tmp_path, monkeypatch, data_root):
     """The live generation records no sign login: `refused` naming the sign login, before any OpenBao

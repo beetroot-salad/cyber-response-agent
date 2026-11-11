@@ -88,7 +88,7 @@ def test_a_deadline_cut_while_waiting_on_the_system_is_still_the_systems(tmp_pat
             A.proxy_for(r.t, r.store, proxy_overhead_sec=1) as (url, _tap):
         answer = W.call(url, r.tok(), f"{base}{API}/users/x", timeout_sec=1)
 
-    assert (answer.status, answer.fault, answer.from_system) == (200, "TransportFault", True)
+    assert (answer.status, answer.fault, answer.origin) == (200, "TransportFault", "system")
 
 
 def _stalled_record(*, reader_fault: bool):

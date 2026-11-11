@@ -100,8 +100,10 @@ class RequestAccess:
     requests make one sign. A failed sign is latched (D8, Principle 3): the asker gets the fault,
     and every later ask raises a fresh fault with the same detail and signs nothing. The client
     tells it of each `setup` or `access` fault it raises (`report`); the first `access` fault
-    marks access **lost** and latches it the same way, and a `setup` fault is recorded against its
-    system. Its owner is called, outside the lock, with each of those faults (`on_fault`) and may
+    marks access **lost** and latches it the same way, and a `setup` fault of configuration kind is
+    recorded against its system. A `setup` fault of transport kind is one failed call, as a run
+    treats it (#1363 O7, #1256 DP2: only what cannot change marks a system), and is not recorded.
+    The holder says whether access was lost because a sign failed (`sign_failed`). Its owner is called, outside the lock, with each of those faults (`on_fault`) and may
     `shut` it. Signing is the injected `mint(expires_at)`, which raises its fault; the clock is the
     holder's own. The token is a bearer value, out of every repr."""
 
@@ -116,6 +118,7 @@ class RequestAccess:
         self._held: _Held | None = None
         #: Why access is lost, once it is: the first `access` fault's detail, or why a sign failed.
         self._lost: str | None = None
+        self._sign_failed = False
         self._shut = False
         self._setup: dict[str, str] = {}
 
@@ -143,6 +146,7 @@ class RequestAccess:
                 return self._held.token
             except AdapterFault as fault:
                 self._held, self._lost, failed = None, fault.detail, fault
+                self._sign_failed = True
         # Reached only by a failed sign: its owner learns of it, then the asker.
         failed.origin = failed.origin or ORIGIN_ACCESS
         self._tell(failed)
@@ -150,8 +154,11 @@ class RequestAccess:
 
     def report(self, fault: AdapterFault) -> None:
         """The client's report of a fault it raised. Only a `setup` or `access` one concerns the
-        holder; any other, and a fault with no origin, is ignored."""
+        holder; any other, a fault with no origin, and a `setup` fault of transport kind are
+        ignored."""
         if fault.origin not in (ORIGIN_SETUP, ORIGIN_ACCESS):
+            return
+        if fault.origin == ORIGIN_SETUP and isinstance(fault, TransportFault):
             return
         with self._lock:
             if fault.origin == ORIGIN_ACCESS:
@@ -174,8 +181,15 @@ class RequestAccess:
             return self._lost
 
     @property
+    def sign_failed(self) -> bool:
+        """Whether access was lost because a sign failed, not because the proxy refused us."""
+        with self._lock:
+            return self._sign_failed
+
+    @property
     def setup_faults(self) -> dict[str, str]:
-        """The `setup` faults reported so far, by the system each names (detail of the first)."""
+        """The configuration-kind `setup` faults reported so far, by the system each names
+        (detail of the first)."""
         with self._lock:
             return dict(self._setup)
 

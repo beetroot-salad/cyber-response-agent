@@ -527,7 +527,7 @@ def test_o6_a_deadline_cut_after_the_system_answered_keeps_its_status_and_blames
         answer = W.call(url, r.tok(), f"{base}{API}/users/x", timeout_sec=1)
 
     assert (answer.status, answer.fault, answer.body) == (200, "TransportFault", "")
-    assert (answer.from_system, answer.system_side) == (True, False)
+    assert (answer.origin, answer.system_side) == ("system", False)
 
 
 def _endless_8_mib(conn: socket.socket) -> None:

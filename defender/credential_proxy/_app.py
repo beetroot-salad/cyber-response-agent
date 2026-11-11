@@ -509,7 +509,7 @@ def _forwarded(headers: Mapping[str, str], auth: Auth) -> dict[str, str]:
             continue
         if lowered in _CREDENTIAL_HEADERS or lowered in own:
             raise Refused(CONFIG, f"the request carries its own {name} header; the proxy "
-                                  "applies the declared credential", origin=ORIGIN_ACCESS)
+                                  "applies the declared credential", origin=ORIGIN_REQUEST)
         sent[name] = value
     return sent
 

@@ -831,6 +831,26 @@ def test_1363_o7_the_mark_belongs_to_the_serving_not_to_the_oracle(tmp_path):
     assert _our_fault(stopped.value) is True, "an ordinary first attempt hid the ours-failure of the second"
 
 
+def test_1363_o7_the_cause_a_give_up_names_is_its_own_servings_not_an_earlier_one(tmp_path):
+    """A first serving meets our failure on one lookup and is then served; a second serving meets our failure on
+    another lookup and gives up: its cause is the second lookup's detail, never the first serving's. Control: the
+    first serving did fail our way. Review of #1468 (finding 7)."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", BOB, BOB_ROWS)
+    est.fail("edr", "query", HOST_DB1, fault="TransportFault", detail="FIRST-SERVING", origin="setup")
+    est.fail("edr", "query", S.query_params("host:db-2"), fault="TransportFault", detail="SECOND-SERVING",
+             origin="setup")
+    o = S.oracle(_explore("host:db-1"), S.submit(BOB_ROWS), _explore("host:db-2"), then=S.text_only("no"))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=2)
+
+    run = _drive(tmp_path, est, reg, [_q("user:bob"), _q("user:carol"), S.done_turn()])
+
+    assert run.rows_for("idp", "user:bob")[0]["exit_code"] == 0, "positive control: the first call was served after the retry"
+    assert run.raised is not None, "the second call was served"
+    assert _our_fault(run.raised) is True, run.raised
+    assert run.raised.our_cause == ("edr", "SECOND-SERVING"), run.raised.our_cause
+
+
 @pytest.mark.parametrize("origin", OUR_ORIGINS)
 def test_1363_o7_a_sibling_whose_oracle_gave_up_after_our_failures_exits_proxy_access_with_no_world_record(
         tmp_path, monkeypatch, caplog, origin):

@@ -467,7 +467,7 @@ def test_o2_a_write_accepted_then_dropped_keeps_its_status_and_no_body(tmp_path,
         answer = W.call(url, r.tok({("identity", "rw")}), f"{base}{T.BASE_PATH}/tickets", method="POST")
 
     assert (answer.status, answer.fault, answer.body) == (201, "TransportFault", "")
-    assert answer.from_system is True
+    assert answer.origin == "system"
 
 
 @pytest.mark.parametrize(("pieces", "text"), [
@@ -592,8 +592,7 @@ def test_1363_o4_the_client_gives_each_answer_the_origin_the_design_rule_says(fi
 
 
 def test_1363_o4_the_client_stores_the_origin_on_the_answer_it_returns():
-    """`proxy_exchange` returns the answer with the origin it assigned; `from_system` is that origin
-    being `system`. #1363 B2."""
+    """`proxy_exchange` returns the answer with the origin it assigned. #1363 B2."""
     from defender.kit.proxy_client import proxy_exchange
 
     for final, origin in (({"status": 404, "fault": "UpstreamFault"}, "system"),
@@ -602,7 +601,6 @@ def test_1363_o4_the_client_stores_the_origin_on_the_answer_it_returns():
         with W.fake_proxy(W.fmt().encode_final(W.final_record(**final)), ended=True) as url:
             answer = proxy_exchange(_Ctx(url), system="identity", method="GET", url=f"{url}/x", body=None, timeout_sec=5)
         assert getattr(answer, "origin", None) == origin, final
-        assert answer.from_system is (origin == "system")
 
 
 def test_1363_b2_an_old_proxys_final_record_without_origin_is_refused_as_access():

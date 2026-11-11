@@ -18,7 +18,7 @@ import uuid
 
 from collections.abc import Callable, Mapping
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pathlib import Path
 
@@ -270,10 +270,10 @@ class QueryDoor:
     limiter: RateLimiter
     store: OracleStore
     context: Callable[[], Any]
-    #: How many lookups failed on our side (a `setup` or `access` fault, #1363 O8), and the first one's
-    #: system and detail: read by the serving that asked, to say whether an attempt failed our way.
-    ours_count: int = 0
-    ours_first: tuple[str, str] | None = None
+    #: Each lookup that failed on our side (a `setup` or `access` fault, #1363 O8), as its system
+    #: and detail, in order: a serving reads the entries added since it began, so it names its own
+    #: cause, never one an earlier serving met.
+    ours: list[tuple[str, str]] = field(default_factory=list)
 
     def run(self, actor: str, system: Any, verb: Any, params: Any, *,
             waits: LimiterWaits) -> Any:
@@ -329,9 +329,7 @@ class QueryDoor:
         O8) fails the attempt as the oracle's own machinery does (M03=A) and tells the oracle nothing
         of its cause; any other is the tenant's answer, shown to the oracle."""
         if exc.origin in (ORIGIN_SETUP, ORIGIN_ACCESS):
-            self.ours_count += 1
-            if self.ours_first is None:
-                self.ours_first = (system, exc.detail)
+            self.ours.append((system, exc.detail))
             return _AttemptFailed(f"run_query {system}.{verb} could not be made (a failure on our side)")
         return Refused(f"run_query {system}.{verb} failed at the tenant: "
                        f"{type(exc).__name__}: {exc}")

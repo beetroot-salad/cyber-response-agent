@@ -26,9 +26,8 @@ from contextlib import AbstractContextManager
 from typing import Any, NamedTuple
 
 import time
-from datetime import UTC, datetime
 
-from defender.credential_proxy import mint_request_token, signing_access
+from defender.credential_proxy import request_access, signing_access
 from defender.kit.access import RequestAccess
 from defender.kit.faults import AdapterFault, ConfigFault
 from defender.records import formats
@@ -317,33 +316,23 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any,
 
 def _preflight_access(source: Run, tenant: RunTenant, reads: Sequence[str], *, signer: Any,  # noqa: PLR0913 — the pass's identity plus the operator's seams
                       proxy_url: str | None, issuer_transport: Any, directory: Any,
-                      clock: Callable[[], float], on_fault: Callable[[AdapterFault], None],
-                      sign_failures: list[AdapterFault]) -> RequestAccess | None:
-    """The pass's one access holder (#1363 O1): the read token over `reads`, the run's read grant,
-    signed in this process as a run signs it, on demand, with the source run as its investigation;
-    `None` when the grant is empty. A configuration that cannot sign (no proxy address, no sign
-    login recorded) raises before anything is contacted. With no `signer` injected, the tenant's
-    own (`request_signer`) over the episode's tenant records `directory`. A sign that fails is
-    noted in `sign_failures`, so the refusal can say the token was the failure. Curators and the
-    author are handed none."""
+                      clock: Callable[[], float],
+                      on_fault: Callable[[AdapterFault], None]) -> RequestAccess | None:
+    """The pass's one access holder (#1363 O1), built as a run builds its own
+    (`request_access`): the read token over `reads`, the run's read grant, with the source run as
+    its investigation; `None` when the grant is empty. A configuration that cannot sign (no proxy
+    address, no sign login recorded) raises before anything is contacted. With no `signer`
+    injected, the tenant's own (`request_signer`) over the episode's tenant records `directory`.
+    Curators and the author are handed none."""
     if not reads:
         return None
     if directory is None:
         raise ConfigFault("no tenant records were handed to pre-flight to sign its read token with")
     signer, address = signing_access(tenant.tenant_id, directory=directory, signer=signer,
                                      proxy_url=proxy_url, transport=issuer_transport)
-    grant = {(system, "r") for system in reads}
-
-    def mint(expires_at: float) -> str:
-        try:
-            return mint_request_token(
-                signer, tenant_id=str(tenant.tenant_id), investigation=source.run_dir.name,
-                grant=grant, expires_at=datetime.fromtimestamp(expires_at, UTC))
-        except AdapterFault as failed:
-            sign_failures.append(failed)
-            raise
-
-    return RequestAccess(address, mint, clock=clock, on_fault=on_fault)
+    return request_access(signer, address, tenant_id=str(tenant.tenant_id),
+                          investigation=source.run_dir.name, reads=reads, clock=clock,
+                          on_fault=on_fault)
 
 
 def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
@@ -433,12 +422,16 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
     # access is lost or a setup fault is known (#1363 O5).
     stop = threading.Event()
     clock = knobs_clock
-    sign_failures: list[AdapterFault] = []
     try:
         access = _preflight_access(
             source, tenant, system_status.read_grant(tenant, down), signer=signer,
             proxy_url=proxy_url, issuer_transport=issuer_transport, directory=directory,
-            clock=clock, on_fault=lambda _fault: stop.set(), sign_failures=sign_failures)
+            clock=clock, on_fault=lambda _fault: stop.set())
+        # Pre-flight is the gate that proves the environment before any sibling launches, so it
+        # signs once now rather than at first need: a pass whose reads all come from the
+        # recording would otherwise accept without ever signing.
+        if access is not None:
+            access.token()
     except AdapterFault as unsigned:
         return record(REFUSED, f"the read token for the credential proxy cannot be signed: "
                                f"{unsigned.detail}", environment=CAUSE_SIGN)
@@ -450,7 +443,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
             return None
         with access.deciding():
             if access.lost is not None:
-                if sign_failures:
+                if access.sign_failed:
                     return record(
                         REFUSED, "the read token for the credential proxy cannot be signed: "
                                  f"{access.lost}", environment=CAUSE_SIGN)

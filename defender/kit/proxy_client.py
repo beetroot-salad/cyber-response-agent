@@ -154,11 +154,6 @@ class ProxyAnswer:
     #: system-side mark is `system`; otherwise the proxy's label, and `access` when it gave none.
     origin: str = ORIGIN_ACCESS
 
-    @property
-    def from_system(self) -> bool:
-        """The system's own answer or failure (`origin` is `system`)."""
-        return self.origin == ORIGIN_SYSTEM
-
 
 def origin_of(final: FinalRecord) -> str:
     """The origin of the answer `final` records."""

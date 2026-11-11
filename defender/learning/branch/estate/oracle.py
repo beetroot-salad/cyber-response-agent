@@ -486,7 +486,7 @@ class Oracle:
             raise OracleUnservable(stop.reason, stop.call, stop.detail,
                                    our_fault=stop.our_fault, our_cause=stop.our_cause)
         failures = 0
-        ours_before = self.door.ours_count
+        ours_before = len(self.door.ours)
         first = True
         while True:
             try:
@@ -574,8 +574,9 @@ class Oracle:
 
     def _ours(self, before: int) -> dict[str, Any]:
         """The give-up's mark: whether a lookup of this serving (since `before`) failed our way."""
-        if self.door.ours_count > before:
-            return {"our_fault": True, "our_cause": self.door.ours_first}
+        ours = self.door.ours[before:]
+        if ours:
+            return {"our_fault": True, "our_cause": ours[0]}
         return {}
 
     def _give_up(self, stop: OracleUnservable) -> None:
