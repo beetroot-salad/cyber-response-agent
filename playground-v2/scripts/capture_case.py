@@ -221,7 +221,7 @@ def capture(freeze_dir: Path, *, T: datetime, scenarios: list[str], repository: 
         doc = {"T": frozen_copy.stamp(T),
                "elastic": {"repository": repository, "snapshot": snap["snapshot"],
                            "uuid": snap["uuid"], "indices": counts,
-                           "data_streams": list(held["data_streams"])},
+                           "data_streams": dict(held["data_streams"])},
                "patterns": list(patterns), "parts": parts, "captured_by": captured_by}
         _publish(freeze_dir, parts_dir / freeze_id, staging, doc)
     except BaseException:

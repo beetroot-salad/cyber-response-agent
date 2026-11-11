@@ -126,8 +126,10 @@ def check_freeze(freeze: Any, name: str) -> None:
     ok = (isinstance(elastic, dict) and isinstance(freeze.get("parts"), dict)
           and all(isinstance(elastic.get(k), str) and elastic[k] for k in ("repository", "snapshot", "uuid"))
           and isinstance(elastic.get("indices"), dict) and elastic["indices"]
-          and isinstance(elastic.get("data_streams"), list)
-          and all(isinstance(s, str) and s for s in elastic["data_streams"])
+          and isinstance(elastic.get("data_streams"), dict)
+          and all(isinstance(s, str) and s and isinstance(m, list) and m
+                  and all(isinstance(i, str) and i in elastic["indices"] for i in m)
+                  for s, m in elastic["data_streams"].items())
           and isinstance(freeze.get("patterns"), list) and freeze["patterns"]
           and all(isinstance(p, str) and p for p in freeze["patterns"]))
     if ok:
@@ -232,6 +234,15 @@ def find_alert(es: Any, patterns: list[str], uuid: str) -> dict | None:
     if len(hits) > 1:
         raise CopyFault(f"alert {uuid} is in {len(hits)} documents of the copy")
     return hits[0]["_source"] if hits else None
+
+
+def stream_members(listing: Any) -> dict[str, list[str]]:
+    """`{data stream: sorted members}` from a `GET /_data_stream` answer: each stream's backing
+    indices and its failure-store indices (r6.4.6). The one reader of stream membership for the
+    freeze and the reuse check."""
+    return {ds["name"]: sorted(i["index_name"] for i in [*ds.get("indices", []),
+                                                         *(ds.get("failure_store") or {}).get("indices", [])])
+            for ds in (listing or {}).get("data_streams", [])}
 
 
 def streams_of(es: Any) -> dict[str, str]:
@@ -541,24 +552,22 @@ def _build(es: Any, clock: Any, freeze: dict, overlay: dict | None) -> tuple[dic
 
 def _holds_the_freeze(es: Any, freeze: dict, location: str) -> bool:
     """On a node that came up: the snapshot is the freeze's (refuses otherwise), and the node holds
-    exactly what the snapshot holds (r6.4.6): every freeze index, open; every member of each freeze
-    stream (its backing and failure-store indices) a freeze index; and no other index the patterns or
-    a scratch name match. The node's own system indices are outside by construction."""
+    exactly what the snapshot holds (r6.4.6): every freeze index, open; each freeze stream with
+    exactly its recorded members (backing and failure-store indices); and no other index the
+    patterns or a scratch name match. The node's own system indices are outside by construction."""
     register_repository(es, freeze, location)
     elastic = freeze["elastic"]
     names = set(elastic["indices"])
     held = held_indices(es)
     if not names <= set(held) or any(held[n]["status"] == "close" for n in names):
         return False
-    streams = list(elastic["data_streams"])
-    if streams:
+    recorded = {s: sorted(m) for s, m in elastic["data_streams"].items()}
+    if recorded:
         try:
-            found = es.es_request("GET", f"/_data_stream/{','.join(streams)}?expand_wildcards=all") or {}
+            found = es.es_request("GET", f"/_data_stream/{','.join(sorted(recorded))}?expand_wildcards=all")
         except Exception:  # noqa: BLE001 — a freeze stream the node lacks: not this copy
             return False
-        members = {i["index_name"] for ds in found.get("data_streams", [])
-                   for i in [*ds.get("indices", []), *(ds.get("failure_store") or {}).get("indices", [])]}
-        if {ds.get("name") for ds in found.get("data_streams", [])} != set(streams) or not members <= names:
+        if stream_members(found) != recorded:
             return False
     globs = [*freeze["patterns"], SCRATCH + "*"]
     return not any(n not in names and any(fnmatch.fnmatchcase(n, g) for g in globs) for n in held)

@@ -668,7 +668,7 @@ class LabOps:
     def verify_restore(self, repository: str, snapshot: str) -> dict[str, Any]:
         """Restore the snapshot into a scratch cluster on the lab server and return what the
         snapshot itself holds (r6.4.6): `{"indices": {name: top-level _count}, "data_streams":
-        [names]}`. Indices the scratch node makes for itself are not the snapshot's, so they never
+        {stream: [members]}}`, the streams the snapshot names with the members the restore gave them. Indices the scratch node makes for itself are not the snapshot's, so they never
         enter a freeze. The scratch cluster is removed either way."""
         name = "lab-verify-es"
         self._outer("rm", "-f", "-v", name, check=False)
@@ -699,10 +699,13 @@ class LabOps:
                  {"include_global_state": False})
             call("POST", "/_refresh?expand_wildcards=all")
             held = call("GET", f"/_snapshot/{repository}/{snapshot}")["snapshots"][0]
+            streams = sorted(held.get("data_streams") or [])
+            members = frozen_copy.stream_members(
+                call("GET", f"/_data_stream/{','.join(streams)}?expand_wildcards=all")) if streams else {}
             # Top-level documents (`_count`), the count every later check compares: `docs.count`
             # also counts the hidden documents of nested fields (r6.4.4).
             return {"indices": {n: int(call("GET", f"/{n}/_count")["count"]) for n in sorted(held["indices"])},
-                    "data_streams": sorted(held.get("data_streams") or [])}
+                    "data_streams": {s: members.get(s, []) for s in streams}}
         finally:
             self._outer("rm", "-f", "-v", name, check=False)
 
