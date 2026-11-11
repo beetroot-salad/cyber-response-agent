@@ -140,3 +140,45 @@ def test_o2_a_store_that_cannot_be_read_fails_the_build_instead_of_an_empty_page
     with pytest.raises(Exception, match=r"(?i)connect|refused"), \
             blocking("postgresql://postgres:postgres@127.0.0.1:1/postgres") as store:  # a closed local port
         serialize_queues.stamped_view(paths, store=store)
+
+
+#: One hostile marker per string a person's or a model's text puts on the page; each is unique so a miss names its field.
+def _hostile(n: int) -> str:
+    return f"<u>m{n}</u>"
+
+
+def _escaped(n: int) -> str:
+    return f"&lt;u&gt;m{n}&lt;/u&gt;"
+
+
+def test_o2_hostile_text_in_every_rendered_string_field_is_escaped_on_the_page(migrated_database, data_root):  # noqa: F811
+    """Item ids of each channel, held ids, reasons: markup in any of them is escaped; a clean twin is untouched. (O2, E1)"""
+    from defender.learning.frontend import serialize_queues
+    from defender.presentation import lessons_page
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    dsn = migrated_database
+    paths = LoopPaths.for_tenant(set_up_tenant(data_root, BLUE))
+    register_tenant(dsn, BLUE)
+    fields = {name: _hostile(n) for n, name in enumerate(
+        ["finding id", "held id", "dead id", "in-batch id", "questioner id", "request run", "held reason",
+         "dead reason", "waiting id"], start=1)}
+    with blocking(dsn) as store:
+        store.publish_findings(BLUE, "run-1", [finding(fields[k]) for k in
+                                               ("finding id", "held id", "dead id", "in-batch id", "waiting id")],
+                               kind="finding")
+        store.publish_findings(BLUE, "run-1", [world_finding(fields["questioner id"])], kind="questioner_finding")
+        store.enqueue_request(BLUE, fields["request run"], "case-1", {"case": "case-1"})
+        claim = store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds=ONE)
+        outcomes = {("finding", fields["held id"]): _outcome("held", fields["held reason"]),
+                    ("finding", fields["dead id"]): _outcome("dead", fields["dead reason"])}
+        for key in (fields["finding id"], fields["in-batch id"], fields["waiting id"]):
+            outcomes[("finding", key)] = _outcome("waiting")
+        store.in_review(claim, 7, outcomes)
+        view = serialize_queues.stamped_view(paths, store=store)
+
+    page = lessons_page.render_queues(view).split("const DATA", 1)[0]
+    for name, raw in fields.items():
+        n = int(raw.removeprefix("<u>m").removesuffix("</u>"))
+        assert raw not in page, f"the {name} reached the page unescaped"
+        assert _escaped(n) in page, f"the {name} is not on the page (control)"
