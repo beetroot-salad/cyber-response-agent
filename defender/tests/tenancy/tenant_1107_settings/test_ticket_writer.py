@@ -231,16 +231,12 @@ def _with_report(run_dir: Path) -> None:
 
 def _directory_with_twin(root: Path, tenant: str) -> tuple[Any, Any]:
     """`(directory, twin)`: the in-process directory `with_publish` would build for `tenant` (active, forge wiring,
-    mapping and records derived from its planted settings), with its memory twin kept so a test can write records
-    through the twin's public seeder (`add_records`) while a run is under way. Seeded as `tenant_directory` seeds it,
-    including the sign generation run start needs for the proxied elastic (#1391 P1/D12)."""
-    from defender.tenancy import TenantDirectory
-    from defender.tests.support.shared._locations_1210 import location_path
-    from defender.tests.support.tenancy import _active1214
-    from defender.tests.support.tenancy._proxied1391 import sign_generation
+    mapping and records derived from its planted settings, the sign generation run start needs for the proxied elastic,
+    #1391 P1/D12), with its memory twin kept so a test can write records through the twin's public seeder while a run is
+    under way (`R.directory_with_twin`)."""
+    from defender.tests.support.tenancy import _systems1366 as R
 
-    twin = _active1214.active_repository(Path(location_path(root)), tenant, generations=[sign_generation(tenant)])
-    return TenantDirectory(lambda: twin), twin
+    return R.directory_with_twin(root, tenant)
 
 
 def test_o8_a_case_version_written_after_run_start_changes_nothing_the_comment_carries(tmp_path, monkeypatch):
@@ -248,7 +244,6 @@ def test_o8_a_case_version_written_after_run_start_changes_nothing_the_comment_c
     the body the comment carries: the run read the records at start and sends that body; control: the same version
     written BEFORE the run starts is the body sent. D-18; #1366 O6/H9 (a run's case record is pinned at start; the
     run records the version it used)."""
-    from defender.tests.support.tenancy import _active1214
     from defender.tests.support.tenancy import _systems1366 as R
 
     edited_body = "EDITED-BODY {disposition}"
@@ -258,7 +253,7 @@ def test_o8_a_case_version_written_after_run_start_changes_nothing_the_comment_c
         return R.value_of(R.RecordsSpec(sound.systems, R.CaseSpec(sound.case.system_id, edited_body, version=2)))
 
     def write(twin: Any, folder: Path) -> None:
-        _active1214.run_sync(_active1214._await(twin.add_records(S.PLAYGROUND_ID, newer_case(folder))))
+        R.write_twin_records(twin, S.PLAYGROUND_ID, newer_case(folder))
 
     control_shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="proxy-control")
     root, folder, alert = _world(tmp_path, name="control")

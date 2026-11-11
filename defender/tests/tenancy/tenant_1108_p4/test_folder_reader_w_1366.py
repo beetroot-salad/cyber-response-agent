@@ -9,10 +9,21 @@ refused and stores nothing): the quote rule and the line rules (moved from `tena
 
 NOT pinned (undecided by the design): a duplicate key, an `export K=v` line, a stray file or dot-folder beside the
 system folders at `import`.
+
+The import's reader (`import`) is the other door: it reads the PUBLISHED export's files. A part that is not UTF-8 text and
+a part larger than the export reader's limit both reach it (probed: publish accepts them) and are pinned below at the
+import (the set-system arm of the text rule is `test_system_records_1366.py::
+test_1366_p2_a_handoff_folder_whose_files_are_not_text_is_refused_and_stored_nowhere`). NOT pinned, returned to the code
+stage as a finding: the two doors judge size differently. `set-system` refuses a `config.env` over 1 MiB ("cannot be
+read (larger than 1048576 bytes)"); the import accepts the same file up to the export reader's 64 MiB, storing a record
+from it (probed with a 2 MiB `config.env`: imported, version 1). The design states no size limit for a record's parts,
+so no test pins either number.
 """
 from __future__ import annotations
 
+import contextlib
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +73,71 @@ def _refused_unchanged(op: R.Operator, system: str, rc: int, said: str, before: 
     assert "MemoryError" not in said, said
     assert str(op.tmp) not in said, f"the refusal names the host path: {said}"
     assert _numbers(op) == before, "a refused folder stored something"
+
+
+@contextlib.contextmanager
+def _imported_world(files: dict[str, Any], tmp_path, data_root, dsn, capsys, monkeypatch) -> Iterator[R.Operator]:
+    """A registered, NOT imported tenant whose published export holds `files` (the import's input), and its operator."""
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)
+    with published_tenant(tmp_path / "forge", root=data_root, files=files) as tenant:
+        register_tenant(dsn, tenant.tenant_id, data_root=tenant.data_root, records=None)
+        yield R.Operator(tenant.tenant_id, dsn, tmp_path / "op", capsys)
+
+
+def _import_refused_whole(op: R.Operator, dsn: str, part: str) -> None:
+    """The dry run and the import each refuse, naming `part`, with no traceback, and nothing is written: no version, no
+    mark, no case version, no secret touched."""
+    dry_rc, listed = op.import_(dry_run=True)
+    rc, said = op.import_()
+    assert dry_rc != 0, listed
+    assert rc != 0, said
+    for output in (listed, said):
+        assert R.lines_naming(output, part), f"the refusal does not name {part}: {output}"
+        assert "Traceback" not in output, output
+        assert "MemoryError" not in output, output
+    assert op.current() == {}
+    assert R.current_records(dsn, op.tid).case is None
+    assert not R.imported(dsn, op.tid)
+    assert op.kv.requests == []
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("part", [None, "settings/systems/cmdb/config.env", "settings/systems/cmdb/access.yaml",
+                                  "settings/case-record.yaml"],
+                         ids=["control-all-text", "config.env", "access.yaml", "case-record.yaml"])
+def test_the_import_refuses_a_part_that_is_not_utf8_text_naming_the_file_and_writes_nothing(
+        part, tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
+    """A `config.env`, `access.yaml` or `case-record.yaml` of the published export that is not UTF-8 text refuses the WHOLE
+    import (the dry run too, which names the file to fix): no version, no mark, no secret touched, no traceback, every
+    other folder unread into the database. The part is the fixture's own text plus ONE comment line of non-UTF-8 bytes, so
+    the only thing wrong with it is the encoding (a reader that decoded leniently would import it). Control: the same
+    export with every part text imports. (#1366 O9, P2: what cannot be used cannot be stored; the import's reader,
+    beside `set-system`'s.)"""
+    files = R.import_files()
+    if part is not None:
+        files[part] = files[part].encode("utf-8") + b"# \xff\xfe not text \x80\n"
+    with _imported_world(files, tmp_path, data_root, migrated_database, capsys, monkeypatch) as op:
+        if part is None:
+            assert op.import_(dry_run=True)[0] == 0
+            rc, said = op.import_()
+            assert rc == 0, said
+            assert set(op.current()) == R.FIXTURE_SYSTEMS
+            return
+        _import_refused_whole(op, migrated_database, part)
+
+
+@pytest.mark.postgres
+def test_the_import_refuses_an_oversized_part_naming_the_file_and_writes_nothing(
+        tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
+    """A `config.env` far larger than any settings file (80 MiB: past the export reader's limit, whatever settings limit the
+    code stage sets) refuses the WHOLE import, dry run included, naming the file: no `MemoryError`, no traceback, nothing
+    stored, no secret touched. The part is the fixture's own text plus one long comment, so size is the only fault.
+    (#1366 O9, P2; the import's reader, beside `set-system`'s oversized arm below.)"""
+    path = "settings/systems/cmdb/config.env"
+    files = R.import_files()
+    files[path] = files[path] + "# " + "x" * (80 << 20) + "\n"
+    with _imported_world(files, tmp_path, data_root, migrated_database, capsys, monkeypatch) as op:
+        _import_refused_whole(op, migrated_database, "systems/cmdb/config.env")
 
 
 @pytest.mark.postgres

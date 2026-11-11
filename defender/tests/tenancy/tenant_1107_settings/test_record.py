@@ -198,9 +198,10 @@ def _with_pattern(spec, pattern: str, version: int):
 
 
 def test_s7_nf4_every_resolve_reads_the_current_records(tmp_path, monkeypatch):
-    """A records write between two resolves is seen by the second (H9/O6: every run reads the tenant's CURRENT records;
-    nothing is cached across resolves or tenants). Restated from 'every resolve reads the folder fresh' (design R10/DC7:
-    the run reads records, not the folder; the folder-fresh arm is retired)."""
+    """A records write between two reads of ONE directory is seen by the second (H9/O6: every run reads the tenant's CURRENT
+    records; nothing is cached across resolves, runs or tenants). Restated from 'every resolve reads the folder fresh' (design
+    R10/DC7: the run reads records, not the folder; the folder-fresh arm is retired). Each arm writes to the directory
+    (the twin's public seeder) between two reads; no arm hands a different `records=` to a second call."""
     from defender.tests.support.tenancy import _systems1366 as R
 
     # Under this test's data root, the one `run.main` below reads its tenants from.
@@ -209,34 +210,45 @@ def test_s7_nf4_every_resolve_reads_the_current_records(tmp_path, monkeypatch):
     S.plant(root, fixture_uuid("tenant:other"), marker="nf4o")
     v1 = R.derive(S.settings_of(folder))
     v2 = _with_pattern(v1, "EDITED-[0-9]+", 2)
+    directory, twin = R.directory_with_twin(root, TID, records=v1)
 
-    # Resolved twice around a records write: nothing is cached.
-    first = _resolve(root, records=v1)
-    second = _resolve(root, records=v2)
-    direct = R.run_tenant_for(S.tenant_folder_of(root), dispatches_lead_zero=False, records=v2)
+    def read() -> object:
+        return directory.current_records(TID)
+
+    # Resolved twice around a records write to the one directory: nothing is cached.
+    first = _resolve(root, records=read())
+    R.write_twin_records(twin, TID, v2)
+    second = _resolve(root, records=read())
+    direct = R.run_tenant_for(S.tenant_folder_of(root), dispatches_lead_zero=False, records=read())
     assert first.systems["ticket"]["TICKET_KEY_PATTERN"] == "NF4-[0-9]+"
     assert second.systems["ticket"]["TICKET_KEY_PATTERN"] == "EDITED-[0-9]+"
     assert direct.systems["ticket"]["TICKET_KEY_PATTERN"] == "EDITED-[0-9]+"
-    # ...and across tenants: resolving another tenant in between memoizes nothing.
-    assert _resolve(root, fixture_uuid("tenant:other")).systems["ticket"]["TICKET_KEY_PATTERN"] == "NF4O-[0-9]+"
-    assert _resolve(root, records=v2).systems["ticket"]["TICKET_KEY_PATTERN"] == "EDITED-[0-9]+"
+    # ...and across tenants: resolving another tenant (its own directory) in between memoizes nothing.
+    other_dir, _other_twin = R.directory_with_twin(root, fixture_uuid("tenant:other"))
+    assert _resolve(root, fixture_uuid("tenant:other"),
+                    records=other_dir.current_records(fixture_uuid("tenant:other"))).systems["ticket"][
+        "TICKET_KEY_PATTERN"] == "NF4O-[0-9]+"
+    assert _resolve(root, records=read()).systems["ticket"]["TICKET_KEY_PATTERN"] == "EDITED-[0-9]+"
 
-    # A second run.main in one process reflects a records write made between the two. (run.main takes
+    # A second run.main in one process, over ONE directory, reflects a records write made between the two. (run.main takes
     # its runs base from the data root, whose `playground` tenant is created on request.)
     ensure_d9_tenant()
     alert = S.plant_alert(tmp_path / "alert")
+    run_dir, run_twin = R.directory_with_twin(root, TID, records=_with_pattern(v1, "RUN-A-[0-9]+", 2))
     seen: list[str] = []
     for n, (run_id, pattern) in enumerate((("r-nf4-a", "RUN-A-[0-9]+"), ("r-nf4-b", "RUN-B-[0-9]+")), start=2):
+        if n == 3:  # the operator's write, between the two runs
+            R.write_twin_records(run_twin, TID, _with_pattern(v1, pattern, n))
         argv = S.run_argv(alert, root)
         rec_ = S.RunRecorder(tmp_path / "runs" / run_id)
-        rc, refused = S.drive_run(argv, rec_, visualize=rec_.visualize,
-                                  directory=directory_for_argv(argv, records=_with_pattern(v1, pattern, n)))
+        rc, refused = S.drive_run(argv, rec_, visualize=rec_.visualize, directory=run_dir)
         assert refused is None, (rc, refused)
         assert rc == 0, (rc, refused)
         seen.append(rec_.lifecycle_calls[0]["tenant"].systems["ticket"]["TICKET_KEY_PATTERN"])
     assert seen == ["RUN-A-[0-9]+", "RUN-B-[0-9]+"], seen
 
-    # Each replay drive reflects an edit made between them.
+    # Each replay drive reflects an edit made between them: the run's tenant is built from the records its directory
+    # holds at that drive (read from the directory as `run.main` reads it at start).
     from defender.tests.e2e import _replay_harness as RH
 
     patterns: list[str] = []
@@ -245,11 +257,12 @@ def test_s7_nf4_every_resolve_reads_the_current_records(tmp_path, monkeypatch):
         patterns.append(S.record_on(ctx).systems["ticket"]["TICKET_KEY_PATTERN"])
         return {"host": host}
 
+    drive_dir, drive_twin = R.directory_with_twin(root, TID, records=v1)
     for n, pattern in enumerate(("DRIVE-A-[0-9]+", "DRIVE-B-[0-9]+")):
-        S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", pattern)
-        run_dir = RH.materialize(tmp_path / f"drive-{n}", RH.GOLDEN_AB3, run_id=f"nf4-drive-{n}")
+        R.write_twin_records(drive_twin, TID, _with_pattern(v1, pattern, n + 2))
+        run_dir_ = RH.materialize(tmp_path / f"drive-{n}", RH.GOLDEN_AB3, run_id=f"nf4-drive-{n}")
         RH.drive(
-            run_dir, run_id=f"nf4-drive-{n}",
+            run_dir_, run_id=f"nf4-drive-{n}",
             main=RH.ReplayFn([
                 RH.Turn(tool_calls=[("gather", {
                     "lead_id": "l-001", "system": "cmdb", "goal": "measure cmdb",
@@ -262,7 +275,7 @@ def test_s7_nf4_every_resolve_reads_the_current_records(tmp_path, monkeypatch):
                 RH.Turn(text="Summary: measured the lead."),
             ]),
             verbs=RH.FakeVerbs({"cmdb": {"get-host": get_host}}),
-            tenant=S.tenant_folder_of(root))
+            tenant=S.tenant_folder_of(root), records=drive_dir.current_records(TID))
     assert patterns == ["DRIVE-A-[0-9]+", "DRIVE-B-[0-9]+"], patterns
 
 
@@ -380,17 +393,22 @@ def test_s60_config_env_fs_confinement(tmp_path):
 
 
 def test_a_config_fault_observed_at_resolve_fixed_by_a_records_write_mid_run(tmp_path):
-    """A run whose record holds unusable settings keeps them: an operator's fix (a new version) mid-run does not reach
-    the run; only a fresh resolve reads it (O6: settings are frozen at start; H9: the next run reads the current record).
-    (Was 'fixed on disk': the run reads records, not the folder, DC7.)"""
+    """A run whose record holds unusable settings keeps them: an operator's fix (a new version, WRITTEN to the directory the
+    run read its records from) mid-run does not reach the run; only a fresh read of that directory sees it (O6: settings
+    are frozen at start; H9: the next run reads the current record). (Was 'fixed on disk': the run reads records, not the
+    folder, DC7.) Limit: the run's context holds a records VALUE and no directory, so no implementation could observe the
+    write at `load_config`; what this pins is that the value the run holds is what it was built from and that a fresh read of
+    the written directory is the fix. The arm that can fail on a run re-reading its directory is the `run.main` one in
+    `test_s7_nf4_every_resolve_reads_the_current_records` (one directory, two runs, a write between)."""
     from defender.tests.support.tenancy import _systems1366 as R
 
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="s063")
     fixed = R.derive(S.settings_of(folder))
-    broken = R.edited(fixed, "cmdb", settings={})
+    directory, twin = R.directory_with_twin(root, TID, records=R.edited(fixed, "cmdb", settings={}))
 
-    rec = _resolve(root, records=broken)
+    # the run starts: its tenant is built from what the directory holds
+    rec = _resolve(root, records=directory.current_records(TID))
     SystemConfig = S.record_type("SystemConfig")
     ConfigFault = S.config_fault()
     _settings_empty(rec, "cmdb")
@@ -398,12 +416,16 @@ def test_a_config_fault_observed_at_resolve_fixed_by_a_records_write_mid_run(tmp
     with pytest.raises(ConfigFault, match="CMDB_TIMEOUT_SEC"):
         transport.load_config(ctx, "cmdb", "CMDB")
 
-    # the operator writes the fix (version 2) mid-run: the run's record is what it was resolved with
+    # the operator writes the fix (version 2) mid-run, into the directory the run read: the premise (it is the current record)
+    R.write_twin_records(twin, TID, R.edited(fixed, "cmdb", version=2))
+    now = directory.current_records(TID).systems["cmdb"]
+    assert (now.version, dict(now.settings)) == (2, dict(fixed.systems["cmdb"].settings)), now
+    # ...and the run, whose record is what it was resolved with, still has the fault
     _settings_empty(rec, "cmdb")
     with pytest.raises(ConfigFault, match="CMDB_TIMEOUT_SEC"):
         transport.load_config(ctx, "cmdb", "CMDB")
 
-    fresh = _resolve(root, records=R.edited(fixed, "cmdb", version=2))  # only a fresh resolve sees the fix
+    fresh = _resolve(root, records=directory.current_records(TID))  # only a fresh read of the directory sees the fix
     assert isinstance(fresh.systems["cmdb"], SystemConfig), fresh.systems["cmdb"]
     assert len(fresh.systems["cmdb"]) > 0
     assert transport.load_config(_ctx(fresh, tmp_path / "fresh"), "cmdb", "CMDB") == {

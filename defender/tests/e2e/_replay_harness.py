@@ -608,14 +608,17 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
         clock: Callable[[], Any] | None = None, roster: Any = None, systems: Any = None, wrap_model: Any = None,
-        agent: Path | None = None, review_state: dict | None = None) -> dict:
+        agent: Path | None = None, review_state: dict | None = None, records: Any = ...) -> dict:
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
     plumbing-free.
 
     `agent` runs the replay as a tenant whose agent half is that tree (a golden's own `agent/`),
-    published for real (`_default_tenant`); it cannot be combined with `tenant`."""
+    published for real (`_default_tenant`); it cannot be combined with `tenant`.
+
+    `records` are the tenant's records the run is built from (#1366 R10), as `_tenants1106.run_tenant(records=)`: a
+    `TenantRecords`/`RecordsSpec`, `None` (not imported), or omitted (derived from the export's planted settings)."""
     # `run_id` is a legacy label: the run's identity is its directory, which
     # materialize(run_id=<label>) names after the label's fixture UUID.
     state = run_state if run_state is not None else RunState(run_dir, run_dir.name)
@@ -624,7 +627,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         store_factory=store_factory, review_stages=review_stages, bounds=bounds,
         toolset=toolset, resume=resume, source_run=source_run, defender_dir=defender_dir, tenant=tenant,
         orient_shim=orient_shim, run_state=state, clock=clock, roster=roster, systems=systems,
-        wrap_model=wrap_model, agent=agent, review_state=review_state,
+        wrap_model=wrap_model, agent=agent, review_state=review_state, records=records,
     )
     return {**summary, "run_state": state}
 
@@ -635,7 +638,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
         clock: Callable[[], Any] | None = None, roster: Any = None, systems: Any = None, wrap_model: Any = None,
-        agent: Path | None = None, review_state: dict | None = None) -> dict:
+        agent: Path | None = None, review_state: dict | None = None, records: Any = ...) -> dict:
     """`drive`'s run (every seam as `drive` documents it), returning `run_investigation`'s own
     summary exactly as production's caller gets it. `run_state` is what the run is handed
     (`run_investigation(run_state=…)`), the caller keeping its reference; omitted, it is not
@@ -693,7 +696,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         roots = {"agent_root": export / "agent", "settings_root": export / "settings"}
     run_tenant = _tenants1106.run_tenant(
         tenant, defender_dir=tree, **roots,
-        dispatches_lead_zero=resume is None and verbs is not None,
+        dispatches_lead_zero=resume is None and verbs is not None, records=records,
     )
     seams["box"] = box if box is not None else production_unboxed_box(run_dir, tree, run_tenant)
     with override_allow_model_requests(False):

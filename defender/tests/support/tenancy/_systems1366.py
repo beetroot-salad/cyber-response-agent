@@ -335,6 +335,29 @@ def seed_twin_records(twin: Any, data_root: Path | str | None, tenant: str, reco
     run_sync(_await(twin.add_records(str(tenant), to_value(spec))))
 
 
+def directory_with_twin(data_root: Path | str, tenant: str, records: Any = DERIVED) -> tuple[Any, Any]:
+    """`(directory, twin)`: the in-process `TenantDirectory` a run is admitted from (the tenant active with its forge
+    wiring and the sign generation a proxied elastic needs, as `tenant_directory`) and the memory twin behind it,
+    seeded with `records`. A test that means 'the operator writes while the run is under way' hands the directory to
+    the run and writes through the twin (`write_twin_records`); what the run reads next is `directory.current_records`."""
+    from defender.tenancy import TenantDirectory
+    from defender.tests.support.shared._locations_1210 import location_path
+    from defender.tests.support.tenancy._active1214 import active_repository
+    from defender.tests.support.tenancy._proxied1391 import sign_generation
+
+    twin = active_repository(Path(location_path(data_root)), str(tenant), generations=[sign_generation(str(tenant))],
+                             records=records)
+    return TenantDirectory(lambda: twin), twin
+
+
+def write_twin_records(twin: Any, tenant: str, records: Any) -> None:
+    """The operator's next write, for a twin-backed run: `records` (a `RecordsSpec` or `TenantRecords`) become the tenant's
+    current records in the memory twin (its public seeder `add_records`, which replaces and stores unjudged)."""
+    from defender.tests.support.tenancy._active1214 import _await, run_sync
+
+    run_sync(_await(twin.add_records(str(tenant), value_of(records))))
+
+
 def seed_postgres_records(dsn: str, tenant: str, records: Any = DERIVED, data_root: Path | str | None = None) -> None:
     """Make `tenant` (a registered row) imported in Postgres with `records`, through the store's own import door
     (`RecordStore.import_tenant`) under an accept-all judge: first versions only (version and generation 1)."""
