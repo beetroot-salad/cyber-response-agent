@@ -84,6 +84,7 @@ import shlex
 import subprocess
 import tarfile
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 
 from _lab_fakes import InjectedStep
@@ -121,9 +122,13 @@ class RigDocker(FakeDocker):
     def __init__(self, *, journal: Any, clock: Any, cluster: Any = None, live_cluster: Any = None,
                  boot_requests: int = 0, fail: set | None = None, scratch_cluster: Callable | None = None,
                  on_service_stop: Callable[[], Any] | None = None,
-                 on_volume_rm: Callable[[], Any] | None = None) -> None:
+                 on_volume_rm: Callable[[], Any] | None = None, engine_skew: Any = None) -> None:
         super().__init__()
         self.journal, self.clock = journal, clock
+        # r6.4.6: the engine's host (the VPS) keeps its own time: the operator's clock plus this skew. Every `date`
+        # a command reads is recorded (`date_reads`: journal index, the instant it printed).
+        self.engine_skew = engine_skew if engine_skew is not None else timedelta(0)
+        self.date_reads: list[tuple[int, datetime]] = []
         self.cluster, self.live_cluster = cluster, live_cluster
         self.boot_requests, self.fail = boot_requests, set(fail or ())
         self.on_service_stop, self.on_volume_rm = on_service_stop, on_volume_rm
@@ -1080,6 +1085,15 @@ class RigDocker(FakeDocker):
         """`$(...)` run when its command runs (in a subshell of this one: the variables set so far are seen). A
         substitution whose command this shell cannot run stays in `unmodelled` (a gap) and yields a fixed word."""
         for key, inner in st["subs"].items():
+            if key in word and inner.startswith(_ARITH):
+                expr = re.sub(r"\$\{?(\w+)\}?|\b([A-Za-z_]\w*)\b",
+                              lambda m: str(int(st["vars"].get(m.group(1) or m.group(2), "0") or 0)), inner[len(_ARITH):])
+                if not re.fullmatch(r"[\d\s+\-*()]+", expr):
+                    self.unmodelled.append(f"$(({inner[len(_ARITH):]}))")
+                    word = word.replace(key, "0")
+                else:
+                    word = word.replace(key, str(int(eval(expr))))     # noqa: S307 - digits and + - * ( ) only
+                continue
             if key in word:
                 before = len(self.unmodelled)
                 _rc, o, _e = self._shell(c, inner, b"", {**env, **st["vars"]}, st["positional"])
@@ -1138,7 +1152,8 @@ class RigDocker(FakeDocker):
 
     def _simple(self, c: Container, words: list, redirects: list, stdin: bytes, env: dict, st: dict) -> int:
         def put_in(word: str) -> str:
-            word = _VARMARK.sub(lambda m: st["vars"].get(m.group(1), ""), word)
+            word = _VARMARK.sub(lambda m: str(len(st["vars"].get(m.group(1)[1:], ""))) if m.group(1).startswith("#")
+                                else st["vars"].get(m.group(1), ""), word)
             return self._substitute(c, word, env, st) if st["subs"] else word
         words = [put_in(w) for w in words]
         redirects = [(k, put_in(t)) for k, t in redirects]
@@ -1297,6 +1312,26 @@ class RigDocker(FakeDocker):
                     return "marker-write"
         return None
 
+    def _date(self, args: list[str], words: list[str]):
+        """`date [-u] [+FORMAT | -Iseconds]`: the engine host's clock (the rig clock's latest reading plus
+        `engine_skew`), in UTC. Any other option is not modelled."""
+        now = (self.clock.last + self.engine_skew).astimezone(UTC)
+        fmt = None
+        for a in args:
+            if a == "-u":
+                continue
+            if a.startswith("+"):
+                fmt = a[1:]
+            elif a in ("-Iseconds", "--iso-8601=seconds", "-Is"):
+                fmt = "%Y-%m-%dT%H:%M:%S+00:00"
+            else:
+                return self._unmodelled(words)
+        if fmt is None:
+            fmt = "%a %b %e %H:%M:%S UTC %Y"
+        self.date_reads.append((len(self.journal) - 1, now))
+        fmt = fmt.replace("%s", str(int(now.timestamp()))).replace("%N", f"{now.microsecond * 1000:09d}")
+        return 0, (now.strftime(fmt) + "\n").encode(), b""
+
     def _command(self, c: Container, words: list[str], stdin: bytes):
         if not words:
             return 0, b"", b""
@@ -1308,6 +1343,8 @@ class RigDocker(FakeDocker):
             return 0, ((fn(args[0].rstrip("/")) or ("/" if cmd == "dirname" else "")) + "\n").encode(), b""
         if cmd == "grep":
             return self._grep(c, words, args, stdin)
+        if cmd == "date":
+            return self._date(args, words)
         if cmd == "ps" and "ps" in c.extra:
             return 0, c.extra["ps"], b""
         if cmd == "dd":
@@ -1320,6 +1357,10 @@ class RigDocker(FakeDocker):
             args = args[1:] if negate else args
             if len(args) == 2 and args[0] in ("-f", "-e", "-d", "-s"):
                 ok = self._exists(c, args[1], args[0])
+                return (0 if ok != negate else 1), b"", b""
+            if len(args) == 3 and args[1] in ("-lt", "-le", "-gt", "-ge", "-eq", "-ne"):
+                a, b = int(args[0]), int(args[2])
+                ok = {"-lt": a < b, "-le": a <= b, "-gt": a > b, "-ge": a >= b, "-eq": a == b, "-ne": a != b}[args[1]]
                 return (0 if ok != negate else 1), b"", b""
             if len(args) == 3 and args[1] in ("=", "==", "!="):
                 ok = (args[0] == args[2]) == (args[1] != "!=")
@@ -1450,7 +1491,8 @@ def _groups(script: str):
     return "".join(out), groups
 
 
-_VARMARK = re.compile("\x01(\\w+)\x02")
+_VARMARK = re.compile("\x01(#?\\w+)\x02")
+_ARITH = "\x00arith:"
 
 
 def _premark(script: str, subs: dict) -> str:
@@ -1474,6 +1516,13 @@ def _premark(script: str, subs: dict) -> str:
             out.append(ch)
             i += 1
             continue
+        if script[i:i + 3] == "$((":      # $(( expr )): integer arithmetic over the shell's variables
+            j = script.index("))", i)
+            key = f"\x03{len(subs)}\x04"
+            subs[key] = _ARITH + script[i + 3:j]
+            out.append(key)
+            i = j + 2
+            continue
         if ch == "$" and script[i + 1:i + 2] == "(":
             depth, j = 0, i + 1
             while j < n:
@@ -1486,7 +1535,7 @@ def _premark(script: str, subs: dict) -> str:
             out.append(key)
             i = j + 1
             continue
-        m = re.match(r"\$(\w+)|\$\{(\w+)\}", script[i:])
+        m = re.match(r"\$(\w+)|\$\{(#?\w+)\}", script[i:])
         if m:
             out.append(f"\x01{m.group(1) or m.group(2)}\x02")
             i += m.end()

@@ -385,7 +385,8 @@ class FakeCluster(FakeES):
                  fail: Callable[[str, str, Any], bool] | None = None,
                  observe: Callable[[], Any] | None = None,
                  clock: "FakeClock | None" = None, latency: dict[str, timedelta] | None = None,
-                 up: bool = True, settings: dict[str, dict] | None = None) -> None:
+                 up: bool = True, settings: dict[str, dict] | None = None,
+                 failure_streams: dict[str, str] | None = None, own_streams: dict[str, str] | None = None) -> None:
         super().__init__(journal, fail=fail, route=self._dispatch)
         self.repo, self.snapshot, self.snapshot_uuid = repo, snapshot, snapshot_uuid
         self.content, self.stream_of, self.observe = content, dict(streams), observe
@@ -416,6 +417,26 @@ class FakeCluster(FakeES):
         self._uuids = 0
         self.uuid_served_step: int | None = None   # step number (FaultJournal.step_log) of the first snapshot read that served the UUID
         self._order = random.Random(1347)   # the order an unsorted search answers in
+        # r6.4.6: `{failure-store index: stream}` (listed by `GET /_data_stream` under the stream's `failure_store`,
+        # in the snapshot's `indices` and `data_streams`), and `{index: stream}` of the data streams the NODE makes
+        # for itself (live: `.ds-ilm-history-7-...`): in the cluster metadata and `GET /_data_stream`, never in
+        # `indices`, never in a snapshot.
+        self.failure_streams, self.own_streams = dict(failure_streams or {}), dict(own_streams or {})
+        # r6.4.6, point-in-time (observed live on Elasticsearch 9.3.3): the open ones (`{id: view}`), every id ever
+        # opened in order, the ids closed; `merge_on_refresh` makes a refresh reorder `_doc` (a merge); `on_search`
+        # is called with (cluster, index expression or None, body) at the start of every search; `lose_from_pit_pages`
+        # is a predicate on an index name: from the second page of a PIT walk on, that index's hits are missing
+        # (a failed shard: `_shards.failed` is 1, the response is otherwise normal).
+        self.open_pits: dict[str, dict] = {}
+        self.pits_opened: list[str] = []
+        self.pits_closed: list[str] = []
+        self.merge_on_refresh = False
+        self.merges = 0
+        self.auto_created: list[str] = []      # indices a `_reindex` created itself (dynamic mappings)
+        self.total_fields_limit = 1000
+        self.on_search: Callable[[FakeCluster, str | None, dict], None] | None = None
+        self.lose_from_pit_pages: Callable[[str], bool] | None = None
+        self._merger = random.Random(6046)
 
     def _took(self, kind: str) -> None:
         if self.clock is not None and kind in self.latency:
@@ -448,7 +469,8 @@ class FakeCluster(FakeES):
     def _index(self, name: str) -> dict:
         if name not in self.indices:
             self._uuids += 1
-            self.indices[name] = {"uuid": f"uuid-{name}-{self._uuids}", "docs": {}, "closed": False, "settings": {}}
+            self.indices[name] = {"uuid": f"uuid-{name}-{self._uuids}", "docs": {}, "closed": False, "settings": {},
+                                  "mappings": {}, "fields": set()}
         return self.indices[name]
 
     def _note(self, kind: str, target: str) -> None:
@@ -505,14 +527,23 @@ class FakeCluster(FakeES):
                          "docs.count": str(len(self.indices[n]["docs"]) + self.nested.get(n, 0))} for n in names]
             if path == "/_cluster/state/metadata":
                 return self._metadata()
+            if seg[-1] == "_pit":
+                return self._pit(method, seg, body)
+            if seg == ["_search"]:
+                return self._search(None, body or {})
             if path == "/_reindex":
                 return self._reindex(body)
             if seg[0] == "_ingest" and seg[1] == "pipeline":
                 return self._pipeline(method, seg[2] if len(seg) > 2 else None, body)
             if seg[-1] == "_settings" or (len(seg) >= 2 and seg[-2] == "_settings"):
                 return self._settings(method, seg, body)
-            if any(s in path for s in ("/_refresh", "/_flush", "/_security", "/_cluster/settings")):
+            if seg[-1] == "_refresh":
+                if self.merge_on_refresh:      # a refresh opens new segments and merges: `_doc` order changes
+                    self.merge(*(self._expand(seg[0], closed=True) if len(seg) > 1 else ()))
                 return ack
+            if any(s in path for s in ("/_flush", "/_security", "/_cluster/settings")):
+                return ack
+
             if method == "DELETE" and len(seg) == 1:
                 names = self._expand(seg[0], streams=False, closed=True)
                 self._note("delete-index", seg[0])
@@ -522,7 +553,9 @@ class FakeCluster(FakeES):
             if method == "PUT" and len(seg) == 1:
                 if seg[0] in self.indices:
                     raise RuntimeError(f"resource_already_exists_exception [{seg[0]}]")
-                self._index(seg[0])
+                if set(body or {}) - {"mappings", "settings"}:
+                    raise FakeGap(f"create index with {sorted(body)}")
+                self._index(seg[0])["mappings"] = copy.deepcopy((body or {}).get("mappings", {}))
                 return ack
             if len(seg) == 2 and seg[1] == "_close":
                 for n in self._expand(seg[0], streams=False):
@@ -554,7 +587,7 @@ class FakeCluster(FakeES):
             raise FakeGap(f"_cluster/state/metadata with query {self.query}")
         out = {n: {"state": "close" if ix["closed"] else "open", "settings": {"index": {"uuid": ix["uuid"]}}}
                for n, ix in self.indices.items()}
-        for n in self.SYSTEM_INDICES:
+        for n in (*self.SYSTEM_INDICES, *self.own_streams):
             out.setdefault(n, {"state": "open", "settings": {"index": {"uuid": f"uuid-{n}"}}})
         return {"metadata": {"indices": out}}
 
@@ -570,22 +603,35 @@ class FakeCluster(FakeES):
         return out
 
     def _data_streams(self, expr: str) -> Any:
-        """`GET /_data_stream/<expr>` as Elasticsearch answers (r6.4.5): a comma list of names and globs; each stream
-        lists its backing indices that exist, the write index last. Membership is `streams` (backing index ->
-        stream), never a parse of a name."""
+        """`GET /_data_stream/<expr>` as Elasticsearch answers (r6.4.5, r6.4.6): a comma list of names and globs; each
+        stream lists its backing indices that exist, the write index last, and its failure store
+        (`failure_store: {"enabled", "indices": [...]}`, live 9.3: `failure_store.indices` is where the `.fs-` indices
+        are). Membership is `streams` (backing index -> stream) and `failure_streams`, never a parse of a name. The
+        node's own streams (`own_streams`) are listed too."""
         found: dict[str, list[str]] = {}
         for name, stream in self.stream_of.items():
             if name in self.indices:
                 found.setdefault(stream, []).append(name)
+        for name, stream in self.own_streams.items():
+            found.setdefault(stream, []).append(name)
+        failed: dict[str, list[str]] = {}
+        for name, stream in self.failure_streams.items():
+            if name in self.indices and stream in found:
+                failed.setdefault(stream, []).append(name)
         out = []
         for part in expr.split(","):
             hits = [s for s in found if fnmatch.fnmatchcase(s, part)]
             if not hits and not any(c in part for c in "*?"):
                 raise RuntimeError(f"resource_not_found_exception: no such data stream [{part}]")
             out += [s for s in hits if s not in out]
+
+        def uuid(n: str) -> str:
+            return self.indices[n]["uuid"] if n in self.indices else f"uuid-{n}"
         return {"data_streams": [
             {"name": s, "timestamp_field": {"name": "@timestamp"}, "generation": len(found[s]), "status": "GREEN",
-             "indices": [{"index_name": n, "index_uuid": self.indices[n]["uuid"]} for n in found[s]]}
+             "indices": [{"index_name": n, "index_uuid": uuid(n)} for n in found[s]],
+             "failure_store": {"enabled": bool(failed.get(s)), "indices": [
+                 {"index_name": n, "index_uuid": uuid(n)} for n in failed.get(s, [])]}}
             for s in out]}
 
     def _snapshots(self, method: str, seg: list[str], body: Any) -> Any:
@@ -601,8 +647,12 @@ class FakeCluster(FakeES):
                 raise RuntimeError(f"snapshot_missing_exception [{repo}:{snap}]")
             if self.uuid_served_step is None:     # the only route that serves the UUID; the fake has no other
                 self.uuid_served_step = len(getattr(self.journal, "step_log", ()))
+            # live (9.3.3): `indices` is every index of the snapshot (failure-store ones included), `data_streams`
+            # the names of its streams
+            streams = sorted({self.stream_of[n] for n in self.content if n in self.stream_of}
+                             | {self.failure_streams[n] for n in self.content if n in self.failure_streams})
             return {"snapshots": [{"snapshot": snap, "uuid": self.snapshot_uuid, "state": "SUCCESS",
-                                   "indices": list(self.content)}]}
+                                   "indices": list(self.content), "data_streams": streams}]}
         if len(seg) == 3 and method in ("PUT", "POST"):
             if (self.repos[repo].get("settings") or {}).get("readonly") or self.repos[repo].get("readonly"):
                 raise RuntimeError(f"repository_exception: [{repo}] cannot create snapshot in a readonly repository")
@@ -637,11 +687,28 @@ class FakeCluster(FakeES):
 
     MAX_RESULT_WINDOW = 10_000      # index.max_result_window: from + size may not exceed it
 
-    def _search(self, expr: str, body: dict) -> Any:
+    def _search(self, expr: str | None, body: dict) -> Any:
         """As Elasticsearch: no order without a `sort` (here a seeded shuffle that differs between
         calls), `from + size` capped at the result window, `_version` only with `"version": true`,
-        and a total that stops counting at 10 000 unless `track_total_hits` asks for it."""
+        and a total that stops counting at 10 000 unless `track_total_hits` asks for it, whatever `search_after` is.
+        r6.4.6: a search with a `pit` reads the point-in-time's fixed view (see `_pit`)."""
         self._took("search")
+        if self.on_search is not None:
+            self.on_search(self, expr, body)
+        pit = body.get("pit")
+        if pit is not None and expr is not None:
+            raise RuntimeError("action_request_validation_exception: Validation Failed: 1: [indices] cannot be used "
+                               "with point in time. Do not specify any index with point in time.;")
+        if pit is None and expr is None:
+            raise FakeGap("a search with neither an index nor a point-in-time")
+        if pit is not None:
+            if not isinstance(pit, dict) or set(pit) - {"id", "keep_alive"} or not pit.get("id"):
+                raise FakeGap(f"point-in-time search with pit {pit!r}")
+            if set(self.query):
+                raise FakeGap(f"point-in-time search with URL parameters {sorted(self.query)}")
+            if pit["id"] not in self.open_pits:
+                raise RuntimeError(f"search_context_missing_exception: No search context found for id [{pit['id']}]"
+                                   + (" (the point-in-time was closed)" if pit["id"] in self.pits_closed else ""))
         start, size = int(body.get("from", 0)), int(body.get("size", 10))
         if start + size > self.MAX_RESULT_WINDOW:
             raise RuntimeError(
@@ -656,27 +723,44 @@ class FakeCluster(FakeES):
                 raise RuntimeError(
                     "illegal_argument_exception: Fielddata access on the _id field is disallowed, you can "
                     "re-enable it by updating the dynamic cluster setting: indices.id_field_data.enabled")
+            if field == "_shard_doc" and pit is None:
+                raise RuntimeError("illegal_argument_exception: [_shard_doc] sort field cannot be used without "
+                                   "[point in time]")
             keys.append((field, (spec.get("order") if isinstance(spec, dict) else spec) == "desc"))
+        if pit is not None and [k for k, _d in keys] != ["_shard_doc"] and keys:
+            raise FakeGap(f"point-in-time search sorted by {[k for k, _d in keys]} (the walk is by _shard_doc)")
         if body.get("search_after") is not None and (not keys or len(body["search_after"]) != len(keys)):
             raise RuntimeError("illegal_argument_exception: search_after has "
                                f"[{len(body['search_after'])}] values but sort has [{len(keys)}]")
+        if pit is not None and body.get("search_after") is not None and start:
+            raise RuntimeError("illegal_argument_exception: `from` parameter must be set to 0 when `search_after` is used.")
         hits = []
-        for n in self._expand(expr):
-            docs = self.indices[n]["docs"]
-            for i, d in (docs.items() if keys else sorted(docs.items())):
+        if pit is not None:
+            view = self.open_pits[pit["id"]]
+            for n, i, d, shard_doc in view["entries"]:
                 if _matches(body.get("query"), d["_source"], i):
-                    # the stored source by reference: only the page returned is copied (fast over a bulk index)
-                    hit = {"_index": n, "_id": i, "_source": d["_source"]}
+                    hit = {"_index": n, "_id": i, "_source": d["_source"], "_shard_doc": shard_doc}
                     if body.get("version"):
                         hit["_version"] = d["_version"]
                     hits.append(hit)
-        if body.get("search_after") is not None and any(f == "_doc" for f, _ in keys) and len(
-                {h["_index"] for h in hits} | set(self._expand(expr))) > 1 and "pit" not in body:
+        else:
+            for n in self._expand(expr):
+                docs = self.indices[n]["docs"]
+                for i, d in (docs.items() if keys else sorted(docs.items())):
+                    if _matches(body.get("query"), d["_source"], i):
+                        # the stored source by reference: only the page returned is copied (fast over a bulk index)
+                        hit = {"_index": n, "_id": i, "_source": d["_source"]}
+                        if body.get("version"):
+                            hit["_version"] = d["_version"]
+                        hits.append(hit)
+        if pit is None and body.get("search_after") is not None and any(f == "_doc" for f, _ in keys) and len(
+                {h["_index"] for h in hits} | set(self._expand(expr))) > 1:
             raise FakeGap("search_after sorted by _doc over more than one index without a point-in-time "
                           "(_doc order is per shard)")
         if keys:
             for hit in hits:      # `_doc` is a document's position in its index (a per-index sequence), not id order
-                hit["sort"] = [self._seq(hit["_index"], hit["_id"]) if f == "_doc" else hit["_source"].get(f)
+                hit["sort"] = [hit["_shard_doc"] if f == "_shard_doc"
+                               else self._seq(hit["_index"], hit["_id"]) if f == "_doc" else hit["_source"].get(f)
                                for f, _ in keys]
 
             def compare(a, b):
@@ -688,20 +772,80 @@ class FakeCluster(FakeES):
                     return (x > y) - (x < y) if not desc else (y > x) - (y < x)
                 return 0
             hits.sort(key=functools.cmp_to_key(lambda h, g: compare(h["sort"], g["sort"])))
-            if body.get("search_after") is not None:
-                after = list(body["search_after"])
-                hits = [h for h in hits if compare(after, h["sort"]) < 0]
         else:
             self._order.shuffle(hits)
+        everything = len(hits)      # the total counts every match, wherever `search_after` starts
+        if keys and body.get("search_after") is not None:
+            after = list(body["search_after"])
+            hits = [h for h in hits if compare(after, h["sort"]) < 0]
         tracked = body.get("track_total_hits", self.MAX_RESULT_WINDOW)
-        page = [{**h, "_source": copy.deepcopy(h["_source"])} for h in hits[start:start + size]]
+        page = [{k: v for k, v in h.items() if k != "_shard_doc"} | {"_source": copy.deepcopy(h["_source"])}
+                for h in hits[start:start + size]]
+        shards = {"total": 1, "successful": 1, "skipped": 0, "failed": 0}
+        if pit is not None and self.lose_from_pit_pages is not None and body.get("search_after") is not None:
+            kept = [h for h in page if not self.lose_from_pit_pages(h["_index"])]
+            if len(kept) != len(page):
+                page, shards["successful"], shards["failed"] = kept, 0, 1
         self.returned += [(len(self.requests) - 1, h["_index"]) for h in page]
+        out: dict[str, Any] = {"took": 1, "timed_out": False, "_shards": shards}
+        if pit is not None:
+            out["pit_id"] = pit["id"]
         if tracked is False:
-            return {"hits": {"hits": page}}      # ES leaves the total out
+            return {**out, "hits": {"hits": page}}      # ES leaves the total out
         limit = None if tracked is True else int(tracked)
-        capped = limit is not None and len(hits) > limit
-        total = {"value": limit if capped else len(hits), "relation": "gte" if capped else "eq"}
-        return {"hits": {"total": total, "hits": page}}
+        capped = limit is not None and everything > limit
+        total = {"value": limit if capped else everything, "relation": "gte" if capped else "eq"}
+        return {**out, "hits": {"total": total, "hits": page}}
+
+    # -- point-in-time (r6.4.6; shapes observed live on Elasticsearch 9.3.3) -----------------------------
+
+    def _pit(self, method: str, seg: list[str], body: Any) -> Any:
+        """`POST /<expr>/_pit?keep_alive=..&expand_wildcards=..` -> `{"id", "_shards"}`: the view of the matching
+        indices as they are now (documents written or deleted later are not seen, and a merge does not reorder
+        it); `DELETE /_pit` `{"id"}` -> `{"succeeded", "num_freed"}`. Anything else is a gap; a missing
+        `keep_alive`, an unknown or closed id are the errors Elasticsearch gives."""
+        if method == "POST" and len(seg) == 2:
+            extra = set(self.query) - {"keep_alive", "expand_wildcards"}
+            if extra or body not in (None, {}):
+                raise FakeGap(f"open point-in-time with {sorted(extra)} / body {body!r}")
+            if not self.query.get("keep_alive"):
+                raise RuntimeError("action_request_validation_exception: Validation Failed: 1: [keep_alive] is "
+                                   "missing;")
+            names = self._expand(seg[0])
+            entries, ordinal = [], 0
+            for ordinal, n in enumerate(names):
+                docs = self.indices[n]["docs"]
+                self._seq(n, next(iter(docs), None)) if docs else None
+                order = self.indices[n].get("order", {})
+                for pos, (i, d) in enumerate(sorted(docs.items(), key=lambda kv: order.get(kv[0], 0))):
+                    entries.append((n, i, d, (ordinal << 32) | pos))
+            pit_id = f"pit-{len(self.pits_opened) + 1}-" + hashlib.sha256(
+                f"{seg[0]}-{len(self.pits_opened)}".encode()).hexdigest()[:24]
+            self.open_pits[pit_id] = {"expr": seg[0], "entries": entries}
+            self.pits_opened.append(pit_id)
+            return {"id": pit_id, "_shards": {"total": len(names), "successful": len(names), "skipped": 0,
+                                              "failed": 0}}
+        if method == "DELETE" and len(seg) == 1:
+            if self.query or not isinstance(body, dict) or set(body) != {"id"}:
+                raise FakeGap(f"close point-in-time with body {body!r}")
+            if body["id"] not in self.open_pits:
+                raise RuntimeError(f"search_context_missing_exception: no point-in-time [{body['id']}] to close "
+                                   "(succeeded false, num_freed 0)")
+            del self.open_pits[body["id"]]
+            self.pits_closed.append(body["id"])
+            return {"succeeded": True, "num_freed": 1}
+        raise FakeGap(f"{method} /{'/'.join(seg)}")
+
+    def merge(self, *names: str) -> None:
+        """A merge: the `_doc` order of the named indices (every index when none is named) changes. A
+        point-in-time keeps its own order."""
+        for n in names or tuple(self.indices):
+            ix = self.indices[n]
+            ids = list(ix["docs"])
+            self._merger.shuffle(ids)
+            ix["order"] = {i: k + 1 for k, i in enumerate(ids)}
+            ix["next"] = len(ids)
+        self.merges += 1
 
     def _seq(self, index: str, doc_id: str) -> int:
         """A document's `_doc` position in its index: assigned in insertion order the first time it is needed;
@@ -820,6 +964,8 @@ class FakeCluster(FakeES):
         if target_name in set(self.stream_of.values()):
             raise FakeGap(f"reindex into the data stream [{target_name}]")
         self._note("reindex", f"{sources}->{target_name}")
+        if target_name not in self.indices:
+            self.auto_created.append(target_name)      # created by the write, with dynamic mappings
         total = created = 0
         failures: list[dict] = []
         for n in self._expand(sources):
@@ -843,7 +989,17 @@ class FakeCluster(FakeES):
                     break
                 if out is None:
                     continue
-                target = self._index(target_name)["docs"]
+                scratch = self._index(target_name)
+                if scratch["mappings"].get("dynamic", True) not in (False, "false", "strict"):
+                    # r6.4.6, live: dynamic mapping adds a field per new key, and `index.mapping.total_fields.limit`
+                    # (1000) refuses the document that would pass it
+                    fresh = scratch["fields"] | set(out)
+                    if len(fresh) > self.total_fields_limit:
+                        failures.append(self._refuse(target_name, i, "Limit of total fields "
+                                                     f"[{self.total_fields_limit}] has been exceeded while adding new fields"))
+                        break
+                    scratch["fields"] = fresh
+                target = scratch["docs"]
                 existing = target.get(i)
                 external = dest.get("version_type") == "external"
                 if (dest.get("op_type") == "create" and existing) or (
@@ -928,6 +1084,13 @@ DEDUP_OLD = "dedup-logs-system.auth-archive"
 DECOY = ".ds-logs-system.auth-default-2026.10.15-000003"
 STREAMS = {DEDUP_OLD: "logs-system.auth-default", DEDUP: "logs-system.auth-default", AUTH: "logs-system.auth-default",
            SYSLOG: "logs-system.syslog-default", NGINX: "logs-nginx.access-default"}
+# r6.4.6: the failure store of the syslog stream (live 9.3: `GET /_data_stream` lists it under `failure_store.indices`),
+# the data streams the world's snapshot holds (the freeze's `elastic.data_streams`, written out from the world), and
+# a data stream the frozen node makes for itself once it runs (live: `.ds-ilm-history-7-...`; not the snapshot's).
+FAILURE_STREAMS = {FAILURE_STORE: "logs-system.syslog-default"}
+DATA_STREAMS = ["logs-nginx.access-default", "logs-system.auth-default", "logs-system.syslog-default"]
+ILM_HISTORY = ".ds-ilm-history-7-2026.11.08-000001"
+OWN_STREAMS = {ILM_HISTORY: "ilm-history-7"}
 DEDUP_IN_SPAN = ["dedup-auth-01", "dedup-auth-02", "dedup-auth-03"]
 DECOY_IN_SPAN = ["decoy-auth-0", "decoy-auth-1"]
 _BASE = datetime(2026, 10, 20, 4, 0, tzinfo=UTC)
@@ -1279,7 +1442,7 @@ class LabRig:
                  patterns: tuple[str, str] = (EVENTS, ALERTS_PATTERN), extra_alerts: dict | None = None,
                  journal: Journal | None = None, latency: dict | None = None, clock_step: float = 1,
                  boot_requests: int = 0, docker_fail: set | None = None,
-                 extra_indices: dict | None = None) -> None:
+                 extra_indices: dict | None = None, engine_skew: timedelta | None = None) -> None:
         from _rig_docker import RigDocker
 
         self.tmp_path = tmp_path
@@ -1293,15 +1456,17 @@ class LabRig:
         self.cluster = FakeCluster(self.journal, repo=REPO, snapshot=SNAP, snapshot_uuid=snapshot_uuid,
                                    content=content, streams=STREAMS, fail=fail,
                                    observe=lambda: copy.deepcopy(self.marker()),
-                                   clock=self.clock, latency=latency, settings=WORLD_SETTINGS)
+                                   clock=self.clock, latency=latency, settings=WORLD_SETTINGS,
+                                   failure_streams=FAILURE_STREAMS, own_streams=OWN_STREAMS)
         self.live = FakeCluster(Journal(), repo=REPO, snapshot=SNAP, snapshot_uuid=snapshot_uuid,
-                                content=content, streams=STREAMS, settings=WORLD_SETTINGS)
+                                content=content, streams=STREAMS, settings=WORLD_SETTINGS,
+                                failure_streams=FAILURE_STREAMS)
         for name, docs in content.items():
             self.live._index(name)
             for doc_id, d in docs.items():
                 self.live.put(name, doc_id, d["_source"], d["_version"])
         self.docker = RigDocker(journal=self.journal, clock=self.clock, cluster=self.cluster,
-                                live_cluster=self.live, boot_requests=boot_requests, fail=docker_fail,
+                                live_cluster=self.live, boot_requests=boot_requests, fail=docker_fail, engine_skew=engine_skew,
                                 on_service_stop=self._seen, on_volume_rm=lambda: copy.deepcopy(self.marker()))
         self._deployed(self.docker)
         self.patterns = list(patterns)
@@ -1318,7 +1483,7 @@ class LabRig:
             (self.parts / FREEZE_ID / n).write_bytes(b)
         self.freeze = {"T": T, "patterns": list(patterns),
                        "elastic": {"repository": REPO, "snapshot": SNAP, "uuid": SNAP_UUID,
-                                   "indices": counts_of(content)},
+                                   "indices": counts_of(content), "data_streams": list(DATA_STREAMS)},
                        "parts": {n: sha(b) for n, b in parts.items()}, "captured_by": "op"}
         (self.freeze_dir / "freeze.yaml").write_text(yaml.safe_dump(self.freeze))
         self.case_dir = tmp_path / "held_out" / SLUG
@@ -1503,7 +1668,7 @@ class LabRig:
         `load_stubs` and `content_digest`. The oracle is the state; the digest is the layer's own function."""
         from _rig_docker import RigDocker
         cluster = FakeCluster(Journal(), repo=REPO, snapshot=SNAP, snapshot_uuid=SNAP_UUID, content={},
-                              streams=STREAMS)
+                              streams=STREAMS, failure_streams=FAILURE_STREAMS)
         for name, docs in state.items():
             cluster._index(name)
             for doc_id, (version, source) in docs.items():
@@ -1568,6 +1733,11 @@ class LabRig:
         """A request the fakes do not model fails the test as a gap IN THE FAKE (repair the fake: model it), not
         as a contract demand on how the lab does what the design leaves open."""
         assert not self.cluster.unsupported, f"the fake cluster does not model: {self.cluster.unsupported}"
+        # A run cut by a `FaultJournal` may have been cut at the very call that closes a point-in-time (the docker
+        # exec carrying it never reached the node): that leak is the fault's, not the product's. The tests that
+        # fail a page through `cluster.fail` (which the product answers) assert the close themselves.
+        if getattr(self.journal, "tripped", None) is None:
+            assert not self.cluster.open_pits, f"a point-in-time was never closed: {sorted(self.cluster.open_pits)}"
         assert not self.docker.unmodelled, f"the rig docker does not model: {self.docker.unmodelled}"
 
     def launch(self, **kw):
