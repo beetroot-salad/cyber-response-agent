@@ -84,7 +84,8 @@ RUN touch /var/log/auth.log /var/log/syslog \
 COPY hosts/base/seed-users.py     /opt/soc-playground/seed-users.py
 COPY hosts/base/entrypoint.sh     /usr/local/bin/host-entrypoint.sh
 COPY hosts/base/agent-enroll.sh   /usr/local/bin/agent-enroll.sh
-# Dormant on live hosts (not on PATH); a replica host links it in as `ps` (#1347 D6); V2_PS_SHIM_TREE names its tree.
+# Dormant on live hosts (not on PATH). A frozen replica gets TODAY's shim mounted as `ps` instead (#1391 r6 O9):
+# this baked copy would be pinned to the argv of the day of capture. Kept so older freezes' images match.
 COPY hosts/base/ps-shim           /opt/soc-playground/ps-shim
 COPY hosts/base/baseline/         /opt/soc-playground/baseline/
 COPY hosts/inventory.yaml         /opt/soc-playground/inventory.yaml

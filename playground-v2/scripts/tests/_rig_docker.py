@@ -269,6 +269,8 @@ class RigDocker(FakeDocker):
         argv = [str(a) for a in argv]
         self.calls.append((list(argv), dict(kw)))
         data = kw.get("input")
+        if data is None and hasattr(kw.get("stdin"), "read"):
+            data = kw["stdin"].read()   # a file handle streamed as stdin (#1391: host image and parts)
         stdin = data.encode() if isinstance(data, str) else (data or b"")
         self._undo = []
         rc, out, err = self._docker(argv, None, stdin)
@@ -417,7 +419,7 @@ class RigDocker(FakeDocker):
                 opts["rm"] = True
             elif opt == "--privileged":
                 opts["privileged"] = True
-            elif opt in ("-i", "-t", "-it", "--interactive", "--tty", "--init", "--read-only"):
+            elif opt in ("-i", "-t", "-it", "--interactive", "--tty", "--init", "--read-only", "--no-healthcheck"):
                 pass
             elif "=" in opt:
                 pass

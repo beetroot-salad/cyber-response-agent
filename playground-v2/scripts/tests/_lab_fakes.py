@@ -1450,7 +1450,15 @@ def rules_tar(rules: dict) -> bytes:
     return tar_bytes({name: json.dumps(rule).encode() for name, rule in rules.items()})
 
 
-PARTS = {"stubs.tar": stub_dump(), "proc-tree.txt": b"PID PPID\n1 0 init\n", RULES_PART: rules_tar(RULES)}
+#: The role host every rig freeze committed (#1391 r6 O9: a launch serves host-state from the
+#: freeze's hosts, and refuses a freeze with none).
+FROZEN_HOST = "web-1"
+HOST_PARTS = {f"image-{FROZEN_HOST}.tar": b"saved image of web-1",
+              f"proc-tree-{FROZEN_HOST}.txt": b"PID PPID\n1 0 init\n",
+              f"volume-{FROZEN_HOST}-var-log.tar": tar_bytes({"auth.log": b"sshd: accepted\n"}),
+              f"volume-{FROZEN_HOST}-var-lib-elastic-agent.tar": tar_bytes({"state.enc": b"x"})}
+PARTS = {"stubs.tar": stub_dump(), "proc-tree.txt": b"PID PPID\n1 0 init\n", RULES_PART: rules_tar(RULES),
+         **HOST_PARTS}
 ROW_KEYS = {"slug", "run_id", "binding", "verdict", "reason", "verified_at", "knowledge"}
 RUN_ID = "5b0d1f2e-3c4d-4e5f-8a6b-7c8d9e0f1a2b"
 
@@ -1484,7 +1492,7 @@ class LabRig:
     * the frozen cluster (`rig.cluster`, a `FakeCluster`), reached only through the real curl path
       (`ops.frozen_es()`, curl run inside the frozen node's container), never through `es=`;
     * the environment the lab layer reads (`V2_RUNS_DIR` holding `rig.live_runs`, `V2_FROZEN_PARTS_DIR` holding
-      the freeze's parts and a second freeze's stub dump carrying `rig.tickets`, `V2_FROZEN_READONLY_PASSWORD` =
+      the freeze's parts and a second freeze's stub dump carrying `rig.tickets`, `V2_DEFENDER_READONLY_PASSWORD` =
       `rig.password`); a source set to None is unset;
     * the lock store, the clock and the journal, as before.
 
@@ -1626,7 +1634,7 @@ class LabRig:
         (side / "stubs.tar").write_bytes(stub_dump(sorted(self._tickets or ())))
         for var, value in (("V2_RUNS_DIR", None if self._live_runs is None and not self.nested_live_runs else self.runs),
                            ("V2_FROZEN_PARTS_DIR", None if self._tickets is None else self.parts),
-                           ("V2_FROZEN_READONLY_PASSWORD", self._password)):
+                           ("V2_DEFENDER_READONLY_PASSWORD", self._password)):
             if value is None:
                 os.environ.pop(var, None)
             else:

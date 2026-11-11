@@ -2,6 +2,8 @@
 # Rotate the playground's Elastic secrets in one pass:
 #   - the `elastic` superuser password            (V2_ELASTIC_PASSWORD)
 #   - the `kibana_system` password, made distinct  (V2_KIBANA_PASSWORD)
+#   - the defender's read-only user `defender-readonly` (V2_DEFENDER_READONLY_PASSWORD; es-init
+#                                                   writes it on the `up` below, #1391)
 #   - Kibana's encryption key                      (V2_KIBANA_ENCRYPTION_KEY; the old one is kept
 #                                                   as V2_KIBANA_ENCRYPTION_KEY_PREVIOUS so saved
 #                                                   objects encrypted with it stay readable)
@@ -31,6 +33,7 @@ OLD_KEY="$(get V2_KIBANA_ENCRYPTION_KEY)"
 # Hex only: these land in .env, curl config and shell, where $ " \ # * all need care.
 NEW_EP="$(openssl rand -hex 24)"
 NEW_KP="$(openssl rand -hex 24)"
+NEW_DP="$(openssl rand -hex 24)"
 NEW_KEY="$(openssl rand -hex 32)"
 
 es_set_password() {  # user, new password — authenticated with the OLD elastic password
@@ -60,6 +63,7 @@ set_var() {  # name, value — rewrite in place (through a symlink, too) or appe
 }
 set_var V2_ELASTIC_PASSWORD "${NEW_EP}"
 set_var V2_KIBANA_PASSWORD "${NEW_KP}"
+set_var V2_DEFENDER_READONLY_PASSWORD "${NEW_DP}"
 set_var V2_KIBANA_ENCRYPTION_KEY_PREVIOUS "${OLD_KEY}"
 set_var V2_KIBANA_ENCRYPTION_KEY "${NEW_KEY}"
 
@@ -94,3 +98,7 @@ printf 'user = "elastic:%s"\n' "${NEW_EP}" \
 echo
 
 echo "-> done. Delete ${backup} once you have checked the stack."
+echo "   defender-readonly has a new password (es-init set it): re-store the lab tenant's elastic"
+echo "   credential (basic, username defender-readonly, password = V2_DEFENDER_READONLY_PASSWORD in"
+echo "   .env) through the API, or every run starts with elastic down (401). Frozen launches read"
+echo "   the same variable: export the new value in the operator's shell."

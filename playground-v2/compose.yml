@@ -182,6 +182,12 @@ services:
       - /srv/lab/frozen-cases:/srv/lab/frozen-cases
     ports:
       - "127.0.0.1:9200:9200"
+    # `ingress` is how the lab's edge reaches it for the credential proxy (#1391 r6 L1, L2).
+    # `default` must be listed: a networks: key drops the implicit default. See the invariant
+    # under kibana's networks.
+    networks:
+      - default
+      - ingress
     mem_limit: 3g
     healthcheck:
       test:
@@ -210,6 +216,9 @@ services:
       - ELASTIC_PASSWORD=${V2_ELASTIC_PASSWORD}
       - KIBANA_PASSWORD=${V2_KIBANA_PASSWORD}
       - WATCHER_PASSWORD=${V2_ALERT_WATCHER_PASSWORD:?set V2_ALERT_WATCHER_PASSWORD in .env}
+      - DEFENDER_PASSWORD=${V2_DEFENDER_READONLY_PASSWORD:?set V2_DEFENDER_READONLY_PASSWORD in .env}
+      - DEFENDER_EVENTS_INDEX=${V2_DEFENDER_EVENTS_INDEX:?set V2_DEFENDER_EVENTS_INDEX in .env (the lab tenant's ELASTIC_EVENTS_INDEX)}
+      - DEFENDER_ALERTS_INDEX=${V2_DEFENDER_ALERTS_INDEX:?set V2_DEFENDER_ALERTS_INDEX in .env (the lab tenant's ELASTIC_ALERTS_INDEX)}
     volumes:
       # Read-only: this one-shot only reads ca.crt, and the volume also holds
       # ca.key. `setup` is the sole writer.
@@ -236,6 +245,14 @@ services:
         echo "-> alert-ticket-watcher role + user";
         printf "user = \"elastic:%s\"\ndata = {\"indices\":[{\"names\":[\".alerts-security.alerts-default*\",\".internal.alerts-security.alerts-default-*\"],\"privileges\":[\"read\"]}]}\n" "$${ELASTIC_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/role/alert_ticket_watcher | grep -q "\"role\"" || { echo "FAIL: alert_ticket_watcher role not written"; exit 1; };
         printf "user = \"elastic:%s\"\ndata = {\"password\":\"%s\",\"roles\":[\"alert_ticket_watcher\"]}\n" "$${ELASTIC_PASSWORD}" "$${WATCHER_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/alert-ticket-watcher | grep -q "\"created\"" || { echo "FAIL: alert-ticket-watcher user not written"; exit 1; };
+        # The defender read-only user (#1391 r6), reached through the credential proxy: read on
+        # the two index patterns of the lab tenant (copied here; a mismatch is a loud 403 at run
+        # start) and the cluster `monitor` privilege health-check needs. The frozen engine creates
+        # the same user with the same password (scripts/lab_ops.py). No apostrophes in this
+        # script: it is one single-quoted bash -c argument.
+        echo "-> defender-readonly role + user";
+        printf "user = \"elastic:%s\"\ndata = {\"cluster\":[\"monitor\"],\"indices\":[{\"names\":[\"%s\",\"%s\"],\"privileges\":[\"read\"]}]}\n" "$${ELASTIC_PASSWORD}" "$${DEFENDER_EVENTS_INDEX}" "$${DEFENDER_ALERTS_INDEX}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/role/defender_readonly | grep -q "\"role\"" || { echo "FAIL: defender_readonly role not written"; exit 1; };
+        printf "user = \"elastic:%s\"\ndata = {\"password\":\"%s\",\"roles\":[\"defender_readonly\"]}\n" "$${ELASTIC_PASSWORD}" "$${DEFENDER_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/defender-readonly | grep -q "\"created\"" || { echo "FAIL: defender-readonly user not written"; exit 1; };
         echo "-> es-init complete";
       '
     restart: "no"
@@ -279,12 +296,14 @@ services:
     # explicitly — a networks: key drops a service off the implicit default
     # network, which would cut Kibana off from Elasticsearch.
     #
-    # Elasticsearch is deliberately NOT dual-homed: Shuffle reaches Elastic data
-    # through Kibana's API on :5601, so it never needs the CA from the certs
-    # volume. It also keeps Kibana↔ES on a single path — if both ends of a
-    # talking pair shared two networks, Docker's embedded DNS would return an
-    # address on each and the traffic could take the uncaptured bridge, silently
-    # vanishing from Zeek's conn.log.
+    # Elasticsearch is NOT on `soar`: Shuffle reaches Elastic data through
+    # Kibana's API on :5601, so it never needs the CA from the certs volume.
+    # The invariant that matters: no talking pair may share two networks — if
+    # both ends did, Docker's embedded DNS would return an address on each and
+    # the traffic could take the uncaptured bridge, silently vanishing from
+    # Zeek's conn.log. Elasticsearch's second network is `ingress` (#1391), which
+    # only the edge shares with it; Kibana, Fleet, the watcher and the role hosts
+    # reach it on `default` alone.
     networks:
       - default
       - soar
@@ -996,7 +1015,8 @@ services:
 
   # Batch 9 stubs: CMDB, threat intel, change management, ticketing.
   # All auth-less FastAPI servers on 8080 internal. Exposed on loopback
-  # 127.0.0.1:8001-8004 on the VPS for debugging; in-cluster access via
+  # 127.0.0.1:8001-8005 on the VPS for debugging; the credential proxy reaches
+  # them only through the edge (#1391), with a key; in-cluster access via
   # Docker DNS (http://cmdb:8080, etc.). Shared healthcheck below uses
   # python's urllib — python:3.12-slim has no curl, and adding one bloats
   # the image for a single liveness probe.
@@ -1014,12 +1034,14 @@ services:
     mem_limit: 256m
     ports:
       - "127.0.0.1:8001:8080"
-    # All five stubs are dual-homed so Shuffle apps can call them. `default` is
-    # listed explicitly or the stub drops off the network the role hosts and the
-    # baseline generators reach it on.
+    # All five stubs are on `soar` so Shuffle apps can call them, and on
+    # `ingress` so the lab's edge can forward the credential proxy's calls to them
+    # (#1391). `default` is listed explicitly or the stub drops off the network the
+    # role hosts and the baseline generators reach it on.
     networks: &stub-networks
       - default
       - soar
+      - ingress
     healthcheck: &stub-health
       test: ["CMD-SHELL", "python -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8080/health\",timeout=2).status==200 else 1)'"]
       interval: 10s
@@ -1109,6 +1131,48 @@ services:
     networks: *stub-networks
     healthcheck: *stub-health
 
+  # The lab's one ingress (#1391 r6 L1): every port the credential proxy reaches, published on
+  # the server's PUBLIC address only (the loopback debug ports above stay), behind the cloud
+  # firewall's rule for the SSH source addresses (infra/firewall.tf). It admits only the lab
+  # tenant's declared surface (lab-surface.json) with the lab key, and passes 9200 through to
+  # Elasticsearch as bytes. On `ingress` only: never `default`, so the defender's own calls stay
+  # out of Zeek and no role host reaches it from inside.
+  edge:
+    build:
+      context: .
+      dockerfile: edge/Dockerfile
+    image: soc-playground/edge:local
+    container_name: lab-edge
+    environment:
+      - V2_LAB_API_KEY=${V2_LAB_API_KEY:?set V2_LAB_API_KEY in .env}
+    ports:
+      - "${V2_LAB_PUBLIC_ADDRESS:?set V2_LAB_PUBLIC_ADDRESS in .env (terraform output ipv4)}:8001-8005:8001-8005"
+      - "${V2_LAB_PUBLIC_ADDRESS}:8007:8007"
+      - "${V2_LAB_PUBLIC_ADDRESS}:9200:9200"
+    networks:
+      - ingress
+    mem_limit: 128m
+    restart: unless-stopped
+
+  # host-state's endpoint-query service (#1391 O5, r6 O8): an endpoint-security product's query
+  # API over the role hosts, answered live through the Docker socket. Enrolls the inventory's
+  # hosts (baked in at build), inspect limited to them. Unpublished: reached only through the
+  # edge on 8007. On `ingress` only, so no role host can reach the socket holder. Its image is
+  # excused in falco/falco_rules.local.yaml (a socket mount is its job).
+  endpoint-query:
+    build:
+      context: .
+      dockerfile: endpoint-query/Dockerfile
+    image: soc-playground/endpoint-query:local
+    container_name: endpoint-query
+    command: ["--hosts", "/etc/endpoint-query/hosts.txt", "--inspectable", "/etc/endpoint-query/hosts.txt"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - ingress
+    mem_limit: 128m
+    restart: unless-stopped
+
 networks:
   # `default` is left undeclared on purpose: declaring it forces Compose to
   # recreate it, stopping every one of the ~30 containers on the stack.
@@ -1136,6 +1200,18 @@ networks:
     ipam:
       config:
         - subnet: 10.77.0.0/24
+
+  # ingress — the edge and what it forwards to (#1391 r6 L2): Elasticsearch, the five stubs and
+  # the endpoint-query service. Pinned like `soar`, for the same two reasons: Zeek's `^br-`
+  # capture choice skips `ingress0`, and the subnet sits outside Docker's default pool. So the
+  # credential proxy's calls never appear in the telemetry the defender investigates.
+  ingress:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: ingress0
+    ipam:
+      config:
+        - subnet: 10.78.0.0/24
 
 volumes:
   certs:

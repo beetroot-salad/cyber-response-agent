@@ -5,8 +5,8 @@ Every scored held-out run is started here, under the frozen engine's lab-server 
 
     verify case, freeze and parts (refuse: no cluster request, no row) -> take the lock ->
     ready the variant (a fresh node, restore + overlays; or trust a clean marker) -> load the
-    stubs pinned at T -> wait for health -> create the read-only user -> compare counts, content
-    digest and alert with case.yaml -> start the frozen proxy -> rewrite the node's clock offset
+    stubs pinned at T -> serve the freeze's hosts (replicas + endpoint-query, #1391) -> wait
+    for health -> create the read-only user -> compare counts, content digest and alert with case.yaml -> start the frozen proxy -> rewrite the node's clock offset
     to T - now -> run the agent with `--as-of T` -> append the row -> tear down -> release the lock
 
 The node's clock (D15 revised) reads T whenever the node starts, and the offset rewrite is the
@@ -183,6 +183,7 @@ def _serve_copy(es: Any, ops: Any, clock: Any, *, case: dict, freeze: dict, free
     copy = frozen_copy.ready(es, ops=ops, clock=clock, freeze=freeze, freeze_id=freeze_id,
                       overlay=overlay, location=location)
     ops.load_stubs(parts_dir / freeze_id, T, (overlay or {}).get("mutations") or None)
+    ops.serve_hosts(parts_dir / freeze_id, freeze)   # host-state from the freeze's hosts (#1391 r6 O9)
     frozen_copy.wait_for_cluster(es, clock, "the copy")
     ops.create_readonly_user(ops.current_password())
     observed = frozen_copy.observed_counts(es, list(freeze["elastic"]["indices"]))
