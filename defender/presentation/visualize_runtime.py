@@ -609,7 +609,7 @@ def render_runtime_leads_queries(run_dir: Path, leads: list | None = None) -> tu
             # from a broken adapter.
             exit_cls = {
                 None: "lq-ok", "infra": "lq-infra", "agent-fixable": "lq-agent",
-                "denied": "lq-denied",
+                "denied": "lq-denied", "request-cut": "lq-cut",
             }.get(q.error_class, "lq-bad")
             payload = esc(q.payload_status or "")
             if q.raw_ref is not None:

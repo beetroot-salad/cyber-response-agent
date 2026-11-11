@@ -160,7 +160,7 @@ def _sentence(outcome: CorrelationOutcome, grant_home: str) -> str:
         return (
             f"The correlation lead's queries were refused: one of its calls showed that "
             f"{outcome.system} is not configured for this run (its settings lack something its "
-            f"adapter needs), so {outcome.system} is down for the rest of the run. There is no "
+            f"adapter needs, or its credential-proxy setup is incomplete), so {outcome.system} is down for the rest of the run. There is no "
             "correlation summary for this alert.")
     return _SENTENCES[str(outcome.ending)]
 
@@ -187,7 +187,7 @@ def _went_down_note(system: str | None) -> str:
     return (
         f"Note from the harness: {system} went down while the correlation lead ran — one of its "
         f"calls showed that {system} is not configured for this run (its settings lack "
-        f"something its adapter needs), so {system} is down for the rest of the run and every "
+        f"something its adapter needs, or its credential-proxy setup is incomplete), so {system} is down for the rest of the run and every "
         "later dispatch or call to it is refused. The summary above is the lead's own final "
         f"report; what it did not measure on {system} is a visibility gap.")
 
@@ -334,7 +334,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one earl
         _stamp_timed_out(store, session_id)
         return CorrelationOutcome(ending=ENDING_TIMED_OUT, system=system)
     except (BudgetKill, circuit_breaker.RunAborted, providers.ProviderDown, providers.ProviderRejected,
-            run_end.CallRecordWriteFailed, session_store.StoreError, sqlite3.Error,
+            run_end.CallRecordWriteFailed, run_end.ProxyAccessLost, session_store.StoreError, sqlite3.Error,
             asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, SystemExit):
         raise
     except Exception as e:  # noqa: BLE001 — the lead's own dispatch must never break the run

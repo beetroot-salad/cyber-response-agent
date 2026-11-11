@@ -12,13 +12,15 @@ import base64
 import binascii
 import json
 import re
-from collections.abc import Iterable, Mapping
+import time
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from defender import tenancy
-from defender.kit.faults import ConfigFault
+from defender.kit.access import TOKEN_SEC, RequestAccess
+from defender.kit.faults import AdapterFault, ConfigFault
 from defender.kit.verbs import is_system_name
 
 READ = "r"
@@ -28,9 +30,8 @@ _CLAIM_KEYS = frozenset({"tenant", "investigation", "grant", "exp"})
 _PAYLOAD = re.compile(r"[A-Za-z0-9_-]+")
 #: Seconds a read pass lives from when it is signed (#1163 r7 A20; #1170 O5): the operator run's own
 #: signer and a job's host helper both sign for this long.
-PASS_LIFETIME_SEC = 600
-#: A pass held is asked for (or signed) again once it has this many seconds left or fewer (C2).
-PASS_REUSE_MARGIN_SEC = 60
+#: The access holder's own lifetime (`TOKEN_SEC`): a job's holder dates the pass it is handed by it.
+PASS_LIFETIME_SEC = TOKEN_SEC
 #: A token longer than this is not one the minter writes: refused before any decoding.
 MAX_TOKEN_CHARS = 16384
 _MAX_INVESTIGATION_CHARS = 128
@@ -75,6 +76,32 @@ def mint_request_token(signer: TokenSigner, *, tenant_id: str, investigation: st
         json.dumps(doc, separators=(",", ":"), sort_keys=True).encode("utf-8")
     ).decode("ascii").rstrip("=")
     return f"{payload}.{signer.sign(payload.encode('ascii'))}"
+
+
+def run_token_mint(signer: TokenSigner, *, tenant_id: str,
+                   investigation: str) -> Callable[[Iterable[tuple[str, str]], float], str]:
+    """The one way a process signs its run's tokens, read and write-back alike: `mint(grant,
+    expires_at)` signs `grant` for `tenant_id`'s run `investigation` until `expires_at`, in
+    seconds of the caller's clock."""
+
+    def mint(grant: Iterable[tuple[str, str]], expires_at: float) -> str:
+        return mint_request_token(signer, tenant_id=tenant_id, investigation=investigation,
+                                  grant=grant, expires_at=datetime.fromtimestamp(expires_at, UTC))
+
+    return mint
+
+
+def request_access(signer: TokenSigner, proxy_url: str, *, tenant_id: str, investigation: str,
+                reads: Iterable[str], clock: Callable[[], float] = time.time,
+                on_fault: Callable[[AdapterFault], None] | None = None) -> RequestAccess:
+    """The one holder of a process's read token (#1363 O1, B1), built the same way by a run, a
+    sibling run and a pre-flight pass: `r` on each system of `reads`, for `investigation`, signed
+    by `signer` (`run_token_mint`) when first needed and re-signed by the holder's one rule.
+    Building it signs nothing. `on_fault` is its owner's callback (see `RequestAccess`)."""
+    grant = {(system, "r") for system in reads}
+    mint = run_token_mint(signer, tenant_id=tenant_id, investigation=investigation)
+    return RequestAccess(proxy_url, lambda expires_at: mint(grant, expires_at), clock=clock,
+                         on_fault=on_fault)
 
 
 def split_token(token: str) -> tuple[bytes, str, Claims]:
@@ -128,4 +155,4 @@ def _claims_of(doc: Any) -> Claims:  # noqa: C901 — one flat shape check
 
 
 __all__ = ["MODES", "READ", "READ_WRITE", "Claims", "TokenSigner", "TokenVerifier",
-           "mint_request_token", "split_token"]
+           "mint_request_token", "run_token_mint", "split_token"]

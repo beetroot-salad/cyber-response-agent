@@ -18,6 +18,7 @@ in this process as the operator's (no job socket in this process's own environme
 from __future__ import annotations
 
 import functools
+import json
 import os
 import subprocess
 import sys
@@ -124,12 +125,18 @@ def family() -> int:
     from defender import box as box_mod
     from defender.learning.branch import job_entry
     from defender.tests.e2e import _1255_twin as TWIN
+    from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
     from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
     from defender.tests.support.learning.branch import _triplet_947 as T
     from defender.tests.support.learning.judge import _judge_921 as J
 
+    from defender.integrations.elastic_adapter import search_envelope
+    from defender.tests.e2e._lead_zero_808 import EVENTS_INDEX
+
+    PROXY_REPLY = W.fmt().encode_body(json.dumps(search_envelope(EVENTS_INDEX, [], 0, False, "desc")).encode()) \
+        + W.fmt().encode_final(W.final_record())
     tenant, source = argv[argv.index("--tenant") + 1], argv[argv.index("--source") + 1]
     runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
 
@@ -139,9 +146,13 @@ def family() -> int:
         # No Docker daemon here: the sibling's box start fails and the operator's opt-out, set for this sibling
         # alone, turns it into production's unboxed mode (as `_replay_harness.production_unboxed_box` does).
         # Its tree is walked by the real reap scan, so the family's verification can archive it.
-        with RH._unsandboxed_allowed():
+        # Its elastic is on the credential proxy, and a sibling that cannot sign or reach the proxy loses its access and
+        # ends `proxy-access` (#1363 O1, O5): it gets the stand-in's signer and a stand-in proxy answering every read
+        # with an empty result, as the reads these replays never judged did before (a failed call the run went on from).
+        with RH._unsandboxed_allowed(), W.fake_proxy(PROXY_REPLY, ended=True) as proxy_url:
             TWIN.run_main(sibling_argv[2:], recording, main_turns=after_the_gather(),
-                          clock=TWIN.SteppingClock(TWIN.ARM_CLOCK_START), scrub=box_mod.scrub)
+                          clock=TWIN.SteppingClock(TWIN.ARM_CLOCK_START), scrub=box_mod.scrub,
+                          signer=FakeSigner("flow1344"), proxy_url=proxy_url)
         (marks / f"sibling-{recording.label}").write_text(str(recording.exit_code), encoding="utf-8")
         return recording.exit_code if isinstance(recording.exit_code, int) else 1
 

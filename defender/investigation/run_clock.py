@@ -4,10 +4,34 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 #: An injected run clock source: a zero-argument callable returning an aware UTC datetime.
 ClockSource = Callable[[], datetime]
+
+
+@dataclass(frozen=True)
+class AnchoredOrigin:
+    """A run clock's origin given as "the clock read `at` at wall instant `wall`" (`run.py --as-of T
+    --as-of-anchor W`, #1347 r6.4.6): at the run's start it reads `at + (now - wall)`, the same
+    function of wall time as a frozen lab node whose offset was written at W, so the run's own
+    setup time never separates the two clocks."""
+
+    at: datetime
+    wall: datetime
+
+    def reading(self, now: datetime) -> datetime:
+        return self.at + (now - self.wall)
+
+
+#: A run clock's origin: a reading, or a reading anchored at a wall instant.
+ClockOrigin = datetime | AnchoredOrigin
+
+
+def origin_reading(origin: ClockOrigin, now: datetime) -> datetime:
+    """What a run clock with `origin` reads at its start, when its own clock reads `now`."""
+    return origin.reading(now) if isinstance(origin, AnchoredOrigin) else origin
 
 
 def _aware_utc(moment: object, *, what: str) -> datetime:

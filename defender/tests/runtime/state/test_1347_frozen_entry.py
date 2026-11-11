@@ -1,0 +1,455 @@
+"""#1347 r6.4 O5/P7: `run.py --as-of T` starts the run clock (and the recorded start times) at T, is refused
+with `--update-ticket` and the branching flags, and cuts nothing; `--arrived-by` is gone."""
+from __future__ import annotations
+
+import contextlib
+import dataclasses
+import datetime as dt
+import json
+import re
+from collections.abc import Callable, Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from defender.records import RunPaths, _provenance
+from defender.systems.verbs import CALL_RUN_STATE
+from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+from defender.tests.integrations.credential_proxy_1163 import _harness as H
+from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.runtime.state import _1255_clock as C
+
+pytestmark = pytest.mark.e2e
+
+L1 = C.LESSONS[0]
+AS_OF = dt.datetime(2026, 10, 20, 9, 0, 0, tzinfo=dt.UTC)
+AS_OF_Z = "2026-10-20T09:00:00Z"
+#: The run's own seconds before its first read; the agent-visible clock moves only by these.
+ELAPSED = 20
+#: A query whose relative date math Elasticsearch resolves itself: the frozen cluster's clock
+#: is pinned to T (D15), so the product sends it as it would to live.
+NATIVE_QUERY = "event.action:* AND @timestamp >= now-1h"
+
+
+@pytest.fixture(autouse=True)
+def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    T.isolate_learning_state(tmp_path, monkeypatch)
+    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+
+
+class Seen:
+    """What the run handed its adapters: each (context, params), and the run state's budget as
+    the platform held it at the first call."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, dict]] = []
+        self.budget: dict[str, Any] | None = None
+
+
+def wired_registry(seen: Seen, proxied: Any) -> type:
+    """The real registry and adapters, each call noted then sent through the real proxy to a recording
+    upstream; only tenant, proxy address and token are swapped in the context."""
+    from defender.systems.verbs import ModuleVerbRegistry
+
+    class Wired(ModuleVerbRegistry):
+        def verbs(self, system: str):
+            real = super().verbs(system)
+
+            def wrap(fn):
+                def call(ctx, /, **params):
+                    seen.calls.append((ctx, dict(params)))
+                    state = CALL_RUN_STATE.get()
+                    if seen.budget is None and state is not None:
+                        seen.budget = dict(state.budget_snapshot())
+                    wired = dataclasses.replace(
+                        ctx, tenant=proxied.tenant, proxy_url=proxied.proxy_url,
+                        request_token=proxied.request_token, token_source=None)
+                    return fn(wired, **params)
+
+                call.__wrapped__ = fn
+                return call
+
+            return {name: wrap(fn) for name, fn in real.items()}
+
+    return Wired
+
+
+def launch(tmp_path: Path, flags: list[str], *, registry_cls: type | None = None,
+           enqueue: Any = None, learn: bool = False, start: dt.datetime = C.ARM_START) -> C.Launched:
+    """A natural run through `run.main` that makes one gathered elastic query, `flags` added."""
+    _base, seed = T.runs_base(tmp_path)
+    tenant_id = T.current_tenant().id
+    clock = C.FakeClock(start)
+    main = C.script(clock, (0, C.append_first_fence()), (ELAPSED, C.gather_turn("l-001", "elastic")),
+                    (0, C.read_lesson(L1)), (5, C.DONE))
+    gather = C.script(clock, (0, C.query("elastic", "query", {"native_query": NATIVE_QUERY})),
+                      (0, C.H.Turn(text="Summary: one query.")))
+    argv = C.natural_argv(RunPaths(seed).alert, tenant_id)
+    if learn:
+        argv.remove("--no-learn")
+    return C.run_main([*argv, *flags], clock=clock, main=main, gather=gather,
+                      registry_cls=registry_cls, enqueue=enqueue)
+
+
+def attempt(tmp_path: Path, argv_of: Any) -> tuple[C.Launched, Path, list[str]]:
+    """A launch that must be refused: `argv_of(alert, tenant_id)` is its command line. Returns
+    the outcome, the runs folder and its listing from before."""
+    base, seed = T.runs_base(tmp_path)
+    before = sorted(p.name for p in base.iterdir())
+    clock = C.FakeClock(C.ARM_START)
+    out = C.run_main(argv_of(str(RunPaths(seed).alert), T.current_tenant().id),
+                     clock=clock, main=C.script(clock, (0, C.DONE)))
+    return out, base, before
+
+
+def refused(out: C.Launched, capsys: pytest.CaptureFixture, needle: str, base: Path,
+            before: list[str]) -> None:
+    """The launch exited through a refusal that names `needle` (not argparse's unknown-flag
+    message), never reached the driver and minted no run."""
+    message = f"{out.refusal} {capsys.readouterr().err}"
+    assert out.exit == "SystemExit", f"the launch was not refused: exit={out.exit}"
+    assert "unrecognized" not in message, f"the flag is simply unknown: {message!r}"
+    assert needle in message, f"the refusal does not name {needle}: {message!r}"
+    assert out.run_dir is None, "a refused launch reached the driver"
+    assert sorted(p.name for p in base.iterdir()) == before, "a refused launch minted a run dir"
+
+
+@contextlib.contextmanager
+def proxied_runs(tmp_path: Path, data_root: Path) -> Iterator[Callable[..., tuple[C.Launched, Seen]]]:
+    """A `run(name, flags)` that launches a natural run whose one elastic query goes through the
+    real proxy to a recording upstream (`run.upstream` lists what it was sent)."""
+    with H.upstream() as up:
+        up.replies[f"/{A.ELASTIC_EVENTS}/_search"] = (
+            200, {"Content-Type": "application/json"},
+            b'{"hits": {"total": {"value": 0}, "hits": []}}')
+        with A.elastic_proxied(tmp_path / "px", data_root, up.url) as (proxied, tap):
+            def run(name: str, flags: list[str], **kw: Any) -> tuple[C.Launched, Seen]:
+                seen = Seen()
+                out = launch(tmp_path / name, flags, registry_cls=wired_registry(seen, proxied), **kw)
+                return out, seen
+
+            run.upstream = up  # type: ignore[attr-defined]
+            run.tap = tap  # type: ignore[attr-defined]
+            yield run
+
+
+@pytest.mark.parametrize("spelling", [
+    pytest.param(AS_OF_Z, id="z"),
+    pytest.param("2026-10-20T11:00:00+02:00", id="colon-offset"),
+    pytest.param("2026-10-20T11:00:00+0200", id="compact-offset"),
+    pytest.param("2026-10-20T14:30:00+05:30", id="half-hour-east"),
+    pytest.param("2026-10-20T05:30:00-03:30", id="half-hour-west"),
+])
+def test_an_as_of_runs_clock_starts_at_T_whatever_the_offset_it_is_spelled_in(tmp_path, spelling):
+    """O5: the first visible time is T (the UTC instant) plus the run's own elapsed seconds,
+    whatever the clock source reads at launch."""
+    out = launch(tmp_path, ["--as-of", spelling])
+
+    assert out.exit == 0, f"the run did not run: exit={out.exit} refusal={out.refusal}"
+    assert C.lesson_reads(out.run_dir, L1) == [C.at(AS_OF, ELAPSED)], C.lesson_rows(out.run_dir)
+
+
+def test_an_ordinary_runs_clock_starts_at_its_clock_source(tmp_path):
+    """O5 control: without the flag the first visible time is the source's reading plus elapsed."""
+    out = launch(tmp_path, [])
+
+    assert out.exit == 0, f"refusal={out.refusal}"
+    assert C.lesson_reads(out.run_dir, L1) == [C.at(C.ARM_START, ELAPSED)]
+
+
+def test_an_as_of_run_records_the_run_clocks_start_not_wall_time(tmp_path, data_root):
+    """O5/A9: the run state's created_at/started_at and the stamp's started_at are T. Control:
+    an ordinary run records its clock source's start in the budget and wall time in the stamp."""
+    with proxied_runs(tmp_path, data_root) as run:
+        frozen, frozen_seen = run("frozen", ["--as-of", AS_OF_Z])
+        ordinary, ordinary_seen = run("ordinary", [])
+
+    assert frozen.exit == 0, (frozen.refusal, ordinary.refusal)
+    assert ordinary.exit == 0, (frozen.refusal, ordinary.refusal)
+    assert frozen_seen.budget, "no call reached the registry with a run state"
+    assert ordinary_seen.budget, "no call reached the registry with a run state"
+    for key in ("created_at", "started_at"):
+        assert C.instant(frozen_seen.budget[key]) == AS_OF, f"{key}={frozen_seen.budget[key]}"
+        assert C.instant(ordinary_seen.budget[key]) == C.ARM_START, ordinary_seen.budget[key]
+    stamped = _provenance.read_provenance(RunPaths(frozen.run_dir).provenance).started_at
+    assert C.instant(stamped) == AS_OF, f"the stamp's start is {stamped}, not the run clock's"
+    wall = _provenance.read_provenance(RunPaths(ordinary.run_dir).provenance).started_at
+    assert abs((C.instant(wall) - dt.datetime.now(dt.UTC)).total_seconds()) < 3600, wall
+
+
+def test_an_as_of_run_keeps_the_milliseconds_it_was_given(tmp_path, data_root):
+    """O5: a fractional second on `--as-of` is kept in the run clock's origin."""
+    with proxied_runs(tmp_path, data_root) as run:
+        out, seen = run("frozen", ["--as-of", "2026-10-20T09:00:00.250Z"])
+
+    assert out.exit == 0, f"refusal={out.refusal}"
+    assert dt.datetime.fromisoformat(seen.budget["started_at"]) == AS_OF + dt.timedelta(milliseconds=250)
+
+
+@pytest.mark.parametrize(("argv_of", "needle"), [
+    pytest.param(lambda alert, tenant: [alert, "--tenant", tenant, "--as-of", AS_OF_Z, "--update-ticket"],
+                 "--update-ticket", id="ticket-write"),
+    pytest.param(lambda alert, tenant: ["--tenant", tenant, "--episode", T.EPISODE_ID, "--world", "a",
+                                        "--as-of", AS_OF_Z], "--as-of", id="episode-and-world"),
+    pytest.param(lambda alert, tenant: ["--tenant", tenant, "--episode", T.EPISODE_ID, "--as-of", AS_OF_Z],
+                 "--as-of", id="episode-alone"),
+    pytest.param(lambda alert, tenant: [alert, "--tenant", tenant, "--world", "a", "--as-of", AS_OF_Z],
+                 "--as-of", id="world-alone-with-an-alert"),
+])
+def test_as_of_is_refused_with_a_ticket_write_or_a_branching_flag(tmp_path, capsys, argv_of, needle):
+    """Non-obligation (ticket writes) and O5: a frozen run never writes a ticket and is never a
+    branch. Refused naming the flag, before a run exists."""
+    out, base, before = attempt(tmp_path, argv_of)
+
+    refused(out, capsys, needle, base, before)
+
+
+@pytest.mark.parametrize("moment", [
+    pytest.param("2026-10-20T09:00:00", id="naive"),
+    pytest.param("2026-10-20", id="date-only"),
+    pytest.param("", id="empty"),
+    pytest.param("yesterday", id="junk"),
+    pytest.param("0001-01-01T00:00:00+02:00", id="before-year-1-in-utc"),
+    pytest.param("9999-12-31T23:59:59-02:00", id="after-year-9999-in-utc"),
+])
+def test_an_as_of_that_is_not_an_instant_is_refused_naming_the_flag(tmp_path, capsys, moment):
+    """O5: T is ISO-8601 with an offset or `Z`, inside years 1-9999 in UTC (a naive time is never
+    read as UTC); anything else is a refusal naming `--as-of`, never an OverflowError."""
+    out, base, before = attempt(
+        tmp_path, lambda alert, tenant: [alert, "--tenant", tenant, "--as-of", moment])
+
+    refused(out, capsys, "--as-of", base, before)
+
+
+def test_arrived_by_is_not_accepted(tmp_path, capsys):
+    """Withdrawn from product: `--arrived-by` is no flag, with or without `--as-of`. Nothing runs."""
+    out, base, before = attempt(tmp_path, lambda alert, tenant: [
+        alert, "--tenant", tenant, "--as-of", AS_OF_Z, "--arrived-by", "2026-10-20T09:03:17Z"])
+
+    assert out.exit == "SystemExit", f"--arrived-by was accepted: exit={out.exit}"
+    message = f"{out.refusal} {capsys.readouterr().err}"
+    assert "--arrived-by" in message, message
+    assert out.run_dir is None
+    assert sorted(p.name for p in base.iterdir()) == before
+
+
+@pytest.mark.parametrize(("flags", "enqueued"), [
+    pytest.param(["--as-of", AS_OF_Z], 0, id="as-of"),
+    pytest.param([], 1, id="ordinary-control"),
+])
+def test_an_as_of_run_is_never_enqueued_for_curation_even_without_no_learn(tmp_path, flags, enqueued):
+    """Held-out isolation: the curation exclusion keys on `--as-of` (replacing `started.cut`),
+    so `--no-learn` is not what keeps a frozen run out. Control: an ordinary run is enqueued."""
+    asked: list[Any] = []
+
+    def enqueue(*args: Any, **kwargs: Any) -> bool:
+        asked.append(args)
+        return True
+
+    out = launch(tmp_path, flags, enqueue=enqueue, learn=True)
+
+    assert out.exit == 0, f"refusal={out.refusal}"
+    assert len(asked) == enqueued, asked
+
+
+def test_an_as_of_runs_elastic_request_is_byte_identical_to_an_ordinary_runs(tmp_path, data_root):
+    """P7: an `--as-of` run's query reaches Elasticsearch as the same method, path and body bytes as
+    an ordinary run's, and the adapter's context has the same fields."""
+    with proxied_runs(tmp_path, data_root) as run:
+        sent: dict[str, Seen] = {}
+        wire: dict[str, list[tuple[str, str, str]]] = {}
+        for name, flags in (("ordinary", []), ("frozen", ["--as-of", AS_OF_Z])):
+            before = len(run.upstream.seen)
+            out, sent[name] = run(name, flags)
+            assert out.exit == 0, f"{name}: exit={out.exit} refusal={out.refusal}"
+            wire[name] = [(s.method, s.path, s.body) for s in run.upstream.seen[before:]]
+
+    assert wire["ordinary"], "the ordinary run's query never reached the upstream"
+    assert wire["frozen"] == wire["ordinary"], (
+        f"the --as-of run's request differs: {wire['frozen']} vs {wire['ordinary']}")
+    assert [p for _c, p in sent["frozen"].calls] == [p for _c, p in sent["ordinary"].calls]
+
+    def fields(ctx: Any) -> dict:
+        return {f.name: getattr(ctx, f.name) for f in dataclasses.fields(ctx)}
+
+    assert set(fields(sent["frozen"].calls[0][0])) == set(fields(sent["ordinary"].calls[0][0])), (
+        "the --as-of run's verb context carries a field an ordinary run's does not")
+
+
+def run_files(run_dir: Path) -> dict[str, str]:
+    """Every file under the run dir by relative name, with its text."""
+    return {str(p.relative_to(run_dir)): p.read_bytes().decode("utf-8", "replace")
+            for p in Path(run_dir).rglob("*") if p.is_file()}
+
+
+#: What would tell the agent a run is frozen: the flag's name, a freeze, a cut.
+FREEZE_WORDS = re.compile(r"as[_-]?of|arrived[_-]?by|frozen|freez|\bcut\b", re.IGNORECASE)
+
+
+def test_an_as_of_run_writes_nothing_about_the_freeze_into_its_run_dir(tmp_path):
+    """P4/A9: the run dir has an ordinary run's files, the provenance start is T, none names the
+    freeze; trace and wire-log timestamps are not required to move."""
+    plain = run_files(launch(tmp_path, []).run_dir)
+    out = launch(tmp_path, ["--as-of", "2026-03-02T09:00:00Z"])
+
+    assert out.exit == 0, f"refusal={out.refusal}"
+    text = run_files(out.run_dir)
+    assert any("2026-03-02T09:00:20" in t for t in text.values()), (
+        "no file carries T's run-clock stamp: the walk is not reading the run")
+    stamped = _provenance.read_provenance(RunPaths(out.run_dir).provenance).started_at
+    assert C.instant(stamped) == dt.datetime(2026, 3, 2, 9, 0, tzinfo=dt.UTC), stamped
+    assert set(text) == set(plain), (
+        f"an --as-of run's dir differs from an ordinary run's: {sorted(set(text) ^ set(plain))}")
+    named = {name: m.group() for name, t in text.items()
+             if name in plain and (m := FREEZE_WORDS.search(t)) and not FREEZE_WORDS.search(plain[name])}
+    assert not named, f"a file of the --as-of run names the freeze: {named}"
+
+
+#: The only per-run differences the differential below forgives, each named so a reviewer can see
+#: what is allowed to differ: the run id and paths, the random ids and untrusted-text nonces a run
+#: mints, the run-clock stamps (compared as seconds from the run's own origin), the provenance
+#: wall-time start (checked against T in its own test), measured durations and the hash of a log
+#: line holding a random id, and every timestamp in the trace and wire
+#: logs (the A9 note exempts them). Nothing else, and nothing about requests.
+INSTANT = re.compile(r"\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?")
+NONCE = re.compile(r"run-[0-9a-f]{16}")
+RANDOM_ID = re.compile(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
+#: Durations the clock of the machine measures, and the hash of a log line that holds a random id.
+MEASURED = re.compile(r'("duration(?:_api)?_ms": )[0-9.]+|("wire_sha": ")[0-9a-f]{64}')
+WALL_START = re.compile(r'"started_at": "[^"]*"')
+STAMP_EXEMPT = ("tool_trace.jsonl", "wire_logs/")
+
+
+def as_instant(raw: str) -> dt.datetime | None:
+    try:
+        parsed = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.UTC)
+
+
+def normalised(name: str, text: str, *, origin: dt.datetime, swaps: dict[str, str]) -> str:
+    """`text` of run-dir file `name` with only the allowlisted per-run differences replaced."""
+    for raw, mark in swaps.items():
+        text = text.replace(raw, mark)
+    text = RANDOM_ID.sub("<ID>", NONCE.sub("<NONCE>", text))
+    if name == "provenance.json":
+        text = WALL_START.sub('"started_at": "<WALL>"', text)
+    text = MEASURED.sub(lambda m: f"{m.group(1) or m.group(2)}<MEASURED>", text)
+    exempt = name.startswith(STAMP_EXEMPT)
+
+    def stamp(m: re.Match) -> str:
+        moved = as_instant(m.group())
+        if exempt:
+            return "<STAMP>"
+        if moved is None or not 0 <= (moved - origin).total_seconds() <= 3600:
+            return m.group()
+        return f"<RUN-CLOCK+{(moved - origin).total_seconds():g}s>"
+
+    return INSTANT.sub(stamp, text)
+
+
+def what_the_proxy_and_upstream_saw(run: Any, since: tuple[int, int, int]) -> dict[str, Any]:
+    """Every adapter-to-proxy request (method, path, all headers, JSON body) and every request
+    the upstream then got (method, path, all headers, body), since the marks in `since`."""
+    tap, up = run.tap, run.upstream
+    return {
+        "to_proxy": tap.requests[since[0]:],
+        "to_proxy_bodies": [json.loads(b) for b in tap.bodies[since[1]:]],
+        "to_upstream": [(s.method, s.path, sorted(s.headers.items()), s.body) for s in up.seen[since[2]:]],
+    }
+
+
+def test_an_as_of_run_differs_from_an_ordinary_run_in_nothing_but_the_allowlisted_stamps(tmp_path, data_root):
+    """P7/P4: one ordinary and one --as-of run send the proxy and the upstream the same requests
+    (every header and body) and write the same run-dir files byte for byte, bar the named allowlist."""
+    swept: dict[str, dict[str, Any]] = {}
+    files: dict[str, dict[str, str]] = {}
+    with proxied_runs(tmp_path, data_root) as run:
+        for name, flags, origin in (("ordinary", [], C.ARM_START), ("frozen", ["--as-of", AS_OF_Z], AS_OF)):
+            marks = (len(run.tap.requests), len(run.tap.bodies), len(run.upstream.seen))
+            out, _seen = run(name, flags)
+            assert out.exit == 0, f"{name}: exit={out.exit} refusal={out.refusal}"
+            swept[name] = what_the_proxy_and_upstream_saw(run, marks)
+            swaps = {str(out.run_dir): "<RUN-DIR>", str(out.run_id): "<RUN-ID>", str(tmp_path / name): "<TMP>"}
+            files[name] = {n: normalised(n, t, origin=origin, swaps=swaps) for n, t in run_files(out.run_dir).items()}
+
+    assert swept["ordinary"]["to_proxy_bodies"], "the ordinary run's query never reached the proxy"
+    for part in swept["ordinary"]:
+        assert swept["frozen"][part] == swept["ordinary"][part], (
+            f"{part} of the --as-of run differs from an ordinary run's:\n"
+            f"{swept['frozen'][part]}\nvs\n{swept['ordinary'][part]}")
+    assert set(files["frozen"]) == set(files["ordinary"]), sorted(set(files["frozen"]) ^ set(files["ordinary"]))
+    assert len(files["ordinary"]) > 5, "the walk read too few files to mean anything"
+    differing = sorted(n for n in files["ordinary"] if files["frozen"][n] != files["ordinary"][n])
+    assert not differing, {
+        n: next((a, b) for a, b in zip(files["frozen"][n].splitlines(), files["ordinary"][n].splitlines(), strict=False)
+                if a != b) for n in differing}
+
+
+# -- r6.4.6: both clocks anchored at one instant; an as-of in the future is refused --------------------------------
+
+WAIT = 40       # seconds between the anchor W and the driver's start
+#: The clock source reads a minute ago: a launch is refused for an instant in the future whether that is judged on this
+#: source or on the machine's own clock, so the tests below sit on the right side of both.
+START = (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1)).replace(microsecond=0)
+ANCHOR = C.at(START, -WAIT)
+
+
+def z(moment: dt.datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@pytest.mark.parametrize("anchor", [
+    pytest.param(z(ANCHOR), id="z"),
+    pytest.param(ANCHOR.astimezone(dt.timezone(dt.timedelta(hours=2))).isoformat(), id="offset"),
+])
+def test_an_anchored_as_of_run_clock_reads_T_plus_the_time_since_the_anchor(tmp_path, data_root, anchor):
+    """r6.4.6: `--as-of T --as-of-anchor W`: from the driver's start the run clock reads `T + (now - W)`, now being
+    the clock source's reading at that start; the run's own seconds are added as ever."""
+    with proxied_runs(tmp_path, data_root) as run:
+        out, seen = run("anchored", ["--as-of", AS_OF_Z, "--as-of-anchor", anchor], start=START)
+
+    assert out.exit == 0, f"the run did not run: exit={out.exit} refusal={out.refusal}"
+    origin = C.at(AS_OF, WAIT)
+    assert C.lesson_reads(out.run_dir, L1) == [C.at(origin, ELAPSED)], C.lesson_rows(out.run_dir)
+    for key in ("created_at", "started_at"):
+        assert C.instant(seen.budget[key]) == origin, f"{key}={seen.budget[key]}"
+
+
+def test_an_anchor_equal_to_the_start_changes_nothing(tmp_path):
+    out = launch(tmp_path, ["--as-of", AS_OF_Z, "--as-of-anchor", z(START)], start=START)
+
+    assert out.exit == 0, f"refusal={out.refusal}"
+    assert C.lesson_reads(out.run_dir, L1) == [C.at(AS_OF, ELAPSED)]
+
+
+def test_an_anchor_without_an_as_of_is_refused_naming_the_flag(tmp_path, capsys):
+    out, base, before = attempt(tmp_path, lambda alert, tenant: [alert, "--tenant", tenant, "--as-of-anchor", z(ANCHOR)])
+
+    refused(out, capsys, "--as-of-anchor", base, before)
+
+
+def _refused(out: C.Launched, capsys: pytest.CaptureFixture, needle: str) -> None:
+    """Refused naming the flag, wherever the check sits (the argument parse or the driver's start): no run."""
+    message = f"{out.refusal} {capsys.readouterr().err}"
+    assert out.exit != 0, f"the run ran: exit={out.exit}"
+    assert out.summary is None, "the run reached a summary"
+    assert "unrecognized" not in message, message
+    assert needle in message, message
+
+
+def test_an_anchor_in_the_future_is_refused(tmp_path, capsys):
+    """The anchor is an instant the engine read before the run started: later than the start, it cannot be."""
+    out = launch(tmp_path, ["--as-of", AS_OF_Z, "--as-of-anchor", z(C.at(START, 3600))], start=START)
+
+    _refused(out, capsys, "--as-of-anchor")
+
+
+@pytest.mark.parametrize("ahead", [3600, 10 * 86400])
+def test_an_as_of_later_than_the_runs_start_is_refused(tmp_path, capsys, ahead):
+    """r6.4.6 patch: T after the run's start is a refusal naming the flag, not a run."""
+    out = launch(tmp_path, ["--as-of", z(C.at(START, ahead))], start=START)
+
+    _refused(out, capsys, "--as-of")

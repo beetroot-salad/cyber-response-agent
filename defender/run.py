@@ -44,15 +44,15 @@ import contextlib  # noqa: E402
 import dataclasses  # noqa: E402
 import functools  # noqa: E402
 import inspect  # noqa: E402
+import re  # noqa: E402
 import signal  # noqa: E402
-import threading  # noqa: E402
 from collections.abc import Callable, Collection, Iterator, Mapping  # noqa: E402
 from typing import Any, Literal, Protocol  # noqa: E402
 
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _log  # noqa: E402
+from defender import _clock, _log  # noqa: E402
 from defender.records.formats import AlertMapping, DataRoot, RunsBase  # noqa: E402
 from defender.records import formats  # noqa: E402
 from defender import run_common as _run  # noqa: E402
@@ -66,6 +66,7 @@ from defender import tenancy  # noqa: E402
 from defender.records.formats import Episode  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.investigation import driver  # noqa: E402
+from defender.investigation.run_clock import AnchoredOrigin, ClockOrigin, origin_reading  # noqa: E402
 from defender.investigation.run_state import RunState  # noqa: E402
 from defender import providers  # noqa: E402
 from defender.records import run_end  # noqa: E402
@@ -76,14 +77,8 @@ from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa
 from defender.systems.system_status import RunSystems  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
-from defender.credential_proxy import (  # noqa: E402
-    PASS_LIFETIME_SEC,
-    PASS_REUSE_MARGIN_SEC,
-    helper_access,
-    mint_request_token,
-    signing_access,
-)
-from defender.kit.access import AccessDeclaration, RequestAccess  # noqa: E402
+from defender.credential_proxy import helper_access, request_access, run_token_mint, signing_access  # noqa: E402
+from defender.kit.access import TOKEN_SEC, AccessDeclaration, RequestAccess  # noqa: E402
 from defender.kit.faults import AdapterFault, ConfigFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
 from defender.systems.verbs import (  # noqa: E402
@@ -140,7 +135,28 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="the tenant this run belongs to; required on every run, --episode "
                         "included (there is no default). On --episode the episode is looked "
                         "up under this tenant's folder, and its arm roster must name --world")
+    p.add_argument("--as-of", default=None, type=_aware_moment, metavar="T",
+                   help="start the run clock at T (ISO-8601 with an offset or Z); not with "
+                        "--update-ticket, --episode or --world")
+    p.add_argument("--as-of-anchor", default=None, type=_aware_moment, metavar="W",
+                   help="with --as-of: the wall instant at which the run clock read T; the run "
+                        "starts at T plus the time since W (a frozen lab node's clock, #1347)")
     ns = p.parse_args(argv)
+    now = datetime.now(UTC)
+    if ns.as_of_anchor is not None and ns.as_of is None:
+        p.error("--as-of-anchor needs --as-of: it says when the run clock read T")
+    if ns.as_of is not None and ns.as_of > now:
+        p.error("--as-of names a future time: a frozen run replays a moment that has passed")
+    if ns.as_of_anchor is not None and ns.as_of_anchor > now:
+        p.error("--as-of-anchor names a future time: the anchor is when the clock was set")
+    # A frozen run's refusals, before any run dir or episode is looked up (#1347 O5).
+    if ns.as_of is not None and (ns.episode is not None or ns.world is not None):
+        p.error("--as-of is not available with --episode/--world: a sibling's clock is its "
+                "branch point's")
+    if ns.as_of is not None and ns.update_ticket:
+        p.error("--update-ticket is not available with --as-of: a run started at another "
+                "moment is not a live investigation, and its ticket row would enter the case "
+                "history as one")
     if ns.episode is not None and ns.alert is not None:
         p.error(
             "the positional alert is illegal with --episode: the manifest already names the "
@@ -152,6 +168,25 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         p.error("--episode needs --world: a manifest declares a family, and a process is one "
                 "arm")
     return ns
+
+
+#: The offset an `--as-of` value must end with.
+_SPELLED_OFFSET = re.compile(r"(Z|[+-]\d\d:?\d\d)\Z")
+
+
+def _aware_moment(text: str) -> datetime:
+    """An `--as-of` value: ISO-8601 carrying its offset (or `Z`), as aware UTC. A time with no
+    offset is refused rather than read as UTC: the operator says which instant."""
+    text = text.strip()
+    if not _SPELLED_OFFSET.search(text):
+        raise argparse.ArgumentTypeError(f"{text!r} names no offset; spell it with Z or +HH:MM")
+    moment = _clock.parse_iso_utc(text)
+    if moment is None:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an ISO-8601 time")
+    try:
+        return moment.astimezone(UTC)
+    except OverflowError:
+        raise argparse.ArgumentTypeError(f"{text!r} is outside the years a run can be served") from None
 
 
 def _source_one_provider_key(prov: providers.Provider) -> int:
@@ -316,7 +351,7 @@ class _Investigate(Protocol):
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
         source: Run | None = None, job_facts: _JobEndFacts | None = None,
-        access: RequestAccess | None = None,
+        access: RequestAccess | None = None, clock_origin: ClockOrigin | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -358,6 +393,9 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     #: A job's facts holder (#1342 r5 C2): the driver keeps its review state in the holder's
     #: dict, so the job entry reads the close however the run ends. `None` off the job lane.
     job_facts: _JobEndFacts | None = None,
+    #: The run clock's start when it is not the source's own (`--as-of`, #1347 O5); `None`
+    #: on an ordinary run and on a world, whose clock is its branch point's.
+    clock_origin: ClockOrigin | None = None,
     #: The run's live state (#1414), handed to the investigation when the caller built one.
     run_state: Any = None,
     #: The credential proxy's address and the run's read token (#1163); `None` when the run has
@@ -431,10 +469,12 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
         finally:
             verbs.close()
     verbs = registry_cls(roster, tenant.grants.gather, grant_home=tenant.table_pointer)
+    # Passed only when set, so an ordinary run calls its seam exactly as before `--as-of`.
+    clock_kw: dict[str, Any] = {} if clock_origin is None else {"clock_origin": clock_origin}
     return investigate(
         alert_path=alert_path, run=run, defender_dir=defender_dir,
         model_name=model_name, model_override=model_override, box=box, verbs=verbs,
-        roster=roster, systems=systems, tenant=tenant, **held, **_access_kwargs(access),
+        roster=roster, systems=systems, tenant=tenant, **clock_kw, **held, **_access_kwargs(access),
     )
 
 
@@ -481,6 +521,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: holds that verdict (`None`: the drive reads `defender_dir`'s roster and the driver
     #: judges it, as for a direct caller).
     systems: RunSystems | None = None,
+    #: The run clock's start (`--as-of`, #1347), threaded to the drive; `None` on an ordinary run.
+    clock_origin: ClockOrigin | None = None,
     #: The credential proxy's address and the run's read token (#1163), signed at run start.
     access: RequestAccess | None = None,
     investigate: _Investigate = _drive_investigation,
@@ -539,6 +581,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     # has one: a seam that predates either is not handed a keyword it has no use for.
     keywords: dict[str, Any] = {} if job_facts is None else {"job_facts": job_facts}
     keywords |= _access_kwargs(access)
+    keywords |= {} if clock_origin is None else {"clock_origin": clock_origin}
     keywords |= {} if run_state is None else {"run_state": run_state}
     investigation_ok = False
     # A run its box ended (#1421) returns normally, but its failure is in flight all the same: a
@@ -581,33 +624,31 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     return summary
 
 
-#: Seconds a request token lives from when it is signed, read or write-back (r7 A20), and the
-#: life a held read token must have left to be handed out again.
-TOKEN_SEC = PASS_LIFETIME_SEC
-TOKEN_REUSE_MARGIN_SEC = PASS_REUSE_MARGIN_SEC
-
-
 class _TokenMint:
     """Signs this run's request tokens in the run process (#1163 A1): a read token over the
-    granted `http-proxy` systems when a call first needs one, reused while it has life left (r7
-    A20), and a write-back token (`rw` on the case system only) at the record step (#1359 D-9).
+    granted `http-proxy` systems when a call first needs one, held by the process's one access
+    holder (#1363 O1, `RequestAccess`), and a write-back token (`rw` on the case system only) at the record step (#1359 D-9).
     Building one checks configuration only; nothing contacts OpenBao until a token is asked for,
     and a run with no `http-proxy` system to reach never does (A7)."""
 
-    def __init__(self, signer: Any, proxy_url: str | None, *, tenant_id: str, run_id: str,
+    def __init__(self, signer: Any, proxy_url: str | None, *, tenant_id: str, run_id: str,  # noqa: PLR0913 — the run's identity plus the holder's two seams
                  reads: tuple[str, ...], case_system: str | None,
-                 unsigned: str | None = None) -> None:
-        self._signer = signer
+                 unsigned: str | None = None, clock: Callable[[], float] = time.time,
+                 on_fault: Callable[[AdapterFault], None] | None = None) -> None:
         self._proxy_url = proxy_url
-        self._tenant_id = tenant_id
-        self._run_id = run_id
-        self._reads = reads
+        self._clock = clock
+        #: Signs the write-back token the way the holder signs the read token (`run_token_mint`).
+        self._mint = (None if signer is None else
+                      run_token_mint(signer, tenant_id=tenant_id, investigation=run_id))
         self._case_system = case_system
         #: Why a write-back token cannot be signed (R4), when it cannot: the run goes on, and the
         #: record step says so.
         self._unsigned = unsigned
-        self._held: tuple[str, float] | None = None
-        self._holding = threading.Lock()
+        #: The process's access holder: built here, signs nothing until a call first needs a
+        #: token. `clock` is the holder's own; `on_fault` is its owner's callback (#1363 B1).
+        self._access: RequestAccess | None = (
+            request_access(signer, proxy_url or "", tenant_id=tenant_id, investigation=run_id,
+                        reads=reads, clock=clock, on_fault=on_fault) if reads else None)
 
     @classmethod
     def for_run(  # noqa: PLR0913 — the run's identity plus the operator's three seams
@@ -615,7 +656,8 @@ class _TokenMint:
                 world: Any, case: case_system.CaseTarget | case_system.CaseSettingsFault | None,
                 run_id: str, accepted: tenancy.Tenant,
                 records: tenancy.TenantDirectory, signer: Any, proxy_url: str | None,
-                issuer_transport: Any) -> _TokenMint:
+                issuer_transport: Any, clock: Callable[[], float] = time.time,
+                on_fault: Callable[[AdapterFault], None] | None = None) -> _TokenMint:
         """The mint for a run, or a mint that signs nothing when no `http-proxy` system is in
         reach. A configuration that cannot sign (no proxy address; a tenant whose live generation
         in `records` records no sign login, A24', whether or not a `signer` is injected, r8.6)
@@ -625,7 +667,7 @@ class _TokenMint:
         and the record step says why. The signer is the tenant's own
         (`credential_proxy.request_signer`, r8.5) unless one is injected."""
         # A branched run is a run (#1449): a world reads its granted systems on a run's terms.
-        reads = _run.proxied_reads(tenant, down=systems.down)
+        reads = system_status.read_grant(tenant, systems.down)
         # The write-back token is for a case system run start judged sound (`case`), reached
         # through the proxy; a case system with bad settings is told so by the record step.
         # A world never gets one: `--update-ticket` with `--episode` is refused before this
@@ -646,26 +688,15 @@ class _TokenMint:
             return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
                        case_system=written, unsigned=refused.detail)
         return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
-                   reads=reads, case_system=written)
-
-    def _mint(self, grant: set[tuple[str, str]], expires_at: float) -> str:
-        return mint_request_token(
-            self._signer, tenant_id=self._tenant_id, investigation=self._run_id, grant=grant,
-            expires_at=datetime.fromtimestamp(expires_at, UTC))
-
-    def _read_token(self) -> str:
-        """The run's read token: the held one while it has life left, else a new one. A mint
-        that fails raises its fault to the call that asked (r7 A20, A18)."""
-        with self._holding:
-            now = time.time()
-            if self._held is None or self._held[1] - TOKEN_REUSE_MARGIN_SEC <= now:
-                expires_at = now + TOKEN_SEC
-                self._held = (self._mint({(s, "r") for s in self._reads}, expires_at), expires_at)
-            return self._held[0]
+                   reads=reads, case_system=written, clock=clock, on_fault=on_fault)
 
     def access_kwargs(self) -> dict[str, RequestAccess]:
-        return _access_kwargs(RequestAccess(self._proxy_url or "", self._read_token)
-                              if self._reads else None)
+        return _access_kwargs(self._access)
+
+    def access_lost(self) -> str | None:
+        """Why the process lost its credential-proxy access (the holder's latched detail), or None
+        while it has not, or never held any (#1363 D11)."""
+        return None if self._access is None else self._access.lost
 
     def write_back(self) -> dict[str, str]:
         """The record step's keywords: a fresh write-back token (`rw` on the case system only) and
@@ -673,10 +704,10 @@ class _TokenMint:
         (a system with bad settings is told so by the step, not by a token it would never use);
         nothing otherwise. A mint that fails here is a warning: the step reports the missing token
         itself."""
-        if self._case_system is None or self._unsigned is not None:
+        if self._case_system is None or self._unsigned is not None or self._mint is None:
             return {}
         try:
-            token = self._mint({(self._case_system, "rw")}, time.time() + TOKEN_SEC)
+            token = self._mint({(self._case_system, "rw")}, self._clock() + TOKEN_SEC)
         except AdapterFault as refused:
             _logger.warning(f"no write-back token for the record step: {refused.detail}")
             return {}
@@ -880,7 +911,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
 def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     alert: Path, *, tenant: tenancy.Tenant, model: str | None, run: Run | None = None,
     world: Any = None, mapping: AlertMapping | None = None,
-    knowledge: run_knowledge.KnowledgeSource | None = None,
+    knowledge: run_knowledge.KnowledgeSource | None = None, started_at: datetime | None = None,
 ) -> Run:
     """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
     handle, stamped with code, model, the request's tenant and (for a sibling) the manifest's
@@ -892,7 +923,7 @@ def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     """
     try:
         run = _run.materialize_run(alert, run=run, tenant=tenant, model=model, world=world,
-                                   mapping=mapping, knowledge=knowledge)
+                                   mapping=mapping, knowledge=knowledge, started_at=started_at)
     except TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run
@@ -992,6 +1023,8 @@ class _ReadAccess(Protocol):
 
     def access_kwargs(self) -> dict[str, RequestAccess]: ...
 
+    def access_lost(self) -> str | None: ...
+
 
 @dataclasses.dataclass(frozen=True)
 class _Started:
@@ -1015,12 +1048,17 @@ class _Started:
     #: The case system's verdict, judged once at setup when the run records its case
     #: (`--update-ticket`); `None` otherwise.
     case: case_system.CaseTarget | case_system.CaseSettingsFault | None = None
+    #: The run clock's start (`--as-of`, with `--as-of-anchor` its wall instant, #1347); `None`
+    #: on an ordinary run.
+    as_of: ClockOrigin | None = None
 
     def lifecycle_kwargs(self, ns: argparse.Namespace) -> dict[str, Any]:
+        # The origin only when set, so a lifecycle seam that predates it is called as before.
+        origin_kw: dict[str, Any] = {} if self.as_of is None else {"clock_origin": self.as_of}
         return {"run": self.run, "model": self.model, "model_override": ns.model,
                 "defender_dir": DEFENDER_DIR, "tenant": self.tenant, "world": self.world,
                 "episode": self.episode, "systems": self.systems,
-                **self.minting.access_kwargs(), **self.seams}
+                **self.minting.access_kwargs(), **self.seams, **origin_kw}
 
 
 def _acceptance_args(ns: argparse.Namespace, data_root: DataRoot) -> dict[str, Any]:
@@ -1144,12 +1182,22 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             # refuses is told so before anything about its input is — save that an ordinary
             # run's alert file is absent, refused above before the publish spends anything.
             alert = _case_input(ns, world, episode_runs)
+            # The run clock's origin (#1347 O5, r6.4.6): T, or T anchored at its wall instant W.
+            origin: ClockOrigin | None = (
+                None if ns.as_of is None else ns.as_of if ns.as_of_anchor is None
+                else AnchoredOrigin(at=ns.as_of, wall=ns.as_of_anchor))
 
             # The handle, not just its directory: the post-run step saves the run page through it.
             # The stamp records the export copied (O-B).
             if world is not None:
                 run = materialize(alert, run=early, tenant=accepted, model=model, world=world,
                                   knowledge=knowledge)
+            elif origin is not None:
+                # A frozen run's recorded start is its run clock's origin, never the wall time
+                # (#1347 O5); named only then, so a seam that predates `--as-of` is called as before.
+                run = materialize(alert, run=early, tenant=accepted, model=model,
+                                  mapping=mapping, knowledge=knowledge,
+                                  started_at=origin_reading(origin, datetime.now(UTC)))
             else:
                 run = materialize(alert, run=early, tenant=accepted, model=model,
                                   mapping=mapping, knowledge=knowledge)
@@ -1160,7 +1208,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             _write_knowledge_record(run_dir, knowledge)
             yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world,
                            episode=episode, systems=systems, seams=seams, alert=alert,
-                           minting=minting, case=case)
+                           minting=minting, case=case, as_of=origin)
         finally:
             copy.remove()
 
@@ -1230,6 +1278,19 @@ def _operator_set_up(ns: argparse.Namespace, data_root: DataRoot, admitted: Admi
     R6-3), held here for the whole run: both halves of run setup (`_set_up`)."""
     with admitted, _set_up(ns, data_root, admitted, **seams) as started:
         yield started
+
+
+def _not_curated(started: _Started, *, no_learn: bool) -> str | None:
+    """Why this run is not enqueued for catalog curation, or `None` when it is. A sibling's
+    evidence was staged on purpose and a run started with `--as-of` read a frozen lab (#1347):
+    neither is today's evidence, so neither ever feeds the catalog."""
+    if started.world is not None:
+        return "--episode: a sibling world is not enqueued for curation"
+    if started.as_of is not None:
+        return "--as-of: a frozen run is not enqueued for curation"
+    if no_learn:
+        return "--no-learn set; not enqueuing for curation"
+    return None
 
 
 def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
@@ -1320,7 +1381,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                 try:
                     summary = lifecycle(**started.lifecycle_kwargs(ns), **in_container, run_state=run_state)
                 except (ServingAbort, BaseExceptionGroup) as escaped:
-                    return _unservable_exit(escaped, world=world, episode=episode)
+                    return _unservable_exit(escaped, world=world, episode=episode,
+                                            lost=started.minting.access_lost())
 
                 def ticket_and_curation() -> None:
                     # No automatic feed into the learning pipeline; only catalog curation is
@@ -1343,11 +1405,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                             truncated_by=truncated_by, closed_before_cut=closed_before_cut,
                             case=started.case, **token)
 
-                    # A sibling's evidence was staged on purpose, so it must never feed the catalog.
-                    if world is not None:
-                        _logger.info("--episode: a sibling world is not enqueued for curation")
-                    elif ns.no_learn:
-                        _logger.info("--no-learn set; not enqueuing for curation")
+                    skipped = _not_curated(started, no_learn=ns.no_learn)
+                    if skipped is not None:
+                        _logger.info(skipped)
                     else:
                         if enqueue_curation(run, started.alert, tenant=started.accepted,
                                             truncated_by=summary.get("truncated_by")):
@@ -1381,7 +1441,8 @@ def parse_job_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--tenant", required=True, help="the tenant the investigation belongs to")
     ns = p.parse_args(argv)
     for name, default in (("alert", None), ("episode", None), ("world", None), ("no_learn", False),
-                          ("update_ticket", False), ("model", None), ("knowledge_commit", None)):
+                          ("update_ticket", False), ("model", None), ("knowledge_commit", None),
+                          ("as_of", None), ("as_of_anchor", None)):
         setattr(ns, name, default)
     return ns
 
@@ -1448,6 +1509,11 @@ class _HelperPass:
 
     def access_kwargs(self) -> dict[str, RequestAccess]:
         return _access_kwargs(self._access)
+
+    def access_lost(self) -> str | None:
+        """Why the process lost its credential-proxy access (the holder's latched detail), or None
+        while it has not, or never held any (#1363 D11)."""
+        return None if self._access is None else self._access.lost
 
 
 def _launch_facts(request: Callable[..., dict[str, Any]], *, kind: str, tenant: str, job: str,
@@ -1692,6 +1758,9 @@ _EXIT_WORDS = {
     run_end.TRUNCATED_BY_PROVIDER_REJECTED: "the model provider refused a request for good; the "
                                             "run ended (rerunning will not help: the run log "
                                             "names the HTTP status and the provider's reason)",
+    run_end.TRUNCATED_BY_PROXY_ACCESS: "the run lost its access to the credential proxy; the run "
+                                       "ended with no report (nothing is wrong with the systems it "
+                                       "was reading: the run log names the cause)",
     run_end.TRUNCATED_BY_BOX_LOST: "the run's box became unusable; the run ended (the operator's "
                                    "to fix: the run log names the command that found it)",
     run_end.TRUNCATED_BY_BOX_OUTPUT_LIMIT: "a process in the run's box wrote past its helper and "
@@ -1702,7 +1771,7 @@ _EXIT_WORDS = {
 def _exit_code(summary: dict) -> int:
     """The exit status of a run whose post-steps are done or skipped: its exit class's own code
     from the one table (`run_end.EXIT_CLASSES`: provider-down 4, box-lost 5, box-output-limit 6,
-    provider-rejected 7),
+    provider-rejected 7, proxy-access 8),
     said on the way out, else 0."""
     truncated_by = run_end.normalized_truncated_by(summary.get("truncated_by"))
     code = run_end.exit_code_of(truncated_by)
@@ -1723,12 +1792,23 @@ def _serving_abort(exc: BaseException) -> ServingAbort | None:
     return None
 
 
-def _unservable_exit(escaped: BaseException, *, world: Any, episode: Episode | None) -> int:
+def _unservable_exit(escaped: BaseException, *, world: Any, episode: Episode | None,
+                     lost: str | None = None) -> int:
     """A sibling whose world went unservable: its world record written and `UNSERVABLE_EXIT`.
     Anything else that escaped the lifecycle is raised again."""
     abort = _serving_abort(escaped)
     if abort is None or world is None or episode is None:
         raise escaped
+    ours = getattr(abort, "our_fault", False) or lost is not None
+    if ours and getattr(abort, "reason", "") != "budget":
+        # The oracle gave up because a lookup met our own failure, or the process lost its access
+        # while it served (#1363 D11): the world is not unservable, so no world record is written;
+        # the sibling ends as a run that lost its access.
+        system, detail = getattr(abort, "our_cause", None) or ("", lost or "")
+        _logger.error(f"--episode: world {world.label}: the oracle's lookup of {system or 'a system'} "
+                      f"failed on our side ({detail}); the sibling ends proxy-access, no world "
+                      "record is written")
+        return run_end.exit_code_of(run_end.TRUNCATED_BY_PROXY_ACCESS)
     _record_unservable_world(episode, world, abort)
     _logger.error(f"--episode: world {world.label} is unservable; the sibling ends "
                   f"({getattr(abort, 'reason', '')})")

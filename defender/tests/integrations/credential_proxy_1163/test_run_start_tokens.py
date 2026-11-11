@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from defender.kit.faults import ConfigFault, TransportFault
+from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._opened_paths import opened, opened_paths
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
@@ -168,7 +168,7 @@ def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_for
     assert "run_dir=" in caplog.text, "positive control: the log channel is read"
 
 
-@pytest.mark.parametrize("truncated_by", ["budget", "store", "provider-down"])
+@pytest.mark.parametrize("truncated_by", ["budget", "store", "provider-down", "proxy-access"])  # #1363 O7
 def test_r1_a_run_that_will_not_comment_signs_no_write_back_token(tmp_path, data_root, truncated_by):
     """A run cut short before a verdict leaves the case alone: no write-back token is signed for
     it, and the record step is handed none. The case system was judged once, at run start, and
@@ -227,12 +227,34 @@ SEALED = {"sealed on login": {"sealed": "login"}, "sealed on sign": {"sealed": "
           "sign answers 502": {"sign_status": 502}}
 
 
+def _latched(access: Any, failed: pytest.ExceptionInfo, bao: A.OpenBaoStandIn) -> None:
+    """A later ask of `access` raises a fresh fault with the failed sign's detail and sends OpenBao nothing
+    (#1363 D8): the failed sign is latched, though OpenBao has healed since."""
+    asked = len(bao.requests)
+    with pytest.raises(AdapterFault) as again:
+        access.token()
+    assert again.value is not failed.value, "the latched fault is raised afresh"
+    assert again.value.detail == failed.value.detail
+    assert len(bao.requests) == asked, "a later ask contacted OpenBao after the sign failed"
+    assert bao.signs == []
+
+
+def _healthy_run_signs(tmp_path, data_root, records) -> None:
+    """Positive control for a latch: a run of its own against a healthy OpenBao signs its read token."""
+    bao = A.OpenBaoStandIn({ROLE: SECRET})
+    rec, _tickets, rc, refused, _ = _drive(tmp_path / "healthy", data_root, ticket=False,
+                                           issuer_transport=bao, directory=records.directory)
+    assert (rc, refused) == (0, None)
+    read_access(rec).token()
+    assert len(bao.signs) == 1, "positive control: a healthy OpenBao signs"
+
+
 @pytest.mark.parametrize("fault", list(SEALED))
-def test_r4_a_sealed_or_unreachable_openbao_does_not_stop_run_start_and_is_retryable(
+def test_r4_a_sealed_or_unreachable_openbao_does_not_stop_run_start_and_a_failed_sign_is_latched(
         tmp_path, data_root, fault):
-    """Run start contacts no OpenBao, so one answering 5xx (sealed on login or sign, or any 5xx)
-    or not at all does not stop it; the read token asked of it then is `TransportFault`, a fault
-    a later call may not meet, and nothing is signed. r7 A20, A18, A24."""
+    """Run start contacts no OpenBao, so one answering 5xx (sealed on login or sign, or any 5xx) or not at
+    all does not stop it; the read token asked of it is then `TransportFault`, and the next ask raises the same
+    detail without contacting OpenBao, though it has healed. r7 A20, A24; #1363 D8 (the retry of A18 is retired)"""
     _plant(data_root, proxy=("identity",))
     records, _ = _records(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: SECRET}, **SEALED[fault])
@@ -241,36 +263,42 @@ def test_r4_a_sealed_or_unreachable_openbao_does_not_stop_run_start_and_is_retry
 
     assert (rc, refused) == (0, None)
     assert bao.requests == [], "run start contacted OpenBao"
-    with pytest.raises(TransportFault):
+    with pytest.raises(TransportFault) as failed:
         read_access(rec).token()
     assert bao.requests, "positive control: OpenBao was asked for the token"
     assert bao.signs == []
+    bao.sealed, bao.unreachable, bao.login_status, bao.sign_status = None, False, None, None
+    _latched(read_access(rec), failed, bao)
+    _healthy_run_signs(tmp_path, data_root, records)
 
 
-def test_r4b_a_login_openbao_refuses_is_a_config_fault_at_the_mint(tmp_path, data_root):
-    """OpenBao refusing the sign login (4xx: a wrong secret) is `ConfigFault`, not a fault a
-    retry may clear; the same login with the right secret signs. A24, A18."""
+def test_r4b_a_login_openbao_refuses_is_a_config_fault_at_the_mint_and_is_latched(tmp_path, data_root):
+    """OpenBao refusing the sign login (4xx: a wrong secret) is `ConfigFault`; the secret corrected, the next ask
+    still raises the same detail and sends nothing (the failed sign is latched); a run of its own with the
+    right secret signs. A24, A18; #1363 D8"""
     _plant(data_root, proxy=("identity",))
     records, _ = _records(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: "another-secret"})
     rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao,
                                            directory=records.directory)
     assert (rc, refused) == (0, None)
-    with pytest.raises(ConfigFault):
+    with pytest.raises(ConfigFault) as failed:
         read_access(rec).token()
     assert (bao.logins, bao.signs) == ([(ROLE, SECRET)], [])
     bao.accounts[ROLE] = SECRET
-    read_access(rec).token()
-    assert len(bao.signs) == 1, "positive control: the right secret signs"
+    _latched(read_access(rec), failed, bao)
+    assert bao.logins == [(ROLE, SECRET)]
+    _healthy_run_signs(tmp_path, data_root, records)
 
 
 @pytest.mark.parametrize(("status", "logins"), [(400, 1), (401, 2), (403, 2)],
                          ids=["bad request", "unauthorized", "forbidden"])
-def test_r4e_a_sign_openbao_refuses_with_a_4xx_is_a_config_fault_after_one_relogin_on_401_or_403(
+def test_r4e_a_sign_openbao_refuses_with_a_4xx_is_a_config_fault_after_one_relogin_on_401_or_403_and_is_latched(
         tmp_path, data_root, status, logins):
-    """A sign call answered 4xx (400: a key not yet made; 401/403: a refused client token) is
-    `ConfigFault`; a 401 or 403 is retried after exactly one fresh login, a 400 not. Control: a
-    sign that is not refused signs. A24 detail (login again once on 401/403), A18."""
+    """A sign call answered 4xx (400: a key not yet made; 401/403: a refused client token) is `ConfigFault`; a 401
+    or 403 is retried after exactly one fresh login, a 400 not. The next ask, with OpenBao accepting, raises the
+    same detail and sends nothing (the failed sign is latched). Control: a run of its own signs. A24 detail,
+    A18; #1363 D8"""
     _plant(data_root, proxy=("identity",))
     records, _ = _records(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: SECRET}, sign_status=status)
@@ -283,8 +311,9 @@ def test_r4e_a_sign_openbao_refuses_with_a_4xx_is_a_config_fault_after_one_relog
     assert bao.signs == []
     assert SECRET not in str(failed.value)
     bao.sign_status = None
-    read_access(rec).token()
-    assert len(bao.signs) == 1, "positive control: the same run signs once OpenBao accepts"
+    _latched(read_access(rec), failed, bao)
+    assert len(bao.logins) == logins, "the latched ask logged in again"
+    _healthy_run_signs(tmp_path, data_root, records)
 
 
 def _make_absent(path: Path) -> None:
@@ -622,10 +651,10 @@ def test_r7c_an_injected_signer_does_not_excuse_a_missing_sign_login(tmp_path, d
     assert tickets.calls == []
 
 
-def _mint_for(tmp_path, data_root, signer, *, world: Any) -> Any:
+def _mint_for(tmp_path, data_root, signer, *, world: Any, **seams: Any) -> Any:
     """The run's token mint, built directly (#1449): a tenant whose `identity` and `ticket` are
     `http-proxy` systems the gather role is granted, `ticket` its judged case system, and
-    `--update-ticket` set. `world` is the sibling's world (any object), or None for a run."""
+    `--update-ticket` set. `world` is the sibling's world (any object), or None for a run. `seams` (#1363: the holder's `clock=`) are handed to the mint as given."""
     import argparse
     import types
 
@@ -645,7 +674,7 @@ def _mint_for(tmp_path, data_root, signer, *, world: Any) -> Any:
         case=case_system.CaseTarget(system="ticket", template=None, module=None),
         run_id=fixture_uuid("1449-mint"), accepted=types.SimpleNamespace(id=S.PLAYGROUND_ID),
         records=records.directory, signer=signer, proxy_url="http://proxy.invalid",
-        issuer_transport=None)
+        issuer_transport=None, **seams)
 
 
 def test_1449_a_world_reads_on_a_runs_terms_and_is_never_minted_a_write_back_token(tmp_path, data_root):

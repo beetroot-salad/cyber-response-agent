@@ -926,3 +926,77 @@ def test_main_cannot_reach_a_payload_by_any_surface(tmp_path):
     assert not _decide(f"cat {payload} # record_query", main, run_dir).allow
     assert not permission.decide_read(
         payload, run_dir=run_dir, defender_dir=DEFENDER, policy=main).allow
+
+
+# --- #1363: a proxy fault's origin decides what the tool does with it ------------------------------
+
+def _origin_fault(kind: type, origin: str | None, detail: str = "ACCESS-1363: the credential proxy could not be used"):
+    fault = kind(detail)
+    if origin is not None:
+        fault.origin = origin
+    return fault
+
+
+@pytest.mark.parametrize("kind", [ConfigFault, TransportFault, UpstreamFault])
+def test_1363_o7_an_access_fault_is_control_flow_through_the_query_tool(tmp_path, kind):
+    """An `access` fault of any kind ends the run `proxy-access`: no row, no breaker charge, the lead is not
+    asked again. Control: the same fault with no origin is filed as before. #1363 O7."""
+    rec = VerbRecorder()
+    r = run_gather(tmp_path / "access", verbs=raising(rec, _origin_fault(kind, "access")),
+                   turns=[q("elastic", "probe", {}), q("elastic", "probe", {}), DONE])
+    assert len(rec.calls) == 1, "the verb ran again after access was lost"
+    assert r.summary.get("truncated_by") == "proxy-access", r.summary
+    assert r.own_rows == [], "the lost call was filed as a row"
+    assert r.state.breaker_snapshot()["total_failures"] == 0, r.breaker
+    assert r.gather.calls == 1, "the lead was asked again after the run lost access"
+
+    ctl = run_gather(tmp_path / "plain", verbs=raising(VerbRecorder(), _origin_fault(kind, None)),
+                     turns=[q("elastic", "probe", {}), DONE])
+    assert ctl.summary.get("truncated_by") is None
+    assert len(ctl.own_rows) == 1, "control: an unlabelled fault is filed"
+
+
+class _GuardFails(FakeVerbs):
+    """A registry whose `seam` raises `exc`: the guards around resolution and listing must carry it."""
+
+    def __init__(self, seam: str, exc: BaseException, rec: VerbRecorder):
+        def probe(ctx: VerbContext, *, native_query: str = "FROM logs") -> list[dict]:
+            rec.record("probe", ctx, {"native_query": native_query})
+            return PAYLOAD
+
+        super().__init__({"elastic": {"probe": probe}})
+        self._seam, self._exc = seam, exc
+
+    def _maybe(self, seam: str) -> None:
+        if seam == self._seam:
+            raise self._exc
+
+    def resolve_call(self, system, verb, params):
+        self._maybe("resolve_call")
+        return super().resolve_call(system, verb, params)
+
+    def verbs(self, system):
+        self._maybe("verbs")
+        return super().verbs(system)
+
+    def decide(self, system, verb):
+        self._maybe("decide")
+        return super().decide(system, verb)
+
+
+@pytest.mark.parametrize("seam", ["resolve_call", "verbs", "decide"])
+def test_1363_o7_the_catalog_resolver_and_guards_carry_the_access_loss_as_control_flow(tmp_path, seam):
+    """`ProxyAccessLost` raised under the resolver or a listing guard ends the run `proxy-access`; the same seam
+    raising an ordinary error degrades as before and the run goes on. #1363 O7, D10."""
+    from defender.tests.runtime.providers import _spec1243 as P
+
+    turn = q("elastic", "probe", {}) if seam == "resolve_call" else Turn(
+        tool_calls=[("list_verbs", {"system": "elastic"})])
+    lost = run_gather(tmp_path / "lost", verbs=_GuardFails(seam, P.proxy_access_lost(), VerbRecorder()),
+                      turns=[turn, DONE])
+    assert lost.summary.get("truncated_by") == "proxy-access", lost.summary
+    ctl = run_gather(tmp_path / "ctl", verbs=_GuardFails(seam, RuntimeError("kaboom in the registry"), VerbRecorder()),
+                     turns=[turn, DONE])
+    assert ctl.summary.get("truncated_by") is None, ctl.summary
+    assert "kaboom" in ctl.gather_saw or "kaboom" in json.dumps(ctl.own_rows), "control: the guard's degradation is shown"
+    assert ctl.gather.calls == 2, "control: the lead went on"

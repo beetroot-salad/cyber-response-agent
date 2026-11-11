@@ -15,6 +15,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
+from evaluations.tests import _frozen_cases as F
 from itertools import takewhile
 
 SLUG = "m05-lsass-access"
@@ -34,7 +35,7 @@ def _fixtures(root: Path, truths: dict[str, str]) -> Path:
         (member / "alert.json").write_text('{"alert": "held-out"}\n', encoding="utf-8")
         (member / "ground_truth.yaml").write_text(
             f"held_out: true\ndisposition: {disposition}\n", encoding="utf-8")
-    return root
+    return F.make_cases(root)  # a labelled fixture is a case with a freeze (A2, O9)
 
 
 def _run(runs: Path, run_id: str | None = None, *, says: str | None,
@@ -51,12 +52,10 @@ def _run(runs: Path, run_id: str | None = None, *, says: str | None,
     return run_dir
 
 
-def _index(path: Path, *rows: tuple[str, str]) -> Path:
-    """The index holding `rows` (`(slug, run_id)`, oldest first) as JSON Lines."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(json.dumps({"slug": slug, "run_id": run_id}) + "\n"
-                            for slug, run_id in rows), encoding="utf-8")
-    return path
+def _index(path: Path, fixtures: Path, *rows: tuple[str, str]) -> Path:
+    """The index holding `rows` (`(slug, run_id)`, oldest first) as JSON Lines, each a valid row
+    bound to its case's current binding in `fixtures` (O9/A8)."""
+    return F.write_index(path, *(F.row(fixtures, slug, run_id) for slug, run_id in rows))
 
 
 # The CLI, driven through `held_out.main`
@@ -166,7 +165,7 @@ def test_scoring_uses_index_order_instead_of_folder_age(tmp_path, scoring, lates
     os.utime(wrong, (1_800_000_000, 1_800_000_000))
     os.utime(right, (1_800_000_600, 1_800_000_600))
     first, last = (right, wrong) if latest == "wrong" else (wrong, right)
-    _index(index, (SLUG, first.name), (SLUG, last.name))
+    _index(index, fixtures, (SLUG, first.name), (SLUG, last.name))
     res = _score(runs, index, fixtures)
     res.assert_score({SLUG: verdict}, accuracy)
     if latest == "wrong":
@@ -181,7 +180,7 @@ def test_a_row_naming_an_absent_or_recordless_run_scores_wrong_not_not_run(tmp_p
     recordless = _run(runs, says="benign", record=False)
     no_report = _run(runs, says=None)
     scored = _run(runs, says="benign")
-    _index(index, ("absent-case", S.new_id()), ("recordless-case", recordless.name),
+    _index(index, fixtures, ("absent-case", S.new_id()), ("recordless-case", recordless.name),
            ("no-report-case", no_report.name), ("scored-case", scored.name))
 
     res = _score(runs, index, fixtures)
@@ -202,13 +201,13 @@ def test_an_index_from_the_old_launcher_scores_past_its_knowledge_pin_line(tmp_p
     runs, index, _ = scoring
     fixtures = _fixtures(tmp_path / "fixtures", {SLUG: "malicious"})
     run = _run(runs, says="malicious")
-    _index(index, (SLUG, run.name))
+    _index(index, fixtures, (SLUG, run.name))
     index.write_text(json.dumps({"knowledge_commit": "a" * 40}) + "\n"
                      + index.read_text(encoding="utf-8"), encoding="utf-8")
     _score(runs, index, fixtures).assert_score({SLUG: "OK"}, (1, 1))
 
 
-def test_a_slug_with_no_row_is_not_run_whatever_folders_are_named_after_it(tmp_path, scoring):
+def test_a_slug_with_no_row_is_unscored_whatever_folders_are_named_after_it(tmp_path, scoring):
     runs, index, _ = scoring
     fixtures = _fixtures(tmp_path / "fixtures", {SLUG: "benign", OTHER: "benign"})
     for name in (SLUG, f"{SLUG}-n5-a", f"20260718t101500z-{SLUG}", f"sec-eval-gen7-{SLUG}-ab12cd34"):
@@ -217,10 +216,14 @@ def test_a_slug_with_no_row_is_not_run_whatever_folders_are_named_after_it(tmp_p
     decoy = _run(runs, OTHER, says="malicious")
     os.utime(indexed, (1_800_000_000, 1_800_000_000))
     os.utime(decoy, (1_800_000_600, 1_800_000_600))
-    _index(index, (OTHER, indexed.name))
+    _index(index, fixtures, (OTHER, indexed.name))
 
     res = _score(runs, index, fixtures)
-    res.assert_score({OTHER: "OK"}, (1, 1), not_run=[SLUG])
+    said = f"{res.out}\n{res.err}"
+    assert (res.crashed, res.verdicts(), res.accuracy()) == (None, {OTHER: "OK"}, (1, 1)), said
+    assert SLUG in said.replace(f"{OTHER}", ""), f"the case with no row is not listed:\n{said}"
+    assert "incomplete" in said.lower(), said
+    assert res.rc not in (0, 2), f"O11: a set with an unscored case exits non-zero:\n{said}"
 
 
 def test_scoring_without_an_index_scores_no_folder_by_its_name(tmp_path, scoring):
@@ -232,7 +235,7 @@ def test_scoring_without_an_index_scores_no_folder_by_its_name(tmp_path, scoring
     assert res.verdicts() == {}, f"a folder was scored by its name with no index:\n{res.out}"
 
     indexed = _run(runs, says="benign")
-    _index(index, (SLUG, indexed.name))
+    _index(index, fixtures, (SLUG, indexed.name))
     res = _score(runs, index, fixtures)
     assert res.verdicts() == {SLUG: "OK"}, f"control: the indexed run was not scored:\n{res.out}"
 
@@ -258,7 +261,7 @@ def test_scoring_refuses_an_index_inside_its_runs_dir(tmp_path, scoring, place):
     elif place == "linked-runs-root":
         handed = tmp_path / "runs-link"
         handed.symlink_to(runs)
-    _index(index, (SLUG, good.name))
+    _index(index, fixtures, (SLUG, good.name))
     held = index.read_bytes()
 
     res = _score(handed, index, fixtures)
@@ -267,7 +270,7 @@ def test_scoring_refuses_an_index_inside_its_runs_dir(tmp_path, scoring, place):
     assert res.accuracy() is None, res.out
     assert index.read_bytes() == held
 
-    _index(ops_index, (SLUG, good.name))
+    _index(ops_index, fixtures, (SLUG, good.name))
     res = _score(runs, ops_index, fixtures)
     assert res.verdicts() == {SLUG: "OK"}, f"control: an index outside was not scored:\n{res.out}"
 
@@ -279,7 +282,7 @@ def test_scoring_depends_only_on_the_index_and_given_runs(tmp_path, scoring, mon
     runs, index, ops = scoring
     fixtures = _fixtures(tmp_path / "fixtures", {SLUG: "benign"})
     good = _run(runs, says="benign")
-    _index(index, (SLUG, good.name))
+    _index(index, fixtures, (SLUG, good.name))
     if scope.startswith("root-"):
         if scope == "root-unset":
             monkeypatch.delenv(S.DATA_ROOT_ENV, raising=False)

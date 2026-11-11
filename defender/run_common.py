@@ -19,7 +19,7 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender import _io
+from defender import _clock, _io
 from defender.records import formats, run_end
 from defender import tenancy  # noqa: E402
 from defender._io import read_bytes_capped  # noqa: E402
@@ -50,6 +50,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     world: ResumeWorld | None = None,
     mapping: AlertMapping | None = None, knowledge: KnowledgeSource | None = None,
     launch: Launched | None = None,
+    started_at: _dt.datetime | None = None,
 ) -> Run:
     """Build the run directory of a fresh run and return the tenant-bound handle the run's later
     records are saved through. No caller names the run's id (#1279 A3): `run` is the handle the
@@ -67,7 +68,10 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
 
     `launch` is a job's checked launch record (#1342 O6, M5): `alert` is then its alert file, the
     bytes admitted are compared to the record's digest (one read, as a sibling's are to its
-    record), and the stamp's label is the record's (the alert's title), not the file's name."""
+    record), and the stamp's label is the record's (the alert's title), not the file's name.
+
+    `started_at` is the start the stamp records when the run clock does not start now (`--as-of`,
+    #1347 O5); `None` is the wall time."""
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     if world is not None and run is None:
@@ -75,7 +79,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
                         "only from its episode's roster")
     if world is None and mapping is None:
         raise TypeError("materialize_run needs the tenant's alert mapping (`mapping=`) for a fresh run")
-    started_at = _started_at()
+    started = _started_at() if started_at is None else _clock.z_seconds(started_at)
     front_door = _admit_input(alert, mapping=mapping, world=world,
                               digest=None if launch is None else launch.record.digest)
     world_id: str | None = None
@@ -106,7 +110,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     _stamp(
         run, knowledge=knowledge, model=model, tenant_id=run.tenant_id,
         world_id=world_id,
-        started_at=started_at,
+        started_at=started,
         alert_label=_alert_label(alert) if launch is None else launch.record.label,
     )
     return run

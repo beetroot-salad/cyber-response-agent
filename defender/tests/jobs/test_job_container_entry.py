@@ -99,7 +99,7 @@ def test_o6_the_entry_asks_for_its_pass_once_reuses_it_and_asks_again_only_withi
     """Inside the container the entry's read pass is asked of the helper when a call first needs one, reused on the next
     call and while more than the reuse margin is left (the clock moved to just outside the margin), and asked afresh once
     the clock is inside it: then the new pass is the one used. (O5, O6, H2: no pass outlives its lifetime)"""
-    from defender import run as run_py
+    from defender.kit.access import TOKEN_REUSE_MARGIN_SEC
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 
     scene, inv, signer, got = granted_scene, str(uuid.uuid4()), A.MarkedSigner(), {}
@@ -118,9 +118,9 @@ def test_o6_the_entry_asks_for_its_pass_once_reuses_it_and_asks_again_only_withi
         take("first")
         take("again")
         expiry = claims_of(signer, seen[0][1])["exp"]
-        offset[0] = expiry - real_time() - run_py.TOKEN_REUSE_MARGIN_SEC - 5  # 5 s outside the margin
+        offset[0] = expiry - real_time() - TOKEN_REUSE_MARGIN_SEC - 5  # 5 s outside the margin
         take("outside-margin")
-        offset[0] = expiry - real_time() - run_py.TOKEN_REUSE_MARGIN_SEC + 5  # 5 s inside it
+        offset[0] = expiry - real_time() - TOKEN_REUSE_MARGIN_SEC + 5  # 5 s inside it
         take("inside-margin")
         take("after-refresh")
         offset[0] = 0.0

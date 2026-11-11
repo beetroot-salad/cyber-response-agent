@@ -18,6 +18,7 @@ from defender.systems.verbs import PLATFORM_SERVED, fresh_adapter_module, redact
 # The run record's fault type, through the record's own module: the import edge into
 # `scripts/` stays `run_tenant`'s (#1080 O1's named pair, retired by #1172/#1121).
 from defender.systems.run_tenant import ConfigFault
+from defender.kit.access import AccessDeclaration
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.systems._state import SystemsState
@@ -80,6 +81,15 @@ class NoUsableSystem(Exception):  # noqa: N818 — named for what it refuses, li
 def granted_systems(grants: RunGrants) -> frozenset[str]:
     """The gather role defines startup scope; correlation is validated as its narrowing."""
     return grants.gather.systems
+
+
+def read_grant(tenant: RunTenant, down: Collection[str]) -> tuple[str, ...]:
+    """The systems a process's read token covers (#1363 O2, D5): each granted system declared on
+    the credential proxy and not judged down. The one rule a run, a sibling run and a pre-flight
+    pass share, so a read token is never signed for a system that cannot be used."""
+    proxied = {name for name, found in tenant.access.items()
+               if isinstance(found, AccessDeclaration) and name not in down}
+    return tuple(sorted(granted_systems(tenant.grants) & proxied))
 
 
 @dataclass(frozen=True)
@@ -287,7 +297,7 @@ def cause_text(cause: Down) -> str:
 
 def mark_escaped(state: SystemsState, system: str, fault_text: str, *,
                  tenant: RunTenant | None = None, defender_dir: Path | None = None,
-                 known_ids: Collection[str] = ()) -> None:
+                 known_ids: Collection[str] = (), defect: bool = True) -> None:
     """A verb of `system` raised `ConfigFault` at call time (O-5b): its settings check missed a
     fault its verbs can raise. The system is down as not configured from this call on — the same
     status and accounting the start check gives, reached late — and the escape is logged as the
@@ -303,10 +313,11 @@ def mark_escaped(state: SystemsState, system: str, fault_text: str, *,
         adapters_root=adapters_under(defender_dir) if defender_dir is not None else None,
         known_ids=frozenset(known_ids))
     cause = NotConfigured(scope.reason(fault_text))
-    _logger.error(
-        f"adapter defect: a {system} verb raised ConfigFault at call time — a settings fault "
-        f"its `check_settings` does not cover. {system} is down for the rest of this run as "
-        f"{cause_text(cause)}")
+    if defect:
+        _logger.error(
+            f"adapter defect: a {system} verb raised ConfigFault at call time — a settings fault "
+            f"its `check_settings` does not cover. {system} is down for the rest of this run as "
+            f"{cause_text(cause)}")
     _mark(state, system, cause)
 
 

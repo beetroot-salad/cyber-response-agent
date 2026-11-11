@@ -41,6 +41,10 @@ cd /workspace/playground-v2/attacks
 ./runner.py run living-off-the-land --cr-mode scope-mismatch
 ```
 
+While a frozen-case capture holds the lab (`scripts/capture_case.py`, #1347), every run is refused
+unless it carries that capture's `--lock-token`; the check reads the lab-server lock
+(`chaos/lock.py`), so it holds from any operator machine. `--dry-run` skips it.
+
 ## `--cr-mode` — synthetic change-request context
 
 A run with `--cr-mode {valid|stale|scope-mismatch}` POSTs a CR to the `change-mgmt` stub immediately before the attack fires. The CR is captured in `meta.json.pre_run` and lives in change-mgmt's STORE until the next container restart. The CR reads like any seed CR (`CHG-<n>`, `OPS-<n>`, ordinary maintenance text) because the agent can read it; `meta.json.pre_run.cr_request.id` is what ties it to the run.

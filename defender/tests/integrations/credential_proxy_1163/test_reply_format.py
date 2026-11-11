@@ -10,9 +10,10 @@ from typing import Any
 import pytest
 
 from defender.tests.integrations.credential_proxy_1163._stream1412 import MIB, decoded, final_record, fmt
-from defender.tests.integrations.credential_proxy_1163._tenant import FINAL_FIELDS, fields_of
+from defender.tests.integrations.credential_proxy_1163._tenant import FINAL_FIELDS, fields_of, label_of
 
-FIELDS = FINAL_FIELDS
+#: #1363 O4: the record also carries the proxy's label, `origin`.
+FIELDS = (*FINAL_FIELDS, "origin")
 TEXT = ['"', "\\", "{", "}", "\n", "é", "☃", "\x00", "a", "b", " ", ":", ","]
 
 
@@ -27,7 +28,8 @@ def _record(rng: random.Random) -> Any:
         headers={_text(rng) or "k": _text(rng) for _ in range(rng.randrange(0, 4))},
         fault=fault,
         detail=rng.choice([None, _text(rng)]), system_side=rng.random() < 0.5,
-        body_whole=fault is None or rng.random() < 0.5, reader_fault=rng.random() < 0.5)
+        body_whole=fault is None or rng.random() < 0.5, reader_fault=rng.random() < 0.5,
+        origin=rng.choice([None, "request", "setup", "access"]))
 
 
 def _upstream_chunks(rng: random.Random) -> list[bytes]:
@@ -51,6 +53,7 @@ def test_p2_any_bytes_an_upstream_sends_come_back_as_data_and_the_record_is_the_
         body, final = decoded(raw)
         assert body == b"".join(chunks)
         assert final == fields_of(record)
+        assert label_of(fmt().decode_reply(raw).final) == record.origin
 
 
 def test_p2_a_copy_of_a_whole_reply_inside_a_body_frame_is_one_body():
@@ -131,7 +134,8 @@ def test_a_final_record_cannot_be_built_without_all_its_fields(name):
     """`FinalRecord` is the only constructor and takes every field, so no proxy arm or fake proxy
     can omit one. O2."""
     given: dict[str, Any] = {"status": 200, "headers": {}, "fault": None, "detail": None,
-                             "system_side": False, "sent": True, "body_whole": True, "reader_fault": False}
+                             "system_side": False, "sent": True, "body_whole": True, "reader_fault": False,
+                             "origin": None}
     assert fmt().FinalRecord(**given), "positive control: all of them build one"
     del given[name]
     with pytest.raises(TypeError):

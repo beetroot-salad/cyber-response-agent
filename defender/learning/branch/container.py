@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -29,6 +30,7 @@ from defender import job_socket
 from defender.job_socket import sigterm_on_stdin_eof
 from defender.credential_proxy import helper_access
 from defender.kit.access import RequestAccess
+from defender.kit.faults import AdapterFault
 
 _logger = logging.getLogger(__name__)
 
@@ -88,12 +90,14 @@ class JobContainer:
         url = self.launch.get("proxy_url")
         return str(url) if url else None
 
-    def access(self, ident: str) -> RequestAccess | None:
+    def access(self, ident: str, *, clock: Callable[[], float] = time.time,
+               on_fault: Callable[[AdapterFault], None] | None = None) -> RequestAccess | None:
         """Where the job's callers get a read pass for `ident` (asked of the helper when a call first needs it, and
-        again within the margin); None when the helper's launch facts name no proxy (an empty grant)."""
+        again by the holder's reuse rule); None when the helper's launch facts name no proxy (an empty grant). `clock` and
+        `on_fault` are the holder's."""
         if self.proxy_url is None:
             return None
-        return helper_access(self.ask, str(ident), self.proxy_url)
+        return helper_access(self.ask, str(ident), self.proxy_url, clock=clock, on_fault=on_fault)
 
     def box(self, kind: str, ident: str) -> Any:
         """A box of `kind` for `ident`, started by the helper (`box.relay_start`); a refusal is the box's `BoxFault`."""

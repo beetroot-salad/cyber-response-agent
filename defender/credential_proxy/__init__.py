@@ -41,8 +41,9 @@ if TYPE_CHECKING:
     )
     from defender.credential_proxy._tokens import (
         PASS_LIFETIME_SEC as PASS_LIFETIME_SEC,
-        PASS_REUSE_MARGIN_SEC as PASS_REUSE_MARGIN_SEC,
         mint_request_token as mint_request_token,
+        request_access as request_access,
+        run_token_mint as run_token_mint,
     )
 
 #: Each name this door serves, and the submodule that defines it.
@@ -53,7 +54,8 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("helper_access",), "_helper_pass"),
     **dict.fromkeys(("TenantRequestSigner", "request_signer", "signing_access",), "_launcher"),
     **dict.fromkeys(("OpenBaoSecrets", "OpenBaoStore", "TransitVerifier", "store_policies", "transit_key_for",), "_openbao"),
-    **dict.fromkeys(("PASS_LIFETIME_SEC", "PASS_REUSE_MARGIN_SEC", "mint_request_token",), "_tokens"),
+    **dict.fromkeys(("PASS_LIFETIME_SEC", "mint_request_token", "request_access",
+                     "run_token_mint",), "_tokens"),
 }
 
 __getattr__ = lazy_door(globals(), _HOMES)

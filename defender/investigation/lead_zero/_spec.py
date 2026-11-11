@@ -29,8 +29,9 @@ ENDING_TIMED_OUT = "timed_out"
 #: so the lead ended before its claim and its gather count, as the withheld ending does. One
 #: ending for every start-time cause; its sentence names the cause.
 ENDING_DOWN_AT_START = "down_at_start"
-#: #1256 O-5b: a call of the lead raised `ConfigFault` its system's start check did not catch,
-#: so the system went down as not configured while the lead ran. Never the breaker's ending: the
+#: #1256 O-5b: a call of the lead raised `ConfigFault` its system's start check did not catch (its
+#: own settings, or the credential proxy's setup for it, #1363), so the system went down as not
+#: configured while the lead ran. A `request`-origin fault never ends it: that call alone is cut. Never the breaker's ending: the
 #: escaped fault is not charged (DP3, DP4).
 ENDING_DOWN_MID_LEAD = "down_mid_lead"
 

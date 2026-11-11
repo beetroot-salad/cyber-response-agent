@@ -27,12 +27,21 @@ STANDING_PATH = Path(os.environ.get("CHANGE_STANDING_PATH", "/app/seed/standing.
 STANDING_REFRESH_SECONDS = int(os.environ.get("STANDING_REFRESH_SECONDS", "300"))
 STANDING_LOOKBACK_DAYS = int(os.environ.get("STANDING_LOOKBACK_DAYS", "7"))
 STANDING_LOOKAHEAD_DAYS = int(os.environ.get("STANDING_LOOKAHEAD_DAYS", "1"))
+# A frozen copy pins the stub's clock (#1347 O3): every "now" is this instant. 0 refresh seconds
+# then turns the standing-CR refresh off, so nothing is derived from the wall clock.
+STUB_AS_OF = os.environ.get("V2_STUB_AS_OF") or None
 
 Status = Literal["planned", "approved", "in_progress", "implemented", "cancelled"]
 
 
+def _clock() -> datetime:
+    if STUB_AS_OF:
+        return datetime.fromisoformat(STUB_AS_OF.replace("Z", "+00:00")).astimezone(timezone.utc)
+    return datetime.now(timezone.utc)
+
+
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return _clock().isoformat()
 
 
 class ChangeRequest(BaseModel):
@@ -124,7 +133,7 @@ def _materialize_standing(now: Optional[datetime] = None) -> int:
     """
     if not STANDING:
         return 0
-    now = now or datetime.now(timezone.utc)
+    now = now or _clock()
     added = 0
     for tmpl in STANDING:
         duration = timedelta(minutes=int(tmpl.get("duration_minutes", 60)))
@@ -172,11 +181,12 @@ async def lifespan(_app: FastAPI):
     _load_seed()
     _load_standing()
     _materialize_standing()
-    task = asyncio.create_task(_standing_refresh_loop())
+    task = asyncio.create_task(_standing_refresh_loop()) if STANDING_REFRESH_SECONDS > 0 else None
     try:
         yield
     finally:
-        task.cancel()
+        if task is not None:
+            task.cancel()
 
 
 app = FastAPI(title="Playground change-mgmt stub", lifespan=lifespan)
@@ -210,7 +220,7 @@ def list_changes(
 
 @app.get("/changes/active")
 def active_changes(host: str, at: Optional[str] = None):
-    when = _parse(at) if at else datetime.now(timezone.utc)
+    when = _parse(at) if at else _clock()
     out = [c for c in STORE.values() if host in c.hosts and _covers(c, when)]
     return out
 
