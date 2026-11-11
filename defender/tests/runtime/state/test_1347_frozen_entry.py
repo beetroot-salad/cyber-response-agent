@@ -76,11 +76,11 @@ def wired_registry(seen: Seen, proxied: Any) -> type:
 
 
 def launch(tmp_path: Path, flags: list[str], *, registry_cls: type | None = None,
-           enqueue: Any = None, learn: bool = False) -> C.Launched:
+           enqueue: Any = None, learn: bool = False, start: dt.datetime = C.ARM_START) -> C.Launched:
     """A natural run through `run.main` that makes one gathered elastic query, `flags` added."""
     _base, seed = T.runs_base(tmp_path)
     tenant_id = T.current_tenant().id
-    clock = C.FakeClock(C.ARM_START)
+    clock = C.FakeClock(start)
     main = C.script(clock, (0, C.append_first_fence()), (ELAPSED, C.gather_turn("l-001", "elastic")),
                     (0, C.read_lesson(L1)), (5, C.DONE))
     gather = C.script(clock, (0, C.query("elastic", "query", {"native_query": NATIVE_QUERY})),
@@ -124,9 +124,9 @@ def proxied_runs(tmp_path: Path, data_root: Path) -> Iterator[Callable[..., tupl
             200, {"Content-Type": "application/json"},
             b'{"hits": {"total": {"value": 0}, "hits": []}}')
         with A.elastic_proxied(tmp_path / "px", data_root, up.url) as (proxied, tap):
-            def run(name: str, flags: list[str]) -> tuple[C.Launched, Seen]:
+            def run(name: str, flags: list[str], **kw: Any) -> tuple[C.Launched, Seen]:
                 seen = Seen()
-                out = launch(tmp_path / name, flags, registry_cls=wired_registry(seen, proxied))
+                out = launch(tmp_path / name, flags, registry_cls=wired_registry(seen, proxied), **kw)
                 return out, seen
 
             run.upstream = up  # type: ignore[attr-defined]
@@ -386,3 +386,70 @@ def test_an_as_of_run_differs_from_an_ordinary_run_in_nothing_but_the_allowliste
     assert not differing, {
         n: next((a, b) for a, b in zip(files["frozen"][n].splitlines(), files["ordinary"][n].splitlines(), strict=False)
                 if a != b) for n in differing}
+
+
+# -- r6.4.6: both clocks anchored at one instant; an as-of in the future is refused --------------------------------
+
+WAIT = 40       # seconds between the anchor W and the driver's start
+#: The clock source reads a minute ago: a launch is refused for an instant in the future whether that is judged on this
+#: source or on the machine's own clock, so the tests below sit on the right side of both.
+START = (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1)).replace(microsecond=0)
+ANCHOR = C.at(START, -WAIT)
+
+
+def z(moment: dt.datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@pytest.mark.parametrize("anchor", [
+    pytest.param(z(ANCHOR), id="z"),
+    pytest.param(ANCHOR.astimezone(dt.timezone(dt.timedelta(hours=2))).isoformat(), id="offset"),
+])
+def test_an_anchored_as_of_run_clock_reads_T_plus_the_time_since_the_anchor(tmp_path, data_root, anchor):
+    """r6.4.6: `--as-of T --as-of-anchor W`: from the driver's start the run clock reads `T + (now - W)`, now being
+    the clock source's reading at that start; the run's own seconds are added as ever."""
+    with proxied_runs(tmp_path, data_root) as run:
+        out, seen = run("anchored", ["--as-of", AS_OF_Z, "--as-of-anchor", anchor], start=START)
+
+    assert out.exit == 0, f"the run did not run: exit={out.exit} refusal={out.refusal}"
+    origin = C.at(AS_OF, WAIT)
+    assert C.lesson_reads(out.run_dir, L1) == [C.at(origin, ELAPSED)], C.lesson_rows(out.run_dir)
+    for key in ("created_at", "started_at"):
+        assert C.instant(seen.budget[key]) == origin, f"{key}={seen.budget[key]}"
+
+
+def test_an_anchor_equal_to_the_start_changes_nothing(tmp_path):
+    out = launch(tmp_path, ["--as-of", AS_OF_Z, "--as-of-anchor", z(START)], start=START)
+
+    assert out.exit == 0, f"refusal={out.refusal}"
+    assert C.lesson_reads(out.run_dir, L1) == [C.at(AS_OF, ELAPSED)]
+
+
+def test_an_anchor_without_an_as_of_is_refused_naming_the_flag(tmp_path, capsys):
+    out, base, before = attempt(tmp_path, lambda alert, tenant: [alert, "--tenant", tenant, "--as-of-anchor", z(ANCHOR)])
+
+    refused(out, capsys, "--as-of-anchor", base, before)
+
+
+def _refused(out: C.Launched, capsys: pytest.CaptureFixture, needle: str) -> None:
+    """Refused naming the flag, wherever the check sits (the argument parse or the driver's start): no run."""
+    message = f"{out.refusal} {capsys.readouterr().err}"
+    assert out.exit != 0, f"the run ran: exit={out.exit}"
+    assert out.summary is None, "the run reached a summary"
+    assert "unrecognized" not in message, message
+    assert needle in message, message
+
+
+def test_an_anchor_in_the_future_is_refused(tmp_path, capsys):
+    """The anchor is an instant the engine read before the run started: later than the start, it cannot be."""
+    out = launch(tmp_path, ["--as-of", AS_OF_Z, "--as-of-anchor", z(C.at(START, 3600))], start=START)
+
+    _refused(out, capsys, "--as-of-anchor")
+
+
+@pytest.mark.parametrize("ahead", [3600, 10 * 86400])
+def test_an_as_of_later_than_the_runs_start_is_refused(tmp_path, capsys, ahead):
+    """r6.4.6 patch: T after the run's start is a refusal naming the flag, not a run."""
+    out = launch(tmp_path, ["--as-of", z(C.at(START, ahead))], start=START)
+
+    _refused(out, capsys, "--as-of")

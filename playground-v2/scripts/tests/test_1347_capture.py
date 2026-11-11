@@ -77,7 +77,12 @@ MAX_AGE = timedelta(hours=6)
 PATTERNS = ["logs-*", ".internal.alerts-security.alerts-*"]   # as the lab tenant configures them (not a built-in default)
 REPO = "frozen-cases"
 SNAP_UUID = "dGhlLXNuYXBzaG90LXV1aWQ"
-COUNTS = {"logs-system.auth-2026.10": 120_400, ".internal.alerts-security.alerts-default-000001": 37}
+BACKING = ".ds-logs-system.auth-default-2026.10.01-000004"
+FAILURE_STORE = ".fs-logs-system.auth-default-2026.10.01-000002"      # live 9.3: _cat/indices never lists it; _count answers
+DATA_STREAMS = ["logs-system.auth-default"]
+OWN_INDEX = ".ds-ilm-history-7-2026.11.08-000001"      # the scratch node makes it for itself once it runs (live)
+COUNTS = {"logs-system.auth-2026.10": 120_400, BACKING: 5_000, FAILURE_STORE: 3,
+          ".internal.alerts-security.alerts-default-000001": 37}
 CATALOG = {s["id"]: s for s in yaml.safe_load((PLAYGROUND / "attacks" / "catalog.yaml").read_text())["scenarios"]}
 SCENARIOS = ["ssh-brute-force-canary", "web-path-scan", "persistence-authorized-keys"]   # from the committed catalog
 HOSTS = [h["name"] for h in yaml.safe_load((PLAYGROUND / "hosts" / "inventory.yaml").read_text())["hosts"]]
@@ -209,11 +214,18 @@ class ScratchCluster:
                 raise RuntimeError(f"snapshot_restore_exception [{m[1]}:{m[2]}] snapshot does not exist")
             self.rig.restores.append((m[1], m[2]))
             self.indices.update(self.rig.contents.get(m[2], {}))
+            self.indices[OWN_INDEX] = 0          # r6.4.6: the node's own index, never the snapshot's
             return {"accepted": True}
+        m = re.fullmatch(r"/_snapshot/([^/]+)/([^/]+)", p)
+        if m and method == "GET":
+            if m[1] not in self.repos or m[2] not in self.rig.snapshots:
+                raise RuntimeError(f"snapshot_missing_exception [{m[1]}:{m[2]}]")
+            return {"snapshots": [copy.deepcopy(self.rig.snapshots[m[2]])]}
         if p in ("/_refresh", "/_all/_refresh", "/*/_refresh"):
             return {"_shards": {"failed": 0}}
         if p == "/_cat/indices" and method == "GET":
-            return [{"index": i, "docs.count": str(n + self.rig.nested.get(i, 0))} for i, n in sorted(self.indices.items())]
+            return [{"index": i, "docs.count": str(n + self.rig.nested.get(i, 0))} for i, n in sorted(self.indices.items())
+                    if not i.startswith(".fs-")]      # live (9.3): never lists failure-store indices
         m = re.fullmatch(r"/([^/_][^/]*)/_count", p)
         if m and method in ("GET", "POST") and not body:
             if m[1] not in self.indices:
@@ -315,7 +327,8 @@ class Rig:
                     raise RuntimeError(f"invalid_snapshot_name_exception: [{REPO}:{m['name']}] Invalid "
                                        f"snapshot name [{m['name']}], snapshot with the same name already exists")
                 self.snapshots[m["name"]] = {"snapshot": m["name"], "uuid": SNAP_UUID,
-                                             "state": state, "indices": list(COUNTS)}
+                                             "state": state, "indices": list(COUNTS),
+                                             "data_streams": list(DATA_STREAMS)}
                 self.contents[m["name"]] = dict(COUNTS)
                 return {"snapshot": self.snapshots[m["name"]]}
             if method == "GET" and m:
@@ -571,6 +584,21 @@ def test_a_capture_writes_one_freeze_of_every_part_with_the_verification_counts(
     rig.edges_modelled()
 
 
+def test_the_freeze_is_the_snapshots_own_indices_and_data_streams_and_never_the_scratch_nodes(tmp_path):
+    """r6.4.6 (the snapshot defines the copy): the scratch node makes an index of its own after the restore
+    (`.ds-ilm-history-7-...`) and `_cat/indices` leaves out failure-store indices; the freeze's `elastic.indices` are
+    exactly the snapshot's (`GET _snapshot/<repo>/<snap>`: `indices`), each with its top-level count, and
+    `elastic.data_streams` its `data_streams`."""
+    rig = Rig(tmp_path)
+    rig.capture()
+
+    elastic = yaml.safe_load((rig.freeze_dir / "freeze.yaml").read_text())["elastic"]
+    assert OWN_INDEX not in elastic["indices"] and FAILURE_STORE in elastic["indices"]
+    assert elastic["indices"] == COUNTS
+    assert elastic["data_streams"] == DATA_STREAMS
+    rig.edges_modelled()
+
+
 def test_the_freeze_records_each_indexs_top_level_count_when_it_holds_nested_documents(tmp_path):
     """r6.4.4 (counts, finding 4): an alert index whose mapping has a nested field holding values (e.g.
     `threat.enrichments`) has more Lucene documents (`_cat/indices` `docs.count`) than top-level ones (`_count`).
@@ -790,6 +818,21 @@ def test_a_capture_is_refused_while_a_fault_is_active_or_the_lock_is_held(tmp_pa
 
 
 _NOT_A_REFUSAL = (AttributeError, TypeError, NameError, ImportError)
+
+
+@pytest.mark.parametrize("scenarios", [["no-such-scenario"], [SCENARIOS[0], "no-such-scenario"]], ids=["only", "after-a-known-one"])
+def test_a_scenario_id_the_catalog_lacks_is_refused_before_the_lock_is_taken(tmp_path, scenarios):
+    """r6.4.6 patch (finding 6): every scenario id is checked against the catalog before capture takes the lock:
+    no lock record is ever written, no pickup held off, nothing fired, no request, nothing stored."""
+    rig = Rig(tmp_path, scenarios=scenarios)
+    with pytest.raises(_FAILED, match="no-such-scenario") as caught:
+        rig.capture()
+
+    assert not isinstance(caught.value, _NOT_A_REFUSAL), repr(caught.value)
+    assert not [c for c in rig.calls if c["step"] == "lock.create"], "the lock was taken before the check"
+    assert not rig.lock_held() and rig.watcher_running()
+    assert not {"hold_pickups", "fire"} & set(rig.journal.ops()) and not rig.es.requests
+    assert not (rig.freeze_dir / "freeze.yaml").exists() and rig.snapshots == {} and not rig.stored()
 
 
 @pytest.mark.parametrize("patterns", [PATTERNS, ["logs-system.*", ".alerts-lab-*"]])
