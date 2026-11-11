@@ -7,6 +7,7 @@ leaves waiting are the learning store's (#1278): a real PostgreSQL."""
 from __future__ import annotations
 
 import json
+import re
 import os
 from pathlib import Path
 from typing import Any
@@ -173,3 +174,59 @@ def test_wake_the_post_step_says_work_waits_exactly_when_the_stores_state_gives_
                    author_tick=lambda *_a, **_k: 0, directory=T.launcher_directory(tenant_id))
 
     assert _record_at(ep, tenant_id) == {"published": [], "refused": [], **({} if waiting else {"waiting": False})}
+
+
+# --- Wake: every batch not yet ended, whatever its lane and phase ---------------------------------------------------------
+
+
+def _lane_batch(dsn: str, tenant: str, lane: str, phase: str) -> None:
+    """One batch of `lane` in `phase`, built with the store's own verbs (a revert batch has no items)."""
+    if lane == "revert":
+        claim = call(dsn, "claim_revert", tenant, owner="reverter")
+    elif lane == LEAD_LANE:
+        call(dsn, "add_pitfall", tenant, {"schema_version": 1, "pitfall_id": "p0", "source_run": "r", "system": "elastic",
+                                          "query_id": "elastic.esql", "goal": "g", "executed_query": "x",
+                                          "stderr_digest": "exit=1; digest 0", "error_class": "agent-fixable"})
+        claim = call(dsn, "claim", tenant, LEAD_LANE, owner="lead-drain", thresholds=ONE)
+    else:
+        _queued(dsn, tenant, "f1")
+        claim = call(dsn, "claim", tenant, AUTHOR_LANE, owner="host-a", thresholds=ONE)
+    if phase in ("in_review", "needs_person"):
+        call(dsn, "in_review", claim, 7, {})
+    if phase == "needs_person":
+        call(dsn, "needs_person", tenant, claim.batch_id, "a person is needed")
+
+
+WAKE_LANES = ("author", "lead_author", "revert")
+WAKE_PHASES = ("working", "in_review", "needs_person")
+
+
+@pytest.mark.parametrize("lane", WAKE_LANES)
+@pytest.mark.parametrize("phase", WAKE_PHASES)
+def test_wake_a_batch_of_any_lane_in_any_phase_but_ended_keeps_the_tenants_checks_running(tmp_path, monkeypatch, lane, phase):
+    """With nothing else queued, a not-yet-ended batch of the author lane, the lead lane or a revert, working, in review or
+    waiting for a person, leaves the record without `waiting: false`: its lease, its PR or a person's release may still
+    change what the tick must do. (Wake)"""
+    from defender.tests.support.learning.core._store1278 import DSN_ENV
+
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
+    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "5")
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
+    ep, _ = _job_episode(tmp_path, f"wake-{lane}-{phase}", findings=False)
+    data_root, tenant_id = J.episode_location(ep)
+    _lane_batch(os.environ[DSN_ENV], tenant_id, lane, phase)
+
+    hand_pending(data_root, tenant_id, None, [])
+    post_step.main(["--tenant", tenant_id, "--parent-pid", str(os.getppid())],
+                   author_tick=lambda *_a, **_k: 0, directory=T.launcher_directory(tenant_id))
+
+    assert _record_at(ep, tenant_id) == {"published": [], "refused": []}
+
+
+def test_wake_the_lanes_and_phases_above_are_every_one_the_schema_allows(migrated_database):  # noqa: F811 — the imported fixture
+    """A lane or phase the schema gains has no case above until it is added: this fails first. (Wake)"""
+    [(lanes,)] = execute(migrated_database, "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_batches_lane'")
+    [(phases,)] = execute(migrated_database, "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_batches_phase'")
+    quoted = lambda text: set(re.findall(r"'([a-z_]+)'", text))  # noqa: E731
+    assert quoted(lanes) | {"revert"} == set(WAKE_LANES)
+    assert quoted(phases) - {"ended"} == set(WAKE_PHASES)
