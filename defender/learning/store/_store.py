@@ -225,6 +225,14 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:32]
 
 
+def mistake_key_of(row: Mapping[str, Any], item_key: str) -> str:
+    """The identity of a pitfall's mistake (its owner and diagnosis; a diagnosis-less failure is its own mistake),
+    stored on the row so the store's claim counts distinct mistakes in SQL. The one definition the queue's merge uses."""
+    from defender.learning.core.persist import pitfall_key
+
+    return _digest(list(pitfall_key({**row, "pitfall_id": item_key})))
+
+
 def _has_nul(value: Any) -> bool:
     if isinstance(value, str):
         return "\x00" in value
@@ -339,7 +347,7 @@ class LearningStore:
         """Queue one pitfall occurrence; a repeated pitfall id is ignored, a keyless row is keyed by its digest."""
         _refuse_nul(row)
         key = str(row["pitfall_id"]) if row.get("pitfall_id") else _digest(dict(row))
-        mistake = _digest([row.get("system"), row.get("stderr_digest")])
+        mistake = mistake_key_of(row, key)
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
             return bool(await self._insert_item(s, tenant, "pitfall", key, dict(row), source_run=_str_or_none(row.get("source_run")),
@@ -416,8 +424,7 @@ class LearningStore:
         """Start a working batch on `lane` over what is due, in one transaction (P2'); `None` when nothing is due.
 
         A replacement due (items still in a batch that closed with feedback) goes first and takes only those items;
-        otherwise every waiting item of each kind at or over its threshold (pitfalls: `pitfalls_lane_is_open`, which counts
-        mistakes, not rows)."""
+        otherwise every waiting item of each kind at or over its threshold (pitfalls: distinct `mistake_key`s, not rows)."""
         if lane not in LANES:
             raise ValueError(f"not a lane: {lane}")
         kinds = [k for k, ln in LANE_OF.items() if ln == lane]
@@ -463,17 +470,12 @@ class LearningStore:
 
     async def _claim_due(self, s: AsyncSession, tenant: str, lane: str, kinds: list[str], owner: str,
                          thresholds: Mapping[str, int]) -> Held | None:
+        # One arrival rule (A2 D8): rows, but a pitfall counts its distinct mistakes (`mistake_key`), in SQL.
+        tid = TenantId(tenant)
         counts: dict[str, int] = dict((await s.execute(
-            select(_I.c.kind, func.count()).where(_I.c.tenant_id == TenantId(tenant), _I.c.kind.in_(kinds),
-                                                  _I.c.status == "waiting").group_by(_I.c.kind))).all())
+            select(_I.c.kind, func.count(func.distinct(case((_I.c.kind == "pitfall", _I.c.mistake_key), else_=_I.c.item_key))))  # lint-half-table: ok — the pitfall's own distinct-mistake count, not its lane
+            .where(_I.c.tenant_id == tid, _I.c.kind.in_(kinds), _I.c.status == "waiting").group_by(_I.c.kind))).all())
         due = [k for k in kinds if counts.get(k, 0) > 0 and counts[k] >= max(1, thresholds.get(k, 1))]
-        if "pitfall" in due:  # rows repeat a mistake: the pitfalls arrival rule counts mistakes, not rows
-            from defender.learning.core.persist import merge_pitfalls, pitfalls_lane_is_open
-
-            payloads = [r.payload for r in (await s.execute(select(_I.c.payload).where(
-                _I.c.tenant_id == TenantId(tenant), _I.c.kind == "pitfall", _I.c.status == "waiting"))).all()]  # lint-half-table: ok — the pitfall's own distinct-mistake threshold, not its lane
-            if not pitfalls_lane_is_open(merge_pitfalls(payloads), max(1, thresholds.get("pitfall", 1))):
-                due.remove("pitfall")
         if not due:
             return None
         return await self._new_batch(s, tenant, lane, "author", owner, due, generation=0, replaces=None,
