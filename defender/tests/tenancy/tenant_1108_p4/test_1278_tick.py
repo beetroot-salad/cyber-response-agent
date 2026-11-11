@@ -220,6 +220,53 @@ def test_locks_a_tick_finding_a_live_batch_of_another_holder_authors_nothing_and
     assert w.t.forge.creates == []
 
 
+def _snapshot(w):
+    """Everything a tick could change in the store and on the forge, as plain values."""
+    return ({k: (i.status, i.batch_id, i.attempts, i.deferrals, i.offers_declined) for k, i in _work(w).items()},
+            {b.id: (b.phase, b.outcome, b.refusals, b.pr_number) for b in _batches(w).values()},
+            len(_record(w)), len(w.t.forge.creates), len([r for r in w.t.forge.requests if r.method != "GET"]))
+
+
+@pytest.mark.parametrize("lane", ["author", "lead_author"])
+@pytest.mark.parametrize("refusal", ["LaneBusy", "TenantInactive"])
+def test_a_claim_the_store_refuses_ends_the_tick_at_zero_with_nothing_changed(world, caplog, monkeypatch, lane, refusal):  # noqa: F811 — the imported fixture
+    """`LaneBusy` or `TenantInactive` raised from the claim itself (a race lost, offboarding begun) is no tick fault: the tick returns 0, claims nothing, and the same item is claimed by the next. (O3, O6, Locks)"""
+    import defender.learning.store as learning_store
+    from defender.learning.store import LearningStore
+    from defender.tests.support.learning.core._declared870 import shim_row
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import lead_author_drain
+
+    w = world
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+    if lane == "author":
+        _seed(w, "f1")
+        tick = lambda: _tick(w, writer)  # noqa: E731
+    else:
+        call(w.dsn, "add_pitfall", w.t.tenant_id, shim_row("p4-run:1"))
+        tick = lambda: lead_author_drain(w.t, w.paths, box=BoxSpy(), run_lead_author=lambda *_a, **_k: None,  # noqa: E731
+                                         run_pitfalls=lambda *_a, **_k: 0)
+    raised = getattr(learning_store, refusal)
+    real, refused = LearningStore.claim, []
+
+    async def claim(self, *args, **kw):
+        refused.append(args)
+        raise raised("refused for the test")
+
+    before = _snapshot(w)
+    monkeypatch.setattr(LearningStore, "claim", claim)
+    rc = tick()
+    monkeypatch.setattr(LearningStore, "claim", real)
+
+    assert refused, "the tick never reached the claim, so the refusal was not what it met"
+    assert (rc, writer.served) == (0, []), critical_text(caplog)
+    assert critical_text(caplog) == "", "a refused claim was reported as a failure"
+    assert _snapshot(w) == before
+
+    tick()
+    assert list(_batches(w)), "control: with the refusal gone the next tick claims the same work"
+
+
 @pytest.mark.parametrize("revert_state", ["working", "in_review"])
 def test_reverts_a_revert_that_is_running_or_open_blocks_authoring(world, caplog, revert_state):  # noqa: F811 — the imported fixture
     """A running revert, and an open revert PR, each stop a tick from authoring: the item waits, nothing is claimed. (Reverts, O3)"""

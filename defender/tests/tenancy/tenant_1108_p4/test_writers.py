@@ -335,6 +335,57 @@ def test_o7_flead_a_failed_claim_is_reset_out_of_the_draft_and_never_reaches_a_c
     assert (_queued(paths, good), _queued(paths, bad)) == ("in_batch", "waiting")
 
 
+class _CreditsOnly(PitfallsStep):
+    """The real pitfalls curation over the claim, crediting only pitfall `only` as committed: a curator that
+    committed one of the claim's pitfalls and left the other unnamed."""
+
+    def __init__(self, bullet: str, *, only: str) -> None:
+        super().__init__(bullet)
+        self.only = only
+
+    def __call__(self, paths: Any, state: Any, *, on_curated: Any = None, **kw: Any) -> int:
+        from defender.learning.core.pitfalls_disposition import PitfallsDisposition
+
+        def narrowed(done: Any) -> None:
+            on_curated(PitfallsDisposition(committed_ids=tuple(i for i in done.committed_ids if i == self.only),
+                                           sha=done.sha, held_ids=done.held_ids))
+        return super().__call__(paths, state, on_curated=narrowed, **kw)
+
+
+@postgres
+def test_o7_flead_a_lead_batch_publishes_at_merge_only_what_its_curators_committed(
+        world, lead_lane, caplog):  # noqa: F811 — the imported fixture
+    """One lead batch with a served request, a failed request, a committed pitfall and an uncommitted one: only the two
+    committed stay in the batch and are published at the merge; the other two wait again, the merge published nothing of
+    theirs. (D9, r8 Lead-author lane: items kept only when positively taken)"""
+    from defender.tests.support.learning.core._declared870 import shim_row
+    from defender.tests.support.learning.core._store1278 import call
+
+    t = world.t
+    paths = _lead_paths(world)
+    good = queued_run(t, paths, "p4-lead-served").name
+    bad = queued_run(t, paths, "p4-lead-failing").name
+    for n, digest in ((1, "exit=1; first mistake"), (2, "exit=1; second mistake")):
+        call(world.dsn, "add_pitfall", str(paths.tenant.id), shim_row(f"p4-run:{n}", digest=digest))
+    step = LeadStep(executed={good: [executed_lead("cmdb.owner-by-tag")], bad: [executed_lead("cmdb.host-owner")]},
+                    edits={good: {TEMPLATE: "\nServed.\n"}, bad: {EXECUTION: "\nStray.\n"}}, rc={bad: 2})
+    pitfalls = _CreditsOnly("- **Name the unnested column.**", only="p4-run:1")
+
+    lead_author_drain(t, paths, box=BoxSpy(), run_lead_author=step, run_pitfalls=pitfalls)
+
+    assert sorted(step.served) == sorted([good, bad]), "control: both requests were served"
+    assert pitfalls.handoffs, "control: the pitfalls curation ran"
+    held_in_batch = {key: i.status for (kind, key), i in items_of(paths).items()}
+    assert held_in_batch == {good: "in_batch", bad: "waiting", "p4-run:1": "in_batch", "p4-run:2": "waiting"}
+    [(branch, _tip)] = remote_branches(t.remote, LEAD_PREFIX).items()
+
+    merge_on_remote(t.p3, world.scratch, branch)
+    author_drain(t, paths, trigger=lambda *_a, **_k: None, box=BoxSpy())
+
+    after = {key: i.status for (kind, key), i in items_of(paths).items()}
+    assert after == {good: "published", bad: "waiting", "p4-run:1": "published", "p4-run:2": "waiting"}
+
+
 @postgres
 def test_o7_flead_pitfalls_curation_lands_on_the_tenant_add_on_page_only(
         world, lead_lane, caplog):  # noqa: F811 — the imported fixture
