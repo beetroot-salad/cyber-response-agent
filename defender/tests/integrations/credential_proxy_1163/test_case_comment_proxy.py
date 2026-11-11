@@ -18,6 +18,7 @@ from defender.tests.integrations.credential_proxy_1163.test_run_start_tokens imp
 from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.support.tenancy import _systems1366 as R
+from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
 
@@ -43,7 +44,8 @@ def _comment(tmp_path, t, url: str, tok: str, *, key: str = C.TICKET_KEY,
     env = run_env(DEFENDER, rec.run_dir_at)
     if shim is not None:
         env = shim.env(env)
-    C.record_leg()(run, tenant=T.run_record(t), defender_dir=DEFENDER, env=env,
+    record = T.run_record(t)
+    C.record_leg()(run, tenant=record, defender_dir=DEFENDER, env=env, case=T1106.case_for(record),
                    request_token=tok, proxy_url=url)
     return S.receipt(rec.run_dir_at)
 

@@ -20,6 +20,7 @@ from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
 from defender.tests.support.runtime.engine._spec767 import write_report
 from defender.tests.support.tenancy import _systems1366 as R
+from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
@@ -132,7 +133,8 @@ class Rig:
         rec = C.CaseRunRecorder(self.tmp / name)
         run = rec.materialize(C.plant_alert(self.tmp / f"in-{name}", key=key))
         write_report(rec.run_dir_at)  # a readable report: the template renders over it
-        C.record_leg()(run, tenant=self.record(), defender_dir=DEFENDER,
+        record = self.record()
+        C.record_leg()(run, tenant=record, defender_dir=DEFENDER, case=T1106.case_for(record),
                        env=run_env(DEFENDER, rec.run_dir_at), request_token=self.token(),
                        proxy_url=self.url)
         return S.receipt(rec.run_dir_at)

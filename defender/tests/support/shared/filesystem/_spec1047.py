@@ -315,7 +315,8 @@ def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
         record = _spec1107.resolve(root, "t1047")
     return {"tenant": record, "defender_dir": _tenants1106.DEFENDER,
             "env": fake.store.env(mod("box").run_env(_tenants1106.DEFENDER, Path(run_dir))),
-            "proxy_url": fake.store.url, "request_token": "token-1047"}
+            "proxy_url": fake.store.url, "request_token": "token-1047",
+            "case": _tenants1106.case_for(record)}  # (#1366 R16) run start's verdict over the tenant's roster, handed in
 
 
 def receipt_path(run_dir: Path) -> Path:

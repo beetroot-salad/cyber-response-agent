@@ -23,6 +23,7 @@ from defender.tests.integrations.credential_proxy_1163 import test_ticket_flow a
 from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4.test_r6_issuer import tls_issuer  # noqa: F401 — fixture
+from defender.tests.support.tenancy import _tenants1106 as T1106
 
 GRANT = {("identity", "r")}
 EXPIRED = timedelta(minutes=-1)
@@ -112,8 +113,10 @@ def test_x3_the_ticket_writer_takes_the_proxy_address_from_the_run_not_the_envir
         with A.proxy_for(t, store) as (url, tap):
             rec, run = K._run(tmp_path / "env-only")
             env = shim.env(run_env(DEFENDER, rec.run_dir_at), **{A.DECOY_PROXY_ENV: url})
-            S.ticket_writer().record_case_ticket(run, tenant=T.run_record(t), defender_dir=DEFENDER,
-                                                 env=env, request_token=tok, proxy_url=None)
+            record = T.run_record(t)
+            S.ticket_writer().record_case_ticket(run, tenant=record, defender_dir=DEFENDER,
+                                                 env=env, request_token=tok, proxy_url=None,
+                                                 case=T1106.case_for(record))
             env_only = S.receipt(rec.run_dir_at)
             reached_by_env = list(tap.tokens)
             control_rec, control_run = K._run(tmp_path / "via-run")

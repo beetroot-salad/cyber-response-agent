@@ -34,6 +34,7 @@ from defender.tests.integrations.credential_proxy_1163.test_ticket_flow import (
 from defender.tests.integrations.credential_proxy_1163.test_proxy_faults_proxy_side import _BrokenStore
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
+from defender.tests.support.tenancy import _tenants1106 as T1106
 
 REASON = "store says no: duplicate-or-invalid"
 
@@ -138,7 +139,7 @@ def _leg_with_adapter_raising(tmp_path, data_root, raises):
     with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
         rec, run = _run(tmp_path)
         tenant = T.run_record(t)
-        real = case_system.case_verdict(tenant, defender_dir=DEFENDER)
+        real = T1106.case_for(tenant, DEFENDER)
         assert isinstance(real, case_system.CaseTarget), real
         stub = dataclasses.replace(real, module=types.SimpleNamespace(add_case_comment=raises))
         S.ticket_writer().record_case_ticket(

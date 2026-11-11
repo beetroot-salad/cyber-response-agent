@@ -25,6 +25,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core._state1135 import env_state
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy import _tenants1106 as T1106
 
 JUDGE = "learning.judge"
 CLI = "learning.branch.cli"
@@ -552,9 +553,10 @@ def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
         "the sibling's record is not the episode copy's (it was re-derived)")
 
     store = S.TicketStore(tmp_path)
+    sibling_tenant = planted.run_tenant(dispatches_lead_zero=False)
     S.ticket_writer(store).record_case_ticket(
-        _run_handle_1165(sib), tenant=planted.run_tenant(dispatches_lead_zero=False), defender_dir=S.DEFENDER,
-        env={})
+        _run_handle_1165(sib), tenant=sibling_tenant, defender_dir=S.DEFENDER,
+        env={}, case=T1106.case_for(sibling_tenant))
     assert len(store.comment_payloads) == 1, (
         f"the record leg posted {len(store.comment_payloads)} comments: {store.calls}")
     assert "sig=SIG-p062" in store.comment_body(), (

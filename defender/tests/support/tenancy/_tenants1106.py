@@ -119,6 +119,22 @@ def fixture_run_tenant(**kw: Any) -> Any:
     return run_tenant(fixture_tenant(), **kw)
 
 
+def tenants_roster(run_tenant: Any, defender_dir: Path | None = None) -> Any:
+    """(#1366 R16, DC7) The roster run start hands every surface that has a tenant: the tenant's systems, its enabled records
+    over the catalog of the checkout at `defender_dir` (this checkout's), built once as `TenantSystems.of`. No surface builds
+    one of its own, so a test that drives one over a tenant hands it this."""
+    catalog = mod("systems.catalog")
+    return catalog.TenantSystems.of(run_tenant.records, catalog.Catalog.of_checkout(defender_dir or DEFENDER)).roster
+
+
+def case_for(run_tenant: Any, defender_dir: Path | None = None) -> Any:
+    """(#1366 R16) The case-system verdict run start makes once and hands the record step (`case_system.case_verdict` over the
+    tenant's roster): a `CaseTarget`, or the `CaseSettingsFault` the step records. For a test that calls `record_case_ticket`
+    itself, as run start does."""
+    tree = defender_dir or DEFENDER
+    return mod("systems.case_system").case_verdict(run_tenant, defender_dir=tree, roster=tenants_roster(run_tenant, tree))
+
+
 def verb_context(defender_dir: Path, run_dir: Path, env: Any, *,
                  tenant: Any = None, settings_dir: Path | None = None, **kw: Any) -> Any:
     """A `VerbContext` carrying the run's tenant record. `tenant` is a `RunTenant`; omitted, it

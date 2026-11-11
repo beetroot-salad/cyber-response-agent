@@ -15,6 +15,7 @@ from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, export_dir, published_tenant
+from defender.tests.support.tenancy import _tenants1106 as T1106
 
 STORE = "/store"
 WRITES = (("POST", "/tickets/*/comments"),)  # glob grammar: contract's pick
@@ -60,9 +61,10 @@ def _leg(t, run, rec, url, tok, shim=None, record=None):
     env = run_env(DEFENDER, rec.run_dir_at)
     if shim is not None:
         env = shim.env(env)
+    tenant = record if record is not None else T.run_record(t)
     S.ticket_writer().record_case_ticket(
-        run, tenant=record if record is not None else T.run_record(t), defender_dir=DEFENDER, env=env, request_token=tok,
-        proxy_url=url)
+        run, tenant=tenant, defender_dir=DEFENDER, env=env, request_token=tok,
+        proxy_url=url, case=T1106.case_for(tenant))
     return S.receipt(rec.run_dir_at)
 
 

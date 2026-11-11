@@ -660,7 +660,9 @@ def ticket_writer() -> Any:
 
 def record_step(run_dir: Path, record: Any, *, env: Mapping[str, str], **kw: Any) -> Any:
     """`record_case_ticket` as run.py calls it: the record, the defender dir and the run env
-    handed in (`tenant=`, `defender_dir=`, `env=`)."""
+    handed in (`tenant=`, `defender_dir=`, `env=`), and the case-system verdict run start made over the tenant's roster
+    (`case=`, #1366 R16: the step never judges it over a roster of its own; a caller passes its own to stand one in)."""
+    kw.setdefault("case", T1106.case_for(record, DEFENDER))
     return ticket_writer().record_case_ticket(
         _run_handle_1165(Path(run_dir)), tenant=record, defender_dir=DEFENDER, env=dict(env), **kw)
 

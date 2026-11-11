@@ -307,9 +307,11 @@ def _handed(run_dir: Path, store: FakeStore, config: dict[str, str] | None | obj
     address and write-back token (the store's stand-in)."""
     from defender import box as box_mod
 
-    return {"tenant": current_record(config=config), "defender_dir": T1106.DEFENDER,
+    record = current_record(config=config)
+    return {"tenant": record, "defender_dir": T1106.DEFENDER,
             "env": store.env(box_mod.run_env(T1106.DEFENDER, Path(run_dir))),
-            "proxy_url": store.url, "request_token": WRITE_TOKEN}
+            "proxy_url": store.url, "request_token": WRITE_TOKEN,
+            "case": T1106.case_for(record)}  # (#1366 R16) run start's verdict over the tenant's roster, handed in
 
 
 def record(run_dir: Path, store: FakeStore, *,
