@@ -23,6 +23,8 @@ from defender.tests.support.runtime.engine._engine_helpers import fake_model
 
 #: The curators, as the prompt tells them apart: the lessons dir the user turn names.
 LESSONS, QUESTIONER, PITFALLS = "lessons", "questioner", "pitfalls"
+#: A4: the feedback curator (items of kind `feedback_instruction`), told apart by its rows' label in the user turn.
+FEEDBACK = "feedback"
 
 
 @dataclass(frozen=True)
@@ -58,7 +60,7 @@ class Seen:
     prompt: str
 
 
-_KEY = re.compile(r'"(?:finding_id|pitfall_id)":\s*"([^"]+)"')
+_KEY = re.compile(r'"(?:finding_id|pitfall_id|comment_id)":\s*"?([^",}\s]+)"?')
 _LESSONS_DIR = re.compile(r"^lessons_dir:\s*(\S+)", re.M)
 _DRAFT_ROOT = re.compile(r"^draft_root:\s*(\S+)", re.M)
 
@@ -68,7 +70,7 @@ class ScriptedModel:
     given on every call that curator makes (a curator with no reply answers an empty no-op)."""
 
     def __init__(self, **replies: Reply) -> None:
-        unknown = set(replies) - {LESSONS, QUESTIONER, PITFALLS}
+        unknown = set(replies) - {LESSONS, QUESTIONER, PITFALLS, FEEDBACK}
         assert not unknown, f"unknown curators {unknown}"
         self.replies = replies
         self.seen: list[Seen] = []
@@ -124,6 +126,8 @@ def _first_user_text(messages: list[Any]) -> str:
 def _curator_of(prompt: str) -> str:
     if "skills_dir:" in prompt:
         return PITFALLS
+    if re.search(r"^feedback instructions \(\d+\)", prompt, re.M):
+        return FEEDBACK
     return QUESTIONER if re.search(r"^lessons_dir:\s*\S*lessons-questioner", prompt, re.M) else LESSONS
 
 

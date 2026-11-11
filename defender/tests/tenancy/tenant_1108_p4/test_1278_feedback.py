@@ -9,6 +9,7 @@ A crash between the reconcile's end and the replacement's claim is made by endin
 from __future__ import annotations
 
 import os
+import random
 
 import httpx
 import pytest
@@ -56,7 +57,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
 
 pytestmark = pytest.mark.postgres
 
-READ_ISSUE = {"write:repository", "read:issue"}
+READ_ISSUE = {"write:repository", "write:issue"}  # the integration's scopes (A4); `read:issue` alone also reads
 #: How long the forked post-step may take to end after its stop.
 STOP_BOUND = 30.0
 
@@ -329,9 +330,10 @@ def test_feedback_an_open_pr_is_left_alone_unless_a_live_review_requests_changes
     [review_row(631, "owner", "REQUEST_CHANGES", body="wrong lane")],
     [review_row(632, "guest", "REQUEST_CHANGES", official=False)],
     [review_row(633, "owner", "REQUEST_CHANGES"), review_row(634, "other", "APPROVED")],
-], ids=["official", "read-only-reviewer", "another-reviewer-approved-later"])
+    [review_row(635, "owner", "REQUEST_CHANGES"), review_row(636, "owner", "COMMENT", body="one more thought")],
+], ids=["official", "read-only-reviewer", "another-reviewer-approved-later", "same-reviewer-commented-later"])
 def test_feedback_a_live_changes_requested_review_on_an_open_pr_gets_it_closed_and_replaced(world, caplog, reviews):
-    """The reconciler closes the PR and the batch ends closed; its replacement follows in the same tick. (H7, C25, D8)"""
+    """The reconciler closes the PR and the batch ends closed, its replacement following in the same tick; a later COMMENT review does not displace the reviewer's request (Forgejo 17 keeps both rows). (H7, C25, D8)"""
     w = world
     w.seed("f1")
     writer = FeedbackCurator(_files("f1"))
@@ -581,8 +583,9 @@ def test_replacement_the_generation_ceiling_holds_the_items(world, caplog):
 # --- A2 H15: refusals and unknowns ---------------------------------------------------------------------
 
 
-def test_h15_a_closed_prs_refused_comment_read_is_unknown_not_no_feedback(world, caplog):
-    """Without `read:issue` the comment read is 403: the closed PR's batch stays unresolved, its item not held; with it, held. (C23, Feedback)"""
+@pytest.mark.parametrize("grant", ["write:issue", "read:issue"])
+def test_h15_a_closed_prs_refused_comment_read_is_unknown_not_no_feedback(world, caplog, grant):
+    """With neither issue scope the comment read is 403: the closed PR's batch stays unresolved, its item not held; with `write:issue` (A4) or `read:issue`, held. (C23, Feedback)"""
     w = world
     w.t.forge.scopes = {"write:repository"}
     w.seed("f1")
@@ -594,7 +597,7 @@ def test_h15_a_closed_prs_refused_comment_read_is_unknown_not_no_feedback(world,
     assert _end(w, batch_id) == ("in_review", None)
     assert w.statuses() == {"f1": "in_batch"}
 
-    w.t.forge.scopes.add("read:issue")
+    w.t.forge.scopes.add(grant)
     tick(w, FeedbackCurator())
     assert w.statuses() == {"f1": "held"}, "control: the same close, read in full, holds the item"
 
@@ -672,3 +675,73 @@ def test_h15_a_good_read_resets_the_refusals(world, caplog):
         counts.append((b.phase, b.refusals))
 
     assert counts == [("in_review", 1), ("in_review", 2), ("in_review", 0), ("in_review", 1), ("in_review", 2)]
+
+
+# --- H15 counting: every status the forge can answer, against a model of the design's rule ------------------------------
+
+
+def _counts_as_refusal(answer) -> bool:
+    """The design's rule (H15): a 4xx but a timeout (408) or a rate limit (429) is a refusal and counts."""
+    return isinstance(answer, int) and 400 <= answer < 500 and answer not in (408, 429)
+
+
+def _answers() -> list:
+    """Every status 400..599 once, in a seeded order, with network faults and good reads woven between."""
+    rng = random.Random(1278)
+    statuses = list(range(400, 600))
+    rng.shuffle(statuses)
+    out: list = []
+    for n, status in enumerate(statuses):
+        out.append(status)
+        if n % 7 == 6:
+            out.append("ok")
+        if n % 11 == 5:
+            out.append(rng.choice(["connect", "timeout"]))
+    return out
+
+
+def _answer_with(w: Scene, target_suffix: str, answer) -> None:
+    w.t.forge.clear_refusals()
+    w.t.forge.fault = None
+    if answer == "ok":
+        return
+    if isinstance(answer, int):
+        w.t.forge.refuse(target_suffix, answer, method="GET")
+        return
+    error = httpx.ConnectError if answer == "connect" else httpx.ReadTimeout
+    w.t.forge.fault = lambda r: (error("down", request=r)
+                                 if r.method == "GET" and r.url.path.rstrip("/").endswith(target_suffix) else None)
+
+
+@pytest.mark.parametrize("target", ["reviews", "pull"])
+def test_h15_each_answer_the_forge_can_give_counts_or_not_as_the_rule_says_and_a_person_is_called_exactly_at_the_ceiling(
+        world, caplog, target):
+    """Every status 400..599, a lost connection, a timeout and good reads, one per tick, on the reviews read and on `GET /pulls/N`: 4xx but 408 and 429 count one; 5xx, 408, 429 and network faults leave the count; a good read zeroes it; the third counted refusal makes the batch needs_person, no sooner. (H15, D7)"""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    w = world
+    w.seed("f1")
+    batch_id, _branch, number = opened(w, FeedbackCurator(_files("f1")), caplog)
+    suffix = "/reviews" if target == "reviews" else f"/pulls/{number}"
+    writer = FeedbackCurator()
+    count, previous = 0, None
+    for answer in _answers():
+        if count == 0 and not _counts_as_refusal(answer):
+            _answer_with(w, suffix, 403)  # a primer: something for an unknown or a good read to leave or zero
+            tick(w, writer)
+            count = 1
+        _answer_with(w, suffix, answer)
+        before = len(w.t.forge.requests)
+        tick(w, writer)
+        asked = [r for r in w.t.forge.requests[before:] if r.method == "GET" and r.url.path.rstrip("/").endswith(suffix)]
+        assert asked, f"answer {answer!r}: the tick never asked {suffix}, so nothing was refused or counted"
+        count = 0 if answer == "ok" else count + (1 if _counts_as_refusal(answer) else 0)
+        b = w.batch_rows()[batch_id]
+        want = ("needs_person", count) if count >= 3 else ("in_review", count)
+        assert (b.phase, b.refusals) == want, f"after {answer!r} (before it: {previous!r}) the batch is {(b.phase, b.refusals)}"
+        previous = answer
+        if b.phase == "needs_person":  # a person's release, by hand: back to review with the count at zero
+            execute(w.dsn, "UPDATE learning.batches SET phase = 'in_review', refusals = 0, reason = NULL WHERE id = %s",
+                    (batch_id,))
+            count = 0
+    assert w.statuses() == {"f1": "in_batch"}, "a refusal lost the item"

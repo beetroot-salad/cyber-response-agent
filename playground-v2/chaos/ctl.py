@@ -25,6 +25,9 @@ touched it:
 
 `activate` is plan + apply in one call. `attacks/runner.py --chaos` calls
 them separately so nothing that can fail runs after the synthetic CR is posted.
+While a capture holds the lab-server lock (`chaos/lock.py`), `activate` and the
+runner both refuse unless handed the capture's `--lock-token`, re-checking it before
+each change and each step.
 
 `execer=`, `profiles_dir=`, `rules_dir=` and `ledger_dir=` are injectable so tests
 never need the live stack.
@@ -52,6 +55,7 @@ if str(HERE.parent) not in sys.path:
     sys.path.insert(0, str(HERE.parent))
 
 from chaos import ledger as ledger_mod  # noqa: E402
+from chaos import lock as lock_mod  # noqa: E402
 from chaos.audit import audit_payloads, scan_markers  # noqa: E402
 from chaos.guard import check_mutations, check_profile  # noqa: E402
 from chaos.mutations import TOMBSTONE, resolve_mutations  # noqa: E402
@@ -344,8 +348,14 @@ def apply(
     *,
     execer: Any = None,
     ledger_dir: Optional[Path] = None,
+    lock_store: Any = None,
+    lock_token: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Push a plan to the stack, recording every step in the ledger first."""
+    """Push a plan to the stack, recording every step in the ledger first.
+
+    With a lock store, the capture lock is re-checked right before each change (#1347 O10): a
+    capture that takes it mid-apply refuses the next change, and the changes already pushed are
+    rolled back like any other failed apply (a failed injection is not an injection)."""
     execer = execer if execer is not None else DockerExecSeam()
     ledger_dir = Path(ledger_dir) if ledger_dir is not None else DEFAULT_LEDGER_DIR
 
@@ -378,6 +388,12 @@ def apply(
     ledger_mod.write_record(ledger_dir, record)
 
     for index, res in enumerate(resources):
+        if lock_store is not None:
+            try:
+                lock_mod.require(lock_store, lock_mod.CAPTURE, lock_token)
+            except lock_mod.LockError as exc:
+                # Refused before this change reached the stack: only the ones before it are restored.
+                raise _roll_back(record, index - 1, ledger_dir, execer, exc) from exc
         # The whole step is the transaction — push, mark, write. A ledger
         # write that fails after the push landed is as much a reason to roll
         # back as a push that failed: either way the record would not say
@@ -438,12 +454,19 @@ def activate(
     profiles_dir: Optional[Path] = None,
     rules_dir: Optional[Path] = None,
     ledger_dir: Optional[Path] = None,
+    lock_store: Any = None,
+    lock_token: Optional[str] = None,
 ) -> dict[str, Any]:
+    # While a capture holds the lab (#1347 O10), only the holder's token activates; checked
+    # before the first read of the stack, and again before each change (`apply`). `None` store =
+    # no check (library callers, tests).
+    if lock_store is not None:
+        lock_mod.require(lock_store, lock_mod.CAPTURE, lock_token)
     execer = execer if execer is not None else DockerExecSeam()
     planned = plan(
         profile_id, seed=seed, execer=execer, profiles_dir=profiles_dir, rules_dir=rules_dir, ledger_dir=ledger_dir
     )
-    return apply(planned, execer=execer, ledger_dir=ledger_dir)
+    return apply(planned, execer=execer, ledger_dir=ledger_dir, lock_store=lock_store, lock_token=lock_token)
 
 
 # -- revert ---------------------------------------------------------------------
@@ -799,7 +822,8 @@ def _cli_plan(args: argparse.Namespace) -> int:
 
 
 def _cli_activate(args: argparse.Namespace) -> int:
-    record = activate(args.profile, seed=args.seed)
+    record = activate(args.profile, seed=args.seed, lock_store=lock_mod.DockerLockStore(),
+                      lock_token=args.lock_token)
     print(json.dumps(record, indent=2, default=str))
     return 0
 
@@ -842,6 +866,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pact = sub.add_parser("activate", help="activate a chaos profile")
     pact.add_argument("profile")
     pact.add_argument("--seed", type=int, default=None)
+    pact.add_argument("--lock-token", default=None,
+                      help="the capture lock's token; a held lock refuses activate without it")
 
     prev = sub.add_parser("revert", help="revert an active chaos profile")
     which = prev.add_mutually_exclusive_group(required=True)
@@ -870,6 +896,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     except SeamError as exc:
         print(f"stack unreachable or refused the request: {exc}", file=sys.stderr)
         return 3
+    except lock_mod.LockError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 4
+    except ChaosApplyError as exc:
+        if not isinstance(exc.__cause__, lock_mod.LockError):
+            raise
+        print(f"refused mid-apply: {exc}", file=sys.stderr)    # the capture took the lock (#1347 O10)
+        return 4
 
 
 if __name__ == "__main__":

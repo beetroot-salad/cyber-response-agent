@@ -23,6 +23,7 @@ import types
 from typing import Any
 import contextlib
 import io
+from pathlib import Path
 
 import pytest
 
@@ -41,6 +42,7 @@ from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
     _has,
     _tenant_placed,  # noqa: F401 — autouse fixture
 )
+from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture
 
 
 NOW = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.UTC)
@@ -422,10 +424,128 @@ def test_a_sibling_run_with_no_directory_and_no_database_address_refuses(data_ro
     _has(_sibling_start(), "[run.py]", DSN_ENV)
 
 
-# Retired by #1278 (design r8 Schema: the batch insert is conditional on the tenant being active, in one transaction; r8
-# Offboarding; A2 D8: one claim per tick): the lead drain's per-claim tenant recheck over the file queue
-# (`test_a_claim_of_a_tenant_no_longer_active_stays_queued_uncounted_across_ticks`,
-# `test_a_directory_that_fails_at_the_second_claim_does_not_serve_it`,
-# `test_a_database_blip_mid_tick_leaves_the_claim_queued_uncounted_and_the_tick_ends_cleanly`). The surviving obligation is
-# enforced by `tests/learning/store_1278/test_store_1278.py::test_o6_a_tenant_off_active_gets_no_batch_and_its_working_batch_is_told_to_stop`
-# and `test_offboarding_1278.py`.
+#: What the tenant becomes once the lead tick has decided to claim: every state a tenant may hold but `active`. (No row is
+#: not a case: a tenant with work items cannot lose its row, `fk_work_items_tenant_id_tenants`; the purge removes items first.)
+AFTER = ["offboarding", "offboarded", "creating"]
+
+
+class _Failing(Exception):
+    pass
+
+
+@pytest.fixture
+def in_the_store(p4_tenant, migrated_database, monkeypatch):  # noqa: F811 — fixtures imported above
+    """The p4 tenant active in the database the lead drain's store reads (#1278: its claim is a store call that requires an
+    active tenant row; the directory the cases flip is the in-memory twin before it)."""
+    from defender.tests.support.jobs._jobs1342 import register_tenant
+
+    register_tenant(migrated_database, p4_tenant.tenant_id)
+    monkeypatch.setenv(DSN_ENV, migrated_database)
+
+
+def _waiting_pitfall(t: Any, dsn: str) -> None:
+    """One pitfall waiting in the store, at the lead lane's threshold of one."""
+    from defender.tests.support.learning.core._store1278 import call
+    from defender.tests.support.learning.core._declared870 import shim_row
+
+    call(dsn, "add_pitfall", t.tenant_id, shim_row("p4-run:1"))
+
+
+def _lead_state(t: Any, dsn: str) -> tuple[Any, Any]:
+    """(items by `(kind, key)` as `(status, batch, attempts, deferrals)`, batch ids) of the tenant, as the store holds them."""
+    from defender.tests.support.learning.core._store1278 import batches, call
+
+    items = {(i.kind, i.key): (i.status, i.batch_id, i.attempts, i.deferrals) for i in call(dsn, "work", t.tenant_id)}
+    return items, sorted(str(b.id) for b in batches(dsn, t.tenant_id))
+
+
+class _Steps:
+    """The lead tick's two work steps, recording that either ran (a served claim) and doing nothing."""
+
+    def __init__(self) -> None:
+        self.served: list[str] = []
+
+    def lead(self, *_a: Any, **_k: Any) -> None:
+        self.served.append("lead")
+
+    def pitfalls(self, *_a: Any, **_k: Any) -> int:
+        self.served.append("pitfalls")
+        return 0
+
+
+def _lead_tick(t: Any, tmp_path: Path, steps: _Steps, **seams: Any) -> int:
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, drain_paths, lead_author_drain, product_repo
+
+    product = tmp_path / "product"  # one product tree per case, however many ticks it runs
+    paths = drain_paths(t, product if product.exists() else product_repo(tmp_path, adapters=("cmdb",)))
+    return lead_author_drain(t, paths, box=BoxSpy(), run_lead_author=steps.lead, run_pitfalls=steps.pitfalls, **seams)
+
+
+@pytest.mark.parametrize("answer", AFTER)
+def test_a_tenant_that_stops_being_active_is_never_claimed_for_and_its_item_keeps_waiting_uncounted(p4_tenant, in_the_store, migrated_database, tmp_path, monkeypatch, answer):  # noqa: F811
+    """Once the tenant is no longer active (whatever it became, even between the tick's read and its claim) no tick claims, serves or charges its waiting item. (Flow 4, O6)"""
+    from defender.learning.store import LearningStore
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    t, dsn = p4_tenant, migrated_database
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    _waiting_pitfall(t, dsn)
+    before = _lead_state(t, dsn)
+    [(status, *_)] = before[0].values()
+    assert status == "waiting", before
+
+    steps = _Steps()
+    flipped: list[bool] = []
+    real_work = LearningStore.work
+
+    async def work_then_the_tenant_changes(self: Any, *args: Any, **kw: Any) -> Any:
+        rows = await real_work(self, *args, **kw)
+        if not flipped:  # the tick has read its work and decided to claim: the tenant changes now
+            flipped.append(True)
+            move_tenant(dsn, t.tenant_id, state=answer)
+        return rows
+
+    monkeypatch.setattr(LearningStore, "work", work_then_the_tenant_changes)
+    for _ in range(3):  # repeated ticks: a set-aside item must not wear out
+        _lead_tick(t, tmp_path, steps)
+    monkeypatch.setattr(LearningStore, "work", real_work)
+
+    assert flipped, "the tick never reached the point where the tenant changed, so nothing was tested"
+    assert steps.served == [], "a step was served for a tenant no longer active"
+    assert _lead_state(t, dsn) == before, "the item was claimed, charged or batched"
+
+
+def test_a_tenant_that_stays_active_is_claimed_and_served_by_the_same_tick(p4_tenant, in_the_store, migrated_database, tmp_path, monkeypatch):  # noqa: F811
+    """Control for the cases above: with the tenant active the same waiting pitfall is claimed into a batch and served."""
+    t, dsn = p4_tenant, migrated_database
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    _waiting_pitfall(t, dsn)
+    before = _lead_state(t, dsn)
+    steps = _Steps()
+    _lead_tick(t, tmp_path, steps)
+    assert steps.served, "premise: an active tenant's waiting pitfall is served"
+    assert _lead_state(t, dsn) != before
+
+
+@pytest.mark.parametrize("unreachable", [True, False], ids=["records-unreachable", "other-error"])
+def test_a_directory_that_fails_when_the_tick_opens_its_delivery_serves_nothing_and_keeps_the_item_waiting(p4_tenant, in_the_store, migrated_database, tmp_path, monkeypatch, unreachable):  # noqa: F811
+    """A tenant-records read that raises fails closed: nothing is served, no batch is made, the item waits unchanged, and once the records are back it is served (PR #678, PR #1350)."""
+    import sqlalchemy.exc
+
+    t, dsn = p4_tenant, migrated_database
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    _waiting_pitfall(t, dsn)
+    before = _lead_state(t, dsn)
+    failure = (sqlalchemy.exc.OperationalError("SELECT", {}, Exception("connection failed: server closed the connection"))
+               if unreachable else _Failing("not about the connection"))
+    steps = _Steps()
+    down = _directory(Probe(fail=failure))
+    for _ in range(3):
+        with contextlib.suppress(_Failing):  # an error that is not about the connection reaches the caller as raised
+            rc = _lead_tick(t, tmp_path, steps, directory=down)
+            assert unreachable and rc == 0, "a tick that met unreachable records must end at zero, not fault"
+    assert steps.served == [], "something was served with the tenant records unreadable"
+    assert _lead_state(t, dsn) == before, "the outage charged, claimed or batched the item"
+
+    _lead_tick(t, tmp_path, steps)  # control: the t.directory the stage gets by default reads the tenant as active
+    assert steps.served, "the item was not served once the records were readable"

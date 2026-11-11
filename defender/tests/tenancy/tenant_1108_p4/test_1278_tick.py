@@ -9,6 +9,7 @@ Reconcile and feedback are in the feedback slice's files.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 from datetime import timedelta
@@ -48,6 +49,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     author_drain,
     critical_text,
     drafts_dir,
+    lead_author_drain,
     remote_branches,
 )
 from defender.tests.tenancy.tenant_1108_p4._support import git
@@ -98,6 +100,21 @@ def _stranded(w, caplog):
     assert [r for r in w.t.forge.prs if r["state"] == "open"] == []
     [batch_id] = _batches(w)
     return writer, batch_id, branch
+
+
+def test_o10_nothing_named_learning_exists_under_the_tenant_folder_after_a_tick_of_each_lane(world, caplog):  # noqa: F811 — the imported fixture
+    """Host prepare makes no `<T>/learning` and neither the author tick (which opens a PR) nor the lead tick creates one
+    anywhere under the tenant folder. (O10, D10)"""
+    w = world
+    folder = Path(location_path(w.t.tenant.tenant_root))
+    named = lambda: sorted(p.relative_to(folder).as_posix() for p in folder.rglob("learning"))  # noqa: E731
+    assert named() == [], "premise: the prepared tenant folder has no learning entry"
+    _seed(w, "f1")
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+    _opened(w, writer, caplog)  # the author lane's tick: claims, commits, pushes, opens its PR
+    assert named() == [], "the author tick created a learning entry"
+    assert lead_author_drain(w.t, w.paths, box=BoxSpy()) == 0  # the lead lane's tick, and the reconcile every tick does
+    assert named() == [], "the lead tick created a learning entry"
 
 
 # --- P2', O3, D5: the row before the commit; a lapsed holder commits nothing ----------------------------------
@@ -219,6 +236,53 @@ def test_locks_a_tick_finding_a_live_batch_of_another_holder_authors_nothing_and
     assert w.t.forge.creates == []
 
 
+def _snapshot(w):
+    """Everything a tick could change in the store and on the forge, as plain values."""
+    return ({k: (i.status, i.batch_id, i.attempts, i.deferrals, i.offers_declined) for k, i in _work(w).items()},
+            {b.id: (b.phase, b.outcome, b.refusals, b.pr_number) for b in _batches(w).values()},
+            len(_record(w)), len(w.t.forge.creates), len([r for r in w.t.forge.requests if r.method != "GET"]))
+
+
+@pytest.mark.parametrize("lane", ["author", "lead_author"])
+@pytest.mark.parametrize("refusal", ["LaneBusy", "TenantInactive"])
+def test_a_claim_the_store_refuses_ends_the_tick_at_zero_with_nothing_changed(world, caplog, monkeypatch, lane, refusal):  # noqa: F811 — the imported fixture
+    """`LaneBusy` or `TenantInactive` raised from the claim itself (a race lost, offboarding begun) is no tick fault: the tick returns 0, claims nothing, and the same item is claimed by the next. (O3, O6, Locks)"""
+    import defender.learning.store as learning_store
+    from defender.learning.store import LearningStore
+    from defender.tests.support.learning.core._declared870 import shim_row
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import lead_author_drain
+
+    w = world
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+    if lane == "author":
+        _seed(w, "f1")
+        tick = lambda: _tick(w, writer)  # noqa: E731
+    else:
+        call(w.dsn, "add_pitfall", w.t.tenant_id, shim_row("p4-run:1"))
+        tick = lambda: lead_author_drain(w.t, w.paths, box=BoxSpy(), run_lead_author=lambda *_a, **_k: None,  # noqa: E731
+                                         run_pitfalls=lambda *_a, **_k: 0)
+    raised = getattr(learning_store, refusal)
+    real, refused = LearningStore.claim, []
+
+    async def claim(self, *args, **kw):
+        refused.append(args)
+        raise raised("refused for the test")
+
+    before = _snapshot(w)
+    monkeypatch.setattr(LearningStore, "claim", claim)
+    rc = tick()
+    monkeypatch.setattr(LearningStore, "claim", real)
+
+    assert refused, "the tick never reached the claim, so the refusal was not what it met"
+    assert (rc, writer.served) == (0, []), critical_text(caplog)
+    assert critical_text(caplog) == "", "a refused claim was reported as a failure"
+    assert _snapshot(w) == before
+
+    tick()
+    assert list(_batches(w)), "control: with the refusal gone the next tick claims the same work"
+
+
 @pytest.mark.parametrize("revert_state", ["working", "in_review"])
 def test_reverts_a_revert_that_is_running_or_open_blocks_authoring(world, caplog, revert_state):  # noqa: F811 — the imported fixture
     """A running revert, and an open revert PR, each stop a tick from authoring: the item waits, nothing is claimed. (Reverts, O3)"""
@@ -275,25 +339,65 @@ def test_o1_a_pushed_branch_with_no_pr_is_taken_over_and_gets_its_one_pr(world, 
     assert len([r for r in w.t.forge.prs if r["state"] == "open"]) == 1, "a second tick opened a second PR"
 
 
-def test_o1_a_lease_lapsed_within_grace_is_not_taken_over_and_one_past_it_is(world, caplog):  # noqa: F811 — the imported fixture
-    """Within grace the next tick leaves the stranded batch alone (no PR, same batch, still working); past grace it opens the PR. (O1, P6, Crash recovery)"""
+#: Every way a stranded batch is recovered; each is judged lapsed by the database's clock alone (one lapse rule).
+RECOVERY = {
+    "tick": None,
+    "take_over": lambda w, bid: call(w.dsn, "take_over", w.t.tenant_id, bid, owner="host-b"),
+    "abandon_by_recovery": lambda w, bid: call(w.dsn, "abandon", w.t.tenant_id, bid, by="recovery"),
+    "offboard": lambda w, bid: call(w.dsn, "offboard", w.t.tenant_id, wait=0.3),
+}
+
+
+@pytest.mark.parametrize("skew_hours", [0, 1, -1], ids=["host-clock-right", "host-clock-an-hour-ahead", "host-clock-an-hour-behind"])
+@pytest.mark.parametrize("path", sorted(RECOVERY))
+def test_o1_every_recovery_path_judges_a_lapse_by_the_databases_clock_alone(world, caplog, path, skew_hours):  # noqa: F811 — the imported fixture
+    """Live or lapsed within grace the stranded batch is left alone; past grace it is recovered; a host clock off by an hour changes neither. (O1, P6, Crash recovery)"""
+    from defender.tests.support.learning.core._clock1278 import host_clock_skewed
+    from defender.tests.support.learning.core._store1278 import store_mod
+
+    S = store_mod()
     w = world
     writer, batch_id, branch = _stranded(w, caplog)
+    [stranded] = _batches(w).values()
 
-    lapse_lease(w.dsn, batch_id, past_grace=False)
-    _tick(w, writer)
+    def attempt():
+        with host_clock_skewed(skew_hours):
+            if RECOVERY[path] is None:
+                return _tick(w, writer)
+            return RECOVERY[path](w, batch_id)
 
-    assert [r for r in w.t.forge.prs if r["state"] == "open"] == [], "taken over within grace"
-    assert list(_batches(w)) == [batch_id]
-    assert _batches(w)[batch_id].phase == "working"
-    assert writer.served == [batch_id]
-    assert lease_seconds_left(w.dsn, batch_id) < 0, "the tick revived the lapsed lease"
+    def standing():
+        b = _batches(w)[batch_id]
+        return (b.phase, b.outcome, b.token, b.pr_number, b.lease_owner)
+
+    for lapsed in (None, "within grace"):  # the lease live (the stranding tick ended its own), then lapsed one second ago
+        if lapsed:
+            lapse_lease(w.dsn, batch_id, past_grace=False)
+        else:
+            execute(w.dsn, "UPDATE learning.batches SET lease_expiry = now() + interval '10 minutes' WHERE id = %s", (batch_id,))
+        with contextlib.suppress(S.NotLapsed, S.LaneBusy):
+            attempt()
+        assert standing() == ("working", None, stranded.token, None, stranded.lease_owner), (
+            f"a batch {lapsed or 'with a live lease'} was recovered by {path}")
+        assert [r for r in w.t.forge.prs if r["state"] == "open"] == []
+        assert list(_batches(w)) == [batch_id]
+        assert writer.served == [batch_id], f"{path} ran a curator again for a batch that was not lapsed"
+        if lapsed:
+            assert lease_seconds_left(w.dsn, batch_id) < 0, f"{path} revived a lease that had lapsed"
 
     lapse_lease(w.dsn, batch_id)
-    _tick(w, writer)
+    attempt()
 
-    [pr] = [r for r in w.t.forge.prs if r["state"] == "open"]
-    assert (pr["head"]["ref"], _batches(w)[batch_id].phase) == (branch, "in_review")
+    after = _batches(w).get(batch_id)
+    if path == "tick":
+        [pr] = [r for r in w.t.forge.prs if r["state"] == "open"]
+        assert (pr["head"]["ref"], after.phase) == (branch, "in_review")
+    elif path == "take_over":
+        assert (after.phase, after.token > stranded.token) == ("working", True)
+    elif path == "abandon_by_recovery":
+        assert (after.phase, after.outcome) == ("ended", "abandoned")
+    else:
+        assert after is None, "offboarding a batch lapsed past grace left its rows"
 
 
 def test_o1_a_branch_only_on_the_forge_is_verified_against_the_record_and_gets_its_pr_from_a_fresh_clone(world, caplog):  # noqa: F811 — the imported fixture

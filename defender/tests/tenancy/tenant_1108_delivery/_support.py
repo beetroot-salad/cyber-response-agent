@@ -274,7 +274,7 @@ class ForgeHTTP:
         self.link = None
         self._rows = []
         #: #1278 (C23): the scopes the bot's token carries. Reviews, PR state and closing need
-        #: `write:repository`; reading plain PR comments also needs `read:issue` (403 without).
+        #: `write:repository`; reading plain PR comments also needs `write:issue` (the integration's scope, #1414 D13, A4) or `read:issue` (403 with neither).
         self.scopes = {"write:repository"}
         #: #1278: PR number -> Forgejo `PullReview` rows / issue `Comment` rows, as planted by a
         #: case (`review_row`, `comment_row`). The fake never computes dismissal (C24): a case
@@ -568,14 +568,14 @@ class ForgeHTTP:
 
     def _feedback(self, request, parts):
         """#1278 (C9, C23): `GET /pulls/N/reviews`, `GET /issues/N/comments` (Forgejo files a
-        PR's plain comments as issue comments; 403 without `read:issue`), and `PATCH /pulls/N`
+        PR's plain comments as issue comments; 403 with neither `write:issue` nor `read:issue`), and `PATCH /pulls/N`
         taking `state` (closing a PR). `None` for any other route."""
         if len(parts) == 4 and parts[1] == "pulls" and parts[3] == "reviews" and request.method == "GET":
             if not self._pull(parts[2]):
                 return httpx.Response(404, json={"message": "pull request does not exist"})
             return self._paged_reviews(request, self.reviews.get(int(parts[2]), []))
         if len(parts) == 4 and parts[1] == "issues" and parts[3] == "comments" and request.method == "GET":
-            if "read:issue" not in self.scopes:
+            if not self.scopes & {"write:issue", "read:issue", "all"}:
                 return httpx.Response(403, json={
                     "message": "token does not have at least one of required scope(s): [read:issue]"})
             if not self._pull(parts[2]):

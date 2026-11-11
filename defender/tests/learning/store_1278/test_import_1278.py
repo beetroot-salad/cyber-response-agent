@@ -25,6 +25,7 @@ from defender.tests.support.learning.core._store1278 import (
     store_mod,
 )
 from defender.tests.support.shared._locations_1210 import location_path
+from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
@@ -359,6 +360,238 @@ async def test_migration_a_retained_delivery_batch_holds_the_items_its_branch_ci
     assert (batch.phase, batch.branch) == ("needs_person", branch)
     assert {key: (i.status, i.batch_id) for (_k, key), i in done.items.items()} == {
         "f1": ("in_batch", batch.id), "f2": ("waiting", None)}
+
+
+# --- one transaction, no file touched --------------------------------------------------------------------------
+
+
+def tenant_tree(w) -> dict[str, bytes | None]:
+    """Every file under the tenant's folder (git's own store aside) by bytes, and every directory by `None`."""
+    base = Path(location_path(w.t.tenant.tenant_root))
+    tree: dict[str, bytes | None] = {}
+    for p in sorted(base.rglob("*")):
+        rel = p.relative_to(base).as_posix()
+        if ".git" in p.relative_to(base).parts:
+            continue
+        tree[rel] = p.read_bytes() if p.is_file() else None
+    return tree
+
+
+def rich_world(w) -> None:
+    """Every file shape the import reads and all three PR shapes, with their commit history: findings, a pitfall, a
+    request, a ledger, a dead letter, an open author PR, an open revert PR and an open lead PR."""
+    from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+
+    t = w.t
+    legacy.queue(w.root, "finding", [finding("f1"), finding("f2"), {**finding("f3"), "attempts": 2}])
+    legacy.queue(w.root, "pitfall", [legacy.pitfall("p1")])
+    legacy.consumed(w.root, "finding", [finding("c1")], "consumed_committed")
+    legacy.consumed(w.root, "finding", [finding("r1")], "consumed_retired")
+    legacy.deadletter(w.root, "finding", [finding("r1")], "ceiling reached for r1")
+    legacy.request(w.root, "c1", "run-1", w.tid)
+    main = legacy.land_on_main(t, {f"{LESSONS}/old.md": lesson_citing("c1")})
+    own = "lessons/0a1b2c3d4e5f"
+    tip = legacy.open_pr(t, 7, own, {f"{LESSONS}/new.md": lesson_citing("f1")})
+    revert = "lessons/revert-new-00ff00ff"
+    rtip = legacy.open_pr(t, 11, revert, {f"{LESSONS}/new.md": "reverted\n"})
+    lead = "lead-author/bbbbbbbbbbbb"
+    ltip = legacy.open_pr(t, 9, lead, {"agent/pitfalls/notes.md": "taught\n"})
+    target = {"branch": own, "base": main, "start": "0011223344556677"}
+    legacy.commit_record(w.root, [
+        legacy.commit_row(tip, own, main, target["start"], changes=[(f"{LESSONS}/new.md", None, "2" * 40)]),
+        legacy.commit_row(rtip, revert, main, "8899aabbccddeeff", changes=[(f"{LESSONS}/new.md", "2" * 40, None)],
+                          reverts=(target, f"{LESSONS}/new.md")),
+        legacy.commit_row(ltip, lead, main, "1122334455667788", lanes=LEAD_AUTHOR_DRAIN_LABEL.lanes,
+                          changes=[("agent/pitfalls/notes.md", None, "3" * 40)])])
+
+
+async def attempted(w, store) -> Exception | None:
+    """Run the import; the exception it raised, if any."""
+    try:
+        await store_mod().import_learning_state(store, w.tid, w.root, delivery=w.t.open_delivery())
+    except Exception as failed:  # noqa: BLE001 — a failed write, however the store reports it
+        return failed
+    return None
+
+
+async def test_migration_a_successful_import_changes_no_file(world):
+    """After a full import nothing under the tenant's folder differs by a byte, and `learning/` still stands. (input 44, A1 cutover)"""
+    rich_world(world)
+    before = tenant_tree(world)
+
+    done = await imported(world)
+
+    assert len(done.batches) == 3, "premise: the import took the PRs in"
+    assert len(done.commits) == 3, "premise: and the history"
+    assert tenant_tree(world) == before
+    assert world.root.is_dir()
+
+
+async def test_migration_a_failure_at_any_one_write_leaves_no_row_and_no_file_changed(world):
+    """Failing the k-th row written, for every k, leaves the store empty of the tenant and the files untouched. (input 44, 46, G-I10)"""
+    execute(world.dsn, "CREATE TABLE public.poison_k (k bigint)")
+    execute(world.dsn, "INSERT INTO public.poison_k VALUES (0)")
+    execute(world.dsn, "CREATE SEQUENCE public.poison_seq")
+    execute(world.dsn, """CREATE FUNCTION public.poison() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF nextval('public.poison_seq') = (SELECT k FROM public.poison_k) THEN
+            RAISE EXCEPTION 'poison at write % (%)', TG_TABLE_NAME, TG_OP;
+          END IF;
+          RETURN NEW;
+        END $$""")
+    for (table,) in execute(world.dsn, "SELECT tablename FROM pg_tables WHERE schemaname = 'learning'"):
+        execute(world.dsn, f'CREATE TRIGGER poison BEFORE INSERT ON learning."{table}" FOR EACH ROW EXECUTE FUNCTION public.poison()')
+    rich_world(world)
+    before = tenant_tree(world)
+
+    k = 0
+    async with learning_store(world.dsn) as store:
+        while True:
+            k += 1
+            assert k < 200, "the import never completed"
+            execute(world.dsn, "ALTER SEQUENCE public.poison_seq RESTART")
+            execute(world.dsn, "UPDATE public.poison_k SET k = %s", (k,))
+            failed = await attempted(world, store)
+            if failed is None:
+                break
+            assert "poison at write" in str(failed), f"the import failed for another reason at write {k}: {failed!r}"
+            held = (await store.work(world.tid), await store.batches(world.tid), await store.commit_record(world.tid))
+            assert held == ([], [], []), f"a failure at write {k} left rows behind"
+            assert tenant_tree(world) == before, f"a failure at write {k} changed a file"
+        written = len(await store.work(world.tid)) + len(await store.batches(world.tid)) + len(await store.commit_record(world.tid))
+    assert k - 1 >= written, f"only {k - 1} write points were tried for {written} rows"
+    assert tenant_tree(world) == before
+
+
+# --- what the import will not take as written ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("counter", ["attempts", "deferrals"])
+@pytest.mark.parametrize("bad", [-3, True, False, 2.5, "4", None], ids=["negative", "true", "false", "float", "text", "null"])
+async def test_migration_a_counter_that_is_not_a_count_imports_as_zero(world, counter, bad):
+    """A negative, boolean, fractional or textual counter in a queued row is 0; a real one beside it is kept. (input 08, G-I5)"""
+    legacy.queue(world.root, "finding", [{**finding("f1"), counter: bad}, {**finding("f2"), counter: 2}])
+    legacy.queue(world.root, "pitfall", [{**legacy.pitfall("p1"), "offers_declined": bad}])
+
+    done = await imported(world)
+
+    assert getattr(done.items[("finding", "f1")], counter) == 0
+    assert getattr(done.items[("finding", "f2")], counter) == 2, "control: a count is carried over"
+    assert done.items[("pitfall", "p1")].offers_declined == 0
+
+
+@pytest.mark.parametrize("kind", ["finding", "questioner_finding", "pitfall"])
+@pytest.mark.parametrize("bad", [5, True, 0, ["f1"], {"a": 1}, "", "  "], ids=["int", "bool", "zero", "list", "dict", "empty", "blank"])
+async def test_migration_a_row_whose_id_is_not_a_string_is_dead_keyed_by_its_digest(world, kind, bad):
+    """A queued row with an id that is not a non-empty string is keyless and dead, never keyed by the id's spelling. (input 09, G-I4)"""
+    row = (finding("x") if kind == "finding" else legacy.world_finding("x") if kind == "questioner_finding"
+           else legacy.pitfall("x"))
+    row[legacy.CHANNELS[kind]["key"]] = bad
+    legacy.queue(world.root, kind, [row])
+
+    done = await imported(world)
+
+    [item] = [i for (k, _key), i in done.items.items() if k == kind]
+    assert item.status == "dead"
+    assert item.reason
+    assert item.key not in {str(bad), repr(bad), "x", ""}
+    assert len(item.key) > 8, "keyed by a digest"
+
+
+@pytest.mark.parametrize("kind", ["finding", "pitfall"])
+async def test_migration_a_keyless_row_is_one_item_whatever_counters_each_copy_carries(world, kind):
+    """The same keyless row queued with attempts 1 and again dead-lettered with others is one dead item: counters are not identity. (input 19, G-I4)"""
+    base = finding("x") if kind == "finding" else legacy.pitfall("x")
+    keyless = {k: v for k, v in base.items() if k != legacy.CHANNELS[kind]["key"]}
+    legacy.queue(world.root, kind, [{**keyless, "attempts": 1, "deferrals": 1}])
+    legacy.consumed(world.root, kind, [{**keyless, "attempts": 4}], "consumed_retired")
+    legacy.queue(world.root, kind, [{**keyless, "attempts": 7, "offers_declined": 2}])
+
+    done = await imported(world)
+
+    assert [i.status for i in done.items.values()] == ["dead"], "one item for one original row"
+
+
+@pytest.mark.parametrize("branch", ["feature/lessons/aaaaaaaaaaaa", "my-lead-author/bbbbbbbbbbbb", "x-lessons/revert-a-1a2b3c4d",
+                                    "Lessons/cccccccccccc", "lessons-x/eeeeeeeeeeee"])
+async def test_migration_an_open_pr_on_a_branch_learning_did_not_name_makes_no_batch(world, branch):
+    """Only a branch that starts with a lane's prefix is ours; a PR whose branch merely contains one imports nothing, and one of ours beside it does. (input 15)"""
+    legacy.queue(world.root, "finding", [finding("f1")])
+    legacy.open_pr(world.t, 5, branch, {f"{LESSONS}/foreign.md": lesson_citing("f1")})
+    legacy.open_pr(world.t, 6, "lessons/dddddddddddd", {f"{LESSONS}/own.md": lesson_citing("f1")})
+
+    done = await imported(world)
+
+    assert [(b.pr_number, b.branch) for b in done.batches] == [(6, "lessons/dddddddddddd")]
+
+
+_GOOD = {"commit": "a" * 40, "base": "1" * 40, "before": None, "after": "2" * 40}
+
+
+@pytest.mark.parametrize("field", ["commit", "base", "before", "after"])
+@pytest.mark.parametrize("bad", ["xyz", "A" * 40, "a" * 39, "a" * 41, "g" * 40, "", 5, ["a" * 40], True],
+                         ids=["word", "upper", "short", "long", "nonhex", "empty", "int", "list", "bool"])
+async def test_migration_a_commit_row_with_a_malformed_object_id_imports_nothing(world, field, bad):
+    """A row whose commit, base or change oid is not 40 lower-case hex is dropped, logged; the good row beside it is imported. (input 17)"""
+    own = {"branch": "lessons/ffffffffffff", "start": "0011223344556677"}
+    spoiled = {**_GOOD, field: bad}
+    legacy.commit_record(world.root, [
+        legacy.commit_row("b" * 40, own["branch"], "1" * 40, own["start"], changes=[(f"{LESSONS}/y.md", None, "3" * 40)]),
+        legacy.commit_row(spoiled["commit"], own["branch"], spoiled["base"], own["start"],
+                          changes=[(f"{LESSONS}/x.md", spoiled["before"], spoiled["after"])])])
+
+    done = await imported(world)
+
+    assert [r.commit for r in done.commits] == ["b" * 40]
+
+
+@pytest.mark.parametrize(("branch", "lanes"), [
+    ("lessons/ffffffffffff", ("skills",)),
+    ("lessons/ffffffffffff", ("lessons",)),
+    ("lessons/revert-x-00ff00ff", ("skills",)),
+    ("lead-author/gggggggggggg", ("lessons", "lessons-questioner")),
+])
+async def test_migration_a_commit_row_whose_lanes_are_not_its_branchs_refuses_the_import(world, branch, lanes):
+    """A row naming other lanes than its branch's lane has refuses the import naming the commit; nothing is written. (input 30, G-I10)"""
+    legacy.queue(world.root, "finding", [finding("f1")])
+    legacy.commit_record(world.root, [
+        legacy.commit_row("c" * 40, branch, "1" * 40, "0011223344556677", lanes=lanes,
+                          changes=[(f"{LESSONS}/x.md", None, "2" * 40)])])
+
+    await refused_import(world, "c" * 40)
+
+
+async def test_migration_a_row_history_is_linked_to_the_imported_batch_of_its_branch(world):
+    """The open PRs' commit rows carry the imported batch's id, a revert's too; history with no open PR has none. (honest defect, A2 D5)"""
+    rich_world(world)
+    legacy.commit_record(world.root, [legacy.commit_row("d" * 40, "lessons/closed00000000", "1" * 40, "0011223344556677",
+                                                        changes=[(f"{LESSONS}/gone.md", None, "4" * 40)])])
+
+    done = await imported(world)
+
+    by_branch = {b.branch: b for b in done.batches}
+    assert {b.kind for b in by_branch.values()} == {"author", "revert"}
+    linked = {r.branch: r.batch_id for r in done.commits}
+    assert linked == {"lessons/0a1b2c3d4e5f": by_branch["lessons/0a1b2c3d4e5f"].id,
+                      "lessons/revert-new-00ff00ff": by_branch["lessons/revert-new-00ff00ff"].id,
+                      "lead-author/bbbbbbbbbbbb": by_branch["lead-author/bbbbbbbbbbbb"].id,
+                      "lessons/closed00000000": None}
+
+
+async def test_migration_an_imported_open_revert_pr_is_seen_by_the_next_revert(world):
+    """The revert lookup finds the open revert PR the import brought in, so a second revert PR is not opened. (honest defect, A2 D5)"""
+    from defender.learning.author.version_control.store_delivery import StoreRecord, _peel
+
+    rich_world(world)
+    path = f"{LESSONS}/new.md"
+    async with learning_store(world.dsn) as store:
+        await store_mod().import_learning_state(store, world.tid, world.root, delivery=world.t.open_delivery())
+        batches = {str(b.id): b for b in await store.batches(world.tid)}
+        record = StoreRecord.of(await store.commit_record(world.tid))
+
+    change, last = _peel(record, path, "2" * 40, batches)
+
+    assert last is not None, "the open revert PR is in the store as a batch, yet the revert lookup does not find it"
 
 
 # --- the commit record --------------------------------------------------------------------------------------------

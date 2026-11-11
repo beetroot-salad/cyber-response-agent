@@ -124,3 +124,46 @@ def test_enqueue_report_retry_counts_only_new_findings(dsn):
     two = report([first, second])
     assert (two.appended, two.malformed) == (1, 0)
     assert _by_id(_queued(dsn, FINDINGS)) == {first["finding_id"]: first, second["finding_id"]: second}
+
+
+_NUL = "a\x00b"
+
+
+@pytest.mark.parametrize("extra", [
+    pytest.param({"finding": _NUL}, id="top-level value"),
+    pytest.param({"extra": {"deeper": [{"x": _NUL}]}}, id="nested value"),
+    pytest.param({"contrast_evidence": ["fine", _NUL]}, id="list item"),
+    pytest.param({_NUL: "v"}, id="top-level key"),
+    pytest.param({"extra": {_NUL: 1}}, id="nested key"),
+])
+def test_a_nul_anywhere_in_a_row_refuses_the_whole_append_and_queues_nothing(channel_case, extra):
+    """A NUL in any key or value at any depth refuses the job before any insert; the good row ahead of it is not queued. (input 10)"""
+    dsn, channel, build, append = channel_case
+    good = build(finding_id="episode/b/0/0")
+    bad = {**build(finding_id="episode/b/1/0"), **extra}
+
+    with pytest.raises(JudgeRefused):
+        _append(dsn, append, [good, bad])
+
+    assert _queued(dsn, channel) == [], "nothing of the refused job was inserted"
+    assert _append(dsn, append, [good]) == (1, 0), "control: the good row alone is queued"
+
+
+@pytest.mark.parametrize("hostile", ["defender", "world"])
+@pytest.mark.parametrize("extra", [
+    pytest.param({"extra": {"deeper": [{"x": _NUL}]}}, id="nested value"),
+    pytest.param({_NUL: "v"}, id="key"),
+])
+def test_a_nul_in_one_channels_row_refuses_the_commits_rows_of_the_other_channel_too(dsn, hostile, extra):
+    """One commit's defender and world rows are one job: a NUL in either refuses both, nothing of either is queued. (input 10, second kind)"""
+    defender, world = queue_row(finding_id="episode/b/0/0"), world_row(finding_id="episode/b/1/0")
+    if hostile == "defender":
+        defender = {**defender, **extra}
+    else:
+        world = {**world, **extra}
+
+    with blocking(dsn) as store, pytest.raises(JudgeRefused):
+        enqueue.enqueue_report("episode", {"world": "b"}, state=enqueue.StoreFindings(store, TENANT, "run-1241"),
+                               drawn=enqueue.DrawnRows(defender=[defender], world=[world]))
+
+    assert (_queued(dsn, FINDINGS), _queued(dsn, QUESTIONER_FINDINGS)) == ([], [])

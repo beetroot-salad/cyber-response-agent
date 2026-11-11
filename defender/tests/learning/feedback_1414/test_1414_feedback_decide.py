@@ -3,22 +3,21 @@ lessons row an instruction becomes (O7).
 """
 from __future__ import annotations
 
-import contextlib
 import datetime as dt
 import json
 import logging
 import re
-from pathlib import Path
 
 import httpx
 import pytest
 
 from defender.tests.learning.feedback_1414 import _spec1414 as S
 from defender.tests.learning.feedback_1414._spec1414 import LOOKUP, LOOKUP_2, NAMED, OWNER, today
-from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_p4._drain_support import remote_branches
 
 CEILING = 3
+
+pytestmark = pytest.mark.postgres
 
 
 def _drafts(fb):
@@ -105,13 +104,13 @@ def test_1414_an_invalid_answer_is_refused_whole_and_counted_to_the_ceiling(fb, 
         if tick < CEILING - 1:
             assert fb.replies(number, comment["id"]) == [], "the ceiling came early"
         assert _drafts(fb) == {}, "an entry was drafted from a refused answer"
-        assert S.lessons_rows(fb.paths) == [], "a lessons row was written from a refused answer"
+        assert S.lessons_rows(fb) == [], "a lessons row was written from a refused answer"
     [reply] = fb.replies(number, comment["id"])
     assert "could not be processed" in reply["body"]
     assert fb.tick(decider) == 0
     assert decider.decided == [comment["id"]] * CEILING, "an exhausted comment was asked again"
     assert _drafts(fb) == {}
-    assert S.lessons_rows(fb.paths) == []
+    assert S.lessons_rows(fb) == []
 
 
 @pytest.mark.parametrize(("given", "expect"), [
@@ -140,7 +139,7 @@ def test_1414_one_comment_may_approve_and_instruct_and_gets_both(fb):
     assert fb.tick(decider) == 0
 
     assert len(_drafts(fb)) == 1
-    [row] = S.lessons_rows(fb.paths)
+    [row] = S.lessons_rows(fb)
     assert row["comment_id"] == str(comment["id"])
 
 
@@ -154,34 +153,27 @@ def test_1414_an_instruction_becomes_one_keyed_lessons_row_and_never_a_draft(fb)
 
     assert fb.tick(decider) == 0
     assert fb.tick(decider) == 0
-    assert S.lessons_rows(fb.paths) == [S.feedback_lesson_row(
+    assert S.lessons_rows(fb) == [S.feedback_lesson_row(
         comment_id=comment["id"], issue=number, author=OWNER, case_id="case-lesson", instruction=instruction)]
     assert _drafts(fb) == {}
     [reply] = fb.replies(number, comment["id"])
     assert "lessons author" in reply["body"]
 
 
-def test_1414_a_lessons_row_that_faulted_after_the_decision_is_written_once_later(fb):
-    """The row write faults once after the decision is recorded: the next tick writes it identically, without asking again; a present row is not duplicated. D11."""
+def test_1414_a_comment_with_instruction_is_decided_and_its_row_written_together(fb):
+    """The decision and the instruction row are one transaction: once the comment is decided its row exists, and a further tick neither asks again nor duplicates it. D11/P8 (replaces the file-fault test: A4 change 4)."""
     instruction = "ask the owner of the host first"
     number, comment = _scene(fb, "case-row", body=instruction)
     decider = S.Decider({comment["id"]: S.answer(instruction=instruction)})
-    queue_file = S.lessons_queue_file(fb.paths)
-    queue_file.unlink(missing_ok=True)
-    queue_file.mkdir(parents=True)  # the row cannot be appended: a real fault at the write
-
-    with contextlib.suppress(Exception):
-        fb.tick(decider)
-    assert decider.decided == [comment["id"]], "premise: the decision was taken before the write faulted"
-    queue_file.rmdir()
-    assert S.lessons_rows(fb.paths) == []
 
     assert fb.tick(decider) == 0
-    [row] = S.lessons_rows(fb.paths)
+    [decided] = [c for c in S.comment_rows(fb) if c.comment_id == comment["id"]]
+    assert decided.decision is not None
+    [row] = S.lessons_rows(fb)
     assert row["comment_id"] == str(comment["id"])
-    assert decider.decided == [comment["id"]], "the recorded decision was asked again"
     assert fb.tick(decider) == 0
-    assert S.lessons_rows(fb.paths) == [row], "positive control: a present row was duplicated"
+    assert decider.decided == [comment["id"]], "the recorded decision was asked again"
+    assert S.lessons_rows(fb) == [row], "positive control: a present row was duplicated"
 
 
 def test_1414_a_framing_run_with_no_lookups_says_no_entry_and_still_sends_the_instruction(fb):
@@ -199,10 +191,10 @@ def test_1414_a_framing_run_with_no_lookups_says_no_entry_and_still_sends_the_in
     assert "no change" not in reply["body"].lower(), "the reply both handed on the instruction and said no change"
     assert "the run made no registry lookup this could approve" in reply["body"]
     assert "lessons author" in reply["body"]
-    assert [r["comment_id"] for r in S.lessons_rows(fb.paths)] == [str(comment["id"])]
+    assert [r["comment_id"] for r in S.lessons_rows(fb)] == [str(comment["id"])]
     assert "could not be processed" not in reply["body"]
     assert _drafts(fb) == {}
-    [row] = S.lessons_rows(fb.paths)
+    [row] = S.lessons_rows(fb)
     assert (row["comment_id"], row["instruction"]) == (str(comment["id"]), instruction)
 
 
@@ -263,19 +255,7 @@ def _request_case(fb, request) -> str | None:
 
 
 def _live_cases(fb) -> set[str]:
-    return {r["case_id"] for r in S.open_issue_requests(fb.paths).values()}
-
-
-def _set_aside_cases(fb) -> set[str]:
-    root = Path(location_path(fb.paths.state_root))
-    live = root / S.REQUEST_QUEUE
-    kept = set()
-    for p in root.rglob("*.json"):
-        name = str(p.relative_to(root)).lower()
-        if p.parent != live and ("fail" in name or "quarantin" in name):
-            with contextlib.suppress(ValueError, AttributeError):
-                kept.add(json.loads(p.read_text(encoding="utf-8"))["case_id"])
-    return kept
+    return {r["case_id"] for r in S.open_issue_requests(fb).values()}
 
 
 def test_1414_no_failure_on_a_request_is_counted_and_each_opens_its_issue_once_the_forge_answers(fb):
@@ -294,7 +274,7 @@ def test_1414_no_failure_on_a_request_is_counted_and_each_opens_its_issue_once_t
     for _ in range(CEILING + 3):
         assert fb.tick(S.Decider()) == 0
     assert _live_cases(fb) == set(cases) | {"fault"}, "a failing request left the queue"
-    assert _set_aside_cases(fb) == set(), "a failing request was set aside"
+    assert {r.case_id for r in S.issue_rows(fb)} == set(cases) | {"fault", "healthy"}, "a failing request was set aside (A4: there is no quarantine; the row stays a request)"
 
     fb.forge.respond = fb.forge.fault = None
     assert fb.tick(S.Decider()) == 0
@@ -369,12 +349,12 @@ def test_1414_a_bot_not_yet_granted_issues_loses_no_request(fb):
     for _ in range(CEILING + 3):
         assert fb.tick(S.Decider()) == 0
     assert fb.issues("case-early") == []
-    assert {r["case_id"] for r in S.open_issue_requests(fb.paths).values()} == {"case-early"}
-    assert S.quarantined_requests(fb.paths, "case-early") == [], "the request was set aside"
+    assert {r["case_id"] for r in S.open_issue_requests(fb).values()} == {"case-early"}
+    assert [r.case_id for r in S.issue_rows(fb)] == ["case-early"], "the request was set aside"
     fb.forge.respond = None
     assert fb.tick(S.Decider()) == 0
     assert len(fb.issues("case-early")) == 1
-    assert S.open_issue_requests(fb.paths) == {}
+    assert S.open_issue_requests(fb) == {}
 
 
 def test_1414_a_4xx_on_a_comment_reply_is_retried_once_a_tick_and_posted_once_when_the_forge_takes_it(fb, caplog):

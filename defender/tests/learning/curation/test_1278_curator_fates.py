@@ -110,8 +110,9 @@ def test_d1_each_curator_is_handed_its_own_kinds_items_from_the_claim(world, cap
 
     assert model.keys_shown(LESSONS) == ["f1"], critical_text(caplog)
     assert model.keys_shown(QUESTIONER) == ["q1"]
-    assert all("q1" not in s.prompt for s in model.seen if s.curator == LESSONS), "the lessons curator saw a questioner item"
-    assert all("f1" not in s.prompt for s in model.seen if s.curator == QUESTIONER), "the questioner curator saw a finding"
+    # by the keys each call was shown, never by a substring of its prompt: a batch id's random hex can hold "f1"
+    assert all(s.keys == ["f1"] for s in model.seen if s.curator == LESSONS), "the lessons curator saw a questioner item"
+    assert all(s.keys == ["q1"] for s in model.seen if s.curator == QUESTIONER), "the questioner curator saw a finding"
     batch = _only_batch(w)
     assert (batch.phase, len(w.t.forge.creates)) == ("in_review", 1)
     assert {k: i.status for k, i in _items(w).items()} == {("finding", "f1"): "in_batch", ("questioner_finding", "q1"): "in_batch"}
@@ -305,7 +306,7 @@ def test_d9_a_rejected_pr_no_longer_loses_the_pitfalls_it_carried(lead, caplog):
     call(w.dsn, "add_pitfall", w.t.tenant_id, _pitfall("p4-run:1"))
     _lead_tick(w, ScriptedModel(pitfalls=Reply({_reducer_path(): _reducer_note()})))
     batch = _only_batch(w)
-    w.t.forge.scopes = {"write:repository", "read:issue"}  # the reconcile reads the PR's comments too (H2)
+    w.t.forge.scopes = {"write:repository", "write:issue"}  # the reconcile reads the PR's comments too (H2)
     close_on_remote(w.t.p3, batch.branch)
 
     author = ScriptedModel()
@@ -371,7 +372,7 @@ _WORDS = ("cite the alert rule, not the host", "wrong lane")
 
 def _closed_with_words(w, branch: str, number: int) -> None:
     """A person asks for changes and closes the PR with a comment."""
-    w.t.forge.scopes = {"write:repository", "read:issue"}
+    w.t.forge.scopes = {"write:repository", "write:issue"}
     w.t.forge.comments[number] = [comment_row(501, "analyst", _WORDS[0])]
     w.t.forge.reviews[number] = [review_row(651, "owner", "REQUEST_CHANGES", body=_WORDS[1])]
     close_on_remote(w.t.p3, branch)

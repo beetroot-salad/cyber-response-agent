@@ -169,6 +169,9 @@ services:
       - xpack.security.transport.ssl.certificate_authorities=certs/ca/ca.crt
       - xpack.security.transport.ssl.verification_mode=certificate
       - "ES_JAVA_OPTS=-Xms${ES_HEAP} -Xmx${ES_HEAP}"
+      # The frozen held-out cases' snapshot repository (#1347): only this live node writes it; the
+      # frozen engine mounts the same lab-disk directory read-only and registers it `readonly`.
+      - path.repo=/srv/lab/frozen-cases
     ulimits:
       memlock:
         soft: -1
@@ -176,6 +179,7 @@ services:
     volumes:
       - certs:/usr/share/elasticsearch/config/certs:ro
       - es_data:/usr/share/elasticsearch/data
+      - /srv/lab/frozen-cases:/srv/lab/frozen-cases
     ports:
       - "127.0.0.1:9200:9200"
     mem_limit: 3g
