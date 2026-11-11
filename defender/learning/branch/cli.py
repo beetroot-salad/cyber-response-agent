@@ -79,6 +79,7 @@ from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import seams
 from defender.learning.branch import timing as timing_mod
 from defender.learning.branch.steps import Step
+from defender.learning.branch.container import JobContainer
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.ledger import Ledger, LedgerError
@@ -340,7 +341,30 @@ def sibling_argv(
 _UNPINNABLE = "the source run's knowledge cannot be pinned for the family"
 
 
-def _pinned_export(tenant: RunTenant, source: Run) -> Any:
+def _materialised(tenant: RunTenant, commit: str, container: JobContainer | None) -> Any:
+    """`<T>/exports/<commit>/`, materialised from the tenant clone when absent: by this process for an operator's
+    launch; inside a job container by its per-job host helper (#1170 P-A, C20: the container writes no export and
+    takes no knowledge lock), the folder it answers held to the one this tenant names for that commit. A helper
+    refusal, or a helper that cannot be reached, is `DeliveryRefused`."""
+    from defender import job_socket
+    from defender.learning.author.version_control import DeliveryRefused, TenantExport, materialise_export
+
+    if container is None:
+        return materialise_export(tenant.tenant, commit)
+    try:
+        answer = container.materialised_export(commit)
+        folder = tenant.tenant.export_folder(commit)
+    except job_socket.Refused as refused:
+        raise DeliveryRefused(f"the job's host helper did not materialise it ({refused.code}): {refused}") from None
+    except (OSError, ValueError, TenantRefused) as lost:
+        raise DeliveryRefused(f"no export from the job's host helper: {type(lost).__name__}: {lost}") from None
+    if answer.get("commit") != commit or str(answer.get("path")) != str(folder):
+        raise DeliveryRefused(f"the job's host helper answered another export ({answer.get('path')!r}) than "
+                              f"{folder}")
+    return TenantExport(commit=commit, path=folder)
+
+
+def _pinned_export(tenant: RunTenant, source: Run, container: JobContainer | None = None) -> Any:
     """The export every sibling is pinned to and the questioner's corpus is read from (flow 7,
     O-PIN): the knowledge commit the source run's HOST-HELD knowledge record names (U12, beside
     the run folder, where no box writes), materialised from the tenant clone when absent —
@@ -350,12 +374,12 @@ def _pinned_export(tenant: RunTenant, source: Run) -> Any:
     clone cannot materialise; both before anything is spent. Only a source from before records
     were written (no record, and a stamp naming no knowledge source) is judged by its stamp, as
     before: a commit it names, a refusal for `unversioned`/`unavailable`, or with none recorded
-    the tenant's published `current` (pre-flight still refuses that unless `--allow-dirty`)."""
+    the tenant's published `current` (pre-flight still refuses that unless `--allow-dirty`). Inside a job
+    container the export is materialised by the job's host helper (`_materialised`)."""
     from defender.learning.author.version_control import (
         DeliveryRefused,
         LockBusy,
         current_export,
-        materialise_export,
     )
     status = source.knowledge_status()
     commit = None if status is None else status.commit
@@ -379,7 +403,7 @@ def _pinned_export(tenant: RunTenant, source: Run) -> Any:
                 f"[branch] source run {source.run_dir}'s knowledge record is unreadable: there "
                 "is no knowledge commit to pin its siblings to, so the family cannot be "
                 "launched (not waived by --allow-dirty)", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
-        return materialise_export(tenant.tenant, commit)
+        return _materialised(tenant, commit, container)
     except (DeliveryRefused, LockBusy) as refused:
         at = "" if commit is None else f" ran at knowledge commit {commit}, which"
         raise ending(
@@ -509,7 +533,7 @@ def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the ten
 
 
 #: How long a stopped sibling is given to exit on SIGTERM before it is killed.
-_STOP_GRACE_SECONDS = 30.0
+_STOP_GRACE_SECONDS = 20.0
 
 
 def _default_spawn(argv: list[str], *, env: dict[str, str] | None = None,
@@ -652,6 +676,30 @@ def launch_job(  # noqa: PLR0913 — the job's identity plus the launcher's seam
     return _launch(ns, lane=lane, preflight=preflight, **seams)
 
 
+class _ContainerAdmitted:
+    """The tenant of a launch inside a job container (#1170): accepted by the folder rules alone. The per-job host
+    helper holds the tenant's host lock and admitted it before the container started (P-C), so no lock is taken, no
+    record read and no database opened here; it has no tenant records (`directory` None)."""
+
+    directory: Any = None
+
+    def __init__(self, tenant: Tenant) -> None:
+        self.tenant = tenant
+
+    def __enter__(self) -> _ContainerAdmitted:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+
+def _admitted(data_root: Any, tenant_id: TenantId, *, box_mounted: tuple[Any, ...]) -> _ContainerAdmitted:
+    """The tenant of a launch inside a job container: the folder rules alone (`_ContainerAdmitted`). An operator's
+    launch opens the one host acceptance in `_launch` itself, the command that holds it."""
+    return _ContainerAdmitted(tenancy.accept_tenant(data_root, tenant_id, defender_dir=_DEFENDER_DIR,
+                                                    box_mounted=box_mounted))
+
+
 def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, then the episode, in order
     ns: argparse.Namespace, *, lane: JobLaneHooks | None, spawn: Any = None, questioner: Any = None,
     preflight: Callable[..., int], render_page: PageRenderer | None = None, judge: Any = None,
@@ -659,6 +707,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     live_tree: Callable[[], formats.RunProvenance] | None = None,
     oracle: Any = None, verifier: Any = None, roster: Any = None, directory: Any = None,
     signer: Any = None, proxy_url: str | None = None, issuer_transport: Any = None,
+    container: JobContainer | None = None,
     clock: Callable[[], float] = time.time,
 ) -> int:
     # Injected seams are resolved once and threaded inward non-`None`, so no two frames can
@@ -682,10 +731,12 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     # refused here at launch exactly as a run refuses one inside its runs base (#1107 MF-13).
     from defender.systems import run_tenant as run_tenant_mod
 
+    admitted: Any
     try:
-        admitted = run_tenant_mod.host_tenant(
-            data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
-            box_mounted=(tenancy.box_mounted_episodes(data_root, tenant_id),))
+        box_mounted = (tenancy.box_mounted_episodes(data_root, tenant_id),)
+        admitted = (run_tenant_mod.host_tenant(data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
+                                               box_mounted=box_mounted)
+                    if container is None else _admitted(data_root, tenant_id, box_mounted=box_mounted))
     except TenantRefused as refusal:
         raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
                      brief=f"the job's tenant was refused ({type(refusal).__name__})",
@@ -728,7 +779,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         # `tmp_path` corpus and this frame is the only one that ever sees the production path.
         # #1108 P4 flow 7: the family's knowledge is the source's commit, its export materialised
         # here (git-capable) before anything is spent; the questioner's corpus is that export's.
-        pinned = _pinned_export(tenant, source)
+        pinned = _pinned_export(tenant, source, container)
         questioner_lessons_dir = (
             KnowledgePaths(Path(pinned.path) / "agent").lessons_questioner_dir
             if lessons_dir is None else lessons_dir)
@@ -769,7 +820,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
                     verifier=verifier, roster=roster, started=started,
                     knowledge_commit=pinned.commit, render_page=render_page,
                     signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
-                    directory=admitted.directory, lane=lane, token_clock=clock)
+                    directory=admitted.directory, lane=lane, container=container,
+                    token_clock=clock)
             except SystemExit:
                 raise
             except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
@@ -790,6 +842,7 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer | None,
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
     issuer_transport: Any = None, directory: Any = None, lane: JobLaneHooks | None = None,
+    container: JobContainer | None = None,
     token_clock: Callable[[], float] = time.time,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
@@ -833,7 +886,9 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
         record = preflight_replay(episode, source=source, roster=roster, tenant=tenant,
                                   oracle=oracle, verifier=verifier, signer=signer,
                                   proxy_url=proxy_url, issuer_transport=issuer_transport,
-                                  directory=directory, clock=token_clock)
+                                  directory=directory, container=container,
+                                  job_id=None if lane is None else lane.job_id,
+                                  clock=token_clock)
     if record["outcome"] != ACCEPTED:
         _logger.info(f"episode {episode_id}: {record['outcome']} before any sibling started "
                      f"({record['reason']})")

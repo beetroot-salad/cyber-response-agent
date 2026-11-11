@@ -69,7 +69,10 @@ runs:
           sudo timeout 120 apt-get "${APT_BOUNDED[@]}" install -y runsc
           # --oci-seccomp: #771's alias ban faults every box on arrival unless the daemon records it
           # as a runtimeArg. This only writes daemon.json, so it waits on nothing and has no bound.
-          sudo runsc install -- --oci-seccomp
+          # --host-uds=open (#1170): the per-job helper's socket is a host unix socket bind-mounted into the
+          # job's gVisor guest; gVisor refuses the guest's connect() to it (ECONNREFUSED) without this.
+          # The flag is daemon-wide, so every box gets the capability. A follow-up issue weighs a job-only runtime.
+          sudo runsc install -- --oci-seccomp --host-uds=open
           sudo timeout 30 systemctl restart docker
           # Printed before the check so a failed check shows what the daemon did register.
           timeout 15 docker info --format '{{.Runtimes}}'

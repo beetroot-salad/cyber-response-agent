@@ -1,5 +1,6 @@
-"""A learning job's family step, the worker's child (#1344): `python -m defender.cli.learning.job
---job <id> --tenant <T> --source <investigation id> --parent-pid <pid>`.
+"""A learning job's family step, in its job container (#1344, #1170): `python -m defender.cli.learning.job
+--job <id> --tenant <T> --source <investigation id>`, started by the per-job host helper; the end of its stdin is its
+SIGTERM (A5).
 
 The steps are the job entry's (`learning/branch/job_entry.py`). This entry sits above learning,
 as the operator's launch command does, because it supplies what learning may not import: the
@@ -31,4 +32,4 @@ if __name__ == "__main__":
     from defender import _log
 
     _log.configure_from_env()
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main(sys.argv[1:], watch_stdin=True))

@@ -6,13 +6,11 @@ handed `pending` jobs, then the drain's gate), and its record is kept under the 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 from defender.learning.branch import post_step
 from defender.records.job_lane import post_step_key
-from defender.tests.learning.branch.test_1344_post_step import _job_episode, _queue, hand_pending
-from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.learning.branch.test_1344_post_step import _job_episode, _queue, hand_pending, post_step_in_container
 from defender.tests.support.learning.judge import _judge_921 as J
 
 
@@ -43,9 +41,7 @@ def test_a1_a_family_less_post_step_publishes_runs_the_gate_and_records_under_th
     seen: list[int] = []
 
     hand_pending(data_root, tenant_id, None, [ep.name])
-    post_step.main(["--tenant", tenant_id, "--parent-pid", str(os.getppid())],
-                   author_tick=lambda *_a, **_k: seen.append(len(_queue(ep))) or 0,
-                   directory=T.launcher_directory(tenant_id))
+    post_step_in_container(None, tenant_id, author_tick=lambda *_a, **_k: seen.append(len(_queue(ep))) or 0)
 
     assert seen, "the gate did not run"
     assert seen[0] > 0, "the gate ran before publishing"
@@ -62,8 +58,7 @@ def test_a1_a_family_less_post_step_with_nothing_pending_still_runs_the_gate(tmp
     ticks: list[int] = []
 
     hand_pending(data_root, tenant_id, None, [])
-    post_step.main(["--tenant", tenant_id, "--parent-pid", str(os.getppid())],
-                   author_tick=lambda *_a, **_k: ticks.append(1) or 0, directory=T.launcher_directory(tenant_id))
+    post_step_in_container(None, tenant_id, author_tick=lambda *_a, **_k: ticks.append(1) or 0)
 
     assert ticks == [1]
     assert _record_at(ep, tenant_id) == {"published": [], "refused": [], "waiting": False}  # nothing queued (amendment 3)
