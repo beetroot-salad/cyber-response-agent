@@ -89,7 +89,7 @@ def _reconcilable(s: Soar, more: int = 0) -> list[str]:
         extra.append(f"{ORPHAN_PREFIX}{0x100 + n:012x}")
         _orphan(s, extra[-1])
         extra.append(s.world.crashed_oauth_create(s.ann, str(create_program(s.ann, T1, f"Other {n}")["id"])))
-    s.world.clock.advance(_dt.timedelta(seconds=1))  # past the later stale rows' deadlines too
+    s.world.clock.advance(PENDING_DEADLINE + _dt.timedelta(seconds=1))  # the extra crashed rows were made after the last advance: age them past their own deadline
     return sorted([revoked, stale, *ORPHANS, *extra])
 
 

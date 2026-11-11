@@ -1030,8 +1030,8 @@ async def _pl_end_tenant_reads(repo, write):
 @pytest.mark.parametrize("write", ["program", "invitation", "accept"])
 @pytest.mark.parametrize("order", ["write-first", "offboard-first"])
 async def test_a_write_and_the_offboard_leave_nothing_live_in_the_tenant_in_either_order(two_repositories, pg_dsn, order, write):
-    """C14: with the write held at its own row, the offboard either finishes first and the write is refused, or waits and the write is
-    there for `end_tenant`; nothing is left live in an offboarded tenant either way (P-L, O-E)."""
+    """C14: write first (held at its own row), the offboard waits and the write is there for `end_tenant`; offboard first (transaction
+    still open), the write blocks on the tenant row, then is refused on commit; nothing is left live in an offboarded tenant either way (P-L, O-E)."""
     from defender.database import async_engine
     from defender.tenancy.models import offboard
 
@@ -1046,31 +1046,33 @@ async def test_a_write_and_the_offboard_leave_nothing_live_in_the_tenant_in_eith
             return await offboard(conn, T1)
 
     async def settled() -> bool:
-        if order == "offboard-first":
-            return attempt.done() or await blocked(pg_dsn) == 1
-        return leave.done() or await blocked(pg_dsn) == 2
+        return leave.done() or attempt.done() or await blocked(pg_dsn) == 2
 
     try:
-        async with holding_row(pg_dsn, *held):
-            if order == "write-first":
+        if order == "write-first":
+            async with holding_row(pg_dsn, *held):
                 attempt = asyncio.ensure_future(_pl_write(one, write, admin, invitee, invitation))
                 await until_blocked(pg_dsn, 1)
                 leave = asyncio.ensure_future(offboarding())
-            else:
-                leave = asyncio.ensure_future(offboarding())
-                await asyncio.wait_for(leave, TIMEOUT)
-                attempt = asyncio.ensure_future(_pl_write(one, write, admin, invitee, invitation))
-            await until(settled)
-            offboard_finished = leave.done()
-        made = await asyncio.wait_for(attempt, TIMEOUT)
-        assert (await asyncio.wait_for(leave, TIMEOUT)).state == "offboarding"
-        if offboard_finished:
-            from defender.identity import TenantNotActive  # imported here so the setup runs before the class exists
-
-            assert (made is None) if write == "accept" else isinstance(made, TenantNotActive), made
-            assert await _pl_end_tenant_reads(one, write) == []
+                await until(settled)
+                offboard_finished = leave.done()
+            made = await asyncio.wait_for(attempt, TIMEOUT)
+            assert (await asyncio.wait_for(leave, TIMEOUT)).state == "offboarding"
+            assert offboard_finished or await _pl_end_tenant_reads(one, write) == [made]
         else:
-            assert await _pl_end_tenant_reads(one, write) == [made]
+            async with engine.begin() as conn:  # the offboard stays open (uncommitted) while the write starts
+                assert (await offboard(conn, T1)).state == "offboarding"
+                attempt = asyncio.ensure_future(_pl_write(one, write, admin, invitee, invitation))
+                await until_blocked(pg_dsn, 1)  # the write waits on the tenant row
+                assert not attempt.done()
+            made = await asyncio.wait_for(attempt, TIMEOUT)
+            if write == "accept":
+                assert made is None, made
+            else:
+                from defender.identity import TenantNotActive  # imported here so the setup runs before the class exists
+
+                assert isinstance(made, TenantNotActive), made
+            assert await _pl_end_tenant_reads(one, write) == []
     finally:
         await engine.dispose()
 
