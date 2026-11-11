@@ -110,3 +110,26 @@ def materialise(tenant_id: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
         return {"commit": export.commit, "path": str(export.path)}
 
     return answer
+
+
+def passes(tenant_id: str, reads: tuple[str, ...], *, directory: Any, proxy_url: str | None, signer: Any = None,
+           transport: Any = None) -> tuple[str, Callable[[dict[str, Any]], dict[str, Any]]]:
+    """The helper's half of a job's passes (#1170 O5): the proxy's address its launch facts name, and its `pass` answer,
+    each pass signed anew by the helper's own mint (`PassMint`) over the read grant `reads`, one it cannot sign refused
+    `sign-fault` as the helper's `answer_pass` refuses it. The helper's first pass at claim is not signed here: a job
+    whose first pass cannot be signed is refused before its container (`tests/jobs/test_job_helper_learning.py`)."""
+    from defender.credential_proxy import signing_access
+    from defender.job_host._session import PassMint
+
+    signer, address = signing_access(tenant_id, directory=directory, signer=signer, proxy_url=proxy_url,
+                                     transport=transport)
+    mint = PassMint(signer, address, tenant_id, tuple(reads))
+
+    def answer(fields: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return mint.mint(str(fields["id"]))
+        except Exception as failed:  # noqa: BLE001 — as the helper's `answer_pass`
+            raise job_socket.Refused(f"the pass could not be signed: {type(failed).__name__}: {failed}",
+                                     "sign-fault") from None
+
+    return address, answer

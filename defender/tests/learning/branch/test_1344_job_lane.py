@@ -114,6 +114,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults."""
     from defender.tests.support.jobs._socket_standin1170 import SocketStandIn
     from defender.tests.support.jobs._socket_standin1170 import materialise as materialise_export
+    from defender.tests.support.jobs._socket_standin1170 import passes as helper_passes
 
     est = estate(tmp_path) if estate is not None else S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls, after_source=after_source)
@@ -141,7 +142,9 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     answers: dict[str, Any] = {"export.materialise": materialise_export(tenant)}
     if "proxy_url" in extra:
         # The helper signs the job's passes (#1170 O5): the launcher's signing seams become the stand-in helper's.
-        launch["proxy_url"], answers["pass"] = _helper_passes(tenant, extra)
+        launch["proxy_url"], answers["pass"] = helper_passes(
+            tenant, extra.pop("helper_grant"), directory=extra.get("directory", seams["directory"]), proxy_url=extra.pop("proxy_url"),
+            signer=extra.pop("signer", None), transport=extra.pop("issuer_transport", None))
     seams.update(extra)
     # In its job container (#1170 A6): no `--parent-pid`, and a job socket answering the helper's `launch` facts and the
     # export it materialises; the helper's own answers are `tests/jobs/test_job_helper_learning.py`'s.
@@ -161,30 +164,6 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
                progress=_read_json(runs / f"{job}.learning-progress.json"), questioner=asking, spawn=siblings,
                judge=grading, ep=Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "episodes" / job, src=src,
                tenant=tenant, exit=outcome)
-
-
-def _helper_passes(tenant: str, extra: dict[str, Any]) -> tuple[str, Any]:
-    """The helper's half of a job's passes, for a scenario that hands the launcher's signing seams (`proxy_url`,
-    `issuer_transport`, `directory`, `helper_grant`; taken out of `extra`): the proxy's address its launch facts name,
-    and its `pass` answer, each pass signed anew by the helper's own mint (`PassMint`) and a pass it cannot sign refused
-    as the helper refuses one. The helper's first pass at claim is not signed here: a job whose first pass cannot be
-    signed is refused before its container (`tests/jobs/test_job_helper_learning.py`)."""
-    from defender.credential_proxy import signing_access
-    from defender.job_host._session import PassMint
-    from defender.job_socket import Refused
-
-    proxy_url = extra.pop("proxy_url")
-    signer, address = signing_access(tenant, directory=extra["directory"], signer=extra.pop("signer", None),
-                                     proxy_url=proxy_url, transport=extra.pop("issuer_transport", None))
-    mint = PassMint(signer, address, tenant, tuple(extra.pop("helper_grant")))
-
-    def answer(fields: dict[str, Any]) -> dict[str, Any]:
-        try:
-            return mint.mint(str(fields["id"]))
-        except Exception as failed:  # noqa: BLE001 — as the helper's `answer_pass`
-            raise Refused(f"the pass could not be signed: {type(failed).__name__}: {failed}", "sign-fault") from None
-
-    return address, answer
 
 
 # --- O3: the fork pick --------------------------------------------------------------------------------

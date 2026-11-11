@@ -12,8 +12,8 @@
 - `post-step`: the real post-step inside its job container, with a recording drain gate (`<marks>/gate`, holding the
   queue's size when it ran).
 
-The learning kinds' job socket is a stand-in (`_socket_standin1170.SocketStandIn`: the helper's `launch` facts and the
-export it materialises): the learning helper's own work is `tests/jobs/test_job_helper_learning.py`'s. The siblings run
+The learning kinds' job socket is a stand-in (`_socket_standin1170.SocketStandIn`: the helper's `launch` facts, the
+export it materialises and, for `family`, the passes it signs): the learning helper's own work is `tests/jobs/test_job_helper_learning.py`'s. The siblings run
 in this process as the operator's (no job socket in this process's own environment), as they did before #1170."""
 from __future__ import annotations
 
@@ -114,11 +114,15 @@ def in_container(entry):
     return entry if os.environ.get(job_socket.SOCKET_ENV) else helper_in_front
 
 
-def _socket(tenant: str, **launch):
-    """The learning kinds' job socket stand-in (module doc)."""
-    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, materialise
+def _socket(tenant: str, *, signing: dict | None = None, **launch):
+    """The learning kinds' job socket stand-in (module doc); with `signing` (`passes`' keywords), it signs the job's
+    passes as the helper does."""
+    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, materialise, passes
 
-    return SocketStandIn(tenant, launch=launch, answers={"export.materialise": materialise(tenant)})
+    answers = {"export.materialise": materialise(tenant)}
+    if signing is not None:
+        launch["proxy_url"], answers["pass"] = passes(tenant, **signing)
+    return SocketStandIn(tenant, launch=launch, answers=answers)
 
 
 def family() -> int:
@@ -185,7 +189,9 @@ def family() -> int:
     if os.environ.get("FLOW_DAMAGE") == "store-version":
         _store_from_a_newer_format(runs, source)
     try:
-        with _socket(tenant, kind="learning", job=argv[argv.index("--job") + 1], proxy_url=PROXY_URL) as helper:
+        # Pre-flight signs its pass up front (#1363): the helper signs it, over the tenant's one proxied system.
+        signing = dict(reads=("elastic",), directory=seams["directory"], proxy_url=PROXY_URL, signer=seams["signer"])
+        with _socket(tenant, kind="learning", job=argv[argv.index("--job") + 1], signing=signing) as helper:
             job_entry.main(_in_container_argv(), environ=helper.environ(), **seams)
     except SystemExit as stop:
         return stop.code if isinstance(stop.code, int) else 1

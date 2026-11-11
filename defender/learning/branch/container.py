@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -90,7 +89,7 @@ class JobContainer:
         url = self.launch.get("proxy_url")
         return str(url) if url else None
 
-    def access(self, ident: str, *, clock: Callable[[], float] = time.time,
+    def access(self, ident: str, *, clock: Callable[[], float] | None = None,
                on_fault: Callable[[AdapterFault], None] | None = None) -> RequestAccess | None:
         """Where the job's callers get a read pass for `ident` (asked of the helper when a call first needs it, and
         again by the holder's reuse rule); None when the helper's launch facts name no proxy (an empty grant). `clock` and

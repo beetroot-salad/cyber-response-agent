@@ -18,10 +18,11 @@ from defender.kit.faults import AdapterFault
 
 
 def helper_access(ask: Callable[..., dict[str, Any]], ident: str, proxy_url: str, *,
-                  clock: Callable[[], float] = time.time,
+                  clock: Callable[[], float] | None = None,
                   on_fault: Callable[[AdapterFault], None] | None = None) -> RequestAccess:
     """The access holder of the run at `ident`, its passes asked of the job's helper (`ask`, the job socket's client)
-    and presented to the proxy at `proxy_url`. `clock` and `on_fault` are the holder's (`RequestAccess`)."""
+    and presented to the proxy at `proxy_url`. `clock` and `on_fault` are the holder's (`RequestAccess`); no `clock` is
+    the wall clock as it is when the holder is built, not when this module was imported."""
 
     def mint(_expires_at: float) -> str:
         try:
@@ -31,4 +32,4 @@ def helper_access(ask: Callable[..., dict[str, Any]], ident: str, proxy_url: str
         except (OSError, ValueError, KeyError, TypeError) as lost:
             raise AdapterFault(f"no pass from the job's host helper: {type(lost).__name__}: {lost}") from None
 
-    return RequestAccess(proxy_url, mint, clock=clock, on_fault=on_fault)
+    return RequestAccess(proxy_url, mint, clock=time.time if clock is None else clock, on_fault=on_fault)
