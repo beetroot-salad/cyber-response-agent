@@ -347,4 +347,5 @@ def test_1366_o9_the_census_lint_judges_template_grants_against_the_whole_catalo
     template.write_text(template.read_text(encoding="utf-8").replace(
         "  cmdb:\n", "  cmdb:\n    no-such-verb: {roles: [gather]}\n", 1), encoding="utf-8")
     rc, out = _census(checkout)
-    assert rc == 1 and "cmdb.no-such-verb" in out, f"a phantom grant in the template went unnamed (rc {rc}):\n{out}"
+    assert rc == 1, f"a phantom grant in the template passed the census (rc {rc}):\n{out}"
+    assert "cmdb.no-such-verb" in out, f"a phantom grant in the template went unnamed (rc {rc}):\n{out}"

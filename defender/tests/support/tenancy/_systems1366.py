@@ -13,7 +13,7 @@ import contextlib
 import json
 import re
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -34,7 +34,7 @@ SEED_AUTHOR = "test seed"
 REAL = ("elastic", "jira", "servicenow")
 EXAMPLES = ("change-mgmt", "cmdb", "host-state", "identity", "threat-intel", "ticket")
 KV_MOUNT = "kv"
-PROXY_ROLE = "defender_proxy_reader"  # R14: NOLOGIN, SELECT on tenancy.system_versions only (migration 0011_system_records)
+PROXY_ROLE = "defender_proxy_reader"  # R14: NOLOGIN, SELECT on tenancy.system_versions only (migration 0012_system_records)
 #: The records tables (schema `tenancy`); columns in shared-interface.md.
 SYSTEM_VERSIONS, CASE_VERSIONS, RECORDS_MARK = "system_versions", "case_versions", "records_mark"
 
@@ -654,6 +654,29 @@ class Operator:
     def numbers(self, system: str) -> list[tuple[int, int, bool]]:
         """(version, credential_generation, deleted) per stored version of `system`."""
         return [(v.version, v.credential_generation, v.deleted) for v in self.versions(system)]
+
+
+def assert_records_within_roster(directory: Any, tenant_id: str, roster: Any, *, removed: Iterable[str] = ()) -> None:
+    """A shared driver that takes `roster=` (which stands for the CATALOG: the tenant's systems are that roster intersected
+    with its enabled records) asserts the records it runs against name no adapter of the REAL catalog that the injected
+    roster lacks. A record inferred by a default (the retired fixture's seven under a roster of three stubs) is a test
+    that did not state its records (R10); one for an adapter no catalog has (`R.added(spec, "legacy-widget")`) is the
+    explicit removed-adapter row, and passes; so does a catalog adapter the test names in `removed` (it pruned that adapter from the
+    roster it injects on purpose: the same row). Reads the directory's records through production's own read."""
+    if roster is None or directory is None:
+        return
+    from defender._paths import adapters_under
+    from defender.systems.verbs import read_roster
+
+    records = directory.current_records(str(tenant_id))
+    carried = set(roster.adapter_files)
+    real = set(read_roster(adapters_under(Path(__file__).resolve().parents[3])).adapter_files)
+    inferred = sorted(s for s, r in records.systems.items() if (r.adapter_id or s) in real and (r.adapter_id or s) not in carried
+                      and (r.adapter_id or s) not in set(removed))
+    assert not inferred, (
+        f"the injected roster stands for the catalog but the tenant's records name {inferred}, adapters it lacks: state the "
+        "records (`R.bare_records(*systems)`, or a `records=` for the planter/directory), or seed an adapter no catalog has "
+        "(`R.added(spec, 'legacy-widget')`) for a removed-adapter row")
 
 
 def lines_naming(text: str, *words: str) -> list[str]:

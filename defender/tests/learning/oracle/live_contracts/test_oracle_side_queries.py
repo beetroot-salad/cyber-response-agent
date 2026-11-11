@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.tenancy import _systems1366 as R
 
 import contextlib
 import dataclasses
@@ -153,6 +154,10 @@ class _Estate(S.Estate):
         for system, source, _verbs in self.extra:
             (self.adapters / f"{system.replace('-', '_')}_adapter.py").write_text(
                 source, encoding="utf-8")
+
+    def records(self) -> Any:
+        """One stub record per planted adapter: the stubs and the `extra` ones (the roster's whole set)."""
+        return R.bare_records(*self.systems, *(system for system, _source, _verbs in self.extra))
 
     def table(self) -> str:
         doc = _yaml.safe_load(super().table())
@@ -675,16 +680,12 @@ def test_1224_preflight_reader_refuses_a_denied_verb_and_an_undeclared_system(
 def test_1366_h9_preflight_reads_the_tenants_current_records_not_the_source_runs(tmp_path, monkeypatch):
     """edr is granted and the source run used it, but the tenant's current records no longer name it: its captured
     failure is not read live and is listed not replayable; idp's, still recorded, is read. (#1366 H9, O1 preflight)"""
-    import os
 
-    from defender.tests.support.tenancy import _active1214
     from defender.tests.support.tenancy import _systems1366 as R
 
     est = _estate(tmp_path)
     edr_failed = S.Call("edr", "query", S.query_params("host:db-9"), {"events": []})
-    settings = Path(est.place(tenant_id=S.FIXTURE_TENANT).settings)
-    current = R.without(R.records_from_settings(settings), "edr")
-    directory = _active1214.active_directory(Path(os.environ["DEFENDER_DATA_ROOT"]), S.FIXTURE_TENANT, records=current)
+    directory = est.directory(records=R.without(est.records(), "edr"))  # the estate's records, edr deleted since the source run
 
     replay_oracle = S.oracle(then=S.submit(BASE))
     monkeypatch.setenv(S.KNOB_RATE, f"{FAST:g}")

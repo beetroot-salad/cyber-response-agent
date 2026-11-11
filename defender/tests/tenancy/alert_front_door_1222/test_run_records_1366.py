@@ -247,7 +247,7 @@ def test_1366_r12_a_record_naming_an_adapter_an_upgrade_removed_refuses_the_run_
     (adapters / "cmdb_adapter.py").unlink()
 
     refused = S.run_alert(tmp_path / "removed", tenant=planted, main=S.closing_main_turns(), roster=read_roster(adapters),
-                          directory=_directory(planted, R.DERIVED))
+                          directory=_directory(planted, R.DERIVED), removed_adapters=("cmdb",))
     ran = _run(tmp_path / "whole", planted)
 
     assert "cmdb" in (refused.refusal or ""), (refused.raised, refused.refusal)

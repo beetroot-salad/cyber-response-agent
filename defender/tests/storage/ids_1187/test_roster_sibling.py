@@ -911,7 +911,8 @@ def test_1279_o8_setup_refuses_an_existing_run_dir_at_the_arms_id_and_resumes_no
 #: not mean "used".
 ALL_SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json",
                         ".ticket-write.json", ".session-pointer.json", ".call-join.jsonl",
-                        ".ticket-comments.jsonl", ".knowledge-source.json", ".job-end.json")
+                        ".ticket-comments.jsonl", ".knowledge-source.json", ".job-end.json",
+                        ".record-versions.json")  # #1366: the record versions a run read at start (shared-interface)
 LEARNING_RECORD_SUFFIXES = (
     ".learning-progress.json", ".learning-end.json", ".post-step.json", ".post-step-pending.json")
 ACCEPTED_ONLY_SIDECAR_SUFFIXES = (".launch.json", ".alert.json", *LEARNING_RECORD_SUFFIXES)

@@ -141,8 +141,10 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None,
         # The request names the tenant whose `<root>/<T>/runs/<run id>` the source sits at,
         # and the source by its id.
         argv = ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID)]
+        directory = directory_for_argv(argv, records=records)
+        R.assert_records_within_roster(directory, src.parent.parent.name, roster)  # the roster stands for the catalog
         outcome = T.mod("cli.learning.branch").main(
-            argv, directory=directory_for_argv(argv, records=records),
+            argv, directory=directory,
             spawn=spawn, questioner=O.questioner_for() if questioner is None else questioner,
             preflight=O.no_preflight,
             live_tree=P.source_capture(tenant_id=stamp_tenant), roster=roster,
@@ -193,10 +195,8 @@ def _estate_launch(tmp_path: Path, *, failed: Any = None,
         O.Call("idp", "query", O.query_params("user:alice"), _BASE),
         O.Call("edr", "query", O.query_params("host:web-1"), _BASE)],
         after_source=None if failed is None else plant_failure)
-    records: Any = R.DERIVED
-    if unrecorded:
-        settings = R.settings_of(current_data_root(), fixture_uuid("tenant:acme"))
-        records = R.without(R.records_from_settings(settings), *unrecorded)
+    # The tenant's records are the estate's (stub adapters of its own roster: stated, not inferred from a folder).
+    records = R.without(est.records(), *unrecorded)
     if source_versions:
         # What the source run recorded it used (audit only): every system of the estate, at a version the twin no longer holds.
         RunPaths(src).record_versions.write_text(json.dumps(

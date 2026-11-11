@@ -337,7 +337,7 @@ def test_o1_openbao_gets_the_proxys_own_allowance_not_the_systems_timeout(tmp_pa
         return 200, {"Content-Type": "application/json"}, _KV_REPLY
 
     with H.upstream() as openbao, T.rig(tmp_path / "forge", data_root) as r:
-        openbao.replies[f"/v1/secret/data/{r.t.tenant_id}/identity"] = slow_kv
+        openbao.replies[f"/v1/secret/data/{r.t.tenant_id}/identity/g1"] = slow_kv
         store = proxy().OpenBaoStore(addr=openbao.url, token="t", mount="secret")
         client = T.client_of(T.deps(r.data_root, store, verifier=r.verifier, audit=r.audit))
         answer = T.ask(client, r.tok(), "identity", "GET", f"{r.up.url}{API}/users/x",
@@ -407,7 +407,7 @@ def test_1375_o1_a_request_builds_no_tls_context_on_any_leg(tmp_path, data_root)
         held = T.oauth_set()
         oauth = json.dumps({"data": {"data": {"kind": held.kind, "fields": held.fields},
                                      "metadata": {"version": held.version}}}).encode()
-        bao.replies[f"/v1/secret/data/{r.t.tenant_id}/identity"] = (
+        bao.replies[f"/v1/secret/data/{r.t.tenant_id}/identity/g1"] = (
             200, {"Content-Type": "application/json"}, oauth)
         bao.replies[f"/v1/transit/verify/{openbao.transit_key_for(r.t.tenant_id)}"] = (
             200, {"Content-Type": "application/json"}, _VERIFY_REPLY)

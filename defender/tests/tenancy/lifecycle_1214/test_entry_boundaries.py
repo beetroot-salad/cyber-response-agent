@@ -168,12 +168,17 @@ def test_an_entry_point_refuses_a_tenant_that_may_not_be_worked_for_before_touch
     """Not active, no row or no wiring: a non-zero exit, the tenant and a reason on the error stream and not on stdout, no
     tenant accepted or built, nothing of the tenant's folder touched, nothing left recorded (r10 O-A1, O-A6, C3)."""
     entry = _entries(tmp_path)[name]
+    # Every directory is built BEFORE its watch: building one seeds its records (a planting helper reads the planted
+    # folder to say what they are, `R.derive`), which is the test's setup and not the entry point's read (R10: the seeder
+    # states the records, the entry reads them from the directory).
+    active = active_directory(data_root, TENANT)
+    directory = _directory(data_root, condition)
     with H.watch_folder(data_root, TENANT) as control_touches:
-        admitted = entry(active_directory(data_root, TENANT))
+        admitted = entry(active)
     assert _no_state_refusal(admitted.everything), f"control: an active tenant was refused: {admitted.everything}"
     assert control_touches, "control: an admitted entry reads the tenant's folder, so the watch can see a read"
     with H.watch_folder(data_root, TENANT) as touches, H.acceptance_calls() as calls:
-        refused = entry(_directory(data_root, condition))
+        refused = entry(directory)
     assert refused.raised is None, f"a refusal must exit or return, not raise: {refused.everything}"
     assert refused.exited_non_zero, f"a refusal must exit non-zero, exited {refused.code!r}: {refused.everything}"
     assert TENANT in refused.operator_text, f"the tenant is not on the error stream: {refused.everything}"
@@ -200,8 +205,9 @@ def test_an_admitted_entry_point_accepts_its_tenant_once_builds_one_and_reads_it
 def test_an_entry_point_stays_recorded_and_locked_for_every_read_of_the_tenants_folder(data_root, tmp_path, name):
     """Every read of the tenant's folder by an admitted entry happens while this process is recorded under the tenant's
     host lock and the lock is held, and nothing stays recorded after (r10 O-A2: held for as long as the command works)."""
+    directory = active_directory(data_root, TENANT)  # built before the watch: seeding its records is setup, not the entry's read
     with H.watch_folder(data_root, TENANT) as touches:
-        outcome = _entries(tmp_path)[name](active_directory(data_root, TENANT))
+        outcome = _entries(tmp_path)[name](directory)
     assert _no_state_refusal(outcome.everything), f"control: {outcome.everything}"
     assert touches, "control: the entry read the tenant's folder"
     unheld = [(event, path) for event, path, held in touches if held != (True, True)]
@@ -290,8 +296,9 @@ def test_a_tenant_that_may_not_be_worked_for_is_refused_for_its_state_whatever_i
     assert _no_state_refusal(entry(active_directory(data_root, TENANT)).everything), "control: the folder is sound"
     for condition in CONDITIONS:
         _faulted(data_root, fault)
+        directory = _directory(data_root, condition)  # built before the watch: seeding its records is setup
         with H.watch_folder(data_root, TENANT) as touches:
-            refused = entry(_directory(data_root, condition))
+            refused = entry(directory)
         where = f"{condition} with {fault}: {refused.everything}"
         assert refused.raised is None, where
         assert refused.exited_non_zero, where

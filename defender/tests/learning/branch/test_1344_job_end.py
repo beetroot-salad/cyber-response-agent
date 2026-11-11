@@ -280,6 +280,14 @@ class _ProxiedEstate(S.Estate):
 
     systems: tuple[str, ...] = (*S.SYSTEMS, "elastic")
 
+    def records(self):
+        """The estate's records, elastic's with the fixture tenant's own settings and access declaration (the proxy-reached
+        system: its record's access text is what puts it on the credential proxy, #1366 O7)."""
+        from defender.tests.support.tenancy import _systems1366 as R
+
+        settings, access = R.FIXTURE_FOLDERS["elastic"]
+        return R.edited(super().records(), "elastic", settings=dict(settings), access=access)
+
     def place(self, data_root=None, tenant_id=S.FIXTURE_TENANT, configs=None):
         from defender.tests.support.tenancy._tenants1106 import config_texts
 

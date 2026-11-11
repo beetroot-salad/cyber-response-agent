@@ -432,10 +432,10 @@ def test_a_tenant_folder_inside_a_tree_a_box_mounts_is_refused(tmp_path, inside)
     runs_base.mkdir()
     outside = tmp_path / "tenants"
     T.place_tenant(outside, fixture_uuid("tenant:acme"))
-    assert rt.resolve_tenant(fixture_data_root(outside), fixture_uuid("tenant:acme"), defender_dir=defender_dir,
+    assert R.resolve_tenant(fixture_data_root(outside), fixture_uuid("tenant:acme"), defender_dir=defender_dir,
                              dispatches_lead_zero=False, box_mounted=(runs_base,)).tenant_id == fixture_uuid("tenant:acme")
     root = (defender_dir if inside == "code tree" else runs_base) / "tenants"
     T.place_tenant(root, fixture_uuid("tenant:acme"))
     with pytest.raises(rt.TenantRefused, match="which a box mounts"):
-        rt.resolve_tenant(fixture_data_root(root), fixture_uuid("tenant:acme"), defender_dir=defender_dir, dispatches_lead_zero=False,
-                          box_mounted=(runs_base,))
+        R.resolve_tenant(fixture_data_root(root), fixture_uuid("tenant:acme"), defender_dir=defender_dir, dispatches_lead_zero=False,
+                         box_mounted=(runs_base,))

@@ -52,12 +52,13 @@ def _run(tmp_path):
     return rec, rec.materialize(S.plant_alert(tmp_path / "in", alert_id=KEY))
 
 
-def _leg(t, run, rec, url, tok, shim=None):
+def _leg(t, run, rec, url, tok, shim=None, record=None):
+    """The record leg over `record` (default: the run's record built from `t`'s records now)."""
     env = run_env(DEFENDER, rec.run_dir_at)
     if shim is not None:
         env = shim.env(env)
     S.ticket_writer().record_case_ticket(
-        run, tenant=T.run_record(t), defender_dir=DEFENDER, env=env, request_token=tok,
+        run, tenant=record if record is not None else T.run_record(t), defender_dir=DEFENDER, env=env, request_token=tok,
         proxy_url=url)
     return S.receipt(rec.run_dir_at)
 
@@ -160,16 +161,20 @@ def test_t6_an_access_file_with_no_write_route_is_named_by_the_receipt_and_nothi
 
 def test_t6b_a_write_the_proxy_refuses_at_call_time_is_a_refusal_not_a_transport_error(
         tmp_path, data_root):
-    """The declaration holds a write route, but not the comment's path: the leg's judgement
-    passes, the proxy refuses the call, and the receipt says so (not an access declaration fault, not
-    "could not be reached"); nothing reaches the store. Control: t1 (matching route). O5, O4."""
+    """The run STARTED over an access that covers the comment's route (so the leg's own judgement passes), then the
+    system's access changed mid-run to a declaration whose write route no longer covers the comment's path: the proxy,
+    which enforces the CURRENT record at each call, refuses, and the receipt says so (not an access declaration fault,
+    not "could not be reached"); nothing reaches the store. Control: t1 (matching route). (#1366 O7, Flows; O5, O4)"""
     other = (("POST", "/elsewhere/*"),)
-    with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up, writes=other)) as t:
+    with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
         store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
         tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
         rec, run = _run(tmp_path)
+        started_with = T.run_record(t)  # the record the run was built from: its access covers the comment route
+        t.merge({H.ACCESS_FILE.format(system=SYSTEM): _decl(up, writes=other)}, "move the write route")
+        t.publish()  # the system's current access no longer covers it
         with A.proxy_for(t, store) as (url, tap):
-            receipt = _leg(t, run, rec, url, tok)
+            receipt = _leg(t, run, rec, url, tok, record=started_with)
     assert receipt is not None
     assert receipt["ok"] is False
     reason = (receipt.get("reason") or "").lower()

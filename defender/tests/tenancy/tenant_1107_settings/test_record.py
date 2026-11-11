@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-from defender.systems import run_tenant
 from defender.kit import transport
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
@@ -26,12 +25,23 @@ TID = S.PLAYGROUND_ID
 RECORD_TYPES = ("SystemConfig",)  # CaseMapping retired with the mapping file (#1359)
 
 
-def _resolve(root: Path, tenant_id: str = TID) -> object:
-    """The real acceptance frame over a planted root (the one frame every entry uses)."""
+def _resolve(root: Path, tenant_id: str = TID, **kw: object) -> object:
+    """The real acceptance frame over a planted root (the one frame every entry uses); `records=` as `R.resolve_tenant`."""
     from defender.tests.support.tenancy import _systems1366 as R
 
     return R.resolve_tenant(
-        fixture_data_root(Path(root)), tenant_id, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
+        fixture_data_root(Path(root)), tenant_id, defender_dir=S.DEFENDER, dispatches_lead_zero=False, **kw)
+
+
+def _unusable(rec: object, system: str, key: str):
+    """The settings judgement of `system`'s adapter over the run's record: it raises the `ConfigFault` that names `key`
+    and locates the record ("system <s> settings", DC6, never a file). A system record is always its settings
+    (#1366 O6: `SystemConfig`); "unusable" is what the adapter's `check_settings` says of them, down at start."""
+    adapter = S.mod(f"integrations.{system.replace('-', '_')}_adapter")
+    with pytest.raises(S.config_fault(), match=key) as raised:
+        adapter.check_settings(rec)
+    assert f"system {system} settings" in str(raised.value), str(raised.value)
+    return raised.value
 
 
 def _ctx(record: object, tmp_path: Path, env: Mapping[str, str] | None = None) -> object:
@@ -40,20 +50,27 @@ def _ctx(record: object, tmp_path: Path, env: Mapping[str, str] | None = None) -
     return S.verb_context(record, run_dir, dict(env or {}))
 
 
+def _settings_empty(rec: object, system: str) -> None:
+    """`system`'s record holds NO settings: a `SystemConfig` with no key (what an upgrade-invalidated or unwritten record
+    is; the judgement, not a stored fault, says it is unusable, O6)."""
+    entry = rec.systems[system]
+    assert isinstance(entry, S.record_type("SystemConfig")), entry
+    assert len(entry) == 0, dict(entry)
+
+
 def test_d_systems_verbatim(tmp_path):
     root = tmp_path / "tenants"
-    folder = S.plant(root, marker="vb")
-    S.write_config(folder, "extra-sys", 'EXTRA_SYS_URL_BASE="http://extra-vb:1"\n')
+    S.plant(root, marker="vb")
 
     rec = _resolve(root)
 
-    assert set(rec.systems) == {*S.PREFIX, "extra-sys"}, sorted(rec.systems)
+    # (the `extra-sys` arm is retired: a system no catalog adapter backs cannot be a record, O4/P2, so it is not one.)
+    assert set(rec.systems) == set(S.PREFIX), sorted(rec.systems)
     assert dict(rec.systems["ticket"]) == {
         "TICKET_TIMEOUT_SEC": "10",
         "TICKET_KEY_PATTERN": "VB-[0-9]+",
     }, dict(rec.systems["ticket"])
     assert "KEY_PATTERN" not in rec.systems["ticket"], "the prefix was stripped at resolve"
-    assert dict(rec.systems["extra-sys"]) == {"EXTRA_SYS_URL_BASE": "http://extra-vb:1"}
     elastic = dict(rec.systems["elastic"])
     assert elastic == {"ELASTIC_EVENTS_INDEX": "vb-events-*",
                        "ELASTIC_ALERTS_INDEX": "vb-alerts-*"}, elastic
@@ -67,10 +84,11 @@ def _identity_placeholder(folder: Path) -> None:
 
 
 def test_d_systems_fault_kept(tmp_path):
-    """A system whose record is unusable (no settings; a placeholder an upgrade invalidated) is that system's fault only:
-    resolve returns, the others keep their config. (R12 'record whose settings an upgrade invalidated', P2/O9: a
-    settings FILE that is not UTF-8 can no longer reach a run, so that arm is retired; it is seeded as a record that
-    fails the judgement.)"""
+    """A system whose record is unusable (no settings; a placeholder an upgrade invalidated) is that system down only:
+    resolve returns, the others keep their config. A system record is always its settings (`SystemConfig`, O6); that they
+    are unusable is the adapter's `check_settings` judgement, located at the record ("system <s> settings", DC6), naming
+    the key (R12 'record whose settings an upgrade invalidated', P2/O9: a settings FILE that is not UTF-8 can no longer
+    reach a run, so that arm is retired; it is seeded as a record that fails the judgement)."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="fk")
     S.config_path(folder, "cmdb").unlink()  # the record's settings are empty
@@ -78,15 +96,16 @@ def test_d_systems_fault_kept(tmp_path):
 
     rec = _resolve(root)  # returns normally
 
+    SystemConfig = S.record_type("SystemConfig")
     ConfigFault = S.config_fault()
-    assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
-    assert isinstance(rec.systems["ticket"], S.record_type("SystemConfig")), rec.systems["ticket"]
+    _settings_empty(rec, "cmdb")
+    assert isinstance(rec.systems["ticket"], SystemConfig), rec.systems["ticket"]
+    judged = _unusable(rec, "cmdb", "CMDB_TIMEOUT_SEC")
     with pytest.raises(ConfigFault) as raised:
         transport.load_config(_ctx(rec, tmp_path), "cmdb", "CMDB")
-    # the contract is the outcome: the same fault's text, not its identity
-    assert str(raised.value) == str(rec.systems["cmdb"]), str(raised.value)
-    with pytest.raises(ConfigFault, match="IDENTITY_TIMEOUT_SEC"):
-        S.mod("integrations.identity_adapter").check_settings(rec)
+    # the contract is the outcome: the verbs raise the judgement's own fault text
+    assert str(raised.value) == str(judged), str(raised.value)
+    _unusable(rec, "identity", "IDENTITY_TIMEOUT_SEC")
     assert S.mod("integrations.ticket_adapter").check_settings(rec) is None
 
 
@@ -132,10 +151,9 @@ def test_o5_resolve_keeps_system_faults(tmp_path):
     S.config_path(folder, "cmdb").unlink()
     _identity_placeholder(folder)
     rec = _resolve(root)  # never raises because of a system's settings
-    ConfigFault = S.config_fault()
-    assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
-    with pytest.raises(ConfigFault, match="IDENTITY_TIMEOUT_SEC"):
-        S.mod("integrations.identity_adapter").check_settings(rec)
+    _settings_empty(rec, "cmdb")
+    _unusable(rec, "cmdb", "CMDB_TIMEOUT_SEC")
+    _unusable(rec, "identity", "IDENTITY_TIMEOUT_SEC")
 
     # TenantRefused keeps its tenant-acceptance reasons, each still refusing.
     TenantRefused = S.tenant_refused()
@@ -149,91 +167,70 @@ def test_o5_resolve_keeps_system_faults(tmp_path):
         _resolve(root, fixture_uuid("tenant:absent"))
 
 
-def test_s7_nf22_systems_keyed_by_exact_directory_name(tmp_path):
-    configs = S.config_texts("nf22")
-    configs["CMDB"] = configs.pop("cmdb")
-    configs["Elastic"] = configs.pop("elastic")
-    configs["cmdb.orig"] = 'ORIG_URL_BASE="http://orig-nf22:1"\n'
+# test_s7_nf22_systems_keyed_by_exact_directory_name is retired (repair round 7, design DC7/R10): the run's systems are the
+# tenant's records, keyed by the record's `system_id`, not a census of `settings/systems/` directory names (dot-folders,
+# stray files, `CMDB` beside `cmdb`). A record the store cannot hold (an id that is not its catalog adapter's) is
+# refused at write (O4, `test_system_records_1366.py`); how the import treats a stray name in a folder is not decided.
+
+
+def test_s7_nf16_required_settings_keep_the_refusal(tmp_path):
+    """A required settings file that is not a file (REQUIRED_SETTINGS, #1106) still refuses the tenant: the control that
+    acceptance's refusal bites. (Repair round 7, DC7: a `config.env` that is a directory or unreadable no longer reaches
+    a run, the run reads records; that arm moved to the operator's `set-system`, which reads the one folder reader left:
+    `tenant_1108_p4/test_folder_reader_w_1366.py`.)"""
     root = tmp_path / "tenants"
-    folder = S.plant(root, marker="nf22", configs=configs)
-    systems_dir = S.settings_of(folder) / "systems"
-    (systems_dir / "README.txt").write_text("not a system\n", encoding="utf-8")
-    (systems_dir / ".hidden").mkdir()
-    (systems_dir / ".hidden" / "config.env").write_text(
-        'HIDDEN_URL_BASE="http://hidden-nf22:1"\n', encoding="utf-8")
-
-    rec = _resolve(root)
-
-    expected = {name for name in configs}
-    assert set(rec.systems) == expected, (sorted(rec.systems), sorted(expected))
-    assert "cmdb" not in rec.systems
-    assert "elastic" not in rec.systems
-    with pytest.raises(S.config_fault()) as raised:
-        transport.load_config(_ctx(rec, tmp_path), "cmdb", "CMDB")
-    assert S.NOT_CONFIGURED in str(raised.value), str(raised.value)
-    assert rec.systems["cmdb.orig"]["ORIG_URL_BASE"] == "http://orig-nf22:1"
-
-
-def test_s7_nf16_unreadable_config_env_kept_as_fault(tmp_path):
-    root = tmp_path / "tenants"
-    folder = S.plant(root, marker="nf16")
-    cmdb_env = S.config_path(folder, "cmdb")
-    cmdb_env.unlink()
-    cmdb_env.mkdir()  # a directory in the file's place: reading it raises IsADirectoryError
-    unreadable = S.config_path(folder, "identity")
-    root_user = os.geteuid() == 0
-    if not root_user:
-        unreadable.chmod(0)  # EACCES; as root the mode does not deny a read, so this arm is skipped
-
-    try:
-        rec = _resolve(root)
-    finally:
-        unreadable.chmod(0o644)
-
-    ConfigFault = S.config_fault()
-    assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
-    if not root_user:
-        assert isinstance(rec.systems["identity"], ConfigFault), rec.systems["identity"]
-    assert isinstance(rec.systems["ticket"], S.record_type("SystemConfig"))
-
-    # REQUIRED_SETTINGS keep #1106's TenantRefused (the control that refusal still bites).
+    S.plant(root, marker="nf16")
     required = S.plant(root, fixture_uuid("tenant:required-dir"), marker="nf16b")
     grants = S.settings_of(required) / "verb-grants.yaml"
     grants.unlink()
     grants.mkdir()
     with pytest.raises(S.tenant_refused()):
         _resolve(root, fixture_uuid("tenant:required-dir"))
+    assert _resolve(root).systems["ticket"]  # control: the sibling tenant, untouched, resolves
 
 
-def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
+def _with_pattern(spec, pattern: str, version: int):
+    """`spec` with the ticket record's TICKET_KEY_PATTERN written as `pattern`: the operator's next version of it."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    ticket = spec.systems["ticket"]
+    return R.edited(spec, "ticket", version=version, settings={**ticket.settings, "TICKET_KEY_PATTERN": pattern})
+
+
+def test_s7_nf4_every_resolve_reads_the_current_records(tmp_path, monkeypatch):
+    """A records write between two resolves is seen by the second (H9/O6: every run reads the tenant's CURRENT records;
+    nothing is cached across resolves or tenants). Restated from 'every resolve reads the folder fresh' (design R10/DC7:
+    the run reads records, not the folder; the folder-fresh arm is retired)."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
     # Under this test's data root, the one `run.main` below reads its tenants from.
     root = current_data_root()
     folder = S.plant(root, marker="nf4")
     S.plant(root, fixture_uuid("tenant:other"), marker="nf4o")
+    v1 = R.derive(S.settings_of(folder))
+    v2 = _with_pattern(v1, "EDITED-[0-9]+", 2)
 
-    # Resolved twice around an edit: nothing is cached.
-    first = _resolve(root)
-    S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", "EDITED-[0-9]+")
-    second = _resolve(root)
-    direct = run_tenant.run_tenant_for(
-        S.tenant_folder_of(root), defender_dir=S.DEFENDER, dispatches_lead_zero=False)
+    # Resolved twice around a records write: nothing is cached.
+    first = _resolve(root, records=v1)
+    second = _resolve(root, records=v2)
+    direct = R.run_tenant_for(S.tenant_folder_of(root), dispatches_lead_zero=False, records=v2)
     assert first.systems["ticket"]["TICKET_KEY_PATTERN"] == "NF4-[0-9]+"
     assert second.systems["ticket"]["TICKET_KEY_PATTERN"] == "EDITED-[0-9]+"
     assert direct.systems["ticket"]["TICKET_KEY_PATTERN"] == "EDITED-[0-9]+"
     # ...and across tenants: resolving another tenant in between memoizes nothing.
     assert _resolve(root, fixture_uuid("tenant:other")).systems["ticket"]["TICKET_KEY_PATTERN"] == "NF4O-[0-9]+"
-    assert _resolve(root).systems["ticket"]["TICKET_KEY_PATTERN"] == "EDITED-[0-9]+"
+    assert _resolve(root, records=v2).systems["ticket"]["TICKET_KEY_PATTERN"] == "EDITED-[0-9]+"
 
-    # A second run.main in one process reflects an edit made between the two. (run.main takes
+    # A second run.main in one process reflects a records write made between the two. (run.main takes
     # its runs base from the data root, whose `playground` tenant is created on request.)
     ensure_d9_tenant()
     alert = S.plant_alert(tmp_path / "alert")
     seen: list[str] = []
-    for run_id, pattern in (("r-nf4-a", "RUN-A-[0-9]+"), ("r-nf4-b", "RUN-B-[0-9]+")):
-        S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", pattern)
+    for n, (run_id, pattern) in enumerate((("r-nf4-a", "RUN-A-[0-9]+"), ("r-nf4-b", "RUN-B-[0-9]+")), start=2):
+        argv = S.run_argv(alert, root)
         rec_ = S.RunRecorder(tmp_path / "runs" / run_id)
-        rc, refused = S.drive_run(S.run_argv(alert, root), rec_,
-                                  visualize=rec_.visualize)
+        rc, refused = S.drive_run(argv, rec_, visualize=rec_.visualize,
+                                  directory=directory_for_argv(argv, records=_with_pattern(v1, pattern, n)))
         assert refused is None, (rc, refused)
         assert rc == 0, (rc, refused)
         seen.append(rec_.lifecycle_calls[0]["tenant"].systems["ticket"]["TICKET_KEY_PATTERN"])
@@ -346,10 +343,8 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     assert broken_out == healthy_out, "the grants answer moved with a system's config"
 
     rec = _resolve(root, fixture_uuid("tenant:broken"))  # the frame policy_cli resolves through
-    ConfigFault = S.config_fault()
-    assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
-    with pytest.raises(ConfigFault, match="IDENTITY_TIMEOUT_SEC"):
-        S.mod("integrations.identity_adapter").check_settings(rec)
+    _unusable(rec, "cmdb", "CMDB_TIMEOUT_SEC")
+    _unusable(rec, "identity", "IDENTITY_TIMEOUT_SEC")
     assert rec.grants.gather == _resolve(root, fixture_uuid("tenant:healthy")).grants.gather
 
 
@@ -384,26 +379,33 @@ def test_s60_config_env_fs_confinement(tmp_path):
     assert rec.systems["ticket"]["TICKET_KEY_PATTERN"] == "S60-[0-9]+"
 
 
-def test_a_config_fault_observed_at_resolve_fixed_on_disk_mid_run(tmp_path):
+def test_a_config_fault_observed_at_resolve_fixed_by_a_records_write_mid_run(tmp_path):
+    """A run whose record holds unusable settings keeps them: an operator's fix (a new version) mid-run does not reach
+    the run; only a fresh resolve reads it (O6: settings are frozen at start; H9: the next run reads the current record).
+    (Was 'fixed on disk': the run reads records, not the folder, DC7.)"""
+    from defender.tests.support.tenancy import _systems1366 as R
+
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="s063")
-    fixed = S.config_path(folder, "cmdb").read_text(encoding="utf-8")
-    S.config_path(folder, "cmdb").unlink()
+    fixed = R.derive(S.settings_of(folder))
+    broken = R.edited(fixed, "cmdb", settings={})
 
-    rec = _resolve(root)
+    rec = _resolve(root, records=broken)
+    SystemConfig = S.record_type("SystemConfig")
     ConfigFault = S.config_fault()
-    assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
+    _settings_empty(rec, "cmdb")
     ctx = _ctx(rec, tmp_path)
-    with pytest.raises(ConfigFault):
+    with pytest.raises(ConfigFault, match="CMDB_TIMEOUT_SEC"):
         transport.load_config(ctx, "cmdb", "CMDB")
 
-    S.write_config(folder, "cmdb", fixed)  # fixed on disk, mid-run
-    assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
-    with pytest.raises(ConfigFault):
+    # the operator writes the fix (version 2) mid-run: the run's record is what it was resolved with
+    _settings_empty(rec, "cmdb")
+    with pytest.raises(ConfigFault, match="CMDB_TIMEOUT_SEC"):
         transport.load_config(ctx, "cmdb", "CMDB")
 
-    fresh = _resolve(root)  # only a fresh resolve sees the fix
-    assert isinstance(fresh.systems["cmdb"], S.record_type("SystemConfig"))
+    fresh = _resolve(root, records=R.edited(fixed, "cmdb", version=2))  # only a fresh resolve sees the fix
+    assert isinstance(fresh.systems["cmdb"], SystemConfig), fresh.systems["cmdb"]
+    assert len(fresh.systems["cmdb"]) > 0
     assert transport.load_config(_ctx(fresh, tmp_path / "fresh"), "cmdb", "CMDB") == {
         "TIMEOUT_SEC": "10"}
 

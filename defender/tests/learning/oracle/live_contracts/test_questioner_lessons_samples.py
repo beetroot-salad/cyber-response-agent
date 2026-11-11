@@ -686,13 +686,13 @@ def test_1224_samples_for_a_system_whose_verbs_answer_in_different_shapes(tmp_pa
 def test_1224_question_writer_prompt_when_configured_and_granted_systems_differ(
         tmp_path, monkeypatch):
     """the question-writer's system names are exactly the manifest's served systems (the gather grant's), not the systems the tenant's settings configure."""
-    est = S.estate(tmp_path)
-    agent = S.questioner_for()
     # #1359: the estate's tenant configures no system on its own (the retired `case-history`
-    # folder is gone), so the ungranted-but-configured system is planted here, outside LAB_SYSTEMS.
+    # folder is gone), so the ungranted-but-configured system is stated here, outside LAB_SYSTEMS: a record (with its
+    # adapter in the roster) and no grant row (#1366 R10).
     configured_only = "ledger"
     assert configured_only not in S.LAB_SYSTEMS
-    est.place(configs={configured_only: "LEDGER_TRANSPORT=carrier-pigeon\n"})
+    est = S.estate(tmp_path, configured_only=(configured_only,))
+    agent = S.questioner_for()
     assert configured_only in est.run_tenant().systems, "scenario precondition: configured"
     assert configured_only not in est.grant().systems, "scenario precondition: not granted"
 

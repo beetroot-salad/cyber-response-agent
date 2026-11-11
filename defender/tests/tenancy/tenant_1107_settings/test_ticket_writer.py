@@ -15,6 +15,8 @@ from defender.investigation import ticket_writer
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy import _systems1366 as R
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 
 TW_LOGGER = ticket_writer.__name__
 MARKER = "tw1107"
@@ -24,6 +26,9 @@ MARKER = "tw1107"
 KEY = "a-1107"
 CASE = "ticket"
 CASE_RECORD = "case-record.yaml"
+#: How a fault names the case system's stored settings (#1366 DC6: the record, "system <s> settings", never a file or the
+#: retired `settings/` pointer).
+RECORD = f"system {CASE} settings"
 
 
 def _world(tmp_path: Path, *, marker: str = MARKER, name: str = "tenants",
@@ -45,21 +50,42 @@ def _shim(tmp_path: Path, monkeypatch, *answers: dict[str, Any], name: str = "pr
     return S.ProxyStandIn(tmp_path / name, list(answers) or None).install(monkeypatch)
 
 
-def _run(tmp_path: Path, root: Path, alert: Path, *, run_id: str = "r1107",
-         summary: dict[str, Any] | None = None, page: bool = False, before: Any = None,
-         update_ticket: bool = True) -> tuple[int | None, Any, Path, S.RunRecorder]:
+def _run(  # noqa: PLR0913 — the run's seams, one keyword each
+        tmp_path: Path, root: Path, alert: Path, *, run_id: str = "r1107",
+        summary: dict[str, Any] | None = None, page: bool = False, before: Any = None,
+        update_ticket: bool = True, records: Any = None) -> tuple[int | None, Any, Path, S.RunRecorder]:
     """`run.main` over one alert with the real ticket writer. `page=True` leaves the real renderer
-    in place; otherwise the recorder's `visualize` stands in. Returns (rc, refusal, run dir,
-    recorder)."""
+    in place; otherwise the recorder's `visualize` stands in. `records` (a `RecordsSpec`) are the tenant's records for this
+    run: a test that changes the run states the change as records (`_with_case`, `R.edited`), not as an edit of the planted
+    folder, which the run no longer reads (R10; the directory derives its records before the launch publish and from the
+    previous export). Returns (rc, refusal, run dir, recorder)."""
     from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
 
     rec = S.RunRecorder(tmp_path / "runs" / run_id, summary=summary, before_lifecycle=before)
     seams: dict[str, Any] = {"signer": FakeSigner()}
     if not page:
         seams["visualize"] = rec.visualize
-    rc, refused = S.drive_run(
-        S.run_argv(alert, root, update_ticket=update_ticket), rec, **seams)
+    argv = S.run_argv(alert, root, update_ticket=update_ticket)
+    if records is not None:
+        seams["directory"] = directory_for_argv(argv, root, records=records)
+    rc, refused = S.drive_run(argv, rec, **seams)
     return rc, refused, rec.run_dir_at, rec
+
+
+def _planted(folder: Path) -> Any:
+    """The records the planted tenant stands for, before the change under test."""
+    return R.derive(S.settings_of(folder))
+
+
+def _with_case(spec: Any, **settings: str | None) -> Any:
+    """`spec` with the case system's settings changed: a key set to a value, to None dropped, `**{}` untouched."""
+    kept = {k: v for k, v in spec.systems[CASE].settings.items() if settings.get(k, v) is not None}
+    return R.edited(spec, CASE, settings={**kept, **{k: v for k, v in settings.items() if v is not None}})
+
+
+def _without_case_settings(spec: Any) -> Any:
+    """`spec` with the case system's record holding no settings at all (what an upgrade-invalidated record is)."""
+    return R.edited(spec, CASE, settings={})
 
 
 def _summary(truncated_by: str | None = None) -> dict[str, Any]:
@@ -108,9 +134,9 @@ def test_o6_missing_config_receipt(tmp_path, monkeypatch, caplog):
     assert refused_present is None, f"the control run was refused: {refused_present}"
 
     root, folder, alert = _world(tmp_path, name="tenants-missing")
-    S.config_path(folder, CASE).unlink()
     caplog.clear()
-    rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-missing", page=True)
+    rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-missing", page=True,
+                                      records=_without_case_settings(_planted(folder)))
     assert refused is None, f"the run was refused over a ticket-config problem: {refused}"
     page = S.page_html(run_dir)
     assert page, "the run page did not render"
@@ -123,8 +149,7 @@ def test_o6_missing_config_receipt(tmp_path, monkeypatch, caplog):
     reason = got.get("reason")
     assert isinstance(reason, str), f"no reason on the receipt: {got}"
     assert reason.strip(), f"no reason on the receipt: {got}"
-    assert S.settings_pointer() in reason, (
-        f"the reason does not name the settings through SETTINGS_POINTER: {reason!r}")
+    assert RECORD in reason, f"the reason does not name the case system's settings record ({RECORD!r}): {reason!r}"
     assert _warnings(caplog), "the missing config logged no warning"
     assert _ticket_line_near(page, reason, got["key"], "error"), (
         "the run page shows no ticket line with the receipt's key, status and reason")
@@ -136,16 +161,14 @@ def test_o6_bad_config_receipt(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     _shim(tmp_path, monkeypatch)
     arms = {
-        "missing-key": ("TICKET_KEY_PATTERN", lambda f: S.drop_key(
-            f, CASE, "TICKET_KEY_PATTERN")),
-        "non-digit-timeout": ("TICKET_TIMEOUT_SEC", lambda f: S.set_key(
-            f, CASE, "TICKET_TIMEOUT_SEC", "ten")),
+        "missing-key": ("TICKET_KEY_PATTERN", {"TICKET_KEY_PATTERN": None}),
+        "non-digit-timeout": ("TICKET_TIMEOUT_SEC", {"TICKET_TIMEOUT_SEC": "ten"}),
     }
     for arm, (bad_key, spoil) in arms.items():
         root, folder, alert = _world(tmp_path, name=f"tenants-{arm}")
-        spoil(folder)
         caplog.clear()
-        rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=f"r-{arm}")
+        rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=f"r-{arm}",
+                                          records=_with_case(_planted(folder), **spoil))
         assert refused is None, f"{arm}: rc={rc} refused={refused}"
         assert rc == 0, f"{arm}: rc={rc} refused={refused}"
         got = S.receipt(run_dir)
@@ -156,8 +179,7 @@ def test_o6_bad_config_receipt(tmp_path, monkeypatch, caplog):
         assert got["url"] is None, f"{arm}: url must be null: {got}"
         reason = got.get("reason") or ""
         assert bad_key in reason, f"{arm}: the reason does not name {bad_key}: {reason!r}"
-        assert S.settings_pointer() in reason, (
-            f"{arm}: the reason does not name the settings through SETTINGS_POINTER: {reason!r}")
+        assert RECORD in reason, f"{arm}: the reason does not name the settings record ({RECORD!r}): {reason!r}"
         assert _warnings(caplog), f"{arm}: no warning logged"
 
 
@@ -299,17 +321,17 @@ def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
 def test_o6_budget_cut_missing_config_no_receipt(tmp_path, monkeypatch):
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path)
-    S.config_path(folder, CASE).unlink()
+    missing = _without_case_settings(_planted(folder))
     # The control, same tenant, same missing config: an aborted run DOES write the error receipt,
     # so the channel below can see a receipt when one is written.
     _rc, _ref, aborted_dir, _rec = _run(
-        tmp_path, root, alert, run_id="r-aborted",
+        tmp_path, root, alert, run_id="r-aborted", records=missing,
         summary=_summary(run_end.TRUNCATED_BY_ABORTED))
     assert S.receipt(aborted_dir) is not None, (
         "the control failed: an aborted run with the config missing wrote no receipt")
     for cut in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE):
         rc, refused, run_dir, _rec = _run(
-            tmp_path, root, alert, run_id=f"r-{cut}", summary=_summary(cut))
+            tmp_path, root, alert, run_id=f"r-{cut}", summary=_summary(cut), records=missing)
         assert refused is None, f"{cut}: rc={rc} refused={refused}"
         assert rc == 0, f"{cut}: rc={rc} refused={refused}"
         path = S.receipt_path(run_dir)
@@ -320,9 +342,8 @@ def test_o6_budget_cut_missing_config_no_receipt(tmp_path, monkeypatch):
 def test_o6_aborted_missing_config_receipt(tmp_path, monkeypatch):
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path)
-    S.config_path(folder, CASE).unlink()
     rc, refused, run_dir, _rec = _run(
-        tmp_path, root, alert, run_id="r-aborted",
+        tmp_path, root, alert, run_id="r-aborted", records=_without_case_settings(_planted(folder)),
         summary=_summary(run_end.TRUNCATED_BY_ABORTED))
     assert refused is None, f"rc={rc} refused={refused}"
     assert rc == 0, f"rc={rc} refused={refused}"
@@ -342,14 +363,15 @@ def test_o5_run_start_makes_no_call_and_writes_no_receipt_on_any_path(tmp_path, 
         answers = [S.timed_out()] if arm == "transport" else S.store_answers_ok()
         shim = _shim(tmp_path, monkeypatch, *answers, name=f"proxy-{arm}")
         root, folder, alert = _world(tmp_path, name=f"tenants-{arm}")
+        records = _planted(folder)
         if arm == "missing-config":
-            S.config_path(folder, CASE).unlink()
+            records = _without_case_settings(records)
         elif arm == "bad-config":
-            S.set_key(folder, CASE, "TICKET_TIMEOUT_SEC", "ten")
+            records = _with_case(records, TICKET_TIMEOUT_SEC="ten")
         elif arm == "case-record-not-covering":
             # What an upgrade leaves (C5; a bad case-record FILE can no longer reach a run, O4/O9): the case system's
             # stored declaration no longer has the comment route.
-            _uncover_comment_route(folder)
+            records = _uncover_comment_route(records)
         elif arm == "no-key":
             alert = _alert_without_key(tmp_path / f"alert-nokey-{arm}")
         seen: list[tuple[int, bool]] = []
@@ -358,7 +380,7 @@ def test_o5_run_start_makes_no_call_and_writes_no_receipt_on_any_path(tmp_path, 
             seen.append((len(shim.requests()), S.receipt_path(run_dir).exists()))
 
         rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=f"r-start-{arm}",
-                                          before=at_start)
+                                          before=at_start, records=records)
         assert refused is None, f"{arm}: rc={rc} refused={refused}"
         assert seen == [(0, False)], f"{arm}: at the lifecycle, (store calls, receipt) = {seen}"
         got = S.receipt(run_dir)
@@ -366,12 +388,11 @@ def test_o5_run_start_makes_no_call_and_writes_no_receipt_on_any_path(tmp_path, 
         assert got["ok"] is (arm == "ok"), f"{arm}: {got}"
 
 
-def _uncover_comment_route(folder: Path) -> None:
-    """Rewrite the case system's access declaration without any write route (a valid declaration, valid record)."""
-    path = S.settings_of(folder) / "systems" / CASE / "access.yaml"
-    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+def _uncover_comment_route(spec: Any) -> Any:
+    """`spec` with the case system's access declaration rewritten without any write route (a valid declaration)."""
+    doc = yaml.safe_load(spec.systems[CASE].access)
     doc["writes"] = []
-    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    return R.edited(spec, CASE, access=yaml.safe_dump(doc))
 
 
 def _alert_without_key(where: Path) -> Path:
@@ -429,9 +450,9 @@ def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog
     caplog.set_level(logging.INFO)
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path, name="tenants-bad")
-    S.drop_key(folder, CASE, "TICKET_KEY_PATTERN")
     caplog.clear()
-    _rc, _ref, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-bad")
+    _rc, _ref, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-bad",
+                                    records=_with_case(_planted(folder), TICKET_KEY_PATTERN=None))
     got = S.receipt(run_dir)
     assert got is not None, f"no reason: {got}"
     assert (got.get("reason") or "").strip(), f"no reason: {got}"
@@ -556,8 +577,7 @@ def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
     old_inode = path.stat().st_ino
     # A reader holding the file open across the next write.
     with path.open("rb") as reader:
-        S.config_path(folder, CASE).unlink()
-        _run(tmp_path, root, alert, run_id=run_id)
+        _run(tmp_path, root, alert, run_id=run_id, records=_without_case_settings(_planted(folder)))
         held = reader.read()
     assert held == old_bytes, "the second write changed the bytes under an open reader (in place)"
     json.loads(held.decode("utf-8"))

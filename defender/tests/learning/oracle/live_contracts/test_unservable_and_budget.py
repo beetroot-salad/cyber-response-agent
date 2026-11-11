@@ -243,10 +243,12 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
 
     argv = ["--tenant", S.FIXTURE_TENANT, "--episode", ep.name, "--world", label]
     try:
-        from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+        from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 
-        # The launch-time publish, in process.
-        sib.rc = S.mod(S.RUN).main(argv, directory=directory_for_argv(argv), lifecycle=lifecycle, visualize=_no_visualize,
+        # The launch-time publish, in process; the tenant's records are the estate's (stated, #1366 R10).
+        directory = est.directory(tenant_id=S.FIXTURE_TENANT)
+        S.R.assert_records_within_roster(directory, S.FIXTURE_TENANT, est.roster())
+        sib.rc = S.mod(S.RUN).main(argv, directory=directory, lifecycle=lifecycle, visualize=_no_visualize,
                                    preflight=_no_preflight, oracle=oracle.model,
                                    verifier=verifier.model, roster=est.roster(),
                                    publish=in_process_publish())

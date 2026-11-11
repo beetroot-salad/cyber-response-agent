@@ -191,7 +191,8 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
     seams.setdefault("verifier", S.passing_verifier().model)
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 
-    seams.setdefault("directory", directory_for_argv(argv))  # r10 A1/C9: the launcher admits through the tenant records
+    seams.setdefault("directory", directory_for_argv(argv, records=est.records()))  # r10 A1/C9: the launcher admits through the tenant records, the estate's (stated, #1366 R10)
+    S.R.assert_records_within_roster(seams["directory"], argv[argv.index("--tenant") + 1], seams["roster"])
     rc: int | None = None
     message = ""
     raised: BaseException | None = None

@@ -129,7 +129,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         questioner=asking, preflight=preflight or S.no_preflight, live_tree=live_tree or T.source_capture(),
         roster=est.roster(), judge=grading,
         oracle=(oracle or S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM))).model,
-        verifier=S.passing_verifier().model, directory=T.launcher_directory(tenant), spawn=siblings,
+        verifier=S.passing_verifier().model, directory=est.launch_directory(tenant), spawn=siblings,
         candidates=candidates if candidates is not None else choose(T.BRANCH_MESSAGE_ID))
     if grade is not None:
         seams["grade"] = grade
