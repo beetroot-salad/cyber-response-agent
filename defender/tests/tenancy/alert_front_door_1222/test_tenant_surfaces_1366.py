@@ -76,12 +76,19 @@ def test_1366_o1_list_verbs_and_query_answer_for_the_tenants_systems_only(tmp_pa
     returned_b = b.router.seen(LEAD)[-1].tool_returns
     assert len(returned_a) == 3, (returned_a, returned_b)
     assert len(returned_b) == 1, (returned_a, returned_b)
+    # The returns arrive in the order the host delivers them (a query reply is stamped and may come last), so each is
+    # told by what it answers: the elastic listing by its verb rows, the query by the `system.verb` it echoes, and the
+    # cmdb listing is the one left.
+    elastic_list = [r for r in returned_a if 'verb="alerts"' in r]
+    query_reply = [r for r in returned_a if "cmdb.get-host" in r]
+    cmdb_list = [r for r in returned_a if r not in elastic_list and r not in query_reply]
+    assert (len(elastic_list), len(query_reply), len(cmdb_list)) == (1, 1, 1), returned_a
     assert 'verb="get-host"' in returned_b[0], "control: tenant B's cmdb lists its verbs"
-    assert 'verb="alerts"' in returned_a[2], "control: tenant A's elastic still lists its verbs"
-    assert "cmdb" in returned_a[0], returned_a[0]
-    assert 'verb="get-host"' not in returned_a[0], returned_a[0]
-    assert "cmdb" in returned_a[1], returned_a[1]
-    assert "credential proxy" not in returned_a[1], returned_a[1]
+    assert 'verb="alerts"' in elastic_list[0], "control: tenant A's elastic still lists its verbs"
+    assert "cmdb" in cmdb_list[0], cmdb_list[0]
+    assert 'verb="get-host"' not in cmdb_list[0], cmdb_list[0]
+    assert "cmdb" in query_reply[0], query_reply[0]
+    assert "credential proxy" not in query_reply[0], query_reply[0]
 
 
 def test_1366_o1_the_workspace_map_command_lists_the_tenants_systems_not_the_checkouts(tmp_path, capsys):
