@@ -20,7 +20,7 @@ from defender._paths import adapters_under
 from defender.credential_proxy._refusal import Refused
 from defender.credential_proxy._scope import check_route
 from defender.credential_proxy._tokens import READ_WRITE
-from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
+from defender.kit.faults import ConfigFault, ConfinementFault, TransportFault, UpstreamFault
 from defender.tenancy import parse_access
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
@@ -172,7 +172,7 @@ def test_1366_k5_a_request_off_the_declared_route_is_refused_by_the_proxy_and_ne
     """Control for the channel: the service-desk adapter under the cloud adapter's declared route sends nothing the
     proxy admits, so a mismatch between sent request and declared route would show here. (#1366 K5)"""
     with _declaring(tmp_path, data_root, RM.JIRA_YES, _declared(RM.JIRA_NO)) as rig:
-        with pytest.raises((ConfigFault, TransportFault, UpstreamFault)):
+        with pytest.raises((ConfigFault, ConfinementFault, TransportFault, UpstreamFault)):  # the proxy's refusal is a ConfinementFault
             rig.comment(checkout_roster, KEY)
         assert rig.sent() == []
 
