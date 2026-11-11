@@ -211,9 +211,12 @@ def _a_403_is_setup(what: str, needs: str) -> Iterator[None]:
     except UpstreamFault as e:
         if e.status != HTTP_FORBIDDEN:
             raise
-        raise ConfigFault(
+        refusal = ConfigFault(
             f"Elasticsearch refused {what} (HTTP 403): the user defender reads it as needs "
-            f"{needs} — a setup mistake, not the agent's") from e
+            f"{needs} — a setup mistake, not the agent's")
+        # The system answered, so the re-raised fault is the system's own (#1363 O4).
+        refusal.origin = e.origin
+        raise refusal from e
 
 
 def health_check(ctx: VerbContext) -> dict:

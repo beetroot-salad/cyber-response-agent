@@ -141,6 +141,10 @@ class _Run:
     began: float = field(default_factory=time.monotonic)
     #: This attempt's limiter waits; the verifier's run shares its attempt's.
     waits: LimiterWaits = field(default_factory=LimiterWaits)
+    #: The serving's record of lookups that failed on our side (#1363 O7, A4), as each one's
+    #: system and detail: every attempt of one serving, and its verifier runs, share one list, so a
+    #: thread an earlier serving abandoned can only add to that serving's.
+    ours: list[tuple[str, str]] = field(default_factory=list)
     #: Whether the call's base is a live read, as opposed to the source's recording: a re-ask is
     #: allowed only on a live base (#1385).
     live: bool = False

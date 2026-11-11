@@ -1053,6 +1053,12 @@ def _ends_with(fault: Any):
     return S.MainScript([S.text("done")], fault=S.LeadFault(raise_on=1, exc=lambda: fault))
 
 
+def _proxy_access_lost() -> BaseException:
+    from defender.records.run_end import ProxyAccessLost  # #1363: not in base yet (expected red)
+
+    return ProxyAccessLost("the credential proxy could not be reached")
+
+
 def _fence_exchange() -> tuple[str, ...]:
     from defender import box as box_mod
 
@@ -1061,7 +1067,8 @@ def _fence_exchange() -> tuple[str, ...]:
 
 @pytest.mark.parametrize(("ending", "word", "rc"), [
     ("fence", "box-output-limit", 6), ("provider-down", "provider-down", 4), ("budget", "budget", 0),
-], ids=["fence", "provider-down", "budget"])
+    ("proxy-access", "proxy-access", 8),
+], ids=["fence", "provider-down", "budget", "proxy-access"])
 def test_o8_o9_the_fifth_fact_carries_the_whole_run_end_vocabulary_not_only_the_box_words(scene, ending, word, rc):
     """The fact is the summary's `truncated_by`, set when the driver returns; the fence also exits 6. (O9, decision 3)"""
     from defender.hooks.budget_enforcer import BudgetKill
@@ -1073,6 +1080,8 @@ def test_o8_o9_the_fifth_fact_carries_the_whole_run_end_vocabulary_not_only_the_
         "fence": lambda: _lost_box_lifecycle(exchange=_fence_exchange()),
         "provider-down": lambda: _lost_box_lifecycle(main=_ends_with(ProviderDown(model="t", status=503, attempts=4))),
         "budget": lambda: _lost_box_lifecycle(main=_ends_with(BudgetKill("spent"))),
+        # #1363 O7/B6: lost proxy access is a run-end word like provider-down, with its own exit code.
+        "proxy-access": lambda: _lost_box_lifecycle(main=_ends_with(_proxy_access_lost())),
     }[ending]()
 
     got = run_job(scene, run_id, lifecycle=lifecycle)

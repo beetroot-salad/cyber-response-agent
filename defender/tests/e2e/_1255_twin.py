@@ -433,8 +433,11 @@ def _no_queue(*_a: Any, **_kw: Any) -> bool:
 
 
 def run_main(argv: list[str], recording: Recording, *, main_turns: list[Any],
-             clock: SteppingClock, registry_cls: type | None = None, scrub: Callable[..., None] = _no_scrub) -> None:
-    """Run the production CLI composition and record its return code or refusal (`scrub`: as `lifecycle`'s)."""
+             clock: SteppingClock, registry_cls: type | None = None, scrub: Callable[..., None] = _no_scrub,
+             **proxy_seams: Any) -> None:
+    """Run the production CLI composition and record its return code or refusal (`scrub`: as `lifecycle`'s).
+    `proxy_seams` (`signer=`, `proxy_url=`) are `run.main`'s own, for a tenant whose systems are declared on the
+    credential proxy: with nothing able to sign, the run's first read token fails and the run ends `proxy-access`."""
     import defender.run as run_mod
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
 
@@ -445,7 +448,7 @@ def run_main(argv: list[str], recording: Recording, *, main_turns: list[Any],
             argv, directory=directory_for_argv(argv), lifecycle=lifecycle(recording, main_turns=main_turns, clock=clock,
                                       registry_cls=registry_cls, scrub=scrub),
             preflight=_no_preflight, visualize=_no_page, enqueue=_no_queue,
-            publish=in_process_publish())
+            publish=in_process_publish(), **proxy_seams)
     except SystemExit as refused:
         recording.exit_code = "SystemExit"
         recording.refusal = str(refused.code)

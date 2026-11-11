@@ -381,11 +381,11 @@ def _case_adapter(tmp_path: Path, read_back: str | None, *, write_raises: str = 
      "TypeError"),
     ("the proxy fails the read",
      f"def {C.READBACK_ACTION}(ctx, *, key):\n"
-     "    fault = TransportFault('proxy down')\n    fault.proxy_own = True\n    raise fault\n",
+     "    fault = TransportFault('proxy down')\n    fault.origin = 'access'  # #1363 B2: proxy_own is derived from the origin\n    raise fault\n",
      "the credential proxy failed: proxy down"),
     ("the proxy refuses the read",
      f"def {C.READBACK_ACTION}(ctx, *, key):\n"
-     "    fault = ConfigFault('token expired')\n    fault.proxy_own = True\n    raise fault\n",
+     "    fault = ConfigFault('token expired')\n    fault.origin = 'access'  # #1363 B2: proxy_own is derived from the origin\n    raise fault\n",
      "the credential proxy refused the call: token expired"),
 ])
 def test_1374_an_unsettled_outcome_is_unknown_and_not_recorded(tmp_path, monkeypatch, label,

@@ -18,12 +18,19 @@ INFRA_EXIT_CODES = frozenset({2, 124})
 #: tell it apart without parsing text.
 DENIED_EXIT_CODE = 77
 
+#: The exit code of a call the proxy cut because this one request was outside what the run's
+#: token or the declaration allows (#1363 D12). Not infra (the system is not down, so no breaker
+#: charge), not agent-fixable (the repeat guard does not count it), not denied (the grant check
+#: did not refuse it): the agent should retry differently, or report it.
+REQUEST_CUT_EXIT_CODE = 3
+
 #: The values `error_class_for_exit` writes into every queries-table row. Readers branch on
 #: them (the repeat guard counts `agent-fixable`, the breaker `infra`; `denied` counts toward
 #: neither), so they import these rather than spelling the strings.
 INFRA_ERROR_CLASS = "infra"
 AGENT_FIXABLE_ERROR_CLASS = "agent-fixable"
 DENIED_ERROR_CLASS = "denied"
+REQUEST_CUT_ERROR_CLASS = "request-cut"
 
 #: What a breaker charge can mean, after its count in both messages that name a cause (the
 #: down message and the run kill). It sees exit codes alone, and one code covers many causes —
@@ -46,6 +53,8 @@ def error_class_for_exit(exit_code: int) -> str | None:
         return None
     if exit_code == DENIED_EXIT_CODE:
         return DENIED_ERROR_CLASS
+    if exit_code == REQUEST_CUT_EXIT_CODE:
+        return REQUEST_CUT_ERROR_CLASS
     return INFRA_ERROR_CLASS if exit_code in INFRA_EXIT_CODES else AGENT_FIXABLE_ERROR_CLASS
 
 

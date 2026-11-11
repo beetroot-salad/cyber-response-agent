@@ -1,6 +1,8 @@
 """Shared helpers for the #1107 tenant-settings-record tests (no test functions)."""
 from __future__ import annotations
 
+import dataclasses
+
 from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -382,10 +384,12 @@ def never_connected(detail: str = "the system refused the connection") -> dict[s
     return {"proxy_fault": "TransportFault", "detail": detail, "sent": False, "system_side": True}
 
 
-def proxy_refused(fault: str, detail: str) -> dict[str, Any]:
-    """The proxy's own refusal (no status, never sent): e.g. a route the declaration does not
-    allow (`ConfinementFault`) or no stored credential (`ConfigFault`)."""
-    return {"proxy_fault": fault, "detail": detail, "sent": False, "system_side": False}
+def proxy_refused(fault: str, detail: str, origin: str) -> dict[str, Any]:
+    """The proxy's own refusal (no status, never sent) and the label it puts on it (#1363 O4): `request` for a
+    route the declaration does not allow (`ConfinementFault`), `setup` for no stored credential (`ConfigFault`).
+    Required, as a refusal with no label reads as `access`."""
+    assert origin in ("request", "setup"), f"a refusal that is not one call's or one system's setup: {origin!r}"
+    return {"proxy_fault": fault, "detail": detail, "sent": False, "system_side": False, "origin": origin}
 
 
 #: How the real proxy classifies a status the system answered (`credential_proxy._app`).
@@ -466,11 +470,15 @@ class ProxyStandIn:
     def _reply(self, n: int) -> bytes:
         pc = mod("kit.proxy_client")
         a = self._answers[min(n, len(self._answers) - 1)]
+        # #1363 B2/O4: the final record carries the proxy's label once it declares the field; an
+        # answer that names none is unlabelled (None), as a system answer is.
+        labelled = ({"origin": a.get("origin")}
+                    if "origin" in {f.name for f in dataclasses.fields(pc.FinalRecord)} else {})
         if "proxy_fault" in a:
             return pc.encode_final(pc.FinalRecord(
                 status=None, headers={}, fault=a["proxy_fault"], detail=a["detail"],
                 system_side=a["system_side"], sent=a["sent"], body_whole=False,
-                reader_fault=False))
+                reader_fault=False, **labelled))
         status = int(a["status"]) if a.get("status") is not None else 200
         raw = a.get("stdout", "")
         body = raw if isinstance(raw, bytes) else str(raw).encode("utf-8")  # bytes: sent as they are
@@ -478,7 +486,7 @@ class ProxyStandIn:
         return pc.encode_body(body) + pc.encode_final(pc.FinalRecord(
             status=status, headers={"Content-Type": "application/json"}, fault=fault,
             detail=None if fault is None else f"HTTP {status}", system_side=True, sent=True,
-            body_whole=True, reader_fault=False))
+            body_whole=True, reader_fault=False, **labelled))
 
     def requests(self) -> list[dict[str, Any]]:
         """Every request sent: `{"system", "method", "url", "path", "body", "token"}`."""

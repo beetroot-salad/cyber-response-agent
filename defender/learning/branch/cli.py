@@ -48,6 +48,7 @@ import os
 import sqlite3
 import sys
 import threading
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -121,6 +122,7 @@ from defender.learning.branch.preflight import (
     ACCEPTED as ACCEPTED,
     DIRT as DIRT,
     ENVIRONMENT_REFUSED as ENVIRONMENT_REFUSED,
+    ENVIRONMENT_CAUSES as ENVIRONMENT_CAUSES,
     LauncherRefused as LauncherRefused,
     MAX_BRANCH_MESSAGE_ID as MAX_BRANCH_MESSAGE_ID,
     REFUSED as REFUSED,
@@ -180,6 +182,17 @@ class SourceInputReplaced(JobEnding, Exception):
 
 #: The launcher's primer: an empty capture primes an empty base, and `_prime_once` warns.
 _PRIME_ALLOWING_EMPTY = functools.partial(prime_base, allow_empty=True)
+
+
+#: The job's fixed brief for each cause of an environment refusal at pre-flight (#1363 O6): who
+#: failed is the first thing the operator reads, so a down system is never put as our failure.
+_ENVIRONMENT_BRIEFS = {
+    "sign": "pre-flight refused: the read token for the credential proxy cannot be signed",
+    "access": "pre-flight refused: the credential proxy could not be used",
+    "setup": "pre-flight refused: our setup for a system failed",
+    "down-systems": "pre-flight refused: every system the source run's calls reached is down "
+                    "for this run",
+}
 
 
 def source_input(source: Run) -> tuple[bytes, str]:
@@ -606,6 +619,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     signer: Any = None,
     proxy_url: str | None = None,
     issuer_transport: Any = None,
+    clock: Callable[[], float] = time.time,
 ) -> int:
     """Launch one episode, reporting a refusal as an operator exit rather than a traceback.
     `preflight` (the role-model check) and `render_page` (the episode page) are handed in by the
@@ -616,7 +630,8 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
         return _launch(ns, lane=lane, spawn=spawn, questioner=questioner, preflight=preflight,
                        render_page=render_page, judge=judge, lessons_dir=lessons_dir, live_tree=live_tree,
                        oracle=oracle, verifier=verifier, roster=roster, directory=directory,
-                       signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport)
+                       signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
+                       clock=clock)
     except (branch.BranchError, LedgerError, EstateError, FamilyError, GrantError,
             session_store.StoreError, sqlite3.Error) as refusal:
         raise LauncherRefused(f"[branch] {refusal}") from refusal
@@ -644,6 +659,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     live_tree: Callable[[], formats.RunProvenance] | None = None,
     oracle: Any = None, verifier: Any = None, roster: Any = None, directory: Any = None,
     signer: Any = None, proxy_url: str | None = None, issuer_transport: Any = None,
+    clock: Callable[[], float] = time.time,
 ) -> int:
     # Injected seams are resolved once and threaded inward non-`None`, so no two frames can
     # disagree about which preflight, roster or model an episode used.
@@ -753,7 +769,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
                     verifier=verifier, roster=roster, started=started,
                     knowledge_commit=pinned.commit, render_page=render_page,
                     signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
-                    directory=admitted.directory, lane=lane)
+                    directory=admitted.directory, lane=lane, token_clock=clock)
             except SystemExit:
                 raise
             except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
@@ -774,6 +790,7 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer | None,
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
     issuer_transport: Any = None, directory: Any = None, lane: JobLaneHooks | None = None,
+    token_clock: Callable[[], float] = time.time,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
 
@@ -816,18 +833,19 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
         record = preflight_replay(episode, source=source, roster=roster, tenant=tenant,
                                   oracle=oracle, verifier=verifier, signer=signer,
                                   proxy_url=proxy_url, issuer_transport=issuer_transport,
-                                  directory=directory)
+                                  directory=directory, clock=token_clock)
     if record["outcome"] != ACCEPTED:
         _logger.info(f"episode {episode_id}: {record['outcome']} before any sibling started "
                      f"({record['reason']})")
         if lane is not None:
             detail = (f"[branch] episode {episode_id}: pre-flight recorded {record['outcome']!r} "
                       f"({record['reason']})")
-            if record.get(ENVIRONMENT_REFUSED):
+            cause = record.get(ENVIRONMENT_REFUSED)
+            if cause:
                 # The environment's refusal, not the family's: the job fails, it is not skipped.
+                # The brief is the cause's own (#1363 O6).
                 raise ending(detail, reason=LAUNCH_REFUSED,
-                             brief="pre-flight refused: the read token for the credential proxy "
-                                   "cannot be signed; no sibling started")
+                             brief=_ENVIRONMENT_BRIEFS[cause] + "; no sibling started")
             raise ending(detail, reason=FAMILY_UNUSABLE,
                          brief=f"pre-flight recorded the family {record['outcome']}; no sibling started")
         return 1

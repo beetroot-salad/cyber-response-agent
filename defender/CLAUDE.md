@@ -72,6 +72,14 @@ ledger). The mark is worked out when a record is read: a row that
 ended after it started, with a cost and no final figure from its worker, reads "at least" (this includes such rows
 already in the database); every other existing row reads exact.
 
+## Upgrade from before #1363
+
+The credential proxy's final frame gains a last field, `origin` (whose failure a refusal is:
+`request`, `setup` or `access`). Upgrade the proxy and every run image together: a new run refuses
+an old proxy's eight-field record whole and reads it as lost access (the run ends `proxy-access`,
+exit 8), and an old run does not read the new field. A call cut for this request alone is now an
+uncharged failed call with exit 3 in the queries table (its own error class, `request-cut`).
+
 ## Upgrade from before #1412
 
 The credential proxy streams each upstream reply to the run in its own frame format (content

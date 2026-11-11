@@ -79,8 +79,8 @@ from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa
 from defender.systems.system_status import RunSystems  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
-from defender.credential_proxy import mint_request_token, signing_access  # noqa: E402
-from defender.kit.access import AccessDeclaration, RequestAccess  # noqa: E402
+from defender.credential_proxy import request_access, run_token_mint, signing_access  # noqa: E402
+from defender.kit.access import TOKEN_SEC, AccessDeclaration, RequestAccess  # noqa: E402
 from defender.kit.faults import AdapterFault, ConfigFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
 from defender.systems.verbs import (  # noqa: E402
@@ -623,33 +623,31 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     return summary
 
 
-#: Seconds a request token lives from when it is signed, read or write-back (r7 A20), and the
-#: life a held read token must have left to be handed out again.
-TOKEN_SEC = 600
-TOKEN_REUSE_MARGIN_SEC = 60
-
-
 class _TokenMint:
     """Signs this run's request tokens in the run process (#1163 A1): a read token over the
-    granted `http-proxy` systems when a call first needs one, reused while it has life left (r7
-    A20), and a write-back token (`rw` on the case system only) at the record step (#1359 D-9).
+    granted `http-proxy` systems when a call first needs one, held by the process's one access
+    holder (#1363 O1, `RequestAccess`), and a write-back token (`rw` on the case system only) at the record step (#1359 D-9).
     Building one checks configuration only; nothing contacts OpenBao until a token is asked for,
     and a run with no `http-proxy` system to reach never does (A7)."""
 
-    def __init__(self, signer: Any, proxy_url: str | None, *, tenant_id: str, run_id: str,
+    def __init__(self, signer: Any, proxy_url: str | None, *, tenant_id: str, run_id: str,  # noqa: PLR0913 — the run's identity plus the holder's two seams
                  reads: tuple[str, ...], case_system: str | None,
-                 unsigned: str | None = None) -> None:
-        self._signer = signer
+                 unsigned: str | None = None, clock: Callable[[], float] = time.time,
+                 on_fault: Callable[[AdapterFault], None] | None = None) -> None:
         self._proxy_url = proxy_url
-        self._tenant_id = tenant_id
-        self._run_id = run_id
-        self._reads = reads
+        self._clock = clock
+        #: Signs the write-back token the way the holder signs the read token (`run_token_mint`).
+        self._mint = (None if signer is None else
+                      run_token_mint(signer, tenant_id=tenant_id, investigation=run_id))
         self._case_system = case_system
         #: Why a write-back token cannot be signed (R4), when it cannot: the run goes on, and the
         #: record step says so.
         self._unsigned = unsigned
-        self._held: tuple[str, float] | None = None
-        self._holding = threading.Lock()
+        #: The process's access holder: built here, signs nothing until a call first needs a
+        #: token. `clock` is the holder's own; `on_fault` is its owner's callback (#1363 B1).
+        self._access: RequestAccess | None = (
+            request_access(signer, proxy_url or "", tenant_id=tenant_id, investigation=run_id,
+                        reads=reads, clock=clock, on_fault=on_fault) if reads else None)
 
     @classmethod
     def for_run(  # noqa: PLR0913 — the run's identity plus the operator's three seams
@@ -657,7 +655,8 @@ class _TokenMint:
                 world: Any, case: case_system.CaseTarget | case_system.CaseSettingsFault | None,
                 run_id: str, accepted: tenancy.Tenant,
                 records: tenancy.TenantDirectory, signer: Any, proxy_url: str | None,
-                issuer_transport: Any) -> _TokenMint:
+                issuer_transport: Any, clock: Callable[[], float] = time.time,
+                on_fault: Callable[[AdapterFault], None] | None = None) -> _TokenMint:
         """The mint for a run, or a mint that signs nothing when no `http-proxy` system is in
         reach. A configuration that cannot sign (no proxy address; a tenant whose live generation
         in `records` records no sign login, A24', whether or not a `signer` is injected, r8.6)
@@ -666,10 +665,8 @@ class _TokenMint:
         A20). A run that needs only the write-back token goes on instead (R4): it mints nothing
         and the record step says why. The signer is the tenant's own
         (`credential_proxy.request_signer`, r8.5) unless one is injected."""
-        proxied = {name for name, found in tenant.access.items()
-                   if isinstance(found, AccessDeclaration) and name not in systems.down}
         # A branched run is a run (#1449): a world reads its granted systems on a run's terms.
-        reads = tuple(sorted(system_status.granted_systems(tenant.grants) & proxied))
+        reads = system_status.read_grant(tenant, systems.down)
         # The write-back token is for a case system run start judged sound (`case`), reached
         # through the proxy; a case system with bad settings is told so by the record step.
         # A world never gets one: `--update-ticket` with `--episode` is refused before this
@@ -690,26 +687,15 @@ class _TokenMint:
             return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
                        case_system=written, unsigned=refused.detail)
         return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
-                   reads=reads, case_system=written)
-
-    def _mint(self, grant: set[tuple[str, str]], expires_at: float) -> str:
-        return mint_request_token(
-            self._signer, tenant_id=self._tenant_id, investigation=self._run_id, grant=grant,
-            expires_at=datetime.fromtimestamp(expires_at, UTC))
-
-    def _read_token(self) -> str:
-        """The run's read token: the held one while it has life left, else a new one. A mint
-        that fails raises its fault to the call that asked (r7 A20, A18)."""
-        with self._holding:
-            now = time.time()
-            if self._held is None or self._held[1] - TOKEN_REUSE_MARGIN_SEC <= now:
-                expires_at = now + TOKEN_SEC
-                self._held = (self._mint({(s, "r") for s in self._reads}, expires_at), expires_at)
-            return self._held[0]
+                   reads=reads, case_system=written, clock=clock, on_fault=on_fault)
 
     def access_kwargs(self) -> dict[str, RequestAccess]:
-        return _access_kwargs(RequestAccess(self._proxy_url or "", self._read_token)
-                              if self._reads else None)
+        return _access_kwargs(self._access)
+
+    def access_lost(self) -> str | None:
+        """Why the process lost its credential-proxy access (the holder's latched detail), or None
+        while it has not, or never held any (#1363 D11)."""
+        return None if self._access is None else self._access.lost
 
     def write_back(self) -> dict[str, str]:
         """The record step's keywords: a fresh write-back token (`rw` on the case system only) and
@@ -717,10 +703,10 @@ class _TokenMint:
         (a system with bad settings is told so by the step, not by a token it would never use);
         nothing otherwise. A mint that fails here is a warning: the step reports the missing token
         itself."""
-        if self._case_system is None or self._unsigned is not None:
+        if self._case_system is None or self._unsigned is not None or self._mint is None:
             return {}
         try:
-            token = self._mint({(self._case_system, "rw")}, time.time() + TOKEN_SEC)
+            token = self._mint({(self._case_system, "rw")}, self._clock() + TOKEN_SEC)
         except AdapterFault as refused:
             _logger.warning(f"no write-back token for the record step: {refused.detail}")
             return {}
@@ -1487,7 +1473,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                 try:
                     summary = lifecycle(**started.lifecycle_kwargs(ns), run_state=run_state)
                 except (ServingAbort, BaseExceptionGroup) as escaped:
-                    return _unservable_exit(escaped, world=world, episode=episode)
+                    return _unservable_exit(escaped, world=world, episode=episode,
+                                            lost=started.minting.access_lost())
 
                 def ticket_and_curation() -> None:
                     # No automatic feed into the learning pipeline; only catalog curation is
@@ -1675,6 +1662,9 @@ _EXIT_WORDS = {
     run_end.TRUNCATED_BY_PROVIDER_REJECTED: "the model provider refused a request for good; the "
                                             "run ended (rerunning will not help: the run log "
                                             "names the HTTP status and the provider's reason)",
+    run_end.TRUNCATED_BY_PROXY_ACCESS: "the run lost its access to the credential proxy; the run "
+                                       "ended with no report (nothing is wrong with the systems it "
+                                       "was reading: the run log names the cause)",
     run_end.TRUNCATED_BY_BOX_LOST: "the run's box became unusable; the run ended (the operator's "
                                    "to fix: the run log names the command that found it)",
     run_end.TRUNCATED_BY_BOX_OUTPUT_LIMIT: "a process in the run's box wrote past its helper and "
@@ -1685,7 +1675,7 @@ _EXIT_WORDS = {
 def _exit_code(summary: dict) -> int:
     """The exit status of a run whose post-steps are done or skipped: its exit class's own code
     from the one table (`run_end.EXIT_CLASSES`: provider-down 4, box-lost 5, box-output-limit 6,
-    provider-rejected 7),
+    provider-rejected 7, proxy-access 8),
     said on the way out, else 0."""
     truncated_by = run_end.normalized_truncated_by(summary.get("truncated_by"))
     code = run_end.exit_code_of(truncated_by)
@@ -1706,12 +1696,23 @@ def _serving_abort(exc: BaseException) -> ServingAbort | None:
     return None
 
 
-def _unservable_exit(escaped: BaseException, *, world: Any, episode: Episode | None) -> int:
+def _unservable_exit(escaped: BaseException, *, world: Any, episode: Episode | None,
+                     lost: str | None = None) -> int:
     """A sibling whose world went unservable: its world record written and `UNSERVABLE_EXIT`.
     Anything else that escaped the lifecycle is raised again."""
     abort = _serving_abort(escaped)
     if abort is None or world is None or episode is None:
         raise escaped
+    ours = getattr(abort, "our_fault", False) or lost is not None
+    if ours and getattr(abort, "reason", "") != "budget":
+        # The oracle gave up because a lookup met our own failure, or the process lost its access
+        # while it served (#1363 D11): the world is not unservable, so no world record is written;
+        # the sibling ends as a run that lost its access.
+        system, detail = getattr(abort, "our_cause", None) or ("", lost or "")
+        _logger.error(f"--episode: world {world.label}: the oracle's lookup of {system or 'a system'} "
+                      f"failed on our side ({detail}); the sibling ends proxy-access, no world "
+                      "record is written")
+        return run_end.exit_code_of(run_end.TRUNCATED_BY_PROXY_ACCESS)
     _record_unservable_world(episode, world, abort)
     _logger.error(f"--episode: world {world.label} is unservable; the sibling ends "
                   f"({getattr(abort, 'reason', '')})")
