@@ -79,11 +79,12 @@ async def _serve() -> int:
                                 openbao=clients.openbao_management(config),
                                 integration=integration_runner(config.integration_command), git=git_runner,
                                 config=config, clock=_now)
+    directory = TenantDirectory(lambda: PostgresTenantRepository(dsn))
     host = HostActor(tenants, forge=clients.forge_anonymous(config), openbao_login=clients.openbao_login(config),
                      git=git_runner, config=config, clock=_now,
+                     open_delivery=clients.learning_delivery(config, directory),
                      # as run start's: the outcomes only the launcher sees are recorded for `tenant.py check`
-                     publish=functools.partial(launch_publish,
-                                               directory=TenantDirectory(lambda: PostgresTenantRepository(dsn))))
+                     publish=functools.partial(launch_publish, directory=directory))
     _logger.info("lifecycle: serving both actors every %ss", config.poll_interval)
     try:
         await serve(service, host, config=config, stop=stopping.is_set)

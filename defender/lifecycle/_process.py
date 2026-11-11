@@ -87,6 +87,20 @@ def integration_runner(container: str) -> Callable[[Sequence[str]], subprocess.C
     return run
 
 
+def learning_delivery(config: LifecycleConfig, directory: Any) -> Callable[[str], Any]:
+    """How the host actor reaches a tenant's forge and clone for the learning import (#1278 Migration): `tenant id` ->
+    the tenant's delivery, opened as the drain opens it (its recorded forge wiring, its forge credential), a context
+    manager that closes what it made."""
+    def open_for(tenant_id: str) -> Any:
+        from defender._paths import process_defender_dir
+        from defender.learning.author import version_control as vc
+        from defender.tenancy import data_root_from_path, requested_tenant
+
+        tenant = requested_tenant(data_root_from_path(config.data_root), tenant_id)
+        return vc.opened_delivery(tenant, defender_dir=process_defender_dir(), directory=directory, purpose="drain")
+    return open_for
+
+
 def forge_admin(config: LifecycleConfig) -> httpx.AsyncClient:
     """The management service's forge client: the admin token on every call."""
     return internal_async_client(trust=tls_trust(), base_url=config.forge_url, timeout=CALL_TIMEOUT,

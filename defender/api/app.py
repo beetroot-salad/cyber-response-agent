@@ -881,6 +881,16 @@ async def rotate_tenant_credential(deps: Deps, caller: Admin, tenant_id: AdminTe
     return _tenant_item(record)
 
 
+@admin.post("/tenants/{tenant_id}/cut-over-learning-state", status_code=status.HTTP_202_ACCEPTED,
+            responses=responses(409))
+async def cut_over_tenant_learning_state(deps: Deps, caller: Admin, tenant_id: AdminTenant) -> TenantItem:
+    """Queue the move of an active tenant's file learning state into the learning store (#1278): the import, then the
+    removal of its old learning folder. Needs nothing pending; a failed job is resumed like any other."""
+    record = await deps.tenants.request_learning_cutover(tenant_id)
+    audit.emit("tenant.learning_cutover", actor=caller.user.id, tenant_id=record.id, target=record.id)
+    return _tenant_item(record)
+
+
 @admin.post("/tenants/{tenant_id}/invitations", status_code=status.HTTP_202_ACCEPTED,
             responses=responses(409))
 async def admin_invite(deps: Deps, caller: Admin, body: InviteCreate,
