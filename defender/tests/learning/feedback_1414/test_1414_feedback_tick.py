@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as dt
 import json
 import logging
@@ -16,6 +17,8 @@ from defender.tests.learning.feedback_1414 import _attacks1414 as A
 from defender.tests.learning.feedback_1414 import _spec1414 as S
 from defender.tests.learning.feedback_1414._spec1414 import LOOKUP, LOOKUP_2, NAMED, OUTSIDER, OWNER
 from defender.tests.tenancy.tenant_1108_p4._drain_support import remote_branches
+
+pytestmark = pytest.mark.postgres
 
 
 def _loud(caplog, *words: str) -> bool:
@@ -42,7 +45,7 @@ def test_1414_each_run_opens_its_own_labelled_bot_issue_naming_the_run(fb):
     [issue] = _run_issues(fb, first)
     assert issue["user"]["login"] == fb.bot
     assert len(fb.forge.issue_creates()) == 1
-    assert S.open_issue_requests(fb.paths) == {}, "the served request was not released"
+    assert S.open_issue_requests(fb) == {}, "the served request was not released"
 
     second = fb.request("case-db07")
     assert fb.tick(S.Decider()) == 0
@@ -59,7 +62,7 @@ def test_1414_each_run_opens_its_own_labelled_bot_issue_naming_the_run(fb):
     assert len(fb.forge.issue_creates()) == 3, "a rerun after a closed issue opened nothing"
     assert len(_run_issues(fb, third)) == 1
     assert [len(fb.forge.comments_on(n, by=fb.bot)) for n in (issue["number"], again["number"])] == [0, 0]
-    assert S.open_issue_requests(fb.paths) == {}
+    assert S.open_issue_requests(fb) == {}
 
 
 def test_1414_an_open_whose_reply_was_lost_is_recovered_not_repeated(fb):
@@ -123,7 +126,7 @@ def test_1414_recovery_matches_only_the_first_line_never_a_title_or_a_fenced_bod
     assert fb.tick(decider) == 0
     assert decider.decided == [comment["id"]], "a decoy was recorded as the run's issue"
     assert not {c["id"] for c in decoy_talk} & set(decider.decided)
-    assert S.open_issue_requests(fb.paths) == {}
+    assert S.open_issue_requests(fb) == {}
 
 
 def test_1414_recovery_finds_the_runs_own_issue_never_another_runs_of_the_case(fb):
@@ -158,7 +161,7 @@ def test_1414_recovery_finds_the_runs_own_issue_never_another_runs_of_the_case(f
     assert fb.tick(S.Decider()) == 0
     assert len(_run_issues(fb, third)) == 1, "positive control: a create never applied is made on the retry"
     assert len(fb.forge.issues) == 4
-    assert S.open_issue_requests(fb.paths) == {}
+    assert S.open_issue_requests(fb) == {}
 
 
 def test_1414_an_issue_the_forge_no_longer_has_is_treated_as_closed(fb):
@@ -177,7 +180,7 @@ def test_1414_an_issue_the_forge_no_longer_has_is_treated_as_closed(fb):
     assert fb.tick(S.Decider()) == 0
     assert len(_run_issues(fb, later)) == 1, "a later run of the case opened nothing"
     assert len(fb.forge.issue_creates()) == 2
-    assert S.open_issue_requests(fb.paths) == {}
+    assert S.open_issue_requests(fb) == {}
 
 
 def test_1414_a_reply_owed_on_a_gone_issue_is_dropped_and_logged(fb, caplog):
@@ -462,7 +465,7 @@ def test_1414_what_the_old_generations_bot_made_is_still_the_bots(fb):
     decider = S.Decider()
     assert fb.tick(decider, directory=directory) == 0
     assert len(fb.forge.issue_creates()) == 1, "the old bot's issue was not recognised and a second was made"
-    assert S.open_issue_requests(fb.paths) == {}
+    assert S.open_issue_requests(fb) == {}
 
     spoken = fb.forge.add_comment(number, user=OWNER, body="nothing to change")
     decider.script[spoken["id"]] = S.answer(reason="nothing to learn")
@@ -524,7 +527,7 @@ def test_1414_a_lookup_with_a_lone_surrogate_does_not_wedge_the_requests_beside_
         run_state=run_state)
     assert queued is True, "premise: the run's end queued its request"
 
-    [kept] = [r for r in S.open_issue_requests(fb.paths).values() if r["run_id"] == S.run_id_of(bad_dir)]
+    [kept] = [r for r in S.open_issue_requests(fb).values() if r["run_id"] == S.run_id_of(bad_dir)]
     assert kept["lookups"] == [{"actor": "ann", "host": "db-03", "pattern": "id"}], \
         "the surrogate lookup was captured, or the run's other lookup was lost with it"
     decider = S.Decider()
@@ -539,7 +542,7 @@ def test_1414_a_lookup_with_a_lone_surrogate_does_not_wedge_the_requests_beside_
     assert sorted(decider.decided) == sorted([spoken["id"], bad_said["id"]]), "a comment was not decided"
     assert decider.item(bad_said["id"])["lookups"] == [kept["lookups"][0]], "the surrogate run is framed by other lookups"
     assert len(fb.replies(number, spoken["id"])) == 1
-    assert S.open_issue_requests(fb.paths) == {}, "a request stayed queued, to fail again every tick"
+    assert S.open_issue_requests(fb) == {}, "a request stayed queued, to fail again every tick"
 
 
 # ---------------------------------------------------------------- attack families (#1414 triage)
@@ -624,45 +627,71 @@ def test_1414_an_issue_made_but_not_recorded_and_closed_before_the_redo_is_not_m
     scene.close()
     A.tick_until_quiet(fb, scene.decider)
     assert len(fb.issues(scene.case)) == 1, "the closed issue was not recovered and a second was made"
-    assert S.open_issue_requests(fb.paths) == {}
+    assert S.open_issue_requests(fb) == {}
 
 
-_BLOCKED_WRITES = [
-    pytest.param(S.STATE_CASES_FOLDER, "open", id="cases-open"),
-    pytest.param(S.STATE_ITEMS_FOLDER, "read", id="items-read"),
-    pytest.param(S.STATE_SEEN_FOLDER, "read", id="seen-read"),
-    pytest.param(S.STATE_CURSOR_FOLDER, "read", id="cursor-read"),
-    pytest.param(S.STATE_PENDING_FOLDER, "read", id="pending-read"),
-    pytest.param(S.STATE_ITEMS_FOLDER, "first-comment", id="items-first-comment"),
-    pytest.param(S.STATE_ITEMS_FOLDER, "second-comment", id="items-second-comment"),
-]
+#: A4 (change 4): the file-fault family (a state folder made unwritable) has no store twin; one fault seam replaces it.
+#: The scenario (a request, its issue, two comments, their decisions and replies) makes more store writes than this.
+_FAULT_AT = range(1, 11)
 
 
-@pytest.mark.parametrize(("folder", "stage"), _BLOCKED_WRITES)
-def test_1414_a_failed_state_write_loses_no_comment_and_makes_no_second_issue(fb, caplog, folder, stage):
-    """A tick that dies (an exit code, or an exception or ERROR record naming the path) on a write into one of its state folders, made unwritable on disk with no hook in the code, is redone whole: one issue, each eligible comment decided and replied to once, its lessons row written. P5/O4/A6."""
+@pytest.mark.parametrize("n", _FAULT_AT)
+def test_1414_a_failed_store_write_loses_no_comment_and_makes_no_second_issue(fb, monkeypatch, n):
+    """A tick that dies on its Nth store write (the fault seam: the proxy raises before the write reaches the database) is redone whole once its lease has lapsed: one issue, each eligible comment decided and replied to once, its instruction row written, and the request released. P5/O4/A4 change 4."""
     scene = A.Scene(fb)
-    record = None
-    if stage != "open":
-        scene.step()
-        assert scene.comments, "premise: the issue was opened and the people commented"
-        record = {"first-comment": 0, "second-comment": 1}.get(stage)
-        record = None if record is None else str(scene.comments[record]["id"])
-    blocked = A.BlockedFolder(fb, folder, record)
-    named = f"{folder}/{record}{S.STATE_RECORD_SUFFIX}" if record else folder
-    with caplog.at_level(logging.INFO):
-        died = A.blocked_tick(fb, scene.decider)
-        at_write = A.died_at(died, caplog.records, named)
-    blocked.restore()
-    assert died, "premise: the tick did not die at the blocked write"
-    assert at_write, f"premise: neither an ERROR record nor the exception names the blocked path {named}"
-    if stage != "open":
-        assert fb.forge.comments_on(scene.number, by=fb.bot) == [], "premise: the failed write stopped the tick before its replies"
-    for _ in range(3):
-        if not scene.comments:
+    with A.store_fault_at(monkeypatch, n) as faults:
+        for _ in range(6):
             scene.step()
+            if faults.get("fired") and scene.comments:
+                break
+    assert faults.get("fired"), f"premise: the scenario makes fewer than {n} store writes ({faults.get('writes')})"
+    fb.lapse()
     A.tick_until_quiet(fb, scene.decider)
     scene.verify()
+
+
+def test_1414_a_failed_decision_transaction_leaves_no_decision_and_no_instruction_row_and_asks_once_more(fb, monkeypatch):
+    """The decision and its instruction row commit together: when `record_decision` fails, neither exists and the comment is asked again exactly once more. A4 change 4/P8."""
+    number = fb.opened("case-decision")
+    comment = fb.forge.add_comment(number, user=OWNER, body="check the VPN log first")
+    decider = S.Decider({comment["id"]: S.answer(instruction="check the VPN log first")})
+    import defender.learning.store as store_mod
+
+    real_blocking = store_mod.blocking
+    failed = {"n": 0}
+
+    class FailDecision:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            target = getattr(self._inner, name)
+            if name != "record_decision":
+                return target
+
+            def boom(*a, **kw):
+                failed["n"] += 1
+                raise A.StoreFault("record_decision")
+            return boom
+
+    @contextlib.contextmanager
+    def faulty(dsn, **knobs):
+        with real_blocking(dsn, **knobs) as inner:
+            yield FailDecision(inner)
+
+    with monkeypatch.context() as m:
+        m.setattr(store_mod, "blocking", faulty)  # lint-monkeypatch: ok — the store opener is a module-level door the tick reaches itself
+        with contextlib.suppress(Exception):
+            fb.tick(decider)
+    assert failed["n"] >= 1, "premise: the decision write was reached"
+    assert [c for c in S.comment_rows(fb) if c.decision is not None] == []
+    assert S.lessons_rows(fb) == []
+    fb.lapse()
+    for _ in range(3):
+        assert fb.tick(decider) == 0
+    assert decider.decided == [comment["id"]] * 2, "the model was asked other than once more"
+    assert [r["comment_id"] for r in S.lessons_rows(fb)] == [str(comment["id"])]
+    assert len(fb.replies(number, comment["id"])) == 1
 
 
 # ---------------------------------------------------------------- honest-code regressions (pre-fix e990542ab fails these)
@@ -685,7 +714,7 @@ def test_1414_a_newer_request_filed_while_the_older_is_served_survives_the_tick(
     A.tick_until_quiet(fb, S.Decider())
     assert len(_run_issues(fb, older)) == 1
     assert len(_run_issues(fb, newer["dir"])) == 1, "the newer run's request was released with the older one's and it got no issue"
-    assert S.open_issue_requests(fb.paths) == {}
+    assert S.open_issue_requests(fb) == {}
 
 
 @pytest.mark.parametrize(("ahead", "fresh"), [
@@ -795,10 +824,10 @@ def test_1414_a_failed_issue_listing_serves_no_request_and_makes_no_second_issue
     assert fb.tick(S.Decider()) == 0
     fb.forge.respond = None
     assert fb.forge.issue_creates() == [], "a request was served from a failed listing"
-    assert len(S.open_issue_requests(fb.paths)) == 2
+    assert len(S.open_issue_requests(fb)) == 2
     assert fb.tick(S.Decider()) == 0
     assert fb.forge.issue_creates() == [], "a run whose issue the forge holds got a second one"
-    assert S.open_issue_requests(fb.paths) == {}
+    assert S.open_issue_requests(fb) == {}
 
 
 def test_1414_a_registry_on_main_that_is_not_utf8_stops_the_draft_but_never_the_replies(fb, caplog):

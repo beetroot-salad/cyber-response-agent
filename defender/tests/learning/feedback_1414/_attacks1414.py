@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import contextlib
 import json
-import shutil
-from pathlib import Path
 from typing import Any
 
 import httpx
 
 from defender.tests.learning.feedback_1414 import _spec1414 as S
-from defender.tests.support.shared._locations_1210 import location_path
 
 
 def forged_markers(fb: Any, span: int = 60) -> str:
@@ -31,7 +28,7 @@ def tick_until_quiet(fb: Any, decide: Any, *, limit: int = 12, **seams: Any) -> 
     def shape() -> tuple:
         return (sum(r.method == "POST" for r in fb.forge.requests), len(decide.items), len(fb.forge.issues),
                 sum(len(v) for v in fb.forge.issue_comments.values()),
-                json.dumps(S.open_issue_requests(fb.paths), sort_keys=True))
+                json.dumps(S.open_issue_requests(fb), sort_keys=True))
 
     quiet = ran = 0
     while quiet < 2 and ran < limit:
@@ -89,30 +86,58 @@ class Crasher:
         return httpx.ConnectError("the forge is unreachable", request=request) if self._hit(request) else None
 
 
-class BlockedFolder:
-    """A state folder replaced by a regular file for a while (or, with `record`, that one record's file name taken by a folder): every write into it fails the way a full or broken
-    disk does, with no hook in the code under test. `restore()` puts the folder back as it was."""
+#: The store verbs that write: a fault is injected at the Nth call to one of these (A4's fault seam).
+WRITE_VERBS = ("enqueue_feedback_issue", "begin_feedback_tick", "renew_feedback_tick", "end_feedback_tick",
+               "record_feedback_issue", "judge_comments", "advance_comment_cursor", "count_failed_answer",
+               "record_decision", "settle_entry", "mark_settled", "claim_registry", "record_commit", "in_review",
+               "end_no_commits", "abandon_clean", "abandon_crashed", "expire_own", "take_over", "abandon", "end_review",
+               "note_check", "note_refusal", "needs_person")
 
-    def __init__(self, fb: Any, folder: str, record: str | None = None) -> None:
-        self.record = record
-        self.path = Path(location_path(fb.paths.state_root)) / folder
-        self.kept = self.path.with_name(self.path.name + ".kept")
-        if record is not None:  # one record's file name is taken by a folder: only that write fails, with a plain OSError
-            self.path.mkdir(exist_ok=True)
-            self.kept = self.path / f"{record}{S.STATE_RECORD_SUFFIX}"
-            self.kept.mkdir()
-            return
-        if self.path.exists():
-            shutil.move(str(self.path), str(self.kept))
-        self.path.write_text("not a folder\n", encoding="utf-8")
 
-    def restore(self) -> None:
-        if self.record is not None:
-            self.kept.rmdir()
-            return
-        self.path.unlink()
-        if self.kept.exists():
-            shutil.move(str(self.kept), str(self.path))
+class StoreFault(Exception):  # noqa: N818 — a test-defined fault, not a product exception
+    """What the proxy raises at the Nth write."""
+
+
+class FaultStore:
+    """A proxy around the sync store (`blocking(dsn)`): the Nth call to a verb in `WRITE_VERBS` raises `StoreFault`
+    before it reaches the database, once. Every other attribute is the real store's. `writes` counts the verbs called,
+    `fired` says whether the fault happened (so a test can tell a fault from an N past the last write)."""
+
+    def __init__(self, real: Any, n: int, shared: dict) -> None:
+        self._real, self._n, self._shared = real, n, shared
+
+    def __getattr__(self, name: str) -> Any:
+        target = getattr(self._real, name)
+        if name not in WRITE_VERBS or not callable(target):
+            return target
+
+        def wrapped(*a: Any, **kw: Any) -> Any:
+            sh = self._shared
+            sh["writes"] = sh.get("writes", 0) + 1
+            if sh["writes"] == self._n and not sh.get("fired"):
+                sh["fired"] = True
+                raise StoreFault(f"injected fault at write {self._n}: {name}")
+            return target(*a, **kw)
+        return wrapped
+
+
+@contextlib.contextmanager
+def store_fault_at(monkeypatch: Any, n: int):
+    """Every `defender.learning.store.blocking(dsn)` the code under test opens yields a `FaultStore` sharing one
+    counter, until the context ends. Yields the counter dict (`writes`, `fired`)."""
+    import defender.learning.store as store_mod
+
+    real_blocking = store_mod.blocking
+    shared: dict = {}
+
+    @contextlib.contextmanager
+    def faulty(dsn: str, **knobs: Any):
+        with real_blocking(dsn, **knobs) as real:
+            yield FaultStore(real, n, shared)
+
+    with monkeypatch.context() as m:
+        m.setattr(store_mod, "blocking", faulty)  # lint-monkeypatch: ok — the store opener is a module-level door the tick reaches itself; the fault seam A4 asks for
+        yield shared
 
 
 class Scene:
@@ -157,5 +182,5 @@ class Scene:
         assert sorted(self.decider.decided) == ids, f"each eligible comment must be decided exactly once, got {self.decider.decided}"
         for cid in ids:
             assert len(fb.replies(self.number, cid)) == 1, f"comment {cid} has {len(fb.replies(self.number, cid))} replies"
-        assert [r["comment_id"] for r in S.lessons_rows(fb.paths)] == [str(ids[1])], "the instruction's lessons row"
-        assert S.open_issue_requests(fb.paths) == {}, "the served request was not released"
+        assert [r["comment_id"] for r in S.lessons_rows(fb)] == [str(ids[1])], "the instruction's lessons row"
+        assert S.open_issue_requests(fb) == {}, "the served request was not released"
