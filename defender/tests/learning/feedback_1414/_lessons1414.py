@@ -41,7 +41,7 @@ def instruct(dsn: str, tenant_id: str, comment_id: int = 101, *, issue: int = 7,
             "issue_url": f"https://forge.invalid/issues/{issue}"}], judged=[comment_id], listed=True)
         call(dsn, "record_decision", held, comment_id, {
             "approved": [], "review_by": None, "instruction": instruction, "no_change": None, "unapprovable": None},
-            instruction={"comment_id": comment_id, "issue": issue, "author": author, "case_id": case_id,
+            instruction={"comment_id": str(comment_id), "issue": issue, "author": author, "case_id": case_id,
                          "instruction": instruction})
     finally:
         call(dsn, "end_feedback_tick", held)

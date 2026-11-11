@@ -78,7 +78,7 @@ async def with_issue(store, tenant=BLUE, run="run-1", number=7):
 
 
 def instruction_row(cid: int, text: str = "check the VPN log first") -> dict:
-    return {"comment_id": cid, "issue": 7, "author": "ann", "case_id": "case-1", "instruction": text}
+    return {"comment_id": str(cid), "issue": 7, "author": "ann", "case_id": "case-1", "instruction": text}
 
 
 # --- the tables (A4 data model) --------------------------------------------------------------------------------------
@@ -595,3 +595,22 @@ def test_offboarding_a_feedback_tick_that_ignores_the_stop_past_the_time_limit_f
     world.drive()
     assert world.record(tenant).state == "offboarded"
     assert sum(_learning_rows_of(dsn, tenant).values()) == 0
+
+
+async def test_d5_the_same_key_in_a_finding_and_a_feedback_instruction_is_two_items_each_with_its_own_fate(dsn):
+    """Finding `101` and instruction `101` are two rows, claimed together; an outcome for one kind moves only that kind's row. (A2 D7/H16 extended: matched per (kind, key), never by key alone)"""
+    S = store_mod()
+    async with learning_store(dsn) as store:
+        await store.publish_findings(BLUE, "run-1", [finding("101")], kind="finding")
+        held, run = await with_issue(store)
+        await store.judge_comments(held, run, taken=[comment(101)], judged=[101])
+        await store.record_decision(held, 101, decision(instruction="do x"), instruction=instruction_row(101, "do x"))
+        assert sorted((i.kind, i.key) for i in await store.work(BLUE)) == [("feedback_instruction", "101"), ("finding", "101")]
+
+        claim = await store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds=ALL_KINDS)
+        assert sorted((k, key) for k, key, _p in claim.items) == [("feedback_instruction", "101"), ("finding", "101")]
+        await store.in_review(claim, 3, {("finding", "101"): S.Outcome.waiting()})
+
+        by = {(i.kind, i.key): i.status for i in await store.work(BLUE)}
+        assert by[("finding", "101")] == "waiting", "the outcome of one kind moved the other"
+        assert by[("feedback_instruction", "101")] == "in_batch"

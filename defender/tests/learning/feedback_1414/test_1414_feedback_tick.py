@@ -631,23 +631,31 @@ def test_1414_an_issue_made_but_not_recorded_and_closed_before_the_redo_is_not_m
 
 
 #: A4 (change 4): the file-fault family (a state folder made unwritable) has no store twin; one fault seam replaces it.
-#: The scenario (a request, its issue, two comments, their decisions and replies) makes more store writes than this.
-_FAULT_AT = range(1, 11)
+#: The scenario (a request, its issue, two comments, their decisions and replies) makes at least this many store writes.
+_MIN_WRITES = 10
 
 
-@pytest.mark.parametrize("n", _FAULT_AT)
-def test_1414_a_failed_store_write_loses_no_comment_and_makes_no_second_issue(fb, monkeypatch, n):
-    """A tick that dies on its Nth store write (the fault seam: the proxy raises before the write reaches the database) is redone whole once its lease has lapsed: one issue, each eligible comment decided and replied to once, its instruction row written, and the request released. P5/O4/A4 change 4."""
-    scene = A.Scene(fb)
-    with A.store_fault_at(monkeypatch, n) as faults:
-        for _ in range(6):
-            scene.step()
-            if faults.get("fired") and scene.comments:
-                break
-    assert faults.get("fired"), f"premise: the scenario makes fewer than {n} store writes ({faults.get('writes')})"
-    fb.lapse()
-    A.tick_until_quiet(fb, scene.decider)
-    scene.verify()
+def test_1414_a_failed_store_write_loses_no_comment_and_makes_no_second_issue(fb, monkeypatch):
+    """For every N the tick makes, a tick that dies on its Nth store write (the fault seam: the proxy raises before the write reaches the database) is redone whole once its lease has lapsed: one issue, each eligible comment decided and replied to once, its instruction row written, the request released. P5/O4/A4 change 4."""
+    n = 0
+    while True:
+        n += 1
+        assert n <= 80, "the scenario never stopped making store writes"
+        scene = A.Scene(fb, case=f"case-fault-{n}")
+        with A.store_fault_at(monkeypatch, n) as faults:
+            for _ in range(6):
+                scene.step()
+                if faults.get("fired") and scene.comments:
+                    break
+        if not faults.get("fired"):
+            break
+        fb.lapse()
+        for _ in range(3):
+            if not scene.comments:
+                scene.step()
+        A.tick_until_quiet(fb, scene.decider)
+        scene.verify()
+    assert n > _MIN_WRITES, f"premise: the scenario makes at least {_MIN_WRITES} store writes, it made {n - 1}"
 
 
 def test_1414_a_failed_decision_transaction_leaves_no_decision_and_no_instruction_row_and_asks_once_more(fb, monkeypatch):

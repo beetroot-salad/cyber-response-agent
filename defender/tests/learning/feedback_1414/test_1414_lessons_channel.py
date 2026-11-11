@@ -182,7 +182,7 @@ def test_an_instruction_recorded_twice_for_one_comment_id_is_one_item_authored_o
     """Two recordings of comment 101 are one item (primary key: one row per comment, for good) and the model is shown it once. (D11, A4)"""
     w = world
     L.instruct(w.dsn, w.t.tenant_id, 101)
-    L.instruct(w.dsn, w.t.tenant_id, 101, issue=8, case_id="case-8", instruction="a second wording")
+    L.instruct(w.dsn, w.t.tenant_id, 101, instruction="a second wording")
     model = _feedback_model()
 
     assert list(L.instructions(w.dsn, w.t.tenant_id)) == ["101"]

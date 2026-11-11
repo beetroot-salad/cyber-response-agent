@@ -182,5 +182,6 @@ class Scene:
         assert sorted(self.decider.decided) == ids, f"each eligible comment must be decided exactly once, got {self.decider.decided}"
         for cid in ids:
             assert len(fb.replies(self.number, cid)) == 1, f"comment {cid} has {len(fb.replies(self.number, cid))} replies"
-        assert [r["comment_id"] for r in S.lessons_rows(fb)] == [str(ids[1])], "the instruction's lessons row"
-        assert S.open_issue_requests(fb) == {}, "the served request was not released"
+        assert [r["comment_id"] for r in S.lessons_rows(fb) if r["comment_id"] == str(ids[1])] == [str(ids[1])], \
+            "the instruction's lessons row"
+        assert [r for r in S.open_issue_requests(fb).values() if r["case_id"] == self.case] == [], "the served request was not released"
