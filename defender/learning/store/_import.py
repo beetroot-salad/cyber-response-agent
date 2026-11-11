@@ -89,6 +89,16 @@ _CHANNELS: dict[str, _Channel] = {
                         "_pending_pitfalls/pitfalls.deadletter.jsonl", "pitfall_id"),
 }
 _REQUESTS = "author-queue"
+#: #1414's feedback records under the learning folder (A4 'The records, today and after'). Owner ruling Q1 (b): the
+#: import refuses while any exists, naming it, and the cutover removes none.
+_FEEDBACK_FOLDERS = ("feedback-issue-queue", "feedback-cases", "feedback-seen", "feedback-cursor", "feedback-items",
+                     "feedback-decisions")
+#: The feedback lessons channel's files under `_pending/` (queue, consumed ledger, dead-letter, stuck, skip report).
+_FEEDBACK_CHANNEL = "feedback_lessons"
+#: A retained feedback delivery's record name (`<prefix slug>-<batch>.json`) and drain label, and its branch prefix.
+_FEEDBACK_DELIVERY = "feedback-"
+_FEEDBACK_LABEL = "feedback_drain"
+_FEEDBACK_BRANCH = "feedback/"
 _DELIVERY = "_pending_delivery"
 _COMMIT_RECORD = "commit-maker.jsonl"
 _WORKTREES = "worktrees"
@@ -317,7 +327,8 @@ def _request(name: str, body: dict[str, Any] | None, text: str, status: str) -> 
 
 def _commits(bound: _io.Bound) -> list[_Commit]:
     """The whole commit-maker record, in its order. A row of another shape records nothing, as today (`_Record.read`:
-    a torn line's commit is refused by every push route); a row whose lanes are not its branch's lane refuses."""
+    a torn line's commit is refused by every push route); a row whose lanes are not its branch's lane refuses, and a
+    row on a feedback branch refuses (Q1 b)."""
     made: list[_Commit] = []
     malformed = 0
     for row in _jsonl(bound, _COMMIT_RECORD):
@@ -326,6 +337,8 @@ def _commits(bound: _io.Bound) -> list[_Commit]:
         except ValueError:
             malformed += 1
             continue
+        if commit.branch.startswith(_FEEDBACK_BRANCH):
+            _refuse_feedback(bound, [commit])
         if tuple(row["lanes"]) != lanes_of_branch(commit.branch):
             raise ImportRefused(f"the commit-maker's row for {commit.commit} on {commit.branch} names lanes "
                                 f"{row['lanes']}, not its branch's lane's {list(lanes_of_branch(commit.branch))}")
@@ -372,6 +385,52 @@ def _record_row(row: dict[str, Any]) -> _Commit:
     branch, base, start = _batch_key(row.get("batch"))
     return _Commit(commit=str(_oid(row.get("commit"), absent=False)), branch=branch, base=base, start=start,
                    changes=tuple(parsed), reverts=reverts)
+
+
+def _records_below(bound: _io.Bound, folder: str, found: list[str]) -> None:
+    """Every entry in or below `folder` but its subfolders, by its path, into `found`; nothing is followed."""
+    listing = bound.under(folder).entries()
+    if listing.absent:
+        return
+    if listing.reason is not None or listing.entries is None:
+        raise ImportRefused(f"{folder}/ could not be listed: {listing.reason}")
+    dirs = set(listing.dirs())
+    for name in sorted(listing.entries):
+        if name in dirs:
+            _records_below(bound, f"{folder}/{name}", found)
+        else:  # a file, or anything else standing where a record would: named, never followed
+            found.append(f"{folder}/{name}")
+
+
+def _files_named(bound: _io.Bound, folder: str, prefix: str) -> list[str]:
+    listing = bound.under(folder).entries()
+    if listing.reason is not None and not listing.absent:
+        raise ImportRefused(f"{folder}/ could not be listed: {listing.reason}")
+    return [f"{folder}/{name}" for name in listing.files() if name.startswith(prefix)]
+
+
+def _feedback_records(bound: _io.Bound) -> list[str]:
+    """Every #1414 feedback record under the learning folder, by its path there: an entry in (or below) one of the
+    feedback record folders, a feedback lessons channel file, or a retained feedback delivery."""
+    found: list[str] = []
+    for folder in _FEEDBACK_FOLDERS:
+        _records_below(bound, folder, found)
+    found += _files_named(bound, "_pending", _FEEDBACK_CHANNEL)
+    found += _files_named(bound, _DELIVERY, _FEEDBACK_DELIVERY)
+    found += [f"{_DELIVERY}/{name}" for name, body, _text in _folder_records(bound, _DELIVERY)
+              if body is not None and body.get("label") == _FEEDBACK_LABEL and f"{_DELIVERY}/{name}" not in found]
+    return found
+
+
+def _refuse_feedback(bound: _io.Bound, commits: Sequence[_Commit] = ()) -> None:
+    """Owner ruling Q1 (b), A4 O13: while the tenant holds any #1414 feedback record (or a commit row on a feedback
+    branch), the import refuses, naming each; an operator decides per tenant."""
+    named = _feedback_records(bound)
+    named += sorted({f"the commit-maker's row for {c.commit} on {c.branch}" for c in commits
+                     if c.branch.startswith(_FEEDBACK_BRANCH)})
+    if named:
+        raise ImportRefused("the tenant holds #1414 feedback records, which the import does not take (owner ruling: "
+                            "an operator decides per tenant): " + ", ".join(named))
 
 
 # -- reading git and the forge ------------------------------------------------------------------------------------------
@@ -499,6 +558,7 @@ async def import_learning_state(store: LearningStore, tid: str, root: Path, *, d
     in one transaction. `ImportRefused` (nothing written, no file changed) for what the import will not guess: an
     unknown ledger category, two open authoring batches on one lane, a record of another shape it cannot place."""
     with _io.bind(Path(root)) as bound:
+        _refuse_feedback(bound)
         items = [item for kind in _CHANNELS for item in _channel_items(bound, kind)]
         items += _requests(bound)
         commits = _commits(bound)
@@ -565,10 +625,13 @@ def cut_over_learning_state(tenant: Any, root: Path) -> None:
 
     Nothing below `root` is followed: a link where a worktree or the folder itself should be is refused. An absent
     `root` is already cut over. The worktrees location must lie outside `root` (the tenant scratch location, A2 D10);
-    while it does not, the cutover refuses and removes nothing."""
+    while it does not, the cutover refuses and removes nothing. While a #1414 feedback record is there (the import
+    took none, Q1 b), the cutover refuses and removes nothing (A4 O13)."""
     root = Path(root)
     if not _io.entry_present(root):
         return
+    with _io.bind(root) as bound:
+        _refuse_feedback(bound)
     destination = unwrap_worktrees_root(tenant.worktrees)
     if destination.resolve().is_relative_to(root.resolve()):
         raise ImportRefused(f"the tenant's worktrees location {destination} is still under its learning folder "
