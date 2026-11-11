@@ -7,8 +7,9 @@ refused and stores nothing): the quote rule and the line rules (moved from `tena
 `config.env` that is not a plain file (moved from `test_record.py::nf16`), and one far larger than any settings file
 (moved from `runtime/permissions/test_review_roots.py`).
 
-NOT pinned (undecided by the design): a duplicate key, an `export K=v` line, a stray file or dot-folder beside the
-system folders at `import`.
+A duplicate key and an `export K=v` line are pinned (r8, R17): refused at every door, naming the system and the key (the
+rows at the end of this file). NOT pinned (undecided by the design): a stray file or dot-folder beside the system
+folders at `import`.
 
 The import's reader (`import`) is the other door: it reads the PUBLISHED export's files. A part that is not UTF-8 text and
 a part larger than the export reader's limit both reach it (probed: publish accepts them) and are pinned below at the
@@ -23,6 +24,8 @@ from __future__ import annotations
 
 import contextlib
 import os
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -246,3 +249,84 @@ def test_keys_are_case_sensitive_so_a_lower_case_spelling_is_not_the_setting(imp
     assert "CHANGE_MGMT_TIMEOUT_SEC" in said or "change_mgmt_timeout_sec" in said, said
     assert "Traceback" not in said, said
     assert _numbers(op) == before
+
+
+# --- R17: a line the old parser tolerated is refused ------------------------------------------------------------------------
+
+REPO = Path(__file__).resolve().parents[4]
+#: (id, the config.env text, the key the refusal names, a value that must not be stored): the declared key beside a line
+#: the old reader silently ignored (`export`) or overrode (a duplicate).
+R17_LINES = [
+    ("duplicate-key", 'CMDB_TIMEOUT_SEC="10"\nCMDB_TIMEOUT_SEC="9917"\n', "CMDB_TIMEOUT_SEC", "9917"),
+    ("duplicate-key-first-wins-looking", 'CMDB_TIMEOUT_SEC="9917"\nCMDB_TIMEOUT_SEC="10"\n', "CMDB_TIMEOUT_SEC", "9917"),
+    ("export-line", 'CMDB_TIMEOUT_SEC="10"\nexport CMDB_TIMEOUT_SEC="9918"\n', "CMDB_TIMEOUT_SEC", "9918"),
+    ("export-only-declared-key", 'export CMDB_TIMEOUT_SEC="9918"\n', "CMDB_TIMEOUT_SEC", "9918"),
+]
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("row", R17_LINES, ids=[r[0] for r in R17_LINES])
+def test_1366_r17_a_duplicate_key_and_an_export_line_are_refused_at_set_system_naming_the_system_and_the_key(imported_op, row):
+    """A `config.env` repeating a key, or spelling a setting as `export KEY=value`, is refused at `set-system` naming the
+    system and the key, with no traceback and no host path, and stores nothing (the old parser took the last value and
+    skipped the `export` line). Control: the declared key once is stored as the next version. (#1366 R17, H2)"""
+    _, text, key, value = row
+    op = imported_op
+    before = _numbers(op)
+    folder = _folder(op, "cmdb", text, CMDB_ACCESS)
+
+    rc, said = _set(op, "cmdb", folder, 1)
+
+    _refused_unchanged(op, "cmdb", rc, said, before)
+    assert R.lines_naming(said, "cmdb", key), said
+    assert value not in repr([op.versions(s) for s in R.FIXTURE_SYSTEMS]), "a value of the refused line was stored"
+    control = _folder(op, "cmdb", 'CMDB_TIMEOUT_SEC="10"\n', CMDB_ACCESS)
+    assert _set(op, "cmdb", control, 1)[0] == 0, "control: the key once is accepted"
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("row", R17_LINES, ids=[r[0] for r in R17_LINES])
+def test_1366_r17_a_duplicate_key_and_an_export_line_fail_the_whole_import_naming_the_system_and_the_key(
+        row, tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
+    """The same lines in a published `config.env` refuse the WHOLE import (the dry run names them too): the system and the
+    key named, nothing stored, the tenant not marked, no secret touched; an existing tenant with such a line fails
+    `import` until it is fixed. (#1366 R17, O9)"""
+    _, text, key, _value = row
+    files = R.import_files(**{"settings/systems/cmdb/config.env": text})
+    with _imported_world(files, tmp_path, data_root, migrated_database, capsys, monkeypatch) as op:
+        dry_rc, listed = op.import_(dry_run=True)
+        rc, said = op.import_()
+        assert dry_rc != 0, listed
+        assert rc != 0, said
+        for output in (listed, said):
+            assert R.lines_naming(output, "cmdb", key), f"the refusal does not name cmdb and {key}: {output}"
+            assert "Traceback" not in output, output
+        assert op.current() == {}
+        assert not R.imported(migrated_database, op.tid)
+        assert op.kv.requests == []
+
+
+@pytest.mark.parametrize("row", R17_LINES, ids=[r[0] for r in R17_LINES])
+def test_1366_r17_connects_handoff_validator_refuses_a_duplicate_key_and_an_export_line_naming_the_file_and_the_key(tmp_path, row):
+    """`validate_scaffold --handoff` judges the folder as the store does: the lines are a failure naming the key and the
+    file (DC6), and the report is not a pass; the same folder with the key once passes. (#1366 R17, O11)"""
+    import os
+
+    _, text, key, _value = row
+
+    def validated(config: str, label: str) -> tuple[int, str]:
+        folder = R.system_folder(tmp_path / label, "cmdb", config=None, access=CMDB_ACCESS)
+        (folder / "config.env").write_text(config, encoding="utf-8")
+        done = subprocess.run([sys.executable, "-m", "defender.skills.connect.validate_scaffold", "cmdb",
+                               "--handoff", str(folder)], cwd=REPO, env={**os.environ, "PYTHONPATH": str(REPO)},
+                              capture_output=True, text=True, timeout=120, check=False)
+        return done.returncode, done.stdout + done.stderr
+
+    _rc, clean = validated('CMDB_TIMEOUT_SEC="10"\n', "clean")
+    assert "the handoff's config.env and access.yaml are a record the store accepts for cmdb" in clean, clean  # control
+
+    _rc, report = validated(text, "bad")
+
+    assert "the handoff's config.env and access.yaml are a record the store accepts" not in report, report
+    assert R.lines_naming(report, key, "config.env"), report
+    assert "Traceback" not in report, report
