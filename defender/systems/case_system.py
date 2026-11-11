@@ -183,9 +183,9 @@ def case_verdict(
 def _judge_cover(system: str, module: Any, record: Any) -> None:
     """The case system's stored access declaration must be usable and cover its adapter's
     comment route (#1366 C2, C5): THE cover rule the store's write and `tenant check` ask
-    (`record_judgement.case_cover_fault`). A route the settings cannot build is the adapter's
-    settings fault, named at the system's settings."""
-    from defender.systems.catalog import COMMENT_ROUTE
+    (`record_judgement.case_cover_fault`). An adapter that declares no comment route offers no
+    comment action there, catalog adapter or not. A route the settings cannot build is the
+    adapter's settings fault, named at the system's settings."""
     from defender.systems.record_judgement import case_cover_fault
 
     pointer = RECORDS.part(system, "access")
@@ -195,15 +195,6 @@ def _judge_cover(system: str, module: Any, record: Any) -> None:
     if found is None:
         raise CaseSettingsFault(pointer, "is absent: a case system is reached only through the "
                                 "credential proxy, at the base its access declaration names")
-    if getattr(module, COMMENT_ROUTE, None) is None:
-        # An adapter with the comment action that declares no route at all is not a catalog
-        # adapter (the catalog lint holds every one to declaring it): a stand-in a test or a
-        # tree copy plants. Its comment has no route to judge cover against, so run start keeps
-        # #1359's rule for it, as before #1366: the declaration routes some write.
-        if not found.writes:
-            raise CaseSettingsFault(pointer, "declares no write route: the host's comment has no "
-                                    "route to be sent on")
-        return
     settings = record.systems.get(system)
     try:
         why = case_cover_fault(module, settings if isinstance(settings, Mapping) else {}, found)
