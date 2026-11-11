@@ -395,15 +395,18 @@ def tenant_py(module: Any, *args: str, root: Path | str | None, seed: list[str] 
 #: test-side launcher is a test module and a copy carries no `tests/`): the copy's `defender` package is first on
 #: the path, the way its script puts its checkout first. Each seeded tenant gets the launcher's
 #: planted alert mapping (#1345: `check` refuses a tenant with none), spelled with the copy's own
-#: production types, as `_mapping1345.add_to_twin` spells it for the launcher.
+#: production types, as `_mapping1345.add_to_twin` spells it for the launcher. Likewise its records (#1366 R8: a tenant
+#: with none is not imported and is refused): the records the test side computes for each seeded tenant (`_records_json`,
+#: `R.derive` over the tenant's planted folder) built with the copy's own `SystemRecord` / `CaseRecord` / `TenantRecords`.
 _COPY_DRIVER = """
 import asyncio, datetime, inspect, json, sys
 from defender.tenancy import InMemoryTenantRepository, TenantDirectory
-from defender.tenancy.models import AlertMappingRow
+from defender.tenancy.models import AlertMappingRow, CaseRecord, SystemRecord, TenantRecords
 from defender.records._alert_input import AlertMapping
 from defender.cli import tenant
 seeded, argv = sys.argv[1].split(","), sys.argv[2:]
 mapping = AlertMapping(paths={k: v for k, v in json.loads(@@MAPPING@@).items() if v is not None})
+records = json.loads(@@RECORDS@@)
 twin = InMemoryTenantRepository()
 for name in filter(None, seeded):
     added = twin.add_tenant(name, created_at=datetime.datetime(2026, 10, 26, 9, tzinfo=datetime.timezone.utc),
@@ -412,8 +415,37 @@ for name in filter(None, seeded):
         asyncio.run(added)
     with twin._mutex:
         twin._mappings[name] = AlertMappingRow.of(name, mapping)
+    held = records.get(name)
+    if held is not None:
+        case = held["case"]
+        added = twin.add_records(name, TenantRecords(
+            imported=True,
+            systems={s: SystemRecord(system_id=s, version=r["version"], adapter_id=r["adapter"], enabled=r["enabled"],
+                                     settings=r["settings"], access=r["access"], credential_generation=r["generation"])
+                     for s, r in held["systems"].items()},
+            case=None if case is None else CaseRecord(version=case["version"], system_id=case["system"],
+                                                      comment_body=case["body"])))
+        if inspect.isawaitable(added):
+            asyncio.run(added)
 sys.exit(tenant.main(argv, directory=TenantDirectory(lambda: twin)))
 """.replace("@@MAPPING@@", repr(json.dumps(dict(_PLANTED_ALERT_MAPPING))))
+
+
+def _records_json(root: Path | str | None, seeds: list[str]) -> str:
+    """The records of each seeded tenant (`R.derive` over its planted/published `settings/`, as every planting helper
+    seeds them), as the driver's JSON: the driver builds production's types from it with the copy's own classes."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    out: dict[str, Any] = {}
+    for name in filter(None, seeds):
+        spec = R.derive(R.settings_of(root, name))
+        out[name] = {
+            "systems": {s: {"version": v.version, "adapter": v.adapter or s, "enabled": v.enabled,
+                            "settings": dict(v.settings), "access": v.access, "generation": v.generation}
+                        for s, v in spec.systems.items()},
+            "case": None if spec.case is None else {"version": spec.case.version, "system": spec.case.system_id,
+                                                    "body": spec.case.comment_body}}
+    return json.dumps(out)
 
 
 def checkout_tenant_py(checkout: Path, *args: str, root: Path | str | None, seed: list[str] | None = None,
@@ -424,7 +456,8 @@ def checkout_tenant_py(checkout: Path, *args: str, root: Path | str | None, seed
     env["PYTHONPATH"] = str(checkout)
     seeds = placed_tenants(root) if seed is None else seed
     return subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
-        [sys.executable, "-c", _COPY_DRIVER, ",".join(seeds), *args], env=env, cwd=str(checkout),
+        [sys.executable, "-c", _COPY_DRIVER.replace("@@RECORDS@@", repr(_records_json(root, seeds))), ",".join(seeds), *args],
+        env=env, cwd=str(checkout),
         capture_output=True, text=True, timeout=180, check=False)
 
 
