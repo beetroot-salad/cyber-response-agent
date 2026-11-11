@@ -159,7 +159,10 @@ def test_an_expiry_warning_claimed_before_its_tenant_left_active_is_settled_and_
     s.world.repo.after["claim_expiry_warning"] = _leaves_active(s.world, T1)
     for world in (s.world, control.world):
         world.clock.advance(DEFAULT_LIFETIME - 14 * DAY + HOUR)  # 14 days minus an hour before the key expires
+    used = control.world.call(control.world.repo.credential_by_id, control.key_id).last_used_at
+    for world in (s.world, control.world):
         world.send_pending()
+    assert control.world.call(control.world.repo.credential_by_id, control.key_id).last_used_at == used  # the recheck must not touch
     assert s.world.mail.warnings == []
     assert "claim_expiry_warning" not in s.world.repo.after  # the flip happened, between the claim and the recheck
     assert s.world.call(s.world.repo.credential_by_id, s.key_id).warn_threshold_days == 3

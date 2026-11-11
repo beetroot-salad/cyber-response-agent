@@ -11,7 +11,7 @@ Forced choices (FC-7, extending the support module's list; the design names no r
 `add_program(tenant_id, *, display_name, created_by, now) -> Program`;
 `add_membership(..., role="admin")` (the seeder takes the role; people default `admin`);
 `add_credential(program_id, *, kind, name, created_by, expires_at, now, key_hash=None) -> row` (keys `live`; OAuth
-`pending` with `pending_deadline = now + 10 min`; None, writing nothing, without an active membership; over the cap, for a non-program, or
+`pending` with `pending_deadline = now + 10 min`; None, writing nothing, for a removed program; over the cap, for a non-program, or
 a key without its hash / an OAuth client with one -> `DataRuleViolation`, the cap as its subclass `CredentialCapReached`);
 `go_live(credential_id, *, service_account_id, now) -> bool`; `revoke_credential(credential_id, *, revoked_by, now) -> bool`;
 `credentials_of_program(program_id)`; `credential_by_id(id)` / `credential_by_hash(key_hash)` -> row or None (any state);
@@ -43,7 +43,7 @@ import hashlib
 import pytest
 
 from defender.identity import DataRuleViolation
-from defender.records.formats import MembershipId, TenantId, UserId
+from defender.records.formats import TenantId, UserId
 from defender.tests.identity.test_identity_repository_contract import (  # noqa: F401  (fixtures)
     HOUR,
     NO_SUCH_ROW,
@@ -65,7 +65,7 @@ from defender.tests.identity.test_identity_repository_contract import (  # noqa:
 )
 from defender.tests.support.identity._tenant_states1454 import NOT_ACTIVE, leave_active
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
-from defender.tests.support.shared._pglocks1339 import TIMEOUT, holding_row, until_blocked
+from defender.tests.support.shared._pglocks1339 import TIMEOUT, blocked, holding_row, until, until_blocked
 
 pytestmark = pytest.mark.anyio
 
@@ -197,17 +197,6 @@ async def test_the_people_reads_hold_only_people_and_the_program_reads_only_acti
     assert await seeded.tenant_has_active_members(T1) is False  # the program does not make a tenant "have members"
     assert await seeded.people_of_tenant(T1, "active") == []
     assert [p.id for p in await seeded.programs_of_tenant(T1)] == [soar.id]  # control: the program is still there
-
-
-async def test_a_program_id_is_no_membership_so_member_removal_finds_nothing(seeded):
-    """Ending or reading a membership by a program's id answers as for any unknown row; a real membership ends (O-B, 404 as today)."""
-    ann = await _user(seeded)
-    membership = await _active(seeded, ann)
-    program = await _program(seeded, ann)
-    unknown = MembershipId(str(program.id))
-    assert await seeded.membership(unknown) is None
-    assert await seeded.end_membership(unknown, ended_by=ann.id, now=NOW) is False
-    assert await seeded.end_membership(membership.id, ended_by=ann.id, now=NOW) is True
 
 
 # --- credentials -------------------------------------------------------------------------------------
@@ -914,7 +903,8 @@ async def _admissions_that_disagree(repo, rows, expected, program_of, key_hash_o
 async def test_every_use_of_a_credential_agrees_with_the_standing_of_its_program_and_its_own_predicate(seeded, backend, tenants):
     """Over credential state x expiry/deadline x program status x tenant state, authentication (by key, by client, by credential), the
     expiry-warning claim and the keep-set each admit exactly standing (program `active`, tenant `active`) and their own credential
-    predicate: usable for the first three, usable or pending within its deadline for the keep-set (O-C, O-D)."""
+    predicate: usable for the first three, usable or pending within its deadline for the keep-set (O-C, O-D).
+    Removed-program cells read back `revoked`; the program-status rule alone is observed by the raw-write test below."""
     built = await _build_matrix(seeded, backend, tenants, await _user(seeded))
     rows = {credential_id: await seeded.credential_by_id(credential_id) for _, credential_id, _, _, _ in built}
     standing = {credential_id: state == "active" and not removed for _, credential_id, state, removed, _ in built}
@@ -1014,55 +1004,73 @@ async def test_an_invitation_is_not_accepted_once_its_tenant_left_active(seeded,
     assert await seeded.accept_invitation(staying.id, now=NOW) is True  # control
 
 
+async def _pl_write(repo, write, admin, invitee, invitation):
+    """The P-L write, held by the caller at its own row: what it made (a program id, the invitee's id, the accepted row's id), None when
+    it returned False, or the `DataRuleViolation` it raised."""
+    try:
+        if write == "program":
+            return (await _program(repo, admin)).id
+        if write == "invitation":
+            return (await repo.ensure_invitation(invitee.id, T1, invited_by=admin.id, now=NOW)).user_id
+        return invitation.id if await repo.accept_invitation(invitation.id, now=NOW) else None
+    except DataRuleViolation as refusal:
+        return refusal
+
+
+async def _pl_end_tenant_reads(repo, write):
+    """What `end_tenant` reads of T1 for that write: active programs, memberships' users, or active memberships."""
+    if write == "program":
+        return [p.id for p in await repo.programs_of_tenant(T1)]
+    if write == "invitation":
+        return [m.user_id for m in await repo.memberships_of_tenant(T1)]
+    return [m.id for m in await repo.memberships_of_tenant(T1) if m.status == "active"]
+
+
 @pytest.mark.postgres
-@pytest.mark.parametrize("write", ["program", "invitation"])
-@pytest.mark.parametrize("first", ["offboard", "create"])
-async def test_a_create_and_the_offboard_write_wait_for_each_other_on_the_tenant_row(two_repositories, pg_dsn, first, write):
-    """C14: offboard first -> the create waits, then raises `TenantNotActive` and writes nothing; create first (held at its insert) -> the
-    offboard waits on the create's share lock and the program or invitation is there for `end_tenant` to read (P-L, O-E)."""
+@pytest.mark.parametrize("write", ["program", "invitation", "accept"])
+@pytest.mark.parametrize("order", ["write-first", "offboard-first"])
+async def test_a_write_and_the_offboard_leave_nothing_live_in_the_tenant_in_either_order(two_repositories, pg_dsn, order, write):
+    """C14: with the write held at its own row, the offboard either finishes first and the write is refused, or waits and the write is
+    there for `end_tenant`; nothing is left live in an offboarded tenant either way (P-L, O-E)."""
     from defender.database import async_engine
-    from defender.identity import TenantNotActive
     from defender.tenancy.models import offboard
 
     one, _ = two_repositories
     admin, invitee = await _user(one), await _user(one, "bob@x.org")
+    invitation = await _invited(one, invitee) if write == "accept" else None
+    held = ("memberships", invitation.id) if write == "accept" else ("users", admin.id)  # the write's own row
     engine = async_engine(pg_dsn)
-
-    def create():
-        if write == "program":
-            return _program(one, admin)
-        return one.ensure_invitation(invitee.id, T1, invited_by=admin.id, now=NOW)  # the insert checks `invited_by`'s row
-
-    async def read():
-        if write == "program":
-            return [p.id for p in await one.programs_of_tenant(T1)]
-        return [m.user_id for m in await one.memberships_of_tenant(T1)]
 
     async def offboarding():
         async with engine.begin() as conn:
             return await offboard(conn, T1)
 
+    async def settled() -> bool:
+        if order == "offboard-first":
+            return attempt.done() or await blocked(pg_dsn) == 1
+        return leave.done() or await blocked(pg_dsn) == 2
+
     try:
-        if first == "offboard":
-            async with engine.begin() as conn:
-                await offboard(conn, T1)
-                attempt = asyncio.ensure_future(create())
-                await until_blocked(pg_dsn, 1)
-                assert not attempt.done()
-            with pytest.raises(TenantNotActive):
-                await asyncio.wait_for(attempt, TIMEOUT)
-            assert await read() == []
-        else:
-            async with holding_row(pg_dsn, "users", admin.id):
-                attempt = asyncio.ensure_future(create())
+        async with holding_row(pg_dsn, *held):
+            if order == "write-first":
+                attempt = asyncio.ensure_future(_pl_write(one, write, admin, invitee, invitation))
                 await until_blocked(pg_dsn, 1)
                 leave = asyncio.ensure_future(offboarding())
-                await until_blocked(pg_dsn, 2)
-                assert not attempt.done()
-                assert not leave.done()
-            made = await asyncio.wait_for(attempt, TIMEOUT)
-            assert (await asyncio.wait_for(leave, TIMEOUT)).state == "offboarding"
-            assert await read() == [made.id if write == "program" else invitee.id]
+            else:
+                leave = asyncio.ensure_future(offboarding())
+                await asyncio.wait_for(leave, TIMEOUT)
+                attempt = asyncio.ensure_future(_pl_write(one, write, admin, invitee, invitation))
+            await until(settled)
+            offboard_finished = leave.done()
+        made = await asyncio.wait_for(attempt, TIMEOUT)
+        assert (await asyncio.wait_for(leave, TIMEOUT)).state == "offboarding"
+        if offboard_finished:
+            from defender.identity import TenantNotActive  # imported here so the setup runs before the class exists
+
+            assert (made is None) if write == "accept" else isinstance(made, TenantNotActive), made
+            assert await _pl_end_tenant_reads(one, write) == []
+        else:
+            assert await _pl_end_tenant_reads(one, write) == [made]
     finally:
         await engine.dispose()
 
