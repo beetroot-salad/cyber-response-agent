@@ -632,6 +632,14 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     return {**summary, "run_state": state}
 
 
+def _tenants_roster(run_tenant: Any, tree: Path) -> Any:
+    """(#1366 R16) The driver builds no roster of its own: a replay naming none runs over the tenant's systems, its enabled
+    records over the checkout's catalog, as run start hands them."""
+    from defender.systems.catalog import Catalog, TenantSystems
+
+    return TenantSystems.of(run_tenant.records, Catalog.of_checkout(tree)).roster
+
+
 def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter each
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
@@ -699,6 +707,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         dispatches_lead_zero=resume is None and verbs is not None, records=records,
     )
     seams["box"] = box if box is not None else production_unboxed_box(run_dir, tree, run_tenant)
+    seams.setdefault("roster", _tenants_roster(run_tenant, tree))
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=RunPaths(run_dir).alert, run=Run.under(fixture_runs_base(run_dir.parent), run_dir.name),
