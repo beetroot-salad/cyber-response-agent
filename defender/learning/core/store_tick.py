@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import datetime as _dt
 import logging
 import math
 import os
@@ -364,13 +363,6 @@ class Tick:
 
     # -- what there is to do -----------------------------------------------------------------------
 
-    def _now(self) -> _dt.datetime:
-        return _dt.datetime.now(_dt.UTC)
-
-    def _lapsed(self, b: Any) -> bool:
-        return (b.phase == "working" and b.lease_expiry is not None
-                and b.lease_expiry + _dt.timedelta(seconds=float(self.store.grace)) < self._now())
-
     def _open_pr_of_ended(self, b: Any) -> bool:
         return (b.phase == "ended" and b.outcome == "abandoned" and b.pr_number is not None
                 and (b.last_checked is None or (b.ended_at is not None and b.last_checked < b.ended_at)))
@@ -394,7 +386,7 @@ class Tick:
         views = self.store.batches(self.tenant_id)
         items = self.store.work(self.tenant_id)
         review = [b for b in views if b.phase == "in_review" and b.lane in self.reconcile_lanes]
-        lapsed = [b for b in views if b.lane == self.lane and self._lapsed(b)]
+        lapsed = [b for b in views if b.lane == self.lane and b.lapsed]
         closing = [b for b in views if b.lane in self.reconcile_lanes and self._open_pr_of_ended(b)]
         busy = any(b.lane == self.lane and b.phase in ("working", "needs_person") for b in views) or any(
             b.lane == self.lane and b.kind == "author" and b.phase != "ended" for b in views)

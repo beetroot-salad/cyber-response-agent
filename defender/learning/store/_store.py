@@ -175,6 +175,9 @@ class BatchView:
     reason: str | None
     created_at: _dt.datetime
     ended_at: _dt.datetime | None
+    #: The database's own reading: working, and its lease and grace have run out. The one lapse test (O1, P6);
+    #: no host reads a clock of its own for it.
+    lapsed: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -214,7 +217,8 @@ def _view(row: Any) -> BatchView:
         start=row.start, phase=row.phase, outcome=row.outcome, lease_owner=row.lease_owner,
         lease_expiry=row.lease_expiry, token=row.fencing_token, cancel_requested=row.cancel_requested,
         pr_number=row.pr_number, replaces=row.replaces, generation=row.generation, refusals=row.refusals,
-        last_checked=row.last_checked, reason=row.reason, created_at=row.created_at, ended_at=row.ended_at)
+        last_checked=row.last_checked, reason=row.reason, created_at=row.created_at, ended_at=row.ended_at,
+        lapsed=bool(getattr(row, "lapsed", False)))
 
 
 def _digest(value: Any) -> str:
@@ -281,6 +285,15 @@ class LearningStore:
 
     def _in(self, seconds: float) -> Any:
         return func.now() + literal(_dt.timedelta(seconds=seconds))
+
+    def _lapsed(self) -> Any:
+        """The one test of "lapsed", judged by the database's clock: a working batch whose lease and grace have run
+        out. Every recovery path (takeover, recovery abandon, offboarding, the tick's selection) uses it."""
+        return and_(_B.c.phase == "working", _B.c.lease_expiry.is_not(None),
+                    func.now() > _B.c.lease_expiry + literal(_dt.timedelta(seconds=self.grace)))
+
+    async def _is_lapsed(self, s: AsyncSession, row: Any) -> bool:
+        return bool((await s.execute(select(self._lapsed()).where(_B.c.id == row.id))).scalar_one())
 
     async def _require_active(self, s: AsyncSession, tenant: str) -> None:
         """The tenant is active, held so for this transaction (a share lock keeps the offboarding's update behind it)."""
@@ -379,7 +392,7 @@ class LearningStore:
 
     async def batches(self, tenant: str) -> list[BatchView]:
         async with self._sessions() as s:
-            rows = (await s.execute(select(_B).where(_B.c.tenant_id == TenantId(tenant))
+            rows = (await s.execute(select(_B, self._lapsed().label("lapsed")).where(_B.c.tenant_id == TenantId(tenant))
                                     .order_by(_B.c.created_at, _B.c.id))).all()
         return [_view(r) for r in rows]
 
@@ -510,9 +523,7 @@ class LearningStore:
         """Fence a working batch whose lease and grace have run out and become its holder (O1, P6)."""
         async with self._sessions.begin() as s:
             row = await self._batch(s, tenant, batch_id)
-            lapsed = (await s.execute(select(func.now() > row.lease_expiry + literal(_dt.timedelta(seconds=self.grace)))
-                                      )).scalar_one() if row.lease_expiry is not None else False
-            if row.phase != "working" or not lapsed:
+            if not await self._is_lapsed(s, row):
                 raise NotLapsed(batch_id)
             token = row.fencing_token + 1
             await s.execute(update(_B).where(_B.c.id == row.id).values(
@@ -617,9 +628,7 @@ class LearningStore:
                     await self._give_back(s, tenant, row, forgive=False, hold=True, reason="abandoned by a person")
                     await self._end(s, row.id, "abandoned", reason="abandoned by a person", token=row.fencing_token + 1)
                 return
-            lapsed = row.lease_expiry is not None and (await s.execute(select(
-                func.now() > row.lease_expiry + literal(_dt.timedelta(seconds=self.grace))))).scalar_one()
-            if row.phase != "working" or not lapsed:
+            if not await self._is_lapsed(s, row):
                 raise NotLapsed(batch_id)
             await self._give_back(s, tenant, row, forgive=False, hold=False)
             await self._end(s, row.id, "abandoned", reason="its holder was lost", token=row.fencing_token + 1)
