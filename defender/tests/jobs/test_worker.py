@@ -588,7 +588,7 @@ _SPELLINGS = {"trailing space": lambda w: w + " ", "trailing newline": lambda w:
               "leading byte-order mark": lambda w: "\ufeff" + w,
               "zero-width space inside": lambda w: w[:2] + "\u200b" + w[2:]}
 for _key, _words in (("setup", ("refused", "crashed", "done")), ("box", ("not_started", "start_failed", "started")),
-                     ("cut_short", ("box-lost", "box-output-limit", "provider-down", "budget"))):
+                     ("cut_short", ("box-lost", "box-output-limit", "provider-down", "budget", "proxy-access"))):
     for _word in _words:
         for _how, _spell in _SPELLINGS.items():
             CASES[f"1-job-end-{_key}-word-{_word}-{_how.replace(' ', '-')}"] = _spec(
@@ -644,7 +644,7 @@ def test_p1_r7_3_a_job_end_record_is_exactly_its_five_facts_and_names_no_spend_f
         assert job_lane.JobEnd.parse(unreadable) is None, unreadable
 
 
-_CUT_SHORT_WORDS = sorted({*run_end.TRUNCATED_BY_VALUES, "box-lost", "box-output-limit"})
+_CUT_SHORT_WORDS = sorted({*run_end.TRUNCATED_BY_VALUES, "box-lost", "box-output-limit", "proxy-access"})  # #1363 B6: named, not only derived
 
 
 @pytest.mark.parametrize(("cut_short", "verified"), [(word, True) for word in _CUT_SHORT_WORDS] + [

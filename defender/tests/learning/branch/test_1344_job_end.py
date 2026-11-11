@@ -247,31 +247,68 @@ def test_too_many_unservable_worlds_end_skipped_family_unusable_with_nothing_sta
     assert ran.spawn.launches == []
 
 
-#: Every refusal pre-flight records before the first sibling, by cause, and the row it ends: a refusal caused by the
-#: family or its source skips the job for good; the environment's (the read token for the credential proxy cannot be
-#: signed) fails it. A new refusal in pre-flight fails the census below until it is given a row here.
+#: The environment's structured causes on the pre-flight record (the value of `ENVIRONMENT_REFUSED`, #1363 O6, B5): the
+#: sign / access / setup that choose the job's fixed brief. Each has a row below, and the module names each.
+_ENVIRONMENT_CAUSES = ("sign", "access", "setup")
+#: The cause value the test pins for D9's down-systems-only refusal (the design names none; the agent's choice, B1).
+_DOWN_SYSTEMS_CAUSE = "down-systems"
+_BRIEF_SIGN = "the read token for the credential proxy cannot be signed"
+_BRIEF_ACCESS = "the credential proxy could not be used"
+_BRIEF_SETUP = "our setup for a system failed"
+#: The fixed brief the record's structured cause chooses: the job-level observation of that cause (the record itself
+#: is not exposed to the entry's callers). D9's down-systems cause has no fixed brief, so none is observable here.
+_BRIEF_OF_CAUSE = {"sign": _BRIEF_SIGN, "access": _BRIEF_ACCESS, "setup": _BRIEF_SETUP}
+
+#: Every refusal pre-flight records before the first sibling, by CAUSE (#1363 B5: not by call site, several causes
+#: share the outcome writer), the row it ends, and the SITE it reaches: `("reason", <the first four words of the reason
+#: text of the `record(REFUSED | UNUSABLE, ...)` that writes it>)` for the family's own refusals, `("cause", <the
+#: structured environment cause>)` for the environment's, `("cause", _DOWN_SYSTEMS_CAUSE)` for D9's down-systems-only refusal.
+#: A refusal caused by the family or its source skips the job for good; the environment's (no signable read token, no usable credential proxy, our setup for a system, a pass left
+#: with only down systems) fails it. A cause with no row here has no job ending.
 _PREFLIGHT_REFUSALS = {
-    "no fact world": ("skipped", "family_unusable"),
-    "no original call": ("skipped", "family_unusable"),
-    "no replayable call": ("skipped", "family_unusable"),
-    "read token cannot be signed": ("failed", "launch_refused"),
-    "too many unservable worlds": ("skipped", "family_unusable"),
+    "no fact world": ("skipped", "family_unusable", ("reason", "no world of the")),
+    "no original call": ("skipped", "family_unusable", ("reason", "the source run made")),
+    "no replayable call": ("skipped", "family_unusable", ("reason", "none of the source")),
+    "too many unservable worlds": ("skipped", "family_unusable", ("reason", "{} worlds failed calibration")),
+    "read token cannot be signed": ("failed", "launch_refused", ("cause", "sign")),
+    "no proxy address, no replayed call proxied": ("failed", "launch_refused", ("cause", "sign")),
+    "only down systems": ("failed", "launch_refused", ("cause", _DOWN_SYSTEMS_CAUSE)),
+    "our failure: proxy unreachable during the live reads": ("failed", "launch_refused", ("cause", "access")),
+    "our failure: no credential set stored for the read system": ("failed", "launch_refused", ("cause", "setup")),
+    "our failure: the first sign fails at the first read": ("failed", "launch_refused", ("cause", "sign")),
+    "our failure: no sign login recorded for the tenant": ("failed", "launch_refused", ("cause", "sign")),
+    "our failure: a re-sign fails mid-pass": ("failed", "launch_refused", ("cause", "sign")),
 }
+#: The brief the job's end must carry, where the design fixes one (B5, C2, O6): the brief of the row's cause (sign, access, setup).
+#: The D9 down-systems-only refusal has none named, so none is pinned for it.
+_PREFLIGHT_BRIEFS = {
+    row: _BRIEF_OF_CAUSE[site[1]] for row, (_s, _r, site) in _PREFLIGHT_REFUSALS.items()
+    if site is not None and site[0] == "cause" and site[1] in _BRIEF_OF_CAUSE}
 #: The question-writer's family refused before pre-flight: the family's own refusal too.
 _QUESTIONER_UNUSABLE = "questioner family unusable"
 
 
-def _preflight_refusal_sites() -> int:
-    """How many refusals `preflight_replay` records: its `record(REFUSED | UNUSABLE, ...)` calls."""
+def _preflight_refusal_reasons() -> set[str]:
+    """What `preflight` records for the family: the first four words of the reason text of each
+    `record(REFUSED | UNUSABLE, ...)` that passes no `environment=`."""
     import ast
     import inspect
 
     from defender.learning.branch import preflight
 
-    tree = ast.parse(textwrap.dedent(inspect.getsource(preflight.preflight_replay)))
-    return sum(1 for node in ast.walk(tree)
-               if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "record"
-               and node.args and isinstance(node.args[0], ast.Name) and node.args[0].id in {"REFUSED", "UNUSABLE"})
+    reasons: set[str] = set()
+    for node in ast.walk(ast.parse(inspect.getsource(preflight))):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "record"):
+            continue
+        if any(kw.arg == "environment" for kw in node.keywords) or not (
+                node.args and isinstance(node.args[0], ast.Name) and node.args[0].id in {"REFUSED", "UNUSABLE"}):
+            continue
+        reason = node.args[1] if len(node.args) > 1 else None
+        text = "".join(part.value if isinstance(part, ast.Constant) else "{}" for part in
+                       (reason.values if isinstance(reason, ast.JoinedStr) else [reason])
+                       if isinstance(part, (ast.Constant, ast.FormattedValue)))
+        reasons.add(" ".join(text.split()[:4]))
+    return reasons
 
 
 @dataclass
@@ -286,7 +323,7 @@ class _ProxiedEstate(S.Estate):
         return super().place(data_root, tenant_id, configs={**(configs or {}), "elastic": config_texts(tenant_id)["elastic"]})
 
 
-def _refused_before_the_first_sibling(tmp_path, monkeypatch, cause: str):
+def _refused_before_the_first_sibling(tmp_path, monkeypatch, cause: str, data_root=None):
     from defender.tests.learning.oracle.live_contracts.test_preflight_and_outcome import _family
 
     if cause == _QUESTIONER_UNUSABLE:
@@ -304,6 +341,19 @@ def _refused_before_the_first_sibling(tmp_path, monkeypatch, cause: str):
         monkeypatch.delenv(PROXY_URL_ENV, raising=False)
         return run_entry(tmp_path, estate=_ProxiedEstate,
                          calls=[*_calls(), S.Call("elastic", "query", S.query_params("user.name:alice"), _BASE)])
+    if cause == "no proxy address, no replayed call proxied":
+        from defender.kit.access import PROXY_URL_ENV
+
+        monkeypatch.delenv(PROXY_URL_ENV, raising=False)
+        return run_entry(tmp_path, estate=_ProxiedEstate)  # elastic is granted and declared; no call reaches it
+    if cause == "only down systems":
+        def down(root):
+            est = S.estate(root, systems=(*S.SYSTEMS, "hr"))
+            est.break_settings("hr")
+            return est
+        return run_entry(tmp_path, estate=down, calls=[S.Call("hr", "query", S.query_params("user:alice"), _BASE)])
+    if cause.startswith("our failure: "):
+        return _our_failure(tmp_path, monkeypatch, data_root, cause.removeprefix("our failure: "))[0]
     assert cause == "too many unservable worlds", cause
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     return run_entry(tmp_path, oracle=S.oracle(then=S.text_only("no served answer fits this world")))
@@ -311,16 +361,97 @@ def _refused_before_the_first_sibling(tmp_path, monkeypatch, cause: str):
 
 @pytest.mark.parametrize("cause", [*_PREFLIGHT_REFUSALS, _QUESTIONER_UNUSABLE])
 def test_a_refusal_before_the_first_sibling_skips_the_job_when_the_family_caused_it_and_fails_it_when_the_environment_did(
-        tmp_path, monkeypatch, cause):
+        tmp_path, monkeypatch, cause, data_root):
     """Each refusal pre-flight records, and the question-writer's unusable family: the family's or its source's own end
     `skipped: family_unusable`; the read token for the credential proxy that cannot be signed is the environment's and
     ends `failed: launch_refused`. Nothing is started either way. (r5 table, L3, #1344 attack round F3)"""
-    assert _preflight_refusal_sites() == len(_PREFLIGHT_REFUSALS), \
-        "pre-flight records a refusal no row of `_PREFLIGHT_REFUSALS` decides"
-    status, reason = _PREFLIGHT_REFUSALS.get(cause, ("skipped", "family_unusable"))
-    ran = _refused_before_the_first_sibling(tmp_path, monkeypatch, cause)
-    _failed_with(ran, status, reason)
+    status, reason, _site = _PREFLIGHT_REFUSALS.get(cause, ("skipped", "family_unusable", None))
+    ran = _refused_before_the_first_sibling(tmp_path, monkeypatch, cause, data_root)
+    message = _failed_with(ran, status, reason)
     assert ran.spawn.launches == []
+    if cause in _PREFLIGHT_BRIEFS:
+        assert _PREFLIGHT_BRIEFS[cause] in message, message
+    if cause == "only down systems":  # D9: its own cause, so none of the other causes' briefs (O6)
+        assert not [b for b in _BRIEF_OF_CAUSE.values() if b in message], ("a down system read as our failure", message)
+
+
+def test_1363_the_refusal_table_names_exactly_the_sites_and_causes_pre_flight_records():
+    """The table's family sites are exactly the reasons pre-flight records for the family, and its causes exactly
+    pre-flight's closed `ENVIRONMENT_CAUSES` (sign, access, setup, down-systems). (#1363 B5, O6, D9)"""
+    from defender.learning.branch.preflight import ENVIRONMENT_CAUSES
+
+    named = [site for _s, _r, site in _PREFLIGHT_REFUSALS.values() if site is not None]
+    assert _preflight_refusal_reasons() == {value for kind, value in named if kind == "reason"}, \
+        "pre-flight records a family refusal the table does not name, or the table names one it does not"
+    assert set(ENVIRONMENT_CAUSES) == {value for kind, value in named if kind == "cause"}, \
+        ("pre-flight's environment causes against the table's", ENVIRONMENT_CAUSES)
+    assert set(ENVIRONMENT_CAUSES) == {*_ENVIRONMENT_CAUSES, _DOWN_SYSTEMS_CAUSE}, ("the three causes and D9's own",)
+
+
+#: #1363 O6, B5: pre-flight's environment refusals for our own failures that need the proxy rig; each row's brief is the fixed
+#: words of the job's brief the structured cause on the record chooses (sign / other access / setup).
+_OUR_FAILURES = [
+    "proxy unreachable during the live reads",
+    "no credential set stored for the read system",
+    "the first sign fails at the first read",
+    "no sign login recorded for the tenant",
+    "a re-sign fails mid-pass",
+]
+
+
+def _our_failure(tmp_path, monkeypatch, data_root, cause):
+    """The job entry over the proxy rig with one of `_OUR_FAILURES` happening; returns `(ran, bao)`."""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.integrations.credential_proxy_1163 import _harness as H
+    from defender.tests.learning.oracle.live_contracts import test_preflight_proxy as P
+
+    scripted = cause in ("the first sign fails at the first read", "a re-sign fails mid-pass")
+    with P.rig(tmp_path, monkeypatch, data_root, bao_type=P.ScriptedBao if scripted else A.OpenBaoStandIn,
+               credential_set=cause != "no credential set stored for the read system",
+               sign_login=cause != "no sign login recorded for the tenant") as r, \
+            A.proxy_for(r.t, r.store) as (url, _tap):
+        oracle, extra = S.oracle(then=S.submit(r.idp.payload, S.EMPTY_CLAIM)), {}
+        if cause == "the first sign fails at the first read":
+            r.bao.sign_script = [(0, 503)]
+        if cause == "a re-sign fails mid-pass":
+            # The first sign succeeds at the live read; the read then takes the held token's whole life (the holder's
+            # clock is the test's), so the first lookup's re-sign is the one OpenBao refuses.
+            monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
+            clock = P.Clock()
+            start, body = clock.now, r.merged.replies[f"{P.API}/events"]
+
+            def read_takes_a_token_s_life(_seen):
+                if clock.now == start:
+                    clock.now = start + P.TOKEN_SEC
+                return body
+
+            r.merged.replies[f"{P.API}/events"] = read_takes_a_token_s_life
+            r.bao.sign_script = [(0, None), (0, 503)]
+            oracle, extra = P._side_lookups("user:bob"), {"clock": clock}
+        ran = run_entry(tmp_path, estate=lambda _root: r.est, calls=r.calls, after_source=r.after_source,
+                        oracle=oracle, issuer_transport=r.bao, directory=r.records,
+                        proxy_url=f"http://127.0.0.1:{H.free_port()}"
+                        if cause == "proxy unreachable during the live reads" else url, **extra)
+        return ran, r.bao
+
+
+@pytest.mark.parametrize("cause", _OUR_FAILURES)
+def test_1363_a_pass_that_lost_access_or_hit_a_setup_fault_fails_the_job_launch_refused_with_its_fixed_brief(
+        tmp_path, monkeypatch, data_root, cause):
+    """Lost access, a failed sign or a `setup` fault in pre-flight is the environment's refusal: `failed:
+    launch_refused`, the brief our own fixed words for that cause alone, nothing started. (#1363 O6, B5)"""
+    ran, bao = _our_failure(tmp_path, monkeypatch, data_root, cause)
+    message = _failed_with(ran, "failed", "launch_refused")
+    brief = _PREFLIGHT_BRIEFS[f"our failure: {cause}"]  # the brief of the row's cause: the record's cause, observed
+    assert brief in message, message
+    others = {_BRIEF_SIGN, _BRIEF_ACCESS, _BRIEF_SETUP} - {brief}
+    assert not [b for b in others if b in message], ("the brief named another environment cause", message)
+    assert "idp" not in message, "run text in the fixed brief"
+    assert ran.spawn.launches == []
+    if cause != "no sign login recorded for the tenant":
+        assert bao.logins, "positive control: OpenBao was reached; the proxy, the sign or our setup failed"
+    if cause == "a re-sign fails mid-pass":
+        assert len(bao.signs) == 1, "positive control: the first token was signed; the re-sign was what failed"
 
 
 # --- failed -------------------------------------------------------------------------------------------

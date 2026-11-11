@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from defender.kit.access import AccessDeclaration
 from defender.kit.faults import (
+    ORIGIN_ACCESS,
+    ORIGIN_SYSTEM,
     USAGE_EXIT_CODE,
     AdapterFault,
     ConfigFault,
@@ -25,7 +27,7 @@ from defender.kit.faults import (
     UpstreamFault,
 )
 from defender.kit.paths import CASE_KEY_REFUSED, KEPT, REFUSED, segment_fault
-from defender.kit.proxy_client import proxy_exchange
+from defender.kit.proxy_client import proxy_exchange, report_fault, request_token
 from defender.kit.settings import (
     NOT_CONFIGURED,
     PLACEHOLDER,
@@ -372,10 +374,10 @@ def capped_detail(value: object) -> object:
 
 
 def raise_proxy_fault(fault: str, detail: str, status: int | None = None, *,
-                      from_system: bool = False, sent: bool = True) -> None:
+                      origin: str = ORIGIN_ACCESS, sent: bool = True) -> None:
     """Raise the fault class the proxy named, with its detail (A9); an `UpstreamFault` carries
-    the store's `status` when the proxy relayed one. The proxy's own (`proxy_own`) unless the
-    system answered (`status`) or the proxy saw its call fail (`from_system`, #1404). A
+    the store's `status` when the proxy relayed one. It carries `origin`, whose failure it is
+    (#1363 B2): the client decides it from the answer, and `proxy_own` follows from it. A
     `TransportFault` may have reached the system unless the proxy said it was not `sent` (#1374)."""
     raised: AdapterFault
     if fault == "UpstreamFault":
@@ -386,7 +388,7 @@ def raise_proxy_fault(fault: str, detail: str, status: int | None = None, *,
         raised = classes.get(fault, TransportFault)(detail or fault)
     if isinstance(raised, TransportFault):
         raised.maybe_delivered = sent
-    raised.proxy_own = not (from_system or status)
+    raised.origin = origin
     raise raised
 
 
@@ -396,7 +398,31 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
 ) -> dict | list:
     """One request through the proxy, its faults raised as the proxy classified them. The
     capture is the caller's."""
-    answer = proxy_exchange(ctx, system=system, method=method, url=url, body=body,
+    # The token step's fault is the access holder's own refusal, which it already knows: raised,
+    # never reported back to it (#1363 B1), so a shut holder is never taken for lost access.
+    token = request_token(ctx)
+    try:
+        return _decided(ctx, token, url, system=system, method=method, body=body,
+                        timeout_sec=timeout_sec, write=write, error_detail=error_detail)
+    except AdapterFault as fault:
+        # The holder of the process's access learns of a `setup` or `access` fault where the
+        # client raises it (#1363 B1), once it names the system the fault is about. A fault the
+        # exchange did not label is one derived from the system's own answer (its status, its
+        # body, a write it refused): `system`.
+        if fault.origin is None:
+            fault.origin = ORIGIN_SYSTEM
+        if fault.system is None:
+            fault.system = system
+        report_fault(ctx, fault)
+        raise
+
+
+def _decided(  # noqa: PLR0913 — one request's per-call state
+    ctx: VerbContext, token: str | None, url: str, *, system: str, method: str,
+    body: dict | None, timeout_sec: int, write: bool, error_detail: ErrorDetail,
+) -> dict | list:
+    """The answer to one proxied request, or the fault the proxy's answer is."""
+    answer = proxy_exchange(ctx, token=token, system=system, method=method, url=url, body=body,
                             timeout_sec=timeout_sec)
     if write:
         if answer.status:
@@ -404,17 +430,16 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
             _judge_write(answer.status, answer.body, system)
             return {}
         raise_proxy_fault(answer.fault or "TransportFault", answer.detail,
-                          from_system=answer.from_system, sent=answer.sent)
+                          origin=answer.origin, sent=answer.sent)
     if answer.fault in ("UpstreamFault", "TransportFault") and answer.status and not answer.reader_fault:
         # The system answered: its own reason, unaltered by the proxy (#1412), reaches the model
         # and curation.
         # With no body to hand on (withheld, or the reply broke) the proxy's reason says why.
         why = error_detail(answer.body) if answer.body else answer.detail
         raise_proxy_fault(answer.fault, f"HTTP {answer.status} from {system}: {why}",
-                          answer.status, from_system=True)
+                          answer.status, origin=ORIGIN_SYSTEM)
     if answer.fault is not None:
-        raise_proxy_fault(answer.fault, answer.detail, from_system=answer.from_system,
-                          sent=answer.sent)
+        raise_proxy_fault(answer.fault, answer.detail, origin=answer.origin, sent=answer.sent)
     if answer.status >= 400:
         raise UpstreamFault(f"HTTP {answer.status} from {system}: {error_detail(answer.body)}",
                             status=answer.status)

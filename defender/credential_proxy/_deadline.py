@@ -19,6 +19,7 @@ import anyio
 import anyio.from_thread
 
 from defender.credential_proxy._refusal import TRANSPORT, Refused
+from defender.kit.faults import ORIGIN_SETUP
 
 _T = TypeVar("_T")
 
@@ -39,7 +40,7 @@ class Deadline:
         """The seconds left for `what`; `Refused` (`TransportFault`) when none are."""
         left = self.at - time.monotonic()
         if left <= 0:
-            raise Refused(TRANSPORT, f"the request ran out of time before {what}")
+            raise Refused(TRANSPORT, f"the request ran out of time before {what}", origin=ORIGIN_SETUP)
         return left
 
     def wait(self, what: str) -> float:
@@ -60,8 +61,10 @@ class Deadline:
         try:
             return anyio.from_thread.run(bounded)
         except TimeoutError:
+            # Our own deadline cut it: the system's when it was the system's leg, else our setup
+            # (a slow OpenBao or token endpoint, D7's accepted imprecision, B4).
             raise Refused(TRANSPORT, f"the request ran out of time during {what}",
-                          system_side=system_side) from None
+                          system_side=system_side, origin=ORIGIN_SETUP) from None
 
 
 _CURRENT: contextvars.ContextVar[Deadline | None] = contextvars.ContextVar(

@@ -88,7 +88,7 @@ def test_a_deadline_cut_while_waiting_on_the_system_is_still_the_systems(tmp_pat
             A.proxy_for(r.t, r.store, proxy_overhead_sec=1) as (url, _tap):
         answer = W.call(url, r.tok(), f"{base}{API}/users/x", timeout_sec=1)
 
-    assert (answer.status, answer.fault, answer.from_system) == (200, "TransportFault", True)
+    assert (answer.status, answer.fault, answer.origin) == (200, "TransportFault", "system")
 
 
 def _stalled_record(*, reader_fault: bool):
@@ -112,6 +112,8 @@ def test_a_read_cut_by_the_reader_is_not_blamed_on_the_system(tmp_path, data_roo
         _ask(tmp_path, data_root, url)
 
     assert raised.value.proxy_own is reader_fault
+    # #1363 O4: a reply the run cut is `request`; one the system broke is the system's.
+    assert getattr(raised.value, "origin", None) == ("request" if reader_fault else "system")
     assert ("HTTP 200 from identity" in raised.value.detail) is not reader_fault
 
 

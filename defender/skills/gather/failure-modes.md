@@ -17,6 +17,8 @@ report a raw unchecked zero or a null.
   or the harness (no `netstat`/`ss`/`docker`/`/dev/tcp`), do **not** hunt
   `.env`/credentials, do **not** re-run "to confirm" — a `2` is for a human to
   resolve, not something you can fix.
+- **exit 3 — this one call was cut:** the system is not down. Retry differently, not
+  identically (a narrower window, another parameter or verb), or report it in your summary.
 - **exit 77 — withheld by policy:** the verb is not granted to your role. Not an
   outage, not your mistake: do **not** re-run it, try another verb or spelling to
   reach the same data, or escalate it as a fault. Move on with what this lead has
