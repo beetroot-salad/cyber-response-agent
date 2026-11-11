@@ -406,3 +406,26 @@ def test_h12_the_client_reports_to_the_holder_exactly_the_setup_and_access_fault
         assert seen.detail == raised.value.detail
         if origin == "setup":
             assert getattr(seen, "system", None) == "identity", "the setup fault does not say whose setup failed"
+
+
+def test_h12b_a_call_refused_by_a_shut_holder_is_not_reported_back_as_lost_access(tmp_path, data_root, clock):
+    """The holder's own refusal (here: it was shut) reaches the caller as an `access` fault but is never reported
+    back to the holder, so a deliberate shut is not taken for lost access, and nothing reaches the proxy.
+    Control: the fault is the shut holder's own refusal. Review of #1468."""
+    from defender.integrations import identity_adapter
+    from defender.tests.integrations.credential_proxy_1163 import _harness as H
+    from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+    from defender.tests.integrations.credential_proxy_1163 import test_query_flow as Q
+
+    signer, told = A.MarkedSigner(), []
+    holder = _access(tmp_path, data_root, signer, clock, on_fault=told.append)
+    with H.upstream() as up, Q._published(tmp_path, data_root, up) as t, \
+            A.proxy_for(t, Q._store(t)) as (url, tap):
+        ctx = A.ctx_for(tmp_path, T.run_record(t), url, None, access=holder)
+        holder.shut()
+        with pytest.raises(AdapterFault) as refused:
+            identity_adapter.get_user(ctx, user="dev.dana")
+    assert refused.value.origin == "access"
+    assert "closed its access" in refused.value.detail, "positive control: the shut holder refused the call"
+    assert tap.tokens == [], "a shut holder's call reached the proxy"
+    assert (holder.lost, told) == (None, []), "the shut holder's own refusal was reported back as lost access"

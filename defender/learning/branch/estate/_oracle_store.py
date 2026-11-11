@@ -18,7 +18,7 @@ import uuid
 
 from collections.abc import Callable, Mapping
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from pathlib import Path
 
@@ -270,15 +270,12 @@ class QueryDoor:
     limiter: RateLimiter
     store: OracleStore
     context: Callable[[], Any]
-    #: Each lookup that failed on our side (a `setup` or `access` fault, #1363 O8), as its system
-    #: and detail, in order: a serving reads the entries added since it began, so it names its own
-    #: cause, never one an earlier serving met.
-    ours: list[tuple[str, str]] = field(default_factory=list)
 
-    def run(self, actor: str, system: Any, verb: Any, params: Any, *,
-            waits: LimiterWaits) -> Any:
+    def run(self, actor: str, system: Any, verb: Any, params: Any, *,  # noqa: PLR0913 — one lookup plus its attempt's records
+            waits: LimiterWaits, ours: list[tuple[str, str]]) -> Any:
         """The real answer, or `Refused` naming why not. Time waiting on the limiter goes to
-        `waits`, the asking attempt's own record."""
+        `waits`, the asking attempt's own record; a failure on our side is added to `ours`, the
+        asking serving's own record (#1363 O7, A4)."""
         if not isinstance(system, str) or not isinstance(verb, str):
             raise Refused(f"run_query needs a system and a verb name; got {system!r}.{verb!r}")
         if params is None:
@@ -313,7 +310,7 @@ class QueryDoor:
             answer = fn(self.context(), **dict(params))
         except AdapterFault as exc:
             self._log(actor, system, verb, params)
-            raise self._refusal(system, verb, exc) from None
+            raise self._refusal(system, verb, exc, ours) from None
         except Exception as exc:  # noqa: BLE001 — a tenant error is the oracle's to see
             self._log(actor, system, verb, params)
             raise Refused(f"run_query {system}.{verb} failed at the tenant: "
@@ -324,12 +321,13 @@ class QueryDoor:
         # One spelling, as every served payload: the adapter's own answer, round-tripped.
         return json.loads(json.dumps(answer, sort_keys=True, default=str))
 
-    def _refusal(self, system: str, verb: str, exc: AdapterFault) -> Exception:
+    def _refusal(self, system: str, verb: str, exc: AdapterFault,
+                 ours: list[tuple[str, str]]) -> Exception:
         """What a lookup's adapter fault becomes: our own failure (a `setup` or `access` fault, #1363
         O8) fails the attempt as the oracle's own machinery does (M03=A) and tells the oracle nothing
         of its cause; any other is the tenant's answer, shown to the oracle."""
         if exc.origin in (ORIGIN_SETUP, ORIGIN_ACCESS):
-            self.ours.append((system, exc.detail))
+            ours.append((system, exc.detail))
             return _AttemptFailed(f"run_query {system}.{verb} could not be made (a failure on our side)")
         return Refused(f"run_query {system}.{verb} failed at the tenant: "
                        f"{type(exc).__name__}: {exc}")

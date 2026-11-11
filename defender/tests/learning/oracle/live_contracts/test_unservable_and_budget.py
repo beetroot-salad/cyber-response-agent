@@ -851,6 +851,37 @@ def test_1363_o7_the_cause_a_give_up_names_is_its_own_servings_not_an_earlier_on
     assert run.raised.our_cause == ("edr", "SECOND-SERVING"), run.raised.our_cause
 
 
+@pytest.mark.parametrize("lost", [True, False], ids=["lost", "not-lost"])
+def test_1363_a4_once_access_is_lost_the_serving_gives_up_after_the_attempt_and_pays_for_no_more(tmp_path, lost):
+    """The call's context carries the process's access holder. With access lost, the attempt whose lookup failed
+    on our side is the serving's last: it gives up marked ours, naming the proxy, with no further attempt. With
+    access held, the same failures retry to the cap (control). #1363 A4 (amends D7's accepted paid attempts)."""
+    from defender.kit.access import RequestAccess
+    from defender.kit.faults import TransportFault
+
+    holder = RequestAccess("http://127.0.0.1:9", lambda _expires_at: "tok")
+    if lost:
+        fault = TransportFault(OURS)
+        fault.origin = "access"
+        holder.report(fault)
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    _lost_edr(est, "access")
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(then=_explore()),
+                           verifier=S.passing_verifier(), retry_cap=3)
+
+    with pytest.raises(S.unservable_cls()) as stopped:
+        S.call(reg, "idp", "query", est.ctx(tmp_path / "inv", access=holder), q="user:alice")
+
+    assert _our_fault(stopped.value) is True, stopped.value
+    attempts = len(est.calls("edr", "query"))
+    if lost:
+        assert attempts == 1, f"{attempts} paid attempts after access was lost"
+        assert "credential proxy" in stopped.value.detail, stopped.value.detail
+    else:
+        assert attempts == 3, f"positive control: with access held the serving retries to its cap ({attempts})"
+
+
 @pytest.mark.parametrize("origin", OUR_ORIGINS)
 def test_1363_o7_a_sibling_whose_oracle_gave_up_after_our_failures_exits_proxy_access_with_no_world_record(
         tmp_path, monkeypatch, caplog, origin):

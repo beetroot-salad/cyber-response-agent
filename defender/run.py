@@ -76,8 +76,7 @@ from defender._agent_role import AgentRole  # noqa: E402
 from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa: E402
 from defender.systems.system_status import RunSystems  # noqa: E402
 import time  # noqa: E402
-from datetime import UTC, datetime  # noqa: E402
-from defender.credential_proxy import mint_request_token, request_access, signing_access  # noqa: E402
+from defender.credential_proxy import request_access, run_token_mint, signing_access  # noqa: E402
 from defender.kit.access import TOKEN_SEC, AccessDeclaration, RequestAccess  # noqa: E402
 from defender.kit.faults import AdapterFault, ConfigFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
@@ -584,10 +583,11 @@ class _TokenMint:
                  reads: tuple[str, ...], case_system: str | None,
                  unsigned: str | None = None, clock: Callable[[], float] = time.time,
                  on_fault: Callable[[AdapterFault], None] | None = None) -> None:
-        self._signer = signer
         self._proxy_url = proxy_url
-        self._tenant_id = tenant_id
-        self._run_id = run_id
+        self._clock = clock
+        #: Signs the write-back token the way the holder signs the read token (`run_token_mint`).
+        self._mint = (None if signer is None else
+                      run_token_mint(signer, tenant_id=tenant_id, investigation=run_id))
         self._case_system = case_system
         #: Why a write-back token cannot be signed (R4), when it cannot: the run goes on, and the
         #: record step says so.
@@ -638,11 +638,6 @@ class _TokenMint:
         return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
                    reads=reads, case_system=written, clock=clock, on_fault=on_fault)
 
-    def _mint(self, grant: set[tuple[str, str]], expires_at: float) -> str:
-        return mint_request_token(
-            self._signer, tenant_id=self._tenant_id, investigation=self._run_id, grant=grant,
-            expires_at=datetime.fromtimestamp(expires_at, UTC))
-
     def access_kwargs(self) -> dict[str, RequestAccess]:
         return _access_kwargs(self._access)
 
@@ -657,10 +652,10 @@ class _TokenMint:
         (a system with bad settings is told so by the step, not by a token it would never use);
         nothing otherwise. A mint that fails here is a warning: the step reports the missing token
         itself."""
-        if self._case_system is None or self._unsigned is not None:
+        if self._case_system is None or self._unsigned is not None or self._mint is None:
             return {}
         try:
-            token = self._mint({(self._case_system, "rw")}, time.time() + TOKEN_SEC)
+            token = self._mint({(self._case_system, "rw")}, self._clock() + TOKEN_SEC)
         except AdapterFault as refused:
             _logger.warning(f"no write-back token for the record step: {refused.detail}")
             return {}

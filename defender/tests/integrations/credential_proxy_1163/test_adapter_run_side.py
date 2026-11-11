@@ -599,7 +599,7 @@ def test_1363_o4_the_client_stores_the_origin_on_the_answer_it_returns():
                           ({"status": None, "fault": "ConfigFault", "origin": "setup", "body_whole": False}, "setup"),
                           ({"status": 200}, "system")):
         with W.fake_proxy(W.fmt().encode_final(W.final_record(**final)), ended=True) as url:
-            answer = proxy_exchange(_Ctx(url), system="identity", method="GET", url=f"{url}/x", body=None, timeout_sec=5)
+            answer = proxy_exchange(_Ctx(url), token="tok", system="identity", method="GET", url=f"{url}/x", body=None, timeout_sec=5)
         assert getattr(answer, "origin", None) == origin, final
 
 

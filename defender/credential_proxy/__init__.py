@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from defender.credential_proxy._tokens import (
         mint_request_token as mint_request_token,
         request_access as request_access,
+        run_token_mint as run_token_mint,
     )
 
 #: Each name this door serves, and the submodule that defines it.
@@ -48,7 +49,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("CredentialSet",), "_credentials"),
     **dict.fromkeys(("TenantRequestSigner", "request_signer", "signing_access",), "_launcher"),
     **dict.fromkeys(("OpenBaoSecrets", "OpenBaoStore", "TransitVerifier", "store_policies", "transit_key_for",), "_openbao"),
-    **dict.fromkeys(("mint_request_token", "request_access",), "_tokens"),
+    **dict.fromkeys(("mint_request_token", "request_access", "run_token_mint",), "_tokens"),
 }
 
 __getattr__ = lazy_door(globals(), _HOMES)

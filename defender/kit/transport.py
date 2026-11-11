@@ -27,7 +27,7 @@ from defender.kit.faults import (
     UpstreamFault,
 )
 from defender.kit.paths import CASE_KEY_REFUSED, KEPT, REFUSED, segment_fault
-from defender.kit.proxy_client import proxy_exchange, report_fault
+from defender.kit.proxy_client import proxy_exchange, report_fault, request_token
 from defender.kit.settings import (
     NOT_CONFIGURED,
     PLACEHOLDER,
@@ -398,8 +398,11 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
 ) -> dict | list:
     """One request through the proxy, its faults raised as the proxy classified them. The
     capture is the caller's."""
+    # The token step's fault is the access holder's own refusal, which it already knows: raised,
+    # never reported back to it (#1363 B1), so a shut holder is never taken for lost access.
+    token = request_token(ctx)
     try:
-        return _decided(ctx, url, system=system, method=method, body=body,
+        return _decided(ctx, token, url, system=system, method=method, body=body,
                         timeout_sec=timeout_sec, write=write, error_detail=error_detail)
     except AdapterFault as fault:
         # The holder of the process's access learns of a `setup` or `access` fault where the
@@ -415,11 +418,11 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
 
 
 def _decided(  # noqa: PLR0913 — one request's per-call state
-    ctx: VerbContext, url: str, *, system: str, method: str, body: dict | None,
-    timeout_sec: int, write: bool, error_detail: ErrorDetail,
+    ctx: VerbContext, token: str | None, url: str, *, system: str, method: str,
+    body: dict | None, timeout_sec: int, write: bool, error_detail: ErrorDetail,
 ) -> dict | list:
     """The answer to one proxied request, or the fault the proxy's answer is."""
-    answer = proxy_exchange(ctx, system=system, method=method, url=url, body=body,
+    answer = proxy_exchange(ctx, token=token, system=system, method=method, url=url, body=body,
                             timeout_sec=timeout_sec)
     if write:
         if answer.status:

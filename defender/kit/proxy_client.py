@@ -271,14 +271,21 @@ def request_body(body: object) -> str | None:
     return None if body is None else json.dumps(body)
 
 
-def proxy_exchange(
-    ctx: VerbContext, *, system: str, method: str, url: str, body: dict | None, timeout_sec: int,
-) -> ProxyAnswer:
-    """One JSON request to `system` through the credential proxy, with the token `ctx` presents;
-    the proxy's answer as it came, with the origin the client gave it. A fault raised before the
-    answer (no token minted, the proxy not reached) is `access`."""
+def request_token(ctx: VerbContext) -> str | None:
+    """The token `ctx` presents for one request (`token_of`). A fault here is `access`, raised
+    before anything was sent, and is the access holder's own refusal (shut, lost, or its sign
+    failed): the holder already knows it, so the caller does not report it back (#1363 B1)."""
     with _the_proxys_own(), _before_sending():
-        token = token_of(ctx)
+        return token_of(ctx)
+
+
+def proxy_exchange(  # noqa: PLR0913 — one request's per-call state
+    ctx: VerbContext, *, token: str | None, system: str, method: str, url: str, body: dict | None,
+    timeout_sec: int,
+) -> ProxyAnswer:
+    """One JSON request to `system` through the credential proxy, presenting `token`
+    (`request_token`); the proxy's answer as it came, with the origin the client gave it. A fault
+    raised before the answer (the proxy not reached) is `access`."""
     return proxy_call(
         ctx.proxy_url, token, system=system, method=method, url=url,
         headers={"Accept": "application/json"}
@@ -287,12 +294,12 @@ def proxy_exchange(
 
 
 def report_fault(ctx: VerbContext, fault: AdapterFault) -> None:
-    """Tell the call's access holder, if it has one, of a fault the client raised (#1363 B1): only
-    what concerns the process's access, a `setup` or `access` fault. Another origin is the
+    """Tell the call's access holder, if it has one, of a fault the exchange raised (#1363 B1):
+    only what concerns the process's access, a `setup` or `access` fault. Another origin is the
     system's or this call's own, and the holder is told nothing of it."""
     holder = getattr(ctx, "access", None)
     if holder is not None and fault.origin in (ORIGIN_SETUP, ORIGIN_ACCESS):
         holder.report(fault)
 
 
-__all__ = ["PROXY_PATH", "REPLY_CONTENT_TYPE", "DecodedReply", "FinalRecord", "ProxyAnswer", "decode_reply", "encode_body", "encode_final", "proxy_call", "origin_of", "proxy_exchange", "report_fault", "request_body", "token_of"]
+__all__ = ["PROXY_PATH", "REPLY_CONTENT_TYPE", "DecodedReply", "FinalRecord", "ProxyAnswer", "decode_reply", "encode_body", "encode_final", "proxy_call", "origin_of", "proxy_exchange", "report_fault", "request_body", "request_token", "token_of"]

@@ -453,6 +453,10 @@ def _fault_of(status: int) -> str | None:
 
 
 def _parse_request(raw: bytes | _Unread) -> _Asked:  # noqa: C901 — one flat shape check
+    """The request as asked, or its refusal (#1363 A5). What the shared client builds (the JSON
+    envelope, its keys and their types, the headers it sets) is `access`: a bug there fails every
+    call. What an adapter supplies (the URL and body text, the timeout) is `request`: this call's
+    own content. How the request arrived is `request` too."""
     if raw is _Unread.TOO_LARGE:
         raise Refused(CONFIG, f"the request is over {MAX_REQUEST_BYTES} bytes", origin=ORIGIN_REQUEST)
     if raw is _Unread.TOO_SLOW:
@@ -481,10 +485,12 @@ def _parse_request(raw: bytes | _Unread) -> _Asked:  # noqa: C901 — one flat s
     timeout = doc.get("timeout_sec")
     if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, int | float)
                                 or not math.isfinite(timeout) or timeout <= 0):
-        raise Refused(CONFIG, "the request's timeout_sec must be a positive number", origin=ORIGIN_ACCESS)
+        # The timeout is the adapter's (its system's setting): this request's own content (#1363 A5).
+        raise Refused(CONFIG, "the request's timeout_sec must be a positive number", origin=ORIGIN_REQUEST)
     if not _encodable(system, method, url, body, *headers.values()):
-        # a lone surrogate: a malformed request, not one a retry could send (r7 A18)
-        raise Refused(CONFIG, "the request holds text that is not valid Unicode", origin=ORIGIN_ACCESS)
+        # a lone surrogate: a malformed request, not one a retry could send (r7 A18). The URL and
+        # body come from the adapter, often from model text: this request's own content (#1363 A5).
+        raise Refused(CONFIG, "the request holds text that is not valid Unicode", origin=ORIGIN_REQUEST)
     return _Asked(system=system, method=method, url=url, headers=headers, body=body,
                   timeout_sec=timeout)
 
@@ -509,7 +515,7 @@ def _forwarded(headers: Mapping[str, str], auth: Auth) -> dict[str, str]:
             continue
         if lowered in _CREDENTIAL_HEADERS or lowered in own:
             raise Refused(CONFIG, f"the request carries its own {name} header; the proxy "
-                                  "applies the declared credential", origin=ORIGIN_REQUEST)
+                                  "applies the declared credential", origin=ORIGIN_ACCESS)
         sent[name] = value
     return sent
 

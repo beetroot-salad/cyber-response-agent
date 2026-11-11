@@ -486,14 +486,15 @@ class Oracle:
             raise OracleUnservable(stop.reason, stop.call, stop.detail,
                                    our_fault=stop.our_fault, our_cause=stop.our_cause)
         failures = 0
-        ours_before = len(self.door.ours)
+        # This serving's own record of lookups that failed on our side, shared by its attempts.
+        ours: list[tuple[str, str]] = []
         first = True
         while True:
             try:
                 result = self._attempt(call, base, real, first=first, fixed=fixed, live=live,
-                                       gate=gate)
+                                       gate=gate, ours=ours)
             except _BudgetSpent as spent:
-                stop = OracleUnservable(REASON_BUDGET, call, str(spent), **self._ours(ours_before))
+                stop = OracleUnservable(REASON_BUDGET, call, str(spent), **self._ours(ours))
                 self._give_up(stop)
                 raise stop from None
             except ServingAbort:
@@ -503,7 +504,7 @@ class Oracle:
                                   "world goes unservable")
                 stop = OracleUnservable(REASON_FAULT, call,
                                         f"the oracle's serving broke ({type(broken).__name__})",
-                                        **self._ours(ours_before))
+                                        **self._ours(ours))
                 self._give_up(stop)
                 raise stop from broken
             first = False
@@ -518,8 +519,14 @@ class Oracle:
                     return result.served, result.claim, result.verdict, failures + 1
             failures += 1
             self._failures = [*self._failures, result][-5:]
-            if failures >= self.retry_cap:
-                stop = OracleUnservable(REASON_RETRIES, call, result, **self._ours(ours_before))
+            lost = self._access_lost()
+            if failures >= self.retry_cap or lost is not None:
+                # Once the process has lost its access every later attempt fails the same way, so
+                # none is paid for (#1363 A4).
+                stop = OracleUnservable(
+                    REASON_RETRIES, call,
+                    result if lost is None else f"the credential proxy could not be used: {lost}",
+                    **self._ours(ours))
                 self._give_up(stop)
                 raise stop
 
@@ -553,7 +560,7 @@ class Oracle:
 
         async def run_query(ctx: Any, **query: Any) -> str:
             run: _Run = ctx.deps
-            return await run.blocking(lambda: self._run_query("verifier", query, run.waits))
+            return await run.blocking(lambda: self._run_query("verifier", query, run))
 
         return Agent(
             model, model_settings=settings, instructions=_VERIFIER_INSTRUCTIONS, deps_type=_Run,
@@ -572,12 +579,18 @@ class Oracle:
         self.store.charge(actor, reported, billed_usage(getattr(response, "usage", None)),
                           priced_as=self._price_rows[actor])
 
-    def _ours(self, before: int) -> dict[str, Any]:
-        """The give-up's mark: whether a lookup of this serving (since `before`) failed our way."""
-        ours = self.door.ours[before:]
+    @staticmethod
+    def _ours(ours: list[tuple[str, str]]) -> dict[str, Any]:
+        """The give-up's mark: whether a lookup of this serving failed our way, and the first."""
         if ours:
             return {"our_fault": True, "our_cause": ours[0]}
         return {}
+
+    def _access_lost(self) -> str | None:
+        """Why the process lost its credential-proxy access (its holder's latched detail), or None
+        while it has not, or holds none: the holder rides on the context of the call served."""
+        holder = getattr(self.door.context(), "access", None)
+        return None if holder is None else holder.lost
 
     def _give_up(self, stop: OracleUnservable) -> None:
         self.unservable = stop
@@ -696,6 +709,7 @@ class Oracle:
 
     def _attempt(self, call: tuple[str, str, dict], base: Any, real: Callable[[], RealData], *,  # noqa: PLR0913 — `serve`'s call plus its pre-branch framing and gate
                  first: bool, fixed: bool = False, live: bool = False,
+                 ours: list[tuple[str, str]],
                  gate: Callable[[Any], str | None] | None = None) -> _Submitted | str:
         """One attempt: one run of the oracle's agent loop over the conversation so far. The
         loop answers every tool call of every reply, so the conversation it hands back is
@@ -714,7 +728,8 @@ class Oracle:
         self._in_conversation += 1
         box = _AttemptBox(self.box_factory)
         run = _Run(door=self.door, deadline=self.turn_deadline, call=call, base=base, real=real,
-                   box=box, gate=gate, live=live, fixed=fixed)
+                   box=box, gate=gate, live=live, fixed=fixed,
+                   ours=ours)
         # A verdict already handed over as a tool's result leaves nothing pending: the
         # conversation then ends on that request, and the run continues from it.
         history = [*self._conversation, *([ModelRequest(parts=self._pending)]
@@ -806,7 +821,7 @@ class Oracle:
 
     def _tool(self, name: str, args: dict, run: _Run) -> str:
         if name == "run_query":
-            return self._run_query("oracle", args, run.waits)
+            return self._run_query("oracle", args, run)
         if name == "forge":
             return self._forge(args, run.attempt, system=run.call[0],
                                names=esql_names(run.against))
@@ -823,10 +838,10 @@ class Oracle:
             return "The draft fails:\n" + "\n".join(failures)
         return f"There is no tool named {wrap_fresh(str(name), 'untrusted')}."
 
-    def _run_query(self, actor: str, args: dict, waits: LimiterWaits) -> str:
+    def _run_query(self, actor: str, args: dict, run: _Run) -> str:
         system, verb, params = args.get("system"), args.get("verb"), args.get("params") or {}
         try:
-            answer = self.door.run(actor, system, verb, params, waits=waits)
+            answer = self.door.run(actor, system, verb, params, waits=run.waits, ours=run.ours)
         except Refused as refused:
             return wrap_fresh(str(refused), "untrusted")
         self.explored.append((str(system), answer))
@@ -991,13 +1006,14 @@ class Oracle:
         """A side query's answer, read once per attempt however often its draft is checked."""
         key = request_key(system, verb, params)
         if key not in run.reruns:
-            run.reruns[key] = self.door.run("host-check", system, verb, params, waits=run.waits)
+            run.reruns[key] = self.door.run("host-check", system, verb, params, waits=run.waits,
+                                               ours=run.ours)
         return run.reruns[key]
 
     def _re_read(self, run: _Run, system: str, verb: str, params: dict) -> Any:
         """A re-ask's answer: always read, and logged as the re-ask's own read. A host check of
         the same question later in the attempt is handed this answer rather than reading again."""
-        answer = self.door.run("re-ask", system, verb, params, waits=run.waits)
+        answer = self.door.run("re-ask", system, verb, params, waits=run.waits, ours=run.ours)
         run.reruns[request_key(system, verb, params)] = answer
         return answer
 
@@ -1073,7 +1089,8 @@ class Oracle:
             _LIVE_ANSWER_LINE if run.live else _RECORDED_ANSWER_LINE, *framed])
         try:
             result = await self._verifier_agent.run(
-                context, deps=_Run(door=self.door, deadline=self.turn_deadline, waits=run.waits),
+                context, deps=_Run(door=self.door, deadline=self.turn_deadline, waits=run.waits,
+                          ours=run.ours),
                 usage_limits=UsageLimits(request_limit=_VERIFIER_STEPS))
         except _VerifierGaveUp as gave_up:
             return {"passed": False, "reason": str(gave_up)}

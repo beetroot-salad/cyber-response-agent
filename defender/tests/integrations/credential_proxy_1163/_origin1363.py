@@ -316,9 +316,9 @@ def bearer_rows() -> list[Row]:  # noqa: C901, PLR0915 — one row per cause
         Row("request-headers-not-an-object", "access", lambda r: req(r, headers=[1])),
         Row("request-header-name-not-a-header", "access", lambda r: req(r, headers={"bad name": "x"})),
         Row("request-body-not-text", "access", lambda r: req(r, body=5)),
-        Row("request-timeout-not-a-positive-number", "access", lambda r: req(r, timeout_sec=-1)),
-        Row("request-text-not-valid-unicode", "access", lambda r: req(r, system="\ud800")),
-        Row("request-carries-its-own-credential-header", "request", lambda r: req(r, headers={"Authorization": "Bearer x"})),
+        Row("request-timeout-not-a-positive-number", "request", lambda r: req(r, timeout_sec=-1)),
+        Row("request-text-not-valid-unicode", "request", lambda r: req(r, system="\ud800")),
+        Row("request-carries-its-own-credential-header", "access", lambda r: req(r, headers={"Authorization": "Bearer x"})),
         Row("audit-cannot-be-written", "access", lambda r: _with(req(r), audit=H.FailingAudit())),
         # a fault a port raises without a label reads access, whatever its kind
         Row("verifier-raises-a-plain-transport-fault", "access", port(_plain("transport"), "verifier"), unlabelled=True),
