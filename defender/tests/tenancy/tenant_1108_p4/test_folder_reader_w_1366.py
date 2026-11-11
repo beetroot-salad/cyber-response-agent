@@ -9,6 +9,11 @@ refused and stores nothing): the quote rule and the line rules (moved from `tena
 
 NOT pinned (undecided by the design): a duplicate key, an `export K=v` line, a stray file or dot-folder beside the
 system folders at `import`.
+
+The import's reader (`import`) is the other door: it reads the PUBLISHED export's files. Publishing refuses a link, a FIFO
+or a file over the export read limit, so none of those can reach it; a part that is not UTF-8 text can, and is pinned
+below at the import (the set-system arm of the same rule is `test_system_records_1366.py::
+test_1366_p2_a_handoff_folder_whose_files_are_not_text_is_refused_and_stored_nowhere`).
 """
 from __future__ import annotations
 
@@ -62,6 +67,44 @@ def _refused_unchanged(op: R.Operator, system: str, rc: int, said: str, before: 
     assert "MemoryError" not in said, said
     assert str(op.tmp) not in said, f"the refusal names the host path: {said}"
     assert _numbers(op) == before, "a refused folder stored something"
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("part", [None, "settings/systems/cmdb/config.env", "settings/systems/cmdb/access.yaml",
+                                  "settings/case-record.yaml"],
+                         ids=["control-all-text", "config.env", "access.yaml", "case-record.yaml"])
+def test_the_import_refuses_a_part_that_is_not_utf8_text_naming_the_file_and_writes_nothing(
+        part, tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
+    """A `config.env`, `access.yaml` or `case-record.yaml` of the published export that is not UTF-8 text refuses the WHOLE
+    import (the dry run too, which names the file to fix): no version, no mark, no secret touched, no traceback, every
+    other folder unread into the database. The part is the fixture's own text plus ONE comment line of non-UTF-8 bytes, so
+    the only thing wrong with it is the encoding (a reader that decoded leniently would import it). Control: the same
+    export with every part text imports. (#1366 O9, P2: what cannot be used cannot be stored; the import's reader,
+    beside `set-system`'s.)"""
+    files = R.import_files()
+    if part is not None:
+        files[part] = files[part].encode("utf-8") + b"# \xff\xfe not text \x80\n"
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
+    with published_tenant(tmp_path / "forge", root=data_root, files=files) as tenant:
+        register_tenant(migrated_database, tenant.tenant_id, data_root=tenant.data_root, records=None)
+        op = R.Operator(tenant.tenant_id, migrated_database, tmp_path / "op", capsys)
+
+        dry_rc, listed = op.import_(dry_run=True)
+        rc, said = op.import_()
+
+        if part is None:
+            assert (dry_rc, rc) == (0, 0), (listed, said)
+            assert set(op.current()) == R.FIXTURE_SYSTEMS
+            return
+        assert dry_rc != 0, listed
+        assert rc != 0, said
+        for output in (listed, said):
+            assert R.lines_naming(output, part), f"the refusal does not name {part}: {output}"
+            assert "Traceback" not in output, output
+        assert op.current() == {}
+        assert R.current_records(migrated_database, op.tid).case is None
+        assert not R.imported(migrated_database, op.tid)
+        assert op.kv.requests == []
 
 
 @pytest.mark.postgres
