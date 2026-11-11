@@ -589,7 +589,6 @@
  "tests/tenancy/tenant_1107_settings/test_census_lint.py": 0.2,
  "tests/tenancy/tenant_1107_settings/test_lead_zero_replay.py": 1.2,
  "tests/tenancy/tenant_1107_settings/test_page_mapping.py": 4.9,
- "tests/tenancy/tenant_1107_settings/test_parser.py": 0.1,
  "tests/tenancy/tenant_1107_settings/test_record.py": 1.5,
  "tests/tenancy/tenant_1107_settings/test_ticket_writer.py": 13.7,
  "tests/tenancy/tenant_1107_settings/test_validator.py": 0.0,

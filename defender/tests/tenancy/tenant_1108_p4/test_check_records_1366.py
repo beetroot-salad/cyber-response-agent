@@ -28,6 +28,7 @@ pytestmark = pytest.mark.postgres
 
 #: A catalog adapter an upgrade removed (a record can still name it: the accept-all seeder stores what it is given).
 RETIRED = "legacy-widget"
+FIXTURE_RECORDS = R.fixture_records()  # what a tenant is seeded with unless a test states its own
 COMMENT_ROUTE = ("POST", "/tickets/*/comments")
 #: A grants table whose gather grant is on the platform-served registry alone (nothing for a record to be missing).
 TABLE_TACIT_ONLY = "dispositions:\n  tacit-knowledge:\n    health-check: {roles: [gather]}\n    lookup: {roles: [gather]}\n"
@@ -48,8 +49,7 @@ def tenants(tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noq
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     stack, made = contextlib.ExitStack(), []
 
-    def make(records=None, files=None):
-        records = R.fixture_records() if records is None else records
+    def make(records=FIXTURE_RECORDS, files=None):
         n = len(made)
         t = (stack.enter_context(published_tenant(tmp_path / "forge", root=data_root, files=files)) if not made
              else stack.enter_context(second_tenant(made[0], files=files if files is not None else {})))

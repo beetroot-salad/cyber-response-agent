@@ -615,7 +615,7 @@ def test_1366_o1_the_lead_authors_write_and_rm_lanes_are_the_tenants_records_wha
         return ModelResponse(parts=[ToolCallPart(tool_name=n, args=a, tool_call_id=f"c{i}") for i, (n, a) in enumerate(attempts)])
 
     real = lead_author_engine.run_author_stage
-    monkeypatch.setattr(lead_author_engine, "run_author_stage", lambda **kw: real(**{
+    monkeypatch.setattr(lead_author_engine, "run_author_stage", lambda **kw: real(**{  # lint-monkeypatch: ok — the real stage runs with the model substituted; the deps' `invoke_agent` offers no model seam
         **kw, "source_key": lambda *_a, **_k: None,
         "run_author": functools.partial(lead_author_engine._run_lead_author_pydantic, make_model=fake_model(model))}))
     run_dir = tmp_path / "run-x"
