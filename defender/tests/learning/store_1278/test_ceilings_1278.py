@@ -189,7 +189,13 @@ async def test_an_item_held_at_its_attempt_ceiling_is_claimed_by_no_one(dsn, cei
 
 
 #: Integer columns that are not ceilinged counters.
-NOT_COUNTERS = {("batches", "fencing_token"), ("batches", "pr_number"), ("commit_changes", "ordinal")}
+NOT_COUNTERS = {("batches", "fencing_token"), ("batches", "pr_number"), ("commit_changes", "ordinal"),
+                # The feedback tables (A4): forge ids and a lease token, not counts.
+                ("feedback_comments", "comment_id"), ("feedback_issues", "issue_number"), ("feedback_tick", "fencing_token")}
+#: A counter whose ceiling is not a store fate: the store only counts a comment's failed answers (`count_failed_answer`,
+#: test_feedback_1278.py::test_p8_failed_answers_are_counted_one_by_one_per_comment); the feedback tick applies the ceiling
+#: (tests/learning/feedback_1414/test_1414_feedback_tick.py), and no row changes state here.
+COUNTED_FOR_THE_TICK = {("feedback_comments", "attempts")}
 COUNTER_COLUMNS = {("work_items", "attempts"), ("work_items", "deferrals"), ("work_items", "offers_declined"),
                    ("batches", "refusals"), ("batches", "generation")}
 
@@ -199,5 +205,5 @@ def test_every_integer_column_of_the_schema_is_a_driven_counter_or_named_as_none
     columns = {(table, column) for table, column in execute(
         dsn, "SELECT table_name, column_name FROM information_schema.columns "
              "WHERE table_schema = 'learning' AND data_type IN ('integer', 'bigint', 'smallint')")}
-    assert columns == COUNTER_COLUMNS | NOT_COUNTERS
+    assert columns == COUNTER_COLUMNS | NOT_COUNTERS | COUNTED_FOR_THE_TICK
     assert {counter for counter, _way in DRIVERS} == {column for _table, column in COUNTER_COLUMNS}
