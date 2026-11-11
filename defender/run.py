@@ -681,6 +681,10 @@ class _TokenMint:
             signer, address = signing_access(accepted.id, directory=records, signer=signer,
                                              proxy_url=proxy_url, transport=issuer_transport)
         except ConfigFault as refused:
+            if reads and world is not None:
+                # A branched sibling's own code, so its launcher stops the family (#1449).
+                print(f"run start refused: {refused.detail}", file=sys.stderr)
+                sys.exit(run_end.SIGN_REFUSED_EXIT)
             if reads:
                 sys.exit(f"run start refused: {refused.detail}")
             _logger.warning(f"the write-back token cannot be signed: {refused.detail}")

@@ -105,6 +105,42 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
         "a retired `_tenant.json` was written")
 
 
+@pytest.mark.parametrize("failed_before", [0, 1], ids=["no earlier failure", "one unservable world"])
+def test_1449_siblings_refused_their_read_token_are_recorded_as_that_not_as_a_bare_exit(tmp_path, failed_before):
+    """The operator's lane starts every sibling together. One refused its read token at run start
+    (`SIGN_REFUSED_EXIT`) is recorded with that cause, not "exited 9 without a record of its own";
+    a sibling started with it already passed the check, so it is not stopped, even when an earlier
+    failure would put one more failed world at `UNUSABLE_AT`: the refusal is not a failed world. (#1449)"""
+    import yaml
+
+    from defender.records.run_end import SIGN_REFUSED_EXIT
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
+
+    cli = T.mod("learning.branch.cli")
+    root = current_data_root()
+    acme = H1105.tenant(root, fixture_uuid("tenant:acme"))
+    with acme.runs_repository().create_episode() as view:
+        ep = root / fixture_uuid("tenant:acme") / "episodes" / view.episode_id
+        P.write_family(ep, P.family_doc(episode_id=view.episode_id))
+        view.start_runs([P.world_id(ep, label) for label in P.WORLDS])
+        ids = [P.world_id(ep, label) for label in ("b", "c")]
+        with Episode.open(ep) as episode:
+            refused_id, running_id = ids
+
+            def spawn(argv: list[str], *, stop: Any, **_kw: Any) -> int:
+                if _arg(argv, "--world") == "b":
+                    return SIGN_REFUSED_EXIT
+                stop.wait(timeout=2)  # a stop would end this sibling early, as the real spawn does
+                return 143 if stop.is_set() else 0
+
+            exits = cli.start_family(episode, ids, spawn=spawn, tenant_id=fixture_uuid("tenant:acme"),
+                                     failed_before=failed_before)
+    assert exits == {refused_id: SIGN_REFUSED_EXIT, running_id: 0}, "a running sibling was stopped"
+    record = yaml.safe_load((ep / "world_records" / f"{refused_id}.yaml").read_text(encoding="utf-8"))
+    assert "cannot be signed" in record["detail"], record
+    assert "without a record of its own" not in record["detail"], record
+
+
 @pytest.mark.parametrize("tenant_id", [None, "Not A Tenant"])
 def test_start_family_refuses_an_episode_with_no_tenant_and_starts_nothing(tmp_path, tenant_id):
     cli = T.mod("learning.branch.cli")

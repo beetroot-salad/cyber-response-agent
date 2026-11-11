@@ -466,6 +466,36 @@ def test_a_failed_control_ends_failed_control_failed_and_no_other_sibling_starts
     assert ran.judge.calls == 0
 
 
+def _sign_refused() -> int:
+    from defender.records.run_end import SIGN_REFUSED_EXIT
+
+    return SIGN_REFUSED_EXIT
+
+
+@pytest.mark.parametrize(("refused", "started"), [("a", ["a"]), ("b", ["a", "b"])],
+                         ids=["the control", "a later sibling"])
+def test_1449_a_sibling_refused_its_read_token_ends_failed_launch_refused_and_no_other_starts(
+        tmp_path, refused, started):
+    """A sibling that exits `SIGN_REFUSED_EXIT` was refused its read token at run start: the
+    environment's refusal, not its world's. Every later sibling would be refused the same way, so
+    none starts, and the job fails `launch_refused` with the sign brief, never `control_failed`.
+    The brief does not say pre-flight refused: pre-flight passed. A control that finished before
+    the refusal is still verified: it is left with a record of its own, never skipped. (#1449)"""
+    spawn = J.FakeSibling(exits={refused: _sign_refused()})
+    ran = run_entry(tmp_path, spawn=spawn)
+    message = _failed_with(ran, "failed", "launch_refused")
+    assert _BRIEF_SIGN in message, message
+    assert "no later world started" in message, message
+    assert "pre-flight" not in message, message
+    assert spawn.worlds == started
+    assert ran.judge.calls == 0
+    if refused != "a":
+        # Verification leaves every finished world archived or with its own record, never neither.
+        archived = (ran.ep / "worlds" / T.world_id(ran.ep, "a")).is_dir()
+        assert archived or S.read_world_record(ran.ep, "a") is not None, (
+            "the control finished, but the refusal skipped its verification")
+
+
 def test_knowledge_the_tenant_cannot_pin_ends_failed_launch_refused(tmp_path):
     """A source that ran at a knowledge commit the tenant's clone does not hold: refused before any spend. (r5 table)"""
     def unpinnable(src: Path) -> None:

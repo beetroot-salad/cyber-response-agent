@@ -651,7 +651,7 @@ def test_r7c_an_injected_signer_does_not_excuse_a_missing_sign_login(tmp_path, d
     assert tickets.calls == []
 
 
-def _mint_for(tmp_path, data_root, signer, *, world: Any, **seams: Any) -> Any:
+def _mint_for(tmp_path, data_root, signer, *, world: Any, records: Any = None, **seams: Any) -> Any:
     """The run's token mint, built directly (#1449): a tenant whose `identity` and `ticket` are
     `http-proxy` systems the gather role is granted, `ticket` its judged case system, and
     `--update-ticket` set. `world` is the sibling's world (any object), or None for a run. `seams` (#1363: the holder's `clock=`) are handed to the mint as given."""
@@ -662,7 +662,8 @@ def _mint_for(tmp_path, data_root, signer, *, world: Any, **seams: Any) -> Any:
     from defender.run import _TokenMint
     from defender.systems import case_system
 
-    records, _fields = _records(data_root, tmp_path)
+    if records is None:
+        records, _fields = _records(data_root, tmp_path)
     declared = AccessDeclaration(base="http://x.invalid/api", auth=None)
     tenant = types.SimpleNamespace(
         tenant_id=S.PLAYGROUND_ID, access={"identity": declared, "ticket": declared},
@@ -695,3 +696,32 @@ def test_1449_a_world_reads_on_a_runs_terms_and_is_never_minted_a_write_back_tok
         ("identity", "r"), ("ticket", "r")], "a world's read grant is not a regular run's"
     assert run.write_back(), "control: the regular run's mint signs no write-back token"
     assert world.write_back() == {}, "a world's mint signed a write-back token"
+
+
+@pytest.mark.parametrize("setup", [_no_generation, _without("sign_role_id", None)],
+                         ids=["no generation", "no sign role"])
+def test_1449_a_world_refused_its_read_token_at_start_exits_the_sign_refused_code(
+        tmp_path, data_root, capsys, setup):
+    """A branched run whose read token cannot be signed at run start exits `SIGN_REFUSED_EXIT`
+    (not 1, which any crash exits), so its launcher can tell the environment's refusal from a
+    failed world; the cause is still said on stderr. A regular run's refusal is unchanged (R7)."""
+    from defender.learning.branch.cli import SPAWN_FAILED_EXIT
+    from defender.records.run_end import EXIT_CLASSES, SIGN_REFUSED_EXIT
+    from defender.run import UNSERVABLE_EXIT
+
+    # Its own meaning: a run's exit class, a crash (1), argparse (2), an unservable world or a
+    # sibling that never started would be read as a refused token and stop the family.
+    taken = {0, 1, 2, UNSERVABLE_EXIT, SPAWN_FAILED_EXIT, *(c.exit_code for c in EXIT_CLASSES.values())}
+    assert SIGN_REFUSED_EXIT not in taken, taken
+    _plant(data_root, proxy=("identity", "ticket"))
+    signer = A.MarkedSigner()
+    with pytest.raises(SystemExit) as world:
+        _mint_for(tmp_path / "world", data_root, signer, world=object(),
+                  records=setup(data_root, tmp_path / "w"))
+    assert world.value.code == SIGN_REFUSED_EXIT, world.value.code
+    assert "run start refused" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as run:
+        _mint_for(tmp_path / "run", data_root, signer, world=None,
+                  records=setup(data_root, tmp_path / "r"))
+    assert _config_refusal(run.value, "sign", "generation", "login"), run.value.code
+    assert signer.payloads == []
