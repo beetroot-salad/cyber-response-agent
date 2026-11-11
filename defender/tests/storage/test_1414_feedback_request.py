@@ -457,6 +457,8 @@ _BAD_ROWS = {
     **{f"{field} a {name}": F.lookup_row("l-1", 1, {**OTHER, field: value})
        for field in ("actor", "host", "pattern")
        for name, value in (("list", ["x"]), ("number", 7), ("null", None), ("map", {"a": 1}), ("bool", True))},
+    #: A4 change 3: the store cannot hold U+0000, so a lookup holding it is not captured (the run keeps its other lookups).
+    **{f"{field} holds NUL": F.lookup_row("l-1", 1, {**OTHER, field: "a\x00b"}) for field in ("actor", "host", "pattern")},
 }
 
 
@@ -473,11 +475,12 @@ def test_1414_captured_lookups_are_the_distinct_qualifying_triples_in_first_seen
     the distinct (actor, host, pattern) triples of the qualifying rows in first-seen order. P3 (C17, C23).
 
     FC: first-seen order is the order the captured lookups are listed, so the indices the model answers with stay stable.
-    FC: a lookup holding text that is not valid UTF-8 (a lone surrogate) is not captured: it could never be sent to Forgejo."""
+    FC: a lookup holding text that is not valid UTF-8 (a lone surrogate) is not captured: it could never be sent to Forgejo.
+    A4: nor one holding U+0000, which the store cannot hold."""
     rng = random.Random(seed)
     actors, hosts, patterns = ("ann", "svc-backup", "root"), ("db-03", "web-01"), ("rm -rf", "curl x", "id")
     spoilers = [{"exit_code": 2}, {"exit_code": 3}, {"system": "cmdb"}, {"verb": "list"}]
-    spoiled_values = [["x"], 7, None, {"a": 1}, True, "\ud800", "ok\udfff"]
+    spoiled_values = [["x"], 7, None, {"a": 1}, True, "\ud800", "ok\udfff", "a\x00b"]
     rows: dict[str, list[dict]] = {}
     expected: list[dict] = []
     for lead in (f"l-{n}" for n in rng.sample(range(1, 9), 4)):
