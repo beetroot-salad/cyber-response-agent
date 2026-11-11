@@ -10,8 +10,9 @@ from defender.box import run_env
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
-from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
+from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, export_dir, published_tenant
 
 STORE = "/store"
 WRITES = (("POST", "/tickets/*/comments"),)  # glob grammar: contract's pick
@@ -161,19 +162,25 @@ def test_t6_an_access_file_with_no_write_route_is_named_by_the_receipt_and_nothi
 
 def test_t6b_a_write_the_proxy_refuses_at_call_time_is_a_refusal_not_a_transport_error(
         tmp_path, data_root):
-    """The run STARTED over an access that covers the comment's route (so the leg's own judgement passes), then the
-    system's access changed mid-run to a declaration whose write route no longer covers the comment's path: the proxy,
-    which enforces the CURRENT record at each call, refuses, and the receipt says so (not an access declaration fault,
-    not "could not be reached"); nothing reaches the store. Control: t1 (matching route). (#1366 O7, Flows; O5, O4)"""
-    other = (("POST", "/elsewhere/*"),)
+    """The run STARTED over a record whose access covers the comment's route (so the leg's own judgement passes), then the
+    operator MOVED the system (a new version at the next credential generation, written to the records the proxy reads):
+    its routes still cover the comment, but the base is elsewhere, so the run's call falls outside the current base. The
+    proxy, which enforces the CURRENT record at each call, refuses, and the receipt says so (not an access declaration
+    fault, not "could not be reached"); nothing reaches the store. This is the design's flow, reachable through the
+    operator command: "in-flight runs' later calls fall outside the new base and are refused" (a rewrite of the routes
+    alone would be refused at write if it left the case system uncovered, C4). Control: t1 (the base unmoved).
+    (#1366 O7, Flows, P5; O5, O4)"""
     with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
         store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
         tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
         rec, run = _run(tmp_path)
-        started_with = T.run_record(t)  # the record the run was built from: its access covers the comment route
-        t.merge({H.ACCESS_FILE.format(system=SYSTEM): _decl(up, writes=other)}, "move the write route")
-        t.publish()  # the system's current access no longer covers it
-        with A.proxy_for(t, store) as (url, tap):
+        started = R.derive(export_dir(t.tenant, t.commit) / "settings")  # covers the comment route at the published base
+        started_with = T.run_record(t, records=started)
+        held = {t.tenant_id: started}  # the records the proxy reads, one lookup per call
+        moved = R.edited(started, SYSTEM, version=2, generation=2,
+                         access=H.declaration(up.url + "/moved-store", writes=WRITES))
+        held[t.tenant_id] = moved  # the operator's write, after the run started
+        with A.proxy_for(t, store, records=R.RecordsPort(held)) as (url, tap):
             receipt = _leg(t, run, rec, url, tok, record=started_with)
     assert receipt is not None
     assert receipt["ok"] is False
