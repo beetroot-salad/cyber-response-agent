@@ -43,6 +43,7 @@ from defender.lifecycle._job import (
 )
 from defender.lifecycle._teardown import Containers, stop_containers, take_exclusive
 from defender.lifecycle.config import LifecycleConfig
+from defender.records.formats import unwrap_learning_root
 from defender.tenancy import FenceMissed, Generation, HeldTenant, TenantRepository, host_lock
 
 _logger = logging.getLogger(__name__)
@@ -315,17 +316,17 @@ class HostActor(Actor):
         was cut over before: nothing to import."""
         from defender.learning.store import ImportRefused, LearningStore, import_learning_state
 
-        tenant, root = self._learning_folder(held.tenant_id)
         async with self._host_lock(held.tenant_id, exclusive=True):
-            if _io.entry_present(root):
-                store = LearningStore(self._learning_dsn())
-                try:
-                    with self._delivery(held.tenant_id) as delivery:
+            with self._delivery(held.tenant_id) as delivery:
+                root = unwrap_learning_root(delivery.tenant.learning)
+                if _io.entry_present(root):
+                    store = LearningStore(self._learning_dsn())
+                    try:
                         await import_learning_state(store, held.tenant_id, root, delivery=delivery)
-                except ImportRefused as refused:
-                    raise StepFailed(f"the learning state was not imported: {refused}") from refused
-                finally:
-                    await store.close()
+                    except ImportRefused as refused:
+                        raise StepFailed(f"the learning state was not imported: {refused}") from refused
+                    finally:
+                        await store.close()
             step, actor = next_step(held)
             await held.commit(step=step, actor=actor)
 
@@ -334,24 +335,15 @@ class HostActor(Actor):
         reached after the import committed; a link the cutover will not follow fails the step, resumed here."""
         from defender.learning.store import ImportRefused, cut_over_learning_state
 
-        tenant, root = self._learning_folder(held.tenant_id)
         async with self._host_lock(held.tenant_id, exclusive=True):
+            with self._delivery(held.tenant_id) as delivery:
+                tenant = delivery.tenant
             try:
-                await asyncio.to_thread(cut_over_learning_state, tenant, root)
+                await asyncio.to_thread(cut_over_learning_state, tenant, unwrap_learning_root(tenant.learning))
             except ImportRefused as refused:
                 raise StepFailed(f"the learning folder was not cut over: {refused}") from refused
             step, actor = next_step(held)
             await held.commit(step=step, actor=actor, pending_action=None)
-
-    def _learning_folder(self, tenant_id: str) -> tuple[Any, Path]:
-        from defender.records.formats import TenantRefused, unwrap_learning_root
-        from defender.tenancy import data_root_from_path, requested_tenant
-
-        try:
-            tenant = requested_tenant(data_root_from_path(self._root), tenant_id)
-        except TenantRefused as refused:
-            raise StepFailed(f"the tenant cannot be used: {refused}") from refused
-        return tenant, unwrap_learning_root(tenant.learning)
 
     @staticmethod
     def _learning_dsn() -> str:

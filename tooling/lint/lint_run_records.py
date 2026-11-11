@@ -257,7 +257,7 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("data_root", "lifecycle/config.py"): frozenset({"LifecycleConfig.__post_init__"}),
     ("data_root", "lifecycle/_host.py"): frozenset({"HostActor.__init__"}),
     # #1278 Migration: the cutover job accepts the tenant and reads its old learning folder, in one function each.
-    ("learning_root", "lifecycle/_host.py"): frozenset({"HostActor._learning_folder"}),
+    ("learning_root", "lifecycle/_host.py"): frozenset({"HostActor._import_learning", "HostActor._cut_over_learning"}),
     ("data_root", "lifecycle/_process.py"): frozenset({"learning_delivery.open_for"}),
     # #1163 A26: the credential proxy's one setting, converted once when its pipeline is built.
     ("data_root", "credential_proxy/_app.py"): frozenset({"_Proxy.__init__"}),

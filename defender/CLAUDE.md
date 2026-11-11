@@ -43,7 +43,8 @@ more. Each existing tenant moves once, by a lifecycle job (like a credential rot
 1. Stop the workers and the learning drains of the host, then run migrations (revisions `0012_learning_store` and
    `0013_learning_cutover_action`). Until a tenant is cut over its old queues are not read, so its learning looks
    empty: nothing is lost, and nothing new is drawn from the old files.
-2. For each active tenant with nothing pending: `POST /admin/tenants/<T>/cut-over-learning-state`. With the lifecycle
+2. For each active tenant with nothing pending: `python -m defender.lifecycle request-learning-cutover --tenant <T>` (or
+   `--all`). With the lifecycle
    (`python -m defender.lifecycle serve`) running, its host actor works the job under the tenant's exclusive host lock
    (a worker still holding the lock fails the step, naming it, until it is free):
    - `import`: reads the old queues, ledgers, dead-letter and stuck records, retained deliveries and the commit

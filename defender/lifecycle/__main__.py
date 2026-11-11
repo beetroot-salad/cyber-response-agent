@@ -94,6 +94,29 @@ async def _serve() -> int:
     return 0
 
 
+async def _request_learning_cutover(tenant_ids: list[str], *, everyone: bool) -> int:
+    """Queue `learning_cutover` for the named tenants (or every active tenant with nothing pending). Prints one line each;
+    a tenant that cannot take it (unknown, not active, a job pending) is reported and makes the exit status 1."""
+    from defender.tenancy import Conflict, NotFound, TenantId
+    from defender.tenancy.postgres import PostgresTenantRepository
+
+    tenants = PostgresTenantRepository(_dsn())
+    try:
+        wanted = ([t.id for t in await tenants.tenants() if t.state == "active" and t.pending_action is None]
+                  if everyone else tenant_ids)
+        refused = 0
+        for tenant_id in wanted:
+            try:
+                await tenants.request_learning_cutover(TenantId(tenant_id))
+                print(f"{tenant_id}: learning cutover queued")
+            except (Conflict, NotFound) as why:
+                refused += 1
+                print(f"{tenant_id}: not queued: {why}", file=sys.stderr)
+        return 1 if refused else 0
+    finally:
+        await tenants.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     from defender.tenancy import mark_lifecycle_process
 
@@ -103,11 +126,20 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m defender.lifecycle", description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("serve", help="run the management service and the host actor until stopped (dev)")
+    cutover = commands.add_parser(
+        "request-learning-cutover",
+        help="queue the move of tenants' file learning state into the learning store (#1278): the job is worked by `serve`")
+    cutover.add_argument("--tenant", action="append", default=[], metavar="ID", help="a tenant to queue (repeatable)")
+    cutover.add_argument("--all", action="store_true", help="every active tenant with nothing pending")
     args = parser.parse_args(argv)
+    if args.command == "request-learning-cutover" and bool(args.tenant) == args.all:
+        parser.error("name tenants with --tenant, or use --all (not both)")
 
     from defender.lifecycle import ConfigRefused
 
     try:
+        if args.command == "request-learning-cutover":
+            return asyncio.run(_request_learning_cutover(args.tenant, everyone=args.all))
         return asyncio.run(_serve())
     except ConfigRefused as refused:
         print(f"python -m defender.lifecycle {args.command}: {refused}", file=sys.stderr)

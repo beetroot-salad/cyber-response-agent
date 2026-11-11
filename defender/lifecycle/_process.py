@@ -89,15 +89,12 @@ def integration_runner(container: str) -> Callable[[Sequence[str]], subprocess.C
 
 def learning_delivery(config: LifecycleConfig, directory: Any) -> Callable[[str], Any]:
     """How the host actor reaches a tenant's forge and clone for the learning import (#1278 Migration): `tenant id` ->
-    the tenant's delivery, opened as the drain opens it (its recorded forge wiring, its forge credential), a context
-    manager that closes what it made."""
-    def open_for(tenant_id: str) -> Any:
-        from defender._paths import process_defender_dir
-        from defender.learning.author import version_control as vc
-        from defender.tenancy import data_root_from_path, requested_tenant
+    a context manager yielding the tenant's delivery (its recorded forge wiring and forge credential), which closes
+    what it made."""
+    from defender.learning.author.version_control.publish import delivery_for_cutover
 
-        tenant = requested_tenant(data_root_from_path(config.data_root), tenant_id)
-        return vc.opened_delivery(tenant, defender_dir=process_defender_dir(), directory=directory, purpose="drain")
+    def open_for(tenant_id: str) -> Any:
+        return delivery_for_cutover(tenant_id, data_root=config.data_root, directory=directory)
     return open_for
 
 
