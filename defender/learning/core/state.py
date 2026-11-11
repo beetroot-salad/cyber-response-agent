@@ -18,6 +18,9 @@ class Channel:
 FINDINGS = Channel(name="findings", id_key="finding_id")
 QUESTIONER_FINDINGS = Channel(name="questioner_findings", id_key="finding_id")
 PITFALLS = Channel(name="pitfalls", id_key="pitfall_id")
+#: #1414 D11 (A4): a person's instruction from a feedback comment, keyed by the comment id (the store's
+#: `feedback_instruction` items); a lesson cites it under the same field as a finding (`config.provenance_field`).
+FEEDBACK_LESSONS = Channel(name="feedback_lessons", id_key="comment_id")
 
 
 def names_systems(value: object) -> bool:

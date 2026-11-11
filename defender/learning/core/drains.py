@@ -30,6 +30,7 @@ from defender.records import Run
 from defender.records.formats import TenantRefused
 from defender.learning.core.store_tick import (
     AUTHOR_LANE,
+    FEEDBACK_LANE,
     LEAD_LANE,
     Refused,
     Tick,
@@ -40,6 +41,8 @@ from defender.learning.core.store_tick import (
 from defender.learning.store import Stop
 
 if TYPE_CHECKING:
+    import datetime
+
     import httpx
 
     from defender.learning.author.version_control import Batch, TenantDelivery
@@ -142,6 +145,9 @@ _CURATOR_MODULES = {
     # Runs as one unit with `author` — same tick, batch, box, branch and PR lease — with its
     # own channel, corpus, claim and consumption.
     "questioner_curator": "defender.learning.author.questioner.run",
+    # The same, for a person's feedback instructions (#1414 D11, #1278 A4): the lessons corpus, its own
+    # kind (`feedback_instruction`), prompt and claim.
+    "feedback_curator": "defender.learning.author.feedback.run",
 }
 
 
@@ -354,6 +360,8 @@ def _store_curators(
 _AUTHOR_CURATORS = (
     ("finding", "LEARNING_AUTHOR_THRESHOLD", "author", "pending"),
     ("questioner_finding", "LEARNING_QUESTIONER_THRESHOLD", "questioner_curator", "questioner_pending"),
+    # One instruction wakes it, with no knob (#1414 D11): its threshold is the store's, fixed at 1.
+    ("feedback_instruction", "", "feedback_curator", "feedback_pending"),
 )
 
 
@@ -482,7 +490,8 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
     make_model: Callable[..., Any] | None = None,
 ) -> int:
     """The lessons lane's tick into the selected tenant's repository over the learning store (#1278):
-    reconcile every batch in review (both lanes, D9), recover a lapsed batch of the lane, then claim and
+    reconcile every batch in review (every lane, D9; the feedback lane's registry batches too, A4), recover a
+    lapsed batch of the lane, then claim and
     author (`store_tick.Tick`). `directory` is the tenant records (else the ones `DEFENDER_DATABASE_DSN`
     names); `client` the forge's HTTP client; `identity` the tenant's delivery credential, else minted
     through its live generation (`credential_config`, `issuer_transport`); `start_box`/`stop_box` the
@@ -501,7 +510,7 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
 
     return _store_tick(paths, lane=AUTHOR_LANE, label=AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
                  author_work=lambda work_paths, **kw: _store_curators(work_paths, seam, **kw),
-                 start_box=start_box, stop_box=stop_box, reconcile_lanes=(AUTHOR_LANE, LEAD_LANE))
+                 start_box=start_box, stop_box=stop_box, reconcile_lanes=(AUTHOR_LANE, LEAD_LANE, FEEDBACK_LANE))
 
 
 def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two steps, the forge, the issuer, the box
@@ -548,8 +557,29 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
                  start_box=start_box, stop_box=stop_box, reconcile_lanes=(LEAD_LANE,))
 
 
-def feedback_drain(paths: LoopPaths, **seams: Any) -> int:
-    """The feedback tick (#1414 F2): not yet ported onto the learning store. Main's entry opened the
-    deleted file-state handle; the feedback subsystem (`core/feedback*.py`) still names it, so the entry
-    refuses rather than import it. The port replaces this body."""
-    raise NotImplementedError("the #1414 feedback tick is not yet ported onto the learning store (#1278)")
+def feedback_drain(  # noqa: PLR0913 — the stage's seams: the model's decision, the forge, the records, the issuer
+    paths: LoopPaths,
+    *,
+    decide: Callable[..., dict] | None = None,
+    client: httpx.Client | None = None,
+    identity: ForgeCredential | None = None,
+    directory: TenantDirectory | None = None,
+    credential_config: Any = None,
+    issuer_transport: httpx.BaseTransport | None = None,
+    eligibility_max_age: datetime.timedelta | None = None,
+) -> int:
+    """The feedback tick (#1414 F2) over the learning store (#1278 A4): open issues, read eligible comments,
+    decide each once, draft approved entries onto a registry PR, and post the replies owed, under the
+    tenant's feedback tick lease (one tick per tenant, O12; the store at `DEFENDER_DATABASE_DSN`)."""
+    from defender.learning.core import feedback
+    from defender.learning.core.feedback_model import model_decide
+
+    _validate_merge_mode()
+    records = _drain_directory(directory)
+
+    def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
+        return _open_delivery(paths, directory=records, client=client, identity=identity,
+                              credential_config=credential_config, issuer_transport=issuer_transport)
+
+    return _refusing(lambda: feedback.run(paths, open_delivery, records, decide=decide or model_decide,
+                                          eligibility_max_age=eligibility_max_age))

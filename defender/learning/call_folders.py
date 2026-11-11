@@ -6,7 +6,7 @@ learning state, nor under a batch draft, nor in any box mount. It holds only tha
 (`wire_logs/`, written by the stage harness, format unchanged until #1082 takes it over). Nothing here
 deletes a folder (O9).
 
-A call is named by its drain batch id, its stage (`lessons`, `questioner`, `pitfalls`) and its ordinal within
+A call is named by its drain batch id, its stage (`lessons`, `questioner`, `pitfalls`, `feedback`) and its ordinal within
 that stage of the batch, counted from 1 (G-A1).
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from defender.tenancy import Tenant
 
 #: The curator stages a call folder is made for, in the order the drains run them.
-STAGES = ("lessons", "questioner", "pitfalls")
+STAGES = ("lessons", "questioner", "pitfalls", "feedback")
 
 
 def call_folder(tenant: Tenant, batch_id: str, stage: str, ordinal: int, *, make: bool = False) -> Path:
