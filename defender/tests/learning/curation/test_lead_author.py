@@ -27,6 +27,7 @@ from defender.tests.support.learning.curation._lead_author_1134 import repo_skil
 from defender.tests.support.learning.core._state1135 import curation_run_dir, curation_tenant, run_of
 from defender.tests.support.learning.core._state1135 import state_over, set_state_dir
 from defender.tests.support.shared._locations_1210 import location_path
+from defender.tests.support.learning.curation._lead_author_1134 import build_deps_handed
 
 
 #: The seeded catalog, agent-relative (where it sits in the draft) and repo-relative.
@@ -60,7 +61,7 @@ def _lane(tmp_path: Path, files: dict[str, str] | None = None, *, tenant=None) -
 
 def _deps(lane: C.DraftLane, **overrides):
     """Real lead-author deps over the lane's draft, leaf collaborators overridden by keyword."""
-    deps = lead_author.build_lead_author_deps(
+    deps = build_deps_handed(
         lane.paths, state=open_state(lane.paths), trees=C.draft_trees(lane), batch=lane.batch)
     return replace(deps, **overrides) if overrides else deps
 
@@ -870,7 +871,7 @@ def test_invoke_agent_pending_drafts_reach_engine_user_prompt(run_dir: Path, mon
     pending = [{"draft_path": "agent/skills/elastic/_draft/falco-na.md",
                 "system": "elastic",
                 "skill_path": "agent/skills/elastic/SKILL.md"}]
-    rc = lead_author.invoke_agent(run_dir, handoffs, pending)
+    rc = lead_author.invoke_agent(run_dir, handoffs, pending, systems=("elastic", "wazuh"))  # (#1366 R16) the spawn scope's systems are handed
     assert rc == 0
     prompt = cap["user_prompt"]
     assert re.search(r"<run-[0-9a-f]+-handoffs>", prompt)

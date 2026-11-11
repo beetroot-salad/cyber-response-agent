@@ -41,6 +41,7 @@ from defender.tests.support.sandbox._spec791 import (
 from defender.records import RunPaths
 from defender.tests.learning.state_contracts import _spec1135 as S
 from defender.learning.core.state import FINDINGS, LEAD_QUEUE_LOCK, PITFALLS, QUESTIONER_FINDINGS
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
 
 #: A marker no page or log can contain unless it read the planted link's target.
 LEAKED = "outside-leak-1135"
@@ -390,9 +391,9 @@ def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default
         return _lead_spine._spawn_author_agent(**kw)
 
     try:
-        escaped = S.caught(lambda: pitfalls_curator.run_pitfalls(
+        escaped = S.caught(lambda: run_pitfalls_handed(
             paths=paths, state=C.open_state(paths), trees=C.draft_trees(lane), batch=lane.batch,
-            invoke=functools.partial(pitfalls_curator._invoke_pitfalls_agent, spawn=spawn)))
+            invoke=functools.partial(pitfalls_curator._invoke_pitfalls_agent, spawn=spawn, systems=("elastic",))))
         default_after = (S.entry_kind(default), S.tree_snapshot(default))
     finally:
         if default_kind == "absent" and S.entry_kind(default) == "dir" and not any(default.iterdir()):

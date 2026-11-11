@@ -59,6 +59,8 @@ from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests.support.learning.curation._lead_author_1134 import lead_deps, lead_trees
 from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
+from defender.tests.support.runtime.engine._declared869 import catalog_of
 
 
 # --- substrate -------------------------------------------------------------------------------
@@ -531,7 +533,7 @@ def test_952_m4_run_pitfalls_hands_its_partition_to_on_curated_and_consumes_noth
     captured: list[PitfallsDisposition] = []
 
     with C.draft_trees(lane) as trees:
-        assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, on_curated=captured.append,
+        assert run_pitfalls_handed(paths=paths, invoke=spawn, on_curated=captured.append,
                                              trees=trees, batch=lane.batch) == 0
 
     sha = lane.tip()
@@ -606,7 +608,7 @@ def test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_
 
     with _held(location_path(paths.state_root) / PITFALLS.append_lock) as holder, pytest.raises(TimeoutError):
         _bounded(
-            lambda: pitfalls_curator.run_pitfalls(
+            lambda: run_pitfalls_handed(
                 paths=paths, invoke=_agent_must_not_run, lock_wait_seconds=0,
                 trees=lead_trees(paths),
             ),
@@ -614,7 +616,7 @@ def test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_
         )
     assert (location_path(paths.state_root) / PITFALLS.queue).read_bytes() == queue_before
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_agent_must_not_run,
+    assert run_pitfalls_handed(paths=paths, invoke=_agent_must_not_run,
                                          trees=lead_trees(paths)) == 0
     assert queue_ids(paths) == []
     assert consumed_by_id(paths)["u:l-001:0"]["consumed_category"] == "consumed_unattributable"
@@ -704,7 +706,7 @@ def test_952_m5_the_drain_enters_the_curator_past_its_own_lock(tmp_path: Path):
     with _held((location_path(paths.state_root) / LEAD_QUEUE_LOCK.file).parent / ".lock"):
         drains._invoke_lead_author(paths, _state1135.state_for_paths(paths),
                                    _state1135.run_of(drained), on_done=captured.append,
-                                   label=LEAD_AUTHOR_DRAIN_LABEL)
+                                   label=LEAD_AUTHOR_DRAIN_LABEL, systems=catalog_of(repo))
         assert (drained / "lead_author" / "pitfalls_collected").is_file(), \
             "the curator never ran past the lock the drain is supposed to have exempted it from"
         assert captured == [], "an empty run dir is the clean path: no sentinel to hand over"

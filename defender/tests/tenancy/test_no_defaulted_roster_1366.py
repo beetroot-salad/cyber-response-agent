@@ -78,7 +78,11 @@ def _answer(surface: str, tenant: Any, tmp_path: Path) -> Any:
         C.plant_record(run_dir)
         write_report(run_dir)
         proxy = S.ProxyStandIn(tmp_path / "proxy", S.store_answers_ok())
-        S.record_step(run_dir, tenant, env={}, proxy_url=proxy.url, request_token="write-token-r16")
+        # The writer itself, not `S.record_step`: that helper hands the verdict run start made (`case=`), which is
+        # the very argument this surface is asked without.
+        S.ticket_writer().record_case_ticket(
+            S._run_handle_1165(run_dir), tenant=tenant, defender_dir=S.DEFENDER, env={},
+            proxy_url=proxy.url, request_token="write-token-r16")
         receipt = S.receipt(run_dir) or {}
         return ("receipt", receipt.get("status"), [r for r in proxy.requests() if r["method"] == "POST"],
                 receipt.get("reason") or "")

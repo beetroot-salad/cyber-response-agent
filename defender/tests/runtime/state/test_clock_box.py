@@ -14,6 +14,7 @@ import pytest
 
 from defender.records import RUN_LAYOUT, RunPaths
 from defender import box as box_mod
+from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.runtime.state import _1255_clock as C
 from defender.tests.support.runtime.state import _1255_view as V
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -400,7 +401,7 @@ def _answers_at_the_tool_boundary(defn: Any, agent_id: str, run_dir: Path,
     agent = driver.build_agent_core(
         defn, deps_type=defn.deps_cls, instructions="probe", logger=logger, agent_id=agent_id,
         make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
-        limits=DEFAULT_LIMITS)
+        limits=DEFAULT_LIMITS, verbs=T1106.registry_for())
     deps = replace(bind(replace(defn, tools=effective_tools_for(defn)), run_dir,
                         defender_dir=C.DEFENDER, box=box),
                    run_state=RunState(run_dir, run_dir.name))

@@ -30,6 +30,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_delivery._identity import ISSUER, VaultHTTP
 from defender.tests.tenancy.tenant_1108_delivery._identity import token as issuer_token
 from defender.tests.tenancy.tenant_1108_p4._support import git
+from defender.tests.support.runtime.engine._declared869 import catalog_of
 
 #: The lesson the fake curator writes, below the corpus dir its config names (the draft's lane).
 LESSON_NAME = "p4-drain-lesson.md"
@@ -377,7 +378,11 @@ class LeadStep:
         self.paths_seen.append(paths)
         skills_dir = draft_root_of(batch) / LEAD_DRAFT_LANES[0]
         with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
-            deps = la.build_lead_author_deps(paths, state=state, trees=trees, batch=batch)
+            # (#1366 R16) The lanes are handed their systems. This stand-in for the drain's step is bound to no records (the real
+            # step is bound to the drain's directory), so it hands the whole catalog of the scratch product checkout: these
+            # suites assert delivery and the batch's lifecycle, not which systems a tenant's lane admits.
+            systems = kw.pop("systems", None) or catalog_of(paths.repo_root)
+            deps = la.build_lead_author_deps(paths, state=state, trees=trees, batch=batch, systems=systems)
 
             def spawn(_run_dir: Any, _handoffs: Any, _drafts: Any, *, box: Any = None) -> int:
                 for rel, text in self.edits.get(name, {}).items():
@@ -430,7 +435,8 @@ class PitfallsStep:
         with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
             return pitfalls_curator.run_pitfalls(paths=paths, state=state, trees=trees,
                                                  batch=batch, invoke=invoke, box=box,
-                                                 on_curated=on_curated, **kw)
+                                                 on_curated=on_curated,
+                                                 systems=kw.pop("systems", None) or catalog_of(paths.repo_root), **kw)
 
 
 def executed_lead(query_id: str, *, lead_id: str = "l-001") -> Any:

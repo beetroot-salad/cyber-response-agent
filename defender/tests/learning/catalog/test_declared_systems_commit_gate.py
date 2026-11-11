@@ -260,9 +260,11 @@ TACIT_PAGE_REL = "agent/skills/tacit-knowledge/SKILL.md"
 def test_1390_the_lane_edits_the_registrys_description_page_but_cannot_commit_the_registry(tmp_path):
     """Against the checkout's real declared systems the lane's gate admits an edited `tacit-knowledge` SKILL.md and refuses an edited `registry.yaml`; an entry lands only by a human merge. A2."""
     from defender._git import REPO_ROOT
-    from defender.learning.leads.declared_systems import declared_systems
+    from defender.learning.leads.declared_systems import lane_names
+    from defender.systems.catalog import Catalog
 
-    declared = declared_systems(REPO_ROOT)
+    # (#1366 R16) the systems a lane with no tenant is handed: the whole catalog's, the checkout's adapters and the registry
+    declared = lane_names(Catalog.of_checkout(REPO_ROOT / "defender"))
     assert {"elastic", "tacit-knowledge"} <= declared, (
         f"the real declared systems leave out the registry's system: {sorted(declared)}")
     files = {**_gate_files(),

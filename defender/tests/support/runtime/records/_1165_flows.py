@@ -133,6 +133,7 @@ def drive_run(  # noqa: PLR0913 — the real driver's injection inputs
             return asyncio.run(driver.run_investigation(
                 run=run, alert_path=run.facts.alert.path, defender_dir=tree,
                 make_model=make_model, tenant=tenant,
+                roster=_tenants1106.tenants_roster(tenant, tree),
                 box=execution_box,
                 review_stages=_review_bundle.bundle(composer=_review_bundle.composer_reply("holds")),
                 orient_shim=replay.no_orient_shims, **kwargs))

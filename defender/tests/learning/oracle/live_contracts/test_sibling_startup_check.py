@@ -108,7 +108,7 @@ def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir
             alert_path=RunPaths(sibling_dir).alert,
             run=Run.under(fixture_runs_base(sibling_dir.parent), sibling_dir.name),
             defender_dir=S.DEFENDER, model_name="fd1256-sibling", model_override=None,
-            box=None, tenant=tenant, world=world, episode=episode, investigate=investigate,
+            box=None, tenant=tenant, systems=T6.run_systems_for(tenant), world=world, episode=episode, investigate=investigate,
             **run_py._world_seams(world, oracle=None, verifier=None, source=source,
                                  tenant_id=str(tenant.tenant_id)))
     assert type(handed.get("verbs")).__name__ == "WorldRegistry", (

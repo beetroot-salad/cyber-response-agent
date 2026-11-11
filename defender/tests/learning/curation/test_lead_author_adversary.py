@@ -16,11 +16,11 @@ from defender.configuration._env import FatalConfigError
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees
-from defender.learning.leads import lead_author, lead_neighbors, pitfalls_curator
+from defender.learning.leads import lead_author, lead_neighbors
 from defender.learning.leads.draft_synthesis import synthesize_drafts
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.curation._tree_listing_1134 import RealOs, fd_path
-from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn, pitfall_row
+from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn, catalog_of, pitfall_row
 from defender.tests.support.learning.core._declared870 import (
     REDUCER_REL,
     Spawn,
@@ -69,6 +69,7 @@ from defender.tests.learning.curation.test_lead_author_handle import (
     said_for,
 )
 from defender.learning.core.state import PITFALLS
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed, build_deps_handed
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -134,7 +135,7 @@ def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
     head = lane.base
     watch = {"opens": [target]} if left == "link" else {"reads": [target]}
     with C.draft_trees(lane) as trees, kernel_watch(**watch) as events:
-        got = _outcome(lambda: pitfalls_curator.run_pitfalls(
+        got = _outcome(lambda: run_pitfalls_handed(
             paths=lane.paths, trees=trees, batch=lane.batch,
             invoke=Spawn(curate, root=Path(lane.batch.draft_root))))
         seen = events()
@@ -332,7 +333,8 @@ def test_two_claims_over_one_paths_each_mint_through_their_own_trees(
         run_dir = _run_dir((lead.query_id, lead.system, lead.verb), run_id=f"claim-{i}")
         try:
             drains._invoke_lead_author(paths, _state1135.state_for_paths(paths), run_of(run_dir),
-                                       label=LEAD, batch=lane.batch, on_done=lambda _sha: None)
+                                       label=LEAD, batch=lane.batch, on_done=lambda _sha: None,
+                                       systems=catalog_of(paths.repo_root))
         except FatalConfigError:
             reached.append(lead.query_id)
         minted[lead.query_id] = (lane.skills_dir / draft_of(lead)[0]).is_file()
@@ -392,7 +394,7 @@ def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, r
 
     with DrainTrees.open((lane.skills_dir,), **seam) as trees:
         deps = dataclasses.replace(
-            lead_author.build_lead_author_deps(paths, state=_state1135.state_for_paths(paths),
+            build_deps_handed(paths, state=_state1135.state_for_paths(paths),
                                                trees=trees, batch=lane.batch),
             invoke_agent=spawn, extract=lambda _run_dir: ([], [lead]))
         rc = lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps)
@@ -460,7 +462,7 @@ def test_run_pitfalls_checks_its_trees_before_it_reads_its_queue(
     spawn = Spawn()
 
     with trees, kernel_watch(reads=[queue], opens=[queue]) as events:
-        got = _outcome(lambda: pitfalls_curator.run_pitfalls(paths=paths, trees=trees,
+        got = _outcome(lambda: run_pitfalls_handed(paths=paths, trees=trees,
                                                             invoke=spawn))
         seen = events()
 

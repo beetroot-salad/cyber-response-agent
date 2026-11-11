@@ -29,6 +29,7 @@ from defender.investigation import observe  # noqa: E402
 from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import replay_once as _replay  # noqa: E402
+from defender.tests.support.learning.curation._lead_author_1134 import lead_scope
 
 # Every spelling of "the model said nothing", labelled with which side of isspace() it falls
 # on — the split an isspace()-based guard gets wrong in both directions.
@@ -98,7 +99,7 @@ def _lead_author(tmp_path: Path, text: str, tag: str, **over) -> str:
     seed_adapter_stubs(wt / "defender", ("elastic",))
     rd = tmp_path / "runs" / "run-A"
     rd.mkdir(parents=True, exist_ok=True)
-    deps = bind(LEAD_AUTHOR_DEF, rd, defender_dir=wt / "defender")
+    deps = bind(LEAD_AUTHOR_DEF, rd, defender_dir=wt / "defender", scope=lead_scope(wt / "defender"))
     kw = {"require_output": False}
     kw.update(over)
     with override_allow_model_requests(False):

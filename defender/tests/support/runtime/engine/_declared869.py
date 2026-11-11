@@ -12,11 +12,8 @@ from defender import _git
 #: Re-exported: the #869 suites import the shape predicate from here.
 from defender.systems.verbs import is_system_name  # noqa: F401  (re-exported)
 
-#: Re-exported: the #869 suites import the resolver under test from here.
-from defender.learning.leads.declared_systems import (  # noqa: F401  (re-exported)
-    adapter_declared_systems,
-    declared_systems,
-)
+from defender.learning.leads.declared_systems import declared_systems_over, read_adapters
+from defender.systems.catalog import Catalog
 
 
 #: The source directories, spelled once so a fixture cannot disagree with the resolver about
@@ -53,6 +50,25 @@ GIT_IGNORE = (
 
 #: An import-safe adapter body.
 ADAPTER_BODY = "VERBS = {}\n"
+
+
+def catalog_of(repo_root: Path) -> Catalog:
+    """The whole catalog of the product checkout at `repo_root` (its `defender/integrations/`), read as a lead lane's resolver
+    reads it: what a caller with no tenant hands a lane (#1366 R16, DC7). An unreadable adapters directory raises
+    `AdaptersUnreadable`, a `LeadAuthorError` (and a `RegistryError`)."""
+    return Catalog(read_adapters(Path(repo_root) / ADAPTERS_REL))
+
+
+def declared_in(repo_root: Path, *, agent: dict | None = None) -> frozenset[str]:
+    """The systems a lead lane with no tenant declares over `repo_root`: the catalog's (adapter files and the platform-served
+    names), plus the tenant's committed `execution.md` markers when `agent` (a committed tree's repo-relative paths) is given
+    (`declared_systems_over`, the one resolver `build_lead_author_deps` applies to a lane handed the catalog)."""
+    return declared_systems_over(catalog_of(repo_root).roster, agent=agent)
+
+
+def adapters_in(repo_root: Path) -> frozenset[str]:
+    """The adapter half alone: the systems with an adapter file under `repo_root`, never the platform-served names."""
+    return frozenset(catalog_of(repo_root).adapter_ids)
 
 
 def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:

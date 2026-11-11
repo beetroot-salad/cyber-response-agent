@@ -11,7 +11,6 @@ pytest.importorskip("pydantic_ai")
 
 from defender.learning.core import persist  # noqa: E402
 from defender.learning.core.config import LoopPaths  # noqa: E402
-from defender.learning.leads import pitfalls_curator  # noqa: E402
 from defender.learning.leads.lead_extraction import collect_general_failures  # noqa: E402
 from defender.investigation import permission  # noqa: E402
 from defender.investigation.agent_definition import RunScope, compile_policy_for  # noqa: E402
@@ -32,6 +31,7 @@ from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.curation import _curator1134 as C  # noqa: E402
 from defender.tests.support.runtime.engine._declared869 import write_adapter  # noqa: E402
 from defender._git import REPO_ROOT  # noqa: E402
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
 
 pytestmark = pytest.mark.e2e
 
@@ -97,7 +97,7 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
 
     # the curation tick: the handoff names the surface, and the commit carries it
     spawn = Spawn(_curate_addon("keep the unnest argument a LIST"))
-    assert pitfalls_curator.run_pitfalls(
+    assert run_pitfalls_handed(
         paths=paths, invoke=spawn, trees=C.draft_trees(lane), batch=lane.batch) == 0
 
     reducer = by_surface(spawn.handoffs)["reducer"]

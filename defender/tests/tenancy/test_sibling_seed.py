@@ -375,7 +375,7 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
         run._drive_investigation(
             alert_path=RunPaths(src).alert, run=_fixture_run_1165(src),
             defender_dir=P.DEFENDER, model_name="m", model_override=None, box=None,
-            tenant=record,
+            tenant=record, systems=T.run_systems_for(record),
             world=run.resume_world(Episode.open(ep), "b", tenant=lambda r=record: r),
             episode=Episode.open(ep), serving=O.serving(), source=P.open_source(src),
             investigate=lambda seen=seen, **kw: seen.update(kw) or {})

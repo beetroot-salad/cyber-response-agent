@@ -33,6 +33,7 @@ from defender.tests.support.learning.core._declared870 import (
     write,
 )
 from defender.tests.support.learning.curation import _curator1134 as C
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
 
 ELASTIC_MD = "agent/skills/elastic/execution.md"
 
@@ -59,7 +60,7 @@ def _spawn(lane: C.DraftLane, edit=None) -> Spawn:
 
 def _tick(lane: C.DraftLane, spawn: Spawn) -> int:
     """One real pitfalls tick over the draft."""
-    return pitfalls_curator.run_pitfalls(
+    return run_pitfalls_handed(
         paths=lane.paths, state=_state1135.state_for_paths(lane.paths),
         trees=C.draft_trees(lane), batch=lane.batch, invoke=spawn)
 

@@ -18,6 +18,7 @@ from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
 from defender.tests.support.learning.curation import _curator1134 as C
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
 
 #: l-003's real failure in `reviewer-measure-0807-b` — the same DuckDB diagnosis, turn after
 #: turn, while the SQL that provoked it changed every time.
@@ -211,7 +212,7 @@ def _run_pitfalls(paths: LoopPaths, invoke: object) -> int:
     lane = C.draft_lane(state_dir.parent, lanes=C.LEAD_LANES, product=paths.repo_root,
                         state_dir=state_dir)
     with C.draft_trees(lane) as trees:
-        return pitfalls_curator.run_pitfalls(paths=lane.paths, invoke=invoke, trees=trees,
+        return run_pitfalls_handed(paths=lane.paths, invoke=invoke, trees=trees,
                                              batch=lane.batch)
 
 

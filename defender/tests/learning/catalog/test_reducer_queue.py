@@ -64,6 +64,7 @@ from defender.tests.support.learning.core._declared870 import (
     REDUCER_HEADINGS,
     write,
 )
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
 
 
 #: The tenant's learned-SQL-pitfalls add-on (the fixture's committed copy).
@@ -137,7 +138,7 @@ def test_a_malformed_name_retires_as_malformed_system(paths, tmp_path, monkeypat
     )
 
     # The spawn's `repo_root` is the draft root.
-    assert pitfalls_curator.run_pitfalls(
+    assert run_pitfalls_handed(
         paths=inert, invoke=Spawn(_curate_execution_md("elastic")), trees=C.draft_trees(lane),
         batch=lane.batch,
     ) == 0
@@ -267,7 +268,7 @@ def scene(tmp_path: Path):
 def _run(lane, invoke: Spawn) -> int:
     """`run_pitfalls` over the lane's draft (its held `skills/` mount and its batch)."""
     with C.draft_trees(lane) as trees:
-        return pitfalls_curator.run_pitfalls(paths=lane.paths, invoke=invoke, trees=trees,
+        return run_pitfalls_handed(paths=lane.paths, invoke=invoke, trees=trees,
                                              batch=lane.batch)
 
 
@@ -471,7 +472,7 @@ def _curate(lane: C.DraftLane, text: str, monkeypatch) -> int | BaseException:
         return 0
 
     try:
-        return pitfalls_curator.run_pitfalls(paths=lane.paths, state=state,
+        return run_pitfalls_handed(paths=lane.paths, state=state,
                                              trees=C.draft_trees(lane), batch=lane.batch,
                                              invoke=agent)
     except LeadAuthorError as refused:

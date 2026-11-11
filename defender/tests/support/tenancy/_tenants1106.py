@@ -135,6 +135,29 @@ def case_for(run_tenant: Any, defender_dir: Path | None = None) -> Any:
     return mod("systems.case_system").case_verdict(run_tenant, defender_dir=tree, roster=tenants_roster(run_tenant, tree))
 
 
+def run_systems_for(run_tenant: Any, defender_dir: Path | None = None, *, roster: Any = None) -> Any:
+    """(#1366 R16) The run's one judgement of its systems that `run.py` makes before the run exists and hands the lifecycle
+    (`system_status.judge_run` over the tenant's roster, `tenants_roster`; `roster` when a test names its own): what a test that
+    calls `_run_investigation_lifecycle` or `_drive_investigation` itself hands as `systems=`."""
+    tree = defender_dir or DEFENDER
+    return mod("systems.system_status").judge_run(
+        roster if roster is not None else tenants_roster(run_tenant, tree), run_tenant, defender_dir=tree)
+
+
+def fixture_run_systems(**kw: Any) -> Any:
+    """`run_systems_for` the fixture tenant: for a lifecycle or drive test whose investigation is a stand-in that reads no systems."""
+    return run_systems_for(fixture_run_tenant(**kw))
+
+
+def registry_for(run_tenant: Any = None, defender_dir: Path | None = None) -> Any:
+    """(#1366 R16) The run's verb registry as `driver._run_start_reads` builds it when a run injects none: over the tenant's roster,
+    under its gather grant. For a test that builds an agent with `build_agent_core` itself: a verb-bearing tool is refused
+    without the registry being handed in. The fixture tenant when none is named."""
+    tenant = run_tenant if run_tenant is not None else fixture_run_tenant()
+    return mod("systems.verbs").ModuleVerbRegistry(
+        tenants_roster(tenant, defender_dir), tenant.grants.gather, grant_home=tenant.table_pointer)
+
+
 def verb_context(defender_dir: Path, run_dir: Path, env: Any, *,
                  tenant: Any = None, settings_dir: Path | None = None, **kw: Any) -> Any:
     """A `VerbContext` carrying the run's tenant record. `tenant` is a `RunTenant`; omitted, it

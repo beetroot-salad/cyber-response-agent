@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.tenancy import _tenants1106 as T1106
 
 from defender.tests.support.learning.judge import _judge_921 as J
 
@@ -1327,7 +1328,7 @@ def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
     run._drive_investigation(
         alert_path=src / "alert.json", run=_fixture_run_1165(tmp_path / fixture_uuid("sib")),
         defender_dir=est.defender_dir, model_name="m", model_override=None, box=None,
-        tenant=est.run_tenant(), world=S.load_world(ep, "b"), episode=Episode.open(ep),
+        tenant=est.run_tenant(), systems=T1106.run_systems_for(est.run_tenant(), est.defender_dir), world=S.load_world(ep, "b"), episode=Episode.open(ep),
         serving=S.serving(), source=S.T.open_source(src),
         investigate=lambda **kw: seen.update(kw) or {})
     assert seen["verbs"].prebranch == expected

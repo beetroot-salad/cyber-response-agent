@@ -45,7 +45,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 )
 
 from defender.kit.verbs import body_param_of, engine_of, verb  # noqa: E402
-from defender.tests.support.learning.curation._lead_author_1134 import held_skills, skills_view  # noqa: E402
+from defender.tests.support.learning.curation._lead_author_1134 import held_skills, run_pitfalls_handed, skills_view  # noqa: E402
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -568,7 +568,7 @@ def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, m
         return 0
 
     with C.draft_trees(lane) as trees:
-        rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=synthesizing_curator,
+        rc = run_pitfalls_handed(paths=paths, invoke=synthesizing_curator,
                                            trees=trees, batch=lane.batch)
     assert rc == 0
     text = lane.text_at_tip(rel)

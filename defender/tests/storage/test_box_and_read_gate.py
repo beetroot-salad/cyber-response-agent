@@ -45,7 +45,9 @@ def _policies(run_dir: Path, defender_dir: Path) -> dict[str, object]:
         role.name: compile_policy_for(
             defn, run_dir=run_dir, defender_dir=defender_dir,
             scope=(RunScope(corpus_name="lessons", read_confine=(defender_dir / "lessons",))
-                   if defn.requires_corpus else RunScope()))
+                   if defn.requires_corpus
+                   # The lead author's write scope names the lane's systems, never the tree's adapters (#1366 R16).
+                   else RunScope(systems=("elastic",)) if role is AgentRole.LEAD_AUTHOR else RunScope()))
         for role, defn in defs.items()}
 
 

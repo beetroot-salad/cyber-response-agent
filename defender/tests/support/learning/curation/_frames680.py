@@ -20,6 +20,7 @@ from defender.investigation.tools import _tool_bash, _tool_read_file
 from defender.tests.support.runtime.state._1255_view import model_path
 from defender.tests.support.learning.curation._curator1134 import corpus_view, open_state
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs
+from defender.tests.support.learning.curation._lead_author_1134 import lead_scope
 
 
 SALT_RE = re.compile(r"<run-([0-9a-f]+)-([^>]+)>\n(.*?)\n</run-\1-\2>", re.DOTALL)
@@ -158,6 +159,7 @@ def _lead_author_prompt(
             run,
             [{"goal": hostile}],
             repo_root=tmp_path,
+            systems=("elastic",),
             spawn=spawn,
             salt=salt,
         )
@@ -180,6 +182,7 @@ def _pitfalls_prompt(
             [{"system": "test", "stderr_digest": hostile}],
             state=open_state(LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "state")),
             repo_root=tmp_path,
+            systems=("test",),
             spawn=spawn,
             salt=salt,
         )
@@ -229,7 +232,7 @@ def _lead_author_deps_scene(tmp_path: Path, result: BoxResult):
     # `system` must be a declared system (#772): the rm grant is compiled per system the tree
     # has an adapter for, not over an anonymous `<name>/_draft/` shape.
     seed_adapter_stubs(defender_dir, ("system",))
-    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir, box=Box(result))
+    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir, box=Box(result), scope=lead_scope(defender_dir))
     return deps, skills, "rm defender/skills/system/_draft/lesson.md"
 
 
@@ -247,7 +250,7 @@ def _lead_author_draft_scene(tmp_path: Path, result: BoxResult):
     # As above: `system` must be a system the product has an adapter for (#772).
     seed_adapter_stubs(defender_dir, ("system",))
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir, box=Box(result),
-                scope=RunScope(tenant_agent=agent))
+                scope=lead_scope(defender_dir, tenant_agent=agent))
     target = deps.view.to_model(skills / "system" / "_draft" / "lesson.md")
     return deps, skills, f"rm {target}"
 

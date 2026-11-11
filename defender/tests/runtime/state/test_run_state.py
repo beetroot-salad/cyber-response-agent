@@ -536,7 +536,8 @@ def _drive_with_box(defn, run_dir: Path, turns, *, limits, enforce: bool, state,
     defn = replace(defn, budget_enforced=enforce)
     agent: Agent = driver.build_agent_core(
         defn, deps_type=defn.deps_cls, instructions="probe", logger=logger, agent_id="main",
-        make_model=lambda name, effort: BuiltModel(FunctionModel(model), None), limits=limits)
+        make_model=lambda name, effort: BuiltModel(FunctionModel(model), None), limits=limits,
+        verbs=T1106.registry_for())
     bindable = replace(defn, tools=effective_tools_for(defn))
     deps = replace(bind(bindable, run_dir, defender_dir=DEFENDER, box=box), run_state=state)
 

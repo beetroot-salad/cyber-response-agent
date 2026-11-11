@@ -24,6 +24,7 @@ from defender.learning.leads.path_validation import (  # noqa: E402
 )
 from defender.investigation import permission  # noqa: E402
 from defender.investigation.agent_definition import RunScope, bind  # noqa: E402
+from defender.tests.support.learning.curation._lead_author_1134 import scope_systems  # noqa: E402
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
 
 #: The draft's repo-relative skills spelling.
@@ -60,7 +61,7 @@ def _tree(tmp_path: Path, systems: tuple[str, ...] = _SYSTEMS) -> tuple[Path, Pa
 
 def _bind(run: Path, defender_dir: Path, agent: Path):
     return bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir,
-                scope=RunScope(tenant_agent=agent))
+                scope=RunScope(tenant_agent=agent, systems=scope_systems(defender_dir)))
 
 
 def _gate(tmp_path: Path, systems: tuple[str, ...] = _SYSTEMS):

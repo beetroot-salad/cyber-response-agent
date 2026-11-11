@@ -46,6 +46,7 @@ from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # 
 from defender.tests.support.runtime.engine._engine_helpers import replay_once as _replay  # noqa: E402
 from defender.records import WIRE_LOG_DIR  # noqa: E402
 from defender.tests.support.sandbox._box1343 import AttachedStartSeam  # noqa: E402
+from defender.tests.support.learning.curation._lead_author_1134 import scope_systems  # noqa: E402
 
 
 # The lane writes a batch draft's `agent/skills`; the adapters and product prompts stay in the
@@ -57,7 +58,7 @@ def _lead_deps(run_dir: Path, wt: Path) -> LeadAuthorDeps:
     """The deps via `bind`: `wt/defender` (product: adapters) as the policy anchor and
     `defender_dir`, `wt/draft/agent` as the tenant agent."""
     deps = bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=wt / "defender",
-                scope=RunScope(tenant_agent=_agent(wt)))
+                scope=RunScope(tenant_agent=_agent(wt), systems=scope_systems(wt / "defender")))
     assert isinstance(deps, LeadAuthorDeps)
     return deps
 
@@ -100,8 +101,13 @@ def _worktree(tmp_path):
     (skills / "gather" / "queries" / "elastic" / "_draft").mkdir(parents=True)
     (skills / "elastic" / "_draft").mkdir(parents=True)
     (root / "defender" / "skills").mkdir(parents=True)
-    seed_adapter_stubs(root / "defender", ("elastic", "cmdb"))
+    seed_adapter_stubs(root / "defender", LANE_STUB_SYSTEMS)
     return root
+
+
+# The systems the lane is handed (#1366 R16: the stage never reads them off the bound tree) — the
+# ones `_worktree` stubs adapters for.
+LANE_STUB_SYSTEMS = ("elastic", "cmdb")
 
 
 def _run_dir(tmp_path):
@@ -302,7 +308,8 @@ def _engine_run(tmp_path: Path, rd: Path, repo_root: Path, fn, trace: str) -> st
             StageWiring(prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name=trace,
                         label="la"),
             StageContext(learning_run_dir=rd, user="u", request_limit=6,
-                         wall_clock_timeout=config.lead_author_timeout(), repo_root=repo_root),
+                         wall_clock_timeout=config.lead_author_timeout(), repo_root=repo_root,
+                         systems=LANE_STUB_SYSTEMS),
             make_model=_fake_model(fn),
         )
 
@@ -432,6 +439,7 @@ def test_claude_none_effort_becomes_fatal_config(tmp_path, monkeypatch):
                 request_limit=4,
                 wall_clock_timeout=config.lead_author_timeout(),
                 repo_root=_worktree(tmp_path),
+                systems=LANE_STUB_SYSTEMS,
             ),
         )
 
@@ -541,7 +549,7 @@ class _Lane:
                                  [ToolCallPart(tool_name="bash", args={"command": command})])
 
         deps = bind(LEAD_AUTHOR_DEF, self.run_dir, defender_dir=self.wt / "defender",
-                    scope=RunScope(tenant_agent=_agent(self.wt)), box=box)
+                    scope=RunScope(tenant_agent=_agent(self.wt), systems=scope_systems(self.wt / "defender")), box=box)
         return run_stage(
             stage="lead_author",
             wiring=StageWiring(prompt_path=_prompt(self.tmp_path), model="m", effort=None, trace_name=trace,

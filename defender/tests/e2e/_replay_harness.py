@@ -699,8 +699,8 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         dispatches_lead_zero=resume is None and verbs is not None, records=records,
     )
     seams["box"] = box if box is not None else production_unboxed_box(run_dir, tree, run_tenant)
-    if "roster" not in seams:  # (#1366 R16) the driver builds none: a replay naming none is handed the tenant's, as run start hands it
-        seams["roster"] = _tenants1106.tenants_roster(run_tenant, tree)
+    # (#1366 R16) the driver builds none: a replay naming none is handed the tenant's, as run start hands it
+    seams.setdefault("roster", _tenants1106.tenants_roster(run_tenant, tree))
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=RunPaths(run_dir).alert, run=Run.under(fixture_runs_base(run_dir.parent), run_dir.name),

@@ -64,6 +64,11 @@ from defender.tests.support.learning.curation._shared_readers_1134 import Refuse
 from defender.tests.support.sandbox._spec791 import author_markers
 from defender.tests.support.learning.curation._tree_listing_1134 import descriptors_under
 from defender.tests.shared.filesystem.test_rooted_io import census, in_time
+from defender.tests.support.learning.curation._lead_author_1134 import (
+    build_deps_handed,
+    handed_systems,
+    run_pitfalls_handed,
+)
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -719,7 +724,7 @@ def _deps(paths: LoopPaths, trees: DrainTrees, spawn: LeadAuthorSpawn,
     """The real deps for `paths` under the open `trees`, with only the seams a hermetic drive
     must own replaced: the agent spawn, the two tables, and the queue lock."""
     return dataclasses.replace(
-        lead_author.build_lead_author_deps(paths, state=state_for_paths(paths), trees=trees),
+        build_deps_handed(paths, state=state_for_paths(paths), trees=trees),
         invoke_agent=spawn,
         extract=lambda _run_dir: ([], list(leads)),
     )
@@ -746,7 +751,7 @@ def test_a_kind_fault_does_not_unwind_the_claim_through_run_under_held_queue_loc
     with DrainTrees.open((paths.skills_dir,), **({"os_": refuser} if refuser else {})) as trees, \
             pytest.raises(FatalConfigError, match=NO_MODEL):
         lead_author.run_under_held_queue_lock(run_of(run_dir), paths=paths, state=state_for_paths(paths), trees=trees,
-                                              on_done=done.append)
+                                              on_done=done.append, systems=handed_systems(paths))
 
     w_draft = paths.skills_dir / f"gather/queries/wazuh/_draft/{_draft_basename('wazuh.hunt-creds')}.md"
     e_draft = paths.skills_dir / f"gather/queries/elastic/_draft/{_draft_basename('elastic.hunt-creds')}.md"
@@ -955,7 +960,8 @@ def test_the_lead_author_seam_holds_skills_only_while_its_call_runs(tmp_path: Pa
 
     drains._invoke_lead_author(
         paths, state_for_paths(paths), run_of(run_dir), label=LEAD,
-        on_done=lambda sha: during.append((sha, sorted(descriptors_under(repo)))))
+        on_done=lambda sha: during.append((sha, sorted(descriptors_under(repo)))),
+        systems=handed_systems(paths))
 
     assert during == [(None, [os.path.realpath(paths.skills_dir)])], during
     assert descriptors_under(repo) == [], "a handle on the leaf outlived the seam"
@@ -978,7 +984,8 @@ def test_the_lead_author_seam_releases_skills_when_its_call_raises(tmp_path: Pat
     expected = RuntimeError if fault == "RuntimeError" else drains._LeadAuthorRetry
     with pytest.raises(expected):
         drains._invoke_lead_author(
-            paths, state_for_paths(paths), run_of(run_dir), label=LEAD, on_done=on_done)
+            paths, state_for_paths(paths), run_of(run_dir), label=LEAD, on_done=on_done,
+            systems=handed_systems(paths))
 
     assert during == [[os.path.realpath(paths.skills_dir)]], during
     assert descriptors_under(repo) == [], "a handle on the leaf outlived the raising seam"
@@ -1023,8 +1030,8 @@ def test_trees_that_do_not_hold_skills_exactly_are_refused(tmp_path: Path, how: 
     spawn = Spawn()
     with trees:
         with pytest.raises(LeadAuthorError):
-            lead_author.build_lead_author_deps(paths, state=state_for_paths(paths), trees=trees)
+            build_deps_handed(paths, state=state_for_paths(paths), trees=trees)
         with pytest.raises(LeadAuthorError):
-            pitfalls_curator.run_pitfalls(paths=paths, trees=trees, invoke=spawn)
+            run_pitfalls_handed(paths=paths, trees=trees, invoke=spawn)
     assert spawn.calls == []
     assert [r["pitfall_id"] for r in persist.read_pitfalls(state_for_paths(paths))] == ["r:l-000:0"]

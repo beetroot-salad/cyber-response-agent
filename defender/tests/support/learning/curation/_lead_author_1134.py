@@ -34,19 +34,77 @@ def lead_trees(paths: LoopPaths) -> DrainTrees:
     return open_drain_trees(paths, LEAD_AUTHOR_DRAIN_LABEL)
 
 
-def lead_deps(paths: LoopPaths) -> Any:
-    """`build_lead_author_deps(paths, trees=<the lead drain's trees over paths>)`. The deps hold
-    the trees' `Held` and bound `tree_for`, so the trees stay open while the deps are referenced;
-    a refusal closes them and propagates."""
+def handed_systems(paths: LoopPaths, systems: Any = None, directory: Any = None) -> Any:
+    """The systems a lead lane over `paths` is handed (#1366 R16: never defaulted by the lane, so a test hands them). `systems` as
+    given; with a `directory` (the tenant's records), none: the lane builds the tenant's own from them; else the whole catalog of
+    the product checkout `paths.repo_root`, read as the lane's resolver reads it (an unreadable adapters directory raises
+    `AdaptersUnreadable` here). That last is what a caller with no tenant hands; a scene whose lane has a tenant but whose
+    assertion is the gate's or the box's, not which systems the tenant has, hands it too (membership by records is pinned in
+    `test_declared_systems_resolution` and `test_tenant_surfaces_1366`)."""
+    from defender.tests.support.runtime.engine._declared869 import catalog_of
+
+    if systems is not None or directory is not None:
+        return systems
+    return catalog_of(paths.repo_root)
+
+
+def lead_deps(paths: LoopPaths, *, systems: Any = None, directory: Any = None) -> Any:
+    """`build_lead_author_deps(paths, trees=<the lead drain's trees over paths>)`, handed its systems (`handed_systems`). The
+    deps hold the trees' `Held` and bound `tree_for`, so the trees stay open while the deps are referenced; a refusal closes
+    them and propagates."""
     from defender.learning.leads import lead_author
     from defender.tests.support.learning.curation._curator1134 import open_state
 
     trees = lead_trees(paths)
     try:
-        return lead_author.build_lead_author_deps(paths, state=open_state(paths), trees=trees)
+        return lead_author.build_lead_author_deps(paths, state=open_state(paths), trees=trees,
+                                                  systems=handed_systems(paths, systems, directory), directory=directory)
     except BaseException:
         trees.close()
         raise
+
+
+def scope_systems(defender_dir: Path) -> tuple[str, ...]:
+    """The systems a lead lane's spawn scope names (`RunScope(systems=)`, #1366 R16: the scope never fills them from the bound tree's
+    adapters): for a caller with no tenant, the whole catalog of the tree it binds, read as the lane's resolver reads it (an
+    unreadable adapters directory is the resolver's `LeadAuthorError`)."""
+    from defender._paths import adapters_under
+    from defender.learning.leads.declared_systems import read_adapters
+    from defender.systems.catalog import Catalog
+
+    return tuple(sorted(Catalog(read_adapters(adapters_under(defender_dir))).roster.systems))
+
+
+def lead_scope(defender_dir: Path, **scope: Any) -> Any:
+    """`RunScope(**scope)` for a lead lane bound over `defender_dir`, its systems named (`scope_systems`, #1366 R16): what a spawn
+    scope carries now that `bind` fills none from the tree's adapters."""
+    from defender.investigation.agent_definition import RunScope
+
+    return RunScope(systems=scope_systems(defender_dir), **scope)
+
+
+def build_deps_handed(paths: LoopPaths, *, systems: Any = None, **kw: Any) -> Any:
+    """`lead_author.build_lead_author_deps(paths, **kw)` handed its systems (`handed_systems`, #1366 R16). `kw` as that takes
+    (`state=`, `trees=`, `batch=`, `directory=`...)."""
+    from defender.learning.leads import lead_author
+
+    return lead_author.build_lead_author_deps(paths, systems=handed_systems(paths, systems, kw.get("directory")), **kw)
+
+
+def run_pitfalls_handed(*, paths: LoopPaths, systems: Any = None, **kw: Any) -> int:
+    """`pitfalls_curator.run_pitfalls(paths=paths, **kw)` handed its systems (`handed_systems`, #1366 R16)."""
+    from defender.learning.leads import pitfalls_curator
+
+    return pitfalls_curator.run_pitfalls(paths=paths, systems=handed_systems(paths, systems, kw.get("directory")), **kw)
+
+
+def run_lead_handed(run: Any, *, paths: LoopPaths | None = None, systems: Any = None, **kw: Any) -> int:
+    """`lead_author.run(run, paths=paths, **kw)` handed its systems when it builds its own deps (`handed_systems`, #1366 R16)."""
+    from defender.learning.leads import lead_author
+
+    if paths is None:
+        return lead_author.run(run, **kw)
+    return lead_author.run(run, paths=paths, systems=handed_systems(paths, systems, kw.get("directory")), **kw)
 
 
 def held_skills(root: Path) -> Held:
@@ -236,9 +294,9 @@ def errors(caplog: pytest.LogCaptureFixture) -> list[str]:
 # serve the suites that still use a product-shaped tree (`defender/skills`).
 
 
-def draft_lead_deps(lane: Any, *, state: Any = None, **replaced: Any) -> Any:
+def draft_lead_deps(lane: Any, *, state: Any = None, systems: Any = None, directory: Any = None, **replaced: Any) -> Any:
     """`build_lead_author_deps(lane.paths, trees=<the draft's skills mount>, batch=lane.batch)`
-    over a `_curator1134.DraftLane`, `replaced` swapped in."""
+    over a `_curator1134.DraftLane`, `replaced` swapped in; handed its systems (`handed_systems`, #1366 R16)."""
     from defender.learning.leads import lead_author
     from defender.tests.support.learning.curation._curator1134 import open_state
 
@@ -246,7 +304,7 @@ def draft_lead_deps(lane: Any, *, state: Any = None, **replaced: Any) -> Any:
     try:
         deps = lead_author.build_lead_author_deps(
             lane.paths, state=state if state is not None else open_state(lane.paths),
-            trees=trees, batch=lane.batch)
+            trees=trees, batch=lane.batch, systems=handed_systems(lane.paths, systems, directory), directory=directory)
     except BaseException:
         trees.close()
         raise
@@ -340,14 +398,16 @@ def lead_lane(tmp_path: Path, *, adapters: tuple[str, ...], markers: tuple[str, 
                                  tenant=tenant)
 
 
-def run_pitfalls(lane: Any, state: Any, spawn: Any) -> int:
-    """`pitfalls_curator.run_pitfalls` over the draft lane's held trees and its batch."""
+def run_pitfalls(lane: Any, state: Any, spawn: Any, *, systems: Any = None, directory: Any = None) -> int:
+    """`pitfalls_curator.run_pitfalls` over the draft lane's held trees and its batch, handed its systems (`handed_systems`,
+    #1366 R16)."""
     from defender.learning.leads import pitfalls_curator
     from defender.tests.support.learning.curation import _curator1134 as C
 
     with C.draft_trees(lane) as trees:
         return pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, invoke=spawn,
-                                             trees=trees, batch=lane.batch)
+                                             trees=trees, batch=lane.batch,
+                                             systems=handed_systems(lane.paths, systems, directory), directory=directory)
 
 
 @contextmanager

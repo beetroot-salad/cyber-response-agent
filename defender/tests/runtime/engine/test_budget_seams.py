@@ -116,6 +116,7 @@ def drive_agent(  # noqa: PLR0913 — one more seam: the model
         make_model=lambda name, effort: BuiltModel(FunctionModel(scripted), None),
         limits=limits,
         extra_capabilities=extra_capabilities,
+        verbs=T1106.registry_for(),  # (#1366 R16) handed in: the builder makes none over the checkout
     )
     if bind_ledger is not None:
         bind_ledger(logger)
@@ -353,7 +354,8 @@ def test_f1_r7_2_a_request_s_ending_reaches_the_agent_unchanged_whatever_the_led
         return ending
 
     agent = driver.build_agent_core(MAIN_DEF, deps_type=MAIN_DEF.deps_cls, instructions="probe", logger=logger, agent_id=agent_id,
-                                    make_model=lambda name, effort: BuiltModel(FunctionModel(model), None), limits=DEFAULT_LIMITS)
+                                    make_model=lambda name, effort: BuiltModel(FunctionModel(model), None), limits=DEFAULT_LIMITS,
+                                    verbs=T1106.registry_for())
     with _unsandboxed_allowed():
         box = box_mod.start_box(run_dir, DEFENDER, docker=_no_docker_daemon, tenant_id=TEST_TENANT)
     bindable = replace(MAIN_DEF, tools=effective_tools_for(MAIN_DEF))
@@ -655,7 +657,7 @@ def _registered_names(defn) -> set[str]:
     agent = driver.build_agent_core(
         defn, deps_type=defn.deps_cls, instructions="probe", logger=logger,
         agent_id="probe", make_model=lambda n, e: BuiltModel(FunctionModel(
-            ScriptedModel([])), None), limits=DEFAULT_LIMITS,
+            ScriptedModel([])), None), limits=DEFAULT_LIMITS, verbs=T1106.registry_for(),
     )
     if defn is MAIN_DEF:
         from defender.investigation.tools import register_gather_tool

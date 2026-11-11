@@ -24,6 +24,7 @@ from defender.tests.support.shared.contracts._repo import seed_skills_repo
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.learning.core.state import PITFALLS
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
 
 
 DECLARED = frozenset({"elastic", "wazuh"})
@@ -80,7 +81,7 @@ def _tick(lane: C.DraftLane, edit, monkeypatch, *, systems: tuple[str, ...] = ("
         edit(lane.skills_dir)
         return 0
 
-    rc = pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, trees=C.draft_trees(lane),
+    rc = run_pitfalls_handed(paths=lane.paths, state=state, trees=C.draft_trees(lane),
                                        batch=lane.batch, invoke=invoke or agent)
     return rc, state
 
@@ -159,7 +160,7 @@ def test_run_pitfalls_below_threshold_is_noop(tmp_path: Path, monkeypatch):
     state = open_state(lane.paths)
     _seed_pitfalls(state, 2)
     called = []
-    rc = pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, trees=C.draft_trees(lane),
+    rc = run_pitfalls_handed(paths=lane.paths, state=state, trees=C.draft_trees(lane),
                                        batch=lane.batch,
                                        invoke=lambda *a, **k: called.append(1) or 0)
     assert rc == 0
@@ -238,7 +239,7 @@ def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_path: Path, m
         [{"pitfall_id": f"r:{i}", "system": ""} for i in range(2)], state=state
     )
     called: list[int] = []
-    rc = pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, trees=C.draft_trees(lane),
+    rc = run_pitfalls_handed(paths=lane.paths, state=state, trees=C.draft_trees(lane),
                                        batch=lane.batch,
                                        invoke=lambda *a, **k: called.append(1) or 0)
     assert rc == 0
@@ -285,4 +286,4 @@ def test_invoke_pitfalls_agent_config_fault_propagates(tmp_path: Path, monkeypat
     from defender.learning.core.config import FatalConfigError
     _capture_engine(monkeypatch, raise_exc=FatalConfigError("needs FIREWORKS_API_KEY"))
     with pytest.raises(FatalConfigError):
-        pitfalls_curator._invoke_pitfalls_agent([], state=_state(tmp_path), repo_root=tmp_path)
+        pitfalls_curator._invoke_pitfalls_agent([], state=_state(tmp_path), repo_root=tmp_path, systems=("elastic",))

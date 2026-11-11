@@ -8,6 +8,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,6 +21,7 @@ from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.learning.leads import declared_systems, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.systems import verbs
+from defender.systems.catalog import Catalog
 from defender.systems.verb_grant import DENY_ALL
 from defender.systems.verb_roster import RosterError, audit_read_surfaces
 from defender.systems.verbs import ModuleVerbRegistry, RegistryError
@@ -27,6 +29,7 @@ from defender.skills.invlang.validate import _gating
 from defender.tests.support.runtime.engine._declared869 import (
     ADAPTER_BODY,
     ADAPTERS_REL,
+    catalog_of,
     pitfall_row,
     seed_tree,
     write,
@@ -260,8 +263,11 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
     assert len(persist.read_pitfalls(open_state(paths))) == 2
 
     def probe():
+        # (#1366 R16) The lane is handed its systems: a caller with no tenant hands the whole catalog, which it reads from the
+        # checkout, here as the lane's resolver reads it (`catalog_of`), as `nobody`. A tenant's lane reads the same tree
+        # itself, through the drain seam (`test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_tree`).
         return drains._invoke_pitfalls(paths, open_state(paths), on_curated=lambda _d: None,
-                                       label=LEAD_AUTHOR_DRAIN_LABEL)
+                                       label=LEAD_AUTHOR_DRAIN_LABEL, systems=catalog_of(repo))
 
     with handed_to_nobody(repo, adapters, 0o400):
         verdict = run_as_nobody(probe, expected=LeadAuthorError)
@@ -335,9 +341,12 @@ def test_the_run_refuses_an_absent_checkout_adapters_directory_at_its_own_frame(
     assert not adapters.exists()
     _redirect_repo_root(monkeypatch, root)
 
+    # (#1366 R16) The roster is handed: the run tree's whole catalog (what a caller with no tenant hands), not the checkout's, so
+    # the run's own read of the checkout is the one that finds the directory absent.
+    handed = Catalog.of_checkout(run_tree / "defender").roster
     _gating.release_capabilities()
     with pytest.raises(RegistryError) as exc:
-        at_run_start(run_tree / "defender", None, object(), _tenants1106.fixture_run_tenant())
+        at_run_start(run_tree / "defender", handed, object(), _tenants1106.fixture_run_tenant())
     assert str(adapters) in str(exc.value), f"does not name the directory: {exc.value}"
     with pytest.raises(_gating.CapabilitiesNotRead):
         _gating._capability_exists("cmdb")
@@ -434,32 +443,43 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
     assert set(read_roster(adapters).adapter_files) == {"cmdb"}
 
 
-def _seed_pitfalls_queue(tmp_path: Path, monkeypatch) -> tuple[Path, LoopPaths]:
-    """Two `mcpsys` rows queued over a tree declaring only `cmdb`: no adapter declares `mcpsys`,
-    so the readable control rotates them out without spawning a curator."""
+def _seed_pitfalls_queue(tmp_path: Path, monkeypatch) -> tuple[Path, LoopPaths, Any]:
+    """Two `mcpsys` rows queued, for the fixture tenant's lane (#1366 R16: a tenant's lane draws its systems from the tenant's
+    current records over the checkout's catalog, which it reads itself), over a tree declaring only `cmdb`: no record of the
+    tenant is served by an adapter that declares `mcpsys`, so the readable control rotates the rows out without spawning a
+    curator. Returns the repo, the tenant's paths over it and the directory holding the tenant's records."""
+    from defender.tests.support.learning.core import _state1135
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
+    from defender.tests.support.tenancy import _systems1366 as R
+
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "1")
     repo = seed_tree(tmp_path, adapters=("cmdb",), markers=("elastic",), skills=("elastic",),
                      catalog=())
-    paths = LoopPaths(repo_root=repo, state_dir=repo / "state")
+    tenant = _state1135.curation_tenant()
+    paths = tenant.learning_paths(LoopPaths, repo_root=repo)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
+    directory = tenant_directory(current_data_root(), tenant.id, records=R.fixture_records())
     persist.append_pitfalls(
         [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")],
         state=open_state(paths),
     )
     assert queue_ids(paths) == ["r:l-000:0", "r:l-001:0"]
-    return repo, paths
+    return repo, paths, directory
 
 
 def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_tree(
     tmp_path, monkeypatch,
 ):
-    repo, paths = _seed_pitfalls_queue(tmp_path, monkeypatch)
+    """A tenant lane builds the tenant's systems from its records over the checkout's catalog; an adapters directory it cannot read
+    is the host's fault (a `RegistryError`, systemic), so the drain re-raises it and spends no queue row. (#1366 R16, #1035)"""
+    repo, paths, directory = _seed_pitfalls_queue(tmp_path, monkeypatch)
     adapters = _repo_adapters(repo)
     shutil.rmtree(adapters)
+    step = functools.partial(drains._invoke_pitfalls, label=LEAD_AUTHOR_DRAIN_LABEL, directory=directory)
 
     with pytest.raises(LeadAuthorError) as exc:
-        drains._drain_pitfalls(
-            paths, open_state(paths), functools.partial(drains._invoke_pitfalls, label=LEAD_AUTHOR_DRAIN_LABEL))
+        drains._drain_pitfalls(paths, open_state(paths), step)
     assert f"{adapters} is {CANNOT_READ}" in str(exc.value), (
         f"the raise is not the resolver's own refusal: {exc.value}"
     )
@@ -477,8 +497,7 @@ def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_t
     # then reads the same tree.
     _git.git(["checkout", "--", str(adapters)], cwd=repo)
     assert (adapters / "cmdb_adapter.py").is_file()
-    drains._drain_pitfalls(
-        paths, open_state(paths), functools.partial(drains._invoke_pitfalls, label=LEAD_AUTHOR_DRAIN_LABEL))
+    drains._drain_pitfalls(paths, open_state(paths), step)
     assert queue_ids(paths) == [], (
         "the readable control did not get past the resolver to rotate the unattributable rows"
     )
@@ -572,41 +591,47 @@ def test_an_adapter_that_does_not_parse_is_recorded_on_the_roster_not_raised_or_
 
 
 def _tenants_run_start(tmp_path: Path, name: str, *, with_cmdb: bool):
-    """Production's own `RunTenant` for a twin tenant whose records lack cmdb (or not), taken off `run.main`'s lifecycle."""
+    """Production's own `RunTenant` for a twin tenant whose records lack cmdb (or not), and the roster `run.main` handed the
+    lifecycle for it (`systems.roster`), both taken off the lifecycle call."""
     from defender.tests.tenancy.alert_front_door_1222.test_tenant_surfaces_1366 import _scene
 
     drive, _directory = _scene(tmp_path, name, with_cmdb=with_cmdb)
-    return drive.lifecycle_calls[0]["tenant"]
+    call = drive.lifecycle_calls[0]
+    return call["tenant"], call["systems"].roster
 
 
-def test_1366_o1_the_drivers_own_roster_fallback_serves_the_systems_of_the_tenants_records(tmp_path):
-    """With no roster injected, the driver's roster is the tenant's records' (cmdb for B, not for A), never the checkout's. (#1366 O1)"""
+def test_1366_o1_run_start_hands_the_driver_the_systems_of_the_tenants_records_and_the_driver_reads_what_it_is_handed(tmp_path):
+    """The roster run start hands the driver is the tenant's records' (cmdb for B, not for A), never the checkout's, and the driver's
+    run-start reads serve exactly that value. (A driver handed none is refused: `test_no_defaulted_roster_1366`.) (#1366 O1, R16, DC7)"""
     at_run_start = _run_start()
     defender_dir = Path(_git.REPO_ROOT) / "defender"
-    tenant_a = _tenants_run_start(tmp_path, "a", with_cmdb=False)
-    tenant_b = _tenants_run_start(tmp_path, "b", with_cmdb=True)
+    tenant_a, handed_a = _tenants_run_start(tmp_path, "a", with_cmdb=False)
+    tenant_b, handed_b = _tenants_run_start(tmp_path, "b", with_cmdb=True)
 
-    roster_a, _ = at_run_start(defender_dir, None, object(), tenant_a)
-    roster_b, _ = at_run_start(defender_dir, None, object(), tenant_b)
+    roster_a, _ = at_run_start(defender_dir, handed_a, object(), tenant_a)
+    roster_b, _ = at_run_start(defender_dir, handed_b, object(), tenant_b)
 
+    assert roster_a is handed_a, "the driver served a roster other than the one it was handed"
+    assert roster_b is handed_b, "the driver served a roster other than the one it was handed"
     assert "elastic" in roster_a.systems
     assert "cmdb" not in roster_a.systems, sorted(roster_a.systems)
     assert {"cmdb", "elastic"} <= set(roster_b.systems), sorted(roster_b.systems)
 
 
-@pytest.mark.parametrize("handed", ["fallback", "tenant roster injected"])
+@pytest.mark.parametrize("handed", ["tenant subset", "whole catalog"])
 def test_1366_o1_the_ceiling_gate_is_the_whole_catalog_even_when_the_runs_roster_is_the_tenants_subset(tmp_path, handed):
-    """The `nothing-to-try` gate is handed every checkout system whether the run's roster is the driver's fallback or the tenant's subset passed in. (#1366 O1, DC7)"""
+    """The `nothing-to-try` gate is handed every checkout system whether the run's roster is the tenant's subset run start hands
+    or the whole catalog a caller with no tenant hands. (#1366 O1, R16, DC7)"""
     at_run_start = _run_start()
     defender_dir = Path(_git.REPO_ROOT) / "defender"
-    tenant_a = _tenants_run_start(tmp_path, "a", with_cmdb=False)
-    subset, _ = at_run_start(defender_dir, None, object(), tenant_a)
+    tenant_a, subset = _tenants_run_start(tmp_path, "a", with_cmdb=False)
     assert "cmdb" not in subset.systems, "premise: the run's roster lacks cmdb"
     whole = verbs.read_roster(adapters_under(Path(_git.REPO_ROOT) / "defender"))
     assert "cmdb" in whole.verbs, "premise: the catalog has cmdb"
 
     _gating.release_capabilities()
-    at_run_start(defender_dir, None if handed == "fallback" else subset, object(), tenant_a)
+    at_run_start(defender_dir, subset if handed == "tenant subset" else Catalog.of_checkout(defender_dir).roster,
+                 object(), tenant_a)
 
     assert set(_gating.known_capabilities()) == set(whole.verbs)
     assert _gating._capability_exists("cmdb") is True

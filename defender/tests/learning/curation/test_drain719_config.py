@@ -21,9 +21,9 @@ from defender.learning.core.state import (
     AUTHOR_DRAIN_LOCK, LEAD_AUTHOR_DRAIN_LOCK, LEAD_QUEUE_LOCK, REPO_LOCK, TRY_ONCE,
     FINDINGS, PITFALLS, QUESTIONER_FINDINGS, LearningState,
 )  # type: ignore[import-not-found]
-from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.curation._lead_author_1134 import lead_trees
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
 
 
 def _graveyard_file(paths, ch) -> Path:
@@ -165,7 +165,7 @@ def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
     h.seed(paths, PITFALLS, _pitfalls_rows(2))
 
     with pytest.raises(Exception) as raised:  # noqa: PT011 - the raised class is the subject under test, asserted below
-        pitfalls_curator.run_pitfalls(paths=paths, state=_state1135.state_for_paths(paths),
+        run_pitfalls_handed(paths=paths, state=_state1135.state_for_paths(paths),
                                       invoke=lambda *a, **k: 7, trees=C.draft_trees(lane),
                                       batch=lane.batch)
     assert type(raised.value) in tuple(drain.RETIRE_SET), (
@@ -174,7 +174,7 @@ def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
 
     def leg(_paths, _state, box=None, **_kw):
         with C.draft_trees(lane) as trees:
-            return pitfalls_curator.run_pitfalls(paths=_paths, state=_state,
+            return run_pitfalls_handed(paths=_paths, state=_state,
                                                  invoke=lambda *a, **k: 7, trees=trees,
                                                  batch=lane.batch)
 
@@ -229,7 +229,7 @@ def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Pat
     late = h.row_for("pitfalls", "r:l-999:0")
 
     def leg(_paths, _state, box=None, **_kw):
-        rc = pitfalls_curator.run_pitfalls(paths=_paths, state=_state, invoke=lambda *a, **k: 7,
+        rc = run_pitfalls_handed(paths=_paths, state=_state, invoke=lambda *a, **k: 7,
                                            trees=lead_trees(_paths))
         return rc
 
