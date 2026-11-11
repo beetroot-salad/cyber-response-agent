@@ -330,9 +330,10 @@ def test_feedback_an_open_pr_is_left_alone_unless_a_live_review_requests_changes
     [review_row(631, "owner", "REQUEST_CHANGES", body="wrong lane")],
     [review_row(632, "guest", "REQUEST_CHANGES", official=False)],
     [review_row(633, "owner", "REQUEST_CHANGES"), review_row(634, "other", "APPROVED")],
-], ids=["official", "read-only-reviewer", "another-reviewer-approved-later"])
+    [review_row(635, "owner", "REQUEST_CHANGES"), review_row(636, "owner", "COMMENT", body="one more thought")],
+], ids=["official", "read-only-reviewer", "another-reviewer-approved-later", "same-reviewer-commented-later"])
 def test_feedback_a_live_changes_requested_review_on_an_open_pr_gets_it_closed_and_replaced(world, caplog, reviews):
-    """The reconciler closes the PR and the batch ends closed; its replacement follows in the same tick. (H7, C25, D8)"""
+    """The reconciler closes the PR and the batch ends closed, its replacement following in the same tick; a later COMMENT review does not displace the reviewer's request (Forgejo 17 keeps both rows). (H7, C25, D8)"""
     w = world
     w.seed("f1")
     writer = FeedbackCurator(_files("f1"))
