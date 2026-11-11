@@ -493,6 +493,16 @@ def _scripted(directory: Any) -> tuple[Any, Any]:
     return directory, lambda answer: box.update(answer=answer)
 
 
+@pytest.fixture
+def in_the_store(p4_tenant, migrated_database, monkeypatch):  # noqa: F811 — fixtures imported above
+    """The p4 tenant active in the database the lead drain's store reads (#1278: its claim is a store call that requires an
+    active tenant row; the directory the cases flip is the in-memory twin before it)."""
+    from defender.tests.support.jobs._jobs1342 import register_tenant
+
+    register_tenant(migrated_database, p4_tenant.tenant_id)
+    monkeypatch.setenv(DSN_ENV, migrated_database)
+
+
 def _drain(t: Any, tmp_path: Path, monkeypatch: Any, answer: Any) -> tuple[list[str], dict[str, str], Any, Any]:
     """Two queued runs, then ticks of the lead drain with `answer` given after the first claim.
     Returns (labels served over the ticks, run name -> label, paths, directory)."""
@@ -521,7 +531,7 @@ def _drain(t: Any, tmp_path: Path, monkeypatch: Any, answer: Any) -> tuple[list[
 
 
 @pytest.mark.parametrize("answer", AFTER)
-def test_a_claim_of_a_tenant_no_longer_active_stays_queued_uncounted_across_ticks(p4_tenant, tmp_path, monkeypatch, answer):  # noqa: F811
+def test_a_claim_of_a_tenant_no_longer_active_stays_queued_uncounted_across_ticks(p4_tenant, in_the_store, tmp_path, monkeypatch, answer):  # noqa: F811
     """Whatever the tenant became after the first claim, the second is never served, keeps `attempts`, and survives repeated ticks (Flow 4)."""
     t = p4_tenant
     served, runs, paths, _ = _drain(t, tmp_path, monkeypatch, answer)
@@ -532,7 +542,7 @@ def test_a_claim_of_a_tenant_no_longer_active_stays_queued_uncounted_across_tick
     assert json.loads(queued.read_text(encoding="utf-8")).get("attempts", 0) == 0, "a set-aside claim was counted"
 
 
-def test_a_directory_that_fails_at_the_second_claim_does_not_serve_it(p4_tenant, tmp_path, monkeypatch):  # noqa: F811
+def test_a_directory_that_fails_at_the_second_claim_does_not_serve_it(p4_tenant, in_the_store, tmp_path, monkeypatch):  # noqa: F811
     """A state read that raises at the second claim: that claim is not served and is not lost (fails closed, deck PR #678)."""
     t = p4_tenant
     served, runs, paths, _ = _drain(t, tmp_path, monkeypatch, _Failing("database away"))
@@ -563,7 +573,7 @@ class _Blip:
         return unreachable
 
 
-def test_a_database_blip_mid_tick_leaves_the_claim_queued_uncounted_and_the_tick_ends_cleanly(p4_tenant, tmp_path, monkeypatch):  # noqa: F811
+def test_a_database_blip_mid_tick_leaves_the_claim_queued_uncounted_and_the_tick_ends_cleanly(p4_tenant, in_the_store, tmp_path, monkeypatch):  # noqa: F811
     """The tenant records' database goes away after the first claim is served: the next claim is handed back exactly
     as queued (no attempt counted, no failed letter) and no more are taken, the tick ends without a fault, and the
     ticks that meet the outage at their delivery skip; once it is back the claims are served (PR #1350 review: repeated
