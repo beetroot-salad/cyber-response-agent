@@ -47,20 +47,24 @@ def lesson_text(mark: str) -> str:
             f"Fixture content for tests (#1108 P4). {mark}\n")
 
 
-#: Settings marker: a system folder no adapter reads, whose `config.env` holds a key whose value
-#: names the revision. The resolver keeps it like any system's settings; no adapter judges it, so
-#: it never takes a real system down (#1391 Q4 refuses a key an adapter does not read).
-MARK_SYSTEM = "s-b-mark"
-MARK_ENV = f"settings/systems/{MARK_SYSTEM}/config.env"
+#: Settings marker (#1366 R10, O6, DC7): a file in the settings half that names the revision. A
+#: system's settings are the tenant's RECORDS now, not a folder of the export, so a system folder
+#: is no longer a way to tell the run's copy of `current` from another revision (and a folder no
+#: adapter backs would be a record naming an adapter the catalog lacks, which run start refuses,
+#: R12). The marker is a plain file beside the grants (`settings/`), which nothing parses: it
+#: shows which revision the run's copy of the settings half is, byte for byte, and the grants the
+#: run resolves (`tenant.grants.path`) are read from that same copy.
+MARK_FILE = "settings/s-b-revision-mark.txt"
+MARK_REL = "s-b-revision-mark.txt"  # the marker as a `Seen.settings_files` key (relative to `settings/`)
 MARK_KEY = "S_B_MARK_REVISION_MARK"
 
 
-def mark_env(mark: str) -> str:
+def mark_text(mark: str) -> str:
     return f'{MARK_KEY}="{mark}"\n'
 
 
-SEED_FILES = {LESSON: lesson_text(SEEDED_MARK), MARK_ENV: mark_env(SEEDED_MARK)}
-MERGE_FILES = {LESSON: lesson_text(MERGED_MARK), MARK_ENV: mark_env(MERGED_MARK)}
+SEED_FILES = {LESSON: lesson_text(SEEDED_MARK), MARK_FILE: mark_text(SEEDED_MARK)}
+MERGE_FILES = {LESSON: lesson_text(MERGED_MARK), MARK_FILE: mark_text(MERGED_MARK)}
 
 
 @contextlib.contextmanager
@@ -70,6 +74,18 @@ def run_tenant(tmp_path: Path, data_root: Path, *,
     with published_tenant(tmp_path / "forge", root=data_root,
                           files={**SEED_FILES, **(files or {})}) as t:
         yield t
+
+
+def settings_read(seen: Any) -> str | None:
+    """The revision mark in the settings half the run holds (its copy's), after asserting that the
+    grants the run resolved were read from that very half: the settings a run still resolves from
+    a folder are its grants and lead-zero config (a system's settings are its records, DC7)."""
+    grants = Path(seen.kw["tenant"].grants.path).resolve()
+    assert grants.is_relative_to(Path(seen.settings).resolve()), (
+        f"the run resolved its grants from {grants}, not from the settings half it holds "
+        f"({seen.settings})")
+    raw = seen.settings_files.get(MARK_REL)
+    return None if raw is None else raw.decode()
 
 
 # --- the outcome vocabulary, spelled once -----------------------------------------------------
