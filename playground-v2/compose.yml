@@ -251,7 +251,7 @@ services:
         # the same user with the same password (scripts/lab_ops.py). No apostrophes in this
         # script: it is one single-quoted bash -c argument.
         echo "-> defender-readonly role + user";
-        printf "user = \"elastic:%s\"\ndata = {\"cluster\":[\"monitor\"],\"indices\":[{\"names\":[\"logs-*\",\".alerts-security.alerts-default*\",\".internal.alerts-security.alerts-default-*\"],\"privileges\":[\"read\"]}]}\n" "$${ELASTIC_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/role/defender_readonly | grep -q "\"role\"" || { echo "FAIL: defender_readonly role not written"; exit 1; };
+        printf "user = \"elastic:%s\"\ndata = {\"cluster\":[\"monitor\"],\"indices\":[{\"names\":[\"logs-*\",\".alerts-security.alerts-*\",\".internal.alerts-security.alerts-*\"],\"privileges\":[\"read\"]}]}\n" "$${ELASTIC_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/role/defender_readonly | grep -q "\"role\"" || { echo "FAIL: defender_readonly role not written"; exit 1; };
         printf "user = \"elastic:%s\"\ndata = {\"password\":\"%s\",\"roles\":[\"defender_readonly\"]}\n" "$${ELASTIC_PASSWORD}" "$${DEFENDER_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/defender-readonly | grep -q "\"created\"" || { echo "FAIL: defender-readonly user not written"; exit 1; };
         echo "-> es-init complete";
       '

@@ -117,8 +117,37 @@ def test_the_rotation_hands_the_new_read_only_password_to_compose_over_any_expor
     assert up.startswith('V2_DEFENDER_READONLY_PASSWORD="${NEW_DP}" docker'), up
 
 
-def test_the_read_only_role_reads_fixed_patterns_with_no_copy_of_the_tenants():
+def test_the_live_read_only_role_reads_exactly_the_surfaces_fixed_indices():
+    """es-init's defender_readonly role grants `readonly_indices`, no copy of the tenant's patterns."""
     env = SERVICES["es-init"]["environment"]
     assert not [e for e in env if "INDEX" in e], env
     script = SERVICES["es-init"]["command"]
-    assert '\\"logs-*\\"' in script and ".alerts-security.alerts-default*" in script
+    role = next(line for line in script.splitlines() if "/_security/role/defender_readonly" in line)
+    names = json.loads("[" + re.search(r'\\"names\\":\[(.*?)\]', role).group(1).replace('\\"', '"') + "]")
+    assert names == SURFACE["readonly_indices"]
+
+
+def test_the_frozen_read_only_role_reads_the_same_fixed_indices_whatever_the_tenant_says(tmp_path):
+    """The frozen copy grants the live list: a tenant with other patterns changes nothing."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("lab_ops_1391_role", PLAYGROUND / "scripts" / "lab_ops.py")
+    lab_ops = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lab_ops)
+
+    class ES:
+        def __init__(self):
+            self.puts = {}
+
+        def es_request(self, method, path, body=None):
+            self.puts[path] = body
+            return {}
+
+    es = ES()
+    settings = tmp_path / "settings" / "systems" / "elastic"
+    settings.mkdir(parents=True)
+    (settings / "config.env").write_text("ELASTIC_EVENTS_INDEX=other-*\nELASTIC_ALERTS_INDEX=.other-alerts*\n")
+    ops = lab_ops.LabOps(run=lambda *a, **k: None, es=es, tenant_dir=tmp_path)
+    ops.create_readonly_user("pw")
+    role = es.puts[f"/_security/role/{lab_ops.RO_ROLE}"]
+    assert role == {"cluster": ["monitor"], "indices": [{"names": SURFACE["readonly_indices"], "privileges": ["read"]}]}
+    assert es.puts["/_security/user/defender-readonly"] == {"password": "pw", "roles": [lab_ops.RO_ROLE]}

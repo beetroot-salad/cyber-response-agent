@@ -85,6 +85,7 @@ FRONTEND_PORTS = (*STUBS.values(), HOST_STATE_PORT, ES_PORT)
 FRONTEND_BASE = 10000    # the engine publishes frontend port p on the lab server's loopback at BASE+p
 HOST_VOLUMES = ("/var/log", "/var/lib/elastic-agent")   # certs and tokens are never copied
 PS_ARGV = list(SURFACE["ps_argv"])
+READONLY_INDICES = tuple(SURFACE["readonly_indices"])   # what defender-readonly reads, live and frozen
 WATCHER = "alert-ticket-watcher"
 
 ENGINE = "lab-engine"
@@ -506,18 +507,14 @@ class LabOps:
                               "of the lab's read-only Elasticsearch user")
         return values[-1]
 
-    def _tenant_patterns(self) -> list[str]:
-        if self.tenant_dir is None:
-            raise NotConfigured("V2_FROZEN_TENANT_DIR is not set: the lab tenant's directory")
-        return frozen_copy.tenant_patterns(self.tenant_dir / "settings")
-
     def create_readonly_user(self, password: str) -> None:
-        """The proxy's read-only user in the frozen cluster: `read` on the configured patterns and
+        """The proxy's read-only user in the frozen cluster: `read` on the lab's fixed read-only
+        indices (`readonly_indices` in lab-surface.json, the same list live es-init grants) and
         `monitor`, with the current password. Created in the cluster, never in a freeze part."""
         es = self.frozen_es()
         es.es_request("PUT", f"/_security/role/{RO_ROLE}", {
             "cluster": ["monitor"],
-            "indices": [{"names": self._tenant_patterns(), "privileges": ["read"]}]})
+            "indices": [{"names": list(READONLY_INDICES), "privileges": ["read"]}]})
         es.es_request("PUT", f"/_security/user/{self.readonly_user}",
                       {"password": password, "roles": [RO_ROLE]})
 
