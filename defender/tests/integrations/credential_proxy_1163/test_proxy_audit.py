@@ -252,6 +252,6 @@ def test_o4_an_audit_failure_withholds_what_was_already_forwarded(tmp_path, data
 
     assert (answer.status, answer.body, answer.fault) == (0, "", "TransportFault")
     assert "withheld" in answer.detail
-    assert answer.from_system is False
+    assert answer.origin != "system"
     assert (final["status"], final["body_whole"]) == (None, False)
     assert forwarded == body

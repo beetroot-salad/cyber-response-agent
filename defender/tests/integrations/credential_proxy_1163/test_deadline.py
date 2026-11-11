@@ -23,6 +23,7 @@ from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.integrations.credential_proxy_1163._tenant import label_of
 from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH, proxy
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
@@ -265,6 +266,7 @@ def test_o1_a_request_waiting_on_another_requests_exchange_answers_by_its_own_de
             holder.join(10)
 
     _on_time(answer, took, timeout=0.3)
+    assert answer["origin"] == "setup", answer  # #1363 B4: the wait for the exchange gate
     assert len(first) == 1, first
     assert first[0]["fault"] is None, first
     assert issued == ["AT-1-canary-1163"], issued
@@ -328,6 +330,7 @@ def test_o1_the_deadline_runs_from_when_the_request_arrives(tmp_path, data_root)
     assert answer["fault"] == "TransportFault", answer
     assert "ran out of time" in (answer["detail"] or ""), answer
     assert r.up.seen == []
+    assert answer["origin"] == "setup", answer  # #1363 B4: time spent before the system was called
 
 
 @pytest.mark.parametrize("overhead", [0, -1, 20.5, 60])
@@ -508,6 +511,8 @@ def test_1404_a_deadline_cut_is_the_systems_only_on_the_systems_own_call(tmp_pat
     _on_time(answer, took)
     assert "during" in answer["detail"], ("positive control: the leg itself was cut", answer)
     assert answer["system_side"] is (leg == "system call"), (leg, answer)
+    # #1363 B4: a deadline cut off the system's own leg is `setup` (OpenBao's included); on it, none.
+    assert answer["origin"] == (None if leg == "system call" else "setup"), (leg, answer)
 
 
 # --- #1412 O6: the deadline covers the last byte ----------------------------------------------
@@ -522,7 +527,7 @@ def test_o6_a_deadline_cut_after_the_system_answered_keeps_its_status_and_blames
         answer = W.call(url, r.tok(), f"{base}{API}/users/x", timeout_sec=1)
 
     assert (answer.status, answer.fault, answer.body) == (200, "TransportFault", "")
-    assert (answer.from_system, answer.system_side) == (True, False)
+    assert (answer.origin, answer.system_side) == ("system", False)
 
 
 def _endless_8_mib(conn: socket.socket) -> None:
@@ -693,6 +698,7 @@ def test_o2_a_request_that_stops_arriving_is_ended_with_a_refusal_and_the_connec
     final = _decoded_final(got)
     assert (final.fault, final.sent, final.status) == ("TransportFault", False, None), final
     assert "in time" in final.detail, final.detail
+    assert label_of(final) == "request", final  # #1363 O4: the caller cut it
     assert len(audit.records) == 1, audit.records
 
 
@@ -762,6 +768,7 @@ def test_o2_the_real_client_reads_the_size_refusal_of_a_request_it_is_still_send
 
     assert (answer.fault, answer.sent) == ("ConfigFault", False), answer
     assert f"over {16 * 2**20} bytes" in answer.detail
+    assert getattr(answer, "origin", None) == "request"  # #1363 O4: this call is outside what is allowed
 
 
 def test_o2_a_peer_that_leaves_partway_through_its_request_is_audited(tmp_path, data_root, caplog):

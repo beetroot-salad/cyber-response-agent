@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Literal, NoReturn, Protocol, runtime_checkable
+from typing import Any, ClassVar, Final, Literal, NoReturn, Protocol, runtime_checkable
 
 from defender._model import model
 from defender.execution import bash_exec
@@ -53,6 +53,40 @@ _HELPER_DEADLINE = 3
 #: The code a command's result carries when the helper itself was killed (rule 2): a kill, as a
 #: stage's own kill reads.
 _KILLED_RC = -9
+
+#: `classify_unframed`'s answers, one per rule.
+NOT_RUNNING: Final = "not-running"
+KILLED: Final = "killed"
+TIMED_OUT: Final = "timeout"
+UNUSABLE: Final = "unusable"
+Unframed = Literal["not-running", "killed", "timeout", "unusable"]
+
+
+def box_status(docker: Any, name: str) -> str | None:
+    """The box's status, asked of `docker` once; `None` for no daemon, no answer or a fault asking."""
+    if docker is None:
+        return None
+    try:
+        return _inspect_field(docker, name, "{{.State.Status}}")
+    except BoxFault:
+        return None
+
+
+def classify_unframed(raw: RawExec | None, failure: Exception | None, status: str | None) -> Unframed:
+    """#1421's rule for an exchange that gave no clean frame, on the box's one status answer (`box_status`), in this
+    order: the job's own executor (`BoxExecutor._unframed`) and the helper's relay (`relay_exec`) both answer by it.
+    1. not `running`, no answer, or a fault asking: the box is lost (`NOT_RUNNING`), whatever else the exchange
+       said, a host timeout included: a command past its timeout on a box that died is a lost box, not a timeout;
+    2. `running` and exec 137: the in-box helper was killed, the box lives (`KILLED`);
+    3. `running` and a host timeout or the in-box helper's own deadline (exec 3): a timeout (`TIMED_OUT`);
+    4. `running` and anything else: the box is lost, worded as unusable (`UNUSABLE`)."""
+    if status != "running":
+        return NOT_RUNNING
+    if raw is not None and raw.rc == _EXEC_KILLED:
+        return KILLED
+    if isinstance(failure, subprocess.TimeoutExpired) or (raw is not None and raw.rc == _HELPER_DEADLINE):
+        return TIMED_OUT
+    return UNUSABLE
 
 
 # This module is host-only (it pulls in pydantic); nothing inside a box imports it. An unset
@@ -234,8 +268,9 @@ class BoxExecutor:
 
     @property
     def sandboxed(self) -> bool:
-        # Derived, never settable: only a confining transport may claim the boundary.
-        return isinstance(self.transport, _DockerTransport)
+        # Derived, never settable: only a confining transport may claim the boundary. A box reached over the job
+        # socket (#1170 A4) is confined by construction: the helper started it, and a relay is never host execution.
+        return isinstance(self.transport, (_DockerTransport, RelayTransport))
 
     def run_parsed(
         self, pipelines: Sequence[bash_exec.Pipeline], *,
@@ -244,6 +279,8 @@ class BoxExecutor:
         self._refuse()
         self._sync_clock()
         frame = encode_request(pipelines)
+        if isinstance(self.transport, RelayTransport):
+            return self._exchange_relayed(frame, command=command, cwd=cwd, timeout=timeout)
         if self.sandboxed:
             return self._exchange_boxed(frame, command=command, cwd=cwd, timeout=timeout)
         return self._exchange_unboxed(frame, command=command, cwd=cwd, timeout=timeout)
@@ -294,22 +331,20 @@ class BoxExecutor:
     def _unframed(
         self, raw: RawExec | None, failure: Exception | None, *, command: str, timeout: float,
     ) -> BoxResult:
-        """#1421's executor rule for an exchange with no clean frame, on the box's one answer:
-        1. not `running`, no answer, or a fault asking: the box is lost;
-        2. `running` and exec 137: the helper was killed, the box lives: a result with the kill
-           line (a result, so the row is recorded);
-        3. `running` and a host timeout or the helper's own deadline (exec 3): a timeout;
-        4. `running` and anything else: the box is lost, worded as unusable."""
+        """An exchange with no clean frame, classified by #1421's rule (`classify_unframed`) on the box's one
+        status answer: lost ends the box, a kill of the in-box helper is a result with the kill line (so the row is
+        recorded), a timeout is the timeout and leaves the box usable."""
         status = self._status()
-        if status != "running":
+        verdict = classify_unframed(raw, failure, status)
+        if verdict == NOT_RUNNING:
             self._end(BoxLost(
                 f"the box {self.name} is not running (its status: {status or 'no answer'}); "
                 "it can run no command"), command, cause=failure)
-        if raw is not None and raw.rc == _EXEC_KILLED:
+        if verdict == KILLED:
             return BoxResult(rc=_KILLED_RC, out=b"", err=KILLED_LINE)
-        if isinstance(failure, subprocess.TimeoutExpired):
-            raise failure
-        if raw is not None and raw.rc == _HELPER_DEADLINE:
+        if verdict == TIMED_OUT:
+            if isinstance(failure, subprocess.TimeoutExpired):
+                raise failure
             raise subprocess.TimeoutExpired(command, timeout)
         said = f"exec rc {raw.rc}, no frame" if raw is not None else f"{type(failure).__name__}"
         self._end(BoxLost(
@@ -317,14 +352,43 @@ class BoxExecutor:
             f"({said}); it is unusable"), command, cause=failure)
         raise AssertionError("unreachable")  # pragma: no cover — `_end` always raises
 
-    def _status(self) -> str | None:
-        """The box's status, asked once; `None` for no answer or a fault asking."""
-        if self.docker is None:
-            return None
+    def _exchange_relayed(self, frame: bytes, *, command: str, cwd: Path, timeout: float) -> BoxResult:
+        """One exchange over the job socket (#1170 A4): the helper, which holds the daemon, has already classified it
+        by #1421's rules, so its answer is mapped to today's outcome here. Only `ok` with a frame that decodes is a
+        result; `timeout` is the timeout and leaves the box usable; `output-limit` and `lost` end the box. Anything
+        else (a refusal, a helper that cannot be reached, an answer or frame outside the vocabulary) is a lost box:
+        the box ends with its helper, so no answer is a loss, never a result."""
+        relay = self.transport
+        assert isinstance(relay, RelayTransport)
         try:
-            return _inspect_field(self.docker, self.name, "{{.State.Status}}")
-        except BoxFault:
-            return None
+            answer = relay.exchange(frame, cwd=cwd, timeout=timeout)
+        except Exception as unreached:  # noqa: BLE001 — every failure to get an answer is the same loss
+            self._end(BoxLost(
+                f"the box {self.name} could not be reached through its helper ({type(unreached).__name__}: "
+                f"{unreached}); it is unusable"), command, cause=unreached)
+        result = answer.get("result") if isinstance(answer, dict) else None
+        if result == "ok":
+            got = answer.get("frame")
+            try:
+                if not isinstance(got, bytes):
+                    raise BoxFault("the helper's ok answer carries no response frame")
+                return decode_response(got)
+            except BoxFault as unreadable:
+                self._end(BoxLost(f"the box {self.name}'s answer through its helper is not a response frame "
+                                  f"({unreadable}); it is unusable"), command, cause=unreadable)
+        if result == "timeout":
+            raise subprocess.TimeoutExpired(command, timeout)
+        if result == "output-limit":
+            self._end(BoxOutputLimitExceeded(), command)
+        if result == "lost":
+            self._end(BoxLost(f"the box {self.name} is not running or did not answer as its helper does "
+                              f"(its helper says: {answer.get('class')!r}); it can run no command"), command)
+        self._end(BoxLost(f"the box {self.name}'s helper answered outside its vocabulary "
+                          f"({type(answer).__name__} {result!r}); it is unusable"), command)
+
+    def _status(self) -> str | None:
+        """The box's status, asked once (`box_status`)."""
+        return box_status(self.docker, self.name)
 
     def _end(self, ending: BoxEnding, command: str, *, cause: BaseException | None = None) -> NoReturn:
         """Refuse every later command with `ending`'s class, stop the box, and raise `ending`.
@@ -333,7 +397,8 @@ class BoxExecutor:
         self._refusing = ending.exit_class
         _logger.error(f"the box {self.name} ended the run ({ending.exit_class}) while running "
                       f"{command!r}")
-        # The lifecycle owns the daemon and proof that every box process has stopped.
+        # The box's own lifecycle proves every box process has stopped: its daemon's, or for a relayed box its
+        # helper's (`box.halt`).
         from ._lifecycle import BoxRuns
 
         try:
@@ -398,6 +463,60 @@ class _DockerTransport:
             ],
             frame, timeout=timeout, popen=self.popen,
         )
+
+
+#: The relay's request client: `request(name, **fields) -> dict`, the job's socket client bound to its socket
+#: (`job_socket.ask`), raising for a refusal or a socket that is gone.
+RelayRequest = Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class RelayTransport:
+    """The confining transport of a box reached over the job socket (#1170 A4): the box was started by the per-job
+    host helper, which holds the daemon and answers each frame already classified (`box.exec`) and proves each stop
+    (`box.stop`). `handle` is the box's handle, as the helper's `box.start` answered it. The job's executor keeps the
+    refusal latch, readmit, the run clock and the typed endings; nothing here talks to a daemon."""
+
+    request: RelayRequest = field(compare=False, repr=False)
+    handle: str
+
+    def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> RawExec:
+        raise BoxFault("a relayed box is reached through BoxExecutor.run_parsed, never as a raw transport")
+
+    def exchange(self, frame: bytes, *, cwd: Path, timeout: float) -> Any:
+        """The helper's answer to one frame: the command's timeout goes as given (the executor's own; no ceiling)."""
+        return self.request("box.exec", handle=self.handle, frame=frame, cwd=str(cwd), timeout=timeout)
+
+    # The box's lifecycle (`_lifecycle.BoxLifecycle`), each step asked of the helper that holds its daemon.
+
+    @property
+    def managed(self) -> bool:
+        return True
+
+    def halt(self) -> None:
+        """Stop the box, proven, and keep it for a later window (`box.halt`): the helper stops it and ends the window it
+        holds. `BoxFault` (the helper's reason, or why it could not be asked) unless the helper answers `stopped`."""
+        self._proven("box.halt", "stopped", ask="stop", proof="stopped")
+
+    def open_window(self, hold: Callable[[subprocess.Popen[bytes]], None]) -> None:  # noqa: ARG002 — the helper holds it
+        """Start the stopped box for one window (`box.window`): the helper starts it attached and holds the attached
+        start until the window's `halt`, or its own end. `BoxFault` unless the helper answers `open`."""
+        self._proven("box.window", "open", ask="start", proof="running")
+
+    def teardown(self) -> None:
+        """Remove the box for good (`box.stop`): `BoxFault` unless the helper answers `stopped`."""
+        self._proven("box.stop", "stopped", ask="stop", proof="stopped")
+
+    def _proven(self, request: str, word: str, *, ask: str, proof: str) -> None:
+        try:
+            answer = self.request(request, handle=self.handle)
+        except Exception as unreached:  # noqa: BLE001 — a step that cannot be asked is a step not proven
+            raise BoxFault(f"could not ask the helper to {ask} the box {self.handle}: "
+                           f"{type(unreached).__name__}: {unreached}") from unreached
+        if isinstance(answer, dict) and answer.get("result") == word:
+            return
+        reason = answer.get("reason") if isinstance(answer, dict) else None
+        raise BoxFault(f"the helper could not prove the box {self.handle} {proof}: {reason or answer!r}")
 
 
 @dataclass(frozen=True)

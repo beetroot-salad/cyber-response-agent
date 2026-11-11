@@ -43,7 +43,7 @@ from defender.hooks.budget_enforcer import BudgetKill
 
 from defender.systems import circuit_breaker
 from defender.systems import system_status
-from defender.records.run_end import CallRecordWriteFailed
+from defender.records.run_end import CallRecordWriteFailed, ProxyAccessLost
 from defender.systems.verbs import GRANTED, ServingAbort, ann_name, resolved_hints
 from defender.kit.verbs import SYSTEM_MAX_LEN, is_system_name
 from defender.kit.verbs import model_facing_params
@@ -63,6 +63,8 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
     # A served verb that gave up on its world (#1224): the sibling ends, nothing is filed.
     ServingAbort,
     CallRecordWriteFailed,
+    # The run lost its credential-proxy access (#1363): the run ends, no row is filed.
+    ProxyAccessLost,
 )
 
 

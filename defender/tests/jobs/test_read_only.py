@@ -1,10 +1,12 @@
 """#1342 O11: a job-lane run can write nowhere outside — the structural check that is P1b's
 revisit trigger. Adding a write-capable verb class, grant, mount or tool fails it.
 
-Explicit exemption: the launch-time knowledge publish (pushes to the tenant's forge) is lock-guarded,
-safe to repeat and kept by #1081; it is not checked here."""
+The launch-time knowledge publish (pushes to the tenant's forge) was exempt here. Under #1170 (A6) it runs in the
+per-job host helper, never in the job: the exemption lapses for the job lane, and
+`test_a6_the_job_entry_runs_no_publish` pins that the job entry reaches no publish."""
 from __future__ import annotations
 
+import ast
 import importlib
 from pathlib import Path
 
@@ -125,3 +127,47 @@ def test_o11_investigation_role_tools_match_the_reviewed_snapshot():
     assert got == REVIEWED_TOOLS
     assert got["main"], "premise: the recorder saw real registrations"
     assert got["gather"], "premise: the recorder saw real registrations"
+
+
+#: Names of the launch-time publish (run.py's `_default_publish`, the child it starts, the seam type).
+_PUBLISH_NAMES = {"_default_publish", "launch_publish", "publish_launch", "PublishLaunch", "_knowledge_source"}
+
+
+def _reached_names(entry: str) -> set[str]:
+    """Every name `entry` mentions in run.py, and in the run.py functions it mentions, transitively."""
+    from defender import run as run_py
+
+    tree = ast.parse(Path(run_py.__file__).read_text(encoding="utf-8"))
+    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    seen: set[str] = set()
+    visited: set[str] = set()
+    todo = [entry]
+    while todo:
+        name = todo.pop()
+        if name in visited or name not in funcs:
+            continue
+        visited.add(name)
+        seen.add(name)
+        for node in ast.walk(funcs[name]):
+            if isinstance(node, ast.Name):
+                todo.append(node.id)
+                seen.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                seen.add(node.attr)
+            elif isinstance(node, ast.ImportFrom):
+                seen.update(a.name for a in node.names)
+    return seen
+
+
+def test_a6_the_job_entry_runs_no_publish():
+    """The in-container job entry takes no `publish` seam and reaches no launch-time publish in run.py; the
+    operator command still does (control). CONFLICT with the exemption in this file's old docstring. (#1170 A6)"""
+    import inspect
+
+    from defender import run as run_py
+
+    operator = _reached_names("main")
+    assert operator & _PUBLISH_NAMES, "control: the operator command reaches the launch-time publish"
+    assert "publish" in inspect.signature(run_py.main).parameters, "control: the operator command takes a publish seam"
+    assert "publish" not in inspect.signature(run_py.job_main).parameters
+    assert _reached_names("job_main") & _PUBLISH_NAMES == set()

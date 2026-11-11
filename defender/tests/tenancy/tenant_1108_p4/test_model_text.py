@@ -14,6 +14,7 @@ import json
 import re
 from pathlib import Path
 
+from defender.tests.support.shared import _request_cut1363 as RC
 from defender.tests.support.shared.contracts._by_path import DEFENDER, WORKTREE
 from defender.tests.tenancy.tenant_1108_delivery.test_architecture import (
     _agent_facing_text, _folded, non_docstring_nodes, production_trees,
@@ -198,3 +199,58 @@ def test_the_workspace_map_names_knowledge_through_the_run_copy(tmp_path):
     assert "/defender/" not in queries, queries
     assert old_spellings(text) == [], old_spellings(text)
     assert str(tmp_path) not in text, "a host path reached the model"
+
+
+# --- #1363 r8.4, D12: the gather skill's failure branch for a cut or malformed request -------------------
+
+FAILURE_MODES = DEFENDER / "skills" / "gather" / "failure-modes.md"
+BRANCH_HEADING = "## Branch on the query's exit code"
+#: The exit-2 branch as it stands today (the design leaves it unchanged), line for line.
+EXIT_2_BRANCH = (
+    "- **exit 2 \u2014 the system could not answer:** the error the tool returned says why.\n"
+    "  Escalate immediately with that error and stop. Do **not** probe the connection\n"
+    "  or the harness (no `netstat`/`ss`/`docker`/`/dev/tcp`), do **not** hunt\n"
+    "  `.env`/credentials, do **not** re-run \"to confirm\" \u2014 a `2` is for a human to\n"
+    "  resolve, not something you can fix.")
+
+
+def _exit_branches() -> dict[int, str]:
+    """The bullets of the exit-code section, by the exit code each one opens on: a bullet is a line starting
+    `- **exit N` and runs over its indented continuation lines, to the next bullet or the section's end."""
+    text = FAILURE_MODES.read_text(encoding="utf-8")
+    assert text.count(BRANCH_HEADING) == 1, f"the exit-code section is not under one `{BRANCH_HEADING}` heading"
+    section = text.split(BRANCH_HEADING, 1)[1].split("\n## ", 1)[0]
+    branches: dict[int, list[str]] = {}
+    current: list[str] | None = None
+    for line in section.splitlines():
+        opening = re.match(r"- \*\*exit (\d+)\b", line)
+        if opening:
+            current = branches.setdefault(int(opening.group(1)), [])
+        elif current is not None and line and not line.startswith("  "):
+            current = None
+        if current is not None and line:
+            current.append(line)
+    return {code: "\n".join(lines) for code, lines in branches.items()}
+
+
+def test_1363_the_exit_2_branch_of_the_gather_failure_modes_is_unchanged():
+    """The exit-2 branch (escalate, do not probe) is word for word as before, and the older branches are still
+    there. #1363 D12."""
+    branches = _exit_branches()
+    assert {0, 1, 2, 64, 77} <= set(branches), sorted(branches)
+    assert branches[2] == EXIT_2_BRANCH, branches[2]
+
+
+def test_1363_the_gather_failure_modes_have_a_branch_for_a_cut_request_that_says_retry_differently():
+    """The branch for the dedicated exit (`RC.REQUEST_CUT_EXIT`) exists, once, in the exit-code section; it says the
+    system is not down, and to retry differently, not identically (identical repeats are stopped). It is red
+    until the doc is written. #1363 D12, D13."""
+    branches = _exit_branches()
+    assert RC.REQUEST_CUT_EXIT in branches, f"no `- **exit {RC.REQUEST_CUT_EXIT}` branch; the section has {sorted(branches)}"
+    branch = branches[RC.REQUEST_CUT_EXIT].lower()
+    assert re.search(r"\bnot down\b|\bis not an outage\b", branch), f"the branch does not say the system is up: {branch!r}"
+    assert re.search(r"\bdifferently\b", branch), \
+        f"the branch does not say to retry differently: {branch!r}"
+    assert re.search(r"\breport", branch), f"the branch does not say the call may be reported: {branch!r}"
+    assert re.search(r"(?:\bnot\b|\bnever\b|n't)\W+(?:\w+\W+){0,4}(?:identical|same)", branch), \
+        f"the branch does not rule out an identical retry: {branch!r}"

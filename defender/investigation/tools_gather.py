@@ -636,7 +636,8 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
         # Run-level abort: passes through; the driver stamps the main session likewise.
         stamp(session_store.TRUNCATED_BY_ABORTED)
         raise
-    except (providers.ProviderDown, box_mod.BoxEnding, BaseExceptionGroup) as ended:
+    except (providers.ProviderDown, run_end.ProxyAccessLost, box_mod.BoxEnding,
+            BaseExceptionGroup) as ended:
         # The run's box became unusable or its fence tripped (#1421), or the provider stayed
         # down (#1243), bare or inside an exception group: ends the run, this lead stamped with
         # the class so its session doesn't read as finished; the box ending first. Any other

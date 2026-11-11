@@ -677,3 +677,48 @@ def run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
     except Exception as e:  # noqa: BLE001 — kept for the test to assert on
         d.raised = e
     return d
+
+
+# =================================================================================================
+# #1363: a run that loses its access to the credential proxy ends `proxy-access`
+# =================================================================================================
+
+#: The new run-end word and its exit (the next free code after provider-rejected's 7).
+PROXY_ACCESS = "proxy-access"
+PROXY_ACCESS_EXIT = 8
+
+
+def proxy_access_lost(detail: str = "PROXY-ACCESS-1363: the request token has expired") -> BaseException:
+    """The control-flow exception the query tool raises for an `access` fault. Coined here, for the
+    contract only: `defender.records.run_end.ProxyAccessLost(detail)`, imported when the fault is
+    BUILT so a test that never builds one still collects before the name exists."""
+    from defender.records.run_end import ProxyAccessLost
+
+    return ProxyAccessLost(detail)
+
+
+def proxy_access_fault(detail: str = "PROXY-ACCESS-1363: the request token has expired") -> Fault:
+    """A fault raising `proxy_access_lost(detail)` when it fires."""
+    return lambda: proxy_access_lost(detail)
+
+
+#: The grouped shapes a `ProxyAccessLost` can arrive in (the same shapes as `GROUPED_PROVIDER_DOWN`).
+GROUPED_PROXY_ACCESS: dict[str, Callable[[Fault], Fault]] = GROUPED_PROVIDER_DOWN
+
+
+def assert_ended_proxy_access(d: S.Drive, *, rc: bool = True) -> None:
+    """The run ended `proxy-access` through a run-level end: no crash, the summary and the run-end
+    record name the class, the reason names the credential proxy, no report.md, exit 8."""
+    assert d.raised is None, f"the run crashed instead of ending {PROXY_ACCESS}: {d.raised!r}"
+    summary = d.summary or {}
+    assert summary.get("truncated_by") == PROXY_ACCESS, (
+        f"the run did not end {PROXY_ACCESS}: truncated_by {summary.get('truncated_by')!r}, "
+        f"exit {summary.get('exit_reason')!r}")
+    assert "credential proxy" in str(summary.get("exit_reason") or "").lower(), summary.get("exit_reason")
+    rec = sidecar(d.folder)
+    assert rec is not None, "no run-end record (or one the production reader refuses)"
+    assert rec["truncated_by"] == PROXY_ACCESS, rec
+    assert not d.paths.report.exists(), "a proxy-access run wrote report.md"
+    if rc:
+        assert d.rc == PROXY_ACCESS_EXIT, (
+            f"run.py exited {d.rc!r} on a proxy-access run, not {PROXY_ACCESS_EXIT}")

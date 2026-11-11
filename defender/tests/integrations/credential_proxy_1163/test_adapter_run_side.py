@@ -209,6 +209,7 @@ def test_the_run_reaches_the_proxy_directly_never_through_a_web_proxy_from_the_e
     assert got, "the request reached the proxy address itself"
     assert json.loads(got[0])["system"] == "identity"
     assert refused.value.proxy_own is True
+    assert getattr(refused.value, "origin", None) == "access"  # #1363 O4: before an answer
 
 
 def test_x7_a_fault_is_the_proxys_own_only_when_the_system_neither_answered_nor_was_seen_failing(
@@ -237,9 +238,74 @@ def test_x7_a_fault_is_the_proxys_own_only_when_the_system_neither_answered_nor_
         "positive control: only the live token's call reached the system")
     assert tap.tokens == [live, expired], "the minting failure still asked the proxy"
     assert seen["system-401"].proxy_own is False, seen["system-401"]
+    assert getattr(seen["system-401"], "origin", None) == "system"  # #1363 O4
     assert seen["proxy-refuses"].proxy_own is True, seen["proxy-refuses"]
+    assert getattr(seen["proxy-refuses"], "origin", None) == "access"  # #1363 O4
     assert seen["no-token-minted"].proxy_own is True, seen["no-token-minted"]
+    assert getattr(seen["no-token-minted"], "origin", None) == "access"  # #1363 O4
     assert isinstance(seen["no-token-minted"], TransportFault), seen["no-token-minted"]
+
+
+#: #1363 O4: the cause each case plants, and the one origin the raised fault must carry. The origin
+#: values are the design's words; the fault attribute `origin` is this contract's name for them.
+ORIGIN_CASES = {
+    "system-answered-401": "system",
+    "token-does-not-grant-the-system": "request",
+    "write-without-a-grant": "request",
+    "no-credential-set-stored": "setup",
+    "expired-token": "access",
+    "no-token-minted": "access",
+    "proxy-unreachable": "access",
+    "refusal-the-proxy-left-unlabelled": "access",
+}
+
+
+def _origin_of(tmp_path, data_root, case: str) -> AdapterFault:  # noqa: C901, PLR0911 — one arm per cause
+    """The fault the real identity adapter raises for `case`, through the real client and (but for an
+    unreachable or unlabelling proxy) the real proxy over a published tenant."""
+    from defender.kit import transport
+
+    def cannot_mint() -> str:
+        raise TransportFault("the token source could not mint a request token")
+
+    with H.upstream() as up, Q._published(tmp_path, data_root, up) as t:
+        up.replies[f"{Q.API}/users/dev.dana"] = (401, {}, b'{"detail": "who are you"}')
+        if case == "refusal-the-proxy-left-unlabelled":
+            # An older proxy: a status-less CONFIG refusal with no origin label in its final record.
+            reply = W.fmt().encode_final(W.final_record(None, fault="ConfigFault", detail="refused, unlabelled"))
+            with W.fake_proxy(reply, ended=True) as url, pytest.raises(AdapterFault) as raised:
+                identity_adapter.get_user(A.ctx_for(tmp_path, T.run_record(t), url, "tok"), user="dev.dana")
+            return raised.value
+        if case == "proxy-unreachable":
+            ctx = A.ctx_for(tmp_path, T.run_record(t), f"http://127.0.0.1:{H.free_port()}",
+                            T.token(t.tenant_id, GRANT))
+            with pytest.raises(AdapterFault) as raised:
+                identity_adapter.get_user(ctx, user="dev.dana")
+            return raised.value
+        grant = {("cmdb", "r")} if case == "token-does-not-grant-the-system" else GRANT
+        token = T.token(t.tenant_id, grant, expires_in=EXPIRED if case == "expired-token" else timedelta(hours=1))
+        with A.proxy_for(t, Q._store(t, empty=case == "no-credential-set-stored")) as (url, _tap):
+            ctx = (A.ctx_for(tmp_path, T.run_record(t), url, None, token_source=cannot_mint)
+                   if case == "no-token-minted" else A.ctx_for(tmp_path, T.run_record(t), url, token))
+            def attempt() -> None:
+                if case == "write-without-a-grant":  # CONFINEMENT at check_route
+                    transport._proxy_request(ctx, f"{up.url}{Q.API}/users/dev.dana", system="identity",
+                                             method="POST", body={}, timeout_sec=10)
+                else:
+                    identity_adapter.get_user(ctx, user="dev.dana")
+
+            with pytest.raises(AdapterFault) as raised:
+                attempt()
+            return raised.value
+
+
+@pytest.mark.parametrize(("case", "origin"), list(ORIGIN_CASES.items()), ids=list(ORIGIN_CASES))
+def test_1363_o4_every_proxy_path_fault_carries_exactly_the_origin_of_its_cause(tmp_path, data_root, case, origin):
+    """A system's answer is `system`, this call out of bounds `request`, one system's setup `setup`, the
+    process's access (and any refusal the proxy did not label) `access`; `proxy_own` follows. #1363 O4."""
+    fault = _origin_of(tmp_path, data_root, case)
+    assert getattr(fault, "origin", None) == origin, (case, type(fault).__name__, fault.detail)
+    assert fault.proxy_own is (origin != "system"), "proxy_own is derived from the origin"
 
 
 def test_x8_a_system_answer_the_proxy_could_not_hand_on_keeps_the_proxys_reason(
@@ -290,6 +356,7 @@ def _refused_as_broken(payload: bytes, *, ended: bool) -> None:
         W.call(url, "tok", f"{url}/x")
 
     assert raised.value.proxy_own is True
+    assert getattr(raised.value, "origin", None) == "access"  # #1363 O4: before an answer
     assert "unreachable" not in raised.value.detail
     assert "broke" in raised.value.detail
     assert PARTIAL.decode() not in str(raised.value)
@@ -335,6 +402,7 @@ def test_o2_a_proxy_that_closes_before_its_head_is_unreachable_not_broken():
 
     assert time.monotonic() - started < 10, "the close was not what ended the wait"
     assert raised.value.proxy_own is True
+    assert getattr(raised.value, "origin", None) == "access"  # #1363 O4: before an answer
     assert "unreachable" in raised.value.detail
 
 
@@ -345,6 +413,7 @@ def test_o2_a_proxy_that_goes_silent_after_its_head_is_broken_not_unreachable():
         W.call(proxy.url, "tok", f"{proxy.url}/x", timeout_sec=1)
 
     assert raised.value.proxy_own is True
+    assert getattr(raised.value, "origin", None) == "access"  # #1363 O4: before an answer
     assert "broke" in raised.value.detail
     assert "unreachable" not in raised.value.detail
 
@@ -398,7 +467,7 @@ def test_o2_a_write_accepted_then_dropped_keeps_its_status_and_no_body(tmp_path,
         answer = W.call(url, r.tok({("identity", "rw")}), f"{base}{T.BASE_PATH}/tickets", method="POST")
 
     assert (answer.status, answer.fault, answer.body) == (201, "TransportFault", "")
-    assert answer.from_system is True
+    assert answer.origin == "system"
 
 
 @pytest.mark.parametrize(("pieces", "text"), [
@@ -431,6 +500,7 @@ def test_o9_a_reply_in_any_other_content_type_is_the_proxys_own_fault():
             with pytest.raises(TransportFault) as raised:
                 W.call(fake.url, "tok", target)
             assert raised.value.proxy_own is True, reply
+            assert getattr(raised.value, "origin", None) == "access"  # #1363 O4: before an answer
             assert "-1412" not in str(raised.value), "a body reached the fault's text"
         fake.replies[PROXY_PATH] = (200, {"Content-Type": W.fmt().REPLY_CONTENT_TYPE}, frames)
         assert W.call(fake.url, "tok", target).body == "NEW-1412"
@@ -457,6 +527,7 @@ def test_o9_only_a_200_in_exactly_the_proxys_content_type_is_its_reply():
             with pytest.raises(TransportFault) as raised:
                 W.call(fake.url, "tok", target)
             assert raised.value.proxy_own is True, (status, kind)
+            assert getattr(raised.value, "origin", None) == "access"  # #1363 O4: before an answer
             assert getattr(raised.value, "status", None) is None, (status, kind)
             assert "-1412" not in str(raised.value), "a body reached the fault's text"
             if status != 200:
@@ -464,3 +535,147 @@ def test_o9_only_a_200_in_exactly_the_proxys_content_type_is_its_reply():
         for kind in accepted:
             fake.replies[PROXY_PATH] = (200, {"Content-Type": kind}, frames)
             assert W.call(fake.url, "tok", target).body == "NEW-1412", kind
+
+
+# --- #1363 O4, B2, B4: who sets the origin, and what the client makes of each answer ---------------
+
+#: The fault classes a final record can name, and one it cannot: the class never decides the origin.
+FAULT_CLASSES = ["ConfigFault", "TransportFault", "ConfinementFault", "UpstreamFault", "SomethingElse"]
+
+
+class _Ctx:
+    """What `proxy_exchange` reads of a verb context: a token, no source, the proxy's address."""
+
+    def __init__(self, url: str) -> None:
+        self.request_token, self.token_source, self.proxy_url = "tok", None, url
+
+
+def _fault_for(final: dict, *, write: bool = False) -> AdapterFault:
+    from defender.kit import transport
+
+    with W.fake_proxy(W.fmt().encode_final(W.final_record(**final)), ended=True) as url, \
+            pytest.raises(AdapterFault) as raised:
+        transport._proxy_request(_Ctx(url), f"{url}/x", system="identity", method="PATCH" if write else "GET",  # noqa: SLF001
+                                 body={} if write else None, write=write, timeout_sec=5)
+    return raised.value
+
+
+#: (the final record, the origin the client gives the fault raised from it, whether it is written).
+CLIENT_RULES = [
+    pytest.param(dict(status=500, fault="TransportFault", body_whole=False), "system", False, id="status-5xx"),
+    pytest.param(dict(status=404, fault="UpstreamFault"), "system", False, id="status-4xx"),
+    pytest.param(dict(status=401, fault="ConfigFault"), "system", False, id="status-401"),
+    pytest.param(dict(status=403, fault="UpstreamFault"), "system", True, id="write-status-4xx"),
+    pytest.param(dict(status=503, fault="TransportFault"), "system", True, id="write-status-5xx"),
+    pytest.param(dict(status=500, fault="TransportFault", origin="setup"), "system", False, id="status-beats-a-label"),
+    pytest.param(dict(status=None, fault="TransportFault", system_side=True, sent=False), "system", False, id="system-side"),
+    pytest.param(dict(status=None, fault="TransportFault", system_side=True, origin="access"), "system", True,
+                 id="system-side-beats-a-label"),
+    pytest.param(dict(status=200, fault="TransportFault", body_whole=False, reader_fault=True), "request", False,
+                 id="reader-fault"),
+    pytest.param(dict(status=200, fault="TransportFault", body_whole=False, reader_fault=True, origin="access"),
+                 "request", False, id="reader-fault-beats-a-label"),
+    *[pytest.param(dict(status=None, fault="ConfigFault", origin=label), label, write, id=f"label-{label}-{'write' if write else 'read'}")
+      for label in ("request", "setup", "access") for write in (False, True)],
+    *[pytest.param(dict(status=None, fault=fault, body_whole=False), "access", write, id=f"unlabelled-{fault}-{'write' if write else 'read'}")
+      for fault in FAULT_CLASSES for write in (False, True)],
+]
+
+
+@pytest.mark.parametrize(("final", "origin", "write"), CLIENT_RULES)
+def test_1363_o4_the_client_gives_each_answer_the_origin_the_design_rule_says(final, origin, write):
+    """A status or a system-side mark is `system`, a reply the run cut `request`, otherwise the proxy's
+    label, and no label (whatever the fault class) `access`; `proxy_own` follows. #1363 O4, B2."""
+    fault = _fault_for(final, write=write)
+    assert getattr(fault, "origin", None) == origin, (type(fault).__name__, fault.detail)
+    assert fault.proxy_own is (origin != "system")
+
+
+def test_1363_o4_the_client_stores_the_origin_on_the_answer_it_returns():
+    """`proxy_exchange` returns the answer with the origin it assigned. #1363 B2."""
+    from defender.kit.proxy_client import proxy_exchange
+
+    for final, origin in (({"status": 404, "fault": "UpstreamFault"}, "system"),
+                          ({"status": None, "fault": "ConfigFault", "origin": "setup", "body_whole": False}, "setup"),
+                          ({"status": 200}, "system")):
+        with W.fake_proxy(W.fmt().encode_final(W.final_record(**final)), ended=True) as url:
+            answer = proxy_exchange(_Ctx(url), token="tok", system="identity", method="GET", url=f"{url}/x", body=None, timeout_sec=5)
+        assert getattr(answer, "origin", None) == origin, final
+
+
+def test_1363_b2_an_old_proxys_final_record_without_origin_is_refused_as_access():
+    """A final record of the eight fields an older proxy sends is refused whole, a healthy 200 with
+    a body included, and reads `access`; the same record with `origin` is the answer. #1363 B2."""
+    healthy = W.old_proxy_reply(b'{"canary": "BODY-CANARY-91c2"}')
+    refusal = W.old_proxy_reply(status=None, fault="ConfigFault", detail="refused", body_whole=False, sent=False)
+    for old in (healthy, refusal):
+        with W.fake_proxy(old, ended=True) as url, pytest.raises(TransportFault) as raised:
+            W.call(url, "tok", f"{url}/x")
+        assert getattr(raised.value, "origin", None) == "access"
+        assert raised.value.proxy_own is True
+        assert "BODY-CANARY-91c2" not in str(raised.value), "the refused reply's body is not shown"
+    f = W.fmt()
+    with W.fake_proxy(f.encode_body(b'{"ok": true}') + f.encode_final(W.final_record()), ended=True) as url:
+        assert W.call(url, "tok", f"{url}/x").body == '{"ok": true}', "positive control"
+
+
+def _whole_record() -> dict[str, object]:
+    """The final record of a healthy 200 as a proxy of this version frames it: nine fields."""
+    return {**dict(zip(W.OLD_FINAL_FIELDS, (200, {}, None, None, False, True, True, False), strict=True)), "origin": None}
+
+
+def _record_cases() -> list[object]:
+    whole = _whole_record()
+    cases = [pytest.param({k: v for k, v in whole.items() if k != dropped}, id=f"drops-{dropped}") for dropped in whole]
+    cases.append(pytest.param({**whole, "extra": 1}, id="adds-a-field"))
+    cases += [pytest.param({**whole, "origin": value}, id=f"origin-{json.dumps(value)}")
+              for value in ("system", 7, "bogus", "", "REQUEST", True, 1.5, [], {}, ["request"])]
+    return cases
+
+
+@pytest.mark.parametrize("record", _record_cases())
+def test_1363_b2_a_final_record_that_is_not_exactly_the_nine_fields_with_a_known_origin_is_refused_as_access(record):
+    """A final record with a field dropped or added, or an `origin` that is neither null nor one of the
+    proxy's labels (`system`, a number, any other text), is refused whole and reads `access`; the
+    unmutated record is the answer. #1363 B2."""
+    healthy = W.framed_reply(record, b'{"canary": "BODY-CANARY-91c2"}')
+    with W.fake_proxy(healthy, ended=True) as url, pytest.raises(TransportFault) as raised:
+        W.call(url, "tok", f"{url}/x")
+    assert getattr(raised.value, "origin", None) == "access"
+    assert raised.value.proxy_own is True
+    assert "BODY-CANARY-91c2" not in str(raised.value)
+    control = W.framed_reply(_whole_record(), b'{"canary": "BODY-CANARY-91c2"}')
+    with W.fake_proxy(control, ended=True) as url:
+        assert W.call(url, "tok", f"{url}/x").body == '{"canary": "BODY-CANARY-91c2"}', "positive control"
+
+
+def test_1363_b2_raise_proxy_fault_takes_the_origin_for_every_class_and_origin():
+    """Every fault class the proxy names, raised with every origin, carries it, with its status and
+    delivery data as before; `proxy_own` is true exactly when the origin is not `system`. #1363 B2."""
+    from defender.kit.faults import ConfinementFault, UpstreamFault
+    from defender.kit.transport import raise_proxy_fault
+
+    classes = {"ConfigFault": ConfigFault, "TransportFault": TransportFault,
+               "ConfinementFault": ConfinementFault, "UpstreamFault": UpstreamFault}
+    for name, cls in classes.items():
+        for origin in ("system", "request", "setup", "access"):
+            with pytest.raises(cls) as raised:
+                raise_proxy_fault(name, "why", 418 if name == "UpstreamFault" else None, origin=origin, sent=False)
+            assert type(raised.value) is cls
+            assert (raised.value.origin, raised.value.proxy_own) == (origin, origin != "system"), (name, origin)
+            if name == "UpstreamFault":
+                assert raised.value.status == 418
+            if name == "TransportFault":
+                assert raised.value.maybe_delivered is False
+
+
+def test_1363_b2_proxy_own_is_derived_from_the_origin_and_cannot_be_set():
+    """A fault with no origin is not the proxy's; setting its origin decides `proxy_own`; assigning
+    `proxy_own` itself is refused. #1363 B2."""
+    fault = TransportFault("x")
+    assert (getattr(fault, "origin", None), fault.proxy_own) == (None, False)
+    for origin, own in (("access", True), ("setup", True), ("request", True), ("system", False)):
+        fault.origin = origin
+        assert fault.proxy_own is own, origin
+    with pytest.raises(AttributeError):
+        fault.proxy_own = False

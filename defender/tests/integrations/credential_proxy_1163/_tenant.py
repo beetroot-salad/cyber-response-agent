@@ -126,6 +126,17 @@ def fields_of(final: Any) -> dict[str, Any]:
     return {name: getattr(final, name) for name in FINAL_FIELDS}
 
 
+#: What `label_of` answers for a final record that has no `origin` field at all (#1363).
+NO_LABEL_FIELD = "<no origin field>"
+
+
+def label_of(final: Any) -> Any:
+    """The proxy's label (#1363 O4) on `final`: None for a system's own answer, else `request`,
+    `setup` or `access`; `NO_LABEL_FIELD` when the record declares none, so a missing field is a
+    rejected assertion, not an AttributeError on an unrelated line."""
+    return getattr(final, "origin", NO_LABEL_FIELD)
+
+
 def answer_of(raw: bytes) -> dict[str, Any]:
     """The final record of the proxy's framed reply `raw` as a dict, with `body` added as the run
     reads it: the body frames' text when the record says the body counts, else empty (#1412)."""
@@ -134,7 +145,7 @@ def answer_of(raw: bytes) -> dict[str, Any]:
     reply = decode_reply(raw)
     final = fields_of(reply.final)
     whole = final["body_whole"] is True
-    return {**final, "body": b"".join(reply.chunks).decode("utf-8", "replace") if whole else ""}
+    return {**final, "origin": label_of(reply.final), "body": b"".join(reply.chunks).decode("utf-8", "replace") if whole else ""}
 
 
 def ask(client: Any, tok: str, system: str, method: str, url: str,

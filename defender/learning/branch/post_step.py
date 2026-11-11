@@ -1,6 +1,6 @@
-"""A learning job's post-step (#1344 O8, O14): `python -m defender.learning.branch.post_step [--job <id>]
---tenant <T> --parent-pid <pid>`, the worker's child once a job that started a
-family step has ended, whatever its status. Without `--job` it is a family-less post-step (#1344
+"""A learning job's post-step (#1344 O8, O14), in its job container (#1170): `python -m
+defender.learning.branch.post_step [--job <id>] --tenant <T>`, started by the per-job host helper once a job that started
+a family step has ended, whatever its status. Without `--job` it is a family-less post-step (#1344
 amendment 1): the worker's check of a tenant whose last post-step left work waiting (amendment 3), so
 a reviewer's verdict, a retained delivery, findings at threshold or stranded `pending` findings are not left waiting for the
 tenant's next alert. It does the same work; only its record's name differs.
@@ -23,8 +23,12 @@ without that says work may still wait, and the worker keeps the tenant's check c
 - neither: anything else (the queue cannot be written, the episode cannot be read). The job stays
   pending and the next post-step retries it.
 
-Tied to its worker like the family step; the first SIGTERM is a `KeyboardInterrupt`, so the gate
-unwinds and anything it started is terminated.
+Inside the container it takes no host lock, runs no admission and opens no database: the helper holds the tenant's
+lock and admitted it before the container started (P-C). The tenant is accepted by the folder rules alone; the drain's
+publish and draft (`batch.start`), its forge tokens (`forge.token`) and its publish outcomes (`record.*`) are the
+helper's, asked over the job socket (`container.JobContainer`). With no job socket (a host shell) it does nothing and
+exits non-zero (A6). The first SIGTERM is a `KeyboardInterrupt`, so the gate unwinds and anything it started is
+terminated; the end of its stdin (the helper's end of the container, A5) is that SIGTERM.
 """
 from __future__ import annotations
 
@@ -33,11 +37,13 @@ import contextlib
 import logging
 import signal
 import sys
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from defender import tenancy
-from defender._parent_tie import require_parent, tie_to_parent
+from defender._paths import process_defender_dir
+from defender.learning.branch.container import JobContainer, NotInContainer, sigterm_on_stdin_eof
 from defender.records.formats import EpisodeRefused, TenantRefused
 from defender.records.job_lane import JobLane, JobLaneRefused, PostStepRecord
 
@@ -47,14 +53,14 @@ __all__ = ["main", "parse_post_step_args"]
 
 
 def parse_post_step_args(argv: list[str]) -> argparse.Namespace:
-    """`[--job <id>] --tenant <T> --parent-pid <pid>`; no `--job` is a family-less post-step
-    (`job` None)."""
+    """`[--job <id>] --tenant <T>`; no `--job` is a family-less post-step (`job` None). A `--parent-pid` (the host
+    entry's, retired) is accepted and not read: inside the container the death tie is the stdin's end (A5)."""
     p = argparse.ArgumentParser(prog="python -m defender.learning.branch.post_step",
-                                description="A learning job's post-step, run by the worker.")
+                                description="A learning job's post-step, run in its job container.")
     p.add_argument("--job", default=None,
                    help="the job whose post-step this is; left out, the worker's family-less check of the tenant")
     p.add_argument("--tenant", required=True, help="the jobs' tenant")
-    p.add_argument("--parent-pid", required=True, type=int, help="the worker that started this process")
+    p.add_argument("--parent-pid", default=None, type=int, help=argparse.SUPPRESS)
     return p.parse_args(argv)
 
 
@@ -66,9 +72,11 @@ def _interrupt(_signum: int, _frame: Any) -> None:
 
 
 def _default_tick(paths: Any) -> int:
-    from defender.learning.core.drains import author_drain
+    """The lessons drain's tick; inside the job container it finds the helper by the job socket itself
+    (`JobContainer.in_environ`)."""
+    from defender.learning.core import drains
 
-    return author_drain(paths)
+    return drains.author_drain(paths)
 
 
 def _default_waiting(paths: Any) -> bool:
@@ -77,31 +85,40 @@ def _default_waiting(paths: Any) -> bool:
     return author_work_waiting(paths)
 
 
-def main(argv: list[str], *, author_tick: Callable[..., int] | None = None,
-         directory: Any = None, still_waiting: Callable[..., bool] | None = None) -> int:
-    """Publish the pending jobs' findings, record the outcome, then run the drain's gate;
-    returns the gate's exit. The tenant is accepted here, by the host acceptance (the command
-    function of an entry module owns the scope), and held for the whole step."""
-    from defender.systems import run_tenant
-
+def main(argv: list[str], *, author_tick: Callable[..., int] | None = None,  # noqa: PLR0913 — the entry's seams
+         directory: Any = None, still_waiting: Callable[..., bool] | None = None,
+         environ: Mapping[str, str] | None = None, watch_stdin: bool = False) -> int:
+    """Publish the pending jobs' findings, record the outcome, then run the drain's gate; returns the gate's exit.
+    In the job container (`environ`, default this process's) the tenant is accepted by the folder rules alone: the
+    helper holds its lock for the whole step. With no job socket in `environ` it exits non-zero having done nothing
+    (A6). `directory` is accepted for callers that still pass it and is not read. `watch_stdin` (the process's own
+    entry point): the end of stdin is a SIGTERM (A5)."""
+    del directory
     ns = parse_post_step_args(argv)
-    tie_to_parent()
-    require_parent(ns.parent_pid, who="learning post-step")
     which = f"job {ns.job}" if ns.job is not None else f"tenant {ns.tenant} (no family)"
-    previous = signal.signal(signal.SIGTERM, _interrupt)
     try:
+        ask = JobContainer.client(environ)
+    except NotInContainer as outside:
+        sys.exit(f"[post-step] {which}: {outside}; nothing was done")
+    on_main = threading.current_thread() is threading.main_thread()
+    previous = signal.signal(signal.SIGTERM, _interrupt) if on_main else None
+    try:
+        if watch_stdin:
+            sigterm_on_stdin_eof()
         try:
+            JobContainer.connect(ask, tenant=ns.tenant)  # the helper's launch facts name this tenant
             data_root = tenancy.resolve_data_root()
-            admitted = run_tenant.host_tenant(data_root, ns.tenant, directory=directory)
+            tenant = tenancy.accept_tenant(data_root, ns.tenant, defender_dir=process_defender_dir())
             lane = JobLane.open(data_root, ns.tenant, make=True)
-        except (TenantRefused, JobLaneRefused) as unusable:
+        except (TenantRefused, JobLaneRefused, OSError, ValueError) as unusable:
             sys.exit(f"[post-step] {which}: the tenant cannot be used: {unusable}")
-        with admitted, lane:
-            return _post_step(ns, which, admitted.tenant, lane,
-                              author_tick=author_tick if author_tick is not None else _default_tick,
+        with lane:
+            tick = author_tick if author_tick is not None else _default_tick
+            return _post_step(ns, which, tenant, lane, author_tick=tick,
                               still_waiting=still_waiting if still_waiting is not None else _default_waiting)
     finally:
-        signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
+        if on_main:
+            signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
 
 
 def _post_step(ns: argparse.Namespace, which: str, tenant: Any, lane: JobLane, *,
@@ -178,4 +195,4 @@ if __name__ == "__main__":
     from defender import _log
 
     _log.configure_from_env()
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main(sys.argv[1:], watch_stdin=True))

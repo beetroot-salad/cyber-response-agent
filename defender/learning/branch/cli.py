@@ -48,6 +48,7 @@ import os
 import sqlite3
 import sys
 import threading
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -78,6 +79,7 @@ from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import seams
 from defender.learning.branch import timing as timing_mod
 from defender.learning.branch.steps import Step
+from defender.learning.branch.container import JobContainer
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.ledger import Ledger, LedgerError
@@ -121,6 +123,8 @@ from defender.learning.branch.preflight import (
     ACCEPTED as ACCEPTED,
     DIRT as DIRT,
     ENVIRONMENT_REFUSED as ENVIRONMENT_REFUSED,
+    sibling_sign_check as sibling_sign_check,
+    ENVIRONMENT_CAUSES as ENVIRONMENT_CAUSES,
     LauncherRefused as LauncherRefused,
     MAX_BRANCH_MESSAGE_ID as MAX_BRANCH_MESSAGE_ID,
     REFUSED as REFUSED,
@@ -180,6 +184,18 @@ class SourceInputReplaced(JobEnding, Exception):
 
 #: The launcher's primer: an empty capture primes an empty base, and `_prime_once` warns.
 _PRIME_ALLOWING_EMPTY = functools.partial(prime_base, allow_empty=True)
+
+
+#: The job's fixed brief for each cause of an environment refusal at pre-flight (#1363 O6): who
+#: failed is the first thing the operator reads, so a down system is never put as our failure.
+_SIGN_CAUSE = "the read token for the credential proxy cannot be signed"
+_ENVIRONMENT_BRIEFS = {
+    "sign": "pre-flight refused: " + _SIGN_CAUSE,
+    "access": "pre-flight refused: the credential proxy could not be used",
+    "setup": "pre-flight refused: our setup for a system failed",
+    "down-systems": "pre-flight refused: every system the source run's calls reached is down "
+                    "for this run",
+}
 
 
 def source_input(source: Run) -> tuple[bytes, str]:
@@ -327,7 +343,30 @@ def sibling_argv(
 _UNPINNABLE = "the source run's knowledge cannot be pinned for the family"
 
 
-def _pinned_export(tenant: RunTenant, source: Run) -> Any:
+def _materialised(tenant: RunTenant, commit: str, container: JobContainer | None) -> Any:
+    """`<T>/exports/<commit>/`, materialised from the tenant clone when absent: by this process for an operator's
+    launch; inside a job container by its per-job host helper (#1170 P-A, C20: the container writes no export and
+    takes no knowledge lock), the folder it answers held to the one this tenant names for that commit. A helper
+    refusal, or a helper that cannot be reached, is `DeliveryRefused`."""
+    from defender import job_socket
+    from defender.learning.author.version_control import DeliveryRefused, TenantExport, materialise_export
+
+    if container is None:
+        return materialise_export(tenant.tenant, commit)
+    try:
+        answer = container.materialised_export(commit)
+        folder = tenant.tenant.export_folder(commit)
+    except job_socket.Refused as refused:
+        raise DeliveryRefused(f"the job's host helper did not materialise it ({refused.code}): {refused}") from None
+    except (OSError, ValueError, TenantRefused) as lost:
+        raise DeliveryRefused(f"no export from the job's host helper: {type(lost).__name__}: {lost}") from None
+    if answer.get("commit") != commit or str(answer.get("path")) != str(folder):
+        raise DeliveryRefused(f"the job's host helper answered another export ({answer.get('path')!r}) than "
+                              f"{folder}")
+    return TenantExport(commit=commit, path=folder)
+
+
+def _pinned_export(tenant: RunTenant, source: Run, container: JobContainer | None = None) -> Any:
     """The export every sibling is pinned to and the questioner's corpus is read from (flow 7,
     O-PIN): the knowledge commit the source run's HOST-HELD knowledge record names (U12, beside
     the run folder, where no box writes), materialised from the tenant clone when absent —
@@ -337,12 +376,12 @@ def _pinned_export(tenant: RunTenant, source: Run) -> Any:
     clone cannot materialise; both before anything is spent. Only a source from before records
     were written (no record, and a stamp naming no knowledge source) is judged by its stamp, as
     before: a commit it names, a refusal for `unversioned`/`unavailable`, or with none recorded
-    the tenant's published `current` (pre-flight still refuses that unless `--allow-dirty`)."""
+    the tenant's published `current` (pre-flight still refuses that unless `--allow-dirty`). Inside a job
+    container the export is materialised by the job's host helper (`_materialised`)."""
     from defender.learning.author.version_control import (
         DeliveryRefused,
         LockBusy,
         current_export,
-        materialise_export,
     )
     status = source.knowledge_status()
     commit = None if status is None else status.commit
@@ -366,13 +405,17 @@ def _pinned_export(tenant: RunTenant, source: Run) -> Any:
                 f"[branch] source run {source.run_dir}'s knowledge record is unreadable: there "
                 "is no knowledge commit to pin its siblings to, so the family cannot be "
                 "launched (not waived by --allow-dirty)", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
-        return materialise_export(tenant.tenant, commit)
+        return _materialised(tenant, commit, container)
     except (DeliveryRefused, LockBusy) as refused:
         at = "" if commit is None else f" ran at knowledge commit {commit}, which"
         raise ending(
             f"[branch] source run {source.run_dir}{at} cannot be pinned to a knowledge "
             f"export: {refused}", reason=LAUNCH_REFUSED, brief=_UNPINNABLE, cause=refused) from refused
 
+
+#: The job's fixed brief when the launcher's check before a sibling finds the token can no
+#: longer be signed (#1449): pre-flight's cause, after pre-flight passed.
+_SIGN_STOP_BRIEF = "before a sibling started: " + _SIGN_CAUSE + "; no later world started"
 
 #: The exit code recorded for an arm whose process never started (spawn raised, or the
 #: rendezvous broke). Distinct from `run.py`'s own 0/1/2 so "never started" is distinguishable
@@ -386,6 +429,7 @@ def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the ten
     tenant_id: TenantId | None, rate: float | None = None, failed_before: int = 0,
     knowledge_commit: str | None = None, width: int | None = None, control: str | None = None,
     on_ended: Callable[[str, int], None] | None = None,
+    may_start: Callable[[], str | None] | None = None,
 ) -> dict[str, int]:
     """Start the selected world UUIDs, returning exits keyed by those UUIDs.
 
@@ -395,8 +439,9 @@ def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the ten
     one sibling after another with the whole rate each. `control`, when named, starts first, and
     its failure stops the family: no world after it starts. Either way, once `UNUSABLE_AT`
     worlds have failed the family is unusable: the siblings still running are stopped and no
-    other world starts. A world that never started is recorded `did not finish` and exits
-    `SPAWN_FAILED_EXIT`. `on_ended(world_id, code)` is called as each sibling's process exits.
+    other world starts. `may_start()`, when given, is asked before each world starts: a
+    reason it returns stops the family the same way, that world never starting (#1449). A
+    world that never started is recorded `did not finish` and exits `SPAWN_FAILED_EXIT`. `on_ended(world_id, code)` is called as each sibling's process exits.
 
     A `BaseException` reaching this frame while siblings run (a stop's signal) stops the family
     the same way, waits for the running siblings to end, and is re-raised."""
@@ -445,9 +490,9 @@ def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the ten
                     "family is unusable; stopping the siblings still running")
                 stop.set()
 
-    def never_started(world_id: str) -> None:
+    def never_started(world_id: str,
+                      why: str = "it never started: the family was stopped before its turn") -> None:
         exits[world_id] = SPAWN_FAILED_EXIT
-        why = "it never started: the family was stopped before its turn"
         if outcome_mod.write_world_record(episode, world_id, outcome_mod.DID_NOT_FINISH,
                                           detail=why):
             _logger.warning(f"world {worlds[world_id].label}: {why}; recorded as did not finish")
@@ -462,6 +507,12 @@ def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the ten
             ready.wait(timeout=30)
         elif stop.is_set():
             never_started(world_id)
+            return
+        refused = None if may_start is None else may_start()
+        if refused is not None:
+            _logger.warning(f"episode {episode.dir.name}: world {label} is not started: {refused}")
+            stop.set()
+            never_started(world_id, f"it never started: {refused}")
             return
         try:
             code = start(sibling_argv(episode.dir.name, label, tenant_id=tenant_id,
@@ -496,7 +547,7 @@ def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the ten
 
 
 #: How long a stopped sibling is given to exit on SIGTERM before it is killed.
-_STOP_GRACE_SECONDS = 30.0
+_STOP_GRACE_SECONDS = 20.0
 
 
 def _default_spawn(argv: list[str], *, env: dict[str, str] | None = None,
@@ -606,6 +657,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     signer: Any = None,
     proxy_url: str | None = None,
     issuer_transport: Any = None,
+    clock: Callable[[], float] = time.time,
 ) -> int:
     """Launch one episode, reporting a refusal as an operator exit rather than a traceback.
     `preflight` (the role-model check) and `render_page` (the episode page) are handed in by the
@@ -616,7 +668,8 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
         return _launch(ns, lane=lane, spawn=spawn, questioner=questioner, preflight=preflight,
                        render_page=render_page, judge=judge, lessons_dir=lessons_dir, live_tree=live_tree,
                        oracle=oracle, verifier=verifier, roster=roster, directory=directory,
-                       signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport)
+                       signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
+                       clock=clock)
     except (branch.BranchError, LedgerError, EstateError, FamilyError, GrantError,
             session_store.StoreError, sqlite3.Error) as refusal:
         raise LauncherRefused(f"[branch] {refusal}") from refusal
@@ -637,6 +690,30 @@ def launch_job(  # noqa: PLR0913 — the job's identity plus the launcher's seam
     return _launch(ns, lane=lane, preflight=preflight, **seams)
 
 
+class _ContainerAdmitted:
+    """The tenant of a launch inside a job container (#1170): accepted by the folder rules alone. The per-job host
+    helper holds the tenant's host lock and admitted it before the container started (P-C), so no lock is taken, no
+    record read and no database opened here; it has no tenant records (`directory` None)."""
+
+    directory: Any = None
+
+    def __init__(self, tenant: Tenant) -> None:
+        self.tenant = tenant
+
+    def __enter__(self) -> _ContainerAdmitted:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+
+def _admitted(data_root: Any, tenant_id: TenantId, *, box_mounted: tuple[Any, ...]) -> _ContainerAdmitted:
+    """The tenant of a launch inside a job container: the folder rules alone (`_ContainerAdmitted`). An operator's
+    launch opens the one host acceptance in `_launch` itself, the command that holds it."""
+    return _ContainerAdmitted(tenancy.accept_tenant(data_root, tenant_id, defender_dir=_DEFENDER_DIR,
+                                                    box_mounted=box_mounted))
+
+
 def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, then the episode, in order
     ns: argparse.Namespace, *, lane: JobLaneHooks | None, spawn: Any = None, questioner: Any = None,
     preflight: Callable[..., int], render_page: PageRenderer | None = None, judge: Any = None,
@@ -644,6 +721,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     live_tree: Callable[[], formats.RunProvenance] | None = None,
     oracle: Any = None, verifier: Any = None, roster: Any = None, directory: Any = None,
     signer: Any = None, proxy_url: str | None = None, issuer_transport: Any = None,
+    container: JobContainer | None = None,
+    clock: Callable[[], float] = time.time,
 ) -> int:
     # Injected seams are resolved once and threaded inward non-`None`, so no two frames can
     # disagree about which preflight, roster or model an episode used.
@@ -666,10 +745,12 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     # refused here at launch exactly as a run refuses one inside its runs base (#1107 MF-13).
     from defender.systems import run_tenant as run_tenant_mod
 
+    admitted: Any
     try:
-        admitted = run_tenant_mod.host_tenant(
-            data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
-            box_mounted=(tenancy.box_mounted_episodes(data_root, tenant_id),))
+        box_mounted = (tenancy.box_mounted_episodes(data_root, tenant_id),)
+        admitted = (run_tenant_mod.host_tenant(data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
+                                               box_mounted=box_mounted)
+                    if container is None else _admitted(data_root, tenant_id, box_mounted=box_mounted))
     except TenantRefused as refusal:
         raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
                      brief=f"the job's tenant was refused ({type(refusal).__name__})",
@@ -712,7 +793,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         # `tmp_path` corpus and this frame is the only one that ever sees the production path.
         # #1108 P4 flow 7: the family's knowledge is the source's commit, its export materialised
         # here (git-capable) before anything is spent; the questioner's corpus is that export's.
-        pinned = _pinned_export(tenant, source)
+        pinned = _pinned_export(tenant, source, container)
         questioner_lessons_dir = (
             KnowledgePaths(Path(pinned.path) / "agent").lessons_questioner_dir
             if lessons_dir is None else lessons_dir)
@@ -753,7 +834,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
                     verifier=verifier, roster=roster, started=started,
                     knowledge_commit=pinned.commit, render_page=render_page,
                     signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
-                    directory=admitted.directory, lane=lane)
+                    directory=admitted.directory, lane=lane, container=container,
+                    token_clock=clock)
             except SystemExit:
                 raise
             except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
@@ -774,6 +856,8 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer | None,
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
     issuer_transport: Any = None, directory: Any = None, lane: JobLaneHooks | None = None,
+    container: JobContainer | None = None,
+    token_clock: Callable[[], float] = time.time,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
 
@@ -816,18 +900,21 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
         record = preflight_replay(episode, source=source, roster=roster, tenant=tenant,
                                   oracle=oracle, verifier=verifier, signer=signer,
                                   proxy_url=proxy_url, issuer_transport=issuer_transport,
-                                  directory=directory)
+                                  directory=directory, container=container,
+                                  job_id=None if lane is None else lane.job_id,
+                                  clock=token_clock)
     if record["outcome"] != ACCEPTED:
         _logger.info(f"episode {episode_id}: {record['outcome']} before any sibling started "
                      f"({record['reason']})")
         if lane is not None:
             detail = (f"[branch] episode {episode_id}: pre-flight recorded {record['outcome']!r} "
                       f"({record['reason']})")
-            if record.get(ENVIRONMENT_REFUSED):
+            cause = record.get(ENVIRONMENT_REFUSED)
+            if cause:
                 # The environment's refusal, not the family's: the job fails, it is not skipped.
+                # The brief is the cause's own (#1363 O6).
                 raise ending(detail, reason=LAUNCH_REFUSED,
-                             brief="pre-flight refused: the read token for the credential proxy "
-                                   "cannot be signed; no sibling started")
+                             brief=_ENVIRONMENT_BRIEFS[cause] + "; no sibling started")
             raise ending(detail, reason=FAMILY_UNUSABLE,
                          brief=f"pre-flight recorded the family {record['outcome']}; no sibling started")
         return 1
@@ -851,13 +938,28 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
                 lane.sibling_ended(view, list(ran))
 
         # A job's siblings run one at a time, the control first (O4); an operator's together.
+        # Before each one the job checks its token can still be signed (#1449): pre-flight proved
+        # it once, and a job's family can run long enough for a rotation or an offboarding.
+        unsigned: list[str] = []
+        sign_check = None if lane is None else sibling_sign_check(
+            tenant, roster=roster, signer=signer, proxy_url=proxy_url,
+            issuer_transport=issuer_transport, directory=directory)
+
+        def may_start() -> str | None:
+            refused = None if sign_check is None else sign_check()
+            if refused is not None:
+                unsigned.append(refused)
+            return refused
+
         exits = start_family(episode, world_ids, spawn=spawn, model=ns.model,
                              tenant_id=tenant.tenant_id, rate=process_oracle_settings().rate,
                              failed_before=len(unservable), knowledge_commit=knowledge_commit,
                              width=None if lane is None else 1,
                              control=None if lane is None else control,
-                             on_ended=sibling_ended)
-    if lane is not None and control is not None and exits.get(control, 0) != 0:
+                             on_ended=sibling_ended,
+                             may_start=None if sign_check is None else may_start)
+    # A control the sign check kept from starting did not fail: the stop below names the cause.
+    if lane is not None and control is not None and exits.get(control, 0) != 0 and not unsigned:
         raise ending(
             f"[branch] episode {episode_id}: the control world exited {exits[control]}, so no "
             "other world started", reason=CONTROL_FAILED,
@@ -879,6 +981,10 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
                         f"record ({report['reason']})")
     _logger.info(f"episode {episode_id}: {len(report['archived'])}/{len(world_ids)} worlds "
                  "archived")
+    if unsigned:
+        # After VERIFY: the arms that finished before the stop are verified and archived.
+        raise ending(f"[branch] episode {episode_id}: a sibling was not started ("
+                     f"{unsigned[0]})", reason=LAUNCH_REFUSED, brief=_SIGN_STOP_BRIEF)
     stage(Step.JUDGE)
     with clock.step(Step.JUDGE):
         if lane is None:

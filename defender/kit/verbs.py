@@ -116,6 +116,13 @@ class VerbContext(Protocol):
         """Where the call gets its request token when it holds none (r7 A20)."""
         ...
 
+    @property
+    def access(self) -> Any:
+        """The process's access holder (#1363 B1), when the call has one: `token()` is the run's
+        read token, and `report(fault)` is told of each `setup` or `access` fault the client
+        raises. None for a call that presents a token of its own."""
+        ...
+
 
 Verb = Callable[..., Any]
 

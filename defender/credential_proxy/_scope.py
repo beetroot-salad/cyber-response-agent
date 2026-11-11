@@ -15,6 +15,7 @@ from urllib.parse import unquote, urlsplit
 from defender.kit.access import AccessDeclaration, Route
 from defender.kit.paths import holds_separator
 from defender.credential_proxy._refusal import CONFIG, CONFINEMENT, Refused
+from defender.kit.faults import ORIGIN_REQUEST
 from defender.credential_proxy._tokens import READ_WRITE
 
 #: Methods that are reads under any base (O3).
@@ -37,35 +38,35 @@ class Target:
 def locate(declaration: AccessDeclaration, url: str) -> Target:
     """`url` as a destination under `declaration`'s base, or `Refused`."""
     if any(ch <= " " or ch == "\x7f" for ch in url):
-        raise Refused(CONFIG, "the URL holds whitespace or a control character")
+        raise Refused(CONFIG, "the URL holds whitespace or a control character", origin=ORIGIN_REQUEST)
     base = urlsplit(declaration.base)
     try:
         asked = urlsplit(url)
         asked_port = asked.port
     except ValueError:
-        raise Refused(CONFIG, "the URL does not parse") from None
+        raise Refused(CONFIG, "the URL does not parse", origin=ORIGIN_REQUEST) from None
     if asked.username is not None or asked.password is not None or "@" in asked.netloc:
-        raise Refused(CONFIG, "the URL carries a login part; the proxy applies the credential")
+        raise Refused(CONFIG, "the URL carries a login part; the proxy applies the credential", origin=ORIGIN_REQUEST)
     if asked.fragment:
-        raise Refused(CONFIG, "the URL carries a fragment")
+        raise Refused(CONFIG, "the URL carries a fragment", origin=ORIGIN_REQUEST)
     scheme = asked.scheme.lower()
     if (scheme, asked.hostname, asked_port or _DEFAULT_PORT.get(scheme)) != (
             base.scheme.lower(), base.hostname, base.port or _DEFAULT_PORT.get(base.scheme.lower())):
-        raise Refused(CONFIG, "the URL's scheme, host or port is not the declared base's")
+        raise Refused(CONFIG, "the URL's scheme, host or port is not the declared base's", origin=ORIGIN_REQUEST)
     path = asked.path or "/"
     decoded = unquote(path)
     if any(part in (".", "..") for part in _SEPARATOR.split(decoded)):
-        raise Refused(CONFINEMENT, "the URL path holds a `.` or `..` segment")
+        raise Refused(CONFINEMENT, "the URL path holds a `.` or `..` segment", origin=ORIGIN_REQUEST)
     if ";" in decoded:
         # Some servers read `;` as starting a path parameter and resolve `/..;/` as `/../`.
-        raise Refused(CONFINEMENT, "the URL path holds a `;` (a path parameter)")
+        raise Refused(CONFINEMENT, "the URL path holds a `;` (a path parameter)", origin=ORIGIN_REQUEST)
     base_path = base.path.rstrip("/")
     if not (path == base_path or path.startswith(base_path + "/")):
-        raise Refused(CONFIG, "the URL path is not under the declared base")
+        raise Refused(CONFIG, "the URL path is not under the declared base", origin=ORIGIN_REQUEST)
     if any(holds_separator(unquote(segment)) for segment in path[len(base_path):].split("/")):
         # A server that decodes the path before routing would split it there (#1391 r5 O-T5).
         # Only the part under the base: the tenant's own base may name an escaped `/`.
-        raise Refused(CONFINEMENT, "a URL path segment holds an encoded `/` or `\\`")
+        raise Refused(CONFINEMENT, "a URL path segment holds an encoded `/` or `\\`", origin=ORIGIN_REQUEST)
     sent = f"{base.scheme}://{base.netloc}{path}" + (f"?{asked.query}" if asked.query else "")
     return Target(url=sent, path=path[len(base_path):] or "/")
 
@@ -76,14 +77,14 @@ def check_route(declaration: AccessDeclaration, system: str, method: str, path: 
     and `mode` (the token's grant on `system`) is read-write. GET and HEAD are reads; another
     method is a read only if a read route lists it (O3, A14)."""
     if not _METHOD.fullmatch(method):
-        raise Refused(CONFIG, f"{method[:20]!r} is not an upper-case HTTP method")
+        raise Refused(CONFIG, f"{method[:20]!r} is not an upper-case HTTP method", origin=ORIGIN_REQUEST)
     if method in READ_METHODS or _route_listed(declaration.reads, method, path):
         return
     if not _route_listed(declaration.writes, method, path):
-        raise Refused(CONFINEMENT, f"{method} {path} is not a declared route of {system}")
+        raise Refused(CONFINEMENT, f"{method} {path} is not a declared route of {system}", origin=ORIGIN_REQUEST)
     if mode != READ_WRITE:
         raise Refused(CONFINEMENT, f"{method} {path} is a write and the token grants {system} "
-                                   "read only")
+                                   "read only", origin=ORIGIN_REQUEST)
 
 
 def _route_listed(routes: tuple[Route, ...], method: str, path: str) -> bool:

@@ -32,9 +32,9 @@ from defender.kit.access import (
     AccessDeclaration,
     Auth,
 )
-from defender.kit.faults import ConfigFault
+from defender.kit.faults import ORIGIN_SETUP, ConfigFault
 from defender.credential_proxy._deadline import Deadline
-from defender.credential_proxy._refusal import CONFIG, TRANSPORT, Refused
+from defender.credential_proxy._refusal import CONFIG, TRANSPORT, Refused, labelled
 from defender.credential_proxy._reply import capped_reply
 
 #: A cached access token is not reused within this many seconds of its stated expiry.
@@ -54,22 +54,25 @@ class CredentialSet:
 
     def __post_init__(self) -> None:
         if self.kind not in CREDENTIAL_KINDS:
-            raise ConfigFault(f"a credential set's kind must be one of {list(CREDENTIAL_KINDS)}")
+            raise labelled(ConfigFault(f"a credential set's kind must be one of "
+                                       f"{list(CREDENTIAL_KINDS)}"), ORIGIN_SETUP)
         if not isinstance(self.fields, Mapping) or not all(
                 isinstance(k, str) and isinstance(v, str) for k, v in self.fields.items()):
-            raise ConfigFault("a credential set's fields must map names to text")
+            raise labelled(ConfigFault("a credential set's fields must map names to text"),
+                           ORIGIN_SETUP)
         if isinstance(self.version, bool) or not isinstance(self.version, int):
-            raise ConfigFault("a credential set's version must be a whole number")
+            raise labelled(ConfigFault("a credential set's version must be a whole number"),
+                           ORIGIN_SETUP)
 
 
 def _needed(creds: CredentialSet, name: str | None, system: str) -> str:
     value = creds.fields.get(name or "")
     if not value:
         raise Refused(CONFIG, f"the credential set of {system} lacks the field {name!r} its "
-                              "declared scheme needs")
+                              "declared scheme needs", origin=ORIGIN_SETUP)
     if not value.isprintable():
         raise Refused(CONFIG, f"the credential field {name!r} of {system} holds a control "
-                              "character")
+                              "character", origin=ORIGIN_SETUP)
     return value
 
 
@@ -77,12 +80,12 @@ def check_fit(auth: Auth, creds: CredentialSet, system: str) -> None:
     """`Refused` unless `creds` is the kind `auth` needs (A4)."""
     if creds.kind != auth.kind:
         raise Refused(CONFIG, f"the credential set of {system} is {creds.kind!r}; its declared "
-                              f"scheme {auth.scheme!r} needs {auth.kind!r}")
+                              f"scheme {auth.scheme!r} needs {auth.kind!r}", origin=ORIGIN_SETUP)
 
 
 def _ascii(value: str, name: str | None, system: str) -> str:
     if not value.isascii():
-        raise Refused(CONFIG, f"the credential field {name!r} of {system} is not ASCII, so it cannot be a header")
+        raise Refused(CONFIG, f"the credential field {name!r} of {system} is not ASCII, so it cannot be a header", origin=ORIGIN_SETUP)
     return value
 
 
@@ -95,7 +98,7 @@ def static_headers(auth: Auth, creds: CredentialSet, system: str) -> dict[str, s
     if auth.scheme == BASIC:
         user = _needed(creds, USERNAME, system)
         if ":" in user:
-            raise Refused(CONFIG, f"the basic-auth username of {system} holds a `:`")
+            raise Refused(CONFIG, f"the basic-auth username of {system} holds a `:`", origin=ORIGIN_SETUP)
         packed = f"{user}:{_needed(creds, PASSWORD, system)}".encode()
         return {"Authorization": f"Basic {base64.b64encode(packed).decode('ascii')}"}
     raise AssertionError(f"not a static scheme: {auth.scheme}")
@@ -144,7 +147,7 @@ class AccessTokens:
         what = f"the token exchange of {system}"
         gate = self._gate(key)
         if not gate.acquire(timeout=deadline.left(what)):
-            raise Refused(TRANSPORT, f"the request ran out of time waiting for {what}")
+            raise Refused(TRANSPORT, f"the request ran out of time waiting for {what}", origin=ORIGIN_SETUP)
         try:
             held = self._held.get(key)
             if (held is not None and (held.version, held.digest) == (creds.version, digest)
@@ -190,16 +193,16 @@ def _token_exchange(auth: Auth, creds: CredentialSet, system: str,
             data=form, headers=headers))
     except httpx.TransportError as e:
         raise Refused(TRANSPORT, f"the token endpoint of {system} is unreachable "
-                                 f"({type(e).__name__})") from None
+                                 f"({type(e).__name__})", origin=ORIGIN_SETUP) from None
     status, withheld = reply.status, reply.withheld
     besides = "" if withheld is None else f" with {withheld}, withheld"
     if status >= 500:
-        raise Refused(TRANSPORT, f"the token endpoint of {system} answered {status}{besides}")
+        raise Refused(TRANSPORT, f"the token endpoint of {system} answered {status}{besides}", origin=ORIGIN_SETUP)
     if status != 200:
         raise Refused(CONFIG, f"the token endpoint of {system} refused the exchange "
-                              f"({status}){besides}")
+                              f"({status}){besides}", origin=ORIGIN_SETUP)
     if withheld is not None:
-        raise Refused(CONFIG, f"the token endpoint of {system} answered {withheld}")
+        raise Refused(CONFIG, f"the token endpoint of {system} answered {withheld}", origin=ORIGIN_SETUP)
     return _issued(reply.body, system)
 
 
@@ -210,14 +213,14 @@ def _issued(body: bytes, system: str) -> tuple[str, int | None]:
         doc = None
     if not isinstance(doc, dict):
         raise Refused(CONFIG, f"the token endpoint of {system} answered 200 without a JSON "
-                              "object")
+                              "object", origin=ORIGIN_SETUP)
     token, kind, lifetime = doc.get("access_token"), doc.get("token_type"), doc.get("expires_in")
     if not isinstance(token, str) or not token or not token.isprintable() or " " in token:
         raise Refused(CONFIG, f"the token endpoint of {system} answered 200 without a usable "
-                              "access_token")
+                              "access_token", origin=ORIGIN_SETUP)
     if kind is not None and (not isinstance(kind, str) or kind.lower() != "bearer"):
         raise Refused(CONFIG, f"the token endpoint of {system} issued a token that is not a "
-                              "bearer token")
+                              "bearer token", origin=ORIGIN_SETUP)
     return token, _lifetime(lifetime)
 
 

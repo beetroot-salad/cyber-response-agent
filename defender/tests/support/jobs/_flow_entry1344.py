@@ -1,17 +1,26 @@
 """#1344 e2e children, started by the real worker: `python _flow_entry1344.py <mode> <commit> <marks> <args...>`.
 
-- `investigate`: the real job entry (`run.job_main`) over the replay driver. MAIN writes a document, dispatches one
-  lead (`gather`) whose query reaches a stand-in elastic, writes the rest and closes: a completed run whose one
-  `gather` response is a legal fork point.
+- `investigate`: the real per-job host helper (`job_host.main`, #1170) in front of the real job entry (`run.job_main`) over
+  the replay driver, as `_helper_child1170.py` runs it: the helper's docker is the stand-in (`ContainerStandIn`) whose job
+  container is this script again, in the same mode, as a real process given only the container's environment (the job
+  socket set: the in-container branch). MAIN writes a document, dispatches one lead (`gather`) whose query reaches a
+  stand-in elastic, writes the rest and closes: a completed run whose one `gather` response is a legal fork point.
 - `investigate-no-gather`: the same run with no `gather`, so no fork point exists.
-- `family`: the real learning job entry (`job_entry.main`), every paid model a script and the siblings real
-  `run.main` processes' in-process equivalent (`_1255_twin.run_main`), continuing MAIN's script after the fork.
-  Args: `--job <id> --tenant <T> --source <investigation id> --parent-pid <pid>`.
-- `post-step`: the real post-step with a recording drain gate (`<marks>/gate`, holding the queue's size when it ran)."""
+- `family`: the real learning job entry (`job_entry.main`) inside its job container (#1170 A6), every paid model a script
+  and the siblings real `run.main` processes' in-process equivalent (`_1255_twin.run_main`), continuing MAIN's script
+  after the fork. Args: `--job <id> --tenant <T> --source <investigation id> [--parent-pid <pid>]`.
+- `post-step`: the real post-step inside its job container, with a recording drain gate (`<marks>/gate`, holding the
+  queue's size when it ran).
+
+The learning kinds' job socket is a stand-in (`_socket_standin1170.SocketStandIn`: the helper's `launch` facts, the
+export it materialises and, for `family`, the passes it signs): the learning helper's own work is `tests/jobs/test_job_helper_learning.py`'s. The siblings run
+in this process as the operator's (no job socket in this process's own environment), as they did before #1170."""
 from __future__ import annotations
 
 import functools
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -63,20 +72,75 @@ def investigate(*, gathers: bool = True) -> int:
 
     drive = functools.partial(run_py._drive_investigation, investigate=investigate_with_a_system)
     lifecycle = functools.partial(run_py._run_investigation_lifecycle, investigate=drive, start_box=_unboxed)
-    return run_py.job_main(argv, lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
-                           publish=lambda *a, **k: f"fresh {commit}")
+    return run_py.job_main(_in_container_argv(), lifecycle=lifecycle, preflight=lambda *a, **k: 0,
+                           visualize=lambda *a, **k: None)
+
+
+def _in_container_argv() -> list[str]:
+    """This child's argv as the helper starts the entry in its container: no `--parent-pid` (A5, A6)."""
+    if "--parent-pid" not in argv:
+        return list(argv)
+    at = argv.index("--parent-pid")
+    return [*argv[:at], *argv[at + 2:]]
+
+
+def helper_in_front() -> int:
+    """The worker's child for an investigation: the real helper whose job container is this script, in this mode."""
+    from defender import job_host
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.support.jobs._job_helper import ContainerStandIn
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    root = Path(__file__).resolve().parents[4]
+    job, tenant = argv[argv.index("--job") + 1], argv[argv.index("--tenant") + 1]
+
+    def entry(container) -> int:
+        env = {k: v for k, v in container.env.items() if v is not None}
+        env.update(PATH=os.environ["PATH"], PYTHONPATH=f"{root}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
+        return subprocess.run([sys.executable, str(Path(__file__).resolve()), mode, commit, str(marks),  # noqa: S603
+                               "--job", job, "--tenant", tenant],
+                              env=env, cwd=str(root), stdin=subprocess.DEVNULL, check=False).returncode
+
+    return job_host.main(["--kind", "investigation", "--job", job, "--tenant", tenant,
+                          "--parent-pid", argv[argv.index("--parent-pid") + 1]],
+                         docker=ContainerStandIn(entry), signer=A.MarkedSigner(),
+                         publish=lambda *a, **k: B.fresh(commit))
+
+
+def in_container(entry):
+    """`entry` inside its job container; the worker's child (no job socket yet) runs the helper in front first."""
+    from defender import job_socket
+
+    return entry if os.environ.get(job_socket.SOCKET_ENV) else helper_in_front
+
+
+def _socket(tenant: str, *, signing: dict | None = None, **launch):
+    """The learning kinds' job socket stand-in (module doc); with `signing` (`passes`' keywords), it signs the job's
+    passes as the helper does."""
+    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, materialise, passes
+
+    answers = {"export.materialise": materialise(tenant)}
+    if signing is not None:
+        launch["proxy_url"], answers["pass"] = passes(tenant, **signing)
+    return SocketStandIn(tenant, launch=launch, answers=answers)
 
 
 def family() -> int:
     from defender import box as box_mod
     from defender.learning.branch import job_entry
     from defender.tests.e2e import _1255_twin as TWIN
+    from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
     from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
     from defender.tests.support.learning.branch import _triplet_947 as T
     from defender.tests.support.learning.judge import _judge_921 as J
 
+    from defender.integrations.elastic_adapter import search_envelope
+    from defender.tests.e2e._lead_zero_808 import EVENTS_INDEX
+
+    PROXY_REPLY = W.fmt().encode_body(json.dumps(search_envelope(EVENTS_INDEX, [], 0, False, "desc")).encode()) \
+        + W.fmt().encode_final(W.final_record())
     tenant, source = argv[argv.index("--tenant") + 1], argv[argv.index("--source") + 1]
     runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
 
@@ -86,9 +150,13 @@ def family() -> int:
         # No Docker daemon here: the sibling's box start fails and the operator's opt-out, set for this sibling
         # alone, turns it into production's unboxed mode (as `_replay_harness.production_unboxed_box` does).
         # Its tree is walked by the real reap scan, so the family's verification can archive it.
-        with RH._unsandboxed_allowed():
+        # Its elastic is on the credential proxy, and a sibling that cannot sign or reach the proxy loses its access and
+        # ends `proxy-access` (#1363 O1, O5): it gets the stand-in's signer and a stand-in proxy answering every read
+        # with an empty result, as the reads these replays never judged did before (a failed call the run went on from).
+        with RH._unsandboxed_allowed(), W.fake_proxy(PROXY_REPLY, ended=True) as proxy_url:
             TWIN.run_main(sibling_argv[2:], recording, main_turns=after_the_gather(),
-                          clock=TWIN.SteppingClock(TWIN.ARM_CLOCK_START), scrub=box_mod.scrub)
+                          clock=TWIN.SteppingClock(TWIN.ARM_CLOCK_START), scrub=box_mod.scrub,
+                          signer=FakeSigner("flow1344"), proxy_url=proxy_url)
         (marks / f"sibling-{recording.label}").write_text(str(recording.exit_code), encoding="utf-8")
         return recording.exit_code if isinstance(recording.exit_code, int) else 1
 
@@ -121,7 +189,10 @@ def family() -> int:
     if os.environ.get("FLOW_DAMAGE") == "store-version":
         _store_from_a_newer_format(runs, source)
     try:
-        job_entry.main(argv, **seams)
+        # Pre-flight signs its pass up front (#1363): the helper signs it, over the tenant's one proxied system.
+        signing = dict(reads=("elastic",), directory=seams["directory"], proxy_url=PROXY_URL, signer=seams["signer"])
+        with _socket(tenant, kind="learning", job=argv[argv.index("--job") + 1], signing=signing) as helper:
+            job_entry.main(_in_container_argv(), environ=helper.environ(), **seams)
     except SystemExit as stop:
         return stop.code if isinstance(stop.code, int) else 1
     return 0
@@ -166,11 +237,14 @@ def post_step() -> int:
         return 0
 
     try:
-        step.main(argv, author_tick=gate)
+        job = argv[argv.index("--job") + 1] if "--job" in argv else None
+        with _socket(tenant, kind="post-step", job=job) as helper:
+            step.main(_in_container_argv(), environ=helper.environ(), author_tick=gate)
     except SystemExit as stop:
         return stop.code if isinstance(stop.code, int) else 1
     return 0
 
 
-sys.exit({"investigate": investigate, "investigate-no-gather": functools.partial(investigate, gathers=False),
+sys.exit({"investigate": in_container(investigate),
+          "investigate-no-gather": in_container(functools.partial(investigate, gathers=False)),
           "family": family, "post-step": post_step}[mode]())
