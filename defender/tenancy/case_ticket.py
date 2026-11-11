@@ -122,12 +122,12 @@ def _format(template: str, ctx: dict[str, str], where: str) -> str:
         return template.format_map(ctx)
     except KeyError as e:
         raise CaseTicketError(
-            f"the case-record file's `{where}` names a render key the context does not "
+            f"the case record's `{where}` names a render key the context does not "
             f"carry: {e}"
         ) from e
     except (ValueError, IndexError, AttributeError, TypeError) as e:
         raise CaseTicketError(
-            f"the case-record file's `{where}` is not a valid template: {e}"
+            f"the case record's `{where}` is not a valid template: {e}"
         ) from e
 
 
