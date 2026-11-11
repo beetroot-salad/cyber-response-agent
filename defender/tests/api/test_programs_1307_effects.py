@@ -220,3 +220,28 @@ def _reconcile_once(s: Soar) -> Any:
     except Exception as e:  # noqa: BLE001 — the pass raises its first failure; the test inspects it
         return e
     return None
+
+
+def test_1454_a_failed_tenant_read_in_a_cleanup_pass_deletes_nothing_and_fails_the_pass(caplog: pytest.LogCaptureFixture) -> None:
+    """The pass reads every tenant it needs before its first delete: a fault at the last repository call before the first
+    delete (the tenant read) leaves every client in place, audits no deletion and fails the pass. Control: unfaulted, each
+    stale client is deleted with its tenant (none for a client with no row) in its audit line (O-F)."""
+    s, audit, plan = _world(caplog)
+    doomed = _reconcilable(s)
+    plan.arm(None)
+    assert _reconcile_once(s) is None
+    assert sorted(s.world.realm.deleted) == doomed
+    assert sorted((e.target, e.tenant_id) for e in audit.events() if e.action == CLIENT_DELETE) == sorted(
+        (c, None if c in ORPHANS else T1) for c in doomed)
+    first_delete = next(i for i, (who, name, _) in enumerate(plan.calls) if (who, name) == ("realm", "delete_client"))
+    tenant_read = max(i for i, (who, _, _) in enumerate(plan.calls[:first_delete]) if who == "repo")
+
+    caplog.clear()
+    s, audit, plan = _world(caplog)
+    _reconcilable(s)
+    plan.arm(tenant_read)
+    outcome = _reconcile_once(s)
+    assert isinstance(outcome, InjectedProgramsFault), outcome
+    assert s.world.realm.deleted == []
+    assert [c for c in doomed if c not in s.world.realm.clients] == []
+    assert CLIENT_DELETE not in [e.action for e in audit.events()]

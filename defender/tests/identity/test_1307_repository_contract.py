@@ -786,3 +786,144 @@ async def test_two_processes_claiming_at_once_get_one_warning_between_them(two_r
     assert sorted(c is None for c in got) == [False, True]
     [won] = [c for c in got if c is not None]
     assert (won.credential_id, won.threshold) == (key.id, FOURTEEN)
+
+
+# --- #1454: programs have their own table (sketch) ---------------------------------------------------------------------
+# Forced choices the design leaves open (reported as gaps): `add_program` returns a program row with `id`, `tenant_id`,
+# `display_name`, `status`; the one admitting read is `admit_by_key(key_hash, *, now)` / `admit_by_client(client_id, *,
+# service_account_id, now)` -> (credential, program) | None; the P-L refusal is `defender.identity.TenantNotActive`.
+
+async def _offboard(backend, tenants, tenant) -> None:
+    """The tenant leaves `active` through tenancy's own offboard request (the one write of `offboarding`)."""
+    if backend is None:
+        await tenants.request_offboard(tenant, now=NOW)
+        return
+    from defender.tenancy.postgres import PostgresTenantRepository
+
+    tenancy = PostgresTenantRepository(backend)
+    try:
+        await tenancy.request_offboard(tenant, now=NOW)
+    finally:
+        await tenancy.close()
+
+
+async def test_1454_a_program_has_no_users_row_and_the_people_reads_hold_only_people(seeded):
+    """After a program is created in T1, no users row exists for it and every people read returns only the person (O-B, P-J)."""
+    ann = await _user(seeded)
+    membership = await _active(seeded, ann)
+    program = await _program(seeded, ann)
+    assert (program.tenant_id, program.display_name, program.status) == (T1, "SOAR prod", "active")
+    assert await seeded.user(UserId(str(program.id))) is None
+    assert await seeded.memberships_of_user(UserId(str(program.id))) == []
+    assert [m.id for m in await seeded.memberships_of_tenant(T1)] == [membership.id]
+    assert [(m.id, u.id) for m, u in await seeded.people_of_tenant(T1, "active")] == [(membership.id, ann.id)]
+    assert await seeded.end_membership(membership.id, ended_by=ann.id, now=NOW) is True
+    assert await seeded.tenant_has_active_members(T1) is False
+    assert [p.id for p in await seeded.programs_of_tenant(T1)] == [program.id]  # control: the program is still there
+
+
+async def test_1454_one_call_admits_a_program_by_its_key_while_the_key_is_usable(seeded):
+    """The key hash's credential and its program come back from one read while usable; nothing once revoked (O-C)."""
+    admin = await _user(seeded)
+    program = await _program(seeded, admin)
+    key = await _add_key(seeded, program, admin, 1)
+    admitted = await seeded.admit_by_key(_key(1), now=NOW)
+    assert admitted is not None
+    credential, who = admitted
+    assert (credential.id, who.id, who.tenant_id, who.display_name) == (key.id, program.id, T1, "SOAR prod")
+    assert await seeded.revoke_credential(key.id, revoked_by=admin.id, now=NOW) is True
+    assert await seeded.admit_by_key(_key(1), now=NOW) is None
+
+
+async def test_1454_a_program_of_a_tenant_being_offboarded_is_admitted_warned_and_kept_by_none(seeded, backend, tenants):
+    """Standing row "tenant offboarding": authentication, the expiry-warning claim and the keep-set all leave out the
+    usable credentials of a program created while its tenant was active; T2's program is the control (O-D)."""
+    admin = await _user(seeded)
+    leaving = await _program(seeded, admin, name="Leaving")
+    staying = await _program(seeded, admin, tenant=T2, name="Staying")
+    rows = {}
+    for program, n in ((leaving, 1), (staying, 3)):
+        key = await _timed_key(seeded, program, admin, n, 30 * DAY)
+        oauth = await _add_oauth(seeded, program, admin, n + 1, expires_at=NOW + 30 * DAY)
+        assert await seeded.go_live(oauth.id, service_account_id=SA, now=NOW) is True
+        rows[program.id] = (key, oauth)
+    await _offboard(backend, tenants, T1)
+    assert await seeded.admit_by_key(_key(1), now=NOW) is None
+    assert await seeded.admit_by_client(rows[leaving.id][1].id, service_account_id=SA, now=NOW) is None
+    assert (await seeded.admit_by_key(_key(3), now=NOW))[1].id == staying.id
+    assert (await seeded.admit_by_client(rows[staying.id][1].id, service_account_id=SA, now=NOW))[1].id == staying.id
+    assert await seeded.oauth_credentials_to_keep(now=NOW) == {rows[staying.id][1].id}
+    at = NOW + 30 * DAY - FOURTEEN
+    claimed = {(await _claim_warning(seeded, at)).credential_id, (await _claim_warning(seeded, at)).credential_id}
+    assert claimed == {r.id for r in rows[staying.id]}
+    assert await _claim_warning(seeded, at) is None
+
+
+async def test_1454_a_pending_credential_within_its_deadline_is_kept_but_neither_admitted_nor_warned(seeded):
+    """Standing row "pending, before its deadline, program and tenant active": the keep-set holds its client
+    (holds_slot), authentication and the warning claim do not (usable); once live, all three take it (O-D)."""
+    admin = await _user(seeded)
+    program = await _program(seeded, admin)
+    pending = await _add_oauth(seeded, program, admin, 1)
+    due = pending.expires_at - FOURTEEN
+    assert await seeded.oauth_credentials_to_keep(now=NOW) == {pending.id}
+    assert await seeded.admit_by_client(pending.id, service_account_id=SA, now=NOW) is None
+    assert await _claim_warning(seeded, due) is None
+    assert await seeded.go_live(pending.id, service_account_id=SA, now=NOW) is True
+    assert (await seeded.admit_by_client(pending.id, service_account_id=SA, now=NOW))[0].id == pending.id
+    assert (await _claim_warning(seeded, due)).credential_id == pending.id
+
+
+async def test_1454_a_program_is_not_created_in_a_tenant_that_is_not_active(seeded, backend, tenants):
+    """Creating a program in an `offboarding` tenant raises the dedicated error and writes nothing; T1 accepts (P-L)."""
+    from defender.identity import TenantNotActive
+
+    admin = await _user(seeded)
+    await _offboard(backend, tenants, T2)
+    with pytest.raises(TenantNotActive):
+        await _program(seeded, admin, tenant=T2)
+    assert await seeded.programs_of_tenant(T2) == []
+    assert (await _program(seeded, admin)).tenant_id == T1  # control
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("first", ["offboard", "create"])
+async def test_1454_a_program_creation_and_the_offboard_write_wait_for_each_other_on_the_tenant_row(
+        two_repositories, pg_dsn, first):
+    """C14: offboard first -> the create waits, then refuses and writes nothing; create first (held at its insert) -> the
+    offboard waits on the create's share lock, and the program is there for `end_tenant` to read (P-L)."""
+    from defender.database import async_engine
+    from defender.identity import TenantNotActive
+    from defender.tenancy.models import offboard
+
+    one, _ = two_repositories
+    admin = await _user(one)
+    engine = async_engine(pg_dsn)
+
+    async def offboarding():
+        async with engine.begin() as conn:
+            return await offboard(conn, T1)
+
+    try:
+        if first == "offboard":
+            async with engine.begin() as conn:
+                await offboard(conn, T1)
+                create = asyncio.ensure_future(_program(one, admin))
+                await until_blocked(pg_dsn, 1)
+                assert not create.done()
+            with pytest.raises(TenantNotActive):
+                await asyncio.wait_for(create, TIMEOUT)
+            assert await one.programs_of_tenant(T1) == []
+        else:
+            async with holding_row(pg_dsn, "users", admin.id):  # the create's insert waits on its creator's row
+                create = asyncio.ensure_future(_program(one, admin))
+                await until_blocked(pg_dsn, 1)
+                leave = asyncio.ensure_future(offboarding())
+                await until_blocked(pg_dsn, 2)
+                assert not create.done()
+                assert not leave.done()
+            program = await asyncio.wait_for(create, TIMEOUT)
+            assert (await asyncio.wait_for(leave, TIMEOUT)).state == "offboarding"
+            assert [p.id for p in await one.programs_of_tenant(T1)] == [program.id]
+    finally:
+        await engine.dispose()

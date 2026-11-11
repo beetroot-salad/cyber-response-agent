@@ -171,3 +171,75 @@ def test_at_head_the_credentials_program_is_a_user_of_kind_program_by_a_composit
     # `= ANY (ARRAY['program'::text])`, `IN ('program')`)
     assert any(d.startswith("CHECK") and "program_kind" in d and set(re.findall(r"'([^']*)'", d)) == {"program"}
                for d in foreign), foreign
+
+
+# --- #1454: programs move to their own table (sketch) -------------------------------------------------------------------
+# Design-implied names: table `identity.programs` with `id, tenant_id, display_name, created_by, created_at, status,
+# removed_at, removed_by`. The new revision is whatever follows `0011_merge_eligibility` (the design calls it `0012`).
+
+MERGE_ELIGIBILITY = "0011_merge_eligibility"
+PROGRAM_COLUMNS = ("id", "tenant_id", "display_name", "created_by", "created_at", "status", "removed_at", "removed_by")
+
+
+def _version(dsn: str) -> list[tuple]:
+    return execute(dsn, "SELECT version_num FROM public.alembic_version")
+
+
+@pytest.mark.postgres
+def test_1454_at_head_programs_have_a_table_and_users_and_memberships_hold_only_people(migrated_database):
+    """`programs` exists; a credential's `program_id` references it; users have a required email and no kind; a
+    membership's role is `admin` only (`automation` refused, `admin` accepted) (Data model, R1)."""
+    import re
+
+    import psycopg
+
+    programs = _columns(migrated_database, "programs")
+    assert set(PROGRAM_COLUMNS) <= set(programs), sorted(set(PROGRAM_COLUMNS) - set(programs))
+    users = _columns(migrated_database, "users")
+    assert users["email"][1] == "NO"
+    assert "kind" not in users
+    foreign = [d for (d,) in execute(migrated_database, """SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+        JOIN pg_class r ON r.oid = c.conrelid JOIN pg_namespace n ON n.oid = r.relnamespace
+        WHERE n.nspname = 'identity' AND r.relname = 'program_credentials' AND c.contype = 'f'""")]
+    assert any(re.match(r"FOREIGN KEY \(program_id\) REFERENCES (identity\.)?programs\(id\)", d) for d in foreign), foreign
+    _tenant(migrated_database)
+    _user(migrated_database, ANN, "ann@x.org")
+    _membership(migrated_database, ANN_ROW, ANN, role="admin")  # control
+    with pytest.raises(psycopg.errors.CheckViolation):
+        execute(migrated_database, "UPDATE identity.memberships SET role = 'automation' WHERE id = %s", (ANN_ROW,))
+
+
+@pytest.mark.postgres
+def test_1454_the_upgrade_refuses_while_a_program_row_exists_and_changes_nothing(empty_database):
+    """From `0011_merge_eligibility` holding a program (a users row of kind program, its automation membership): the
+    upgrade fails, the database stays at 0011 and both rows remain (O-G, R2)."""
+    from defender.migrations import head, upgrade
+
+    assert head() != MERGE_ELIGIBILITY
+    _upgrade_to(empty_database, MERGE_ELIGIBILITY)
+    _tenant(empty_database)
+    _user(empty_database, ANN, "ann@x.org", kind="person")
+    _membership(empty_database, ANN_ROW, ANN, role="admin")
+    _user(empty_database, SOAR, None, kind="program", created_by=ANN)
+    _membership(empty_database, BOB_ROW, SOAR, role="automation")
+    with pytest.raises(Exception):  # noqa: B017, PT011 — the design names no error type (fails loudly)
+        upgrade(empty_database)
+    assert _version(empty_database) == [(MERGE_ELIGIBILITY,)]
+    assert execute(empty_database, "SELECT id, kind FROM identity.users ORDER BY kind") == [(ANN, "person"), (SOAR, "program")]
+
+
+@pytest.mark.postgres
+def test_1454_the_upgrade_of_people_only_keeps_them_and_reaches_head(empty_database):
+    """Control for the refusal: from `0011_merge_eligibility` with one person and her admin membership, the upgrade reaches
+    head and both rows are as they were (O-G)."""
+    from defender.migrations import head, upgrade
+
+    assert head() != MERGE_ELIGIBILITY
+    _upgrade_to(empty_database, MERGE_ELIGIBILITY)
+    _tenant(empty_database)
+    _user(empty_database, ANN, "ann@x.org", kind="person")
+    _membership(empty_database, ANN_ROW, ANN, role="admin")
+    upgrade(empty_database)
+    assert _version(empty_database) == [(head(),)]
+    assert execute(empty_database, "SELECT id, email, status FROM identity.users") == [(ANN, "ann@x.org", "active")]
+    assert execute(empty_database, "SELECT id, user_id, status, role FROM identity.memberships") == [(ANN_ROW, ANN, "active", "admin")]
