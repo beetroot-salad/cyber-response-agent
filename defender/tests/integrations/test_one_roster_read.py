@@ -267,7 +267,7 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
 
     with handed_to_nobody(repo, adapters, 0o755):
         control = run_as_nobody(probe, expected=LeadAuthorError)
-    _expect_returned(control, (0, [("pitfall", "r:l-000:0"), ("pitfall", "r:l-001:0")]))
+    _expect_returned(control, (0, [("pitfall", "r:l-000:0"), ("pitfall", "r:l-001:0"), ("pitfall", "r:l-002:0")]))
     assert CONTINUING not in control.log, control.log
     assert CANNOT_READ not in control.log, control.log
 
@@ -424,9 +424,10 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
 
 
 def _claimed_pitfalls() -> list[tuple[str, str, dict]]:
-    """Two `mcpsys` pitfalls as a store claim hands them to the curator: over a tree declaring only `cmdb`, no adapter
+    """THRESHOLD (3) distinct `mcpsys` pitfalls as a store claim hands them to the curator (fewer distinct mistakes
+    would skip below the pitfalls threshold before the adapters tree is read): over a tree declaring only `cmdb`, no adapter
     declares `mcpsys`, so the readable control skips them without spawning a curator."""
-    rows = [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")]
+    rows = [pitfall_row(f"r:l-00{n}:0", "mcpsys") for n in range(3)]
     return [("pitfall", r["pitfall_id"], r) for r in rows]
 
 
@@ -459,7 +460,7 @@ def test_the_pitfalls_step_decides_no_fate_for_an_unreadable_adapters_tree(tmp_p
     assert (adapters / "cmdb_adapter.py").is_file()
     drains._invoke_pitfalls(paths, None, on_curated=lambda _d: None, label=LEAD_AUTHOR_DRAIN_LABEL,
                             items=items, outcomes=outcomes)
-    assert sorted(outcomes) == [("pitfall", "r:l-000:0"), ("pitfall", "r:l-001:0")], (
+    assert sorted(outcomes) == [("pitfall", "r:l-000:0"), ("pitfall", "r:l-001:0"), ("pitfall", "r:l-002:0")], (
         "the readable control did not get past the resolver to decide the unattributable rows"
     )
 
