@@ -77,6 +77,10 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool, env
             monkeypatch.setenv(name, value)
     est = S.estate(tmp_path)
     (est.adapters / "idp_adapter.py").write_text(IDP_ADAPTER, encoding="utf-8")
+    # `crm`: a second tenant-only http-proxy system. It has a record (below) so its adapter is in the roster (the roster
+    # stands for the catalog: a record naming an adapter the roster lacks is a removed-adapter refusal, R12), and no grant.
+    (est.adapters / "crm_adapter.py").write_text(
+        IDP_ADAPTER.replace('"idp"', '"crm"').replace('"IDP"', '"CRM"'), encoding="utf-8")
     idp = [c for c in S.default_calls() if c.system == "idp"][0]
     # Every call answers with the idp rows, so the one scripted submission is true of all three
     # (calibrating edr or siem-x against another system's rows would fail the family). The idp
@@ -93,7 +97,8 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool, env
                                            json.dumps(idp.payload).encode())
         files = {"settings/verb-grants.yaml": est.table(),
                  # #1366 O9: the fixture ships no `settings/systems/` (its folders are retired), so there is none to remove;
-                 # the tenant's records are idp and crm alone, derived from the files planted below.
+                 # the tenant's records are idp and crm alone, derived from the files planted below (crm is in the roster
+                 # above and in no grant).
                  **A.system_files("idp", H.declaration(merged.url + API)),
                  # Another http-proxy system the source run never called: the grant must not reach it.
                  **A.system_files("crm", H.declaration(merged.url + "/crm"))}
@@ -176,16 +181,19 @@ def test_p1b_preflight_signs_with_the_sign_login_whatever_the_environment_holds(
     assert all(A.SIGNATURE_CANARY in tok for tok in tap.tokens)
 
 
-def test_p2_a_working_tree_base_that_differs_from_current_is_refused_and_sent_nowhere(
+def test_p2_a_working_tree_base_that_differs_from_current_is_never_read_by_preflight(
         tmp_path, monkeypatch, data_root):
-    """The proxy refuses the working tree's base (it applies `current`); the idp call's live read
-    fails without making a world unservable, and neither upstream is reached. A3, O2."""
+    """An unmerged edit of the idp declaration in the clone's working tree reaches nothing: pre-flight reads the tenant's
+    CURRENT records (H9, A5, O6: every replay uses the current records, never the working tree), so the idp call's live
+    read goes to the current base through the proxy, and the working tree's upstream is never reached. A3, O2.
+    (Was: the adapter's record was the working tree and the proxy refused its base. Under #1366 preflight has no working
+    tree record; what stays pinned is that the edit is not obeyed.)"""
     run, outcome, bao, tap, merged, wt = _preflight(
         tmp_path, monkeypatch, data_root, working_tree_edit=True)
     assert outcome is not None, run.message  # the outcome is written before any sibling
-    assert outcome["unservable_worlds"] == [], "the failed live read made a world unservable"
+    assert outcome["unservable_worlds"] == [], "the live read made a world unservable"
     assert tap.tokens, "positive control: the proxy was asked"
-    assert merged.seen == []
+    assert len(merged.seen) == 1, "the idp read went to the current base, once"
     assert wt.seen == []
 
 

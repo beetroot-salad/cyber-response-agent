@@ -24,6 +24,7 @@ from defender import _yaml
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
@@ -412,9 +413,23 @@ class Estate:
                             root / tenant_id, symlinks=True)
         return T6.accept(root, tenant_id)
 
+    def records(self) -> Any:
+        """The tenant's system records: one enabled stub record per estate system (R10: stated, not inferred. The estate's
+        systems are stub adapters of its own roster, so a default that fell back to the retired fixture's seven would
+        record systems the roster does not have and none it does)."""
+        return R.bare_records(*self.systems)
+
+    def directory(self, data_root: Path | None = None, tenant_id: str = FIXTURE_TENANT, **kw: Any) -> Any:
+        """The seeded ACTIVE tenant directory over the estate's tenant, holding `records()` (or the `records=` given)."""
+        from defender.tests.support.tenancy._active1214 import active_directory
+
+        root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
+        kw.setdefault("records", self.records())
+        return active_directory(root, tenant_id, **kw)
+
     def run_tenant(self, data_root: Path | None = None,
                    tenant_id: str = FIXTURE_TENANT) -> Any:
-        return T6.run_tenant(self.place(data_root, tenant_id))
+        return T6.run_tenant(self.place(data_root, tenant_id), records=self.records())
 
     def grant(self) -> Any:
         """The tenant's gather `VerbGrant` — the grant every branching query goes through."""
@@ -1596,7 +1611,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     # The episode lands under the launching tenant's own `<T>/episodes/`; the launcher mints
     # its id, so it is found as the ONE new folder there.
     tenant_id = src.parent.parent.name
-    seams.setdefault("directory", T.launcher_directory(tenant_id))  # C9: one seeded active directory
+    seams.setdefault("directory", est.directory(tenant_id=tenant_id))  # C9: one seeded active directory, the estate's records
     root = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "episodes"
     before = {p.name for p in root.iterdir()} if root.is_dir() else set()
     try:

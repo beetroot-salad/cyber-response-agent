@@ -193,10 +193,8 @@ def _estate_launch(tmp_path: Path, *, failed: Any = None,
         O.Call("idp", "query", O.query_params("user:alice"), _BASE),
         O.Call("edr", "query", O.query_params("host:web-1"), _BASE)],
         after_source=None if failed is None else plant_failure)
-    records: Any = R.DERIVED
-    if unrecorded:
-        settings = R.settings_of(current_data_root(), fixture_uuid("tenant:acme"))
-        records = R.without(R.records_from_settings(settings), *unrecorded)
+    # The tenant's records are the estate's (stub adapters of its own roster: stated, not inferred from a folder).
+    records = R.without(est.records(), *unrecorded)
     if source_versions:
         # What the source run recorded it used (audit only): every system of the estate, at a version the twin no longer holds.
         RunPaths(src).record_versions.write_text(json.dumps(
