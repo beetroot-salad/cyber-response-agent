@@ -78,14 +78,24 @@ def data_root_of(tenants: Mapping[str, Path]) -> Path:
     return root
 
 
+def _reads_a_generation(store: Any) -> bool:
+    """Does `store.read` take (tenant, system, generation)? A real `OpenBaoStore` does and is handed as it is; only the
+    legacy two-argument fakes need `R.GenerationBlind`."""
+    import inspect
+
+    positional = [p for p in inspect.signature(store.read).parameters.values()
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    return len(positional) >= 3
+
+
 def deps(tenants: Mapping[str, Path] | Path, store: Any, *, verifier: Any = None,
          audit: Any = None, **extra: Any) -> Any:
     """`ProxyDeps` for tenants under a data root: `tenants` is the root itself or the `{id: exports}` mapping
     of tenants under it; `extra` keywords (e.g. `max_response_bytes`) pass through. #1366: the proxy reads its systems
     through the records port, so `records=` (a port, or a `{tenant id: RecordsSpec}` mapping handed to `R.RecordsPort`; `None` = no tenant
     has records; default `R.DERIVED` = `R.ExportRecords(root)`: records computed, per call, from the planted export
-    folders by the run side's own `derive` rule, version 1 / generation 1) is the port, and a `store` whose `read` takes no generation is wrapped
-    (`R.GenerationBlind`); pass `records=` and an already generation-aware `store=` (`generation_aware=True`) for a
+    folders by the run side's own `derive` rule, version 1 / generation 1) is the port, and a `store` whose `read` takes no generation (a legacy fake) is wrapped
+    (`R.GenerationBlind`; a real `OpenBaoStore` is not, so its sets are seeded at `<tenant>/<system>/g1`); pass `records=` and an already generation-aware `store=` (`generation_aware=True`) for a
     test of the new behaviour."""
     root = tenants if isinstance(tenants, Path) else data_root_of(tenants)
     records = extra.pop("records", R.DERIVED)
@@ -95,7 +105,7 @@ def deps(tenants: Mapping[str, Path] | Path, store: Any, *, verifier: Any = None
         records = R.RecordsPort({})
     elif not hasattr(records, "current_system"):  # {tenant id: RecordsSpec}: records, not folders
         records = R.RecordsPort(records)
-    if not extra.pop("generation_aware", False):
+    if not extra.pop("generation_aware", False) and not _reads_a_generation(store):
         store = R.GenerationBlind(store)
     return proxy().ProxyDeps(records=records, store=store,
                              verifier=verifier if verifier is not None else H.FakeVerifier(),
