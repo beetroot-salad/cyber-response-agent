@@ -60,10 +60,13 @@ def test_q1_a_query_reaches_the_upstream_with_the_key_and_returns_the_echo_unalt
     assert result["authorization"] == f"Bearer {H.CANARY_KEY}"
     assert tok not in caplog.text
     (entry,) = audit.records  # the path is relative to the base (A2, A4), never the base's own
-    assert {k: entry.get(k) for k in ("tenant", "system", "investigation", "commit", "method",
+    # The trail names the system's record VERSION (the planted records are at version 1) in place of the export commit
+    # (#1366 O7).
+    assert {k: entry.get(k) for k in ("tenant", "system", "investigation", "version", "method",
                                       "path")} == {
         "tenant": t.tenant_id, "system": "identity", "investigation": T.RUN_ID,
-        "commit": t.commit, "method": "GET", "path": "/users/dev.dana"}
+        "version": 1, "method": "GET", "path": "/users/dev.dana"}
+    assert "commit" not in entry
     assert H.CANARY_KEY not in repr(audit.records)
     assert tok not in repr(audit.records)
     assert tok not in repr(ctx), "the request token shows in the context's repr (O10)"
