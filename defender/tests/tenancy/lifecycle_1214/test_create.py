@@ -89,8 +89,7 @@ def test_the_job_leaves_an_active_tenant_with_repo_bot_credential_folder_and_no_
     assert world.openbao.secret_accessors(gen.sign_approle) == {gen.sign_secret_accessor}
     folder = world.data_root / tenant
     assert folder.is_dir() and not folder.is_symlink()
-    assert (folder / "learning").is_dir() and not (folder / "learning").is_symlink()
-    assert list((folder / "learning").iterdir()) == [], "prepare makes an empty real learning root (GAP-Re-4)"
+    assert not list(folder.rglob("learning")), "prepare made a learning entry; the tenant's learning state is in the store (O10, D10)"
     assert world.publish.calls == [(tenant, world.data_root)]
     assert world.call(world.repo.memberships_of_tenant, tenant) == []
     assert not list(world.data_root.rglob("tenant.json"))

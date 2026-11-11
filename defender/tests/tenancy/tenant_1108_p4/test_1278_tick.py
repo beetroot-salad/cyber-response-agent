@@ -48,6 +48,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     author_drain,
     critical_text,
     drafts_dir,
+    lead_author_drain,
     remote_branches,
 )
 from defender.tests.tenancy.tenant_1108_p4._support import git
@@ -98,6 +99,21 @@ def _stranded(w, caplog):
     assert [r for r in w.t.forge.prs if r["state"] == "open"] == []
     [batch_id] = _batches(w)
     return writer, batch_id, branch
+
+
+def test_o10_nothing_named_learning_exists_under_the_tenant_folder_after_a_tick_of_each_lane(world, caplog):  # noqa: F811 — the imported fixture
+    """Host prepare makes no `<T>/learning` and neither the author tick (which opens a PR) nor the lead tick creates one
+    anywhere under the tenant folder. (O10, D10)"""
+    w = world
+    folder = Path(location_path(w.t.tenant.tenant_root))
+    named = lambda: sorted(p.relative_to(folder).as_posix() for p in folder.rglob("learning"))  # noqa: E731
+    assert named() == [], "premise: the prepared tenant folder has no learning entry"
+    _seed(w, "f1")
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+    _opened(w, writer, caplog)  # the author lane's tick: claims, commits, pushes, opens its PR
+    assert named() == [], "the author tick created a learning entry"
+    assert lead_author_drain(w.t, w.paths, box=BoxSpy()) == 0  # the lead lane's tick, and the reconcile every tick does
+    assert named() == [], "the lead tick created a learning entry"
 
 
 # --- P2', O3, D5: the row before the commit; a lapsed holder commits nothing ----------------------------------
