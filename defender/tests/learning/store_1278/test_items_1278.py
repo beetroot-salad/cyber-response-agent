@@ -150,6 +150,144 @@ async def test_a_row_with_no_key_takes_a_key_from_its_digest(dsn):
         assert len({r.key for r in rows}) == 2
 
 
+# --- the columns: mistake key, source run -------------------------------------------------------------------------
+
+
+async def test_columns_a_pitfall_keeps_its_source_run_and_its_repeats_share_a_mistake_key(dsn):
+    """Same system and error digest -> equal mistake keys; another digest or system -> another; source runs are stored. (input 23, 24)"""
+    async with learning_store(dsn) as store:
+        await store.add_pitfall(BLUE, pitfall("p1", source_run="run-a"))
+        await store.add_pitfall(BLUE, pitfall("p2", source_run="run-b", goal="another goal"))
+        await store.add_pitfall(BLUE, pitfall("p3", stderr_digest="exit=1; unexpected token"))
+        await store.add_pitfall(BLUE, pitfall("p4", system="wazuh", query_id="wazuh.q"))
+        await store.publish_findings(BLUE, "run-7", [finding("f1")], kind="finding")
+        await store.publish_findings(BLUE, "run-8", [world_finding("q1")], kind="questioner_finding")
+        await store.enqueue_request(BLUE, "run-9", "case-9", {"case": "case-9"})
+        got = await items(store)
+
+    mistake = {n: got[("pitfall", n)].mistake_key for n in ("p1", "p2", "p3", "p4")}
+    assert mistake["p1"], "a pitfall is stored with a mistake key"
+    assert mistake["p1"] == mistake["p2"], "one mistake, two occurrences: one key"
+    assert len({mistake["p1"], mistake["p3"], mistake["p4"]}) == 3, "another digest or another system is another mistake"
+    assert (got[("pitfall", "p1")].source_run, got[("pitfall", "p2")].source_run) == ("run-a", "run-b")
+    assert (got[("finding", "f1")].source_run, got[("questioner_finding", "q1")].source_run) == ("run-7", "run-8")
+    assert got[("curation_request", "run-9")].source_run == "run-9"
+
+
+LEAD_THRESHOLD = {**ONE, "pitfall": 3}
+
+
+def _mistakes(*digests: str, system: str = "elastic", **extra):
+    """One pitfall row per digest; a repeated digest is a repeat of one mistake."""
+    return [pitfall(f"p{n}", system=system, stderr_digest=d, **extra) for n, d in enumerate(digests)]
+
+
+def _reducer_rows(n: int):
+    from defender.knowledge import BASH_SHIM_QUERY_ID
+
+    return [pitfall(f"p{k}", query_id=BASH_SHIM_QUERY_ID, stderr_digest="exit=1; one unchanging error") for k in range(n)]
+
+
+@pytest.mark.parametrize(("rows", "opens"), [
+    pytest.param(_mistakes("exit=1; same", "exit=1; same", "exit=1; same"), False, id="three rows of one mistake"),
+    pytest.param(_mistakes("exit=1; one", "exit=1; one", "exit=1; two"), False, id="three rows of two mistakes"),
+    pytest.param(_reducer_rows(3), False, id="three rows of one reducer mistake"),
+    pytest.param(_mistakes("exit=1; one", "exit=1; two"), False, id="two mistakes"),
+    pytest.param(_mistakes("exit=1; one", "exit=1; two", "exit=1; three"), True, id="three mistakes"),
+    pytest.param(_mistakes("exit=1; one", "exit=1; one", "exit=1; two", "exit=1; three"), True, id="four rows of three mistakes"),
+])
+async def test_columns_the_pitfall_threshold_counts_mistakes_not_rows(dsn, rows, opens):
+    """A threshold-3 lead lane opens on three distinct mistakes and on nothing less, however many rows repeat them. (input 56, ruling)"""
+    async with learning_store(dsn) as store:
+        for row in rows:
+            await store.add_pitfall(BLUE, row)
+
+        claim = await store.claim(BLUE, LEAD_LANE, owner="host-a", thresholds=LEAD_THRESHOLD)
+
+        if opens:
+            assert sorted(key for kind, key, _payload in claim.items) == sorted(r["pitfall_id"] for r in rows)
+        else:
+            assert claim is None, "mistakes below the threshold open no lane, however many rows they are"
+            assert {i.status for i in await store.work(BLUE)} == {"waiting"}, "and the rows stay queued"
+
+
+# --- a finding's key is the judge's finding_id ----------------------------------------------------------------
+
+
+_NO_ID = object()
+
+
+@pytest.mark.parametrize("kind", ["finding", "questioner_finding"])
+@pytest.mark.parametrize("bad", [_NO_ID, None, 5, 5.5, True, "", "   ", ["f1"]],
+                         ids=["missing", "null", "int", "float", "bool", "empty", "blank", "list"])
+async def test_a_finding_with_no_string_id_is_refused_before_anything_is_inserted(dsn, kind, bad):
+    """A missing, null, numeric, boolean, empty or listed finding_id refuses the whole publish; the good row beside it is not queued. (input 09)"""
+    make = finding if kind == "finding" else world_finding
+    row = {k: v for k, v in make("bad").items() if k != "finding_id"}
+    if bad is not _NO_ID:
+        row["finding_id"] = bad
+    async with learning_store(dsn) as store:
+        with pytest.raises(store_mod().ItemRefused):
+            await store.publish_findings(BLUE, "run-1", [make("good"), row], kind=kind)
+        assert await store.work(BLUE) == [], "nothing of the refused job was inserted"
+        assert tuple(await store.publish_findings(BLUE, "run-1", [make("good")], kind=kind)) == (1, 0), "control: a keyed row is queued"
+
+
+# --- a NUL is refused for the whole job, wherever it hides ------------------------------------------------------
+
+
+def _nul_in(where: str):
+    """A row for `kind`'s verb with a NUL at `where`: a top value, a nested value, a list item, a key, a deep key."""
+    nul = "a\x00b"
+    return {"top": {"goal": nul}, "nested": {"goal": {"deep": nul}}, "list": {"goal": ["ok", [nul]]},
+            "key": {nul: "v"}, "deep_key": {"goal": {nul: 1}}}[where]
+
+
+@pytest.mark.parametrize("where", ["top", "nested", "list", "key", "deep_key"])
+@pytest.mark.parametrize("verb", ["finding", "questioner_finding", "pitfall", "request"])
+async def test_a_nul_anywhere_refuses_the_whole_job_and_queues_nothing(dsn, verb, where):
+    """A NUL at any depth, in any key or value, of any kind's row refuses the job; rows beside it are not queued. (input 10)"""
+    async with learning_store(dsn) as store:
+        refused = store_mod().ItemRefused
+        if verb in ("finding", "questioner_finding"):
+            make = finding if verb == "finding" else world_finding
+            with pytest.raises(refused):
+                await store.publish_findings(BLUE, "run-1", [make("good"), {**make("bad"), **_nul_in(where)}], kind=verb)
+        elif verb == "pitfall":
+            with pytest.raises(refused):
+                await store.add_pitfall(BLUE, pitfall("bad", **_nul_in(where)))
+        else:
+            with pytest.raises(refused):
+                await store.enqueue_request(BLUE, "run-1", "case-1", _nul_in(where))
+        assert await store.work(BLUE) == []
+
+
+# --- the same arrival twice is one ------------------------------------------------------------------------------
+
+
+async def test_a_request_arriving_twice_is_one_arrival(dsn):
+    """Re-enqueueing a run's request leaves what the first left, whether it waits, was superseded or is claimed. (input 25)"""
+    async with learning_store(dsn) as store:
+        await store.enqueue_request(BLUE, "run-1", "case-A", {"n": 1})
+        once = {k: (i.status, i.reason) for k, i in (await items(store)).items()}
+        assert await store.enqueue_request(BLUE, "run-1", "case-A", {"n": 1}) is False
+        assert {k: (i.status, i.reason) for k, i in (await items(store)).items()} == once
+        assert once == {("curation_request", "run-1"): ("waiting", None)}, "premise: the first arrival waits"
+
+        await store.enqueue_request(BLUE, "run-2", "case-A", {"n": 2})
+        superseded = {k: (i.status, i.reason) for k, i in (await items(store)).items()}
+        await store.enqueue_request(BLUE, "run-1", "case-A", {"n": 1})
+        assert {k: (i.status, i.reason) for k, i in (await items(store)).items()} == superseded
+        assert superseded[("curation_request", "run-1")][0] == "skipped"
+        assert superseded[("curation_request", "run-2")][0] == "waiting"
+
+        assert await store.claim(BLUE, LEAD_LANE, owner="host-a", thresholds=ONE) is not None
+        claimed = {k: i.status for k, i in (await items(store)).items()}
+        await store.enqueue_request(BLUE, "run-2", "case-A", {"n": 2})
+        assert {k: i.status for k, i in (await items(store)).items()} == claimed
+        assert claimed[("curation_request", "run-2")] == "in_batch"
+
+
 # --- coalescing ---------------------------------------------------------------------------------------------------
 
 

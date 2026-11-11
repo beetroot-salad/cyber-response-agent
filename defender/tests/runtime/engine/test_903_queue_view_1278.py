@@ -3,7 +3,7 @@ learning store, not from a state root. The view and its page are `serialize_queu
 
 Interface request (names chosen here): `serialize_queues.stamped_view(paths, store=)` builds the view for the tenant
 `paths` names from the store's sync facade; its channels are `findings`, `questioner_findings`, `pitfalls`,
-`curation_requests`, each with `items` (rows `id`, `status`, `reason`, `batch_id`, `pr_number`), `depth.waiting` and
+`curation_requests`, each with `items` (rows `id`, `status`, `reason`, `batch_id`, `pr_number`, `source_run`), `depth.waiting` and
 `held.ids`; there is no `state_root`; `quarantine.tainted` stays (the worktree archive is not a queue)."""
 from __future__ import annotations
 
@@ -86,6 +86,21 @@ def test_o2_the_view_names_each_items_status_batch_and_pr(seen):
     assert channel["findings"]["depth"]["waiting"] == 1
     assert "state_root" not in view
     assert view["generated_at"]
+
+
+def test_o2_the_view_shows_the_run_each_item_came_from(seen):
+    """Each row of the view names its `source_run`: the run that published it, a pitfall's own, a request's run. (input 24, ruling)"""
+    dsn, paths, _batch = seen
+    from defender.learning.frontend import serialize_queues
+
+    with blocking(dsn) as store:
+        view = serialize_queues.stamped_view(paths, store=store)
+
+    got = {k: r.get("source_run") for k, r in _rows(view).items()}
+    assert got[("findings", "f1")] == got[("findings", "f4")] == "run-1"
+    assert got[("questioner_findings", "q1")] == "run-1"
+    assert got[("pitfalls", "p1")] == "r"
+    assert got[("curation_requests", "run-9")] == "run-9"
 
 
 def test_o2_another_tenants_items_never_show(seen):
