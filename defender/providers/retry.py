@@ -91,15 +91,22 @@ class RetryPolicy:
     jitter: Callable[[], float] = random.random
 
 
-def _temporary(exc: BaseException) -> tuple[bool, int | None]:
+def temporary_failure(exc: BaseException) -> tuple[bool, int | None]:
     """`(whether exc is a temporary provider failure, its HTTP status or None for no response)`.
-    Classified by status alone, never by body text."""
+    Classified by status alone, never by body text. The retrier retries exactly these."""
     from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 
     if isinstance(exc, ModelHTTPError):
         status = exc.status_code
         return (status in _TEMPORARY_STATUSES or status >= 500), status
     return isinstance(exc, ModelAPIError), None
+
+
+def refused_by_provider(exc: BaseException) -> bool:
+    """Whether `exc` is the provider refusing a request before its model ran: an HTTP error the
+    retrier does not retry (a 4xx other than 408, 409 or 429), so no attempt was billed. The one
+    reading of "refused" (#1377 r7.1 E), shared with what a refusal does to the run (#1243)."""
+    return refusal_status(exc) is not None
 
 
 def refusal_status(exc: BaseException) -> int | None:
@@ -109,7 +116,7 @@ def refusal_status(exc: BaseException) -> int | None:
     other refusal on a lead ends only that lead (#1243)."""
     from pydantic_ai.exceptions import ModelHTTPError
 
-    if isinstance(exc, ModelHTTPError) and not _temporary(exc)[0]:
+    if isinstance(exc, ModelHTTPError) and not temporary_failure(exc)[0]:
         return exc.status_code
     return None
 
@@ -156,7 +163,7 @@ def _wrapper_class() -> type:
                     return await self.wrapped.request(
                         messages, model_settings, model_request_parameters)
                 except Exception as e:  # noqa: BLE001 — classified below; non-temporary re-raised as is
-                    temporary, status = _temporary(e)
+                    temporary, status = temporary_failure(e)
                     if not temporary:
                         raise
                     # `retry_after` is the framework's own parse of the header (seconds or HTTP-date).

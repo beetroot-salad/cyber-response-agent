@@ -298,7 +298,7 @@ claims:
     claim: "`defender-sql` runs end-to-end from a read-only-bound `.venv` inside the real box."
     source: "RSG §Compatibility ('Still wanting the real box (not blocking)'); issue-comment §1"
     status: superseded
-    note: "Superseded by #1092: the box no longer resolves a `.venv` at all (O5) — `defender-sql` runs end-to-end against the owned image's own `duckdb` instead, closed by `test_665_box_live.py`. Historical claim kept for record; do not read as current."
+    note: "Superseded by #1092: the box no longer resolves a `.venv` at all (O5) — `defender-sql` runs end-to-end against the owned image's own `duckdb` instead, closed by `test_box_live.py`. Historical claim kept for record; do not read as current."
 
   # --- The boundary's exec seam ---
   - id: C33

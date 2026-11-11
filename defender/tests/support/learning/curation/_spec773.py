@@ -384,9 +384,8 @@ class FakeCurator:
             self.also(rows, batch_id, cfg)
         if self.result is not None:
             return dict(self.result)
-        ids = [r["finding_id"] for r in rows]
         out: dict[str, Any] = {
-            "committed": list(self.committed if self.committed is not None else ids),
+            "committed": list(self.committed if self.committed is not None else [r["finding_id"] for r in rows]),
             "consumed_skip": list(self.consumed_skip or []),
             "commit_message": self.commit_message,
         }

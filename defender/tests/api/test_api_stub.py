@@ -26,6 +26,7 @@ from defender.api import fakes as fakes_module, ports as ports_module  # noqa: E
 from defender.api.app import MAX_PAGE, create_app  # noqa: E402
 from defender.api.demo import DEMO_ROLES, demo_deps, demo_id, demo_sessions  # noqa: E402
 from defender.api.fakes import (  # noqa: E402
+    InMemoryOffboarding,
     InMemorySecrets,
     InMemoryStore,
     StubArtifactLinks,
@@ -95,7 +96,7 @@ SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
 INV = Investigation(
     investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="completed", disposition="benign",
     request_key="req-1", attempt=1,
-    cost_usd=1.5, created_at=NOW, artifacts=["report.md", "gather_raw/L1/0.json"],
+    cost_usd=1.5, cost_is_lower_limit=False, created_at=NOW, artifacts=["report.md", "gather_raw/L1/0.json"],
     # The knowledge revision the run used (`current` = the run record's `fresh`).
     knowledge={"status": "current", "commit": "f4e5c0de0000f4e5c0de0000f4e5c0de0000f4e5",
                "stale_kind": None},
@@ -342,7 +343,7 @@ def _deps(ports: Any) -> tuple[ApiDeps, dict[str, str]]:
     return ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=ports, investigations=ports, learning_jobs=ports, lessons=ports,
-        systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports,
+        systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports, offboarding=ports,
     ), users
 
 
@@ -689,7 +690,7 @@ def _over_the_fake() -> tuple[TestClient, InMemoryStore]:
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
         writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks(),
+        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
     )), base_url=BASE), store
 
 
@@ -1216,7 +1217,7 @@ def test_a_blank_client_request_id_is_refused() -> None:
 def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="not a disposition"):
         Investigation(investigation_id="i", alert_id="a", status="completed", disposition="fine",
-                      request_key="k", attempt=1, cost_usd=0.0, created_at=NOW)
+                      request_key="k", attempt=1, cost_usd=0.0, cost_is_lower_limit=False, created_at=NOW)
 
 
 @pytest.mark.parametrize("bad", ["a/b", "a b", "a?b#c", "é", ""])
@@ -1236,7 +1237,7 @@ def test_a_principal_carries_a_checked_tenant(legacy) -> None:
 
 def test_a_naive_time_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="timezone"):
-        Investigation(investigation_id="i", alert_id="a", status="queued", cost_usd=0.0,
+        Investigation(investigation_id="i", alert_id="a", status="queued", cost_usd=0.0, cost_is_lower_limit=False,
                       request_key="k", attempt=1, created_at=NOW.replace(tzinfo=None))
 
 
@@ -1441,7 +1442,7 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
         writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks(),
+        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
     )), base_url=BASE)
     seen: list[str] = []
     params: dict[str, Any] = {"limit": 2}
@@ -1560,6 +1561,16 @@ def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
     auth = _session(sessions[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
     systems = client.get(f"/tenants/{DEMO_ONE}/systems", headers=auth).json()["items"]
     assert {s["system_id"]: s["has_credentials"] for s in systems} == {"siem": False, "tickets": True}
+
+
+def test_the_demo_seed_serves_every_investigation_with_an_exact_cost_beside_a_number() -> None:
+    """The demo's investigations carry `cost_is_lower_limit` over the wire: false, each beside a number. (#1377 S2, S4)"""
+    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
+    client = TestClient(create_app(deps), base_url=BASE)
+    auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
+    items = client.get(f"/tenants/{DEMO_ONE}/investigations", headers=auth).json()["items"]
+    assert items
+    assert all((i["cost_is_lower_limit"], i["cost_usd"] is not None) == (False, True) for i in items), items
 
 
 def test_a_demo_session_outlasts_the_production_idle_limit() -> None:

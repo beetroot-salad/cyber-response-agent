@@ -34,6 +34,20 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1414
+
+Feedback issues on the tenant's Forgejo repository need the bot to write issues, labels and comments. Run
+migrations (revision `0011_merge_eligibility`), then rotate each existing tenant's forge credential once
+(`POST /admin/tenants/<T>/rotate-forge-credential`): only an integration created or rotated by this code is granted
+`write:issue`. Until a tenant rotates, its issue calls are refused (403) and logged every feedback tick; its
+open-issue requests and replies wait in the queue and are all served on the first tick after the rotation. Nothing is
+given up. The first feedback tick after the upgrade lists each existing feedback issue's comments once; after
+that, a tick reads only the issues the forge lists new comments on.
+
+The management service reads each active tenant's merge whitelist when its record is older than 20 s, and the feedback
+tick reads no comments from a record older than `LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE` (default 60 s). Keep that bound
+well above 20 s, or the tick will find the record stale between the service's reads.
+
 ## Upgrade from before #1345
 
 The tenant's alert mapping lives in the database; nothing reads `settings/alert-mapping.yaml` any more. After migration
@@ -44,6 +58,19 @@ The tenant's alert mapping lives in the database; nothing reads `settings/alert-
 2. `python3 defender/cli/tenant.py set-alert-mapping <tenant-id> <that file>`. The top of `defender/cli/tenant.py`
    describes the six entries.
 3. Delete the file from the tenant's repository.
+
+## Upgrade from before #1377
+
+A run's cost is now the sum of a spend ledger (a table in the run's session database, one row per model
+response any agent of the run received, review calls included), so `cost_usd` and the run file's
+`total_cost_usd` count what the run really paid. Old run files keep their main-only totals: totals before
+and after this change are not comparable. Stop the API and workers before running the migration: it adds a
+required column with no default, so an older process fails on every insert until it is upgraded. Run
+migrations (revision `0010_cost_lower_limit`): the API's investigations gain `cost_is_lower_limit`, true
+when `cost_usd` is "at least" that much (a spend write failed, or the run was killed before it sealed its
+ledger). The mark is worked out when a record is read: a row that
+ended after it started, with a cost and no final figure from its worker, reads "at least" (this includes such rows
+already in the database); every other existing row reads exact.
 
 ## Upgrade from before #1412
 
@@ -108,9 +135,14 @@ A tenant's `systems/elastic/` needs, in one commit: <!-- lint-shippable: ok — 
    the cluster `monitor` privilege (without it `health-check` answers a settings fault naming it).
 
 `health-check` no longer reports Kibana. Fault classes now follow the proxy's: 401 settings, 403
-the agent's, 5xx transport. The exceptions: a 403 on `health-check`, `query` or `alerts` is a
-settings fault naming the missing privilege (`monitor`, or `read` on the configured indexes); only
-`esql`, which names its own indexes, keeps a 403 as the agent's.
+the agent's, 5xx transport. The exceptions: a 403 on `health-check`, `query`, `alerts` or `esql` is a
+settings fault naming the missing privilege (`monitor`, or `read` on the configured indexes). `esql`
+names its sources in the query, so each must fall within the configured patterns (FROM, TS, LOOKUP
+JOIN) or the call is refused before the proxy. Commands are allow-listed: a query starts with FROM, TS,
+ROW or SHOW (ROW and SHOW read nothing), and later commands are WHERE, EVAL, STATS, KEEP, DROP, RENAME,
+SORT, LIMIT, DISSECT, GROK, MV_EXPAND and LOOKUP JOIN; any other command (ENRICH, FORK, RERANK, ...),
+a subquery, a remote `cluster:index`, any triple-quoted string or run of three `"` outside a backtick
+name, and unparsable text are refused (#1347 O2a, r6.4.4).
 
 ## Upgrade from before #1382
 

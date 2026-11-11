@@ -109,7 +109,7 @@ META_CORPUS = {
     "meta-lead.md": _meta_lesson("meta-lead", desc=_WRITE_LEAD_TEXT, sig=_FOLD_LEAD_PREFIX),
 }
 
-#: The #919 reproduction (test_lessons_frontier_scale_935): an open `ident` on a compute vertex
+#: The #919 reproduction (test_lessons_frontier_scale): an open `ident` on a compute vertex
 #: and a held `loginuid` on an identity vertex.
 TWO_VERTEX_DOC = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]

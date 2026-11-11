@@ -57,7 +57,6 @@ header.top h1 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-
 /* The review gate's share of the total, named beside it rather than folded into it — the
    same treatment `.ps-gather` gives the gather subagents on a phase line, and the same
    accent, because both answer "how much of this number was not the main agent". */
-.top-stats .ts-review { font-size: 12px; font-weight: 600; color: var(--accent-learning); }
 .top-stats .ts-wall { font-size: 14px; font-weight: 600; color: var(--text); }
 .top-stats .ts-sep { color: var(--text-dim); opacity: 0.6; }
 header.top .meta {

@@ -18,13 +18,14 @@ bypasses hide: a wider stream glob, a bare dataset name, a rename's untouched
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from _fakes import FakeExecSeam, write_profile
 
 from chaos.guard import GuardRefused, check_mutations, check_profile, rule_key_fields, rule_read_datasets
 from chaos.mutations import UnresolvableProfile, resolve_mutations
-from chaos.profiles import load_profile
+from chaos.profiles import list_profiles, load_profile
 
 # Keyed on only via `threshold.field` — a query-string-only parser misses these.
 THRESHOLD_ONLY_FIELDS = ["source.ip", "falco.output_fields.container.name"]
@@ -53,6 +54,85 @@ def test_rule_key_fields_covers_threshold_array_and_query_text(rules_dir):
 
 def test_rule_read_datasets_is_every_rule_index_dataset(rules_dir):
     assert rule_read_datasets(rules_dir) == {"system.auth", "falco.alerts"}
+
+
+def _esql_rules(tmp_path, *queries):
+    d = tmp_path / "rules"
+    d.mkdir(parents=True, exist_ok=True)
+    for i, q in enumerate(queries):
+        (d / f"r{i}.json").write_text(json.dumps(
+            {"rule_id": f"r{i}", "type": "esql", "language": "esql", "query": q}))
+    return d
+
+
+def test_the_guard_reads_esql_sources_through_the_products_esql_text_not_its_own_pattern():
+    """A5: one reader: chaos/guard.py imports `defender.integrations.esql_text`, as the launcher
+    imports the scorer's binding; a guard-side regex cannot satisfy this."""
+    import ast
+    tree = ast.parse((Path(__file__).resolve().parents[1] / "guard.py").read_text())
+    imported = {f"{n.module}.{a.name}" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+                for a in n.names} | {a.name for n in ast.walk(tree) if isinstance(n, ast.Import)
+                                     for a in n.names}
+    assert any(i == "defender.integrations.esql_text" or i.startswith("defender.integrations.esql_text.")
+               for i in imported), sorted(imported)
+
+
+def test_the_committed_esql_rule_reads_the_dataset_its_from_clause_names(tmp_path, rules_dir):
+    """#1347 A5/P8: `v2-keycloak-credential-stuffing` has no `index`; its dataset is its FROM's.
+    Needs `defender` importable (PYTHONPATH=<repo>)."""
+    only = tmp_path / "only"
+    only.mkdir()
+    rule = rules_dir / "v2-keycloak-credential-stuffing.json"
+    (only / rule.name).write_text(rule.read_text())
+
+    assert rule_read_datasets(only) == {"keycloak.events"}
+
+
+@pytest.mark.parametrize(("query", "datasets"), [
+    pytest.param("FROM logs-keycloak.events-* | LIMIT 1", {"keycloak.events"}, id="one"),
+    pytest.param("from logs-keycloak.events-*,logs-system.auth-* | LIMIT 1",
+                 {"keycloak.events", "system.auth"}, id="lowercase-and-list"),
+    pytest.param("FROM logs-keycloak.events-* METADATA _id | LIMIT 1", {"keycloak.events"}, id="metadata"),
+    pytest.param('FROM "logs-keycloak.events-*" | LIMIT 1', {"keycloak.events"}, id="quoted"),
+    pytest.param("FROM logs-keycloak.events-* | LOOKUP JOIN logs-system.auth-default ON host.name",
+                 {"keycloak.events", "system.auth"}, id="lookup-join"),
+])
+def test_an_esql_rule_reads_every_source_it_names_through_the_products_reader(tmp_path, query, datasets):
+    """A5: the datasets come from the product's esql_text reader, not a guard-side regex: every
+    FROM source and LOOKUP JOIN source counts, spelled however ES|QL allows."""
+    assert rule_read_datasets(_esql_rules(tmp_path, query)) == datasets
+
+
+@pytest.mark.parametrize("query", [
+    pytest.param("ROW a = 1", id="no-from"),
+    pytest.param("FROM", id="from-without-source"),
+    pytest.param("", id="empty"),
+    pytest.param("FROM logs-keycloak.events-* | FORK (LIMIT 1) (LIMIT 2)", id="fork"),
+    pytest.param("FROM remote:logs-keycloak.events-* | LIMIT 1", id="remote-cluster"),
+    pytest.param("FROM logs-keycloak.events-* | ENRICH policy ON host.name", id="enrich"),
+])
+def test_an_esql_rule_whose_sources_cannot_be_read_counts_as_reading_every_dataset(tmp_path, query):
+    """#1347 A5/A6: the guard fails closed: an ES|QL rule it cannot read (or O2a refuses) reads
+    `*`. Control: a readable `FROM` names its own dataset only."""
+    assert "*" in rule_read_datasets(_esql_rules(tmp_path, query))
+    assert rule_read_datasets(_esql_rules(tmp_path / "ok", "FROM logs-keycloak.events-* | LIMIT 1")) == \
+        {"keycloak.events"}
+
+
+def test_a_data_drop_on_an_esql_rules_dataset_is_refused_and_an_unreadable_one_refuses_every_drop(
+        tmp_path, profiles_dir):
+    """A5/P8: the data-drop guard now sees the ES|QL rule's dataset; an unreadable ES|QL rule
+    refuses a drop on a dataset no rule names."""
+    write_profile(profiles_dir, "drop-kc", "data-drop", {"dataset": "keycloak.events", "rate": 5})
+    with pytest.raises(GuardRefused):
+        check_profile(load_profile("drop-kc", profiles_dir=profiles_dir),
+                      rules_dir=_esql_rules(tmp_path / "a", "FROM logs-keycloak.events-* | LIMIT 1"))
+    write_profile(profiles_dir, "drop-sys", "data-drop", {"dataset": "system.syslog", "rate": 5})
+    check_profile(load_profile("drop-sys", profiles_dir=profiles_dir),
+                  rules_dir=_esql_rules(tmp_path / "b", "FROM logs-keycloak.events-* | LIMIT 1"))
+    with pytest.raises(GuardRefused):
+        check_profile(load_profile("drop-sys", profiles_dir=profiles_dir),
+                      rules_dir=_esql_rules(tmp_path / "c", "ROW a = 1"))
 
 
 # -- schema-drift: fields ------------------------------------------------------------
@@ -273,3 +353,31 @@ def test_activate_runs_the_guard_before_touching_the_stack(profiles_dir, rules_d
         )
     assert execer.mutating_calls() == []
     assert list(ledger_dir.iterdir()) == []
+
+
+# -- D22: a committed schema-drift profile no rule reads ---------------------------------------
+
+COMMITTED_PROFILES = Path(__file__).resolve().parents[1] / "profiles"
+
+
+def test_a_committed_schema_drift_profile_is_accepted_against_the_current_rules(
+        rules_dir, inventory, profiles_dir):
+    """#1347 D22: at least one committed schema-drift profile passes check_profile and
+    check_mutations against the committed rules (the field it moves is read by no rule); the
+    implementer writes it. Control: `schema-drift-username` stays refused (rules read user.name)."""
+    drift = [p for p in list_profiles(profiles_dir=COMMITTED_PROFILES)
+             if load_profile(p, profiles_dir=COMMITTED_PROFILES).mode == "schema-drift"]
+    accepted = []
+    for pid in drift:
+        profile = load_profile(pid, profiles_dir=COMMITTED_PROFILES)
+        try:
+            check_profile(profile, rules_dir=rules_dir)
+            check_mutations(resolve_mutations(profile, seed=profile.seed, inventory=inventory),
+                            rules_dir=rules_dir)
+        except GuardRefused:
+            continue
+        accepted.append(pid)
+
+    assert accepted, f"no committed schema-drift profile is accepted by the guard (have {drift})"
+    assert "schema-drift-username" in drift
+    assert "schema-drift-username" not in accepted

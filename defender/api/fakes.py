@@ -12,6 +12,9 @@ from pydantic import AwareDatetime
 from defender._model import model
 from defender.records import formats
 from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId, UuidId
+from defender.records.job_facts import OFFBOARD_MESSAGE, TENANT_OFFBOARDED
+
+from defender.tenancy import TenantRecord, TenantRepository
 
 from .models import (
     Alert,
@@ -170,7 +173,7 @@ class InMemoryStore:
             raise UnknownReference(f"no alert {alert_id!r}")
         investigation = Investigation(
             investigation_id=self._mint(InvestigationId), alert_id=alert_id, status="queued",
-            request_key=client_request_id, attempt=1, cost_usd=0.0, created_at=self._clock(),
+            request_key=client_request_id, attempt=1, cost_usd=0.0, cost_is_lower_limit=False, created_at=self._clock(),
         )
         return self.add_investigation(tenant_id, investigation), True
 
@@ -199,6 +202,22 @@ class InMemoryStore:
         aborted = existing.model_copy(update={"status": "aborted", "failure_reason": "cancelled",
                                               "finished_at": self._clock()})
         return self.add_investigation(tenant_id, aborted)
+
+    def end_live_jobs(self, tenant_id: TenantId, *, actor: str) -> None:
+        """Offboarding's ending of the tenant's queued and running jobs (#1360): investigations `aborted`, learning
+        jobs `skipped`, both with the reason `tenant_offboarded`. Not part of any port; `InMemoryOffboarding` calls
+        it. There is no concurrency here, so one pass ends them all."""
+        now = self._clock()
+        for key, investigation in list(self._investigations.items()):
+            if key[0] == tenant_id and investigation.status in ("queued", "running"):
+                self._investigations[key] = investigation.model_copy(update={
+                    "status": "aborted", "failure_reason": TENANT_OFFBOARDED, "finished_at": now,
+                    "failure_message": OFFBOARD_MESSAGE})
+        for key, job in list(self._learning_jobs.items()):
+            if key[0] == tenant_id and job.status in ("queued", "running"):
+                self._learning_jobs[key] = job.model_copy(update={
+                    "status": "skipped", "reason": TENANT_OFFBOARDED, "finished_at": now,
+                    "message": OFFBOARD_MESSAGE})
 
     async def delete_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId) -> None:
         existing = await self._existing(tenant_id, investigation_id)
@@ -310,6 +329,21 @@ class _InMemoryTransaction:
             tenant_id=self._tenant_id, user_id=self._actor, action=action, target=target,
             at=self._clock(), detail=detail, credential_id=self._credential_id,
         ))
+
+
+class InMemoryOffboarding:
+    """The development composition of the offboarding port (#1360 D6): the tenant twin's offboard transition, then the
+    job store ending that tenant's live jobs. A refused transition raises before anything is ended."""
+
+    def __init__(self, tenants: TenantRepository, store: InMemoryStore, clock: Callable[[], _dt.datetime]) -> None:
+        self._tenants = tenants
+        self._store = store
+        self._clock = clock
+
+    async def offboard_tenant(self, tenant_id: TenantId, *, actor: str) -> TenantRecord:
+        record = await self._tenants.request_offboard(tenant_id, now=self._clock())
+        self._store.end_live_jobs(tenant_id, actor=actor)
+        return record
 
 
 class InMemorySecrets:

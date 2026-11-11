@@ -160,6 +160,11 @@ class FakeForge(_Recorder):
         self.orgs: dict[str, set[str]] = {ORG: {"Owners", "Reviewers"}}
         #: (organisation, team) -> member logins.
         self.team_members: dict[tuple[str, str], set[str]] = {}
+        #: repository full name -> status answered to every GET of its branch protections (#1414: a forge that fails a read).
+        self.protection_read_status: dict[str, int] = {}
+        #: team name -> status answered to a GET of that team's members (#1414).
+        self.team_members_status: dict[str, int] = {}
+        self._team_ids: dict[tuple[str, str], int] = {}
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -275,11 +280,49 @@ class FakeForge(_Recorder):
             repo["collaborators"].pop(user, None)
         return httpx.Response(204)
 
+    def _team_id(self, org: str, team: str) -> int:
+        return self._team_ids.setdefault((org, team), 101 + len(self._team_ids))
+
+    @staticmethod
+    def _paged(call: Call, items: list[Any]) -> httpx.Response:
+        """Forgejo's paging: `limit` (default 30, at most 50) and 1-based `page`, the full count in X-Total-Count (#1414)."""
+        limit = min(int(call.query.get("limit", ["30"])[0]), 50)
+        page = int(call.query.get("page", ["1"])[0])
+        return httpx.Response(200, json=items[(page - 1) * limit:page * limit], headers={"X-Total-Count": str(len(items))})
+
+    def _teams_of(self, org: str) -> list[dict[str, Any]]:
+        return [{"id": self._team_id(org, t), "name": t, "organization": {"username": org}} for t in sorted(self.orgs.get(org, ()))]
+
+    def _team_read(self, call: Call, parts: list[str]) -> httpx.Response | None:
+        """#1414: the admin reads of an organisation's teams and their members (the routes Forgejo has), or None for any other call."""
+        match (call.method, parts):
+            case ("GET", ["orgs", org, "teams"]) if org in self.orgs:
+                return self._paged(call, self._teams_of(org))
+            case ("GET", ["orgs", org, "teams", "search"]) if org in self.orgs:
+                q = (call.query.get("q") or [""])[0].lower()
+                found = [t for t in self._teams_of(org) if q in t["name"].lower()]
+                return httpx.Response(200, json={"ok": True, "data": found})
+            case ("GET", ["teams", team_id, "members"]):
+                named = next((k for k, v in self._team_ids.items() if str(v) == team_id), None)
+                if named is None:
+                    return httpx.Response(404, json={"message": "team does not exist"})
+                org, team = named
+                if team in self.team_members_status:
+                    return httpx.Response(self.team_members_status[team], json={"message": "injected"})
+                return self._paged(call, [{"login": u} for u in sorted(self.team_members.get((org, team), set()))])
+        return None
+
     def handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0911, PLR0912 — one arm per endpoint
         call, injected = self._record(request)
         if injected is not None:
             return injected
         parts = call.path.removeprefix("/api/v1/").split("/")
+        if call.method == "GET" and not call.headers.get("authorization", "").startswith("Bearer "):
+            if len(parts) >= 4 and parts[0] == "repos" and parts[3] == "branch_protections" \
+                    and f"{parts[1]}/{parts[2]}" in self.protection_read_status:
+                return httpx.Response(self.protection_read_status[f"{parts[1]}/{parts[2]}"], json={"message": "injected"})
+            if (read := self._team_read(call, parts)) is not None:
+                return read
         body = call.body or {}
         if call.headers.get("authorization", "").startswith("Bearer "):
             response = self._integration(call, parts)
@@ -376,7 +419,7 @@ class FakeForge(_Recorder):
         self.integration_calls.append((bot, call.method, call.path, response.status_code))
         return response
 
-    def _integration_answer(self, bot: str | None, rule: dict[str, Any] | None, claims: dict[str, Any],
+    def _integration_answer(self, bot: str | None, rule: dict[str, Any] | None, claims: dict[str, Any],  # noqa: C901
                             call: Call, parts: list[str]) -> httpx.Response:
         if bot is None:
             return httpx.Response(401, json={"message": "token is unauthorized"})
@@ -406,6 +449,10 @@ class FakeForge(_Recorder):
                                                  "user_can_merge": self._can_merge(bot, full, rule_)})
             case ("GET", ["repos", _, _, "branch_protections", *_]):
                 return httpx.Response(403, json={"message": "bot may not read protections"})
+            case ("GET", ["repos", owner, name, "issues"]) if self._can_read(bot, f"{owner}/{name}"):  # #1414: issues need write:issue
+                if rule is not None and not set(rule["scopes"]) & {"all", "read:issue", "write:issue"}:
+                    return httpx.Response(403, json={"message": "token does not have at least one of required scope(s): read:issue"})
+                return httpx.Response(200, json=[])
         return httpx.Response(404, json={"message": "not found"})
 
     @staticmethod
@@ -471,7 +518,7 @@ class FakeIntegrationCommand:
             return subprocess.CompletedProcess(args, 1, "", f"user does not exist [name: {user}]")
         claims = dict(c.split("=", 1) for c in flags.get("claim-eq", []))
         rule = {"user": user, "name": name, "issuer": issuer, "claims_eq": claims,
-                "scopes": flags.get("scope", ["all"]), "repos": flags.get("repo", ["all"])}
+                "scopes": [x for v in flags.get("scope", ["all"]) for x in v.split(",")], "repos": flags.get("repo", ["all"])}
         audience = f"u:{len(self.forge.users)}:{uuid.uuid4()}"
         self.forge.integrations.setdefault(user, []).append(audience)
         self.forge.integration_rules[audience] = rule

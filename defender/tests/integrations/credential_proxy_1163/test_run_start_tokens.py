@@ -620,3 +620,49 @@ def test_r7c_an_injected_signer_does_not_excuse_a_missing_sign_login(tmp_path, d
     assert signer.payloads == []
     assert "materialize" not in rec.order, "the run folder was made before the refusal"
     assert tickets.calls == []
+
+
+def _mint_for(tmp_path, data_root, signer, *, world: Any) -> Any:
+    """The run's token mint, built directly (#1449): a tenant whose `identity` and `ticket` are
+    `http-proxy` systems the gather role is granted, `ticket` its judged case system, and
+    `--update-ticket` set. `world` is the sibling's world (any object), or None for a run."""
+    import argparse
+    import types
+
+    from defender.kit.access import AccessDeclaration
+    from defender.run import _TokenMint
+    from defender.systems import case_system
+
+    records, _fields = _records(data_root, tmp_path)
+    declared = AccessDeclaration(base="http://x.invalid/api", auth=None)
+    tenant = types.SimpleNamespace(
+        tenant_id=S.PLAYGROUND_ID, access={"identity": declared, "ticket": declared},
+        grants=types.SimpleNamespace(gather=types.SimpleNamespace(
+            systems=frozenset({"identity", "ticket", "cmdb"}))))
+    return _TokenMint.for_run(
+        tenant, types.SimpleNamespace(down=frozenset()),
+        ns=argparse.Namespace(update_ticket=True), world=world,
+        case=case_system.CaseTarget(system="ticket", template=None, module=None),
+        run_id=fixture_uuid("1449-mint"), accepted=types.SimpleNamespace(id=S.PLAYGROUND_ID),
+        records=records.directory, signer=signer, proxy_url="http://proxy.invalid",
+        issuer_transport=None)
+
+
+def test_1449_a_world_reads_on_a_runs_terms_and_is_never_minted_a_write_back_token(tmp_path, data_root):
+    """A branched run is a run (#1449 W1, W3): the mint built for a world grants the same reads a
+    regular run's does, and signs no write-back token even with `--update-ticket` set, which
+    the regular run's control gets (`rw` on the case system). Run start already refuses
+    `--update-ticket` with `--episode`; this pins the mint's own guard behind that refusal."""
+    _plant(data_root, proxy=("identity", "ticket"))
+    run_signer, world_signer = A.MarkedSigner(), A.MarkedSigner()
+    run = _mint_for(tmp_path / "run", data_root, run_signer, world=None)
+    world = _mint_for(tmp_path / "world", data_root, world_signer, world=object())
+
+    def read_grant(mint: Any, signer: A.MarkedSigner) -> list[tuple[str, str]]:
+        token = mint.access_kwargs()["access"].token()
+        return A.grant_of(_claims_of_token(signer, token))
+
+    assert read_grant(world, world_signer) == read_grant(run, run_signer) == [
+        ("identity", "r"), ("ticket", "r")], "a world's read grant is not a regular run's"
+    assert run.write_back(), "control: the regular run's mint signs no write-back token"
+    assert world.write_back() == {}, "a world's mint signed a write-back token"

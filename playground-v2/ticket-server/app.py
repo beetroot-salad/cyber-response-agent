@@ -23,11 +23,15 @@ from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 SEED_PATH = Path(os.environ.get("TICKET_SEED_PATH", "/app/seed/tickets.json"))
+# A frozen copy pins the stub's clock (#1347 O3): every stamp is this instant.
+STUB_AS_OF = os.environ.get("V2_STUB_AS_OF") or None
 
 Status = Literal["open", "in_progress", "closed"]
 
 
 def _now() -> str:
+    if STUB_AS_OF:
+        return datetime.fromisoformat(STUB_AS_OF.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
     return datetime.now(timezone.utc).isoformat()
 
 

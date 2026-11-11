@@ -20,7 +20,7 @@ import pytest
 from defender.jobs import Conflict, UnknownReference
 from defender.jobs.models import LEARNING_TRIGGERS
 from defender.jobs.store import is_refusal
-from defender.tests.jobs.test_1342_worker import _FAST, _child, _committed, _queued, _run_one, _until, _worker
+from defender.tests.jobs.test_worker import _FAST, _child, _committed, _queued, _run_one, _until, _worker
 from defender.tests.support.jobs._jobs1342 import (
     NOW,
     T1,
@@ -1518,12 +1518,14 @@ def test_o1_the_migration_queues_no_job_for_investigations_completed_before_it(e
     """A database holding a completed investigation, taken to head: no learning job row appears, the investigation stays. (O1, no backfill)"""
     from alembic import command
 
-    from defender.migrations import _config, _scripts, head, upgrade
+    from defender.migrations import _config, _scripts, upgrade
     from defender.tests.migrations.test_1343_migrations import TENANT, _inv, _plant
 
     config = _config()
     config.attributes["dsn"] = empty_database
-    command.upgrade(config, _scripts().get_revision(head()).down_revision)
+    # The revision below #1344's learning-jobs revision, not "one below head": later revisions (#1307, #1414) stack on
+    # top, and the columns they require are not what this test plants.
+    command.upgrade(config, _scripts().get_revision("0008_learning_jobs").down_revision)
     execute(empty_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, now(), 'active')", (TENANT,))
     _plant(empty_database, _inv("done"), "completed", "t0", cost=2.5)
     _plant(empty_database, _inv("still-queued"), "queued", "t1")

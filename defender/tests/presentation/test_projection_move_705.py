@@ -75,24 +75,33 @@ def _trace_events(run_dir: Path) -> list[dict]:
             in (run_dir / "tool_trace.jsonl").read_text().splitlines() if line.strip()]
 
 
-def _log_derived_reference(run_dir: Path) -> dict:
-    """The projection's expected consumed fields, computed IN THE TEST from the wire log."""
+#: What MAIN is built to request in `test_the_moved_projection_preserves_the_usage_transform_and_the_cost`, set by the test and priced by the oracle.
+REQUESTED_MAIN = "claude-sonnet-4-6"
+
+
+def _log_derived_reference(run_dir: Path, *, requested: str) -> dict:
+    """The projection's expected consumed fields, computed IN THE TEST from the wire log, each response priced at the
+    model its agent requested (`requested`, MAIN's only here), never the name the log reports (r7 S1)."""
     records = [r for r in jsonl(RunPaths(run_dir).wire_log)
                if r.get("kind") == "response" and r.get("agent_id", "main") == "main"]
     keys = ("input_tokens", "output_tokens", "cache_read_input_tokens",
             "cache_creation_input_tokens")
     totals = {k: sum(int((r.get("usage") or {}).get(k, 0) or 0) for r in records)
               for k in keys}
-    cost = sum(usage_cost(r.get("model") or "", r.get("usage") or {}) for r in records)
+    cost = sum(usage_cost(requested, r.get("usage") or {}) for r in records)
     return {"usage": totals, "total_cost_usd": round(cost, 6), "num_turns": len(records)}
 
 
 # consumed-field equivalence, one test per frozen reader
 
-def test_the_moved_projection_preserves_the_usage_transform_and_the_cost(tmp_path):
-    """The store-derived projection keeps `input_tokens` NET of cache reads and writes, so the cost is unchanged."""
+def test_the_moved_projection_preserves_the_usage_transform_and_the_cost(tmp_path, monkeypatch):
+    """The store-derived projection keeps `input_tokens` NET of cache reads and writes, so the cost is unchanged.
+    The cost is each response priced at the model MAIN requested, as the ledger prices it (r7 S1); the replay stand-in
+    reports a name with no price, so a reported-name oracle reads $0."""
+    monkeypatch.setenv("DEFENDER_MODEL", REQUESTED_MAIN)
     run_dir, _store, _replay = _driven_run(tmp_path, run_id="usage")
-    expected = _log_derived_reference(run_dir)
+    expected = _log_derived_reference(run_dir, requested=REQUESTED_MAIN)
+    assert expected["total_cost_usd"] > 0, "premise: the requested model prices the recorded usage"
 
     events = [json.loads(line) for line in
               (run_dir / "tool_trace.jsonl").read_text().splitlines() if line.strip()]
@@ -128,7 +137,11 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
     run_dir, store, replay = _driven_run(tmp_path, run_id="runtime-html")
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
 
-    page = visualize_run.render_runtime_page(run_dir)
+    from defender.records import session_store as ss
+
+    # r7.2 P1: the page takes its cost as an argument; this run's own ledger, read as the post-run step reads it.
+    cost = visualize_run.LedgerCost(ss.read_ledger(store, run_dir.name))
+    page = visualize_run.render_runtime_page(run_dir, cost=cost)
     assert page.strip(), "runtime.html rendered empty"
 
     events = [json.loads(line) for line in
@@ -149,7 +162,8 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
 
 
 def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second_write(tmp_path):
-    """A second `write_trace` under one `run_id` fails loud or keeps every event of the first."""
+    """A second `write_trace` under one `run_id` fails loud or keeps every event of the first. (#1377 S5: the run file's
+    total reads the ledger for the run's own id, which a run's directory names, so the call names it.)"""
     observe_mod = __import__("defender.investigation.observe", fromlist=["write_trace"])
     run_dir, store, _replay = _driven_run(tmp_path, run_id="trace-once")
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
@@ -160,7 +174,7 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
         return len([line for line in text.splitlines() if line.strip()])
 
     try:
-        observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=1.0)
+        observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=1.0, run_id=run_dir.name)
     except FileExistsError:
         return  # failing loud on a second write discharges the demand
     second = (run_dir / "tool_trace.jsonl").read_text()

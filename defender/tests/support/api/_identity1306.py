@@ -559,6 +559,29 @@ class _LifespanClient(_WorldClient):
         return self
 
 
+class OffboardingSpy:
+    """#1360 D6: a recorder around the dev composition's production port (`defender.api.fakes.InMemoryOffboarding`).
+    Records each call as `(tenant, actor)` in `calls`; with `failing` set it raises before delegating. It holds NO
+    policy: the tenant transition and the ending of jobs are the wrapped class's."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.calls: list[tuple[str, str]] = []
+        self.failing = False
+
+    async def offboard_tenant(self, tenant_id: str, *, actor: Any) -> Any:
+        self.calls.append((str(tenant_id), str(actor)))
+        if self.failing:
+            raise InjectedFailure("offboard_tenant failed")
+        return await self._inner.offboard_tenant(tenant_id, actor=actor)
+
+
+def _offboarding_spy(tenants: Any, store: Any, clock: Any) -> Any:
+    from defender.api.fakes import InMemoryOffboarding
+
+    return OffboardingSpy(InMemoryOffboarding(tenants, store, clock))
+
+
 class World:
     """App + identity service over an in-memory repository, fakes, one clock and a bootstrap file.
     `restart` builds a fresh service and app over the same repository and fakes; browsers follow it.
@@ -580,6 +603,8 @@ class World:
         self.tenants: Any = tenant_repo if tenant_repo is not None else InMemoryTenantRepository()
         self.raw_repo: Any = InMemoryIdentityRepository(tenants=self.tenants)
         self.repo: Any = FailingRepository(self.raw_repo) if failing_writes else self.raw_repo
+        #: #1360 D6: the one port the admin offboard route reaches the tenant transition and the jobs through.
+        self.offboarding = _offboarding_spy(self.tenants, self.store, self.clock)
         self._loop = _AppLoop()
         weakref.finalize(self, self._loop.stop)
         self.signin = FakeSignIn()
@@ -634,6 +659,7 @@ class World:
             secrets=InMemorySecrets(), checker=StubSystemChecker(),
             artifact_links=StubArtifactLinks(),
             identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants,
+            offboarding=self.offboarding,
         ))
 
     def restart(self, *, administrators: Sequence[str] = (),

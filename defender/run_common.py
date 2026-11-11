@@ -8,15 +8,15 @@ import logging
 import sys
 import dataclasses as _dataclasses
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 DEFENDER_DIR = Path(__file__).resolve().parent
 REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender import _io
-from defender.records import formats
+from defender import _clock, _io
+from defender.records import formats, run_end
 from defender import tenancy  # noqa: E402
 from defender._io import read_bytes_capped  # noqa: E402
 from defender.records import (  # noqa: E402
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from defender.records.job_lane import Launched
     from defender.records.formats import ResumeWorld
     from defender.tenancy.run_knowledge import KnowledgeSource
+    from defender.systems.run_tenant import RunTenant
 
 _GENERIC_ALERT_STEMS = {"alert"}
 
@@ -45,6 +46,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     world: ResumeWorld | None = None,
     mapping: AlertMapping | None = None, knowledge: KnowledgeSource | None = None,
     launch: Launched | None = None,
+    started_at: _dt.datetime | None = None,
 ) -> Run:
     """Build the run directory of a fresh run and return the tenant-bound handle the run's later
     records are saved through. No caller names the run's id (#1279 A3): `run` is the handle the
@@ -62,7 +64,10 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
 
     `launch` is a job's checked launch record (#1342 O6, M5): `alert` is then its alert file, the
     bytes admitted are compared to the record's digest (one read, as a sibling's are to its
-    record), and the stamp's label is the record's (the alert's title), not the file's name."""
+    record), and the stamp's label is the record's (the alert's title), not the file's name.
+
+    `started_at` is the start the stamp records when the run clock does not start now (`--as-of`,
+    #1347 O5); `None` is the wall time."""
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     if world is not None and run is None:
@@ -70,7 +75,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
                         "only from its episode's roster")
     if world is None and mapping is None:
         raise TypeError("materialize_run needs the tenant's alert mapping (`mapping=`) for a fresh run")
-    started_at = _started_at()
+    started = _started_at() if started_at is None else _clock.z_seconds(started_at)
     front_door = _admit_input(alert, mapping=mapping, world=world,
                               digest=None if launch is None else launch.record.digest)
     world_id: str | None = None
@@ -101,7 +106,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     _stamp(
         run, knowledge=knowledge, model=model, tenant_id=run.tenant_id,
         world_id=world_id,
-        started_at=started_at,
+        started_at=started,
         alert_label=_alert_label(alert) if launch is None else launch.record.label,
     )
     return run
@@ -286,6 +291,7 @@ def learning_refusal_gate(
     *,
     fixtures_dir: Path = HELD_OUT_FIXTURES,
     truncated_by: str | None = None,
+    unsandboxed_ok: bool = False,
 ) -> str | None:
     """The refusal predicate every learning enqueue consults: the reason a run must not feed
     a corpus, or `None`.
@@ -307,7 +313,7 @@ def learning_refusal_gate(
             "findings must never feed a corpus it is scored against"
     from defender import box
 
-    if box.tree_unsandboxed(run_dir):
+    if not unsandboxed_ok and box.tree_unsandboxed(run_dir):
         return f"{run_dir.name} ran without a sandbox, so its input directory was never bound " \
             "read-only — nothing is learned from it"
     if not box.tree_verified(run_dir):
@@ -372,5 +378,81 @@ def enqueue_curation(
     except (FatalConfigError, TenantRefused) as config_error:
         _logger.error(f"NOT enqueuing for curation: could not enqueue the request: "
                       f"{config_error}")
+        return False
+    return True
+
+
+def enqueue_feedback_issue(run: Run, alert: Path | None = None, **kw: Any) -> bool:
+    """Queue an open-issue request for a run whose outcome the tenant's feedback setting lists
+    (#1414 F1); False when none is queued. Never raises: it runs at run end beside curation and
+    the run page, and a failure of any kind (an unreadable record, a broken gate) costs the run
+    only its feedback issue, logged."""
+    try:
+        return _enqueue_feedback_issue(run, alert, **kw)
+    except Exception as failed:  # noqa: BLE001 — a post-step must never break the run
+        _logger.error(f"NOT enqueuing a feedback issue: it failed unexpectedly: {failed!r}")
+        return False
+
+
+def _enqueue_feedback_issue(
+    run: Run,
+    alert: Path | None = None,
+    *,
+    tenant: RunTenant,
+    truncated_by: str | None = None,
+    closed_before_cut: bool = False,
+    run_state: Any = None,
+    fixtures_dir: Path = HELD_OUT_FIXTURES,
+) -> bool:
+    """`enqueue_feedback_issue`'s work. The learning gate's refusals apply except two arms: its
+    truncation arm (the escalated outcomes are truncations) and its unsandboxed arm
+    (`unsandboxed_ok`: a contract test asks for a request from a run with no box, an open human
+    decision on PR #1463). A run that ended silently opens nothing."""
+    from defender.investigation import ticket_writer
+    from defender.investigation.record_query import captured_lookups
+    from defender.tenancy import feedback_setting
+
+    accepted = tenant.tenant
+    owner = getattr(run, "tenant_id", None)  # a `Run.at` handle carries no address, so no tenant
+    if owner is None or str(accepted.id) != str(owner):
+        whose = "addressed to no tenant" if owner is None else f"tenant {owner}'s"
+        _logger.error(f"NOT enqueuing a feedback issue: the request names tenant {accepted.id}, but the run is {whose}")
+        return False
+    truncated_by = run_end.normalized_truncated_by(truncated_by)
+    if not ticket_writer.comments_on(truncated_by, closed_before_cut):
+        _logger.info(f"NOT enqueuing a feedback issue: the run ended silently ({truncated_by})")
+        return False
+    reason = learning_refusal_gate(run.run_dir, alert, fixtures_dir=fixtures_dir, truncated_by=None,
+                                   unsandboxed_ok=True)
+    if reason is not None:
+        _logger.info(f"NOT enqueuing a feedback issue: {reason}")
+        return False
+    try:
+        listed = feedback_setting.load_feedback_outcomes(tenant.settings)
+    except feedback_setting.FeedbackSettingError as bad:
+        _logger.error(f"NOT enqueuing a feedback issue: {bad}")
+        return False
+    if not listed:
+        return False
+    outcome = ticket_writer.run_outcome(run, truncated_by=truncated_by,
+                                        closed_before_cut=closed_before_cut)
+    if outcome not in listed:
+        return False
+    from defender.configuration import FatalConfigError
+    from defender.learning.core.config import LoopPaths
+    from defender.learning.core.state import LearningState, StateRefused
+
+    try:
+        record = formats.read_record(RunPaths(run.run_dir).alert_record)
+        if record is None:
+            raise OSError("the run's record vanished")
+        case_id = case_ref_of_digest(record.digest)
+        lookups = captured_lookups(run_state) if run_state is not None else []
+        with LearningState.open(LoopPaths.for_tenant(accepted)) as state:
+            state.enqueue_feedback_issue(case_id, {
+                "case_id": case_id, "tenant_id": str(run.tenant_id), "run_id": str(run.id),
+                "outcome": outcome, "lookups": lookups})
+    except (OSError, StateRefused, FatalConfigError, TenantRefused) as failed:
+        _logger.error(f"NOT enqueuing a feedback issue: could not write the request: {failed}")
         return False
     return True

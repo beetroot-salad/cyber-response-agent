@@ -546,6 +546,7 @@ def _investigation(investigation_id: str, knowledge: dict[str, Any] | None) -> A
         "disposition": "benign", "cost_usd": 1.0, "created_at": _NOW, "started_at": _NOW,
         "finished_at": _NOW,
         "request_key": f"rk-{investigation_id}", "attempt": 1,  # required on the wire model (#1342 D-d)
+        "cost_is_lower_limit": False,  # required on the wire model too (#1377 r4 API field)
     }
     if knowledge is not None:
         doc["knowledge"] = knowledge
@@ -569,7 +570,7 @@ def _client(*investigations: Any) -> Any:
     from fastapi.testclient import TestClient
 
     from defender.api.app import create_app
-    from defender.api.fakes import (InMemorySecrets, InMemoryStore, StubArtifactLinks,
+    from defender.api.fakes import (InMemoryOffboarding, InMemorySecrets, InMemoryStore, StubArtifactLinks,
                                     StubSystemChecker)
     from defender.api.ports import ApiDeps
     from defender.identity import Bootstrap, IdentityService, InMemoryIdentityRepository
@@ -598,7 +599,7 @@ def _client(*investigations: Any) -> Any:
         identity=identity, tenants=tenants, frontend_origin=_ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
         writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks())
+        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, now))
     return TestClient(create_app(deps), base_url="https://testserver")
 
 

@@ -33,7 +33,7 @@ What it does not see — read this before treating a green run as proof:
 - A write split across functions: a helper that writes an already-composed string, called by
   a function that validated nothing, is invisible from either side.
 - A consumer that publishes without validating: "expose" is not a syntactic act. That half is
-  held by ``tests/runtime/permissions/test_ungated_artifact_write_961_964.py`` and by review.
+  held by ``tests/runtime/permissions/test_ungated_artifact_write.py`` and by review.
 - Artifacts reached through a computed name.
 
 So a clean run means "no writer of these two artifacts is missing their schema in its own

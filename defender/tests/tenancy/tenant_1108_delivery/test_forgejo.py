@@ -431,3 +431,38 @@ def test_closing_a_pr_patches_its_state_and_nothing_else():
     assert json.loads(patch.content) == {"state": "closed"}
     assert http.prs[0]["state"] == "closed"
     _all_ours(http)
+# -- #1414: the issue and comment listings ---------------------------------------------------------
+
+
+def _comment_rows(n):
+    return [{"id": 2000 + i, "body": f"c{i}", "user": {"login": "ann"}} for i in range(n)]
+
+
+def test_a_comment_listing_from_a_server_that_ignores_the_page_and_sends_no_total_ends():
+    """#1414: Forgejo's comment listing may answer every page with the whole list and no `X-Total-Count`; the listing
+    stops at the first page that adds nothing new, with each row once."""
+    http = ForgeHTTP()
+    every = _comment_rows(60)
+    http.respond = lambda r: (httpx.Response(200, json=every) if r.url.path.endswith("/issues/comments") else None)
+    found, error, hung = bounded(lambda: forge(http).list_repo_comments())
+    assert not hung, "the listing never stopped"
+    assert error is None, error
+    assert [c["id"] for c in found] == [c["id"] for c in every]
+
+
+def test_a_comment_listing_goes_on_past_a_page_the_server_clamped_with_no_total():
+    """#1414: a page shorter than asked (the server's own maximum) is not the end when no total is sent; an empty one is."""
+    http = ForgeHTTP()
+    rows = _comment_rows(25)
+
+    def clamp(r):
+        if not r.url.path.endswith("/issues/comments"):
+            return None
+        page = int(r.url.params["page"])
+        return httpx.Response(200, json=rows[(page - 1) * 10:page * 10])
+
+    http.respond = clamp
+    found = forge(http).list_repo_comments(since="2026-11-10T00:00:00Z")
+    assert [c["id"] for c in found] == [c["id"] for c in rows]
+    asked = [r for r in http.requests if r.url.path.endswith("/issues/comments")]
+    assert {r.url.params.get("since") for r in asked} == {"2026-11-10T00:00:00Z"}

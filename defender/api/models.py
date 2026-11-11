@@ -125,13 +125,18 @@ class Investigation(BaseModel):
         description="Model cost so far while the investigation is live (0 until its first update), "
                     "final once the status is terminal and its worker has written its last figure; "
                     "null when the run ended but its cost could not be read (unknown).")
+    cost_is_lower_limit: bool = Field(
+        description="True when `cost_usd` is a lower limit: the run's cost is at least that much, because "
+                    "spend recorded for the run may be missing from it (a spend write failed, the run was "
+                    "killed before it reported, or its row was ended without its final figure). False when "
+                    "the figure is exact, and always false beside a null `cost_usd`.")
     created_at: Instant
     started_at: Instant | None = None
     finished_at: Instant | None = None
     failure_reason: str | None = Field(
         default=None,
         description="Set when the investigation failed or was aborted: a fixed reason such as "
-                    "`setup_refused`, `no_report`, `worker_error`, `cancelled`, `lease_lapsed` (its worker "
+                    "`setup_refused`, `no_report`, `worker_error`, `cancelled`, `tenant_offboarded` (its tenant was offboarded), `lease_lapsed` (its worker "
                     "was lost; a retry follows) or `retry_cap` (lost on the last of its attempts).")
     failure_message: str | None = Field(
         default=None, description="Our own words on why it failed; never model or run output.")
@@ -171,7 +176,7 @@ class LearningJob(BaseModel):
         "Why a `skipped` or `failed` job ended, one fixed word: `no_fork_point`, `history_unreadable`, "
         "`expired`, `family_unusable`, `control_failed`, `launch_refused`, `verify_refused`, "
         "`source_unavailable`, `judge_failed`, `entry_error`, `exited_without_result`, `worker_error`, "
-        "`lease_lapsed` or `retry_cap`; null otherwise."))
+        "`lease_lapsed`, `retry_cap` or `tenant_offboarded` (its tenant was offboarded); null otherwise."))
     message: str | None = Field(default=None, description=(
         "A sentence of our own code's about the ending (never run or launcher text); a `completed` job "
         "with no findings carries the judge's verdict word here."))

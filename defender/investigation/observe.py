@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ from defender._io import JSON_NESTING_LIMIT, guarded_mkdir, json_safe, open_guar
 from defender.records import Run, RUN_LAYOUT, RunPaths
 from defender.records.formats import wire_digest
 
-from defender.configuration import billed_usage as _usage_dict, usage_cost
+from defender.configuration import billed_usage as _usage_dict, usage_cost  # noqa: F401 — `observe.usage_cost` is re-exported
 
 _logger = logging.getLogger(__name__)
 
@@ -80,6 +81,67 @@ _ACTIVE_PATHS: set[str] = set()
 _EVER_LOGGER_PATHS: set[str] = set()
 
 
+class _NoLedger:
+    """The explicit "this logger keeps no spend ledger" (a learning stage, the policy-denial
+    stream): its responses are not a failed spend write. A logger that is neither bound nor given
+    this is a wiring fault, and each run-side response it records is a failed write (#1377)."""
+
+    def __repr__(self) -> str:
+        return "NO_LEDGER"
+
+
+NO_LEDGER = _NoLedger()
+
+
+@dataclass(frozen=True)
+class RequestEnd:
+    """How one model request ended, as its ledger row records it (#1377 r7 S2a): the requesting
+    agent, the model it was built to request, the outcome word, and on a response the name the
+    provider reported and the billed counts."""
+
+    agent_id: str
+    requested_model: str
+    outcome: str
+    reported_model: str | None = None
+    usage: dict[str, int] = field(default_factory=dict)
+
+    @classmethod
+    def of(cls, agent_id: str, requested_model: str, *, response: Any = None,
+           failure: BaseException | None = None) -> RequestEnd:
+        """A request's end from what its handler returned or raised: a response; an HTTP error
+        the retrier does not retry, refused ($0); any other end (a cancellation, `ProviderDown`,
+        a reply that did not parse, an HTTP error that reached the hook unretried), unseen."""
+        from defender import providers
+        from defender.records import session_store as ss
+
+        if failure is None:
+            return cls(agent_id, requested_model, ss.RESPONSE, getattr(response, "model_name", None) or None,
+                       _usage_dict(getattr(response, "usage", None)))
+        outcome = ss.REFUSED if providers.refused_by_provider(failure) else ss.UNSEEN
+        return cls(agent_id, requested_model, outcome)
+
+
+class SpendLedger:
+    """A run's spend ledger: the run's session store and the run id its rows are written under."""
+
+    def __init__(self, store: Any, run_id: str) -> None:
+        self.store, self.run_id = store, run_id
+
+    def record(self, end: RequestEnd) -> None:
+        """Append `end`'s row. Raises whatever the store raises; `RequestLogger.record_spend`
+        is the caller that never lets it reach an agent."""
+        from defender.records import session_store as ss
+
+        ss.record_spend(self.store, self.run_id, agent_id=end.agent_id, requested_model=end.requested_model,
+                        outcome=end.outcome, reported_model=end.reported_model, usage=end.usage)
+
+    def seal(self) -> None:
+        """Seal the run's ledger at its last row. Raises whatever the store raises."""
+        from defender.records import session_store as ss
+
+        ss.seal_ledger(self.store, self.run_id)
+
+
 class RequestLogger:
 
     def __init__(self, path: Path):
@@ -103,9 +165,50 @@ class RequestLogger:
         self._seq: dict[str, int] = {}
         self.n_requests = 0
         self._denial_seq = 0
+        self._init_spend()
+
+    def _init_spend(self) -> None:
+        #: `None`: unbound. A `SpendLedger` once the run's store is open, or `NO_LEDGER`.
+        self.ledger: SpendLedger | _NoLedger | None = None
+        #: Set when a spend write failed (or none was bound). The logger alone holds it: it decides
+        #: whether the run's ledger is sealed (#1377 r7.3 T1), and no other code is handed it.
+        self.spend_write_failed = False
+
+    def bind_ledger(self, ledger: SpendLedger | _NoLedger) -> None:
+        """Bind the run's ledger (or `NO_LEDGER`)."""
+        self.ledger = ledger
+
+    def record_spend(self, end: RequestEnd) -> None:
+        """The ledger write for one request, the first step after it ends, whatever its outcome.
+        It never raises: a failure (or a missing binding) logs at ERROR and sets `spend_write_failed`,
+        so the run is never sealed, and the agent runs on. A raise here would change a verdict (the
+        review gate forces `inconclusive` on any exception from a stage)."""
+        ledger = self.ledger
+        if ledger is NO_LEDGER:
+            return
+        try:
+            if not isinstance(ledger, SpendLedger):
+                raise RuntimeError("no spend ledger is bound to this run's request logger")
+            ledger.record(end)
+        except Exception as fault:  # noqa: BLE001 — bookkeeping never stops the run (#1377 S3)
+            self.spend_write_failed = True
+            _logger.error(f"spend write failed ({fault!r}); this run's cost is a lower limit")
+
+    def seal_spend(self) -> None:
+        """Seal the run's ledger when none of its spend writes failed (#1377 r7.3 T1): the ledger then
+        says for itself that it holds every request. A run with a failed write is left unsealed, so
+        its total reads "at least"; a failed seal is logged and leaves it so too. Never raises. A
+        logger with no ledger (`NO_LEDGER`, unbound) seals nothing."""
+        ledger = self.ledger
+        if not isinstance(ledger, SpendLedger) or self.spend_write_failed:
+            return
+        try:
+            ledger.seal()
+        except Exception as fault:  # noqa: BLE001 — a failed seal reads "at least", never a failed run
+            _logger.error(f"sealing the spend ledger failed ({fault!r}); this run's cost is a lower limit")
 
     @classmethod
-    def from_record(cls, record: Any, *, continuing: bool = False) -> RequestLogger:
+    def from_record(cls, record: Any, *, continuing: bool = False, no_ledger: bool = False) -> RequestLogger:
         """A logger writing to `record`. A stream is started empty the first time this process
         opens its path, unless `continuing`: then it is appended to, and its policy-denial
         numbering goes on from the denials it already holds (a branch arm's log, restored to
@@ -125,6 +228,8 @@ class RequestLogger:
         logger.messages = []
         logger._seq = {}
         logger.n_requests = logger._denial_seq = 0
+        logger._init_spend()
+        logger.ledger = NO_LEDGER if no_ledger else None
         if continuing:
             rows, _malformed, _read = record.read_rows()
             logger._denial_seq = sum(
@@ -257,7 +362,7 @@ def _denial_logger_or_null(record: Any) -> RequestLogger:
     try:
         # Continued, never started over: a branch arm's log already holds its source's denials
         # through the branch point; a fresh run's does not exist yet.
-        return RequestLogger.from_record(record, continuing=True)
+        return RequestLogger.from_record(record, continuing=True, no_ledger=True)
     except OSError as e:
         _logger.error(
             f"the policy-denial log at {record.path} could not be opened ({e!r}); denials "
@@ -361,11 +466,17 @@ def _user_event(message: Any) -> dict | None:
     return ev
 
 
-def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -> None:
+def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float, run_id: str) -> None:
     """`{run_dir}/tool_trace.jsonl`: the events this run produced, and its own cost.
 
-    Sliced at the branch point: a resumed run hydrates the source run's prefix too, which
-    would otherwise be reported (and billed, e.g. in `run_stats.py`) once per sibling.
+    The events are sliced at the branch point: a resumed run hydrates the source run's prefix too,
+    which would otherwise be reported once per sibling. The result line's cost and usage are the
+    spend ledger's rows for `run_id` (#1377 S5): every response the run received (main, every
+    lead's last one, the review), never the saved conversation. `num_turns` stays MAIN's turns,
+    which run health reads. The total is marked a lower limit when the ledger read is not complete (no
+    seal naming the run's last row, an unseen request or an unpriced model; #1377 r7.3 T1), the page's
+    and the worker's rule too; the driver seals before it writes this file. A ledger
+    that cannot be read leaves the events whole with a null total and usage (the job's cost is unknown then too).
     """
     from defender.records import session_store as ss  # local import — avoids a cycle at module load
 
@@ -389,20 +500,23 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -
                 events.append(user)
 
     responses = [m for m in messages if isinstance(m, ModelResponse)]
-    keys = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
-    totals = {k: 0 for k in keys}
-    total_cost = 0.0
-    for m in responses:
-        d = _usage_dict(m.usage)
-        for k in keys:
-            totals[k] += d.get(k, 0)
-        total_cost += usage_cost(m.model_name or "", d)
+    total_cost: float | None
+    totals: dict[str, int] | None
+    lower = False
+    try:
+        read = ss.read_ledger(store, run_id)
+        total_cost, totals = read.total, dict(read.usage)
+        lower = not read.complete
+    except Exception as e:  # noqa: BLE001 — an unreadable ledger leaves the events whole and the total unknown
+        _logger.error(f"the spend ledger could not be read for the run file ({e!r}); its total is left null")
+        total_cost = totals = None
 
     events.append({
         "type": "result",
         "duration_ms": round(wall_ms),
         "duration_api_ms": round(wall_ms),
-        "total_cost_usd": round(total_cost, 6),
+        "total_cost_usd": None if total_cost is None else round(total_cost, 6),
+        "total_cost_is_lower_limit": lower,
         "num_turns": len(responses),
         "usage": totals,
     })
@@ -412,5 +526,5 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -
 # Public path-mode helpers remain available to learning and tooling callers.
 __all__ = [
     "RequestLogger", "encode_wire_record", "denial_logger", "wire_log_path",
-    "stage_trace_path", "writer_id", "write_trace",
+    "stage_trace_path", "writer_id", "write_trace", "NO_LEDGER", "RequestEnd", "SpendLedger",
 ]

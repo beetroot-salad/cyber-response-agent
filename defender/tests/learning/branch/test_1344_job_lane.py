@@ -22,7 +22,7 @@ import pytest
 
 from defender.records._episode_handle import Episode
 from defender.records.formats import BASE_ROLE, load_family
-from defender.tests.learning.branch.test_947_triplet_launcher import _BASE, _calls, _launch
+from defender.tests.learning.branch.test_triplet_launcher import _BASE, _calls, _launch
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.jobs._jobs1342 import register_tenant
@@ -520,39 +520,52 @@ def _spent(usage: dict) -> list:
     return _response(SONNET, usage)
 
 
-def _cost_of(store, sibling_session: str) -> float:
-    """The one call into the reader. `store` is an open store on the database the siblings share."""
+def _cost_of(store, sibling_run_id: str) -> float:
+    """The one call into the reader. `store` is an open store on the database the siblings share (r7.5 L1)."""
     from defender.records.job_lane import sibling_cost
 
-    return sibling_cost(store, sibling_session)
+    return sibling_cost(store, sibling_run_id)
 
 
-def test_o13_a_siblings_cost_is_its_own_main_session_and_descendants_in_the_shared_database(tmp_path):
-    """Two siblings fork one source: each is priced alone, the prefix, the source's gathers and the other roles not at all. (O13)"""
+def _row(store, run_id: str, usage: dict, *, agent_id: str = "main", outcome: str = "response",
+         requested: str = SONNET, reported: str | None = SONNET) -> None:
+    """One ledger row through the real writer, as a run's agent leaves it."""
+    from defender.records import session_store as ss
+
+    ss.record_spend(store, run_id, agent_id=agent_id, requested_model=requested, outcome=outcome,
+                    reported_model=reported, usage=usage)
+
+
+def test_o13_a_siblings_cost_is_its_own_ledger_total_in_the_shared_database(tmp_path):
+    """CONFLICT-UPDATED (was #1344 O13: session lineage; r7.5 L1): a sibling's cost is the ledger total under its own
+    run id. Two siblings and the source run share one database; each is priced alone, gather and review rows count, a
+    refused row is $0, a row is priced at the requested model, and the source run's rows are never counted. (O13)"""
     from defender.records.session_store._write import open_store
     from defender.tests.support.jobs._jobs1342 import _paths
 
     runs = tmp_path / "runs"
     runs.mkdir()
     one_in, one_out = {"input_tokens": 1_000_000}, {"output_tokens": 1_000_000}
+    source, first, second, third = (fixture_uuid(f"o13-{n}") for n in ("source", "first", "second", "third"))
+    opus = "claude-opus-4-1"
     with open_store(case_id=CASE, sessions=_paths(runs)) as store:
-        source = store.new_session("main")
-        ids = store.append(source, _spent(one_in) + _spent(one_in), agent_id="main")
-        fork_at = ids[-1]
-        store.append(store.fork(source, fork_at), _spent(one_in), agent_id="gather")  # the source's own gather
-        first, second = store.fork(source, fork_at), store.fork(source, fork_at)
-        first_ids = store.append(first, _spent(one_out), agent_id="main")      # 15.0
-        store.append(store.fork(first, first_ids[-1]), _spent(one_in), agent_id="gather")  # its descendant, 3.0
-        store.append(second, _spent(one_in), agent_id="main")                  # 3.0
-        for role in ("questioner", "oracle", "judge"):
-            store.append(store.new_session(role), _spent(one_out), agent_id=role)  # 15.0 each, outside
-        assert _cost_of(store, first) == pytest.approx(18.0)
+        _row(store, source, one_out, agent_id="main")                       # the source run's own: never counted
+        _row(store, source, one_in, agent_id="gather:l-001")
+        _row(store, first, one_out, agent_id="main")                        # 15.0
+        _row(store, first, one_in, agent_id="gather:l-001")                       # 3.0
+        _row(store, first, one_in, agent_id="review:quality")                       # 3.0: a review call counts
+        _row(store, first, one_in, agent_id="main", outcome="refused", requested=SONNET, reported=None)  # $0
+        _row(store, second, one_in, agent_id="main")                        # 3.0
+        _row(store, third, one_in, agent_id="main", requested=SONNET, reported=opus)  # priced at the requested model: 3.0
+        assert _cost_of(store, first) == pytest.approx(21.0)
         assert _cost_of(store, second) == pytest.approx(3.0)
+        assert _cost_of(store, third) == pytest.approx(3.0)
+        assert _cost_of(store, source) == pytest.approx(18.0)               # control: the reader does read a run's rows
 
 
 class SpendingSibling(J.FakeSibling):
     """A sibling that RAN and was billed: it forks the source's session in the shared database, as a real resume
-    does, appends priced responses to the fork and points its run at it (`attach_case_pointer`)."""
+    does, points its run at it (`attach_case_pointer`) and leaves its spend as ledger rows under its arm's run id."""
 
     def __init__(self, spend: dict[str, dict], **kw: Any) -> None:
         super().__init__(**kw)
@@ -582,7 +595,9 @@ class SpendingSibling(J.FakeSibling):
         case_id = T.source_case_id(self.src)
         with ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(self.src.parent))) as store:
             fork = store.fork(ss.main_session_id(store), T.BRANCH_MESSAGE_ID)
-            store.append(fork, _spent(usage), agent_id="main")
+            # The conversation carries a decoy (r7.5 L1): the cost is the ledger rows below, never this response.
+            store.append(fork, _spent({"output_tokens": 99_000_000}), agent_id="main")
+            _row(store, arm, usage)
             ss.write_case_pointer(fixture_run(self.episode_dir / "runs" / arm), case_id=case_id,
                                   store_path=store.path, session_id=fork)
 
@@ -592,7 +607,7 @@ def _label_of(argv: list[str]) -> str | None:
 
 
 def test_o13_the_entry_carries_the_siblings_cost_and_its_stage_to_the_progress_and_end_records(tmp_path):
-    """Three sibling sessions billed 15, 3 and 6 dollars: both records say 24, and the stage moves on. (O13, Records)"""
+    """Three siblings billed 15, 3 and 6 dollars in the ledger: both records say 24, and the stage moves on. (O13, Records)"""
     spawn = SpendingSibling({"a": {"output_tokens": 1_000_000}, "b": {"input_tokens": 1_000_000},
                              "c": {"input_tokens": 2_000_000}})
     ran = run_entry(tmp_path, spawn=spawn, fix_source=spawn.attach)
