@@ -100,16 +100,6 @@ def _marker_names(agent: Mapping[str, object]) -> frozenset[str]:
     return frozenset(names)
 
 
-def declared_systems(
-    repo_root: Path, *, agent: Mapping[str, object] | None = None,
-) -> frozenset[str]:
-    """The union of the adapter glob (the product checkout at `repo_root`, working tree) and
-    the tenant's committed `execution.md` markers (`agent`, a committed tree's repo-relative
-    paths; none given, the adapter half alone: a product checkout carries no tenant marker
-    after #1108 P4 O1). An unreadable adapter source raises `LeadAuthorError`."""
-    return declared_systems_over(read_adapters(repo_root / ADAPTERS_REL), agent=agent)
-
-
 def declared_systems_over(
     roster: RosterRead, *, agent: Mapping[str, object] | None = None,
 ) -> frozenset[str]:
@@ -160,12 +150,6 @@ def lane_names(systems: TenantSystems | Catalog) -> frozenset[str]:
     catalog-backed records and the platform-served ones), or, from a caller with no tenant, every
     system of the whole catalog."""
     return frozenset(systems.roster.systems)
-
-
-def adapter_declared_systems(repo_root: Path) -> frozenset[str]:
-    """The adapter half alone, as the pitfalls lane resolves it. Never consults the marker
-    source, so an unresolvable marker doesn't raise here."""
-    return adapter_systems_under(repo_root / ADAPTERS_REL)
 
 
 def adapter_systems_under(adapters_dir: Path) -> frozenset[str]:
