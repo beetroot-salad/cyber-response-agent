@@ -404,7 +404,8 @@ def test_a_search_window_reaches_the_wire_exactly_as_the_caller_spelled_it(
 @pytest.mark.parametrize("asked", [
     "FROM logs-zeek.ssh-* | LIMIT 1",
     "FROM logs-x-* METADATA _id | LIMIT 5",
-    'FROM "logs|weird"',
+    # A quoted source is a name (A6): the odd character stays inside `logs-*`, so it is confined in.
+    'FROM "logs-weird|name"',
     ('FROM logs-system.auth-*\n'
      '| WHERE @timestamp >= "2026-05-01T00:00:00Z" AND @timestamp < "2026-06-01T00:00:00Z"\n'
      '| STATS events = COUNT(*) BY user = user.name'),

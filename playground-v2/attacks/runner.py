@@ -198,6 +198,16 @@ def _default_chaos_ctl() -> Any:
     return chaos_ctl_module
 
 
+def _lock_module() -> Any:
+    """`chaos.lock`, imported the same lazy way as the chaos control."""
+    chaos_root = HERE.parent
+    if str(chaos_root) not in sys.path:
+        sys.path.insert(0, str(chaos_root))
+    from chaos import lock as lock_module
+
+    return lock_module
+
+
 def run_scenario(
     scenario: dict,
     seed: int,
@@ -210,7 +220,25 @@ def run_scenario(
     chaos_ctl: Any = None,
     post_cr: Any = _post_cr,
     exec_fn: Any = docker_exec,
+    lock_store: Any = None,
+    lock_token: str | None = None,
 ) -> tuple[str, Path, list[dict]]:
+    # While a capture holds the lab (#1347 O10), only the capture itself may fire: it passes
+    # its lock token. Checked before anything is planned, posted or written, and again right
+    # before every execution of a step (each repeat included), so a capture that takes the lock
+    # mid-scenario stops it there; the steps already done stay done. A dry run touches nothing,
+    # so it needs no lab.
+    def require_lock(before: str) -> None:
+        if lock_store is None or dry_run:
+            return
+        lock = _lock_module()
+        try:
+            lock.require(lock_store, lock.CAPTURE, lock_token)
+        except lock.LockError as exc:
+            raise SystemExit(f"not firing {scenario['id']} {before}: {exc}") from exc
+
+    require_lock("(nothing fired)")
+
     intensity = int(overrides.get("intensity") or scenario.get("default_intensity", 1))
     source_user = overrides.get("user") or scenario.get("source_user", "root")
     target_host = overrides.get("target") or scenario["target_host"]
@@ -268,7 +296,7 @@ def run_scenario(
             print(f"DRY-RUN: would activate chaos profile {chaos!r} (seed={seed}), revert after")
             pre_run["chaos"] = {"profile": chaos, "seed": seed, "dry_run": True}
         else:
-            active_chaos = ctl_mod.apply(chaos_plan)
+            active_chaos = ctl_mod.apply(chaos_plan, lock_store=lock_store, lock_token=lock_token)
             pre_run["chaos"] = {
                 "profile": chaos,
                 "seed": seed,
@@ -300,6 +328,11 @@ def run_scenario(
                     "intensity": intensity,
                 }
                 cmd = render(step["cmd"], ctx)
+                try:
+                    require_lock(f"at step {step_index}.{iteration} ({cmd}); the steps before it stay done")
+                except SystemExit:
+                    aborted = True
+                    raise
                 step_started = now_iso()
                 t0 = time.monotonic()
                 rc, out, err = exec_fn(source_host, cmd, step_user, dry_run)
@@ -407,8 +440,12 @@ def cmd_run(
     *,
     run_scenario_fn: Any = run_scenario,
     load_catalog_fn: Any = load_catalog,
+    lock_store: Any = None,
 ) -> int:
-    # Injection seams for tests, like run_scenario's `post_cr=`/`exec_fn=`.
+    # Injection seams for tests, like run_scenario's `post_cr=`/`exec_fn=`. The CLI always
+    # checks the lab-server capture lock; `lock_store=` replaces the real one.
+    if lock_store is None:
+        lock_store = _lock_module().DockerLockStore()
 
     catalog = load_catalog_fn()
     if args.scenario not in catalog:
@@ -426,6 +463,7 @@ def cmd_run(
     run_id, run_dir, step_log = run_scenario_fn(
         scenario, args.seed, overrides, args.dry_run, args.cr_mode,
         chaos=args.chaos, keep_chaos=args.keep_chaos,
+        lock_store=lock_store, lock_token=getattr(args, "lock_token", None),
     )
     ok = sum(1 for s in step_log if s["rc"] == 0)
     print(f"finished: run_id={run_id} steps={len(step_log)} ok={ok}")
@@ -472,6 +510,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--keep-chaos",
         action="store_true",
         help="do not revert the --chaos profile after the run (leaves the fault live)",
+    )
+    prun.add_argument(
+        "--lock-token",
+        default=None,
+        help="the capture lock's token; a held lock refuses every run without it",
     )
 
     return parser
