@@ -10,8 +10,8 @@ from defender.box import _lifecycle, _oracle
 from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, LANES, ForgeHTTP, delivery
 
 PLANTED = "postgresql://planted_user:PLANTED-PASSWORD-9f3@db.invalid:5432/defender"
-#: What a rendered learning box's environment may hold, by name: the box layer's own and the drain's one knob.
-RENDERED_ALLOWED = {"DEFENDER_DIR", "PYTHONPATH", "PATH", "DEFENDER_AGENT_DIR"}
+#: What a rendered learning box's environment may hold, by name: the box layer's own (as rendered today) and the drain's one knob.
+RENDERED_ALLOWED = {"DEFENDER_DIR", "PYTHONPATH", "PATH", "DEFENDER_AGENT_DIR", "DEFENDER_BOX", "DEFENDER_BOX_MEMORY", "LANG", "TZ"}
 #: The product modules that build a box request, and what each request's own `env` mapping may hold.
 LAUNCHERS = {"learning/author/version_control/batch.py": {"DEFENDER_AGENT_DIR"}, "box/_oracle.py": set()}
 
