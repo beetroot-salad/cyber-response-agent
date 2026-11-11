@@ -10,12 +10,13 @@ judgement read them so. Accepted spellings: a literal, an alias of another modul
 template beside literals (`(*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "TABLE")`). A call, an expression or a definition
 under a condition is a finding.
 
-An adapter offering the host's comment action (`add_case_comment`) also declares `comment_route` (C1, K5): the route
-the store's cover rule judges a record against.
+An adapter offering the host's comment action (`add_case_comment`, defined or imported at module level) also declares
+`comment_route` (C1, K5): the route the store's cover rule judges a record against.
 
 K8: no declared settings key is named like a secret (`TOKEN`, `PASSWORD`, `PASSWD`, `SECRET`, `CREDENTIAL`, `API_KEY`,
-`APIKEY`, or a `*_SECRET_REF` reference): a secret is a credential in the secret store, never a setting. This replaces
-connect's validator scan of a tenant's `config.env` values.
+`APIKEY`, or a `*_SECRET_REF` reference, each also under a trailing `_ENV`, as connect's retired scan read it): a
+secret is a credential in the secret store, never a setting. This replaces connect's validator scan of a tenant's
+`config.env` values.
 
 Run from repo root:  python tooling/lint/lint_catalog_declarations.py [--root <repo-shaped tree>]
 Exit 0 = clean, 1 = findings (each line names the module's repo-relative path and the constant or key), 2 = the scan
@@ -37,8 +38,9 @@ TEXT, FLAG, KEYS = "text", "flag", "keys"
 #: Each declaration and the kind of literal it must be.
 DECLARATIONS = {"PREFIX": TEXT, "REQUIRED_CONFIG_KEYS": KEYS, "PATH_KEYS": KEYS, "DISPLAY_NAME": TEXT, "EXAMPLE": FLAG}
 COMMENT_ACTION, COMMENT_ROUTE = "add_case_comment", "comment_route"
-#: A secret-named key (K8): the name ends in a secret word, or is a reference to a secret.
-SECRET_NAMED = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|API[_-]?KEY)(_REF)?$", re.I)
+#: A secret-named key (K8): the name ends in a secret word, or is a reference to a secret, either one optionally
+#: under the retired `_ENV` suffix (connect's old rule judged the key with `_ENV` stripped: `API_TOKEN_ENV` is a secret).
+SECRET_NAMED = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|API[_-]?KEY)(_REF)?(_ENV)?$", re.I)
 
 _UNREAD = object()
 _SPLAT = object()  # a splat of something outside the module (the shared template): keys not knowable here
@@ -51,7 +53,8 @@ def _adapters(root: Path) -> list[Path]:
 
 
 def _module_level(tree: ast.Module) -> tuple[dict[str, ast.expr], set[str]]:
-    """The module-level assignments by name, and the module-level names defined (functions and assignments)."""
+    """The module-level assignments by name, and the module-level names the module has (functions, assignments and
+    imported names: an adapter offers an action it imports as surely as one it defines)."""
     assigned: dict[str, ast.expr] = {}
     defined: set[str] = set()
     for node in tree.body:
@@ -66,6 +69,8 @@ def _module_level(tree: ast.Module) -> tuple[dict[str, ast.expr], set[str]]:
                 assigned[node.target.id] = node.value
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             defined.add(node.name)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            defined.update(alias.asname or alias.name.split(".")[0] for alias in node.names if alias.name != "*")
     return assigned, defined
 
 
