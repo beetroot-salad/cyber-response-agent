@@ -466,34 +466,97 @@ def test_a_failed_control_ends_failed_control_failed_and_no_other_sibling_starts
     assert ran.judge.calls == 0
 
 
-def _sign_refused() -> int:
-    from defender.records.run_end import SIGN_REFUSED_EXIT
+class BreaksSigningAfter(J.FakeSibling):
+    """A sibling double that, once world `after` has run, makes the tenant's token unsignable (`breaks()`), as a
+    rotation or an offboarding during a long job would."""
 
-    return SIGN_REFUSED_EXIT
+    def __init__(self, *, after: str, breaks, **kw) -> None:
+        super().__init__(**kw)
+        self.after, self.breaks = after, breaks
+
+    def __call__(self, argv, **kw):
+        code = super().__call__(argv, **kw)
+        if _world(argv) == self.after:
+            self.breaks()
+        return code
 
 
-@pytest.mark.parametrize(("refused", "started"), [("a", ["a"]), ("b", ["a", "b"])],
-                         ids=["the control", "a later sibling"])
-def test_1449_a_sibling_refused_its_read_token_ends_failed_launch_refused_and_no_other_starts(
-        tmp_path, refused, started):
-    """A sibling that exits `SIGN_REFUSED_EXIT` was refused its read token at run start: the
-    environment's refusal, not its world's. Every later sibling would be refused the same way, so
-    none starts, and the job fails `launch_refused` with the sign brief, never `control_failed`.
-    The brief does not say pre-flight refused: pre-flight passed. A control that finished before
-    the refusal is still verified: it is left with a record of its own, never skipped. (#1449)"""
-    spawn = J.FakeSibling(exits={refused: _sign_refused()})
-    ran = run_entry(tmp_path, spawn=spawn)
+class BreaksSigningWhenAsked(S.ScriptedModel):
+    """The oracle double that, on its first turn (pre-flight's calibration, after pre-flight signed), makes the
+    tenant's token unsignable (`breaks()`)."""
+
+    def __init__(self, *moves, breaks, **kw) -> None:
+        super().__init__(*moves, name="oracle", **kw)
+        self.breaks = breaks
+
+    def __call__(self, messages, info):
+        self.breaks()
+        return super().__call__(messages, info)
+
+
+@pytest.mark.parametrize("cause", ["offboarded", "unreadable for one check", "offboarded during pre-flight",
+                                   "records intact"])
+def test_1449_a_token_that_can_no_longer_be_signed_stops_the_family_before_the_next_sibling(
+        tmp_path, monkeypatch, data_root, cause):
+    """Pre-flight proved the read token can be signed; the tenant is then offboarded while the control runs. The
+    job checks again before each later sibling (#1449): no later world starts, the control that finished is still
+    verified (archived, or a record of its own), and the job fails `launch_refused` with pre-flight's sign cause,
+    worded as found before a later sibling, never `control_failed`, `family_unusable` or completed. Control: with
+    the records intact every world starts and the job completes. Records unreadable for one check only still stop
+    the family: no world after the refused one starts, though its own check would pass. Offboarded during
+    pre-flight's calibration, after it signed: the control itself is kept from starting, and the job is still
+    `launch_refused`, not `control_failed`."""
+    from defender.tenancy import TenantDirectory
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.learning.oracle.live_contracts import test_preflight_proxy as P
+
+    with P.rig(tmp_path, monkeypatch, data_root) as r, A.proxy_for(r.t, r.store) as (url, _tap):
+        live, gone = r.records._open, r.t.repository_with(generations=[])  # noqa: SLF001 — the rig's own twin
+        broken: list[bool] = []
+        once = cause == "unreadable for one check"
+
+        def repository():
+            if not broken:
+                return live()
+            if once:
+                broken.clear()
+            return gone
+
+        directory = TenantDirectory(repository)
+        def breaks() -> None:
+            if not broken:
+                broken.append(True)
+
+        early = cause == "offboarded during pre-flight"
+        spawn = BreaksSigningAfter(after="a", breaks=(lambda: None) if cause == "records intact" or early
+                                   else breaks)
+        oracle = BreaksSigningWhenAsked(then=S.submit(r.idp.payload, S.EMPTY_CLAIM),
+                                        breaks=breaks if early else (lambda: None))
+        ran = run_entry(tmp_path, estate=lambda _root: r.est, calls=r.calls, after_source=r.after_source,
+                        oracle=oracle, issuer_transport=r.bao, directory=directory, proxy_url=url, spawn=spawn)
+    if cause == "records intact":
+        assert spawn.worlds == ["a", "b", "c"], spawn.worlds
+        _ended(ran, "completed", None)
+        return
     message = _failed_with(ran, "failed", "launch_refused")
     assert _BRIEF_SIGN in message, message
     assert "no later world started" in message, message
     assert "pre-flight" not in message, message
-    assert spawn.worlds == started
     assert ran.judge.calls == 0
-    if refused != "a":
-        # Verification leaves every finished world archived or with its own record, never neither.
-        archived = (ran.ep / "worlds" / T.world_id(ran.ep, "a")).is_dir()
-        assert archived or S.read_world_record(ran.ep, "a") is not None, (
-            "the control finished, but the refusal skipped its verification")
+    if early:
+        # Refused on the control's own turn: nothing ran, and the control is not called failed.
+        assert spawn.worlds == [], spawn.worlds
+        control = S.read_world_record(ran.ep, "a")
+        assert control is not None, "the control the stop kept from starting has no record"
+        assert "cannot be signed" in control["detail"], control
+        return
+    assert spawn.worlds == ["a"], spawn.worlds
+    archived = (ran.ep / "worlds" / T.world_id(ran.ep, "a")).is_dir()
+    assert archived or S.read_world_record(ran.ep, "a") is not None, (
+        "the control finished, but the stop skipped its verification")
+    never = S.read_world_record(ran.ep, "b")
+    assert never is not None, "the world the stop kept from starting has no record"
+    assert "cannot be signed" in never["detail"], never
 
 
 def test_knowledge_the_tenant_cannot_pin_ends_failed_launch_refused(tmp_path):

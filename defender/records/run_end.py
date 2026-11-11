@@ -71,12 +71,6 @@ EXIT_CLASSES: dict[str, ExitClass] = {
     TRUNCATED_BY_PROXY_ACCESS: ExitClass(8),
 }
 
-#: A branched sibling refused at run start because its read token for the credential proxy cannot
-#: be signed exits with this (#1449). Not an exit class: no run folder exists yet, so there is no
-#: ending to record. The branch launcher reads it as the environment's refusal, not the world's:
-#: every later sibling would be refused the same way, so none starts.
-SIGN_REFUSED_EXIT = 9
-
 #: Endings with no verdict whose case gets the escalation note: a person must look, and a rerun
 #: alone will not settle it.
 ESCALATED_EXITS = frozenset({TRUNCATED_BY_ABORTED, TRUNCATED_BY_PROVIDER_REJECTED})

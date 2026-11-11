@@ -335,6 +335,31 @@ def _preflight_access(source: Run, tenant: RunTenant, reads: Sequence[str], *, s
                           on_fault=on_fault)
 
 
+def sibling_sign_check(tenant: RunTenant, *, roster: Any, signer: Any, proxy_url: str | None,  # noqa: PLR0913 — the tenant plus the operator's seams
+                       issuer_transport: Any, directory: Any) -> Callable[[], str | None]:
+    """The launcher's check before each sibling it starts in turn (#1449): why the next sibling's
+    read token cannot be signed, or None. The rule run start applies (`signing_access`: tenant
+    records only, nothing contacted), over the read grant a sibling is minted (`read_grant` over
+    the systems judged down, settled once here: a run's settings are frozen at launch). A grant
+    with nothing proxied never refuses."""
+    reads = system_status.read_grant(
+        tenant, system_status.judge_run(roster, tenant, defender_dir=_DEFENDER_DIR).down)
+
+    def check() -> str | None:
+        if not reads:
+            return None
+        if directory is None:
+            return "no tenant records were handed to the launcher to sign its siblings' tokens with"
+        try:
+            signing_access(tenant.tenant_id, directory=directory, signer=signer,
+                           proxy_url=proxy_url, transport=issuer_transport)
+        except ConfigFault as refused:
+            return refused.detail
+        return None
+
+    return check
+
+
 def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
     episode: Episode, *, source: Run, roster: Any, tenant: RunTenant, oracle: Any = None,
     verifier: Any = None, signer: Any = None, proxy_url: str | None = None,
