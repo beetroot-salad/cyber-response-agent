@@ -35,7 +35,7 @@ from defender.tests.support.shared._postgres1339 import (  # noqa: F401 — fixt
     execute,
     migrated_database,
 )
-from defender.tests.support.tenancy._active1214 import DSN_ENV, active_directory
+from defender.tests.support.tenancy._active1214 import CREATED, DSN_ENV, active_directory
 from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
     NOT_A_REFUSAL_OF_STATE,
     TENANT,
@@ -44,11 +44,49 @@ from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
     _tenant_placed,  # noqa: F401 — autouse fixture
 )
 from defender.tests.support.shared._locations_1210 import location_path
-from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
-    _FlipOnFirst,
-    _twin_directory,
-)
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture
+
+
+def _twin_directory(tenant: str, origin: str) -> tuple[Any, dict[str, Any]]:
+    """A directory over a one-tenant twin, and the ways to change that tenant's row afterwards, by the state it moves
+    to: `offboarding` (through the service), `creating`, `offboarded` (rows as written) and `removed` (no row)."""
+    import dataclasses
+
+    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+
+    twin: Any = InMemoryTenantRepository()
+    asyncio.run(twin.add_tenant(tenant, created_at=CREATED, state="active", repo=f"tenants/{tenant}",
+                                origin=origin))
+    directory = TenantDirectory(lambda: twin)
+
+    def move(**changes: Any) -> Any:
+        def flip() -> None:  # the twin is a test double: its rows are rewritten as a database would be
+            twin._tenants[tenant] = dataclasses.replace(twin._tenants[tenant], **changes)
+        return flip
+
+    def remove() -> None:
+        del twin._tenants[tenant]
+    flips = {
+        "offboarding": lambda: asyncio.run(twin.request_offboard(tenant, now=CREATED)),
+        "creating": move(state="creating", pending_action="create", step="names", step_actor="service"),
+        "offboarded": move(state="offboarded", pending_action=None, step=None, step_actor=None),
+        "removed": remove,
+    }
+    return directory, flips
+
+
+class _FlipOnFirst:
+    """A lead-author step (`LeadStep` shape) that, on its first claim, has the tenant change state.
+    (`_twin_directory` and this class lived in `test_host_entry`, whose lead-drain claim section the #1278 merge dropped while this file, from main, still uses them.)"""
+
+    def __init__(self, inner: Any, flip: Any) -> None:
+        self.inner, self.flip, self.served = inner, flip, []
+
+    def __call__(self, paths: Any, state: Any, run: Any, **kw: Any) -> Any:
+        self.served.append(Path(run.run_dir).name)
+        if len(self.served) == 1 and self.flip is not None:
+            self.flip()
+        return self.inner(paths, state, run, **kw)
 
 
 NOW = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.UTC)
