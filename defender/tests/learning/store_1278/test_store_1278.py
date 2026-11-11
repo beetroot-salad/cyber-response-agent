@@ -204,7 +204,7 @@ async def test_o3_a_second_claim_on_a_lane_with_a_not_ended_author_batch_is_refu
 
 
 async def test_o3_two_claims_at_once_make_one_batch(dsn):
-    """Raced claims on one lane: exactly one gets a batch, the other is told the lane is busy. (O3, the unique rule)"""
+    """Raced claims on one lane: exactly one gets a batch; the other gets none, or is told the lane is busy. (O3, the unique rule)"""
     S = store_mod()
     async with learning_store(dsn) as store:
         await publish(store, BLUE, "f1")
@@ -220,8 +220,13 @@ async def test_o3_two_claims_at_once_make_one_batch(dsn):
             async with anyio.create_task_group() as group:
                 group.start_soon(attempt, store)
                 group.start_soon(attempt, other)
-        assert sorted(type(o).__name__ for o in outcomes).count("LaneBusy") == 1, outcomes
-        assert len(await store.batches(BLUE)) == 1
+        # the loser sees either the winner's batch (LaneBusy) or, once the winner has taken the item, nothing due (None)
+        batches = await store.batches(BLUE)
+        assert len(batches) == 1, outcomes
+        got = [o for o in outcomes if isinstance(o, S.Held)]
+        assert [(str(h.batch_id), h.items[0][1]) for h in got] == [(str(batches[0].id), "f1")], outcomes
+        assert all(o is None or isinstance(o, S.LaneBusy) for o in outcomes if o not in got), outcomes
+        assert len(outcomes) == 2
 
 
 # --- the lease, its grace, the token (O3, P6) -----------------------------------------------------------------

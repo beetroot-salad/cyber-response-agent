@@ -9,6 +9,7 @@ Reconcile and feedback are in the feedback slice's files.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 from datetime import timedelta
@@ -275,25 +276,62 @@ def test_o1_a_pushed_branch_with_no_pr_is_taken_over_and_gets_its_one_pr(world, 
     assert len([r for r in w.t.forge.prs if r["state"] == "open"]) == 1, "a second tick opened a second PR"
 
 
-def test_o1_a_lease_lapsed_within_grace_is_not_taken_over_and_one_past_it_is(world, caplog):  # noqa: F811 — the imported fixture
-    """Within grace the next tick leaves the stranded batch alone (no PR, same batch, still working); past grace it opens the PR. (O1, P6, Crash recovery)"""
+#: Every way a stranded batch is recovered; each is judged lapsed by the database's clock alone (one lapse rule).
+RECOVERY = {
+    "tick": None,
+    "take_over": lambda w, bid: call(w.dsn, "take_over", w.t.tenant_id, bid, owner="host-b"),
+    "abandon_by_recovery": lambda w, bid: call(w.dsn, "abandon", w.t.tenant_id, bid, by="recovery"),
+    "offboard": lambda w, bid: call(w.dsn, "offboard", w.t.tenant_id, wait=0.3),
+}
+
+
+@pytest.mark.parametrize("skew_hours", [0, 1, -1], ids=["host-clock-right", "host-clock-an-hour-ahead", "host-clock-an-hour-behind"])
+@pytest.mark.parametrize("path", sorted(RECOVERY))
+def test_o1_every_recovery_path_judges_a_lapse_by_the_databases_clock_alone(world, caplog, path, skew_hours):  # noqa: F811 — the imported fixture
+    """Live or lapsed within grace the stranded batch is left alone; past grace it is recovered; a host clock off by an hour changes neither. (O1, P6, Crash recovery)"""
+    from defender.tests.support.learning.core._clock1278 import host_clock_skewed
+    from defender.tests.support.learning.core._store1278 import store_mod
+
+    S = store_mod()
     w = world
     writer, batch_id, branch = _stranded(w, caplog)
+    [stranded] = _batches(w).values()
 
-    lapse_lease(w.dsn, batch_id, past_grace=False)
-    _tick(w, writer)
+    def attempt():
+        with host_clock_skewed(skew_hours):
+            if RECOVERY[path] is None:
+                return _tick(w, writer)
+            return RECOVERY[path](w, batch_id)
 
-    assert [r for r in w.t.forge.prs if r["state"] == "open"] == [], "taken over within grace"
-    assert list(_batches(w)) == [batch_id]
-    assert _batches(w)[batch_id].phase == "working"
-    assert writer.served == [batch_id]
-    assert lease_seconds_left(w.dsn, batch_id) < 0, "the tick revived the lapsed lease"
+    def standing():
+        b = _batches(w)[batch_id]
+        return (b.phase, b.outcome, b.token, b.pr_number, b.lease_owner)
+
+    for lapsed in (None, "within grace"):  # the lease live, then lapsed one second ago
+        if lapsed:
+            lapse_lease(w.dsn, batch_id, past_grace=False)
+        with contextlib.suppress(S.NotLapsed, S.LaneBusy):
+            attempt()
+        assert standing() == ("working", None, stranded.token, None, stranded.lease_owner), (
+            f"a batch {lapsed or 'with a live lease'} was recovered by {path}")
+        assert [r for r in w.t.forge.prs if r["state"] == "open"] == []
+        assert list(_batches(w)) == [batch_id]
+        if lapsed:
+            assert lease_seconds_left(w.dsn, batch_id) < 0, f"{path} revived a lease that had lapsed"
 
     lapse_lease(w.dsn, batch_id)
-    _tick(w, writer)
+    attempt()
 
-    [pr] = [r for r in w.t.forge.prs if r["state"] == "open"]
-    assert (pr["head"]["ref"], _batches(w)[batch_id].phase) == (branch, "in_review")
+    after = _batches(w).get(batch_id)
+    if path == "tick":
+        [pr] = [r for r in w.t.forge.prs if r["state"] == "open"]
+        assert (pr["head"]["ref"], after.phase) == (branch, "in_review")
+    elif path == "take_over":
+        assert (after.phase, after.token > stranded.token) == ("working", True)
+    elif path == "abandon_by_recovery":
+        assert (after.phase, after.outcome) == ("ended", "abandoned")
+    else:
+        assert after is None, "offboarding a batch lapsed past grace left its rows"
 
 
 def test_o1_a_branch_only_on_the_forge_is_verified_against_the_record_and_gets_its_pr_from_a_fresh_clone(world, caplog):  # noqa: F811 — the imported fixture

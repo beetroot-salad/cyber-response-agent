@@ -110,8 +110,9 @@ def test_d1_each_curator_is_handed_its_own_kinds_items_from_the_claim(world, cap
 
     assert model.keys_shown(LESSONS) == ["f1"], critical_text(caplog)
     assert model.keys_shown(QUESTIONER) == ["q1"]
-    assert all("q1" not in s.prompt for s in model.seen if s.curator == LESSONS), "the lessons curator saw a questioner item"
-    assert all("f1" not in s.prompt for s in model.seen if s.curator == QUESTIONER), "the questioner curator saw a finding"
+    # by the keys each call was shown, never by a substring of its prompt: a batch id's random hex can hold "f1"
+    assert all(s.keys == ["f1"] for s in model.seen if s.curator == LESSONS), "the lessons curator saw a questioner item"
+    assert all(s.keys == ["q1"] for s in model.seen if s.curator == QUESTIONER), "the questioner curator saw a finding"
     batch = _only_batch(w)
     assert (batch.phase, len(w.t.forge.creates)) == ("in_review", 1)
     assert {k: i.status for k, i in _items(w).items()} == {("finding", "f1"): "in_batch", ("questioner_finding", "q1"): "in_batch"}
