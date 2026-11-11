@@ -307,15 +307,18 @@ def test_o1_every_recovery_path_judges_a_lapse_by_the_databases_clock_alone(worl
         b = _batches(w)[batch_id]
         return (b.phase, b.outcome, b.token, b.pr_number, b.lease_owner)
 
-    for lapsed in (None, "within grace"):  # the lease live, then lapsed one second ago
+    for lapsed in (None, "within grace"):  # the lease live (the stranding tick ended its own), then lapsed one second ago
         if lapsed:
             lapse_lease(w.dsn, batch_id, past_grace=False)
+        else:
+            execute(w.dsn, "UPDATE learning.batches SET lease_expiry = now() + interval '10 minutes' WHERE id = %s", (batch_id,))
         with contextlib.suppress(S.NotLapsed, S.LaneBusy):
             attempt()
         assert standing() == ("working", None, stranded.token, None, stranded.lease_owner), (
             f"a batch {lapsed or 'with a live lease'} was recovered by {path}")
         assert [r for r in w.t.forge.prs if r["state"] == "open"] == []
         assert list(_batches(w)) == [batch_id]
+        assert writer.served == [batch_id], f"{path} ran a curator again for a batch that was not lapsed"
         if lapsed:
             assert lease_seconds_left(w.dsn, batch_id) < 0, f"{path} revived a lease that had lapsed"
 
