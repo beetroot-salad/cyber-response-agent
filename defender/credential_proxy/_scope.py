@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
 from defender.kit.access import AccessDeclaration, Route
-from defender.kit.paths import holds_separator
+from defender.kit.paths import holds_separator, url_form_fault, url_path_fault
 from defender.credential_proxy._refusal import CONFIG, CONFINEMENT, Refused
 from defender.credential_proxy._tokens import READ_WRITE
 
@@ -35,30 +35,28 @@ class Target:
 
 
 def locate(declaration: AccessDeclaration, url: str) -> Target:
-    """`url` as a destination under `declaration`'s base, or `Refused`."""
-    if any(ch <= " " or ch == "\x7f" for ch in url):
-        raise Refused(CONFIG, "the URL holds whitespace or a control character")
-    base = urlsplit(declaration.base)
+    """`url` as a destination under `declaration`'s base, or `Refused`. The rules for a URL as a
+    whole are `kit.paths`' (`url_form_fault`, `url_path_fault`), the ones the access
+    declaration's parser judges a base by (#1366 R15)."""
+    form = url_form_fault(url)
+    if form is not None:
+        raise Refused(CONFIG, form.reason)
+    asked = urlsplit(url)
     try:
-        asked = urlsplit(url)
-        asked_port = asked.port
+        base = urlsplit(declaration.base)
+        base_port = base.port
     except ValueError:
-        raise Refused(CONFIG, "the URL does not parse") from None
-    if asked.username is not None or asked.password is not None or "@" in asked.netloc:
-        raise Refused(CONFIG, "the URL carries a login part; the proxy applies the credential")
-    if asked.fragment:
-        raise Refused(CONFIG, "the URL carries a fragment")
+        # The parser refuses such a base; a declaration that reached here anyway is the
+        # system's configuration fault, not a transport one.
+        raise Refused(CONFIG, "the system's declared base does not parse") from None
     scheme = asked.scheme.lower()
-    if (scheme, asked.hostname, asked_port or _DEFAULT_PORT.get(scheme)) != (
-            base.scheme.lower(), base.hostname, base.port or _DEFAULT_PORT.get(base.scheme.lower())):
+    if (scheme, asked.hostname, asked.port or _DEFAULT_PORT.get(scheme)) != (
+            base.scheme.lower(), base.hostname, base_port or _DEFAULT_PORT.get(base.scheme.lower())):
         raise Refused(CONFIG, "the URL's scheme, host or port is not the declared base's")
     path = asked.path or "/"
-    decoded = unquote(path)
-    if any(part in (".", "..") for part in _SEPARATOR.split(decoded)):
-        raise Refused(CONFINEMENT, "the URL path holds a `.` or `..` segment")
-    if ";" in decoded:
-        # Some servers read `;` as starting a path parameter and resolve `/..;/` as `/../`.
-        raise Refused(CONFINEMENT, "the URL path holds a `;` (a path parameter)")
+    confined = url_path_fault(path)
+    if confined is not None:
+        raise Refused(CONFINEMENT if confined.confinement else CONFIG, confined.reason)
     base_path = base.path.rstrip("/")
     if not (path == base_path or path.startswith(base_path + "/")):
         raise Refused(CONFIG, "the URL path is not under the declared base")

@@ -25,6 +25,7 @@ from defender.kit.access import (
     Route,
 )
 from defender.kit.faults import ConfigFault
+from defender.kit.paths import url_fault
 from defender.kit.settings import NOT_CONFIGURED, PLACEHOLDER, pointer_to
 from defender.kit.tls import trust_of_ca
 from defender.kit.verbs import is_system_name
@@ -141,13 +142,24 @@ def _ca(shown: str, value: object, base: str, auth: Auth) -> str | None:
 
 
 def _base(shown: str, value: object, key: str) -> str:
+    """`value` as a URL the credential proxy sends to (the base, or an OAuth token URL): an
+    http(s) URL with a host and no query, fragment or login, that the proxy's own URL rules
+    (`kit.paths.url_fault`) do not refuse (#1366 R15), so a declaration is never stored that the
+    proxy could not use."""
     if not isinstance(value, str):
         raise ConfigFault(f"{shown}: `{key}` must be one URL string")
-    parts = urlsplit(value)
-    if (parts.scheme not in ("http", "https") or not parts.hostname or parts.query
-            or parts.fragment or parts.username is not None or parts.password is not None):
+    try:
+        parts = urlsplit(value)
+        shaped = (parts.scheme in ("http", "https") and bool(parts.hostname) and not parts.query
+                  and not parts.fragment and parts.username is None and parts.password is None)
+    except ValueError:
+        shaped = False
+    if not shaped:
         raise ConfigFault(f"{shown}: `{key}` must be an http(s) URL with a host and no query, "
                           "fragment or login")
+    fault = url_fault(value)
+    if fault is not None:
+        raise ConfigFault(f"{shown}: `{key}` is a URL the credential proxy refuses: {fault.reason}")
     return value
 
 
