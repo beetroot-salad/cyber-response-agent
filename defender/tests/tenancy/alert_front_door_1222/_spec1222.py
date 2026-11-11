@@ -1704,6 +1704,7 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     materialize: Callable[..., Any] | None = None,
     directory: Any = None,
     box_lifecycle: Mapping[str, Any] | None = None,
+    removed_adapters: Sequence[str] = (),
 ) -> Drive:
     """Drive one alert through the production front door (`run.main`) and return what happened.
 
@@ -1781,7 +1782,7 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
         seams["materialize"] = materialize  # run.main's setup seam (faults planted in setup)
     seams["publish"] = publish_double(d.published)
     seams["directory"] = directory if directory is not None else planted.directory  # #1345 slice B: a test-held directory
-    R.assert_records_within_roster(seams["directory"], planted.tenant_id, roster)  # the roster stands for the catalog
+    R.assert_records_within_roster(seams["directory"], planted.tenant_id, roster, removed=removed_adapters)  # the roster stands for the catalog
     if isinstance(writer, _WriterOverTheProxy):
         seams.update(writer.store.stand_in.seams())  # the proxy's address and a signer for its token
     try:

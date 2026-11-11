@@ -320,6 +320,12 @@ class Estate:
     root: Path
     systems: tuple[str, ...] = SYSTEMS
     withheld: tuple[tuple[str, str], ...] = ()
+    #: Systems the tenant RECORDS (each with a stub adapter in the roster) but whose grant table has no row: configured and
+    #: not granted. (#1366 R10: a record is stated, and a record needs an adapter.)
+    configured_only: tuple[str, ...] = ()
+    #: Like `configured_only`, and the stub's settings check raises `ConfigFault` over the record's settings: a system
+    #: whose settings cannot be used (down at start).
+    unusable: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self.root = Path(self.root)
@@ -328,9 +334,13 @@ class Estate:
         if not (self.state / "answers.json").exists():
             (self.state / "answers.json").write_text("{}", encoding="utf-8")
         (self.state / "calls.jsonl").touch()
-        for system in self.systems:
+        for system in (*self.systems, *self.configured_only):
             (self.adapters / f"{system.replace('-', '_')}_adapter.py").write_text(
                 _ADAPTER.format(system=system, state=str(self.state)), encoding="utf-8")
+        for system in self.unusable:
+            broken = _ADAPTER.replace("    return None\n", "    raise faults.ConfigFault('fixture: these settings cannot be used')\n", 1)
+            (self.adapters / f"{system.replace('-', '_')}_adapter.py").write_text(
+                broken.format(system=system, state=str(self.state)), encoding="utf-8")
 
     # --- where things are --------------------------------------------------------------
     @property
@@ -417,7 +427,10 @@ class Estate:
         """The tenant's system records: one enabled stub record per estate system (R10: stated, not inferred. The estate's
         systems are stub adapters of its own roster, so a default that fell back to the retired fixture's seven would
         record systems the roster does not have and none it does)."""
-        return R.bare_records(*self.systems)
+        spec = R.bare_records(*self.systems, *self.configured_only)
+        for system in self.unusable:
+            spec = R.added(spec, system, R.SysSpec({f"{system.upper()}_CARRIER": "pigeon"}, ""))
+        return spec
 
     def directory(self, data_root: Path | None = None, tenant_id: str = FIXTURE_TENANT, **kw: Any) -> Any:
         """The seeded ACTIVE tenant directory over the estate's tenant, holding `records()` (or the `records=` given)."""

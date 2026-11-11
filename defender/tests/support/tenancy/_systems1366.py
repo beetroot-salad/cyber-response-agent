@@ -13,7 +13,7 @@ import contextlib
 import json
 import re
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -656,12 +656,13 @@ class Operator:
         return [(v.version, v.credential_generation, v.deleted) for v in self.versions(system)]
 
 
-def assert_records_within_roster(directory: Any, tenant_id: str, roster: Any) -> None:
+def assert_records_within_roster(directory: Any, tenant_id: str, roster: Any, *, removed: Iterable[str] = ()) -> None:
     """A shared driver that takes `roster=` (which stands for the CATALOG: the tenant's systems are that roster intersected
     with its enabled records) asserts the records it runs against name no adapter of the REAL catalog that the injected
     roster lacks. A record inferred by a default (the retired fixture's seven under a roster of three stubs) is a test
     that did not state its records (R10); one for an adapter no catalog has (`R.added(spec, "legacy-widget")`) is the
-    explicit removed-adapter row, and passes. Reads the directory's records through production's own read."""
+    explicit removed-adapter row, and passes; so does a catalog adapter the test names in `removed` (it pruned that adapter from the
+    roster it injects on purpose: the same row). Reads the directory's records through production's own read."""
     if roster is None or directory is None:
         return
     from defender._paths import adapters_under
@@ -670,7 +671,8 @@ def assert_records_within_roster(directory: Any, tenant_id: str, roster: Any) ->
     records = directory.current_records(str(tenant_id))
     carried = set(roster.adapter_files)
     real = set(read_roster(adapters_under(Path(__file__).resolve().parents[3])).adapter_files)
-    inferred = sorted(s for s, r in records.systems.items() if (r.adapter_id or s) in real and (r.adapter_id or s) not in carried)
+    inferred = sorted(s for s, r in records.systems.items() if (r.adapter_id or s) in real and (r.adapter_id or s) not in carried
+                      and (r.adapter_id or s) not in set(removed))
     assert not inferred, (
         f"the injected roster stands for the catalog but the tenant's records name {inferred}, adapters it lacks: state the "
         "records (`R.bare_records(*systems)`, or a `records=` for the planter/directory), or seed an adapter no catalog has "
