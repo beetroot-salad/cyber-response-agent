@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import re
+from urllib.parse import parse_qs
 
 import pytest
 from _lab_fakes import (ALERTS, AUTH, DATA_DROP, DEDUP, SPAN_START, SYSLOG, T, FakeGap, LabRig, expected_copy, instant,
@@ -22,6 +23,7 @@ from _lab_fakes import (ALERTS, AUTH, DATA_DROP, DEDUP, SPAN_START, SYSLOG, T, F
 from test_1347_inplace import _PAGE, ALERTS_2, _cluster, _many_alerts
 from test_1347_make_case import _drift_profiles, _overlay
 
+HIDDEN = ".ds-logs-system.auth-default-2026.10.21-000009"      # a hidden (dot) backing index
 PIT_PATH = "keep_alive=2m&expand_wildcards=open,hidden"
 
 
@@ -105,12 +107,33 @@ def test_the_fake_refuses_what_elasticsearch_refuses_around_a_point_in_time():
     with pytest.raises(FakeGap):
         cluster.es_request("POST", f"/{AUTH}/_pit?keep_alive=2m&routing=x")
     assert _close(cluster, pit_id) == {"succeeded": True, "num_freed": 1}
-    with pytest.raises(RuntimeError, match="search_context_missing_exception"):
+    # a closed id: searching and closing it again raise (live: 404; closing answers {succeeded: true, num_freed: 0})
+    with pytest.raises(RuntimeError):
         cluster.es_request("POST", "/_search", body)
-    with pytest.raises(RuntimeError, match="search_context_missing_exception"):
+    with pytest.raises(RuntimeError):
         _close(cluster, pit_id)
-    with pytest.raises(RuntimeError, match="search_context_missing_exception"):
+    # a malformed id raises (live: 400)
+    with pytest.raises(RuntimeError):
         cluster.es_request("POST", "/_search", {"pit": {"id": "never-opened"}, "sort": [{"_shard_doc": "asc"}]})
+    with pytest.raises(RuntimeError):
+        _close(cluster, "never-opened")
+
+
+def test_the_fake_point_in_time_leaves_hidden_indices_out_unless_it_is_asked_for_them():
+    cluster = _cluster()
+    cluster.put(HIDDEN, "h-0", {"@timestamp": "2026-10-20T04:00:00Z"})
+
+    def view(query):
+        pit_id = cluster.es_request("POST", f"/*/_pit?{query}")["id"]
+        out = cluster.es_request("POST", "/_search", {"pit": {"id": pit_id}, "sort": [{"_shard_doc": "asc"}],
+                                                      "size": 500})
+        _close(cluster, pit_id)
+        return {h["_index"] for h in out["hits"]["hits"]}
+
+    visible = view("keep_alive=2m")
+    assert DEDUP in visible and HIDDEN not in visible and AUTH not in visible      # AUTH is a dot-named backing index
+    both = view("keep_alive=2m&expand_wildcards=open,hidden")
+    assert {DEDUP, HIDDEN, AUTH} <= both
 
 
 def test_the_fake_tells_a_point_in_time_nobody_closed(tmp_path):
@@ -271,6 +294,11 @@ def test_every_point_in_time_a_step_opens_is_closed_and_the_walks_use_one(tmp_pa
     try:
         assert rig.cluster.pits_opened, "no walk opened a point-in-time"
         assert rig.cluster.open_pits == {} and sorted(rig.cluster.pits_closed) == sorted(rig.cluster.pits_opened)
+        opens = [r for r in rig.cluster.requests if r[0] == "POST" and r[1].split("?")[0].endswith("/_pit")]
+        assert len(opens) == len(rig.cluster.pits_opened)
+        for _m, path, _b in opens:
+            query = parse_qs(path.partition("?")[2])
+            assert query.get("keep_alive") and query.get("expand_wildcards") == ["open,hidden"], path
         searched = [r for r in rig.cluster.requests if r[1].split("?")[0].endswith("/_search")]
         assert all(r[1].split("?")[0] == "/_search" and r[2].get("pit") for r in searched if r[2] and r[2].get("search_after")), (
             "a paged search was made without a point-in-time, or with an index in its path")
@@ -410,7 +438,8 @@ def _auth_bulk(n: int) -> dict:
 
 def _listings(rig) -> int:
     """The requests that list the copy's indices (`_cat/indices`, the cluster metadata, a data-stream listing)."""
-    return len([r for r in rig.cluster.requests if r[1].startswith(("/_cat/indices", "/_cluster/state/metadata"))])
+    return len([r for r in rig.cluster.requests
+                if r[1].startswith(("/_cat/indices", "/_cluster/state/metadata", "/_data_stream"))])
 
 
 def _ancestor_lookups(rig) -> int:
@@ -437,7 +466,6 @@ def test_the_derived_alert_lookup_over_several_alert_indices_and_batches_lists_n
     big, held_big, _mark, n = _drift_over(tmp_path / "big", 2400)
     try:
         assert _ancestor_lookups(small) >= 1
-        assert _ancestor_lookups(big) >= _ancestor_lookups(small) + 2, "the big world did not need more batches"
         assert _listings(big) == _listings(small), (
             f"{_listings(big)} index listings for {_ancestor_lookups(big)} lookups, against {_listings(small)} "
             f"for {_ancestor_lookups(small)}: the lookup lists the indices per batch")

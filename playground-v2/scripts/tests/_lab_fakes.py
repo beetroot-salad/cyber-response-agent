@@ -93,6 +93,8 @@ class FaultJournal(Journal):
     def __init__(self, trip_at: int | None = None, skip: tuple[str, ...] = ()) -> None:
         super().__init__()
         self.trip_at, self.skip, self.step_log, self.tripped = trip_at, set(skip), [], None
+        self.probe: Callable[[], Any] | None = None     # called as a fault trips: what to remember of the world then
+        self.at_trip: Any = None
 
     def append(self, entry) -> None:
         super().append(entry)
@@ -102,6 +104,7 @@ class FaultJournal(Journal):
         self.step_log.append(entry)
         if self.trip_at is not None and len(self.step_log) == self.trip_at:
             self.tripped = entry
+            self.at_trip = self.probe() if self.probe is not None else None
             raise InjectedStep(f"injected failure at step {self.trip_at}: {op}")
 
 
@@ -247,6 +250,19 @@ class FakeES:
 
     def matching(self, method: str, needle: str) -> list[tuple[str, str, Any]]:
         return [r for r in self.requests if r[0] == method and needle in r[1]]
+
+
+def _declared(mappings: dict) -> set[str]:
+    """The (dotted) field names a mapping's `properties` declare, object parents included."""
+    out: set[str] = set()
+
+    def walk(props: dict, prefix: str) -> None:
+        for name, spec in (props or {}).items():
+            out.add(prefix + name)
+            if isinstance(spec, dict) and "properties" in spec:
+                walk(spec["properties"], f"{prefix}{name}.")
+    walk((mappings or {}).get("properties", {}), "")
+    return out
 
 
 def sha(data: bytes) -> str:
@@ -422,6 +438,10 @@ class FakeCluster(FakeES):
         # for itself (live: `.ds-ilm-history-7-...`): in the cluster metadata and `GET /_data_stream`, never in
         # `indices`, never in a snapshot.
         self.failure_streams, self.own_streams = dict(failure_streams or {}), dict(own_streams or {})
+        # r6.4.6: the stream membership AS THE SNAPSHOT WAS TAKEN (`{index: stream}` for backing and for failure-store
+        # indices): the snapshot's `data_streams` and what a restore re-creates, whatever the live copy became since.
+        self.snapshot_backing = {n: s for n, s in self.stream_of.items() if n in content}
+        self.snapshot_failure = {n: s for n, s in self.failure_streams.items() if n in content}
         # r6.4.6, point-in-time (observed live on Elasticsearch 9.3.3): the open ones (`{id: view}`), every id ever
         # opened in order, the ids closed; `merge_on_refresh` makes a refresh reorder `_doc` (a merge); `on_search`
         # is called with (cluster, index expression or None, body) at the start of every search; `lose_from_pit_pages`
@@ -649,8 +669,7 @@ class FakeCluster(FakeES):
                 self.uuid_served_step = len(getattr(self.journal, "step_log", ()))
             # live (9.3.3): `indices` is every index of the snapshot (failure-store ones included), `data_streams`
             # the names of its streams
-            streams = sorted({self.stream_of[n] for n in self.content if n in self.stream_of}
-                             | {self.failure_streams[n] for n in self.content if n in self.failure_streams})
+            streams = sorted(set(self.snapshot_backing.values()) | set(self.snapshot_failure.values()))
             return {"snapshots": [{"snapshot": snap, "uuid": self.snapshot_uuid, "state": "SUCCESS",
                                    "indices": list(self.content), "data_streams": streams}]}
         if len(seg) == 3 and method in ("PUT", "POST"):
@@ -680,6 +699,13 @@ class FakeCluster(FakeES):
             self.indices.pop(n, None)
             self._index(n)["docs"] = copy.deepcopy(self.content[n])
             self.indices[n]["settings"] = copy.deepcopy(self.content_settings.get(n, {}))
+            # the restored index is a member of the stream it was in when the snapshot was taken, and of no other
+            self.stream_of.pop(n, None)
+            self.failure_streams.pop(n, None)
+            if n in self.snapshot_backing:
+                self.stream_of[n] = self.snapshot_backing[n]
+            if n in self.snapshot_failure:
+                self.failure_streams[n] = self.snapshot_failure[n]
         self.restores += 1
         self._took("restore")
         return {"snapshot": {"snapshot": self.snapshot, "indices": names,
@@ -707,8 +733,7 @@ class FakeCluster(FakeES):
             if set(self.query):
                 raise FakeGap(f"point-in-time search with URL parameters {sorted(self.query)}")
             if pit["id"] not in self.open_pits:
-                raise RuntimeError(f"search_context_missing_exception: No search context found for id [{pit['id']}]"
-                                   + (" (the point-in-time was closed)" if pit["id"] in self.pits_closed else ""))
+                raise RuntimeError(self._pit_id_error(pit["id"]))
         start, size = int(body.get("from", 0)), int(body.get("size", 10))
         if start + size > self.MAX_RESULT_WINDOW:
             raise RuntimeError(
@@ -811,7 +836,12 @@ class FakeCluster(FakeES):
             if not self.query.get("keep_alive"):
                 raise RuntimeError("action_request_validation_exception: Validation Failed: 1: [keep_alive] is "
                                    "missing;")
+            states = set((self.query.get("expand_wildcards") or ["open"])[-1].split(","))
             names = self._expand(seg[0])
+            if not states & {"hidden", "all"}:
+                # a wildcard does not reach hidden (dot) indices unless asked; a literal name always does
+                literal = set(seg[0].split(","))
+                names = [n for n in names if not n.startswith(".") or n in literal]
             entries, ordinal = [], 0
             for ordinal, n in enumerate(names):
                 docs = self.indices[n]["docs"]
@@ -829,12 +859,21 @@ class FakeCluster(FakeES):
             if self.query or not isinstance(body, dict) or set(body) != {"id"}:
                 raise FakeGap(f"close point-in-time with body {body!r}")
             if body["id"] not in self.open_pits:
-                raise RuntimeError(f"search_context_missing_exception: no point-in-time [{body['id']}] to close "
-                                   "(succeeded false, num_freed 0)")
+                # live: closing an already-closed id is a 404 answering {succeeded: true, num_freed: 0}; the fake
+                # raises (the body is not modelled), as it does for a malformed id (400)
+                raise RuntimeError(self._pit_id_error(body["id"]))
             del self.open_pits[body["id"]]
             self.pits_closed.append(body["id"])
             return {"succeeded": True, "num_freed": 1}
         raise FakeGap(f"{method} /{'/'.join(seg)}")
+
+    @staticmethod
+    def _pit_id_error(pit_id: str) -> str:
+        """A malformed id is a 400 (`illegal_argument_exception`), a well-formed one that is closed or unknown a 404
+        (`search_context_missing_exception`); the messages are the fake's own (not observed live)."""
+        if not re.fullmatch(r"pit-\d+-[0-9a-f]{24}", str(pit_id)):
+            return "illegal_argument_exception: malformed point-in-time id"
+        return "search_context_missing_exception: no such point-in-time"
 
     def merge(self, *names: str) -> None:
         """A merge: the `_doc` order of the named indices (every index when none is named) changes. A
@@ -990,7 +1029,14 @@ class FakeCluster(FakeES):
                 if out is None:
                     continue
                 scratch = self._index(target_name)
-                if scratch["mappings"].get("dynamic", True) not in (False, "false", "strict"):
+                dynamic = scratch["mappings"].get("dynamic", True)
+                unmapped = set(out) - _declared(scratch["mappings"])
+                if dynamic == "strict" and unmapped:
+                    # live: `dynamic: strict` refuses a document with a field the mapping does not declare
+                    failures.append(self._refuse(target_name, i, "mapping set to strict, dynamic introduction of "
+                                                 f"{sorted(unmapped)} is not allowed"))
+                    break
+                if dynamic not in (False, "false", "strict"):
                     # r6.4.6, live: dynamic mapping adds a field per new key, and `index.mapping.total_fields.limit`
                     # (1000) refuses the document that would pass it
                     fresh = scratch["fields"] | set(out)
@@ -1085,10 +1131,9 @@ DECOY = ".ds-logs-system.auth-default-2026.10.15-000003"
 STREAMS = {DEDUP_OLD: "logs-system.auth-default", DEDUP: "logs-system.auth-default", AUTH: "logs-system.auth-default",
            SYSLOG: "logs-system.syslog-default", NGINX: "logs-nginx.access-default"}
 # r6.4.6: the failure store of the syslog stream (live 9.3: `GET /_data_stream` lists it under `failure_store.indices`),
-# the data streams the world's snapshot holds (the freeze's `elastic.data_streams`, written out from the world), and
+# the data streams the world's snapshot holds (`DATA_STREAMS`, below: the freeze's `elastic.data_streams`), and
 # a data stream the frozen node makes for itself once it runs (live: `.ds-ilm-history-7-...`; not the snapshot's).
 FAILURE_STREAMS = {FAILURE_STORE: "logs-system.syslog-default"}
-DATA_STREAMS = ["logs-nginx.access-default", "logs-system.auth-default", "logs-system.syslog-default"]
 ILM_HISTORY = ".ds-ilm-history-7-2026.11.08-000001"
 OWN_STREAMS = {ILM_HISTORY: "ilm-history-7"}
 DEDUP_IN_SPAN = ["dedup-auth-01", "dedup-auth-02", "dedup-auth-03"]
@@ -1270,6 +1315,20 @@ def counts_of(state: dict) -> dict[str, int]:
     return {n: len(docs) for n, docs in state.items() if n != DECOY}
 
 
+def stream_members(counts: dict) -> dict[str, list[str]]:
+    """The freeze's `elastic.data_streams`: `{stream: sorted member indices}` (backing plus failure-store) of the freeze
+    indices `counts` names."""
+    out: dict[str, list[str]] = {}
+    for n in counts:
+        for stream in (STREAMS.get(n), FAILURE_STREAMS.get(n)):
+            if stream:
+                out.setdefault(stream, []).append(n)
+    return {s: sorted(m) for s, m in sorted(out.items())}
+
+
+DATA_STREAMS = stream_members(counts_of(world_content()))
+
+
 def ancestor_reaches(ancestor: dict, index: str, doc_id: str) -> bool:
     """Whether a `kibana.alert.ancestors` entry names the event `doc_id` held in `index`: same id, and its
     `index` is that index or a pattern (the rule's) matching it or its data stream."""
@@ -1448,6 +1507,8 @@ class LabRig:
         self.tmp_path = tmp_path
         self.journal = Journal() if journal is None else journal
         self.store = FakeLockStore(self.journal)
+        if isinstance(self.journal, FaultJournal):
+            self.journal.probe = lambda: sorted(self.cluster.open_pits)
         self.clock = FakeClock(self.journal, instant("2026-11-08T12:00:00Z"), clock_step)
         content = world_content()
         for uuid, doc in (extra_alerts or {}).items():
@@ -1483,7 +1544,7 @@ class LabRig:
             (self.parts / FREEZE_ID / n).write_bytes(b)
         self.freeze = {"T": T, "patterns": list(patterns),
                        "elastic": {"repository": REPO, "snapshot": SNAP, "uuid": SNAP_UUID,
-                                   "indices": counts_of(content), "data_streams": list(DATA_STREAMS)},
+                                   "indices": counts_of(content), "data_streams": stream_members(counts_of(content))},
                        "parts": {n: sha(b) for n, b in parts.items()}, "captured_by": "op"}
         (self.freeze_dir / "freeze.yaml").write_text(yaml.safe_dump(self.freeze))
         self.case_dir = tmp_path / "held_out" / SLUG
@@ -1733,10 +1794,11 @@ class LabRig:
         """A request the fakes do not model fails the test as a gap IN THE FAKE (repair the fake: model it), not
         as a contract demand on how the lab does what the design leaves open."""
         assert not self.cluster.unsupported, f"the fake cluster does not model: {self.cluster.unsupported}"
-        # A run cut by a `FaultJournal` may have been cut at the very call that closes a point-in-time (the docker
-        # exec carrying it never reached the node): that leak is the fault's, not the product's. The tests that
-        # fail a page through `cluster.fail` (which the product answers) assert the close themselves.
-        if getattr(self.journal, "tripped", None) is None:
+        # A run cut by a `FaultJournal` while a point-in-time was open may have been cut at the very call that closes
+        # it (the docker exec carrying it never reached the node): that leak is the fault's, not the product's. A cut
+        # with none open, and every run without a cut, must leave none open. The tests that fail a page through
+        # `cluster.fail` (which the product answers) assert the close themselves.
+        if not getattr(self.journal, "at_trip", None):
             assert not self.cluster.open_pits, f"a point-in-time was never closed: {sorted(self.cluster.open_pits)}"
         assert not self.docker.unmodelled, f"the rig docker does not model: {self.docker.unmodelled}"
 
