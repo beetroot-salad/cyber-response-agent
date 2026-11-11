@@ -36,7 +36,7 @@ def _opt_str(value: object) -> str | None:
 def _channel_view(kind: str, name: str, accent: str, hold_means: str, items: list[Any]) -> dict:
     rows = [
         {"id": i.key, "status": i.status, "reason": i.reason, "batch_id": str(i.batch_id) if i.batch_id else None,
-         "pr_number": i.pr_number}
+         "pr_number": i.pr_number, "source_run": i.source_run}
         for i in items if i.kind == kind and i.status in _LISTED
     ]
     held = [r["id"] for r in rows if r["status"] == "held"]

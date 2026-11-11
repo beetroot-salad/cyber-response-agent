@@ -374,12 +374,14 @@ def _stat(key: str, value_html: str) -> str:
 
 
 def _item_rows(ch: dict) -> str:
-    """Each listed item: its id, status, reason, the batch it is in and that batch's PR. Escaped where written."""
+    """Each listed item: its id, status, reason, the run it came from, the batch it is in and that batch's PR.
+    Escaped where written."""
     if not ch["items"]:
         return '<div class="empty">Nothing waiting, held or dead.</div>'
     return _list([
         _li(r["id"], r["status"] + (f' — {r["reason"]}' if r["reason"] else ""),
-            " · ".join(x for x in (r["batch_id"] or "", f'PR {r["pr_number"]}' if r["pr_number"] else "") if x))
+            " · ".join(x for x in (f'run {r["source_run"]}' if r.get("source_run") else "", r["batch_id"] or "",
+                                   f'PR {r["pr_number"]}' if r["pr_number"] else "") if x))
         for r in ch["items"]
     ])
 
