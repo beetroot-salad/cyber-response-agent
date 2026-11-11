@@ -34,7 +34,7 @@ class Family:
     #1366 DC6 a record's fault is located "system <s> settings", never by the file."""
 
     label: str
-    kind: str  # "no-folder" | "stored" | "drop" | "set"
+    kind: str  # "no-folder" | "drop-all" | "drop" | "set"
     names: tuple[str, ...]
     mutate: Callable[[Path, str], Any]
     key: str = ""
@@ -51,11 +51,12 @@ def _remove_file(folder: Path, system: str) -> None:
 
 # Retired (#1366 P2/O9): the `config-env-not-utf8` and `config-env-unreadable` families. A settings FILE that is
 # not text, or not a plain file, can no longer reach a run (the store refuses non-text settings at write, the files
-# are retired); what is left of them is an unusable record: empty settings, the `config-env-absent` family here.
+# are retired); what is left of them is an unusable record: no settings at all, the `config-env-absent` family here (a
+# system record is always its settings, a `SystemConfig`; "unusable" is the adapter's `check_settings`, down at start).
 # The store's refusal of bad bytes: tenant_1108_p4/test_system_records_1366.py.
 FILE_FAMILIES: tuple[Family, ...] = (
     Family("no-folder", "no-folder", (NOT_CONFIGURED, "system {system} settings"), _remove_folder),
-    Family("config-env-absent", "stored", ("system {system} settings",), _remove_file),
+    Family("config-env-absent", "drop-all", ("system {system} settings",), _remove_file),
 )
 
 
@@ -146,10 +147,10 @@ def _landed(record: Any, system: str, family: Family) -> bool:
     entry = record.systems.get(system)
     if family.kind == "no-folder":
         return system not in record.systems
-    if family.kind == "stored":
-        return isinstance(entry, ConfigFault)
     if not isinstance(entry, SystemConfig):
         return False
+    if family.kind == "drop-all":
+        return len(entry) == 0
     if family.kind == "drop":
         return family.key not in entry
     return entry.get(family.key) == family.value
@@ -246,8 +247,8 @@ def _no_systems(folder: Path, _system: str) -> None:
 
 
 def _every_record_faulted(folder: Path, _system: str) -> None:
-    """Every configured system's record unusable (empty settings: what an upgrade leaves, R12), each a stored fault in the
-    run's tenant. (#1366 P2/O9 retired the arm that planted a `tacit-knowledge` `config.env` that was not UTF-8: no
+    """Every configured system's record unusable (empty settings: what an upgrade leaves, R12), each judged down at start by
+    its adapter's settings check. (#1366 P2/O9 retired the arm that planted a `tacit-knowledge` `config.env` that was not UTF-8: no
     record can exist for a platform-served name, R3, and a bad file cannot reach a run.)"""
     for config in sorted((S.settings_of(folder) / "systems").glob("*/config.env")):
         config.unlink()
@@ -279,8 +280,9 @@ def test_1390_judge_run_never_marks_the_platform_served_registry_down(
     assert "tacit-knowledge" in record.grants.gather.systems, "premise: the tenant grants the registry"
     assert "tacit-knowledge" not in checkout_roster.adapter_files, "premise: no file serves it"
     if label == "every-record-faulted":
-        assert any(isinstance(v, ConfigFault) for v in record.systems.values()), (
-            f"premise: the records hold stored faults: {record.systems!r}")
+        assert record.systems, "premise: the tenant has system records"
+        assert all(len(v) == 0 for v in record.systems.values()), (
+            f"premise: every record holds no settings (so every adapter's check says unusable): {record.systems!r}")
 
     judged = system_status.judge_run(checkout_roster, record, defender_dir=S.DEFENDER)
 
@@ -290,8 +292,8 @@ def test_1390_judge_run_never_marks_the_platform_served_registry_down(
         assert judged.down, "positive control: settings that break adapters take them down"
 
 
-def test_1390_the_platform_verbs_answer_over_records_holding_stored_config_faults(tmp_path, checkout_roster):
-    """With the tenant's system records all unusable (stored ConfigFaults), neither `lookup` nor `health-check` of `tacit-knowledge` raises one, and `health-check` answers. A4. (Was: a stored fault for tacit-knowledge itself; no record can exist for a platform-served name, R3, so the premise is retired, #1366 P2/O9.)"""
+def test_1390_the_platform_verbs_answer_over_records_whose_settings_are_all_unusable(tmp_path, checkout_roster):
+    """With the tenant's system records all unusable (no settings: every adapter's check raises), neither `lookup` nor `health-check` of `tacit-knowledge` raises one, and `health-check` answers. A4. (Was: a stored fault for tacit-knowledge itself; no record can exist for a platform-served name, R3, so the premise is retired, #1366 P2/O9.)"""
     from defender.systems.verbs import ModuleVerbRegistry
 
     root = tmp_path / "tenants"
@@ -299,8 +301,9 @@ def test_1390_the_platform_verbs_answer_over_records_holding_stored_config_fault
         "  tacit-knowledge:\n    health-check: {roles: [gather]}\n    lookup: {roles: [gather]}\n"))
     _every_record_faulted(folder, "tacit-knowledge")
     record = S.resolve(root)
-    assert any(isinstance(v, ConfigFault) for v in record.systems.values()), (
-        f"premise: the records hold stored faults: {record.systems!r}")
+    assert record.systems, "premise: the tenant has system records"
+    assert all(len(v) == 0 for v in record.systems.values()), (
+        f"premise: every record holds no settings: {record.systems!r}")
     verbs = ModuleVerbRegistry(checkout_roster, record.grants.gather).verbs("tacit-knowledge")
     ctx = _ctx(record, tmp_path)
 
@@ -312,7 +315,7 @@ def test_1390_the_platform_verbs_answer_over_records_holding_stored_config_fault
             outcomes[name] = exc
 
     assert not [e for e in outcomes.values() if isinstance(e, ConfigFault)], (
-        f"a platform verb raised the stored ConfigFault: {outcomes}")
+        f"a platform verb raised the ConfigFault of an unusable record: {outcomes}")
     assert isinstance(outcomes["health-check"], dict), (
         f"health-check did not answer over the faulted record: {outcomes['health-check']!r}")
 

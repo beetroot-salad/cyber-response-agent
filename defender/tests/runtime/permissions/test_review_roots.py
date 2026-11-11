@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from defender.kit import transport
+from defender.kit.access import AccessDeclaration
 from defender.integrations import elastic_adapter
 from defender.kit.faults import ConfigFault
 from defender.kit.settings import NOT_CONFIGURED
@@ -37,7 +38,7 @@ def _ctx(record, where: Path):
 
 
 def test_settings_faults_name_no_host_path(tmp_path):
-    from defender.integrations import cmdb_adapter
+    from defender.integrations import cmdb_adapter, identity_adapter
 
     root, folder = _tenant(tmp_path, "pth")
     # #1366 P2/O9: a settings file that is not UTF-8 cannot reach a run; the record that fails the judgement is a placeholder
@@ -48,7 +49,7 @@ def test_settings_faults_name_no_host_path(tmp_path):
     ctx = _ctx(record, tmp_path)
 
     texts = {
-        "placeholder": str(record.systems["identity"]),
+        "placeholder": str(_raised(identity_adapter.check_settings, record)),  # the judgement of the stored settings
         "missing key": str(_raised(cmdb_adapter.health_check, ctx)),
         "elastic key": str(_raised(elastic_adapter.query, ctx, native_query="*")),
         "no folder": str(_raised(transport.system_entry, ctx, "no-such-system")),
@@ -78,15 +79,9 @@ def test_lone_cr_line_endings_parse_as_lines(tmp_path):
     assert record.systems["ticket"]["TICKET_KEY_PATTERN"] == "CRX-[0-9]+"
 
 
-def test_oversized_config_is_that_system_down_not_a_crash(tmp_path):
-    """A sparse config.env far larger than any settings file is that system's ConfigFault at
-    resolve — the run goes on — never a MemoryError out of the resolver."""
-    root, folder = _tenant(tmp_path, "big")
-    with open(S.config_path(folder, "cmdb"), "r+b") as fh:
-        fh.truncate(64 << 20)
-    record = S.resolve(root)
-    assert isinstance(record.systems["cmdb"], ConfigFault), record.systems["cmdb"]
-    assert not isinstance(record.systems["identity"], ConfigFault), "a sibling went down with it"
+# test_oversized_config_is_that_system_down_not_a_crash moved (repair round 7, DC7/R10): the run no longer reads a
+# `config.env`, so an oversized one cannot reach it. The only production folder reader left is the operator's
+# `set-system` / `import`; its arm is `tenant_1108_p4/test_folder_reader_w_1366.py`.
 
 
 @pytest.mark.parametrize("alias", ["hard link", "symlink"])
@@ -156,18 +151,23 @@ def test_deeply_nested_receipt_is_unreadable_at_any_depth(tmp_path):
 
 
 def test_stored_faults_carry_no_traceback_or_cause(tmp_path):
-    """A fault the record keeps is text only: no traceback (whose frames hold the live dict
-    behind the read-only view) and no cause (an OSError carrying the host path)."""
+    """A fault the run's record keeps is text only: no traceback (whose frames hold the live structures behind the
+    read-only view) and no cause or context (a parser error carrying the declaration's text). The fault production still
+    keeps per system is the one for an access declaration that fails `parse_access` (a stored declaration is parsed once
+    at run start and kept as its fault, DC6); the settings arm is retired with the stored settings fault (a system's
+    settings are always a `SystemConfig`, judged by the adapter's check, repair round 7)."""
     root, folder = _tenant(tmp_path, "sfc")
-    cfg = S.config_path(folder, "cmdb")
-    cfg.unlink()
-    cfg.mkdir()  # unreadable as a file: an OSError underneath the fault
+    access = S.settings_of(folder) / "systems" / "cmdb" / "access.yaml"
+    access.write_text("access: [\n", encoding="utf-8")  # unparseable YAML: a parser error underneath the fault
     record = S.resolve(root)
-    kept = record.systems["cmdb"]
-    assert isinstance(kept, Exception), kept
+    kept = record.access["cmdb"]
+    assert isinstance(kept, ConfigFault), kept
     assert kept.__traceback__ is None, f"{kept!r} keeps a traceback"
     assert kept.__cause__ is None, f"{kept!r} keeps its cause: {kept.__cause__!r}"
     assert kept.__context__ is None, f"{kept!r} keeps its context: {kept.__context__!r}"
+    assert "system cmdb access" in str(kept), str(kept)
+    assert str(tmp_path) not in str(kept), "the fault names the host path"
+    assert isinstance(record.access["identity"], AccessDeclaration), "a sibling's declaration went down with it"
 
 
 def _raised(fn, *args, **kw):
