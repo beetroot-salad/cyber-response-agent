@@ -19,7 +19,7 @@ from defender._model import model
 from defender.records import Run, RunPaths
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
@@ -39,6 +39,9 @@ from defender.learning.author.version_control import DeliveryRefused
 from defender.learning.leads import lead_render
 from defender import box as _box
 from defender.systems.verbs import engine_for
+
+if TYPE_CHECKING:
+    from defender.systems.catalog import Catalog, TenantSystems
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
     CATALOG_PREFIX,
@@ -191,22 +194,20 @@ class LeadAuthorDeps:
 
 def build_lead_author_deps(  # noqa: PLR0913 — the lane's tree, state and batch, plus the tenant's systems
     paths: _loop_config.LoopPaths, *, state: LearningState, trees: DrainTrees,
-    batch: Any = None, git_timeout: float = GIT_TIMEOUT_SECONDS, directory: Any = None,
-    systems: Any = None,
+    batch: Any = None, git_timeout: float = GIT_TIMEOUT_SECONDS, systems: TenantSystems | Catalog,
 ) -> LeadAuthorDeps:
     """The lane's seams over `batch`'s draft (#1108 P4 O7, OD16), reading and writing `skills/`
     through `trees`, the lane's held mounts (`open_drain_trees`): `trees` must hold the draft's
     `agent/skills` itself (`paths.skills_dir` with no batch), else `LeadAuthorError`. `paths`
     names the product checkout. The deps must not outlive `trees`.
 
-    The lane's systems are handed, never defaulted (#1366 O1, DC7, R16): `systems` (the tenant's
-    `TenantSystems`, or the whole `Catalog` from a caller with no tenant), else the tenant's built
-    once from its records (`directory`, the drain's or the by-hand entry's): its current enabled
-    records the product checkout's catalog carries, plus the platform-served ones. A lane with
-    neither is refused (`declared_systems.lane_systems`). Only a caller with no tenant, handing
-    the catalog, has the batch's committed markers declare systems beside it. The spawned
-    author's write and `rm` lanes are drawn over the same set."""
-    from defender.learning.leads.declared_systems import declared_systems_over, lane_names, lane_systems
+    The lane's systems are handed, never defaulted (#1366 O1, DC7, R16): the tenant's
+    `TenantSystems` (its current enabled records the product checkout's catalog carries, plus the
+    platform-served ones), built once by the entry that admitted the tenant, or the whole
+    `Catalog` from a caller with no tenant. Only a caller with no tenant, handing the catalog, has
+    the batch's committed markers declare systems beside it. The spawned author's write and `rm`
+    lanes are drawn over the same set."""
+    from defender.learning.leads.declared_systems import declared_systems_over, lane_names
     from defender.systems.catalog import Catalog
 
     if batch is not None:
@@ -216,10 +217,9 @@ def build_lead_author_deps(  # noqa: PLR0913 — the lane's tree, state and batc
     else:
         root, skills_dir, base = paths.repo_root, paths.skills_dir, None
     skills = lane_skills(trees, paths, skills_dir=skills_dir)
-    handed = lane_systems(paths.repo_root, paths.tenant, directory, systems=systems)
-    declared = (declared_systems_over(handed.roster, agent=base) if isinstance(handed, Catalog)
-                else lane_names(handed))
-    lanes = tuple(sorted(lane_names(handed)))
+    declared = (declared_systems_over(systems.roster, agent=base) if isinstance(systems, Catalog)
+                else lane_names(systems))
+    lanes = tuple(sorted(lane_names(systems)))
     return LeadAuthorDeps(
         paths=paths,
         state=state,
@@ -252,12 +252,10 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
     deps: LeadAuthorDeps | None = None,
     box: Any = None,
     on_done: DoneSink | None = None,
-    directory: Any = None,
-    systems: Any = None,
+    systems: TenantSystems | Catalog | None = None,
 ) -> int:
     """Serve one run under the per-author queue lock, over `batch`'s draft (`deps.batch` when
-    deps are given). `directory` is the tenant records the systems are read from (#1366 O1), or
-    `systems` the systems handed (`build_lead_author_deps`)."""
+    deps are given). Without deps, `systems` are the lane's systems (`build_lead_author_deps`)."""
     if deps is None and paths is None:
         raise TypeError("run takes paths= (or deps=)")
     # The lane's grant is read before anything else: a non-member label never reaches the
@@ -293,24 +291,32 @@ def run(  # noqa: PLR0913 — the by-hand entry: the run, its lane, and each sea
                 return QUEUE_LOCK_SKIP_RC
             with open_drain_trees(paths, label, batch=batch) as trees:
                 deps = build_lead_author_deps(paths, state=state, trees=trees, batch=batch,
-                                              directory=directory, systems=systems)
+                                              systems=_handed(systems))
                 return _run_locked(run_dir, deps, box=box, on_done=sink)
+
+
+def _handed(systems: TenantSystems | Catalog | None) -> TenantSystems | Catalog:
+    """The lane's handed systems; a lane building its deps with none is refused (#1366 R16: never defaulted)."""
+    if systems is None:
+        raise LeadAuthorError("the lead-author lane was handed no systems: its entry hands the tenant's (or, with no "
+                              "tenant, the whole catalog)")
+    return systems
 
 
 def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the run, its held lock and trees, and its seams
     run: Run, *, paths: _loop_config.LoopPaths, state: LearningState, trees: DrainTrees,
     box: Any = None, on_done: DoneSink, git_timeout: float = GIT_TIMEOUT_SECONDS,
-    batch: Any = None, deps: LeadAuthorDeps | None = None, directory: Any = None,
-    systems: Any = None,
+    batch: Any = None, deps: LeadAuthorDeps | None = None,
+    systems: TenantSystems | Catalog | None = None,
 ) -> int:
     """`run` for a caller that already holds the per-author queue lock (the drain holds it for
     its whole tick, since it defers the done sentinel) and the lane's held mounts, `trees` (the
     drain's work step opens them over `batch`'s draft). Never skips. `run` is the run the drain
     opened from the claim's address; `deps` given are used as built, else they are built over
-    `batch`."""
+    `batch`, over `systems`."""
     if deps is None:
         deps = build_lead_author_deps(paths, state=state, trees=trees, batch=batch,
-                                      git_timeout=git_timeout, directory=directory, systems=systems)
+                                      git_timeout=git_timeout, systems=_handed(systems))
     return _run_locked(Path(run.run_dir), deps, box=box, on_done=on_done)
 
 
@@ -585,6 +591,7 @@ def main(argv: list[str], *, directory: Any = None) -> int:
     args = p.parse_args(argv)
     from defender import tenancy
     from defender.records.formats import TenantRefused
+    from defender.learning.leads.declared_systems import tenant_systems_of
     from defender.systems.run_tenant import host_tenant
 
     # The request's tenant through the one host acceptance (r10 A1), held while the run is
@@ -600,10 +607,15 @@ def main(argv: list[str], *, directory: Any = None) -> int:
         if isinstance(opened, str):
             print(f"lead_author: {opened}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 2
+        paths = _loop_config.LoopPaths.for_tenant(admitted.tenant)
+        # The tenant's systems, from the records it was admitted through (#1366 O1, R16).
+        try:
+            systems = tenant_systems_of(paths.repo_root, admitted.directory.current_records(admitted.tenant.id))
+        except TenantRefused as refused:
+            print(f"lead_author: {refused}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+            return 2
         # By hand this serves the lead-author lane's own queue under its lock, so it names that lane.
-        return run(opened, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL,
-                   paths=_loop_config.LoopPaths.for_tenant(admitted.tenant),
-                   directory=admitted.directory)
+        return run(opened, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL, paths=paths, systems=systems)
 
 
 #: Re-exports: callers import these names from here; their real homes are the source

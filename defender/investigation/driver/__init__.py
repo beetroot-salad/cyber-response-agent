@@ -459,16 +459,9 @@ def _correlation_dispatch_at_run_start(
     return tenant.correlation
 
 
-def _adapters_at_run_start(
-    defender_dir: Path, roster: RosterRead, verbs: Any, tenant: RunTenant,
-) -> tuple[RosterRead, Any]:
-    """`_run_start_reads` without the narrowed tenant."""
-    roster, verbs, _tenant = _run_start_reads(defender_dir, roster, verbs, tenant)
-    return roster, verbs
-
-
 def _run_start_reads(
     defender_dir: Path, roster: RosterRead, verbs: Any, tenant: RunTenant,
+    catalog: RosterRead | None = None,
 ) -> tuple[RosterRead, Any, RunTenant]:
     """Everything a run resolves from an adapters tree, resolved first — before the budget,
     logger or any model — so an unreadable tree fails here as `RegistryError`, not mid-tool.
@@ -480,14 +473,16 @@ def _run_start_reads(
     The invlang `nothing-to-try` gate is a no-tenant surface: it is handed the WHOLE catalog,
     the checkout's (`hold_capabilities`), rather than reading lazily, so a read fault is not
     misfiled as a document fault by the gates that call it. A whole read of the checkout is
-    reused; a tenant's roster never is, though it shares the checkout's root.
+    reused (`catalog`, the one a tenant's roster was drawn from, or `roster` itself when whole);
+    a tenant's roster never is, though it shares the checkout's root.
 
     The tenant comes back with its grants narrowed to its roster (#1366 R12,
     `run_tenant.narrowed_to`): a grant on a catalog system the tenant has no record of is not
     the run's, whoever resolved the tenant."""
     checkout = DefenderPaths(_git.REPO_ROOT).adapters_dir
-    whole = (roster if roster.whole and Path(roster.root).resolve() == checkout.resolve()
-             else read_roster(checkout))
+    whole = next((read for read in (catalog, roster)
+                  if read is not None and read.whole and Path(read.root).resolve() == checkout.resolve()),
+                 None) or read_roster(checkout)
     hold_capabilities(whole)
     tenant = narrowed_to(tenant, roster, roster if roster.whole else whole)
     # Built over the run's gather grant; there is no process-level one.
@@ -692,7 +687,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
     roster, verbs, tenant = _run_start_reads(
-        defender_dir, systems.roster if systems is not None else roster, verbs, tenant)
+        defender_dir, systems.roster if systems is not None else roster, verbs, tenant,
+        catalog=systems.catalog if systems is not None else None)
     judged = _systems_at_run_start(
         state, systems, roster, tenant, defender_dir,
         known_ids=frozenset() if verbs is None else verbs.branch_identities())

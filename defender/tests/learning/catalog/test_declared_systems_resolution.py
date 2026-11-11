@@ -50,6 +50,7 @@ from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender import _git
 from defender.learning.leads import lead_author
 from defender.tests.support.runtime.engine._declared869 import (
+    catalog_of,
     LeadAuthorSpawn,
     Spawn,
     adapters_in,
@@ -238,7 +239,6 @@ def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypat
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     repo = seed_tree(tmp_path, adapters=(), markers=("elastic",), skills=("elastic",),
                      catalog=())
-    (repo / ADAPTERS_REL).rmdir()
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     persist.append_pitfalls(
         [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")],
@@ -248,7 +248,8 @@ def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypat
 
     with pytest.raises(LeadAuthorError):
         drains._invoke_pitfalls(
-            paths, _state1135.state_for_paths(paths), on_curated=lambda _d: None, label=LEAD_AUTHOR_DRAIN_LABEL)
+            paths, _state1135.state_for_paths(paths), on_curated=lambda _d: None, label=LEAD_AUTHOR_DRAIN_LABEL,
+            systems=catalog_of(repo))  # a catalog that declares no system: the lane's own refusal
 
     assert len(persist.read_pitfalls(_state1135.state_for_paths(paths))) == 2
     assert not (location_path(paths.state_root) / PITFALLS.consumed).exists()

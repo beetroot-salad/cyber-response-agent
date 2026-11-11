@@ -77,8 +77,7 @@ class _LeadAuthorRetry(Exception):
 def _invoke_lead_author(  # noqa: PLR0913 — the work step's call shape plus its bound label, git bound and tenant records
     paths: LoopPaths, state: LearningState, run: Run, *, label: DrainLabel,
     batch: Batch | None = None, box: Any = None, on_done: Callable[[str | None], None],
-    git_timeout: float = GIT_TIMEOUT_SECONDS, directory: TenantDirectory | None = None,
-    systems: TenantSystems | Catalog | None = None,
+    git_timeout: float = GIT_TIMEOUT_SECONDS, systems: TenantSystems | Catalog,
 ) -> None:
     """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
     `lead_author_drain`): the held roots of its writable mounts — the lanes of `batch`'s draft —
@@ -86,9 +85,9 @@ def _invoke_lead_author(  # noqa: PLR0913 — the work step's call shape plus it
     raises (#1134 A3, #1108 P4). A fault holding them propagates as itself, never as a
     swallowed transient. With no `batch` (a checkout-shaped scene), the label's trees over
     `paths` are held, and the curator refuses at its commit (it commits only into a batch).
-    The lane's systems are handed (#1366 R16): the tenant's from its records (`directory`, bound
-    in by `lead_author_drain`), or `systems` as built; with neither the lane refuses
-    (`declared_systems.lane_systems`)."""
+    The lane's systems are handed (#1366 R16): the tenant's, read once per tick as
+    `lead_author_drain` opens its delivery (`_tick_systems`), or the whole `Catalog` from a
+    caller with no tenant."""
     from defender.learning.leads.lead_extraction import LeadAuthorError
 
     _logger.info("step=lead-author")
@@ -100,7 +99,7 @@ def _invoke_lead_author(  # noqa: PLR0913 — the work step's call shape plus it
             "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             lambda mod: mod.run_under_held_queue_lock(
                 run, paths=paths, state=state, trees=trees, box=box, on_done=on_done,
-                git_timeout=git_timeout, batch=batch, directory=directory, systems=systems,
+                git_timeout=git_timeout, batch=batch, systems=systems,
             ),
         )
     if rc not in (0, None):
@@ -579,8 +578,7 @@ def _invoke_pitfalls(  # noqa: PLR0913 — the work step's call shape plus its b
     paths: LoopPaths, state: LearningState, *, label: DrainLabel, batch: Batch | None = None,
     box: Any = None, on_curated: Callable[[PitfallsDisposition], None],
     lock_wait_seconds: int | None = None,
-    git_timeout: float = GIT_TIMEOUT_SECONDS, directory: TenantDirectory | None = None,
-    systems: TenantSystems | Catalog | None = None,
+    git_timeout: float = GIT_TIMEOUT_SECONDS, systems: TenantSystems | Catalog,
 ) -> int:
     """The lead-author lane's default pitfalls work step: as `_invoke_lead_author` (its systems
     handed the same way), the held roots
@@ -594,7 +592,7 @@ def _invoke_pitfalls(  # noqa: PLR0913 — the work step's call shape plus its b
             lambda mod: mod.run_pitfalls(
                 paths=paths, state=state, trees=trees, batch=batch, box=box,
                 on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
-                git_timeout=git_timeout, directory=directory, systems=systems,
+                git_timeout=git_timeout, systems=systems,
             ),
         )
     return rc if rc is not None else 0
@@ -741,6 +739,26 @@ def _open_delivery(
             raise _classified_refusal(
                 f"the tenant {tenant.id}'s delivery refused: {refused}", refused) from None
         yield delivery
+
+
+def _tick_systems(paths: LoopPaths, records: TenantDirectory) -> TenantSystems:
+    """The lead-author tick's systems (#1366 O1, R16): the selected tenant's, from its current
+    records over the catalog of the product checkout `paths` names. Read once, as the tick's
+    delivery opens and before any claim, so every claim and the pitfalls curation of the tick are
+    handed one set, and an outage skips the tick (`_Refused`, transient) with no claim taken and
+    no attempt counted. An unreadable adapters directory refuses the stage."""
+    from defender.learning.leads.declared_systems import AdaptersUnreadable, tenant_systems_of
+    from defender.tenancy import RecordsUnreachable
+
+    tenant = paths.tenant
+    if tenant is None:
+        raise _Refused("the drain delivers to a tenant's repository: no tenant is selected")
+    try:
+        return tenant_systems_of(paths.repo_root, records.current_records(tenant.id))
+    except RecordsUnreachable as down:
+        raise _Refused(f"the tenant {tenant.id}'s records could not be read: {down}", transient=True) from None
+    except AdaptersUnreadable as unreadable:
+        raise _Refused(f"the product checkout's adapters could not be read: {unreadable}") from None
 
 
 def revert_delivery(
@@ -1050,23 +1068,29 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     lock_wait_seconds = repo_lock_wait_seconds()
     # The lane's label and git bound reach its work steps bound into the DEFAULT seams, so an
     # injected seam keeps its call shape (#1134).
-    # The tenant records reach the default steps the same way: the lanes' systems are the
-    # tenant's current records' (#1366 O1).
-    if run_lead_author is None:
-        run_lead_author = functools.partial(
-            _invoke_lead_author, label=LEAD_AUTHOR_DRAIN_LABEL, git_timeout=git_timeout,
-            directory=records,
-        )
-    if run_pitfalls is None:
-        run_pitfalls = functools.partial(
-            _invoke_pitfalls, lock_wait_seconds=lock_wait_seconds, label=LEAD_AUTHOR_DRAIN_LABEL,
-            git_timeout=git_timeout, directory=records,
-        )
-    lead_step, pitfalls_step = run_lead_author, run_pitfalls
+    # The default steps are handed the tenant's systems, read once per tick as the delivery opens
+    # (#1366 O1, R16); an injected step brings its own.
+    tick_systems: list[TenantSystems] = []
+    reads_systems = run_lead_author is None or run_pitfalls is None
 
-    def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
-        return _open_delivery(paths, directory=records, client=client, identity=identity,
-                              credential_config=credential_config, issuer_transport=issuer_transport)
+    def steps() -> tuple[Callable[..., None], Callable[..., int]]:
+        return (
+            run_lead_author or functools.partial(
+                _invoke_lead_author, label=LEAD_AUTHOR_DRAIN_LABEL, git_timeout=git_timeout,
+                systems=tick_systems[0]),
+            run_pitfalls or functools.partial(
+                _invoke_pitfalls, lock_wait_seconds=lock_wait_seconds, label=LEAD_AUTHOR_DRAIN_LABEL,
+                git_timeout=git_timeout, systems=tick_systems[0]),
+        )
+
+    @contextlib.contextmanager
+    def open_delivery() -> Iterator[TenantDelivery]:
+        with _open_delivery(paths, directory=records, client=client, identity=identity,
+                            credential_config=credential_config,
+                            issuer_transport=issuer_transport) as delivery:
+            if reads_systems:
+                tick_systems[:] = [_tick_systems(paths, records)]
+            yield delivery
 
     with LearningState.open(paths) as state, state.lock(
             LEAD_AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as locked:
@@ -1089,7 +1113,7 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
                 paths, state, label=LEAD_AUTHOR_DRAIN_LABEL,
                 has_work=_has_lead_author_work,
                 do_work=lambda work_paths, *, batch, box=None: _drain_lead_author(
-                    work_paths, state, lead_step, pitfalls_step, box=box, batch=batch,
+                    work_paths, state, *steps(), box=box, batch=batch,
                     lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
                     claims=claims, directory=records,
                 ),

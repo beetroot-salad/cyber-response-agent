@@ -36,15 +36,21 @@ def lead_trees(paths: LoopPaths) -> DrainTrees:
 
 def handed_systems(paths: LoopPaths, systems: Any = None, directory: Any = None) -> Any:
     """The systems a lead lane over `paths` is handed (#1366 R16: never defaulted by the lane, so a test hands them). `systems` as
-    given; with a `directory` (the tenant's records), none: the lane builds the tenant's own from them; else the whole catalog of
+    given; with a `directory` (the tenant's records), the tenant's own, built from them as the drain's tick builds them (the
+    tenant `paths` names); else the whole catalog of
     the product checkout `paths.repo_root`, read as the lane's resolver reads it (an unreadable adapters directory raises
     `AdaptersUnreadable` here). That last is what a caller with no tenant hands; a scene whose lane has a tenant but whose
     assertion is the gate's or the box's, not which systems the tenant has, hands it too (membership by records is pinned in
     `test_declared_systems_resolution` and `test_tenant_surfaces_1366`)."""
     from defender.tests.support.runtime.engine._declared869 import catalog_of
 
-    if systems is not None or directory is not None:
+    if systems is not None:
         return systems
+    if directory is not None:
+        from defender.learning.leads.declared_systems import tenant_systems_of
+
+        assert paths.tenant is not None, "a lane handed a tenant's records names that tenant"
+        return tenant_systems_of(paths.repo_root, directory.current_records(paths.tenant.id))
     return catalog_of(paths.repo_root)
 
 
@@ -58,7 +64,7 @@ def lead_deps(paths: LoopPaths, *, systems: Any = None, directory: Any = None) -
     trees = lead_trees(paths)
     try:
         return lead_author.build_lead_author_deps(paths, state=open_state(paths), trees=trees,
-                                                  systems=handed_systems(paths, systems, directory), directory=directory)
+                                                  systems=handed_systems(paths, systems, directory))
     except BaseException:
         trees.close()
         raise
@@ -88,14 +94,16 @@ def build_deps_handed(paths: LoopPaths, *, systems: Any = None, **kw: Any) -> An
     (`state=`, `trees=`, `batch=`, `directory=`...)."""
     from defender.learning.leads import lead_author
 
-    return lead_author.build_lead_author_deps(paths, systems=handed_systems(paths, systems, kw.get("directory")), **kw)
+    directory = kw.pop("directory", None)
+    return lead_author.build_lead_author_deps(paths, systems=handed_systems(paths, systems, directory), **kw)
 
 
 def run_pitfalls_handed(*, paths: LoopPaths, systems: Any = None, **kw: Any) -> int:
     """`pitfalls_curator.run_pitfalls(paths=paths, **kw)` handed its systems (`handed_systems`, #1366 R16)."""
     from defender.learning.leads import pitfalls_curator
 
-    return pitfalls_curator.run_pitfalls(paths=paths, systems=handed_systems(paths, systems, kw.get("directory")), **kw)
+    directory = kw.pop("directory", None)
+    return pitfalls_curator.run_pitfalls(paths=paths, systems=handed_systems(paths, systems, directory), **kw)
 
 
 def run_lead_handed(run: Any, *, paths: LoopPaths | None = None, systems: Any = None, **kw: Any) -> int:
@@ -104,7 +112,8 @@ def run_lead_handed(run: Any, *, paths: LoopPaths | None = None, systems: Any = 
 
     if paths is None:
         return lead_author.run(run, **kw)
-    return lead_author.run(run, paths=paths, systems=handed_systems(paths, systems, kw.get("directory")), **kw)
+    directory = kw.pop("directory", None)
+    return lead_author.run(run, paths=paths, systems=handed_systems(paths, systems, directory), **kw)
 
 
 def held_skills(root: Path) -> Held:
@@ -304,7 +313,7 @@ def draft_lead_deps(lane: Any, *, state: Any = None, systems: Any = None, direct
     try:
         deps = lead_author.build_lead_author_deps(
             lane.paths, state=state if state is not None else open_state(lane.paths),
-            trees=trees, batch=lane.batch, systems=handed_systems(lane.paths, systems, directory), directory=directory)
+            trees=trees, batch=lane.batch, systems=handed_systems(lane.paths, systems, directory))
     except BaseException:
         trees.close()
         raise
@@ -407,7 +416,7 @@ def run_pitfalls(lane: Any, state: Any, spawn: Any, *, systems: Any = None, dire
     with C.draft_trees(lane) as trees:
         return pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, invoke=spawn,
                                              trees=trees, batch=lane.batch,
-                                             systems=handed_systems(lane.paths, systems, directory), directory=directory)
+                                             systems=handed_systems(lane.paths, systems, directory))
 
 
 @contextmanager

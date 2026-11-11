@@ -54,15 +54,17 @@ def run_stage(stage) -> int:
 def product_repo(tmp_path: Path, *, adapters: tuple[str, ...] = ()) -> Path:
     """A scratch product checkout (a real git repo with a `defender/` tree and one commit) used
     as the drain's `paths.repo_root`. `adapters` names systems whose shipped adapter module it
-    carries, for lanes that resolve declared systems and verbs from the product (#1172)."""
+    carries, for lanes that resolve declared systems and verbs from the product (#1172). Its adapters directory is
+    always there, empty without `adapters`, as every product checkout carries one: the lead-author tick reads it as its
+    delivery opens (#1366 R16)."""
     from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 
     repo = tmp_path / "product"
     (repo / "defender" / "lessons").mkdir(parents=True)
     (repo / "defender" / "lessons" / "product-era.md").write_text("product era\n", encoding="utf-8")
     (repo / "defender" / "README.md").write_text("scratch product checkout\n", encoding="utf-8")
+    (repo / "defender" / "integrations").mkdir()
     if adapters:
-        (repo / "defender" / "integrations").mkdir()
         for system in adapters:
             name = f"{system.replace('-', '_')}_adapter.py"
             shutil.copyfile(DEFENDER / "integrations" / name, repo / "defender" / "integrations" / name)

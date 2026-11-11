@@ -895,7 +895,7 @@ def _run_roster(defender_dir: Path) -> RosterRead:
 
 
 def _judge_start(tenant: RunTenant, *, roster: RosterRead, defender_dir: Path,
-                 known_ids: Collection[str] = ()) -> RunSystems:
+                 known_ids: Collection[str] = (), catalog: RosterRead | None = None) -> RunSystems:
     """#1256 O-8, before the run exists: the run's ONE judgement of its systems
     (`system_status.judge_run`) — each granted system judged by its own adapter's settings check
     over `roster`, the roster this run reads — handed back whole, for `main` to hand on to the
@@ -905,10 +905,10 @@ def _judge_start(tenant: RunTenant, *, roster: RosterRead, defender_dir: Path,
     folder, the box and any model call; nothing is logged or held here — the driver does that
     once, when the run starts. Never in the tenant resolution the tenant check and
     `defender-policy` share: whether a system is usable is a run's question, not the tenant's
-    (D4)."""
+    (D4). `catalog`, the whole catalog `roster` was drawn from, is handed on with the judgement."""
     try:
         systems = system_status.judge_run(
-            roster, tenant, defender_dir=defender_dir, known_ids=known_ids)
+            roster, tenant, defender_dir=defender_dir, known_ids=known_ids, catalog=catalog)
         system_status.require_usable(tenant.grants, systems.down)
     except (GrantError, system_status.NoUsableSystem) as refusal:
         sys.exit(f"[run.py] this run's tenant {tenant.tenant_id!r} cannot be used: {refusal}")
@@ -1270,7 +1270,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             known_ids = (() if world is None else family_identities(world.family, world.arm_ids))
             systems = _judge_start(
                 tenant, defender_dir=DEFENDER_DIR, roster=verdict.systems.roster,
-                known_ids=known_ids)
+                known_ids=known_ids, catalog=verdict.systems.catalog.roster)
             # The request tokens' signer, over the systems just judged, on both lanes (#1342
             # R6-8): a configuration that cannot sign them refuses here, before the run is made;
             # nothing is signed until a call or a ticket leg asks (r7 A20).

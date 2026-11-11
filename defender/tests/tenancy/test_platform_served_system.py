@@ -153,13 +153,13 @@ def test_1390_the_map_lists_the_registry_only_for_a_grant_that_holds_it():
 def test_1390_a_declared_set_of_only_platform_names_declares_nothing():
     """Every lead-author and pitfalls guard refuses a tree with no real system, though the registry's name is in every roster; each still admits the registry's paths once a real one exists. A14."""
     from defender.learning.leads.declared_systems import (
-        adapter_systems_under,
         declares_no_system,
+        read_adapters,
         with_platform_systems,
     )
 
-    assert SYSTEM not in adapter_systems_under(ADAPTERS), "the adapter half names a system with no adapter"
-    assert "cmdb" in adapter_systems_under(ADAPTERS)
+    assert SYSTEM not in read_adapters(ADAPTERS).adapter_files, "the adapter half names a system with no adapter"
+    assert "cmdb" in read_adapters(ADAPTERS).adapter_files
     assert declares_no_system(frozenset({SYSTEM}))
     assert not declares_no_system(frozenset({SYSTEM, "cmdb"}))
     widened = with_platform_systems(frozenset({"cmdb"}))

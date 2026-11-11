@@ -24,7 +24,6 @@ ADAPTERS_REL = DefenderPaths.adapters_rel
 
 if TYPE_CHECKING:
     from defender.systems.catalog import Catalog, TenantSystems
-    from defender.tenancy import Tenant, TenantDirectory
     from defender.tenancy.models import TenantRecords
 
 _logger = logging.getLogger(__name__)
@@ -57,12 +56,6 @@ def read_adapters(adapters_dir: Path) -> RosterRead:
             f"declared_systems: refused adapter name {name!r} from {adapters_dir} — {why}"
         )
     return roster
-
-
-def _adapter_names(adapters_dir: Path) -> frozenset[str]:
-    """The adapter half as a set of names: the systems with an adapter file, never the
-    platform-served ones. A caller that admits by name adds those with `with_platform_systems`."""
-    return frozenset(read_adapters(adapters_dir).adapter_files)
 
 
 def with_platform_systems(systems: frozenset[str]) -> frozenset[str]:
@@ -114,29 +107,6 @@ def declared_systems_over(
     return union
 
 
-def lane_systems(
-    repo_root: Path, tenant: Tenant | None, directory: TenantDirectory | None, *,
-    systems: TenantSystems | Catalog | None = None,
-) -> TenantSystems | Catalog:
-    """The systems a lead lane is handed (#1366 O1, DC7, R16), never defaulted: `systems` when the
-    caller built them (the tenant's, or the whole `Catalog` from a caller with no tenant), else
-    the tenant's built once here from its current records (`directory`) over the catalog of the
-    product checkout at `repo_root`. A lane with neither is refused (`LeadAuthorError`): a tenant
-    whose records were not handed is never given the checkout's adapters instead, and a caller
-    with no tenant says so by handing the catalog."""
-    if systems is not None:
-        return systems
-    if tenant is None:
-        raise LeadAuthorError(
-            "declared_systems: the lane was handed no systems and has no tenant: a caller with no "
-            "tenant hands the whole catalog (`systems=Catalog(...)`) explicitly")
-    if directory is None:
-        raise LeadAuthorError(
-            f"declared_systems: tenant {tenant.id}'s lane was handed neither its systems nor its "
-            "records: its systems are its current records', never the checkout's adapters")
-    return tenant_systems_of(repo_root, directory.current_records(tenant.id))
-
-
 def tenant_systems_of(repo_root: Path, records: TenantRecords) -> TenantSystems:
     """A tenant's systems (`TenantSystems`) from its current `records` over the catalog of the
     product checkout at `repo_root`. An unreadable adapter source raises `AdaptersUnreadable`."""
@@ -150,12 +120,3 @@ def lane_names(systems: TenantSystems | Catalog) -> frozenset[str]:
     catalog-backed records and the platform-served ones), or, from a caller with no tenant, every
     system of the whole catalog."""
     return frozenset(systems.roster.systems)
-
-
-def adapter_systems_under(adapters_dir: Path) -> frozenset[str]:
-    """The adapter half rooted at the adapters directory itself, for a caller that holds the
-    tree rather than the repo (the permission gate, handed a `defender_dir` by `bind`).
-    Reconstructing a repo root via `.parent` would read a sibling tree's adapters whenever the
-    bound tree isn't literally named `defender`.
-    """
-    return _adapter_names(adapters_dir)
