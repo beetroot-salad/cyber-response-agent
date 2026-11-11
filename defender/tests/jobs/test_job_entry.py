@@ -1644,9 +1644,11 @@ def test_m4_run_py_binds_nothing_of_the_ticket_writer_or_its_transport_at_import
     assert run_py._default_ticket_writer.__name__ == "defender.investigation.ticket_writer", "premise: the one module binding"
 
 
-def test_m4_the_disk_check_sees_the_operator_default_enqueue(scene, tmp_path):
-    """Control for the M4 disk check: `run.main`'s own default enqueue writes `learning/author-queue/case-*.json`. (M4)"""
+def test_m4_the_store_check_sees_the_operator_default_enqueue(scene, tmp_path):
+    """Control for the M4 store check: `run.main`'s own default enqueue files a waiting curation request for the tenant in the
+    learning store (#1278: the queue is rows, not `learning/author-queue/case-*.json`), and writes nothing under the tenant's folder. (M4)"""
     from defender import run as run_py
+    from defender.learning.store import blocking
 
     class Writer:
         def clear_receipt(self, *_a: Any, **_k: Any) -> None: ...
@@ -1656,14 +1658,18 @@ def test_m4_the_disk_check_sees_the_operator_default_enqueue(scene, tmp_path):
         kw["run"].facts.scrub_verdict.write('{"ran": true, "reason": "walk completed"}')
         return summary()
 
-    (scene.root / scene.t.tenant_id / "learning").mkdir()
+    def waiting() -> list[str]:
+        with blocking(scene.dsn) as store:
+            return [i.coalesce_key for i in store.work(scene.t.tenant_id) if i.kind == "curation_request" and i.status == "waiting"]
+
+    assert waiting() == [], "premise: the tenant has no request before the run"
     before = set(tree(scene.root))
     rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id, "--update-ticket"],
                      lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
                      ticket_writer=Writer(), publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
-    made = [k for k in set(tree(scene.root)) - before if re.search(r"learning/author-queue/case-.*\.json$", k)]
-    assert made, "the operator default enqueue left no queue entry the disk check can see"
+    assert len(waiting()) == 1, "the operator default enqueue left no request row the store check can see"
+    assert not [k for k in set(tree(scene.root)) - before if re.search(r"learning", k)], "the request left a file under a learning folder"
 
 
 # --- the sidecar split --------------------------------------------------------------------------------------

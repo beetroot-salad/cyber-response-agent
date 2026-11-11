@@ -464,12 +464,14 @@ def test_1360_d6_the_dev_composition_ends_the_offboarded_demo_tenants_live_jobs_
 # --- the lifecycle world: failures and running steps ------------------------------------------------
 
 @pytest.fixture
-def jobs(tmp_path: Any, data_root: Any) -> Any:
-    from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld
+def jobs(tmp_path: Any, data_root: Any, monkeypatch: Any) -> Any:
+    """The lifecycle world, with its learning database (#1278 O6): a whole offboard job purges the tenant's learning rows."""
+    from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld, learning_database
 
-    world = LifecycleWorld(tmp_path, data_root)
-    yield world
-    world.close()
+    with learning_database(monkeypatch):
+        world = LifecycleWorld(tmp_path, data_root)
+        yield world
+        world.close()
 
 
 REPOS = "/api/v1/orgs/tenants/repos"
