@@ -2,7 +2,7 @@
 
 - Store: KV v2, one secret per (tenant, system, credential generation) at `<kv mount>/data/<tenant>/<system>/g<N>`, holding
   `{"kind": ..., "fields": {...}}`; a write replaces the whole set and moves the version on.
-  The writer (`OpenBaoSecrets`, the API's port) may create, update and read metadata only; the
+  The writer (`OpenBaoSecrets`, the operator command's) may create, update and read metadata only; the
   proxy (`OpenBaoStore`) may read data only (`store_policies`).
 - Tokens: transit on the deployment's fixed mount (`configuration.issuer.TRANSIT_MOUNT`), one key
   per tenant (`transit_key_for`). The proxy may verify with any tenant's key and sign with none
@@ -187,8 +187,9 @@ class OpenBaoStore(_OpenBao):
 
 
 class OpenBaoSecrets(_OpenBao):
-    """The API's write-only secret port: set a whole credential set with its kind, and ask
-    whether one exists. It cannot read a value back."""
+    """The operator command's write-only secret port (`tenant.py set-credentials`, `systems`, `check`): set a whole
+    credential set with its kind at a credential generation, and ask whether one exists there. It cannot read a value
+    back. Not the API's `SecretPort`, which names no generation yet (#1470)."""
 
     async def put_credentials(self, tenant_id: str, system_id: str, kind: str,
                               credentials: Mapping[str, str], *, generation: int) -> None:
