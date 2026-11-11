@@ -20,14 +20,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from defender._yaml import safe_dump
 from defender.kit.access import AccessDeclaration, Route
 from defender.kit.faults import ConfigFault
 from defender.kit.settings import RECORDS, Locator, Part, SystemConfig
 from defender.systems.catalog import Catalog, route_of
 from defender.systems.verbs import is_platform_served
 from defender.tenancy import access_pointer, parse_access
-from defender.tenancy.case_ticket import CASE_RECORD_REL, CaseTicketError, parse_case_record
+from defender.tenancy.case_ticket import CaseTicketError, case_record_text, parse_case_record
 from defender.tenancy.models import CaseRecord, SystemRecord, TenantRecords
 
 #: Where nothing is read from: a tenant record built for a judgement has no agent knowledge.
@@ -192,10 +191,6 @@ def _located(text: str, system: str, locator: Locator) -> str:
     return f"{locator.system(system)}: {text}"
 
 
-def _case_text(record: CaseRecord) -> str:
-    return safe_dump({"system": record.system_id, "comment": {"body": record.comment_body}}, sort_keys=False)
-
-
 @dataclasses.dataclass(frozen=True)
 class _CaseWrite:
     """The case record and its system as a write leaves them, and what the write changed."""
@@ -230,9 +225,9 @@ def _case_faults(after: TenantRecords, before: TenantRecords | None, *, catalog:
 def _template_faults(case: CaseRecord, locator: Locator) -> list[str]:
     """#1359's rules for the case record (its template), named by the locator."""
     try:
-        parse_case_record(_case_text(case))
+        parse_case_record(case_record_text(case), named=locator.case())
     except CaseTicketError as bad:
-        return [str(bad).replace(f"settings/{CASE_RECORD_REL}", locator.case(), 1)]
+        return [str(bad)]
     return []
 
 

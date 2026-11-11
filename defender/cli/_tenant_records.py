@@ -27,12 +27,9 @@ from typing import Any
 
 from defender import tenancy
 from defender.kit.settings import RECORDS, FolderLocator
+from defender.systems.run_tenant import IMPORT_COMMAND, not_imported_text
 from defender.tenancy.models import CaseRecord, SystemRecord, TenantRecords
 
-#: The command that imports a tenant (R8: what every refusal of a tenant not imported names).
-IMPORT_COMMAND = "tenant.py import"
-#: The words a refusal names the import with.
-NOT_IMPORTED = "its system records are not imported: run `tenant.py import {tenant}` first"
 
 
 def author(command: str) -> str:
@@ -160,11 +157,11 @@ def import_candidate(files: Mapping[str, bytes]) -> tuple[TenantRecords, list[st
     raw = files.get(CASE_RECORD_REL)
     if raw is not None:
         try:
-            parsed = parse_case_record(raw.decode("utf-8"))
+            parsed = parse_case_record(raw.decode("utf-8"), named=locator.case())
         except UnicodeDecodeError:
             faults.append(f"{locator.case()} is not UTF-8 text")
         except CaseTicketError as bad:
-            faults.append(str(bad).replace(f"settings/{CASE_RECORD_REL}", locator.case(), 1))
+            faults.append(str(bad))
         else:
             case = CaseRecord(version=1, system_id=parsed.system, comment_body=parsed.body)
     return TenantRecords(imported=True, systems=systems, case=case), faults
@@ -251,7 +248,7 @@ def run_delete_system(admitted: Any, system: str, *, replaces: int) -> int:
 
 def _case_of_file(file: Path) -> Any:
     """The case record `file` holds (#1359's format and rules), or a printed refusal and None."""
-    from defender.tenancy.case_ticket import CASE_RECORD_REL, CaseTicketError, parse_case_record
+    from defender.tenancy.case_ticket import CaseTicketError, parse_case_record
     from defender.tenancy.tenant_settings import read_regular_bytes
 
     try:
@@ -260,9 +257,9 @@ def _case_of_file(file: Path) -> Any:
         _say(f"{file} cannot be read as UTF-8 text: {type(unreadable).__name__}")
         return None
     try:
-        return parse_case_record(text)
+        return parse_case_record(text, named=str(file))
     except CaseTicketError as bad:
-        _say(str(bad).replace(f"settings/{CASE_RECORD_REL}", str(file), 1))
+        _say(str(bad))
         return None
 
 
@@ -313,7 +310,7 @@ def run_systems(admitted: Any, *, export: Path | None, secrets: Any) -> int:
     tenant = admitted.tenant
     records = admitted.directory.current_records(tenant.id)
     if not records.imported:
-        _say(f"tenant {tenant.id}: " + NOT_IMPORTED.format(tenant=tenant.id))
+        _say(not_imported_text(tenant.id))
         return 1
     if export is not None:
         for system, record in sorted(records.systems.items()):
@@ -398,7 +395,7 @@ def _current_system(admitted: Any, system: str, for_version: int) -> SystemRecor
     tenant = admitted.tenant
     records = admitted.directory.current_records(tenant.id)
     if not records.imported:
-        _say(f"tenant {tenant.id}: " + NOT_IMPORTED.format(tenant=tenant.id))
+        _say(not_imported_text(tenant.id))
         return None
     current = records.systems.get(system)
     if current is None:
@@ -433,6 +430,6 @@ def operator_secrets(token_file: Path | None, *, mount: str) -> Any:
     return OpenBaoSecrets(addr=DEPLOYMENT_ISSUER.openbao_url, token=token, mount=mount)
 
 
-__all__ = ["IMPORT_COMMAND", "NOT_IMPORTED", "author", "catalog", "import_candidate", "operator_secrets", "say",
+__all__ = ["author", "catalog", "import_candidate", "operator_secrets", "say",
            "run_delete_case", "run_delete_system", "run_import", "run_set_case", "run_set_credentials",
            "run_set_system", "run_systems"]

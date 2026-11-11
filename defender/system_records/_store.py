@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from defender.database import async_engine
 from defender.kit.faults import ConfigFault
 from defender.records.formats import TenantId
+from defender.systems.run_tenant import not_imported_text
 from defender.tenancy import parse_access
 from defender.tenancy.models import (CaseRecord, CaseVersionRow, RecordsMark, SystemRecord, SystemVersionRow, TenantRecords,
                                      adapter_column)
@@ -84,6 +85,11 @@ class RecordStore:
     async def _marked(self, conn: AsyncConnection, tenant: TenantId) -> bool:
         return (await conn.execute(select(_RM.c.tenant_id).where(_RM.c.tenant_id == tenant))).first() is not None
 
+    async def _require_marked(self, conn: AsyncConnection, tenant: TenantId) -> None:
+        """R8: a write to a tenant whose import has not run is refused, naming the import."""
+        if not await self._marked(conn, tenant):
+            raise RecordRefused([not_imported_text(tenant)])
+
     @staticmethod
     def _current(history: Mapping[str, list[Any]]) -> dict[str, SystemRecord]:
         return {s: SystemVersionRow(**rows[-1]._mapping).as_record() for s, rows in history.items() if not rows[-1].deleted}
@@ -129,8 +135,7 @@ class RecordStore:
     async def put_system(self, tenant: TenantId, system: str, *, replaces: int, adapter: str | tuple[str, str],
                          enabled: bool, settings: Mapping[str, str], access: str, author: str) -> SystemRecord:
         async with self._locked(tenant) as conn:
-            if not await self._marked(conn, tenant):
-                raise RecordRefused([f"tenant {tenant} has not been imported: run `tenant.py import` first"])
+            await self._require_marked(conn, tenant)
             history = await self._history(conn, tenant)
             rows = history.get(system, [])
             self._check_replaces(system, rows, replaces)
@@ -158,8 +163,7 @@ class RecordStore:
 
     async def delete_system(self, tenant: TenantId, system: str, *, replaces: int, author: str) -> None:
         async with self._locked(tenant) as conn:
-            if not await self._marked(conn, tenant):
-                raise RecordRefused([f"tenant {tenant} has not been imported: run `tenant.py import` first"])
+            await self._require_marked(conn, tenant)
             history = await self._history(conn, tenant)
             rows = history.get(system, [])
             self._check_replaces(system, rows, replaces)
@@ -177,8 +181,7 @@ class RecordStore:
 
     async def put_case(self, tenant: TenantId, *, replaces: int, system_id: str, comment_body: str, author: str) -> CaseRecord:
         async with self._locked(tenant) as conn:
-            if not await self._marked(conn, tenant):
-                raise RecordRefused([f"tenant {tenant} has not been imported: run `tenant.py import` first"])
+            await self._require_marked(conn, tenant)
             history = await self._case_history(conn, tenant)
             current = history[-1].version if history else 0
             if replaces != current:
@@ -194,8 +197,7 @@ class RecordStore:
 
     async def delete_case(self, tenant: TenantId, *, replaces: int, author: str) -> None:
         async with self._locked(tenant) as conn:
-            if not await self._marked(conn, tenant):
-                raise RecordRefused([f"tenant {tenant} has not been imported: run `tenant.py import` first"])
+            await self._require_marked(conn, tenant)
             history = await self._case_history(conn, tenant)
             current = history[-1].version if history else 0
             if replaces != current:

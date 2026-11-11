@@ -32,7 +32,7 @@ from defender.systems.verb_dispositions import DispositionError, RunGrants, requ
 from defender.systems.verb_grant import GrantError, VerbGrant
 from defender import tenancy
 from defender.tenancy.case_ticket import (
-    CASE_RECORD_REL, CaseRecordSettings, CaseTicketError, parse_case_record)
+    CaseRecordSettings, CaseTicketError, case_record_text, parse_case_record)
 from defender.tenancy.models import CaseRecord, TenantRecords
 from defender.kit.access import AccessDeclaration
 from defender.kit.settings import SystemConfig
@@ -260,13 +260,10 @@ def _case_settings(case: CaseRecord | None) -> CaseRecordSettings | CaseTicketEr
     record they now refuse kept as its error, which names the case record (DC6), not a file."""
     if case is None:
         return None
-    from defender._yaml import safe_dump
-
-    text = safe_dump({"system": case.system_id, "comment": {"body": case.comment_body}}, sort_keys=False)
     try:
-        return parse_case_record(text)
+        return parse_case_record(case_record_text(case), named=CASE_RECORD_NAME)
     except CaseTicketError as bad:
-        return CaseTicketError(str(bad).replace(f"settings/{CASE_RECORD_REL}", CASE_RECORD_NAME, 1))
+        return bad
 
 
 #: How the run's faults name the tenant's case record (#1366 DC6: the record, not a file).
