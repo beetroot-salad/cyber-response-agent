@@ -350,6 +350,22 @@ def test_a_table_edited_between_two_runs_is_read_again(tmp_path):
 
 # ---- the operator's audit CLI is an entry point too -------------------------------------------------
 
+@pytest.mark.parametrize("agent", sorted(set(T.mod("cli.policy_cli").AGENT_NAMES) - {"gather"}))
+def test_the_policy_cli_shows_every_role_that_names_no_tenant(tmp_path, capsys, agent):
+    """Every role but gather is shown with no tenant, over a worktree-shaped tree (the authors bind only such a tree): a
+    role whose scope a run hands it (the lead author's systems, #1366 R16) is handed what a caller with no tenant hands,
+    never left to fail its own policy's build."""
+    from defender.tests.support.runtime.engine._declared869 import seed_tree
+
+    policy_cli = T.mod("cli.policy_cli")
+    tree = seed_tree(tmp_path, adapters=("cmdb",)) / "defender"
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    corpus = ["--corpus-name", "lessons"] if agent == "corpus_author" else []  # the role's own per-spawn input
+    assert policy_cli.main(["show", agent, "--run-dir", str(run_dir), "--defender-dir", str(tree), *corpus]) == 0
+    assert f"agent: {agent}" in capsys.readouterr().out
+
+
 def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_tenant(
         tmp_path, capsys, monkeypatch):
     policy_cli = T.mod("cli.policy_cli")

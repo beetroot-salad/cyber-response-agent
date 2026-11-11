@@ -63,6 +63,17 @@ def _scope_for(
     if role is AgentRole.CORPUS_AUTHOR:
         from defender.learning.author.curator_engine import lesson_read_confine
         return RunScope(corpus_name=corpus_name, read_confine=lesson_read_confine(defender_dir))
+    if role is AgentRole.LEAD_AUTHOR:
+        # The lead author's lanes are drawn over the systems its spawn is handed (#1366 R16); this
+        # command names no tenant, so it is handed the whole catalog of the tree it shows, as a
+        # caller with no tenant is.
+        from defender.systems.catalog import Catalog
+        from defender.systems.verbs import RegistryError
+        try:
+            catalog = Catalog.of_checkout(defender_dir)
+        except RegistryError as unreadable:
+            sys.exit(f"defender-policy: {unreadable}")
+        return RunScope(systems=catalog.roster.systems)
     return RunScope()
 
 
