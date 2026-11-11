@@ -33,7 +33,7 @@ def folder_of_bytes(system: str, *, config: bytes | None, access: bytes | None, 
     faults: list[str] = []
     settings: dict[str, str] = {}
     where = locator.part(system, "settings")
-    text = _text(config, where, faults)
+    text = _folder_part_text(config, where, faults)
     if text is not None:
         seen: set[str] = set()
         for key, value, exported in assignments(text):
@@ -45,7 +45,7 @@ def folder_of_bytes(system: str, *, config: bytes | None, access: bytes | None, 
             else:
                 settings[key] = value
             seen.add(key)
-    declaration = _text(access, locator.part(system, "access"), faults) or ""
+    declaration = _folder_part_text(access, locator.part(system, "access"), faults) or ""
     return SystemFolder(settings=settings, access=declaration, faults=tuple(faults))
 
 
@@ -71,7 +71,7 @@ def config_text(settings: Mapping[str, str]) -> str:
     return "".join(f'{key}="{value}"\n' for key, value in sorted(settings.items()))
 
 
-def _text(data: bytes | None, where: str, faults: list[str]) -> str | None:
+def _folder_part_text(data: bytes | None, where: str, faults: list[str]) -> str | None:
     """`data` as text, or None: absent, or a fault (naming `where`) appended for a part over the settings-file size or
     not UTF-8 text."""
     if data is None:

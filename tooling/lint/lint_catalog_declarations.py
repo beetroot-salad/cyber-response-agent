@@ -29,6 +29,8 @@ import re
 import sys
 from pathlib import Path
 
+import _astlib
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ADAPTERS = "defender/integrations"
 EXAMPLE_ADAPTER = "defender/skills/connect/examples/example_adapter.py"
@@ -69,8 +71,8 @@ def _module_level(tree: ast.Module) -> tuple[dict[str, ast.expr], set[str]]:
                 assigned[node.target.id] = node.value
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             defined.add(node.name)
-        elif isinstance(node, ast.Import | ast.ImportFrom):
-            defined.update(alias.asname or alias.name.split(".")[0] for alias in node.names if alias.name != "*")
+    # The names its imports bind, by the scope-aware resolver (an alias included).
+    defined.update(_astlib.module_env(tree).imports)
     return assigned, defined
 
 
