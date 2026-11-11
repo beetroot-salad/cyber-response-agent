@@ -377,6 +377,39 @@ def test_lead_author_drain_quarantines_on_nonzero_rc(tenant, tmp_path: Path, mon
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
 
 
+class _RecordsDown:
+    """The tenant's directory, its current-records read down (an outage) while every other read answers."""
+
+    def __init__(self, directory) -> None:
+        self._directory = directory
+
+    def __getattr__(self, name):
+        return getattr(self._directory, name)
+
+    def current_records(self, tenant_id):
+        from defender.tenancy import RecordsUnreachable
+
+        raise RecordsUnreachable("the tenant records' database could not be reached")
+
+
+def test_lead_author_drain_skips_the_tick_when_the_tenants_systems_cannot_be_read(tenant, tmp_path: Path, caplog):
+    """The tick reads the tenant's systems once, as its delivery opens; an outage there skips the tick (rc 0) before any
+    claim, so the queued claim stays queued with no attempt counted and nothing is dead-lettered. (#1366 R16)"""
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
+    run_dir = curation_run_dir("case-outage")
+    enqueue_run(state_for_paths(paths), run_dir)
+    marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
+    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
+
+    assert drains.lead_author_drain(paths, **{**_seams(t), "directory": _RecordsDown(t.directory)}) == 0
+
+    assert marker.exists()
+    assert not json.loads(marker.read_text()).get("attempts"), marker.read_text()
+    assert not failed.exists()
+    assert "an outage; skipping this tick" in caplog.text
+
+
 def test_lead_author_drain_bounded_retry_then_quarantine(tenant, tmp_path: Path, monkeypatch):
     import defender.learning.leads.lead_author as la
 
