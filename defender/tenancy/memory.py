@@ -17,8 +17,8 @@ from collections.abc import AsyncIterator, Collection, Mapping
 from typing import Any, Literal, TypeVar, cast, overload
 
 from defender.records.formats import AlertMapping, TenantId
-from defender.tenancy.models import (ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, PublishStatus, TenantRecord,
-                                     TenantRecords)
+from defender.tenancy.models import (ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, MergeEligibility, PublishStatus,
+                                     TenantRecord, TenantRecords)
 from defender.tenancy.repository import (
     KEEP,
     SERVICE,
@@ -58,6 +58,7 @@ class InMemoryTenantRepository:
         self._publish: dict[str, PublishStatus] = {}
         self._mappings: dict[str, AlertMappingRow] = {}
         self._records: dict[str, TenantRecords] = {}
+        self._eligibility: dict[str, MergeEligibility] = {}
         self._locked: set[str] = set()
 
     async def close(self) -> None:
@@ -158,6 +159,10 @@ class InMemoryTenantRepository:
         with self._mutex:
             return self._records.get(tenant_id, TenantRecords())
 
+    async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
+        with self._mutex:
+            return self._eligibility.get(tenant_id)
+
     # --- requests (the API) ----------------------------------------------------------------------
     async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
         row = TenantRecord(id=TenantId.mint(), created_at=now, state="creating", pending_action="create",
@@ -192,7 +197,7 @@ class InMemoryTenantRepository:
         with self._mutex:
             row = self._row(tenant_id)
             return self._request(
-                tenant_id, row.state in ("creating", "active"), f"a tenant {row.state} cannot be offboarded",
+                tenant_id, row.state in ("creating", "active"), "only a creating or active tenant can be offboarded",
                 state="offboarding", pending_action="offboard", step="offboard", step_actor=SERVICE, failure=None)
 
     async def request_rotate(self, tenant_id: TenantId) -> TenantRecord:
@@ -204,6 +209,12 @@ class InMemoryTenantRepository:
                 pending_action="rotate", step="names", step_actor=SERVICE)
 
     # --- host processes --------------------------------------------------------------------------
+    async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:
+        with self._mutex:
+            if tenant_id not in self._tenants:
+                raise ValueError(f"no tenant {tenant_id}")
+            self._eligibility[tenant_id] = MergeEligibility(logins=frozenset(logins), read_at=read_at.astimezone(_dt.UTC))
+
     async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
         published, refused, kind = publish_outcome(line)
         with self._mutex:

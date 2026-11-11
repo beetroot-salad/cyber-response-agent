@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import json
+import logging
 import secrets
 import shutil
 import subprocess
@@ -24,6 +25,7 @@ from defender.configuration.issuer import TRANSIT_MOUNT
 from defender.credential_proxy import transit_key_for
 from defender.identity import audit
 from defender.lifecycle._bot import Minted, log_in, mint
+from defender.lifecycle._eligibility import eligible_to_merge, listed_logins
 from defender.lifecycle._job import SERVICE, Actor, Step, StepFailed, answered, field_of, next_step, only
 from defender.lifecycle.config import LifecycleConfig
 from defender.tenancy import ALL, ForgeWiring, Generation, HeldTenant, TenantId, TenantRepository, tenant_id_file_text
@@ -39,9 +41,15 @@ CLAIMS = '{"tenant_id": {{identity.entity.metadata.tenant_id}}}'
 #: How long a JWT of a tenant lives, and a wrapped secret waits for the host.
 TOKEN_TTL = "10m"
 WRAP_TTL = "600"
+#: The integration's grant: the repository, and issues, labels and comments (#1414 D13). One value, the way the forge takes it.
+INTEGRATION_SCOPES = "write:repository,write:issue"
+#: How old a tenant's merge-eligibility record may be before a pass reads it again: a third of the feedback tick's
+#: default 60 s staleness bound, so a record never goes stale between passes, and the forge is not read every pass.
+ELIGIBILITY_REFRESH = _dt.timedelta(seconds=20)
 MAIN_WAIT_TRIES = 40
 MAIN_WAIT_SECONDS = 0.25
-_COLLABORATOR_PAGE = 50
+
+_logger = logging.getLogger(__name__)
 
 Git = Callable[..., subprocess.CompletedProcess[str]]
 Integration = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
@@ -68,6 +76,39 @@ class ManagementService(Actor):
                 "sweep": self._sweep, "activate": self._activate, "retire": self._retire,
                 "offboard": self._offboard, "finish": self._finish, "delete_repo": self._delete_repo}
 
+    async def work(self) -> int:
+        """The job's steps (`Actor.work`), then the merge eligibility of every active tenant whose record is older than
+        `ELIGIBILITY_REFRESH` read afresh (#1414 D13), whether or not a step ran. The count is the steps run."""
+        ran = await super().work()
+        await self._record_eligibility()
+        return ran
+
+    async def _record_eligibility(self) -> None:
+        """For each active tenant: `main`'s merge whitelist (users and team members) less every generation's bot,
+        recorded with the time read. A read that fails, for any reason, is logged and leaves the tenant's earlier record
+        as it was; the other tenants are still read."""
+        try:
+            tenants = [t for t in await self._tenants.tenants() if t.state == "active"]
+        except Exception:  # noqa: BLE001 — a failed listing never fails the pass: the next one retries
+            _logger.exception("merge eligibility: the tenants could not be listed")
+            return
+        for tenant in tenants:
+            try:
+                await self._record_eligibility_of(tenant.id)
+            except Exception as failed:  # noqa: BLE001 — one tenant's failed read keeps its record and never stops the others
+                _logger.warning("tenant %s: merge eligibility not read, the earlier record stays: %s", tenant.id, failed)
+
+    async def _record_eligibility_of(self, tenant: TenantId) -> None:
+        recorded = await self._tenants.merge_eligibility(tenant)
+        if recorded is not None and _dt.timedelta(0) <= self._clock() - recorded.read_at < ELIGIBILITY_REFRESH:
+            return
+        wiring = await self._tenants.forge_wiring(tenant)
+        if wiring is None:
+            raise StepFailed("the tenant has no forge wiring")
+        bots = {g.bot_login for g in await self._tenants.generations(tenant)}
+        logins = await eligible_to_merge(self._forge, wiring.repo, bots=bots)
+        await self._tenants.record_merge_eligibility(tenant, logins=logins, read_at=self._clock())
+
     async def _commit_next(self, held: HeldTenant, **records: Any) -> None:
         step, actor = next_step(held)
         await held.commit(step=step, actor=actor, **records)
@@ -90,7 +131,7 @@ class ManagementService(Actor):
             oidc_role=f"tenant-{tenant}-{salt}", approle=f"delivery-{tenant}-{salt}", entity=f"tenant-{tenant}-{salt}",
             sign_approle=sign["sign_approle"], sign_entity=sign["sign_entity"],
             integration_args=["--username", bot, "--name", f"defender-{salt}", "--issuer", self._config.issuer_url,
-                              "--claim-eq", f"tenant_id={tenant}", "--scope", "write:repository",
+                              "--claim-eq", f"tenant_id={tenant}", "--scope", INTEGRATION_SCOPES,
                               "--repo", wiring.repo])
         repo_url = held.record.repo_url or f"{self._config.forge_url.rstrip('/')}/{wiring.repo}"
         await self._commit_next(held, add_generation=generation, wiring=wiring, repo_url=repo_url)
@@ -223,20 +264,7 @@ class ManagementService(Actor):
         await self._commit_next(held)
 
     async def _collaborators(self, repo: str) -> list[str]:
-        found: list[str] = []
-        page = 1
-        while True:
-            listed = answered(await self._forge.get(f"/api/v1/repos/{repo}/collaborators",
-                                                    params={"page": page, "limit": _COLLABORATOR_PAGE})).json()
-            if not isinstance(listed, list):
-                raise StepFailed(f"the collaborators of {repo} are not a list")
-            # The forge may page by fewer than asked (its own maximum), so only an empty page, or one
-            # that adds nobody (a forge ignoring `page`), ends the listing.
-            logins = [str(c.get("login")) for c in listed if isinstance(c, dict)]
-            if not set(logins) - set(found):
-                return found
-            found += logins
-            page += 1
+        return await listed_logins(self._forge, f"/api/v1/repos/{repo}/collaborators", f"the collaborators of {repo}")
 
     async def _integration(self, held: HeldTenant) -> None:
         """The fixed command with the recorded arguments (Flow 1.6), then the OIDC role's client id

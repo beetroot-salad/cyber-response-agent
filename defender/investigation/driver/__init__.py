@@ -57,8 +57,9 @@ from .. import toon_gate as toon_gate_mod
 from ..agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from defender._agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from .. import challenge_gate
-from ..box_endings import box_ending_in
-from defender._exception_groups import carried, carried_unless_overridden
+from ..run_endings import (
+    CORRELATION_ENDINGS, ending_in, log_ending,
+)
 from .. import review_roles
 from ..close_tool import register_close_tool
 from defender.systems.circuit_breaker import RunAborted
@@ -317,39 +318,14 @@ async def _drive_agent(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the loop's 
             ModelHTTPError, box_mod.BoxEnding, BaseExceptionGroup) as e:
         # These failures end the run by name. Concurrent leads may deliver any of them inside an
         # exception group; a group that carries none propagates as itself.
-        ending = box_ending_in(e)
-        failed = carried(e, run_end.CallRecordWriteFailed)
-        down = _provider_down_in(e)
-        refused = _refusal_in(e)
-        if ending is not None:
-            # The box is unusable, or a process wrote past its helper (#1421 O8, O9): ahead of a
-            # call-record or provider fault beside it. Its own words are logged here, once; the
-            # records carry only its class.
-            _logger.error(f"{ending}")
-            truncated_by = ending.exit_class
-            exit_reason = type(ending).__name__
-        elif failed is not None:
-            # A call record the run could not write (A12, #1234), stamped with the record that
-            # failed.
-            _logger.error(f"{failed}")
-            truncated_by = failed.record
-            exit_reason = "CallRecordWriteFailed"
-        elif down is not None:
-            # A model request kept failing temporarily past the retrier (#1243): an
-            # infrastructure end, so like the budget kill it writes no report.
-            _logger.error(f"{down}; ending the run")
-            truncated_by = session_store.TRUNCATED_BY_PROVIDER_DOWN
-            exit_reason = "ProviderDown"
-        elif refused is not None:
-            # The provider refused MAIN's own request, or a lead's with a broken setup, for good
-            # (#1243 r3): resending gets the same answer, so like provider-down it is an
-            # infrastructure end with no report. The traceback is kept: a 400 may be our own
-            # request built wrong.
-            _logger.error(f"{refused}; ending the run", exc_info=e)
-            truncated_by = run_end.TRUNCATED_BY_PROVIDER_REJECTED
-            exit_reason = "ProviderRejected"
-        else:
+        # One owner picks which ending the failure carries (`run_endings`): the box first, then a
+        # call record the run could not write, a provider that stayed down, a refusal for good.
+        ending = ending_in(e)
+        if ending is None:
             raise
+        log_ending(_logger, ending, e, "ending the run")
+        truncated_by = ending.exit_class
+        exit_reason = ending.exit_reason
     finally:
         _flush_run_end(run, store, session_id, truncated_by)
     # The run-end record is taken before the forced close sets `closed`, and written always
@@ -375,35 +351,6 @@ def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
 
     run = getattr(verbs, "call_run", None)
     bind_call_ids(state, run if isinstance(run, str) and run else run_id)
-
-
-def _refusal_in(exc: BaseException) -> providers.ProviderRejected | None:
-    """The refusal that should end the run on `exc` (#1243 r3): a lead's `ProviderRejected`, or
-    MAIN's own refused request, bare or carried by a group that holds no interrupt, kill, abort
-    or outage; else `None`."""
-    overriding = (BudgetKill, RunAborted, box_mod.BoxEnding, providers.ProviderDown)
-    found = carried_unless_overridden(exc, providers.ProviderRejected, overriding)
-    if found is not None:
-        return found
-    if carried_unless_overridden(exc, ModelHTTPError, overriding) is None:
-        return None
-    # Every HTTP error the group carries, not only the first: a temporary one ahead of a
-    # refusal must not hide it.
-    pending = [exc]
-    while pending:
-        leaf = pending.pop(0)
-        if isinstance(leaf, BaseExceptionGroup):
-            pending.extend(leaf.exceptions)
-        elif isinstance(leaf, ModelHTTPError) and (rejection := providers.rejected(leaf)):
-            return rejection
-    return None
-
-
-def _provider_down_in(exc: BaseException) -> providers.ProviderDown | None:
-    """The `ProviderDown` that should end the run on `exc` (bare, or carried by a group that
-    holds no interrupt, kill or abort), else `None`."""
-    return carried_unless_overridden(
-        exc, providers.ProviderDown, (BudgetKill, RunAborted, box_mod.BoxEnding))
 
 
 def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
@@ -615,20 +562,11 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
     except BaseException as e:
         # A box ending (#1421) or a provider that stayed down (#1243) may arrive inside an
         # exception group; the box ending first.
-        ending = box_ending_in(e)
-        if ending is not None:
-            _logger.error(f"{ending}")
-            return None, stop(ending.exit_class, type(ending).__name__)
-        down = _provider_down_in(e)
-        if down is not None:
-            _logger.error(f"{down}; stopping before the agent starts")
-            return None, stop(session_store.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")
-        refused = _refusal_in(e)
-        if refused is not None:
-            # The correlation lead's model has a broken setup (#1243 r3): MAIN's leads share it.
-            _logger.error(f"{refused}; stopping before the agent starts", exc_info=e)
-            return None, stop(run_end.TRUNCATED_BY_PROVIDER_REJECTED, "ProviderRejected")
-        raise
+        ending = ending_in(e, CORRELATION_ENDINGS)
+        if ending is None:
+            raise
+        log_ending(_logger, ending, e, "stopping before the agent starts")
+        return None, stop(ending.exit_class, ending.exit_reason)
     return lead_zero_mod.render_correlation_section(
         outcome, grant_home=tenant.table_pointer), None
 

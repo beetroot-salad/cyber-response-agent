@@ -4,10 +4,11 @@ from the tenancy tables. `InMemoryTenantRepository` (`tenancy/memory.py`) and
 code, so the refusals below can be caught by code that never builds a repository.
 
 Writers (P2, DC-4):
-- The API: `request_create(now=)`, `request_resume(T)`, `request_offboard(T, now=)`,
-  `request_rotate(T)`. Each is one conditional update on an ordinary connection that never takes
+- The API: `request_create(now=)`, `request_resume(T)`, `request_rotate(T)`. Each is one conditional update on an ordinary connection that never takes
   the tenant lock; it returns the record it left, or raises `NotFound` (no such tenant) or
-  `Conflict` (the tenant's state refuses the request).
+  `Conflict` (the tenant's state refuses the request). `request_offboard(T, now=)` is no longer
+  the API's (#1360): the job store runs tenancy's `offboard` together with the ending of the
+  tenant's jobs, in one transaction; `request_offboard` stays for the lifecycle and tests.
 - Host processes: `record_publish_status(T, line, by=)`, a launch-time publish report line.
 - The worker holding a tenant's lock (management service or host actor), through `HeldTenant`.
 
@@ -52,7 +53,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from defender.records.formats import AlertMapping, TenantId
-    from defender.tenancy.models import ForgeWiring, Generation, TenantRecord, TenantRecords
+    from defender.tenancy.models import ForgeWiring, Generation, MergeEligibility, TenantRecord, TenantRecords
 
 #: The first key of every tenant lock: a fixed int4 naming tenancy's advisory locks.
 LOCK_NAMESPACE = 1214
@@ -140,6 +141,10 @@ class TenantRepository(Protocol):
         """The tenant's alert mapping (#1345), None until one is saved. Read here, written only by the jobs
         store's replace."""
         ...
+    async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
+        """Who may merge into the tenant's `main`, as the management service last read it (#1414 D13); None when no read
+        has succeeded yet (never an empty record standing for it)."""
+        ...
 
     async def current_records(self, tenant_id: TenantId) -> TenantRecords:
         """The tenant's system and case records as they stand (#1366 R10): whether its systems come from records (the mark),
@@ -163,6 +168,9 @@ class TenantRepository(Protocol):
         ...
 
     # --- host processes
+    async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:
+        """Replace the tenant's merge-eligibility record whole (#1414 D13); `ValueError` for an unknown tenant."""
+        ...
     async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
         """Replace the tenant's publish outcome with what the report `line` states (`fresh <commit>`,
         `stale:transient <why>`, `stale:operator <why>`, `misconfigured <why>`)."""

@@ -20,8 +20,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 
 from defender.systems import circuit_breaker
 from defender.systems import system_status
-from defender._exception_groups import carried_unless_overridden
-from .box_endings import box_ending_in
+from .run_endings import STAMPED_ON_THE_WAY_UP, ending_in
 from .run_state import run_state_of
 from . import permission
 from defender import box as box_mod
@@ -642,12 +641,9 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
         # down (#1243), bare or inside an exception group: ends the run, this lead stamped with
         # the class so its session doesn't read as finished; the box ending first. Any other
         # group propagates as it did.
-        ending = box_ending_in(ended)
+        ending = ending_in(ended, STAMPED_ON_THE_WAY_UP)
         if ending is not None:
             stamp(ending.exit_class)
-        elif carried_unless_overridden(ended, providers.ProviderDown,
-                                       (BudgetKill, circuit_breaker.RunAborted, box_mod.BoxEnding)):
-            stamp(session_store.TRUNCATED_BY_PROVIDER_DOWN)
         raise
     except run_end.CallRecordWriteFailed as failed:
         # A call record could not be written (A12): the run ends, this lead with it, stamped

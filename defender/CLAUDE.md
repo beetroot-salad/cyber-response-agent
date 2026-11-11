@@ -42,7 +42,7 @@ A tenant's systems and its case record are versioned records in the database, wr
 its records name (`tenant.py catalog` lists the adapters a record may name). Credentials live at a
 per-generation path `<tenant>/<system>/g<N>`. Once:
 
-1. Run migrations (revision `0011_system_records`). It also creates the NOLOGIN role
+1. Run migrations (revision `0012_system_records`). It also creates the NOLOGIN role
    `defender_proxy_reader` (SELECT on `tenancy.system_versions` only): create a login that is a
    member of it and set the proxy config's `records_dsn` to that login's DSN in place of
    `data_root` (an old config refuses to start).
@@ -65,6 +65,20 @@ folder, `tenant.py set-system <tenant-id> <system> <dir>/<system> --replaces <it
 change of its base, CA or auth block raises its credential generation, and its credentials are
 set again. Connect hands its result to the operator as such a folder: its validator takes
 `--handoff <folder>` and no longer `--tenant`.
+
+## Upgrade from before #1414
+
+Feedback issues on the tenant's Forgejo repository need the bot to write issues, labels and comments. Run
+migrations (revision `0011_merge_eligibility`), then rotate each existing tenant's forge credential once
+(`POST /admin/tenants/<T>/rotate-forge-credential`): only an integration created or rotated by this code is granted
+`write:issue`. Until a tenant rotates, its issue calls are refused (403) and logged every feedback tick; its
+open-issue requests and replies wait in the queue and are all served on the first tick after the rotation. Nothing is
+given up. The first feedback tick after the upgrade lists each existing feedback issue's comments once; after
+that, a tick reads only the issues the forge lists new comments on.
+
+The management service reads each active tenant's merge whitelist when its record is older than 20 s, and the feedback
+tick reads no comments from a record older than `LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE` (default 60 s). Keep that bound
+well above 20 s, or the tick will find the record stale between the service's reads.
 
 ## Upgrade from before #1345
 

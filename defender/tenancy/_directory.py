@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from defender.records.formats import AlertMapping, TenantId, TenantRefused
 
 if TYPE_CHECKING:
-    from defender.tenancy.models import ForgeWiring, Generation, TenantRecords
+    from defender.tenancy.models import ForgeWiring, Generation, MergeEligibility, TenantRecords
 
 _R = TypeVar("_R")
 
@@ -87,6 +87,13 @@ class TenantDirectory:
         launcher build the tenant's systems from."""
         async def read(repository: Any) -> TenantRecords:
             return await repository.current_records(tenant_id)
+        return self._call(read)
+
+    def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
+        """Who may merge into the tenant's `main` as of the management service's latest read (#1414 D13), None until
+        one has succeeded: what the feedback tick reads to decide whose comments count."""
+        async def read(repository: Any) -> MergeEligibility | None:
+            return await repository.merge_eligibility(tenant_id)
         return self._call(read)
 
     def _call(self, read: Callable[[Any], Awaitable[_R]]) -> _R:

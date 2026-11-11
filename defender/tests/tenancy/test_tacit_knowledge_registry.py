@@ -784,3 +784,52 @@ def test_1390_a_wildcard_scope_loads_iff_it_has_the_minimum_literal_characters(t
         entry = _entry(id=f"tk-lit-{n}", **{field: value})
         loaded = _ids(_load(tmp_path / f"n{n}", entry))
         assert (loaded == [entry["id"]]) == (n >= minimum), f"{field}={value!r} ({n} literal chars): {loaded}"
+
+
+# ---------------------------------------------------------------- #1414 A7: entries also arrive by reviewed PR
+
+def _valid_row(**over) -> dict:
+    return _current_entry() | over
+
+
+_ROWS = {
+    "valid": (_valid_row(), True),
+    "blanket actor": (_valid_row(actor_scope="*"), False),
+    "too few literal characters": (_valid_row(host_scope="db*"), False),
+    "review span over 180 days": (_valid_row(added_at="2026-01-01", review_by="2026-09-01"), False),
+    "review before added": (_valid_row(added_at="2026-05-05", review_by="2026-05-01"), False),
+    "unreadable date": (_valid_row(review_by="soon"), False),
+    "blank justification": (_valid_row(justification=" "), False),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_ROWS))
+def test_1414_the_public_entry_check_agrees_with_the_reader_on_every_row(tmp_path, name):
+    """`entry_problem` answers None exactly for a row the file reader loads, and a reason otherwise. #1414 A7."""
+    row, loads = _ROWS[name]
+    path = _write_registry(tmp_path, row)
+    read = registry().read_registry(path)
+    assert (len(read.entries) == 1) is loads, "premise: the reader's verdict on the row"
+
+    problem = registry().entry_problem(row)
+    assert (problem is None) is loads
+    assert loads or (isinstance(problem, str) and problem.strip())
+
+
+def test_1414_the_public_entry_check_refuses_what_is_not_a_mapping_with_the_missing_and_unknown_fields_named():
+    """A non-mapping, a missing field and an unrecognised field are each refused with a reason. #1414 A7."""
+    row = _valid_row()
+    missing = {k: v for k, v in row.items() if k != "justification"}
+    assert registry().entry_problem(["not", "a", "mapping"])
+    assert "justification" in registry().entry_problem(missing)
+    assert "extra" in registry().entry_problem(row | {"extra": "x"})
+
+
+def test_1414_the_shipped_registry_header_says_entries_also_arrive_by_reviewed_pull_request():
+    """The template header no longer claims the file is edited by humans only; it says feedback drafts arrive as PRs a person merges and still loads empty. #1414 A7/D3 (product content: red until edited)."""
+    path = registry().registry_path(REPO_ROOT / "knowledge" / "tenant-template" / "agent")
+    header = "\n".join(ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.startswith("#"))
+    assert "HUMAN-EDITED ONLY" not in header
+    assert "feedback" in header.lower()
+    assert "pull request" in header.lower()
+    assert registry().read_registry(path).problems == []

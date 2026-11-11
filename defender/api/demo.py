@@ -31,6 +31,7 @@ from defender.identity import (
 )
 
 from .fakes import (
+    InMemoryOffboarding,
     _Id,
     InMemorySecrets,
     InMemoryStore,
@@ -176,6 +177,7 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
         secrets=secrets,
         checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(),
+        offboarding=InMemoryOffboarding(tenant_rows, store, clock),
     )
 
 

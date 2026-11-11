@@ -68,7 +68,7 @@ def _comment_body(
         rec = case_ticket.read_case_record(run)
     except case_ticket.ReportNotParsable:
         if truncated_by in run_end.FORCED_CLOSE_EXITS:
-            return case_ticket.escalation_comment_body(truncated_by), RECEIPT_ESCALATED
+            return case_ticket.escalation_comment_body(str(truncated_by)), RECEIPT_ESCALATED
         return case_ticket.unreadable_comment_body(), RECEIPT_COMMENTED
     return case_ticket.case_record_to_comment(rec, settings=settings), RECEIPT_COMMENTED
 
@@ -78,6 +78,26 @@ def _ticket_key(run: Run) -> str | None:
     (#1359 P3), or `None`. Never read off the alert again."""
     record = formats.parse_alert_record(run.facts.alert_record.read() or "")
     return None if record is None else record.facts.case_key
+
+
+def escalated(truncated_by: str | None, closed_before_cut: bool) -> bool:
+    """Did the run end in an escalated exit without a verdict (`run_end.ESCALATED_EXITS`)?"""
+    return truncated_by in run_end.ESCALATED_EXITS and not closed_before_cut
+
+
+def run_outcome(run: Run, *, truncated_by: str | None, closed_before_cut: bool) -> str:
+    """The word naming how a run ended, as the feedback setting matches it (#1414 O1): the escalated
+    word when the run ended in an escalated exit without a verdict; `unreadable` when the report
+    cannot be parsed; otherwise the report's disposition. It differs from the case ticket on one
+    path, by design (C21): a forced close whose report cannot be parsed is `unreadable` here,
+    while the ticket posts the escalation note for it (`_comment_body`)."""
+    truncated_by = run_end.normalized_truncated_by(truncated_by)
+    if escalated(truncated_by, closed_before_cut):
+        return str(truncated_by)
+    try:
+        return case_ticket.read_case_record(run).disposition
+    except case_ticket.ReportNotParsable:
+        return "unreadable"
 
 
 def comments_on(truncated_by: str | None, closed_before_cut: bool) -> bool:
@@ -125,8 +145,8 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
             _leg_refused(run, key, REASON_NO_TOKEN)
             return
         try:
-            if truncated_by in run_end.ESCALATED_EXITS and not closed_before_cut:
-                body, word = case_ticket.escalation_comment_body(truncated_by), RECEIPT_ESCALATED
+            if escalated(truncated_by, closed_before_cut):
+                body, word = case_ticket.escalation_comment_body(str(truncated_by)), RECEIPT_ESCALATED
             else:
                 body, word = _comment_body(run, truncated_by, target.template)
         except case_ticket.CaseTicketError as e:

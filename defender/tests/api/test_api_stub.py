@@ -26,6 +26,7 @@ from defender.api import fakes as fakes_module, ports as ports_module  # noqa: E
 from defender.api.app import MAX_PAGE, create_app  # noqa: E402
 from defender.api.demo import DEMO_ROLES, demo_deps, demo_id, demo_sessions  # noqa: E402
 from defender.api.fakes import (  # noqa: E402
+    InMemoryOffboarding,
     InMemorySecrets,
     InMemoryStore,
     StubArtifactLinks,
@@ -342,7 +343,7 @@ def _deps(ports: Any) -> tuple[ApiDeps, dict[str, str]]:
     return ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=ports, investigations=ports, learning_jobs=ports, lessons=ports,
-        systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports,
+        systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports, offboarding=ports,
     ), users
 
 
@@ -702,7 +703,7 @@ def _over_the_fake() -> tuple[TestClient, InMemoryStore]:
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
         writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks(),
+        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
     )), base_url=BASE), store
 
 
@@ -1454,7 +1455,7 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
         writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
-        artifact_links=StubArtifactLinks(),
+        artifact_links=StubArtifactLinks(), offboarding=InMemoryOffboarding(tenants, store, lambda: NOW),
     )), base_url=BASE)
     seen: list[str] = []
     params: dict[str, Any] = {"limit": 2}
