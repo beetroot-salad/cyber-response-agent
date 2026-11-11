@@ -5,7 +5,9 @@ may select `tenancy.system_versions` and nothing else). Each call reads the high
 (tenant, system) through a blocking connection bounded by the request's deadline (connect and statement
 timeouts), like `OpenBaoStore`. Connections are kept for reuse, at most `IDLE_CONNECTIONS` idle at once, so a request
 does not pay a connection's setup; one that failed is closed, never reused, and a reused one that fails is
-replaced once by a fresh one. Building it does not connect. A database that cannot be reached is
+replaced once by a fresh one. A fresh connection is bounded by the request's deadline; a kept one by the statement
+timeout while its server answers, and by TCP (about `READ_TIMEOUT_SEC`, not the request's deadline) when the server
+vanished without closing it. Building it does not connect. A database that cannot be reached is
 `TransportFault`; a query it refuses (a login without the grant) is `ConfigFault`. No message holds the DSN."""
 from __future__ import annotations
 
@@ -81,8 +83,12 @@ class PostgresSystemRecords:
 
     def _connect(self, left: float) -> Any:
         try:
+            # A kept connection's server is bounded by the statement timeout while it answers; one that vanished
+            # without closing the connection is cut by TCP: unacknowledged data after `READ_TIMEOUT_SEC`, a silent peer
+            # by keepalives on the same order.
             return psycopg.connect(self._dsn, connect_timeout=max(1, math.ceil(left)), row_factory=tuple_row,
-                                   autocommit=True)
+                                   autocommit=True, tcp_user_timeout=int(READ_TIMEOUT_SEC * 1000), keepalives=1,
+                                   keepalives_idle=5, keepalives_interval=2, keepalives_count=2)
         except psycopg.Error as e:
             raise TransportFault(f"the records database is unreachable ({type(e).__name__})") from None
 
