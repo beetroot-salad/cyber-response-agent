@@ -6,6 +6,8 @@ import json
 import logging
 from contextlib import contextmanager
 
+import pytest
+
 from defender.box import run_env
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
@@ -160,29 +162,37 @@ def test_t6_an_access_file_with_no_write_route_is_named_by_the_receipt_and_nothi
             assert up.seen == [], f"{label}: the store was reached"
 
 
+@pytest.mark.parametrize("base_moved", [False, True], ids=["control-base-unmoved", "base-moved"])
 def test_t6b_a_write_the_proxy_refuses_at_call_time_is_a_refusal_not_a_transport_error(
-        tmp_path, data_root):
+        tmp_path, data_root, base_moved):
     """The run STARTED over a record whose access covers the comment's route (so the leg's own judgement passes), then the
-    operator MOVED the system (a new version at the next credential generation, written to the records the proxy reads):
-    its routes still cover the comment, but the base is elsewhere, so the run's call falls outside the current base. The
-    proxy, which enforces the CURRENT record at each call, refuses, and the receipt says so (not an access declaration
-    fault, not "could not be reached"); nothing reaches the store. This is the design's flow, reachable through the
-    operator command: "in-flight runs' later calls fall outside the new base and are refused" (a rewrite of the routes
-    alone would be refused at write if it left the case system uncovered, C4). Control: t1 (the base unmoved).
-    (#1366 O7, Flows, P5; O5, O4)"""
+    system's record changed to a new version at the next credential generation whose routes still cover the comment but
+    whose BASE is elsewhere: the run's call falls outside the current base, and the proxy, which enforces the CURRENT
+    record at each call, refuses; the receipt says so (not an access declaration fault, not "could not be reached");
+    nothing reaches the store. Control: the same new version at generation 2 with the base UNMOVED comments (so the base is
+    what is refused, not the version or the generation). This is the design's flow, "in-flight runs' later calls fall
+    outside the new base and are refused", in a state the store accepts (the routes still cover, C4: a route-only change
+    that uncovered the comment would be refused at write); the test writes the record into the proxy's records port, it
+    does not drive the operator command (its write door is pinned in `test_system_records_1366.py`). (#1366 O7, Flows,
+    P5/R4; O5, O4)"""
     with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
+        up.replies[COMMENT] = (201, {}, json.dumps({"id": 1}).encode())
         store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
         tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
         rec, run = _run(tmp_path)
         started = R.derive(export_dir(t.tenant, t.commit) / "settings")  # covers the comment route at the published base
         started_with = T.run_record(t, records=started)
         held = {t.tenant_id: started}  # the records the proxy reads, one lookup per call
-        moved = R.edited(started, SYSTEM, version=2, generation=2,
-                         access=H.declaration(up.url + "/moved-store", writes=WRITES))
-        held[t.tenant_id] = moved  # the operator's write, after the run started
+        base = up.url + ("/moved-store" if base_moved else STORE)
+        held[t.tenant_id] = R.edited(started, SYSTEM, version=2, generation=2,
+                                     access=H.declaration(base, writes=WRITES))  # written after the run started
         with A.proxy_for(t, store, records=R.RecordsPort(held)) as (url, tap):
             receipt = _leg(t, run, rec, url, tok, record=started_with)
     assert receipt is not None
+    if not base_moved:
+        assert (receipt["status"], receipt["ok"]) == ("commented", True), receipt
+        assert [(s.method, s.path.split("?")[0]) for s in up.seen] == [("POST", COMMENT)]
+        return
     assert receipt["ok"] is False
     reason = (receipt.get("reason") or "").lower()
     assert "the credential proxy refused" in reason, reason

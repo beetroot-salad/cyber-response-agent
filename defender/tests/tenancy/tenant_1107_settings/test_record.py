@@ -396,7 +396,10 @@ def test_a_config_fault_observed_at_resolve_fixed_by_a_records_write_mid_run(tmp
     """A run whose record holds unusable settings keeps them: an operator's fix (a new version, WRITTEN to the directory the
     run read its records from) mid-run does not reach the run; only a fresh read of that directory sees it (O6: settings
     are frozen at start; H9: the next run reads the current record). (Was 'fixed on disk': the run reads records, not the
-    folder, DC7.)"""
+    folder, DC7.) Limit: the run's context holds a records VALUE and no directory, so no implementation could observe the
+    write at `load_config`; what this pins is that the value the run holds is what it was built from and that a fresh read of
+    the written directory is the fix. The arm that can fail on a run re-reading its directory is the `run.main` one in
+    `test_s7_nf4_every_resolve_reads_the_current_records` (one directory, two runs, a write between)."""
     from defender.tests.support.tenancy import _systems1366 as R
 
     root = tmp_path / "tenants"
