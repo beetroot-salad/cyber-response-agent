@@ -19,7 +19,8 @@ from defender.tests.support.shared._postgres1339 import VERSION_TABLE, database,
 #: The schemas PostgreSQL itself owns; everything else in a database is ours to compare.
 _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
 IDENTITY_TABLES = {"users", "memberships", "sessions", "program_credentials", "warning_deliveries"}  # #1214: `tenants` moved to `tenancy`; #1307 adds credentials and their warning deliveries
-LEARNING_TABLES = {"work_items", "batches", "commits", "commit_changes"}  # #1278: learning's work tracking (design: Schema)
+LEARNING_TABLES = {"work_items", "batches", "commits", "commit_changes",
+                   "feedback_issues", "feedback_comments", "feedback_tick"}  # #1278: learning's work tracking, A4 feedback (design: Schema)
 JOBS_TABLES = {"alerts", "investigations", "learning_jobs", "learning_checks"}  # #1342, #1344 (amendment 3: learning_checks) (#1345 r5: the mapping table is a tenant record, in `tenancy`)
 UNKNOWN_REVISION = "f00dfeedbeef"
 #: #1345 r5 Upgrade: the migration after `0006_job_leases`. r5 names no id: this one is DESIGN-IMPLIED for the code stage.
