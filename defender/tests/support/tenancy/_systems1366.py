@@ -34,7 +34,7 @@ SEED_AUTHOR = "test seed"
 REAL = ("elastic", "jira", "servicenow")
 EXAMPLES = ("change-mgmt", "cmdb", "host-state", "identity", "threat-intel", "ticket")
 KV_MOUNT = "kv"
-PROXY_ROLE = "defender_proxy_reader"  # R14: NOLOGIN, SELECT on tenancy.system_versions only (migration 0011_system_records)
+PROXY_ROLE = "defender_proxy_reader"  # R14: NOLOGIN, SELECT on tenancy.system_versions only (migration 0012_system_records)
 #: The records tables (schema `tenancy`); columns in shared-interface.md.
 SYSTEM_VERSIONS, CASE_VERSIONS, RECORDS_MARK = "system_versions", "case_versions", "records_mark"
 
