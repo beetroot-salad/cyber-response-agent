@@ -49,12 +49,16 @@ STOP_PUSH_SECONDS = 15.0
 
 AUTHOR_LANE = "author"
 LEAD_LANE = "lead_author"  # lint-run-records: ok — the learning store's lane name, not the `lead_author/` record dir
-#: Each author-lane kind's corpus folder in the tenant repository: what "cited" reads (A2 D7).
-CORPUS_OF = {"finding": "agent/lessons", "questioner_finding": "agent/lessons-questioner"}
+#: #1414's registry lane (A4): item-less registry batches, drafted by the feedback tick.
+FEEDBACK_LANE = "feedback"
+#: Each author-lane kind's corpus folder in the tenant repository: what "cited" reads (A2 D7). A feedback
+#: instruction's lesson is a lesson like a finding's (#1414 D11).
+CORPUS_OF = {"finding": "agent/lessons", "questioner_finding": "agent/lessons-questioner",
+             "feedback_instruction": "agent/lessons"}
 #: The provenance field both corpora cite their findings under.
 CITE_FIELD = provenance_field("finding_id")
 #: Each lane's branch prefix on the tenant repository (the store mints the branch under it).
-PREFIX_OF = {AUTHOR_LANE: "lessons/", LEAD_LANE: "lead-author/"}
+PREFIX_OF = {AUTHOR_LANE: "lessons/", LEAD_LANE: "lead-author/", FEEDBACK_LANE: "feedback/"}
 
 
 class Refused(Exception):
@@ -124,10 +128,10 @@ def owner_name(purpose: str) -> str:
 
 def thresholds() -> dict[str, int]:
     """Each kind's threshold, one owner (A2 D8): the curators' wake counts, the pitfalls curation's own,
-    and any queued curation request."""
+    and any queued curation request or person's feedback instruction (one wakes it, no knob: #1414 D11)."""
     return {"finding": env_int("LEARNING_AUTHOR_THRESHOLD", 5),
             "questioner_finding": env_int("LEARNING_QUESTIONER_THRESHOLD", 5),
-            "pitfall": pitfalls_threshold(), "curation_request": 1}
+            "pitfall": pitfalls_threshold(), "curation_request": 1, "feedback_instruction": 1}
 
 
 # --- forge faults: a refusal counts, an unknown waits (H15, D7) -------------------------------------------
@@ -185,10 +189,20 @@ class Holding:
     """While held: a thread renews the lease every `store.renew_every` seconds; a lost lease or a cancel
     is delivered to the main thread as SIGTERM, whose handler (installed here when the tick runs on the
     main thread) raises `TickStopped`. Only the first signal stops; later ones are ignored, so the stop
-    path is not itself interrupted."""
+    path is not itself interrupted.
 
-    def __init__(self, store: Any, held: Any) -> None:
+    `renew` is the lease's own renewal (default `store.renew`, a batch's; the feedback tick's is
+    `store.renew_feedback_tick`, A4). A holding nested in another (`parent`: a registry batch inside the
+    feedback tick) stops with the reason of whichever lease saw the stop, so a lost outer lease reaches
+    the inner stop path as `lease`, never as a plain `sigterm`."""
+
+    def __init__(self, store: Any, held: Any, *, renew: Callable[[Any], None] | None = None,
+                 parent: Holding | None = None) -> None:
         self.store, self.held = store, held
+        self._renew: Callable[[Any], None] = renew if renew is not None else store.renew
+        self._parent = parent
+        batch = getattr(held, "batch_id", None)
+        self._what = f"batch {batch}" if batch is not None else f"the feedback tick of {held.tenant_id}"
         self.why: str | None = None
         self._done = threading.Event()
         self._lock = threading.Lock()
@@ -196,7 +210,7 @@ class Holding:
         self._previous: Any = None
         self._installed = False
         self._main = threading.main_thread().ident
-        self._thread = threading.Thread(target=self._renew_loop, name=f"lease-{held.batch_id}", daemon=True)
+        self._thread = threading.Thread(target=self._renew_loop, name=f"lease-{batch or 'feedback'}", daemon=True)
 
     def __enter__(self) -> Holding:
         if threading.current_thread() is threading.main_thread():
@@ -217,16 +231,23 @@ class Holding:
             self._thread.join(timeout=10)
 
     def check(self) -> None:
-        """Raise the stop the renewer saw, where no signal could carry it (not the main thread)."""
-        if self.why is not None and not self._fired:
-            raise TickStopped(self.why)
+        """Raise the stop the renewer saw (or the enclosing holding's), where no signal could carry it (not
+        the main thread)."""
+        why = self._seen()
+        if why is not None and not self._fired:
+            raise TickStopped(why)
+
+    def _seen(self) -> str | None:
+        if self.why is not None:
+            return self.why
+        return self._parent._seen() if self._parent is not None else None
 
     def _renew_loop(self) -> None:
         from defender.learning.store import LeaseLost, Stop
 
         while not self._done.wait(float(self.store.renew_every)):
             try:
-                self.store.renew(self.held)
+                self._renew(self.held)
             except LeaseLost:
                 self._stop("lease")
                 return
@@ -234,7 +255,7 @@ class Holding:
                 self._stop("cancel")
                 return
             except Exception:  # noqa: BLE001 — a brief database blip costs no run: the lease outlasts a renewal
-                _logger.warning(f"batch {self.held.batch_id}: its lease could not be renewed now", exc_info=True)
+                _logger.warning(f"{self._what}: its lease could not be renewed now", exc_info=True)
 
     def _stop(self, why: str) -> None:
         with self._lock:
@@ -242,14 +263,14 @@ class Holding:
                 return
             self.why = why
             if self._installed and self._main is not None:
-                _logger.warning(f"batch {self.held.batch_id}: stopping the tick ({why})")
+                _logger.warning(f"{self._what}: stopping the tick ({why})")
                 signal.pthread_kill(self._main, signal.SIGTERM)
 
     def _on_sigterm(self, _signum: int, _frame: Any) -> None:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         self._fired = True
         self._done.set()
-        raise TickStopped(self.why or "sigterm")
+        raise TickStopped(self._seen() or "sigterm")
 
 
 # --- feedback (H7, H13, H14) ----------------------------------------------------------------------------
@@ -319,11 +340,16 @@ def without_kept(outcomes: Mapping[tuple[str, str], Any]) -> dict[tuple[str, str
     return {item: fate for item, fate in outcomes.items() if fate.name != "kept"}
 
 
-def pr_text(held: Any) -> tuple[str, str]:
+def pr_text(held: Any, tip_message: str | None = None) -> tuple[str, str]:
     """The title and body of a batch's PR, built from its row: a revert or an authoring batch, and for a
-    replacement the link to the PR it replaces."""
+    replacement the link to the PR it replaces. A registry batch's body is its tip commit's message,
+    `tip_message`, whether its PR is opened at claim or at takeover (#1414 A2, #1278 A4)."""
     title = (f"revert: batch {held.batch_id}" if held.kind == "revert"
              else f"learning: tenant knowledge batch {held.batch_id}")
+    if held.kind == "registry":
+        if tip_message is None:
+            raise ValueError(f"registry batch {held.batch_id}: its PR body is its tip commit's message, and none was given")
+        return title, tip_message
     body = (f"Tenant agent knowledge batch `{held.branch}`. Changes `agent/` only, every commit made by the "
             "host's commit-maker.")
     if held.replaces is not None and held.feedback_pr is not None:
@@ -340,7 +366,9 @@ AuthorWork = Callable[..., None]
 @dataclasses.dataclass
 class Tick:
     """One lane's tick. `author_work(paths, *, batch, box, held, feedback, outcomes)` runs the lane's
-    curators over the claim; `reconcile_lanes` the lanes whose batches in review this tick reconciles."""
+    curators over the claim; `reconcile_lanes` the lanes whose batches in review this tick reconciles.
+    `boxed` False authors with no box (the registry lane: no model runs, A4); `parent` is the holding a
+    claim's own holding sits inside (the feedback tick's lease)."""
 
     paths: LoopPaths
     lane: str
@@ -353,6 +381,8 @@ class Tick:
     reconcile_lanes: tuple[str, ...]
     owner: str = ""
     thresholds: Mapping[str, int] = dataclasses.field(default_factory=dict)
+    boxed: bool = True
+    parent: Holding | None = None
 
     def __post_init__(self) -> None:
         assert self.paths.tenant is not None, "a tick is a tenant's"
@@ -372,7 +402,8 @@ class Tick:
                 and b.lease_expiry + _dt.timedelta(seconds=float(self.store.grace)) < self._now())
 
     def _open_pr_of_ended(self, b: Any) -> bool:
-        return (b.phase == "ended" and b.outcome == "abandoned" and b.pr_number is not None
+        # The bot never closes a registry PR (A4): a person's abandon leaves it open for a person.
+        return (b.kind != "registry" and b.phase == "ended" and b.outcome == "abandoned" and b.pr_number is not None
                 and (b.last_checked is None or (b.ended_at is not None and b.last_checked < b.ended_at)))
 
     def _claimable(self, views: Sequence[Any], items: Sequence[Any]) -> bool:
@@ -390,14 +421,21 @@ class Tick:
                 waiting.setdefault(i.kind, []).append(i)
         return any(arrived(k, rows, int(self.thresholds.get(k, 1))) for k, rows in waiting.items())
 
-    def run(self) -> int:
-        views = self.store.batches(self.tenant_id)
-        items = self.store.work(self.tenant_id)
+    def _to_tend(self, views: Sequence[Any]) -> tuple[list[Any], list[Any], list[Any]]:
+        """`(in review, lapsed, ended with a PR to close)`: what this tick reconciles and recovers."""
         review = [b for b in views if b.phase == "in_review" and b.lane in self.reconcile_lanes]
         lapsed = [b for b in views if b.lane == self.lane and self._lapsed(b)]
         closing = [b for b in views if b.lane in self.reconcile_lanes and self._open_pr_of_ended(b)]
+        return review, lapsed, closing
+
+    def run(self) -> int:
+        from defender.jobs.learning_models import AUTHORING_KINDS
+
+        views = self.store.batches(self.tenant_id)
+        items = self.store.work(self.tenant_id)
+        review, lapsed, closing = self._to_tend(views)
         busy = any(b.lane == self.lane and b.phase in ("working", "needs_person") for b in views) or any(
-            b.lane == self.lane and b.kind == "author" and b.phase != "ended" for b in views)
+            b.lane == self.lane and b.kind in AUTHORING_KINDS and b.phase != "ended" for b in views)
         claim = not busy and self._claimable(views, items)
         if not (review or lapsed or closing or claim):
             _logger.info(f"{self.label}: nothing in review, nothing lapsed and nothing at threshold — skipping")
@@ -414,7 +452,15 @@ class Tick:
             delivery = dataclasses.replace(delivery, branch_prefix=PREFIX_OF[self.lane])
             return self._opened(delivery, review, lapsed, closing)
 
-    def _opened(self, delivery: TenantDelivery, review: list[Any], lapsed: list[Any], closing: list[Any]) -> int:
+    def tend(self, delivery: TenantDelivery) -> None:
+        """Reconcile and recover with no claim, over a delivery the caller opened (the feedback tick's
+        registry lane: its claim is its own, A4)."""
+        review, lapsed, closing = self._to_tend(self.store.batches(self.tenant_id))
+        if review or lapsed or closing:
+            self._opened(delivery, review, lapsed, closing, claim=False)
+
+    def _opened(self, delivery: TenantDelivery, review: list[Any], lapsed: list[Any], closing: list[Any], *,
+                claim: bool = True) -> int:
         from defender.learning.author.version_control.store_delivery import StoreRecord
 
         record = StoreRecord.of(self.store.commit_record(self.tenant_id))
@@ -425,7 +471,7 @@ class Tick:
             self._close_ended(delivery, b)
         for b in lapsed:
             self._recover(delivery, b, record)
-        return self._claim(delivery)
+        return self._claim(delivery) if claim else 0
 
     # -- counting what the forge said ----------------------------------------------------------------
 
@@ -460,6 +506,9 @@ class Tick:
     def _reconcile(self, delivery: TenantDelivery, b: Any, record: Any, members: list[Any]) -> None:
         forge = delivery.repository.forge
         number = int(b.pr_number)
+        if b.kind == "registry":
+            self._reconcile_registry(forge, b, number)
+            return
         try:
             pr = forge.pull_request(number)
             if pr.status == "open":
@@ -495,6 +544,23 @@ class Tick:
                               held=[(i.kind, i.key) for i in members],
                               reason=f"PR #{number} of batch {b.id} was closed with no feedback: held for a person")
         _logger.info(f"{self.label}: PR #{number} of batch {b.id} was closed with no words: its items are held")
+
+    def _reconcile_registry(self, forge: Any, b: Any, number: int) -> None:
+        """A registry PR is read by its state alone (A4): merged or closed ends the batch, which holds no item;
+        open notes a check. No review or comment is read, and the bot never closes one: a closed registry PR is
+        the merger's final no, and the PR body stays the truth of what it settled (#1414 P6)."""
+        try:
+            pr = forge.pull_request(number)
+        except _forge_faults() as fault:
+            self._fault(b, fault, f"reading PR #{number}")
+            return
+        if pr.status == "open":
+            self.store.note_check(self.tenant_id, str(b.id))
+            return
+        outcome = "merged" if pr.status == "merged" else "closed"
+        self.store.end_review(self.tenant_id, str(b.id), expect_phase="in_review", outcome=outcome, published=[],
+                              held=[])
+        _logger.info(f"{self.label}: registry PR #{number} of batch {b.id} was {outcome}: the batch ended")
 
     def _merged(  # noqa: C901 — one rule per lane and per citation source, kept in the one merge reading (H16, D7, D9)
             self, delivery: TenantDelivery, b: Any, pr: Any, record: Any, members: list[Any]) -> None:
@@ -675,6 +741,14 @@ class Tick:
         if found is not None:
             _logger.info(f"{self.label}: batch {held.batch_id}: PR #{found.number} ({found.status}) is already its own")
             return int(found.number)
+        tip_message = None
+        if held.kind == "registry":
+            from defender.learning.author.version_control.store_delivery import remote_tip
+
+            tip = repository.branch_tip(held.branch) or remote_tip(repository, held.branch)
+            if tip is None:
+                raise RuntimeError(f"registry batch {held.batch_id} has no tip to describe its PR by")
+            tip_message = repository.commit_message(tip)
         if held.kind == "author":
             prefix = PREFIX_OF[held.lane]
             known = {b.branch for b in self.store.batches(self.tenant_id)}
@@ -685,7 +759,7 @@ class Tick:
                                         f"an open PR on {prefix} that no batch made holds the lane: {names}")
                 _logger.error(f"{self.label}: batch {held.batch_id} opens no PR beside {names}: a person must look")
                 return None
-        title, body = pr_text(held)
+        title, body = pr_text(held, tip_message)
         number, url = open_pr_on(repository, branch=held.branch, title=title, body=body)
         _logger.info(f"{self.label}: batch {held.batch_id}: PR opened {url}")
         return number
@@ -708,10 +782,11 @@ class Tick:
         return framed_feedback(number, forge.reviews(number), forge.comments(number))
 
     def _claim(self, delivery: TenantDelivery) -> int:
+        from defender.jobs.learning_models import AUTHORING_KINDS
         from defender.learning.store import LaneBusy, TenantInactive
 
         views = self.store.batches(self.tenant_id)
-        if any(b.lane == self.lane and (b.phase == "working" or (b.kind == "author" and b.phase != "ended")
+        if any(b.lane == self.lane and (b.phase == "working" or (b.kind in AUTHORING_KINDS and b.phase != "ended")
                                         or (b.kind == "revert" and b.phase == "in_review")) for b in views):
             _logger.info(f"{self.label}: a batch of the lane is not ended — no new batch")
             return 0
@@ -748,6 +823,11 @@ class Tick:
 
     # -- authoring and delivery ------------------------------------------------------------------------
 
+    def author_claim(self, delivery: TenantDelivery, held: Any) -> int:
+        """Author and deliver a claim made outside this tick's own claim (the feedback tick's registry batch, A4):
+        the same life as the tick's own claim, its stop and crash paths included."""
+        return self._author(delivery, held, None)
+
     def _author(  # noqa: C901, PLR0912, PLR0915 — the claim's whole life (author, push, open, review) and each stop path, kept in one place so no path skips its store verb
             self, delivery: TenantDelivery, held: Any, feedback: str | None) -> int:
         from defender.learning.author.version_control import DeliveryRefused
@@ -756,7 +836,7 @@ class Tick:
         repository = delivery.repository
         outcomes: dict[tuple[str, str], Any] = {}
         batch: Batch | None = None
-        with Holding(self.store, held) as hold:
+        with Holding(self.store, held, parent=self.parent) as hold:
             try:
                 try:
                     batch = delivery.start_batch(str(held.batch_id), lanes=self.label.lanes, branch=held.branch,
@@ -764,16 +844,20 @@ class Tick:
                 except DeliveryRefused as refused:
                     self.store.abandon_clean(held)
                     raise classified_refusal(f"{self.label}: the batch could not start: {refused}", refused) from None
-                box = (self.start_box or delivery.start_box)(batch.box_request())
-                runs = box_mod.BoxRuns(box)
-                work_ok = False
-                try:
-                    runs.stop()
-                    self.author_work(self.paths, batch=batch, box=runs, held=held, feedback=feedback,
+                if not self.boxed:
+                    self.author_work(self.paths, batch=batch, box=None, held=held, feedback=feedback,
                                      outcomes=outcomes)
-                    work_ok = True
-                finally:
-                    _stop_after_work(self.stop_box, box, work_ok=work_ok, label=str(self.label))
+                else:
+                    box = (self.start_box or delivery.start_box)(batch.box_request())
+                    runs = box_mod.BoxRuns(box)
+                    work_ok = False
+                    try:
+                        runs.stop()
+                        self.author_work(self.paths, batch=batch, box=runs, held=held, feedback=feedback,
+                                         outcomes=outcomes)
+                        work_ok = True
+                    finally:
+                        _stop_after_work(self.stop_box, box, work_ok=work_ok, label=str(self.label))
                 hold.check()
                 tip = repository.branch_tip(held.branch)
                 if tip is None:
@@ -896,7 +980,7 @@ def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapp
     return any(arrived(k, rows, int(limits.get(k, 1))) for k, rows in waiting.items())
 
 
-__all__ = ["AUTHOR_LANE", "CORPUS_OF", "DSN_ENV", "GRACE_ENV", "Holding", "LEAD_LANE", "LEASE_ENV", "RENEW_ENV",
+__all__ = ["AUTHOR_LANE", "CORPUS_OF", "DSN_ENV", "FEEDBACK_LANE", "GRACE_ENV", "Holding", "LEAD_LANE", "LEASE_ENV", "RENEW_ENV",
            "Refused", "STOP_PUSH_SECONDS", "Tick", "TickStopped", "classified_refusal", "closed_with_feedback",
            "framed_feedback", "forge_refuses", "http_status", "lane_waiting", "live_changes_requested", "opened_store",
            "owner_name", "store_knobs", "thresholds"]

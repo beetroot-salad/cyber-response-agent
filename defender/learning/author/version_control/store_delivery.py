@@ -144,7 +144,9 @@ def _cited(texts: Iterable[bytes], field: str) -> set[str]:
             continue
         value = fm.get(field)
         if isinstance(value, list):
-            cited.update(c for c in value if isinstance(c, str))
+            # As the drain reads a citation (`drain._cited_ids_in`): a numeric id (a feedback comment's, #1414)
+            # parses as an int and is cited under its text.
+            cited.update(str(c) for c in value if isinstance(c, (str, int)) and not isinstance(c, bool))
     return cited
 
 
