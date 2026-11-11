@@ -74,6 +74,39 @@ VERBS = {"query": query, "lookup": lookup, "health-check": health_check, "isolat
 '''
 
 
+#: `IDP_ADAPTER` whose lookup of `user:bob` (the oracle's side query) outlives the oracle's turn deadline: it waits
+#: for the pass's outcome file (the glob in `LATE_OUTCOME`), then asks once more (`q=late`) and writes how that ended
+#: to the file `LATE_RESULT` names: `waited-out` when the outcome never appeared, else `sent` or `raised:<class>`.
+LATE_IDP_ADAPTER = IDP_ADAPTER.replace(
+    '''    return transport.request(ctx, "idp", "GET", "/events", query={"q": q},
+                             timeout_sec=transport.timeout_of(config))
+''',
+    '''    answer = transport.request(ctx, "idp", "GET", "/events", query={"q": q},
+                               timeout_sec=transport.timeout_of(config))
+    if q == "user:bob":
+        import glob
+        import os
+        import pathlib
+        import time
+
+        give_up = time.monotonic() + 40
+        while not glob.glob(os.environ["LATE_OUTCOME"]) and time.monotonic() < give_up:
+            time.sleep(0.05)
+        if not glob.glob(os.environ["LATE_OUTCOME"]):
+            seen = "waited-out"
+        else:
+            try:
+                transport.request(ctx, "idp", "GET", "/events", query={"q": "late"},
+                                  timeout_sec=transport.timeout_of(config))
+                seen = "sent"
+            except BaseException as raised:
+                seen = "raised:" + type(raised).__name__
+        pathlib.Path(os.environ["LATE_RESULT"]).write_text(seen, encoding="utf-8")
+    return answer
+''')
+assert LATE_IDP_ADAPTER != IDP_ADAPTER, "the late adapter must differ"
+
+
 #: A granted, declared system whose adapter's settings check fails: judged down, so outside the
 #: run's read grant (#1363 O2, D5).
 HR_DOWN_ADAPTER = IDP_ADAPTER.replace(
@@ -137,7 +170,7 @@ class Rig:
 @contextlib.contextmanager
 def rig(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = False,  # noqa: PLR0913
         env_url: str | None = None, credential_set: bool = True, source: str = "idp",
-        sign_login: bool = True, bao_type: type = A.OpenBaoStandIn) -> Iterator[Rig]:
+        sign_login: bool = True, bao_type: type = A.OpenBaoStandIn, idp_adapter: str = IDP_ADAPTER) -> Iterator[Rig]:
     """The fixture tenant with `idp` and `crm` (granted, declared, never called by the source run)
     on the credential proxy, `hr` granted and declared but judged down, and the OpenBao stand-in
     that signs with the live generation's sign login. Yields before any launch. `source` is what the
@@ -149,7 +182,7 @@ def rig(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = False,  #
                             ("VAULT_TOKEN", "env-token-1163"), ("BAO_TOKEN", "env-token-1163")):
             monkeypatch.setenv(name, value)
     est = S.estate(tmp_path, systems=(*S.SYSTEMS, "crm", "hr"))
-    (est.adapters / "idp_adapter.py").write_text(IDP_ADAPTER, encoding="utf-8")
+    (est.adapters / "idp_adapter.py").write_text(idp_adapter, encoding="utf-8")
     (est.adapters / "hr_adapter.py").write_text(HR_DOWN_ADAPTER, encoding="utf-8")
     idp = [c for c in S.default_calls() if c.system == "idp"][0]
     # Every call answers with the idp rows, so the one scripted submission is true of all three
@@ -204,13 +237,15 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = Fa
                env_url: str | None = None, proxy_address: bool = True, oracle: Any = None,
                unreachable_proxy: bool = False, credential_set: bool = True,
                on_read: Any = None, source: str = "idp", sign_login: bool = True,
-               bao_type: type = A.OpenBaoStandIn, sign_script: Any = (), **seams: Any):
+               bao_type: type = A.OpenBaoStandIn, sign_script: Any = (), idp_adapter: str = IDP_ADAPTER,
+               settle: Any = None, **seams: Any):
     """One launch through pre-flight over `rig`. `on_read(rig)` runs as the merged upstream serves
     each idp read; `unreachable_proxy` hands the launcher an address nothing listens at;
-    `sign_script` (a `ScriptedBao`'s) shapes the sign requests in order."""
+    `sign_script` (a `ScriptedBao`'s) shapes the sign requests in order; `settle(run, tap)` runs
+    once the launch has returned, while the proxy is still being served."""
     with rig(tmp_path, monkeypatch, data_root, working_tree_edit=working_tree_edit, env_url=env_url,
              credential_set=credential_set, source=source, sign_login=sign_login,
-             bao_type=ScriptedBao if sign_script else bao_type) as r:
+             bao_type=ScriptedBao if sign_script else bao_type, idp_adapter=idp_adapter) as r:
         if sign_script:
             r.bao.sign_script = list(sign_script)
         if on_read is not None:
@@ -227,6 +262,8 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = Fa
                 then=S.submit(r.idp.payload, S.EMPTY_CLAIM)),
                 verifier=S.passing_verifier(), issuer_transport=r.bao, proxy_url=address,
                 directory=r.records, after_source=r.after_source, **seams)
+            if settle is not None:
+                settle(run, tap)
         outcome = S.read_outcome(run.ep)
     return run, outcome, r.bao, tap, r.merged, r.wt
 
@@ -373,9 +410,11 @@ def _healthy_pass(tmp_path, monkeypatch, data_root, **kw: Any) -> tuple[int, dic
     oracle = _side_lookups("user:bob")
     (tmp_path / "healthy").mkdir()
     run, outcome, *_rest = _preflight(tmp_path / "healthy", monkeypatch, data_root, oracle=oracle, **kw)
-    assert outcome is not None and outcome["outcome"] == "accepted", ("positive control: the healthy pass", run.message)
+    assert outcome is not None, ("positive control: the healthy pass", run.message)
+    assert outcome["outcome"] == "accepted", ("positive control: the healthy pass", run.message)
     calls = _calls_per_world(run.ep)
-    assert len(set(calls.values())) == 1 and min(calls.values()) >= 2, ("positive control: every world ran every call", calls)
+    assert len(set(calls.values())) == 1, ("positive control: every world ran every call", calls)
+    assert min(calls.values()) >= 2, ("positive control: every world ran every call", calls)
     assert oracle.requests == len(calls) * min(calls.values()) + 1, "positive control: one turn per call, one more for the lookup"
     return oracle.requests, calls
 
@@ -557,7 +596,8 @@ def test_p8_a_lookup_refused_by_the_proxy_as_lost_access_refuses_the_pass_naming
     assert outcome["outcome"] == "refused", ("the proxy's refusal of our token was shown to the model as evidence", outcome)
     assert "credential proxy" in outcome["reason"], outcome["reason"]
     assert outcome["unservable_worlds"] == []
-    assert len(bao.signs) == 1 and len(tap.tokens) == 1, "positive control: a token was signed and the proxy refused it"
+    assert len(bao.signs) == 1, "positive control: a token was signed and the proxy refused it"
+    assert len(tap.tokens) == 1, "positive control: a token was signed and the proxy refused it"
     assert merged.seen == [], "the system was reached with a refused token"
     _no_world_went_on(run, oracle, healthy)
 
@@ -573,7 +613,8 @@ def test_p8b_a_lookup_met_by_a_setup_refusal_refuses_the_pass_naming_our_setup_f
         tmp_path, monkeypatch, data_root, source="unproxied", oracle=oracle, credential_set=False)
     assert outcome is not None, run.message
     assert outcome["outcome"] == "refused", ("our setup failure was shown to the model as evidence", outcome)
-    assert "idp" in outcome["reason"] and "setup" in outcome["reason"].lower(), outcome["reason"]
+    assert "idp" in outcome["reason"], outcome["reason"]
+    assert "setup" in outcome["reason"].lower(), outcome["reason"]
     assert outcome["unservable_worlds"] == []
     assert len(tap.tokens) >= 1, "positive control: the lookup reached the proxy"
     assert merged.seen == []
@@ -615,3 +656,35 @@ def test_p7_a_slow_sign_in_flight_when_the_outcome_is_decided_is_counted_and_not
         assert outcome["unservable_worlds"] == []
     time.sleep(0.5)
     assert _sign_requests(bao) == 2, "something signed after the outcome was decided"
+
+
+def test_p7_an_adapter_that_asks_again_after_the_outcome_exists_is_refused_and_the_proxy_sees_no_further_token(
+        tmp_path, monkeypatch, data_root):
+    """A lookup that outlives the oracle's turn deadline waits, on its abandoned thread, until the pass's outcome
+    file exists and then makes a second request: it raises, and the proxy is sent nothing for it (the pass shut
+    its access holder when it decided). #1363 O6, N1."""
+    monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
+    monkeypatch.setenv(KNOB_TURN_DEADLINE, "0.3")
+    result = tmp_path / "late-result.txt"
+    monkeypatch.setenv("LATE_OUTCOME", str(data_root / "*" / "episodes" / "*" / S.OUTCOME_NAME))
+    monkeypatch.setenv("LATE_RESULT", str(result))
+    waited: list[str] = []
+
+    def until_the_late_request_ended(_run, _tap) -> None:
+        limit = time.monotonic() + 45
+        while not result.exists() and time.monotonic() < limit:
+            time.sleep(0.05)
+        waited.append(result.read_text(encoding="utf-8") if result.exists() else "never")
+
+    run, outcome, _bao, tap, _merged, _wt = _preflight(
+        tmp_path, monkeypatch, data_root, oracle=_side_lookups("user:bob"), idp_adapter=LATE_IDP_ADAPTER,
+        settle=until_the_late_request_ended)
+
+    assert outcome is not None, run.message
+    assert outcome["outcome"] == "accepted", ("positive control: the pass recorded its own result", outcome)
+    assert len(outcome["unservable_worlds"]) == 1, \
+        ("positive control: the lookup outlived the turn deadline and its world gave up", outcome)
+    assert any(b"user%3Abob" in b or b"user:bob" in b for b in tap.bodies), "positive control: the lookup reached the proxy"
+    assert waited, "the late request never ended"
+    assert waited[0].startswith("raised:"), f"the request made after the outcome was not refused: {waited}"
+    assert not any(b"late" in body for body in tap.bodies), "the proxy was sent a request made after the pass decided"

@@ -273,7 +273,7 @@ def bearer_rows() -> list[Row]:  # noqa: C901, PLR0915 — one row per cause
         Row("caller-left-before-its-request-arrived", "request", lambda r: Req(_Unread.PEER_LEFT, f"Bearer {r.tok()}")),
         # setup: ours, for one system
         Row("no-credential-set-stored", "setup", set_for(None)),
-        Row("no-declaration-for-a-granted-system", "setup", other_system("cmdb")),
+        Row("no-declaration-for-a-granted-system", "setup", other_system("inventory")),  # no such folder in the export
         Row("declaration-not-valid", "setup", other_system(BROKEN_SYSTEM)),
         Row("credential-kind-does-not-fit", "setup", set_for(T.oauth_set())),
         Row("credential-field-missing", "setup", set_for(T.custom_set({"other": "x"}))),

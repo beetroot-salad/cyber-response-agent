@@ -608,17 +608,47 @@ def test_1363_o4_the_client_stores_the_origin_on_the_answer_it_returns():
 def test_1363_b2_an_old_proxys_final_record_without_origin_is_refused_as_access():
     """A final record of the eight fields an older proxy sends is refused whole, a healthy 200 with
     a body included, and reads `access`; the same record with `origin` is the answer. #1363 B2."""
-    healthy = W.old_proxy_reply(b'{"ok": true}')
+    healthy = W.old_proxy_reply(b'{"canary": "BODY-CANARY-91c2"}')
     refusal = W.old_proxy_reply(status=None, fault="ConfigFault", detail="refused", body_whole=False, sent=False)
     for old in (healthy, refusal):
         with W.fake_proxy(old, ended=True) as url, pytest.raises(TransportFault) as raised:
             W.call(url, "tok", f"{url}/x")
         assert getattr(raised.value, "origin", None) == "access"
         assert raised.value.proxy_own is True
-        assert "ok" not in str(raised.value)
+        assert "BODY-CANARY-91c2" not in str(raised.value), "the refused reply's body is not shown"
     f = W.fmt()
     with W.fake_proxy(f.encode_body(b'{"ok": true}') + f.encode_final(W.final_record()), ended=True) as url:
         assert W.call(url, "tok", f"{url}/x").body == '{"ok": true}', "positive control"
+
+
+def _whole_record() -> dict[str, object]:
+    """The final record of a healthy 200 as a proxy of this version frames it: nine fields."""
+    return {**dict(zip(W.OLD_FINAL_FIELDS, (200, {}, None, None, False, True, True, False), strict=True)), "origin": None}
+
+
+def _record_cases() -> list[object]:
+    whole = _whole_record()
+    cases = [pytest.param({k: v for k, v in whole.items() if k != dropped}, id=f"drops-{dropped}") for dropped in whole]
+    cases.append(pytest.param({**whole, "extra": 1}, id="adds-a-field"))
+    cases += [pytest.param({**whole, "origin": value}, id=f"origin-{json.dumps(value)}")
+              for value in ("system", 7, "bogus", "", "REQUEST", True, 1.5, [], {}, ["request"])]
+    return cases
+
+
+@pytest.mark.parametrize("record", _record_cases())
+def test_1363_b2_a_final_record_that_is_not_exactly_the_nine_fields_with_a_known_origin_is_refused_as_access(record):
+    """A final record with a field dropped or added, or an `origin` that is neither null nor one of the
+    proxy's labels (`system`, a number, any other text), is refused whole and reads `access`; the
+    unmutated record is the answer. #1363 B2."""
+    healthy = W.framed_reply(record, b'{"canary": "BODY-CANARY-91c2"}')
+    with W.fake_proxy(healthy, ended=True) as url, pytest.raises(TransportFault) as raised:
+        W.call(url, "tok", f"{url}/x")
+    assert getattr(raised.value, "origin", None) == "access"
+    assert raised.value.proxy_own is True
+    assert "BODY-CANARY-91c2" not in str(raised.value)
+    control = W.framed_reply(_whole_record(), b'{"canary": "BODY-CANARY-91c2"}')
+    with W.fake_proxy(control, ended=True) as url:
+        assert W.call(url, "tok", f"{url}/x").body == '{"canary": "BODY-CANARY-91c2"}', "positive control"
 
 
 def test_1363_b2_raise_proxy_fault_takes_the_origin_for_every_class_and_origin():

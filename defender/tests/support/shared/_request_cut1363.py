@@ -45,6 +45,7 @@ def real_proxy_request_faults() -> dict[str, tuple[type, str]]:
     # `reader_fault=True` (_app ~353/356). The proxy client raises its fault kind (`fault`) from that
     # record (`raise_proxy_fault`), and a reader fault is the run's own cut, so origin `request`.
     cut = _broken_reply("cmdb", 200, "the run was too slow reading it", reader_fault=True)
-    assert cut.reader_fault and cut.fault in FAULT_CLASSES, cut
+    assert cut.reader_fault, cut
+    assert cut.fault in FAULT_CLASSES, cut
     out["reader-cut-the-reply"] = (FAULT_CLASSES[cut.fault], cut.detail)
     return out

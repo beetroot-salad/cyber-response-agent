@@ -1211,7 +1211,7 @@ def test_1363_a_call_that_reaches_only_a_down_system_is_refused_at_admission_wit
     assert "hr" in entry["reason"], entry
     assert "live gather grant" not in entry["reason"], ("a down system's call read as an ungranted one", entry)
     assert est.calls("hr") == [], "a call to a down system was sent"
-    assert est.calls("edr"), "positive control: the up system's call was replayed"
+    assert [e for e in outcome["not_replayable"] if e["system"] == "edr"] == [], "positive control: the up system's call stays replayable"
     assert oracle.requests, "positive control: the pass went on to calibrate"
 
 

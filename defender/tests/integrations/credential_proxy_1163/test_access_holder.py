@@ -261,7 +261,8 @@ def test_h9b_a_setup_fault_is_not_lost_access_but_reaches_the_owner(tmp_path, da
     assert access.token() != first, "a setup fault stopped the holder signing"
     assert len(signer.payloads) == 2
     access.report(_lost("the credential proxy answered nothing"))
-    assert told[-1].origin == "access" and len(told) == 2, "positive control: an access fault reaches the owner too"
+    assert told[-1].origin == "access", "positive control: an access fault reaches the owner too"
+    assert len(told) == 2, "positive control: an access fault reaches the owner too"
 
 
 def test_h11_a_shut_holder_raises_for_every_ask_and_asks_the_signer_nothing(tmp_path, data_root, clock):
@@ -276,6 +277,55 @@ def test_h11_a_shut_holder_raises_for_every_ask_and_asks_the_signer_nothing(tmp_
         with pytest.raises(AdapterFault):
             access.token()
     assert signer.asked == asked, "a shut holder asked the signer"
+
+
+def test_h13_the_owner_decides_after_the_sign_in_flight_and_the_holder_is_shut_as_it_decides(tmp_path, data_root, clock):
+    """`deciding()` waits for a sign in flight, holds off every other ask while the block runs, and shuts the
+    holder when it ends: the ask that waited raises, signs nothing, and so does every later one. `deciding` is
+    the holder's name for the owner's decision (a test-reach pin). #1363 O6, B5"""
+    signer = GatedSigner()
+    access = _access(tmp_path, data_root, signer, clock)
+    got: list[str] = []
+    signing = threading.Thread(target=lambda: got.append(access.token()))
+    signing.start()
+    assert signer.entered.wait(10), "no sign began"
+    inside, leave = threading.Event(), threading.Event()
+
+    def decide() -> None:
+        with access.deciding():
+            inside.set()
+            leave.wait(10)
+
+    decider = threading.Thread(target=decide)
+    decider.start()
+    assert not inside.wait(0.3), "the owner began deciding while a sign was still in flight"
+    signer.release.set()
+    signing.join(10)
+    assert inside.wait(10), "the owner never got to decide"
+    assert len(got) == 1, "positive control: the sign in flight completed"
+    asked = signer.asked
+
+    late: list[object] = []
+
+    def ask() -> None:
+        try:
+            late.append(access.token())
+        except AdapterFault as fault:
+            late.append(fault)
+
+    waiting = threading.Thread(target=ask)
+    waiting.start()
+    waiting.join(0.3)
+    assert waiting.is_alive(), "an ask was answered while the owner was deciding"
+    assert late == [], f"an ask was answered while the owner was deciding: {late}"
+    leave.set()
+    decider.join(10)
+    waiting.join(10)
+    assert len(late) == 1, f"the ask that waited was not refused once: {late}"
+    assert isinstance(late[0], AdapterFault), f"the ask that waited was answered: {late}"
+    with pytest.raises(AdapterFault):
+        access.token()
+    assert signer.asked == asked, "the holder asked the signer after the owner decided"
 
 
 def test_h10_the_holder_shows_no_token_in_any_repr(tmp_path, data_root, clock):
@@ -334,6 +384,7 @@ def test_h12_the_client_reports_to_the_holder_exactly_the_setup_and_access_fault
     assert len(holder.reports) == (1 if reported else 0), (origin, holder.reports)
     if reported:
         (seen,) = holder.reports
-        assert seen.origin == origin and seen.detail == raised.value.detail
+        assert seen.origin == origin
+        assert seen.detail == raised.value.detail
         if origin == "setup":
             assert getattr(seen, "system", None) == "identity", "the setup fault does not say whose setup failed"

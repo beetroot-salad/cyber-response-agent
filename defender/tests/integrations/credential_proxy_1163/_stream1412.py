@@ -53,6 +53,12 @@ def old_proxy_reply(*chunks: bytes, status: int | None = 200, **over: Any) -> by
     record = {"status": status, "headers": {}, "fault": None, "detail": None, "system_side": False,
               "sent": True, "body_whole": True, "reader_fault": False} | over
     assert tuple(record) == OLD_FINAL_FIELDS, "the old record has exactly its eight fields"
+    return framed_reply(record, *chunks)
+
+
+def framed_reply(record: dict[str, Any], *chunks: bytes) -> bytes:
+    """A reply framed by hand: body frames, then a final frame carrying `record` as given, whatever
+    fields or values it holds (nothing here checks the record)."""
     frame = struct.Struct(">cI")
     payload = json.dumps(record).encode("utf-8")
     return b"".join(frame.pack(b"B", len(c)) + c for c in chunks) + frame.pack(b"F", len(payload)) + payload
