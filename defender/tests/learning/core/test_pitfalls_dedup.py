@@ -227,9 +227,10 @@ def test_a_single_lesson_repeated_does_not_clear_the_threshold(paths, monkeypatc
     assert len(paths.rows) == 8, "the under-threshold queue lost its evidence"
 
 
-def test_an_attributed_reducer_lesson_repeated_does_clear_it(paths, monkeypatch, tmp_path):
-    """The same eight rows as attributed REDUCER rows DO open the lane: one record whose
-    `occurrences` alone clears the threshold, handed off on the reducer surface."""
+def test_an_attributed_reducer_lesson_repeated_counts_once_and_two_more_mistakes_clear_it(paths, monkeypatch, tmp_path):
+    """The strict arrival rule has no second route for the reducer (#1278 ruling): eight rows of one attributed REDUCER mistake
+    are one record under threshold 3 and the curator is not reached, but with two more distinct reducer mistakes it opens,
+    handed off on the reducer surface with the repeated record carrying its eight occurrences."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     paths.append([_shim(f"r:l-003:{i}", system="elastic") for i in range(8)])
 
@@ -239,8 +240,14 @@ def test_an_attributed_reducer_lesson_repeated_does_clear_it(paths, monkeypatch,
 
     calls: list = []
     assert _run_pitfalls(paths, _invoke_spy(calls), tmp_path) == 0
-    assert calls, "the tick gate refused the attributed reducer record"
+    assert calls == [], "the curator ran on one reducer mistake wearing eight hats"
+
+    paths.append([_shim("r:l-004:0", digest=QUOTING), _shim("r:l-005:0", digest="exit=1; a third error")])
+    assert len(_records(paths.rows)) == 3
+    assert _run_pitfalls(paths, _invoke_spy(calls), tmp_path) == 0
+    assert calls, "the tick gate refused three distinct reducer mistakes"
     assert [e["surface"] for e in calls[0]] == ["reducer"]
+    assert max(f["occurrences"] for f in calls[0][0]["failures"]) == 8
 
 
 @pytest.mark.postgres
