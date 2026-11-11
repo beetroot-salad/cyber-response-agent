@@ -44,9 +44,13 @@ upgrading a worker:
    from the repository root, or set `DEFENDER_JOB_IMAGE` to an image you built from it. The helper never pulls. Without
    the image every job fails its row (an investigation `worker_error`, a learning job `failed: entry_error`), and no
    job runs outside a container.
-2. Job containers start under the box runtime (`DEFENDER_BOX_RUNTIME`). Set `DEFENDER_JOB_NETWORK` to the Docker network
+2. Register gVisor with `--host-uds=open` on every execution host: `runsc install -- --oci-seccomp --host-uds=open`, then
+   restart Docker. The job's socket is a host unix socket mounted into the job's gVisor guest, and gVisor refuses the
+   guest's connection to it without this. The flag is daemon-wide, so every box gets the capability; a follow-up issue
+   weighs a job-only runtime.
+3. Job containers start under the box runtime (`DEFENDER_BOX_RUNTIME`). Set `DEFENDER_JOB_NETWORK` to the Docker network
    from which the job reaches the credential proxy and the model provider. Leave OpenBao and the database off that network.
-3. The job container runs as the uid that owns the data root, and its socket lives under
+4. The job container runs as the uid that owns the data root, and its socket lives under
    `<data root>/.job-sockets/<claim>/`. A data root whose socket path would exceed 107 bytes fails every job as a start
    failure: keep the data root's path short.
 
