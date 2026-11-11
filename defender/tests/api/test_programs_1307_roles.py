@@ -18,6 +18,7 @@ from defender.api.app import Authed, create_app, unauthenticated_routes, undecla
 from defender.identity import DataRuleViolation  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,
+    ANN,
     NEW,
     T1,
     T2,
@@ -287,8 +288,8 @@ def test_the_app_does_not_start_when_one_of_its_routers_holds_a_route_that_decla
     assert undeclared_routes(create_app(route_table_deps())) == []
 
 
-def test_an_admin_creates_a_program_that_is_an_active_automation_member_with_no_email(caplog) -> None:
-    """Program creation: active at once, one automation membership in the tenant, creator recorded, audited (O4, O8)."""
+def test_an_admin_creates_a_program_of_the_tenant_that_is_active_and_is_no_user_or_member(caplog) -> None:
+    """Program creation: a `programs` row of the tenant, active at once, creator recorded, no users or memberships row and not in the members list, audited (O-A, O-B, O4, O8)."""
     audit = AuditLog(caplog)
     s = soar()
     mark = audit.mark()
@@ -298,15 +299,17 @@ def test_an_admin_creates_a_program_that_is_an_active_automation_member_with_no_
     listed = {p["id"]: p for p in items(s.ann.get(f"/tenants/{T1}/programs"))}
     assert set(listed) == {s.program_id, program_id}
     assert listed[program_id]["created_by"] == s.ann.get("/me").json()["user"]["id"]
-    user = s.world.call(s.world.raw_repo.user, program_id)
-    assert (user.kind, user.email, user.status, user.signin_account_id) == ("program", None, "active", None)
-    [membership] = s.world.call(s.world.raw_repo.memberships_of_user, program_id)
-    assert (str(membership.tenant_id), membership.status, membership.role) == (T1, "active", "automation")
+    program = s.world.call(s.world.raw_repo.program, program_id)
+    assert (str(program.tenant_id), program.display_name, program.status, str(program.created_by)) == (
+        T1, "Ticket sync", "active", user_id(s.ann))
+    assert s.world.call(s.world.raw_repo.user, program_id) is None
+    assert s.world.call(s.world.raw_repo.memberships_of_user, program_id) == []
+    assert [m["email"] for m in items(s.ann.get(f"/tenants/{T1}/members"))] == [ANN]  # control: the person is listed, the program is not
     assert [(e.action, e.target) for e in audit.since(mark)] == [("program.create", program_id)]
 
 
 def test_a_program_cannot_be_given_a_second_membership() -> None:
-    """A program belongs to exactly one tenant; no invitation can address it (O4, D5)."""
+    """No invitation can address a program: it has no users row to invite, and no membership appears (O-B, O4, D5)."""
     s = soar()
     before = s.world.call(s.world.raw_repo.memberships_of_user, s.program_id)
     with pytest.raises(DataRuleViolation):

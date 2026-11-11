@@ -132,8 +132,10 @@ OPERATIONS: dict[str, Callable[[Soar], Callable[[], Any]]] = {
 
 
 def _rows(s: Soar) -> list[Any]:
-    programs = {p for r in s.world.call(s.world.raw_repo.memberships_of_tenant, T1) for p in [str(r.user_id)]}
-    return [row for program in sorted(programs) for row in s.world.credentials(program)]
+    # the seeded program (which an operation may remove, so it is named) and the tenant's other active programs (#1454: programs
+    # are their own rows, not memberships)
+    active = {str(p.id) for p in s.world.call(s.world.raw_repo.programs_of_tenant, T1)}
+    return [row for program in sorted({s.program_id, *active}) for row in s.world.credentials(program)]
 
 
 def _facts(s: Soar, audit: AuditLog, clients_before: set[str]) -> list[str]:
@@ -222,10 +224,15 @@ def _reconcile_once(s: Soar) -> Any:
     return None
 
 
-def test_1454_a_failed_tenant_read_in_a_cleanup_pass_deletes_nothing_and_fails_the_pass(caplog: pytest.LogCaptureFixture) -> None:
-    """The pass reads every tenant it needs before its first delete: a fault at the last repository call before the first
-    delete (the tenant read) leaves every client in place, audits no deletion and fails the pass. Control: unfaulted, each
-    stale client is deleted with its tenant (none for a client with no row) in its audit line (O-F)."""
+def _repo_calls_before_the_first_delete(plan: FaultPlan) -> list[tuple[int, str]]:
+    """(call number, method) of every repository call the pass made before its first client deletion."""
+    first_delete = next(i for i, (who, name, _) in enumerate(plan.calls) if (who, name) == ("realm", "delete_client"))
+    return [(i, name) for i, (who, name, _) in enumerate(plan.calls[:first_delete]) if who == "repo"]
+
+
+def test_1454_a_cleanup_pass_reads_the_tenants_it_needs_once_before_it_deletes_and_audits_them(caplog: pytest.LogCaptureFixture) -> None:
+    """Unfaulted: the keep-set and the tenants of the clients to delete are each read once, before the first deletion, with no
+    per-client lookup; each deletion is audited with its tenant, none for a client with no row, the stale `pending` one with its own (O-F)."""
     s, audit, plan = _world(caplog)
     doomed = _reconcilable(s)
     plan.arm(None)
@@ -233,15 +240,31 @@ def test_1454_a_failed_tenant_read_in_a_cleanup_pass_deletes_nothing_and_fails_t
     assert sorted(s.world.realm.deleted) == doomed
     assert sorted((e.target, e.tenant_id) for e in audit.events() if e.action == CLIENT_DELETE) == sorted(
         (c, None if c in ORPHANS else T1) for c in doomed)
-    first_delete = next(i for i, (who, name, _) in enumerate(plan.calls) if (who, name) == ("realm", "delete_client"))
-    tenant_read = max(i for i, (who, _, _) in enumerate(plan.calls[:first_delete]) if who == "repo")
+    before = [name for _, name in _repo_calls_before_the_first_delete(plan)]
+    assert before.count("oauth_credentials_to_keep") == before.count("tenants_of_credentials") == 1, before
+    every = [name for who, name, _ in plan.calls if who == "repo"]
+    assert (every.count("oauth_credentials_to_keep"), every.count("tenants_of_credentials")) == (1, 1)  # not once per client
+    assert "credential_by_id" not in every  # no per-client lookup of the tenant
 
-    caplog.clear()
+
+def test_1454_a_failed_read_in_a_cleanup_pass_deletes_nothing_and_fails_the_pass(caplog: pytest.LogCaptureFixture) -> None:
+    """A fault at the keep-set read or at the tenant read, both of which come before the first deletion, leaves every client in
+    the realm, audits no deletion and fails the pass with the fault; the unfaulted pass deletes them all (O-F)."""
     s, audit, plan = _world(caplog)
-    _reconcilable(s)
-    plan.arm(tenant_read)
-    outcome = _reconcile_once(s)
-    assert isinstance(outcome, InjectedProgramsFault), outcome
-    assert s.world.realm.deleted == []
-    assert [c for c in doomed if c not in s.world.realm.clients] == []
-    assert CLIENT_DELETE not in [e.action for e in audit.events()]
+    doomed = _reconcilable(s)
+    plan.arm(None)
+    assert _reconcile_once(s) is None
+    assert sorted(s.world.realm.deleted) == doomed  # control: unfaulted, all deleted
+    reads = [(i, name) for i, name in _repo_calls_before_the_first_delete(plan)
+             if name in ("oauth_credentials_to_keep", "tenants_of_credentials")]
+    assert sorted(name for _, name in reads) == ["oauth_credentials_to_keep", "tenants_of_credentials"], reads
+    for at, name in reads:
+        caplog.clear()
+        s, audit, plan = _world(caplog)
+        doomed_here = _reconcilable(s)  # ids are minted per world
+        plan.arm(at)
+        outcome = _reconcile_once(s)
+        assert isinstance(outcome, InjectedProgramsFault), (name, outcome)
+        assert s.world.realm.deleted == [], name
+        assert [c for c in doomed_here if c not in s.world.realm.clients] == [], name
+        assert CLIENT_DELETE not in [e.action for e in audit.events()], name

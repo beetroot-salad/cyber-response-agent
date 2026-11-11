@@ -18,7 +18,7 @@ from defender.tests.support.shared._postgres1339 import VERSION_TABLE, database,
 
 #: The schemas PostgreSQL itself owns; everything else in a database is ours to compare.
 _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
-IDENTITY_TABLES = {"users", "memberships", "sessions", "program_credentials", "warning_deliveries"}  # #1214: `tenants` moved to `tenancy`; #1307 adds credentials and their warning deliveries
+IDENTITY_TABLES = {"users", "memberships", "sessions", "programs", "program_credentials", "warning_deliveries"}  # #1214: `tenants` moved to `tenancy`; #1307 adds credentials and their warning deliveries; #1454 gives programs their own table
 JOBS_TABLES = {"alerts", "investigations", "learning_jobs", "learning_checks"}  # #1342, #1344 (amendment 3: learning_checks) (#1345 r5: the mapping table is a tenant record, in `tenancy`)
 UNKNOWN_REVISION = "f00dfeedbeef"
 #: #1345 r5 Upgrade: the migration after `0006_job_leases`. r5 names no id: this one is DESIGN-IMPLIED for the code stage.
@@ -91,7 +91,7 @@ def test_the_history_has_exactly_one_head():
 
 @pytest.mark.postgres
 def test_upgrading_an_empty_database_records_head_and_creates_identitys_tables(empty_database):
-    """Empty -> head: the version table in `public` holds head; identity's five tables are in `identity` (O1)."""
+    """Empty -> head: the version table in `public` holds head; identity's tables are in `identity` (O1, #1454: `programs` among them)."""
     from defender.migrations import head, upgrade
 
     upgrade(empty_database)

@@ -215,17 +215,20 @@ def test_a_keys_expiry_writes_nothing_but_an_oauth_clients_cleanup_is_audited(ca
     assert [(e.action, e.actor, e.target) for e in audit.since(mark)] == [(CLIENT_DELETE, SYSTEM, oauth)]
 
 
-# --- #1454 (sketch) ------------------------------------------------------------------------------------
+# --- #1454 ---------------------------------------------------------------------------------------------
 
 MEMBER_REMOVE = "member.remove"
 
 
-def test_1454_offboarding_removes_the_tenants_program_and_ends_its_people_with_todays_audit_lines(caplog) -> None:
-    """`end_tenant`: the active program's credentials revoked then `program.remove`, the person's membership ended with
-    `member.remove`, all by the system; afterwards T1 has no program and its only membership row, ann's, is ended (O-E)."""
+def test_1454_offboarding_removes_the_tenants_active_programs_and_ends_its_people_with_todays_audit_lines(caplog) -> None:
+    """`end_tenant`: each active program's credentials revoked then `program.remove`, the person's membership ended with
+    `member.remove`, all by the system; a program removed earlier is not touched; a second run emits nothing (O-E, O-A)."""
     audit = AuditLog(caplog)
     s = soar()
     oauth = issue_oauth(s.ann, T1, s.program_id)
+    earlier = str(create_program(s.ann, T1, "Earlier")["id"])
+    issue_key(s.ann, T1, earlier)
+    assert s.ann.delete(f"/tenants/{T1}/programs/{earlier}").status_code == 204
     mark = audit.mark()
     s.world.call(s.world.lifecycle_service().end_tenant, T1, now=s.world.clock())
     events = [(e.action, e.actor, e.tenant_id, e.target) for e in audit.since(mark)]
@@ -234,26 +237,11 @@ def test_1454_offboarding_removes_the_tenants_program_and_ends_its_people_with_t
         (PROGRAM_REMOVE, SYSTEM, T1, s.program_id), (MEMBER_REMOVE, SYSTEM, T1, user_id(s.ann))])
     removal = events.index((PROGRAM_REMOVE, SYSTEM, T1, s.program_id))
     assert {e[3] for e in events[:removal] if e[0] == CREDENTIAL_REVOKE} == {s.key_id, oauth}  # revokes, then the removal
-    assert s.world.call(s.world.raw_repo.programs_of_tenant, T1) == []
+    program = s.world.call(s.world.raw_repo.program, s.program_id)
+    assert (program.status, program.removed_by, program.removed_at) == ("removed", None, s.world.clock())
     assert {r.state for r in s.world.credentials(s.program_id)} == {"revoked"}
     assert [(str(m.user_id), m.status) for m in s.world.call(s.world.raw_repo.memberships_of_tenant, T1)] == [
         (user_id(s.ann), "ended")]
-
-
-def test_1454_a_program_create_whose_tenant_leaves_active_during_the_request_is_404_and_writes_nothing(caplog) -> None:
-    """The tenant is offboarded after the admin's membership check and before the repository write: the create is
-    refused as an unknown tenant (404), no program is added and no `program.create` is audited (P-L)."""
-    audit = AuditLog(caplog)
-    s = soar()
-    repo, add_program = s.world.raw_repo, s.world.raw_repo.add_program
-
-    async def offboarded_first(tenant_id, **kwargs):
-        await s.world.tenants.request_offboard(tenant_id, now=s.world.clock())
-        return await add_program(tenant_id, **kwargs)
-
-    repo.add_program = offboarded_first
     mark = audit.mark()
-    response = s.ann.post(f"/tenants/{T1}/programs", json={"display_name": "Late"})
-    assert response.status_code == 404, response.text
-    assert [str(p.id) for p in s.world.call(repo.programs_of_tenant, T1)] == [s.program_id]
-    assert PROGRAM_CREATE not in audit.actions(mark)
+    s.world.call(s.world.lifecycle_service().end_tenant, T1, now=s.world.clock())
+    assert audit.since(mark) == []  # idempotent: nothing left to end

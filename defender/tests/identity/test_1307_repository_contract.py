@@ -1,8 +1,14 @@
 # ruff: noqa: F811  — the #1306 contract's fixtures are imported, as in test_1214_atk1_repository.py
 """#1307 IdentityRepository contract for programs and their credentials, memory and PostgreSQL (P-I, P-G, O4, O5).
 
+#1454 amends this contract: a program is a `programs` row, not a users row with a membership (P-J). Its row is read as
+`id, tenant_id, display_name, created_by, created_at, status ("active" | "removed"), removed_at, removed_by`; `program(id)`
+answers at any status; one admitting read per use (`admit_by_key`, `admit_by_client`, `admit_by_credential`) replaces
+`credential_by_hash` and `program_standing`; `revoke_stale_pending` answers `(credential id, tenant)` pairs; a write that makes
+something live in a tenant (`add_program`, `ensure_invitation`) raises `TenantNotActive` unless the tenant is `active`.
+
 Forced choices (FC-7, extending the support module's list; the design names no repository method):
-`add_program(tenant_id, *, display_name, created_by, now) -> User`;
+`add_program(tenant_id, *, display_name, created_by, now) -> Program`;
 `add_membership(..., role="admin")` (the seeder takes the role; people default `admin`);
 `add_credential(program_id, *, kind, name, created_by, expires_at, now, key_hash=None) -> row` (keys `live`; OAuth
 `pending` with `pending_deadline = now + 10 min`; None, writing nothing, without an active membership; over the cap, for a non-program, or
@@ -24,7 +30,7 @@ threshold, *, until)` (a failed send's retry); `warning_deliveries(credential_id
 only the rest; #1450 review). Reconciliation's keep-set read:
 `oauth_credentials_to_keep(*, now) -> set[credential id]` (OAuth rows `live` with `expires_at > now`, or `pending` with
 `pending_deadline > now`; never keys, never revoked). The claim and the keep-set count only a credential whose program is
-in standing (`program_standing`; #1450 review). Rows carry the design's fields (`state`, `kind`, `key_hash`,
+in standing (#1450 review; #1454 O-D). Rows carry the design's fields (`state`, `kind`, `key_hash`,
 `service_account_id`, `pending_deadline`, `last_used_at`, `revoked_at`, `revoked_by`, ...).
 """
 from __future__ import annotations
@@ -37,13 +43,15 @@ import hashlib
 import pytest
 
 from defender.identity import DataRuleViolation
-from defender.records.formats import TenantId, UserId
+from defender.records.formats import MembershipId, TenantId, UserId
 from defender.tests.identity.test_identity_repository_contract import (  # noqa: F401  (fixtures)
     HOUR,
     NO_SUCH_ROW,
+    NO_SUCH_USER,
     NOW,
     T1,
     T2,
+    T_UNREGISTERED,
     _active,
     _invited,
     _seed_tenant,
@@ -55,6 +63,7 @@ from defender.tests.identity.test_identity_repository_contract import (  # noqa:
     tenants,
     two_repositories,
 )
+from defender.tests.support.identity._tenant_states1454 import NOT_ACTIVE, leave_active
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._pglocks1339 import TIMEOUT, holding_row, until_blocked
 
@@ -88,40 +97,46 @@ async def _states(repo, program) -> dict[str, str]:
     return {r.id: r.state for r in await repo.credentials_of_program(program.id)}
 
 
-# --- the program row -------------------------------------------------------------------------------
+# --- the program row (P-J, P-K) ----------------------------------------------------------------------
 
-async def test_a_program_is_an_active_automation_member_with_no_email(seeded):
-    """A program: kind program, no email, always active, creator recorded, one active `automation` membership (O4, O3)."""
+def _as_user(program) -> UserId:
+    """A program's id read as a user id: what a caller would pass if it confused the two kinds."""
+    return UserId(str(program.id))
+
+
+async def test_a_program_is_a_row_of_its_tenant_with_its_creator_and_no_users_row(seeded):
+    """A program holds its tenant, name, creator and `active` status; no users row or membership exists for it (P-J, P-K, O-B)."""
     admin = await _user(seeded)
     program = await _program(seeded, admin)
-    assert (program.kind, program.email, program.status, program.created_by) == ("program", None, "active", admin.id)
-    assert program.display_name == "SOAR prod"
-    assert await seeded.user(program.id) == program
-    [membership] = await seeded.memberships_of_user(program.id)
-    assert (membership.tenant_id, membership.status, membership.role) == (T1, "active", "automation")
-    assert (await seeded.active_membership(program.id, T1)).id == membership.id
-    second = await _program(seeded, admin, name="Another")  # two programs, both with no email
+    assert (program.tenant_id, program.display_name, program.status) == (T1, "SOAR prod", "active")
+    assert (program.created_by, program.created_at, program.removed_at, program.removed_by) == (admin.id, NOW, None, None)
+    assert await seeded.program(program.id) == program
+    assert await seeded.user(_as_user(program)) is None
+    assert await seeded.memberships_of_user(_as_user(program)) == []
+    second = await _program(seeded, admin, name="Another")  # control: two programs, each its own row
     assert second.id != program.id
-    assert second.email is None
+    assert await seeded.program(UserId(fixture_uuid("program:nobody"))) is None
 
 
-async def test_a_person_is_kind_person_with_an_admin_membership(seeded):
-    """Control for the program row: people default to kind person, no creator, and `admin` memberships (O3)."""
+async def test_a_person_has_an_admin_membership_and_no_kind(seeded):
+    """Control for the program row: people carry a required email, `admin` memberships and no `kind` or creator (O-B, R1)."""
     ann = await _user(seeded)
     invited = await _invited(seeded, await _user(seeded, "bob@x.org"))
     active = await _active(seeded, ann)
-    assert (ann.kind, ann.created_by, ann.email) == ("person", None, "ann@x.org")
+    assert ann.email == "ann@x.org"
+    assert (hasattr(ann, "kind"), hasattr(ann, "created_by")) == (False, False)
     assert (invited.role, active.role) == ("admin", "admin")
 
 
 @pytest.mark.parametrize("attempt", [
-    pytest.param(lambda r, p, a: r.set_platform_admin(p.id, True), id="platform-admin-flag"),
-    pytest.param(lambda r, p, a: r.ensure_invitation(p.id, T2, invited_by=None, now=NOW), id="invitation"),
-    pytest.param(lambda r, p, a: r.add_membership(p.id, T2, status="active", invited_by=None, created_at=NOW,
-                                                  accepted_at=NOW, role="admin"), id="admin-membership"),
+    pytest.param(lambda r, p, a: r.ensure_invitation(_as_user(p), T2, invited_by=None, now=NOW), id="invitation-of-a-program"),
+    pytest.param(lambda r, p, a: r.add_membership(_as_user(p), T2, status="active", invited_by=None, created_at=NOW,
+                                                  accepted_at=NOW, role="admin"), id="membership-of-a-program"),
     pytest.param(lambda r, p, a: r.add_membership(a.id, T2, status="active", invited_by=None, created_at=NOW,
                                                   accepted_at=NOW, role="automation"), id="person-automation"),
     pytest.param(lambda r, p, a: r.add_user(None, created_at=NOW), id="person-without-email"),
+    pytest.param(lambda r, p, a: r.add_program(T1, display_name="By nobody", created_by=NO_SUCH_USER, now=NOW),
+                 id="program-by-nobody"),
     pytest.param(lambda r, p, a: r.add_credential(a.id, kind="key", name="k", created_by=a.id, expires_at=EXPIRES,
                                                   now=NOW, key_hash=_key(9)), id="credential-of-a-person"),
     pytest.param(lambda r, p, a: r.add_credential(NO_SUCH_ROW, kind="key", name="k", created_by=a.id,
@@ -134,37 +149,65 @@ async def test_a_person_is_kind_person_with_an_admin_membership(seeded):
                                                   now=NOW, key_hash=_key(9)), id="unknown-kind"),
 ])
 async def test_a_write_the_data_rules_forbid_is_refused_and_changes_nothing(seeded, attempt):
-    """Program never admin / invited / platform admin; people never automation; a key iff its hash; credentials only for programs (W2, O3, O5)."""
+    """A program is never invited or a member; people never `automation`, never without email; a key iff its hash; credentials only for programs (O-B, R1)."""
     admin = await _user(seeded)
     program = await _program(seeded, admin)
-    before = (await seeded.user(program.id), await seeded.user(admin.id), await seeded.memberships_of_user(program.id),
-              await seeded.memberships_of_user(admin.id), await seeded.credentials_of_program(program.id))
+
+    async def snapshot():
+        return (await seeded.user(admin.id), await seeded.memberships_of_user(admin.id), await seeded.memberships_of_tenant(T2),
+                await seeded.programs_of_tenant(T1), await seeded.credentials_of_program(program.id))
+
+    before = await snapshot()
     with pytest.raises(DataRuleViolation):
         await attempt(seeded, program, admin)
-    after = (await seeded.user(program.id), await seeded.user(admin.id), await seeded.memberships_of_user(program.id),
-             await seeded.memberships_of_user(admin.id), await seeded.credentials_of_program(program.id))
-    assert after == before
+    assert await snapshot() == before
     control = await _add_key(seeded, program, admin, 1)  # the same repository accepts the lawful write
     assert control.state == "live"
 
 
-# --- people queries ignore programs (P-I) --------------------------------------------------------------
+async def test_a_program_cannot_be_made_platform_admin_because_it_is_no_user(seeded):
+    """Setting the flag on a program's id changes no row and creates none; on a person it applies (O-B)."""
+    admin = await _user(seeded)
+    program = await _program(seeded, admin)
+    before = (await seeded.programs_of_tenant(T1), await seeded.user(admin.id))
+    await seeded.set_platform_admin(_as_user(program), True)
+    assert await seeded.user(_as_user(program)) is None
+    assert (await seeded.programs_of_tenant(T1), await seeded.user(admin.id)) == before
+    await seeded.set_platform_admin(admin.id, True)  # control: a person takes it
+    assert (await seeded.user(admin.id)).is_platform_admin is True
 
-async def test_people_queries_see_only_people_and_program_queries_only_programs(seeded):
-    """has-active-members, people_of_tenant: persons only; memberships_of_tenant: both; programs_of_tenant: active programs of that tenant (P-I)."""
+
+# --- people queries hold only people (O-B) ----------------------------------------------------------------
+
+async def test_the_people_reads_hold_only_people_and_the_program_reads_only_active_programs_of_the_tenant(seeded):
+    """After programs exist, member count, members list and rescue read answer people only; `programs_of_tenant` lists the tenant's active programs (O-B, O-E)."""
     ann = await _user(seeded)
     ann_membership = await _active(seeded, ann)
     soar = await _program(seeded, ann)
     other_tenant = await _program(seeded, ann, tenant=T2, name="Elsewhere")
+    gone = await _program(seeded, ann, name="Gone")
+    assert await seeded.remove_program(gone.id, removed_by=ann.id, now=NOW) is not None
     assert await seeded.tenant_has_active_members(T1) is True
     assert [(m.id, u.id) for m, u in await seeded.people_of_tenant(T1, "active")] == [(ann_membership.id, ann.id)]
-    assert {m.user_id for m in await seeded.memberships_of_tenant(T1)} == {ann.id, soar.id}
+    assert [m.id for m in await seeded.memberships_of_tenant(T1)] == [ann_membership.id]
+    assert await seeded.memberships_of_tenant(T2) == []
     assert [p.id for p in await seeded.programs_of_tenant(T1)] == [soar.id]
     assert [p.id for p in await seeded.programs_of_tenant(T2)] == [other_tenant.id]
     assert await seeded.end_membership(ann_membership.id, ended_by=ann.id, now=NOW) is True
     assert await seeded.tenant_has_active_members(T1) is False  # the program does not make a tenant "have members"
     assert await seeded.people_of_tenant(T1, "active") == []
-    assert (await seeded.active_membership(soar.id, T1)) is not None  # still the program's own membership
+    assert [p.id for p in await seeded.programs_of_tenant(T1)] == [soar.id]  # control: the program is still there
+
+
+async def test_a_program_id_is_no_membership_so_member_removal_finds_nothing(seeded):
+    """Ending or reading a membership by a program's id answers as for any unknown row; a real membership ends (O-B, 404 as today)."""
+    ann = await _user(seeded)
+    membership = await _active(seeded, ann)
+    program = await _program(seeded, ann)
+    unknown = MembershipId(str(program.id))
+    assert await seeded.membership(unknown) is None
+    assert await seeded.end_membership(unknown, ended_by=ann.id, now=NOW) is False
+    assert await seeded.end_membership(membership.id, ended_by=ann.id, now=NOW) is True
 
 
 # --- credentials -------------------------------------------------------------------------------------
@@ -186,19 +229,20 @@ async def test_a_credential_row_holds_what_the_design_lists_and_no_secret(seeded
     assert [r.id for r in await seeded.credentials_of_program((await _program(seeded, admin, name="Empty")).id)] == []
 
 
-async def test_a_credential_is_found_by_its_hash_or_id_in_any_state(seeded):
-    """Lookups by key hash and by id return the row (revoked included: its state decides use); unknown -> None (Keys, Audit)."""
+async def test_a_credential_is_found_by_its_id_in_any_state_and_admitted_by_its_hash_while_usable(seeded):
+    """The id lookup returns the row revoked or not; the key hash admits it while usable and not once revoked; unknown -> None (Keys, O-C)."""
     admin = await _user(seeded)
     program = await _program(seeded, admin)
     key = await _add_key(seeded, program, admin, 1)
     other = await _add_key(seeded, program, admin, 2)
-    assert (await seeded.credential_by_hash(_key(1))).id == key.id
+    assert (await seeded.admit_by_key(_key(1), now=NOW))[0].id == key.id
     assert (await seeded.credential_by_id(other.id)).key_hash == _key(2)
-    assert await seeded.credential_by_hash(_key(3)) is None
+    assert await seeded.admit_by_key(_key(3), now=NOW) is None
     assert await seeded.credential_by_id(NO_SUCH_ROW) is None
     assert await seeded.revoke_credential(key.id, revoked_by=admin.id, now=NOW + HOUR) is True
-    assert (await seeded.credential_by_hash(_key(1))).state == "revoked"
+    assert await seeded.admit_by_key(_key(1), now=NOW + HOUR) is None
     assert (await seeded.credential_by_id(key.id)).state == "revoked"
+    assert (await seeded.admit_by_key(_key(2), now=NOW + HOUR))[0].id == other.id  # control: the sibling still admits
 
 
 @pytest.mark.parametrize("frees", ["revoked", "expired-at-the-instant", "pending-deadline-at-the-instant", "pending-revoked"])
@@ -259,9 +303,9 @@ async def test_pending_goes_live_once_and_records_the_service_account(seeded):
     assert await seeded.go_live(NO_SUCH_ROW, service_account_id=SA, now=NOW) is False
 
 
-@pytest.mark.parametrize("how", ["revoked", "deadline", "membership-ended"])
+@pytest.mark.parametrize("how", ["revoked", "deadline", "program-removed"])
 async def test_pending_stays_pending_or_revoked_when_its_conditions_fail(seeded, how):
-    """Not still pending, at/after its deadline, or the program's membership ended -> no `live` row (Create step 4, removal race)."""
+    """Not still pending, at/after its deadline, or the program removed (which revokes it) -> no `live` row (Create step 4, O-E)."""
     admin = await _user(seeded)
     program = await _program(seeded, admin)
     row = await _add_oauth(seeded, program, admin, 1)
@@ -271,24 +315,24 @@ async def test_pending_stays_pending_or_revoked_when_its_conditions_fail(seeded,
     elif how == "deadline":
         now = NOW + DEADLINE
     else:
-        membership = await seeded.active_membership(program.id, T1)
-        assert await seeded.end_membership(membership.id, ended_by=admin.id, now=NOW) is True
+        assert await seeded.remove_program(program.id, removed_by=admin.id, now=NOW) == [row.id]
     assert await seeded.go_live(row.id, service_account_id=SA, now=now) is False
     after = await seeded.credential_by_id(row.id)
-    assert (after.state, after.service_account_id) == (("revoked" if how == "revoked" else "pending"), None)
+    assert (after.state, after.service_account_id) == (("pending" if how == "deadline" else "revoked"), None)
     fine = await _add_oauth(seeded, (await _program(seeded, admin, name="Fine")), admin, 2)
     assert await seeded.go_live(fine.id, service_account_id=SA, now=NOW) is True  # control
 
 
-async def test_no_credential_is_added_for_a_program_whose_membership_ended(seeded):
-    """Insert requires the program's membership to be active (one lock per program); without one the answer is None
-    and nothing is written (#1450 review: removed is an answer, so the service can say 404)."""
+async def test_no_credential_is_added_for_a_removed_program(seeded):
+    """Insert requires the program `active` (one lock per program); a removed one answers None and nothing is written
+    (#1450 review: removed is an answer, so the service can say 404); a sibling program takes one (O-E)."""
     admin = await _user(seeded)
     program = await _program(seeded, admin)
-    membership = await seeded.active_membership(program.id, T1)
-    await seeded.end_membership(membership.id, ended_by=admin.id, now=NOW)
+    assert await seeded.remove_program(program.id, removed_by=admin.id, now=NOW) is not None
     assert await _add_key(seeded, program, admin, 1) is None
+    assert await _add_oauth(seeded, program, admin, 2) is None
     assert await seeded.credentials_of_program(program.id) == []
+    assert (await _add_key(seeded, await _program(seeded, admin, name="Sibling"), admin, 3)).state == "live"  # control
 
 
 async def test_revoking_is_conditional_and_keeps_the_first_revocation(seeded):
@@ -321,15 +365,17 @@ async def test_last_used_is_written_only_when_older_than_five_minutes(seeded):
     assert await seeded.touch_credential(NO_SUCH_ROW, now=later) is False
 
 
-async def test_a_stale_pending_credential_is_revoked_by_the_system_and_nothing_else(seeded):
-    """The purge revokes `pending` rows at or past their deadline, with no actor, and returns them (Reconciliation)."""
+async def test_a_stale_pending_credential_is_revoked_by_the_system_and_answered_with_its_tenant(seeded):
+    """The purge revokes `pending` rows at or past their deadline, with no actor, and answers each with its program's tenant (O-F)."""
     admin = await _user(seeded)
     program = await _program(seeded, admin)
+    elsewhere = await _program(seeded, admin, tenant=T2, name="Elsewhere")
     stale = await _add_oauth(seeded, program, admin, 1)
+    stale_elsewhere = await _add_oauth(seeded, elsewhere, admin, 5)
     key = await _add_key(seeded, program, admin, 2)
     at = NOW + DEADLINE
     assert await seeded.revoke_stale_pending(now=at - dt.timedelta(seconds=1)) == []
-    assert await seeded.revoke_stale_pending(now=at) == [stale.id]
+    assert sorted(await seeded.revoke_stale_pending(now=at)) == sorted([(stale.id, T1), (stale_elsewhere.id, T2)])
     got = await seeded.credential_by_id(stale.id)
     assert (got.state, got.revoked_at, got.revoked_by) == ("revoked", at, None)
     assert (await seeded.credential_by_id(key.id)).state == "live"
@@ -339,24 +385,37 @@ async def test_a_stale_pending_credential_is_revoked_by_the_system_and_nothing_e
     assert await seeded.revoke_stale_pending(now=at + 2 * HOUR) == []  # a live OAuth row is not pending
 
 
-# --- the schema, not a recheck, keeps a credential from authenticating a person (A1, P-F) ----------------------------------------
+async def test_the_tenant_of_each_credential_is_read_in_one_call_whatever_its_program_has_become(seeded, backend, tenants):
+    """Each id of ours maps to its program's tenant, also once the program is removed or its tenant left `active`; an id that is none is left out (O-F)."""
+    admin = await _user(seeded)
+    mine = await _program(seeded, admin, name="Mine")
+    elsewhere = await _program(seeded, admin, tenant=T2, name="Elsewhere")
+    removed = await _program(seeded, admin, name="Removed")
+    key = await _add_key(seeded, mine, admin, 1)
+    oauth = await _add_oauth(seeded, elsewhere, admin, 2)
+    gone = await _add_key(seeded, removed, admin, 3)
+    assert await seeded.remove_program(removed.id, removed_by=admin.id, now=NOW) is not None
+    assert dict(await seeded.tenants_of_credentials([key.id, oauth.id, gone.id, NO_SUCH_ROW])) == {
+        key.id: T1, oauth.id: T2, gone.id: T1}
+    assert dict(await seeded.tenants_of_credentials([])) == {}
+    assert dict(await seeded.tenants_of_credentials([NO_SUCH_ROW])) == {}
+    await leave_active(backend, tenants, T2, "offboarded")
+    assert dict(await seeded.tenants_of_credentials([key.id, oauth.id])) == {key.id: T1, oauth.id: T2}
 
-@pytest.mark.parametrize(("owner", "program_kind"), [("person", "program"), ("person", "person"), ("program", "person"), ("program", "program")])
-async def test_a_credential_for_a_person_is_refused_by_the_schema(seeded, backend, owner, program_kind):
-    """Every combination of the credential's owner (a person or a program) and the kind it claims for it: only a program's, claiming
-    `program`, is stored. In PostgreSQL the schema refuses the rest (`program_kind` is constrained to `program`, and the composite
-    foreign key `(program_id, program_kind) -> users(id, kind)` finds no person), whatever wrote the row; the in-memory repository
-    refuses a person's credential with `DataRuleViolation`, which it states the same rule by (it has no column to disagree with)."""
+
+# --- the schema, not a recheck, keeps a credential from authenticating a person (P-J) ------------------------------------------
+
+@pytest.mark.parametrize("owner", ["person", "program"])
+async def test_a_credential_belongs_to_a_program_and_never_to_a_person(seeded, backend, owner):
+    """A credential row names a `programs` row: a program's is stored; a person's id is refused (PostgreSQL: by the foreign key,
+    whatever wrote the row; memory: `DataRuleViolation`) (P-J, O-B)."""
     import uuid
 
     admin = await _user(seeded)
     program = await _program(seeded, admin)
     holder = program if owner == "program" else admin
-    accepted = owner == "program" and program_kind == "program"
     if backend is None:
-        if program_kind != "program":
-            pytest.skip("no program_kind column in memory")  # the person case above is the memory repository's whole rule
-        if accepted:
+        if owner == "program":
             assert (await _add_key(seeded, holder, admin, 1)).state == "live"
         else:
             with pytest.raises(DataRuleViolation):
@@ -365,16 +424,16 @@ async def test_a_credential_for_a_person_is_refused_by_the_schema(seeded, backen
     import psycopg
     from defender.tests.support.shared._postgres1339 import execute
 
-    insert = """INSERT INTO identity.program_credentials (id, program_id, program_kind, kind, name, state, key_hash, created_by,
-                created_at, expires_at) VALUES (%s, %s, %s, 'key', 'raw', 'live', %s, %s, %s, %s)"""  # noqa: S608
-    params = (str(uuid.uuid4()), holder.id, program_kind, _key(1), admin.id, NOW, EXPIRES)
-    if accepted:
+    insert = """INSERT INTO identity.program_credentials (id, program_id, kind, name, state, key_hash, created_by,
+                created_at, expires_at) VALUES (%s, %s, 'key', 'raw', 'live', %s, %s, %s, %s)"""  # noqa: S608
+    params = (str(uuid.uuid4()), holder.id, _key(1), admin.id, NOW, EXPIRES)
+    if owner == "program":
         execute(backend, insert, params)
         assert [r.name for r in await seeded.credentials_of_program(program.id)] == ["raw"]
     else:
-        with pytest.raises(psycopg.errors.IntegrityError):
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
             execute(backend, insert, params)
-        assert await seeded.credentials_of_program(holder.id) == []
+        assert await seeded.credentials_of_program(admin.id) == []
 
 
 # --- names Postgres text cannot hold are refused by the repository (A2) --------------------------------------------------------
@@ -484,7 +543,7 @@ async def test_one_usable_rule_decides_the_cap_the_keep_set_and_the_purge(seeded
     stale = {r.id for r in before.values() if r.state == "pending" and r.pending_deadline <= EVAL}
     assert stale  # control: some pending rows are stale, some are not
     assert stale != {r.id for r in before.values() if r.state == "pending"}
-    assert set(await seeded.revoke_stale_pending(now=EVAL)) == stale
+    assert set(await seeded.revoke_stale_pending(now=EVAL)) == {(i, T1) for i in stale}  # every program is T1's
     for p in programs:
         for after in await seeded.credentials_of_program(p.id):
             was = before[after.id]
@@ -496,9 +555,9 @@ async def test_one_usable_rule_decides_the_cap_the_keep_set_and_the_purge(seeded
 
 # --- removal is one write -----------------------------------------------------------------------------
 
-async def test_removing_a_program_ends_its_membership_and_revokes_every_credential(seeded):
-    """One write: membership ended (who, when) and live and pending credentials revoked; the user row, an earlier
-    revocation, other programs and people stay as they were (O6)."""
+async def test_removing_a_program_marks_it_removed_and_revokes_every_credential(seeded):
+    """One write: status `removed` with who and when, live and pending credentials revoked; an earlier revocation, other
+    programs and people stay as they were; a second removal changes nothing (O-E)."""
     admin = await _user(seeded)
     member = await _active(seeded, admin)
     program = await _program(seeded, admin)
@@ -509,38 +568,33 @@ async def test_removing_a_program_ends_its_membership_and_revokes_every_credenti
     kept = await _add_key(seeded, other, admin, 4)
     later = NOW + HOUR
     assert await seeded.remove_program(program.id, removed_by=admin.id, now=later) is not None
-    assert await seeded.active_membership(program.id, T1) is None
-    [membership] = await seeded.memberships_of_user(program.id)
-    assert (membership.status, membership.ended_at, membership.ended_by) == ("ended", later, admin.id)
+    removed = await seeded.program(program.id)  # the row stays: the audit names it
+    assert (removed.status, removed.removed_at, removed.removed_by) == ("removed", later, admin.id)
+    assert (removed.tenant_id, removed.display_name, removed.created_by) == (T1, "SOAR prod", admin.id)
     states = {r.id: (r.state, r.revoked_at, r.revoked_by) for r in await seeded.credentials_of_program(program.id)}
     assert states == {old.id: ("revoked", NOW, admin.id), live.id: ("revoked", later, admin.id),
                       pending.id: ("revoked", later, admin.id)}
-    assert (await seeded.user(program.id)).kind == "program"  # the row stays: the audit names it
     assert (await seeded.credential_by_id(kept.id)).state == "live"
-    assert (await seeded.active_membership(other.id, T1)) is not None
-    assert (await seeded.active_membership(admin.id, T1)).id == member.id
-    assert await seeded.programs_of_tenant(T1) == [await seeded.user(other.id)]
-    assert await seeded.remove_program(program.id, removed_by=admin.id, now=later + HOUR) is None
-    assert (await seeded.memberships_of_user(program.id))[0].ended_at == later
+    assert (await seeded.program(other.id)).status == "active"
+    assert [m.id for m in await seeded.memberships_of_tenant(T1)] == [member.id]
+    assert [p.id for p in await seeded.programs_of_tenant(T1)] == [other.id]
+    assert await seeded.remove_program(program.id, removed_by=None, now=later + HOUR) is None
+    again = await seeded.program(program.id)
+    assert (again.removed_at, again.removed_by) == (later, admin.id)
 
 
-async def test_a_programs_standing_is_its_active_automation_membership_while_its_tenant_is_active(seeded, backend, tenants):
-    """One read lets a verified credential's program in: the program and its membership while that is active and its
-    tenant `active`; None once removed, for a person, for no user, and for a program of a tenant not `active` (#1450
-    review: authentication settles the tenant, so a route never reads it again)."""
+async def test_the_system_removes_a_program_of_a_tenant_that_has_left_active(seeded, backend, tenants):
+    """Offboarding reads the tenant's active programs and removes them after the tenant left `active`: both still work, `removed_by` is none (O-E)."""
     admin = await _user(seeded)
     program = await _program(seeded, admin)
-    standing = await seeded.program_standing(program.id)
-    assert standing is not None
-    assert (standing[0].id, standing[1].tenant_id, standing[1].role) == (program.id, T1, "automation")
-    elsewhere = TenantId(fixture_uuid("tenant:stranded"))
-    await _seed_tenant(backend, tenants, elsewhere, state="creating")
-    stranded = await _program(seeded, admin, tenant=elsewhere, name="Stranded")
-    assert await seeded.program_standing(stranded.id) is None
-    assert await seeded.program_standing(admin.id) is None
-    assert await seeded.program_standing(UserId(fixture_uuid("user:nobody"))) is None
-    await seeded.remove_program(program.id, removed_by=admin.id, now=NOW)
-    assert await seeded.program_standing(program.id) is None
+    key = await _add_key(seeded, program, admin, 1)
+    await leave_active(backend, tenants, T1, "offboarding")
+    assert [p.id for p in await seeded.programs_of_tenant(T1)] == [program.id]
+    assert await seeded.remove_program(program.id, removed_by=None, now=NOW + HOUR) == [key.id]
+    removed = await seeded.program(program.id)
+    assert (removed.status, removed.removed_by) == ("removed", None)
+    assert (await seeded.credential_by_id(key.id)).revoked_by is None
+    assert await seeded.programs_of_tenant(T1) == []
 
 
 async def test_removing_a_program_answers_the_credentials_it_revoked_and_no_others(seeded):
@@ -563,14 +617,14 @@ async def test_removing_a_program_answers_the_credentials_it_revoked_and_no_othe
 @pytest.mark.parametrize("first", ["remove", "create"])
 async def test_a_removal_and_a_credential_creation_for_one_program_are_ordered_by_the_program_lock(
         two_repositories, pg_dsn, first):
-    """Both wait on the program's user row; whichever goes first, no usable or pending credential survives the removal (one lock per program)."""
+    """Both wait on the program's own row; whichever goes first, no usable or pending credential survives the removal (one lock per program, O-E)."""
     one, two = two_repositories
     admin = await _user(one)
     program = await _program(one, admin)
     operations = {"remove": lambda: one.remove_program(program.id, removed_by=admin.id, now=NOW),
                   "create": lambda: _add_oauth(two, program, admin, 1)}
     order = [first, "create" if first == "remove" else "remove"]
-    async with holding_row(pg_dsn, "users", program.id):
+    async with holding_row(pg_dsn, "programs", program.id):
         tasks = {}
         for count, name in enumerate(order, start=1):
             tasks[name] = asyncio.ensure_future(operations[name]())
@@ -583,7 +637,7 @@ async def test_a_removal_and_a_credential_creation_for_one_program_are_ordered_b
         assert outcome["create"].state == "pending"
     else:
         assert outcome["create"] is None, outcome["create"]  # removed: an answer, not a refusal
-    assert await one.active_membership(program.id, T1) is None
+    assert (await one.program(program.id)).status == "removed"
     assert {r.state for r in await one.credentials_of_program(program.id)} <= {"revoked"}
 
 
@@ -735,28 +789,6 @@ async def test_the_keep_set_is_the_oauth_credentials_that_are_usable_or_pending_
     assert gone.id not in await seeded.oauth_credentials_to_keep(now=NOW)
 
 
-async def test_a_credential_of_a_tenant_not_active_is_neither_warned_about_nor_kept(seeded, backend, tenants):
-    """One rule decides whether a credential is in use: authentication's (`program_standing`). A live, unrevoked
-    credential whose program's tenant is not `active` (a creation racing offboarding leaves one behind, its row never
-    revoked) has no warning to claim and no client to keep (#1450 review)."""
-    admin = await _user(seeded)
-    elsewhere = TenantId(fixture_uuid("tenant:leaving"))
-    await _seed_tenant(backend, tenants, elsewhere, state="creating")
-    stranded = await _program(seeded, admin, tenant=elsewhere, name="Stranded")
-    control = await _program(seeded, admin, name="Control")
-    rows = {}
-    for program, n in ((stranded, 1), (control, 3)):
-        key = await _timed_key(seeded, program, admin, n, 30 * DAY)
-        oauth = await _add_oauth(seeded, program, admin, n + 1, expires_at=NOW + 30 * DAY)
-        await seeded.go_live(oauth.id, service_account_id=SA, now=NOW)
-        rows[program.id] = (key, oauth)
-    assert await seeded.oauth_credentials_to_keep(now=NOW) == {rows[control.id][1].id}
-    at = NOW + 30 * DAY - FOURTEEN
-    claimed = {(await _claim_warning(seeded, at)).credential_id, (await _claim_warning(seeded, at)).credential_id}
-    assert claimed == {r.id for r in rows[control.id]}
-    assert await _claim_warning(seeded, at) is None  # the stranded program's are never claimed
-
-
 # --- PostgreSQL only: two processes on one warning --------------------------------------------------------
 
 @pytest.mark.postgres
@@ -788,117 +820,223 @@ async def test_two_processes_claiming_at_once_get_one_warning_between_them(two_r
     assert (won.credential_id, won.threshold) == (key.id, FOURTEEN)
 
 
-# --- #1454: programs have their own table (sketch) ---------------------------------------------------------------------
-# Forced choices the design leaves open (reported as gaps): `add_program` returns a program row with `id`, `tenant_id`,
-# `display_name`, `status`; the one admitting read is `admit_by_key(key_hash, *, now)` / `admit_by_client(client_id, *,
-# service_account_id, now)` -> (credential, program) | None; the P-L refusal is `defender.identity.TenantNotActive`.
-
-async def _offboard(backend, tenants, tenant) -> None:
-    """The tenant leaves `active` through tenancy's own offboard request (the one write of `offboarding`)."""
-    if backend is None:
-        await tenants.request_offboard(tenant, now=NOW)
-        return
-    from defender.tenancy.postgres import PostgresTenantRepository
-
-    tenancy = PostgresTenantRepository(backend)
-    try:
-        await tenancy.request_offboard(tenant, now=NOW)
-    finally:
-        await tenancy.close()
 
 
-async def test_1454_a_program_has_no_users_row_and_the_people_reads_hold_only_people(seeded):
-    """After a program is created in T1, no users row exists for it and every people read returns only the person (O-B, P-J)."""
-    ann = await _user(seeded)
-    membership = await _active(seeded, ann)
-    program = await _program(seeded, ann)
-    assert (program.tenant_id, program.display_name, program.status) == (T1, "SOAR prod", "active")
-    assert await seeded.user(UserId(str(program.id))) is None
-    assert await seeded.memberships_of_user(UserId(str(program.id))) == []
-    assert [m.id for m in await seeded.memberships_of_tenant(T1)] == [membership.id]
-    assert [(m.id, u.id) for m, u in await seeded.people_of_tenant(T1, "active")] == [(membership.id, ann.id)]
-    assert await seeded.end_membership(membership.id, ended_by=ann.id, now=NOW) is True
-    assert await seeded.tenant_has_active_members(T1) is False
-    assert [p.id for p in await seeded.programs_of_tenant(T1)] == [program.id]  # control: the program is still there
+# --- #1454: one admitting read per use, and the one standing rule (O-C, O-D) ---------------------------------------------
 
-
-async def test_1454_one_call_admits_a_program_by_its_key_while_the_key_is_usable(seeded):
-    """The key hash's credential and its program come back from one read while usable; nothing once revoked (O-C)."""
+async def test_one_call_admits_a_program_by_key_by_client_or_by_credential_while_the_credential_is_usable(seeded):
+    """Each admitting read returns the credential and its program; a wrong service account, an unknown key and a revoked credential admit nothing (O-C)."""
     admin = await _user(seeded)
     program = await _program(seeded, admin)
     key = await _add_key(seeded, program, admin, 1)
-    admitted = await seeded.admit_by_key(_key(1), now=NOW)
-    assert admitted is not None
-    credential, who = admitted
-    assert (credential.id, who.id, who.tenant_id, who.display_name) == (key.id, program.id, T1, "SOAR prod")
-    assert await seeded.revoke_credential(key.id, revoked_by=admin.id, now=NOW) is True
+    oauth = await _add_oauth(seeded, program, admin, 2)
+    assert await seeded.go_live(oauth.id, service_account_id=SA, now=NOW) is True
+    for admitted, credential in ((await seeded.admit_by_key(_key(1), now=NOW), key),
+                                 (await seeded.admit_by_client(oauth.id, service_account_id=SA, now=NOW), oauth),
+                                 (await seeded.admit_by_credential(key.id, now=NOW), key),
+                                 (await seeded.admit_by_credential(oauth.id, now=NOW), oauth)):
+        assert admitted is not None
+        assert (admitted[0].id, admitted[1].id, admitted[1].tenant_id, admitted[1].display_name) == (
+            credential.id, program.id, T1, "SOAR prod")
+    assert await seeded.admit_by_key(_key(9), now=NOW) is None
+    assert await seeded.admit_by_client(oauth.id, service_account_id="someone-else", now=NOW) is None
+    assert await seeded.admit_by_client(NO_SUCH_ROW, service_account_id=SA, now=NOW) is None
+    assert await seeded.admit_by_credential(NO_SUCH_ROW, now=NOW) is None
+    for credential in (key, oauth):
+        assert await seeded.revoke_credential(credential.id, revoked_by=admin.id, now=NOW) is True
     assert await seeded.admit_by_key(_key(1), now=NOW) is None
+    assert await seeded.admit_by_client(oauth.id, service_account_id=SA, now=NOW) is None
+    assert await seeded.admit_by_credential(key.id, now=NOW) is None
 
 
-async def test_1454_a_program_of_a_tenant_being_offboarded_is_admitted_warned_and_kept_by_none(seeded, backend, tenants):
-    """Standing row "tenant offboarding": authentication, the expiry-warning claim and the keep-set all leave out the
-    usable credentials of a program created while its tenant was active; T2's program is the control (O-D)."""
+EV = NOW + 30 * DAY
+#: (kind, state, expiry offset from EV, deadline offset from EV) of the credential in one cell of the standing matrix.
+CELLS = ([("key", "live", e, None) for e in AROUND] + [("key", "revoked", AROUND[1], None)]
+         + [("oauth_client", "live", e, None) for e in AROUND] + [("oauth_client", "revoked", AROUND[1], None)]
+         + [("oauth_client", "pending", None, d) for d in AROUND])
+#: A program removed with a credential of each shape: removal revokes it, so what is read back is `revoked` (O-E).
+REMOVED_CELLS = [("key", "live", AROUND[2], None), ("oauth_client", "live", AROUND[2], None), ("oauth_client", "pending", None, AROUND[2])]
+
+
+async def _cell(repo, admin, tenant, n, cell, *, removed):
+    """One program of `tenant` holding exactly one credential of shape `cell` as it stands at `EV`; the program is removed afterwards if asked.
+    A key and a live OAuth row are made at `NOW` (so both warning thresholds fall after their creation); a `pending` row is made
+    so that its deadline is `EV + deadline`, and expires at `EV + 14 days`, so its 14-day warning is due exactly at `EV`."""
+    kind, state, expiry, deadline = cell
+    program = await _program(repo, admin, tenant=tenant, name=f"p{n}")
+    created = NOW if deadline is None else EV - DEADLINE + deadline
+    expires_at = EV + 14 * DAY if expiry is None else EV + expiry
+    if kind == "key":
+        row = await _add_key(repo, program, admin, n, expires_at=expires_at, now=created)
+    else:
+        row = await _add_oauth(repo, program, admin, n, expires_at=expires_at, now=created)
+        if state == "live":
+            assert await repo.go_live(row.id, service_account_id=SA, now=created) is True
+    if state == "revoked":
+        assert await repo.revoke_credential(row.id, revoked_by=admin.id, now=created) is True
+    if removed:
+        assert await repo.remove_program(program.id, removed_by=admin.id, now=created) is not None
+    return program, row.id
+
+
+async def _build_matrix(repo, backend, tenants, admin):
+    """One program per cell of CELLS (and REMOVED_CELLS) in each tenant state; each tenant leaves `active` only after its programs
+    and credentials were made. Returns (program, credential id, tenant state, removed, n) per program."""
+    tenant_of = {"active": T1}
+    for state in NOT_ACTIVE:
+        tenant_of[state] = TenantId(fixture_uuid(f"tenant:1454-{state}"))
+        await _seed_tenant(backend, tenants, tenant_of[state])
+    built = []
+    for state, tenant in tenant_of.items():
+        for removed, cells in ((False, CELLS), (True, REMOVED_CELLS)):
+            for cell in cells:
+                program, credential_id = await _cell(repo, admin, tenant, len(built), cell, removed=removed)
+                built.append((program, credential_id, state, removed, len(built)))
+    for state in NOT_ACTIVE:
+        await leave_active(backend, tenants, tenant_of[state], state)
+    return built
+
+
+async def _admissions_that_disagree(repo, rows, expected, program_of, key_hash_of):
+    """The (use, shape) of every admitting read that admitted a credential it should not, refused one it should admit, or returned another pair."""
+    wrong = []
+    for c, row in rows.items():
+        by_secret = (await repo.admit_by_key(key_hash_of[c], now=EV) if row.kind == "key"
+                     else await repo.admit_by_client(c, service_account_id=SA, now=EV))
+        for use, got in (("by-secret", by_secret), ("by-credential", await repo.admit_by_credential(c, now=EV))):
+            if (got is not None) != expected[c]:
+                wrong.append((use, row.kind, row.state, row.expires_at - EV, expected[c]))
+            elif got is not None and (got[0].id, got[1].id, got[1].tenant_id) != (c, program_of[c].id, program_of[c].tenant_id):
+                wrong.append((use, "wrong pair", c))
+    return wrong
+
+
+async def test_every_use_of_a_credential_agrees_with_the_standing_of_its_program_and_its_own_predicate(seeded, backend, tenants):
+    """Over credential state x expiry/deadline x program status x tenant state, authentication (by key, by client, by credential), the
+    expiry-warning claim and the keep-set each admit exactly standing (program `active`, tenant `active`) and their own credential
+    predicate: usable for the first three, usable or pending within its deadline for the keep-set (O-C, O-D)."""
+    built = await _build_matrix(seeded, backend, tenants, await _user(seeded))
+    rows = {credential_id: await seeded.credential_by_id(credential_id) for _, credential_id, _, _, _ in built}
+    standing = {credential_id: state == "active" and not removed for _, credential_id, state, removed, _ in built}
+    program_of = {credential_id: program for program, credential_id, _, _, _ in built}
+    key_hash_of = {credential_id: _key(n) for _, credential_id, _, _, n in built}
+    usable = {c: standing[c] and _usable(rows[c], EV) for c in rows}
+    kept = {c: standing[c] and rows[c].kind == "oauth_client" and _holds_a_slot(rows[c], EV) for c in rows}
+    assert {True, False} == set(usable.values()) == set(kept.values()) == set(standing.values())  # controls: every channel both ways
+    assert any(kept[c] and not usable[c] for c in rows)  # a pending row within its deadline is kept though not usable
+
+    assert await _admissions_that_disagree(seeded, rows, usable, program_of, key_hash_of) == []
+    assert await seeded.oauth_credentials_to_keep(now=EV) == {c for c in rows if kept[c]}
+    claimed = []
+    while (claim := await _claim_warning(seeded, EV)) is not None:
+        claimed.append(claim.credential_id)
+    assert sorted(claimed) == sorted(c for c in rows if usable[c])  # each exactly once
+
+
+@pytest.mark.postgres
+async def test_a_program_removed_with_a_usable_credential_left_is_admitted_warned_and_kept_by_none(seeded, backend):
+    """Whatever wrote it: a `removed` program row whose credentials were left usable admits, warns and keeps nothing; its sibling does (O-D)."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    if backend is None:
+        pytest.skip("only a raw write leaves a removed program's credentials usable; the in-memory repository has none")
     admin = await _user(seeded)
-    leaving = await _program(seeded, admin, name="Leaving")
-    staying = await _program(seeded, admin, tenant=T2, name="Staying")
+    stale = await _program(seeded, admin, name="Stale")
+    sibling = await _program(seeded, admin, name="Sibling")
     rows = {}
-    for program, n in ((leaving, 1), (staying, 3)):
+    for program, n in ((stale, 1), (sibling, 3)):
         key = await _timed_key(seeded, program, admin, n, 30 * DAY)
         oauth = await _add_oauth(seeded, program, admin, n + 1, expires_at=NOW + 30 * DAY)
         assert await seeded.go_live(oauth.id, service_account_id=SA, now=NOW) is True
         rows[program.id] = (key, oauth)
-    await _offboard(backend, tenants, T1)
+    execute(backend, "UPDATE identity.programs SET status = 'removed', removed_at = %s WHERE id = %s", (NOW, str(stale.id)))
+    key, oauth = rows[stale.id]
     assert await seeded.admit_by_key(_key(1), now=NOW) is None
-    assert await seeded.admit_by_client(rows[leaving.id][1].id, service_account_id=SA, now=NOW) is None
-    assert (await seeded.admit_by_key(_key(3), now=NOW))[1].id == staying.id
-    assert (await seeded.admit_by_client(rows[staying.id][1].id, service_account_id=SA, now=NOW))[1].id == staying.id
-    assert await seeded.oauth_credentials_to_keep(now=NOW) == {rows[staying.id][1].id}
+    assert await seeded.admit_by_client(oauth.id, service_account_id=SA, now=NOW) is None
+    assert await seeded.admit_by_credential(key.id, now=NOW) is None
+    assert await seeded.oauth_credentials_to_keep(now=NOW) == {rows[sibling.id][1].id}
     at = NOW + 30 * DAY - FOURTEEN
-    claimed = {(await _claim_warning(seeded, at)).credential_id, (await _claim_warning(seeded, at)).credential_id}
-    assert claimed == {r.id for r in rows[staying.id]}
+    assert {(await _claim_warning(seeded, at)).credential_id, (await _claim_warning(seeded, at)).credential_id} == {
+        r.id for r in rows[sibling.id]}
     assert await _claim_warning(seeded, at) is None
+    assert (await seeded.admit_by_key(_key(3), now=NOW))[1].id == sibling.id  # control
 
 
-async def test_1454_a_pending_credential_within_its_deadline_is_kept_but_neither_admitted_nor_warned(seeded):
-    """Standing row "pending, before its deadline, program and tenant active": the keep-set holds its client
-    (holds_slot), authentication and the warning claim do not (usable); once live, all three take it (O-D)."""
-    admin = await _user(seeded)
-    program = await _program(seeded, admin)
-    pending = await _add_oauth(seeded, program, admin, 1)
-    due = pending.expires_at - FOURTEEN
-    assert await seeded.oauth_credentials_to_keep(now=NOW) == {pending.id}
-    assert await seeded.admit_by_client(pending.id, service_account_id=SA, now=NOW) is None
-    assert await _claim_warning(seeded, due) is None
-    assert await seeded.go_live(pending.id, service_account_id=SA, now=NOW) is True
-    assert (await seeded.admit_by_client(pending.id, service_account_id=SA, now=NOW))[0].id == pending.id
-    assert (await _claim_warning(seeded, due)).credential_id == pending.id
+# --- #1454: a write that makes something live holds the tenant active (P-L) -----------------------------------------------
+
+async def _leave(state, backend, tenants, tenant) -> TenantId:
+    """`tenant` after it left `active` for `state`; the unregistered tenant for "absent"."""
+    if state == "absent":
+        return T_UNREGISTERED
+    await leave_active(backend, tenants, tenant, state)
+    return tenant
 
 
-async def test_1454_a_program_is_not_created_in_a_tenant_that_is_not_active(seeded, backend, tenants):
-    """Creating a program in an `offboarding` tenant raises the dedicated error and writes nothing; T1 accepts (P-L)."""
+@pytest.mark.parametrize("state", [*NOT_ACTIVE, "absent"])
+async def test_a_program_is_not_created_in_a_tenant_that_is_not_active(seeded, backend, tenants, state):
+    """Creating a program in an offboarding, offboarded or absent tenant raises `TenantNotActive` (a data-rule violation) and writes nothing; T1 accepts (P-L)."""
     from defender.identity import TenantNotActive
 
+    assert issubclass(TenantNotActive, DataRuleViolation)
     admin = await _user(seeded)
-    await _offboard(backend, tenants, T2)
+    tenant = await _leave(state, backend, tenants, T2)
     with pytest.raises(TenantNotActive):
-        await _program(seeded, admin, tenant=T2)
-    assert await seeded.programs_of_tenant(T2) == []
+        await _program(seeded, admin, tenant=tenant)
+    assert await seeded.programs_of_tenant(tenant) == []
     assert (await _program(seeded, admin)).tenant_id == T1  # control
 
 
+@pytest.mark.parametrize("state", [*NOT_ACTIVE, "absent"])
+async def test_a_person_is_not_invited_to_a_tenant_that_is_not_active(seeded, backend, tenants, state):
+    """Inviting into an offboarding, offboarded or absent tenant raises `TenantNotActive` and adds no membership; an invitation made while it was active stays and revokes (P-L, O-E)."""
+    from defender.identity import TenantNotActive
+
+    ann, bob = await _user(seeded), await _user(seeded, "bob@x.org")
+    earlier = None if state == "absent" else await _invited(seeded, ann, T2)
+    tenant = await _leave(state, backend, tenants, T2)
+    with pytest.raises(TenantNotActive):
+        await seeded.ensure_invitation(bob.id, tenant, invited_by=ann.id, now=NOW)
+    assert [m.id for m in await seeded.memberships_of_tenant(tenant)] == ([] if earlier is None else [earlier.id])
+    if earlier is not None:
+        assert (await seeded.membership(earlier.id)).status == "invited"
+        assert await seeded.revoke_invitation(earlier.id) is True  # offboarding revokes what is open
+    assert (await _invited(seeded, bob)).status == "invited"  # control: T1 is active
+
+
+@pytest.mark.parametrize("state", NOT_ACTIVE)
+async def test_an_invitation_is_not_accepted_once_its_tenant_left_active(seeded, backend, tenants, state):
+    """Accepting returns False and leaves the row `invited` after the tenant left `active`; another tenant's invitation accepts (P-L)."""
+    ann = await _user(seeded)
+    leaving, staying = await _invited(seeded, ann, T2), await _invited(seeded, ann, T1)
+    await leave_active(backend, tenants, T2, state)
+    assert await seeded.accept_invitation(leaving.id, now=NOW) is False
+    assert (await seeded.membership(leaving.id)).status == "invited"
+    assert await seeded.accept_invitation(staying.id, now=NOW) is True  # control
+
+
 @pytest.mark.postgres
+@pytest.mark.parametrize("write", ["program", "invitation"])
 @pytest.mark.parametrize("first", ["offboard", "create"])
-async def test_1454_a_program_creation_and_the_offboard_write_wait_for_each_other_on_the_tenant_row(
-        two_repositories, pg_dsn, first):
-    """C14: offboard first -> the create waits, then refuses and writes nothing; create first (held at its insert) -> the
-    offboard waits on the create's share lock, and the program is there for `end_tenant` to read (P-L)."""
+async def test_a_create_and_the_offboard_write_wait_for_each_other_on_the_tenant_row(two_repositories, pg_dsn, first, write):
+    """C14: offboard first -> the create waits, then raises `TenantNotActive` and writes nothing; create first (held at its insert) -> the
+    offboard waits on the create's share lock and the program or invitation is there for `end_tenant` to read (P-L, O-E)."""
     from defender.database import async_engine
     from defender.identity import TenantNotActive
     from defender.tenancy.models import offboard
 
     one, _ = two_repositories
-    admin = await _user(one)
+    admin, invitee = await _user(one), await _user(one, "bob@x.org")
     engine = async_engine(pg_dsn)
+
+    def create():
+        if write == "program":
+            return _program(one, admin)
+        return one.ensure_invitation(invitee.id, T1, invited_by=admin.id, now=NOW)  # the insert checks `invited_by`'s row
+
+    async def read():
+        if write == "program":
+            return [p.id for p in await one.programs_of_tenant(T1)]
+        return [m.user_id for m in await one.memberships_of_tenant(T1)]
 
     async def offboarding():
         async with engine.begin() as conn:
@@ -908,22 +1046,43 @@ async def test_1454_a_program_creation_and_the_offboard_write_wait_for_each_othe
         if first == "offboard":
             async with engine.begin() as conn:
                 await offboard(conn, T1)
-                create = asyncio.ensure_future(_program(one, admin))
+                attempt = asyncio.ensure_future(create())
                 await until_blocked(pg_dsn, 1)
-                assert not create.done()
+                assert not attempt.done()
             with pytest.raises(TenantNotActive):
-                await asyncio.wait_for(create, TIMEOUT)
-            assert await one.programs_of_tenant(T1) == []
+                await asyncio.wait_for(attempt, TIMEOUT)
+            assert await read() == []
         else:
-            async with holding_row(pg_dsn, "users", admin.id):  # the create's insert waits on its creator's row
-                create = asyncio.ensure_future(_program(one, admin))
+            async with holding_row(pg_dsn, "users", admin.id):
+                attempt = asyncio.ensure_future(create())
                 await until_blocked(pg_dsn, 1)
                 leave = asyncio.ensure_future(offboarding())
                 await until_blocked(pg_dsn, 2)
-                assert not create.done()
+                assert not attempt.done()
                 assert not leave.done()
-            program = await asyncio.wait_for(create, TIMEOUT)
+            made = await asyncio.wait_for(attempt, TIMEOUT)
             assert (await asyncio.wait_for(leave, TIMEOUT)).state == "offboarding"
-            assert [p.id for p in await one.programs_of_tenant(T1)] == [program.id]
+            assert await read() == [made.id if write == "program" else invitee.id]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.postgres
+async def test_an_accept_waits_for_an_offboard_that_wrote_first_then_returns_false(two_repositories, pg_dsn):
+    """C14 for accepting, offboard first: the accept waits on the tenant row, then returns False and the row stays `invited` (P-L)."""
+    from defender.database import async_engine
+    from defender.tenancy.models import offboard
+
+    one, _ = two_repositories
+    invitation = await _invited(one, await _user(one))
+    engine = async_engine(pg_dsn)
+    try:
+        async with engine.begin() as conn:
+            await offboard(conn, T1)
+            attempt = asyncio.ensure_future(one.accept_invitation(invitation.id, now=NOW))
+            await until_blocked(pg_dsn, 1)
+            assert not attempt.done()
+        assert await asyncio.wait_for(attempt, TIMEOUT) is False
+        assert (await one.membership(invitation.id)).status == "invited"
     finally:
         await engine.dispose()
