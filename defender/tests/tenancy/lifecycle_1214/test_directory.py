@@ -35,7 +35,7 @@ from defender.tests.support.shared._postgres1339 import (  # noqa: F401 — fixt
     execute,
     migrated_database,
 )
-from defender.tests.support.tenancy._active1214 import DSN_ENV, active_directory
+from defender.tests.support.tenancy._active1214 import CREATED, DSN_ENV, active_directory
 from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
     NOT_A_REFUSAL_OF_STATE,
     TENANT,
@@ -44,11 +44,49 @@ from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
     _tenant_placed,  # noqa: F401 — autouse fixture
 )
 from defender.tests.support.shared._locations_1210 import location_path
-from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
-    _FlipOnFirst,
-    _twin_directory,
-)
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture
+
+
+def _twin_directory(tenant: str, origin: str) -> tuple[Any, dict[str, Any]]:
+    """A directory over a one-tenant twin, and the ways to change that tenant's row afterwards, by the state it moves
+    to: `offboarding` (through the service), `creating`, `offboarded` (rows as written) and `removed` (no row)."""
+    import dataclasses
+
+    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+
+    twin: Any = InMemoryTenantRepository()
+    asyncio.run(twin.add_tenant(tenant, created_at=CREATED, state="active", repo=f"tenants/{tenant}",
+                                origin=origin))
+    directory = TenantDirectory(lambda: twin)
+
+    def move(**changes: Any) -> Any:
+        def flip() -> None:  # the twin is a test double: its rows are rewritten as a database would be
+            twin._tenants[tenant] = dataclasses.replace(twin._tenants[tenant], **changes)
+        return flip
+
+    def remove() -> None:
+        del twin._tenants[tenant]
+    flips = {
+        "offboarding": lambda: asyncio.run(twin.request_offboard(tenant, now=CREATED)),
+        "creating": move(state="creating", pending_action="create", step="names", step_actor="service"),
+        "offboarded": move(state="offboarded", pending_action=None, step=None, step_actor=None),
+        "removed": remove,
+    }
+    return directory, flips
+
+
+class _FlipOnFirst:
+    """A lead-author step (`LeadStep` shape) that, on its first claim, has the tenant change state.
+    (`_twin_directory` and this class lived in `test_host_entry`, whose lead-drain claim section the #1278 merge dropped while this file, from main, still uses them.)"""
+
+    def __init__(self, inner: Any, flip: Any) -> None:
+        self.inner, self.flip, self.served = inner, flip, []
+
+    def __call__(self, paths: Any, state: Any, run: Any, **kw: Any) -> Any:
+        self.served.append(Path(run.run_dir).name)
+        if len(self.served) == 1 and self.flip is not None:
+            self.flip()
+        return self.inner(paths, state, run, **kw)
 
 
 NOW = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.UTC)
@@ -455,6 +493,16 @@ def _scripted(directory: Any) -> tuple[Any, Any]:
     return directory, lambda answer: box.update(answer=answer)
 
 
+@pytest.fixture
+def in_the_store(p4_tenant, migrated_database, monkeypatch):  # noqa: F811 — fixtures imported above
+    """The p4 tenant active in the database the lead drain's store reads (#1278: its claim is a store call that requires an
+    active tenant row; the directory the cases flip is the in-memory twin before it)."""
+    from defender.tests.support.jobs._jobs1342 import register_tenant
+
+    register_tenant(migrated_database, p4_tenant.tenant_id)
+    monkeypatch.setenv(DSN_ENV, migrated_database)
+
+
 def _drain(t: Any, tmp_path: Path, monkeypatch: Any, answer: Any) -> tuple[list[str], dict[str, str], Any, Any]:
     """Two queued runs, then ticks of the lead drain with `answer` given after the first claim.
     Returns (labels served over the ticks, run name -> label, paths, directory)."""
@@ -483,7 +531,7 @@ def _drain(t: Any, tmp_path: Path, monkeypatch: Any, answer: Any) -> tuple[list[
 
 
 @pytest.mark.parametrize("answer", AFTER)
-def test_a_claim_of_a_tenant_no_longer_active_stays_queued_uncounted_across_ticks(p4_tenant, tmp_path, monkeypatch, answer):  # noqa: F811
+def test_a_claim_of_a_tenant_no_longer_active_stays_queued_uncounted_across_ticks(p4_tenant, in_the_store, tmp_path, monkeypatch, answer):  # noqa: F811
     """Whatever the tenant became after the first claim, the second is never served, keeps `attempts`, and survives repeated ticks (Flow 4)."""
     t = p4_tenant
     served, runs, paths, _ = _drain(t, tmp_path, monkeypatch, answer)
@@ -494,7 +542,7 @@ def test_a_claim_of_a_tenant_no_longer_active_stays_queued_uncounted_across_tick
     assert json.loads(queued.read_text(encoding="utf-8")).get("attempts", 0) == 0, "a set-aside claim was counted"
 
 
-def test_a_directory_that_fails_at_the_second_claim_does_not_serve_it(p4_tenant, tmp_path, monkeypatch):  # noqa: F811
+def test_a_directory_that_fails_at_the_second_claim_does_not_serve_it(p4_tenant, in_the_store, tmp_path, monkeypatch):  # noqa: F811
     """A state read that raises at the second claim: that claim is not served and is not lost (fails closed, deck PR #678)."""
     t = p4_tenant
     served, runs, paths, _ = _drain(t, tmp_path, monkeypatch, _Failing("database away"))
@@ -525,7 +573,7 @@ class _Blip:
         return unreachable
 
 
-def test_a_database_blip_mid_tick_leaves_the_claim_queued_uncounted_and_the_tick_ends_cleanly(p4_tenant, tmp_path, monkeypatch):  # noqa: F811
+def test_a_database_blip_mid_tick_leaves_the_claim_queued_uncounted_and_the_tick_ends_cleanly(p4_tenant, in_the_store, tmp_path, monkeypatch):  # noqa: F811
     """The tenant records' database goes away after the first claim is served: the next claim is handed back exactly
     as queued (no attempt counted, no failed letter) and no more are taken, the tick ends without a fault, and the
     ticks that meet the outage at their delivery skip; once it is back the claims are served (PR #1350 review: repeated
