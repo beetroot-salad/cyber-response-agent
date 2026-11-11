@@ -201,14 +201,16 @@ WAKE_LANES = ("author", "lead_author", "revert")
 WAKE_PHASES = ("working", "in_review", "needs_person")
 
 
+@pytest.mark.parametrize("gate", ["as_it_is", "finds_nothing"])
 @pytest.mark.parametrize("lane", WAKE_LANES)
 @pytest.mark.parametrize("phase", WAKE_PHASES)
-def test_wake_a_batch_of_any_lane_in_any_phase_but_ended_keeps_the_tenants_checks_running(tmp_path, monkeypatch, lane, phase):
-    """With nothing else queued, a not-yet-ended batch of the author lane, the lead lane or a revert, working, in review or
-    waiting for a person, leaves the record without `waiting: false`: its lease, its PR or a person's release may still
-    change what the tick must do. (Wake)"""
+def test_wake_a_batch_of_any_lane_in_any_phase_but_ended_keeps_the_tenants_checks_running(tmp_path, monkeypatch, lane, phase, gate):
+    """With nothing else queued, a not-yet-ended batch of any lane, working, in review or waiting for a person, leaves the record without `waiting: false`, whatever the author gate itself finds: its lease, PR or release may still change what a tick must do. (Wake)"""
+    from defender.learning.core import drains
     from defender.tests.support.learning.core._store1278 import DSN_ENV
 
+    if gate == "finds_nothing":
+        monkeypatch.setattr(drains, "author_work_waiting", lambda _paths: False)
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "5")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
