@@ -605,7 +605,7 @@ class Tick:
             number = self._find_or_open_pr(delivery, held, record)
             if number is None:
                 return
-            self.store.in_review(held, number, self._fates(delivery, held, record, {}))
+            self.store.in_review(held, number, self._fates(delivery, held, record, None))
             _logger.info(f"{self.label}: took over batch {b.id} and recorded its PR #{number}")
         except LeaseLost:
             return
@@ -616,13 +616,13 @@ class Tick:
 
     def _citation_rule(self, delivery: TenantDelivery, held: Any, record: Any) -> dict[tuple[str, str], Any]:
         """A takeover has no outcomes in memory (D1): items cited by the batch's own commits stay, the rest
-        of the author lane's wait again. The lead lane has no citation to read, so nothing proves one of its items
-        was committed: they all wait again (P3), and a merge publishes none of them unseen."""
+        of the author lane's wait again; the lead lane's stay (it has no citation to read, and the store keeps no
+        record of what its curators took)."""
         from defender.learning.author.version_control.store_delivery import cited_in_paths
         from defender.learning.store import Outcome
 
         if held.lane == LEAD_LANE:
-            return {(kind, key): Outcome.waiting() for kind, key, _payload in held.items}
+            return {}
         tip = delivery.repository.branch_tip(held.branch)
         if tip is None:
             from defender.learning.author.version_control.store_delivery import remote_tip
@@ -639,13 +639,16 @@ class Tick:
         return out
 
     def _fates(self, delivery: TenantDelivery, held: Any, record: Any,
-               outcomes: Mapping[tuple[str, str], Any]) -> dict[tuple[str, str], Any]:
+               outcomes: Mapping[tuple[str, str], Any] | None) -> dict[tuple[str, str], Any]:
         """What the batch's items become when it enters review. The author lane: the curators' outcomes over the
         citation rule; an item with none stays, because its lesson cites it. The lead lane has nothing to cite, so
-        it takes a positive set: an item stays only when its curator named it `kept`, and every other item goes
-        back to waiting (P3), whatever it lacks an outcome for."""
+        a tick that ran the curators takes a positive set: an item stays only when its curator named it `kept`,
+        and every other item goes back to waiting (P3), whatever it lacks an outcome for. `outcomes` is `None` for
+        a takeover, which ran no curator and has none in memory: the citation rule alone."""
         from defender.learning.store import Outcome
 
+        if outcomes is None:
+            return self._citation_rule(delivery, held, record)
         if held.lane != LEAD_LANE:
             return without_kept({**self._citation_rule(delivery, held, record), **outcomes})
         fates: dict[tuple[str, str], Any] = {}
