@@ -112,7 +112,7 @@ if TYPE_CHECKING:
         unwrap_episodes_root as unwrap_episodes_root,
         unwrap_exports_root as unwrap_exports_root,
         unwrap_knowledge_lock as unwrap_knowledge_lock,
-        unwrap_learning_root as unwrap_learning_root,
+        unwrap_learning_root as unwrap_learning_root,  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
         unwrap_runs_base as unwrap_runs_base,
         unwrap_scratch_root as unwrap_scratch_root,
         unwrap_tenant_root as unwrap_tenant_root,

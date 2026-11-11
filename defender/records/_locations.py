@@ -106,7 +106,7 @@ class LearningRoot(_Location):  # lint-learning-state: ok — the cutover import
 
 
 def unwrap_learning_root(location: LearningRoot) -> Path:  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
-    if not isinstance(location, LearningRoot):
+    if not isinstance(location, LearningRoot):  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
         raise TypeError("expected LearningRoot")
     return location._record_location_path
 

@@ -43,7 +43,7 @@ from defender.lifecycle._job import (
 )
 from defender.lifecycle._teardown import Containers, stop_containers, take_exclusive
 from defender.lifecycle.config import LifecycleConfig
-from defender.records.formats import unwrap_learning_root
+from defender.records.formats import unwrap_learning_root  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
 from defender.tenancy import FenceMissed, Generation, HeldTenant, TenantRepository, host_lock
 
 _logger = logging.getLogger(__name__)
@@ -318,7 +318,7 @@ class HostActor(Actor):
 
         async with self._host_lock(held.tenant_id, exclusive=True):
             with self._delivery(held.tenant_id) as delivery:
-                root = unwrap_learning_root(delivery.tenant.learning)
+                root = unwrap_learning_root(delivery.tenant.learning)  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
                 if _io.entry_present(root):
                     store = LearningStore(self._learning_dsn())
                     try:
@@ -339,7 +339,7 @@ class HostActor(Actor):
             with self._delivery(held.tenant_id) as delivery:
                 tenant = delivery.tenant
             try:
-                await asyncio.to_thread(cut_over_learning_state, tenant, unwrap_learning_root(tenant.learning))
+                await asyncio.to_thread(cut_over_learning_state, tenant, unwrap_learning_root(tenant.learning))  # lint-learning-state: ok — the cutover import reads the old folder (#1278 A2 D10)
             except ImportRefused as refused:
                 raise StepFailed(f"the learning folder was not cut over: {refused}") from refused
             step, actor = next_step(held)
