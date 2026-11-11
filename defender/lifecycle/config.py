@@ -44,7 +44,8 @@ class LifecycleConfig:
     `secrets_dir` holds one folder per tenant with one file per installed secret, outside every
     tenant's folder. `poll_interval` is the wait between passes (seconds), `lock_keepalive` the bound
     after which the database drops a dead worker's tenant lock (seconds, RC-2), `teardown_wait` how
-    long teardown waits for the host lock after SIGTERM before SIGKILL (seconds). `oidc_key` is the
+    long teardown waits for the host lock after SIGTERM before SIGKILL, and how long it then keeps removing a folder
+    that late writes keep filling before it fails the step (seconds each, #1360). `oidc_key` is the
     deployment's OIDC signing key; `token_policy` and `sign_policy` are its two templated policies,
     of each generation's delivery AppRole and of its sign-only AppRole (#1163 A24')."""
 

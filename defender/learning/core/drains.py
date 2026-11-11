@@ -546,3 +546,10 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     return _store_tick(paths, lane=LEAD_LANE, label=LEAD_AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
                  author_work=lambda work_paths, **kw: _store_lead_work(work_paths, lead_step, pitfalls_step, **kw),
                  start_box=start_box, stop_box=stop_box, reconcile_lanes=(LEAD_LANE,))
+
+
+def feedback_drain(paths: LoopPaths, **seams: Any) -> int:
+    """The feedback tick (#1414 F2): not yet ported onto the learning store. Main's entry opened the
+    deleted file-state handle; the feedback subsystem (`core/feedback*.py`) still names it, so the entry
+    refuses rather than import it. The port replaces this body."""
+    raise NotImplementedError("the #1414 feedback tick is not yet ported onto the learning store (#1278)")

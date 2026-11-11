@@ -9,11 +9,13 @@ Identity's memberships refer to `tenants`; nothing here refers to identity."""
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as _dt
 from pathlib import Path
 from typing import Any, Literal, get_args
 
-from sqlalchemy import ARRAY, CheckConstraint, DateTime, ForeignKey, Index, Text, text
+from sqlalchemy import ARRAY, CheckConstraint, DateTime, ForeignKey, Index, Table, Text, select, text, update
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -90,6 +92,31 @@ class TenantRecord(Base, kw_only=True):
     repo_url: Mapped[str | None] = mapped_column(Text, default=None)
     offboarded_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     repo_delete_after: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+
+
+#: What the offboard request writes: the tenant's job becomes the teardown, replacing any pending action.
+_OFFBOARD_VALUES = {"state": "offboarding", "pending_action": "offboard", "step": "offboard", "step_actor": "service",
+                    "failure": None}
+
+
+async def offboard(executor: AsyncConnection | AsyncSession, tenant_id: TenantId) -> TenantRecord:
+    """Move a `creating` or `active` tenant to `offboarding` (the teardown pending at its first step, any failure
+    cleared) in the caller's transaction, on either a Core connection or the ORM session, and return the tenant as
+    it now stands. `NotFound` for an absent tenant, `Conflict` for any other state: tenancy's own refusals, and the
+    one place the transition's rules live (#1360 D1): the repository's `request_offboard` and the job store's
+    combined offboard both run it. Takes the tenant row's lock, held until the caller's transaction ends."""
+    from defender.tenancy.repository import Conflict, NotFound  # here: the repository imports these models
+
+    table: Table = TenantRecord.__table__  # type: ignore[assignment]
+    done = (await executor.execute(
+        update(table).where(table.c.id == tenant_id, table.c.state.in_(("creating", "active")))
+        .values(**_OFFBOARD_VALUES).returning(*table.c))).first()
+    if done is not None:
+        return TenantRecord(**done._mapping)
+    present = (await executor.execute(select(table.c.id).where(table.c.id == tenant_id))).first()
+    if present is None:
+        raise NotFound(f"no tenant {tenant_id}")
+    raise Conflict("only a creating or active tenant can be offboarded")
 
 
 class ForgeWiring(Base, kw_only=True):
@@ -189,3 +216,28 @@ class AlertMappingRow(Base, kw_only=True):
     def of(cls, tenant_id: TenantId, mapping: AlertMapping) -> AlertMappingRow:
         """The row for `mapping` (entries it does not map are null)."""
         return cls(tenant_id=tenant_id, **{k: mapping.path_of(k) for k in MAPPING_KEYS})
+
+
+@dataclasses.dataclass(frozen=True)
+class MergeEligibility:
+    """Who may merge into the tenant's `main`, as of the management service's latest read (#1414 D13): the logins of the
+    merge whitelist's users and its teams' members, no generation's bot among them, and the instant it was read."""
+
+    logins: frozenset[str]
+    read_at: _dt.datetime
+
+
+class MergeEligibilityRow(Base, kw_only=True):
+    """The tenant's latest merge-eligibility record (#1414 D13): at most one row, absent until the first successful read,
+    replaced whole by each later one and never deleted. An empty `logins` is a record (a whitelist nobody is on)."""
+
+    __tablename__ = "merge_eligibility"
+    __table_args__ = {"schema": SCHEMA}
+
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
+    logins: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    read_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+
+    def as_record(self) -> MergeEligibility:
+        """The record the row holds, its time an instant in UTC."""
+        return MergeEligibility(logins=frozenset(self.logins), read_at=self.read_at.astimezone(_dt.UTC))

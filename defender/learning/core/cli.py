@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from defender.learning.core.config import LoopPaths, RunAlreadyLive, RunUnprocessable
-from defender.learning.core.drains import author_drain, lead_author_drain
+from defender.learning.core.drains import author_drain, feedback_drain, lead_author_drain
 from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.records.formats import TenantRefused
 
@@ -92,6 +92,11 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
              "catalog + system skills for each queued run and open one lead-author "
              "PR (separate from the lessons PR; takes no run_dir; one drainer at a time).",
     )
+    parser.add_argument(
+        "--feedback-drain", action="store_true",
+        help="FEEDBACK stage (#1414): open issues for finished runs, read eligible comments, "
+             "draft approved registry entries onto a PR a person merges.",
+    )
     parser.add_argument("--tenant", required=True, help="tenant whose learning queues are drained")
     ns = parser.parse_args(argv[1:])
     # The one host acceptance (r10 A1), held for the whole drain: this process recorded under the
@@ -121,6 +126,9 @@ def _drain_admitted(ns: argparse.Namespace, records: TenantDirectory, paths: Loo
 
     if ns.lead_author_drain:
         return _run_stage(lambda: lead_author_drain(paths, directory=records))
+
+    if ns.feedback_drain:
+        return _run_stage(lambda: feedback_drain(paths, directory=records))
 
     # A bare invocation is a usage error.
     print("one of --author-drain / --lead-author-drain is required", file=sys.stderr)

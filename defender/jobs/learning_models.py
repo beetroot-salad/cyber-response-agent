@@ -1,5 +1,5 @@
 """The learning store's tables (#1278): work items, batches and the commit-maker's record, in the
-`learning` schema. Every value is set in Python (no server defaults); migration `0011_learning_store`
+`learning` schema. Every value is set in Python (no server defaults); migration `0012_learning_store`
 creates them. The rules the data holds on its own are constraints here, so #1339's catalog comparison
 covers them: one item per (tenant, kind, key), one waiting request per case, at most one not-ended author
 batch per lane and one working batch per lane."""

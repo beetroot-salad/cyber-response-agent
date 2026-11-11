@@ -1,7 +1,7 @@
 """The learning store (#1278): work items, batches and the commit-maker's record.
 
-Revision ID: 0011_learning_store
-Revises: 0010_cost_lower_limit
+Revision ID: 0012_learning_store
+Revises: 0011_merge_eligibility
 
 No backfill here: a tenant's file state is imported once, at its cutover (`import_learning_state`). Every
 value is set by the store in Python (no server defaults). The rules the data holds on its own (one item per
@@ -11,8 +11,8 @@ partial unique indexes.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0011_learning_store"
-down_revision = "0010_cost_lower_limit"
+revision = "0012_learning_store"
+down_revision = "0011_merge_eligibility"
 
 SCHEMA = "learning"
 KINDS = "'finding', 'questioner_finding', 'pitfall', 'curation_request'"

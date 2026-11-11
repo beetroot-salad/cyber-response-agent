@@ -223,6 +223,10 @@ class LocalRepository:
             raise DeliveryRefused(f"{path} on main is not a regular file")
         return found[0][2] if found else None
 
+    def commit_message(self, commit: str) -> str:
+        """The full message of `commit` (#1414 A2: a registry PR's body is built from its batch's commit)."""
+        return self._git(["show", "-s", "--format=%B", commit]).strip()
+
     def make_commit(
         self, parent: str, changes: ChangeSet, message: str
     ) -> tuple[str, dict[str, str | None]]:

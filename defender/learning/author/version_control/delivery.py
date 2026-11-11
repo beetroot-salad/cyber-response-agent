@@ -254,7 +254,11 @@ class TenantDelivery:
         url = self.repository.open_pr(branch=batch.branch, title=title, body=body)
         return Delivered(status=DeliveryStatus.OPENED, url=url)
 
-    def finish(self, batch: Batch) -> Delivered:
+    def _body(self, tip: str, from_commit: bool) -> str | None:
+        """The PR body the tip commit's message holds, when the lane's PRs are described by it (#1414 A2)."""
+        return self.repository.commit_message(tip) if from_commit else None
+
+    def finish(self, batch: Batch, *, body_from_commit: bool = False) -> Delivered:
         """Deliver the batch: `nothing to deliver` when it made no commit (it has no branch);
         otherwise its PR's status when the forge has one, or its branch pushed and a PR
         opened. A branch moved from the commit-maker's last commit, or holding any commit it
@@ -274,7 +278,7 @@ class TenantDelivery:
                 tip,
                 mine=frozenset(m.commit for m in batch.committer.made if m.batch == line.batch),
                 title=_batch_title(batch.id),
-                body=_batch_body(line.batch.branch, line.batch.base),
+                body=self._body(tip, body_from_commit) or _batch_body(line.batch.branch, line.batch.base),
             )
 
 

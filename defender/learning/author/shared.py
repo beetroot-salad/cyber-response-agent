@@ -72,7 +72,9 @@ def existing_finding_ids(cfg: Any) -> set[str]:
     ):
         sids = lesson.fm.get(field) or []  # lint-lesson-text: ok — ids compared as set members, never printed
         if isinstance(sids, list):
-            ids.update(sid for sid in sids if isinstance(sid, str))
+            # A numeric id (a feedback comment id, #1414) is read by YAML as an int.
+            ids.update(str(sid) for sid in sids
+                       if isinstance(sid, (str, int)) and not isinstance(sid, bool))
     return ids
 
 

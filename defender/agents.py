@@ -3,6 +3,7 @@ from __future__ import annotations
 from defender.learning.author.curator_engine import CORPUS_AUTHOR_DEF
 from defender.learning.branch.estate.oracle import ORACLE_CHECK_DEF, ORACLE_DEF
 from defender.learning.branch.questioner import QUESTIONER_DEF
+from defender.learning.feedback_role import FEEDBACK_DEF
 from defender.learning.judge_role import JUDGE_DEF
 from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF
 from defender.learning.roles import LEARNING_AGENTS
@@ -24,6 +25,7 @@ __all__ = [
     "AGENTS",
     "COMPOSER_DEF",
     "CORPUS_AUTHOR_DEF",
+    "FEEDBACK_DEF",
     "GATHER_DEF",
     "JUDGE_DEF",
     "LEAD_AUTHOR_DEF",
