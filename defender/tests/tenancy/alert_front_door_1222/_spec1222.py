@@ -36,6 +36,7 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender.tests.support.shared.contracts import _data_root_1078 as D
 from defender.tests.support.storage import _session_store_705 as SS
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
@@ -545,13 +546,17 @@ class Planted:
     root: Path
     tenant_id: str
     knowledge: Path
+    #: What `directory` seeds as the tenant's records (#1366): `R.DERIVED` = what the planted `settings/` stands for; a test
+    #: whose subject is not the records, and which puts files in `settings/` that would change that reading (a leftover
+    #: `systems/` folder), states them: `dataclasses.replace(planted, records=R.fixture_records())`.
+    records: Any = R.DERIVED
 
     @property
     def directory(self) -> Any:
         """A `TenantDirectory` holding this tenant active with its forge wiring (#1214 Flow 4)."""
         from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
 
-        return tenant_directory(self.root, self.tenant_id, alert_mapping=current_mapping(self))
+        return tenant_directory(self.root, self.tenant_id, alert_mapping=current_mapping(self), records=self.records)
 
     @property
     def settings(self) -> Path:
