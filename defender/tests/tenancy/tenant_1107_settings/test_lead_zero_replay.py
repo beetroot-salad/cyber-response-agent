@@ -15,6 +15,8 @@ pytest.importorskip("pydantic_ai")
 
 from defender.systems import run_tenant  # noqa: E402
 from defender.kit import transport as _stub_transport  # noqa: E402
+from defender.tests.support.tenancy import _systems1366 as R
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root  # noqa: E402
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -146,8 +148,8 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
     assert rc == 0, (rc, refused and H.refusal_text(refused))
 
     S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", edited)
-    fresh = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
-                                      dispatches_lead_zero=False)
+    fresh = R.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
+                             dispatches_lead_zero=False)
 
     def edit_within(_run_dir: Path) -> None:
         S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", later)
@@ -156,8 +158,11 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
                                                       worlds=_identity_worlds()),
                                label="mf16")
     sibling = S.RunRecorder(tmp_path / "sibling", before_lifecycle=edit_within)
-    rc, refused = S.drive_run(_resume_argv(episode / "family.yaml"), sibling,
-                              visualize=sibling.visualize)
+    resume = _resume_argv(episode / "family.yaml")
+    # The sibling's start reads the tenant's CURRENT records; the edit is the records at that moment, so the
+    # test states them (the launch's directory is built before the publish, from the previous export).
+    rc, refused = S.drive_run(resume, sibling, visualize=sibling.visualize,
+                              directory=directory_for_argv(resume, root, records=R.derive(S.settings_of(folder))))
     assert refused is None, (rc, refused and H.refusal_text(refused))
     assert rc == 0, (rc, refused and H.refusal_text(refused))
 
@@ -230,8 +235,8 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
     root, _folder, tenant = _plant(tmp_path, "red1107")
-    record = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
-                                       dispatches_lead_zero=False)
+    record = R.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
+                              dispatches_lead_zero=False)
     assert record.settings == tenant.settings, (record.settings, tenant.settings)
     given, resolved = str(record.settings), str(Path(record.settings).resolve())
     spellings = {given, resolved}

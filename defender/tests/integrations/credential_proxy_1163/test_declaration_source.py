@@ -6,7 +6,6 @@ from __future__ import annotations
 import base64
 import functools
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -16,6 +15,7 @@ from defender.kit.faults import ConfigFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.integrations.credential_proxy_1163._target import (
     ACCESS_FILE,
 )
@@ -109,50 +109,9 @@ def test_d2_a_declaration_only_in_an_unmerged_commits_export_has_no_effect(
     assert control["fault"] is None
 
 
-def test_d2_a_current_pointer_that_is_a_link_to_an_unmerged_export_is_not_followed(
-        tmp_path, data_root):
-    """`current` replaced by a symlink to the unmerged export is refused, not obeyed. O2, C26."""
-    with H.upstream() as unmerged_up, T.rig(tmp_path / "forge", data_root) as r:
-        commit = _unmerged_export(r.t, unmerged_up.url)
-        pointer = export_dir(r.t.tenant, commit).parent / "current"
-        pointer.unlink()
-        pointer.symlink_to(commit)
-        refused = r.ask(url=f"{unmerged_up.url}{T.BASE_PATH}/users/x")
-        merged_path = r.ask()
-
-    assert (refused["fault"], merged_path["fault"]) == ("ConfigFault", "ConfigFault")
-    assert (unmerged_up.seen, r.up.seen) == ([], [])
-
-
-@pytest.mark.parametrize("link", ["access-file", "system-folder", "settings-folder"])
-def test_d3_a_declaration_reached_through_a_link_in_the_export_is_refused(
-        tmp_path, data_root, link):
-    """A link at the access file, its system folder or `settings/` in the current export,
-    pointing at a declaration for another base, is not read. O2, C26."""
-    with H.upstream() as decoy, T.rig(tmp_path / "forge", data_root) as r:
-        base = export_dir(r.t.tenant, r.t.commit)
-        outside = tmp_path / "outside"
-        (outside / "systems" / "identity").mkdir(parents=True)
-        (outside / "systems" / "identity" / "access.yaml").write_text(
-            H.declaration(decoy.url + T.BASE_PATH), encoding="utf-8")
-        assert r.ask()["fault"] is None  # control: the real file works
-        if link == "access-file":
-            target = base / ACCESS
-            target.unlink()
-            target.symlink_to(outside / "systems" / "identity" / "access.yaml")
-        elif link == "system-folder":
-            shutil.rmtree(base / "settings" / "systems" / "identity")
-            (base / "settings" / "systems" / "identity").symlink_to(
-                outside / "systems" / "identity")
-        else:
-            shutil.rmtree(base / "settings")
-            (base / "settings").symlink_to(outside)
-        refused = r.ask(url=f"{decoy.url}{T.BASE_PATH}/users/x")
-        original = r.ask()
-
-    assert (refused["fault"], original["fault"]) == ("ConfigFault", "ConfigFault")
-    assert decoy.seen == []
-    assert len(r.up.seen) == 1
+# Retired (#1366 O7: the proxy reads the system's current record, not an export, so a `current` pointer or a link
+# inside an export is no longer a path to a declaration): test_d2_a_current_pointer_that_is_a_link_to_an_unmerged_export_is_not_followed
+# and test_d3_a_declaration_reached_through_a_link_in_the_export_is_refused[access-file|system-folder|settings-folder].
 
 
 BAD_NAMES = [
@@ -253,14 +212,14 @@ def test_d5_a_malformed_declaration_is_a_config_fault_unsent(tmp_path, data_root
 
 def test_d3_adapter_over_the_working_tree_reaches_nothing_the_merged_declaration_forbids(
         tmp_path, data_root):
-    """An adapter whose record is the working tree (preflight, C34) and whose base exists only
-    there is refused; the record over the export reaches the merged base. O2, A3."""
-    from defender.systems.run_tenant import run_tenant_for
+    """An adapter whose run record is the clone's working tree (preflight, C34) and whose base exists only
+    there is refused by the proxy, which enforces the system's CURRENT record; the run record built from
+    the current records reaches the merged base. O7, A3."""
 
     with H.upstream() as wt_up, T.rig(tmp_path / "forge", data_root) as r:
         (Path(r.t.clone) / ACCESS).write_text(
             H.declaration(wt_up.url + T.BASE_PATH), encoding="utf-8")
-        working_tree = run_tenant_for(r.t.tenant, dispatches_lead_zero=False)
+        working_tree = R.run_tenant_for(r.t.tenant, dispatches_lead_zero=False)
         with A.proxy_for(r.t, r.store, verifier=r.verifier, audit=r.audit) as (proxy_url, tap):
             tok = r.tok()
             with pytest.raises(ConfigFault):

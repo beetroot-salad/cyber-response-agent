@@ -59,7 +59,6 @@ class _Investigating(RunAtHandedRecorder):
 
 
 def _drive(tmp_path, data_root, records, bao, *, read_token=False, between=None):
-    _plant(data_root, proxy=("identity", "ticket"))
     tickets = _LegSees(bao)
     rec = _Investigating(tmp_path / "run", bao=bao, read_token=read_token, between=between)
     started = time.time()
@@ -72,6 +71,10 @@ def _drive(tmp_path, data_root, records, bao, *, read_token=False, between=None)
 
 
 def _records(data_root, tmp_path, *generations):
+    """The tenant planted (identity and ticket reachable, every other system without a declaration), THEN its records
+    built over that folder: the records a run starts from are the folder's, which must exist when they are seeded
+    (#1366 R8: records are stated, not inferred by a default)."""
+    _plant(data_root, proxy=("identity", "ticket"))
     return A.Records(data_root, {S.PLAYGROUND_ID: list(generations)})
 
 
