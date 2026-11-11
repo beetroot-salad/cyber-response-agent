@@ -45,6 +45,8 @@ for _path in (HERE, HERE.parent, REPO):
 
 import frozen_copy  # noqa: E402
 from chaos import lock  # noqa: E402
+from defender._io import append_jsonl  # noqa: E402
+from evaluations import held_out  # noqa: E402
 from evaluations.held_out import binding  # noqa: E402
 
 CASE_KEYS = ("freeze", "alert", "counts", "content")
@@ -133,7 +135,7 @@ def _stale(case: dict, observed: dict[str, int], content: str, alert: dict | Non
         reasons.append("counts differ: " + "; ".join(diff))
     if content != case["content"]:
         reasons.append("content digest differs from the case's")
-    copy_alert = None if alert is None else frozen_copy.digest_of(alert)
+    copy_alert = None if alert is None else held_out.digest(alert)
     if copy_alert != case["alert"] or alert_file_digest != case["alert"]:
         reasons.append("alert differs: the copy's alert, alert.json and case.yaml do not agree")
     return reasons
@@ -147,12 +149,18 @@ def _run_id(stdout: str) -> str | None:
 
 
 def _append_row(index: Path, row: dict) -> None:
-    index.parent.mkdir(parents=True, exist_ok=True)
-    needs_newline = index.exists() and index.stat().st_size > 0 and not index.read_bytes().endswith(b"\n")
-    with open(index, "ab") as fh:
-        if needs_newline:
+    """One run row, through the product's JSONL appender. A torn last line (a write cut short)
+    is ended first, so the new row is a line of its own and the scorer skips only the torn one."""
+    try:
+        with open(index, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            torn = fh.tell() > 0 and (fh.seek(-1, os.SEEK_END), fh.read(1))[1] != b"\n"
+    except FileNotFoundError:
+        torn = False
+    if torn:
+        with open(index, "ab") as fh:
             fh.write(b"\n")
-        fh.write((json.dumps(row, sort_keys=True) + "\n").encode())
+    append_jsonl(index, [row])
 
 
 def _default_run_fn(argv: list[str], env: dict) -> tuple[int, str, str]:
@@ -180,7 +188,7 @@ def _serve_copy(es: Any, ops: Any, clock: Any, *, case: dict, freeze: dict, free
     observed = frozen_copy.observed_counts(es, list(freeze["elastic"]["indices"]))
     uuid = alert_uuid_of(alert_file)
     alert = frozen_copy.find_alert(es, patterns, uuid)
-    file_digest = frozen_copy.digest_of(json.loads(alert_file.read_text()))
+    file_digest = held_out.digest(json.loads(alert_file.read_text()))
     reasons = _stale(case, observed, ops.content_digest(copy.touched), alert, file_digest)
     if reasons:
         frozen_copy.mark_dirty(ops, freeze_id, overlay)
@@ -226,11 +234,14 @@ def launch(case_dir: Path, *, freezes_dir: Path, tenant_settings: Path, index: P
             reasons = _serve_copy(es, ops, clock, case=case, freeze=freeze, freeze_id=case["freeze"],
                                   parts_dir=parts_dir, alert_file=alert_file, location=location)
             proxy_url = ops.start_proxy()
+            # The last lab step: the node's clock is rewritten from the VPS's clock at instant W,
+            # and the agent's run clock is anchored at the same W (r6.4.6), so both read T + (now - W).
+            anchor = ops.set_clock(freeze["T"])
             argv = [_agent_python(), str(REPO / "defender" / "run.py"), str(alert_file),
-                    "--tenant", tenant, "--no-learn", "--as-of", frozen_copy.stamp(freeze["T"])]
+                    "--tenant", tenant, "--no-learn", "--as-of", frozen_copy.stamp(freeze["T"]),
+                    "--as-of-anchor", frozen_copy.stamp(anchor)]
             if knowledge:
                 argv += ["--knowledge-commit", knowledge]
-            ops.set_clock(freeze["T"], clock)   # the last lab step: the node's clock starts with the agent's
             rc, stdout, _ = run_fn(argv, {**(os.environ if env is None else env),
                                           "DEFENDER_CREDENTIAL_PROXY_URL": proxy_url})
             run_id = _run_id(stdout)

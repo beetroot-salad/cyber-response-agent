@@ -68,6 +68,7 @@ from defender import tenancy  # noqa: E402
 from defender.records.formats import Episode  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.investigation import driver  # noqa: E402
+from defender.investigation.run_clock import AnchoredOrigin, ClockOrigin, origin_reading  # noqa: E402
 from defender.investigation.run_state import RunState  # noqa: E402
 from defender import providers  # noqa: E402
 from defender.records import run_end  # noqa: E402
@@ -139,7 +140,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--as-of", default=None, type=_aware_moment, metavar="T",
                    help="start the run clock at T (ISO-8601 with an offset or Z); not with "
                         "--update-ticket, --episode or --world")
+    p.add_argument("--as-of-anchor", default=None, type=_aware_moment, metavar="W",
+                   help="with --as-of: the wall instant at which the run clock read T; the run "
+                        "starts at T plus the time since W (a frozen lab node's clock, #1347)")
     ns = p.parse_args(argv)
+    now = datetime.now(UTC)
+    if ns.as_of_anchor is not None and ns.as_of is None:
+        p.error("--as-of-anchor needs --as-of: it says when the run clock read T")
+    if ns.as_of is not None and ns.as_of > now:
+        p.error("--as-of names a future time: a frozen run replays a moment that has passed")
+    if ns.as_of_anchor is not None and ns.as_of_anchor > now:
+        p.error("--as-of-anchor names a future time: the anchor is when the clock was set")
     # A frozen run's refusals, before any run dir or episode is looked up (#1347 O5).
     if ns.as_of is not None and (ns.episode is not None or ns.world is not None):
         p.error("--as-of is not available with --episode/--world: a sibling's clock is its "
@@ -342,7 +353,7 @@ class _Investigate(Protocol):
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
         source: Run | None = None, job_facts: _JobEndFacts | None = None,
-        access: RequestAccess | None = None, clock_origin: datetime | None = None,
+        access: RequestAccess | None = None, clock_origin: ClockOrigin | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -386,7 +397,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     job_facts: _JobEndFacts | None = None,
     #: The run clock's start when it is not the source's own (`--as-of`, #1347 O5); `None`
     #: on an ordinary run and on a world, whose clock is its branch point's.
-    clock_origin: datetime | None = None,
+    clock_origin: ClockOrigin | None = None,
     #: The run's live state (#1414), handed to the investigation when the caller built one.
     run_state: Any = None,
     #: The credential proxy's address and the run's read token (#1163); `None` when the run has
@@ -513,7 +524,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: judges it, as for a direct caller).
     systems: RunSystems | None = None,
     #: The run clock's start (`--as-of`, #1347), threaded to the drive; `None` on an ordinary run.
-    clock_origin: datetime | None = None,
+    clock_origin: ClockOrigin | None = None,
     #: The credential proxy's address and the run's read token (#1163), signed at run start.
     access: RequestAccess | None = None,
     investigate: _Investigate = _drive_investigation,
@@ -1149,8 +1160,9 @@ class _Started:
     #: The case system's verdict, judged once at setup when the run records its case
     #: (`--update-ticket`); `None` otherwise.
     case: case_system.CaseTarget | case_system.CaseSettingsFault | None = None
-    #: The run clock's start (`--as-of`, #1347); `None` on an ordinary run.
-    as_of: datetime | None = None
+    #: The run clock's start (`--as-of`, with `--as-of-anchor` its wall instant, #1347); `None`
+    #: on an ordinary run.
+    as_of: ClockOrigin | None = None
 
     def lifecycle_kwargs(self, ns: argparse.Namespace) -> dict[str, Any]:
         # The origin only when set, so a lifecycle seam that predates it is called as before.
@@ -1297,6 +1309,10 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             # refuses is told so before anything about its input is — save that an ordinary
             # run's alert file is absent, refused above before the publish spends anything.
             alert = _case_input(ns, world, episode_runs, launch=launch)
+            # The run clock's origin (#1347 O5, r6.4.6): T, or T anchored at its wall instant W.
+            origin: ClockOrigin | None = (
+                None if ns.as_of is None else ns.as_of if ns.as_of_anchor is None
+                else AnchoredOrigin(at=ns.as_of, wall=ns.as_of_anchor))
 
             # The handle, not just its directory: the post-run step saves the run page through it.
             # The stamp records the export copied (O-B).
@@ -1306,11 +1322,12 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             elif launch is not None:
                 run = materialize(alert, run=early, tenant=accepted, model=model,
                                   mapping=mapping, knowledge=knowledge, launch=launch)
-            elif ns.as_of is not None:
+            elif origin is not None:
                 # A frozen run's recorded start is its run clock's origin, never the wall time
                 # (#1347 O5); named only then, so a seam that predates `--as-of` is called as before.
                 run = materialize(alert, run=early, tenant=accepted, model=model,
-                                  mapping=mapping, knowledge=knowledge, started_at=ns.as_of)
+                                  mapping=mapping, knowledge=knowledge,
+                                  started_at=origin_reading(origin, datetime.now(UTC)))
             else:
                 run = materialize(alert, run=early, tenant=accepted, model=model,
                                   mapping=mapping, knowledge=knowledge)
@@ -1321,7 +1338,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             _write_knowledge_record(run_dir, knowledge)
             yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world,
                            episode=episode, systems=systems, seams=seams, alert=alert,
-                           minting=minting, case=case, as_of=ns.as_of)
+                           minting=minting, case=case, as_of=origin)
         finally:
             copy.remove()
 
@@ -1530,7 +1547,7 @@ def parse_job_args(argv: list[str]) -> argparse.Namespace:
     ns = p.parse_args(argv)
     for name, default in (("alert", None), ("episode", None), ("world", None), ("no_learn", False),
                           ("update_ticket", False), ("model", None), ("knowledge_commit", None),
-                          ("as_of", None)):
+                          ("as_of", None), ("as_of_anchor", None)):
         setattr(ns, name, default)
     return ns
 

@@ -34,6 +34,7 @@ for _path in (HERE, HERE.parent, REPO):
         sys.path.insert(0, str(_path))
 
 import frozen_copy  # noqa: E402
+from evaluations import held_out  # noqa: E402
 from chaos import lock  # noqa: E402
 from chaos.guard import check_mutations  # noqa: E402
 from chaos.mutations import resolve_mutations  # noqa: E402
@@ -122,7 +123,7 @@ def _record(*, freeze: dict, freeze_id: str, overlay: dict | None, alert: dict, 
         raise frozen_copy.CopyFault(f"the restore returned other documents than the freeze counted "
                                     f"(observed, derived): {wrong}")
     T = frozen_copy.utc(freeze["T"])
-    return {"freeze": freeze_id, "alert": frozen_copy.digest_of(alert),
+    return {"freeze": freeze_id, "alert": held_out.digest(alert),
             "age": int((T - frozen_copy.utc(frozen_copy.dug(alert, "@timestamp"))).total_seconds()),
             "overlay": overlay, "counts": copy.counts, "content": ops.content_digest(copy.touched),
             "confirmed": None}

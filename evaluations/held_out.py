@@ -54,7 +54,9 @@ if TYPE_CHECKING:
     from defender.records import RunPaths  # noqa: F401
 
 
-def _digest(doc: object) -> str:
+def digest(doc: object) -> str:
+    """Canonical-JSON sha256 (sorted keys, compact, ASCII-escaped), bare lowercase hex: the one
+    digest of a case document, a freeze, an alert or an overlay, here and in the lab (#1347)."""
     return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -64,7 +66,7 @@ def binding(freeze_doc: object, case_doc: object) -> str:
     is sorted keys, compact separators, ASCII-escaped, so comments, key order and line endings
     do not matter. This is the one owner. Raises `TypeError` / `ValueError` for a value
     canonical JSON cannot carry (an unquoted YAML timestamp, say)."""
-    return _digest([_digest(freeze_doc), _digest(case_doc)])
+    return digest([digest(freeze_doc), digest(case_doc)])
 
 
 #: The failure bucket of a slug whose newest row names a run that is absent or has no alert

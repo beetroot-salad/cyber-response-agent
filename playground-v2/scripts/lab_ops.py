@@ -36,6 +36,7 @@ import sys
 import tarfile
 import tempfile
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -275,14 +276,21 @@ class LabOps:
         self._engine("test", "-f", f"{CERTS_DIR}/elasticsearch/elasticsearch.crt")
         self._engine("test", "-f", f"{CERTS_DIR}/ca/ca.crt")
 
-    def set_clock(self, as_of: Any, clock: Any = None) -> int:
+    def set_clock(self, as_of: Any) -> datetime:
         """Rewrite the node's clock offset to `as_of - now` in place (D15 revised): the running
-        shim maps the file, so its next reading moves; a new file would never be read. Returns the
-        offset written. The launcher's last lab step before the agent runs."""
-        now = (clock or _WALL).now()
-        offset = round((frozen_copy.utc(as_of) - frozen_copy.utc(now)).total_seconds())
-        self._write_offset(offset)
-        return offset
+        shim maps the file, so its next reading moves; a new file would never be read. One engine
+        command reads the VPS's own clock, writes the offset from it and prints that instant W
+        (r6.4.6), returned: the node reads `as_of + (now - W)`, and the agent's `--as-of-anchor W`
+        makes its run clock the same function of wall time."""
+        target = round(frozen_copy.utc(as_of).timestamp())
+        out = self._engine("sh", "-c", f'mkdir -p {CLOCK_DIR} && now=$(date +%s) && '
+                                       f'off=$(( $1 - now )) && [ ${{#off}} -lt {OFFSET_RECORD} ] && '
+                                       f'printf "%23s\\n" "$off" 1<> {CLOCK_FILE} && echo "$now"',
+                           "sh", str(target), text=True)
+        try:
+            return datetime.fromtimestamp(int(out.stdout.strip()), tz=UTC)
+        except (ValueError, AttributeError) as exc:
+            raise LabOpsError(f"the clock step printed no instant: {out.stdout!r}") from exc
 
     def _write_offset(self, offset: int | None) -> None:
         """The fixed record at byte 0 of CLOCK_FILE, opened without truncation (`1<>`, which also
@@ -297,7 +305,7 @@ class LabOps:
             raise LabOpsError(f"clock offset {text} does not fit the {OFFSET_RECORD}-byte record")
         self._engine("sh", "-c", f'mkdir -p {CLOCK_DIR} && printf "{record}" "$1" 1<> {CLOCK_FILE}', "sh", text)
 
-    def _start_node(self, as_of: Any = None, clock: Any = None) -> None:
+    def _start_node(self, as_of: Any = None) -> None:
         """A new node container on the `frozen-es-data` volume (as it is: a fresh restore removed it
         first). Its offset file holds `as_of - now` when the node starts."""
         self._ensure_image(self.es_image)
@@ -320,7 +328,7 @@ class LabOps:
         if as_of is None:
             self._write_offset(None)
         else:
-            self.set_clock(as_of, clock)
+            self.set_clock(as_of)
         self._inner("run", "-d", "--name", ES_CONTAINER, "--hostname", ES_CONTAINER,
                     "--network", ENGINE_NETWORK, "--env-file", ES_ENV_FILE, *flags,
                     "-v", f"{ES_DATA_VOLUME}:/usr/share/elasticsearch/data",
@@ -339,7 +347,7 @@ class LabOps:
         self.ensure_engine()
         return self._node_state() is not None
 
-    def ensure_node(self, as_of: Any = None, clock: Any = None) -> None:
+    def ensure_node(self, as_of: Any = None) -> None:
         """The engine, and a frozen node running on the data it has. Idempotent: a running node is
         left alone; a stopped one is started again (the same container and data), a missing one is
         created; either way its clock reads `as_of` at its start (without `as_of` the offset file
@@ -350,21 +358,21 @@ class LabOps:
         if state == "true":
             return
         if state is None:
-            self._start_node(as_of, clock)
+            self._start_node(as_of)
             return
         if as_of is None:
             self._write_offset(None)
         else:
-            self.set_clock(as_of, clock)
+            self.set_clock(as_of)
         self._inner("start", ES_CONTAINER)
 
-    def fresh_node(self, as_of: Any, clock: Any = None) -> None:
+    def fresh_node(self, as_of: Any) -> None:
         """D25: discard the node container and its data volume and start a new, empty node whose
         clock reads `as_of` at its start. The marker, on the engine's state volume, is kept."""
         self.mount_node_cert()
         self._inner("rm", "-f", ES_CONTAINER, check=False)
         self._inner("volume", "rm", "-f", ES_DATA_VOLUME)
-        self._start_node(as_of, clock)
+        self._start_node(as_of)
 
     # -- the copy-state marker (A4) ---------------------------------------------------------------
 
@@ -528,8 +536,6 @@ class LabOps:
         digest = hashlib.sha256()
         for name in names:
             docs = sorted(self._document_digests(es, name))
-            if len(docs) != int(es.es_request("GET", f"/{name}/_count")["count"]):
-                raise LabOpsError(f"{name}: the documents read are not all its documents")
             digest.update(json.dumps([name, docs], separators=(",", ":")).encode())
         digest.update(self._stubs_loaded.encode())
         for stub, path in STUB_STATE.items():
@@ -538,24 +544,10 @@ class LabOps:
 
     @staticmethod
     def _document_digests(es: Any, name: str) -> list[str]:
-        """sha256 of each document of the index `name`, read in pages of `_search`."""
-        found: list[str] = []
-        after: list | None = None
-        while True:
-            body: dict[str, Any] = {"size": 1000, "version": True, "sort": [{"_doc": "asc"}],
-                                    "query": {"match_all": {}}}
-            if after:
-                body["search_after"] = after
-            hits = es.es_request("POST", f"/{name}/_search?expand_wildcards=open,hidden", body)["hits"]["hits"]
-            for h in hits:
-                found.append(hashlib.sha256(json.dumps(
-                    [h["_index"], h["_id"], h.get("_version"), h["_source"]], sort_keys=True,
-                    separators=(",", ":")).encode()).hexdigest())
-            if len(hits) < 1000:
-                return found
-            after = hits[-1].get("sort")
-            if not after:
-                raise LabOpsError(f"{name}: a full page came back without a sort value to continue from")
+        """sha256 of each document of the index `name`, read through one fixed view (r6.4.6)."""
+        return [hashlib.sha256(json.dumps([h["_index"], h["_id"], h.get("_version"), h["_source"]], sort_keys=True,
+                                          separators=(",", ":")).encode()).hexdigest()
+                for h in frozen_copy.walk(es, name, {"match_all": {}}, source=True, version=True)]
 
     def teardown(self) -> None:
         """Stop the proxy, the frontends and the stubs; the frozen cluster and its data stay."""
@@ -588,6 +580,10 @@ class LabOps:
 
     def release_pickups(self) -> None:
         self._outer("start", WATCHER)
+
+    def scenario_ids(self) -> set[str]:
+        """The attack catalog's scenario ids, as `fire` reads them."""
+        return set(_load_module("attack_runner", PLAYGROUND / "attacks" / "runner.py").load_catalog())
 
     def fire(self, scenario: str, lock_token: str) -> dict:
         runner = _load_module("attack_runner", PLAYGROUND / "attacks" / "runner.py")
@@ -669,9 +665,11 @@ class LabOps:
                 self._outer("unpause", host, check=False)
         return names
 
-    def verify_restore(self, repository: str, snapshot: str) -> dict[str, int]:
-        """Restore the snapshot into a scratch cluster on the lab server and return each index's
-        top-level document count (`_count`); the scratch cluster is removed either way."""
+    def verify_restore(self, repository: str, snapshot: str) -> dict[str, Any]:
+        """Restore the snapshot into a scratch cluster on the lab server and return what the
+        snapshot itself holds (r6.4.6): `{"indices": {name: top-level _count}, "data_streams":
+        [names]}`. Indices the scratch node makes for itself are not the snapshot's, so they never
+        enter a freeze. The scratch cluster is removed either way."""
         name = "lab-verify-es"
         self._outer("rm", "-f", "-v", name, check=False)
         self._outer("run", "-d", "--name", name, "-e", "discovery.type=single-node",
@@ -700,11 +698,11 @@ class LabOps:
             call("POST", f"/_snapshot/{repository}/{snapshot}/_restore?wait_for_completion=true",
                  {"include_global_state": False})
             call("POST", "/_refresh?expand_wildcards=all")
-            rows = call("GET", "/_cat/indices?format=json&h=index&expand_wildcards=all")
+            held = call("GET", f"/_snapshot/{repository}/{snapshot}")["snapshots"][0]
             # Top-level documents (`_count`), the count every later check compares: `docs.count`
             # also counts the hidden documents of nested fields (r6.4.4).
-            return {r["index"]: int(call("GET", f"/{r['index']}/_count")["count"])
-                    for r in rows if not r["index"].startswith(".geoip")}
+            return {"indices": {n: int(call("GET", f"/{n}/_count")["count"]) for n in sorted(held["indices"])},
+                    "data_streams": sorted(held.get("data_streams") or [])}
         finally:
             self._outer("rm", "-f", "-v", name, check=False)
 
@@ -790,7 +788,6 @@ class LabOps:
         return path.name
 
 
-_WALL = frozen_copy.WallClock()
 
 
 def _dump_overlays(proc: Any) -> list[tuple[str, dict]]:

@@ -189,6 +189,9 @@ def capture(freeze_dir: Path, *, T: datetime, scenarios: list[str], repository: 
         raise CaptureRefused(f"freeze {freeze_id} already exists; a freeze is never overwritten")
     patterns = frozen_copy.tenant_patterns(tenant_settings)
     _check_moment(T, scenarios, clock.now())
+    unknown = sorted(set(scenarios) - ops.scenario_ids()) if scenarios else []
+    if unknown:
+        raise CaptureRefused(f"no such scenario in the attack catalog: {', '.join(unknown)}")
     token = lock.take(lock_store, lock.CAPTURE)
     started: list[str] = []
     staging: Path | None = None
@@ -213,10 +216,12 @@ def capture(freeze_dir: Path, *, T: datetime, scenarios: list[str], repository: 
         raise
 
     try:
-        counts = ops.verify_restore(repository, snap["snapshot"])
+        held = ops.verify_restore(repository, snap["snapshot"])
+        counts = dict(held["indices"])
         doc = {"T": frozen_copy.stamp(T),
                "elastic": {"repository": repository, "snapshot": snap["snapshot"],
-                           "uuid": snap["uuid"], "indices": dict(counts)},
+                           "uuid": snap["uuid"], "indices": counts,
+                           "data_streams": list(held["data_streams"])},
                "patterns": list(patterns), "parts": parts, "captured_by": captured_by}
         _publish(freeze_dir, parts_dir / freeze_id, staging, doc)
     except BaseException:

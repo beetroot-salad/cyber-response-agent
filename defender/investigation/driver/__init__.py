@@ -25,7 +25,6 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -66,7 +65,7 @@ from ..close_tool import register_close_tool
 from defender.systems.circuit_breaker import RunAborted
 from ..permission.policies import _common
 from defender.providers import BuiltModel
-from ..run_clock import ClockSource
+from ..run_clock import ClockOrigin, ClockSource, origin_reading
 from ..run_state import RunState, run_state_of
 from defender.kit.access import RequestAccess
 from ..tools import (
@@ -643,7 +642,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     orient_shim: orient.ShimRunner | None = None,
     run_state: RunState | None = None,
     clock: ClockSource | None = None,
-    clock_origin: datetime | None = None,
+    clock_origin: ClockOrigin | None = None,
     #: The review gate's state container MAIN's deps use (`AgentDeps.review_state`), when the
     #: caller holds it (#1342 r5 C2: a job's facts holder, which reads the close however the
     #: run ends). `None`: a fresh one of the run's own.
@@ -670,7 +669,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     run_dir, run_id = run.run_dir, str(run.id)
     state = _run_state_at_boundary(run_state, run_dir, run_id, clock)
     if clock_origin is not None:
-        state.resume_clock(clock_origin, 0.0)
+        state.resume_clock(origin_reading(clock_origin, state.clock.at(state.clock.ticks())), 0.0)
     state.access = access
     _box_follows_run_clock(box, state)
     model_name = resolve_main_model(model_name)

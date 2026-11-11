@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
-import json
 import os
 import re
 import sys
@@ -35,10 +34,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+_REPO = str(Path(__file__).resolve().parents[2])
+if _REPO not in sys.path:
+    sys.path.insert(0, _REPO)
+
+from evaluations import held_out  # noqa: E402
+
 ES_KINDS = ("data-drop", "schema-drift")
 # Where a frozen cluster finds the snapshot repository (its `path.repo`).
 REPO_LOCATION = "/lab/repo"
-SCRATCH = "-overlay"          # suffix of the scratch index an overlay copies through
+SCRATCH = ".frozen-overlay-"   # prefix of a data-drop's scratch index: a dot name no index template matches
 PIPELINE = "frozen-overlay"   # the temporary pipeline holding the processor verbatim
 ANCESTORS = "kibana.alert.ancestors"
 PAGE = 1000
@@ -82,11 +87,6 @@ def stamp(value: Any) -> str:
     return utc(value).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def digest_of(doc: Any) -> str:
-    """Canonical-JSON sha256 (sorted keys, compact, ASCII-escaped), bare lowercase hex."""
-    return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
-
 def dug(source: dict, dotted: str) -> Any:
     """`dotted` in a document stored flat (`{"a.b": 1}`) or nested (`{"a": {"b": 1}}`)."""
     if dotted in source:
@@ -126,6 +126,8 @@ def check_freeze(freeze: Any, name: str) -> None:
     ok = (isinstance(elastic, dict) and isinstance(freeze.get("parts"), dict)
           and all(isinstance(elastic.get(k), str) and elastic[k] for k in ("repository", "snapshot", "uuid"))
           and isinstance(elastic.get("indices"), dict) and elastic["indices"]
+          and isinstance(elastic.get("data_streams"), list)
+          and all(isinstance(s, str) and s for s in elastic["data_streams"])
           and isinstance(freeze.get("patterns"), list) and freeze["patterns"]
           and all(isinstance(p, str) and p for p in freeze["patterns"]))
     if ok:
@@ -160,9 +162,6 @@ def tenant_patterns(tenant_settings: Any) -> list[str]:
         text = path.read_text()
     except OSError as exc:
         raise NotConfigured(f"{path} is unreadable: {exc}") from exc
-    repo = str(Path(__file__).resolve().parents[2])
-    if repo not in sys.path:
-        sys.path.insert(0, repo)
     from defender.tenancy.tenant_settings import parse_env
     values = parse_env(text)
     keys = ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX")
@@ -197,7 +196,7 @@ def variant_id(freeze_id: str, overlay: dict | None) -> str:
     parameters and the span's start), so no change to the overlay can share a copy."""
     resolved = overlay if overlay is None or "span_start" not in overlay \
         else {**overlay, "span_start": stamp(overlay["span_start"])}
-    return digest_of({"freeze": freeze_id, "overlay": resolved})
+    return held_out.digest({"freeze": freeze_id, "overlay": resolved})
 
 
 def es_mutations(overlay: dict | None) -> list[dict]:
@@ -331,18 +330,20 @@ def _drop(es: Any, index: str, query: dict) -> int:
     """A data-drop: `query`'s documents of `index` go through the temporary pipeline into a scratch
     index; the ones it dropped are deleted from `index`, and the survivors are never written, so they
     keep `_version`. Returns how many were deleted."""
-    scratch = index + SCRATCH
-    _check_bulk(es.es_request("POST", "/_reindex", {"source": {"index": index, "query": query},
-                                                    "dest": {"index": scratch, "pipeline": PIPELINE}}),
-                f"overlay copy of {index}")
+    scratch = SCRATCH + hashlib.sha256(index.encode()).hexdigest()[:16]
+    # Created first with no mapping of its own (r6.4.6): only `_id` is read back, so the source's
+    # thousands of fields never meet a dynamic mapping's limit or guessed types.
+    es.es_request("PUT", f"/{scratch}", {"settings": {"index": {"number_of_replicas": 0}},
+                                         "mappings": {"dynamic": False}})
     try:
+        _check_bulk(es.es_request("POST", "/_reindex", {"source": {"index": index, "query": query},
+                                                        "dest": {"index": scratch, "pipeline": PIPELINE}}),
+                    f"overlay copy of {index}")
         es.es_request("POST", f"/{scratch}/_refresh")
-        kept = {h["_id"] for h in _page_ids(es, scratch, {"match_all": {}})}
-    except BaseException:
-        es.es_request("DELETE", f"/{scratch}?ignore_unavailable=true")
-        raise
-    es.es_request("DELETE", f"/{scratch}")
-    dropped = sorted(h["_id"] for h in _page_ids(es, index, query) if h["_id"] not in kept)
+        kept = {h["_id"] for h in walk(es, scratch, {"match_all": {}})}
+    finally:
+        es.es_request("DELETE", f"/{scratch}")
+    dropped = sorted(h["_id"] for h in walk(es, index, query) if h["_id"] not in kept)
     deleted = 0
     for i in range(0, len(dropped), PAGE):
         done = _check_bulk(es.es_request("POST", f"/{index}/_delete_by_query",
@@ -353,28 +354,60 @@ def _drop(es: Any, index: str, query: dict) -> int:
     return deleted
 
 
-def _page_ids(es: Any, index: str, query: dict) -> list[dict]:
-    """Every hit of `query` in `index` (`_id`, `_index`, ancestry), in pages ordered by `_doc`."""
-    found: list[dict] = []
-    after: list | None = None
-    while True:
-        body: dict[str, Any] = {"size": PAGE, "_source": [ANCESTORS], "sort": [{"_doc": "asc"}], "query": query}
-        if after:
-            body["search_after"] = after
-        hits = es.es_request("POST", f"/{index}/_search?expand_wildcards=open,hidden", body)["hits"]["hits"]
-        found += hits
-        if len(hits) < PAGE:
-            return found
-        after = hits[-1].get("sort")
-        if not after:
-            raise CopyFault(f"{index}: a full page came back without a sort value to continue from")
+KEEP_ALIVE = "5m"   # a point-in-time's keep-alive, renewed by every page
 
 
-def _page_ids_each(es: Any, patterns: list[str], query: dict) -> list[dict]:
-    """`_page_ids` over every index the patterns match, one index at a time: `_doc` order is per shard,
-    so paging it by `search_after` across several indices without a point-in-time skips documents."""
-    rows = es.es_request("GET", f"/_cat/indices/{_expr(patterns)}?format=json&h=index&expand_wildcards=open,hidden")
-    return [hit for name in sorted(r["index"] for r in rows or []) for hit in _page_ids(es, name, query)]
+class _View:
+    """An open point-in-time over some indices: a fixed view, which merges and refreshes do not
+    reorder and later writes do not reach (r6.4.6)."""
+
+    def __init__(self, es: Any, pit: str) -> None:
+        self.es, self.pit = es, pit
+
+    def walk(self, query: dict, *, source: Any = False, version: bool = False) -> list[dict]:
+        """Every hit of `query` in the view, paged by `_shard_doc`; refuses when the documents read
+        are not as many as the first page counted."""
+        found: list[dict] = []
+        after: list | None = None
+        total: int | None = None
+        while True:
+            body: dict[str, Any] = {"size": PAGE, "_source": source, "version": version, "query": query,
+                                    "sort": [{"_shard_doc": "asc"}], "track_total_hits": total is None,
+                                    "pit": {"id": self.pit, "keep_alive": KEEP_ALIVE}}
+            if after is not None:
+                body["search_after"] = after
+            page = self.es.es_request("POST", "/_search", body)
+            self.pit = page.get("pit_id") or self.pit
+            if total is None:
+                total = int(page["hits"]["total"]["value"])
+            hits = page["hits"]["hits"]
+            found += hits
+            if len(hits) < PAGE:
+                break
+            after = hits[-1].get("sort")
+            if not after:
+                raise CopyFault("a full page came back without a sort value to continue from")
+        if len(found) != total:
+            raise CopyFault(f"a walk read {len(found)} documents of the {total} its view holds")
+        return found
+
+
+@contextmanager
+def fixed_view(es: Any, expr: str) -> Iterator[_View]:
+    """A point-in-time over the indices `expr` names, closed on every exit (r6.4.6: the one way
+    the lab walks the copy's documents)."""
+    opened = es.es_request("POST", f"/{expr}/_pit?keep_alive={KEEP_ALIVE}&expand_wildcards=open,hidden")
+    view = _View(es, opened["id"])
+    try:
+        yield view
+    finally:
+        es.es_request("DELETE", "/_pit", {"id": view.pit})
+
+
+def walk(es: Any, expr: str, query: dict, *, source: Any = False, version: bool = False) -> list[dict]:
+    """`query`'s hits in the indices `expr` names, through one fixed view."""
+    with fixed_view(es, expr) as view:
+        return view.walk(query, source=source, version=version)
 
 
 def _names(ancestor_index: str, target: str, stream: str | None) -> bool:
@@ -392,14 +425,16 @@ def _alerts_derived_from(es: Any, patterns: list[str], targets: dict[str, str],
     in-span events are found first and the alerts looked up by their ids, so the work follows the
     span, not the size of the alerts index (#1347 live check 10)."""
     derived: dict[str, set[str]] = {}
-    for target, stream in targets.items():
-        events = [h["_id"] for h in _page_ids(es, target, {"bool": {"filter": [span]}})]
-        for i in range(0, len(events), PAGE):
-            batch = set(events[i:i + PAGE])
-            for hit in _page_ids_each(es, patterns, {"terms": {f"{ANCESTORS}.id": sorted(batch)}}):
-                ancestors = dug(hit.get("_source") or {}, ANCESTORS) or []
-                if any(a.get("id") in batch and _names(str(a.get("index", "")), target, stream) for a in ancestors):
-                    derived.setdefault(hit["_index"], set()).add(hit["_id"])
+    with fixed_view(es, _expr(patterns)) as alerts:   # one view for every batch: nothing re-listed
+        for target, stream in targets.items():
+            events = [h["_id"] for h in walk(es, target, {"bool": {"filter": [span]}})]
+            for i in range(0, len(events), PAGE):
+                batch = set(events[i:i + PAGE])
+                for hit in alerts.walk({"terms": {f"{ANCESTORS}.id": sorted(batch)}}, source=[ANCESTORS]):
+                    ancestors = dug(hit.get("_source") or {}, ANCESTORS) or []
+                    if any(a.get("id") in batch and _names(str(a.get("index", "")), target, stream)
+                           for a in ancestors):
+                        derived.setdefault(hit["_index"], set()).add(hit["_id"])
     return {index: sorted(ids) for index, ids in sorted(derived.items())}
 
 
@@ -416,7 +451,7 @@ def unverifiable_ancestry(es: Any, freeze: dict, overlay: dict | None) -> list[s
             continue
         span = {"range": {"@timestamp": {"gte": stamp(overlay["span_start"]), "lte": stamp(freeze["T"])}}}  # type: ignore[index]
         query = {"bool": {"filter": [span, {"exists": {"field": f"{ANCESTORS}.index"}}]}}
-        for hit in _page_ids_each(es, list(freeze["patterns"]), query):
+        for hit in walk(es, _expr(list(freeze["patterns"])), query, source=[ANCESTORS]):
             for a in dug(hit.get("_source") or {}, ANCESTORS) or []:
                 name = str(a.get("index") or "")
                 m = BACKING.match(name)
@@ -506,14 +541,27 @@ def _build(es: Any, clock: Any, freeze: dict, overlay: dict | None) -> tuple[dic
 
 def _holds_the_freeze(es: Any, freeze: dict, location: str) -> bool:
     """On a node that came up: the snapshot is the freeze's (refuses otherwise), and the node holds
-    exactly the freeze's indices, all open: each of them, and no other the patterns (or a scratch
-    index) match. The node's own system indices are not the copy's."""
+    exactly what the snapshot holds (r6.4.6): every freeze index, open; every member of each freeze
+    stream (its backing and failure-store indices) a freeze index; and no other index the patterns or
+    a scratch name match. The node's own system indices are outside by construction."""
     register_repository(es, freeze, location)
-    names = set(freeze["elastic"]["indices"])
+    elastic = freeze["elastic"]
+    names = set(elastic["indices"])
     held = held_indices(es)
-    globs = [*freeze["patterns"], "*" + SCRATCH]
-    extra = {n for n in held if n not in names and any(fnmatch.fnmatchcase(n, g) for g in globs)}
-    return names <= set(held) and not extra and all(held[n]["status"] != "close" for n in names)
+    if not names <= set(held) or any(held[n]["status"] == "close" for n in names):
+        return False
+    streams = list(elastic["data_streams"])
+    if streams:
+        try:
+            found = es.es_request("GET", f"/_data_stream/{','.join(streams)}?expand_wildcards=all") or {}
+        except Exception:  # noqa: BLE001 — a freeze stream the node lacks: not this copy
+            return False
+        members = {i["index_name"] for ds in found.get("data_streams", [])
+                   for i in [*ds.get("indices", []), *(ds.get("failure_store") or {}).get("indices", [])]}
+        if {ds.get("name") for ds in found.get("data_streams", [])} != set(streams) or not members <= names:
+            return False
+    globs = [*freeze["patterns"], SCRATCH + "*"]
+    return not any(n not in names and any(fnmatch.fnmatchcase(n, g) for g in globs) for n in held)
 
 
 def _came_up(es: Any, ops: Any, clock: Any, freeze: dict) -> bool:
@@ -522,7 +570,7 @@ def _came_up(es: Any, ops: Any, clock: Any, freeze: dict) -> bool:
     the restore goes on into a fresh node. A refusal (the lab not configured) still refuses."""
     deadline = clock.now().timestamp() + PRECHECK_WAIT_S
     try:
-        ops.ensure_node(freeze["T"], clock)
+        ops.ensure_node(freeze["T"])
         wait_for_cluster(es, clock, "the node start", timeout_s=max(0.0, deadline - clock.now().timestamp()))
     except CopyRefused:
         raise
@@ -554,7 +602,7 @@ def ready(es: Any, *, ops: Any, clock: Any, freeze: dict, freeze_id: str, overla
             # A2 under D25: the snapshot must be the freeze's before the copy there is discarded.
             register_repository(es, freeze, location)
         mark_dirty(ops, freeze_id, overlay)   # before the wipe: a crash from here leaves no trusted copy
-        ops.fresh_node(freeze["T"], clock)
+        ops.fresh_node(freeze["T"])
         wait_for_cluster(es, clock, "the node start")
         register_repository(es, freeze, location)
         tallies, touched = _build(es, clock, freeze, overlay)
