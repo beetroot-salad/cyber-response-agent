@@ -123,6 +123,7 @@ from defender.learning.branch.preflight import (
     ACCEPTED as ACCEPTED,
     DIRT as DIRT,
     ENVIRONMENT_REFUSED as ENVIRONMENT_REFUSED,
+    sibling_sign_check as sibling_sign_check,
     ENVIRONMENT_CAUSES as ENVIRONMENT_CAUSES,
     LauncherRefused as LauncherRefused,
     MAX_BRANCH_MESSAGE_ID as MAX_BRANCH_MESSAGE_ID,
@@ -187,8 +188,9 @@ _PRIME_ALLOWING_EMPTY = functools.partial(prime_base, allow_empty=True)
 
 #: The job's fixed brief for each cause of an environment refusal at pre-flight (#1363 O6): who
 #: failed is the first thing the operator reads, so a down system is never put as our failure.
+_SIGN_CAUSE = "the read token for the credential proxy cannot be signed"
 _ENVIRONMENT_BRIEFS = {
-    "sign": "pre-flight refused: the read token for the credential proxy cannot be signed",
+    "sign": "pre-flight refused: " + _SIGN_CAUSE,
     "access": "pre-flight refused: the credential proxy could not be used",
     "setup": "pre-flight refused: our setup for a system failed",
     "down-systems": "pre-flight refused: every system the source run's calls reached is down "
@@ -411,6 +413,10 @@ def _pinned_export(tenant: RunTenant, source: Run, container: JobContainer | Non
             f"export: {refused}", reason=LAUNCH_REFUSED, brief=_UNPINNABLE, cause=refused) from refused
 
 
+#: The job's fixed brief when the launcher's check before a sibling finds the token can no
+#: longer be signed (#1449): pre-flight's cause, after pre-flight passed.
+_SIGN_STOP_BRIEF = "before a sibling started: " + _SIGN_CAUSE + "; no later world started"
+
 #: The exit code recorded for an arm whose process never started (spawn raised, or the
 #: rendezvous broke). Distinct from `run.py`'s own 0/1/2 so "never started" is distinguishable
 #: from "ran and failed".
@@ -423,6 +429,7 @@ def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the ten
     tenant_id: TenantId | None, rate: float | None = None, failed_before: int = 0,
     knowledge_commit: str | None = None, width: int | None = None, control: str | None = None,
     on_ended: Callable[[str, int], None] | None = None,
+    may_start: Callable[[], str | None] | None = None,
 ) -> dict[str, int]:
     """Start the selected world UUIDs, returning exits keyed by those UUIDs.
 
@@ -432,8 +439,9 @@ def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the ten
     one sibling after another with the whole rate each. `control`, when named, starts first, and
     its failure stops the family: no world after it starts. Either way, once `UNUSABLE_AT`
     worlds have failed the family is unusable: the siblings still running are stopped and no
-    other world starts. A world that never started is recorded `did not finish` and exits
-    `SPAWN_FAILED_EXIT`. `on_ended(world_id, code)` is called as each sibling's process exits.
+    other world starts. `may_start()`, when given, is asked before each world starts: a
+    reason it returns stops the family the same way, that world never starting (#1449). A
+    world that never started is recorded `did not finish` and exits `SPAWN_FAILED_EXIT`. `on_ended(world_id, code)` is called as each sibling's process exits.
 
     A `BaseException` reaching this frame while siblings run (a stop's signal) stops the family
     the same way, waits for the running siblings to end, and is re-raised."""
@@ -482,9 +490,9 @@ def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the ten
                     "family is unusable; stopping the siblings still running")
                 stop.set()
 
-    def never_started(world_id: str) -> None:
+    def never_started(world_id: str,
+                      why: str = "it never started: the family was stopped before its turn") -> None:
         exits[world_id] = SPAWN_FAILED_EXIT
-        why = "it never started: the family was stopped before its turn"
         if outcome_mod.write_world_record(episode, world_id, outcome_mod.DID_NOT_FINISH,
                                           detail=why):
             _logger.warning(f"world {worlds[world_id].label}: {why}; recorded as did not finish")
@@ -499,6 +507,12 @@ def start_family(  # noqa: PLR0913, PLR0915, C901 — the family's arms, the ten
             ready.wait(timeout=30)
         elif stop.is_set():
             never_started(world_id)
+            return
+        refused = None if may_start is None else may_start()
+        if refused is not None:
+            _logger.warning(f"episode {episode.dir.name}: world {label} is not started: {refused}")
+            stop.set()
+            never_started(world_id, f"it never started: {refused}")
             return
         try:
             code = start(sibling_argv(episode.dir.name, label, tenant_id=tenant_id,
@@ -924,13 +938,28 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
                 lane.sibling_ended(view, list(ran))
 
         # A job's siblings run one at a time, the control first (O4); an operator's together.
+        # Before each one the job checks its token can still be signed (#1449): pre-flight proved
+        # it once, and a job's family can run long enough for a rotation or an offboarding.
+        unsigned: list[str] = []
+        sign_check = None if lane is None else sibling_sign_check(
+            tenant, roster=roster, signer=signer, proxy_url=proxy_url,
+            issuer_transport=issuer_transport, directory=directory)
+
+        def may_start() -> str | None:
+            refused = None if sign_check is None else sign_check()
+            if refused is not None:
+                unsigned.append(refused)
+            return refused
+
         exits = start_family(episode, world_ids, spawn=spawn, model=ns.model,
                              tenant_id=tenant.tenant_id, rate=process_oracle_settings().rate,
                              failed_before=len(unservable), knowledge_commit=knowledge_commit,
                              width=None if lane is None else 1,
                              control=None if lane is None else control,
-                             on_ended=sibling_ended)
-    if lane is not None and control is not None and exits.get(control, 0) != 0:
+                             on_ended=sibling_ended,
+                             may_start=None if sign_check is None else may_start)
+    # A control the sign check kept from starting did not fail: the stop below names the cause.
+    if lane is not None and control is not None and exits.get(control, 0) != 0 and not unsigned:
         raise ending(
             f"[branch] episode {episode_id}: the control world exited {exits[control]}, so no "
             "other world started", reason=CONTROL_FAILED,
@@ -952,6 +981,10 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
                         f"record ({report['reason']})")
     _logger.info(f"episode {episode_id}: {len(report['archived'])}/{len(world_ids)} worlds "
                  "archived")
+    if unsigned:
+        # After VERIFY: the arms that finished before the stop are verified and archived.
+        raise ending(f"[branch] episode {episode_id}: a sibling was not started ("
+                     f"{unsigned[0]})", reason=LAUNCH_REFUSED, brief=_SIGN_STOP_BRIEF)
     stage(Step.JUDGE)
     with clock.step(Step.JUDGE):
         if lane is None:
