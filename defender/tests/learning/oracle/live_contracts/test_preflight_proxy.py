@@ -9,6 +9,7 @@ import contextlib
 import json
 import threading
 import time
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -181,7 +182,10 @@ def rig(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = False,  #
         for name, value in (("VAULT_ADDR", env_url), ("BAO_ADDR", env_url),
                             ("VAULT_TOKEN", "env-token-1163"), ("BAO_TOKEN", "env-token-1163")):
             monkeypatch.setenv(name, value)
-    est = S.estate(tmp_path, systems=(*S.SYSTEMS, "crm", "hr"))
+    # A root of its own per rig: the process caches an adapter module by its resolved path
+    # (`systems.verbs._MODULES`), and pytest reuses a finished test's `tmp_path` name, so an earlier row's
+    # stub `idp` adapter at the same path would answer in place of the proxy-using one written here.
+    est = S.estate(tmp_path / uuid.uuid4().hex, systems=(*S.SYSTEMS, "crm", "hr"))
     (est.adapters / "idp_adapter.py").write_text(idp_adapter, encoding="utf-8")
     (est.adapters / "hr_adapter.py").write_text(HR_DOWN_ADAPTER, encoding="utf-8")
     idp = [c for c in S.default_calls() if c.system == "idp"][0]
