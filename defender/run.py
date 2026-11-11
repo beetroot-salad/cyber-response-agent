@@ -298,10 +298,9 @@ class _Investigate(Protocol):
     """The investigation seam's exact shape, so both the call site and `_drive_investigation`
     stay type-checked (tests inject the seam, so only a real run would catch a renamed keyword).
 
-    The run's judgement of its systems is not part of it: the lifecycle binds the one `main`
-    made at run start (`system_status.RunSystems`: the roster the run reads and each system down
-    at its start) into whichever seam it drives (`_judged`), which hands it to
-    `_drive_investigation(systems=…)`.
+    `systems` is the run's one judgement of its systems, `main`'s at run start
+    (`system_status.RunSystems`: the tenant's roster the run reads and each system down at its
+    start), handed to every seam (#1366 R16: required, never computed by the drive).
 
     `job_facts` is a job's facts holder (#1342 r5 C2), handed on the job lane only: the driver
     keeps its review state in the holder's dict.
@@ -310,6 +309,7 @@ class _Investigate(Protocol):
     def __call__(  # noqa: PLR0913 — the investigation's whole identity, one keyword each
         self, *, alert_path: Path, run: Run, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
+        systems: RunSystems,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
         source: Run | None = None, job_facts: _JobEndFacts | None = None,
         access: RequestAccess | None = None,
@@ -346,11 +346,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     registry_cls: Any = ModuleVerbRegistry,
     investigate: Callable[..., dict[str, Any]] = _run_the_driver,
     #: The run's one judgement of its systems (#1256), made by `main` before the run folder
-    #: existed: the roster the run reads and each granted system down at its start. The
-    #: registry is built over that roster and the driver holds that verdict, so the run is
-    #: judged once. `None` (a direct caller with no `main` before it): the roster is
-    #: `defender_dir`'s, read here, and the driver judges it.
-    systems: RunSystems | None = None,
+    #: existed: the tenant's roster the run reads and each granted system down at its start.
+    #: The registry is built over that roster and the driver holds that verdict, so the run is
+    #: judged once. Required (#1366 R16): the drive never reads a roster of its own.
+    systems: RunSystems,
     #: A job's facts holder (#1342 r5 C2): the driver keeps its review state in the holder's
     #: dict, so the job entry reads the close however the run ends. `None` off the job lane.
     job_facts: _JobEndFacts | None = None,
@@ -372,8 +371,8 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     The two registries are built in separate arms of one `if` so both can never exist.
     """
     # The roster `main` judged, handed down to the registry and `run_investigation` with its
-    # verdict; read here only for a direct caller, whose run the driver judges.
-    roster = systems.roster if systems is not None else _tenant_roster(tenant, defender_dir)
+    # verdict.
+    roster = systems.roster
     held: dict[str, Any] = {} if job_facts is None else {"review_state": job_facts.review_state}
     if run_state is not None:
         held["run_state"] = run_state
@@ -434,18 +433,6 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     )
 
 
-def _judged(investigate: _Investigate, systems: RunSystems | None) -> _Investigate:
-    """`investigate` with the run's one judgement of its systems bound in (`systems=`), when
-    `main` made one (#1256): the seam's shape (`_Investigate`) stays the investigation's
-    identity, and the judgement rides beside it to the drive that holds it
-    (`_drive_investigation`, or a seam composed over it), so the run is not judged twice.
-    Without one, the seam as it is: its driver judges."""
-    if systems is None:
-        return investigate
-    seam: Callable[..., dict[str, Any]] = investigate
-    return functools.partial(seam, systems=systems)
-
-
 def _access_kwargs(access: RequestAccess | None) -> dict[str, RequestAccess]:
     """`access=` for a seam to take, only when the run has one: a seam that predates the
     credential proxy is not handed a keyword it has no use for."""
@@ -473,10 +460,9 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: The opened source run a world forks, threaded beside `world`.
     source: Run | None = None,
     #: The run's one judgement of its systems, made by `main` at run start (#1256), handed to
-    #: the investigation beside its seam's shape (`_judged`) so the run reads that roster and
-    #: holds that verdict (`None`: the drive reads `defender_dir`'s roster and the driver
-    #: judges it, as for a direct caller).
-    systems: RunSystems | None = None,
+    #: the investigation so the run reads that roster and holds that verdict. Required (#1366
+    #: R16): no drive reads a roster of its own.
+    systems: RunSystems,
     #: The credential proxy's address and the run's read token (#1163), signed at run start.
     access: RequestAccess | None = None,
     investigate: _Investigate = _drive_investigation,
@@ -527,7 +513,6 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             raise box_mod.BoxStartFault(f"the run's box did not start: {fault}") from fault
     if job_facts is not None:
         job_facts.box = _BOX_STARTED
-    drive = _judged(investigate, systems)
     # The job's facts holder (#1342) and the run's request access (#1163), each only when the run
     # has one: a seam that predates either is not handed a keyword it has no use for.
     keywords: dict[str, Any] = {} if job_facts is None else {"job_facts": job_facts}
@@ -538,7 +523,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     # teardown fault on it is logged, never raised over the ending.
     box_ending = False
     try:
-        summary = drive(
+        summary = investigate(
             alert_path=RunPaths(run_dir).alert,
             run=run,
             defender_dir=defender_dir,
@@ -550,6 +535,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             episode=episode,
             serving=serving,
             source=source,
+            systems=systems,
             **keywords,
         )
         investigation_ok = True
@@ -676,14 +662,6 @@ class _TokenMint:
             _logger.warning(f"no write-back token for the record step: {refused.detail}")
             return {}
         return {"request_token": token, "proxy_url": self._proxy_url or ""}
-
-
-def _tenant_roster(tenant: RunTenant, defender_dir: Path) -> RosterRead:
-    """The tenant's systems over `defender_dir`'s catalog (#1366 O1, DC7): for a direct caller
-    of the lifecycle, which no `main` judged."""
-    from defender.systems.catalog import Catalog, TenantSystems
-
-    return TenantSystems.of(tenant.records, Catalog(read_roster(adapters_under(defender_dir)))).roster
 
 
 def _resolve_run_tenant(
@@ -1160,6 +1138,14 @@ class _Started:
     #: (`--update-ticket`); `None` otherwise.
     case: case_system.CaseTarget | case_system.CaseSettingsFault | None = None
 
+    def record_case(self) -> case_system.CaseTarget | case_system.CaseSettingsFault:
+        """The verdict the record step comments on: set at setup whenever the run records its case,
+        so its absence there is a caller bug, never a reason to judge again (#1366 R16)."""
+        if self.case is None:
+            raise TypeError("the record step needs the case verdict judged at run start "
+                            "(`--update-ticket`), and setup made none")
+        return self.case
+
     def lifecycle_kwargs(self, ns: argparse.Namespace) -> dict[str, Any]:
         return {"run": self.run, "model": self.model, "model_override": ns.model,
                 "defender_dir": DEFENDER_DIR, "tenant": self.tenant, "world": self.world,
@@ -1485,7 +1471,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                             run, tenant=tenant, defender_dir=DEFENDER_DIR,
                             env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent),
                             truncated_by=truncated_by, closed_before_cut=closed_before_cut,
-                            case=started.case, **token)
+                            case=started.record_case(), **token)
 
                     # A sibling's evidence was staged on purpose, so it must never feed the catalog.
                     if world is not None:

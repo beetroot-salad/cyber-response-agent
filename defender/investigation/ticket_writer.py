@@ -114,7 +114,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     run: Run, *, tenant: RunTenant, defender_dir: Path, env: Mapping[str, str],
     truncated_by: str | None = None, closed_before_cut: bool = False,
     request_token: str | None = None, proxy_url: str | None = None,
-    case: case_system.CaseTarget | case_system.CaseSettingsFault | None = None,
+    case: case_system.CaseTarget | case_system.CaseSettingsFault,
 ) -> None:
     """Record the investigation into the case, never close it: at most one comment on the ticket
     the alert names, no transition. Closing is a person's act, which is what lets the store's
@@ -122,7 +122,8 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     a warning and an `error` or `unknown` receipt.
 
     `case` is the case system's verdict run start made (`case_system.case_verdict`), the one the
-    write-back token was minted on; without it (a direct caller) the step judges the record."""
+    write-back token was minted on; required (#1366 R16): the step never judges the record over
+    a roster of its own."""
     run_dir = run.run_dir
     key = ""
     try:
@@ -133,8 +134,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
             _logger.info(f"{run_dir.name}: run ended ({truncated_by}) with no verdict; "
                          "leaving ticket open")
             return
-        target = case if case is not None else case_system.case_verdict(
-            tenant, defender_dir=defender_dir)
+        target = case
         if isinstance(target, case_system.CaseSettingsFault):
             _leg_refused(run, key, redact_settings_path(str(target), tenant.settings))
             return

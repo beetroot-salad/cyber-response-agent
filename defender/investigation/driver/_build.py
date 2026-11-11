@@ -42,7 +42,6 @@ from ..tools import (
     register_tools,
 )
 from defender.systems.verb_grant import VerbGrant
-from defender.systems.verbs import ModuleVerbRegistry
 
 from defender._frontmatter import strip_frontmatter
 from defender.records import RUN_LAYOUT, RunPaths
@@ -121,13 +120,15 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
         capabilities.append(toon_gate)
     # Both verb-bearing tools need a real registry: a stand-in that grants everything would
     # expose the whole verb surface through `list_verbs`. `QueryCapture` wraps `query` only.
+    # It is handed, over the tenant's systems (#1366 R16): never built here over the checkout.
     if defn.tools.query or defn.tools.list_verbs:
-        from defender._paths import PATHS
-
-        from defender.systems.verbs import VerbRegistry, read_roster
+        from defender.systems.verbs import VerbRegistry
 
         if verbs is None:
-            verbs = ModuleVerbRegistry(read_roster(PATHS.adapters_dir), defn.verb_grant)
+            raise TypeError(
+                f"{agent_id}: a verb-bearing tool needs the run's verb registry, built over the "
+                "tenant's systems and handed in (`verbs=`): there is no registry of the checkout's "
+                "adapters to fall back to")
         if not isinstance(verbs, VerbRegistry):
             raise TypeError(
                 f"a verb-bearing tool needs a real VerbRegistry, got {type(verbs).__name__} — a "

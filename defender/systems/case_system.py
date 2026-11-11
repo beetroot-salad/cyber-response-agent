@@ -24,10 +24,9 @@ from defender.kit.settings import RECORDS, pointer_to
 from defender.kit.verbs import COMMENT_ACTION, HOST_ACTIONS, READBACK_ACTION, CaseComments
 from defender.systems.run_tenant import RunTenant
 from defender.systems.system_status import AdapterBroken, NotConfigured, ReasonScope, judge_adapter
-from defender.systems.verbs import RegistryError, RosterRead, fresh_adapter_module
+from defender.systems.verbs import RosterRead, fresh_adapter_module
 from defender.tenancy.case_ticket import (
     CASE_RECORD_REL, CaseRecordSettings, CaseTicketError)
-from defender.tenancy.models import TenantRecords
 
 #: The retired system folder a tenant may still hold; `tenant check` names the new file for it.
 LEGACY_SYSTEM = "case-history"  # lint-shippable: ok — the retired system's folder name, named only to tell the operator to migrate
@@ -78,22 +77,6 @@ def legacy_folder_finding(settings: Path) -> str | None:
     return None
 
 
-def tenant_roster(record: Any, *, defender_dir: Path) -> RosterRead:
-    """The tenant's systems (#1366 O1, DC7) for a caller that hands no roster: the record's
-    current records (`RunTenant.records`; none on a record that carries none) over the catalog of
-    `defender_dir`. Never the whole checkout. The catalog unreadable is the case record's
-    `CaseSettingsFault`."""
-    from defender.systems.catalog import Catalog, TenantSystems
-
-    records = getattr(record, "records", None)
-    try:
-        catalog = Catalog.of_checkout(Path(defender_dir))
-    except RegistryError as e:
-        raise CaseSettingsFault(CASE_RECORD_POINTER,
-                                f"cannot be judged: the adapters cannot be read ({e})") from None
-    return TenantSystems.of(records if records is not None else TenantRecords(), catalog).roster
-
-
 def _adapter_of(system: str, *, roster: RosterRead) -> Any:
     """`system`'s adapter module among the tenant's systems (`roster`, #1366 O1: never the whole
     checkout), read fresh, or the `CaseSettingsFault` naming the case record for why it cannot
@@ -130,13 +113,14 @@ def _adapter_of(system: str, *, roster: RosterRead) -> Any:
 
 
 def judge_case_system(
-    record: Any, *, defender_dir: Path, roster: RosterRead | None = None,
+    record: Any, *, defender_dir: Path, roster: RosterRead,
 ) -> CaseTarget:
     """The case system `record` names, ready to take a comment, or `CaseSettingsFault`.
 
     `record` is the run's tenant record (or `tenant check`'s, built from the same records): it
     carries `case_record`, `systems` and `access`, read once when the run began. `roster` is the
-    tenant's systems (`tenant_roster` when none is handed). A tenant with no case record has no
+    tenant's systems (`TenantSystems.roster`, built once and handed, #1366 R16: never computed
+    here), or the whole catalog's from a caller with no tenant. A tenant with no case record has no
     case system: that too is a fault, said so, for the callers that asked (`--update-ticket` was
     given). Order (C3): the case record, its system among the tenant's, its settings (the
     adapter's own check), then the cover of its comment route by its stored access."""
@@ -149,8 +133,6 @@ def judge_case_system(
                                 str(case).removeprefix(f"{CASE_RECORD_POINTER} ")
                                 .removeprefix(f"settings/{CASE_RECORD_REL} "))
     system = case.system
-    if roster is None:
-        roster = tenant_roster(record, defender_dir=defender_dir)
     module = _adapter_of(system, roster=roster)
     # The run's own reason scope, as run start's judgement uses: a crash text naming the
     # tenant's folder or the data root is shown by name, never located.
@@ -170,7 +152,7 @@ def judge_case_system(
 
 
 def case_verdict(
-    record: Any, *, defender_dir: Path, roster: RosterRead | None = None,
+    record: Any, *, defender_dir: Path, roster: RosterRead,
 ) -> CaseTarget | CaseSettingsFault:
     """`judge_case_system` as a value: run start judges once, over the roster the run reads, and
     hands the verdict to both the token mint and the record step, so they cannot disagree."""
@@ -208,5 +190,5 @@ def _judge_cover(system: str, module: Any, record: Any) -> None:
 
 __all__ = [
     "CASE_RECORD_POINTER", "CaseSettingsFault", "CaseTarget", "LEGACY_SYSTEM",
-    "case_verdict", "judge_case_system", "legacy_folder_finding", "tenant_roster",
+    "case_verdict", "judge_case_system", "legacy_folder_finding",
 ]

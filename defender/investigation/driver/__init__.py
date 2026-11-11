@@ -39,7 +39,7 @@ from defender.investigation.tools._deps import run_of
 from defender._io import write_guarded
 from defender import _git
 from defender.knowledge import KnowledgePaths
-from defender._paths import DefenderPaths, adapters_under
+from defender._paths import DefenderPaths
 from defender._vocab import HOST_ONLY_DISPOSITION
 
 from defender import box as box_mod
@@ -460,7 +460,7 @@ def _correlation_dispatch_at_run_start(
 
 
 def _adapters_at_run_start(
-    defender_dir: Path, roster: RosterRead | None, verbs: Any, tenant: RunTenant,
+    defender_dir: Path, roster: RosterRead, verbs: Any, tenant: RunTenant,
 ) -> tuple[RosterRead, Any]:
     """`_run_start_reads` without the narrowed tenant."""
     roster, verbs, _tenant = _run_start_reads(defender_dir, roster, verbs, tenant)
@@ -468,14 +468,14 @@ def _adapters_at_run_start(
 
 
 def _run_start_reads(
-    defender_dir: Path, roster: RosterRead | None, verbs: Any, tenant: RunTenant,
+    defender_dir: Path, roster: RosterRead, verbs: Any, tenant: RunTenant,
 ) -> tuple[RosterRead, Any, RunTenant]:
     """Everything a run resolves from an adapters tree, resolved first — before the budget,
     logger or any model — so an unreadable tree fails here as `RegistryError`, not mid-tool.
 
     The roster is the tenant's systems (#1366 O1, DC7: its enabled records the catalog carries,
-    plus the platform-served ones); it is built here only if the caller injected none, from the
-    tenant's records over `defender_dir`'s catalog. Consumers take the value.
+    plus the platform-served ones), handed by the caller (R16: the driver never builds one of its
+    own); a caller with no tenant hands the whole catalog's. Consumers take the value.
 
     The invlang `nothing-to-try` gate is a no-tenant surface: it is handed the WHOLE catalog,
     the checkout's (`hold_capabilities`), rather than reading lazily, so a read fault is not
@@ -485,19 +485,11 @@ def _run_start_reads(
     The tenant comes back with its grants narrowed to its roster (#1366 R12,
     `run_tenant.narrowed_to`): a grant on a catalog system the tenant has no record of is not
     the run's, whoever resolved the tenant."""
-    catalog = None
-    if roster is None:
-        from defender.systems.catalog import Catalog, TenantSystems
-
-        catalog = read_roster(adapters_under(defender_dir))
-        roster = TenantSystems.of(tenant.records, Catalog(catalog)).roster  # lint-default: ok — DI seam owning its default (the tenant's systems over the run's tree)
     checkout = DefenderPaths(_git.REPO_ROOT).adapters_dir
-    whole = next(
-        (read for read in (roster, catalog) if read is not None and read.whole
-         and Path(read.root).resolve() == checkout.resolve()),
-        None) or read_roster(checkout)
+    whole = (roster if roster.whole and Path(roster.root).resolve() == checkout.resolve()
+             else read_roster(checkout))
     hold_capabilities(whole)
-    tenant = narrowed_to(tenant, roster, roster if roster.whole else (catalog or whole))
+    tenant = narrowed_to(tenant, roster, roster if roster.whole else whole)
     # Built over the run's gather grant; there is no process-level one.
     verbs = verbs if verbs is not None else ModuleVerbRegistry(  # lint-default: ok — DI seam owning its default (built over the run's own grant)
         roster, tenant.grants.gather, grant_home=tenant.table_pointer)
@@ -648,7 +640,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     model_name: str | None = None,
     make_model: MakeModel | None = None,
     verbs: Any = None,
-    roster: RosterRead | None = None,
+    #: The tenant's systems the run reads (#1366 O1, DC7), handed: the driver never builds a
+    #: roster of its own (R16). A caller with no tenant hands the whole catalog's.
+    roster: RosterRead,
     #: The run's one judgement of its systems, made by `run.py` before the run existed (#1256):
     #: its roster is the run's, and the driver holds its verdict rather than judging again.
     #: `None`: the driver judges the roster itself.
