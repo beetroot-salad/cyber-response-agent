@@ -109,8 +109,8 @@ def _pitfalls_lane(tmp_path: Path) -> C.DraftLane:
 
 
 def _reducer_items() -> list[tuple[str, str, dict]]:
-    """The claim's three reducer rows (a `defender-sql` mistake each), as the store hands them (#1278)."""
-    return [("pitfall", f"r:l-003:{i}", shim_row(f"r:l-003:{i}")) for i in range(3)]
+    """The claim's three reducer rows (a distinct `defender-sql` mistake each, by digest), as the store hands them (#1278)."""
+    return [("pitfall", f"r:l-003:{i}", shim_row(f"r:l-003:{i}", digest=f"exit=1; mismatched input at token {i}")) for i in range(3)]
 
 
 @pytest.mark.parametrize("left", ["plain", "link", "hardlink"])

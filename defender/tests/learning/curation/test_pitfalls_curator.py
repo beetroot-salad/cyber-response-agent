@@ -255,14 +255,14 @@ def test_run_pitfalls_all_systemless_skips_the_claim_without_spawn(tmp_path: Pat
     """Pitfalls no declared surface can teach (no system) are skipped, the reason naming why; the curator is never
     spawned and nothing lands."""
     lane = _lane(tmp_path)
-    items = [("pitfall", f"r:{i}", {"pitfall_id": f"r:{i}", "system": ""}) for i in range(2)]
+    items = [(k, i, {**row, "system": ""}) for k, i, row in _pitfall_items(THRESHOLD)]  # distinct mistakes, no system
     called: list[int] = []
     claim = _Claim()
     rc = _run(lane, items, claim, lambda *a, **k: called.append(1) or 0)
     assert rc == 0
     assert called == []
     assert {k: (o.name, o.reason) for k, o in claim.outcomes.items()} == {
-        ("pitfall", "r:0"): ("skipped", "no-system"), ("pitfall", "r:1"): ("skipped", "no-system")}
+        (k, i): ("skipped", "no-system") for k, i, _ in items}
     assert lane.commits() == []
 
 
