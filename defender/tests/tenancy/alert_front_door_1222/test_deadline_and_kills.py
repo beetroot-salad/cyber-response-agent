@@ -885,7 +885,7 @@ def test_t1_r7_3_every_run_exit_seals_its_ledger_so_the_ledger_the_run_file_and_
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
     _priced_names(monkeypatch)
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))  # lint-stale-ref: ok — the retired variable is set on purpose to prove the learning store ignores it
     stores: list = []
     tenant = S.plant_tenant()
     complete = ending not in ("row-write-fails", "seal-write-fails", "seal-write-held-up")

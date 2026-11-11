@@ -6,15 +6,14 @@ import os
 
 import pytest
 
-from defender.learning.branch import post_step
 from defender.tests.learning.branch.test_1344_amend_post_step import _record_at
 from defender.tests.learning.branch.test_1344_post_step import (  # noqa: F401 — store_dsn is the module's autouse fixture
     _job_episode,
     hand_pending,
+    post_step_in_container,
     store_dsn,
 )
 from defender.tests.learning.feedback_1414 import _lessons1414 as L
-from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core._store1278 import DSN_ENV, call
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
@@ -44,7 +43,7 @@ def test_wake_a_feedback_instruction_or_a_registry_batch_not_ended_leaves_work_w
         call(dsn, "end_feedback_tick", held)
 
     hand_pending(data_root, tenant_id, None, [])
-    post_step.main(["--tenant", tenant_id, "--parent-pid", str(os.getppid())],
-                   author_tick=lambda *_a, **_k: 0, directory=T.launcher_directory(tenant_id))
+    post_step_in_container(None, tenant_id,
+                   author_tick=lambda *_a, **_k: 0)
 
     assert _record_at(ep, tenant_id) == {"published": [], "refused": [], **({} if waiting else {"waiting": False})}

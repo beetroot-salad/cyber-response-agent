@@ -8,7 +8,6 @@ A crash between the reconcile's end and the replacement's claim is made by endin
 """
 from __future__ import annotations
 
-import os
 import random
 
 import httpx
@@ -507,7 +506,7 @@ def test_replacement_a_successor_abandoned_before_its_pr_passes_its_replaces_on(
 @pytest.mark.parametrize("how", ["cancel", "sigterm"])
 def test_replacement_a_stop_before_its_pr_keeps_the_items_due_with_the_generation_unchanged(world, caplog, monkeypatch, how):
     """The post-step, forked, is stopped while the replacement's curator is blocked in a subprocess: the batch ends abandoned, the items are due again, the next tick replaces. (O7, D4, D8)"""
-    from defender.learning.branch import post_step
+    from defender.tests.learning.branch.test_1344_post_step import post_step_in_container
 
     w = world
     old_id, _number = _due(w, caplog)
@@ -516,9 +515,9 @@ def test_replacement_a_stop_before_its_pr_keeps_the_items_due_with_the_generatio
     monkeypatch.setenv(RENEW_ENV, "0.2")
 
     def body():
-        return post_step.main(["--tenant", w.t.tenant_id, "--parent-pid", str(os.getppid())],
+        return post_step_in_container(None, w.t.tenant_id,
                               author_tick=lambda _paths: tick(w, blocked),
-                              still_waiting=lambda _paths: False, directory=w.t.directory)
+                              still_waiting=lambda _paths: False)
     child = TickChild(body, w.scratch / f"child-{how}.json")
     sleeper = int(await_file(marker))
     try:
