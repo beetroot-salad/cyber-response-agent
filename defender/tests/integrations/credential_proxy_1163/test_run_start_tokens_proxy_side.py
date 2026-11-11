@@ -45,11 +45,11 @@ class _Investigating(RunAtHandedRecorder):
     def __init__(self, *a: Any, bao: A.OpenBaoStandIn, read_token: bool = False,
                  between: Any = None, **kw: Any) -> None:
         super().__init__(*a, **kw)
-        self._bao, self._read_token, self._between = bao, read_token, between
+        self._bao, self._signs_read_token, self._between = bao, read_token, between
         self.signed_during: int | None = None
 
     def lifecycle(self, **kw: Any) -> dict[str, Any]:
-        if self._read_token:
+        if self._signs_read_token:
             kw["access"].token()
         if self._between is not None:
             self._between()
