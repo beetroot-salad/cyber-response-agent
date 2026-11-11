@@ -10,6 +10,7 @@ through `R.ExportRecords`. No case gives the proxy a data root: it has none.
 from __future__ import annotations
 
 import contextlib
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -322,6 +323,39 @@ def test_1366_o7_the_proxy_sends_to_the_current_records_base_with_its_generation
 
         assert refused["fault"] == "ConfigFault", refused
         assert len(w.up.seen) == 1, "a deleted system's call reached the upstream"
+
+
+@pytest.mark.postgres
+def test_1366_o7_the_records_port_reuses_its_connection_and_still_reads_the_newest_version(
+        tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
+    """Three reads through one port hold one database session, and a read after a write sees the write; a kept session the
+    server closed is replaced, and the read answers rather than failing. (#1366 O7)"""
+    from psycopg.conninfo import conninfo_to_dict
+
+    from defender.credential_proxy._records import PostgresSystemRecords
+    from defender.tests.support.shared._postgres1339 import execute
+
+    with _pg(tmp_path, data_root, migrated_database, capsys, monkeypatch) as w:
+        login = w.stack.enter_context(R.proxy_login(w.dsn))
+        user = conninfo_to_dict(login)["user"]
+        port = w.stack.enter_context(contextlib.closing(PostgresSystemRecords(login)))
+
+        def sessions() -> list[Any]:
+            return [r[0] for r in execute(w.dsn, "SELECT pid FROM pg_stat_activity WHERE usename = %s", (user,))]
+
+        assert port.current_system(w.t.tenant_id, "identity").version == 1
+        assert port.current_system(w.t.tenant_id, "identity").version == 1
+        assert w.op.set_system("identity", replaces=1, config=IDENTITY, access=H.declaration(w.base))[0] == 0
+        assert port.current_system(w.t.tenant_id, "identity").version == 2, "a kept session read a stale version"
+        held = sessions()
+        assert len(held) == 1, held
+
+        execute(w.dsn, "SELECT pg_terminate_backend(%s)", (held[0],))
+        assert port.current_system(w.t.tenant_id, "identity").version == 2
+        settle = time.monotonic() + 5  # the terminated session leaves the activity view on its own time
+        while held[0] in sessions() and time.monotonic() < settle:
+            time.sleep(0.05)
+        assert len(sessions()) == 1, sessions()
 
 
 @pytest.mark.postgres
