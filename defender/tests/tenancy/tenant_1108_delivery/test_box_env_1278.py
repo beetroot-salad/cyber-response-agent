@@ -44,7 +44,8 @@ def test_the_drain_box_environment_is_the_allowlist_whatever_the_host_holds(repo
     rendered = _rendered(request)
     assert {e.partition("=")[0] for e in rendered} == RENDERED_ALLOWED, rendered
     blob = json.dumps(_lifecycle._render_argv(request, [], "probe-token").argv)
-    assert "PLANTED-PASSWORD" not in blob and "DATABASE" not in blob
+    assert "PLANTED-PASSWORD" not in blob
+    assert "DATABASE" not in blob
 
 
 def test_the_oracle_box_environment_is_the_allowlist_whatever_the_host_holds(tmp_path, monkeypatch):
