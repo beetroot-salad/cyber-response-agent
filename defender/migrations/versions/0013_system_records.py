@@ -54,8 +54,10 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], ["tenancy.tenants.id"], name=op.f("fk_records_mark_tenant_id_tenants")),
         schema="tenancy")
     # Tenants that exist now come from folders until the operator imports them: no mark for them.
-    op.execute(f"DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{ROLE}') "
-               f"THEN CREATE ROLE {ROLE} NOLOGIN; END IF; END $$")
+    # Roles are cluster-wide: another database on the server may create it at this same moment, so "absent, then create"
+    # would race. The create itself decides: one that finds the role there (either error) leaves it as it is.
+    op.execute(f"DO $$ BEGIN CREATE ROLE {ROLE} NOLOGIN; "
+               f"EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$")
     op.execute(f"GRANT USAGE ON SCHEMA tenancy TO {ROLE}")
     op.execute(f"GRANT SELECT ON tenancy.system_versions TO {ROLE}")
     # The mark: whether a token's tenant is one whose systems come from records at all (R8), read, never inferred from
