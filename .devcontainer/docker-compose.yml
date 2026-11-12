@@ -46,9 +46,16 @@ services:
       # dev/tooling container. NOTE: this makes the dev container effectively
       # root-equivalent on the host daemon; acceptable because the dev container
       # is the trusted "coding machine", and it is the seam by which the SEPARATE,
-      # minimal runtime container gets spawned (and, later, given the privilege
-      # runsc needs — which this dev container deliberately does not have).
+      # minimal runtime container gets spawned.
       - /var/run/docker.sock:/var/run/docker.sock
+      # The jobs daemon's images and containers (`start-jobs-docker`, Dockerfile.dev). Its own store: a daemon's data
+      # folder cannot sit on this container's overlay filesystem, and the host daemon's store is not shared.
+      - jobs-docker-data:/var/lib/docker
+    # The jobs daemon (#1170, #1475) runs inside this container, so a job's helper here shares its mount paths and pid
+    # namespace, as the helper requires (defender/docs/decisions/vps-compose-deployment.md, brain confinement); the
+    # host daemon above shares neither. A docker daemon in a container needs it privileged. That adds little: the host
+    # docker socket above already makes this container root-equivalent on the host.
+    privileged: true
     # PID 1 must reap orphaned children. Without an init, `sleep infinity`
     # becomes PID 1 and never reaps — every detached process (run.py
     # launchers, backgrounded ssh/git/gh) leaks as a permanent zombie, and
@@ -254,3 +261,4 @@ services:
 
 volumes:
   postgres-data:
+  jobs-docker-data:
