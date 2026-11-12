@@ -386,15 +386,21 @@ def run_set_credentials(admitted: Any, system: str, file: Path, *, for_version: 
     except AdapterFault as refused:
         _say(f"system {system}: the credentials were not written: {refused}")
         return 1
-    # A set belongs to a credential generation, not a version: a write meanwhile that kept the generation (no change of
-    # base, CA or auth) is served by it as well.
+    # O5: like every write, this one names the version it was prepared for, and is refused when another write moved the
+    # record meanwhile. What the stored set serves is said as it is: a set belongs to a credential generation, so a
+    # version that kept it (no change of base, CA or auth) is served by it all the same.
     after = admitted.directory.current_records(tenant.id).systems.get(system)
-    if after is None or after.credential_generation != current.credential_generation:
-        now = ("it has no current record" if after is None
-               else f"version {after.version}, at credential generation {after.credential_generation}, is now current")
-        _say(f"system {system}: it was written while its credentials were stored for version {for_version}, and {now}: "
-             f"the set stored at generation {current.credential_generation} does not serve it; prepare the credentials "
-             "for the current version and set them again")
+    if after is None or after.version != current.version:
+        if after is None:
+            now, serves = "it has no current record", "serves no current version"
+        else:
+            now = f"version {after.version} is now current"
+            serves = ("serves that version too (it kept the generation)"
+                      if after.credential_generation == current.credential_generation
+                      else f"does not serve it (it is at generation {after.credential_generation})")
+        _say(f"system {system}: it was written while its credentials were stored for version {for_version}, and {now}; "
+             f"the set stored at generation {current.credential_generation} {serves}. Check the current version and set "
+             "its credentials for it")
         return 1
     print(f"system {system}: credentials stored for version {for_version} at credential generation "
           f"{current.credential_generation}")

@@ -562,7 +562,7 @@ def test_1366_o4_a_case_system_that_is_not_a_current_enabled_record_is_refused(i
 
     _refused(op, before, rc, said, (("jira", "case"),), file_ok=True)
     version = {"absent": 0, "disabled": 1, "deleted": 2}[how]
-    assert op.set_system("jira", replaces=version, config=JIRA_CONFIG, access=_jira_access(JIRA_API))[0] == 0
+    assert op.set_system("jira", replaces=version, config=JIRA_CONFIG, access=_jira_access(JIRA_API), disabled=False)[0] == 0
     assert op.set_case(replaces=1, system="jira")[0] == 0
     assert op.current()["jira"].enabled
 
@@ -1154,20 +1154,23 @@ class _WrittenMeanwhile(R.KvStandIn):
         return super()._handle(request)
 
 
-@pytest.mark.parametrize(("raise_by", "served"), [(0, True), (1, False)], ids=["same-generation", "new-generation"])
+@pytest.mark.parametrize(("raise_by", "says"), [(0, "serves that version too"), (1, "does not serve it")],
+                         ids=["same-generation", "new-generation"])
 @pytest.mark.postgres
-def test_1366_o8_a_version_written_meanwhile_is_served_when_it_keeps_the_generation(imported_op, raise_by, served):
-    """identity moves to version 2 while its version-1 credentials are being stored. The set at `g1` serves version 2
-    when that version kept generation 1, so the command succeeds; when it took generation 2 the set serves nothing
-    current, and the command says so and fails. (#1366 O8, P5)"""
+def test_1366_o8_a_version_written_meanwhile_is_refused_saying_truly_whether_the_stored_set_serves_it(
+        imported_op, raise_by, says):
+    """identity moves to version 2 while its version-1 credentials are being stored: refused, as every write naming a
+    version no longer current is (O5). The refusal says what the set at `g1` serves as it is: version 2 too when that
+    version kept generation 1, not when it took generation 2. (#1366 O5, O8, P5)"""
     op = imported_op
     op.kv = _WrittenMeanwhile(op.dsn, op.tid, "identity", raise_by)
 
     rc, said = op.set_credentials("identity", {"api_key": "k-1366"}, for_version=1)
 
     assert op.versions("identity")[-1].version == 2, "premise: a version was written meanwhile"
-    assert (rc == 0) is served, said
-    assert bool(R.lines_naming(said, "identity", "does not serve")) is not served, said
+    assert rc == 1, said
+    assert R.lines_naming(said, "identity", "version 2 is now current", says), said
+    assert "serves only that version" not in said
 
 
 @pytest.mark.postgres

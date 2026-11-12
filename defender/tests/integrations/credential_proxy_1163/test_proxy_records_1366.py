@@ -469,7 +469,7 @@ def test_1366_o7_an_operators_edits_between_calls_apply_to_the_next_call_without
         assert w.op.set_system("identity", replaces=2, config=IDENTITY, access=decl, disabled=True)[0] == 0
         assert ask()["fault"] == "ConfigFault"
         assert len(w.up.seen) == 1, "a disabled system's call was sent"
-        assert w.op.set_system("identity", replaces=3, config=IDENTITY, access=decl)[0] == 0
+        assert w.op.set_system("identity", replaces=3, config=IDENTITY, access=decl, disabled=False)[0] == 0
         assert ask()["fault"] is None
         assert ask("POST", "/tickets", GRANT_RW)["fault"] == "ConfinementFault"
         writes = H.declaration(w.base, writes=(("POST", "/tickets"),))
