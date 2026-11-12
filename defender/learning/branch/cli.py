@@ -939,9 +939,11 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
 
         # A job's siblings run one at a time, the control first (O4); an operator's together.
         # Before each one the job checks its token can still be signed (#1449): pre-flight proved
-        # it once, and a job's family can run long enough for a rotation or an offboarding.
+        # it once, and a job's family can run long enough for a rotation or an offboarding. Only
+        # where the launcher holds the tenant's records (the operator's `--job-id`): in a job
+        # container there are none, and the host helper signs each pass itself (#1170 O5).
         unsigned: list[str] = []
-        sign_check = None if lane is None else sibling_sign_check(
+        sign_check = None if lane is None or container is not None else sibling_sign_check(
             tenant, roster=roster, signer=signer, proxy_url=proxy_url,
             issuer_transport=issuer_transport, directory=directory)
 
