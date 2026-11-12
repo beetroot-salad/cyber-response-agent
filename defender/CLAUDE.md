@@ -34,6 +34,14 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1454
+
+Programs (#1307) now have their own table, `identity.programs`; users and memberships are people only. Run migrations
+(revision `0012_programs_table`). It stops, changing nothing, while any program row exists (a `users` row of kind
+`program`) or any membership's role is not `admin`: no deployment created a program through the #1307 API, so
+remove any left in a development database first. Stop the API and the
+lifecycle service before migrating; an older process fails on every program read once the columns are gone.
+
 ## Upgrade from before #1170
 
 The worker no longer runs a job as its own child process. For each claim it starts a per-job host helper

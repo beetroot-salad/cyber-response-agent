@@ -47,6 +47,7 @@ from .audit import SYSTEM, announce
 from .errors import Conflict, NotFound, OffboardNotSettled, UnknownReference, UnstorableText
 from defender.tenancy.models import AlertMappingRow, TenantRecord
 from defender.tenancy.models import offboard as _tenancy_offboard
+from defender.tenancy.models import share_tenant
 
 from .models import (
     LEARNING_TERMINAL,
@@ -274,7 +275,7 @@ class JobStore:
         no alert mapping (#1345 O4)."""
         _refuse_unstorable_text(request_key=request_key)
         async with self._tx() as s:
-            state = await self._share_tenant(s, tenant_id)
+            state = await share_tenant(s, tenant_id)
             locked = (await s.execute(select(AlertRow.id).where(
                 AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id).with_for_update())).first()
             if locked is None:
@@ -300,14 +301,6 @@ class JobStore:
             record = investigation_record(row)
         announce("investigation.start", actor=actor, tenant_id=tenant_id, target=record.investigation_id)
         return record, True
-
-    @staticmethod
-    async def _share_tenant(s: AsyncSession, tenant_id: TenantId) -> str | None:
-        """The tenant's state, read with a share lock on its row before any other lock (#1360 Flow 2): a create that
-        locks first makes the offboard wait and end the row it inserts; an offboard that locks first makes the create
-        wait and read the new state. `None` for an absent tenant."""
-        return (await s.execute(select(TenantRecord.state).where(TenantRecord.id == tenant_id)
-                                .with_for_update(read=True))).scalar()
 
     # --- claim --------------------------------------------------------------------------
 
@@ -693,7 +686,7 @@ class JobStore:
         if client_request_id.startswith(AUTO_REQUEST_KEY_PREFIX):
             raise Conflict(f"a client request id may not start with {AUTO_REQUEST_KEY_PREFIX!r}, the auto jobs' prefix")
         async with self._tx() as s:
-            state = await self._share_tenant(s, tenant_id)  # the tenant row first, as every outside create (#1360 Flow 2)
+            state = await share_tenant(s, tenant_id)  # the tenant row first, as every outside create (#1360 Flow 2)
             named = await self._row(s, tenant_id, investigation_id)
             if named is None:
                 raise UnknownReference(f"no investigation {investigation_id!r}")

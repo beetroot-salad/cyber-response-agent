@@ -20,9 +20,10 @@ from .errors import (
     NotFound,
     SignInRefused,
     SignInUnavailable,
+    TenantNotActive,
 )
 from .memory import InMemoryIdentityRepository
-from .models import Membership, ProgramCredential, Session, User
+from .models import Membership, Program, ProgramCredential, Session, User
 from .ports import (
     ExpiryWarning, IdentityRepository, MailPort, ProgramsPort, SignInPort, VerifiedProgramToken, VerifiedSignIn,
 )
@@ -34,12 +35,15 @@ from .service import (
     MemberView,
     MeView,
     OpenInvitation,
+    PersonCaller,
+    ProgramCaller,
 )
 
 __all__ = [
     "Authenticated", "Bootstrap", "BootstrapRefused", "CallbackRefused", "Conflict",
     "DataRuleViolation", "ExpiryWarning", "Forbidden", "IdentityError", "IdentityRepository", "IdentityService",
     "InMemoryIdentityRepository", "Invalid", "InvitationView", "LoginStart", "MailPort", "MemberView",
-    "Membership", "MeView", "NotAuthenticated", "NotFound", "OpenInvitation", "ProgramCredential", "ProgramsPort", "Session",
+    "Membership", "MeView", "NotAuthenticated", "NotFound", "OpenInvitation", "PersonCaller", "Program",
+    "ProgramCaller", "ProgramCredential", "ProgramsPort", "Session", "TenantNotActive",
     "SignInPort", "SignInRefused", "SignInUnavailable", "User", "VerifiedProgramToken", "VerifiedSignIn",
 ]

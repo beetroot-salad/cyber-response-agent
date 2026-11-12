@@ -17,7 +17,9 @@ invitation `invited_by=None` and the same set-password / notification request th
 all through the raw identity repository's existing seeders (so `failing_writes` never touches seeding).
 So every old observable (sends, first sign-in accepting the invitation, audit lines) is unchanged; the
 administrator invite path is `World.member(admin_browser, tenant, email)` (a world with an administrator
-that wants the r9 route uses it). Seeding is idempotent.
+that wants the r9 route uses it). Seeding is idempotent. #1454 (P-L): an invitation is only ever written into an `active` tenant, so a case that
+needs an open invitation in a tenant that is not active seeds it while the tenant is active and then calls
+`world.move_tenant(T, state)`.
 
 Interface: `World(administrators=, tenants=, start=, failing_sends=, send_interval=, send_deadline=,
 failing_writes=, tenant_repo=None, alert_mapping=PLANTED_ALERT_MAPPING)`; `world.tenants` (the twin), `world.repo` (identity repository,
@@ -116,21 +118,21 @@ class InjectedFailure(Exception):
 class FailingRepository:
     """The in-memory identity repository with scripted write failures: every method named in
     `failing` raises `InjectedFailure` instead of running; everything else is delegated.
-    `missing_tenants` scripts the answer of `tenant_exists` (False), `active_tenants` (left out) and
-    `program_standing` (None for a program of such a tenant, #1307) for a tenant whose row is gone or
-    no longer active (#1214's lifecycle); nothing else about the tenant changes.
     `after` maps a method name to a hook (a coroutine function, no arguments) awaited once right
-    after that method returns (an interleaving point: the hook is the test's own action, e.g. a
-    sign-in; it decides nothing). Every delegated method is a coroutine function and the inner
+    after that method returns, and `before` the same right before the method runs (interleaving points: the
+    hook is the test's own action, e.g. a sign-in or `World.move_tenant`; it decides nothing, and the method
+    then runs against what the hook did). #1454: a tenant that is not active is made so for real
+    (`World.move_tenant`), never scripted here: the tenant's state is the rule and the repository reads it.
+    Every delegated method is a coroutine function and the inner
     method is awaited strictly: a repository whose method is not async fails loudly."""
 
     def __init__(self, inner: Any) -> None:
         self._inner = inner
         self.failing: set[str] = set()
-        self.missing_tenants: set[str] = set()
         #: method name -> how many calls were refused (the sender may be the caller).
         self.refusals: dict[str, int] = {}
         self.after: dict[str, Callable[[], Awaitable[None]]] = {}
+        self.before: dict[str, Callable[[], Awaitable[None]]] = {}
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("__"):
@@ -144,13 +146,10 @@ class FailingRepository:
             if name in self.failing:
                 self.refusals[name] = self.refusals.get(name, 0) + 1
                 raise InjectedFailure(f"{name} failed")
-            if name == "tenant_exists" and args and str(args[0]) in self.missing_tenants:
-                return False
+            first = self.before.pop(name, None)
+            if first is not None:
+                await first()
             result = await attribute(*args, **kwargs)
-            if name == "active_tenants":
-                result = result - self.missing_tenants
-            if name == "program_standing" and result is not None and str(result[1].tenant_id) in self.missing_tenants:
-                result = None
             hook = self.after.pop(name, None)
             if hook is not None:
                 await hook()
@@ -709,6 +708,21 @@ class World:
     def register(self, tenant: str, *, state: str = "active") -> None:
         """Seed `tenant` through the tenant twin's seeder (r9 DC-6: no port method registers a tenant)."""
         self.call(self._add_tenant, str(tenant), state)
+
+    async def amove_tenant(self, tenant: str, state: str) -> None:
+        """`move_tenant` for a hook already running on the world's loop (a hook must not block on `call`)."""
+        await self.tenants.request_offboard(tenant, now=self.clock())
+        if state == "offboarded":  # the worker's last step, through the twin's own hold
+            async with self.tenants.lock(tenant) as held:
+                assert held is not None, "the tenant is held by nobody else"
+                await held.commit(step=None, actor=None, state="offboarded", pending_action=None, offboarded_at=self.clock())
+
+    def move_tenant(self, tenant: str, state: str) -> None:
+        """#1454: move an existing `active` tenant to `offboarding` (the request) or `offboarded` (the request, then the
+        worker's commit), through the twin's own operations. Seed a tenant's invitations or programs while it is `active`,
+        then call this: nothing is created in a tenant that is not (P-L)."""
+        assert state in ("offboarding", "offboarded"), state
+        self.call(self.amove_tenant, str(tenant), state)
 
     async def _asgi(self, scope: Any, receive: Any, send: Any) -> None:
         await self.app(scope, receive, send)

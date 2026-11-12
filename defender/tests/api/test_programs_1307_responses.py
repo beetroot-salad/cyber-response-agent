@@ -177,7 +177,7 @@ def test_the_expiry_header_is_on_a_409_and_absent_once_the_tenant_left_active(ki
     """Cancelling an investigation that already ended (409) carries the credential's expiry (D9). Once the tenant left
     `active`, the credential no longer lets the program in: `/me` is a 401 without the header, as for any credential that
     does not hold, and lists no tenant (A5; #1450 review: the tenant is part of whether a program's credential works)."""
-    s = soar(failing_writes=True)
+    s = soar()
     program, credential = _as_program(s, kind)
     expires = {r.id: r for r in s.world.credentials(s.program_id)}[credential].expires_at
     investigation = start_investigation(program, T1).json()["investigation_id"]
@@ -186,7 +186,7 @@ def test_the_expiry_header_is_on_a_409_and_absent_once_the_tenant_left_active(ki
     assert again.status_code == 409, again.text
     assert parse_time(again.headers[EXPIRY_HEADER]) == expires
     assert parse_time(program.get("/me").headers[EXPIRY_HEADER]) == expires  # control: the 200
-    s.world.repo.missing_tenants.add(T1)  # the tenant left `active` (#1214) and the program's membership is still active
+    s.world.move_tenant(T1, "offboarding")  # the tenant left `active` (#1214) and the program row is still `active`
     refused = program.get("/me")
     assert refused.status_code == 401, refused.text
     assert EXPIRY_HEADER not in refused.headers
@@ -196,16 +196,16 @@ def test_the_expiry_header_is_on_a_409_and_absent_once_the_tenant_left_active(ki
 # --- F11: a tenant that is not active ends access for every caller kind (A5, #1214) ----------------------------------------
 
 def test_a_tenant_that_is_not_active_is_404_on_every_tenant_route_for_a_person_and_for_a_program() -> None:
-    """The tenant leaves `active` while every membership stays active: a person admin is told what an unknown tenant is told
+    """The tenant leaves `active` while every membership and the program row stay active: a person admin is told what an unknown tenant is told
     (404) on every tenant route; a program, by key or by token, is no longer let in at all (401: its one tenant is part of
     whether its credential works, #1450 review); no `/me` lists the tenant (A5, O2, P-F)."""
-    s = soar(failing_writes=True)
+    s = soar()
     credential = issue_oauth(s.ann, T1, s.program_id)
     callers = {"person": s.ann, "key": s.program(), "token": s.world.bearer(s.world.realm.issue(credential))}
     for name, caller in callers.items():  # control: before the flip each caller reaches the tenant
         assert caller.get(f"/tenants/{T1}/alerts").status_code == 200, name
         assert T1 in caller.get("/me").text, name
-    s.world.repo.missing_tenants.add(T1)
+    s.world.move_tenant(T1, "offboarding")
     failures = []
     for name, caller in callers.items():
         for route in TENANT_ROUTES:

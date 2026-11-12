@@ -24,7 +24,6 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     FRONTEND_ORIGIN,
     SESSION_COOKIE,
     T1,
-    user_id,
 )
 from defender.tests.support.api._programs1307 import (  # noqa: E402
     MIN_LIFETIME,
@@ -71,10 +70,8 @@ def _present(s: Soar, kind: str, reason: str, programs: tuple[str, str]) -> str:
     s.world.clock.advance(_dt.timedelta(minutes=10))  # long enough that a use would be written again (every 5 minutes)
     if reason == "revoked":
         assert revoke(s.ann, T1, programs[0], credential).status_code == 204
-    elif reason == "program-inactive":
-        membership = s.world.call(s.world.raw_repo.active_membership, programs[0], T1)
-        assert s.world.call(s.world.raw_repo.end_membership, membership.id, ended_by=user_id(s.ann),
-                            now=s.world.clock()) is True  # the credential row stays live
+    elif reason == "tenant-offboarding":  # #1454: the program is out of standing; its credential row stays live
+        s.world.move_tenant(T1, "offboarding")
     elif reason == "expired":
         s.world.clock.advance(MIN_LIFETIME)
     # the value to present, made now (after every clock move) so an OAuth token is within its own `exp`
@@ -88,7 +85,7 @@ def _present(s: Soar, kind: str, reason: str, programs: tuple[str, str]) -> str:
     elif reason in ("unknown", "altered"):
         value = _unknown_or_altered(s, kind, reason, value)
     else:
-        assert reason in ("unused", "usable", "revoked", "expired", "program-inactive"), reason
+        assert reason in ("unused", "usable", "revoked", "expired", "tenant-offboarding"), reason
     return value
 
 
@@ -101,8 +98,8 @@ def _unknown_or_altered(s: Soar, kind: str, reason: str, value: str) -> str:
 
 
 REASONS = {
-    "key": ["revoked", "expired", "program-inactive", "wrong-kind", "oauth-id-as-key", "altered", "unknown"],
-    "oauth_client": ["revoked", "expired", "program-inactive", "wrong-sub", "wrong-kind", "unknown"],
+    "key": ["revoked", "expired", "tenant-offboarding", "wrong-kind", "oauth-id-as-key", "altered", "unknown"],
+    "oauth_client": ["revoked", "expired", "tenant-offboarding", "wrong-sub", "wrong-kind", "unknown"],
 }
 CASES = [(kind, reason) for kind in KINDS for reason in REASONS[kind]]
 
@@ -110,7 +107,7 @@ CASES = [(kind, reason) for kind in KINDS for reason in REASONS[kind]]
 @pytest.mark.parametrize(("kind", "reason"), [*CASES, *((kind, "usable") for kind in KINDS)],
                          ids=lambda v: v if isinstance(v, str) else None)
 def test_a_refused_bearer_is_401_and_changes_no_credential_row(kind: str, reason: str) -> None:
-    """Every way a bearer can be refused (revoked, expired, program inactive, wrong `sub`, wrong kind, altered, unknown),
+    """Every way a bearer can be refused (revoked, expired, program out of standing (its tenant offboarding), wrong `sub`, wrong kind, altered, unknown),
     for both credential kinds: 401 and every credential row of every program exactly as before, `last_used_at` included
     (use is recorded only once the credential is usable and its program active). `usable` is the control: the same
     arrangement without a fault is served and DOES advance `last_used_at`, so an unchanged row means something."""
