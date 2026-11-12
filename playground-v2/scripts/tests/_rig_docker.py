@@ -76,8 +76,10 @@ What a test reads: `containers`, `events` (`node-start`, `proxy-start`, `service
 from __future__ import annotations
 
 import copy
+import hashlib
 import io
 import json
+import os
 import posixpath
 import re
 import shlex
@@ -85,6 +87,7 @@ import subprocess
 import tarfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Callable
 
 from _lab_fakes import InjectedStep
@@ -148,6 +151,11 @@ class RigDocker(FakeDocker):
         self._inode = 0
         self.scratch_cluster = scratch_cluster
         self.images: dict[tuple[str, str], bytes] = {}
+        # #1391: the engine's copies of lab-server images, by the marker tag `<repo>:<tag>-lab-<id12>`
+        # naming the lab server's image id. Only markers are modelled: any other `image inspect` still
+        # succeeds. `image_rev[name]` bumps an image's lab-server id (a rebuild under the same tag).
+        self.markers: set[tuple[str, str]] = set()
+        self.image_rev: dict[str, int] = {}
         # The ENV of an image, as a test declares it: `build` is a no-op here, so a variable the lab bakes into an
         # image it builds is visible only through this map (a gap to fill by test repair, not a demand).
         self.image_env: dict[str, dict] = {}
@@ -269,9 +277,14 @@ class RigDocker(FakeDocker):
         argv = [str(a) for a in argv]
         self.calls.append((list(argv), dict(kw)))
         data = kw.get("input")
+        if data is None and hasattr(kw.get("stdin"), "read"):
+            data = kw["stdin"].read()   # a file handle streamed as stdin (#1391: host image and parts)
         stdin = data.encode() if isinstance(data, str) else (data or b"")
         self._undo = []
-        rc, out, err = self._docker(argv, None, stdin)
+        if argv[1:2] == ["compose"]:
+            rc, out, err = self._compose(argv, kw.get("env", os.environ))
+        else:
+            rc, out, err = self._docker(argv, None, stdin)
         self._undo = None
         self._held = []
         deferred, self._deferred = self._deferred, []
@@ -323,14 +336,29 @@ class RigDocker(FakeDocker):
             return self._inspect(rest, scope)
         if verb == "volume":
             return self._volume_cmd(rest, scope)
+        if verb == "tag" and len(rest) == 2 and "-lab-" in rest[1]:
+            self.markers.add((scope, rest[1]))
+            return 0, "", ""
         if verb in ("network", "build", "version", "load", "pull", "tag"):
             return 0, "", ""
+        if verb == "cp" and rest[:2] == ["-a", "-"] and len(rest) == 3:
+            return 0, "", ""    # a tar streamed into a container (#1391: a replica image's overlay)
         if verb == "commit":
             return self._commit(rest, scope)
         if verb == "image":
+            names = [a for a in rest[1:] if not a.startswith("-") and not a.startswith("{{")]
+            if rest[:1] == ["inspect"] and rest[1:3] == ["-f", "{{.Id}}"] and "/" not in scope:
+                name = names[0]
+                return 0, "sha256:" + hashlib.sha256(f"{name}#{self.image_rev.get(name, 0)}".encode()).hexdigest(), ""
+            if rest[:1] == ["inspect"] and names and "-lab-" in names[0]:
+                return (0, "[{}]", "") if (scope, names[0]) in self.markers else (1, "", f"No such image: {names[0]}")
+            if rest[:1] == ["ls"] and rest[1:3] == ["--format", "{{.Tag}}"] and names:
+                tags = sorted(t.rpartition(":")[2] for s, t in self.markers if s == scope and t.rpartition(":")[0] == names[0])
+                return 0, "\n".join(tags), ""
             if rest and rest[0] == "rm":
-                for tag in [a for a in rest[1:] if not a.startswith("-")]:
+                for tag in names:
                     self.images.pop((scope, tag), None)
+                    self.markers.discard((scope, tag))
             return (0, "", "") if rest and rest[0] in ("inspect", "rm", "ls", "prune", "tag") else self._unmodelled(argv)
         if verb == "save":
             names = [a for a in rest if not a.startswith("-")]
@@ -338,6 +366,28 @@ class RigDocker(FakeDocker):
                 return self._unmodelled(argv)
             return 0, self.images.get((scope, names[0]), b""), ""
         return self._unmodelled(argv)
+
+    def _compose(self, argv: list[str], env) -> tuple:
+        """`docker compose -f F --env-file E config --format json`, local (no daemon), as measured on
+        Compose v5.3.1: the environment it runs with beats the env file, and es-init's
+        DEFENDER_PASSWORD is `${V2_DEFENDER_READONLY_PASSWORD:?...}`. The rig's env files hold plain
+        `KEY=VALUE` lines; compose's own quoting rules are checked against real compose."""
+        rest = argv[2:]
+        if "config" not in rest or "--env-file" not in rest:
+            return self._unmodelled(argv)
+        values = {}
+        try:
+            for line in Path(rest[rest.index("--env-file") + 1]).read_text().splitlines():
+                key, sep, value = line.partition("=")
+                if sep:
+                    values[key] = value
+        except OSError as exc:
+            return 1, "", f"open env file: {exc}"
+        values.update(env)
+        password = values.get("V2_DEFENDER_READONLY_PASSWORD")
+        if not password:
+            return 1, "", "required variable V2_DEFENDER_READONLY_PASSWORD is missing a value"
+        return 0, json.dumps({"services": {"es-init": {"environment": {"DEFENDER_PASSWORD": password}}}}), ""
 
     def _unmodelled(self, argv):
         self.unmodelled.append(" ".join(map(str, argv)))
@@ -417,7 +467,7 @@ class RigDocker(FakeDocker):
                 opts["rm"] = True
             elif opt == "--privileged":
                 opts["privileged"] = True
-            elif opt in ("-i", "-t", "-it", "--interactive", "--tty", "--init", "--read-only"):
+            elif opt in ("-i", "-t", "-it", "--interactive", "--tty", "--init", "--read-only", "--no-healthcheck"):
                 pass
             elif "=" in opt:
                 pass
@@ -1198,6 +1248,12 @@ class RigDocker(FakeDocker):
                 st["err"] += b"sh: line 1: flock: command not found\n"
                 return 127
             return self._flock(c, words, stdin, env, st)
+        if words and words[0] == "docker" and c.engine and not redirects:
+            # the engine's own docker CLI inside an engine script (#1391: the replicas started in one exec)
+            rc, o, e = self._docker(words, f"{c.scope}/{c.name}", b"")
+            st["out"] += o if isinstance(o, bytes) else o.encode()
+            st["err"] += e if isinstance(e, bytes) else e.encode()
+            return rc
         if words and words[0] == "exit":
             raise _Exit(int(words[1]) if len(words) > 1 else st["rc"])
         if words[:2] == ["set", "-C"] or words[:3] == ["set", "-o", "noclobber"]:

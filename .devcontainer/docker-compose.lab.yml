@@ -1,0 +1,19 @@
+# The credential proxy's names for the lab (#1391 r6, D7): an override, used only by a developer
+# whose tenant reaches the playground lab. Without it nothing changes, so `docker compose up`
+# works for everyone without a lab.
+#
+#   V2_LAB_ADDRESS=<lab server public IPv4> \
+#     docker compose -f docker-compose.yml -f docker-compose.lab.yml up -d credential-proxy
+#
+# The lab tenant's access.yaml bases name these hosts, never an IP literal (#1347 A7: the frozen
+# proxy maps the same names to the frozen copy):
+#   elastic  https://elasticsearch:9200   (the name the lab certificate covers; `ca` = the lab CA)
+#   others   http://soc-lab:<port>        (ports: playground-v2/lab-surface.json)
+# The lab's cloud firewall admits these ports only from the SSH source address. A lever-up
+# (playground-v2/infra/bin/up.sh) gives the server a new address: update V2_LAB_ADDRESS and
+# recreate the proxy.
+services:
+  credential-proxy:
+    extra_hosts:
+      - "elasticsearch:${V2_LAB_ADDRESS:?set V2_LAB_ADDRESS to the lab server's public IPv4}"
+      - "soc-lab:${V2_LAB_ADDRESS}"

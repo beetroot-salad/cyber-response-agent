@@ -15,7 +15,7 @@ docker --context soc-playground compose up -d     # `down` keeps volumes; `down 
 docker --context soc-playground exec <svc> ...    # no host ports on most services; exec or Docker DNS
 ```
 
-Web UIs (Kibana 5601, Keycloak 8080, ES 9200, Fleet 8220) are loopback-only on the VPS — access via `ssh -L <port>:localhost:<port> soc-playground`. Credentials come from `.env` (gitignored; template in `.env.example`).
+Web UIs (Kibana 5601, Keycloak 8080, ES 9200, Fleet 8220) are loopback-only on the VPS — access via `ssh -L <port>:localhost:<port> soc-playground`. The one exception is the edge (#1391): the ports the credential proxy reaches (8001-8005, 8007, 9200), on the public address, firewalled to the SSH source, keyed, declared surface only. Credentials come from `.env` (gitignored; template in `.env.example`).
 
 ## Map
 
@@ -34,6 +34,7 @@ Web UIs (Kibana 5601, Keycloak 8080, ES 9200, Fleet 8220) are loopback-only on t
 | detection rules | `detection-rules/*.json`; install/refresh with `python3 scripts/install_detection_rules.py` (idempotent). Alerts land in `.internal.alerts-security.alerts-default-*` — the defender's `alert.json` input |
 | an alert's ticket (opened when the alert fires, keyed by `kibana.alert.uuid`) | `alert-ticket-watcher/` polls the alerts index every 30s as a read-only user es-init creates (`V2_ALERT_WATCHER_PASSWORD`) and posts new alerts to `ticket-server`'s `POST /hooks/kibana-alerts`. Not a Kibana rule action: the webhook connector needs Gold, this stack is Basic. Tests: `alert-ticket-watcher/tests/`, `ticket-server/tests/` |
 | network/syscall telemetry | `unbound/` (DNS), `squid/` (auth'd proxy), `zeek/` (passive monitor), `falco/` (syscalls) |
+| the lab's public surface / the edge / host-state | `lab-surface.json` (ports, declared writes, the `ps` argv: the one copy) · `edge/` (the keyed ingress, live and in the frozen engine) · `endpoint-query/` (host-state's query API over the Docker socket) · `infra/firewall.tf` · runbook §Lab ingress, host-state and the lab tenant (also the lab tenant's one-time move onto the proxy) |
 | the SOAR / automations | `soar/compose.yml` (four Shuffle services, `include:`d from `compose.yml`) + `soar/workflows/`; UI on `127.0.0.1:8006`. Lives on the isolated `soar` network with Kibana and the five stubs — the role hosts can't see it |
 
 ## Conventions & invariants
