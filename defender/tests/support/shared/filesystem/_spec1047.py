@@ -27,7 +27,6 @@ from defender.tests.support.learning.judge._judge_921 import (  # noqa: F401 —
     sym,
     world_id,
 )
-from defender.tests.support.learning.core._state1135 import state_over
 from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 — re-exported vocabulary
     refusals,
 )
@@ -138,9 +137,7 @@ def graded_record(episode_dir: Path, *, judge: Any = None) -> Any:
     real episode dir."""
     ep = Path(episode_dir)
     (ep / "judge.yaml").unlink(missing_ok=True)
-    side = ep.parent / f".{ep.name}-judge"
-    return grade(ep, judge=judge,
-                 state=state_over(side / "learning-state"))
+    return grade(ep, judge=judge)
 
 
 def graded_with_view(episode_dir: Path) -> tuple[dict[str, dict], dict[str, str]]:

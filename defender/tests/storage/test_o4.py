@@ -20,12 +20,12 @@ from defender import _io
 from defender.records._episode_paths import LAYOUT
 from defender._io import read_jsonl_rows
 from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.filesystem._umask import umask
 from defender.tests.storage import test_rev3 as R
 from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.core._state1135 import env_state
 
 EPISODE_ID = "ep-1133"
 WORLD_B = T.fixture_world_id("b")
@@ -451,7 +451,7 @@ def test_o4_6_a_link_at_a_malformed_draws_name_is_refused_logged_and_left_and_th
 
     caplog.set_level(logging.WARNING)
     judge = _malformed_first()
-    J.grade_at(ep, judge=judge, draws=2, state=env_state())
+    J.grade_at(ep, judge=judge, draws=2, store=MemoryStore())
 
     assert f"judge:{WORLD_B}:1" in judge.agent_ids, "the draw loop stopped at the refused removal"
     link = draw_dir / "0.yaml"
@@ -476,7 +476,7 @@ def test_o4_6_a_plain_stale_draw_at_a_malformed_index_is_still_removed(tmp_path,
     draw_dir.mkdir(parents=True, exist_ok=True)
     (draw_dir / "0.yaml").write_text("findings: [{bucket: stale}]\n", encoding="utf-8")
 
-    J.grade_at(ep, judge=_malformed_first(), draws=2, state=env_state())
+    J.grade_at(ep, judge=_malformed_first(), draws=2, store=MemoryStore())
 
     assert not os.path.lexists(draw_dir / "0.yaml"), "the stale plain draw survived"
     assert (draw_dir / "1.yaml").is_file()
@@ -626,12 +626,12 @@ def test_o4_8_2_grade_episode_refuses_a_missing_episode_dir_and_does_not_recreat
 
     with pytest.raises(judge_mod.JudgeRefused):
         J.grade_at(ep, runs=tenant.runs_repository(),
-                   judge=ScriptedJudge({}, default="never called"), state=env_state())
+                   judge=ScriptedJudge({}, default="never called"), store=MemoryStore())
     assert S.census(Path(location_path(tenant.tenant_root))) == before, f"grading a {kind} episode dir created something"
 
     control = T.episode(tmp_path / "control", episode_id=fixture_uuid("o4-8-2-grade-control"),
                         doc=T.family_doc(episode_id=fixture_uuid("o4-8-2-grade-control")))
-    grade = J.grade_at(control, judge=ScriptedJudge({}, default="never called"), state=env_state())
+    grade = J.grade_at(control, judge=ScriptedJudge({}, default="never called"), store=MemoryStore())
     assert grade.not_graded is not None
     assert (control / "judge.yaml").is_file()
 

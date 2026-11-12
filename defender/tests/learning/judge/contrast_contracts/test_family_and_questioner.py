@@ -81,11 +81,6 @@ def _all_keys(doc: Any) -> set[str]:
     return set()
 
 
-def _questioner_file(state: Any) -> Path:
-    """Where the questioner channel's queue lives under `state`."""
-    return Path(state.describe(S.sym(S.STATE, "QUESTIONER_FINDINGS")))
-
-
 def _names_the_cap(row: dict) -> bool:
     text = json.dumps(row, default=str)
     return S.CAP_KNOB in text or re.search(r"\bcap\b", text, re.IGNORECASE) is not None
@@ -260,22 +255,21 @@ def test_1234_family_findings_requeued_after_a_stopped_pass(tmp_path: Path) -> N
                   claim=S.marker(S.FAMILY, f"later{n}")) for n in range(2)]
 
     stopped = S.family(tmp_path, root=tmp_path / "stopped")
-    state_a = S.state_over(tmp_path / "state-stopped")
-    queue_file = _questioner_file(state_a)
-    S.plant_dir(queue_file)
-    # The refused append may surface as a refusal or as the state handle's own `StateRefused`;
-    # this test reads the record the stopped pass left.
-    with contextlib.suppress(*S.stops()):
+    # The insert cannot land (#1278: the learning store is unreachable; the file queue's planted directory is gone).
+    # The pass may stop with a refusal or the store's own connection fault; this test reads the record it left.
+    state_a = S.state_over()
+    state_a.fail_kinds.add("questioner_finding")
+    with contextlib.suppress(*S.stops(), ConnectionError):
         S.grade(stopped, S.judge(family_default=S.family_reply(world=[d0])), draws=1,
-                state=state_a)
-    queue_file.rmdir()
+                store=state_a)
+    state_a.fail_kinds.clear()
     assert S.family_row(stopped).get(S.STATE_KEY) == S.QUEUEING, (
         "the family row must be written `queueing` before its append, and stay so when the "
         f"append is refused: {S.family_row(stopped)}")
     assert S.draw_files(stopped, S.FAMILY), "the family's completed draw left no file on disk"
     assert not S.from_world(S.questioner_queue(state_a), S.FAMILY)
     again = S.judge(family_default=S.family_reply(world=later))
-    refused = S.grade_refused(stopped, again, draws=1, state=state_a)
+    refused = S.grade_refused(stopped, again, draws=1, store=state_a)
     assert _names_family_queueing(refused), f"the refusal does not name the family: {refused}"
     assert not again.called(S.FAMILY), "complete draw files on disk counted as a completion"
     assert not S.from_world(S.questioner_queue(state_a), S.FAMILY)
@@ -283,7 +277,7 @@ def test_1234_family_findings_requeued_after_a_stopped_pass(tmp_path: Path) -> N
     done = S.family(tmp_path, root=tmp_path / "done")
     state_b = S.state_over(tmp_path / "state-done")
     S.grade(done, S.judge({S.FAMILY: [S.family_reply(world=[d0]), S.family_reply(world=[d1])]}),
-            draws=2, state=state_b)
+            draws=2, store=state_b)
     assert S.family_row(done).get(S.STATE_KEY) == S.QUEUED, S.family_row(done)
     wanted = sorted([done.finding_id(S.FAMILY, 0, 0), done.finding_id(S.FAMILY, 1, 0)])
     queued_ids = sorted(_ids(S.from_world(S.questioner_queue(state_b), S.FAMILY)))
@@ -293,7 +287,7 @@ def test_1234_family_findings_requeued_after_a_stopped_pass(tmp_path: Path) -> N
     assert recorded == queued_ids, "the record of what was queued disagrees with the queue"
     before = S.queue_bytes(state_b)
     rerun = S.judge({S.FAMILY: [S.family_reply(world=[w]) for w in later]})
-    S.grade(done, rerun, draws=2, state=state_b)
+    S.grade(done, rerun, draws=2, store=state_b)
     assert not rerun.called(S.FAMILY), "a `queued` family was asked again"
     assert S.queue_bytes(state_b) == before
     held = json.dumps(S.from_world(S.questioner_queue(state_b), S.FAMILY))

@@ -15,12 +15,17 @@ from defender._io import REFUSED_ALIAS, Bound, Held, NotPlainEntry, RecordRead, 
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.tests.support.learning.curation._tree_listing_1134 import RealOs, fd_path, last_component
-from defender.tests.support.shared._locations_1210 import location_path
-from defender.tests.support.learning.core._state1135 import state_for_paths as open_state  # noqa: F401 — re-export: this module's tests open their handle through it
 
 #: The type `DrainTrees.tree_for` has (bound): a working-copy path to `(held mount, name)`, or
 #: `None` outside the lane's mounts.
 TreeForFn = Callable[[Path | str], "tuple[Held, str] | None"]
+
+
+def open_state(paths: LoopPaths) -> None:
+    """Retired (#1278 A1): the file-state handle is gone, a claim's work lives in the learning store. Kept as a
+    name only so a module that still imports it collects; it opens nothing, and a builder given its result as
+    `state=` refuses the keyword."""
+    return None
 
 
 # ---------------------------------------------------------------------------------------
@@ -39,14 +44,13 @@ def author_trees(paths: LoopPaths) -> DrainTrees:
 
 
 def author_cfg(paths: LoopPaths, *, trees: DrainTrees | None = None, manifest_seed: str | None = None,
-               box: Any = None, state: Any = None, **replaced: Any) -> Any:
+               box: Any = None, **replaced: Any) -> Any:
     """The REAL lessons config: `build_author_config(paths, trees=<trees, else author_trees(paths)>,
     manifest_seed=..., box=...)`, with the `replaced` fields swapped in (`dataclasses.replace`)."""
     from defender.learning.author.lessons import run as lessons_run
 
     cfg = lessons_run.build_author_config(
-        paths, state=state if state is not None else open_state(paths),
-        trees=trees if trees is not None else author_trees(paths),
+        paths, trees=trees if trees is not None else author_trees(paths),
         manifest_seed=manifest_seed, box=box)
     return dataclasses.replace(cfg, **replaced) if replaced else cfg
 
@@ -56,7 +60,7 @@ def questioner_cfg(paths: LoopPaths) -> Any:
     from defender.learning.author.questioner import run as questioner_run
 
     return questioner_run.build_questioner_config(
-        paths, state=open_state(paths), trees=author_trees(paths))
+        paths, trees=author_trees(paths))
 
 
 def corpus_view(root: Path) -> Bound:
@@ -358,8 +362,6 @@ class World(_HeldCorpora):
     paths: LoopPaths
     outside: Path
     trees: DrainTrees
-    #: The learning-state handle over `paths`' root (made first: the handle never creates it).
-    state: Any = None
 
     @property
     def corpus_dir(self) -> Path:
@@ -371,7 +373,7 @@ class World(_HeldCorpora):
 
     def cfg(self, **replaced: Any) -> Any:
         """The REAL lessons config over these trees."""
-        return author_cfg(self.paths, trees=self.trees, state=self.state, **replaced)
+        return author_cfg(self.paths, trees=self.trees, **replaced)
 
     def git(self, *args: str, check: bool = True) -> Any:
         from defender.tests.support.learning.curation._drain719 import git
@@ -397,9 +399,8 @@ def world(tmp_path: Path) -> World:
         git(repo, "commit", "-q", "-m", "sibling corpus")
     outside = tmp_path / "outside"
     outside.mkdir()
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    return World(tmp=tmp_path, repo=repo, paths=paths, outside=outside, trees=author_trees(paths),
-                 state=open_state(paths))
+    paths = LoopPaths(repo_root=repo)
+    return World(tmp=tmp_path, repo=repo, paths=paths, outside=outside, trees=author_trees(paths))
 
 
 # ---------------------------------------------------------------------------------------
@@ -532,7 +533,7 @@ def draft_agent(at: Path, files: dict[str, str | bytes] | None = None) -> Path:
 
 def draft_lane(tmp_path: Path, *, lanes: tuple[str, ...] = AUTHOR_LANES,
                files: dict[str, str | bytes] | None = None, agent: Path | None = None,
-               state_dir: Path | None = None, product: Path | None = None,
+               state_dir: Path | None = None, product: Path | None = None,  # state_dir: retired (#1278 A1), ignored
                tenant: Any = None) -> DraftLane:
     """The fixture tenant published for real over its own data root (its agent content
     `draft_agent(files)`, or `agent`), then the real `start_batch("b1", lanes=lanes)`: the
@@ -551,12 +552,6 @@ def draft_lane(tmp_path: Path, *, lanes: tuple[str, ...] = AUTHOR_LANES,
     with published_tenant(scene / "forge", root=scene / "data", agent=source) as t:
         batch = t.open_delivery().start_batch("b1", lanes=lanes)
         clone = t.clone
-    if tenant is not None:
-        assert state_dir is None, "a tenant lane keeps its state under the tenant's learning root"
-        state = None
-    else:
-        state = state_dir if state_dir is not None else scene / "state"
-        state.mkdir(parents=True, exist_ok=True)
     # The product checkout holds no corpus: the lane's `paths` name a scratch checkout with none,
     # so a lane still reading `paths.lessons_dir` finds nothing there.
     if product is None:
@@ -564,9 +559,8 @@ def draft_lane(tmp_path: Path, *, lanes: tuple[str, ...] = AUTHOR_LANES,
         product.mkdir(exist_ok=True)
     if tenant is not None:
         paths = tenant.learning_paths(LoopPaths, repo_root=product)
-        location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
     else:
-        paths = LoopPaths(repo_root=product, state_dir=state)
+        paths = LoopPaths(repo_root=product)
     return DraftLane(tmp=scene, clone=clone, batch=batch, paths=paths, lanes=tuple(lanes))
 
 
@@ -577,27 +571,25 @@ def draft_trees(lane: DraftLane) -> DrainTrees:
 
 
 def draft_author_cfg(lane: DraftLane, *, trees: DrainTrees | None = None,
-                     manifest_seed: str | None = None, box: Any = None, state: Any = None,
+                     manifest_seed: str | None = None, box: Any = None,
                      **replaced: Any) -> Any:
     """The real lessons config over a draft lane (`batch=lane.batch`), `replaced` swapped in."""
     from defender.learning.author.lessons import run as lessons_run
 
     cfg = lessons_run.build_author_config(
-        lane.paths, state=state if state is not None else open_state(lane.paths),
-        trees=trees if trees is not None else draft_trees(lane),
+        lane.paths, trees=trees if trees is not None else draft_trees(lane),
         manifest_seed=manifest_seed, box=box, batch=lane.batch)
     return dataclasses.replace(cfg, **replaced) if replaced else cfg
 
 
 def draft_questioner_cfg(lane: DraftLane, *, trees: DrainTrees | None = None,
-                         manifest_seed: str | None = None, box: Any = None, state: Any = None,
+                         manifest_seed: str | None = None, box: Any = None,
                          **replaced: Any) -> Any:
     """The real questioner config over a draft lane, as `draft_author_cfg` builds the lessons one."""
     from defender.learning.author.questioner import run as questioner_run
 
     cfg = questioner_run.build_questioner_config(
-        lane.paths, state=state if state is not None else open_state(lane.paths),
-        trees=trees if trees is not None else draft_trees(lane),
+        lane.paths, trees=trees if trees is not None else draft_trees(lane),
         manifest_seed=manifest_seed, box=box, batch=lane.batch)
     return dataclasses.replace(cfg, **replaced) if replaced else cfg
 
@@ -613,7 +605,6 @@ class DraftWorld(_HeldCorpora):
     lane: DraftLane
     outside: Path
     trees: DrainTrees
-    state: Any = None
 
     @property
     def paths(self) -> LoopPaths:
@@ -628,10 +619,10 @@ class DraftWorld(_HeldCorpora):
         return self.lane.sibling_dir
 
     def cfg(self, **replaced: Any) -> Any:
-        return draft_author_cfg(self.lane, trees=self.trees, state=self.state, **replaced)
+        return draft_author_cfg(self.lane, trees=self.trees, **replaced)
 
     def questioner_cfg(self, **replaced: Any) -> Any:
-        return draft_questioner_cfg(self.lane, trees=self.trees, state=self.state, **replaced)
+        return draft_questioner_cfg(self.lane, trees=self.trees, **replaced)
 
 
 def draft_world(tmp_path: Path) -> DraftWorld:
@@ -640,5 +631,4 @@ def draft_world(tmp_path: Path) -> DraftWorld:
     lane = draft_lane(tmp_path)
     outside = lane.tmp / "outside"
     outside.mkdir()
-    return DraftWorld(tmp=lane.tmp, lane=lane, outside=outside, trees=draft_trees(lane),
-                      state=open_state(lane.paths))
+    return DraftWorld(tmp=lane.tmp, lane=lane, outside=outside, trees=draft_trees(lane))

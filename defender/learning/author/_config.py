@@ -7,7 +7,7 @@ from typing import Any
 
 from defender._io import Held
 from defender.learning.core.lane_trees import TreeFor
-from defender.learning.core.state import Channel, LearningState
+from defender.learning.core.state import Channel
 
 #: How long one lane git call may take, in seconds, before the tick treats it as a git failure
 #: (the lead lane's bounded reads, #1175): a local status, lookup or compare still running after
@@ -35,7 +35,7 @@ class BucketSpec:
 class CorpusAuthorConfig:
     """What every corpus-authoring drain needs, in one shape.
 
-    Where channels differ (pre-author gate, buckets, id field, locks, commit trailers, held
+    Where channels differ (pre-author gate, buckets, id field, commit trailers, held
     report) is a field here rather than a second copy of the batch driver (#719); these fields
     are the driver's contract with whatever authors a corpus.
 
@@ -46,9 +46,6 @@ class CorpusAuthorConfig:
     #: The root the corpus' agent root sits in, as the spawn's box sees it: a batch draft's
     #: `stage/` (the box's `staged` mount, holding `agent/`), or a scene's checkout.
     repo_root: Path
-    #: The learning state handle, opened by the entry point on the entry's own paths: the
-    #: channel's queue, ledgers, locks and reports are all reached through it.
-    state: LearningState
     #: The corpus folder's spelling: the readers' `where=` and the curator engine's path
     #: checks. Never opened: every host read, write, delete and listing of the corpus goes
     #: through `corpus` (#1134).
@@ -63,7 +60,6 @@ class CorpusAuthorConfig:
     #: prefix of every change this channel's claim may commit.
     corpus_rel: str
     channel: Channel
-    repo_lock_wait_seconds: int
     log_prefix: str
     author_prompt: Path
     author_model: str
@@ -76,14 +72,13 @@ class CorpusAuthorConfig:
     buckets: tuple[BucketSpec, ...]
     #: What the drain's diagnostics call a row, e.g. "findings".
     noun: str
-    #: The attempt ceiling, bound once here so a malformed value fails the tick before any
-    #: row is read and a mid-batch environment change can't move it.
-    max_attempts: int
     #: The batch (P3's `version_control.Batch`) whose draft the corpus lies in: each tick of
     #: the channel is one claim of it — its change set, the commit-maker's commit, its reset
     #: (#1108 P4, O7). `None` only for a scene that never claims (the claim refuses).
     batch: Any = None
-    #: Optional hook run after both the corpus commit and the queue rotation (the lessons
-    #: channel's held report).
-    post_rotate: Callable[..., None] | None = None
     box: Any = None
+    #: The reviewers' words on the PR a replacement batch re-authors, already framed as untrusted
+    #: data by the drain (#1278 H13, G-F2); `None` when the batch replaces none.
+    feedback: str | None = None
+    #: The curator stage's model seam (`run_stage(make_model=)`); `None`: the stage's own default.
+    make_model: Callable[..., Any] | None = None

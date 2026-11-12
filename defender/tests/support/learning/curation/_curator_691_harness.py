@@ -23,8 +23,8 @@ from defender.learning.author.curator_engine import (  # noqa: E402
 SHIPPED: tuple[str, ...] = ("lessons", "lessons-questioner")
 
 
-# On-disk fixtures: a worktree (where lessons are authored) and the `_pending` run dir every
-# spawn drains into.
+# On-disk fixtures: a worktree (where lessons are authored) and the call-folder run dir every
+# spawn binds over.
 
 def make_worktree(tmp_path: Path) -> Path:
     """A tmp batch worktree: the shipped corpora exist (so real writes land), plus two real
@@ -38,9 +38,11 @@ def make_worktree(tmp_path: Path) -> Path:
 
 
 def pending_run_dir(tmp_path: Path) -> Path:
-    """The production run-dir shape, ``<MAIN>/defender/learning/_pending``: a different tree
-    from the authored worktree, with ``run_id == "_pending"`` for every spawn."""
-    d = tmp_path / "MAIN" / "defender" / "learning" / "_pending"
+    """The run dir a curator binds over, in the production shape of #1278 A1: a call folder
+    (``<tenant scratch>/<drain batch>-lessons-1``), a different tree from the authored worktree
+    and from any learning state. The name is kept for the 691 suites that call it; the old
+    ``_pending`` state folder it stood for goes at cutover (O10)."""
+    d = tmp_path / "MAIN" / "scratch" / "drain-batch-lessons-1"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import dataclasses
 
-from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.records._episode_handle import Episode
@@ -12,6 +11,8 @@ import pytest
 
 from defender import run as run_py
 from defender.tests.support.runtime.engine._spec767 import TENANT_ID
+from defender.tests.support.sandbox._curation_store1278 import reach_store
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
     author_markers,
@@ -36,20 +37,22 @@ class Tail(SpecTail):
 
 
 @pytest.fixture
-def state(tmp_path, monkeypatch):
-    """A learning state root and a runs base under tmp, and a key per provider so the
-    entrypoint's startup preflight cannot fail ahead of the tail under test."""
+def state(tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
+    """The tenant's learning paths over a scratch repo, a learning store holding the tenant active (the run end's curation
+    request lands there, #1278), and a key per provider so the entrypoint's startup preflight cannot fail ahead of the
+    tail under test."""
     from defender.learning.core.config import LoopPaths
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     tenant = set_up_tenant(current_data_root())
-    location_path(tenant.learning).mkdir(exist_ok=True)
+    reach_store(migrated_database, monkeypatch, tenant)
     repo = tmp_path / "repo"
     (repo / "defender").mkdir(parents=True)
     return dataclasses.replace(LoopPaths.for_tenant(tenant), repo_root=repo)
 
 
+@pytest.mark.postgres
 def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state):
     """Under `--update-ticket`, run start clears the receipt through the seam, a run whose
     lifecycle COMPLETES then records after it, and one that dies does not. No open leg. O1, r4."""
@@ -78,6 +81,7 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state):
     assert RECORD_STEP not in dying.names, "a run that never completed its lifecycle recorded anyway"
 
 
+@pytest.mark.postgres
 def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
     """`--update-ticket` is the whole switch: without it nothing reaches the ticket store, and
     the resume path refuses the flag."""
@@ -112,6 +116,7 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
     assert "--update-ticket" in str(refusal.value), "the resume path accepted the ticket flag"
 
 
+@pytest.mark.postgres
 def test_767_record_runs_before_the_curation_marker(tmp_path, state):
     """The record step runs before the curation marker is queued, and before the render."""
     tail = Tail(state)

@@ -58,7 +58,7 @@ def _run(sc, *, fifo: Path | None = None):
     box: dict = {}
 
     def go():
-        box["rc"] = drain.run_batch(cfg=sc.cfg)
+        box["rc"] = drain.run_batch(cfg=sc.cfg, items=sc.items(), outcomes=sc.outcomes)
 
     if fifo is not None:
         exc = raised_by(go, fifo=fifo)
@@ -72,26 +72,20 @@ def _run(sc, *, fifo: Path | None = None):
     return ("raised", exc) if exc is not None else ("rc", box["rc"])
 
 
-def _stuck_classes(sc) -> list[str]:
-    return [r.get("fault_class") for r in S.stuck_records(sc.paths, sc.channel)]
-
-
-#: The lane's counted-attempt classes (`drain.RETIRE_SET`'s `AuthorError`) plus the ChangeSet's
-#: claim refusal: a stuck record of either is the attempt's bookkeeping, never an unhandled crash.
-_COUNTED = {"AuthorError", "DeliveryRefused"}
+# Retired with the file queue (#1278 D1, design r8 Locks): the per-row attempt counter, the graveyard and the
+# stuck-fault record are the store's now (the claim counts each attempt; the ceiling and the fault record are
+# `tests/learning/store_1278`'s). What a claim owes at this seam is that it decides NO fate for a row it faulted
+# or refused (`sc.outcomes == {}`): the batch's commits then say what becomes of the items.
 
 
 def _refused_claim_routed(sc, got, fid: str) -> None:
     """A refused claim returns rc 0 (routed, not a stage failure), lands nothing, leaves the draft
-    at the batch base, and keeps its row queued with one attempt counted (not consumed,
-    graveyarded or stuck as a crash) for a retry up to the ceiling."""
+    at the batch base, and decides no fate for its row (not consumed, skipped or dead-lettered:
+    the claim's attempt is counted and the row retried by the store)."""
     assert got == ("rc", 0), got
     assert sc.head_files() == []
     assert sc.draft_drift() == []
-    assert sc.pending_by_id()[fid].get("attempts") == 1
-    assert fid not in sc.consumed_by_id()
-    assert all(r.get(sc.channel.id_key) != fid for r in sc.graveyard())
-    assert set(_stuck_classes(sc)) <= _COUNTED
+    assert sc.outcomes == {}, f"a refused claim decided a fate for {fid}: {sc.outcomes}"
 
 
 def _plain_single(at: Path, text: str) -> bool:
@@ -132,14 +126,14 @@ def test_a_link_lesson_citing_the_batch_is_a_refused_claim_and_nothing_lands(
 
 def test_control_the_same_bytes_as_a_plain_lesson_are_attributed_and_committed(tmp_path):
     """Control at the same name: the outside lesson's bytes as a plain draft file cite `f1`, land
-    on the batch branch with those bytes, and `f1` is consumed as committed."""
+    on the batch branch with those bytes, and `f1` stays in the batch as committed (no fate is named for it)."""
     body = lesson_text("f1", mark=OUT_MARK)
     sc = _scene(tmp_path, curator=S.FakeCurator(writes={PLANTED: body}))
 
     assert _run(sc) == ("rc", 0)
     assert sc.head_files() == [f"{LESSONS}/{PLANTED}"]
     assert sc.head_text(f"{LESSONS}/{PLANTED}") == body
-    assert sc.category_of("f1") == "consumed_committed"
+    assert sc.fate("f1") is None
 
 
 def test_control_an_unattributable_plain_lesson_is_gone_from_the_draft_after_the_fault(tmp_path):
@@ -177,8 +171,7 @@ def test_a_non_md_alias_in_the_lane_never_lands_and_its_target_is_never_written(
 
 def test_control_an_unrelated_fault_beside_a_link_is_not_routed_as_a_refused_claim(tmp_path):
     """Control for the refused-claim routing: the same symlink plant, but the curator raises an
-    unrelated fault (outside `RETIRE_SET`), which propagates unchanged and sticks; the row is not
-    charged an attempt."""
+    unrelated fault (outside `RETIRE_SET`), which propagates unchanged; the row is decided nothing."""
     target = _outside(tmp_path, "secret.txt", f"host notes {OUT_MARK}\n")
     fault = RuntimeError("unrelated, after the plant")
 
@@ -189,8 +182,7 @@ def test_control_an_unrelated_fault_beside_a_link_is_not_routed_as_a_refused_cla
     sc = _scene(tmp_path, curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")}, also=plant))
 
     assert _run(sc) == ("raised", fault)
-    assert _stuck_classes(sc) == ["RuntimeError"]
-    assert sc.pending_by_id()["f1"].get("attempts") is None
+    assert sc.outcomes == {}, "the row was charged or decided for an unrelated fault"
     assert sc.head_files() == []
     assert target.read_text() == f"host notes {OUT_MARK}\n"
 
@@ -241,7 +233,7 @@ def _unwritten(entries: dict[str, tuple]) -> dict[str, tuple]:
 
 @pytest.mark.parametrize("kind", PLANTS)
 def test_o5_3_a_retire_member_still_retires_over_a_plant_at_a_base_name(tmp_path, kind):
-    """A retiring fault over a plant at a base name still retires (rc 2, one attempt); nothing
+    """A retiring fault over a plant at a base name still faults the claim (rc 2, no fate decided); nothing
     reads or writes through the plant, and the lane is back at its base."""
     target = _outside(tmp_path, text=lesson_text("f0", mark=OUT_MARK))
     sc = _scene(tmp_path, curator=S.FakeCurator(
@@ -253,8 +245,7 @@ def test_o5_3_a_retire_member_still_retires_over_a_plant_at_a_base_name(tmp_path
         seen = events()
 
     assert got == ("rc", 2), got
-    assert sc.pending_by_id()["f1"].get("attempts") == 1
-    assert set(_stuck_classes(sc)) <= {"AuthorError"}
+    assert sc.outcomes == {}
     if kind != "hard link":
         assert seen == []
     assert _unwritten(census(target.parent)) == _unwritten(before)
@@ -264,7 +255,7 @@ def test_o5_3_a_retire_member_still_retires_over_a_plant_at_a_base_name(tmp_path
 
 @pytest.mark.parametrize("kind", PLANTS)
 def test_o5_3_a_non_member_fault_propagates_unchanged_over_a_plant(tmp_path, kind):
-    """A non-retiring fault over a plant propagates unchanged and sticks, the row unattempted;
+    """A non-retiring fault over a plant propagates unchanged, deciding nothing for the row;
     nothing writes through the plant and the lane is back at its base."""
     target = _outside(tmp_path, text=lesson_text("f0", mark=OUT_MARK))
     fault = RuntimeError("injected after the plant")
@@ -275,8 +266,7 @@ def test_o5_3_a_non_member_fault_propagates_unchanged_over_a_plant(tmp_path, kin
 
     assert result == "raised", got
     assert got is fault
-    assert _stuck_classes(sc) == ["RuntimeError"]
-    assert sc.pending_by_id()["f1"].get("attempts") is None
+    assert sc.outcomes == {}
     assert _unwritten(census(target.parent)) == _unwritten(before)
     assert _plain_single(sc.corpus / SEEDED, lesson_text("f0"))
     assert sc.head_files() == []
@@ -293,16 +283,15 @@ def test_o5_3_control_with_nothing_planted_the_base_file_is_back(tmp_path, fault
 
     if fault == "AuthorError":
         assert got == ("rc", 2), got
-        assert sc.pending_by_id()["f1"].get("attempts") == 1
     else:
         assert got == ("raised", exc), got
-        assert _stuck_classes(sc) == ["RuntimeError"]
+    assert sc.outcomes == {}
     assert (sc.corpus / SEEDED).read_text() == lesson_text("f0")
 
 
 def test_a_fifo_at_a_new_name_is_never_opened_and_the_fault_still_retires(tmp_path):
-    """A FIFO the box leaves at a new name is never opened (deadline), the fault retires (rc 2,
-    one attempt) and the lane holds no FIFO after the claim."""
+    """A FIFO the box leaves at a new name is never opened (deadline), the fault faults the claim (rc 2,
+    no fate decided) and the lane holds no FIFO after the claim."""
     holder: dict = {}
 
     def agent(rows, batch_id, cfg):
@@ -315,7 +304,7 @@ def test_a_fifo_at_a_new_name_is_never_opened_and_the_fault_still_retires(tmp_pa
     got = _run(sc, fifo=sc.corpus / PLANTED)
 
     assert got == ("rc", 2), got
-    assert sc.pending_by_id()["f1"].get("attempts") == 1
+    assert sc.outcomes == {}
     assert not os.path.lexists(holder["at"])
 
 
@@ -333,7 +322,7 @@ def test_a_nested_lesson_the_agent_rewrote_is_back_at_its_base_after_the_fault(t
                 curator=S.FakeCurator(also=agent))
 
     assert _run(sc) == ("rc", 2)
-    assert sc.pending_by_id()["f1"].get("attempts") == 1
+    assert sc.outcomes == {}
     assert (sc.corpus / "nested/deep/l1.md").read_text() == lesson_text("f0", mark="original")
     assert not (sc.corpus / "nested/deep/stray.md").exists()
     assert sc.head_files() == []

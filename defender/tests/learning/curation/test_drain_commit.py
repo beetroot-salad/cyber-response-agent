@@ -24,11 +24,11 @@ from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _spec773 as S
 from defender.tests.support.learning.curation._curator1134 import JournalBound, JournalHeld
 
-
 LESSON = "agent/lessons/l1.md"
-
-
+LESSON2 = "agent/lessons/l2.md"
 OLD = "agent/lessons/old.md"
+TRAVERSAL = "../../../../etc/passwd"
+PATHY = "agent/lessons/attacker-chosen.md"
 
 
 def test_the_draft_lane_observation_channel_sees_a_commit_and_a_reset(tmp_path):
@@ -77,8 +77,9 @@ def test_approved_list_and_deletions_list_are_both_empty_773(tmp_path):
 
 
 def test_an_empty_approved_list_still_lets_the_rest_of_the_tick_complete_773(tmp_path):
-    """An empty approved list is a branch of the tick, not an early exit: the skip still
-    rotates and the report is written."""
+    """An empty approved list is a branch of the tick, not an early exit: the skip still gets
+    its fate (skipped, naming the curator's reason). The disposition report file it also wrote is
+    retired with the file queue (#1278 D1: the fate and its reason are the store item's)."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -86,8 +87,7 @@ def test_an_empty_approved_list_still_lets_the_rest_of_the_tick_complete_773(tmp
                               consumed_skip=[{"finding_id": "f1", "reason": "already taught"}]),
     )
     assert sc.run() == 0
-    assert sc.category_of("f1") == "consumed_skip"
-    assert sc.report_lines()
+    assert sc.fate("f1") == ("skipped", "already taught")
 
 
 def test_the_commit_names_the_approved_files_and_the_curator_deletions_and_nothing_else_773(
@@ -146,17 +146,18 @@ def test_a_reported_committed_finding_no_approved_file_cites_is_deferred_not_con
         curator=S.FakeCurator(writes={"l1.md": S.lesson("a")}, committed=["a", "b"]),
     )
     assert sc.run() == 0
-    assert sc.category_of("a") == "consumed_committed"
-    assert sc.category_of("b") is None
-    assert sc.pending_by_id()["b"]["deferrals"] == 1
+    assert sc.fate("a") is None, "a committed (cited) finding stays in the batch, named nowhere"
+    assert sc.head_files() == [LESSON]
+    assert sc.fate("b") == ("deferred", None)
 
 
 @pytest.mark.parametrize("fault", ["forbidden-name", "ref-locked", "control", "unrelated"])
 def test_a_refused_commit_is_routed_as_a_refused_claim_773(tmp_path, fault):
     """A claim the batch's ChangeSet refuses (a `.gitattributes` in the lane) is routed: rc 0,
-    nothing lands, the draft is reset, the row stays queued with one attempt. `ref-locked` (a
-    held branch ref fails `update-ref`) is a commit fault, not a refusal: only "nothing lands or
-    is consumed" is pinned. Controls: a clean tick lands; an unrelated fault propagates uncharged."""
+    nothing lands, the draft is reset, no item is given a fate (the claim counted its attempt;
+    #1278 D1: the counter is the store's). `ref-locked` (a held branch ref fails `update-ref`) is a
+    commit fault, not a refusal: only "nothing lands or is decided" is pinned. Controls: a clean
+    tick lands; an unrelated fault propagates and decides nothing."""
     holder: dict = {}
 
     def act(rows, batch_id, cfg):
@@ -180,7 +181,7 @@ def test_a_refused_commit_is_routed_as_a_refused_claim_773(tmp_path, fault):
     if fault == "unrelated":
         with pytest.raises(RuntimeError, match="unrelated curator fault"):
             sc.run()
-        assert sc.pending_by_id()["f1"].get("attempts") is None
+        assert sc.outcomes == {}
         assert sc.commit_count() == 1
         return
     if fault == "ref-locked":
@@ -189,24 +190,20 @@ def test_a_refused_commit_is_routed_as_a_refused_claim_773(tmp_path, fault):
             sc.run()
         assert sc.commit_count() == 1
         assert sc.head_files() == []
-        assert sc.consumed() == []
+        assert sc.outcomes == {}
         return
 
     rc = sc.run()
     if fault == "control":
         assert rc == 0
         assert sc.head_files() == [LESSON]
-        assert sc.category_of("f1") == "consumed_committed"
+        assert sc.fate("f1") is None, "the committed finding stays in the batch"
         return
     assert rc == 0, "a refused-only tick failed the stage"
     assert sc.commit_count() == 1
     assert sc.head_files() == []
     assert sc.draft_drift() == []
-    assert sc.pending_by_id()["f1"].get("attempts") == 1
-    assert sc.consumed() == []
-    assert all(r.get("finding_id") != "f1" for r in sc.graveyard())
-    stuck = {r.get("fault_class") for r in S.stuck_records(sc.paths, sc.channel)}
-    assert stuck <= {"AuthorError", "DeliveryRefused"}, stuck
+    assert sc.outcomes == {}, "a refused claim decided a fate (consumed or dead-lettered) for its row"
 
 
 def test_the_commit_step_reads_author_result_only_for_skip_reasons_and_commit_message_773(
@@ -226,9 +223,9 @@ def test_the_commit_step_reads_author_result_only_for_skip_reasons_and_commit_me
     )
     assert sc.run() == 0
     assert sc.head_files() == [LESSON]
-    assert sc.category_of("a") == "consumed_committed"
+    assert sc.fate("a") is None
     assert "the curator's own prose" in sc.head_message()
-    assert "already taught" in str(sc.consumed_by_id()["skip"])
+    assert sc.fate("skip") == ("skipped", "already taught")
 
 
 def test_author_result_committed_id_is_foreign_to_this_batch_773(tmp_path):
@@ -242,7 +239,7 @@ def test_author_result_committed_id_is_foreign_to_this_batch_773(tmp_path):
         ),
     )
     assert sc.run() == 2
-    assert "not-in-this-batch" not in sc.consumed_by_id()
+    assert sc.outcomes == {}
     assert sc.head_files() == []
 
 
@@ -261,9 +258,6 @@ def test_a_rename_lands_as_the_new_path_and_the_old_path_deleted_773(tmp_path):
     assert sc.run() == 0
     assert sorted(sc.head_files()) == ["agent/lessons/new.md", OLD]
     assert sc.head_text(OLD) is None
-
-
-LESSON2 = "agent/lessons/l2.md"
 
 
 class _Rewriting(JournalHeld):
@@ -310,7 +304,7 @@ def test_the_citations_are_read_from_the_bytes_the_commit_carries(tmp_path):
     assert sc.run() == 0
     assert sc.cfg.corpus.reads == 0, "the drain read the lesson's citations from the file again"
     assert sc.head_files() == [LESSON], "the cited lesson did not land"
-    assert sc.category_of("f1") == "consumed_committed"
+    assert sc.fate("f1") is None
     assert sc.draft_drift() == []
 
 
@@ -337,7 +331,7 @@ def test_a_mode_only_change_is_put_back_and_the_tree_is_clean_after_the_tick(tmp
 
 def test_a_finding_the_curator_did_not_report_but_an_approved_file_cites_is_committed(tmp_path):
     """The curator writes lessons for a and b, reports only a. The tree says both landed:
-    both are `consumed_committed`, and b is not left queued with no counter."""
+    both stay in the batch as committed (named nowhere), and b is not deferred or skipped."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("a", run_id="a"), S.finding_row("b", run_id="b")],
@@ -347,14 +341,14 @@ def test_a_finding_the_curator_did_not_report_but_an_approved_file_cites_is_comm
     )
     assert sc.run() == 0
     assert sc.head_files() == [LESSON, LESSON2]
-    assert sc.category_of("a") == "consumed_committed"
-    assert sc.category_of("b") == "consumed_committed"
-    assert sc.pending_by_id() == {}
+    assert sc.fate("a") is None
+    assert sc.fate("b") is None
+    assert sc.outcomes == {}
 
 
 def test_a_finding_the_curator_filed_as_skipped_but_wrote_a_lesson_for_takes_the_trees_fate(tmp_path):
     """The curator files x as skipped but writes a lesson citing it: the tree wins, and x is
-    consumed once, as committed."""
+    committed (named nowhere), not skipped."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("x", run_id="x"), S.finding_row("y", run_id="y")],
@@ -366,13 +360,12 @@ def test_a_finding_the_curator_filed_as_skipped_but_wrote_a_lesson_for_takes_the
     )
     assert sc.run() == 0
     assert sc.head_files() == [LESSON, LESSON2]
-    assert [r["finding_id"] for r in sc.consumed()].count("x") == 1
-    assert sc.category_of("x") == "consumed_committed"
+    assert sc.fate("x") is None
 
 
 def test_a_changed_file_citing_no_batch_finding_raises_author_error_773(tmp_path):
     """A changed corpus file citing none of this batch's ids (another batch's, another
-    channel's) is unvouched: `AuthorError`, the draft reset, the row charged an attempt."""
+    channel's) is unvouched: `AuthorError`, the draft reset, no fate decided for the row (the claim counted its attempt)."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -381,7 +374,7 @@ def test_a_changed_file_citing_no_batch_finding_raises_author_error_773(tmp_path
     )
     assert sc.run() == 2
     assert sc.corpus_files() == []
-    assert sc.pending_by_id()["f1"]["attempts"] == 1
+    assert sc.outcomes == {}
 
 
 def test_a_file_whose_citations_match_head_no_longer_passes_vouching_773(tmp_path):
@@ -442,9 +435,9 @@ def test_a_file_whose_bytes_return_to_head_after_editing_no_longer_exempts_itsel
     assert still_dirty.run() == 2
 
 
-def test_curator_reports_no_commits_but_leaves_dirty_corpus_edits_773(tmp_path):
+def test_curator_reports_no_commits_but_leaves_dirty_corpus_edits_773(tmp_path, caplog):
     """Reporting nothing committed over a well-cited edit aborts before vouching: rc 2,
-    nothing lands or rotates, the draft is reset."""
+    nothing lands or is decided, the draft is reset, and the fault is logged."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -452,17 +445,12 @@ def test_curator_reports_no_commits_but_leaves_dirty_corpus_edits_773(tmp_path):
     )
     assert sc.run() == 2
     assert sc.head_files() == []
-    assert sc.consumed() == []
-    assert "f1" in sc.pending_by_id()
+    assert sc.outcomes == {}
     assert "l1.md" not in sc.corpus_files()
-    reported = " ".join(
-        [r.get("deadletter_reason", "") for r in sc.graveyard()]
-        + [r.get("reason", "") for r in S.stuck_records(sc.paths, sc.channel)]
-    )
-    assert "reported no commits but left edits" in reported
+    assert "reported no commits but left edits" in caplog.text
 
 
-def test_curator_reports_committed_but_leaves_the_corpus_clean_773(tmp_path):
+def test_curator_reports_committed_but_leaves_the_corpus_clean_773(tmp_path, caplog):
     """The same gate, the opposite mismatch: `committed` reported over an unchanged corpus."""
     sc = S.build_draft_scene(
         tmp_path,
@@ -472,18 +460,8 @@ def test_curator_reports_committed_but_leaves_the_corpus_clean_773(tmp_path):
     assert sc.run() == 2
     assert sc.head_files() == []
     assert sc.commit_count() == 1
-    assert sc.category_of("f1") is None
-    reported = " ".join(
-        [r.get("deadletter_reason", "") for r in sc.graveyard()]
-        + [r.get("reason", "") for r in S.stuck_records(sc.paths, sc.channel)]
-    )
-    assert "reported committed" in reported and "unchanged" in reported  # noqa: PT018 — locked spec test (#773), suppressed not split
-
-
-TRAVERSAL = "../../../../etc/passwd"
-
-
-PATHY = "agent/lessons/attacker-chosen.md"
+    assert sc.outcomes == {}
+    assert "reported committed" in caplog.text and "unchanged" in caplog.text  # noqa: PT018 — locked spec test (#773), suppressed not split
 
 
 def _committing(**kw):
@@ -500,7 +478,7 @@ def _assert_the_control_commits(tmp_path) -> None:
     )
     assert control.run() == 0
     assert control.head_files() == [LESSON]
-    assert control.category_of("f1") == "consumed_committed"
+    assert control.fate("f1") is None
 
 
 def test_path_like_strings_planted_in_author_result_never_reach_the_check_or_the_commit_773(
@@ -580,7 +558,7 @@ def test_author_result_consumed_skip_reason_contains_a_path_like_string_773(tmp_
     )
     assert sc.run() == 0
     assert sc.head_files() == [LESSON]
-    assert TRAVERSAL in str(sc.consumed_by_id()["skip"])
+    assert sc.fate("skip") == ("skipped", TRAVERSAL)
     assert not (tmp_path / "etc").exists()
 
 
@@ -671,23 +649,19 @@ def test_changed_lesson_files_citations_span_this_batch_and_an_earlier_one_773(t
     assert sc.head_files() == [LESSON]
 
 
-def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path):
-    """A tick refuses to start on an already-dirty corpus, loudly (a named, reported
-    disposition), never silently widening vouching to whatever is under the corpus."""
+def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path, caplog):
+    """A tick refuses to start on an already-dirty corpus, loudly (a named, logged
+    refusal), never silently widening vouching to whatever is under the corpus."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-        max_attempts=1,
     )
     (sc.corpus / "left-behind.md").write_text(S.lesson("some-old-batch"), encoding="utf-8")
     assert sc.run() == 2
     assert sc.curator.calls == []
-    reported = " ".join(
-        [r.get("deadletter_reason", "") for r in sc.graveyard()]
-        + [r.get("reason", "") for r in S.stuck_records(sc.paths, sc.channel)]
-    )
-    assert "left-behind.md" in reported or "dirty" in reported.lower()
+    assert sc.outcomes == {}
+    assert "left-behind.md" in caplog.text or "dirty" in caplog.text.lower()
 
 
 def test_a_non_markdown_file_left_under_the_corpus_773(tmp_path):

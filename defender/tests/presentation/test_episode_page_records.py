@@ -12,7 +12,7 @@ from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.storage._alert_plant import plant_source_copy
-from defender.tests.support.learning.core._state1135 import env_state
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -280,7 +280,7 @@ def test_1025_grade_episode_reads_world_archive_through_the_same_screen_as_the_p
         family.read_world_facts(bound, "c", world_id=T.world_id(ep, "c"))
 
     grade = J.grade_at(
-        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
+        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), store=MemoryStore())
     rows = J.rows(grade)
     assert rows["b"].get("ungradable"), rows["b"]
     assert "report.md" in rows["b"]["ungradable_reason"], rows["b"]
@@ -317,7 +317,7 @@ def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malfor
     grade = J.grade_at(
         ep.dir, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(
             bucket="none", systems=[E.SYSTEM]))),
-        state=env_state())
+        store=MemoryStore())
     assert (ep.dir / "judge.yaml").is_file(), "the torn samples record took the grading pass down"
     rows = J.rows(grade)
     graded = [label for label, row in rows.items() if not row.get("ungradable")]

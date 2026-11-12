@@ -119,6 +119,18 @@ def publish_for_run(  # noqa: PLR0913 — the child's work and its in-process st
     return line
 
 
+def delivery_for_cutover(tenant_id: str, *, data_root: Path, directory: TenantDirectory) -> contextlib.AbstractContextManager[Any]:
+    """The tenant's delivery for the learning-state import (#1278 Migration), in the lifecycle's own process: the tenant
+    accepted by the folder rules only (the host acceptance never runs there), its delivery opened against the recorded
+    forge wiring with its forge credential. A refusal is `TenantRefused` or `DeliveryRefused`."""
+    from defender._paths import process_defender_dir
+
+    from .delivery import opened_delivery
+
+    tenant = requested_tenant(data_root_from_path(Path(data_root)), tenant_id)
+    return opened_delivery(tenant, defender_dir=process_defender_dir(), directory=directory, purpose="drain")
+
+
 def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outcome unrecorded
     tenant: Tenant,
     *,

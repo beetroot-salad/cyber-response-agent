@@ -26,6 +26,7 @@ from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
     TENANT,
     _Calls,
     _Logged,
+    _the_learning_store_is_reached_not_used,  # noqa: F401 — autouse fixture
     _no_state_refusal,
     _production,
     _reaching,

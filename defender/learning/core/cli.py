@@ -29,7 +29,7 @@ WHERE THE FINDINGS COME FROM (#922). Until the cutover this file also carried th
 run and appended its verdicts to the findings queue. That pipeline is deleted. Findings now
 come from a BRANCHED EPISODE: `defender/cli/learning/branch.py` forks a finished run at a
 chosen message, runs a family of worlds from it, and its judge appends the graded rows to the
-same `_pending/findings.jsonl` this drain reads. The queue and both stages below are unchanged;
+same learning-store findings queue this drain reads. The queue and both stages below are unchanged;
 only the producer moved.
 
 Environment:

@@ -307,6 +307,14 @@ class RequestLogger:
         )
         self.n_requests += 1
 
+    def log_unanswered(self, *, request_messages: list[Any], agent_id: str = "main") -> None:
+        """The request records of a request the model never answered (it raised: a refusal, an
+        outage, a cancel), as `log` writes them before a response. No response record follows: the
+        trace shows what was sent and that nothing came back (#1278 A1 O9: a call that reached the
+        model and failed still leaves its trace)."""
+        for dumped in ModelMessagesTypeAdapter.dump_python(request_messages, mode="json"):
+            self._emit(agent_id, "request", dumped, self._cap)
+
     def log_policy_denial(
         self, *, role: str, system: str, verb: str, call_id: str, params: Any,
         ts: str | None = None,

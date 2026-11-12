@@ -1,116 +1,62 @@
-"""#1414 D11 support: the lessons author's feedback channel, driven through the existing drain seams.
+"""#1414 D11 support (A4): the lessons author's feedback channel is the store's `feedback_instruction` work items.
 
-Nothing here implements policy. `FeedbackCurator` is `FakeCurator` keyed on `comment_id`; `FeedbackTrigger`
-is `CuratorTrigger` that also serves the feedback curator; `feedback_scene` is `build_*_draft_scene` for it.
-Every target is resolved at call time, so collection never imports code that does not exist yet.
+Nothing here implements policy. `instruct` writes one instruction the way the feedback tick does (an issue row, a tick
+lease, a comment taken in, one decision carrying the instruction text), through the store's own verbs; the curator
+itself is the real feedback curator behind the scripted model (`_curators1278`), driven by `author_drain`.
+Every store verb is resolved at call time, so collection never imports code that does not exist yet.
 
-Forced names (FC, owned here, not in the shared r5 block; reported to the orchestrator):
-  - module `defender.learning.author.feedback.run`: `build_feedback_config(paths, *, state, trees,
-    manifest_seed=None, box=None, batch=None)`, `build_feedback_user_prompt(rows, batch_id, cfg, *, salt=None)`,
-    `run_batch(hold_committed=, cfg=, box=)`; drain module key `FEEDBACK_MODULE` in `_CURATOR_MODULES`.
-  - a feedback lesson cites its comment id (as a string) under `source_finding_ids`, like any lesson.
+Interface requests this module uses (A4): `enqueue_feedback_issue`, `begin_feedback_tick`, `record_feedback_issue`,
+`judge_comments`, `record_decision(held, comment_id, decision, *, instruction=)`, `end_feedback_tick`, `work`,
+`claim` thresholds with the kind `feedback_instruction`.
 """
 from __future__ import annotations
 
-import dataclasses
-import importlib
 import re
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-from defender.tests.learning.feedback_1414._spec1414 import feedback_lesson_row
-from defender.tests.support.learning.curation import _curator1134 as C
-from defender.tests.support.learning.curation import _spec773 as S
-from defender.tests.tenancy.tenant_1108_p4._drain_support import (
-    AUTHOR_DRAFT_LANES,
-    CuratorTrigger,
-    draft_lane_trees,
-)
+from defender.tests.support.learning.core._store1278 import call
+from defender.tests.support.learning.core._store1278 import work as work_of
 
-FEEDBACK_MODULE = "feedback_curator"
-FEEDBACK_RUN = "defender.learning.author.feedback.run"
-FEEDBACK_LESSON_NAME = "p4-feedback-lesson.md"
-FEEDBACK_LESSON_PATH = f"agent/lessons/{FEEDBACK_LESSON_NAME}"
-
-SALT = "7e" * 16
+KIND = "feedback_instruction"
+LESSON_NAME = "p4-feedback-lesson.md"
+LESSON_PATH = f"agent/lessons/{LESSON_NAME}"
 FRAME_RE = re.compile(r"<run-(?P<salt>[0-9a-f]+)-(?P<tag>[^>\n]+)>\n(?P<body>.*?)\n</run-(?P=salt)-(?P=tag)>",
                       re.DOTALL)
+#: Every kind due at one waiting item, with the feedback kind (its threshold is 1 whatever the tenant sets, D11).
+THRESHOLDS = {"finding": 1, "questioner_finding": 1, "pitfall": 1, "curation_request": 1, KIND: 1}
 
 
-def channel() -> Any:
-    """The feedback channel (`FEEDBACK_LESSONS`), resolved now."""
-    return importlib.import_module("defender.learning.core.state").FEEDBACK_LESSONS
+def instruct(dsn: str, tenant_id: str, comment_id: int = 101, *, issue: int = 7, author: str = "ann",
+             case_id: str = "case-7", instruction: str = "check the VPN log first for this user",
+             approve: bool = False) -> None:
+    """The feedback tick's own sequence for one instruction: the run's issue recorded, the comment taken in, the decision
+    recorded with its instruction. (The comment's run is `run-<issue>`.)"""
+    run_id = f"run-{issue}"
+    call(dsn, "enqueue_feedback_issue", tenant_id, run_id, case_id, outcome="inconclusive", lookups=[])
+    held = call(dsn, "begin_feedback_tick", tenant_id, owner="seed")
+    try:
+        call(dsn, "record_feedback_issue", held, run_id, issue)
+        call(dsn, "judge_comments", held, run_id, taken=[{
+            "comment_id": comment_id, "author": author, "created": "2026-11-10T10:00:00Z", "body": instruction,
+            "issue_url": f"https://forge.invalid/issues/{issue}"}], judged=[comment_id], listed=True)
+        call(dsn, "record_decision", held, comment_id, {
+            "approved": [], "review_by": None, "instruction": instruction, "no_change": None, "unapprovable": None},
+            instruction={"comment_id": str(comment_id), "issue": issue, "author": author, "case_id": case_id,
+                         "instruction": instruction})
+    finally:
+        call(dsn, "end_feedback_tick", held)
 
 
-def row(comment_id: int = 101, **over: Any) -> dict:
-    """One channel row as the tick writes it (shared shape)."""
-    kw = {"comment_id": comment_id, "issue": 7, "author": "ann", "case_id": "case-7",
-          "instruction": "check the VPN log first for this user"}
-    kw.update(over)
-    return feedback_lesson_row(**kw)
+def instructions(dsn: str, tenant_id: str) -> dict[str, Any]:
+    """The tenant's `feedback_instruction` items by comment id."""
+    return {k: i for k, i in work_of(dsn, tenant_id).items() if i.kind == KIND}
 
 
-def lesson(comment_id: int, body: str = "check the VPN log first") -> str:
-    """A lesson the feedback curator authored: cites its comment id like any lesson cites its source row."""
-    return S.lesson(str(comment_id), body=body)
+def lesson(comment_id: int) -> str:
+    """A lesson the feedback curator authored: cites its comment id under `source_finding_ids` like any lesson cites its source row."""
+    from defender.tests.support.learning.core._store1278 import lesson_citing
 
-
-@dataclass
-class FeedbackCurator(S.FakeCurator):
-    """`FakeCurator` whose self-report names the rows' comment ids (as strings) unless told otherwise."""
-
-    def __call__(self, rows: list[dict], batch_id: str, cfg: Any) -> dict:
-        saved = self.committed
-        self.committed = saved if saved is not None else [str(r["comment_id"]) for r in rows]
-        try:
-            return super().__call__(rows, batch_id, cfg)
-        finally:
-            self.committed = saved
-
-    def comment_ids(self) -> list[list[str]]:
-        """The comment ids each call was handed."""
-        return [[r["comment_id"] for r in c["rows"]] for c in self.calls]
-
-
-class FeedbackTrigger(CuratorTrigger):
-    """`CuratorTrigger` that also serves the feedback curator module with `feedback=`."""
-
-    def __init__(self, *, feedback: Any = None, **curators: Any) -> None:
-        super().__init__(**curators)
-        self.feedback = feedback
-
-    def __call__(self, paths: Any, state: Any, channel: Any, threshold_env: str, module_name: str,
-                 pending_label: str, *, batch: Any, **kw: Any) -> None:
-        if module_name != FEEDBACK_MODULE:
-            return super().__call__(paths, state, channel, threshold_env, module_name, pending_label,
-                                    batch=batch, **kw)
-        self.calls.append(module_name)
-        self.handed.append(dict(kw))
-        self.batches.append(batch)
-        self.paths_seen.append(paths)
-        if self.feedback is None:
-            return
-        mod = importlib.import_module(FEEDBACK_RUN)
-        box = kw.pop("box", None)
-        with draft_lane_trees(batch, AUTHOR_DRAFT_LANES) as trees:
-            cfg = mod.build_feedback_config(paths, state=state, trees=trees, box=box, batch=batch, **kw)
-            mod.run_batch(hold_committed=True, cfg=dataclasses.replace(cfg, invoke_agent=self.feedback), box=box)
-
-
-def feedback_scene(tmp_path: Path, *, rows: list[dict] | None = None,
-                   curator: FeedbackCurator | None = None, **cfg_overrides: Any) -> S.DraftScene:
-    """The feedback channel's tick over a draft lane (`build_questioner_draft_scene` for this channel)."""
-    mod = importlib.import_module(FEEDBACK_RUN)
-    lane = C.draft_lane(tmp_path)
-    S.seed(lane.paths, channel(), list(rows if rows is not None else [row()]))
-    fake = curator if curator is not None else FeedbackCurator()
-    base = mod.build_feedback_config(lane.paths, state=C.open_state(lane.paths), trees=C.draft_trees(lane),
-                                     manifest_seed=None, box=None, batch=lane.batch)
-    cfg = dataclasses.replace(base, invoke_agent=fake, **cfg_overrides)
-    return S.DraftScene(paths=lane.paths, cfg=cfg, channel=channel(), repo=lane.clone,
-                        corpus=lane.agent / "lessons", rows=rows or [], curator=fake,
-                        runner=mod.run_batch, base_sha=lane.base, lane=lane)
+    return lesson_citing(str(comment_id))
 
 
 def frames(prompt: str) -> list[tuple[str, str, str]]:

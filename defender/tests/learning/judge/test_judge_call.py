@@ -7,13 +7,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 import pytest
 
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.core._state1135 import env_state
-
-
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 
 
 def _run():
@@ -25,9 +19,9 @@ def _episode(tmp_path, **kw):
     return J.accepted_episode(tmp_path, **kw)
 
 
-def _grade(tmp_path, ep, judge, **kw):
+def _grade(tmp_path, ep, judge, store=None, **kw):
     J.grade_at(
-        ep, judge=judge, state=env_state(), **kw)
+        ep, judge=judge, store=store if store is not None else MemoryStore(), **kw)
     return judge
 
 
@@ -64,12 +58,13 @@ def test_921_pointer_resolving_nowhere_is_recorded_on_the_finding(tmp_path):
     filed = [*resolving, "the analyst simply never looked at the holding system",
              "https://example.invalid/runs/abc"]
     reply = J.as_reply_text(J.reply_doc(findings=[J.finding_doc(evidence=filed)]))
-    _grade(tmp_path, ep, J.FakeJudge(default=reply), draws=1)
+    store = MemoryStore()
+    _grade(tmp_path, ep, J.FakeJudge(default=reply), store, draws=1)
 
     finding = J.draw_doc(ep, "b", 0)["investigator_findings"][0]
     assert finding["contrast_evidence"] == filed, "the filed pointers were not recorded"
     assert _lanes(ep) == {"0": "defender"}, "the finding was dropped although a pair resolved"
-    row = next(r for r in J.enqueued_rows(J.judge_record(ep))
+    row = next(r for r in J.enqueued_rows(J.judge_record(ep), store)
                if r["finding_id"].endswith("/b/0/0"))
     assert row["citations"] == resolving, f"the row cites {row['citations']}"
     assert row["contrast_evidence"] == resolving
@@ -172,7 +167,7 @@ def test_921_no_model_authored_text_reaches_the_prompt_unframed(tmp_path):
         bodies={("deadbee", "defender/lessons/L1.md"): "MARKER-LESSON-BODY\n"})
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.grade_at(
-        ep, judge=judge, git_show=git_show, draws=1, state=env_state())
+        ep, judge=judge, git_show=git_show, draws=1, store=MemoryStore())
     prompt = judge.prompts[judge.agent_ids.index(f"judge:{T.fixture_world_id('b')}:0")]
 
     for what, marker in {**markers, "lesson": "MARKER-LESSON-BODY"}.items():

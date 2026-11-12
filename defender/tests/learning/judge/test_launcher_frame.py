@@ -1,24 +1,12 @@
 """#921 — where the judge runs, what it is triggered by, and what it leaves behind."""
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
-from defender.learning.core.config import LoopPaths
-from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, LearningState, StateRefused
-from defender.tests.support.learning.core._state1135 import env_state
-
-
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    """Point the learning-state root inside `tmp_path`; otherwise the production resolver
-    answers about the real one."""
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+from defender.learning.core.state import QUESTIONER_FINDINGS
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 
 
 _EMPTY: dict = {"rows": []}
@@ -33,6 +21,12 @@ def _launch_judge() -> J.FakeJudge:
     """A judge double answering in the launched family's own served systems (the fixture
     tenant serves `idp`, not the archived fixtures' `elastic`)."""
     return J.scripted_judge(default=J.as_reply_text(J.reply_doc(systems=["idp"])))
+
+
+@pytest.fixture
+def launcher_store(monkeypatch):
+    """The learning store the launcher's grade opens (#1278), as the in-memory stand-in this test reads back."""
+    return J.install_launcher_store(monkeypatch)
 
 
 def _launch(tmp_path, *, judge=None, spawn=None, **seams):
@@ -55,7 +49,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, **seams):
     return launched.rc, judge, launched.ep
 
 
-def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
+def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path, launcher_store):
     # A world finding citing a family-level plan pointer resolves under the launcher's minted
     # world ids; the default investigator finding cites fixed ids and would queue nothing.
     judge = J.scripted_judge(default=J.as_reply_text(J.reply_doc(
@@ -76,16 +70,15 @@ def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
     assert judge.calls == (len(graded) + 1) * grade["draws"]["configured"], (
         "one model call per world per draw plus one per-draw family call is the contract; the "
         "seam saw a different count")
-    # The launcher builds the episode tenant's own state; the ambient state-dir override is a
-    # decoy that must stay untouched.
-    tenant_learning = ep.parent.parent / "learning"
+    # The launcher inserts into the learning store for the episode's own tenant (#1278), not into any file queue.
     assert grade["world_enqueued_rows"] > 0, "positive control: the launcher queued no findings"
-    assert Path(grade["enqueued_to"]) == tenant_learning / FINDINGS.queue
-    assert Path(grade["world_enqueued_to"]) == tenant_learning / QUESTIONER_FINDINGS.queue
-    rows = [json.loads(line) for line in Path(grade["world_enqueued_to"]).read_text().splitlines()]
+    assert grade["enqueued_to"] == "the learning store (finding)"
+    assert grade["world_enqueued_to"] == "the learning store (questioner_finding)"
+    rows = launcher_store.rows(QUESTIONER_FINDINGS)
     assert len(rows) == grade["world_enqueued_rows"]
     assert all(row["run_id"] == ep.name for row in rows)
-    assert not (tmp_path / "learning-state" / QUESTIONER_FINDINGS.queue).exists()
+    assert set(launcher_store.items) == {ep.parent.parent.name}, (
+        "the rows were queued for a tenant other than the episode's own")
 
 
 def test_921_unaccepted_episodes_are_not_graded(tmp_path):
@@ -94,7 +87,7 @@ def test_921_unaccepted_episodes_are_not_graded(tmp_path):
     for outcome in ("accepted", "unusable", "refused", "incomplete"):
         ep = J.accepted_episode(tmp_path / outcome, outcome=outcome)
         judge = J.scripted_judge()
-        J.grade_at(ep, judge=judge, state=env_state())
+        J.grade_at(ep, judge=judge, store=MemoryStore())
         seen[outcome] = (judge.calls, (ep / "judge.yaml").is_file())
         if outcome != "accepted":
             record = J.judge_record(ep)
@@ -110,7 +103,7 @@ def test_921_unaccepted_episodes_are_not_graded(tmp_path):
     assert seen["incomplete"][0] == 0, "an episode with no outcome word reached the model"
 
 
-def test_921_the_trigger_reads_the_outcome_record_preflight_wrote(tmp_path):
+def test_921_the_trigger_reads_the_outcome_record_preflight_wrote(tmp_path, launcher_store):  # noqa: ARG001 — the launch needs a store to insert into
     import yaml
 
     rc, judge, ep = _launch(tmp_path)
@@ -129,12 +122,12 @@ def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
     ep = J.accepted_episode(tmp_path)
 
     first = J.scripted_judge()
-    J.grade_at(ep, judge=first, state=env_state())
+    J.grade_at(ep, judge=first, store=MemoryStore())
     assert first.calls > 0, "the control failed: the first pass never reached the model"
     before = (ep / "judge.yaml").read_text(encoding="utf-8")
 
     second = J.scripted_judge()
-    J.grade_at(ep, judge=second, state=env_state())
+    J.grade_at(ep, judge=second, store=MemoryStore())
     assert second.calls == 0, "a second grade ran over an episode already graded"
     assert (ep / "judge.yaml").read_text(encoding="utf-8") == before
 
@@ -142,7 +135,7 @@ def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
     (ep / "judge.yaml").write_text("\x00not: [a, family, grade", encoding="utf-8")
     third = J.scripted_judge()
     with pytest.raises(J.refusals()):
-        J.grade_at(ep, judge=third, state=env_state())
+        J.grade_at(ep, judge=third, store=MemoryStore())
 
 
 def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
@@ -153,7 +146,7 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
 
     with pytest.raises(J.refusals()):
         J.grade_at(
-            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
+            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), store=MemoryStore())
     assert outside.read_text(encoding="utf-8") == "untouched\n", (
         "the family record was written THROUGH an aliased target")
 
@@ -164,13 +157,13 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
     (draw_dir / "0.yaml").symlink_to(outside)
     with pytest.raises(J.refusals()):
         J.grade_at(
-            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
+            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), store=MemoryStore())
     assert outside.read_text(encoding="utf-8") == "untouched\n"
 
     # Positive control: with neither link the same grade lands both sinks as plain files, so
     # each refusal above was the link's, not the episode failing to open.
     (draw_dir / "0.yaml").unlink()
-    J.grade_at(ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
+    J.grade_at(ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), store=MemoryStore())
     assert (ep / "judge.yaml").is_file(), "control: the unlinked grade wrote no judge.yaml"
     assert not (ep / "judge.yaml").is_symlink(), "control: judge.yaml is not a plain file"
     assert outside.read_text(encoding="utf-8") == "untouched\n"
@@ -180,7 +173,7 @@ def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_c
     ep = J.accepted_episode(tmp_path)
 
     grade = J.grade_at(
-        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
+        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), store=MemoryStore())
     record = J.judge_record(ep)
     assert record["enqueued_rows"] == grade.enqueued_rows
     assert record["enqueued_rows"] > 0, "a gradable episode with findings enqueued nothing"
@@ -189,25 +182,19 @@ def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_c
     assert all(n > 0 for n in completed.values()), (
         "the family record does not carry a per-world completed-draw count")
 
-    # The ordering itself: an enqueue that cannot land leaves NO family record behind.
+    # The ordering itself: an enqueue that cannot land leaves NO family record behind. The store cannot be reached.
     ep2 = J.accepted_episode(tmp_path / "second")
-    queue_dir = tmp_path / "second" / "queue"
-    queue_dir.mkdir(parents=True, exist_ok=True)
-    # An enqueue that cannot land: the queue's holding folder is a regular file (a permission
-    # bit would not bind a root test runner).
-    (queue_dir / "_pending").write_text("not a directory", encoding="utf-8")
-    refused = LearningState.open(LoopPaths(repo_root=tmp_path / "second", state_dir=queue_dir))
-    # `StateRefused` is deliberately not an `OSError`, so it is not folded into `JudgeRefused`.
-    with pytest.raises((*J.refusals(), StateRefused)):
+    down = J.faultable_store(fail=("finding", "questioner_finding"))
+    with pytest.raises((*J.refusals(), ConnectionError)):
         J.grade_at(
             ep2, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-            state=refused)
+            store=down)
     states = {row["world"]: row.get("state") for row in J.judge_record(ep2)["worlds"]}
     assert "queued" not in states.values(), (
         f"a row whose append failed was committed `queued`: {states}")
     assert states.get("b") == "queueing", f"the failed commit is not on world b's row: {states}"
     with pytest.raises(J.refusals()) as rerun:
-        J.grade_at(ep2, judge=J.scripted_judge(), state=refused)
+        J.grade_at(ep2, judge=J.scripted_judge(), store=down)
     assert "queueing" in str(rerun.value), "the re-run did not refuse the uncommitted row"
 
 
@@ -225,7 +212,7 @@ def test_921_the_four_knobs_are_resolved_once_and_an_oversized_lead_is_truncated
         "x" * 4000 + "\nTAIL-OF-THE-OVERSIZED-LEAD\n", encoding="utf-8")
 
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    J.grade_at(ep, judge=judge, state=env_state())
+    J.grade_at(ep, judge=judge, store=MemoryStore())
 
     record = J.judge_record(ep)
     assert record["draws"]["configured"] == 2

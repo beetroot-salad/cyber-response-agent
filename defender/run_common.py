@@ -367,32 +367,35 @@ def enqueue_curation(
     if reason is not None:
         _logger.info(f"NOT enqueuing for curation: {reason}")
         return False
-    from defender.configuration import FatalConfigError
-    from defender.learning.core.config import LoopPaths
-    from defender.learning.core.state import LearningState, StateRefused
+    import os
+
+    from defender.learning.store import blocking
 
     address = RunAddress(tenant_id=TenantId(run.tenant_id), run_id=run.id)
-    # Reading the alert is inside the guard too: a moved alert must not fail the run. So is the
-    # state tree: a refused entry or a missing root costs this request, never the investigation.
+    # Reading the alert is guarded: a moved alert must not fail the run. So is the learning store
+    # (#1278): one it cannot reach, or that refuses the request (the tenant is not active, the
+    # request holds what it can never hold), costs this request, never the investigation.
     try:
         record = formats.read_record(RunPaths(run_dir).alert_record)
         if record is None:
             raise OSError("the run's record vanished")
         case_id = case_ref_of_digest(record.digest)
-        with LearningState.open(LoopPaths.for_tenant(tenant)) as state:
-            state.enqueue_curation(
-                case_id, {"case_id": case_id, "tenant_id": str(address.tenant_id),
-                          "run_id": str(address.run_id)})
-    except OSError as e:
-        _logger.error(f"NOT enqueuing for curation: could not write the request: {e}")
+    except (OSError, ValueError) as e:
+        _logger.error(f"NOT enqueuing for curation: could not read the run's record: {e}")
         return False
-    except StateRefused as refused:
-        _logger.error(f"NOT enqueuing for curation: could not enqueue the request, refused "
-                      f"{refused.record}: {refused.reason}")
+    variable = tenancy.database_address_variable()
+    dsn = os.environ.get(variable, "")
+    if not dsn:
+        _logger.error(f"NOT enqueuing for curation: {variable} is not set, so the learning store "
+                      "cannot be reached")
         return False
-    except (FatalConfigError, TenantRefused) as config_error:
-        _logger.error(f"NOT enqueuing for curation: could not enqueue the request: "
-                      f"{config_error}")
+    try:
+        with blocking(dsn) as store:
+            store.enqueue_request(
+                str(address.tenant_id), str(address.run_id), case_id,
+                {"case_id": case_id, "tenant_id": str(address.tenant_id), "run_id": str(address.run_id)})
+    except Exception as failed:  # noqa: BLE001 — a request that cannot be filed costs only itself
+        _logger.error(f"NOT enqueuing for curation: the learning store did not take the request: {failed!r}")
         return False
     return True
 
@@ -424,7 +427,6 @@ def _enqueue_feedback_issue(
     (`unsandboxed_ok`: a contract test asks for a request from a run with no box, an open human
     decision on PR #1463). A run that ended silently opens nothing."""
     from defender.investigation import ticket_writer
-    from defender.investigation.record_query import captured_lookups
     from defender.tenancy import feedback_setting
 
     accepted = tenant.tenant
@@ -453,9 +455,18 @@ def _enqueue_feedback_issue(
                                         closed_before_cut=closed_before_cut)
     if outcome not in listed:
         return False
-    from defender.configuration import FatalConfigError
-    from defender.learning.core.config import LoopPaths
-    from defender.learning.core.state import LearningState, StateRefused
+    return _file_feedback_request(run, outcome, run_state)
+
+
+def _file_feedback_request(run: Run, outcome: str, run_state: Any) -> bool:
+    """File the run's open-issue request in the learning store (#1278 A4 F1), as `enqueue_curation` files its
+    request. Reading the run's record is guarded, and so is the store: one it cannot reach, or that refuses the
+    request (the tenant is not active, the request holds what it can never hold), costs this request, never the
+    investigation or its curation."""
+    import os
+
+    from defender.investigation.record_query import captured_lookups
+    from defender.learning import store as learning_store
 
     try:
         record = formats.read_record(RunPaths(run.run_dir).alert_record)
@@ -463,14 +474,25 @@ def _enqueue_feedback_issue(
             raise OSError("the run's record vanished")
         case_id = case_ref_of_digest(record.digest)
         lookups = captured_lookups(run_state) if run_state is not None else []
-        with LearningState.open(LoopPaths.for_tenant(accepted)) as state:
-            state.enqueue_feedback_issue(case_id, {
-                "case_id": case_id, "tenant_id": str(run.tenant_id), "run_id": str(run.id),
-                "outcome": outcome, "lookups": lookups})
-    except (OSError, StateRefused, FatalConfigError, TenantRefused) as failed:
-        _logger.error(f"NOT enqueuing a feedback issue: could not write the request: {failed}")
+    except (OSError, ValueError, TenantRefused) as failed:
+        _logger.error(f"NOT enqueuing a feedback issue: could not read the run's record: {failed}")
         return False
-    return True
+    variable = tenancy.database_address_variable()
+    dsn = os.environ.get(variable, "")
+    if not dsn:
+        _logger.error(f"NOT enqueuing a feedback issue: {variable} is not set, so the learning store cannot be "
+                      "reached")
+        return False
+    try:
+        with learning_store.blocking(dsn) as store:
+            filed = store.enqueue_feedback_issue(str(run.tenant_id), str(run.id), case_id, outcome=outcome,
+                                                 lookups=lookups)
+    except Exception as failed:  # noqa: BLE001 — a request that cannot be filed costs only itself
+        _logger.error(f"NOT enqueuing a feedback issue: the learning store did not take the request: {failed!r}")
+        return False
+    if not filed:
+        _logger.info(f"NOT enqueuing a feedback issue: run {run.id} is already filed")
+    return bool(filed)
 
 
 # -- run setup's host half (#1342 M3, #1170 A6) -----------------------------------------------------

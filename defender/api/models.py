@@ -346,7 +346,7 @@ class TenantItem(BaseModel):
 
     tenant_id: TenantId
     state: Literal["creating", "active", "offboarding", "offboarded"]
-    pending_action: Literal["create", "rotate", "offboard", "delete_repo"] | None
+    pending_action: Literal["create", "rotate", "offboard", "delete_repo", "learning_cutover"] | None
     step: str | None
     step_actor: Literal["service", "host"] | None
     failure: str | None

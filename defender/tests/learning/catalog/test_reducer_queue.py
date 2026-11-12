@@ -18,18 +18,13 @@ from pathlib import Path
 
 import pytest
 
-from defender.learning.core import persist
-from defender.learning.core.config import LoopPaths
 from defender.learning.leads import pitfalls_curator
 from defender.systems.verbs import is_system_name
 from defender.tests.support.learning.core._declared870 import (
     PITFALLS_SECTION,
     Spawn,
-    consumed_by_id,
-    graveyard_by_id,
     pitfall_row,
 )
-from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.runtime.engine._declared869 import write_adapter
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
@@ -55,19 +50,19 @@ from defender.tests.support.learning.core._declared870 import (
     shim_lead,
     shim_row,
 )
-from defender.learning.core import drains
-from defender.learning.core.config import pitfalls_threshold
 from defender.tests.support.learning.core._declared870 import (
     REDUCER_REL,
     curate_agent_execution_md,
-    queue_ids,
     reducer_surface_text,
     seed_agent_files,
     seed_product,
     silent_shim_row,
 )
-from defender.tests.support.learning.curation._curator1134 import open_state
 from defender import _git
+from defender.learning.store import Outcome
+from defender.tests.support.learning.core._declared870 import Claim, lead_wakes, pitfall_items, queue_pitfalls, tick
+from defender.tests.support.learning.core._store1278 import migrated_database, world  # noqa: F401 — fixtures
+from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.tests.support.learning.core._declared870 import (
     PRODUCT_REDUCER_REL,
@@ -93,35 +88,39 @@ def _curate_execution_md(system: str):
 
 
 @pytest.fixture
-def paths(tmp_path: Path) -> LoopPaths:
-    """State only — `_graveyard_dropped_rows` writes beside the queue and reads no tree."""
-    return LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
+def lane(tmp_path: Path, monkeypatch):
+    """A batch draft of the tenant declaring `elastic` (a marker and an adapter), over a product checkout."""
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    product = tmp_path / "product"
+    write_adapter(product, "elastic")
+    return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files={
+        "skills/elastic/execution.md": "# execution\n",
+        "skills/gather/defender-sql.pitfalls.md": ADDON.read_text(encoding="utf-8"),
+    })
 
 
-def _reason(paths, row: dict) -> str:
-    """Retire one row through the real appender and classifier and read back the reason it filed
-    under. Read with `.get`, so an unfiled row fails the caller's comparison, not a `KeyError` here.
-    """
-    persist.append_pitfalls([row], state=_state1135.state_for_paths(paths))
-    rows = persist.read_pitfalls(_state1135.state_for_paths(paths))
-    pitfalls_curator._graveyard_dropped_rows(_state1135.state_for_paths(paths), rows, [row["pitfall_id"]])
-    entry = graveyard_by_id(paths).get(row["pitfall_id"], {})
-    return str(entry.get("deadletter_reason"))
+def _fate(lane, row: dict):
+    """Run one real tick over a claim holding only `row` and read the fate the dropped row took (`None` if it took none, so
+    an undecided row fails the caller's comparison, not a `KeyError` here)."""
+    claim = Claim()
+    claim.add(row)
+    assert tick(lane, Spawn(None), claim) == 0
+    return claim.outcomes.get(("pitfall", row["pitfall_id"]))
 
 
-def test_a_systemless_row_retires_as_no_system(paths):
-    assert _reason(paths, pitfall_row("r:l-000:0", "")) == "no-system"
+def test_a_systemless_row_retires_as_no_system(lane):
+    assert _fate(lane, pitfall_row("r:l-000:0", "")) == Outcome.skipped("no-system")
 
 
-def test_a_malformed_name_retires_as_malformed_system(paths, tmp_path, monkeypatch):
+def test_a_malformed_name_retires_as_malformed_system(lane):
     for i, malformed in enumerate(("../evil", "a\\b", ".hidden", "a\x00b")):
         assert is_system_name(malformed) is False, malformed
-        assert _reason(paths, pitfall_row(f"m:l-00{i}:0", malformed)) == "malformed-system"
+        assert _fate(lane, pitfall_row(f"m:l-00{i}:0", malformed)) == Outcome.skipped("malformed-system")
 
     # Whitespace is stripped before the shape check, so this row is `no-system` under either
     # alphabet; the probe only keeps that traceable.
     assert is_system_name("   ") is False, "the name alphabet admits whitespace"
-    assert _reason(paths, pitfall_row("w:l-000:0", "   ")) == "no-system"
+    assert _fate(lane, pitfall_row("w:l-000:0", "   ")) == Outcome.skipped("no-system")
 
     # Outside the alphabet: two homoglyphs, and the uppercase spelling #914 moved out.
     for i, outside in enumerate(("\u0435lastic", "\uff45lastic", "Elastic")):
@@ -129,43 +128,26 @@ def test_a_malformed_name_retires_as_malformed_system(paths, tmp_path, monkeypat
             f"the name alphabet admits {outside!r}, so it reads as an onboarding miss, "
             f"not as attacker-shaped"
         )
-        assert _reason(paths, pitfall_row(f"u:l-00{i}:0", outside)) == "malformed-system"
+        assert _fate(lane, pitfall_row(f"u:l-00{i}:0", outside)) == Outcome.skipped("malformed-system")
 
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    # The lane writes a batch draft carrying the declared system's marker and the pitfalls
-    # add-on; adapters stay in the product checkout.
-    product = tmp_path / "product"
-    write_adapter(product, "elastic")
-    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files={
-        "skills/elastic/execution.md": "# execution\n",
-        "skills/gather/defender-sql.pitfalls.md": ADDON.read_text(encoding="utf-8"),
-    })
-    inert = LoopPaths(repo_root=product, state_dir=tmp_path / "state-inert")
+
+def test_a_row_with_no_id_is_dead_at_once_and_does_not_hold_back_the_taught_one(lane):
+    """An id-less row cannot be addressed: it is dead, and the keyed row beside it is taught and reported committed."""
     idless = {k: v for k, v in pitfall_row("x:l-000:0", "elastic").items() if k != "pitfall_id"}
-    persist.append_pitfalls([idless, pitfall_row("k:l-000:0", "elastic")], state=_state1135.state_for_paths(inert))
-    assert len(persist.merge_pitfalls(persist.read_pitfalls(_state1135.state_for_paths(inert)))) == 2, (
-        "an id-less row stopped counting toward the threshold arithmetic"
-    )
+    keyed = pitfall_row("k:l-000:0", "elastic")
+    claim = Claim()
+    claim.items = lambda: [("pitfall", "k:l-000:0", keyed), ("pitfall", "digest-key", idless)]  # the store keys an id-less row by its digest
 
-    # The spawn's `repo_root` is the draft root.
-    assert pitfalls_curator.run_pitfalls(
-        paths=inert, invoke=Spawn(_curate_execution_md("elastic")), trees=C.draft_trees(lane),
-        batch=lane.batch,
-    ) == 0
-    survivors = persist.read_pitfalls(_state1135.state_for_paths(inert))
-    assert [r.get("pitfall_id") for r in survivors] == [None], (
-        "the id-less row no longer survives the tick untouched (recorded, not demanded: "
-        "changing it is a decision, not a fix)"
-    )
-    assert "k:l-000:0" in consumed_by_id(inert)
-    assert graveyard_by_id(inert) == {}
+    assert tick(lane, Spawn(_curate_execution_md("elastic"), root=Path(lane.batch.draft_root)), claim) == 0
+
+    assert claim.committed == {"k:l-000:0"}
+    assert claim.outcomes == {("pitfall", "digest-key"): Outcome.dead("row carries no value under 'pitfall_id'")}
 
 
-def test_an_undeclared_name_retires_naming_itself(paths):
-    assert _reason(paths, pitfall_row("r:l-001:0", "newsys")) == "undeclared-system:newsys"
-    assert _reason(paths, pitfall_row("r:l-002:0", "alsomissing")) == (
-        "undeclared-system:alsomissing"
-    ), "the one false string all three classes shared survived"
+def test_an_undeclared_name_retires_naming_itself(lane):
+    assert _fate(lane, pitfall_row("r:l-001:0", "newsys")) == Outcome.skipped("undeclared-system:newsys")
+    assert _fate(lane, pitfall_row("r:l-002:0", "alsomissing")) == Outcome.skipped(
+        "undeclared-system:alsomissing"), "the one false string all three classes shared survived"
 
 
 RUN = Path("reviewer-measure-0807-b")
@@ -263,144 +245,94 @@ def test_no_model_supplied_query_id_reaches_the_reducer_surface():
 
 
 @pytest.fixture
-def scene(tmp_path: Path):
-    """The tenant draft (elastic's marker and skill, `gather`, the reducer add-on, no catalog)
-    over a product checkout declaring the elastic and cmdb adapters; `paths` the lane's
-    learning paths (product-rooted)."""
+def threshold_lane(tmp_path: Path):
+    """The tenant draft (elastic's marker and skill, `gather`, the reducer add-on, no catalog) over a product checkout
+    declaring the elastic and cmdb adapters."""
     product = seed_product(tmp_path, adapters=("elastic", "cmdb"))
-    files = seed_agent_files(markers=("elastic",), skills=("elastic",), catalog=(),
-                             non_systems=("gather",))
+    files = seed_agent_files(markers=("elastic",), skills=("elastic",), catalog=(), non_systems=("gather",))
     files[REDUCER_REL.removeprefix("agent/")] = reducer_surface_text()
-    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=files)
-    return lane, lane.paths
+    return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=files)
 
 
-def _run(lane, invoke: Spawn) -> int:
-    """`run_pitfalls` over the lane's draft (its held `skills/` mount and its batch)."""
-    with C.draft_trees(lane) as trees:
-        return pitfalls_curator.run_pitfalls(paths=lane.paths, invoke=invoke, trees=trees,
-                                             batch=lane.batch)
-
-
-def _tick(lane) -> Spawn:
-    """One tick with a curator that declines to edit, so what is observed is the gate (was the
-    curator reached at all), never what the curator then did."""
-    spawn = Spawn(None)
-    assert _run(lane, spawn) == 0
-    assert spawn.calls, "the tick gate refused the batch — the curator was never spawned"
-    return spawn
+def _offer(threshold_lane, w, spawn: Spawn) -> Claim:
+    """One tick over the draft, handed the store's waiting pitfalls as its claim."""
+    claim = Claim()
+    claim.rows = [i.payload for i in pitfall_items(w).values() if i.status == "waiting"]
+    assert tick(threshold_lane, spawn, claim) == 0
+    assert spawn.calls, "the curator was never spawned for the claim"
+    return claim
 
 
 # The arrival condition.
 
 
-def test_the_threshold_gates_on_a_records_own_occurrences(scene, monkeypatch):
+@pytest.mark.postgres
+def test_the_threshold_counts_distinct_reducer_mistakes_not_a_records_own_occurrences(world, threshold_lane, monkeypatch):  # noqa: F811 — the imported fixture
+    """Strict rule, no reducer route (#1278 ruling): three occurrences of one reducer mistake are one mistake and do not wake the lane at
+    threshold 3; three distinct reducer mistakes do, and the curator is handed all three records."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
-    lane, paths = scene
-    persist.append_pitfalls([shim_row(f"r:l-003:{i}") for i in range(3)], state=open_state(paths))
+    queue_pitfalls(world, *[shim_row(f"r:l-003:{i}") for i in range(3)])
+    assert lead_wakes(world) is False, "three rows of one reducer mistake woke the drain"
 
-    records = persist.merge_pitfalls(persist.read_pitfalls(open_state(paths)))
-    assert len(records) == 1, "the three shim rows did not merge to one record"
-    assert records[0]["occurrences"] == 3
-    assert len(records) < pitfalls_threshold(), (
-        "the record-counting reading no longer refuses this batch, so the test is vacuous"
-    )
-
-    assert drains._has_lead_author_work(open_state(paths)) is True, "the drain never wakes for it"
-    assert by_surface(_tick(lane).handoffs)["reducer"], "the tick gate refused it"
+    queue_pitfalls(world, shim_row("r:l-004:0", digest="exit=1; a second error"), shim_row("r:l-005:0", digest="exit=1; a third error"))
+    assert lead_wakes(world) is True, "the drain never wakes for three distinct reducer mistakes"
+    spawn = Spawn(None)
+    _offer(threshold_lane, world, spawn)
+    [reducer] = by_surface(spawn.handoffs)["reducer"]
+    assert sorted(f["occurrences"] for f in reducer["failures"]) == [1, 1, 3]
 
 
-def test_the_motivating_incident_reaches_the_curator_alone(scene, monkeypatch):
+@pytest.mark.postgres
+def test_the_motivating_incident_reaches_the_curator_alone(world, threshold_lane, monkeypatch):  # noqa: F811 — the imported fixture
+    """Eight failed reduces of one diagnosis are one mistake and wake nothing alone at threshold 3; with two more distinct reducer
+    mistakes the lane wakes and the curator is handed the reducer surface alone, the eight-occurrence record first."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
-    lane, paths = scene
-    persist.append_pitfalls(
-        collect_general_failures(
-            [shim_lead(sql=f"SELECT unnest(data, {i})", query_index=i) for i in range(8)],
-            Path("reviewer-measure-0807-b"), catalog=[],
-        ),
-        state=open_state(paths),
-    )
-    records = persist.merge_pitfalls(persist.read_pitfalls(open_state(paths)))
-    assert [r["occurrences"] for r in records] == [8], "the eight reduces did not merge to one"
-    assert records[0]["system"] == ""
+    queue_pitfalls(world, *collect_general_failures(
+        [shim_lead(sql=f"SELECT unnest(data, {i})", query_index=i) for i in range(8)],
+        Path("reviewer-measure-0807-b"), catalog=[]))
+    assert lead_wakes(world) is False, "eight reduces of one diagnosis woke the drain"
 
-    assert drains._has_lead_author_work(open_state(paths)) is True
-    spawn = _tick(lane)
+    queue_pitfalls(world, shim_row("r:l-004:0", digest="exit=1; a second error"), shim_row("r:l-005:0", digest="exit=1; a third error"))
+    assert lead_wakes(world) is True
+    spawn = Spawn(None)
+    _offer(threshold_lane, world, spawn)
     assert [e["surface"] for e in spawn.handoffs] == ["reducer"]
     assert spawn.handoffs[0]["failures"][0]["occurrences"] == 8
 
 
-def test_silent_reducer_failures_alone_do_not_open_the_lane(scene, monkeypatch):
+@pytest.mark.postgres
+def test_silent_reducer_failures_alone_do_not_open_the_lane(world, threshold_lane, monkeypatch):  # noqa: F811 — the imported fixture
+    """Two content-less failures are below threshold 3 and never wake the threshold_lane; six more (eight distinct records, each
+    worth one occurrence) clear it by count, and the tick that is only offered them leaves them all waiting."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
-    lane, paths = scene
-    below = [silent_shim_row(f"r:l-00{i}:0") for i in range(2)]
-    persist.append_pitfalls(below, state=open_state(paths))
+    queue_pitfalls(world, *[silent_shim_row(f"r:l-00{i}:0") for i in range(2)])
+    assert lead_wakes(world) is False, "silent noise woke the drain"
 
-    records = persist.merge_pitfalls(persist.read_pitfalls(open_state(paths)))
-    assert len(records) == 2, "the two silent rows did not merge to two distinct records"
-    assert {r["occurrences"] for r in records} == {1}
-    assert drains._has_lead_author_work(open_state(paths)) is False, "silent noise woke the drain"
-    shut = Spawn(None)
-    assert _run(lane, shut) == 0
-    assert shut.calls == [], "silent noise alone reached the curator"
-    assert queue_ids(paths) == [r["pitfall_id"] for r in below]
-
-    # Above threshold the count of distinct records clears it while every record is still worth
-    # one occurrence, so the occurrences disjunct cannot be what fired.
-    persist.append_pitfalls(
-        [silent_shim_row(f"r:l-01{i}:0") for i in range(6)], state=open_state(paths),
-    )
-    records = persist.merge_pitfalls(persist.read_pitfalls(open_state(paths)))
-    assert len(records) == 8
-    assert max(r["occurrences"] for r in records) == 1, (
-        "content-less digests accumulated into one record, so this test's premise is gone"
-    )
-    assert drains._has_lead_author_work(open_state(paths)) is True, (
-        "the distinct-count gate no longer opens on this batch"
-    )
+    queue_pitfalls(world, *[silent_shim_row(f"r:l-01{i}:0") for i in range(6)])
+    assert lead_wakes(world) is True, "the distinct-count gate no longer opens on this batch"
     offered = Spawn(None)
-    assert _run(lane, offered) == 0
-    assert offered.calls, "the tick gate refused a batch its own count clears"
+    claim = _offer(threshold_lane, world, offered)
     assert [e["surface"] for e in offered.calls[-1]["handoffs"]] == ["reducer"]
-    assert len(queue_ids(paths)) == 8, (
-        "the undiagnosable batch was consumed on the tick it was only offered"
-    )
-    assert graveyard_by_id(paths) == {}
+    assert claim.committed == set(), "the undiagnosable batch was decided on the tick it was only offered"
+    assert claim.outcomes == {}, "the undiagnosable batch was decided on the tick it was only offered"
+    assert {i.status for i in pitfall_items(world).values()} == {"waiting"}
+    assert len(pitfall_items(world)) == 8
 
 
-def test_the_system_lane_still_curates_at_its_own_threshold(scene, monkeypatch):
+@pytest.mark.postgres
+def test_the_system_lane_still_curates_at_its_own_threshold(world, threshold_lane, monkeypatch):  # noqa: F811 — the imported fixture
+    """One row for each of elastic, cmdb and the reducer sits exactly on threshold 3: the threshold_lane wakes and the curator is
+    handed the two systems and the reducer entry."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
-    lane, paths = scene
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "elastic"),
-         pitfall_row("r:l-001:0", "cmdb"),
-         shim_row("r:l-003:0")],
-        state=open_state(paths),
-    )
-    records = persist.merge_pitfalls(persist.read_pitfalls(open_state(paths)))
-    assert len(records) == 3, "the fixture no longer sits exactly on the count boundary"
-    assert max(r["occurrences"] for r in records) == 1, (
-        "some record clears the new disjunct on its own, so this says nothing about the count"
-    )
+    queue_pitfalls(world, pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "cmdb"), shim_row("r:l-003:0"))
 
-    assert drains._has_lead_author_work(open_state(paths)) is True, (
-        "the wake gate stopped counting the reducer record, so the system rows never even "
-        "reach a tick"
-    )
+    assert lead_wakes(world) is True, "the wake gate stopped counting the reducer record, so the system rows never reach a tick"
     spawn = Spawn(curate_agent_execution_md("elastic"))
-    assert _run(lane, spawn) == 0
-    assert spawn.calls, "the tick gate refused a batch that clears its own count"
-    # Read shape-independently: whether the system lane curates is a question about the gate,
-    # not about the `surface` key.
-    assert sorted(
-        str(h["system"]) for h in spawn.calls[-1]["handoffs"] if h.get("system")
-    ) == ["cmdb", "elastic"], "the system lane stopped curating at its own threshold"
-    assert by_surface(spawn.handoffs)["reducer"], (
-        "the reducer entry vanished from the mixed batch"
-    )
+    _offer(threshold_lane, world, spawn)
+    assert sorted(str(h["system"]) for h in spawn.calls[-1]["handoffs"] if h.get("system")) == ["cmdb", "elastic"], \
+        "the system threshold_lane stopped curating at its own threshold"
+    assert by_surface(spawn.handoffs)["reducer"], "the reducer entry vanished from the mixed batch"
 
-
-# The routing decision, at the shape seam.
 
 
 def test_an_attributed_shim_row_is_never_taught_as_a_systems_mistake():
@@ -472,9 +404,7 @@ def _curate(lane: C.DraftLane, text: str, monkeypatch) -> int | BaseException:
     """One REAL pitfalls tick at threshold 2 (two distinct reducer mistakes queued), the spawn
     faked as writing `text` over the add-on in the draft. Returns rc, or the refusal raised."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    state = C.open_state(lane.paths)
-    persist.append_pitfalls([shim_row("r:l-003:0"),
-                             shim_row("r:l-004:0", digest="exit=1; Parser Error: x")], state=state)
+    rows = [shim_row("r:l-003:0"), shim_row("r:l-004:0", digest="exit=1; Parser Error: x")]
 
     def agent(handoffs, **_kw):
         assert [h.get("surface") for h in handoffs] == ["reducer"]
@@ -482,9 +412,9 @@ def _curate(lane: C.DraftLane, text: str, monkeypatch) -> int | BaseException:
         return 0
 
     try:
-        return pitfalls_curator.run_pitfalls(paths=lane.paths, state=state,
-                                             trees=C.draft_trees(lane), batch=lane.batch,
-                                             invoke=agent)
+        return pitfalls_curator.run_pitfalls(paths=lane.paths, trees=C.draft_trees(lane), batch=lane.batch, invoke=agent,
+                                             items=[("pitfall", r["pitfall_id"], r) for r in rows], outcomes={},
+                                             on_curated=lambda _d: None)
     except LeadAuthorError as refused:
         return refused
 

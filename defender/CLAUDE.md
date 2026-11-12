@@ -34,6 +34,36 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1278
+
+A tenant's learning work (queued findings, pitfalls and requests, the batches that author lessons, the commit-maker's
+record) lives in the `learning` schema of PostgreSQL; nothing reads the tenant's `<data root>/<T>/learning/` folder any
+more. Each existing tenant moves once, by a lifecycle job (like a credential rotation), in this order:
+
+1. Stop the workers and the learning drains of the host, then run migrations (revisions `0013_learning_store` and
+   `0014_learning_cutover_action`). Until a tenant is cut over its old queues are not read, so its learning looks
+   empty: nothing is lost, and nothing new is drawn from the old files.
+2. For each active tenant with nothing pending: `python -m defender.lifecycle request-learning-cutover --tenant <T>` (or
+   `--all`). With the lifecycle
+   (`python -m defender.lifecycle serve`) running, its host actor works the job under the tenant's exclusive host lock
+   (a worker still holding the lock fails the step, naming it, until it is free):
+   - `import`: reads the old queues, ledgers, dead-letter and stuck records, retained deliveries and the commit
+     record, and the tenant's open learning PRs from the forge, and writes them to the store in ONE transaction. A
+     record it will not guess (an unknown ledger category, two open authoring batches on one lane, a NUL character,
+     a feedback record) or an unreachable store writes nothing and touches no file.
+   - `cutover`: only after the import committed. It moves the batch worktrees to the tenant's scratch location and
+     removes the whole `learning/` folder (queues, ledgers, markers, locks, curator traces: those have no batch to
+     attach to and are discarded).
+3. Watch `GET /admin/tenants/<T>`: `pending_action` is `learning_cutover` at step `import`, then `cutover`, then the
+   tenant is `active` with nothing pending and no failure. A failure names the step and the record; fix it (remove or
+   repair the offending file) and `POST /admin/tenants/<T>/resume`: the job restarts at the failed step. A failed
+   `cutover` is not imported again.
+
+It is one-way: after the cutover the folder is gone and nothing recreates it, so keep a backup of
+`<data root>/<T>/learning/` first if the old state matters. Asking again for a tenant that is already cut over changes
+nothing. Findings held from a PR merged before the cutover import as waiting and are retired by the corpus check on the
+next tick. Other tenants' jobs are independent: one tenant's refused import does not stop another's.
+
 ## Upgrade from before #1454
 
 Programs (#1307) now have their own table, `identity.programs`; users and memberships are people only. Run migrations

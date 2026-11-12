@@ -6,7 +6,6 @@ from defender.tests.support.shared._locations_1210 import location_path
 import uuid
 import threading
 
-import json
 import logging
 import os
 from contextlib import contextmanager
@@ -15,6 +14,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
@@ -176,12 +177,14 @@ def _steps(episode_dir: Path) -> list[str]:
         return [row["step"] for row in timing.read_stage_timings(bound) or []]
 
 
+@pytest.mark.postgres
 def test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     """Through the launcher: after the siblings ran, `<ep>/runs` became a link to a folder
     holding every finished arm. VERIFY never follows it: every world is `not archived` (its
     `RunRefused`, or the container's `TenantRefused`, caught too), the launch returns a status
     and the judge step is still reached. Control: a clean launch archives and grades."""
+    P.reach_launch_store(migrated_database, monkeypatch)  # the judge pass inserts into the learning store (#1278)
     est, src = P.launch_source(tmp_path)
     outside = tmp_path / "outside-the-episode"
     outside.mkdir()
@@ -217,14 +220,12 @@ def test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged(
     assert clean.judge.prompts
 
 
-def _queued(paths: Any, case_id: str) -> dict | None:
-    row = Path(location_path(paths.state_root)) / "author-queue" / f"{case_id}.json"
-    return json.loads(row.read_text(encoding="utf-8")) if row.is_file() else None
-
-
-def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt(
-        tmp_path, monkeypatch):
-    monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "2")
+def test_b_a_run_that_is_gone_is_dead_and_a_row_that_cannot_be_reached_right_now_waits(tmp_path):
+    """#1278 update: a run that is gone (or that the tenant never held) is dead at once (`artifact-missing`), as before. A
+    row whose run cannot be opened right now (a linked folder) was a counted transient attempt, quarantined at
+    `LEAD_AUTHOR_MAX_RETRIES`; it is now a request that waits: the store stamps the attempt at claim and holds the item at
+    its ceiling (design D8, `store_1278/test_store_1278.py::test_d8_*`), so the drain never decides it dead. The variable
+    is read nowhere any more."""
     r1, linked, nope, only_in_u = (str(uuid.uuid4()) for _ in range(4))
     t = _uuid_tenant(r1)
     _uuid_tenant(r1, only_in_u, tenant_id=H.U_ID)  # `crossed` names a run only this other tenant holds
@@ -256,20 +257,20 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
         letter = P.dead_letter(paths, case_id)
         assert letter is not None, f"{case_id}: {letter!r}"
         assert letter.get("failed") == "artifact-missing", f"{case_id}: {letter!r}"
+        assert not P.still_queued(paths, case_id)
     for case_id in transient:
         assert P.dead_letter(paths, case_id) is None, (
             f"{case_id} was dead-lettered at once: {P.dead_letter(paths, case_id)!r}")
-        row = _queued(paths, case_id)
-        assert row is not None, f"{case_id} was not re-queued"
-        assert row.get("attempts") == 1, f"{case_id}: {row!r}"
+        assert P.fate_name(paths, case_id) == "waiting", f"{case_id} was not left waiting"
 
-    P.drain(paths, P.Lane())
-    for case_id in transient:
-        letter = P.dead_letter(paths, case_id)
-        assert letter is not None, f"{case_id} was not quarantined at the retry ceiling"
-        assert str(letter.get("failed", "")).startswith("transient-exhausted"), (
-            f"{case_id}: {letter!r}")
-        assert not P.still_queued(paths, case_id)
+    # Every tick hands the waiting row again and never decides it dead; the ceiling is the store's.
+    for _ in range(3):
+        again = P.Lane()
+        P.drain(paths, again)
+        assert again.run_dirs == []
+        for case_id in transient:
+            assert P.dead_letter(paths, case_id) is None
+            assert P.still_queued(paths, case_id)
 
 
 class _Box:
@@ -295,9 +296,7 @@ def published(tmp_path, data_root):
 def _tenant_paths(t: Any, tmp_path: Path) -> Any:
     from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo
 
-    paths = drain_paths(t, product_repo(tmp_path))
-    Path(location_path(paths.state_root)).mkdir(parents=True, exist_ok=True)
-    return paths
+    return drain_paths(t, product_repo(tmp_path))
 
 
 def _tick(t: Any, paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> int:
@@ -315,16 +314,15 @@ def _tick(t: Any, paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> i
         stop_box=lambda *_a, **_k: None)
 
 
-def test_c_a_pitfalls_only_tick_needs_no_data_root(published, tmp_path, monkeypatch):
+@pytest.mark.postgres
+def test_c_a_pitfalls_only_tick_needs_no_data_root(published, tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     """With `DEFENDER_DATA_ROOT` unset, a tick with only pitfalls work still starts its box and
-    reaches pitfalls."""
-    from defender.learning.core import persist
-    from defender.tests.support.learning.core._state1135 import state_for_paths
+    reaches pitfalls (the pitfall is a row of the learning store, #1278)."""
+    from defender.tests.support.runtime.engine._declared869 import pitfall_row
 
     paths = _tenant_paths(published, tmp_path)
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls([{"pitfall_id": "r:0", "system": "elastic"}],
-                            state=state_for_paths(paths))
+    P.store_tick_scene(migrated_database, monkeypatch, published.tenant_id)
+    P.file_pitfall(migrated_database, published.tenant_id, pitfall_row("r:0", "elastic"))
     monkeypatch.delenv(P.DATA_ROOT_ENV)
     pitfalls: list[str] = []
     box = _Box()
@@ -336,21 +334,24 @@ def test_c_a_pitfalls_only_tick_needs_no_data_root(published, tmp_path, monkeypa
     assert lane.handed == []
 
 
+@pytest.mark.postgres
 def test_c_a_tenant_tick_serves_its_rows_from_its_own_root_without_the_env(
-        published, tmp_path, monkeypatch):
+        published, tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     """A drain is tenant-selected, so a queued row's run is rehydrated under that tenant's own
     data root: with `DEFENDER_DATA_ROOT` unset, the row is still served."""
     t = published
     H.make_run(H.runs_folder(t.tenant), RID_R1)
     paths = _tenant_paths(t, tmp_path)
-    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": t.tenant_id, "run_id": RID_R1})
+    P.store_tick_scene(migrated_database, monkeypatch, t.tenant_id)
+    P.file_request(migrated_database, t.tenant_id, "case-t", {"case_id": "case-t", "tenant_id": t.tenant_id, "run_id": RID_R1})
     monkeypatch.delenv(P.DATA_ROOT_ENV)
     box = _Box()
     lane = P.Lane()
     assert _tick(t, paths, lane=lane, pitfalls=[], box=box) == 0
     assert box.started, "the tick never started its box"
     assert lane.run_dirs == [Path(location_path(t.tenant.runs)) / RID_R1]
-    assert _queued(paths, "case-t") is None, "the served row was left on the queue"
+    served = P.store_items(migrated_database, t.tenant_id, "curation_request")["case-t"]
+    assert served.status != "waiting", "the served row was left waiting in the store"
 
 
 @contextmanager
@@ -363,26 +364,21 @@ def _no_logging():
         logging.disable(logging.NOTSET)
 
 
-def _lead_author_main():
-    from defender.learning.leads import lead_author
-
-    return lead_author.main
-
-
 def _workspace_map_main():
     from defender.cli import workspace_map
 
     return workspace_map.main
 
 
-@pytest.mark.parametrize("cli", ["lead_author", "visualize_run", "workspace_map",
-                                 "visualize_run --episode"])
+# retired: the `lead_author` row (the by-hand `lead_author.main --tenant T <run id>` entry is deleted, design A3; the
+# lead author is only reached through the drain's claim, whose run address refusals are pinned in
+# `test_1105_pr2_declared_changes::test_dc8_*` and `test_1105_pr2_tighten::test_f6_*`).
+@pytest.mark.parametrize("cli", ["visualize_run", "workspace_map", "visualize_run --episode"])
 def test_d_each_run_id_command_prints_its_refusal_on_stderr(tmp_path, d9_tenant, cli):
     from defender.tests.support.learning.core._state1135 import curation_run_dir
 
     curation_run_dir("r-real", tenant_id=d9_tenant)
     argv, main, status = {
-        "lead_author": (["--tenant", d9_tenant, "nope-run"], _lead_author_main(), 2),
         "visualize_run": (P.new_run_page_argv(d9_tenant, "nope-run"), P.run_page_main(), 1),
         "workspace_map": (["workspace_map.py", "--tenant", d9_tenant, "nope-run"],
                           _workspace_map_main(), 2),

@@ -26,6 +26,8 @@ from defender.tests.tenancy.tenant_1108_p4._support import git
 
 FIELDS = ("pattern", "actor_scope", "host_scope", "added_by", "added_at", "review_by")
 
+pytestmark = pytest.mark.postgres
+
 
 def _drafts(fb) -> dict[str, str]:
     return remote_branches(fb.t.remote, S.FEEDBACK_PREFIX)
@@ -205,6 +207,7 @@ def test_1414_a_draft_lost_before_its_pr_is_drafted_again_once(fb):
     assert fb.replies(number, comment["id"]) == [], "a reply was posted before the PR existed"
 
     fb.forge.fail_create = False
+    fb.lapse()  # A4 change 1: the redo is a takeover, after lease + grace
     for _ in range(2):
         assert fb.tick(decider) == 0
     named = [p for p in fb.forge.prs if S.entry_id(number, comment["id"]) in (p.get("body") or "")]
@@ -272,7 +275,7 @@ def test_1414_ids_in_a_bot_pr_body_are_read_only_from_its_drafted_and_covered_li
 # ---------------------------------------------------------------- A2: one recovery path
 
 def test_1414_a_retained_delivery_holds_the_lease_and_is_redelivered_with_the_same_body(fb):
-    """While a feedback branch is retained or its PR open no new batch starts; the retried PR carries the first attempt's body (ids drafted and covered). A2."""
+    """While a registry batch holds the lane or its PR is open no new batch starts; the takeover's PR carries the first attempt's body (ids drafted and covered). A2/A4 (lane `feedback`, kind `registry`)."""
     number, first, decider = _approved(fb, "case-lease", lookups=[LOOKUP, LOOKUP_2], approve=(0,))
     dup = fb.forge.add_comment(number, user=NAMED, body="agreed")
     decider.script[dup["id"]] = S.answer(approve=(0,))
@@ -281,7 +284,10 @@ def test_1414_a_retained_delivery_holds_the_lease_and_is_redelivered_with_the_sa
     [(branch, _)] = _drafts(fb).items()
     assert fb.forge.prs == []
 
+    [held] = [b for b in S.feedback_batches(fb) if b.phase == "working"]
+    assert held.kind == S.REGISTRY_KIND, "premise: a registry batch of lane `feedback` holds the lane"
     fb.forge.fail_create = False
+    fb.lapse()  # A4 change 1: the retry is a takeover, after lease + grace
     late = fb.forge.add_comment(number, user=NAMED, body="and another")
     decider.script[late["id"]] = S.answer(approve=(1,))
     assert fb.tick(decider) == 0
@@ -310,6 +316,7 @@ def test_1414_a_pr_the_forge_applied_but_never_answered_is_found_not_drafted_aga
     assert len(fb.forge.prs) == 1, "premise: the forge applied the create"
 
     fb.forge.lose_reply = None
+    fb.lapse()  # A4 change 1: the redo is a takeover, after lease + grace
     for _ in range(3):
         assert fb.tick(decider) == 0
     assert len(fb.forge.prs) == 1, "the entry was drafted into a second PR"
@@ -332,7 +339,7 @@ def test_1414_while_a_feedback_pr_is_open_new_requests_and_no_change_replies_sti
     assert fb.tick(decider) == 0
     [fresh] = fb.issues("case-while-open")
     assert fresh["user"]["login"] == fb.bot
-    assert S.open_issue_requests(fb.paths) == {}
+    assert S.open_issue_requests(fb) == {}
     [reply] = fb.replies(number, thanks["id"])
     assert "a thanks" in reply["body"]
     assert len(fb.forge.prs) == 1

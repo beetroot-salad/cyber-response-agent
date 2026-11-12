@@ -18,7 +18,9 @@ from ._support import (
     TOKEN,
     ForgeHTTP,
     bounded,
+    comment_row,
     pr_row,
+    review_row,
 )
 
 
@@ -75,6 +77,10 @@ _FORGE_CALLS = {
     "verify_main_protection": lambda f: f.verify_main_protection(),
     "list_open_prs": lambda f: f.list_open_prs("lessons/"),
     "open_pr": lambda f: f.open_pr(base="main", head="lessons/a", title="t", body="b"),
+    "pull_request": lambda f: f.pull_request(7),
+    "reviews": lambda f: f.reviews(7),
+    "comments": lambda f: f.comments(7),
+    "close_pr": lambda f: f.close_pr(7),
 }
 
 
@@ -322,6 +328,120 @@ def test_origin_cannot_inject_transport_configuration(origin):
     assert http.requests == []
 
 
+# --- #1278: a PR's state, reviews and comments, and closing it (Feedback, D7) ---------------------
+
+
+def _stored_pr(http, number=7, **kw):
+    http.add_pr(pr_row(number, "lessons/a", **kw))
+
+
+def test_a_single_pr_is_read_by_number_with_its_status_and_merge_commit():
+    """`pull_request(n)` reads `GET /pulls/n` at our address and reports open, merged (with `merge_commit_sha`) or closed. (Reconcile)"""
+    http = ForgeHTTP()
+    _stored_pr(http, 7)
+    http.add_pr({**pr_row(8, "lessons/a", merged=True), "merge_commit_sha": "abc123"})
+    _stored_pr(http, 9, state="closed")
+    f = forge(http)
+
+    assert (f.pull_request(7).number, f.pull_request(7).status) == (7, "open")
+    merged = f.pull_request(8)
+    assert (merged.status, merged.merge_commit_sha) == ("merged", "abc123")
+    assert f.pull_request(9).status == "closed"
+    assert ("GET", "/api/v1/repos/tenants/blue/pulls/7") in [(r.method, r.url.path) for r in http.requests]
+    _all_ours(http)
+
+
+def test_reviews_and_comments_are_read_from_their_own_endpoints_and_returned_whole():
+    """Reviews come from `/pulls/n/reviews` and plain comments from `/issues/n/comments`, as the forge files them; an empty list is an answer. (C9, C23)"""
+    http = ForgeHTTP()
+    http.scopes = {"write:repository", "write:issue"}
+    _stored_pr(http)
+    http.reviews[7] = [review_row(1, "owner", "REQUEST_CHANGES", body="no", inline=2)]
+    http.comments[7] = [comment_row(2, "analyst", "why")]
+    f = forge(http)
+
+    [review] = f.reviews(7)
+    assert (review["id"], review["user"]["login"], review["state"], review["body"],
+            review["dismissed"], review["comments_count"]) == (1, "owner", "REQUEST_CHANGES", "no", False, 2)
+    [comment] = f.comments(7)
+    assert (comment["id"], comment["user"]["login"], comment["body"]) == (2, "analyst", "why")
+    paths = [(r.method, r.url.path) for r in http.requests]
+    assert ("GET", "/api/v1/repos/tenants/blue/pulls/7/reviews") in paths
+    assert ("GET", "/api/v1/repos/tenants/blue/issues/7/comments") in paths
+    assert forge(ForgeHTTP()).address == f.address
+    _all_ours(http)
+
+
+def test_reviews_past_the_forges_page_are_all_returned_and_the_words_on_a_late_page_are_seen():
+    """70 reviews, the forge's page at most 50: `reviews(n)` returns all 70, the only one with words the last. (C30, Feedback)"""
+    http = ForgeHTTP()
+    _stored_pr(http)
+    http.reviews[7] = [review_row(i, f"r{i}", "APPROVED") for i in range(1, 70)] + [
+        review_row(70, "late", "COMMENT", body="only on the last page")]
+    got = forge(http).reviews(7)
+
+    assert len(got) == 70
+    assert [r["body"] for r in got if r["body"]] == ["only on the last page"]
+
+
+def test_reading_reviews_needs_no_issue_scope_but_reading_comments_does():
+    """With `write:repository` alone reviews read and comments are a `ForgeError` carrying 403, never an empty list. (C23)"""
+    http = ForgeHTTP()
+    _stored_pr(http)
+    f = forge(http)
+
+    assert f.reviews(7) == []
+    with pytest.raises(forgejo.ForgeError) as refused:
+        f.comments(7)
+    assert refused.value.status == 403
+
+
+@pytest.mark.parametrize("grant", ["write:issue", "read:issue"])
+def test_a_token_with_an_issue_scope_reads_the_comments_the_one_without_could_not(grant):
+    """`write:issue` (the integration's scope, A4) reads a PR's plain comments as `read:issue` does; neither is an empty list. (C23, A4)"""
+    http = ForgeHTTP()
+    http.scopes = {"write:repository", grant}
+    _stored_pr(http)
+    http.comments[7] = [comment_row(2, "analyst", "why")]
+
+    assert [c["body"] for c in forge(http).comments(7)] == ["why"]
+
+
+@pytest.mark.parametrize(("status", "call"), [(401, "reviews"), (403, "comments"), (404, "pull_request"),
+                                              (422, "close_pr"), (500, "reviews"), (503, "comments"),
+                                              (502, "pull_request"), (503, "close_pr")])
+def test_a_forge_error_carries_the_http_status_it_was_refused_with(status, call):
+    """Every call's `ForgeError` names the HTTP status, so a refusal (4xx) and an unknown (5xx) differ by it. (D7, H15)"""
+    http = ForgeHTTP()
+    http.scopes = {"write:repository", "write:issue"}
+    _stored_pr(http)
+    http.refuse("", status)
+    with pytest.raises(forgejo.ForgeError) as error:
+        _FORGE_CALLS[call](forge(http))
+    assert error.value.status == status
+
+
+@pytest.mark.parametrize("call", ["pull_request", "reviews", "comments", "close_pr", "list_open_prs", "open_pr"])
+def test_a_transport_fault_carries_no_status(call):
+    """A lost connection is unknown: its `ForgeError` has `status` `None`. (D7)"""
+    http = ForgeHTTP()
+    http.fault = lambda request: httpx.ConnectError("the forge is down", request=request)
+    with pytest.raises(forgejo.ForgeError) as error:
+        _FORGE_CALLS[call](forge(http))
+    assert error.value.status is None
+
+
+def test_closing_a_pr_patches_its_state_and_nothing_else():
+    """`close_pr(n)` sends `PATCH /pulls/n` with `{"state": "closed"}` to our repository with the token. (Feedback)"""
+    http = ForgeHTTP()
+    _stored_pr(http)
+    forge(http).close_pr(7)
+
+    [patch] = [r for r in http.requests if r.method == "PATCH"]
+    assert patch.url.path == "/api/v1/repos/tenants/blue/pulls/7"
+    assert json.loads(patch.content) == {"state": "closed"}
+    assert http.prs[0]["state"] == "closed"
+    _all_ours(http)
 # -- #1414: the issue and comment listings ---------------------------------------------------------
 
 

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
-from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -442,7 +441,7 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     before_pages = {p: p.read_bytes() if p.exists() else None for p in outputs}
     try:
         proc = H.run_script(H.REPO_ROOT / script, *args, *identity, root=data_root, DEFENDER_DEPLOYMENT="dev",
-                            DEFENDER_LEARNING_STATE_DIR=str(poison), **records)
+                            DEFENDER_LEARNING_STATE_DIR=str(poison), **records)  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
         out = H.output(proc)
         assert proc.returncode != 0, f"tenant-free command ran successfully: {out}"
         assert "tenant" in out.lower(), out
@@ -461,37 +460,49 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
                 p.write_bytes(blob)
 
 
-@pytest.mark.parametrize(("script", "args", "lock_name", "diagnostic", "status"), [
-    ("defender/learning/loop.py", ["--author-drain"], ".author-drain.lock",
-     "another drainer holds the lock", 0),
-    ("defender/learning/loop.py", ["--lead-author-drain"], ".lead-author-drain.lock",
-     "another drainer holds the lock", 0),
+@pytest.mark.parametrize(("script", "args", "lane", "diagnostic", "status"), [
+    ("defender/learning/loop.py", ["--author-drain"], "author", "skipping", 0),
+    ("defender/learning/loop.py", ["--lead-author-drain"], "lead_author", "skipping", 0),
     # A curator module's own command runs the author lane's tenant batch, as
-    # `loop.py --author-drain --tenant T` does, so it meets the author drain's lock.
-    ("defender/learning/author/lessons/run.py", [], ".author-drain.lock",
-     "another drainer holds the lock", 0),
-    ("defender/learning/author/questioner/run.py", [], ".author-drain.lock",
-     "another drainer holds the lock", 0),
-    ("defender/cli/learning/revert_lesson.py", ["example-lesson"], ".author-drain.lock",
-     "an author drain is in progress", 3),
+    # `loop.py --author-drain --tenant T` does, so it meets the author lane's working batch.
+    ("defender/learning/author/lessons/run.py", [], "author", "skipping", 0),
+    ("defender/learning/author/questioner/run.py", [], "author", "skipping", 0),
+    ("defender/cli/learning/revert_lesson.py", ["example-lesson"], "author", "an author drain is in progress", 3),
 ])
 @pytest.mark.postgres
-def test_1186_learning_operator_cli_uses_the_explicit_tenants_lock(
-    data_root: Path, tmp_path: Path, script: str, args: list[str], lock_name: str,
+def test_1186_learning_operator_cli_meets_the_explicit_tenants_busy_lane(
+    data_root: Path, tmp_path: Path, script: str, args: list[str], lane: str,
     diagnostic: str, status: int, migrated_database: str,  # noqa: F811
 ):
-    """A valid --tenant meets its own tenant's held lock despite a conflicting retired
-    state-dir override."""
-    from defender.tests.support.learning.curation._drain719 import Holder
+    """A valid --tenant meets its own tenant's working batch despite a conflicting retired state-dir override: the
+    command leaves the one batch as it was, makes no second, and writes nothing under the ambient root.
+    (#1278 r8 Locks: the drain locks are the store's working-batch rule; this was the file lock's case.)"""
+    from defender.tests.support.learning.core._store1278 import FINDING, ONE, batches, call, finding
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
-    tenant = set_up_tenant(data_root, H.TID)
+    set_up_tenant(data_root, H.TID)
     # The script is the operator's own command, so it reads its directory from the database address (Flow 4).
     insert_active_tenant(migrated_database, H.TID, data_root=data_root)
-    location_path(tenant.learning).mkdir(parents=True, exist_ok=True)
-    with Holder(location_path(tenant.learning) / lock_name, blocking_discipline=False):
-        proc = H.run_script(H.REPO_ROOT / script, *args, "--tenant", H.TID, root=data_root,
-                            DEFENDER_LEARNING_STATE_DIR=str(data_root), **database_env(migrated_database))
+    # The tenant's lane is held: a working batch under a live lease, claimed as a drain on another process would.
+    if lane == "author":
+        call(migrated_database, "publish_findings", H.TID, "run-1", [finding("f1")], kind=FINDING)
+    else:
+        call(migrated_database, "enqueue_request", H.TID, "run-1", "case-1", {"case": "case-1"})
+    held = call(migrated_database, "claim", H.TID, lane, owner="another-process", thresholds=ONE)
+    # Work is waiting at threshold again, so the command reaches the lane's busy check rather than skipping for want of work.
+    if lane == "author":
+        call(migrated_database, "publish_findings", H.TID, "run-2", [finding("f2")], kind=FINDING)
+    else:
+        call(migrated_database, "enqueue_request", H.TID, "run-2", "case-2", {"case": "case-2"})
+    ambient = {p.name for p in data_root.iterdir() if p.name != H.TID}
+    proc = H.run_script(H.REPO_ROOT / script, *args, "--tenant", H.TID, root=data_root,
+                        DEFENDER_LEARNING_STATE_DIR=str(data_root), LEARNING_AUTHOR_THRESHOLD="1",  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
+                        LEARNING_QUESTIONER_THRESHOLD="1", **database_env(migrated_database))
     assert proc.returncode == status, H.output(proc)
     assert diagnostic in H.output(proc), H.output(proc)
-    assert not (data_root / lock_name).exists(), "retired ambient root received the lock"
+    assert [(b.id, b.phase) for b in batches(migrated_database, H.TID)] == [(held.batch_id, "working")], (
+        "the command did not leave the tenant's one working batch alone")
+    assert [i.status for i in call(migrated_database, "work", H.TID) if i.key in ("f2", "run-2")] == ["waiting"], (
+        "the command took the work waiting behind the tenant's busy lane")
+    assert {p.name for p in data_root.iterdir() if p.name != H.TID} <= ambient | {".host-locks"}, (
+        "retired ambient root received state")

@@ -9,7 +9,7 @@ from defender.learning.author.curator_engine import CuratorDeps
 
 
 def curator_scene(tmp_path: Path, *, extra_corpora: Sequence[str] = ()) -> SimpleNamespace:
-    """A worktree, a lessons corpus and the `_pending` run dir.
+    """A worktree, a lessons corpus and the curator run dir.
 
     `extra_corpora` creates sibling lesson corpora (`lessons-questioner`) for the
     read-confinement suite, whose checks are vacuous if the sibling does not exist.
@@ -19,7 +19,7 @@ def curator_scene(tmp_path: Path, *, extra_corpora: Sequence[str] = ()) -> Simpl
     corpus.mkdir(parents=True)
     for name in extra_corpora:
         (repo / "defender" / name).mkdir(parents=True)
-    curdir = tmp_path / "state" / "_pending"
+    curdir = tmp_path / "state" / "curator-run"
     curdir.mkdir(parents=True)
     return SimpleNamespace(tmp=tmp_path, repo=repo, corpus=corpus, curdir=curdir)
 

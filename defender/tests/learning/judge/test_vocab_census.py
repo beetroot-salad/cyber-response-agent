@@ -9,13 +9,8 @@ from types import SimpleNamespace
 import pytest
 
 from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.tenancy import _tenants1106 as T1106
-from defender.tests.support.learning.core import _state1135
-
-
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(tmp_path):
@@ -28,7 +23,7 @@ def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(
     J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         draws=1,
-        state=_state1135.env_state())
+        store=MemoryStore())
     traces = J.wire_logs(ep)
     assert traces, "the judge left no wire log at all; there is nothing to deny"
 

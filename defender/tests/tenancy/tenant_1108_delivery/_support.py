@@ -129,9 +129,26 @@ def pr_row(number, head, *, repo=OURS, state="open", sha=None, merged=False):
     if repo is not None:
         head_side.update(repo_id=repo["id"], repo=repo)
     return {"number": number, "state": "closed" if merged else state, "merged": merged,
-            "merged_at": "2026-10-16T00:00:00Z" if merged else None, "head": head_side,
+            "merged_at": "2026-10-16T00:00:00Z" if merged else None, "merge_commit_sha": None,
+            "head": head_side,
             "base": {"ref": "main", "label": "tenants:main", "repo_id": OURS["id"], "repo": OURS},
             "html_url": f"http://forge.invalid:3000/tenants/blue/pulls/{number}"}
+
+
+def review_row(review_id, login, state, *, body="", dismissed=False, official=True, inline=0):
+    """A Forgejo `PullReview` (C9, C24, C25): `state` one of `APPROVED`, `REQUEST_CHANGES`,
+    `COMMENT`; `dismissed` as the forge reports it (a later approval by the same reviewer
+    dismisses their changes-requested review); `official` false for a read-only reviewer;
+    `inline` the review's inline comments (`comments_count`), which carry words with no body (D7)."""
+    return {"id": review_id, "user": {"login": login}, "state": state, "body": body,
+            "dismissed": dismissed, "official": official, "stale": False, "commit_id": None,
+            "submitted_at": "2026-11-09T10:00:00Z", "comments_count": inline}
+
+
+def comment_row(comment_id, login, body):
+    """A Forgejo issue `Comment` as `GET /issues/N/comments` lists a PR's plain comment."""
+    return {"id": comment_id, "user": {"login": login}, "body": body,
+            "created_at": "2026-11-09T10:05:00Z", "updated_at": "2026-11-09T10:05:00Z"}
 
 
 def forge_pulls(remote):
@@ -169,11 +186,11 @@ def _sync_open_pulls(remote):
     return rows
 
 
-def set_pull_state(remote, branch, *, merged, delete_branch=False):
+def set_pull_state(remote, branch, *, merged, delete_branch=False, merge_commit=None):
     """A human closing, or merging, the open PR of our repository whose head is `branch`
     (raising when there is none, so no case passes on a PR that never existed). Deleting the
     branch leaves the row as Forgejo 15 lists it: `head.ref` `refs/pull/N/head`, no label,
-    `head.sha` kept."""
+    `head.sha` kept. `merge_commit` is what Forgejo reports as `merge_commit_sha` (#1278)."""
     with _pulls_updating(remote):
         rows = _sync_open_pulls(remote)
         mine = [row for row in rows if row["state"] == "open" and row["head"]["ref"] == branch
@@ -181,7 +198,8 @@ def set_pull_state(remote, branch, *, merged, delete_branch=False):
         assert mine, f"no open PR of ours has the head {branch!r}: {rows}"
         for row in mine:
             row.update(state="closed", merged=merged,
-                       merged_at="2026-10-16T00:00:00Z" if merged else None)
+                       merged_at="2026-10-16T00:00:00Z" if merged else None,
+                       merge_commit_sha=merge_commit if merged else None)
             if delete_branch:
                 row["head"].update(ref=f"refs/pull/{row['number']}/head", label="")
         _save_pulls(remote, rows)
@@ -255,6 +273,16 @@ class ForgeHTTP:
         self.every_page = None
         self.link = None
         self._rows = []
+        #: #1278 (C23): the scopes the bot's token carries. Reviews, PR state and closing need
+        #: `write:repository`; reading plain PR comments also needs `write:issue` (the integration's scope, #1414 D13, A4) or `read:issue` (403 with neither).
+        self.scopes = {"write:repository"}
+        #: #1278: PR number -> Forgejo `PullReview` rows / issue `Comment` rows, as planted by a
+        #: case (`review_row`, `comment_row`). The fake never computes dismissal (C24): a case
+        #: plants `dismissed` as the forge would report it.
+        self.reviews = {}
+        self.comments = {}
+        #: #1278 (D7): scripted status answers, see `refuse`.
+        self.refusals = []
         # #1414: issues, issue comments, labels, `main`'s protection rule and the organisation's teams, in
         # Forgejo's API shapes. Served from injected state; every request is recorded in `requests`.
         #: The login the token authenticates as: what Forgejo records as `user.login` on what it creates.
@@ -276,6 +304,30 @@ class ForgeHTTP:
         self.respond = None
         self._ids = 900
         self.client = httpx.Client(transport=httpx.MockTransport(self.reply))
+
+    def refuse(self, suffix, status, *, after=0, times=None, method=None):
+        """#1278 (D7, H15): answer `status` to the requests whose path ends `suffix` (of one HTTP `method`
+        when given, so a refused `GET /pulls` leaves `POST /pulls` visible), skipping the first `after` of them,
+        for `times` requests (always when `None`). `clear_refusals` ends it."""
+        self.refusals.append({"suffix": suffix, "status": status, "skip": after, "left": times,
+                              "method": method})
+
+    def clear_refusals(self):
+        self.refusals.clear()
+
+    def _refused(self, path, method):
+        for rule in self.refusals:
+            if not path.rstrip("/").endswith(rule["suffix"]) or rule["method"] not in (None, method):
+                continue
+            if rule["skip"] > 0:
+                rule["skip"] -= 1
+                continue
+            if rule["left"] is not None:
+                if rule["left"] <= 0:
+                    continue
+                rule["left"] -= 1
+            return httpx.Response(rule["status"], json={"message": f"scripted {rule['status']}"})
+        return None
 
     @property
     def prs(self):
@@ -323,6 +375,9 @@ class ForgeHTTP:
         if not self._ours(request) or not (path == api or path.startswith(api + "/")):
             self.foreign.append(request)
             return httpx.Response(404, json={"message": "not this forge's repository"})
+        refused = self._refused(path, request.method)
+        if refused is not None:
+            return refused
         if self.remote is None:
             return self._answer(request, path[len(api):])
         # One request is one update: a create's number and its row land under the same lock.
@@ -338,6 +393,9 @@ class ForgeHTTP:
                                   headers={"Content-Type": "application/json"})
         if rest == "/pulls" and request.method == "GET":
             return self._listing(request)
+        feedback = self._feedback(request, rest.split("/"))
+        if feedback is not None:
+            return feedback
         if rest.startswith("/pulls/") and request.method == "GET":
             found = [row for row in self.prs if str(row["number"]) == rest.split("/")[2]]
             return httpx.Response(200, json=found[0]) if found else httpx.Response(404, json={})
@@ -508,6 +566,56 @@ class ForgeHTTP:
             headers["Link"] = f'<{LINK_ROOT}/api/v1/repos/tenants/blue/pulls?page={page + 1}>; rel="next"'
         return httpx.Response(200, json=rows, headers=headers)
 
+    def _feedback(self, request, parts):
+        """#1278 (C9, C23): `GET /pulls/N/reviews`, `GET /issues/N/comments` (Forgejo files a
+        PR's plain comments as issue comments; 403 with neither `write:issue` nor `read:issue`), and `PATCH /pulls/N`
+        taking `state` (closing a PR). `None` for any other route."""
+        if len(parts) == 4 and parts[1] == "pulls" and parts[3] == "reviews" and request.method == "GET":
+            if not self._pull(parts[2]):
+                return httpx.Response(404, json={"message": "pull request does not exist"})
+            return self._paged_reviews(request, self.reviews.get(int(parts[2]), []))
+        if len(parts) == 4 and parts[1] == "issues" and parts[3] == "comments" and request.method == "GET":
+            if not self._pull(parts[2]):
+                return None  # a plain issue's comments are `_one_issue_answer`'s (#1414), not a PR's
+            if not self.scopes & {"write:issue", "read:issue", "all"}:
+                return httpx.Response(403, json={
+                    "message": "token does not have at least one of required scope(s): [read:issue]"})
+            # Forgejo 17 (probe, 70 comments): comments ignore `page` and `limit` and answer the lot.
+            rows = self.comments.get(int(parts[2]), [])
+            return httpx.Response(200, json=rows, headers={"X-Total-Count": str(len(rows))})
+        if len(parts) == 3 and parts[1] == "pulls" and request.method == "PATCH":
+            rows = list(self.prs)
+            found = [row for row in rows if str(row["number"]) == parts[2]]
+            if not found:
+                return httpx.Response(404, json={"message": "pull request does not exist"})
+            if json.loads(request.content).get("state") == "closed" and found[0]["state"] == "open":
+                found[0]["state"] = "closed"
+            if self.remote is not None:
+                _save_pulls(self.remote, rows)
+            return httpx.Response(201, json=found[0])
+        return None
+
+    def _paged_reviews(self, request, rows):
+        """Forgejo 17 (probe, 70 reviews, #1278 C30): a review listing sent with neither `page` nor `limit` answers
+        every review; sent with either, it pages (30 by default, `limit` clamped to Forgejo's `[api] MAX_RESPONSE_ITEMS`,
+        default 50, as the PR listing is) and never sends a `Link`. `X-Total-Count` is always the total."""
+        params = request.url.params
+        if "page" in params or "limit" in params:
+            size, page = min(int(params.get("limit") or 30), 50), int(params.get("page") or 1)
+            shown = rows[(page - 1) * size:page * size]
+        else:
+            shown = rows
+        return httpx.Response(200, json=shown, headers={"X-Total-Count": str(len(rows))})
+
+    def _pull(self, number):
+        return [row for row in self.prs if str(row["number"]) == number]
+
+    @property
+    def patches(self):
+        """#1278: the `PATCH /pulls/N` calls made, in order, as `(N, body)`."""
+        return [(int(r.url.path.rstrip("/").split("/")[-1]), json.loads(r.content))
+                for r in self.requests if r.method == "PATCH"]
+
     def _create(self, body):
         if self.fail_create:
             return httpx.Response(503, json={"message": "the forge failed"})
@@ -611,15 +719,25 @@ MERGE_STYLES = ("merge", "squash", "rebase")
 _FORGE_COMMITTER = {"GIT_COMMITTER_NAME": "Forgejo", "GIT_COMMITTER_EMAIL": "forgejo@test.invalid"}
 
 
-def merge_on_remote(repo, tmp_path, branch, style="merge", *, delete_branch=False):
+def merge_on_remote(repo, tmp_path, branch, style="merge", *, delete_branch=False, edit=None):
     """A human merging a PR into the remote's `main`: `merge` makes a merge commit (Forgejo's
     default), `squash` one new commit holding the branch's changes, `rebase` re-commits each
     of the branch's commits on `main` under the forge's committer (new shas). The forge marks
     the branch's open PR merged (there must be one), and `delete_branch` deletes the branch
-    as Forgejo's merge option does. Returns the new `main`."""
+    as Forgejo's merge option does. `edit(checkout)` (merge style only) changes the merge result
+    before it is committed, as a reviewer's edit in the merge dialog would: the branch tip keeps
+    what the merge commit's tree drops (#1278 H16). The PR's `merge_commit_sha` is the new `main` for all three
+    styles (Forgejo 17 probe, C29: the merge commit, the squash commit, the last rebased commit), whose tree is
+    the merged tree. Returns the new `main`."""
     writer = tmp_path / f"merger-{len(list(tmp_path.glob('merger-*')))}"
     git(tmp_path, "clone", repo[1], writer)
-    if style == "merge":
+    assert edit is None or style == "merge", "an edited merge is a merge commit"
+    if style == "merge" and edit is not None:
+        git(writer, "merge", "--no-ff", "--no-commit", f"origin/{branch}")
+        edit(writer)
+        git(writer, "add", "-A")
+        git(writer, "commit", "-m", f"Merge {branch} (edited)", env=_FORGE_COMMITTER)
+    elif style == "merge":
         git(writer, "merge", "--no-ff", "-m", f"Merge {branch}", f"origin/{branch}")
     elif style == "squash":
         git(writer, "merge", "--squash", f"origin/{branch}")
@@ -627,8 +745,9 @@ def merge_on_remote(repo, tmp_path, branch, style="merge", *, delete_branch=Fals
     else:
         git(writer, "cherry-pick", f"main..origin/{branch}", env=_FORGE_COMMITTER)
     git(writer, "push", "origin", "main")
-    set_pull_state(repo[1], branch, merged=True, delete_branch=delete_branch)
-    return git(writer, "rev-parse", "HEAD")
+    head = git(writer, "rev-parse", "HEAD")
+    set_pull_state(repo[1], branch, merged=True, delete_branch=delete_branch, merge_commit=head)
+    return head
 
 
 def merged_agent_lesson(repo, tmp_path, batch_id, path, content, style="merge"):
@@ -1069,22 +1188,29 @@ def http_repo(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------------------
-# A later drain: a delivery opened in a fresh process
+# A delivery opened in a freshly started process
 # ---------------------------------------------------------------------------------------
+# (`in_a_later_process(repo, "deliver"/"revert", ...)` is retired: a later process picking a batch up by the
+# on-disk commit record is a takeover over the store's record, #1278 D11, A2 D1; the commit-maker's record is
+# in memory now (`batch.committer.made`), so a fresh process can only finish the batch it makes itself.)
 
-_LATER_SCRIPT = """
+_FRESH_SCRIPT = """
 import json, sys
 from pathlib import Path
 from defender.tests.support.tenancy import _tenants1106 as tenants
-from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, configured_origin, target, fixture_identity
-root, tenant_id, remote, verb, args = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
+from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, LANES, ForgeHTTP, configured_origin, target, fixture_identity
+root, tenant_id, remote, batch_id = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
 mod = target()
 tenant = tenants.accept(root, tenant_id)
 http = ForgeHTTP(remote=remote, origin=configured_origin(tenant.knowledge))
 out = {}
 try:
-    later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
-    result = getattr(later, verb)(*args)
+    d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
+    batch = d.start_batch(batch_id, lanes=LANES)
+    (batch.draft_root / "agent/lessons" / (batch_id + ".md")).write_bytes(b"a lesson\\n")
+    out["commit"] = batch.commit(batch.change_set(), "claim")
+    out["branch"] = batch.branch
+    result = d.finish(batch)
     status = result.status
     out["status"] = status if isinstance(status, str) else repr(status)
     out["url"] = getattr(result, "url", None)
@@ -1111,19 +1237,17 @@ def fresh_process_env(tenant, scratch: Path):
     return env
 
 
-def in_a_later_process(repo, verb, *args, python_prelude=""):
-    """`verb(*args)` (`deliver` or `revert`) on a `TenantDelivery` opened for `repo`'s tenant in
-    another, freshly started process with its own forge double (backed by the same remote,
-    as the real forge is) and a fresh environment, as a later drain would: nothing of this
-    process's objects, memory or environment reaches it. Returns `{"status": ..., "url": ...}`
-    (`url` `None` when the result has none) or `{"refused": ...}`, with `"creates"`, the PR
-    requests it sent."""
+def in_a_fresh_process_finishing(repo, batch_id, *, python_prelude=""):
+    """A batch started, committed with one lesson and finished on a `TenantDelivery` opened for `repo`'s tenant in
+    another, freshly started process with its own forge double (backed by the same remote, as the real forge is) and
+    a fresh environment: nothing of this process's objects, memory or environment reaches it. Returns
+    `{"status", "url", "commit", "branch"}` or `{"refused": ...}`, with `"creates"`, the PR requests it sent."""
     tenant, remote = repo[0], repo[1]
     scratch = Path(location_path(tenant.data_root)).parent / f"later-{len(list(Path(location_path(tenant.data_root)).parent.glob('later-*')))}"
-    proc = subprocess.run([sys.executable, "-c", python_prelude + "\n" + _LATER_SCRIPT, str(location_path(tenant.data_root)), str(tenant.id),
-                           str(remote), verb, *map(str, args)], capture_output=True, text=True,
+    proc = subprocess.run([sys.executable, "-c", python_prelude + "\n" + _FRESH_SCRIPT, str(location_path(tenant.data_root)), str(tenant.id),
+                           str(remote), batch_id], capture_output=True, text=True,
                           env=fresh_process_env(tenant, scratch), timeout=300, check=False)
-    assert proc.returncode == 0, f"the later process crashed: {proc.stderr}"
+    assert proc.returncode == 0, f"the fresh process crashed: {proc.stderr}"
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 

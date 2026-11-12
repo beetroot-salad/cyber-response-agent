@@ -8,7 +8,6 @@ from string import Template
 
 from defender.presentation.visualize_primitives import (
     esc_untrusted,
-    pretty_json_html,
 )
 from defender.presentation.visualize_run import CSS as RUN_CSS
 
@@ -322,11 +321,10 @@ QUEUES_PAGE = """<!doctype html>
 <style>${css}</style></head><body id="top">
 <header class="top"><div class="top-row">
   <h1>Learning loop — Queues</h1>
-  <div class="meta">generated ${generated} · ${state_root}</div>
+  <div class="meta">generated ${generated}</div>
   <nav class="views"><a href="lessons.html">lessons →</a></nav>
 </div></header>
 <main class="queues">
-${fault_band}
 <div class="q-cards">${cards}</div>
 </main>
 <script>
@@ -375,6 +373,19 @@ def _stat(key: str, value_html: str) -> str:
     return f'<span class="qs"><span class="qt-key">{key}</span>{value_html}</span>'
 
 
+def _item_rows(ch: dict) -> str:
+    """Each listed item: its id, status, reason, the run it came from, the batch it is in and that batch's PR.
+    Escaped where written."""
+    if not ch["items"]:
+        return '<div class="empty">Nothing waiting, held or dead.</div>'
+    return _list([
+        _li(r["id"], r["status"] + (f' — {r["reason"]}' if r["reason"] else ""),
+            " · ".join(x for x in (f'run {r["source_run"]}' if r.get("source_run") else "", r["batch_id"] or "",
+                                   f'PR {r["pr_number"]}' if r["pr_number"] else "") if x))
+        for r in ch["items"]
+    ])
+
+
 def _channel_card(ch: dict) -> str:
     held = ch["held"]
     held_html = ""
@@ -383,23 +394,11 @@ def _channel_card(ch: dict) -> str:
             f'<p class="q-held"><b>{held["count"]} held</b> · {esc_untrusted(ch["hold_means"])} · '
             + ", ".join(esc_untrusted(i) for i in held["ids"]) + "</p>"
         )
-    if ch["deadletter"]:
-        rows = "".join(
-            "<details><summary>"
-            f'<span class="dl-id">{"no id" if e["id"] is None else esc_untrusted(e["id"])}</span>'
-            f'<span class="dl-reason">{esc_untrusted(e["reason"])}</span>'
-            f'<span class="dl-when">{esc_untrusted(_when(e["when"]))}</span>'
-            f'</summary><div class="body">{pretty_json_html(e["row"])}</div></details>'
-            for e in ch["deadletter"]
-        )
-        dead_html = f'<div class="dl">{rows}</div>'
-    else:
-        dead_html = '<div class="empty">No dead letters.</div>'
-    stats = _stat("queued", _num(ch["depth"]["queued"])) + _stat("dead", _num(len(ch["deadletter"]), 1))
+    dead = len(ch["deadletter"])
+    stats = _stat("waiting", _num(ch["depth"]["waiting"])) + _stat("dead", _num(dead, 1))
     return _card(
         f't-{esc_untrusted(ch["accent"])}', esc_untrusted(ch["name"]), stats,
-        held_html + dead_html + _unreadable_line(ch["unreadable"], "line"),
-        bool(ch["deadletter"]) or held["count"] > 0,
+        held_html + _item_rows(ch), dead > 0 or held["count"] > 0,
     )
 
 
@@ -423,15 +422,12 @@ def _cap(tainted: dict) -> str:
 
 
 def _aside_card(q: dict) -> str:
-    markers, deliveries, tainted = q["markers"], q["deliveries"], q["tainted"]
-    needs_person = len(markers["rows"]) + len(tainted["rows"])
+    tainted = q["tainted"]
+    needs_person = len(tainted["rows"])
     human = (
         '<div class="q-group q-human"><div class="q-group-head">Needs a person '
         '<span class="q-group-sub">nothing retries these</span></div>'
-        "<h3>Markers not served</h3>"
-        + _list([_li(r["identity"], r["failed"], r["queue"]) for r in markers["rows"]])
-        + _unreadable_line(markers["unreadable"], "file")
-        + f"<h3>Tainted worktrees{_cap(tainted)}</h3>"
+        f"<h3>Tainted worktrees{_cap(tainted)}</h3>"
         + f'<p class="q-dir">{esc_untrusted(tainted["dir"])}</p>'
         + _list([
             _li(r["batch_id"], r["taint"],
@@ -441,43 +437,7 @@ def _aside_card(q: dict) -> str:
         + _unreadable_line(tainted["unreadable"], "file")
         + "</div>"
     )
-    system = (
-        '<div class="q-group q-system"><div class="q-group-head">Retrying itself '
-        '<span class="q-group-sub">the lane serves nothing new until this lands</span></div>'
-        "<h3>Committed, not delivered</h3>"
-        + _list([
-            _li(r["branch"], r["reason"], f'since {_when(r["at"]) or "?"}, retried every tick')
-            for r in deliveries["rows"]
-        ])
-        + _unreadable_line(deliveries["unreadable"], "file")
-        + "</div>"
-    )
-    stats = _stat("needs a person", _num(needs_person, 1)) + _stat("retrying", _num(len(deliveries["rows"])))
-    return _card("t-raw", "set aside", stats, human + system, needs_person > 0)
-
-
-def _fault_band(view: dict) -> str:
-    """The machinery-health band, present only when a channel has a stuck record. Titled
-    "last fault", never "stuck now": the stuck file is append-only and nothing clears it."""
-    stuck = [ch for ch in view["channels"] if ch.get("stuck")]
-    if not stuck:
-        return ""
-    rows = "".join(
-        '<div class="qf-row">'
-        f'<span class="qf-ch">{esc_untrusted(ch["name"])}</span>'
-        f'<span class="qf-class">{esc_untrusted(ch["stuck"]["fault_class"])}</span>'
-        f'<span class="qf-ticks">{ch["stuck"]["consecutive_ticks"]} '
-        f'{_plural(ch["stuck"]["consecutive_ticks"], "tick", "ticks")} running</span>'
-        f'<span class="qf-when">{esc_untrusted(ch["stuck"]["recorded_at"] or "time unknown")}</span>'
-        f'<span class="qf-reason">{esc_untrusted(ch["stuck"]["reason"])}</span>'
-        "</div>"
-        for ch in stuck
-    )
-    return (
-        '<div class="q-fault"><div class="qf-head">Last fault</div>' + rows
-        + '<div class="qf-note">the rows were left queued and retried on the next tick; a '
-          'later clean tick leaves this record in place</div></div>'
-    )
+    return _card("t-raw", "set aside", _stat("needs a person", _num(needs_person, 1)), human, needs_person > 0)
 
 
 def render_queues(view: dict) -> str:
@@ -488,8 +448,6 @@ def render_queues(view: dict) -> str:
     return Template(QUEUES_PAGE).substitute(
         css=RUN_CSS + NAV_CSS + QUEUES_CSS,
         generated=esc_untrusted(view.get("generated_at") or "—"),
-        state_root=esc_untrusted(view["state_root"]),
-        fault_band=_fault_band(view),
         cards="".join(_channel_card(ch) for ch in view["channels"]) + _aside_card(view["quarantine"]),
         queues_json=payload,
     )

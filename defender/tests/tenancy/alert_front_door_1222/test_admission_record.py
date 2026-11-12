@@ -2,7 +2,7 @@
 run record (facts plus alert digest) written beside the alert; identity checks read that record."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.records import Run
 
@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.sandbox._spec791 import author_markers, marker_body
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+from defender.tests.tenancy.alert_front_door_1222._requests1222 import a_store_that_records_requests  # noqa: F401 — autouse fixture
+from defender.tests.tenancy.alert_front_door_1222 import _requests1222 as R
 from defender.tests.e2e import _replay_harness as H
 from defender.tests.support.storage._setup_faults_1279 import PlantAfterRunDirIo, materialize_through
 
@@ -31,8 +32,6 @@ CAUSE_CLASSES: dict[str, tuple[str, ...]] = {
     "unpaired_surrogate": ("lone_surrogate",),
     "size": ("oversize",),
 }
-#: The curation request queue under the learning-state root (`_spec791.author_markers` reads it).
-CURATION_QUEUE = "author-queue"
 #: The rule object every scenario's alert starts from (`S.generic_alert`'s, spelled out so a
 #: scenario can add or drop a member without replacing the rest).
 BASE_RULE = {"id": "R-1001", "name": "Generic outbound beacon",
@@ -191,20 +190,13 @@ def _held_out_fixtures(tmp_path: Path, *members: bytes) -> Path:
     return fixtures
 
 
-def _curation_requests(run_dir: Path) -> dict[str, Path]:
-    """Every curation request on the queue: its case key -> the run folder it names."""
-    from defender.learning.core.config import LoopPaths
-    from defender.tenancy._tenant import requested_tenant
+_FILED = R.FILED
 
-    root = Path(os.environ["DEFENDER_DATA_ROOT"])
-    tenant = requested_tenant(fixture_data_root(root), Path(run_dir).parent.parent.name)
-    paths = LoopPaths.for_tenant(tenant)
-    out: dict[str, Path] = {}
-    for name in author_markers(paths):
-        body = marker_body(Path(location_path(paths.state_root)) / CURATION_QUEUE / name)
-        out[str(body.get("case_id"))] = (
-            Path(os.environ["DEFENDER_DATA_ROOT"]) / str(body["tenant_id"]) / "runs" / str(body["run_id"]))
-    return out
+
+def _curation_requests(run_dir: Path) -> dict[str, Path]:  # noqa: ARG001 — the run whose tenant it is; the stand-in holds one test's requests
+    """Every curation request filed: its case key -> the run folder it names."""
+    return {case: Path(os.environ["DEFENDER_DATA_ROOT"]) / str(body["tenant_id"]) / "runs" / str(body["run_id"])
+            for case, body in _FILED.requests.items()}
 
 
 def _request_key_for(run_dir: Path) -> str | None:

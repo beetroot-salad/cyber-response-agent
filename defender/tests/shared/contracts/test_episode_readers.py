@@ -12,7 +12,7 @@ from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared.contracts import _record_1049 as R
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -23,7 +23,6 @@ NOT_ROOT = R.NOT_ROOT
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _episode(tmp_path: Path) -> Path:
@@ -47,7 +46,7 @@ def _grade(ep: Path):
     again sees a fresh pass rather than the idempotent re-read of the earlier one."""
     (ep / "judge.yaml").unlink(missing_ok=True)
     return J.grade_at(ep, judge=J.FakeJudge(default=_REPLY), git_show=J.FakeGitShow(),
-                      state=_state1135.env_state())
+                      store=MemoryStore())
 
 
 def _ledger_name(label: str) -> str:

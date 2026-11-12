@@ -4,14 +4,19 @@ person merges or closes, and every decided comment gets one reply where the pers
 Each approved entry is judged once (A1): drafted onto a PR, covered by an entry already on `main` or earlier
 in the batch, or not writable. The judgement is recorded on the decision after the fact it records; a crash
 before the record is a redo, because the PR the bot opened names its ids in its body (A2/P6).
+
+On the learning store (#1278 A4) the registry PR is an item-less batch of lane `feedback`, kind `registry`: its row
+is the lane's writer lease, its commits are recorded in the store before the branch moves, a lapsed one is taken
+over and delivered by the lane's recovery (the PR body is the tip commit's message either way), and the PR is
+reconciled by its state alone.
 """
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import logging
 import re
 import tempfile
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +25,6 @@ from defender._io import read_text_utf8, write_guarded
 from defender.learning.author.version_control import DeliveryRefused
 from defender.learning.author.version_control.forgejo import ForgeError
 from defender.learning.core import feedback_decide
-from defender.learning.core.config import FEEDBACK_DRAIN_LABEL
-from defender.learning.core.state import FEEDBACK_DECISIONS, LearningState
 from defender.systems import tacit_registry
 
 _logger = logging.getLogger(__name__)
@@ -155,19 +158,19 @@ def main_registry(delivery: Any) -> tuple[str, list[dict[str, str]]]:
 
 # ------------------------------------------------------------------ settlement
 
-def _decisions(state: LearningState, *, open_only: bool = False) -> list[dict]:
-    records = state.records(FEEDBACK_DECISIONS)
-    found = [records[k] for k in sorted(records, key=int)]
-    return [d for d in found if not (open_only and d.get("settled"))]
+def _decisions(ctx: Any, *, open_only: bool = False) -> list[dict]:
+    """Every decided comment, as `feedback_decide.decision_view` reads it (unsettled ones only: `open_only`)."""
+    return [feedback_decide.decision_view(c) for c in ctx.comments()
+            if c.decision is not None and not (open_only and c.settled)]
 
 
-def _unsettled(state: LearningState) -> list[tuple[dict, dict]]:
-    return [(d, a) for d in _decisions(state) for a in d["approved"] if a["settled"] is None]
+def _unsettled(ctx: Any) -> list[tuple[dict, dict]]:
+    return [(d, a) for d in _decisions(ctx) for a in d["approved"] if a["settled"] is None]
 
 
-def _settle(state: LearningState, decision: dict, approved: dict, how: dict) -> None:
+def _settle_entry(ctx: Any, decision: dict, approved: dict, how: dict) -> None:
+    ctx.store.settle_entry(ctx.held, decision["comment_id"], approved["id"], how)
     approved["settled"] = how
-    state.put_record(FEEDBACK_DECISIONS, str(decision["comment_id"]), decision)
 
 
 def feedback_prs(forge: Any, bots: frozenset[str], prefix: str) -> dict[str, Any]:
@@ -183,10 +186,10 @@ def feedback_prs(forge: Any, bots: frozenset[str], prefix: str) -> dict[str, Any
     return found
 
 
-def settle_from_prs(state: LearningState, forge: Any, bots: frozenset[str], prefix: str) -> None:
+def settle_from_prs(ctx: Any, forge: Any, bots: frozenset[str], prefix: str) -> None:
     """Settle every entry a bot feedback PR already names: `covered` when its body lists it so, else `drafted`.
     With no entry unsettled, the PRs are not listed."""
-    unsettled = _unsettled(state)
+    unsettled = _unsettled(ctx)
     if not unsettled:
         return
     named = feedback_prs(forge, bots, prefix)
@@ -195,25 +198,25 @@ def settle_from_prs(state: LearningState, forge: Any, bots: frozenset[str], pref
         if pr is None:
             continue
         covered = dict(_COVERED_LINE.findall(pr.body)).get(approved["id"])
-        _settle(state, decision, approved,
+        _settle_entry(ctx, decision, approved,
                 {"how": "covered", "by": covered, "pr": pr.url} if covered else {"how": "drafted", "pr": pr.url})
 
 
-def _judge(state: LearningState, text: str, main_entries: list[dict[str, str]]) -> tuple[list, list]:
+def _judge(ctx: Any, text: str, main_entries: list[dict[str, str]]) -> tuple[list, list]:
     """Judge every unsettled entry once. Not writable and covered-by-`main` are recorded now; the rest are
     returned: (to draft, covered by an earlier draft of this batch)."""
     today = dt.datetime.now(dt.UTC).date()
     drafts: list[tuple[dict, dict, dict]] = []
     within: list[tuple[dict, dict, str]] = []
-    for decision, approved in _unsettled(state):
+    for decision, approved in _unsettled(ctx):
         entry = entry_for(decision, approved)
         actor, host, pattern = entry["actor_scope"], entry["host_scope"], entry["pattern"]
         if (why := unwritable(entry) or read_back(text, append_entries(text, [entry]), [entry])) is not None:
             if (broken := file_level_problem(text)) is not None:
                 raise ShapeRefused(f"the registry on main cannot be appended to: {broken}")
-            _settle(state, decision, approved, {"how": "not-draftable", "why": why})
+            _settle_entry(ctx, decision, approved, {"how": "not-draftable", "why": why})
         elif (hit := tacit_registry.find_entry(main_entries, actor=actor, host=host, pattern=pattern, now=today)) is not None:
-            _settle(state, decision, approved, {"how": "covered", "by": hit["id"]})
+            _settle_entry(ctx, decision, approved, {"how": "covered", "by": hit["id"]})
         elif (earlier := tacit_registry.find_entry([e for _, _, e in drafts], actor=actor, host=host, pattern=pattern, now=today)) is not None:
             within.append((decision, approved, earlier["id"]))
         else:
@@ -231,43 +234,65 @@ def _pr_body(drafts: list, within: list) -> str:
             "to decline them for good.\n\n" + "\n".join(lines))
 
 
-def draft(state: LearningState, delivery: Any, bots: frozenset[str], drains: Any) -> None:
-    """Step 4, under the registry lane's writer lease. A retained batch or an open feedback PR holds the lease:
-    nothing new is judged or started, but entries a PR already names are still settled."""
-    label = FEEDBACK_DRAIN_LABEL
+def _lane_busy(ctx: Any, forge: Any, prefix: str) -> bool:
+    """The registry lane's writer lease (#1414 A2, #1278 A4): a not-ended batch of the lane (one in review, one
+    working or taken over, one a person must see), or any open PR on the lane's prefix (a person's included)."""
+    from defender.learning.core.store_tick import FEEDBACK_LANE
+
+    if any(b.lane == FEEDBACK_LANE and b.phase != "ended" for b in ctx.store.batches(ctx.tenant_id)):
+        return True
+    return bool(forge.list_open_prs(prefix))
+
+
+def draft(ctx: Any, delivery: Any, lane: Any) -> None:
+    """Step 4, on the registry lane. Its batches are reconciled (by PR state) and a lapsed one recovered first
+    (`lane`, the lane's `store_tick.Tick`); entries a PR already names are settled; while the lane is busy nothing
+    new is judged or started."""
     forge = delivery.repository.forge
+    prefix = delivery.branch_prefix
     try:
-        clear = drains._deliver_pending(state, delivery, label)
-        settle_from_prs(state, forge, bots, delivery.branch_prefix)
-        if not clear or not _unsettled(state) or delivery.open_pr_exists():
+        lane.tend(delivery)
+        settle_from_prs(ctx, forge, ctx.bots, prefix)
+        if not _unsettled(ctx) or _lane_busy(ctx, forge, prefix):
             return
         text, main_entries = main_registry(delivery)
-        drafts, within = _judge(state, text, main_entries)
+        drafts, within = _judge(ctx, text, main_entries)
         if drafts:
-            _start_and_land(state, delivery, drains, text, drafts, within)
-            settle_from_prs(state, forge, bots, delivery.branch_prefix)
+            _start_and_land(ctx, delivery, lane, text, drafts, within)
+            settle_from_prs(ctx, forge, ctx.bots, prefix)
     except (ForgeError, DeliveryRefused) as e:
         _logger.error(f"feedback: the registry batch could not be made: {e}")
     except ShapeRefused as e:
         _logger.warning(f"feedback: the registry draft is refused, retried next tick: {e}")
 
 
-def _start_and_land(state: LearningState, delivery: Any, drains: Any, text: str, drafts: list, within: list) -> None:
+def _start_and_land(ctx: Any, delivery: Any, lane: Any, text: str, drafts: list, within: list) -> None:
+    """Claim an item-less registry batch under the tick's lease (its row exists before any commit, P2'), append the
+    entries in its draft, commit them (recorded in the store before the branch moves) with the PR body as the
+    message, and deliver it as the lane delivers any claim: pushed, its PR opened, in review."""
+    from defender.learning.store import LaneBusy
+
     entries = [e for _, _, e in drafts]
     grown = append_entries(text, entries)  # refuse a registry shape before any batch exists
     if (problem := read_back(text, grown, entries)) is not None:
         raise ShapeRefused(problem)
-    batch = delivery.start_batch(uuid.uuid4().hex[:12], lanes=FEEDBACK_DRAIN_LABEL.lanes)
+    ctx.confirm()
     try:
+        held = ctx.store.claim_registry(ctx.held)
+    except LaneBusy:
+        _logger.info("feedback: the registry lane is busy — no new batch")
+        return
+    body = _pr_body(drafts, within)
+
+    def append(_paths: Any, *, batch: Any, **_kw: Any) -> None:
         path = Path(batch.draft_root) / REGISTRY
         write_guarded(path, append_entries(read_text_utf8(path), entries), encoding="utf-8")
         changes = batch.change_set()
         if [c.path for c in changes.changes] != [REGISTRY]:
             raise ShapeRefused(f"the batch changes {[c.path for c in changes.changes]}, not only the registry")
-        batch.commit(changes, _pr_body(drafts, within))
-        drains._land_batch(state, delivery, batch, FEEDBACK_DRAIN_LABEL, body_from_commit=True)
-    finally:
-        batch.discard()
+        batch.commit(changes, body)
+
+    dataclasses.replace(lane, author_work=append).author_claim(delivery, held)
 
 
 # ------------------------------------------------------------------ replies
@@ -295,34 +320,31 @@ def reply_text(decision: dict) -> str:
     return text.encode("utf-8", "replace").decode("utf-8")  # a lone surrogate in the model's reason cannot be sent
 
 
-def _mark_replied(state: LearningState, decision: dict) -> None:
-    decision["settled"] = True
-    state.put_record(FEEDBACK_DECISIONS, str(decision["comment_id"]), decision)
-
-
-def _reply_is_on_issue(forge: Any, seen: dict[int, str], bots: frozenset[str], decision: dict) -> bool:
+def _reply_is_on_issue(ctx: Any, seen: dict[int, str], decision: dict) -> bool:
     """Make sure `decision`'s reply is on its issue; False while its outcome does not exist yet."""
     if not all(a["settled"] for a in decision["approved"]):
         return False  # the reply is posted only once its outcome exists, so none can be on the issue yet
     number = decision["issue"]
     if number not in seen:
-        seen[number] = "\n".join(marker_head(c["body"]) for c in forge.list_comments(number) if c["user"]["login"] in bots)
+        seen[number] = "\n".join(marker_head(c["body"]) for c in ctx.forge.list_comments(number)
+                                 if c["user"]["login"] in ctx.bots)
     if marker(decision["comment_id"]) in seen[number]:
         return True
     # A failure raises and is retried next tick, never given up: the text is the host's own and always sendable,
     # so a failure is the forge's state (down, throttling, a bot not yet granted issues), not the reply's (ruling 2026-11-10: no refusal ceiling).
-    forge.create_comment(number, reply_text(decision))
+    ctx.confirm()
+    ctx.forge.create_comment(number, reply_text(decision))
     return True
 
 
-def reply(state: LearningState, forge: Any, bots: frozenset[str]) -> None:
+def reply(ctx: Any) -> None:
     """Post the reply each decision is owed. Whether one is owed is read from the issue: a bot comment carrying
-    the comment's marker settles it, and a settled decision is never read again. A reply waits until its
+    the comment's marker settles it, and a settled comment is never read again. A reply waits until its
     outcome exists (every approved entry judged and, if drafted, on its PR)."""
     seen: dict[int, str] = {}
-    for decision in _decisions(state, open_only=True):
+    for decision in _decisions(ctx, open_only=True):
         try:
-            done = _reply_is_on_issue(forge, seen, bots, decision)
+            done = _reply_is_on_issue(ctx, seen, decision)
         except ForgeError as e:
             if e.status != 404:
                 _logger.error(f"feedback: the reply to comment {decision['comment_id']} failed, retried next tick: {e}")
@@ -331,4 +353,4 @@ def reply(state: LearningState, forge: Any, bots: frozenset[str]) -> None:
                             f"{decision['comment_id']} is dropped")
             done = True
         if done:
-            _mark_replied(state, decision)
+            ctx.store.mark_settled(ctx.held, decision["comment_id"])

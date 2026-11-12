@@ -29,7 +29,7 @@ FIXTURE = KNOWLEDGE_ROOT / "tenant-fixture"
 TEMPLATE = KNOWLEDGE_ROOT / "tenant-template"
 
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
-LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
+LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"  # lint-stale-ref: ok — the retired variable is named here to set or clear it as an ambient decoy
 
 #: The ids the design's own examples use.
 TID = fixture_uuid("tenant:acme")

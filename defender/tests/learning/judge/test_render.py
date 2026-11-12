@@ -13,12 +13,7 @@ import pytest
 
 from defender.records._episode_handle import Episode
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.core import _state1135
-
-
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 
 
 def _render():
@@ -45,7 +40,7 @@ def _prompts(tmp_path, ep, **kw):
     """
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.grade_at(
-        ep, judge=judge, **{"state": _state1135.env_state(), **kw})
+        ep, judge=judge, **{"store": MemoryStore(), **kw})
     return judge
 
 
@@ -264,7 +259,7 @@ def test_921_the_lesson_commit_is_pinned_once_per_pass_and_allow_dirty_is_a_cave
     J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         git_show=git_show, draws=1,
-        state=_state1135.env_state())
+        store=MemoryStore())
 
     assert set(git_show.revs) == {"deadbee"}, (
         "two worlds of one episode read their lesson bodies at different refs")

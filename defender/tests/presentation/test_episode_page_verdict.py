@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
 
 import re
 import shutil
@@ -192,16 +191,18 @@ def test_1025_a_not_graded_page_below_the_band(tmp_path):
 
 
 def test_1025_an_episode_whose_judge_failed_at_the_enqueue_still_renders_its_stages_and_worlds_and_says_which_world_is_in_progress(
-        tmp_path):
-    """The queue folder is a file, so the append fails after `judge.yaml` records b as `queueing`."""
+        tmp_path, monkeypatch):
+    """The learning store refuses the insert, so the append fails after `judge.yaml` records b as `queueing`."""
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
+
+    def refuse(self, tenant, run_id, rows, *, kind):
+        raise OSError("the learning store refused the insert")
+
+    monkeypatch.setattr(MemoryStore, "publish_findings", refuse)  # lint-monkeypatch: ok — the sink's failure is the test's subject; the launch frame's own store is the stand-in
     # One investigator finding per world draw; the family scope refuses a world-scope reply,
     # so the family call completes no draw.
     class JudgeWithCurrentPointers(J.FakeJudge):
         def __call__(self, prompt, *, agent_id="judge", **kwargs):
-            if self.calls == 0:
-                # The launch scene has now installed its own accepted tenant settings.
-                (location_path(T.current_tenant().learning) / "_pending").write_text(
-                    "not a directory", encoding="utf-8")
             world_ids = re.findall(r"storage world UUID: ([0-9a-f-]{36})", prompt)
             assert agent_id.split(":")[1] in world_ids
             self.default = J.as_reply_text(J.reply_doc(
