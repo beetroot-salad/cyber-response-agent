@@ -19,6 +19,18 @@ from .model import _REGULAR_MODES, ChangeSet, DeliveryRefused
 from .transport import _NO_BACKGROUND_GIT, GitTransport
 
 
+#: Who every tenant commit is by (#1484): the product's own commit-maker, author and committer
+#: both, whatever identity the shell's git has, or whether it has one at all (a job container
+#: runs as a bare uid with no git config). Given as environment, which beats any configured or
+#: exported identity.
+COMMIT_IDENTITY: dict[str, str] = {
+    "GIT_AUTHOR_NAME": "defender commit-maker",
+    "GIT_AUTHOR_EMAIL": "commit-maker@defender.invalid",
+    "GIT_COMMITTER_NAME": "defender commit-maker",
+    "GIT_COMMITTER_EMAIL": "commit-maker@defender.invalid",
+}
+
+
 def _local_env() -> dict[str, str]:
     """Every git call's environment: nothing that relocates the repository (`GIT_DIR`,
     `GIT_WORK_TREE`, ...), no replace objects, pathspecs taken literally, no prompt (an empty
@@ -234,7 +246,8 @@ class LocalRepository:
         if tree == self._git(["rev-parse", f"{parent}^{{tree}}"]):
             raise DeliveryRefused("the change set changes nothing")
         return self._git(
-            ["commit-tree", tree, "-p", parent, "-F", "-"], input=message
+            ["commit-tree", tree, "-p", parent, "-F", "-"], input=message,
+            env={**_local_env(), **COMMIT_IDENTITY},
         ), after
 
     def move_branch(self, branch: str, commit: str, old: str | None) -> None:

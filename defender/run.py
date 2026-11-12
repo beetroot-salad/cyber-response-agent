@@ -1379,7 +1379,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
 
                 run_state = RunState(run_dir, run_dir.name)
                 try:
-                    summary = lifecycle(**started.lifecycle_kwargs(ns), **in_container, run_state=run_state)
+                    with _box_runtime_refusal(on_host=request is None):
+                        summary = lifecycle(**started.lifecycle_kwargs(ns), **in_container, run_state=run_state)
                 except (ServingAbort, BaseExceptionGroup) as escaped:
                     return _unservable_exit(escaped, world=world, episode=episode,
                                             lost=started.minting.access_lost())
@@ -1778,6 +1779,19 @@ def _exit_code(summary: dict) -> int:
     if code and truncated_by is not None:
         _logger.error(_EXIT_WORDS.get(truncated_by, f"the run ended {truncated_by}"))
     return code
+
+
+@contextlib.contextmanager
+def _box_runtime_refusal(*, on_host: bool) -> Iterator[None]:
+    """A box runtime the host's Docker lacks (#1484) is the host's to fix: on the operator's own
+    host the run exits with one line naming the remedy, not a crash with a traceback. A job
+    container's box is its helper's, whose start fault the job lane records: it passes through."""
+    try:
+        yield
+    except box_mod.BoxRuntimeMissing as missing:
+        if not on_host:
+            raise
+        sys.exit(f"[run.py] the run cannot start a box: {missing}")
 
 
 def _serving_abort(exc: BaseException) -> ServingAbort | None:

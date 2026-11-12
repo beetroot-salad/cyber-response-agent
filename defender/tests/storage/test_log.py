@@ -321,3 +321,27 @@ def test_a_run_s_crash_is_logged_while_the_run_is_still_bound(tmp_path, monkeypa
     assert "the run failed" in crash
     assert f"tenant_id={tenant}" in crash
     assert "run_id=" in crash
+
+
+def test_a_box_runtime_the_host_lacks_ends_the_run_as_one_line_naming_the_remedy(tmp_path, monkeypatch, capsys):
+    """The box's runtime is not registered with Docker (#1484): the run exits non-zero with one
+    line carrying the remedy, and no CRITICAL record or traceback. Control: the crash test above."""
+    from defender import box as box_mod
+
+    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
+    base, src = location_path(T.runs_base)(tmp_path)
+
+    def lifecycle(**kw):
+        raise box_mod.BoxRuntimeMissing("the box runtime 'runsc' is not registered with Docker on this host: "
+                                        "install gVisor")
+
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as e:
+        RunWithPublish(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
+                          lifecycle=lifecycle, visualize=lambda p, **kw: None,
+                          preflight=T.no_preflight)
+    assert e.value.code == "[run.py] the run cannot start a box: the box runtime 'runsc' is not registered " \
+                           "with Docker on this host: install gVisor"
+    err = capsys.readouterr().err
+    assert " CRITICAL " not in err, err
+    assert "Traceback" not in err, err
