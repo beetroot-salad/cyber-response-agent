@@ -6,7 +6,7 @@ import dataclasses
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path, PurePath
 from typing import Any
 
@@ -220,14 +220,36 @@ class AlertFacts:
         return {k: v for k, v in dataclasses.asdict(self).items() if v is not None}
 
 
-def _walk(document: Mapping[str, Any], dotted: str) -> Any:
-    """The value at `dotted` (a walk over JSON objects only), or `None`."""
-    current: Any = document
-    for key in dotted.split("."):
-        if not isinstance(current, dict) or key not in current:
-            return None
-        current = current[key]
-    return current
+def _readings(current: Any, segments: list[str], start: int = 0) -> Iterator[Any]:
+    """Every value `segments[start:]` reach under `current` (#1481), shortest key first. A key may hold one segment (a
+    nested alert) or several joined by dots (an alert stored with flat dotted keys), and any mix, so a path can have
+    more than one reading. Every node is reached by one key, so the search visits each node at most once."""
+    if start == len(segments):
+        yield current
+        return
+    if not isinstance(current, dict):
+        return
+    key = ""
+    for end in range(start, len(segments)):
+        key = segments[end] if end == start else f"{key}.{segments[end]}"
+        if key in current:
+            yield from _readings(current[key], segments, end + 1)
+
+
+def _first(document: Mapping[str, Any], dotted: str, rule: Callable[[Any], str | None]) -> str | None:
+    """The first reading of `dotted` that `rule` takes as a value, or `None`. Readings come
+    nested-first, so where both shapes hold a value the nested one wins; one that is no value (null, an object, a
+    list, blank text) gives way to the next reading."""
+    for value in _readings(document, dotted.split(".")):
+        if (text := rule(value)) is not None:
+            return text
+    return None
+
+
+def unrecorded_facts(facts: AlertFacts, mapping: AlertMapping) -> list[str]:
+    """The facts the mapping maps but `facts` holds no value for (#1481), in `FACT_KEYS` order: the run records each
+    as absent, which is worth saying."""
+    return [fact for fact in FACT_KEYS if mapping.path_of(fact) is not None and getattr(facts, fact) is None]
 
 
 def _scalar_text(value: Any) -> str | None:
@@ -266,15 +288,15 @@ def derive_facts(document: Mapping[str, Any], mapping: AlertMapping) -> AlertFac
     takes them from the record. A fact whose key is unmapped, whose path is absent, or whose
     value is not text (or, for the signature, not key-shaped) is `None`: no vendor default
     stands in."""
-    def at(fact: str) -> Any:
+    def at(fact: str, rule: Callable[[Any], str | None]) -> str | None:
         path = mapping.path_of(fact)
-        return None if path is None else _walk(document, path)
+        return None if path is None else _first(document, path, rule)
 
     return AlertFacts(
-        signature=signature_of(at("signature")),
-        event_time=_scalar_text(at("event_time")),
-        summary=_scalar_text(at("summary")),
-        case_key=case_key_of(at("case_key")),
+        signature=at("signature", signature_of),
+        event_time=at("event_time", _scalar_text),
+        summary=at("summary", _scalar_text),
+        case_key=at("case_key", case_key_of),
     )
 
 
@@ -283,12 +305,13 @@ def derive_display(document: Mapping[str, Any], mapping: AlertMapping) -> tuple[
     fact text rule over the same path walk, cut to `DISPLAY_CAPS`, and `None` for what PostgreSQL text cannot hold, so
     a store never writes a value its column refuses."""
     def at(entry: str) -> str | None:
+        def shown(value: Any) -> str | None:
+            text = _scalar_text(value)
+            kept = None if text is None else text[:DISPLAY_CAPS[entry]]
+            return kept if kept is not None and postgres_can_hold(kept) else None
+
         path = mapping.path_of(entry)
-        text = None if path is None else _scalar_text(_walk(document, path))
-        if text is None:
-            return None
-        kept = text[:DISPLAY_CAPS[entry]]
-        return kept if postgres_can_hold(kept) else None
+        return None if path is None else _first(document, path, shown)
 
     return at("title"), at("description")
 

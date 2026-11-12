@@ -252,3 +252,103 @@ def test_1345_reading_alerts_and_tenant_records_does_not_load_a_yaml_parser():
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[4])}
     done = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True, timeout=60, check=False, env=env)
     assert done.returncode == 0, done.stderr
+
+
+# --- #1481: Elastic stores alerts with flat dotted keys; the walk reads both shapes, and says which facts it recorded nothing for ---
+
+ELASTIC_FLAT = {"kibana.alert.rule.rule_id": "R-7", "kibana.alert.uuid": "u-1", "kibana.alert.reason": "why"}
+
+
+def test_1481_a_flat_dotted_key_is_read_as_the_path_it_spells():
+    """Elastic stores `kibana.alert.uuid` as one key holding dots; the mapping's path for it must find it."""
+    mapping = A.AlertMapping(paths={"signature": "kibana.alert.rule.rule_id", "case_key": "kibana.alert.uuid",
+                                    "title": "kibana.alert.reason"})
+    facts = A.derive_facts(ELASTIC_FLAT, mapping)
+    assert (facts.signature, facts.case_key) == ("R-7", "u-1")
+    assert A.derive_display(ELASTIC_FLAT, mapping) == ("why", None)
+
+
+@pytest.mark.parametrize("document", [
+    {"kibana": {"alert": {"rule": {"rule_id": "R-7"}}}},
+    {"kibana.alert": {"rule.rule_id": "R-7"}},
+    {"kibana": {"alert.rule": {"rule_id": "R-7"}}},
+    {"kibana.alert.rule.rule_id": "R-7"},
+], ids=["nested", "flat-tail", "mixed-middle", "flat"])
+def test_1481_every_split_of_the_path_between_nested_and_flat_keys_finds_the_value(document):
+    mapping = A.AlertMapping(paths={"signature": "kibana.alert.rule.rule_id"})
+    assert A.derive_facts(document, mapping).signature == "R-7"
+
+
+def test_1481_a_longer_flat_key_that_dead_ends_does_not_hide_the_value_under_a_shorter_key():
+    """Both `a` and `a.b` exist: `a.b.c` is under `a.b`, and `a` (which has no `b`) must not stop the search; the
+    reverse holds too, a flat key whose rest is missing must not stop the nested one."""
+    mapping = A.AlertMapping(paths={"signature": "a.b.c"})
+    assert A.derive_facts({"a": {"x": 1}, "a.b": {"c": "S-1"}}, mapping).signature == "S-1"
+    assert A.derive_facts({"a.b": {"x": 1}, "a": {"b": {"c": "S-2"}}}, mapping).signature == "S-2"
+
+
+def test_1481_where_an_alert_has_both_shapes_the_nested_key_wins_as_it_did_before():
+    """A tenant whose alert nests `rule.id` keeps its signature when a flat `rule.id` key appears beside it."""
+    mapping = A.AlertMapping(paths={"signature": "rule.id"})
+    assert A.derive_facts({"rule": {"id": "R-1"}, "rule.id": "R-2"}, mapping).signature == "R-1"
+    assert A.derive_facts({"rule.id": "R-2", "rule": {"id": "R-1"}}, mapping).signature == "R-1"
+
+
+def test_1481_a_value_that_is_not_there_is_still_no_fact_and_a_key_is_not_matched_by_a_partial_name():
+    mapping = A.AlertMapping(paths={"signature": "kibana.alert.uuid"})
+    assert A.derive_facts({"kibana.alert.uuid.extra": "x", "xkibana.alert.uuid": "y"}, mapping).signature is None
+
+
+@pytest.mark.parametrize("nested", [None, {"x": 1}, ["R-9"], "   "], ids=["null", "object", "list", "blank"])
+def test_1481_a_nested_key_that_holds_no_value_gives_way_to_the_flat_key_that_does(nested):
+    """Nested wins only when it holds a value: a mixed alert with `kibana: {alert: {uuid: null}}` beside
+    `kibana.alert.uuid` must still record the flat key's value."""
+    mapping = A.AlertMapping(paths={"signature": "rule.id", "case_key": "kibana.alert.uuid", "title": "rule.id"})
+    document = {"rule": {"id": nested}, "rule.id": "R-1", "kibana": {"alert": {"uuid": nested}}, "kibana.alert.uuid": "u-1"}
+    facts = A.derive_facts(document, mapping)
+    assert (facts.signature, facts.case_key) == ("R-1", "u-1")
+    assert A.derive_display(document, mapping) == ("R-1", None)
+
+
+def test_1481_a_reading_that_is_not_key_shaped_gives_way_to_one_that_is():
+    """Each fact's own rule decides what is a value: a nested signature with a space is no signature, the flat one is."""
+    mapping = A.AlertMapping(paths={"signature": "rule.id"})
+    assert A.derive_facts({"rule": {"id": "not a key"}, "rule.id": "R-1"}, mapping).signature == "R-1"
+
+
+def test_1481_the_mapped_facts_that_recorded_nothing_are_named_and_no_other_entry_is():
+    """What is named is what the run records as absent: a fact whose path finds nothing, or finds no value. An
+    unmapped fact and the display entries (a run never reads them) are not named."""
+    mapping = A.AlertMapping(paths={"signature": "kibana.alert.rule.rule_id", "case_key": "no.such",
+                                    "summary": "obj", "event_time": "kibana.alert.uuid", "title": "no.such"})
+    document = {**ELASTIC_FLAT, "obj": {"x": 1}}
+    assert A.unrecorded_facts(A.derive_facts(document, mapping), mapping) == ["summary", "case_key"]
+    every = A.AlertMapping(paths={"signature": "kibana.alert.rule.rule_id"})
+    assert A.unrecorded_facts(A.derive_facts(ELASTIC_FLAT, every), every) == []
+
+
+def test_1481_run_start_warns_naming_each_mapped_fact_that_recorded_nothing_and_no_alert_content(tmp_path, caplog):
+    from defender import run_common
+
+    alert = tmp_path / "alert.json"
+    alert.write_text(json.dumps({"rule": {"id": "SECRET-VALUE"}, "obj": {"SECRET-KEY": 1}}))
+    mapping = A.AlertMapping(paths={"signature": "rule.id", "summary": "obj", "case_key": "ticket.key",
+                                    "title": "kibana.alert.reason"})
+    with caplog.at_level("WARNING", logger="defender.run_common"):
+        run_common._admit_input(alert, mapping=mapping, world=None)
+    text = " ".join(r.getMessage() for r in caplog.records if r.levelname == "WARNING")
+    assert "for: summary, case_key " in text
+    assert "title" not in text
+    assert "signature" not in text
+    assert "SECRET" not in text
+
+
+def test_1481_run_start_stays_quiet_when_every_mapped_fact_is_recorded(tmp_path, caplog):
+    from defender import run_common
+
+    alert = tmp_path / "alert.json"
+    alert.write_text(json.dumps(ELASTIC_FLAT))
+    mapping = A.AlertMapping(paths={"signature": "kibana.alert.rule.rule_id", "title": "no.such"})
+    with caplog.at_level("WARNING", logger="defender.run_common"):
+        run_common._admit_input(alert, mapping=mapping, world=None)
+    assert [r for r in caplog.records if r.levelname == "WARNING"] == []
