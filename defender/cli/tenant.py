@@ -124,6 +124,7 @@ from defender.systems.verb_dispositions import (  # noqa: E402
 )
 from defender.records.formats import TenantRefused  # noqa: E402
 from defender.cli import _tenant_records  # noqa: E402
+from defender.kit.faults import AdapterFault  # noqa: E402
 
 #: How long one git call of `check`'s committed read may take: each is a local lookup of one
 #: path, so a call still running is blocked (a FIFO where git expects a file), not slow.
@@ -582,12 +583,23 @@ def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
         _say(f"propose refused: {refused}" if ns.command == "propose" else refused)
         return 1
     with admitted:
-        if ns.command in _RECORD_COMMANDS:
-            return _record_command(admitted, ns, secrets=secrets)
-        if ns.command == "set-alert-mapping":
-            return set_alert_mapping(admitted, mapping)
-        return _admitted_command(admitted, ns, client=client, identity=identity,
-                                 credential_config=credential_config, secrets=secrets)
+        try:
+            return _admitted_dispatch(admitted, ns, mapping, client=client, identity=identity,
+                                      credential_config=credential_config, secrets=secrets)
+        except AdapterFault as fault:  # the secret store's every refusal (a bad mount, OpenBao down or refusing): one line
+            _say(f"{type(fault).__name__}: {fault}")
+            return 1
+
+
+def _admitted_dispatch(  # noqa: PLR0913 — main's seams, passed through
+        admitted: run_tenant.Admitted, ns: argparse.Namespace, mapping: Any, *, client: Any, identity: Any,
+        credential_config: Any, secrets: Any) -> int:
+    if ns.command in _RECORD_COMMANDS:
+        return _record_command(admitted, ns, secrets=secrets)
+    if ns.command == "set-alert-mapping":
+        return set_alert_mapping(admitted, mapping)
+    return _admitted_command(admitted, ns, client=client, identity=identity,
+                             credential_config=credential_config, secrets=secrets)
 
 
 def _admitted_command(admitted: run_tenant.Admitted, ns: argparse.Namespace, *, client: Any, identity: Any,

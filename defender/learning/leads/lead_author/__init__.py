@@ -591,7 +591,7 @@ def main(argv: list[str], *, directory: Any = None) -> int:
     args = p.parse_args(argv)
     from defender import tenancy
     from defender.records.formats import TenantRefused
-    from defender.learning.leads.declared_systems import tenant_systems_of
+    from defender.learning.leads.declared_systems import AdaptersUnreadable, tenant_systems_of
     from defender.systems.run_tenant import host_tenant
 
     # The request's tenant through the one host acceptance (r10 A1), held while the run is
@@ -611,7 +611,7 @@ def main(argv: list[str], *, directory: Any = None) -> int:
         # The tenant's systems, from the records it was admitted through (#1366 O1, R16).
         try:
             systems = tenant_systems_of(paths.repo_root, admitted.directory.current_records(admitted.tenant.id))
-        except TenantRefused as refused:
+        except (TenantRefused, AdaptersUnreadable) as refused:
             print(f"lead_author: {refused}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 2
         # By hand this serves the lead-author lane's own queue under its lock, so it names that lane.

@@ -1120,6 +1120,42 @@ def test_1366_p5_a_delete_carries_the_generation_and_a_re_create_takes_the_next_
 
 # --- O8: set-credentials -----------------------------------------------------------------------------------------------
 
+
+class _BaoDown(R.KvStandIn):
+    """OpenBao unreachable: every request fails to connect."""
+
+    def _handle(self, request):
+        import httpx
+
+        raise httpx.ConnectError("connection refused", request=request)
+
+
+@pytest.mark.postgres
+def test_1366_o8_an_unreachable_secret_store_is_a_printed_refusal_not_a_traceback(imported_op):
+    """set-credentials while OpenBao is down: exit 1 and one `[tenant.py]` line naming the system, nothing written."""
+    op = imported_op
+    op.kv = _BaoDown()
+    rc, said = op.set_credentials("identity", {"api_key": "k-1366"}, for_version=1)
+    assert rc == 1, said
+    assert R.lines_naming(said, "[tenant.py]", "identity", "not written"), said
+    assert "Traceback" not in said
+
+
+@pytest.mark.postgres
+def test_1366_o8_a_bad_kv_mount_is_a_printed_refusal_not_a_traceback(imported_op):
+    """`--kv-mount` that is not a mount name: exit 1 and one `[tenant.py]` line naming the mount."""
+    op = imported_op
+    op.tmp.mkdir(parents=True, exist_ok=True)
+    token = op.tmp / "token"
+    token.write_text("operator-token\n", encoding="utf-8")
+    from defender.cli import tenant
+
+    op.capsys.readouterr()
+    rc = tenant.main(["systems", op.tid, "--token-file", str(token), "--kv-mount", "bad mount"])
+    said = op.capsys.readouterr()
+    assert rc == 1, said
+    assert R.lines_naming(said.err, "[tenant.py]", "mount"), said
+
 @pytest.mark.postgres
 def test_1366_o8_credentials_prepared_for_a_stale_version_are_refused_and_current_ones_land_at_its_generation(imported_op):
     """identity moves (version 2, generation 2): credentials naming version 1 are refused naming identity and the
@@ -1254,6 +1290,24 @@ def test_1366_dc8_a_system_exported_by_systems_is_taken_back_by_set_system_uncha
     assert (again.version, again.settings, again.access, again.credential_generation) == (
         3, before.settings, before.access, before.credential_generation)
     assert op.run(R.SET_SYSTEM, op.tid, "host-state", str(out / "host-state"), R.REPLACES, "1")[0] == 0
+
+
+@pytest.mark.postgres
+def test_1366_dc8_an_export_refuses_a_directory_already_holding_a_system_folder(imported_op, tmp_path):
+    """host-state has no settings, so its export writes no config.env: a stale one an earlier folder left would be read
+    back by set-system. `--export` into a directory holding any system's folder is refused, naming it, and writes
+    nothing. (#1366 DC8)"""
+    op = imported_op
+    out = tmp_path / "exported"
+    stale = out / "host-state" / "config.env"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("HOST_STATE_LEFTOVER=1\n", encoding="utf-8")
+
+    rc, said = op.systems(R.EXPORT, str(out))
+
+    assert rc == 1, said
+    assert R.lines_naming(said, "[tenant.py]", "host-state"), said
+    assert sorted(p.relative_to(out).as_posix() for p in out.rglob("*")) == ["host-state", "host-state/config.env"]
 
 
 @pytest.mark.postgres

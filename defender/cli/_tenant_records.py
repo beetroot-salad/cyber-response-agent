@@ -313,9 +313,15 @@ def run_systems(admitted: Any, *, export: Path | None, secrets: Any) -> int:
         _say(not_imported_text(tenant.id))
         return 1
     if export is not None:
+        # Only fresh folders: one an earlier export or a handoff left would keep a file this export does not write
+        # (a system with no settings writes no config.env), and set-system would read it back. Refused before any write.
+        taken = sorted(system for system in records.systems if os.path.lexists(Path(export) / system))
+        if taken:
+            _say(f"{export} already holds a folder for {', '.join(taken)}: export into a new directory")
+            return 1
         for system, record in sorted(records.systems.items()):
             folder = Path(export) / system
-            folder.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the operator names this folder on its own host; no box writes it
+            folder.mkdir(parents=True)  # lint-unguarded-tree-write: ok — the operator names this folder on its own host; no box writes it
             files = {"access.yaml": record.access, **({"config.env": config_text(record.settings)} if record.settings else {})}
             for name, text in files.items():
                 (folder / name).write_text(text, encoding="utf-8")  # lint-unguarded-tree-write: ok — the operator's export folder
@@ -363,7 +369,7 @@ def run_set_credentials(admitted: Any, system: str, file: Path, *, for_version: 
     which must be the current one (disabled included). The version is read again after the write: if another
     operator wrote the system meanwhile, the command reports the refusal (the set left at the old version's path is
     never read for the new one)."""
-    from defender.kit.faults import ConfigFault
+    from defender.kit.faults import AdapterFault
 
     tenant = admitted.tenant
     loaded = _credential_file(file)
@@ -376,7 +382,7 @@ def run_set_credentials(admitted: Any, system: str, file: Path, *, for_version: 
     try:
         asyncio.run(secrets.put_credentials(str(tenant.id), system, kind, fields,
                                             generation=current.credential_generation))
-    except ConfigFault as refused:
+    except AdapterFault as refused:
         _say(f"system {system}: the credentials were not written: {refused}")
         return 1
     after = admitted.directory.current_records(tenant.id).systems.get(system)
