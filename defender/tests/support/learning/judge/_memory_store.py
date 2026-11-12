@@ -24,8 +24,9 @@ class Item:
 class MemoryStore:
     items: dict[str, list[Item]] = field(default_factory=dict)
 
-    def work(self, tenant: str) -> list[Item]:
-        return list(self.items.get(str(tenant), []))
+    def work(self, tenant: str, *, statuses: Any = None, kind: str | None = None) -> list[Item]:
+        return [i for i in self.items.get(str(tenant), [])
+                if (statuses is None or getattr(i, "status", "waiting") in statuses) and (kind is None or i.kind == kind)]
 
     def publish_findings(self, tenant: str, run_id: str, rows: Any, *, kind: str) -> tuple[int, int]:  # noqa: ARG002 — the real verb's shape
         held = self.items.setdefault(str(tenant), [])

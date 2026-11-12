@@ -120,7 +120,7 @@ def _tainted(paths: LoopPaths) -> dict:
 def build_view(paths: LoopPaths, store: Any) -> dict:  # lint-dup: ok — serialize.build_view builds the lessons page from the corpus; this builds the queue page from the store. Same name by design: build.py calls each by module.
     """The contract over the tenant `paths` names: its work items from `store` (the sync facade), and the tainted-worktree
     archive (not a queue). No clock (see `stamped_view`); a store that cannot be read raises, so the build fails."""
-    items = store.work(str(paths.tenant.id))  # type: ignore[union-attr]
+    items = store.work(str(paths.tenant.id), statuses=_LISTED)  # type: ignore[union-attr]
     return {
         "channels": [_channel_view(kind, *_PAGE[kind], items) for kind in KINDS],
         "quarantine": {"tainted": _tainted(paths)},

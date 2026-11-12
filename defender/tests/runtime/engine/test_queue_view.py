@@ -95,7 +95,7 @@ EXPECTED_TAINTED = [
 class _NoWork:
     """A store holding nothing: the page's tainted-archive half and its empty state do not read a queue."""
 
-    def work(self, tenant: str) -> list:  # noqa: ARG002 — the store's verb
+    def work(self, tenant: str, **_filters: object) -> list:  # noqa: ARG002 — the store's verb
         return []
 
 

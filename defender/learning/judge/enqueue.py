@@ -438,7 +438,7 @@ class StoreFindings:
     def rows(self, channel: Any) -> list[dict[str, Any]]:
         """The payloads of every item of `channel`'s kind the store holds for the tenant."""
         kind = _store_kind(channel)
-        return [item.payload for item in self._store.work(self._tenant) if item.kind == kind]
+        return [item.payload for item in self._store.work(self._tenant, kind=kind)]
 
     def append(self, channel: Any, rows: list[dict[str, Any]], *,
                dedup_key: str | None = None) -> tuple[int, int]:

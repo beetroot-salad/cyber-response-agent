@@ -171,6 +171,10 @@ def _forge_faults() -> tuple[type[BaseException], ...]:
     return (ForgeError, ForgejoAuthError, DeliveryRefused, httpx.HTTPError, _git.GitError, _git.GitTimeout, OSError)
 
 
+#: The item statuses a tick reads: what can be claimed and what is in a batch (the rest is history or a person's).
+OPEN_WORK = ("waiting", "in_batch")
+
+
 def arrived(kind: str, waiting: Sequence[Any], threshold: int) -> bool:
     """Whether a kind's waiting items clear its threshold: rows, but a pitfall counts its distinct mistakes (the
     store's claim applies the same rule)."""
@@ -424,7 +428,7 @@ class Tick:
         from defender.jobs.learning_models import AUTHORING_KINDS
 
         views = self.store.batches(self.tenant_id)
-        items = self.store.work(self.tenant_id)
+        items = self.store.work(self.tenant_id, statuses=OPEN_WORK)
         review, lapsed, closing = self._to_tend(views)
         busy = any(b.lane == self.lane and b.phase in ("working", "needs_person") for b in views) or any(
             b.lane == self.lane and b.kind in AUTHORING_KINDS and b.phase != "ended" for b in views)
@@ -456,7 +460,7 @@ class Tick:
         from defender.learning.author.version_control.store_delivery import StoreRecord
 
         record = StoreRecord.of(self.store.commit_record(self.tenant_id))
-        items = self.store.work(self.tenant_id)
+        items = self.store.work(self.tenant_id, statuses=OPEN_WORK)
         for b in review:
             self._reconcile(delivery, b, record, [i for i in items if i.batch_id == b.id and i.status == "in_batch"])
         for b in closing:
@@ -782,7 +786,7 @@ class Tick:
                                         or (b.kind == "revert" and b.phase == "in_review")) for b in views):
             _logger.info(f"{self.label}: a batch of the lane is not ended — no new batch")
             return 0
-        due = self._due(views, self.store.work(self.tenant_id))
+        due = self._due(views, self.store.work(self.tenant_id, statuses=OPEN_WORK))
         feedback: str | None = None
         if due is not None and due.pr_number is not None and due.generation < int(self.store.generation_ceiling):
             try:
@@ -964,7 +968,7 @@ def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapp
     limits = dict(tick_thresholds or thresholds())
     closed = {b.id for b in views if b.phase == "ended" and b.outcome == "closed"}
     waiting: dict[str, list[Any]] = {}
-    for i in store.work(tenant_id):
+    for i in store.work(tenant_id, statuses=OPEN_WORK):
         if LANE_OF.get(i.kind) != lane:
             continue
         if i.status == "in_batch" and i.batch_id in closed:
