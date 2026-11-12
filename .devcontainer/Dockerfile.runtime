@@ -6,7 +6,7 @@
 # investigation actually executes (defender/run.py) and — per the sandbox design
 # (defender/docs/runtime-sandbox-design.md) — the eventual untrusted "hands" whose
 # rootfs should be minimal. So this image carries ONLY python + the defender
-# runtime deps (plus the `api` extra the credential proxy serves with, #1482) + the defender code. No dev tooling, no egress tooling. Two tools are carried
+# runtime deps + the defender code. No dev tooling, no egress tooling. Two tools are carried
 # because the worker needs them (#1344 "One image"): git, for the tenant clones the runs and the
 # learning jobs read, and the docker CLI, which starts each run's box (mount the host's Docker
 # socket). The worker runs learning as its own child processes, so there is one image.
@@ -70,12 +70,11 @@ RUN pip install --no-cache-dir uv
 
 WORKDIR /workspace
 
-# Deps layer first, cached across code changes: resolve the `.[runtime]` and `.[api]` extras
+# Deps layer first, cached across code changes: resolve the `.[runtime]` extra
 # from the committed lock into defender/.venv — the exact venv path run.py
-# re-execs into (defender/run.py:28). `api` too (#1482): the dev compose's credential
-# proxy runs from this image, and it serves over fastapi and uvicorn, which only `api` brings.
+# re-execs into (defender/run.py:28).
 COPY defender/pyproject.toml defender/uv.lock defender/
-RUN cd defender && uv sync --frozen --extra runtime --extra api
+RUN cd defender && uv sync --frozen --extra runtime
 
 # Code layer (busts only when defender/ changes, not on a dep change).
 COPY defender/ defender/

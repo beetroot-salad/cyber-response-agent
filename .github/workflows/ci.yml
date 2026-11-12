@@ -301,28 +301,22 @@ jobs:
             -e DEFENDER_BUDGET_ENFORCE \
             python:3.11-slim bash /repo/.dood-inner.sh
 
-  # #1482: the dev compose's credential proxy runs from the runtime image, and that image once
-  # lacked the proxy's web framework (fastapi, uvicorn: the `api` extra), so the proxy exited at
-  # import while every test passed against CI's venv, which syncs `api` itself. This builds the
-  # proxy's image the way compose does and imports the module compose starts, inside it.
-  # Its own job, not a step of `test`: five shards would build the image five times.
+  # #1482: the dev compose's credential proxy once exited at import (its image lacked fastapi and
+  # uvicorn) while every test passed against CI's venv, which syncs those itself. This starts the
+  # service exactly as compose defines it: compose builds its image (`pull_policy: build`), runs its
+  # command, and with no configuration file in CI the proxy refuses with exit 2; a missing package
+  # exits 1 at import instead. Its own job, not a step of `test`: five shards would build it five times.
   proxy-image:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
 
-      - name: Build the credential proxy's image through compose
+      - name: Start the credential proxy through compose
         timeout-minutes: 8
-        run: docker compose -p ci -f .devcontainer/docker-compose.yml build credential-proxy
-
-      # Starting it with no configuration gets past every import and into `main()`, which refuses
-      # with exit 2; a missing package exits 1 at import instead. (`ci-credential-proxy` is
-      # compose's name for the image: project `ci`, service `credential-proxy`, no `image:` key.)
-      - name: Start the proxy inside its image
         run: |
           set +e
-          docker run --rm ci-credential-proxy defender/.venv/bin/python -m defender.credential_proxy
+          docker compose -p ci -f .devcontainer/docker-compose.yml run --rm --no-deps credential-proxy
           status=$?
           if [ "$status" -ne 2 ]; then
             echo "expected the proxy to refuse its missing configuration (exit 2), got exit $status"

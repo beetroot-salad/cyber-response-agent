@@ -87,8 +87,7 @@ box = [
 ]
 # The platform HTTP API (`defender/api/`, #1131): the stub endpoints over in-memory fakes. Its
 # own extra because the API is its own program — it never loads the investigation or learning
-# modules, and the box image never needs a web framework. The runtime image syncs it too
-# (#1482): the dev credential proxy runs from that image and serves with fastapi and uvicorn.
+# modules, and neither the runtime nor the box image needs a web framework.
 api = [
     "fastapi>=0.115",
     # The ASGI server behind `api/serve.py`, the local dev entry point.
@@ -102,8 +101,19 @@ api = [
     # The people, memberships and tenants stores (#1306, #1214).
     "defender[database]",
 ]
+# The credential proxy (`defender/credential_proxy/`, #1163), in its own image
+# (`.devcontainer/Dockerfile.credential-proxy`, #1482): what the proxy and the tenancy reads it makes
+# import. Its own extra, not `api` plus `runtime`, so the proxy image carries neither the
+# investigation stack nor the API's sign-in libraries, and the worker image no web framework.
+credential-proxy = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "httpx",
+    # The proxy reads tenant records from PostgreSQL through `defender.tenancy`.
+    "defender[database]",
+]
 # The database packages (#1339, #1214): what the API and the host processes need to reach
-# PostgreSQL. Included by `api` and `runtime`; never by `box`.
+# PostgreSQL. Included by `api`, `runtime` and `credential-proxy`; never by `box`.
 database = [
     # The Postgres driver; `[binary]` ships libpq.
     "psycopg[binary]>=3.2",

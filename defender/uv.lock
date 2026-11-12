@@ -540,6 +540,14 @@ box = [
     { name = "libfaketime" },
     { name = "pytz" },
 ]
+credential-proxy = [
+    { name = "alembic" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "uvicorn" },
+]
 database = [
     { name = "alembic" },
     { name = "psycopg", extra = ["binary"] },
@@ -574,11 +582,14 @@ requires-dist = [
     { name = "alembic", marker = "extra == 'database'", specifier = ">=1.13" },
     { name = "coverage", marker = "extra == 'dev'" },
     { name = "defender", extras = ["database"], marker = "extra == 'api'" },
+    { name = "defender", extras = ["database"], marker = "extra == 'credential-proxy'" },
     { name = "defender", extras = ["database"], marker = "extra == 'runtime'" },
     { name = "duckdb", marker = "extra == 'box'", specifier = ">=1.5,<2" },
     { name = "duckdb", marker = "extra == 'runtime'", specifier = ">=1.5,<2" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115" },
+    { name = "fastapi", marker = "extra == 'credential-proxy'", specifier = ">=0.115" },
     { name = "httpx", marker = "extra == 'api'" },
+    { name = "httpx", marker = "extra == 'credential-proxy'" },
     { name = "httpx", marker = "extra == 'dev'" },
     { name = "httpx", marker = "extra == 'runtime'" },
     { name = "libfaketime", marker = "extra == 'box'", specifier = "==3.0.1" },
@@ -601,9 +612,10 @@ requires-dist = [
     { name = "toons", marker = "extra == 'runtime'", specifier = ">=0.7,<0.8" },
     { name = "typing-extensions", specifier = ">=4.12" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.30" },
+    { name = "uvicorn", marker = "extra == 'credential-proxy'", specifier = ">=0.30" },
     { name = "vulture", marker = "extra == 'dev'" },
 ]
-provides-extras = ["runtime", "box", "api", "database", "dev"]
+provides-extras = ["runtime", "box", "api", "credential-proxy", "database", "dev"]
 
 [[package]]
 name = "dnspython"
