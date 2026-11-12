@@ -24,7 +24,7 @@ import signal
 import socket
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from defender import box as box_mod
 from defender._text import one_line
@@ -59,6 +59,8 @@ CITE_FIELD = provenance_field("finding_id")
 #: Each lane's branch prefix on the tenant repository (the store mints the branch under it).
 PREFIX_OF = {AUTHOR_LANE: "lessons/", LEAD_LANE: "lead-author/", FEEDBACK_LANE: "feedback/"}
 
+
+_T = TypeVar("_T")
 
 class Refused(Exception):
     """A delivery refusal met while the tick opens its tenant delivery or starts its batch: the stage's
@@ -232,6 +234,13 @@ class Holding:
             self._done.set()
         if self._thread.is_alive() and self._thread is not threading.current_thread():
             self._thread.join(timeout=10)
+
+    def ending(self, verb: Callable[..., _T], *args: Any, **kwargs: Any) -> _T:
+        """Call `verb`, a store verb that ends this lease (the batch goes to review, ends, is abandoned, goes to a
+        person, or its lease is expired for a takeover), with the renewer halted first: a renewal after the verb would
+        find the lease gone and signal a lost lease into a holder that finished."""
+        self.halt()
+        return verb(*args, **kwargs)
 
     def check(self) -> None:
         """Raise the stop the renewer saw (or the enclosing holding's), where no signal could carry it (not
@@ -724,7 +733,8 @@ class Tick:
 
     # -- opening a PR (D6, O5) -------------------------------------------------------------------------------
 
-    def _find_or_open_pr(self, delivery: TenantDelivery, held: Any, record: Any) -> int | None:
+    def _find_or_open_pr(self, delivery: TenantDelivery, held: Any, record: Any, *,
+                         ending: Callable[..., Any] = lambda verb, *a, **k: verb(*a, **k)) -> int | None:
         """The batch's one PR, for a fresh tick and a takeover alike: the PR the forge already has for it, in any
         state (found by its head branch or by a commit the record holds for the batch), is recorded and never opened
         again, a merged or closed one included: the reconcile reads its state next. Else, an open PR on the lane's
@@ -751,8 +761,8 @@ class Tick:
             foreign = [r for r in repository.forge.list_open_prs(prefix) if r["headRefName"] not in known]
             if foreign:
                 names = ", ".join(f"#{r['number']} ({r['headRefName']})" for r in foreign)
-                self.store.needs_person(self.tenant_id, str(held.batch_id),
-                                        f"an open PR on {prefix} that no batch made holds the lane: {names}")
+                ending(self.store.needs_person, self.tenant_id, str(held.batch_id),
+                       f"an open PR on {prefix} that no batch made holds the lane: {names}")
                 _logger.error(f"{self.label}: batch {held.batch_id} opens no PR beside {names}: a person must look")
                 return None
         title, body = pr_text(held, tip_message)
@@ -838,7 +848,7 @@ class Tick:
                     batch = delivery.start_batch(str(held.batch_id), lanes=self.label.lanes, branch=held.branch,
                                                  recorder=_recorder(self.store, held))
                 except DeliveryRefused as refused:
-                    self.store.abandon_clean(held)
+                    hold.ending(self.store.abandon_clean, held)
                     raise classified_refusal(f"{self.label}: the batch could not start: {refused}", refused) from None
                 if not self.boxed:
                     self.author_work(self.paths, batch=batch, box=None, held=held, feedback=feedback,
@@ -858,7 +868,7 @@ class Tick:
                 hold.check()
                 tip = repository.branch_tip(held.branch)
                 if tip is None:
-                    self.store.end_no_commits(held, without_kept(outcomes))
+                    hold.ending(self.store.end_no_commits, held, without_kept(outcomes))
                     _logger.info(f"{self.label}: batch {held.batch_id} produced no commits — no PR opened")
                     return 0
                 try:
@@ -868,10 +878,11 @@ class Tick:
                     from defender.learning.author.version_control.store_delivery import StoreRecord
 
                     record = StoreRecord.of(self.store.commit_record(self.tenant_id))
-                    number = self._find_or_open_pr(delivery, held, record)
+                    number = self._find_or_open_pr(delivery, held, record, ending=hold.ending)
                     if number is None:
                         return 0
-                    self.store.in_review(held, number, self._fates(delivery, held, record, outcomes))
+                    fates = self._fates(delivery, held, record, outcomes)
+                    hold.ending(self.store.in_review, held, number, fates)
                     _logger.info(f"{self.label}: batch {held.batch_id} is in review as PR #{number}")
                 except LeaseLost:
                     _logger.warning(f"{self.label}: batch {held.batch_id}'s lease was lost before its delivery: "
@@ -882,7 +893,7 @@ class Tick:
                     _logger.error(f"{self.label}: batch {held.batch_id} could not be delivered "
                                   f"({one_line(str(fault))}): its commits stay on its branch for a takeover")
                     with contextlib.suppress(Exception):
-                        self.store.expire_own(held)
+                        hold.ending(self.store.expire_own, held)
                 return 0
             except TickStopped as stopped:
                 self._stopped(delivery, held, hold, stopped.why)
@@ -899,9 +910,9 @@ class Tick:
                 # charged, and held for a person at the ceiling, never dead.
                 with contextlib.suppress(Exception):
                     if repository.branch_tip(held.branch) is None:
-                        self.store.abandon_crashed(held)
+                        hold.ending(self.store.abandon_crashed, held)
                     else:
-                        self.store.expire_own(held)
+                        hold.ending(self.store.expire_own, held)
                 raise
             finally:
                 if batch is not None:
