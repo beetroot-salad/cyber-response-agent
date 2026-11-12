@@ -294,6 +294,19 @@ async def test_a_lone_surrogate_in_any_text_a_verb_is_given_is_refused_before_an
         assert await store.work(BLUE) == []
 
 
+async def test_requests_for_one_case_arriving_together_leave_one_waiting_and_none_refused(dsn):
+    """Runs of one case ending together each file their request at once: none fails on the one-waiting-per-case index
+    (each sees the others as committed and supersedes them), and exactly one waits. (finding 6 of the #1476 review)"""
+    import asyncio
+
+    async with learning_store(dsn) as store:
+        for round_ in range(5):
+            runs = [f"run-{round_}-{n}" for n in range(8)]
+            await asyncio.gather(*(store.enqueue_request(BLUE, run, "case-A", {"n": run}) for run in runs))
+        waiting = [k for k, i in (await items(store)).items() if i.status == "waiting"]
+        assert len(waiting) == 1, waiting
+
+
 # --- the same arrival twice is one ------------------------------------------------------------------------------
 
 

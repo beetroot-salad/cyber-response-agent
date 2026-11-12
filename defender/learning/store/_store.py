@@ -254,8 +254,16 @@ def _refuse_unkeyed(row: Mapping[str, Any]) -> None:
         raise ItemRefused(f"a finding row carries no string finding_id (got {key!r})")
 
 
+async def _settle_requests(s: AsyncSession, tenant: str) -> None:
+    """Take, for the rest of `s`'s transaction, the tenant's lock on which curation request waits for each case. Every
+    transaction that can make a request wait takes it before applying `_superseded`, so it sees the requests another
+    such transaction made wait as committed, never as a second waiting row the one-per-case index refuses."""
+    await s.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(
+        literal("learning.curation_request:") + literal(str(tenant)), 0))))
+
+
 def _superseded(item: Any) -> Any:
-    """The test that a request returning to waiting has a fresher one waiting for its case."""
+    """The test that a request returning to waiting has a fresher one waiting for its case (under `_settle_requests`)."""
     other = _I.alias()
     return and_(item.c.kind == "curation_request",  # lint-half-table: ok — supersession is the curation request's own rule, not its lane
                 item.c.coalesce_key.is_not(None),
@@ -357,6 +365,7 @@ class LearningStore(FeedbackVerbs):
         _refuse_unstorable([run_id, case_id, spec])
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
+            await _settle_requests(s, tenant)
             have = (await s.execute(select(_I.c.item_key).where(
                 _I.c.tenant_id == TenantId(tenant), _I.c.kind == "curation_request", _I.c.item_key == run_id))).first()
             if have is not None:
@@ -640,6 +649,7 @@ class LearningStore(FeedbackVerbs):
     async def release_held(self, tenant: str, kind: str, key: str) -> None:
         """A person's release: a held item starts afresh (attempts and deferrals both) and waits again (O7)."""
         async with self._sessions.begin() as s:
+            await _settle_requests(s, tenant)
             await s.execute(update(_I).where(
                 _I.c.tenant_id == TenantId(tenant), _I.c.kind == kind, _I.c.item_key == key, _I.c.status == "held")
                 .values(**_to_waiting(), attempts=0, deferrals=0, updated_at=func.now()))
@@ -717,6 +727,7 @@ class LearningStore(FeedbackVerbs):
                      default: Outcome | None) -> None:
         """Apply per-item outcomes to the items still `in_batch` in `batch_id`; unnamed items take `default`
         (`None`: they stay in the batch)."""
+        await _settle_requests(s, tenant)
         mine = [_I.c.tenant_id == TenantId(tenant), _I.c.batch_id == BatchId(batch_id), _I.c.status == "in_batch"]
         named = dict(outcomes)
         for (kind, key), out in named.items():
@@ -775,6 +786,7 @@ class LearningStore(FeedbackVerbs):
                          reason: str | None = None) -> None:
         """The batch's items leave it unfinished. A replacement's go back to the batch it replaces (still due);
         otherwise they wait (held for a person, or at the attempt ceiling)."""
+        await _settle_requests(s, tenant)
         mine = [_I.c.tenant_id == TenantId(tenant), _I.c.batch_id == row.id, _I.c.status == "in_batch"]
         attempts = func.greatest(_I.c.attempts - 1, 0) if forgive else _I.c.attempts
         if hold:
