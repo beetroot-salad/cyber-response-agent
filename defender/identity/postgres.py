@@ -4,7 +4,7 @@ answering the same contract suite. Needs `psycopg` and SQLAlchemy (the `database
 imports this module.
 
 Each operation is one transaction on a pooled async connection. Concurrency-sensitive writes are
-explicit statements (a user-row lock, `FOR UPDATE SKIP LOCKED` claims, conditional updates that
+explicit statements (a tenant share lock, a program-row lock, `FOR UPDATE SKIP LOCKED` claims, conditional updates that
 report whether they applied); the rest are ORM queries. A returned model is a detached copy with
 every field loaded. The tables come from `defender.migrations`, never from this module."""
 
@@ -22,17 +22,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender.database import async_engine, sessions
-from defender.records.formats import CredentialId, MembershipId, TenantId, UserId
-from defender.tenancy.models import TenantRecord
+from defender.records.formats import CredentialId, MembershipId, ProgramId, TenantId, UserId
+from defender.tenancy.models import TenantRecord, share_tenant
 
-from .errors import CredentialCapReached, DataRuleViolation
+from .errors import CredentialCapReached, DataRuleViolation, TenantNotActive
 from .memory import (
-    CREDENTIAL_CAP, PENDING_DEADLINE, TOUCH_AFTER, check_credential_fields, check_membership_fields, check_role,
-    first_warning, is_warning_threshold, secret_hash, tightest_due, warning_after,
+    CREDENTIAL_CAP, PENDING_DEADLINE, TOUCH_AFTER, check_credential_fields, check_membership_fields, first_warning, is_warning_threshold, secret_hash, tightest_due, warning_after,
 )
 from .models import (
-    CredentialKind, CredentialWarningDelivery, Membership, MembershipStatus, ProgramCredential, Role, Session, User,
-    UserStatus, normalize_email,
+    CredentialKind, CredentialWarningDelivery, Membership, MembershipStatus, PersonRole, Program, ProgramCredential,
+    Session, User, UserStatus, normalize_email,
 )
 from .ports import ExpiryWarning
 
@@ -44,12 +43,20 @@ def _active_tenant(tenant_id: Any) -> Any:
     return (TenantRecord.id == tenant_id) & (TenantRecord.state == "active")
 
 
+def _in_standing() -> Any:
+    """The one standing rule (O-D) as a condition on `Program`: it is `active` and its tenant is `active`."""
+    return (Program.status == "active") & exists().where(_active_tenant(Program.tenant_id))
+
+
 def _program_in_standing() -> Any:
-    """The credential's program is a member of an `active` tenant (as `program_standing` reads it): a condition on
-    `ProgramCredential` for the statements that decide whether a credential is still in use."""
-    return exists().where(
-        Membership.user_id == ProgramCredential.program_id, Membership.status == "active",
-        Membership.role == "automation", _active_tenant(Membership.tenant_id))
+    """The credential's program is in standing: a condition on `ProgramCredential` for the statements that decide whether
+    a credential is still in use (the keep-set, the warning claim)."""
+    return exists().where(Program.id == ProgramCredential.program_id, _in_standing())
+
+
+def _usable(now: _dt.datetime) -> Any:
+    """`memory.usable` as a condition on `ProgramCredential`."""
+    return (ProgramCredential.state == "live") & (ProgramCredential.expires_at > now)
 
 
 class PostgresIdentityRepository:
@@ -96,8 +103,7 @@ class PostgresIdentityRepository:
 
     async def tenant_has_active_members(self, tenant_id: TenantId) -> bool:
         return await self._one(select(exists().where(
-            Membership.tenant_id == tenant_id, Membership.status == "active",
-            Membership.user_id == User.id, User.kind == "person"))) is True
+            Membership.tenant_id == tenant_id, Membership.status == "active"))) is True
 
     # --- users -------------------------------------------------------------------------------
     async def add_user(
@@ -105,6 +111,8 @@ class PostgresIdentityRepository:
         display_name: str = "", signin_account_id: str | None = None, is_platform_admin: bool = False,
     ) -> User:
         """Seeder."""
+        if email is None:
+            raise DataRuleViolation("a person needs an email address")
         user = User.new(
             email, created_at=created_at, status=status, display_name=display_name,
             signin_account_id=signin_account_id, is_platform_admin=is_platform_admin)
@@ -166,7 +174,7 @@ class PostgresIdentityRepository:
         self, user_id: UserId, tenant_id: TenantId, *, status: MembershipStatus, invited_by: UserId | None,
         created_at: _dt.datetime, expires_at: _dt.datetime | None = None,
         accepted_at: _dt.datetime | None = None, ended_at: _dt.datetime | None = None,
-        ended_by: UserId | None = None, role: Role = "admin",
+        ended_by: UserId | None = None, role: PersonRole = "admin",
     ) -> Membership:
         """Seeder."""
         check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at)
@@ -174,9 +182,6 @@ class PostgresIdentityRepository:
             user_id=user_id, tenant_id=tenant_id, status=status, invited_by=invited_by, created_at=created_at,
             expires_at=expires_at, accepted_at=accepted_at, ended_at=ended_at, ended_by=ended_by, role=role)
         async with self._tx() as s:
-            kind = (await s.execute(select(User.kind).where(User.id == user_id))).scalars().first()
-            if kind is not None:
-                check_role(kind, role)
             s.add(row)
         return row
 
@@ -185,11 +190,10 @@ class PostgresIdentityRepository:
         expires_at: _dt.datetime | None = None,
     ) -> Membership | None:
         async with self._tx() as s:
-            locked = (await s.execute(select(User.kind).where(User.id == user_id).with_for_update())).first()
+            await self._hold_tenant_active(s, tenant_id)
+            locked = (await s.execute(select(User.id).where(User.id == user_id).with_for_update())).first()
             if locked is None:
                 raise DataRuleViolation(f"no user {user_id!r}")
-            if locked[0] == "program":
-                raise DataRuleViolation("a program is never invited")
             live = (await s.execute(select(Membership).where(
                 Membership.user_id == user_id, Membership.tenant_id == tenant_id,
                 Membership.status.in_(_LIVE)))).scalars().first()
@@ -201,13 +205,25 @@ class PostgresIdentityRepository:
             s.add(row)
         return row
 
+    @staticmethod
+    async def _hold_tenant_active(s: AsyncSession, tenant_id: TenantId) -> None:
+        """P-L: the tenant is `active`, its row share-locked until this transaction ends, before any other lock.
+        `TenantNotActive` otherwise (an absent tenant reads as not active)."""
+        state = await share_tenant(s, tenant_id)
+        if state != "active":
+            raise TenantNotActive(f"tenant {tenant_id!r} is not active")
+
     async def accept_invitation(self, membership_id: MembershipId, *, now: _dt.datetime) -> bool:
-        return await self._applied(
-            update(Membership).where(
-                Membership.id == membership_id, Membership.status == "invited",
-                (Membership.expires_at.is_(None)) | (Membership.expires_at > now),
-                exists().where(_active_tenant(Membership.tenant_id)))
-            .values(status="active", accepted_at=now).returning(Membership.id))
+        async with self._tx() as s:
+            tenant_id = (await s.execute(
+                select(Membership.tenant_id).where(Membership.id == membership_id))).scalars().first()
+            if tenant_id is None or await share_tenant(s, tenant_id) != "active":
+                return False
+            return (await s.execute(
+                update(Membership).where(
+                    Membership.id == membership_id, Membership.status == "invited",
+                    (Membership.expires_at.is_(None)) | (Membership.expires_at > now))
+                .values(status="active", accepted_at=now).returning(Membership.id))).first() is not None
 
     async def end_membership(self, membership_id: MembershipId, *, ended_by: UserId | None, now: _dt.datetime) -> bool:
         return await self._applied(
@@ -236,7 +252,7 @@ class PostgresIdentityRepository:
         async with self._tx() as s:
             rows = (await s.execute(
                 select(Membership, User).join(User, User.id == Membership.user_id)
-                .where(Membership.tenant_id == tenant_id, Membership.status == status, User.kind == "person")
+                .where(Membership.tenant_id == tenant_id, Membership.status == status)
                 .order_by(Membership.created_at, Membership.id))).all()
         return [(m, u) for m, u in rows]
 
@@ -245,57 +261,71 @@ class PostgresIdentityRepository:
             Membership.user_id == user_id, Membership.tenant_id == tenant_id,
             Membership.status == "active"))
 
-    async def program_standing(self, program_id: UserId) -> tuple[User, Membership] | None:
-        async with self._tx() as s:
-            found = (await s.execute(
-                select(User, Membership).join(Membership, Membership.user_id == User.id)
-                .join(TenantRecord, TenantRecord.id == Membership.tenant_id)
-                .where(User.id == program_id, User.kind == "program", User.status == "active",
-                       Membership.status == "active", Membership.role == "automation",
-                       TenantRecord.state == "active"))).first()
-        return None if found is None else (found[0], found[1])
-
     # --- programs and their credentials -------------------------------------------------------
     @staticmethod
-    async def _lock_program(s: AsyncSession, program_id: UserId) -> str | None:
-        """The program's user row, locked until the transaction ends (the one lock per program); its kind."""
-        found = (await s.execute(select(User.kind).where(User.id == program_id).with_for_update())).first()
+    async def _lock_program(s: AsyncSession, program_id: ProgramId) -> str | None:
+        """The program's row, locked until the transaction ends (the one lock per program); its status."""
+        found = (await s.execute(select(Program.status).where(Program.id == program_id).with_for_update())).first()
         return None if found is None else str(found[0])
+
+    async def program(self, program_id: ProgramId) -> Program | None:
+        return await self._one(select(Program).where(Program.id == program_id))
 
     async def add_program(
         self, tenant_id: TenantId, *, display_name: str, created_by: UserId, now: _dt.datetime,
-    ) -> User:
-        program = User.new_program(display_name=display_name, created_by=created_by, created_at=now)
-        membership = Membership(
-            user_id=program.id, tenant_id=tenant_id, status="active", invited_by=created_by, created_at=now,
-            accepted_at=now, role="automation")
+    ) -> Program:
+        program = Program.new(tenant_id, display_name=display_name, created_by=created_by, created_at=now)
         async with self._tx() as s:
-            creator = (await s.execute(select(User.kind).where(User.id == created_by))).scalars().first()
-            if creator != "person":
-                raise DataRuleViolation(f"no person {created_by!r} to create a program")
+            await self._hold_tenant_active(s, tenant_id)
             s.add(program)
-            await s.flush()
-            s.add(membership)
         return program
 
-    async def programs_of_tenant(self, tenant_id: TenantId) -> list[User]:
+    async def programs_of_tenant(self, tenant_id: TenantId) -> list[Program]:
+        return await self._all(select(Program).where(Program.tenant_id == tenant_id, Program.status == "active")
+                               .order_by(Program.created_at, Program.id))
+
+    async def _admit(self, condition: Any, now: _dt.datetime) -> tuple[ProgramCredential, Program] | None:
+        """The one admitting read: the credential matching `condition` while usable, with its program, while the program
+        is in standing (O-C, O-D)."""
         async with self._tx() as s:
-            return list((await s.execute(
-                select(User).join(Membership, Membership.user_id == User.id)
-                .where(Membership.tenant_id == tenant_id, Membership.status == "active", User.kind == "program")
-                .order_by(Membership.created_at, Membership.id))).scalars())
+            found = (await s.execute(
+                select(ProgramCredential, Program).join(Program, Program.id == ProgramCredential.program_id)
+                .where(condition, _usable(now), _in_standing()))).first()
+        return None if found is None else (found[0], found[1])
+
+    async def admit_by_key(self, key_hash: str, *, now: _dt.datetime) -> tuple[ProgramCredential, Program] | None:
+        return await self._admit((ProgramCredential.key_hash == key_hash) & (ProgramCredential.kind == "key"), now)
+
+    async def admit_by_client(
+        self, client_id: CredentialId, *, service_account_id: str, now: _dt.datetime,
+    ) -> tuple[ProgramCredential, Program] | None:
+        return await self._admit(
+            (ProgramCredential.id == client_id) & (ProgramCredential.kind == "oauth_client")
+            & (ProgramCredential.service_account_id == service_account_id), now)
+
+    async def admit_by_credential(
+        self, credential_id: CredentialId, *, now: _dt.datetime,
+    ) -> tuple[ProgramCredential, Program] | None:
+        return await self._admit(ProgramCredential.id == credential_id, now)
+
+    async def tenants_of_credentials(self, credential_ids: Collection[CredentialId]) -> dict[CredentialId, TenantId]:
+        wanted = set(credential_ids)
+        if not wanted:
+            return {}
+        async with self._tx() as s:
+            rows = (await s.execute(
+                select(ProgramCredential.id, Program.tenant_id).join(Program, Program.id == ProgramCredential.program_id)
+                .where(ProgramCredential.id.in_(wanted)))).all()
+        return {r[0]: r[1] for r in rows}
 
     async def remove_program(
-        self, program_id: UserId, *, removed_by: UserId | None, now: _dt.datetime,
+        self, program_id: ProgramId, *, removed_by: UserId | None, now: _dt.datetime,
     ) -> list[CredentialId] | None:
         async with self._tx() as s:
-            if await self._lock_program(s, program_id) != "program":
+            if await self._lock_program(s, program_id) != "active":
                 return None
-            ended = (await s.execute(
-                update(Membership).where(Membership.user_id == program_id, Membership.status == "active")
-                .values(status="ended", ended_at=now, ended_by=removed_by).returning(Membership.id))).first()
-            if ended is None:
-                return None
+            await s.execute(update(Program).where(Program.id == program_id).values(
+                status="removed", removed_at=now, removed_by=removed_by))
             revoked = (await s.execute(
                 update(ProgramCredential).where(
                     ProgramCredential.program_id == program_id, ProgramCredential.state.in_(("pending", "live")))
@@ -304,7 +334,7 @@ class PostgresIdentityRepository:
             return [r.id for r in sorted(revoked, key=lambda r: (r.created_at, r.id))]
 
     async def add_credential(
-        self, program_id: UserId, *, kind: CredentialKind, name: str, created_by: UserId,
+        self, program_id: ProgramId, *, kind: CredentialKind, name: str, created_by: UserId,
         expires_at: _dt.datetime, now: _dt.datetime, key_hash: str | None = None,
         credential_id: CredentialId | None = None,
     ) -> ProgramCredential | None:
@@ -316,10 +346,10 @@ class PostgresIdentityRepository:
             pending_deadline=now + PENDING_DEADLINE if kind == "oauth_client" else None)
         row.warn_threshold_days, row.warn_next_at = first_warning(now, expires_at)
         async with self._tx() as s:
-            if await self._lock_program(s, program_id) != "program":
+            status = await self._lock_program(s, program_id)
+            if status is None:
                 raise DataRuleViolation(f"{program_id!r} is no program")
-            if not (await s.execute(select(exists().where(
-                    Membership.user_id == program_id, Membership.status == "active")))).scalar():
+            if status != "active":
                 return None
             slots = (await s.execute(select(func.count()).select_from(ProgramCredential).where(
                 ProgramCredential.program_id == program_id,
@@ -341,7 +371,7 @@ class PostgresIdentityRepository:
                 update(ProgramCredential).where(
                     ProgramCredential.id == credential_id, ProgramCredential.state == "pending",
                     ProgramCredential.pending_deadline > now,
-                    exists().where(Membership.user_id == ProgramCredential.program_id, Membership.status == "active"))
+                    exists().where(Program.id == ProgramCredential.program_id, Program.status == "active"))
                 .values(state="live", service_account_id=service_account_id)
                 .returning(ProgramCredential.id))).first() is not None
 
@@ -361,10 +391,7 @@ class PostgresIdentityRepository:
     async def credential_by_id(self, credential_id: CredentialId) -> ProgramCredential | None:
         return await self._one(select(ProgramCredential).where(ProgramCredential.id == credential_id))
 
-    async def credential_by_hash(self, key_hash: str) -> ProgramCredential | None:
-        return await self._one(select(ProgramCredential).where(ProgramCredential.key_hash == key_hash))
-
-    async def credentials_of_program(self, program_id: UserId) -> list[ProgramCredential]:
+    async def credentials_of_program(self, program_id: ProgramId) -> list[ProgramCredential]:
         return await self._all(select(ProgramCredential).where(ProgramCredential.program_id == program_id)
                                .order_by(ProgramCredential.created_at, ProgramCredential.id))
 
@@ -375,13 +402,18 @@ class PostgresIdentityRepository:
                 or_(ProgramCredential.last_used_at.is_(None), now - ProgramCredential.last_used_at > TOUCH_AFTER))
             .values(last_used_at=now).returning(ProgramCredential.id))
 
-    async def revoke_stale_pending(self, *, now: _dt.datetime) -> list[CredentialId]:
+    async def revoke_stale_pending(self, *, now: _dt.datetime) -> list[tuple[CredentialId, TenantId]]:
         async with self._tx() as s:
-            return [row[0] for row in (await s.execute(
+            revoked = (await s.execute(
                 update(ProgramCredential).where(
                     ProgramCredential.state == "pending", ProgramCredential.pending_deadline <= now)
                 .values(state="revoked", revoked_at=now, revoked_by=None)
-                .returning(ProgramCredential.id))).all()]
+                .returning(ProgramCredential.id, ProgramCredential.program_id))).all()
+            if not revoked:
+                return []
+            tenants = dict((await s.execute(
+                select(Program.id, Program.tenant_id).where(Program.id.in_({r[1] for r in revoked})))).all())
+            return [(r[0], tenants[r[1]]) for r in revoked]
 
     async def oauth_credentials_to_keep(self, *, now: _dt.datetime) -> set[CredentialId]:
         return set(await self._all(select(ProgramCredential.id).where(

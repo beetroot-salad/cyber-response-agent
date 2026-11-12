@@ -158,6 +158,7 @@ if TYPE_CHECKING:
         InvestigationId as InvestigationId,
         LearningJobId as LearningJobId,
         MembershipId as MembershipId,
+        ProgramId as ProgramId,
         UserId as UserId,
         UuidId as UuidId,
     )
@@ -188,7 +189,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("BranchError", "holds_content", "inherited_artifact_names", "lead_dirs", "refuse_seeded_run_dir",), "_seeded"),
     **dict.fromkeys(("parse_mapping",), "_alert_mapping_file"),
     **dict.fromkeys(("TenantId", "TenantRefused",), "_tenant_id"),
-    **dict.fromkeys(("UUID_PATTERN", "AlertId", "CredentialId", "IdRefused", "InvestigationId", "LearningJobId", "MembershipId", "UserId",
+    **dict.fromkeys(("UUID_PATTERN", "AlertId", "CredentialId", "IdRefused", "InvestigationId", "LearningJobId", "MembershipId", "ProgramId", "UserId",
                      "UuidId",), "_record_ids"),
     **dict.fromkeys(("wire_digest",), "_wire"),
 }

@@ -34,6 +34,13 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1454
+
+Programs (#1307) now have their own table, `identity.programs`; users and memberships are people only. Run migrations
+(revision `0012_programs_table`). It stops, changing nothing, while any program row exists (a `users` row of kind
+`program`): no production path ever wrote one, so remove any left in a development database first. Stop the API and the
+lifecycle service before migrating; an older process fails on every program read once the columns are gone.
+
 ## Upgrade from before #1414
 
 Feedback issues on the tenant's Forgejo repository need the bot to write issues, labels and comments. Run

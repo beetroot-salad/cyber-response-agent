@@ -42,8 +42,9 @@ VULTURE_ARGS = [
     "--min-confidence", "60",
     "--exclude", "defender/.venv,defender/tests,defender/skills/invlang/schema.py",
     # event_time is the alert mapping's entry in its wire model and its table: read through pydantic and SQLAlchemy.
-    # `program_kind` is a column no code reads: it is always 'program', and its composite foreign key (to users' id and kind) is what it is for.
-    "--ignore-names", "key_field,key_value,event_time,program_kind",
+    # `removed_at` (a program's removal time) is a column no code reads: it is written when the program is removed, and the
+    # database's removed-exactly-when-recorded CHECK and the operator's queries are what it is for.
+    "--ignore-names", "key_field,key_value,event_time,removed_at",
     # pydantic calls its validators by decorator registration, never by name.
     "--ignore-decorators", "@field_validator,@model_validator",
 ]

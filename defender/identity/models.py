@@ -2,7 +2,8 @@
 declaration. Every value is set in Python (no server defaults): a field's starting value is
 declared on it, and a returned model is a detached copy: changing it changes nothing that is stored.
 A status outside the model is refused as it is set, so both repositories refuse it alike.
-Tenants are tenancy's (#1214): a membership refers to `tenancy.tenants`."""
+Tenants are tenancy's (#1214): a membership and a program refer to `tenancy.tenants`. A person is a `users` row, a
+program a `programs` row (#1454 P-J): no query filters one out of the other."""
 
 from __future__ import annotations
 
@@ -10,14 +11,12 @@ import datetime as _dt
 from typing import Annotated, Literal, get_args
 
 from pydantic import AfterValidator
-from sqlalchemy import (
-    Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, Text, UniqueConstraint, text,
-)
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from defender._text import postgres_can_hold
 from defender.database import Base, IdColumn
-from defender.records.formats import CredentialId, MembershipId, TenantId, UserId
+from defender.records.formats import CredentialId, MembershipId, ProgramId, TenantId, UserId
 # The memberships' foreign key names `tenancy.tenants`: its table must be on the metadata too.
 from defender.tenancy import models as _tenancy  # noqa: F401
 
@@ -51,26 +50,31 @@ Email = Annotated[str, AfterValidator(normalize_email)]
 
 UserStatus = Literal["invited", "active"]
 MembershipStatus = Literal["invited", "active", "ended", "revoked"]
-UserKind = Literal["person", "program"]
-Role = Literal["admin", "automation"]
+ProgramStatus = Literal["active", "removed"]
+#: What a membership holds: people's roles only (R1; a tenant analyst role is planned).
+PersonRole = Literal["admin"]
+#: A program's role is a property of being a program, fixed in code, never stored.
+ProgramRole = Literal["automation"]
+Role = PersonRole | ProgramRole
 CredentialKind = Literal["key", "oauth_client"]
 CredentialState = Literal["pending", "live", "revoked"]
 
 _TIME = DateTime(timezone=True)
 
 
-def _status_check(allowed: object) -> CheckConstraint:
-    """The table's CHECK on `status`, spelled from the same Literal the model validates against."""
-    return CheckConstraint(f"status IN ({', '.join(repr(s) for s in get_args(allowed))})", name="status")
-
-
 def _in_check(column: str, allowed: object, name: str) -> CheckConstraint:
+    """A CHECK that `column` holds one of the values of the Literal `allowed`, spelled from the same Literal the
+    model validates against."""
     return CheckConstraint(f"{column} IN ({', '.join(repr(s) for s in get_args(allowed))})", name=name)
 
 
-def _checked_status(model: str, allowed: object, value: str) -> str:
+def _status_check(allowed: object) -> CheckConstraint:
+    return _in_check("status", allowed, "status")
+
+
+def _checked(what: str, allowed: object, value: str) -> str:
     if value not in get_args(allowed):
-        raise DataRuleViolation(f"{value!r} is not a {model} status")
+        raise DataRuleViolation(f"{value!r} is not a {what}")
     return value
 
 
@@ -79,23 +83,14 @@ class User(Base, kw_only=True):
     __table_args__ = (
         UniqueConstraint("email"),
         UniqueConstraint("signin_account_id"),
-        # The target of `program_credentials`' composite foreign key.
-        UniqueConstraint("id", "kind"),
         CheckConstraint("email = lower(email)", name="email_lowercase"),
         _status_check(UserStatus),
         CheckConstraint("status <> 'active' OR activated_at IS NOT NULL", name="active_is_activated"),
-        _in_check("kind", UserKind, "kind"),
-        CheckConstraint("(kind = 'program') = (email IS NULL)", name="email_iff_person"),
-        CheckConstraint(
-            "kind = 'person' OR (signin_account_id IS NULL AND NOT is_platform_admin AND status = 'active')",
-            name="program_is_plain"),
-        CheckConstraint("kind = 'program' OR created_by IS NULL", name="creator_is_for_programs"),
         {"schema": SCHEMA},
     )
 
     id: Mapped[UserId] = mapped_column(IdColumn(UserId), primary_key=True, default_factory=UserId.mint)
-    #: Absent exactly for a program (CHECK).
-    email: Mapped[str | None] = mapped_column(Text)
+    email: Mapped[str] = mapped_column(Text)
     display_name: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[UserStatus] = mapped_column(Text, default="invited")
     signin_account_id: Mapped[str | None] = mapped_column(Text, default=None)
@@ -109,47 +104,61 @@ class User(Base, kw_only=True):
     created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     updated_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     activated_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
-    kind: Mapped[UserKind] = mapped_column(Text, default="person")
-    #: The admin who made a program; None for a person.
-    created_by: Mapped[UserId | None] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"), default=None)
 
     @classmethod
-    def new(cls, email: str | None, *, created_at: _dt.datetime, status: UserStatus = "invited",
+    def new(cls, email: str, *, created_at: _dt.datetime, status: UserStatus = "invited",
             display_name: str = "", signin_account_id: str | None = None,
             is_platform_admin: bool = False) -> User:
-        """A person as first stored: updated and, when created active, activated at `created_at`.
-        The email is required."""
-        if email is None:
-            raise DataRuleViolation("a person needs an email address")
+        """A person as first stored: updated and, when created active, activated at `created_at`."""
         return cls(email=normalize_email(email), created_at=created_at, updated_at=created_at,
                    status=status, display_name=display_name, signin_account_id=signin_account_id,
                    is_platform_admin=is_platform_admin,
                    activated_at=created_at if status == "active" else None)
 
-    @property
-    def person_email(self) -> str:
-        """The email of a user known to be a person (the CHECK gives every person one)."""
-        assert self.email is not None, "a person has an email"
-        return self.email
+    @validates("status")
+    def _status(self, _key: str, value: str) -> str:
+        return _checked("user status", UserStatus, value)
+
+
+class Program(Base, kw_only=True):
+    """A non-human caller of one tenant (#1454): its tenant is fixed for life and stored here (P-K), its creator is a
+    person (`users`), and it is `active` until removed. Rows are never deleted (credentials and the audit refer to
+    them). It holds no role: a program's is `automation`, in code."""
+
+    __tablename__ = "programs"
+    __table_args__ = (
+        _status_check(ProgramStatus),
+        CheckConstraint("(status = 'removed') = (removed_at IS NOT NULL)", name="removed_iff_removal_recorded"),
+        Index("programs_by_tenant", "tenant_id"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[ProgramId] = mapped_column(IdColumn(ProgramId), primary_key=True, default_factory=ProgramId.mint)
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey("tenancy.tenants.id"))
+    display_name: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[UserId] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"))
+    created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+    status: Mapped[ProgramStatus] = mapped_column(Text, default="active")
+    removed_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: The person who removed it, or None for the system (or while not removed).
+    removed_by: Mapped[UserId | None] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"), default=None)
 
     @classmethod
-    def new_program(cls, *, display_name: str, created_by: UserId, created_at: _dt.datetime) -> User:
-        """A program as first stored: active, with no email, account or administrator flag. The display
-        name must be text PostgreSQL can hold."""
-        return cls(email=None, kind="program", created_by=created_by,
-                   display_name=postgres_text(display_name, "a program's display name"),
-                   status="active", created_at=created_at, updated_at=created_at, activated_at=created_at)
+    def new(cls, tenant_id: TenantId, *, display_name: str, created_by: UserId, created_at: _dt.datetime) -> Program:
+        """A program as first stored: `active`. The display name must be text PostgreSQL can hold."""
+        return cls(tenant_id=tenant_id, display_name=postgres_text(display_name, "a program's display name"),
+                   created_by=created_by, created_at=created_at)
 
     @validates("status")
     def _status(self, _key: str, value: str) -> str:
-        return _checked_status("user", UserStatus, value)
+        return _checked("program status", ProgramStatus, value)
 
 
 class Membership(Base, kw_only=True):
     __tablename__ = "memberships"
     __table_args__ = (
         _status_check(MembershipStatus),
-        _in_check("role", Role, "role"),
+        _in_check("role", PersonRole, "role"),
         CheckConstraint("status <> 'active' OR accepted_at IS NOT NULL", name="active_is_accepted"),
         CheckConstraint("status <> 'ended' OR ended_at IS NOT NULL", name="ended_is_ended"),
         Index("memberships_one_live_row", "user_id", "tenant_id", unique=True,
@@ -176,12 +185,12 @@ class Membership(Base, kw_only=True):
     ended_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: The user who ended it, or None for the system (or while not ended).
     ended_by: Mapped[UserId | None] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"), default=None)
-    #: `admin` for a person, `automation` for a program; the identity service and repositories are the only writers.
-    role: Mapped[Role] = mapped_column(Text, default="admin")
+    #: A person's role (`admin`; R1); the identity service and repositories are the only writers.
+    role: Mapped[PersonRole] = mapped_column(Text, default="admin")
 
     @validates("status")
     def _status(self, _key: str, value: str) -> str:
-        return _checked_status("membership", MembershipStatus, value)
+        return _checked("membership status", MembershipStatus, value)
 
 
 class Session(Base):
@@ -202,10 +211,6 @@ class ProgramCredential(Base, kw_only=True):
 
     __tablename__ = "program_credentials"
     __table_args__ = (
-        # A credential's program is a user of kind program: `program_kind` is always 'program', and the pair
-        # must exist in `users` (so no credential can ever authenticate a person by bearer, P-F).
-        ForeignKeyConstraint(["program_id", "program_kind"], [f"{SCHEMA}.users.id", f"{SCHEMA}.users.kind"]),
-        CheckConstraint("program_kind = 'program'", name="program_kind"),
         _in_check("kind", CredentialKind, "kind"),
         _in_check("state", CredentialState, "state"),
         CheckConstraint("(kind = 'key') = (key_hash IS NOT NULL)", name="key_iff_hash"),
@@ -223,9 +228,8 @@ class ProgramCredential(Base, kw_only=True):
     )
 
     id: Mapped[CredentialId] = mapped_column(IdColumn(CredentialId), primary_key=True, default_factory=CredentialId.mint)
-    program_id: Mapped[UserId] = mapped_column(IdColumn(UserId))
-    #: Always `program`; see the foreign key above.
-    program_kind: Mapped[Literal["program"]] = mapped_column(Text, default="program")
+    #: A credential's program is a `programs` row, so no credential can authenticate a person (P-F, P-J).
+    program_id: Mapped[ProgramId] = mapped_column(IdColumn(ProgramId), ForeignKey(f"{SCHEMA}.programs.id"))
     kind: Mapped[CredentialKind] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
     state: Mapped[CredentialState] = mapped_column(Text)
@@ -251,11 +255,11 @@ class ProgramCredential(Base, kw_only=True):
 
     @validates("kind")
     def _kind(self, _key: str, value: str) -> str:
-        return _checked_status("credential kind", CredentialKind, value)
+        return _checked("credential kind", CredentialKind, value)
 
     @validates("state")
     def _state(self, _key: str, value: str) -> str:
-        return _checked_status("credential state", CredentialState, value)
+        return _checked("credential state", CredentialState, value)
 
 
 class CredentialWarningDelivery(Base, kw_only=True):
