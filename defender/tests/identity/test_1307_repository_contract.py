@@ -1051,7 +1051,7 @@ async def test_a_write_held_at_its_row_leaves_the_offboarding_step_nothing_to_mi
 
     async def offboarding_then_step_reads():
         async with engine.begin() as conn:
-            await offboard(conn, T1)
+            assert (await offboard(conn, T1)).state == "offboarding"
         return await _pl_end_tenant_reads(one, write)
 
     async def release_now() -> bool:  # when to release the row only; it selects no assertion
@@ -1090,6 +1090,7 @@ async def test_a_write_after_an_uncommitted_offboard_waits_then_is_refused(two_r
             attempt = asyncio.ensure_future(_pl_write(one, write, admin, invitee, invitation))
             await until_blocked(pg_dsn, 1)  # the write waits on the tenant row
             assert not attempt.done()
+            assert await _pl_end_tenant_reads(one, write) == []  # nothing the write made is live while it waits (P-L: the check is in the write's own transaction)
         made = await asyncio.wait_for(attempt, TIMEOUT)
         if write == "accept":
             assert made is None, made
@@ -1117,6 +1118,7 @@ async def test_an_accept_waits_for_an_offboard_that_wrote_first_then_returns_fal
             attempt = asyncio.ensure_future(one.accept_invitation(invitation.id, now=NOW))
             await until_blocked(pg_dsn, 1)
             assert not attempt.done()
+            assert (await one.membership(invitation.id)).status == "invited"  # still invited while the accept waits
         assert await asyncio.wait_for(attempt, TIMEOUT) is False
         assert (await one.membership(invitation.id)).status == "invited"
     finally:
