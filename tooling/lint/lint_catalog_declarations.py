@@ -49,7 +49,11 @@ _SPLAT = object()  # a splat of something outside the module (the shared templat
 
 
 def _adapters(root: Path) -> list[Path]:
-    found = sorted((root / ADAPTERS).glob(f"*{ADAPTER_SUFFIX}")) if (root / ADAPTERS).is_dir() else []
+    """The catalog's adapter modules (`integrations/*_adapter.py`, top level only), through the shared listing, then the
+    connect example."""
+    folder = root / ADAPTERS
+    listed = _astlib.source_files(folder, (), suffixes=(ADAPTER_SUFFIX,)) if folder.is_dir() else []
+    found = [folder / rel for rel in listed if "/" not in rel]
     example = root / EXAMPLE_ADAPTER
     return found + ([example] if example.is_file() else [])
 

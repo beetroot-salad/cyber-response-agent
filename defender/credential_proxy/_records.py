@@ -21,21 +21,27 @@ from psycopg.rows import tuple_row
 
 from defender.credential_proxy._deadline import current as current_deadline
 from defender.kit.faults import ConfigFault, TransportFault
-from defender.tenancy.models import SystemRecord
+from defender.tenancy.record_values import SystemRecord
 
 #: How long one read may take when no request deadline is current, in seconds.
 READ_TIMEOUT_SEC = 10.0
 #: How many idle connections the port keeps for reuse; one returned beyond them is closed.
 IDLE_CONNECTIONS = 4
 
-_QUERY = ("SELECT version, adapter_id, enabled, settings, access, credential_generation, deleted "
-          "FROM tenancy.system_versions WHERE tenant_id = %s AND system_id = %s "
-          "ORDER BY version DESC LIMIT 1")
+#: One row always: whether the tenant has any system version at all, then the system's newest version (nulls when it
+#: has none), so an unknown tenant and an unknown system are told apart in one read.
+_QUERY = ("SELECT k.known, v.version, v.adapter_id, v.enabled, v.settings, v.access, v.credential_generation, v.deleted "
+          "FROM (SELECT EXISTS (SELECT 1 FROM tenancy.system_versions WHERE tenant_id = %(t)s) AS known) AS k "
+          "LEFT JOIN LATERAL (SELECT version, adapter_id, enabled, settings, access, credential_generation, deleted "
+          "FROM tenancy.system_versions WHERE tenant_id = %(t)s AND system_id = %(s)s "
+          "ORDER BY version DESC LIMIT 1) AS v ON true")
 
 
 class SystemRecordsPort(Protocol):
     """The proxy's read of a system's current record; None when there is none or it is deleted. A disabled
-    record comes back with `enabled=False`."""
+    record comes back with `enabled=False`. A tenant with no system record at all (never imported, or not one of ours)
+    raises an unlabelled `ConfigFault`: a validly signed token naming such a tenant is the proxy's access, not one
+    system's setup (#1363)."""
 
     def current_system(self, tenant_id: str, system_id: str) -> SystemRecord | None: ...
 
@@ -66,10 +72,10 @@ class PostgresSystemRecords:
                 reused = None  # closed by `_read`; a fresh connection answers instead
         if reused is None:
             row = self._read(self._connect(left), left, tenant_id, system_id, reused=False)
-        if row is None:
-            return None
-        version, adapter_id, enabled, settings, access, generation, deleted = row
-        if deleted:
+        known, version, adapter_id, enabled, settings, access, generation, deleted = row
+        if not known:
+            raise ConfigFault("the request token's tenant has no system records")
+        if version is None or deleted:
             return None
         return SystemRecord(system_id=system_id, version=version, adapter_id=adapter_id, enabled=enabled,
                             settings=dict(settings), access=access, credential_generation=generation)
@@ -99,7 +105,7 @@ class PostgresSystemRecords:
         try:
             with conn.transaction():
                 conn.execute("SELECT set_config('statement_timeout', %s, true)", (str(max(1, int(left * 1000))),))
-                row = conn.execute(_QUERY, (tenant_id, system_id)).fetchone()
+                row = conn.execute(_QUERY, {"t": tenant_id, "s": system_id}).fetchone()
         except (psycopg.errors.InsufficientPrivilege, psycopg.errors.UndefinedTable,
                 psycopg.errors.InvalidSchemaName, psycopg.errors.UndefinedColumn) as e:
             conn.close()

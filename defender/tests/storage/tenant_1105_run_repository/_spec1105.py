@@ -35,7 +35,7 @@ ACCEPTED_ONLY_SUFFIXES = (".launch.json", ".alert.json")
 #: the layout's `USED_SIDECAR_SUFFIXES` by `test_1342_the_used_suffixes_are_the_layouts`.
 USED_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json", ".ticket-write.json",
                  ".session-pointer.json", ".call-join.jsonl", ".ticket-comments.jsonl",
-                 ".knowledge-source.json", ".job-end.json")
+                 ".knowledge-source.json", ".job-end.json", ".record-versions.json")
 JOB_END_SUFFIX = ".job-end.json"
 #: The staged-name tail a sidecar write creates first (`_io.staged_leaf`: `.staged-` plus 16
 #: lowercase hex digits).

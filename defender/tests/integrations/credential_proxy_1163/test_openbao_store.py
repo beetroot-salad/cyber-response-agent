@@ -79,8 +79,8 @@ def test_b1_the_writer_sets_and_asks_but_only_the_proxy_reads(openbao):
     writer = _writer(openbao, tokens["writer"])
     _put(writer, tenant, "identity", STATIC, {"api_key": H.CANARY_KEY})
 
-    assert asyncio.run(writer.has_credentials(tenant, "identity")) is True
-    assert asyncio.run(writer.has_credentials(tenant, "cmdb")) is False
+    assert asyncio.run(writer.has_credentials(tenant, "identity", generation=1)) is True
+    assert asyncio.run(writer.has_credentials(tenant, "cmdb", generation=1)) is False
     with pytest.raises(ConfigFault) as refused:
         _store(openbao, tokens["writer"]).read(tenant, "identity", 1)
     assert H.CANARY_KEY not in str(refused.value)

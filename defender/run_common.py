@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from defender.records.formats import ResumeWorld
     from defender.systems.run_tenant import RunTenant, TenantVerdict
     from defender.systems.verbs import RosterRead
-    from defender.tenancy.models import TenantRecords
+    from defender.tenancy.record_values import TenantRecords
     from defender.tenancy.run_knowledge import KnowledgeSource, PublishReport, RunCopy
 
 _GENERIC_ALERT_STEMS = {"alert"}
@@ -703,7 +703,7 @@ def handed_records(launch: Any, *, label: str) -> TenantRecords:
     """Inside a job container (#1170 A6): the tenant records its host helper read at setup and
     handed over in the launch facts (`records`), or the `[run.py]` refusal naming why they are not
     there. The container reads no database (O3)."""
-    from defender.tenancy.models import TenantRecords
+    from defender.tenancy.record_values import TenantRecords
 
     try:
         return TenantRecords.from_wire(launch.get("records"))

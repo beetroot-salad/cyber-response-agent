@@ -1326,8 +1326,13 @@ def _held_lead_drain(s: TenantLeadScene, monkeypatch: Any
     daemon.tripwire = X.Tripwire(s.tmp).install(monkeypatch)
     daemon.refuse_start(at=[1])
     start = X.HeldStart(daemon)
+    # The tenant's records hold wazuh too (#1366 R16: a lane authors only the tenant's own systems), so the wazuh lead
+    # is served and its box is the one whose start is refused.
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    directory = s.t.directory_with(records=R.added(R.fixture_records(), "wazuh"))
     got = _p4_caught(lambda: drains.lead_author_drain(
-        s.paths, client=s.t.forge.client, identity=s.t.vault.identity(), directory=s.t.directory,
+        s.paths, client=s.t.forge.client, identity=s.t.vault.identity(), directory=directory,
         start_box=start))
     [request] = start.requests
     X.no_path_docker(daemon)

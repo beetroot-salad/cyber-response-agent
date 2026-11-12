@@ -33,7 +33,7 @@ from defender.systems.verb_grant import GrantError, VerbGrant
 from defender import tenancy
 from defender.tenancy.case_ticket import (
     CaseRecordSettings, CaseTicketError, case_record_text, parse_case_record)
-from defender.tenancy.models import CaseRecord, TenantRecords
+from defender.tenancy.record_values import CaseRecord, TenantRecords
 from defender.kit.access import AccessDeclaration
 from defender.kit.settings import SystemConfig
 from defender.kit.faults import ConfigFault

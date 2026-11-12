@@ -40,7 +40,7 @@ from defender.records.formats import TenantRefused
 from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF
 
 if TYPE_CHECKING:
-    from defender.tenancy.models import TenantRecords
+    from defender.tenancy.record_values import TenantRecords
 
 #: The report line's classes (OD2) are `tenancy._publish_status`'s, shared with the child that
 #: writes them. `stale:*` keeps a run with a snapshot going; `misconfigured` refuses it (O9);

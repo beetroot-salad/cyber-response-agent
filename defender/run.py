@@ -73,7 +73,7 @@ from defender.tenancy import run_knowledge  # noqa: E402
 from defender.systems import case_system, system_status  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa: E402
-from defender.tenancy.models import TenantRecords  # noqa: E402
+from defender.tenancy.record_values import TenantRecords  # noqa: E402
 from defender.systems.system_status import RunSystems  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402

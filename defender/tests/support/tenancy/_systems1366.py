@@ -241,18 +241,32 @@ def records_from_settings(settings: Path) -> RecordsSpec:
     return RecordsSpec(systems, case)
 
 
+def _readable(path: Path, *, folder: bool) -> bool:
+    """Is `path` a folder (`folder`) or a file that this process can see? A tenant folder a test made unreadable (a
+    refusal case) is not, so its records fall back to the fixture's rather than crash the seeder (Python 3.11's
+    `is_file`/`is_dir` raise on a denied `stat`)."""
+    try:
+        return path.is_dir() if folder else path.is_file()
+    except OSError:
+        return False
+
+
 def settings_of(data_root: Path | str | None, tenant: str) -> Path | None:
-    """The `settings/` a run of `tenant` would read: the published run copy (`exports/current`) else the placed folder."""
+    """The `settings/` a run of `tenant` would read: the published run copy (`exports/current`) else the placed folder;
+    None when neither can be seen."""
     if data_root is None:
         return None
     base = Path(str(data_root)) / str(tenant)
     pointer = base / "exports" / "current"
-    if pointer.is_file():
-        published = base / "exports" / pointer.read_text("utf-8").strip() / "settings"
-        if published.is_dir():
+    if _readable(pointer, folder=False):
+        try:
+            published = base / "exports" / pointer.read_text("utf-8").strip() / "settings"
+        except OSError:
+            published = None
+        if published is not None and _readable(published, folder=True):
             return published
     placed = base / "knowledge" / "settings"
-    return placed if placed.is_dir() else None
+    return placed if _readable(placed, folder=True) else None
 
 
 class _Derived:
@@ -276,7 +290,7 @@ def derive(settings: Path | str | None) -> RecordsSpec:
       planted one, as planted.
     - No folder, or one with no `systems/` directory at all (a published fixture tenant that planted no systems; git
       carries no empty directory): the retired fixture's records, as every test that names no systems has always run."""
-    if settings is None or not (Path(settings) / "systems").is_dir():
+    if settings is None or not _readable(Path(settings) / "systems", folder=True):
         return fixture_records()
     planted = records_from_settings(Path(settings))
     if (Path(settings) / NO_CASE).is_file():
@@ -516,8 +530,8 @@ def credential_set(fields: Mapping[str, str], kind: str = "static") -> dict[str,
 class RecordsPort:
     """A hermetic `SystemRecordsPort` over RECORDS (not folders) for the proxy tests: `source` is a mapping
     `{tenant id: RecordsSpec | TenantRecords}` or a callable `tenant id -> RecordsSpec | TenantRecords | None`, read on
-    each call (a test may swap what it holds). `current_system` answers the system's current record, `None` for none /
-    unknown tenant. Decides nothing (a disabled record is returned as it is: the proxy refuses it). New proxy tests seed
+    each call (a test may swap what it holds). `current_system` answers the system's current record, `None` for none, and
+    raises an unlabelled `ConfigFault` for a tenant with no records, as `PostgresSystemRecords` does. Decides nothing (a disabled record is returned as it is: the proxy refuses it). New proxy tests seed
     Postgres and use `PostgresSystemRecords` instead; run-side tests hand the same value to the run (`value_of`)."""
 
     def __init__(self, source: Mapping[str, Any] | Any) -> None:
@@ -528,8 +542,12 @@ class RecordsPort:
         return None if found is None else value_of(found)
 
     def current_system(self, tenant_id: str, system_id: str) -> Any:
+        from defender.kit.faults import ConfigFault
+
         records = self._records(tenant_id)
-        return None if records is None else records.systems.get(system_id)
+        if records is None or not records.systems:
+            raise ConfigFault("the request token's tenant has no system records")  # as the real port: unlabelled
+        return records.systems.get(system_id)
 
 
 class ExportRecords(RecordsPort):
