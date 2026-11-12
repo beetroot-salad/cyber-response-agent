@@ -152,8 +152,8 @@ def test_at_head_a_membership_role_is_admin_only(migrated_database):
 
 @pytest.mark.postgres
 def test_at_head_a_program_names_a_person_who_made_it_and_a_tenant_it_belongs_to(migrated_database):
-    """A program needs a creator who is a user and a tenant that exists; a remover, when named, is a user too; a creator that
-    is a user is stored (control). (Data model, P-K)"""
+    """A program needs a creator who is a user and a tenant that exists; a remover, when named, is a user too and is named only
+    with the removal time; a creator that is a user is stored, and a removal by a person or by the system (controls). (Data model, P-K)"""
     import psycopg
 
     _tenant(migrated_database)
@@ -170,7 +170,11 @@ def test_at_head_a_program_names_a_person_who_made_it_and_a_tenant_it_belongs_to
         _program(migrated_database, "a7000000-0000-4000-8000-00000000f104", tenant=ghost)
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
         _program(migrated_database, "a7000000-0000-4000-8000-00000000f105", removed_at=CREATED, removed_by=ghost)
-    assert execute(migrated_database, "SELECT count(*) FROM identity.programs") == [(1,)]
+    with pytest.raises(psycopg.errors.CheckViolation):  # a remover is recorded only with the removal time
+        _program(migrated_database, "a7000000-0000-4000-8000-00000000f106", removed_by=ANN)
+    _program(migrated_database, "a7000000-0000-4000-8000-00000000f107", removed_at=CREATED, removed_by=ANN)  # control
+    _program(migrated_database, "a7000000-0000-4000-8000-00000000f108", removed_at=CREATED)  # control: removed by the system
+    assert execute(migrated_database, "SELECT count(*) FROM identity.programs") == [(3,)]
 
 
 @pytest.mark.postgres

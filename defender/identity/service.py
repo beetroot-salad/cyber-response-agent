@@ -594,7 +594,7 @@ class IdentityService:
         """The tenant's active program, else `NotFound`: another tenant's program, a person's id and a
         removed program all answer alike."""
         program = await self._repo.program(program_id)
-        if program is None or program.removed_at is not None or program.tenant_id != tenant_id:
+        if program is None or not program.active or program.tenant_id != tenant_id:
             raise NotFound("no such program")
         return program
 
@@ -713,6 +713,7 @@ class IdentityService:
             with contextlib.suppress(IdRefused):
                 ours[client_id] = CredentialId(client_id)
         tenants = await self._repo.tenants_of_credentials(list(ours.values()))
+        tenant_of = {client_id: tenants.get(credential_id) for client_id, credential_id in ours.items()}
         failure: Exception | None = None
         for client_id in doomed:
             try:
@@ -724,7 +725,7 @@ class IdentityService:
             # One already gone (another replica's pass deleted it) is not a deletion of ours: nothing to audit.
             if deleted:
                 audit.emit("program_client.delete", actor=audit.SYSTEM,
-                           tenant_id=tenants.get(ours[client_id]) if client_id in ours else None, target=client_id)
+                           tenant_id=tenant_of.get(client_id), target=client_id)
         if failure is not None:
             raise failure
 
@@ -738,9 +739,10 @@ class IdentityService:
 
 
     async def end_tenant(self, tenant_id: TenantId, *, now: _dt.datetime) -> None:
-        """Offboarding's people step (#1214): end every active membership of the tenant
-        (`ended_by` None: the system) and revoke every open invitation, each with its usual audit line
-        by `system`. Idempotent: a row already finished is left as it is."""
+        """Offboarding's identity step (#1214): first remove every active program (its credentials revoked, #1454),
+        then end every active membership of the tenant and revoke every open invitation, each by the system
+        (`removed_by`/`ended_by` None) with its usual audit line. A failed program removal raises before any person
+        is touched. Idempotent: a row already finished is left as it is."""
         for program in await self._repo.programs_of_tenant(tenant_id):
             await self._end_program(program.id, tenant_id, now)
         for row in await self._repo.memberships_of_tenant(tenant_id):

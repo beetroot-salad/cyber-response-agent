@@ -972,6 +972,9 @@ async def test_a_program_is_not_created_in_a_tenant_that_is_not_active(seeded, b
     tenant = await _leave(state, backend, tenants, T2)
     with pytest.raises(TenantNotActive):
         await _program(seeded, admin, tenant=tenant)
+    # The tenant is refused before the name: both repositories answer alike to a name PostgreSQL cannot hold here.
+    with pytest.raises(TenantNotActive):
+        await seeded.add_program(tenant, display_name="bad\x00name", created_by=admin.id, now=NOW)
     assert await seeded.programs_of_tenant(tenant) == []
     assert (await _program(seeded, admin)).tenant_id == T1  # control
 

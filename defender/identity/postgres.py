@@ -27,7 +27,8 @@ from defender.tenancy.models import TenantRecord, share_tenant
 
 from .errors import CredentialCapReached, DataRuleViolation, TenantNotActive
 from .memory import (
-    CREDENTIAL_CAP, PENDING_DEADLINE, TOUCH_AFTER, check_credential_fields, check_membership_fields, first_warning, is_warning_threshold, secret_hash, tightest_due, warning_after,
+    CREDENTIAL_CAP, PENDING_DEADLINE, TOUCH_AFTER, check_credential_fields, check_membership_fields, first_warning,
+    is_warning_threshold, secret_hash, tightest_due, warning_after,
 )
 from .models import (
     CredentialKind, CredentialWarningDelivery, Membership, MembershipStatus, PersonRole, Program, ProgramCredential,
@@ -45,7 +46,7 @@ def _active_tenant(tenant_id: Any) -> Any:
 
 def _in_standing() -> Any:
     """The one standing rule (O-D) as a condition on `Program`: it is `active` and its tenant is `active`."""
-    return Program.removed_at.is_(None) & exists().where(_active_tenant(Program.tenant_id))
+    return Program.active & exists().where(_active_tenant(Program.tenant_id))
 
 
 def _program_in_standing() -> Any:
@@ -222,7 +223,11 @@ class PostgresIdentityRepository:
         async with self._tx() as s:
             tenant_id = (await s.execute(
                 select(Membership.tenant_id).where(Membership.id == membership_id))).scalars().first()
-            if tenant_id is None or await share_tenant(s, tenant_id) != "active":
+            if tenant_id is None:
+                return False
+            try:
+                await self._hold_tenant_active(s, tenant_id)
+            except TenantNotActive:
                 return False
             return (await s.execute(
                 update(Membership).where(
@@ -271,8 +276,8 @@ class PostgresIdentityRepository:
     async def _lock_program(s: AsyncSession, program_id: ProgramId) -> bool | None:
         """The program's row, locked until the transaction ends (the one lock per program): whether it is active (not
         removed), or None when there is no such program."""
-        found = (await s.execute(select(Program.removed_at).where(Program.id == program_id).with_for_update())).first()
-        return None if found is None else found[0] is None
+        found = (await s.execute(select(Program.active).where(Program.id == program_id).with_for_update())).first()
+        return None if found is None else bool(found[0])
 
     async def program(self, program_id: ProgramId) -> Program | None:
         return await self._one(select(Program).where(Program.id == program_id))
@@ -280,14 +285,14 @@ class PostgresIdentityRepository:
     async def add_program(
         self, tenant_id: TenantId, *, display_name: str, created_by: UserId, now: _dt.datetime,
     ) -> Program:
-        program = Program.new(tenant_id, display_name=display_name, created_by=created_by, created_at=now)
         async with self._tx() as s:
             await self._hold_tenant_active(s, tenant_id)
+            program = Program.new(tenant_id, display_name=display_name, created_by=created_by, created_at=now)
             s.add(program)
         return program
 
     async def programs_of_tenant(self, tenant_id: TenantId) -> list[Program]:
-        return await self._all(select(Program).where(Program.tenant_id == tenant_id, Program.removed_at.is_(None))
+        return await self._all(select(Program).where(Program.tenant_id == tenant_id, Program.active)
                                .order_by(Program.created_at, Program.id))
 
     async def _admit(self, condition: Any, now: _dt.datetime) -> tuple[ProgramCredential, Program] | None:
@@ -374,7 +379,7 @@ class PostgresIdentityRepository:
                 update(ProgramCredential).where(
                     ProgramCredential.id == credential_id, ProgramCredential.state == "pending",
                     ProgramCredential.pending_deadline > now,
-                    exists().where(Program.id == ProgramCredential.program_id, Program.removed_at.is_(None)))
+                    exists().where(Program.id == ProgramCredential.program_id, Program.active))
                 .values(state="live", service_account_id=service_account_id)
                 .returning(ProgramCredential.id))).first() is not None
 

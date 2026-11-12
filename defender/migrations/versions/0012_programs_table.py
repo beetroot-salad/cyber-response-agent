@@ -1,8 +1,8 @@
 """Programs get their own table (#1454): a program is a row of `identity.programs` (its tenant, creator, name and removal),
 no longer a `users` row of kind `program` with an `automation` membership. Users are people only (a required email, no
 `kind`, no creator), a membership's role is `admin` alone, and a credential's `program_id` is a plain foreign key to
-`programs`. A program is removed exactly when it has a removal time: there is no separate status. No production path ever
-wrote a program (census C3), so nothing moves: the upgrade refuses, changing nothing, while any row exists that the new
+`programs`. A program is removed exactly when it has a removal time: there is no separate status. No deployment created a
+program through the #1307 API (census C3), so nothing moves: the upgrade refuses, changing nothing, while any row exists that the new
 schema cannot hold (a program user, or a membership whose role is not `admin`).
 
 Revision ID: 0012_programs_table
@@ -45,6 +45,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["tenant_id"], ["tenancy.tenants.id"], name=op.f("fk_programs_tenant_id_tenants")),
         sa.ForeignKeyConstraint(["created_by"], ["identity.users.id"], name=op.f("fk_programs_created_by_users")),
         sa.ForeignKeyConstraint(["removed_by"], ["identity.users.id"], name=op.f("fk_programs_removed_by_users")),
+        sa.CheckConstraint("removed_by IS NULL OR removed_at IS NOT NULL", name=op.f("ck_programs_remover_only_when_removed")),
         schema="identity")
     op.create_index("programs_by_tenant", "programs", ["tenant_id"], schema="identity")
 

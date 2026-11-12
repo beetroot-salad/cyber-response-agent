@@ -11,7 +11,8 @@ import datetime as _dt
 from typing import Annotated, Literal, get_args
 
 from pydantic import AfterValidator
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, CheckConstraint, ColumnElement, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, text
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from defender._text import postgres_can_hold
@@ -126,6 +127,7 @@ class Program(Base, kw_only=True):
 
     __tablename__ = "programs"
     __table_args__ = (
+        CheckConstraint("removed_by IS NULL OR removed_at IS NOT NULL", name="remover_only_when_removed"),
         Index("programs_by_tenant", "tenant_id"),
         {"schema": SCHEMA},
     )
@@ -139,6 +141,16 @@ class Program(Base, kw_only=True):
     removed_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: The person who removed it, or None for the system (or while not removed).
     removed_by: Mapped[UserId | None] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"), default=None)
+
+    @hybrid_property
+    def active(self) -> bool:
+        """Not removed: the one spelling of the rule, on a row and (below) in SQL."""
+        return self.removed_at is None
+
+    @active.inplace.expression
+    @classmethod
+    def _active_expression(cls) -> ColumnElement[bool]:
+        return cls.removed_at.is_(None)
 
     @classmethod
     def new(cls, tenant_id: TenantId, *, display_name: str, created_by: UserId, created_at: _dt.datetime) -> Program:
@@ -184,6 +196,10 @@ class Membership(Base, kw_only=True):
     @validates("status")
     def _status(self, _key: str, value: str) -> str:
         return _checked("membership status", MembershipStatus, value)
+
+    @validates("role")
+    def _role(self, _key: str, value: str) -> str:
+        return _checked("membership role", PersonRole, value)
 
 
 class Session(Base):
