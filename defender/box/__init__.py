@@ -119,7 +119,6 @@ from ._docker import (
     _own_container_mounts,
     _reap_on_fault,
     _refuse_an_existing_container,
-    BoxRuntimeMissing,
     BoxStartConflict,
     BoxStartFault,
     _render_env,
@@ -133,6 +132,7 @@ from ._docker import (
     container_name,
     infra_env,
     require_image,
+    require_runtime,
     resolve_rootfs,
 )
 from ._host_env import provider_scrubbed_environ, run_env
@@ -255,7 +255,6 @@ __all__ = [
     "_probe_sentinel",
     "_reap_on_fault",
     "_refuse_an_existing_container",
-    "BoxRuntimeMissing",
     "BoxStartConflict",
     "BoxStartFault",
     "_render_argv",
@@ -293,6 +292,7 @@ __all__ = [
     "relay_stop",
     "relay_window",
     "require_image",
+    "require_runtime",
     "resolve_rootfs",
     "run_lane_sources",
     "scrub",

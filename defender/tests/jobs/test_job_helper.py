@@ -1261,6 +1261,36 @@ def test_a3_o11_a_container_that_cannot_start_ends_the_row_as_a_box_start_failur
     assert end.setup != SETUP_REFUSED
 
 
+class _NoRunscStandIn(ContainerStandIn):
+    """A daemon that lists only Docker's default runtime (`docker info`)."""
+
+    def __call__(self, argv, **kw) -> subprocess.CompletedProcess:
+        if list(argv)[1:2] == ["info"]:
+            self.log.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"runc": {"path": "runc"}}) + "\n", "")
+        return super().__call__(argv, **kw)
+
+
+def test_a_worker_host_without_runsc_ends_the_row_as_a_box_start_failure_naming_the_remedy_and_starts_nothing(
+        scene, capsys):
+    """#1484: the helper asks its daemon for the job's runtime before the container's start: none is started, the end
+    record says `box: start_failed`, and the helper says the remedy rather than docker's refusal."""
+    from defender.records.job_facts import BOX_START_FAILED
+
+    inv, argv = _investigation(scene)
+    docker = _NoRunscStandIn(lambda c: 0)
+    ran = drive_helper(scene, argv, docker=docker, signer=make_signer())
+
+    assert ran.raised is None, ran.raised
+    assert not docker.boxes, "a container start was asked for"
+    end = scene.end(inv)
+    assert end is not None
+    assert end.box == BOX_START_FAILED, end
+    err = capsys.readouterr().err
+    assert "no runtime 'runsc' registered" in err, err
+    assert "runsc install" in err, err
+
+
 def test_a3_an_investigations_helper_waits_for_a_busy_tenant_lock_and_then_runs(scene):
     """The tenant's lock held exclusive (prepare, teardown) for a while: the helper waits, writes no end record while it is
     held, and starts its container once the lock is free. (A3, O11; learning's 30 s is its own)"""

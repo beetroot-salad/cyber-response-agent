@@ -40,7 +40,7 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
 from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 from defender._model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
-from ._docker import BoxStartConflict, Create, create_fault, claim_label, DockerFn, START_TOKEN_LABEL, TENANT_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _container_status, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import BoxStartConflict, Create, claim_label, DockerFn, START_TOKEN_LABEL, TENANT_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _container_status, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, require_runtime, resolve_rootfs
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._host_env import provider_scrubbed_environ
 from ._spec import DEFAULT_SPEC, _HostTransport, _text
@@ -662,9 +662,10 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
         lane=lane, tenant_id=tenant_id,
     )
     try:
-        # Confirm the image before the create, so a missing image is its own refusal (with
-        # the build remedy) rather than a create fault told apart by its text.
+        # Confirm the image and the runtime before the create, so each missing is its own
+        # refusal (with its remedy) rather than a create fault told apart by its text.
         require_image(docker, create.rootfs)
+        require_runtime(docker, spec.runtime)
     except BoxFault as e:
         write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
         raise
@@ -685,7 +686,9 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
                      f"{(created.stderr or '').strip()}", write_verdict=write_verdict
         )
         _reap_on_fault(docker, name, owned_token=start_token)
-        raise create_fault(docker, name, created.stderr, spec.runtime)
+        raise BoxFault(
+            f"could not create the box {name}: {(created.stderr or '').strip()}"
+        )
     return _start_created(_Created(run_dir, name, clock_file, start_token, write_verdict),
                           spec, docker, staged_token, running_wait)
 
@@ -771,6 +774,7 @@ def _start_boxed_request(
     create = _render_argv(request, shared_mounts(docker), start_token)
     try:
         require_image(docker, create.rootfs)
+        require_runtime(docker, request.spec.runtime)
     except BoxFault as e:
         _did_not_run_for_request(request, f"box start refused before create: {e}")
         raise
@@ -782,7 +786,9 @@ def _start_boxed_request(
                      f"{(created.stderr or '').strip()}"
         )
         _reap_on_fault(docker, request.name, owned_token=start_token)
-        raise create_fault(docker, request.name, created.stderr, request.spec.runtime)
+        raise BoxFault(
+            f"could not create the box {request.name}: {(created.stderr or '').strip()}"
+        )
     try:
         # Each read-only mount is checked by the kind it declares; a second code mount, or a
         # read-only mount with no kind, is refused here, after create, so the container is

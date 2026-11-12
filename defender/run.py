@@ -257,6 +257,36 @@ def _branching_roles() -> dict[AgentRole, Callable[[], str]]:
             AgentRole.ORACLE_CHECK: config.oracle_check_effort}
 
 
+def preflight_run_host(model_override: str | None = None, *, branching: bool = False) -> int:
+    """The operator's run preflight: the role models (`preflight_role_models`), then whether this host can start the
+    run's box (`box_host_refusal`, #1484), so a host that cannot refuses before the run is made, in one line. A job
+    container's run asks only the role models: its box is its helper's, which checks its own host."""
+    rc = preflight_role_models(model_override, branching=branching)
+    if rc:
+        return rc
+    refusal = box_host_refusal()
+    if refusal is not None:
+        _logger.error(f"preflight: this host cannot start the run's box: {refusal}")
+        return 2
+    return 0
+
+
+def box_host_refusal(environ: Mapping[str, str] = os.environ,
+                     docker: Callable[..., Any] = box_mod.run_docker) -> str | None:
+    """Why this host cannot start a run box, with its remedy, or `None`: the box runtime setting, then the same image
+    and runtime checks the box start makes before its create. `None` with the unsandboxed opt-out set: the box start
+    then degrades to the host instead."""
+    if environ.get("DEFENDER_ALLOW_UNSANDBOXED") == "1":
+        return None
+    try:
+        spec = box_mod.BoxSpec.from_env(environ)
+        box_mod.require_image(docker, box_mod.resolve_rootfs(spec.rootfs, DEFENDER_DIR))
+        box_mod.require_runtime(docker, spec.runtime)
+    except (ValueError, box_mod.BoxFault) as cannot:
+        return str(cannot)
+    return None
+
+
 def preflight_role_models(  # noqa: C901 — one fail-fast check per role, plus the branching roles' efforts
         model_override: str | None = None, *, branching: bool = False) -> int:
     """Check every registered role's model config at startup and fail fast if a provider key
@@ -1302,7 +1332,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
     enqueue_feedback: Callable[..., bool] = _run.enqueue_feedback_issue,
-    preflight: Callable[..., int] = preflight_role_models,
+    preflight: Callable[..., int] = preflight_run_host,
     materialize: Callable[..., Run] = _materialize_run,
     oracle: Any = None,
     verifier: Any = None,
@@ -1379,8 +1409,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
 
                 run_state = RunState(run_dir, run_dir.name)
                 try:
-                    with _box_runtime_refusal(on_host=request is None):
-                        summary = lifecycle(**started.lifecycle_kwargs(ns), **in_container, run_state=run_state)
+                    summary = lifecycle(**started.lifecycle_kwargs(ns), **in_container, run_state=run_state)
                 except (ServingAbort, BaseExceptionGroup) as escaped:
                     return _unservable_exit(escaped, world=world, episode=episode,
                                             lost=started.minting.access_lost())
@@ -1779,19 +1808,6 @@ def _exit_code(summary: dict) -> int:
     if code and truncated_by is not None:
         _logger.error(_EXIT_WORDS.get(truncated_by, f"the run ended {truncated_by}"))
     return code
-
-
-@contextlib.contextmanager
-def _box_runtime_refusal(*, on_host: bool) -> Iterator[None]:
-    """A box runtime the host's Docker lacks (#1484) is the host's to fix: on the operator's own
-    host the run exits with one line naming the remedy, not a crash with a traceback. A job
-    container's box is its helper's, whose start fault the job lane records: it passes through."""
-    try:
-        yield
-    except box_mod.BoxRuntimeMissing as missing:
-        if not on_host:
-            raise
-        sys.exit(f"[run.py] the run cannot start a box: {missing}")
 
 
 def _serving_abort(exc: BaseException) -> ServingAbort | None:

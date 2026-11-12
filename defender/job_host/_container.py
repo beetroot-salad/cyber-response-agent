@@ -183,6 +183,20 @@ def container_run_argv(session: Session, socket: Path, command: list[str], envir
     return argv
 
 
+def require_runtime(session: Session, environ: Mapping[str, str] = os.environ) -> None:
+    """The job container's runtime is registered with the helper's Docker (#1484), else `StartFailed` naming the
+    remedy: the box lane's own check (`box.require_runtime`), asked before the container's start."""
+    from defender.box import BoxFault, BoxSpec
+    from defender.box import require_runtime as box_requires
+
+    try:
+        box_requires(session.docker, BoxSpec.from_env(environ).runtime)
+    except ValueError as unknown:
+        raise StartFailed(str(unknown)) from None
+    except BoxFault as missing:
+        raise StartFailed(str(missing)) from None
+
+
 def start(session: Session, argv: list[str]) -> Any:
     """The container, attached: its input a pipe this helper holds and never writes (A5); its output the helper's."""
     popen = getattr(session.docker, "popen", None)
