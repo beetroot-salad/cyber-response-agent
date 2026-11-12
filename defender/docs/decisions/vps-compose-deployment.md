@@ -228,13 +228,38 @@ knowledge. Sharing code or an image must not imply sharing all permissions.
 
 The supervisor owns execution-host runtime privileges. Restrict brain-to-launcher
 operations to the job's assigned executor and approved configuration. The brain
-and executor should not receive a general Docker socket. This launcher privilege
-split requires integration work beyond the existing bash isolation library.
+and executor do not receive a Docker socket.
 
-Run each brain in an OS-confined job process/container, with its assigned files,
-provider access, and approved adapter capabilities, without launcher privileges
-or other jobs' secrets. This limits blast radius; it does not protect credentials
-or network authority supplied to that brain from a compromise of the brain.
+**Brain confinement, as specified by #1170.** Every job (an investigation, a learning
+job, a learning post-step, a family-less check) runs in one job container of its own,
+labelled with its tenant, its claim and the job-container label. The worker starts a
+**per-job host helper** for each claim (`python -m defender.job_host`, the worker's
+child, tied to it), and the job container is the helper's child. The helper is trusted
+product code and holds what reaches more than one tenant: Docker, the shared database
+login, OpenBao's sign and forge logins. For its one job it takes the tenant's shared
+lock, admits the tenant, runs the launch-time publish, makes the run folder, the run
+copies, the drafts and the exports, signs every read pass (the tenant, the
+investigation id or the learning job's id, the read grant, 600 s), mints the
+post-step's forge tokens (at most 150 s), writes the post-step's database records,
+and starts, relays and stops every box. The job container mounts its own tenant's
+folder at the same path (read-write), the worker's code copy (read-only, no `.env`)
+and its job socket's folder, and nothing else: no other tenant's folder, no
+`.host-locks`, no host `/tmp`, no secret file, no Docker socket. Its environment is the
+settings the job reads minus secrets and cross-tenant addresses, plus the provider key
+the helper resolved. It runs as the uid that owns the data root, read-only, with every
+capability dropped. The job asks the helper over the job socket (`defender.job_socket`)
+for its launch facts, its passes and its boxes; the helper answers only that
+container's processes, and answers each request by job kind. A fence or the worker's
+stop reaches the helper as SIGTERM and the container is stopped with a grace period;
+tenant teardown signals the helper and force-removes the tenant's labelled containers
+(#1214's order). A job that cannot be started confined (an image missing, a refusing
+runtime) fails its row and never runs unconfined. The job image is named by
+`DEFENDER_JOB_IMAGE` (default `defender-job:latest`, built from
+`.devcontainer/Dockerfile.job`).
+
+This limits a job's blast radius to its own tenant. It does not protect the provider
+key, the tenant's own read pass, or its own tenant's folder from a compromise of that
+job, and the job still reports its own outcome and cost (#1170 N3, N4).
 
 Parse and render run outputs in a separate restricted process/container. Give it
 only the assigned input and output locations, no credentials or runtime socket,
@@ -463,6 +488,11 @@ reach the key in memory. While sealed, workers cannot obtain Forgejo credentials
 
 A trusted supervisor authenticates using a workload mechanism, proposed AppRole
 for a generic VPS, and delegates tenant/purpose authority to the relevant job.
+Since #1170 that delegation is never a login: the per-job host helper logs in as the
+tenant's sign and forge roles and hands its job container only results scoped to the
+tenant: read passes it signed (P-B: whoever decides a pass's scope is the only one who
+signs it; no pass once the worker no longer holds the row) and, to the post-step
+alone, short-lived forge tokens.
 Forgejo identity JWTs have a proposed maximum lifetime of 600 seconds. Issuer URL,
 JWKS discovery, and audience/tenant mapping must work across the two hosts.
 Validate effective issuer policies, including inherited identity/group grants.
@@ -480,6 +510,8 @@ a requirement of this architecture.
 | CI/CD to hosts | Deploy credentials only, reaching hosts over Tailscale as an ephemeral tagged node; no unseal keys or tenant secrets. |
 | Cloudflare to origin | Explicit web routes and trusted proxy configuration; administration remains private. |
 | Execution host to application host | Scoped service access; no application-host runtime administration. |
+| Worker to per-job helper | One helper per claim, the worker's child; it holds Docker, the database login and the tenant's OpenBao logins for that one job (#1170). |
+| Job container to helper | The job socket: launch facts, passes the helper signed, boxes the helper started, and for the post-step forge tokens and its records; answered only to that container's processes, by job kind. The job holds no sign login, forge login, database login or Docker socket. |
 | Brain to executor | Assigned working directory and execution only; no secrets or network. |
 | Brain to adapters | Typed authorized operations, controlled identities/destinations; tool misuse still needs least privilege. |
 | Supervisor to runtime | Execution-host administration is trusted; compromise affects that host and its authorized remote capabilities. |

@@ -1,14 +1,16 @@
-"""A learning job's family step (#1344), the worker's child: its steps, started by
-`python -m defender.cli.learning.job --job <id> --tenant <T> --source <investigation id>
---parent-pid <pid>`, which hands in the role-model preflight learning may not import.
+"""A learning job's family step (#1344), inside its job container (#1170): started by the per-job host
+helper as `python -m defender.cli.learning.job --job <id> --tenant <T> --source <investigation id>`, which hands in the
+role-model preflight learning may not import.
 
-The entry ties itself to its worker, opens the tenant's runs container (the job lane's door),
-installs its own SIGTERM handler, waits a bounded time for the tenant's host lock, then runs the
-launcher's job lane (`cli.launch_job`): the fork pick (O3), the questioner, pre-flight, the
-siblings one at a time with the control first (O4), verification and the judge's job-lane pass.
-It writes two host-held records the worker copies (`records.job_lane`): the progress record
-(fork, stage, sibling cost), replaced whole as each changes, and the create-only end record,
-written at every exit with the outcome table's status and reason.
+The helper took the tenant's host lock (waiting at most 30 s, else it wrote the `stopped` hand-back itself), admitted the
+tenant and signed the first pass before the container started (A3, P-C), so the entry takes no lock and runs no
+admission: it asks the job socket for its `launch` facts (`container.JobContainer`), opens the tenant's runs container
+(the job lane's door), installs its own SIGTERM handler, and runs the launcher's job lane (`cli.launch_job`): the fork
+pick (O3), the questioner, pre-flight, the siblings one at a time with the control first (O4), verification and the
+judge's job-lane pass. Its passes and boxes are the helper's, asked over the socket. With no job socket (a host shell)
+it does nothing and exits non-zero (A6: there is no host mode). It writes two host-held records the worker copies
+(`records.job_lane`): the progress record (fork, stage, sibling cost), replaced whole as each changes, and the
+create-only end record, written at every exit with the outcome table's status and reason.
 
 **The ending.** A reason is never read from message text: every ending the outcome table gives
 the entry is raised typed where it is decided (`endings.JobEnding`), and anything else is
@@ -17,9 +19,9 @@ and carry no run text, path or secret.
 
 **Stopping.** The first SIGTERM raises `JobStopped` where the entry is (every later one is
 ignored), so the launcher unwinds and terminates the sibling it runs; the job records `stopped`,
-a hand-back. Two endings are decided before that and stand whatever signal arrives: a job with
-no fork point (`skipped: no_fork_point`), and a judge pass that returned (`completed`). The
-tenant's host lock still busy after the entry's wait is also a hand-back.
+a hand-back. The end of the entry's stdin (the helper's end of the container, A5) is that SIGTERM. Two endings are
+decided before that and stand whatever signal arrives: a job with no fork point (`skipped: no_fork_point`), and a
+judge pass that returned (`completed`).
 """
 from __future__ import annotations
 
@@ -29,13 +31,13 @@ import math
 import signal
 import sys
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from defender import tenancy
-from defender._parent_tie import require_parent, tie_to_parent
 from defender.investigation import branch
 from defender.learning.branch import cli
+from defender.learning.branch.container import JobContainer, NotInContainer, sigterm_on_stdin_eof
 from defender.learning.branch.endings import (
     ENTRY_ERROR,
     HISTORY_UNREADABLE,
@@ -60,16 +62,10 @@ from defender.records.job_lane import (
     LearningProgress,
     sibling_cost,
 )
-from defender.tenancy import host_lock
 
 _logger = logging.getLogger(__name__)
 
 __all__ = ["JobStopped", "main"]
-
-#: How long the entry waits for the tenant's host lock (held exclusive by prepare or teardown)
-#: before handing the job back.
-HOST_LOCK_WAIT_SECONDS = 30.0
-
 
 class JobStopped(BaseException):
     """The entry's first SIGTERM, raised where the entry was. A `BaseException`, so no broad
@@ -77,13 +73,14 @@ class JobStopped(BaseException):
 
 
 def parse_learning_job_args(argv: list[str]) -> argparse.Namespace:
-    """`--job <id> --tenant <T> --source <investigation id> --parent-pid <pid>`."""
+    """`--job <id> --tenant <T> --source <investigation id>`; a `--parent-pid` (the host entry's, retired) is
+    accepted and not read: inside the container the death tie is the stdin's end (A5)."""
     p = argparse.ArgumentParser(prog="python -m defender.cli.learning.job",
-                                description="A learning job's family step, run by the worker.")
+                                description="A learning job's family step, run in its job container.")
     p.add_argument("--job", required=True, help="the learning job's id; the episode's id too")
     p.add_argument("--tenant", required=True, help="the job's tenant")
     p.add_argument("--source", required=True, help="the finished investigation to fork, by its id")
-    p.add_argument("--parent-pid", required=True, type=int, help="the worker that started this process")
+    p.add_argument("--parent-pid", default=None, type=int, help=argparse.SUPPRESS)
     return p.parse_args(argv)
 
 
@@ -293,57 +290,59 @@ def main(  # noqa: PLR0913 — the entry's inputs plus the launcher's seams
     candidates: Callable[..., Any] = fork_candidates,
     grade: Callable[..., Any] | None = None,
     preflight: Callable[..., int],
+    environ: Mapping[str, str] | None = None,
+    watch_stdin: bool = False,
     **seams: Any,
 ) -> int:
-    """The learning job's family step; returns 0 unless the job ended `failed` (1). The worker
-    reads the end record, never this exit."""
+    """The learning job's family step in its job container (`environ`: the container's environment, default this
+    process's); returns 0 unless the job ended `failed` (1). The worker reads the end record, never this exit. With no
+    job socket in `environ` it exits non-zero having done nothing: no record, no lock, no step (A6). `watch_stdin`
+    (the process's own entry point): the end of stdin is a SIGTERM (A5), watched once the handler is in place."""
     ns = parse_learning_job_args(argv)
-    tie_to_parent()
-    require_parent(ns.parent_pid, who="learning job")
+    try:
+        ask = JobContainer.client(environ)
+    except NotInContainer as outside:
+        sys.exit(f"[learning job] job {ns.job}: {outside}; nothing was done")
     try:
         data_root = tenancy.resolve_data_root()
         lane = JobLane.open(data_root, ns.tenant)
     except (TenantRefused, JobLaneRefused) as refused:
         sys.exit(f"[learning job] job {ns.job}: the job lane cannot be opened: {refused}")
+    on_main = threading.current_thread() is threading.main_thread()
     with lane:
         job = _Job(lane, ns.job)
-        previous = signal.signal(signal.SIGTERM, job.on_term)
+        previous = signal.signal(signal.SIGTERM, job.on_term) if on_main else None
         raised: BaseException | None = None
         try:
-            _run(job, ns, data_root, candidates=candidates, grade=grade, preflight=preflight, **seams)
+            if watch_stdin:
+                sigterm_on_stdin_eof()
+            _run(job, ns, ask, candidates=candidates, grade=grade, preflight=preflight, **seams)
         except BaseException as caught:  # noqa: BLE001 — every exit is recorded, then decided below
             raised = caught
         finally:
             # No signal interrupts the record: from here a SIGTERM is ignored.
-            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            if on_main:
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
         end = job.ending_for(raised)
         if raised is not None and not isinstance(raised, (JobEnding, JobStopped)):
             _logger.error(f"job {ns.job}: the family step raised", exc_info=raised)
         written = job.write_end(end)
-        signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
+        if on_main:
+            signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
     if not written:
         return 1
     return 1 if end.status == LEARNING_FAILED else 0
 
 
-def _run(job: _Job, ns: argparse.Namespace, data_root: Any, *, candidates: Callable[..., Any],
-         grade: Callable[..., Any] | None, preflight: Callable[..., int], **seams: Any) -> None:
-    """The tenant's host lock within a bounded wait (a hand-back when still busy), then the
-    launcher's job lane, its hooks reporting to `job`."""
-    job.at_stage("waiting for the tenant")
-    held = host_lock.acquire(tenancy.data_root_for_child(data_root), ns.tenant, exclusive=False,
-                             timeout=HOST_LOCK_WAIT_SECONDS)
-    if held is None:
-        job.decided = job._end(
-            LEARNING_STOPPED, None, f"the tenant's host lock was still held after "
-                                    f"{HOST_LOCK_WAIT_SECONDS:.0f} s; the job is handed back")
-        return
-    try:
-        hooks = JobLaneHooks(
-            job_id=ns.job, pick=lambda source: job.pick(source, candidates), stage=job.at_stage,
-            sibling_ended=job.sibling_ended, judged=job.judged, grade=grade)
-        cli.launch_job(tenant=ns.tenant, source_run_id=ns.source, lane=hooks, preflight=preflight,
-                       **seams)
-    finally:
-        host_lock.release_lock(held)
-
+def _run(job: _Job, ns: argparse.Namespace, ask: Callable[..., dict[str, Any]], *,
+         candidates: Callable[..., Any], grade: Callable[..., Any] | None, preflight: Callable[..., int],
+         **seams: Any) -> None:
+    """The job socket's launch facts, then the launcher's job lane in the container, its hooks reporting to `job`.
+    No lock is taken here: the helper holds the tenant's for the whole job."""
+    job.at_stage("launch")
+    container = JobContainer.connect(ask, tenant=ns.tenant)
+    hooks = JobLaneHooks(
+        job_id=ns.job, pick=lambda source: job.pick(source, candidates), stage=job.at_stage,
+        sibling_ended=job.sibling_ended, judged=job.judged, grade=grade)
+    cli.launch_job(tenant=ns.tenant, source_run_id=ns.source, lane=hooks, preflight=preflight,
+                   container=container, **seams)
