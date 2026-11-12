@@ -211,7 +211,7 @@ def _tenants_systems(d9_tenant, defender_dir) -> tuple[str, ...]:
     from defender.systems.catalog import Catalog, TenantSystems
 
     records = d9_tenant.directory.current_records(d9_tenant)
-    return TenantSystems.of(records, Catalog.of_checkout(defender_dir)).roster.systems
+    return TenantSystems.of(records, Catalog.of_checkout(defender_dir), tenant_id=d9_tenant).roster.systems
 
 
 def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d9_tenant):

@@ -610,7 +610,8 @@ def main(argv: list[str], *, directory: Any = None) -> int:
         paths = _loop_config.LoopPaths.for_tenant(admitted.tenant)
         # The tenant's systems, from the records it was admitted through (#1366 O1, R16).
         try:
-            systems = tenant_systems_of(paths.repo_root, admitted.directory.current_records(admitted.tenant.id))
+            systems = tenant_systems_of(paths.repo_root, admitted.directory.current_records(admitted.tenant.id),
+                                        tenant_id=admitted.tenant.id)
         except (TenantRefused, AdaptersUnreadable) as refused:
             print(f"lead_author: {refused}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 2

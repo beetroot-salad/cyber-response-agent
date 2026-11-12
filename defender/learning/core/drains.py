@@ -718,6 +718,7 @@ def _open_delivery(
     recorded origin), its own clients closed on exit. Missing wiring or issuer configuration is
     decided locally, before any request (O9); every refusal is `_Refused`, naming why."""
     from defender.learning.author import version_control as vc
+    from defender.records.formats import TenantRefused
     from defender.tenancy import RecordsUnreachable
 
     tenant = paths.tenant
@@ -749,15 +750,18 @@ def _tick_systems(paths: LoopPaths, records: TenantDirectory) -> TenantSystems:
     pitfalls curation of the tick are handed one set, and an outage skips the tick (`_Refused`, transient) with no claim taken and
     no attempt counted. An unreadable adapters directory refuses the stage."""
     from defender.learning.leads.declared_systems import AdaptersUnreadable, tenant_systems_of
+    from defender.records.formats import TenantRefused
     from defender.tenancy import RecordsUnreachable
 
     tenant = paths.tenant
     if tenant is None:
         raise _Refused("the drain delivers to a tenant's repository: no tenant is selected")
     try:
-        return tenant_systems_of(paths.repo_root, records.current_records(tenant.id))
+        return tenant_systems_of(paths.repo_root, records.current_records(tenant.id), tenant_id=tenant.id)
     except RecordsUnreachable as down:
         raise _Refused(f"the tenant {tenant.id}'s records could not be read: {down}", transient=True) from None
+    except TenantRefused as refused:  # not imported (R8): the tick is refused before any claim, and nothing is charged
+        raise _Refused(str(refused)) from None
     except AdaptersUnreadable as unreadable:
         raise _Refused(f"the product checkout's adapters could not be read: {unreadable}") from None
 

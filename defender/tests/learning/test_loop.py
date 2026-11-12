@@ -410,6 +410,35 @@ def test_lead_author_drain_skips_the_tick_when_the_tenants_systems_cannot_be_rea
     assert "an outage; skipping this tick" in caplog.text
 
 
+class _NotImported(_RecordsDown):
+    """The tenant's directory, its records read as a tenant whose import has not run (R8)."""
+
+    def current_records(self, tenant_id):
+        from defender.tenancy.record_values import TenantRecords
+
+        return TenantRecords(imported=False, systems={}, case=None)
+
+
+def test_lead_author_drain_refuses_a_tick_for_a_tenant_not_imported_and_charges_no_claim(tenant, tmp_path: Path):
+    """Right after the upgrade every tenant is not imported: its tick is refused naming the import, before any claim,
+    so its queued work waits for the import rather than being charged and dead-lettered. (#1366 R8, R16)"""
+    from defender.configuration import FatalConfigError
+
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
+    run_dir = curation_run_dir("case-not-imported")
+    enqueue_run(state_for_paths(paths), run_dir)
+    marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
+    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
+
+    with pytest.raises(FatalConfigError, match="not imported"):
+        drains.lead_author_drain(paths, **{**_seams(t), "directory": _NotImported(t.directory)})
+
+    assert marker.exists()
+    assert not json.loads(marker.read_text()).get("attempts"), marker.read_text()
+    assert not failed.exists()
+
+
 def test_lead_author_drain_delivers_a_retained_batch_while_the_tenants_systems_cannot_be_read(tenant, tmp_path: Path):
     """Delivery needs no systems: a batch an earlier tick retained is delivered even while the tenant's records are
     down, and only then does the outage skip the tick, its claim still queued. (#1366 R16)"""

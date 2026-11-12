@@ -50,7 +50,7 @@ def handed_systems(paths: LoopPaths, systems: Any = None, directory: Any = None)
         from defender.learning.leads.declared_systems import tenant_systems_of
 
         assert paths.tenant is not None, "a lane handed a tenant's records names that tenant"
-        return tenant_systems_of(paths.repo_root, directory.current_records(paths.tenant.id))
+        return tenant_systems_of(paths.repo_root, directory.current_records(paths.tenant.id), tenant_id=paths.tenant.id)
     return catalog_of(paths.repo_root)
 
 

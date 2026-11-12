@@ -162,9 +162,13 @@ class TenantSystems:
     adapter_missing: Mapping[str, SystemRecord]
 
     @classmethod
-    def of(cls, records: TenantRecords, catalog: Catalog) -> TenantSystems:
-        """The tenant's systems over `catalog` from its current `records`. A tenant not imported has only the
-        platform-served systems here; refusing its run (R8) is its caller's."""
+    def of(cls, records: TenantRecords, catalog: Catalog, *, tenant_id: object) -> TenantSystems:
+        """Tenant `tenant_id`'s systems over `catalog` from its current `records`. A tenant not imported has no
+        systems to tell: `TenantRefused` naming the import (R8), here, so no caller can take its absent records for a
+        tenant with none."""
+        from defender.systems.run_tenant import require_imported
+
+        require_imported(records, tenant_id)
         whole = catalog.roster
         enabled: dict[str, SystemRecord] = {}
         disabled: dict[str, SystemRecord] = {}

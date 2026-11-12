@@ -28,7 +28,8 @@ def test_1390_name_consumers_see_the_registry_and_file_consumers_do_not():
     assert SYSTEM in registry.systems()
     # (#1366 R16) A lead lane is handed its systems: the whole catalog from a caller with no tenant, the tenant's own otherwise.
     for handed in (Catalog.of_checkout(REPO_ROOT / "defender"),
-                   TenantSystems.of(_tenants1106.fixture_run_tenant().records, Catalog.of_checkout(REPO_ROOT / "defender"))):
+                   TenantSystems.of(_tenants1106.fixture_run_tenant().records, Catalog.of_checkout(REPO_ROOT / "defender"),
+                                   tenant_id=_tenants1106.fixture_run_tenant().tenant_id)):
         declared = lane_names(handed)
         assert "cmdb" in declared, "the lead-author lane's declared systems leave out an adapter system"
         assert SYSTEM in declared, "the lead-author lane's declared systems leave out the platform-served registry"

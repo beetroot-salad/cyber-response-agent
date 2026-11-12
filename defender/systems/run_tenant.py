@@ -300,7 +300,7 @@ def tenant_systems(tenant: RunTenant, catalog: Catalog) -> TenantVerdict:
     as a table that names no correlation holder withholds it."""
     from defender.systems.catalog import TenantSystems
 
-    systems = TenantSystems.of(tenant.records, catalog)
+    systems = TenantSystems.of(tenant.records, catalog, tenant_id=tenant.tenant_id)
     if systems.adapter_missing:
         named = ", ".join(sorted(systems.adapter_missing))
         raise TenantRefused(

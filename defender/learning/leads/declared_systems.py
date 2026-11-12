@@ -107,12 +107,13 @@ def declared_systems_over(
     return union
 
 
-def tenant_systems_of(repo_root: Path, records: TenantRecords) -> TenantSystems:
+def tenant_systems_of(repo_root: Path, records: TenantRecords, *, tenant_id: object) -> TenantSystems:
     """A tenant's systems (`TenantSystems`) from its current `records` over the catalog of the
-    product checkout at `repo_root`. An unreadable adapter source raises `AdaptersUnreadable`."""
+    product checkout at `repo_root`. An unreadable adapter source raises `AdaptersUnreadable`; a tenant not
+    imported, `TenantRefused` naming the import (R8)."""
     from defender.systems.catalog import Catalog, TenantSystems
 
-    return TenantSystems.of(records, Catalog(read_adapters(repo_root / ADAPTERS_REL)))
+    return TenantSystems.of(records, Catalog(read_adapters(repo_root / ADAPTERS_REL)), tenant_id=tenant_id)
 
 
 def lane_names(systems: TenantSystems | Catalog) -> frozenset[str]:

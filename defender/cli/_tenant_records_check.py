@@ -95,7 +95,7 @@ def records_check(tenant_id: TenantId, directory: TenantDirectory, *, knowledge:
     for _system, record in sorted(records.systems.items()):
         lines += system_faults(record, catalog=catalog)
     lines += grant_findings(records, catalog, Path(knowledge) / SETTINGS_HALF)
-    lines += _case_findings(records, catalog, agent=Path(knowledge) / AGENT_HALF, defender_dir=defender_dir)
+    lines += _case_findings(tenant_id, records, catalog, agent=Path(knowledge) / AGENT_HALF, defender_dir=defender_dir)
     lines += credential_findings(tenant_id, records, secrets)
     return RecordsCheck(lines, records)
 
@@ -123,14 +123,15 @@ def grant_findings(records: TenantRecords, catalog: Catalog, settings: Path) -> 
     return lines
 
 
-def _case_findings(records: TenantRecords, catalog: Catalog, *, agent: Path, defender_dir: Path) -> list[str]:
+def _case_findings(tenant_id: TenantId, records: TenantRecords, catalog: Catalog, *, agent: Path,
+                   defender_dir: Path) -> list[str]:
     """The case record judged as run start judges it, over the tenant's systems (C3, O1). No case record: none."""
     if records.case is None:
         return []
     record = _CaseRecordOf(agent=agent, records=records, **record_settings(records))
     try:
         case_system.judge_case_system(record, defender_dir=defender_dir,
-                                      roster=TenantSystems.of(records, catalog).roster)
+                                      roster=TenantSystems.of(records, catalog, tenant_id=tenant_id).roster)
     except case_system.CaseSettingsFault as fault:
         return [str(fault)]
     return []

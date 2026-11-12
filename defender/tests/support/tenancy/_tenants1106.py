@@ -124,7 +124,8 @@ def tenants_roster(run_tenant: Any, defender_dir: Path | None = None) -> Any:
     over the catalog of the checkout at `defender_dir` (this checkout's), built once as `TenantSystems.of`. No surface builds
     one of its own, so a test that drives one over a tenant hands it this."""
     catalog = mod("systems.catalog")
-    return catalog.TenantSystems.of(run_tenant.records, catalog.Catalog.of_checkout(defender_dir or DEFENDER)).roster
+    return catalog.TenantSystems.of(run_tenant.records, catalog.Catalog.of_checkout(defender_dir or DEFENDER),
+                                    tenant_id=run_tenant.tenant_id).roster
 
 
 def case_for(run_tenant: Any, defender_dir: Path | None = None) -> Any:
