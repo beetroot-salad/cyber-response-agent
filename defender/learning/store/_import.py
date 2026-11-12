@@ -11,6 +11,7 @@ reader must read what it wrote until then."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from sqlalchemy import Table, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from defender import _frontmatter, _git, _io
@@ -554,10 +556,26 @@ def _refuse_two_open(batches: list[_Batch]) -> None:
 # -- the import ----------------------------------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class LearningImport:
+    """What the import will write for one tenant, settled in memory before any row is written."""
+
+    batches: list[_Batch]
+    items: list[_Item]
+    commits: list[_Commit]
+
+
 async def import_learning_state(store: LearningStore, tid: str, root: Path, *, delivery: TenantDelivery) -> None:
     """Import tenant `tid`'s file learning state under `root` and its open PRs (read through `delivery`) into `store`,
-    in one transaction. `ImportRefused` (nothing written, no file changed) for what the import will not guess: an
-    unknown ledger category, two open authoring batches on one lane, a record of another shape it cannot place."""
+    in one transaction: `read_learning_state` (off the event loop) then `write_learning_state`."""
+    plan = await asyncio.to_thread(read_learning_state, root, delivery=delivery)
+    await write_learning_state(store, tid, plan)
+
+
+def read_learning_state(root: Path, *, delivery: TenantDelivery) -> LearningImport:
+    """Everything the import reads (the folder under `root`, the tenant's clone and its open PRs), settled. Blocking:
+    files, git and the forge. `ImportRefused` for what the import will not guess: an unknown ledger category, two open
+    authoring batches on one lane, a NUL character, a record of another shape it cannot place."""
     with _io.bind(Path(root)) as bound:
         _refuse_feedback(bound)
         items = [item for kind in _CHANNELS for item in _channel_items(bound, kind)]
@@ -577,42 +595,63 @@ async def import_learning_state(store: LearningStore, tid: str, root: Path, *, d
             _refuse_nul(item.payload)
         except ItemRefused:
             raise ImportRefused(f"the {item.kind} {item.key} holds a NUL character, which the store cannot hold") from None
+    return LearningImport(batches=batches, items=items, commits=commits)
+
+
+async def write_learning_state(store: LearningStore, tid: str, plan: LearningImport) -> None:
+    """Write `plan` for tenant `tid` in one transaction; `ImportRefused` (nothing written) when the store refuses it.
+    Written again (the step retried after its transaction committed), it adds nothing: every row's key is derived from
+    what it records, and a row already there is kept."""
     try:
-        await _write(store, tid, batches, items, commits)
+        await _write(store, tid, plan.batches, plan.items, plan.commits)
     except IntegrityError as refused:
         raise ImportRefused(f"the store refused the import: {refused.orig}") from None
     except ItemRefused as refused:
         raise ImportRefused(f"the store refused an item: {refused}") from None
-    _logger.info("import: tenant %s: %d item(s), %d batch(es), %d commit row(s)", tid, len(items), len(batches),
-                 len(commits))
+    _logger.info("import: tenant %s: %d item(s), %d batch(es), %d commit row(s)", tid, len(plan.items),
+                 len(plan.batches), len(plan.commits))
+
+
+#: The namespace of the import's derived row keys.
+_IMPORT_NS = uuid.UUID("5b0f7a52-2a3e-4d1c-9a51-1278a0000001")
+
+
+def _imported_id(tid: str, *parts: object) -> str:
+    """A row key derived from tenant `tid` and what the row records: the same on every run of the import."""
+    return str(uuid.uuid5(_IMPORT_NS, "\N{UNIT SEPARATOR}".join([tid, *map(str, parts)])))
 
 
 async def _write(store: LearningStore, tid: str, batches: list[_Batch], items: list[_Item],
                  commits: list[_Commit]) -> None:
     """One transaction. A commit row is linked to the imported batch that shares its branch (so the revert lookup and
-    the merge reading see an open PR's history as theirs); history whose batch is not imported has no batch."""
+    the merge reading see an open PR's history as theirs); history whose batch is not imported has no batch. A batch
+    or commit row whose derived key is already there was written by an earlier run of the import, and is kept."""
     tenant = TenantId(tid)
     async with store._sessions.begin() as s:
         await store._require_active(s, tid)
         ids: dict[str, BatchId] = {}
         for b in batches:
-            ids[b.branch] = BatchId.mint()
-            await s.execute(_B.insert().values(
+            ids[b.branch] = BatchId(_imported_id(tid, "batch", b.branch))
+            await s.execute(pg_insert(_B).values(
                 id=ids[b.branch], tenant_id=tenant, kind=b.kind, lane=b.lane, branch=b.branch, base=b.base,
                 start=b.start, phase=b.phase, fencing_token=1, cancel_requested=False, pr_number=b.pr_number,
-                generation=0, refusals=0, reason=b.reason, created_at=func.clock_timestamp()))
+                generation=0, refusals=0, reason=b.reason, created_at=func.clock_timestamp(),
+            ).on_conflict_do_nothing(index_elements=["id"]))
         for i in items:
             await store._insert_item(
                 s, tid, i.kind, i.key, i.payload, status=i.status, source_run=i.source_run,
                 coalesce_key=i.coalesce_key, mistake_key=i.mistake_key, reason=i.reason,
                 batch_id=ids[i.batch] if i.batch is not None else None, **i.counters)
-        for c in commits:
-            row_id = str(uuid.uuid4())
-            await s.execute(_C.insert().values(
+        for ordinal, c in enumerate(commits):
+            row_id = _imported_id(tid, "commit", ordinal, c.commit, c.branch)
+            written = (await s.execute(pg_insert(_C).values(
                 id=row_id, tenant_id=tenant, batch_id=ids.get(c.branch), commit=c.commit, branch=c.branch, base=c.base,
-                start=c.start, reverts=c.reverts, created_at=func.clock_timestamp()))
-            for ordinal, (path, before, after) in enumerate(c.changes):
-                await s.execute(_CC.insert().values(commit_row=row_id, ordinal=ordinal, tenant_id=tenant, path=path,
+                start=c.start, reverts=c.reverts, created_at=func.clock_timestamp(),
+            ).on_conflict_do_nothing(index_elements=["id"]).returning(_C.c.id))).first()
+            if written is None:
+                continue
+            for change, (path, before, after) in enumerate(c.changes):
+                await s.execute(_CC.insert().values(commit_row=row_id, ordinal=change, tenant_id=tenant, path=path,
                                                     blob_base=before, blob_left=after))
 
 

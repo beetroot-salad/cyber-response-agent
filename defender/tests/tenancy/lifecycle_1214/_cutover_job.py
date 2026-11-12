@@ -15,6 +15,7 @@ Interface requests the cases use (the code stage supplies them):
 """
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -44,7 +45,15 @@ class CutoverWorld:
         self.lifecycle.config = lifecycle_config(tmp_path / "lc", data_root, **config)
         self.repo = PostgresTenantRepository(dsn)
         self.tenants: dict[str, Any] = {}
-        self.host = self.lifecycle.new_host(self.repo, open_delivery=lambda tid: self.tenants[str(tid)].open_delivery())
+        self.host = self.lifecycle.new_host(self.repo, open_delivery=self._open_delivery)
+
+    def _open_delivery(self, tid: str) -> Any:
+        """As production's opener does (its `TenantDirectory` is synchronous): refused on a running event loop."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return self.tenants[str(tid)].open_delivery()
+        raise RuntimeError("the tenant's delivery was opened on the lifecycle's event loop")
 
     def add(self, published: Any) -> SimpleNamespace:
         register_tenant(self.dsn, published.tenant_id)

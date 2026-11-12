@@ -594,6 +594,25 @@ async def test_migration_an_imported_open_revert_pr_is_seen_by_the_next_revert(w
     assert last is not None, "the open revert PR is in the store as a batch, yet the revert lookup does not find it"
 
 
+async def test_migration_an_import_run_again_after_it_committed_adds_nothing_and_is_not_refused(world):
+    """The lifecycle step is committed after the import's own transaction, so a failed step commit runs the import again:
+    the second run is refused nothing (an open author or lead PR is not a second open batch on its lane) and adds no
+    batch, item or commit row. (finding 5 of the #1476 review)"""
+    rich_world(world)
+    legacy.commit_record(world.root, [legacy.commit_row("d" * 40, "lessons/closed00000000", "1" * 40, "0011223344556677",
+                                                        changes=[(f"{LESSONS}/gone.md", None, "4" * 40)])])
+    first = await imported(world)
+
+    again = await imported(world)
+
+    assert sorted((b.id, b.kind, b.branch, b.phase) for b in again.batches) == sorted(
+        (b.id, b.kind, b.branch, b.phase) for b in first.batches)
+    assert {k: (i.status, i.batch_id) for k, i in again.items.items()} == {
+        k: (i.status, i.batch_id) for k, i in first.items.items()}
+    assert [(r.commit, r.branch, r.batch_id, r.changes) for r in again.commits] == [
+        (r.commit, r.branch, r.batch_id, r.changes) for r in first.commits]
+
+
 # --- the commit record --------------------------------------------------------------------------------------------
 
 
