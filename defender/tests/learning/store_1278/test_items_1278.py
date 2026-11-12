@@ -262,6 +262,38 @@ async def test_a_nul_anywhere_refuses_the_whole_job_and_queues_nothing(dsn, verb
         assert await store.work(BLUE) == []
 
 
+@pytest.mark.parametrize("where", ["key", "run", "case", "payload"])
+@pytest.mark.parametrize("verb", ["finding", "pitfall", "request"])
+async def test_a_lone_surrogate_in_any_text_a_verb_is_given_is_refused_before_anything_is_written(dsn, verb, where):
+    """A lone surrogate (not UTF-8, so no text column takes it) in an item's key, its run, its case or its payload is
+    `ItemRefused`, as a NUL is, never a driver fault the caller cannot classify. (finding 7 of the #1476 review)"""
+    lone = "a\ud800b"
+    async with learning_store(dsn) as store:
+        refused = store_mod().ItemRefused
+        if verb == "finding":
+            if where == "case":
+                pytest.skip("a finding has no case")
+            row = {**finding("bad"), **({"finding_id": lone} if where == "key" else {})}
+            if where == "payload":
+                row["goal"] = lone
+            with pytest.raises(refused):
+                await store.publish_findings(BLUE, lone if where == "run" else "run-1", [finding("good"), row],
+                                             kind="finding")
+        elif verb == "pitfall":
+            if where == "case":
+                pytest.skip("a pitfall has no case")
+            row = pitfall("bad", **({"pitfall_id": lone} if where == "key" else {}),
+                          **({"source_run": lone} if where == "run" else {}), **({"goal": lone} if where == "payload" else {}))
+            with pytest.raises(refused):
+                await store.add_pitfall(BLUE, row)
+        else:
+            with pytest.raises(refused):
+                await store.enqueue_request(BLUE, lone if where in ("key", "run") else "run-1",
+                                            lone if where == "case" else "case-1",
+                                            {"goal": lone} if where == "payload" else {"n": 1})
+        assert await store.work(BLUE) == []
+
+
 # --- the same arrival twice is one ------------------------------------------------------------------------------
 
 

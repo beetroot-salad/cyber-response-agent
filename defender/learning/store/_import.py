@@ -28,6 +28,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from defender import _frontmatter, _git, _io
+from defender._text import postgres_cannot_hold
 from defender.records.formats import BatchId, TenantId, unwrap_worktrees_root
 
 from ._store import (
@@ -38,7 +39,6 @@ from ._store import (
     LearningStore,
     _digest,
     mistake_key_of,
-    _refuse_nul,
     _str_or_none,
     lanes_of_branch,
 )
@@ -591,10 +591,9 @@ def read_learning_state(root: Path, *, delivery: TenantDelivery) -> LearningImpo
             batch.base, batch.start = first.base, first.start
     _place_members(delivery, batches, items)
     for item in items:
-        try:
-            _refuse_nul(item.payload)
-        except ItemRefused:
-            raise ImportRefused(f"the {item.kind} {item.key} holds a NUL character, which the store cannot hold") from None
+        why = postgres_cannot_hold([item.key, item.source_run, item.coalesce_key, item.reason, item.payload])
+        if why is not None:
+            raise ImportRefused(f"the {item.kind} {item.key!r}: {why}")
     return LearningImport(batches=batches, items=items, commits=commits)
 
 

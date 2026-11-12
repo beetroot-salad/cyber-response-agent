@@ -15,7 +15,7 @@ import yaml
 
 from defender._io import ENTRY_FILE, Bound
 from defender._yaml import safe_load as _yaml_safe_load
-from defender._text import is_content_less
+from defender._text import is_content_less, postgres_cannot_hold
 from defender.records.formats import LAYOUT
 from defender.records import formats
 from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
@@ -92,24 +92,15 @@ def _store_kind(channel: Any) -> str:
     return kind
 
 
-def _holds_nul(value: Any) -> bool:
-    if isinstance(value, str):
-        return "\x00" in value
-    if isinstance(value, dict):
-        return any(_holds_nul(k) or _holds_nul(v) for k, v in value.items())
-    if isinstance(value, (list, tuple)):
-        return any(_holds_nul(v) for v in value)
-    return False
-
-
-def _refuse_nul_row(row: dict[str, Any], where: str, channel: str) -> None:
-    """A NUL character anywhere in the row: the store's jsonb can never hold it, so a row bound
-    for the store that carries one fails validation, screened before anything is inserted
-    (#1278). An episode's own record holds it; its publish refuses it. Keys and string values
-    are walked, since JSON text escapes the character."""
-    if _holds_nul(row):
-        raise JudgeRefused(f"{where}a {channel} finding row holds a NUL character, which the "
-                           "learning store can never hold")
+def _refuse_unstorable_row(row: dict[str, Any], where: str, channel: str) -> None:
+    """Text the store can never hold anywhere in the row (a NUL character or a lone surrogate,
+    `postgres_cannot_hold`): a row bound for the store that carries one fails validation,
+    screened before anything is inserted (#1278). An episode's own record holds it; its publish
+    refuses it. Keys and string values are walked, since JSON text escapes both."""
+    why = postgres_cannot_hold(row)
+    if why is not None:
+        raise JudgeRefused(f"{where}a {channel} finding row holds {why.removesuffix(' cannot be stored')}, "
+                           "which the learning store can never hold")
 
 
 def _require_keys(row: dict[str, Any], where: str, channel: str) -> None:
@@ -253,7 +244,7 @@ def _screen_for_store(drawn: DrawnRows, where: str) -> None:
     the store refuses a NUL only per insert, after an earlier kind's rows went in."""
     for channel, rows in ((FINDINGS, drawn.defender), (QUESTIONER_FINDINGS, drawn.world)):
         for row in rows:
-            _refuse_nul_row(row, where, channel.name)
+            _refuse_unstorable_row(row, where, channel.name)
 
 
 def enqueue_report(episode_dir: Path, record: dict[str, Any], *, state: FindingsSink,
@@ -583,7 +574,7 @@ def _publish_held(episode: formats.Episode, *, store: Any, tenant_id: str) -> Pu
         for row in rows:
             try:
                 validate(row, episode_dir=episode.dir)
-                _refuse_nul_row(row, where, channel.name)
+                _refuse_unstorable_row(row, where, channel.name)
             except JudgeRefused as bad:
                 raise FindingsRefused(f"a held row fails the {channel.name} rule, so the job's "
                                       f"findings are not published: {bad}") from None

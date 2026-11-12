@@ -23,6 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from defender._text import postgres_cannot_hold
 from defender.database import async_engine, sessions
 from defender.records.formats import BatchId, CommitId, TenantId
 from defender.tenancy.models import TenantRecord
@@ -237,19 +238,12 @@ def mistake_key_of(row: Mapping[str, Any], item_key: str) -> str:
     return _digest(list(pitfall_key({**row, "pitfall_id": item_key})))
 
 
-def _has_nul(value: Any) -> bool:
-    if isinstance(value, str):
-        return "\x00" in value
-    if isinstance(value, Mapping):
-        return any(_has_nul(k) or _has_nul(v) for k, v in value.items())
-    if isinstance(value, list | tuple):
-        return any(_has_nul(v) for v in value)
-    return False
-
-
-def _refuse_nul(value: Any) -> None:
-    if _has_nul(value):
-        raise ItemRefused("a NUL character cannot be stored")
+def _refuse_unstorable(value: Any) -> None:
+    """Refuse, before anything is written, a value PostgreSQL could never hold (`postgres_cannot_hold`): every store
+    verb screens all the text it was given."""
+    why = postgres_cannot_hold(value)
+    if why is not None:
+        raise ItemRefused(why)
 
 
 def _refuse_unkeyed(row: Mapping[str, Any]) -> None:
@@ -338,8 +332,8 @@ class LearningStore(FeedbackVerbs):
         """Queue `rows` as `kind`: `(added, duplicates)`. A finding id is unique for good (O14)."""
         if LANE_OF.get(kind) != AUTHOR_LANE:
             raise ValueError(f"not a findings kind: {kind}")
+        _refuse_unstorable([run_id, *rows])
         for row in rows:
-            _refuse_nul(row)
             _refuse_unkeyed(row)
         added = 0
         async with self._sessions.begin() as s:
@@ -350,7 +344,7 @@ class LearningStore(FeedbackVerbs):
 
     async def add_pitfall(self, tenant: str, row: Mapping[str, Any]) -> bool:
         """Queue one pitfall occurrence; a repeated pitfall id is ignored, a keyless row is keyed by its digest."""
-        _refuse_nul(row)
+        _refuse_unstorable(row)
         key = str(row["pitfall_id"]) if row.get("pitfall_id") else _digest(dict(row))
         mistake = mistake_key_of(row, key)
         async with self._sessions.begin() as s:
@@ -360,7 +354,7 @@ class LearningStore(FeedbackVerbs):
 
     async def enqueue_request(self, tenant: str, run_id: str, case_id: str, spec: Mapping[str, Any]) -> bool:
         """File a curation request for `case_id`; the later run wins: an older waiting request is skipped, superseded."""
-        _refuse_nul(spec)
+        _refuse_unstorable([run_id, case_id, spec])
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
             have = (await s.execute(select(_I.c.item_key).where(

@@ -261,6 +261,22 @@ def test_o8_a_nul_character_is_a_validation_failure_that_refuses_the_job_and_pub
     assert _queue(good, QUESTIONER_FINDINGS) == [], "a refused job's other kind reached the store"
 
 
+def test_o8_a_lone_surrogate_in_a_finding_id_refuses_the_job_rather_than_retrying_it(tmp_path):
+    """A lone surrogate, which no store text column takes, refuses its job for good as a NUL does: never a driver fault
+    the post-step reads as neither and retries for ever. (finding 7 of the #1476 review)"""
+    bad, _ = _job_episode(tmp_path, "surrogate-id", topic="a topic the surrogate job found")
+    good, _ = _job_episode(tmp_path, "surrogate-good", topic="a topic the good job found")
+    path = _sink_file(bad, FINDINGS)
+    rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
+    assert rows, "premise: the job holds findings"
+    rows[0]["finding_id"] = "id-\ud800"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+    _post_step(good, good.name, [bad.name, good.name])
+
+    assert _record(good, good.name) == {"published": [good.name], "refused": [bad.name]}
+
+
 def test_o8_a_post_step_with_nothing_pending_still_runs_the_gate(tmp_path):
     """An empty `--pending`: nothing to publish, and the drain's gate is still asked once; the record is empty. (O8)"""
     ep, _ = _job_episode(tmp_path, "nothing", findings=False)

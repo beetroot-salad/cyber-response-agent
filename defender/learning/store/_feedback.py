@@ -109,11 +109,10 @@ class FeedbackVerbs:
                                      lookups: Sequence[Mapping[str, Any]]) -> bool:
         """File a run's open-issue request: a row with no issue number. False when the run is already filed (nothing
         changes); `TenantInactive` off active; `ItemRefused` for text the store cannot hold."""
-        from ._store import _refuse_nul
+        from ._store import _refuse_unstorable
 
         rows = [dict(lk) for lk in lookups]
-        _refuse_nul([run_id, case_id, outcome, rows])
-        _refuse_unencodable([run_id, case_id, outcome, rows])
+        _refuse_unstorable([run_id, case_id, outcome, rows])
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
             done = (await s.execute(pg_insert(_FI).values(
@@ -219,11 +218,10 @@ class FeedbackVerbs:
         """One issue's read, in one transaction: the comments taken in are stored (one already there is kept as it
         was), every judged id (taken or passed over) is added to the run's judged ids, and `listed` is set when the
         read was the issue's whole listing. `TenantInactive` off active: nothing is stored."""
-        from ._store import _refuse_nul
+        from ._store import _refuse_unstorable
 
         rows = [dict(c) for c in taken]
-        _refuse_nul(rows)
-        _refuse_unencodable(rows)
+        _refuse_unstorable(rows)
         ids = {int(i) for i in judged} | {int(c["comment_id"]) for c in rows}
         async with self._sessions.begin() as s:
             await self._tick_guard(s, held)
@@ -267,11 +265,10 @@ class FeedbackVerbs:
         """Record the comment's decision where it has none, and, in the same transaction, its instruction as a waiting
         `feedback_instruction` item keyed by the comment id (one per comment, for good). False: the comment was
         already decided, and nothing changes. `TenantInactive` off active: nothing is recorded."""
-        from ._store import _refuse_nul
+        from ._store import _refuse_unstorable
 
         made, row = dict(decision), dict(instruction) if instruction is not None else None
-        _refuse_nul([made, row])
-        _refuse_unencodable([made, row])
+        _refuse_unstorable([made, row])
         async with self._sessions.begin() as s:
             await self._tick_guard(s, held)
             await self._require_active(s, str(held.tenant_id))
@@ -291,11 +288,10 @@ class FeedbackVerbs:
     async def settle_entry(self, held: FeedbackHeld, comment_id: int, entry_id: str, how: Mapping[str, Any]) -> bool:
         """Settle one approved entry of the comment's decision where it is unsettled. False: it was settled already
         (the first settlement stays), or the decision names no such entry."""
-        from ._store import _refuse_nul
+        from ._store import _refuse_unstorable
 
         settled = dict(how)
-        _refuse_nul(settled)
-        _refuse_unencodable(settled)
+        _refuse_unstorable(settled)
         async with self._sessions.begin() as s:
             await self._tick_guard(s, held)
             current = (await s.execute(select(_FC.c.decision).where(
@@ -361,28 +357,6 @@ class FeedbackVerbs:
         await s.execute(delete(_FC).where(_FC.c.tenant_id == t))  # before the issues it references
         await s.execute(delete(_FI).where(_FI.c.tenant_id == t))
         await s.execute(delete(_FT).where(_FT.c.tenant_id == t))
-
-
-def _unencodable(value: Any) -> bool:
-    if isinstance(value, str):
-        try:
-            value.encode("utf-8")
-        except UnicodeEncodeError:
-            return True
-        return False
-    if isinstance(value, Mapping):
-        return any(_unencodable(k) or _unencodable(v) for k, v in value.items())
-    if isinstance(value, list | tuple):
-        return any(_unencodable(v) for v in value)
-    return False
-
-
-def _refuse_unencodable(value: Any) -> None:
-    """Text that is not valid UTF-8 (a lone surrogate) cannot be stored: refused whole, as a NUL is."""
-    from ._store import ItemRefused
-
-    if _unencodable(value):
-        raise ItemRefused("text that is not valid UTF-8 (a lone surrogate) cannot be stored")
 
 
 __all__ = ["INSTRUCTION_KIND", "FeedbackComment", "FeedbackHeld", "FeedbackIssue", "FeedbackVerbs"]
