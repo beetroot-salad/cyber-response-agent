@@ -101,14 +101,22 @@ def _record(ep: Path, job: str) -> dict:
 
 
 def post_step_in_container(job: str | None, tenant_id: str, **seams) -> int:
-    """The real post-step in its job container (#1170 A6): its argv as the helper starts it (no `--parent-pid`), and a
-    job socket answering the helper's `launch` facts (the helper's own answers are `tests/jobs/`'s)."""
+    """The real post-step in its job container (#1170 A6): its argv as the helper starts it (no `--parent-pid`), a
+    job socket answering the helper's `launch` facts (the helper's own answers are `tests/jobs/`'s), and only the
+    environment a job container is given: the helper's own filter drops the database address and every login (A8), so
+    a step that reads one from its process environment meets what it would inside the container."""
+    from unittest import mock
+
+    from defender.job_host import _container
     from defender.learning.branch import post_step
     from defender.tests.support.jobs._socket_standin1170 import SocketStandIn
 
     argv = [*(["--job", job] if job is not None else []), "--tenant", tenant_id]
-    with SocketStandIn(tenant_id, launch={"kind": "post-step", "job": job}) as helper:
-        return post_step.main(argv, environ=helper.environ(), **seams)
+    denied = _container._denied_values(os.environ)
+    contained = {k: v for k, v in os.environ.items() if _container._setting(k, v, denied)}
+    with SocketStandIn(tenant_id, launch={"kind": "post-step", "job": job}) as helper, \
+            mock.patch.dict(os.environ, {**contained, **helper.environ_delta()}, clear=True):
+        return post_step.main(argv, environ=dict(os.environ), **seams)
 
 
 def _post_step(ep: Path, job: str, pending: list[str], *, tick=None, waiting=lambda *_a, **_k: True) -> None:

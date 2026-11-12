@@ -45,8 +45,14 @@ class SocketStandIn:
         self._thread.start()
 
     def environ(self) -> dict[str, str]:
-        """This process's environment with the job socket named: the container's, as the entry reads it."""
-        return {**os.environ, job_socket.SOCKET_ENV: str(self.path)}
+        """This process's environment with the job socket named, as the entry reads it. Not the container's whole
+        environment: a caller that needs that filters this process's environment as the helper does
+        (`job_host._container`)."""
+        return {**os.environ, **self.environ_delta()}
+
+    def environ_delta(self) -> dict[str, str]:
+        """What a job container's environment adds for its socket."""
+        return {job_socket.SOCKET_ENV: str(self.path)}
 
     def requests(self, name: str) -> list[dict[str, Any]]:
         return [fields for asked, fields in self.asked if asked == name]
