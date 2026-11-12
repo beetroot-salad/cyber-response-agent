@@ -8,19 +8,23 @@ from defender._clock import z_seconds
 from pathlib import Path
 
 from defender._io import TEXT_READ_ERRORS, load_json_artifact, read_text_utf8
+from defender.jobs.learning_models import KINDS
 from defender.learning.core.config import LoopPaths
 from defender.learning.core.quarantine import held_archives, quarantine_cap
 from defender.learning.frontend.serialize import dump_contract
 
 __all__ = ["build_view", "stamped_view", "dump_contract"]
 
-#: The channels, in page order: the store's work-item kind, the page's name, its accent and what a hold means.
-_CHANNELS: tuple[tuple[str, str, str, str], ...] = (
-    ("finding", "findings", "defender", "held until a person moves them — nothing retries a hold"),
-    ("questioner_finding", "questioner_findings", "learning", "held until a person moves them — nothing retries a hold"),
-    ("pitfall", "pitfalls", "oracle", "declined by the curator — offered again every tick, retired at the offer ceiling"),
-    ("curation_request", "curation_requests", "raw", "held until a person moves them — nothing retries a hold"),
-)
+_PERSON_HOLD = "held until a person moves them — nothing retries a hold"
+#: How the page shows each of the store's work-item kinds: its name, its accent and what a hold means. Every kind the
+#: store holds has an entry (the page lists them in the store's order, `KINDS`), so a new kind cannot go unlisted.
+_PAGE: dict[str, tuple[str, str, str]] = {
+    "finding": ("findings", "defender", _PERSON_HOLD),
+    "questioner_finding": ("questioner_findings", "learning", _PERSON_HOLD),
+    "pitfall": ("pitfalls", "oracle", "declined by the curator — offered again every tick, retired at the offer ceiling"),
+    "curation_request": ("curation_requests", "raw", _PERSON_HOLD),
+    "feedback_instruction": ("feedback_instructions", "learning", _PERSON_HOLD),
+}
 #: What the page lists: everything not yet finished (published and skipped items are history).
 _LISTED = ("waiting", "in_batch", "held", "dead")
 
@@ -118,7 +122,7 @@ def build_view(paths: LoopPaths, store: Any) -> dict:  # lint-dup: ok — serial
     archive (not a queue). No clock (see `stamped_view`); a store that cannot be read raises, so the build fails."""
     items = store.work(str(paths.tenant.id))  # type: ignore[union-attr]
     return {
-        "channels": [_channel_view(kind, name, accent, hold, items) for kind, name, accent, hold in _CHANNELS],
+        "channels": [_channel_view(kind, *_PAGE[kind], items) for kind in KINDS],
         "quarantine": {"tainted": _tainted(paths)},
     }
 

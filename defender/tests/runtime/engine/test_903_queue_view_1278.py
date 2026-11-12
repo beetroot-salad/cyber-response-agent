@@ -63,6 +63,20 @@ def _rows(view: dict) -> dict[tuple[str, str], dict]:
     return {(ch["name"], row["id"]): row for ch in view["channels"] for row in ch["items"]}
 
 
+def test_o2_the_page_has_a_channel_for_every_kind_the_store_holds(seen):
+    """A person's feedback instruction held at the attempt ceiling must be as visible as a held finding: every work-item
+    kind the store can hold is a channel of the page. (finding 9 of the #1476 review)"""
+    from defender.jobs.learning_models import KINDS
+    from defender.learning.frontend import serialize_queues
+
+    dsn, paths, _batch = seen
+    with blocking(dsn) as store:
+        view = serialize_queues.stamped_view(paths, store=store)
+
+    assert len(view["channels"]) == len(KINDS)
+    assert "feedback_instructions" in {ch["name"] for ch in view["channels"]}
+
+
 def test_o2_the_view_names_each_items_status_batch_and_pr(seen):
     """Waiting, held, dead and in-batch items each show their status, reason, batch and PR; the others' counts follow. (O2)"""
     dsn, paths, batch_id = seen

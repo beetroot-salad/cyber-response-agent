@@ -209,13 +209,14 @@ def _view(stored) -> dict:
 # the serializer
 
 
-def test_an_empty_store_reads_as_four_idle_channels_and_nothing_set_aside(tmp_path, data_root):
-    """A tenant with nothing queued reads as four idle channels with no rows, and an empty archive as none held. (O2)"""
+def test_an_empty_store_reads_as_idle_channels_and_nothing_set_aside(tmp_path, data_root):
+    """A tenant with nothing queued reads as one idle channel per kind with no rows, and an empty archive as none held. (O2)"""
     paths = _tenant_paths(tmp_path, data_root)
 
     view = serialize_queues.build_view(paths, _NoWork())
 
-    assert [ch["name"] for ch in view["channels"]] == ["findings", "questioner_findings", "pitfalls", "curation_requests"]
+    assert [ch["name"] for ch in view["channels"]] == ["findings", "questioner_findings", "pitfalls", "curation_requests",
+                                                       "feedback_instructions"]
     for ch in view["channels"]:
         assert ch["items"] == []
         assert ch["deadletter"] == []
@@ -229,7 +230,8 @@ def test_an_empty_store_reads_as_four_idle_channels_and_nothing_set_aside(tmp_pa
 def test_each_channel_carries_its_accent(stored):
     view = _view(stored)
     assert {ch["name"]: ch["accent"] for ch in view["channels"]} == {
-        "findings": "defender", "questioner_findings": "learning", "pitfalls": "oracle", "curation_requests": "raw"}
+        "findings": "defender", "questioner_findings": "learning", "pitfalls": "oracle", "curation_requests": "raw",
+        "feedback_instructions": "learning"}
 
 
 def test_one_more_row_moves_exactly_one_number(stored):
@@ -472,7 +474,7 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
         assert sorted(p.name for p in area.iterdir()) == sorted(_PAGE_NAMES)
         queues = json.loads((area / "queues.json").read_text(encoding="utf-8"))
         assert [ch["name"] for ch in queues["channels"]] == [
-            "findings", "questioner_findings", "pitfalls", "curation_requests",
+            "findings", "questioner_findings", "pitfalls", "curation_requests", "feedback_instructions",
         ]
         assert queues["generated_at"]
         assert "state_root" not in queues
