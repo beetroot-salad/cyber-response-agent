@@ -251,7 +251,7 @@ class Scripted:
 
     def transaction(self, tenant_id: str, principal: Any) -> _ScriptedTransaction:
         # Conflict updated (#1307 D6): the transaction takes the principal in place of the bare actor id.
-        return _ScriptedTransaction(self, tenant_id, principal.user_id)
+        return _ScriptedTransaction(self, tenant_id, principal.actor_id)
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         if name.startswith("_"):
