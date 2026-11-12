@@ -136,6 +136,22 @@ def test_1366_r8_a_not_imported_tenant_has_that_one_finding_and_no_findings_from
     assert not R.lines_naming(out, "orphan") + R.lines_naming(out, "no credentials"), out
 
 
+def test_1366_r8_a_not_imported_tenant_still_gets_the_findings_that_need_no_records(
+        tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811 — the imported fixture
+    """The import finding stands in for the findings about the tenant's systems only: a feedback setting that cannot
+    stand is reported on the same first check, beside the import, not after it. (#1366 R8)"""
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
+    files = R.import_files(**{"settings/feedback.yaml": "outcomes: [not-an-outcome]\n"})
+    with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=t.data_root, records=None)
+        rc, out = R.Operator(t.tenant_id, migrated_database, tmp_path / "op", capsys).check()
+
+    assert rc != 0, out
+    assert R.lines_naming(out, R.AUTHOR[R.IMPORT]), out
+    assert R.lines_naming(out, "feedback"), out
+    assert not R.lines_naming(out, "retired"), out
+
+
 def test_1366_r12_a_grant_on_a_system_that_was_never_recorded_is_reported_as_orphaned(tenants):
     """cmdb is granted (the fixture grants every system) but the tenant never had a record for it: `check` reports an
     orphaned grant naming cmdb that the sound tenant does not get. (#1366 R12, O1)"""

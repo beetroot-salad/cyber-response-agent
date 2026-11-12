@@ -149,10 +149,11 @@ def check_tenant(admitted: run_tenant.Admitted, *, secrets: Any = None) -> int:
     tenant, records = admitted.tenant, admitted.directory
     mine = records_check.records_check(tenant.id, records, knowledge=tenant.knowledge, secrets=secrets,
                                        defender_dir=_DEFENDER_DIR)
-    if mine.records is None:  # not imported (R8): the import finding alone, nothing judged from the folders
-        return _report([*mine.lines, *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
-    return _report([*mine.lines, *_findings(tenant.knowledge, systems=mine.systems),
-                    *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
+    # Not imported (R8): the import finding in place of every finding about its systems (nothing is judged from the
+    # retired folders, which the import still reads); every other finding is reported all the same.
+    findings = (_findings(tenant.knowledge, systems=mine.systems) if mine.records is not None
+                else _tenant_findings(tenant.knowledge))
+    return _report([*mine.lines, *findings, *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
 
 
 def _mapping_findings(tenant: tenancy.Tenant, records: tenancy.TenantDirectory) -> list[str]:
@@ -406,15 +407,20 @@ def _findings(knowledge: Path, *, systems: Any = None) -> list[str]:
     if census is not None:
         findings += [f"adapter `{name}` refused: {why}" for name, why in census.refused.items()
                      if is_platform_served(name)]
-    findings += _registry_findings(knowledge)
-    findings += _feedback_findings(knowledge)
-    findings += _registry_grant_findings(knowledge)
+    findings += _tenant_findings(knowledge)
     try:
         findings += (census_findings(_tenant_census.table_findings(settings, census), systems).lines(table)
                      if census is not None
                      else _tenant_census.folder_findings(settings).lines())
     except DispositionError as unloadable:
         findings.append(str(unloadable))
+    return findings
+
+
+def _tenant_findings(knowledge: Path) -> list[str]:
+    """The findings that need nothing of the tenant's systems: the registry, the feedback setting, the registry's
+    grants and the committed `.tenant-id`. A tenant not yet imported gets these too (R8)."""
+    findings = [*_registry_findings(knowledge), *_feedback_findings(knowledge), *_registry_grant_findings(knowledge)]
     committed = _tenant_id_committed(knowledge)
     if committed is not None:
         findings.append(committed)
