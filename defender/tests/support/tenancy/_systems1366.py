@@ -389,7 +389,7 @@ def seed_postgres_records(dsn: str, tenant: str, records: Any = DERIVED, data_ro
         from defender.system_records import RecordStore
         from defender.tests.support.jobs._jobs1342 import fixed_clock
 
-        store = RecordStore(dsn, clock=fixed_clock, judge=lambda after: [])
+        store = RecordStore(dsn, clock=fixed_clock, judge=lambda after, before: [])
         try:
             await store.import_tenant(str(tenant), to_value(spec), author=SEED_AUTHOR)
         finally:

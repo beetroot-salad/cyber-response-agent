@@ -7,9 +7,9 @@ from __future__ import annotations
 import datetime as _dt
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, NamedTuple
 
-from sqlalchemy import Table, insert, select
+from sqlalchemy import Table, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from defender.database import async_engine
@@ -20,9 +20,8 @@ from defender.tenancy import parse_access
 from defender.tenancy.models import (CaseRecord, CaseVersionRow, RecordsMark, SystemRecord, SystemVersionRow, TenantRecords,
                                      adapter_column)
 
-#: What a record store reports as the writer of a version when a caller names none.
-#: The injected judgement: the after-state, and (when it takes one) the state the write replaces (C4).
-Judge = Callable[..., Sequence[str]]
+#: The injected judgement: every reason the after-state is unusable, given the state a write replaces (None for the import).
+Judge = Callable[[TenantRecords, TenantRecords | None], Sequence[str]]
 
 
 class RecordRefused(Exception):
@@ -39,16 +38,16 @@ _RM: Table = RecordsMark.__table__  # type: ignore[assignment]
 _TENANTS = "tenancy.tenants"
 
 
-def _takes_before(judge: Judge) -> bool:
-    """Whether `judge` accepts the replaced state as a second argument (the real judgement does; a stand-in judging the
-    after-state alone does not, and is called with that alone)."""
-    import inspect
-    try:
-        params = list(inspect.signature(judge).parameters.values())
-    except (TypeError, ValueError):
-        return False
-    positional = [p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
-    return len(positional) >= 2 or any(p.kind == p.VAR_POSITIONAL for p in params)
+class _Latest(NamedTuple):
+    """A system's newest version row (deleted or not) and the highest credential generation any of its versions had."""
+
+    row: Any
+    top_generation: int
+
+
+def _version_of(last: _Latest | None) -> int:
+    """The system's current version number; 0 before its first."""
+    return 0 if last is None else last.row.version
 
 
 class RecordStore:
@@ -72,15 +71,18 @@ class RecordStore:
 
     # --- reads under the lock -------------------------------------------------------------------------------------
 
-    async def _history(self, conn: AsyncConnection, tenant: TenantId) -> dict[str, list[Any]]:
-        rows = (await conn.execute(select(_SV).where(_SV.c.tenant_id == tenant).order_by(_SV.c.system_id, _SV.c.version))).all()
-        out: dict[str, list[Any]] = {}
-        for row in rows:
-            out.setdefault(row.system_id, []).append(row)
-        return out
+    async def _latest(self, conn: AsyncConnection, tenant: TenantId) -> dict[str, _Latest]:
+        """Each system's newest version, a deleted one included, with the highest credential generation it ever had:
+        all a write needs of its history, read without the versions before."""
+        top = func.max(_SV.c.credential_generation).over(partition_by=_SV.c.system_id).label("top_generation")
+        rows = (await conn.execute(select(_SV, top).where(_SV.c.tenant_id == tenant).distinct(_SV.c.system_id)
+                                   .order_by(_SV.c.system_id, _SV.c.version.desc()))).all()
+        return {row.system_id: _Latest(row, row.top_generation) for row in rows}
 
-    async def _case_history(self, conn: AsyncConnection, tenant: TenantId) -> list[Any]:
-        return list((await conn.execute(select(_CV).where(_CV.c.tenant_id == tenant).order_by(_CV.c.version))).all())
+    async def _latest_case(self, conn: AsyncConnection, tenant: TenantId) -> Any:
+        """The case record's newest version, a deleted one included; None before the first."""
+        return (await conn.execute(select(_CV).where(_CV.c.tenant_id == tenant).order_by(_CV.c.version.desc())
+                                   .limit(1))).first()
 
     async def _marked(self, conn: AsyncConnection, tenant: TenantId) -> bool:
         return (await conn.execute(select(_RM.c.tenant_id).where(_RM.c.tenant_id == tenant))).first() is not None
@@ -91,41 +93,41 @@ class RecordStore:
             raise RecordRefused([not_imported_text(tenant)])
 
     @staticmethod
-    def _current(history: Mapping[str, list[Any]]) -> dict[str, SystemRecord]:
-        return {s: SystemVersionRow(**rows[-1]._mapping).as_record() for s, rows in history.items() if not rows[-1].deleted}
+    def _current(latest: Mapping[str, _Latest]) -> dict[str, SystemRecord]:
+        return {s: SystemVersionRow(**{c.name: getattr(last.row, c.name) for c in _SV.c}).as_record()
+                for s, last in latest.items() if not last.row.deleted}
 
     @staticmethod
-    def _current_case(history: list[Any]) -> CaseRecord | None:
-        if not history or history[-1].deleted:
+    def _current_case(row: Any) -> CaseRecord | None:
+        if row is None or row.deleted:
             return None
-        row = history[-1]
         return CaseRecord(version=row.version, system_id=row.system_id, comment_body=row.comment_body)
 
     def _refuse_if_faulty(self, after: TenantRecords, before: TenantRecords | None = None) -> None:
         """The judge sees the after-state and, for a write (not the import), the state it replaces: it judges what the
         write changes and names the part whose change broke cover (C4)."""
-        faults = self._judge(after, before) if before is not None and _takes_before(self._judge) else self._judge(after)
+        faults = self._judge(after, before)
         if faults:
             raise RecordRefused(faults)
 
     # --- generation -------------------------------------------------------------------------------------------------
 
     @staticmethod
-    def _generation(system: str, rows: list[Any], access: str) -> int:
+    def _generation(system: str, last: _Latest | None, access: str) -> int:
         """P5, R4, K4: the first version is 1; a re-create after a delete is the highest ever + 1; otherwise the current
         generation, one higher when the base, the CA or the auth block differs, compared as parsed values. Unchanged
         access text keeps the generation without a parse; an access, old or new, that does not parse cannot be shown to
         name the same upstream, so it takes a new generation (a new access that does not parse is the judge's
         refusal besides)."""
-        if not rows:
+        if last is None:
             return 1
-        top = max(r.credential_generation for r in rows)
-        if rows[-1].deleted:
+        top = last.top_generation
+        if last.row.deleted:
             return top + 1
-        if rows[-1].access == access:
+        if last.row.access == access:
             return top
         try:
-            was, now = parse_access(rows[-1].access, system=system), parse_access(access, system=system)
+            was, now = parse_access(last.row.access, system=system), parse_access(access, system=system)
         except ConfigFault:
             return top + 1
         return top if (was.base, was.ca, was.auth) == (now.base, now.ca, now.auth) else top + 1
@@ -136,18 +138,18 @@ class RecordStore:
                          enabled: bool, settings: Mapping[str, str], access: str, author: str) -> SystemRecord:
         async with self._locked(tenant) as conn:
             await self._require_marked(conn, tenant)
-            history = await self._history(conn, tenant)
-            rows = history.get(system, [])
-            self._check_replaces(system, rows, replaces)
+            latest = await self._latest(conn, tenant)
+            last = latest.get(system)
+            self._check_replaces(system, last, replaces)
             custom = adapter if isinstance(adapter, tuple) else None
-            generation = self._generation(system, rows, access)
-            candidate = SystemRecord(system_id=system, version=len(rows) + 1, adapter_id="" if custom else str(adapter),
+            generation = self._generation(system, last, access)
+            candidate = SystemRecord(system_id=system, version=_version_of(last) + 1, adapter_id="" if custom else str(adapter),
                                      enabled=enabled, settings=dict(settings), access=access, custom_ref=custom,
                                      credential_generation=generation)
-            after = self._current(history) | {system: candidate}
-            case = self._current_case(await self._case_history(conn, tenant))
+            after = self._current(latest) | {system: candidate}
+            case = self._current_case(await self._latest_case(conn, tenant))
             self._refuse_if_faulty(TenantRecords(imported=True, systems=after, case=case),
-                                   TenantRecords(imported=True, systems=self._current(history), case=case))
+                                   TenantRecords(imported=True, systems=self._current(latest), case=case))
             await conn.execute(insert(_SV).values(
                 tenant_id=tenant, system_id=system, version=candidate.version, adapter_id=adapter_column(candidate),
                 enabled=enabled, settings=dict(settings), access=access, credential_generation=generation, deleted=False,
@@ -155,8 +157,8 @@ class RecordStore:
             return candidate
 
     @staticmethod
-    def _check_replaces(system: str, rows: list[Any], replaces: int) -> None:
-        current = rows[-1].version if rows else 0
+    def _check_replaces(system: str, last: _Latest | None, replaces: int) -> None:
+        current = _version_of(last)
         if replaces != current:
             raise RecordRefused([f"system {system}: the write replaces version {replaces}, but the current version is "
                                  f"{current}"])
@@ -164,16 +166,16 @@ class RecordStore:
     async def delete_system(self, tenant: TenantId, system: str, *, replaces: int, author: str) -> None:
         async with self._locked(tenant) as conn:
             await self._require_marked(conn, tenant)
-            history = await self._history(conn, tenant)
-            rows = history.get(system, [])
-            self._check_replaces(system, rows, replaces)
-            if not rows or rows[-1].deleted:
+            latest = await self._latest(conn, tenant)
+            found = latest.get(system)
+            self._check_replaces(system, found, replaces)
+            if found is None or found.row.deleted:
                 raise RecordRefused([f"system {system} has no current record to delete"])
-            last = rows[-1]
-            after = {k: v for k, v in self._current(history).items() if k != system}
-            case = self._current_case(await self._case_history(conn, tenant))
+            last = found.row
+            after = {k: v for k, v in self._current(latest).items() if k != system}
+            case = self._current_case(await self._latest_case(conn, tenant))
             self._refuse_if_faulty(TenantRecords(imported=True, systems=after, case=case),
-                                   TenantRecords(imported=True, systems=self._current(history), case=case))
+                                   TenantRecords(imported=True, systems=self._current(latest), case=case))
             await conn.execute(insert(_SV).values(
                 tenant_id=tenant, system_id=system, version=last.version + 1, adapter_id=last.adapter_id,
                 enabled=last.enabled, settings=last.settings, access=last.access,
@@ -182,14 +184,14 @@ class RecordStore:
     async def put_case(self, tenant: TenantId, *, replaces: int, system_id: str, comment_body: str, author: str) -> CaseRecord:
         async with self._locked(tenant) as conn:
             await self._require_marked(conn, tenant)
-            history = await self._case_history(conn, tenant)
-            current = history[-1].version if history else 0
+            last = await self._latest_case(conn, tenant)
+            current = last.version if last is not None else 0
             if replaces != current:
                 raise RecordRefused([f"case record: the write replaces version {replaces}, but the current version is {current}"])
             case = CaseRecord(version=current + 1, system_id=system_id, comment_body=comment_body)
-            systems = self._current(await self._history(conn, tenant))
+            systems = self._current(await self._latest(conn, tenant))
             self._refuse_if_faulty(TenantRecords(imported=True, systems=systems, case=case),
-                                   TenantRecords(imported=True, systems=systems, case=self._current_case(history)))
+                                   TenantRecords(imported=True, systems=systems, case=self._current_case(last)))
             await conn.execute(insert(_CV).values(tenant_id=tenant, version=case.version, system_id=system_id,
                                                   comment_body=comment_body, deleted=False, author=author,
                                                   written_at=self._clock()))
@@ -198,13 +200,12 @@ class RecordStore:
     async def delete_case(self, tenant: TenantId, *, replaces: int, author: str) -> None:
         async with self._locked(tenant) as conn:
             await self._require_marked(conn, tenant)
-            history = await self._case_history(conn, tenant)
-            current = history[-1].version if history else 0
+            last = await self._latest_case(conn, tenant)
+            current = last.version if last is not None else 0
             if replaces != current:
                 raise RecordRefused([f"case record: the write replaces version {replaces}, but the current version is {current}"])
-            if not history or history[-1].deleted:
+            if last is None or last.deleted:
                 raise RecordRefused(["the tenant has no case record to delete"])
-            last = history[-1]
             await conn.execute(insert(_CV).values(tenant_id=tenant, version=current + 1, system_id=last.system_id,
                                                   comment_body=last.comment_body, deleted=True, author=author,
                                                   written_at=self._clock()))

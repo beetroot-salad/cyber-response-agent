@@ -960,12 +960,12 @@ def test_1366_o5_one_tenants_writes_are_serialized_across_the_system_and_case_ta
     op = imported_op
     in_a, release, in_b, failed, seen_b = threading.Event(), threading.Event(), threading.Event(), [], []
 
-    def judge_a(after: Any) -> list[str]:
+    def judge_a(after: Any, before: Any) -> list[str]:
         in_a.set()
         assert release.wait(60), "test left A held"
         return []
 
-    def judge_b(after: Any) -> list[str]:
+    def judge_b(after: Any, before: Any) -> list[str]:
         seen_b.append(after)
         in_b.set()
         return []
