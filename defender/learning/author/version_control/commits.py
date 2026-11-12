@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from defender.tenancy import Tenant
 
 from .model import AgentChange, ChangeSet, DeliveryRefused, _refusals, _require_in_lanes
-from .record import _BatchKey, _Made, _record_made
+from .record import _BatchKey, _Made
 from .repository import GitRepository
 
 
@@ -27,10 +28,19 @@ class _Line:
         return self.tip or self.batch.base
 
 
+#: Where the commit-maker records a commit before its branch moves: the learning store's verb for a
+#: batch's commit (#1278 D5, its holder's token checked in the same transaction). A batch with none
+#: (a `propose`, which has no learning batch) keeps only `CommitMaker.made`.
+Recorder = Callable[[_Made], None]
+
+
 @dataclass
 class CommitMaker:
     tenant: Tenant
     repository: GitRepository
+    recorder: Recorder | None = None
+    #: Every commit this maker made, oldest first: what `finish` checks a branch's commits against.
+    made: list[_Made] = field(default_factory=list)
 
     def commit(
         self,
@@ -89,20 +99,20 @@ class CommitMaker:
                 else self.repository.regular_blobs(line.batch.base, paths)
             )
             commit, after = self.repository.make_commit(parent, change_set, message)
-            _record_made(
-                self.tenant,
-                _Made(
-                    commit=commit,
-                    batch=line.batch,
-                    lanes=line.lanes,
-                    reverts=reverts,
-                    changes=()
-                    if reverts is not None
-                    else tuple(
-                        (path, at_base.get(path), after[path]) for path in paths
-                    ),
+            made = _Made(
+                commit=commit,
+                batch=line.batch,
+                lanes=line.lanes,
+                reverts=reverts,
+                changes=tuple(
+                    (path, at_base.get(path), after[path]) for path in paths
                 ),
             )
+            if self.recorder is not None:
+                # Recorded before the branch moves (P2'): a recorder that refuses (a holder whose
+                # lease is gone, `LeaseLost`) leaves a commit object no branch holds.
+                self.recorder(made)
+            self.made.append(made)
             self.repository.move_branch(branch, commit, tip)
             line.tip = commit
             return commit

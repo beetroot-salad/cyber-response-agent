@@ -10,7 +10,6 @@ import os
 import shutil
 
 
-
 import stat
 
 import subprocess
@@ -30,18 +29,14 @@ from ._support import (
     RENAMED,
     SIBLING_FORK,
     ForgeHTTP,
-    delivery,
     forge_pulls,
     fresh_process_env,
     git,
     git_bytes,
-    merge_on_remote,
-    merged_agent_lesson,
     opened,
     pr_row,
     push_object,
     push_to_remote,
-    target,
 )
 
 
@@ -392,29 +387,6 @@ def _revert_commit(remote, http, main, result):
 _LEARNED = "agent/lessons/learned.md"
 
 
-def _reverted(repo, lesson, name):
-    """Revert `lesson` through a fresh delivery object; returns the revert's one commit on
-    the remote (directly on `main`, which does not move)."""
-    remote = repo[1]
-    http = ForgeHTTP()
-    d = delivery(repo, http)
-    main = git(remote, "rev-parse", "main")
-    return _revert_commit(remote, http, main, d.revert(lesson, name))
-
-
-def _refused_revert(repo, lesson, name):
-    """Revert `lesson`, expecting `DeliveryRefused` with nothing pushed or requested."""
-    remote = repo[1]
-    http = ForgeHTTP()
-    d = delivery(repo, http)
-    main, branches = git(remote, "rev-parse", "main"), _branches(remote)
-    with pytest.raises(target().DeliveryRefused):
-        d.revert(lesson, name)
-    assert _branches(remote) == branches
-    assert git(remote, "rev-parse", "main") == main
-    assert not http.creates
-
-
 def _on_main(repo, path):
     """The bytes the remote's `main` holds at `path`, or `None` when it holds none."""
     if not git(repo[1], "ls-tree", "--name-only", "main", "--", path):
@@ -422,24 +394,7 @@ def _on_main(repo, path):
     return git_bytes(repo[1], "cat-file", "blob", f"main:{path}")
 
 
-def _revert_and_merge(repo, tmp_path, lesson, name, style):
-    """Revert `lesson`, then merge the revert's PR as a human would in `style` (its branch
-    deleted after a squash or a rebase, kept after a merge commit). Returns what `main` then
-    holds for the lesson."""
-    http = ForgeHTTP()
-    d = delivery(repo, http)
-    _revert_commit(repo[1], http, git(repo[1], "rev-parse", "main"), d.revert(lesson, name))
-    merge_on_remote(repo, tmp_path, http.creates[-1]["head"], style, delete_branch=style != "merge")
-    return _on_main(repo, lesson)
-
-
 _FIRST, _SECOND = b"the agent's first words\n", b"the agent's second words\n"
-
-
-def _agent_wrote(repo, tmp_path, *history):
-    """The commit-maker wrote `_LEARNED` once per entry of `history`, each batch merged."""
-    for number, words in enumerate(history):
-        merged_agent_lesson(repo, tmp_path, f"batch-{number}", _LEARNED, words)
 
 
 class _AnswerLost(ForgeHTTP):

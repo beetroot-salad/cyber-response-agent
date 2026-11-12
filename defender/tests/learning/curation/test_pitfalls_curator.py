@@ -1,32 +1,33 @@
-"""Pitfalls curation mode (leads/pitfalls_curator.py): commit-gate verification, threshold/rotation, and the systemless-batch drop.
+"""Pitfalls curation mode (leads/pitfalls_curator.py): commit-gate verification, the claim's dispositions, and the systemless-batch drop.
 
 The lane works over a batch's git-free draft, never a product worktree. Every gate case drives
-the real tick, `run_pitfalls(paths=, state=, trees=, batch=)`, with the spawn faked as an edit of
-the draft's `agent/skills/`, and reads what landed off the batch branch (`agent/...`).
+the real tick, `run_pitfalls(paths=, trees=, batch=, items=, outcomes=)` over a store claim's pitfall items, with the
+spawn faked as an edit of the draft's `agent/skills/`, and reads what landed off the batch branch (`agent/...`).
 `paths.repo_root` is the product checkout, holding only the adapters (#1172).
+
+Retired with the file queue (design r8 Items, D1/D9): `test_run_pitfalls_below_threshold_is_noop` (the threshold, and a
+queue that stays whole below it, are the store's claim: `LearningStore.claim(thresholds=)`,
+`tests/learning/store_1278/test_items_1278.py`), and the queue rotation / consumed ledger the at-threshold and no-edit
+ticks asserted: a curated pitfall now stays in its batch (the disposition's `committed_ids`), an uncurable one is skipped.
 """
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
-
-import json
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from defender.learning.core.config import pitfalls_threshold
 from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
 from defender.learning.leads.lead_extraction import LeadAuthorError  # type: ignore[import-not-found]
-from defender.learning.core import persist  # type: ignore[import-not-found]
-from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
 from defender.tests.support.learning.curation import _curator1134 as C
-from defender.tests.support.learning.curation._curator1134 import open_state
-from defender.learning.core.state import PITFALLS
 
 
 DECLARED = frozenset({"elastic", "wazuh"})
+#: The pitfalls arrival threshold the curator is run under: a claim holds at least this many distinct mistakes.
+THRESHOLD = pitfalls_threshold()
 
 
 def _lane(tmp_path: Path, files: dict[str, str] | None = None, *,
@@ -49,62 +50,69 @@ def _lane(tmp_path: Path, files: dict[str, str] | None = None, *,
     return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, agent=agent, product=product)
 
 
-def _seed_pitfalls(state, n: int, *, system: str = "elastic", start: int = 0) -> None:
-    """``n`` queued pitfalls, each a distinct mistake: #840 collapses rows sharing a
-    `stderr_digest` into one record, and the threshold counts records."""
-    persist.append_pitfalls(
-        [
-            {
-                "schema_version": 1, "pitfall_id": f"r:l-{i:03d}:0", "source_run": "r",
-                "system": system, "query_id": f"{system}.esql", "goal": "g",
-                "executed_query": "bad pipe",
-                "stderr_digest": f"exit=1; mismatched input at token {i}",
-                "error_class": "agent-fixable",
-            }
-            for i in range(start, start + n)
-        ],
-        state=state,
-    )
+def _pitfall_items(n: int, *, system: str = "elastic", start: int = 0) -> list[tuple[str, str, dict]]:
+    """``n`` claimed pitfalls (store items `(kind, key, payload)`), each a distinct mistake: #840 collapses rows
+    sharing a `stderr_digest` into one record, and the curator counts records."""
+    return [
+        ("pitfall", f"r:l-{i:03d}:0", {
+            "schema_version": 1, "pitfall_id": f"r:l-{i:03d}:0", "source_run": "r",
+            "system": system, "query_id": f"{system}.esql", "goal": "g",
+            "executed_query": "bad pipe",
+            "stderr_digest": f"exit=1; mismatched input at token {i}",
+            "error_class": "agent-fixable",
+        })
+        for i in range(start, start + n)
+    ]
 
 
-def _tick(lane: C.DraftLane, edit, monkeypatch, *, systems: tuple[str, ...] = ("elastic",),
-          invoke=None) -> tuple[int, object]:
-    """One real pitfalls tick at threshold 2 over the draft: two distinct queued mistakes per
-    system in `systems`, the spawn faked as `edit(<the draft's agent/skills>)` (it runs no git)."""
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    state = open_state(lane.paths)
-    for k, system in enumerate(systems):
-        _seed_pitfalls(state, 2, system=system, start=2 * k)
+class _Claim:
+    """What one `run_pitfalls` claim wrote: its `outcomes` (fates) and the dispositions it reported."""
+
+    def __init__(self) -> None:
+        self.outcomes: dict = {}
+        self.curated: list = []
+
+
+def _run(lane: C.DraftLane, items, claim: _Claim, invoke) -> int:
+    return pitfalls_curator.run_pitfalls(
+        paths=lane.paths, trees=C.draft_trees(lane), batch=lane.batch, invoke=invoke,
+        items=items, outcomes=claim.outcomes, on_curated=claim.curated.append)
+
+
+def _tick(lane: C.DraftLane, edit, *, systems: tuple[str, ...] = ("elastic",),
+          invoke=None) -> tuple[int, _Claim]:
+    """One real pitfalls claim over the draft: `THRESHOLD` distinct claimed mistakes per system in `systems` (the lane
+    opens only on that many, #1278 ruling), the spawn faked as `edit(<the draft's agent/skills>)` (it runs no git)."""
+    items = [it for k, system in enumerate(systems)
+             for it in _pitfall_items(THRESHOLD, system=system, start=THRESHOLD * k)]
 
     def agent(handoffs, **_kw):
         edit(lane.skills_dir)
         return 0
 
-    rc = pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, trees=C.draft_trees(lane),
-                                       batch=lane.batch, invoke=invoke or agent)
-    return rc, state
+    claim = _Claim()
+    return _run(lane, items, claim, invoke or agent), claim
 
 
-def _refused(lane: C.DraftLane, edit, match: str, monkeypatch, *, errors=LeadAuthorError,
-             **kw) -> None:
+def _refused(lane: C.DraftLane, edit, match: str, *, errors=LeadAuthorError, **kw) -> None:
     """The gate refused the tick naming `match`, and nothing landed on the batch branch."""
     with pytest.raises(errors, match=match):
-        _tick(lane, edit, monkeypatch, **kw)
+        _tick(lane, edit, **kw)
     assert lane.landed() == []
 
 
-def test_verify_pitfalls_state_accepts_execution_md(tmp_path: Path, monkeypatch):
+def test_verify_pitfalls_state_accepts_execution_md(tmp_path: Path):
     lane = _lane(tmp_path)
     rc, _ = _tick(lane, lambda sk: (sk / "elastic" / "execution.md").write_text(
-        "# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n"), monkeypatch)
+        "# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n"))
     assert rc == 0
     assert lane.landed() == ["agent/skills/elastic/execution.md"]
 
 
-def test_verify_pitfalls_state_rejects_non_execution_md(tmp_path: Path, monkeypatch):
+def test_verify_pitfalls_state_rejects_non_execution_md(tmp_path: Path):
     """A SKILL.md edit is in lead-author scope but not pitfalls scope: rejected."""
     _refused(_lane(tmp_path), lambda sk: (sk / "elastic" / "SKILL.md").write_text(
-        (sk / "elastic" / "SKILL.md").read_text() + "\nedit\n"), "non-execution.md", monkeypatch)
+        (sk / "elastic" / "SKILL.md").read_text() + "\nedit\n"), "non-execution.md")
 
 
 def _stray_errors():
@@ -115,28 +123,28 @@ def _stray_errors():
     return (LeadAuthorError, DeliveryRefused)
 
 
-def test_verify_pitfalls_state_rejects_stray(tmp_path: Path, monkeypatch):
+def test_verify_pitfalls_state_rejects_stray(tmp_path: Path):
     lane = _lane(tmp_path, {"other/stray.md": "committed\n"})
     _refused(lane, lambda sk: (sk.parent / "other" / "stray.md").write_text("x"), "outside",
-             monkeypatch, errors=_stray_errors())
+             errors=_stray_errors())
 
 
-def test_verify_pitfalls_state_rejects_deletion(tmp_path: Path, monkeypatch):
+def test_verify_pitfalls_state_rejects_deletion(tmp_path: Path):
     lane = _lane(tmp_path, {"skills/elastic/execution.md": "# e\n"})
-    _refused(lane, lambda sk: (sk / "elastic" / "execution.md").unlink(), "deleted", monkeypatch)
+    _refused(lane, lambda sk: (sk / "elastic" / "execution.md").unlink(), "deleted")
 
 
-def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_path: Path, monkeypatch):
+def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_path: Path):
     lane = _lane(tmp_path, {"other/stray.md": "committed\n"})
 
     def edit(sk: Path) -> None:
         (sk.parent / "other" / "stray.md").write_text("stray")
         (sk / "elastic" / "SKILL.md").write_text((sk / "elastic" / "SKILL.md").read_text() + "\nedit\n")
 
-    _refused(lane, edit, "outside", monkeypatch, errors=_stray_errors())
+    _refused(lane, edit, "outside", errors=_stray_errors())
 
 
-def test_verify_pitfalls_state_returns_sorted_changed(tmp_path: Path, monkeypatch):
+def test_verify_pitfalls_state_returns_sorted_changed(tmp_path: Path):
     """A modified and a new execution.md both land, sorted."""
     lane = _lane(tmp_path, {"skills/cmdb/SKILL.md": "---\nname: defender-cmdb\n---\n# cmdb\n",
                             "skills/elastic/execution.md": "# e\n"}, adapters=("cmdb",))
@@ -145,7 +153,7 @@ def test_verify_pitfalls_state_returns_sorted_changed(tmp_path: Path, monkeypatc
         (sk / "elastic" / "execution.md").write_text("# e edited\n")
         (sk / "cmdb" / "execution.md").write_text("# c\n")
 
-    rc, _ = _tick(lane, edit, monkeypatch, systems=("elastic", "cmdb"))
+    rc, _ = _tick(lane, edit, systems=("elastic", "cmdb"))
     assert rc == 0
     assert lane.landed() == [
         "agent/skills/cmdb/execution.md",
@@ -153,50 +161,40 @@ def test_verify_pitfalls_state_returns_sorted_changed(tmp_path: Path, monkeypatc
     ]
 
 
-def test_run_pitfalls_below_threshold_is_noop(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "5")
-    lane = _lane(tmp_path)
-    state = open_state(lane.paths)
-    _seed_pitfalls(state, 2)
-    called = []
-    rc = pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, trees=C.draft_trees(lane),
-                                       batch=lane.batch,
-                                       invoke=lambda *a, **k: called.append(1) or 0)
-    assert rc == 0
-    assert called == []
-    assert len(persist.read_pitfalls(state)) == 2
-
-
-def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_path: Path, monkeypatch):
-    """At threshold the curator is handed the system's execution.md, its fold lands on the batch
-    branch, and the rows rotate. The handoff path's prefix is still unsettled, so only its tail
-    and the absence of the product spelling are pinned."""
+def test_run_pitfalls_commits_the_fold_and_reports_the_claims_pitfalls_as_taken(tmp_path: Path):
+    """The curator is handed the system's execution.md, its fold lands on the batch branch, and the claim's
+    pitfalls are reported taken (they stay in the batch, none is given a fate). The handoff path's prefix is
+    still unsettled, so only its tail and the absence of the product spelling are pinned."""
     lane = _lane(tmp_path)
 
     def fake_invoke(handoffs, **_kw):
         assert handoffs[0]["system"] == "elastic"
         assert handoffs[0]["path"].endswith("skills/elastic/execution.md")
         assert not handoffs[0]["path"].startswith("defender/")
-        assert len(handoffs[0]["failures"]) == 2
+        assert len(handoffs[0]["failures"]) == THRESHOLD
         p = lane.skills_dir / "elastic" / "execution.md"
         p.write_text("# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n")
         return 0
 
-    rc, state = _tick(lane, None, monkeypatch, invoke=fake_invoke)
+    rc, claim = _tick(lane, None, invoke=fake_invoke)
     assert rc == 0
     assert lane.landed() == ["agent/skills/elastic/execution.md"]
     assert "execution.md pitfalls" in lane.message()
-    assert persist.read_pitfalls(state) == []
-    consumed = [json.loads(ln) for ln in (location_path(lane.paths.state_root) / PITFALLS.consumed).read_text().splitlines()]
-    assert {c["pitfall_id"] for c in consumed} == {"r:l-000:0", "r:l-001:0"}
+    [taken] = claim.curated
+    assert set(taken.committed_ids) == {f"r:l-{i:03d}:0" for i in range(THRESHOLD)}
+    assert taken.sha == lane.tip()
+    assert claim.outcomes == {}
 
 
-def test_run_pitfalls_no_edit_tick_still_rotates(tmp_path: Path, monkeypatch):
+def test_run_pitfalls_no_edit_claim_still_reports_its_pitfalls_taken(tmp_path: Path):
     lane = _lane(tmp_path)
-    rc, state = _tick(lane, lambda sk: None, monkeypatch)
+    rc, claim = _tick(lane, lambda sk: None)
     assert rc == 0
-    assert persist.read_pitfalls(state) == []
     assert lane.commits() == []
+    [taken] = claim.curated
+    assert set(taken.committed_ids) == {f"r:l-{i:03d}:0" for i in range(THRESHOLD)}
+    assert taken.sha is None
+    assert claim.outcomes == {}
 
 
 def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path():
@@ -214,41 +212,58 @@ def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path():
 
 
 def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
 ):
     """The commit gate asks whether the directory is a declared system, not merely whether the
     file is an execution.md (#855)."""
     _refused(_lane(tmp_path), lambda sk: C.put(sk / "ghost" / "execution.md",
                                                 "# ghost\n## Common pitfalls\n- invented\n"),
-             "undeclared system", monkeypatch)
+             "undeclared system")
 
     # Positive control on the same gate: the fixture's real system dir takes a NEW execution.md.
     control = _lane(tmp_path / "control")
-    rc, _ = _tick(control, lambda sk: (sk / "elastic" / "execution.md").write_text("# e\n"),
-                  monkeypatch)
+    rc, _ = _tick(control, lambda sk: (sk / "elastic" / "execution.md").write_text("# e\n"))
     assert rc == 0
     assert control.landed() == ["agent/skills/elastic/execution.md"]
 
 
-def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+@pytest.mark.parametrize(("distinct", "rows", "runs"), [
+    pytest.param(1, THRESHOLD, False, id="one mistake repeated to the threshold"),
+    pytest.param(THRESHOLD - 1, THRESHOLD - 1, False, id="one mistake short of the threshold"),
+    pytest.param(THRESHOLD - 1, THRESHOLD + 2, False, id="one mistake short, rows past the threshold"),
+    pytest.param(THRESHOLD, THRESHOLD, True, id="the threshold's mistakes"),
+    pytest.param(THRESHOLD, THRESHOLD + 2, True, id="the threshold's mistakes, repeated"),
+])
+def test_the_pitfalls_curator_runs_only_for_the_thresholds_distinct_mistakes(tmp_path: Path, distinct, rows, runs):
+    """A claim under the threshold in mistakes is not curated however many rows it holds; the same guard as the store's claim. (input 56, ruling)"""
     lane = _lane(tmp_path)
-    state = open_state(lane.paths)
-    persist.append_pitfalls(
-        [{"pitfall_id": f"r:{i}", "system": ""} for i in range(2)], state=state
-    )
+    items = [("pitfall", f"r:l-{i:03d}:0", {**_pitfall_items(1, start=i % distinct)[0][2], "pitfall_id": f"r:l-{i:03d}:0"})
+             for i in range(rows)]
     called: list[int] = []
-    rc = pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, trees=C.draft_trees(lane),
-                                       batch=lane.batch,
-                                       invoke=lambda *a, **k: called.append(1) or 0)
+
+    def agent(handoffs, **_kw):
+        called.append(len(handoffs))
+        return 0
+
+    rc = _run(lane, items, _Claim(), agent)
+
+    assert rc == 0
+    assert bool(called) is runs
+
+
+def test_run_pitfalls_all_systemless_skips_the_claim_without_spawn(tmp_path: Path):
+    """Pitfalls no declared surface can teach (no system) are skipped, the reason naming why; the curator is never
+    spawned and nothing lands."""
+    lane = _lane(tmp_path)
+    items = [(k, i, {**row, "system": ""}) for k, i, row in _pitfall_items(THRESHOLD)]  # distinct mistakes, no system
+    called: list[int] = []
+    claim = _Claim()
+    rc = _run(lane, items, claim, lambda *a, **k: called.append(1) or 0)
     assert rc == 0
     assert called == []
-    assert persist.read_pitfalls(state) == []
+    assert {k: (o.name, o.reason) for k, o in claim.outcomes.items()} == {
+        (k, i): ("skipped", "no-system") for k, i, _ in items}
     assert lane.commits() == []
-
-
-def _state(tmp_path: Path):
-    return open_state(LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "state"))
 
 
 def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
@@ -285,4 +300,4 @@ def test_invoke_pitfalls_agent_config_fault_propagates(tmp_path: Path, monkeypat
     from defender.learning.core.config import FatalConfigError
     _capture_engine(monkeypatch, raise_exc=FatalConfigError("needs FIREWORKS_API_KEY"))
     with pytest.raises(FatalConfigError):
-        pitfalls_curator._invoke_pitfalls_agent([], state=_state(tmp_path), repo_root=tmp_path)
+        pitfalls_curator._invoke_pitfalls_agent([], run_dir=tmp_path / "call", repo_root=tmp_path)

@@ -8,6 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.learning.core._store1278 import (
+    migrated_database,  # noqa: F401 — fixture the world needs
+    world,  # noqa: F401 — fixture
+)
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, export_dir
 
@@ -92,11 +96,14 @@ def _staged(tmp_path) -> Path:
     return staged.parent
 
 
-def test_r6_revert_lesson_logs_in_from_the_secret_file_the_generation_records(p4_tenant, tmp_path,
-                                                                             caplog):
+@pytest.mark.postgres
+def test_r6_revert_lesson_logs_in_from_the_secret_file_the_generation_records(
+        world, tmp_path, caplog):  # noqa: F811 — the imported fixture
+    """The revert reaches its login only past its store (#1278 Reverts: the revert claims a batch there), so the tenant
+    is the world's: active in the database the CLI's store reads."""
     from defender.cli.learning import revert_lesson
 
-    t = p4_tenant
+    t = world.t
     missing = _bind_missing_secret(t, tmp_path)
     with caplog.at_level(logging.CRITICAL):
         rc = revert_lesson.main(["--tenant", t.tenant_id, "some-lesson"], directory=t.directory)

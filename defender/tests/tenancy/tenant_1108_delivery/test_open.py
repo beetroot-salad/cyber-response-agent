@@ -14,6 +14,7 @@ import pytest
 
 from defender.learning.author.version_control.forgejo import ForgeError
 
+from ._revert_store import claimed_batch, reviewed, revert_with
 from ._support import (
     LANES,
     TOKEN,
@@ -98,7 +99,8 @@ def test_tenant_identity_must_match_before_forge_http(repo):
 
 
 @pytest.mark.parametrize("ambient", ["git-dir", "work-tree", "both"])
-def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, tmp_path, monkeypatch, ambient):
+@pytest.mark.postgres
+def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, store, tmp_path, monkeypatch, ambient):
     foreign = tmp_path / "foreign"
     foreign.mkdir()
     git(foreign, "init", "-b", "main")
@@ -117,7 +119,7 @@ def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, t
     with monkeypatch.context() as env:
         redirect(env)
         d = delivery(repo, http)
-        batch = d.start_batch("ambient", lanes=LANES)
+        batch, held = claimed_batch(repo, store, d, "ambient")
         assert (batch.draft_root / "agent/lessons/seed.md").read_text(encoding="utf-8") == "seed\n"
         assert "foreign-only.md" not in files_under(batch.draft_root)
         _write(batch.draft_root / "agent/lessons/ambient.md", "tenant authored\n")
@@ -126,14 +128,16 @@ def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, t
         with pytest.raises(target().DeliveryRefused, match="503|forge|PR|pull"):
             d.finish(batch)
         http.fail_create = False
-        opened(d.deliver("ambient"))
+        again = d.finish(batch)
+        opened(again)
+        reviewed(store, held, again)
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
     assert git(repo[0].knowledge, "rev-parse", f"refs/heads/{batch.branch}") == sha
     assert git(repo[1], "rev-parse", "main") == expected
     merged = merge_on_remote(repo, tmp_path, batch.branch)
     with monkeypatch.context() as env:
         redirect(env)
-        reverted = d.revert("agent/lessons/ambient.md", "ambient")
+        reverted = revert_with(d, store, "agent/lessons/ambient.md", "ambient")
     assert opened(reverted, None) == forge_pulls(repo[1])[-1]["html_url"]
     revert_head = http.creates[-1]["head"]
     tip = git(repo[1], "rev-parse", f"refs/heads/{revert_head}")

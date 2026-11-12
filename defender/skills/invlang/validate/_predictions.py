@@ -45,7 +45,7 @@ def _by_id_first(records, core_fn) -> dict[str, tuple]:
     for r in records:
         rid = r.get("id")
         if isinstance(rid, str) and rid not in idx:
-            idx[rid] = core_fn(r)
+            idx[rid] = core_fn(r)  # lint-stale-ref: ok — unrelated local loop variable, not the retired helper
     return idx
 
 
@@ -72,12 +72,12 @@ def _check_append_only(
         return errors
 
     proposed = proposed or CompanionBody()
-    for label, records_cur, records_new, core_fn in (
+    for label, records_cur, records_new, core_fn in (  # lint-stale-ref: ok — unrelated local loop variable, not the retired helper
         ("vertex", _walkers.all_vertices(current), _walkers.all_vertices(proposed), _vertex_core),
         ("edge", _walkers.all_edges(current), _walkers.all_edges(proposed), _edge_core),
     ):
-        cur_idx = _by_id_first(records_cur, core_fn)
-        new_idx = _by_id_first(records_new, core_fn)
+        cur_idx = _by_id_first(records_cur, core_fn)  # lint-stale-ref: ok — unrelated local loop variable, not the retired helper
+        new_idx = _by_id_first(records_new, core_fn)  # lint-stale-ref: ok — unrelated local loop variable, not the retired helper
         for rid, core in cur_idx.items():
             if rid not in new_idx:
                 errors.append(

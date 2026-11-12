@@ -9,10 +9,11 @@ from typing import Any
 import pytest
 
 from defender.configuration._env import FatalConfigError
-from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, kind_at
 from defender.learning.leads import lead_author
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
+from defender.tests.support.learning.core._state1135 import tenant_of
 from defender.tests.support.learning.curation._lead_author_1134 import (
     GHOST,
     discover,
@@ -66,7 +67,8 @@ def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
                        ("elastic.hunt-creds", "elastic", "esql"))
 
     with pytest.raises(FatalConfigError, match=NO_MODEL):
-        lead_author.run(run_of(run_dir), label=LEAD, paths=lane.paths, batch=lane.batch)
+        lead_author.run(run_of(run_dir), label=LEAD, batch=lane.batch,
+                        paths=tenant_of(run_dir).learning_paths(LoopPaths, repo_root=lane.paths.repo_root))
 
     for system in ("wazuh", "elastic"):
         qid = f"{system}.hunt-creds"

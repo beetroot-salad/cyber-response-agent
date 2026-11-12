@@ -2,7 +2,8 @@
 
 The model answers which of the framing run's captured lookups the comment approves (by index), an earlier
 review date it names, instruction text, or nothing with a reason (A3). The host validates the answer whole,
-assigns entry ids, records the decision under the comment's id, and writes the lessons row (D11).
+assigns entry ids, and records the decision on the comment's row together with its instruction's lessons item
+(D11), in one store transaction (#1278 A4 P8).
 """
 from __future__ import annotations
 
@@ -12,12 +13,6 @@ from collections.abc import Callable
 from typing import Any
 
 from defender._clock import parse_iso_utc
-from defender.learning.core.state import (
-    FEEDBACK_DECISIONS,
-    FEEDBACK_ITEMS,
-    FEEDBACK_LESSONS,
-    LearningState,
-)
 from defender.systems import tacit_registry
 
 _logger = logging.getLogger(__name__)
@@ -104,36 +99,67 @@ def validate_answer(answer: Any, item: dict) -> dict:
             "review_by": review_by, "instruction": instruction, "no_change": no_change, "unapprovable": unapprovable}
 
 
-def _record_decision(state: LearningState, item: dict, made: dict) -> dict:
-    decision = {"comment_id": item["comment_id"], "issue": item["issue"], "issue_url": item["issue_url"],
-                "author": item["author"], "date": item["date"], "body": item["body"],
-                "case_id": item["case_id"], "settled": False, **made}
-    state.put_record(FEEDBACK_DECISIONS, str(item["comment_id"]), decision)
+def decision_view(comment: Any) -> dict:
+    """A decided comment as steps 4 and the replies read it: the comment's own fields (as #1414's decision record
+    carried them) beside its decision's."""
+    return {"comment_id": int(comment.comment_id), "issue": comment.issue_number, "issue_url": comment.issue_url,
+            "author": comment.author, "date": comment.created, "body": comment.body, **(comment.decision or {})}
+
+
+def _item(comment: Any, run: Any) -> dict:
+    """The decide seam's item (A3): the comment, and the outcome and captured lookups of the run whose issue it is
+    on (ruling 5)."""
+    return {"comment_id": int(comment.comment_id), "issue": comment.issue_number, "issue_url": comment.issue_url,
+            "author": comment.author, "date": comment.created, "body": comment.body, "case_id": run.case_id,
+            "run_id": run.run_id, "outcome": run.outcome, "lookups": [dict(lk) for lk in run.lookups]}
+
+
+def _stored(made: dict) -> dict:
+    """The decision as the store keeps it (A4): the model's texts as the store can hold them."""
+    from defender.learning.core.feedback import storable
+
+    return {**made, **{k: storable(made[k]) for k in ("instruction", "no_change", "unapprovable")
+                       if isinstance(made.get(k), str)}}
+
+
+def _lesson_row(item: dict, decision: dict) -> dict:
+    return {"comment_id": str(item["comment_id"]), "issue": item["issue"], "author": item["author"],
+            "case_id": item["case_id"], "instruction": decision["instruction"]}
+
+
+def _record_decision(ctx: Any, item: dict, made: dict) -> dict:
+    """Record the comment's decision and, in the same transaction, its instruction's lessons item (D11, P8). The one
+    write a fault costs a model call: one that fails short of a stop is tried once more before the tick gives up."""
+    from defender.learning.core.feedback import _halts
+
+    decision = _stored(made)
+    row = _lesson_row(item, decision) if decision.get("instruction") else None
+    try:
+        ctx.store.record_decision(ctx.held, item["comment_id"], decision, instruction=row)
+    except _halts():
+        raise
+    except Exception as first:  # noqa: BLE001 — retried once; a second failure is the step's
+        _logger.warning(f"feedback: recording the decision of comment {item['comment_id']} failed ({first!r}); "
+                        "trying once more")
+        ctx.store.record_decision(ctx.held, item["comment_id"], decision, instruction=row)
     return decision
 
 
-def _lesson_row(decision: dict) -> dict:
-    return {"comment_id": str(decision["comment_id"]), "issue": decision["issue"], "author": decision["author"],
-            "case_id": decision["case_id"], "instruction": decision["instruction"]}
-
-
-def _failed(state: LearningState, item: dict, why: str) -> bool:
+def _failed(ctx: Any, item: dict, why: str) -> dict | None:
     """One counted failure of a comment. At the ceiling the host records the no-change decision that the
-    normal reply path posts; answers whether the comment is closed now (A4)."""
-    attempts = int(item.get("attempts", 0)) + 1
+    normal reply path posts, and returns it (A4)."""
+    attempts = int(ctx.store.count_failed_answer(ctx.held, item["comment_id"]))
     if attempts < MAX_ATTEMPTS:
         _logger.error(f"feedback: comment {item['comment_id']} on issue {item['issue']} was not decided "
                       f"(attempt {attempts}/{MAX_ATTEMPTS}): {why}")
-        state.put_record(FEEDBACK_ITEMS, str(item["comment_id"]), {**item, "attempts": attempts})
-        return False
+        return None
     _logger.warning(f"feedback: comment {item['comment_id']} on issue {item['issue']} could not be processed "
                     f"after {attempts} attempts ({why}); recorded as no change")
-    _record_decision(state, item, {"approved": [], "review_by": None, "instruction": None,
-                          "no_change": f"could not be processed ({why})"})
-    return True
+    return _record_decision(ctx, item, {"approved": [], "review_by": None, "instruction": None,
+                                        "no_change": f"could not be processed ({why})", "unapprovable": None})
 
 
-def _ask(state: LearningState, item: dict, decide: Callable[..., Any]) -> dict | None:
+def _ask(ctx: Any, item: dict, decide: Callable[..., Any]) -> dict | None:
     """The comment's decision, recorded, or None when this attempt failed (counted)."""
     try:
         made = validate_answer(decide(dict(item)), item)
@@ -142,24 +168,18 @@ def _ask(state: LearningState, item: dict, decide: Callable[..., Any]) -> dict |
     except Exception as e:  # noqa: BLE001 — a model or box fault is a failed attempt, never a crashed tick
         why = f"{type(e).__name__}: {e}"
     else:
-        return _record_decision(state, item, made)
-    closed = _failed(state, item, why)
-    return state.get_record(FEEDBACK_DECISIONS, str(item["comment_id"])) if closed else None
+        return _record_decision(ctx, item, made)
+    return _failed(ctx, item, why)
 
 
-def decide_items(state: LearningState, decide: Callable[..., Any]) -> None:
-    """Every queued item with no decision yet, in order per issue; a failing comment holds back its issue's
-    later ones for this tick. An item that has a decision only has its lessons row written if missing."""
+def decide_comments(ctx: Any, decide: Callable[..., Any]) -> None:
+    """Every comment taken in with no decision yet, in order per issue; a failing comment holds back its issue's
+    later ones for this tick."""
+    runs = {r.run_id: r for r in ctx.issues()}
     stopped: set[int] = set()
-    items = sorted(state.records(FEEDBACK_ITEMS).values(), key=lambda i: (i["issue"], i["comment_id"]))
-    for item in items:
-        if item["issue"] in stopped:
+    for comment in ctx.comments():
+        if comment.decision is not None or comment.issue_number in stopped:
             continue
-        key = str(item["comment_id"])
-        decision = state.get_record(FEEDBACK_DECISIONS, key) or _ask(state, item, decide)
-        if decision is None:
-            stopped.add(item["issue"])
-            continue
-        if decision.get("instruction"):
-            state.append(FEEDBACK_LESSONS, [_lesson_row(decision)], dedup_key="comment_id")
-        state.drop_record(FEEDBACK_ITEMS, key)
+        ctx.hold.check()
+        if _ask(ctx, _item(comment, runs[comment.run_id]), decide) is None:
+            stopped.add(comment.issue_number)

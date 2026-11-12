@@ -82,7 +82,6 @@ def test_1110_o6_an_unrecognised_value_is_production_with_one_error_naming_it(
 def state(tmp_path, monkeypatch):
     """A learning state root and a runs base under tmp, and a key per provider, so the
     entrypoint's startup preflight cannot fail ahead of the tail these demands are about."""
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     return loop_paths(tmp_path)
 

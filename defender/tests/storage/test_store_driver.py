@@ -847,7 +847,7 @@ def test_s3_r7_3_a_page_re_rendered_after_a_failed_write_through_the_post_run_st
     from defender.tests.support.presentation import _cost_page_1377 as C
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))  # lint-stale-ref: ok — the retired variable is set on purpose to prove the learning store ignores it
     tenant = set_up_tenant(current_data_root())
     heads = {}
     for label, refuse in (("exact", None), ("lost-write", 2)):
@@ -1148,7 +1148,7 @@ def _page_of(run_dir: Path, tmp_path, monkeypatch) -> str:
     """The run page through its real renderer, handed the run and nothing else (r7.3 T1: no failed-write argument)."""
     from defender.presentation.visualize_run import render_page
 
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))  # lint-stale-ref: ok — the retired variable is set on purpose to prove the learning store ignores it
     return render_page(_run_handle_1165(run_dir))
 
 

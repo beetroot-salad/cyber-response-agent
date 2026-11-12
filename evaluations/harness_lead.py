@@ -98,8 +98,7 @@ def run_lead_author(tmp: Path, run_dir: Path) -> LeadRun:
     from defender.records import Run
 
     tenant = LocalTenant(tmp, _agent_source(tmp))
-    paths = LoopPaths(repo_root=REAL_REPO_ROOT, state_dir=tmp / "_state")
-    (tmp / "_state").mkdir(exist_ok=True)  # lint-unguarded-tree-write: ok — eval scratch dir; the handle never creates its root
+    paths = LoopPaths(repo_root=REAL_REPO_ROOT)
     out, err = io.StringIO(), io.StringIO()
     commits: tuple[str, ...] = ()
     try:

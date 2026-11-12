@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
@@ -12,7 +12,10 @@ from .auth import ForgeCredential
 
 
 class ForgeError(Exception):
-    """A forge call that failed; `status` is the HTTP status when the forge answered, else None."""
+    """A forge call that did not give a usable answer. `status` is the HTTP status the forge
+    answered with, so a caller tells a refusal (a 4xx: the forge answered and said no) from an
+    unknown (a 5xx); it is `None` for a fault with no answer (a transport failure) or an answer
+    of the wrong shape, both unknown."""
 
     def __init__(self, message: str = "", *, status: int | None = None) -> None:
         super().__init__(message)
@@ -148,13 +151,17 @@ def _total_count(response: httpx.Response) -> int | None:
 @dataclass(frozen=True)
 class PullRequest:
     """One PR of our repository as Forgejo lists it: its number and URL, its head commit
-    (`None` when the row carries none; the head branch plays no part in which PR is whose),
-    and its `status`: `open`, `merged` or `closed` (closed unmerged)."""
+    (`None` when the row carries none) and head branch (`head_ref`), the two ways a batch's PR is found,
+    and its `status`: `open`, `merged` or `closed` (closed unmerged). `merge_commit_sha` is, once it is merged,
+    `main`'s new head for a merge, a squash and a rebase alike (`None` when the row names none)."""
 
     number: int
     url: str
     head_sha: str | None
     status: str
+    merge_commit_sha: str | None = None
+    #: The head branch's name (`None` when the row names none). Not part of what makes two PRs equal.
+    head_ref: str | None = field(default=None, compare=False)
     #: The PR's body, head branch and author as the listing carries them (#1414 P6/A2: whose PR names an entry id).
     body: str = ""
     branch: str = ""
@@ -172,11 +179,16 @@ def _pull_request(row: dict) -> PullRequest:
             f"Forgejo pull #{row['number']} has an unknown state {state!r}"
         )
     sha = row["head"].get("sha")
+    merge_sha = row.get("merge_commit_sha")
     return PullRequest(
         number=row["number"],
         url=row["html_url"],
         head_sha=sha if isinstance(sha, str) and sha else None,
         status=status,
+        merge_commit_sha=(
+            merge_sha if status == "merged" and isinstance(merge_sha, str) and merge_sha else None
+        ),
+        head_ref=row["head"].get("ref") if isinstance(row["head"].get("ref"), str) else None,
         body=str(row.get("body") or ""),
         branch=row["head"].get("ref") if isinstance(row["head"].get("ref"), str) else "",
         author=(row.get("user") or {}).get("login", "") if isinstance(row.get("user"), dict) else "",
@@ -210,9 +222,12 @@ class ForgejoForge:
             )
             response.raise_for_status()
             return response
+        except httpx.HTTPStatusError as e:
+            raise ForgeError(
+                f"Forgejo {method} failed: {e}", status=e.response.status_code
+            ) from e
         except httpx.HTTPError as e:
-            status = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else None
-            raise ForgeError(f"Forgejo {method} failed: {e}", status=status) from e
+            raise ForgeError(f"Forgejo {method} failed: {e}") from e
 
     @staticmethod
     def _json(response: httpx.Response) -> object:
@@ -303,6 +318,61 @@ class ForgejoForge:
         """Every PR of this repository's own, open, merged or closed (a `state=all` listing),
         with its head commit: where a batch's PR is found by its head commit (amendment 3, C1)."""
         return [_pull_request(row) for row in self._rows("all")]
+
+    def pull_request(self, number: int) -> PullRequest:
+        """One PR by number (`GET /pulls/{n}`), open, merged or closed: where a batch's PR is
+        read back for its state and, once merged, its merge commit."""
+        value = self._json(self._request("GET", f"{self.address.api}/pulls/{number}"))
+        if (
+            not isinstance(value, dict)
+            or type(value.get("number")) is not int
+            or not isinstance(value.get("head"), dict)
+            or not isinstance(value.get("html_url"), str)
+        ):
+            raise ForgeError(f"Forgejo pull #{number} has invalid number, head or URL")
+        return _pull_request(value)
+
+    def reviews(self, number: int) -> list[dict]:
+        """Every review of PR `number` (`GET /pulls/{n}/reviews`), the forge's `PullReview` rows
+        as sent. A listing sent neither `page` nor `limit` is answered whole only on some
+        forges, and one sent either is paged and never carries a `Link`, so this always sends
+        both and pages on `X-Total-Count`: a review on a later page (a request for changes)
+        is never read as absent (#1278 C30)."""
+        reviews: list[dict] = []
+        page = 1
+        while True:
+            response = self._request(
+                "GET",
+                f"{self.address.api}/pulls/{number}/reviews",
+                params={"page": str(page), "limit": str(_PAGE_LIMIT)},
+            )
+            rows = self._rows_of(response, "reviews")
+            if not rows:
+                return reviews
+            reviews.extend(rows)
+            total = _total_count(response)
+            if total is not None and len(reviews) >= total:
+                return reviews
+            page += 1
+
+    def comments(self, number: int) -> list[dict]:
+        """Every plain comment on PR `number`, which Forgejo files as an issue's comments
+        (`GET /issues/{n}/comments`, the token needs `read:issue`: without it a 403 `ForgeError`,
+        never an empty list). The listing is not paged: it answers the lot."""
+        response = self._request("GET", f"{self.address.api}/issues/{number}/comments")
+        return self._rows_of(response, "comments")
+
+    def _rows_of(self, response: httpx.Response, what: str) -> list[dict]:
+        value = self._json(response)
+        if not isinstance(value, list) or not all(isinstance(r, dict) for r in value):
+            raise ForgeError(f"Forgejo {what} JSON must be an array of objects")
+        return value
+
+    def close_pr(self, number: int) -> None:
+        """Close PR `number` unmerged (`PATCH /pulls/{n}` with `state` `closed`)."""
+        self._request(
+            "PATCH", f"{self.address.api}/pulls/{number}", json={"state": "closed"}
+        )
 
     def open_pr(self, *, base: str, head: str, title: str, body: str) -> str:
         response = self._request(

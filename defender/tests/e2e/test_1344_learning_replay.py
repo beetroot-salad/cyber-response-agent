@@ -133,11 +133,16 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, invest
     return flow
 
 
+def _queued_findings(dsn: str, tenant_id: str) -> list[dict]:
+    """The finding rows the tenant's learning store holds (#1278: published rows, not a queue file)."""
+    from defender.tests.support.learning.core._store1278 import call
+
+    return [dict(item.payload) for item in call(dsn, "work", tenant_id) if item.kind == "finding"]
+
+
 async def test_o1_o8_o14_a_completed_investigation_is_learned_from_end_to_end_and_its_findings_reach_the_queue(
         migrated_database, tmp_path, monkeypatch, request):  # noqa: F811
     """Completed run → auto job → family → judge → row `completed` → published → drain gate saw the findings. (O1, O3, O4, O8, O14, D-C)"""
-    from defender.learning.core.state import FINDINGS
-    from defender.tests.support.learning.core._state1135 import state_over
 
     flow = await _run_flow(migrated_database, tmp_path, monkeypatch, request, investigate_mode="investigate")
 
@@ -151,7 +156,7 @@ async def test_o1_o8_o14_a_completed_investigation_is_learned_from_end_to_end_an
     assert job["fork_message_id"] == str(gathers[0]), "the family forked somewhere but at MAIN's gather"
     assert job["findings_count"] >= 1, job
     assert job["publish_state"] == "done", job
-    queue = state_over(flow["root"] / flow["tenant"] / "learning").rows(FINDINGS)
+    queue = _queued_findings(migrated_database, flow["tenant"])
     assert [r for r in queue if "the lead was never revisited" in json.dumps(r)], "the judge's finding never reached the queue"
     gate = flow["marks"] / "post-step" / "gate"
     assert gate.is_file(), "the drain gate never ran"
@@ -164,8 +169,6 @@ async def test_o1_o8_o14_a_completed_investigation_is_learned_from_end_to_end_an
 async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_and_nothing_is_published(
         migrated_database, tmp_path, monkeypatch, request):  # noqa: F811
     """Same flow, MAIN never gathered: `skipped`/`no_fork_point`, no sibling, no queue row; the child started, so the post-step and its gate still run. (O3, O8, L3)"""
-    from defender.learning.core.state import FINDINGS
-    from defender.tests.support.learning.core._state1135 import state_over
 
     flow = await _run_flow(migrated_database, tmp_path, monkeypatch, request, investigate_mode="investigate-no-gather")
 
@@ -174,7 +177,7 @@ async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_
     (job,) = _jobs(migrated_database, flow["investigation"])
     assert (job["status"], job["reason"]) == ("skipped", "no_fork_point"), job
     assert job["findings_count"] == 0
-    assert state_over(flow["root"] / flow["tenant"] / "learning").rows(FINDINGS) == []
+    assert _queued_findings(migrated_database, flow["tenant"]) == []
     gate = flow["marks"] / "post-step" / "gate"
     assert gate.is_file(), "the job's child started, so the post-step runs the gate whatever the ending"
     assert int(gate.read_text(encoding="utf-8")) == 0
@@ -186,8 +189,6 @@ async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_
 async def test_l5_a_source_whose_session_store_is_of_another_version_ends_skipped_history_unreadable_not_in_a_crash(
         migrated_database, tmp_path, monkeypatch, request):  # noqa: F811
     """The source's database carries a format version current code refuses: typed `skipped`/`history_unreadable` with the type in the message, before any sibling; the intact flow above is the control. (O3, L5, Old history)"""
-    from defender.learning.core.state import FINDINGS
-    from defender.tests.support.learning.core._state1135 import state_over
 
     flow = await _run_flow(migrated_database, tmp_path, monkeypatch, request, investigate_mode="investigate", damage="store-version")
 
@@ -197,4 +198,4 @@ async def test_l5_a_source_whose_session_store_is_of_another_version_ends_skippe
     assert (job["status"], job["reason"]) == ("skipped", "history_unreadable"), job
     assert "UnknownSchemaVersion" in (job["message"] or ""), "the message names the refusal type"
     assert not list((flow["marks"] / "family").glob("sibling-*")), "a sibling started on a history that cannot be read"
-    assert state_over(flow["root"] / flow["tenant"] / "learning").rows(FINDINGS) == []
+    assert _queued_findings(migrated_database, flow["tenant"]) == []

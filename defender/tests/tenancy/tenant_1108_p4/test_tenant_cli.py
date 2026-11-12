@@ -24,6 +24,7 @@ from defender.tests.support.jobs._jobs1342 import (
     restate_tenant,
     seed_alert_mapping,
 )
+from defender.tests.support.learning.core._store1278 import world  # noqa: F401 — fixture
 from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — the fixture
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
 from defender.tests.support.tenancy._tenants1106 import ALERT_MAPPING_TEXT
@@ -224,34 +225,22 @@ def test_o_see_check_names_a_merged_link_refused_by_the_launch_time_child(
         f"`check` does not name the link the launch-time publish refused: {after}")
 
 
-def test_o_see_check_names_an_unprotected_main_met_at_drain_start(
-        p4_tenant, tmp_path, capsys, monkeypatch):
+@pytest.mark.postgres
+def test_o_see_check_names_an_unprotected_main_met_at_drain_start(world, capsys):  # noqa: F811 — the imported fixture
     """A drain whose start-of-tick publish meets an unprotected `main` refuses, and `check`
     afterwards names that refusal."""
-    from defender.tests.support.learning.curation import _spec773 as S
-    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
-        LESSON_NAME,
-        BoxSpy,
-        CuratorTrigger,
-        author_drain,
-        drain_paths,
-        product_repo,
-        queue,
-    )
+    from defender.tests.support.learning.core._store1278 import LessonWriter, call, finding, lesson_citing
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import LESSON_NAME, BoxSpy, author_drain
 
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
-    bind_forge(p4_tenant)
-    before = _check(p4_tenant, capsys)
+    t = world.t
+    before = _check(t, capsys)
 
-    p4_tenant.forge.protection = {"name": "main", "protected": False, "user_can_push": True}
-    paths = drain_paths(p4_tenant, product_repo(tmp_path))
-    queue(paths, [S.finding_row("f1", run_id="f1")])
-    trigger = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")}))
-    rc = author_drain(p4_tenant, paths, trigger=trigger, box=BoxSpy())
+    t.forge.protection = {"name": "main", "protected": False, "user_can_push": True}
+    call(world.dsn, "publish_findings", t.tenant_id, "run-1", [finding("f1")], kind="finding")  # waiting in the store: one claim
+    rc = author_drain(t, world.paths, trigger=LessonWriter({LESSON_NAME: lesson_citing("f1")}), box=BoxSpy())
     assert rc == 2, f"the drain did not refuse an unprotected `main` (rc={rc})"
 
-    after = _new(_check(p4_tenant, capsys), before)
+    after = _new(_check(t, capsys), before)
     assert any("protect" in entry.lower() for entry in after), (
         f"`check` does not name the refusal the drain-start publish met: {after}")
 

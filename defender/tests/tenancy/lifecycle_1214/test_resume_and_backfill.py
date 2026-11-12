@@ -205,13 +205,14 @@ def _tree(path) -> list[str]:
     return sorted(str(p.relative_to(path)) for p in path.rglob("*")) if path.is_dir() else []
 
 
-@pytest.mark.parametrize("linked", ["tenant", "dangling tenant", "learning"])
-def test_prepare_refuses_a_link_at_the_tenant_folder_or_its_learning_root_and_resumes_once_removed(world, tmp_path, linked):
-    """A linked or dangling `<T>`, or a linked `<T>/learning`, fails prepare (host) and publishes nothing; the link's
-    target is untouched; with the link removed resume completes with a real empty `learning/` (GAP-Re-4, O6, O1)."""
+# Retired by #1278 O10/D10: the `learning` case ("a linked `<T>/learning` fails prepare"). Prepare no longer creates or reads
+# `<T>/learning` (the tenant's learning state is rows), so a link there is not prepare's to refuse; the folder-link cases stay.
+@pytest.mark.parametrize("linked", ["tenant", "dangling tenant"])
+def test_prepare_refuses_a_link_at_the_tenant_folder_and_resumes_once_removed(world, tmp_path, linked):
+    """A linked or dangling `<T>` fails prepare (host) and publishes nothing; the link's target is untouched; with the
+    link removed resume completes and no `learning` entry exists (O6, O1, O10)."""
     tenant = world.create()
     world.drive(stop=lambda: world.item(tenant)["step"] == "prepare")
-    origin = world.call(world.tenants.forge_wiring, tenant).origin
     target = tmp_path / "elsewhere"
     link = world.data_root / tenant
     if linked == "dangling tenant":
@@ -219,12 +220,7 @@ def test_prepare_refuses_a_link_at_the_tenant_folder_or_its_learning_root_and_re
     else:
         target.mkdir()
         (target / "keep.txt").write_text("mine")
-        if linked == "tenant":
-            link.symlink_to(target)
-        else:
-            _plant_clone(world, tenant, origin)
-            link = link / "learning"
-            link.symlink_to(target)
+        link.symlink_to(target)
     before = _tree(target)
     world.drive()
     item = world.item(tenant)
@@ -236,8 +232,7 @@ def test_prepare_refuses_a_link_at_the_tenant_folder_or_its_learning_root_and_re
     assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
-    learning = world.data_root / tenant / "learning"
-    assert learning.is_dir() and not learning.is_symlink() and list(learning.iterdir()) == []
+    assert not list((world.data_root / tenant).rglob("learning"))
     assert _tree(target) == before
 
 
@@ -413,7 +408,7 @@ def test_a_backfilled_row_does_nothing_until_resumed(world, lab):
 
 def test_the_job_keeps_the_recorded_wiring_skips_repo_and_template_and_keeps_the_clone(world, lab):
     """Resumed, the actors finish the job on the existing repo `tenants/playground`: wiring kept, no repo created, no
-    template push, the clone kept and not re-cloned, an empty `learning/` made (RC-9, Flow 1.9)."""
+    template push, the clone kept and not re-cloned, no `learning/` made (RC-9, Flow 1.9, O10)."""
     lab.resume()
     world.drive()
     assert world.item(LAB)["state"] == "active"
@@ -425,7 +420,7 @@ def test_the_job_keeps_the_recorded_wiring_skips_repo_and_template_and_keeps_the
     assert world.git.pushes() == [], "the template was committed over an existing repository"
     assert not [1 for args, _e in world.git.calls[lab.git_calls:] if "clone" in args]
     assert (lab.clone / "keep.txt").read_text(encoding="utf-8") == "the lab's own clone\n"
-    assert (lab.folder / "learning").is_dir() and not list((lab.folder / "learning").iterdir())
+    assert not (lab.folder / "learning").exists(), "prepare made a learning entry (O10)"
     assert "main" in world.forge.repos[LAB_REPO]["protections"]
     [made] = [c for c in world.integration.created if c["user"] == world.live(LAB).bot_login]
     assert made["repos"] == [LAB_REPO], "the integration names the recorded repo, not one derived from the id (FR-2)"

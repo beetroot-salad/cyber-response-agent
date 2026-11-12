@@ -12,7 +12,8 @@ from typing import Literal
 AuditAction = Literal[
     "member.invite", "invitation.accept", "member.remove", "invitation.revoke",
     "admin.tenants.list", "admin.invite", "admin.flag.set", "admin.flag.clear",
-    "tenant.create", "tenant.resume", "tenant.offboard", "tenant.rotate", "tenant.repo.delete",
+    "tenant.create", "tenant.resume", "tenant.offboard", "tenant.rotate", "tenant.learning_cutover",
+    "tenant.repo.delete",
     "program.create", "program.remove", "program_credential.create", "program_credential.revoke",
     "program_client.delete",
 ]

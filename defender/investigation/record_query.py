@@ -706,7 +706,8 @@ def _encodes(text: str) -> bool:
 
 def captured_lookups(state: RunState) -> list[dict[str, str]]:
     """The successful `tacit-knowledge` `lookup` calls in the run's in-memory rows whose actor,
-    host and pattern are all UTF-8 text, de-duplicated across leads (#1414 P3, C17, C23)."""
+    host and pattern are all UTF-8 text with no NUL (the learning store cannot hold one, #1278 A4),
+    de-duplicated across leads (#1414 P3, C17, C23)."""
     seen: list[dict[str, str]] = []
     with state.lock:
         for rows in state.rows.values():
@@ -716,6 +717,6 @@ def captured_lookups(state: RunState) -> list[dict[str, str]]:
                         or row.get("exit_code") != 0 or not isinstance(params, dict)):
                     continue
                 found = {k: params.get(k) for k in ("actor", "host", "pattern")}
-                if all(isinstance(v, str) and _encodes(v) for v in found.values()) and found not in seen:
+                if all(isinstance(v, str) and _encodes(v) and "\x00" not in v for v in found.values()) and found not in seen:
                     seen.append(found)  # type: ignore[arg-type]
     return seen

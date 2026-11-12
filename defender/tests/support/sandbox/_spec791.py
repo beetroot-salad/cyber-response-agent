@@ -79,14 +79,12 @@ class SpecBranch:
 
 
 def loop_paths(tmp_path: Path):
-    """A `LoopPaths` whose queues and runs live under `tmp_path`, with the fake repo tree
-    kept apart from the mutable state root."""
+    """A scratch `LoopPaths` over a fake repo tree under `tmp_path` (no tenant, no state root: #1278 O10)."""
     from defender.learning.core.config import LoopPaths
 
     repo = tmp_path / "repo"
     (repo / "defender").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "state").mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
-    return LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    return LoopPaths(repo_root=repo)
 
 
 def satisfy_entrypoint_keys(monkeypatch, tmp_path: Path) -> None:
@@ -177,8 +175,11 @@ class SpecTail:
         truncated_by: str | None = None,
         closed_before_cut: bool = False,
         certify: bool = True,
+        observe_queue: bool = True,
     ) -> None:
         self._paths = paths
+        #: Whether each step reads the learning store's waiting requests (off for an arm whose store is unreachable).
+        self._observe_queue = observe_queue
         self._truncated_by = truncated_by
         self._closed_before_cut = closed_before_cut
         self._certify = certify
@@ -235,7 +236,8 @@ class SpecTail:
 
         self.steps.append(TailStep(
             name=name,
-            curation_requests=tuple(author_markers(self._paths)),
+            # Without a store the view is empty; a test that asserts on it also asks `author_markers`, which then refuses.
+            curation_requests=tuple(author_markers(self._paths)) if self._observe_queue and store_dsn() and self._paths.tenant is not None else (),
             tree_certified=bool(scrub_mod.tree_verified(run_dir)),
         ))
 
@@ -290,9 +292,30 @@ def plant_alert(tmp_path: Path, *, alert_bytes: bytes | None = None) -> Path:
     return alert
 
 
+def store_dsn() -> str | None:
+    """The learning store's database address the entrypoint reads (`DEFENDER_DATABASE_DSN`), when the test names one."""
+    import os
+
+    return os.environ.get("DEFENDER_DATABASE_DSN") or None
+
+
+def curation_requests(paths) -> dict[str, dict]:
+    """The curation requests still waiting in the learning store for `paths`' tenant, by case id (#1278: the queue is
+    rows, not an `author-queue` folder). A test that asks needs a store: without one this refuses to answer, so an
+    "is empty" assertion can never pass for want of a database."""
+    from defender.learning.store import blocking
+
+    dsn = store_dsn()
+    assert dsn, "curation_requests reads the learning store: the test must name one (DEFENDER_DATABASE_DSN)"
+    assert paths.tenant is not None, "curation_requests is for a tenant's paths"
+    with blocking(dsn) as store:
+        items = store.work(str(paths.tenant.id))
+    return {i.coalesce_key: dict(i.payload) for i in items if i.kind == "curation_request" and i.status == "waiting"}
+
+
 def author_markers(paths) -> list[str]:
-    q = location_path(paths.state_root) / "author-queue"
-    return sorted(p.name for p in q.glob("*.json")) if q.is_dir() else []
+    """The case ids of the curation requests still waiting for `paths`' tenant (see `curation_requests`)."""
+    return sorted(curation_requests(paths))
 
 
 def marker_body(path: Path) -> dict:

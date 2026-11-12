@@ -3,17 +3,10 @@ from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 
-import pytest
 
 from defender.records._episode_handle import Episode
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.core._state1135 import env_state
-
-
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 
 
 def _grade(ep, **kw):
@@ -75,12 +68,13 @@ def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
                       claim="this world is plainly lead-set and nothing else"),
         J.finding_doc(bucket="lead-quality", anchor="l-002", topic="scope"),
     ]))
-    _grade(ep, judge=J.scripted_judge(default=loud))
+    store = MemoryStore()
+    _grade(ep, judge=J.scripted_judge(default=loud), store=store)
 
     record = J.judge_record(ep)
     assert J.world_rows(record)["b"]["bucket"] == "decision-discipline", (
         "the findings' buckets moved the world's bucket the reply gave")
-    types = {row["type"] for row in J.enqueued_rows(record)}
+    types = {row["type"] for row in J.enqueued_rows(record, store)}
     assert types == {"lead-set", "lead-quality"}, (
         "a finding row did not carry its OWN bucket as `type`")
 
@@ -104,7 +98,7 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     # Two answers, then every later call fails (`raise_after=2`).
     judge = J.FakeJudge(replies=[discard, discard], default=discard,
                         fault=J.Fault(raise_after=2))
-    J.grade_at(ep, judge=judge, draws=4, state=env_state())
+    J.grade_at(ep, judge=judge, draws=4, store=MemoryStore())
 
     record = J.judge_record(ep)
     assert record["draws"] == {"configured": 4, "completed": 2}, (
@@ -125,7 +119,7 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
 
     dead = J.accepted_episode(tmp_path / "dead", ledgers={"b": [J.oracle_row("b")], "c": []})
     J.grade_at(dead, judge=J.FakeJudge(fault=J.Fault(raise_after=0)), draws=2,
-               state=env_state())
+               store=MemoryStore())
     dead_rows = J.world_rows(J.judge_record(dead))
     assert dead_rows["b"]["completed_draws"] == 0
     assert dead_rows["b"]["bucket"] is None, (

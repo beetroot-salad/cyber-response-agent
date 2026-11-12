@@ -292,9 +292,10 @@ class PostStepRecord:
     """The post-step's record (`<runs>/<key>.post-step.json`, `post_step_key`: the job it
     followed, or the tenant's own id for a family-less one): the pending jobs whose findings it
     published and those it refused for good (their rows failed validation). A job in neither
-    stays pending (a queue-level or transient failure). `waiting` (amendment 3): whether, after
-    its gate ran, the gate would still find something to do; a record without it says so, which
-    keeps the tenant's check clock running."""
+    stays pending (the learning store could not take them now, or a transient failure).
+    `waiting` (amendment 3, #1278 Wake): whether, after its gate ran, the learning store still
+    holds work a post-step could act on; a record without it says so, which keeps the tenant's
+    check clock running."""
 
     published: tuple[str, ...] = ()
     refused: tuple[str, ...] = ()

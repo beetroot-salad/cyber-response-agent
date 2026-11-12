@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import unicodedata
+from collections.abc import Mapping
 from typing import Any
 
 from defender._tsv import flatten_cell
@@ -43,6 +44,23 @@ def postgres_can_hold(text: str) -> bool:
     except UnicodeEncodeError:
         return False
     return True
+
+
+def postgres_cannot_hold(value: Any) -> str | None:
+    """Why PostgreSQL could never hold `value` (a parsed JSON value: every key and string in it is checked against
+    `postgres_can_hold`), or `None`: a NUL character, or text that is not valid UTF-8 (a lone surrogate)."""
+    if isinstance(value, str):
+        if postgres_can_hold(value):
+            return None
+        return ("a NUL character cannot be stored" if "\x00" in value
+                else "text that is not valid UTF-8 (a lone surrogate) cannot be stored")
+    if isinstance(value, Mapping):
+        children: Any = [*value.keys(), *value.values()]
+    elif isinstance(value, (list, tuple)):
+        children = value
+    else:
+        return None
+    return next((why for child in children if (why := postgres_cannot_hold(child)) is not None), None)
 
 
 def is_content_less(text: str) -> bool:

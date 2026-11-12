@@ -297,14 +297,14 @@ class _InMemoryTransaction:
         self._tenant_id = tenant_id
         self._actor = principal.actor_id
         self._credential_id = principal.credential_id
-        self._pending: list[AuditEvent] = []
+        self._pending: list[AuditEvent] = []  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
 
     async def __aenter__(self) -> _InMemoryTransaction:
         return self
 
     async def __aexit__(self, exc_type: type[BaseException] | None, *_: object) -> None:
         if exc_type is None:
-            self._store.audit_events.extend(self._pending)
+            self._store.audit_events.extend(self._pending)  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
 
     async def create_investigation(self, alert_id: AlertId, client_request_id: str) -> tuple[Investigation, bool]:
         return await self._store.create_investigation(self._tenant_id, alert_id, client_request_id)
@@ -325,7 +325,7 @@ class _InMemoryTransaction:
         return await self._store.put_alert_mapping(self._tenant_id, body)
 
     async def audit(self, action: AuditAction, target: str, detail: str = "") -> None:
-        self._pending.append(AuditEvent(
+        self._pending.append(AuditEvent(  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
             tenant_id=self._tenant_id, user_id=self._actor, action=action, target=target,
             at=self._clock(), detail=detail, credential_id=self._credential_id,
         ))

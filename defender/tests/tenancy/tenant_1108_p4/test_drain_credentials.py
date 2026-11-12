@@ -18,8 +18,11 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.learning.core._store1278 import (
+    migrated_database,  # noqa: F401 — fixture the world needs
+    world,  # noqa: F401 — the tick's world: tenant, forge and learning store
+)
 from defender.tests.support.learning.curation import _spec773 as S
-from defender.learning.core.state import FINDINGS
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, bind_forge, git, minting, unbind_forge
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     SECRET_ID,
@@ -32,6 +35,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     drain_paths,
     draft_entries,
     executed_lead,
+    items_of,
     lead_author_drain,
     product_repo,
     queue,
@@ -39,7 +43,8 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     remote_branches,
     under,
 )
-from defender.tests.support.shared._locations_1210 import location_path
+
+postgres = pytest.mark.postgres
 
 # ---------------------------------------------------------------------------------------------
 # A-ID: the credential provider
@@ -80,16 +85,16 @@ def test_a_id_a_refused_approle_login_is_a_refusal_that_never_echoes_the_secret(
 # ---------------------------------------------------------------------------------------------
 
 
+@postgres
 def test_a_id_o8_the_drain_pushes_with_its_token_and_hands_no_host_secret_to_the_box(
-        p4_tenant, tmp_path, monkeypatch, caplog):
+        world, tmp_path, monkeypatch, caplog):  # noqa: F811 — the imported fixture
     """The drain pushes and opens its PR with its token. The host secret (the file the live generation
     records) leaves the host process nowhere: none is in the box request's environment or under its mounts,
     or in the drain's environment while the model step runs. Each check has a positive control."""
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    t = p4_tenant
+    t = world.t
     scene = minting(t, tmp_path)
     config = scene.fields["host_secret_file"]
-    paths = drain_paths(t, product_repo(tmp_path))
+    paths = world.paths
     queue(paths, [S.finding_row("f1", run_id="f1")])
     secrets = scene.secrets
     env_seen: list[dict] = []
@@ -176,7 +181,7 @@ def _break_tenant(t: Any, config: Path, fault: str) -> None:
 class _Tick:
     """One drain's tick over `t`: `run()` drives it through the stage runner (with `mint`, the drain mints
     from the live generation's host secret file; else it is handed an identity); `handed()` is everything its work steps were handed;
-    `queued_untouched()` is its row still waiting where it was queued, not in flight."""
+    `queued_untouched()` is its item still waiting in the learning store, in no batch."""
 
     run: Callable[[], int]
     handed: Callable[[], list]
@@ -185,26 +190,26 @@ class _Tick:
     box: BoxSpy
 
 
-def _tick(drain: str, t: Any, tmp_path: Path, *, mint: bool, identity: Any = None) -> _Tick:
+def _tick(drain: str, w: Any, *, mint: bool, identity: Any = None) -> _Tick:
+    t = w.t
     box = BoxSpy()
     seams: dict[str, Any] = {"mint": mint}
     if identity is not None:
         seams["identity"] = identity
     if drain == "author":
-        paths = drain_paths(t, product_repo(tmp_path))
+        paths = w.paths
         queue(paths, [S.finding_row("f1", run_id="f1")])
         trigger = CuratorTrigger(author=S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")}))
         return _Tick(
             run=lambda: author_drain(t, paths, trigger=trigger, box=box, **seams),
             handed=lambda: list(trigger.calls),
-            queued_untouched=lambda: "f1" in S.pending_by_id(paths, FINDINGS),
+            queued_untouched=lambda: items_of(paths)[("finding", "f1")].status == "waiting",
             delivered=lambda: bool(remote_branches(t.remote)) and bool(t.forge.creates),
             box=box)
-    paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
+    paths = drain_paths(t, product_repo(w.scratch / "lead", adapters=("cmdb",)))
     run = queued_run(t, paths, "p4-lead-refused").name
-    case = "case-p4-lead-refused"
-    queue_dir = Path(location_path(paths.state_root)) / "author-queue"
-    assert (queue_dir / f"{case}.json").is_file(), "control: the row is read where it was queued"
+    request = ("curation_request", run)
+    assert items_of(paths)[request].status == "waiting", "control: the request is read where it was filed"
     step = LeadStep(executed={run: [executed_lead("cmdb.owner-by-tag")]}, edits={})
     pitfalls_calls: list[Any] = []
 
@@ -216,26 +221,25 @@ def _tick(drain: str, t: Any, tmp_path: Path, *, mint: bool, identity: Any = Non
         run=lambda: lead_author_drain(t, paths, box=box, run_lead_author=step,
                                       run_pitfalls=pitfalls, **seams),
         handed=lambda: [*step.served, *pitfalls_calls],
-        queued_untouched=lambda: ((queue_dir / f"{case}.json").is_file()
-                                  and not (queue_dir / "inflight" / f"{case}.json").is_file()),
+        queued_untouched=lambda: items_of(paths)[request].status == "waiting",
         delivered=lambda: step.served == [run],
         box=box)
 
 
+@postgres
 @pytest.mark.parametrize("drain", ["author", "lead"])
 @pytest.mark.parametrize("fault", list(O9_REFUSALS))
 def test_o9_a_tenant_open_refuses_is_the_stages_one_line_refusal_and_runs_nothing(
-        p4_tenant, tmp_path, monkeypatch, caplog, drain, fault):
+        world, tmp_path, monkeypatch, caplog, drain, fault):  # noqa: F811 — the imported fixture
     """Each refusal P3's open makes is the stage runner's refusal on both drains: exit 2 with one
     critical line naming the cause and no traceback, no box, nothing handed to the lane's steps,
     no draft, no branch, and the queued row left in place. A locally decidable refusal (config,
     binding) reaches neither the issuer nor the forge. Control: the next case."""
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
-    t = p4_tenant
+    t = world.t
     config = _host_secret(t, tmp_path)
-    tick = _tick(drain, t, tmp_path, mint=fault in _LOCAL)
+    tick = _tick(drain, world, mint=fault in _LOCAL)
     _break_tenant(t, config, fault)
     t.forge.requests.clear()  # the fixture's own publish asked the forge (and minted); only the tick counts
     t.vault.calls.clear()
@@ -260,17 +264,17 @@ def test_o9_a_tenant_open_refuses_is_the_stages_one_line_refusal_and_runs_nothin
     assert tick.queued_untouched(), "the row left its place in the queue"
 
 
+@postgres
 @pytest.mark.parametrize("drain", ["author", "lead"])
 def test_control_o9_a_deliverable_tenant_serves_the_row(
-        p4_tenant, tmp_path, monkeypatch, caplog, drain):
+        world, tmp_path, monkeypatch, caplog, drain):  # noqa: F811 — the imported fixture
     """Positive control for the O9 matrix, same scene and seams with nothing broken: its work step is
     handed the row, and the tick delivers."""
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
-    t = p4_tenant
+    t = world.t
     config = _host_secret(t, tmp_path)
-    tick = _tick(drain, t, tmp_path, mint=False)
+    tick = _tick(drain, world, mint=False)
     _break_tenant(t, config, "none")
     assert tick.queued_untouched(), "control: the observer sees the queued row"
 
@@ -283,17 +287,17 @@ def test_control_o9_a_deliverable_tenant_serves_the_row(
     assert tick.delivered()
 
 
+@postgres
 @pytest.mark.parametrize("drain", ["author", "lead"])
 def test_control_o9_a_minting_drain_logs_in_with_the_file_and_serves_the_row(
-        p4_tenant, tmp_path, monkeypatch, caplog, drain):
+        world, tmp_path, monkeypatch, caplog, drain):  # noqa: F811 — the imported fixture
     """Positive control for the host-secret-file arm: the same scene with the file intact and the real provider
     over a fake OpenBao logs in with the file's secret and delivers."""
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
-    t = p4_tenant
+    t = world.t
     scene = minting(t, tmp_path)
-    tick = _tick(drain, t, tmp_path, mint=True, identity=scene.credential)
+    tick = _tick(drain, world, mint=True, identity=scene.credential)
 
     caplog.clear()
     with caplog.at_level(logging.INFO):

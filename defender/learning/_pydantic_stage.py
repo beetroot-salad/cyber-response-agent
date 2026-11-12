@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import functools
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, ClassVar, Protocol
 
@@ -38,6 +40,13 @@ class RoleDeps(Protocol):
     """
 
     role: ClassVar[AgentRole]
+
+
+def with_make_model(runner: Callable[..., str], make_model: MakeModel | None) -> Callable[..., str]:
+    """`runner` (a stage's `run_author`) over `make_model`; `None` keeps the stage's own default model."""
+    if make_model is None:
+        return runner
+    return functools.partial(runner, make_model=make_model)
 
 
 def build_stage_agent(

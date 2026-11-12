@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
 
 import dataclasses
 import errno
-import json
 import logging
 import os
 import shutil
@@ -59,9 +57,11 @@ from defender.tests.support.learning.curation._lead_author_1134 import (
 )
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.tests.support.learning.core._declared870 import REDUCER_REL as ADDON_REL
-from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, run_of, state_for_paths
+from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of, tenant_of
+from defender.tests.support.learning.core._store1278 import world as store_world  # noqa: F401
+from defender.tests.support.learning.core._store1278 import call, migrated_database  # noqa: F401
+from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401
 from defender.tests.support.learning.curation._shared_readers_1134 import RefusesFolder, kernel_watch
-from defender.tests.support.sandbox._spec791 import author_markers
 from defender.tests.support.learning.curation._tree_listing_1134 import descriptors_under
 from defender.tests.shared.filesystem.test_rooted_io import census, in_time
 
@@ -719,7 +719,7 @@ def _deps(paths: LoopPaths, trees: DrainTrees, spawn: LeadAuthorSpawn,
     """The real deps for `paths` under the open `trees`, with only the seams a hermetic drive
     must own replaced: the agent spawn, the two tables, and the queue lock."""
     return dataclasses.replace(
-        lead_author.build_lead_author_deps(paths, state=state_for_paths(paths), trees=trees),
+        lead_author.build_lead_author_deps(paths, trees=trees),
         invoke_agent=spawn,
         extract=lambda _run_dir: ([], list(leads)),
     )
@@ -735,7 +735,7 @@ def test_a_kind_fault_does_not_unwind_the_claim_through_run_under_held_queue_loc
         tmp_path: Path, err: int | None, monkeypatch, caplog):
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     repo = _worktree(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    paths = LoopPaths(repo_root=repo)
     run_dir = _run_dir(("wazuh.hunt-creds", "wazuh", "esql"),
                        ("elastic.hunt-creds", "elastic", "esql"))
     site = paths.skills_dir / "gather/queries/wazuh/_draft"
@@ -745,8 +745,9 @@ def test_a_kind_fault_does_not_unwind_the_claim_through_run_under_held_queue_loc
 
     with DrainTrees.open((paths.skills_dir,), **({"os_": refuser} if refuser else {})) as trees, \
             pytest.raises(FatalConfigError, match=NO_MODEL):
-        lead_author.run_under_held_queue_lock(run_of(run_dir), paths=paths, state=state_for_paths(paths), trees=trees,
-                                              on_done=done.append)
+        lead_author.run_under_held_queue_lock(
+            run_of(run_dir), paths=paths, trees=trees, on_done=done.append,
+            deps=lead_author.build_lead_author_deps(paths, trees=trees, file_pitfalls=lambda rows: len(rows)))
 
     w_draft = paths.skills_dir / f"gather/queries/wazuh/_draft/{_draft_basename('wazuh.hunt-creds')}.md"
     e_draft = paths.skills_dir / f"gather/queries/elastic/_draft/{_draft_basename('elastic.hunt-creds')}.md"
@@ -802,7 +803,7 @@ def test_run_writes_no_draft_outside_skills_through_a_linked_catalog(
 @pytest.mark.parametrize("kind", ["file", "link"])
 def test_run_goes_on_past_a_refused_draft_folder(tmp_path: Path, kind: str, caplog):
     repo = _worktree(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    paths = LoopPaths(repo_root=repo)
     run_dir = _run_dir()
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -854,37 +855,33 @@ class PlantingBox:
         self._spy.stop(box, **kw)
 
 
-def _failed(paths: LoopPaths) -> list[dict]:
-    failed = location_path(paths.state_root) / "author-queue" / "failed"
-    return [json.loads(p.read_text()) for p in sorted(failed.glob("*.json"))] \
-        if failed.is_dir() else []
-
-
-def _lead_tick(tmp_path: Path, data_root: Path, plant: Callable[[Path], None]):
-    """One real lead-author drain tick over the fixture tenant's draft, for a queued run whose
-    one executed query coins `elastic.newthing`, the box planting `plant` into the draft.
-    Returns `(rc, box, paths, run_dir, delivered)`: the forge lives only inside the call, so
-    what it delivered is read here."""
+def _lead_tick(w: Any, tmp_path: Path, plant: Callable[[Path], None]):
+    """One real lead-author drain tick over the fixture tenant's draft (a store `world`), for a queued
+    curation request whose run has one executed query coining `elastic.newthing`, the box planting
+    `plant` into the draft. Returns `(rc, box, run_dir, delivered)`: what the forge delivered is read here.
+    (#1278: the request is a `curation_request` item of the learning store, not a file-queue marker.)"""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import (
-        LEAD_PREFIX, drain_paths, drains, remote_branches, run_stage)
-    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
+        LEAD_PREFIX, drain_paths, lead_author_drain, remote_branches)
 
     box = PlantingBox(plant)
-    with published_tenant(tmp_path / "forge", root=data_root) as t:
-        bind_forge(t)
-        paths = drain_paths(t, _worktree(tmp_path, name="product"))
-        run_dir = curation_run_dir("run-1", tenant_id=t.tenant_id)
-        seed_executed_query(run_dir, query_id="elastic.newthing", system="elastic", verb="esql")
-        state_for_paths(paths).enqueue_curation("case-1", curation_row("case-1", run_dir))
-        rc = run_stage(lambda: drains().lead_author_drain(
-            paths, client=t.forge.client, identity=t.vault.identity(), directory=t.directory,
-            start_box=box.start, stop_box=box.stop))
-        delivered = (remote_branches(t.remote, prefix=LEAD_PREFIX), list(t.forge.creates))
-    return rc, box, paths, run_dir, delivered
+    paths = drain_paths(w.t, _worktree(tmp_path, name="product"))
+    run_dir = curation_run_dir("run-1", tenant_id=w.t.tenant_id)
+    seed_executed_query(run_dir, query_id="elastic.newthing", system="elastic", verb="esql")
+    call(w.dsn, "enqueue_request", w.t.tenant_id, run_dir.name, "case-1",
+         {"case_id": "case-1", "tenant_id": w.t.tenant_id, "run_id": run_dir.name})
+    rc = lead_author_drain(w.t, paths, box=box)
+    delivered = (remote_branches(w.t.remote, prefix=LEAD_PREFIX), list(w.t.forge.creates))
+    return rc, box, run_dir, delivered
 
 
+def _request(w: Any) -> Any:
+    [item] = [i for i in call(w.dsn, "work", w.t.tenant_id) if i.kind == "curation_request"]
+    return item
+
+
+@pytest.mark.postgres
 def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skills(
-    tmp_path: Path, data_root: Path, monkeypatch, caplog,
+    store_world, tmp_path: Path, monkeypatch, caplog,  # noqa: F811 — the imported fixture
 ):
     """A box swapped the draft's catalog folder for a link out: the lane's default seams (label
     carried to the held `skills/` mount) refuse every draft write behind the link, write nothing
@@ -900,7 +897,7 @@ def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skill
         queries.symlink_to(outside / "elsewhere-queries", target_is_directory=True)
         planted.append(census(outside))
 
-    rc, box, _paths, run_dir, delivered = _lead_tick(tmp_path, data_root, plant)
+    rc, box, run_dir, delivered = _lead_tick(store_world, tmp_path, plant)
 
     assert box.drafts, "the batch's box never started over a draft"
     [before] = planted
@@ -914,29 +911,32 @@ def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skill
     assert rc in (0, 2), rc
 
 
-def test_a_seam_that_cannot_hold_skills_dead_letters_the_claim(
-        tmp_path: Path, data_root: Path, caplog):
+@pytest.mark.postgres
+def test_a_seam_that_cannot_hold_skills_leaves_the_request_unserved_and_delivers_nothing(
+        store_world, tmp_path: Path, caplog):  # noqa: F811 — the imported fixture
     """A box that removed the draft's `skills/` lane leaves the lead author nothing to hold: the
-    claim is dead-lettered `lead-author-error` naming `FileNotFoundError`, never re-queued as a
-    transient, and the run gets no lead-author state."""
+    fault is contained to the request (logged naming `FileNotFoundError`), the request is not
+    decided (it waits; the store's attempt ceiling is what dead-letters it, #1278 D8), the run gets no
+    lead-author state, and nothing is delivered. (Port of the dead-letter test: the file queue's
+    `failed/` entry and `lead-author-error` reason are the store's `dead` with its own ceiling.)"""
     def plant(draft: Path) -> None:
         shutil.rmtree(draft / "agent" / "skills")
 
-    _rc, box, paths, run_dir, delivered = _lead_tick(tmp_path, data_root, plant)
+    _rc, box, run_dir, delivered = _lead_tick(store_world, tmp_path, plant)
 
     assert box.drafts, "the batch's box never started over a draft"
-    failed = _failed(paths)
-    assert len(failed) == 1, failed
-    assert failed[0]["failed"].startswith("lead-author-error"), failed
-    assert "FileNotFoundError" in failed[0]["failed"], failed
-    assert author_markers(paths) == [], "the claim was re-queued as a transient"
+    assert "FileNotFoundError" in caplog.text, caplog.text
+    item = _request(store_world)
+    assert item.status == "waiting", item
     assert not (run_dir / "lead_author").exists()
     assert delivered == ({}, [])
 
 
-def _lifetime_paths(tmp_path: Path) -> tuple[LoopPaths, Path]:
+def _lifetime_paths(tmp_path: Path, run_dir: Path) -> tuple[LoopPaths, Path]:
+    """The drain's paths over the product checkout, carrying the run's accepted tenant (a lead-author
+    serve over the store files its pitfalls for that tenant, #1278: it refuses paths with none)."""
     repo = _worktree(tmp_path)
-    return LoopPaths(repo_root=repo, state_dir=tmp_path / "state"), repo
+    return tenant_of(run_dir).learning_paths(LoopPaths, repo_root=repo), repo
 
 
 def _unresolved_run() -> Path:
@@ -948,13 +948,13 @@ def _unresolved_run() -> Path:
 
 def test_the_lead_author_seam_holds_skills_only_while_its_call_runs(tmp_path: Path, caplog):
     caplog.set_level(logging.DEBUG)
-    paths, repo = _lifetime_paths(tmp_path)
     run_dir = _unresolved_run()
+    paths, repo = _lifetime_paths(tmp_path, run_dir)
     during: list[tuple[str | None, list[str]]] = []
     assert descriptors_under(repo) == []
 
     drains._invoke_lead_author(
-        paths, state_for_paths(paths), run_of(run_dir), label=LEAD,
+        paths, None, run_of(run_dir), label=LEAD,
         on_done=lambda sha: during.append((sha, sorted(descriptors_under(repo)))))
 
     assert during == [(None, [os.path.realpath(paths.skills_dir)])], during
@@ -966,8 +966,8 @@ def test_the_lead_author_seam_holds_skills_only_while_its_call_runs(tmp_path: Pa
 
 @pytest.mark.parametrize("fault", ["RuntimeError", "OSError"])
 def test_the_lead_author_seam_releases_skills_when_its_call_raises(tmp_path: Path, fault: str):
-    paths, repo = _lifetime_paths(tmp_path)
     run_dir = _unresolved_run()
+    paths, repo = _lifetime_paths(tmp_path, run_dir)
     during: list[list[str]] = []
 
     def on_done(_sha: str | None) -> None:
@@ -978,7 +978,7 @@ def test_the_lead_author_seam_releases_skills_when_its_call_raises(tmp_path: Pat
     expected = RuntimeError if fault == "RuntimeError" else drains._LeadAuthorRetry
     with pytest.raises(expected):
         drains._invoke_lead_author(
-            paths, state_for_paths(paths), run_of(run_dir), label=LEAD, on_done=on_done)
+            paths, None, run_of(run_dir), label=LEAD, on_done=on_done)
 
     assert during == [[os.path.realpath(paths.skills_dir)]], during
     assert descriptors_under(repo) == [], "a handle on the leaf outlived the raising seam"
@@ -997,7 +997,7 @@ def _refusing_trees(tmp_path: Path) -> dict[str, Callable[[], tuple[LoopPaths, D
     (`defender/`) or below it. A member label answers its own trees, so the wrong mount sets are
     opened directly (`DrainTrees.open`)."""
     repo = _worktree(tmp_path)
-    plain = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    plain = LoopPaths(repo_root=repo)
     _lessons(plain)
     (repo / "moved-skills").mkdir()
     return {
@@ -1012,19 +1012,18 @@ REFUSALS = ("author_label", "moved_mount", "mount_above", "mount_below")
 
 
 @pytest.mark.parametrize("how", REFUSALS)
-def test_trees_that_do_not_hold_skills_exactly_are_refused(tmp_path: Path, how: str, caplog,
-                                                           monkeypatch):
-    from defender.learning.core import persist
+def test_trees_that_do_not_hold_skills_exactly_are_refused(tmp_path: Path, how: str, caplog):
     from defender.tests.support.runtime.engine._declared869 import Spawn, pitfall_row
 
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     paths, trees = _refusing_trees(tmp_path)[how]()
-    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=state_for_paths(paths))
     spawn = Spawn()
+    outcomes: dict = {}
     with trees:
         with pytest.raises(LeadAuthorError):
-            lead_author.build_lead_author_deps(paths, state=state_for_paths(paths), trees=trees)
+            lead_author.build_lead_author_deps(paths, trees=trees)
         with pytest.raises(LeadAuthorError):
-            pitfalls_curator.run_pitfalls(paths=paths, trees=trees, invoke=spawn)
+            pitfalls_curator.run_pitfalls(paths=paths, trees=trees, invoke=spawn,
+                                          items=[("pitfall", "r:l-000:0", pitfall_row("r:l-000:0", "elastic"))],
+                                          outcomes=outcomes)
     assert spawn.calls == []
-    assert [r["pitfall_id"] for r in persist.read_pitfalls(state_for_paths(paths))] == ["r:l-000:0"]
+    assert outcomes == {}, "a refused tree decided the claim's pitfall"
