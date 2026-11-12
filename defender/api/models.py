@@ -399,7 +399,7 @@ class ProgramCreate(BaseModel):
 class Program(BaseModel):
     id: ProgramId
     display_name: str
-    created_by: UserId | None = Field(description="The administrator who made it.")
+    created_by: UserId = Field(description="The administrator who made it.")
     created_at: Instant
 
 

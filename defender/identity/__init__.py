@@ -37,7 +37,6 @@ from .service import (
     OpenInvitation,
     PersonCaller,
     ProgramCaller,
-    ProgramMeView,
 )
 
 __all__ = [
@@ -45,6 +44,6 @@ __all__ = [
     "DataRuleViolation", "ExpiryWarning", "Forbidden", "IdentityError", "IdentityRepository", "IdentityService",
     "InMemoryIdentityRepository", "Invalid", "InvitationView", "LoginStart", "MailPort", "MemberView",
     "Membership", "MeView", "NotAuthenticated", "NotFound", "OpenInvitation", "PersonCaller", "Program",
-    "ProgramCaller", "ProgramCredential", "ProgramMeView", "ProgramsPort", "Session", "TenantNotActive",
+    "ProgramCaller", "ProgramCredential", "ProgramsPort", "Session", "TenantNotActive",
     "SignInPort", "SignInRefused", "SignInUnavailable", "User", "VerifiedProgramToken", "VerifiedSignIn",
 ]

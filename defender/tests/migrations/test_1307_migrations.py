@@ -2,12 +2,12 @@
 existing people stay people with `admin` rows. #1454 then moves programs out of `users`/`memberships` into `identity.programs`
 (the revision after `0011_merge_eligibility`, whose id these tests never spell: they ask `head()`): users keep a required email and
 lose `kind`, a membership's role is `admin` only, a credential's `program_id` is a plain foreign key to `programs`, and the upgrade
-refuses while any program (a users row of kind `program`) exists (R1, R2, O-G).
+refuses while any program (a users row of kind `program`) or any membership whose role is not `admin` exists (R1, R2, O-G).
 
 Database cases are marked `postgres`; each runs on a database of its own (`conftest.py`).
 
-Names the design fixes: table `identity.programs` with `id, tenant_id, display_name, created_by, created_at, status, removed_at,
-removed_by`; `identity.program_credentials` with `id, program_id, kind, name, state, key_hash, service_account_id, created_by,
+Names the design fixes: table `identity.programs` with `id, tenant_id, display_name, created_by, created_at, removed_at, removed_by`
+(removed exactly when it has a removal time); `identity.program_credentials` with `id, program_id, kind, name, state, key_hash, service_account_id, created_by,
 created_at, expires_at, pending_deadline, last_used_at, revoked_at, revoked_by` (the repository contract's row fields).
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ SOAR = "a7000000-0000-4000-8000-0000000000c1"
 ANN_ROW = "a7000000-0000-4000-8000-0000000000d1"
 BOB_ROW = "a7000000-0000-4000-8000-0000000000d2"
 MERGE_ELIGIBILITY = "0011_merge_eligibility"  # the last revision before programs have a table; a revision #1454 builds on, not one it adds
-PROGRAM_COLUMNS = ("id", "tenant_id", "display_name", "created_by", "created_at", "status", "removed_at", "removed_by")
+PROGRAM_COLUMNS = ("id", "tenant_id", "display_name", "created_by", "created_at", "removed_at", "removed_by")
 CREDENTIAL_COLUMNS = ("id", "program_id", "kind", "name", "state", "key_hash", "service_account_id", "created_by",
                       "created_at", "expires_at", "pending_deadline", "last_used_at", "revoked_at", "revoked_by")
 
@@ -69,12 +69,12 @@ def _version(dsn: str) -> list[tuple]:
     return execute(dsn, "SELECT version_num FROM public.alembic_version")
 
 
-def _program(dsn: str, program: str, *, tenant: str | None = TENANT, created_by: str | None = ANN, status: str = "active",
+def _program(dsn: str, program: str, *, tenant: str | None = TENANT, created_by: str | None = ANN,
              removed_at: _dt.datetime | None = None, removed_by: str | None = None) -> None:
     """A `programs` row as the database stores it (PostgreSQL's own checks decide what goes in)."""
-    execute(dsn, """INSERT INTO identity.programs (id, tenant_id, display_name, created_by, created_at, status, removed_at, removed_by)
-                    VALUES (%s, %s, 'SOAR prod', %s, %s, %s, %s, %s)""",
-            (program, tenant, created_by, CREATED, status, removed_at, removed_by))
+    execute(dsn, """INSERT INTO identity.programs (id, tenant_id, display_name, created_by, created_at, removed_at, removed_by)
+                    VALUES (%s, %s, 'SOAR prod', %s, %s, %s, %s)""",
+            (program, tenant, created_by, CREATED, removed_at, removed_by))
 
 
 @pytest.mark.postgres
@@ -107,9 +107,9 @@ def test_at_head_programs_have_their_columns_and_the_credential_table_keeps_its_
     """`programs` has its columns (name, creator, tenant and creation time required, removal optional); `program_credentials` has
     its columns without `program_kind`, with `expires_at` required; `users.email` and `memberships.role` are required. (Data model)"""
     programs = _columns(migrated_database, "programs")
-    assert set(PROGRAM_COLUMNS) <= set(programs), sorted(set(PROGRAM_COLUMNS) - set(programs))
+    assert set(PROGRAM_COLUMNS) == set(programs), sorted(set(PROGRAM_COLUMNS) ^ set(programs))  # no status: the removal time is it
     assert {c: programs[c][1] for c in PROGRAM_COLUMNS} == {
-        "id": "NO", "tenant_id": "NO", "display_name": "NO", "created_by": "NO", "created_at": "NO", "status": "NO",
+        "id": "NO", "tenant_id": "NO", "display_name": "NO", "created_by": "NO", "created_at": "NO",
         "removed_at": "YES", "removed_by": "YES"}
     credentials = _columns(migrated_database, "program_credentials")
     assert set(CREDENTIAL_COLUMNS) <= set(credentials), sorted(set(CREDENTIAL_COLUMNS) - set(credentials))
@@ -151,25 +151,6 @@ def test_at_head_a_membership_role_is_admin_only(migrated_database):
 
 
 @pytest.mark.postgres
-def test_at_head_a_program_is_active_or_removed_and_removed_exactly_when_removal_is_recorded(migrated_database):
-    """A program is `active` with no removal time, or `removed` with one (who optional); a status outside the two, a removal time
-    on an active one and a `removed` one without it are refused. (Data model)"""
-    import psycopg
-
-    _tenant(migrated_database)
-    _user(migrated_database, ANN, "ann@x.org")
-    ids = [f"a7000000-0000-4000-8000-00000000f0{n:02d}" for n in range(8)]
-    _program(migrated_database, ids[0])  # control: active
-    _program(migrated_database, ids[1], status="removed", removed_at=CREATED)  # control: removed by the system
-    _program(migrated_database, ids[2], status="removed", removed_at=CREATED, removed_by=ANN)  # control: removed by a person
-    for n, refused in enumerate((dict(status="removed"), dict(status="active", removed_at=CREATED),
-                                 dict(status="paused"), dict(status="paused", removed_at=CREATED)), start=3):
-        with pytest.raises(psycopg.errors.CheckViolation):
-            _program(migrated_database, ids[n], **refused)
-    assert [i for (i,) in execute(migrated_database, "SELECT id FROM identity.programs ORDER BY id")] == ids[:3]
-
-
-@pytest.mark.postgres
 def test_at_head_a_program_names_a_person_who_made_it_and_a_tenant_it_belongs_to(migrated_database):
     """A program needs a creator who is a user and a tenant that exists; a remover, when named, is a user too; a creator that
     is a user is stored (control). (Data model, P-K)"""
@@ -188,7 +169,7 @@ def test_at_head_a_program_names_a_person_who_made_it_and_a_tenant_it_belongs_to
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
         _program(migrated_database, "a7000000-0000-4000-8000-00000000f104", tenant=ghost)
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
-        _program(migrated_database, "a7000000-0000-4000-8000-00000000f105", status="removed", removed_at=CREATED, removed_by=ghost)
+        _program(migrated_database, "a7000000-0000-4000-8000-00000000f105", removed_at=CREATED, removed_by=ghost)
     assert execute(migrated_database, "SELECT count(*) FROM identity.programs") == [(1,)]
 
 
@@ -247,6 +228,26 @@ def test_the_upgrade_refuses_while_a_program_row_exists_and_changes_nothing(empt
     assert _version(empty_database) == [(MERGE_ELIGIBILITY,)]
     assert _columns(empty_database, "programs") == {}
     assert execute(empty_database, "SELECT id, kind FROM identity.users ORDER BY kind") == [(ANN, "person"), (SOAR, "program")]
+    assert execute(empty_database, "SELECT id, role FROM identity.memberships ORDER BY role") == [(ANN_ROW, "admin"), (BOB_ROW, "automation")]
+
+
+@pytest.mark.postgres
+def test_the_upgrade_refuses_while_a_person_holds_a_role_other_than_admin_and_changes_nothing(empty_database):
+    """From `0011_merge_eligibility` with no program but a person holding `automation` (the old schema let any user hold it):
+    the upgrade fails naming the role, before any change, rather than at the new role CHECK (O-G, R1)."""
+    from defender.migrations import head, upgrade
+
+    assert head() != MERGE_ELIGIBILITY
+    _upgrade_to(empty_database, MERGE_ELIGIBILITY)
+    _tenant(empty_database)
+    _user(empty_database, ANN, "ann@x.org", kind="person")
+    _membership(empty_database, ANN_ROW, ANN, role="admin")
+    _user(empty_database, BOB, "bob@x.org", kind="person")
+    _membership(empty_database, BOB_ROW, BOB, role="automation")
+    with pytest.raises(RuntimeError, match=r"1 membership\(s\) whose role is not 'admin'"):
+        upgrade(empty_database)
+    assert _version(empty_database) == [(MERGE_ELIGIBILITY,)]
+    assert _columns(empty_database, "programs") == {}
     assert execute(empty_database, "SELECT id, role FROM identity.memberships ORDER BY role") == [(ANN_ROW, "admin"), (BOB_ROW, "automation")]
 
 

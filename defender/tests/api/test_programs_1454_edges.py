@@ -70,7 +70,7 @@ def test_end_tenant_raises_when_a_call_it_depends_on_fails_and_a_retry_finishes_
     assert world.repo.refusals == {call: 1}
     world.repo.failing = set()
     world.call(_lifecycle(world).end_tenant, T1, now=world.clock())
-    assert world.call(world.raw_repo.program, s.program_id).status == "removed"
+    assert world.call(world.raw_repo.program, s.program_id).removed_at is not None
     assert {m.status for m in world.call(world.raw_repo.memberships_of_tenant, T1)} == {"ended", "revoked"}
     assert {r.state for r in world.credentials(s.program_id)} == {"revoked"}
 
@@ -107,12 +107,12 @@ def test_a_program_with_no_credentials_is_removed_and_audited_by_an_admin_and_by
     assert s.ann.delete(f"/tenants/{T1}/programs/{by_admin}").status_code == 204
     assert [(e.action, e.actor, e.tenant_id, e.target) for e in audit.since(mark)] == [
         (PROGRAM_REMOVE, user_id(s.ann), T1, by_admin)]
-    assert s.world.call(s.world.raw_repo.program, by_admin).status == "removed"
+    assert s.world.call(s.world.raw_repo.program, by_admin).removed_at is not None
     mark = audit.mark()
     s.world.call(s.world.lifecycle_service().end_tenant, T1, now=s.world.clock())
     removals = [(e.actor, e.tenant_id, e.target) for e in audit.since(mark) if e.action == PROGRAM_REMOVE]
     assert sorted(removals) == sorted([(SYSTEM, T1, s.program_id), (SYSTEM, T1, by_system)])
-    assert s.world.call(s.world.raw_repo.program, by_system).status == "removed"
+    assert s.world.call(s.world.raw_repo.program, by_system).removed_at is not None
 
 
 # --- F2 re-inviting an existing live row ----------------------------------------------------------------

@@ -238,7 +238,7 @@ def test_1454_offboarding_removes_the_tenants_active_programs_and_ends_its_peopl
     removal = events.index((PROGRAM_REMOVE, SYSTEM, T1, s.program_id))
     assert {e[3] for e in events[:removal] if e[0] == CREDENTIAL_REVOKE} == {s.key_id, oauth}  # revokes, then the removal
     program = s.world.call(s.world.raw_repo.program, s.program_id)
-    assert (program.status, program.removed_by, program.removed_at) == ("removed", None, s.world.clock())
+    assert (program.removed_by, program.removed_at) == (None, s.world.clock())
     assert {r.state for r in s.world.credentials(s.program_id)} == {"revoked"}
     assert [(str(m.user_id), m.status) for m in s.world.call(s.world.raw_repo.memberships_of_tenant, T1)] == [
         (user_id(s.ann), "ended")]

@@ -300,8 +300,8 @@ def test_an_admin_creates_a_program_of_the_tenant_that_is_active_and_is_no_user_
     assert set(listed) == {s.program_id, program_id}
     assert listed[program_id]["created_by"] == s.ann.get("/me").json()["user"]["id"]
     program = s.world.call(s.world.raw_repo.program, program_id)
-    assert (str(program.tenant_id), program.display_name, program.status, str(program.created_by)) == (
-        T1, "Ticket sync", "active", user_id(s.ann))
+    assert (str(program.tenant_id), program.display_name, program.removed_at, str(program.created_by)) == (
+        T1, "Ticket sync", None, user_id(s.ann))
     assert s.world.call(s.world.raw_repo.user, program_id) is None
     assert s.world.call(s.world.raw_repo.memberships_of_user, program_id) == []
     assert [m["email"] for m in items(s.ann.get(f"/tenants/{T1}/members"))] == [ANN]  # control: the person is listed, the program is not

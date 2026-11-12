@@ -38,7 +38,8 @@ Load only the references relevant to the task. Historical explanations live in `
 
 Programs (#1307) now have their own table, `identity.programs`; users and memberships are people only. Run migrations
 (revision `0012_programs_table`). It stops, changing nothing, while any program row exists (a `users` row of kind
-`program`): no production path ever wrote one, so remove any left in a development database first. Stop the API and the
+`program`) or any membership's role is not `admin`: no production path ever wrote either, so remove any left in a
+development database first. Stop the API and the
 lifecycle service before migrating; an older process fails on every program read once the columns are gone.
 
 ## Upgrade from before #1170

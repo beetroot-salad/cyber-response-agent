@@ -334,7 +334,7 @@ class InMemoryIdentityRepository:
     def _in_standing(self, program_id: ProgramId) -> bool:
         """The one standing rule (O-D): the program is `active` and its tenant `active`."""
         program = self._programs.get(program_id)
-        return program is not None and program.status == "active" and self._active(program.tenant_id)
+        return program is not None and program.removed_at is None and self._active(program.tenant_id)
 
     def _admit(self, row: ProgramCredential | None, now: _dt.datetime) -> tuple[ProgramCredential, Program] | None:
         """The credential and its program when the credential is usable and the program in standing."""
@@ -374,7 +374,7 @@ class InMemoryIdentityRepository:
         return _copy(program)
 
     async def programs_of_tenant(self, tenant_id: TenantId) -> list[Program]:
-        rows = [p for p in self._programs.values() if p.tenant_id == tenant_id and p.status == "active"]
+        rows = [p for p in self._programs.values() if p.tenant_id == tenant_id and p.removed_at is None]
         return [_copy(p) for p in sorted(rows, key=lambda p: (p.created_at, p.id))]
 
     async def tenants_of_credentials(self, credential_ids: Collection[CredentialId]) -> dict[CredentialId, TenantId]:
@@ -393,11 +393,10 @@ class InMemoryIdentityRepository:
         self, program_id: ProgramId, *, removed_by: UserId | None, now: _dt.datetime,
     ) -> list[CredentialId] | None:
         program = self._programs.get(program_id)
-        if program is None or program.status != "active":
+        if program is None or program.removed_at is not None:
             return None
         self._refuse_unknown_actor(removed_by)
-        self._programs[program_id] = dataclasses.replace(
-            program, status="removed", removed_at=now, removed_by=removed_by)
+        self._programs[program_id] = dataclasses.replace(program, removed_at=now, removed_by=removed_by)
         revoked = sorted((r for r in self._credentials.values()
                           if r.program_id == program_id and r.state in ("pending", "live")),
                          key=lambda r: (r.created_at, r.id))
@@ -414,7 +413,7 @@ class InMemoryIdentityRepository:
         if program is None:
             raise DataRuleViolation(f"{program_id!r} is no program")
         check_credential_fields(kind=kind, key_hash=key_hash)
-        if program.status != "active":
+        if program.removed_at is not None:
             return None
         self._refuse_unknown_actor(created_by)
         if sum(holds_slot(r, now) for r in self._credentials.values() if r.program_id == program_id) >= CREDENTIAL_CAP:
@@ -433,7 +432,7 @@ class InMemoryIdentityRepository:
     async def go_live(self, credential_id: CredentialId, *, service_account_id: str, now: _dt.datetime) -> bool:
         row = self._credentials.get(credential_id)
         if (row is None or row.state != "pending" or row.pending_deadline is None or row.pending_deadline <= now
-                or self._programs[row.program_id].status != "active"):
+                or self._programs[row.program_id].removed_at is not None):
             return False
         self._credentials[row.id] = dataclasses.replace(row, state="live", service_account_id=service_account_id)
         return True

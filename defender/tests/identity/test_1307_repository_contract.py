@@ -2,7 +2,7 @@
 """#1307 IdentityRepository contract for programs and their credentials, memory and PostgreSQL (P-I, P-G, O4, O5).
 
 #1454 amends this contract: a program is a `programs` row, not a users row with a membership (P-J). Its row is read as
-`id, tenant_id, display_name, created_by, created_at, status ("active" | "removed"), removed_at, removed_by`; `program(id)`
+`id, tenant_id, display_name, created_by, created_at, removed_at (None while active), removed_by`; `program(id)`
 answers at any status; one admitting read per use (`admit_by_key`, `admit_by_client`, `admit_by_credential`) replaces
 `credential_by_hash` and `program_standing`; `revoke_stale_pending` answers `(credential id, tenant)` pairs; a write that makes
 something live in a tenant (`add_program`, `ensure_invitation`) raises `TenantNotActive` unless the tenant is `active`.
@@ -105,10 +105,10 @@ def _as_user(program) -> UserId:
 
 
 async def test_a_program_is_a_row_of_its_tenant_with_its_creator_and_no_users_row(seeded):
-    """A program holds its tenant, name, creator and `active` status; no users row or membership exists for it (P-J, P-K, O-B)."""
+    """A program holds its tenant, name, creator and no removal time (active); no users row or membership exists for it (P-J, P-K, O-B)."""
     admin = await _user(seeded)
     program = await _program(seeded, admin)
-    assert (program.tenant_id, program.display_name, program.status) == (T1, "SOAR prod", "active")
+    assert (program.tenant_id, program.display_name, program.removed_at) == (T1, "SOAR prod", None)
     assert (program.created_by, program.created_at, program.removed_at, program.removed_by) == (admin.id, NOW, None, None)
     assert await seeded.program(program.id) == program
     assert await seeded.user(_as_user(program)) is None
@@ -545,7 +545,7 @@ async def test_one_usable_rule_decides_the_cap_the_keep_set_and_the_purge(seeded
 # --- removal is one write -----------------------------------------------------------------------------
 
 async def test_removing_a_program_marks_it_removed_and_revokes_every_credential(seeded):
-    """One write: status `removed` with who and when, live and pending credentials revoked; an earlier revocation, other
+    """One write: the removal time and who removed it, live and pending credentials revoked; an earlier revocation, other
     programs and people stay as they were; a second removal changes nothing (O-E)."""
     admin = await _user(seeded)
     member = await _active(seeded, admin)
@@ -558,13 +558,13 @@ async def test_removing_a_program_marks_it_removed_and_revokes_every_credential(
     later = NOW + HOUR
     assert await seeded.remove_program(program.id, removed_by=admin.id, now=later) is not None
     removed = await seeded.program(program.id)  # the row stays: the audit names it
-    assert (removed.status, removed.removed_at, removed.removed_by) == ("removed", later, admin.id)
+    assert (removed.removed_at, removed.removed_by) == (later, admin.id)
     assert (removed.tenant_id, removed.display_name, removed.created_by) == (T1, "SOAR prod", admin.id)
     states = {r.id: (r.state, r.revoked_at, r.revoked_by) for r in await seeded.credentials_of_program(program.id)}
     assert states == {old.id: ("revoked", NOW, admin.id), live.id: ("revoked", later, admin.id),
                       pending.id: ("revoked", later, admin.id)}
     assert (await seeded.credential_by_id(kept.id)).state == "live"
-    assert (await seeded.program(other.id)).status == "active"
+    assert (await seeded.program(other.id)).removed_at is None
     assert [m.id for m in await seeded.memberships_of_tenant(T1)] == [member.id]
     assert [p.id for p in await seeded.programs_of_tenant(T1)] == [other.id]
     assert await seeded.remove_program(program.id, removed_by=None, now=later + HOUR) is None
@@ -581,7 +581,7 @@ async def test_the_system_removes_a_program_of_a_tenant_that_has_left_active(see
     assert [p.id for p in await seeded.programs_of_tenant(T1)] == [program.id]
     assert await seeded.remove_program(program.id, removed_by=None, now=NOW + HOUR) == [key.id]
     removed = await seeded.program(program.id)
-    assert (removed.status, removed.removed_by) == ("removed", None)
+    assert (removed.removed_at, removed.removed_by) == (NOW + HOUR, None)
     assert (await seeded.credential_by_id(key.id)).revoked_by is None
     assert await seeded.programs_of_tenant(T1) == []
 
@@ -626,7 +626,7 @@ async def test_a_removal_and_a_credential_creation_for_one_program_are_ordered_b
         assert outcome["create"].state == "pending"
     else:
         assert outcome["create"] is None, outcome["create"]  # removed: an answer, not a refusal
-    assert (await one.program(program.id)).status == "removed"
+    assert (await one.program(program.id)).removed_at == NOW
     assert {r.state for r in await one.credentials_of_program(program.id)} <= {"revoked"}
 
 
@@ -939,7 +939,7 @@ async def test_a_program_removed_with_a_usable_credential_left_is_admitted_warne
         oauth = await _add_oauth(seeded, program, admin, n + 1, expires_at=NOW + 30 * DAY)
         assert await seeded.go_live(oauth.id, service_account_id=SA, now=NOW) is True
         rows[program.id] = (key, oauth)
-    execute(backend, "UPDATE identity.programs SET status = 'removed', removed_at = %s WHERE id = %s", (NOW, str(stale.id)))
+    execute(backend, "UPDATE identity.programs SET removed_at = %s WHERE id = %s", (NOW, str(stale.id)))
     key, oauth = rows[stale.id]
     assert await seeded.admit_by_key(_key(1), now=NOW) is None
     assert await seeded.admit_by_client(oauth.id, service_account_id=SA, now=NOW) is None

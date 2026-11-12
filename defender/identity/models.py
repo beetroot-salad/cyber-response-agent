@@ -50,7 +50,6 @@ Email = Annotated[str, AfterValidator(normalize_email)]
 
 UserStatus = Literal["invited", "active"]
 MembershipStatus = Literal["invited", "active", "ended", "revoked"]
-ProgramStatus = Literal["active", "removed"]
 #: What a membership holds: people's roles only (R1; a tenant analyst role is planned).
 PersonRole = Literal["admin"]
 #: A program's role is a property of being a program, fixed in code, never stored.
@@ -127,8 +126,6 @@ class Program(Base, kw_only=True):
 
     __tablename__ = "programs"
     __table_args__ = (
-        _status_check(ProgramStatus),
-        CheckConstraint("(status = 'removed') = (removed_at IS NOT NULL)", name="removed_iff_removal_recorded"),
         Index("programs_by_tenant", "tenant_id"),
         {"schema": SCHEMA},
     )
@@ -138,20 +135,16 @@ class Program(Base, kw_only=True):
     display_name: Mapped[str] = mapped_column(Text)
     created_by: Mapped[UserId] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"))
     created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
-    status: Mapped[ProgramStatus] = mapped_column(Text, default="active")
+    #: When it was removed; None while it is active. Its one status: a removed program has a removal time.
     removed_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: The person who removed it, or None for the system (or while not removed).
     removed_by: Mapped[UserId | None] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"), default=None)
 
     @classmethod
     def new(cls, tenant_id: TenantId, *, display_name: str, created_by: UserId, created_at: _dt.datetime) -> Program:
-        """A program as first stored: `active`. The display name must be text PostgreSQL can hold."""
+        """A program as first stored: active (no removal time). The display name must be text PostgreSQL can hold."""
         return cls(tenant_id=tenant_id, display_name=postgres_text(display_name, "a program's display name"),
                    created_by=created_by, created_at=created_at)
-
-    @validates("status")
-    def _status(self, _key: str, value: str) -> str:
-        return _checked("program status", ProgramStatus, value)
 
 
 class Membership(Base, kw_only=True):

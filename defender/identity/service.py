@@ -80,10 +80,6 @@ class PersonCaller:
     def actor_id(self) -> UserId:
         return self.user.id
 
-    @property
-    def credential(self) -> None:
-        return None
-
 
 @model(frozen=True)
 class ProgramCaller:
@@ -96,10 +92,6 @@ class ProgramCaller:
     @property
     def actor_id(self) -> ProgramId:
         return self.program.id
-
-    @property
-    def administrator(self) -> bool:
-        return False
 
 
 #: A request's caller, one of two types, never one type with optional fields (#1454 D1).
@@ -143,15 +135,6 @@ class MeView:
     tenants: tuple[TenantId, ...]
     administrator: bool
     invitations: tuple[OpenInvitation, ...]
-
-
-@model(frozen=True)
-class ProgramMeView:
-    """A program's own view: itself, its one tenant, and the credential it used."""
-
-    program: Program
-    tenant_id: TenantId
-    credential: ProgramCredential
 
 
 def _audit_removal(program_id: ProgramId, revoked: list[CredentialId], *, actor: str, tenant_id: TenantId) -> None:
@@ -505,13 +488,16 @@ class IdentityService:
         if not roles.grants(role, permission):
             raise Forbidden("this caller may not do that")
 
-    def require_administrator(self, auth: Authenticated) -> None:
+    @staticmethod
+    def require_administrator(auth: PersonCaller) -> None:
         if not auth.administrator:
             raise Forbidden("platform administrators only")
 
-    async def me(self, auth: Authenticated) -> MeView | ProgramMeView:
-        if isinstance(auth, ProgramCaller):  # its one tenant, `active` when it was let in
-            return ProgramMeView(program=auth.program, tenant_id=auth.program.tenant_id, credential=auth.credential)
+    async def me(self, auth: Authenticated) -> MeView | ProgramCaller:
+        """A person's view; a program's is the caller itself: its program (one tenant, `active` when it was let in) and
+        the credential it used."""
+        if isinstance(auth, ProgramCaller):
+            return auth
         now = self._clock()
         rows = await self._repo.memberships_of_user(auth.user.id)
         active = await self._repo.active_tenants({m.tenant_id for m in rows}) if rows else set()
@@ -608,7 +594,7 @@ class IdentityService:
         """The tenant's active program, else `NotFound`: another tenant's program, a person's id and a
         removed program all answer alike."""
         program = await self._repo.program(program_id)
-        if program is None or program.status != "active" or program.tenant_id != tenant_id:
+        if program is None or program.removed_at is not None or program.tenant_id != tenant_id:
             raise NotFound("no such program")
         return program
 

@@ -7,7 +7,7 @@ import datetime as _dt
 import logging
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Annotated, Any, Literal, NamedTuple
+from typing import Annotated, Any, Generic, Literal, NamedTuple, TypeVar
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -263,8 +263,12 @@ Person = Annotated[PersonCaller, Depends(_person)]
 AnyCaller = Annotated[Authenticated, Depends(_any_caller)]
 
 
-class _Membered(NamedTuple):
-    auth: Authenticated
+#: The caller a tenant route holds: either kind, or a person once a people route has narrowed it.
+_Caller = TypeVar("_Caller", bound=Authenticated)
+
+
+class _Membered(NamedTuple, Generic[_Caller]):
+    auth: _Caller
     tenant_id: TenantId
     #: The caller's role in the tenant: what `member_of` answered, the one producer of a role.
     role: Role
@@ -273,47 +277,49 @@ class _Membered(NamedTuple):
 async def _membered(
     tenant_id: Annotated[TenantId, Path(description="The tenant the request acts in.")],
     auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)],
-) -> _Membered:
+) -> _Membered[Authenticated]:
     """The tenant is the path's and is checked against the caller's membership on every request;
     a non-member and an unknown tenant are the same 404 (P-D). A malformed id is a 422, after the
     sign-in check (#1382): it says nothing of any tenant. Membership comes before permission (D1)."""
     return _Membered(auth, tenant_id, await deps.identity.member_of(auth, tenant_id))
 
 
-Membered = Annotated[_Membered, Depends(_membered)]
+Membered = Annotated[_Membered[Authenticated], Depends(_membered)]
 
 
 def _permitted(permission: Permission) -> Callable[..., Any]:
     """The dependency of a route that needs `permission`: the caller is a member of the path's tenant
     and its role grants it, else 404 or 403 before anything else in the path is looked at (D1, D4)."""
     @_declares(permission)
-    async def dependency(member: Membered, deps: Annotated[ApiDeps, Depends(_deps)]) -> _Membered:
+    async def dependency(member: Membered, deps: Annotated[ApiDeps, Depends(_deps)]) -> _Membered[Authenticated]:
         deps.identity.require(member.role, permission)
         return member
     return dependency
 
 
-def _principal(member: _Membered) -> Principal:
+def _principal(member: _Membered[Authenticated]) -> Principal:
     """The audit's caller, built here and nowhere else: the user and, for a program, the credential it used.
     Every tenant route takes its `Principal` from `_caller_with`, so none can leave the credential out."""
-    credential = member.auth.credential
-    return Principal(tenant_id=member.tenant_id, actor_id=member.auth.actor_id,
-                     credential_id=None if credential is None else credential.id)
+    auth = member.auth
+    return Principal(tenant_id=member.tenant_id, actor_id=auth.actor_id,
+                     credential_id=auth.credential.id if isinstance(auth, ProgramCaller) else None)
 
 
 def _caller_with(permission: Permission) -> Callable[..., Any]:
     check = _permitted(permission)
 
     @_declares(permission)
-    async def dependency(member: _Membered = Depends(check)) -> Principal:  # noqa: B008
+    async def dependency(member: _Membered[Authenticated] = Depends(check)) -> Principal:  # noqa: B008
         return _principal(member)
     return dependency
 
 
 @_declares("platform")
-async def _administrator(auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)]) -> PersonCaller:
+async def _administrator(
+    auth: Annotated[PersonCaller, Depends(_person)], deps: Annotated[ApiDeps, Depends(_deps)],
+) -> PersonCaller:
+    """A platform administrator: a person (a program is refused before the flag is looked at) whose flag is set."""
     deps.identity.require_administrator(auth)
-    assert isinstance(auth, PersonCaller), "a program is never an administrator"
     return auth
 
 
@@ -328,20 +334,19 @@ ConfigReader = Annotated[Principal, Depends(_caller_with("config.read"))]
 ConfigWriter = Annotated[Principal, Depends(_caller_with("config.write"))]
 
 
-class _PeopleMembered(NamedTuple):
-    auth: PersonCaller
-    tenant_id: TenantId
-    role: Role
+async def _people_manager(
+    member: Annotated[_Membered[Authenticated], Depends(_permitted("people.manage"))],
+) -> _Membered[PersonCaller]:
+    """The caller of a people route, narrowed once to a person. Membership is checked first (a program of another
+    tenant gets the same 404 as anyone), then the permission; `automation` does not grant `people.manage`, and a
+    program is refused here as well should a role ever change that."""
+    auth = member.auth
+    if isinstance(auth, ProgramCaller):
+        raise _identity.Forbidden("only a person may do that")
+    return _Membered(auth, member.tenant_id, member.role)
 
 
-async def _people_manager(member: Annotated[_Membered, Depends(_permitted("people.manage"))]) -> _PeopleMembered:
-    """The caller of a people route, narrowed once to a person: `people.manage` is not an `automation` permission, so a
-    program cannot get here, and it fails loudly if it ever does."""
-    assert isinstance(member.auth, PersonCaller), "a program may not manage people"
-    return _PeopleMembered(member.auth, member.tenant_id, member.role)
-
-
-PeopleManager = Annotated[_PeopleMembered, Depends(_people_manager)]
+PeopleManager = Annotated[_Membered[PersonCaller], Depends(_people_manager)]
 def _declared_query(dependant: Any) -> set[str]:
     """The query parameter names a route reads, its dependencies' included."""
     names = {param.alias for param in dependant.query_params}
@@ -721,10 +726,10 @@ async def read_me(deps: Deps, caller: AnyCaller) -> Me | ProgramMe:
     """Who the caller is: a person with their tenants and invitations, or a program with its one tenant
     and the credential it used."""
     view = await deps.identity.me(caller)
-    if isinstance(view, _identity.ProgramMeView):  # a program, let in only while its one tenant is active
+    if isinstance(view, ProgramCaller):  # a program, let in only while its one tenant is active
         return ProgramMe(
             program=ProgramRef(id=view.program.id, display_name=view.program.display_name),
-            tenant=TenantRef(tenant_id=view.tenant_id),
+            tenant=TenantRef(tenant_id=view.program.tenant_id),
             credential=CredentialRef(id=view.credential.id, expires_at=view.credential.expires_at))
     return Me(
         user=MeUser(id=view.user.id, email=view.user.email, display_name=view.user.display_name),

@@ -1,8 +1,9 @@
-"""Programs get their own table (#1454): a program is a row of `identity.programs` (its tenant, creator, name and status),
+"""Programs get their own table (#1454): a program is a row of `identity.programs` (its tenant, creator, name and removal),
 no longer a `users` row of kind `program` with an `automation` membership. Users are people only (a required email, no
 `kind`, no creator), a membership's role is `admin` alone, and a credential's `program_id` is a plain foreign key to
-`programs`. No production path ever wrote a program (census C3), so nothing moves: the upgrade refuses, changing nothing,
-while any program row exists.
+`programs`. A program is removed exactly when it has a removal time: there is no separate status. No production path ever
+wrote a program (census C3), so nothing moves: the upgrade refuses, changing nothing, while any row exists that the new
+schema cannot hold (a program user, or a membership whose role is not `admin`).
 
 Revision ID: 0012_programs_table
 Revises: 0011_merge_eligibility
@@ -21,11 +22,15 @@ def _uuid() -> sa.Uuid:
 
 
 def upgrade() -> None:
-    programs: int = op.get_bind().execute(sa.text("SELECT count(*) FROM identity.users WHERE kind = 'program'")).scalar_one()
-    if programs:
+    bind = op.get_bind()
+    programs: int = bind.execute(sa.text("SELECT count(*) FROM identity.users WHERE kind = 'program'")).scalar_one()
+    # The old schema let any user, a person included, hold `automation`; the new role CHECK refuses it.
+    roles: int = bind.execute(sa.text("SELECT count(*) FROM identity.memberships WHERE role <> 'admin'")).scalar_one()
+    if programs or roles:
         raise RuntimeError(
-            f"{programs} program row(s) exist in identity.users: programs now have their own table and no data move is "
-            "written for them (#1454); remove them, or move them by hand, before upgrading")
+            f"{programs} program row(s) in identity.users and {roles} membership(s) whose role is not 'admin': programs "
+            "now have their own table, a membership's role is 'admin' alone, and no data move is written for either "
+            "(#1454); remove them, or move them by hand, before upgrading")
 
     op.create_table(
         "programs",
@@ -34,16 +39,12 @@ def upgrade() -> None:
         sa.Column("display_name", sa.Text(), nullable=False),
         sa.Column("created_by", _uuid(), nullable=False),
         sa.Column("created_at", _TIME, nullable=False),
-        sa.Column("status", sa.Text(), nullable=False),
         sa.Column("removed_at", _TIME, nullable=True),
         sa.Column("removed_by", _uuid(), nullable=True),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_programs")),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenancy.tenants.id"], name=op.f("fk_programs_tenant_id_tenants")),
         sa.ForeignKeyConstraint(["created_by"], ["identity.users.id"], name=op.f("fk_programs_created_by_users")),
         sa.ForeignKeyConstraint(["removed_by"], ["identity.users.id"], name=op.f("fk_programs_removed_by_users")),
-        sa.CheckConstraint("status IN ('active', 'removed')", name=op.f("ck_programs_status")),
-        sa.CheckConstraint("(status = 'removed') = (removed_at IS NOT NULL)",
-                           name=op.f("ck_programs_removed_iff_removal_recorded")),
         schema="identity")
     op.create_index("programs_by_tenant", "programs", ["tenant_id"], schema="identity")
 

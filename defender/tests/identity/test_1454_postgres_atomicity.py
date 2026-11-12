@@ -40,7 +40,7 @@ async def test_concurrent_credential_creations_held_on_the_program_row_succeed_e
 
 
 async def test_removal_whose_credential_update_fails_leaves_the_program_active_and_can_be_retried(two_repositories, pg_dsn):
-    """A failure in the credentials' revoking update undoes the status change with it (one transaction): the program is still
+    """A failure in the credentials' revoking update undoes the removal time with it (one transaction): the program is still
     `active`, its credential `live`; once the fault is gone the same removal succeeds and answers what it revoked (O-E)."""
     one, _ = two_repositories
     admin = await _user(one)
@@ -52,10 +52,10 @@ async def test_removal_whose_credential_update_fails_leaves_the_program_active_a
                        FOR EACH ROW EXECUTE FUNCTION identity.refuse_update()""")
     with pytest.raises(DBAPIError):
         await one.remove_program(program.id, removed_by=admin.id, now=NOW)
-    assert (await one.program(program.id)).status == "active"
+    assert (await one.program(program.id)).removed_at is None
     assert await _states(one, program) == {key.id: "live"}
     assert [p.id for p in await one.programs_of_tenant(program.tenant_id)] == [program.id]
     execute(pg_dsn, "DROP TRIGGER refuse_update ON identity.program_credentials")
     assert await one.remove_program(program.id, removed_by=admin.id, now=NOW) == [key.id]  # not "already removed"
-    assert (await one.program(program.id)).status == "removed"
+    assert (await one.program(program.id)).removed_at == NOW
     assert await _states(one, program) == {key.id: "revoked"}

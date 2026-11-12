@@ -410,7 +410,7 @@ def _two_programs_with_credentials(world: ProgramsWorld, ann: Any) -> list[str]:
 
 
 def _consistent(world: ProgramsWorld, program: str) -> tuple[bool, bool]:
-    ended = world.call(world.raw_repo.program, program).status != "active"  # the program row, at any status (#1454)
+    ended = world.call(world.raw_repo.program, program).removed_at is not None  # the program row, removed or not (#1454)
     revoked = all(r.state == "revoked" for r in world.credentials(program))
     return ended, revoked
 

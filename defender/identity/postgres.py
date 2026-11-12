@@ -45,7 +45,7 @@ def _active_tenant(tenant_id: Any) -> Any:
 
 def _in_standing() -> Any:
     """The one standing rule (O-D) as a condition on `Program`: it is `active` and its tenant is `active`."""
-    return (Program.status == "active") & exists().where(_active_tenant(Program.tenant_id))
+    return Program.removed_at.is_(None) & exists().where(_active_tenant(Program.tenant_id))
 
 
 def _program_in_standing() -> Any:
@@ -57,6 +57,11 @@ def _program_in_standing() -> Any:
 def _usable(now: _dt.datetime) -> Any:
     """`memory.usable` as a condition on `ProgramCredential`."""
     return (ProgramCredential.state == "live") & (ProgramCredential.expires_at > now)
+
+
+def _holds_slot(now: _dt.datetime) -> Any:
+    """`memory.holds_slot` as a condition on `ProgramCredential`."""
+    return _usable(now) | ((ProgramCredential.state == "pending") & (ProgramCredential.pending_deadline > now))
 
 
 class PostgresIdentityRepository:
@@ -263,10 +268,11 @@ class PostgresIdentityRepository:
 
     # --- programs and their credentials -------------------------------------------------------
     @staticmethod
-    async def _lock_program(s: AsyncSession, program_id: ProgramId) -> str | None:
-        """The program's row, locked until the transaction ends (the one lock per program); its status."""
-        found = (await s.execute(select(Program.status).where(Program.id == program_id).with_for_update())).first()
-        return None if found is None else str(found[0])
+    async def _lock_program(s: AsyncSession, program_id: ProgramId) -> bool | None:
+        """The program's row, locked until the transaction ends (the one lock per program): whether it is active (not
+        removed), or None when there is no such program."""
+        found = (await s.execute(select(Program.removed_at).where(Program.id == program_id).with_for_update())).first()
+        return None if found is None else found[0] is None
 
     async def program(self, program_id: ProgramId) -> Program | None:
         return await self._one(select(Program).where(Program.id == program_id))
@@ -281,7 +287,7 @@ class PostgresIdentityRepository:
         return program
 
     async def programs_of_tenant(self, tenant_id: TenantId) -> list[Program]:
-        return await self._all(select(Program).where(Program.tenant_id == tenant_id, Program.status == "active")
+        return await self._all(select(Program).where(Program.tenant_id == tenant_id, Program.removed_at.is_(None))
                                .order_by(Program.created_at, Program.id))
 
     async def _admit(self, condition: Any, now: _dt.datetime) -> tuple[ProgramCredential, Program] | None:
@@ -322,10 +328,9 @@ class PostgresIdentityRepository:
         self, program_id: ProgramId, *, removed_by: UserId | None, now: _dt.datetime,
     ) -> list[CredentialId] | None:
         async with self._tx() as s:
-            if await self._lock_program(s, program_id) != "active":
+            if not await self._lock_program(s, program_id):
                 return None
-            await s.execute(update(Program).where(Program.id == program_id).values(
-                status="removed", removed_at=now, removed_by=removed_by))
+            await s.execute(update(Program).where(Program.id == program_id).values(removed_at=now, removed_by=removed_by))
             revoked = (await s.execute(
                 update(ProgramCredential).where(
                     ProgramCredential.program_id == program_id, ProgramCredential.state.in_(("pending", "live")))
@@ -346,15 +351,13 @@ class PostgresIdentityRepository:
             pending_deadline=now + PENDING_DEADLINE if kind == "oauth_client" else None)
         row.warn_threshold_days, row.warn_next_at = first_warning(now, expires_at)
         async with self._tx() as s:
-            status = await self._lock_program(s, program_id)
-            if status is None:
+            active = await self._lock_program(s, program_id)
+            if active is None:
                 raise DataRuleViolation(f"{program_id!r} is no program")
-            if status != "active":
+            if not active:
                 return None
             slots = (await s.execute(select(func.count()).select_from(ProgramCredential).where(
-                ProgramCredential.program_id == program_id,
-                or_((ProgramCredential.state == "live") & (ProgramCredential.expires_at > now),
-                    (ProgramCredential.state == "pending") & (ProgramCredential.pending_deadline > now))))).scalar_one()
+                ProgramCredential.program_id == program_id, _holds_slot(now)))).scalar_one()
             if slots >= CREDENTIAL_CAP:
                 raise CredentialCapReached("the program already has two credentials in use or being made")
             s.add(row)
@@ -371,7 +374,7 @@ class PostgresIdentityRepository:
                 update(ProgramCredential).where(
                     ProgramCredential.id == credential_id, ProgramCredential.state == "pending",
                     ProgramCredential.pending_deadline > now,
-                    exists().where(Program.id == ProgramCredential.program_id, Program.status == "active"))
+                    exists().where(Program.id == ProgramCredential.program_id, Program.removed_at.is_(None)))
                 .values(state="live", service_account_id=service_account_id)
                 .returning(ProgramCredential.id))).first() is not None
 
@@ -406,27 +409,21 @@ class PostgresIdentityRepository:
         async with self._tx() as s:
             revoked = (await s.execute(
                 update(ProgramCredential).where(
-                    ProgramCredential.state == "pending", ProgramCredential.pending_deadline <= now)
+                    ProgramCredential.state == "pending", ProgramCredential.pending_deadline <= now,
+                    Program.id == ProgramCredential.program_id)
                 .values(state="revoked", revoked_at=now, revoked_by=None)
-                .returning(ProgramCredential.id, ProgramCredential.program_id))).all()
-            if not revoked:
-                return []
-            tenants = dict((await s.execute(
-                select(Program.id, Program.tenant_id).where(Program.id.in_({r[1] for r in revoked})))).all())
-            return [(r[0], tenants[r[1]]) for r in revoked]
+                .returning(ProgramCredential.id, Program.tenant_id))).all()
+            return [(r[0], r[1]) for r in revoked]
 
     async def oauth_credentials_to_keep(self, *, now: _dt.datetime) -> set[CredentialId]:
         return set(await self._all(select(ProgramCredential.id).where(
-            ProgramCredential.kind == "oauth_client", _program_in_standing(),
-            or_((ProgramCredential.state == "live") & (ProgramCredential.expires_at > now),
-                (ProgramCredential.state == "pending") & (ProgramCredential.pending_deadline > now)))))
+            ProgramCredential.kind == "oauth_client", _program_in_standing(), _holds_slot(now))))
 
     async def claim_expiry_warning(self, *, now: _dt.datetime, hold_until: _dt.datetime) -> ExpiryWarning | None:
         async with self._tx() as s:
             row = (await s.execute(
                 select(ProgramCredential).where(
-                    ProgramCredential.state == "live", ProgramCredential.expires_at > now,
-                    ProgramCredential.warn_next_at <= now, _program_in_standing())
+                    _usable(now), ProgramCredential.warn_next_at <= now, _program_in_standing())
                 .order_by(ProgramCredential.warn_next_at, ProgramCredential.id)
                 .limit(1).with_for_update(skip_locked=True))).scalars().first()
             if row is None:
