@@ -168,7 +168,10 @@ services:
   credential-proxy:
     build:
       context: ../
-      dockerfile: .devcontainer/Dockerfile.runtime
+      dockerfile: .devcontainer/Dockerfile.credential-proxy
+    # Rebuilt on every `up` or `run` (#1482): an image built before a dependency change would
+    # otherwise be reused as it is. Unchanged layers come from the build cache.
+    pull_policy: build
     container_name: response-credential-proxy
     hostname: credential-proxy
     command: ["defender/.venv/bin/python", "-m", "defender.credential_proxy"]

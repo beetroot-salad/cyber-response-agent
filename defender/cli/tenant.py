@@ -41,7 +41,9 @@ only `agent/` is touched.
 
 `set-alert-mapping` (#1345) replaces the tenant's alert mapping, which lives in the database: the file is
 YAML naming each of the six entries (signature, event_time, summary, case_key, title, description) with a dotted path
-into the raw alert; an entry left out, or `null`, is unmapped. It is validated by the rules the API's `PUT` applies and
+into the raw alert; an entry left out, or `null`, is unmapped. A path finds its value whether the alert nests one key per
+segment or holds keys with dots in them (`alert.rule.id` as one key), or a mix; where both hold a value, the nested key
+wins. A run warns naming each mapped fact (signature, event_time, summary, case_key) it reads no value for. It is validated by the rules the API's `PUT` applies and
 stored by the same operation. It applies to alerts stored from then on; stored alerts keep their title and description. It is the production writer
 until the API is wired to the real store, and the upgrade path from `settings/alert-mapping.yaml`. The entries:
 

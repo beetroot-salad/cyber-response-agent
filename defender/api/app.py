@@ -966,7 +966,8 @@ async def get_alert_mapping(deps: Deps, caller: ConfigReader) -> AlertMapping:
 async def put_alert_mapping(
     deps: Deps, caller: ConfigWriter, body: AlertMapping, request: Request, response: Response
 ) -> AlertMapping:
-    """Replace the tenant's alert mapping whole: all six entries, each a dotted path or null. It applies to alerts
+    """Replace the tenant's alert mapping whole: all six entries, each a dotted path or null. A path reads nested keys, keys
+    holding dots, or a mix; where both hold a value, the nested key wins (#1481). It applies to alerts
     stored from now on; alerts already stored keep their title and description."""
     async with _transaction(deps, caller) as tx:
         mapping, created = await tx.put_alert_mapping(body)

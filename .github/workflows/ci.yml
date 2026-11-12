@@ -301,6 +301,42 @@ jobs:
             -e DEFENDER_BUDGET_ENFORCE \
             python:3.11-slim bash /repo/.dood-inner.sh
 
+  # #1482: the dev compose's credential proxy once exited at import (its image lacked fastapi and
+  # uvicorn) while every test passed against CI's venv, which syncs those itself. This runs the
+  # service as compose defines it (compose builds its image, `pull_policy: build`). Its own job, not
+  # a step of `test`: five shards would build it five times.
+  proxy-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      # With no configuration file in CI, the proxy's command reaches `main()` and refuses with
+      # exit 2 and this message; a missing package exits 1 at import. `main()` returns 2 for other
+      # refusals too, so the message pins which one.
+      - name: Start the credential proxy through compose
+        timeout-minutes: 8
+        run: |
+          set +e
+          docker compose -p ci -f .devcontainer/docker-compose.yml run --rm --no-deps credential-proxy 2>&1 | tee proxy.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 2 ] || ! grep -q "not a readable JSON configuration (FileNotFoundError)" proxy.log; then
+            echo "expected exit 2 with the proxy's refusal of its missing configuration file; got exit $status (output above)"
+            exit 1
+          fi
+
+      # The proxy loads some modules only when its app is built or a request arrives (through
+      # `defender.lazy_door`), which the start above never reaches. Importing every module of both
+      # packages in the image covers them.
+      - name: Import every proxy and tenancy module in the proxy's image
+        timeout-minutes: 3
+        run: >-
+          docker compose -p ci -f .devcontainer/docker-compose.yml run --rm --no-deps credential-proxy
+          defender/.venv/bin/python -c "import importlib, pkgutil;
+          [importlib.import_module(m.name) for p in ('defender.credential_proxy', 'defender.tenancy')
+          for m in pkgutil.walk_packages(importlib.import_module(p).__path__, p + '.')]"
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
