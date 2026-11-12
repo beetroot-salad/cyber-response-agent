@@ -1130,6 +1130,46 @@ class _BaoDown(R.KvStandIn):
         raise httpx.ConnectError("connection refused", request=request)
 
 
+class _WrittenMeanwhile(R.KvStandIn):
+    """OpenBao that, as the credential set arrives, lets another writer store the system's next version first: the
+    same record with its credential generation raised by `raise_by` (0: a change that keeps the generation, such as a
+    reads route)."""
+
+    def __init__(self, dsn: str, tenant_id: str, system: str, raise_by: int) -> None:
+        super().__init__()
+        self._meanwhile = (dsn, tenant_id, system, raise_by)
+
+    def _handle(self, request):
+        from defender.tests.support.shared._postgres1339 import execute
+
+        if request.method in ("POST", "PUT") and self._meanwhile is not None:
+            dsn, tenant_id, system, raise_by = self._meanwhile
+            self._meanwhile = None
+            execute(dsn, "INSERT INTO tenancy.system_versions (tenant_id, system_id, version, adapter_id, enabled, settings, "
+                         "access, credential_generation, deleted, author, written_at) "
+                         "SELECT tenant_id, system_id, version + 1, adapter_id, enabled, settings, access, "
+                         "credential_generation + %s, deleted, author, written_at FROM tenancy.system_versions "
+                         "WHERE tenant_id = %s AND system_id = %s ORDER BY version DESC LIMIT 1",
+                    (raise_by, tenant_id, system))
+        return super()._handle(request)
+
+
+@pytest.mark.parametrize(("raise_by", "served"), [(0, True), (1, False)], ids=["same-generation", "new-generation"])
+@pytest.mark.postgres
+def test_1366_o8_a_version_written_meanwhile_is_served_when_it_keeps_the_generation(imported_op, raise_by, served):
+    """identity moves to version 2 while its version-1 credentials are being stored. The set at `g1` serves version 2
+    when that version kept generation 1, so the command succeeds; when it took generation 2 the set serves nothing
+    current, and the command says so and fails. (#1366 O8, P5)"""
+    op = imported_op
+    op.kv = _WrittenMeanwhile(op.dsn, op.tid, "identity", raise_by)
+
+    rc, said = op.set_credentials("identity", {"api_key": "k-1366"}, for_version=1)
+
+    assert op.versions("identity")[-1].version == 2, "premise: a version was written meanwhile"
+    assert (rc == 0) is served, said
+    assert bool(R.lines_naming(said, "identity", "does not serve")) is not served, said
+
+
 @pytest.mark.postgres
 def test_1366_o8_an_unreachable_secret_store_is_a_printed_refusal_not_a_traceback(imported_op):
     """set-credentials while OpenBao is down: exit 1 and one `[tenant.py]` line naming the system, nothing written."""
@@ -1312,8 +1352,9 @@ def test_1366_dc8_an_export_refuses_a_directory_already_holding_a_system_folder(
 
 @pytest.mark.postgres
 def test_1366_dc8_disabling_and_re_enabling_is_a_version_that_keeps_the_record(imported_op):
-    """`--disabled` stores version 2 with enabled false (settings and access judged all the same); the same call
-    without the flag is version 3, enabled again. (#1366 DC8, O1)"""
+    """`--disabled` stores version 2 with enabled false (settings and access judged all the same); a write with no flag
+    keeps it disabled (version 3: the folder does not say on or off, so an exported folder written back cannot switch it
+    on); `--enabled` is version 4, enabled again. (#1366 DC8, O1)"""
     op = imported_op
     rc, said = op.set_system("cmdb", replaces=1, config={**CMDB_CONFIG, "CMDB_COLOUR": "x"}, access=CMDB_ACCESS, disabled=True)
     assert rc != 0, said
@@ -1321,7 +1362,8 @@ def test_1366_dc8_disabling_and_re_enabling_is_a_version_that_keeps_the_record(i
     assert op.set_system("cmdb", replaces=1, config=CMDB_CONFIG, access=CMDB_ACCESS, disabled=True)[0] == 0
     assert op.current()["cmdb"].enabled is False
     assert op.set_system("cmdb", replaces=2, config=CMDB_CONFIG, access=CMDB_ACCESS)[0] == 0
-    assert [(v.version, v.enabled) for v in op.versions("cmdb")] == [(1, True), (2, False), (3, True)]
+    assert op.set_system("cmdb", replaces=3, config=CMDB_CONFIG, access=CMDB_ACCESS, disabled=False)[0] == 0
+    assert [(v.version, v.enabled) for v in op.versions("cmdb")] == [(1, True), (2, False), (3, False), (4, True)]
 
 
 @pytest.mark.postgres

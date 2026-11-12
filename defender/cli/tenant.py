@@ -8,7 +8,7 @@ lifecycle's operator command once the lifecycle became a service).
     python3 defender/cli/tenant.py set-alert-mapping <tenant-id> <mapping file>
     python3 defender/cli/tenant.py catalog
     python3 defender/cli/tenant.py import <tenant-id> [--dry-run]
-    python3 defender/cli/tenant.py set-system <tenant-id> <system> <folder> --replaces N [--disabled]
+    python3 defender/cli/tenant.py set-system <tenant-id> <system> <folder> --replaces N [--disabled | --enabled]
     python3 defender/cli/tenant.py delete-system <tenant-id> <system> --replaces N
     python3 defender/cli/tenant.py set-case <tenant-id> <case-record file> --replaces N
     python3 defender/cli/tenant.py delete-case <tenant-id> --replaces N
@@ -639,7 +639,11 @@ def _record_parsers(sub: Any) -> None:
     set_p.add_argument("system")
     set_p.add_argument("folder", type=Path)
     set_p.add_argument("--replaces", type=int, required=True, help="the version it replaces (0: none ever)")
-    set_p.add_argument("--disabled", action="store_true", help="store the system disabled")
+    on_off = set_p.add_mutually_exclusive_group()
+    on_off.add_argument("--disabled", dest="enabled", action="store_false", default=None,
+                        help="store the system disabled (without either flag a write keeps its current state)")
+    on_off.add_argument("--enabled", dest="enabled", action="store_true", default=None,
+                        help="store the system enabled (a new system is enabled unless --disabled)")
     del_p = sub.add_parser("delete-system", help="delete a system's record (a new version)")
     del_p.add_argument("tenant_id")
     del_p.add_argument("system")
@@ -670,7 +674,7 @@ def _record_command(admitted: run_tenant.Admitted, ns: argparse.Namespace, *, se
         return _tenant_records.run_import(admitted, dry_run=ns.dry_run)
     if ns.command == "set-system":
         return _tenant_records.run_set_system(admitted, ns.system, ns.folder, replaces=ns.replaces,
-                                              disabled=ns.disabled)
+                                              enabled=ns.enabled)
     if ns.command == "delete-system":
         return _tenant_records.run_delete_system(admitted, ns.system, replaces=ns.replaces)
     if ns.command == "set-case":

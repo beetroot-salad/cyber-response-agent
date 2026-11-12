@@ -135,7 +135,9 @@ class RecordStore:
     # --- writes -----------------------------------------------------------------------------------------------------
 
     async def put_system(self, tenant: TenantId, system: str, *, replaces: int, adapter: str | tuple[str, str],
-                         enabled: bool, settings: Mapping[str, str], access: str, author: str) -> SystemRecord:
+                         enabled: bool | None, settings: Mapping[str, str], access: str, author: str) -> SystemRecord:
+        """`system`'s next version. `enabled` None keeps the current version's on/off state (on for a system with no
+        current version)."""
         async with self._locked(tenant) as conn:
             await self._require_marked(conn, tenant)
             latest = await self._latest(conn, tenant)
@@ -143,6 +145,8 @@ class RecordStore:
             self._check_replaces(system, last, replaces)
             custom = adapter if isinstance(adapter, tuple) else None
             generation = self._generation(system, last, access)
+            if enabled is None:
+                enabled = last.row.enabled if last is not None and not last.row.deleted else True
             candidate = SystemRecord(system_id=system, version=_version_of(last) + 1, adapter_id="" if custom else str(adapter),
                                      enabled=enabled, settings=dict(settings), access=access, custom_ref=custom,
                                      credential_generation=generation)

@@ -211,9 +211,10 @@ def run_import(admitted: Any, *, dry_run: bool) -> int:
 # set-system / delete-system / set-case / delete-case
 # ==========================================================================================
 
-def run_set_system(admitted: Any, system: str, folder: Path, *, replaces: int, disabled: bool) -> int:
+def run_set_system(admitted: Any, system: str, folder: Path, *, replaces: int, enabled: bool | None) -> int:
     """`set-system`: the folder's `config.env` and `access.yaml` as `system`'s next version (its adapter is the catalog
-    adapter of that id), enabled unless `--disabled`."""
+    adapter of that id). On or off is not the folder's: `enabled` None keeps the current version's (a new system's is
+    on), so an exported folder written back never switches a disabled system on."""
     from defender.systems.system_folder import read_folder
 
     dsn = _records_dsn()
@@ -225,11 +226,11 @@ def run_set_system(admitted: Any, system: str, folder: Path, *, replaces: int, d
             _say(fault)
         return 1
     done, record = _written(dsn, lambda store: store.put_system(
-        admitted.tenant.id, system, replaces=replaces, adapter=system, enabled=not disabled,
+        admitted.tenant.id, system, replaces=replaces, adapter=system, enabled=enabled,
         settings=dict(read.settings), access=read.access, author=author("set-system")))
     if not done:
         return 1
-    print(f"system {system}: version {record.version} stored ({'disabled' if disabled else 'enabled'}), credential "
+    print(f"system {system}: version {record.version} stored ({'enabled' if record.enabled else 'disabled'}), credential "
           f"generation {record.credential_generation}")
     return 0
 
@@ -385,12 +386,15 @@ def run_set_credentials(admitted: Any, system: str, file: Path, *, for_version: 
     except AdapterFault as refused:
         _say(f"system {system}: the credentials were not written: {refused}")
         return 1
+    # A set belongs to a credential generation, not a version: a write meanwhile that kept the generation (no change of
+    # base, CA or auth) is served by it as well.
     after = admitted.directory.current_records(tenant.id).systems.get(system)
-    if after is None or after.version != current.version:
-        now = "it has no current record" if after is None else f"version {after.version} is now current"
+    if after is None or after.credential_generation != current.credential_generation:
+        now = ("it has no current record" if after is None
+               else f"version {after.version}, at credential generation {after.credential_generation}, is now current")
         _say(f"system {system}: it was written while its credentials were stored for version {for_version}, and {now}: "
-             f"the set stored at generation {current.credential_generation} serves only that version; prepare the "
-             "credentials for the current version and set them again")
+             f"the set stored at generation {current.credential_generation} does not serve it; prepare the credentials "
+             "for the current version and set them again")
         return 1
     print(f"system {system}: credentials stored for version {for_version} at credential generation "
           f"{current.credential_generation}")
