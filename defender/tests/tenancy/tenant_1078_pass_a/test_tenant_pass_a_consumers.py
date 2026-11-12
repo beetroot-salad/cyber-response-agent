@@ -14,6 +14,7 @@ import pytest
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
+from evaluations.tests import _frozen_cases as F
 
 TENANT = H.VALID_ID
 #: The family's branch-point clock pre-flight's context carries.
@@ -27,13 +28,13 @@ def _held_out():
 
 
 def _fixtures(tmp_path: Path) -> Path:
-    """One labeled held-out fixture (benign): `<fixtures>/<SLUG>/{alert.json, ground_truth.yaml}`."""
+    """One labeled held-out case (benign): `<fixtures>/<SLUG>/{alert.json, ground_truth.yaml, case.yaml}`."""
     fx = tmp_path / "fixtures" / SLUG
     fx.mkdir(parents=True)
     (fx / "alert.json").write_text(json.dumps({"rule": {"id": SLUG}}), encoding="utf-8")
     (fx / "ground_truth.yaml").write_text("held_out: true\ndisposition: benign\n",
                                           encoding="utf-8")
-    return fx.parent
+    return F.make_cases(fx.parent)  # a labelled fixture is a case with a freeze (A2, O9)
 
 
 def _scored_run(runs: Path, disposition: str, run_id: str) -> Path:
@@ -44,12 +45,10 @@ def _scored_run(runs: Path, disposition: str, run_id: str) -> Path:
     return run
 
 
-def _held_out_index(tmp_path: Path, run_id: str) -> Path:
-    """Write the operator's launch-index input independently of the production writer."""
-    index = tmp_path / "ops" / "held-out-index.jsonl"
-    index.parent.mkdir(parents=True, exist_ok=True)
-    index.write_text(json.dumps({"slug": SLUG, "run_id": run_id}) + "\n", encoding="utf-8")
-    return index
+def _held_out_index(tmp_path: Path, fixtures: Path, run_id: str) -> Path:
+    """Write the operator's launch-index input independently of the production writer: one row
+    bound to the case's current binding (A8)."""
+    return F.write_index(tmp_path / "ops" / "held-out-index.jsonl", F.row(fixtures, SLUG, run_id))
 
 
 def _drive_held_out(argv: list[str], capsys) -> tuple[Any, str]:
@@ -110,7 +109,7 @@ def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(stale))
     positional = tmp_path / "given-dir"
     _scored_run(positional, "inconclusive", run_id)
-    fx = ["--index", str(_held_out_index(tmp_path, run_id)), "--fixtures-dir", str(fixtures)]
+    fx = ["--index", str(_held_out_index(tmp_path, fixtures, run_id)), "--fixtures-dir", str(fixtures)]
 
     status, out = _drive_held_out([str(positional), *fx], capsys)
     assert status == 0, out
@@ -133,7 +132,7 @@ def test_s7_j50_held_out_positional_ignores_data_root(tmp_path, monkeypatch, cap
     given = tmp_path / "given-dir"
     _scored_run(given, "benign", run_id)
     _scored_run(tmp_path / "stale-knob", "malicious", run_id)
-    index = _held_out_index(tmp_path, run_id)
+    index = _held_out_index(tmp_path, fixtures, run_id)
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(tmp_path / "stale-knob"))
     for value in ("rel/", None):
         if value is None:

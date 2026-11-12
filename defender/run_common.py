@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import contextlib
 import datetime as _dt
+import functools
 import logging
+import signal
 import sys
+import threading
 import dataclasses as _dataclasses
+from collections.abc import Collection, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 DEFENDER_DIR = Path(__file__).resolve().parent
 REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender import _io
+from defender import _clock, _io
 from defender.records import formats, run_end
 from defender import tenancy  # noqa: E402
 from defender._io import read_bytes_capped  # noqa: E402
@@ -23,7 +27,7 @@ from defender.records import (  # noqa: E402
     RUN_LAYOUT, Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, artifact_file, case_ref_of_digest, sidecar_names,
 )
 from defender.presentation import VisualizeFailed  # noqa: E402
-from defender.records.formats import TenantId, TenantRefused
+from defender.records.formats import DataRoot, TenantId, TenantRefused
 
 _logger = logging.getLogger(__name__)
 
@@ -31,8 +35,10 @@ if TYPE_CHECKING:
     from defender.records.formats import AlertMapping
     from defender.records.job_lane import Launched
     from defender.records.formats import ResumeWorld
-    from defender.tenancy.run_knowledge import KnowledgeSource
-    from defender.systems.run_tenant import RunTenant
+    from defender.systems.run_tenant import RunTenant, TenantVerdict
+    from defender.systems.verbs import RosterRead
+    from defender.tenancy.models import TenantRecords
+    from defender.tenancy.run_knowledge import KnowledgeSource, PublishReport, RunCopy
 
 _GENERIC_ALERT_STEMS = {"alert"}
 
@@ -46,6 +52,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     world: ResumeWorld | None = None,
     mapping: AlertMapping | None = None, knowledge: KnowledgeSource | None = None,
     launch: Launched | None = None,
+    started_at: _dt.datetime | None = None,
 ) -> Run:
     """Build the run directory of a fresh run and return the tenant-bound handle the run's later
     records are saved through. No caller names the run's id (#1279 A3): `run` is the handle the
@@ -63,7 +70,10 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
 
     `launch` is a job's checked launch record (#1342 O6, M5): `alert` is then its alert file, the
     bytes admitted are compared to the record's digest (one read, as a sibling's are to its
-    record), and the stamp's label is the record's (the alert's title), not the file's name."""
+    record), and the stamp's label is the record's (the alert's title), not the file's name.
+
+    `started_at` is the start the stamp records when the run clock does not start now (`--as-of`,
+    #1347 O5); `None` is the wall time."""
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     if world is not None and run is None:
@@ -71,7 +81,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
                         "only from its episode's roster")
     if world is None and mapping is None:
         raise TypeError("materialize_run needs the tenant's alert mapping (`mapping=`) for a fresh run")
-    started_at = _started_at()
+    started = _started_at() if started_at is None else _clock.z_seconds(started_at)
     front_door = _admit_input(alert, mapping=mapping, world=world,
                               digest=None if launch is None else launch.record.digest)
     world_id: str | None = None
@@ -102,7 +112,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     _stamp(
         run, knowledge=knowledge, model=model, tenant_id=run.tenant_id,
         world_id=world_id,
-        started_at=started_at,
+        started_at=started,
         alert_label=_alert_label(alert) if launch is None else launch.record.label,
     )
     return run
@@ -223,16 +233,23 @@ def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
                       "nothing downstream can prove which code it ran")
 
 
-def visualize(run: Run, *, tenant: tenancy.Tenant, update_ticket: bool = False) -> None:
+def visualize(run: Run, *, tenant: tenancy.Tenant, update_ticket: bool = False, mirror: bool = True) -> None:
     """The post-run page step as `run.py` takes it: load the renderer, then hand it the run
     (`visualize_run.publish_page` renders, saves the record through `run`, and makes the dev-only
     copy). Runs in the process holding the handle, after the sandbox has exited and the tree has
-    been scrubbed, so the model never had a chance to rewrite its own report."""
+    been scrubbed, so the model never had a chance to rewrite its own report.
+
+    `mirror=False` is a job container's page (#1170 A10): the record is saved in the run's own
+    folder and nothing else is written; the shared publish folder is never the job's to reach, and
+    the job's host helper copies the record there once the container has exited."""
     try:
         from defender.presentation import visualize_run as vr
     except Exception as e:
         raise VisualizeFailed("the renderer could not be loaded") from e
-    vr.publish_page(run, tenant=tenant, update_ticket=update_ticket)
+    if mirror:
+        vr.publish_page(run, tenant=tenant, update_ticket=update_ticket)
+    else:
+        vr.save_page(run, update_ticket=update_ticket)
 
 
 def cross_check_tables(run_dir: Path) -> None:
@@ -452,3 +469,243 @@ def _enqueue_feedback_issue(
         _logger.error(f"NOT enqueuing a feedback issue: could not write the request: {failed}")
         return False
     return True
+
+
+# -- run setup's host half (#1342 M3, #1170 A6) -----------------------------------------------------
+#
+# What a run does on the trusted side before its investigation: the tenant's alert mapping, the
+# launch-time publish and its outcome, the run's own copy of its knowledge, the tenant resolved over
+# that copy and its read grant, the knowledge record beside the run folder. Shared by the operator
+# command (`run.py <alert>`, which runs both halves in one process) and the per-job host helper
+# (`defender.job_host`, which runs this half for a job and hands the job container the rest). Every
+# refusal is a `SystemExit` naming its cause, as run setup's are.
+
+def read_alert_mapping(records: Any, tenant_id: Any) -> AlertMapping:
+    """The tenant's alert mapping from its records, or a `[run.py]` refusal: none saved (the wording
+    `records` owns, naming how to set one) or the records could not be reached (#1345 O4)."""
+    try:
+        mapping = records.alert_mapping(tenant_id)
+    except TenantRefused as refused:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+    if mapping is None:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {formats.ALERT_MAPPING_MISSING}")
+    return mapping
+
+
+class PublishLaunch(Protocol):
+    """The launch-time publish run start calls (`publish_launch.launch_publish`, or an in-process
+    caller's stand-in): typed, so the tenant id reaches the records it writes as a `TenantId`."""
+
+    def __call__(self, tenant_id: TenantId, *, data_root: Path) -> object: ...
+
+
+def default_publish(records: tenancy.TenantDirectory) -> PublishLaunch:
+    """The real launch-time publish: a separate child process (O-BUDGET, P-3), whose outcomes
+    only the launcher sees are recorded through this run's tenant records."""
+    from defender.investigation.publish_launch import launch_publish as real
+
+    return functools.partial(real, directory=records)
+
+
+@contextlib.contextmanager
+def stopped_by_sigterm() -> Iterator[None]:
+    """While the launch-time publish runs, a SIGTERM (teardown stopping this run) unwinds this
+    process as `SystemExit(128 + SIGTERM)`, so the run never goes on past its publish. The real
+    launcher holds the signal back while its child runs: it stops the child by its one rule (a
+    child that took the tenant lock is waited for, never signalled), kills its process group (its own session, which
+    no signal to this process reaches) and only then delivers the signal here (#1379 r3). The
+    handler found is put back after. Only in the main thread, the one a handler runs in."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def stop(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
+
+
+def publish_report(
+    publish: PublishLaunch | None, tenant: tenancy.Tenant, data_root: DataRoot,
+    records: tenancy.TenantDirectory,
+) -> PublishReport:
+    """The launch-time publish's outcome (#1108 P4, U7): the child is handed identifiers only
+    — the tenant id and the data root (O8: no login material passes through the run process)
+    — and its one report line is read back. The real launcher never raises and records every
+    outcome itself in the tenant records; a seam that raises is U11's `stale:operator`, never
+    fresh, recorded by the same recorder the launcher uses."""
+    from defender.tenancy import run_knowledge
+
+    try:
+        launch = publish if publish is not None else default_publish(records)
+        with stopped_by_sigterm():
+            line = launch(tenant.id, data_root=tenancy.data_root_for_child(data_root))
+    except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
+        from defender.tenancy import record_report
+
+        line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
+        record_report(records, tenant.id, line, by="launch-time publish")
+    return run_knowledge.read_publish_report(line)
+
+
+def resolve_knowledge(
+    tenant: tenancy.Tenant, *, pin: str | None, publish: PublishLaunch | None,
+    data_root: DataRoot, records: tenancy.TenantDirectory,
+) -> KnowledgeSource:
+    """Which export this run reads and why: the pinned one (no publish), else `current` after
+    the launch-time publish — or the refusal before the box (O-A, O9)."""
+    from defender.tenancy import run_knowledge
+
+    report = None if pin is not None else publish_report(publish, tenant, data_root, records)
+    try:
+        source = run_knowledge.resolve_source(tenant, report=report, pinned=pin)
+    except run_knowledge.KnowledgeRefused as refused:
+        sys.exit(f"[run.py] {refused}")
+    if source.kind == run_knowledge.STALE:
+        _logger.warning(f"knowledge is stale ({source.stale_kind}): the run reads the last "
+                        f"published snapshot {source.commit[:12]}; the publish said: "
+                        f"{source.reason}")
+    return source
+
+
+def copy_knowledge(tenant: tenancy.Tenant, source: KnowledgeSource, run_id: str) -> RunCopy:
+    """The run's own copy of its export (U9), made and owned by the calling process, or the
+    refusal before the box."""
+    from defender.tenancy import run_knowledge
+
+    try:
+        copy = run_knowledge.copy_for_run(tenant, source, run_id)
+    except (run_knowledge.KnowledgeRefused, OSError) as refused:
+        sys.exit(f"[run.py] the run's knowledge could not be copied: {refused}")
+    try:
+        tenancy.check_run_settings(copy.settings)
+    except TenantRefused as refused:
+        copy.remove()
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+    return copy
+
+
+def run_tenant_or_exit(
+    tenant: tenancy.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
+    records: TenantRecords, copy: RunCopy | None = None,
+) -> RunTenant:
+    """The accepted tenant ready to run — its grants and lead-zero dispatch from run start's
+    readiness function, over the run's own copy of its knowledge (#1108 P4, O-B: settings,
+    catalog and lessons from one export) — or the refusal, before the run dir, the box and any
+    model call, so tenant misconfiguration fails early. Refusals name the file to edit.
+
+    `dispatches_lead_zero` is False for an `--episode` sibling, which dispatches no turn-0
+    lead. Without `copy` (a direct caller), the grants are resolved over the tenant's own
+    folder. Its systems, access and case record are the tenant's current `records` (#1366 O6),
+    read once at setup (`read_records`; inside a job container, the ones its host helper read and
+    handed over). `defender_dir` is not read: the code tree holds no tenant knowledge (O1)."""
+    from defender.systems import run_tenant as run_tenant_mod
+
+    del defender_dir
+    roots = ({} if copy is None else
+             {"agent_root": copy.agent, "settings_root": copy.settings,
+              "stage_token": copy.token})
+    try:
+        return run_tenant_mod.run_tenant_for(
+            tenant, dispatches_lead_zero=dispatches_lead_zero, records=records, **roots)
+    except run_tenant_mod.TenantRefused as refusal:
+        sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
+
+
+def proxied_reads(tenant: RunTenant, *, down: Collection[str] = ()) -> tuple[str, ...]:
+    """The systems a run's read pass names (#1163, #1449): the tenant's granted systems that are
+    declared `http-proxy` in the knowledge the run reads, less `down`. The operator's run subtracts
+    the systems its start judged down; a job's helper subtracts none, since that judgement runs
+    adapter code (#1170 O5)."""
+    from defender.kit.access import AccessDeclaration
+    from defender.systems import system_status
+
+    proxied = {name for name, found in tenant.access.items()
+               if isinstance(found, AccessDeclaration) and name not in down}
+    return tuple(sorted(system_status.granted_systems(tenant.grants) & proxied))
+
+
+def write_knowledge_record(run_dir: Path, source: KnowledgeSource) -> None:
+    """The host-held knowledge-source record beside the run dir (U12): what every reader of
+    the run's knowledge status reads. A run that cannot write it does not start: a missing
+    record would read as unreadable everywhere (OD22')."""
+    from defender.tenancy import run_knowledge
+
+    path = RunPaths(run_dir).knowledge_source()
+    try:
+        run_knowledge.write_host_record(path, source)
+    except OSError as e:
+        sys.exit(f"[run.py] could not write the run's knowledge record {path}: {e}")
+
+
+def read_records(records: Any, tenant_id: Any) -> TenantRecords:
+    """The tenant's current system and case records (#1366 O6, R10), read ONCE at setup on the
+    host (the operator command, or a job's host helper), or a `[run.py]` refusal: the records
+    could not be reached, or the tenant is not imported (R8, named before anything else of the
+    tenant's settings is looked at, the alert mapping included)."""
+    from defender.systems import run_tenant as run_tenant_mod
+
+    try:
+        current = records.current_records(tenant_id)
+        run_tenant_mod.require_imported(current, tenant_id)
+    except TenantRefused as refused:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+    return current
+
+
+def write_versions_record(run_dir: Path, records: TenantRecords) -> None:
+    """The host-held record of which system and case versions the run read at its start (#1366
+    O6, P3; audit only), beside the knowledge-source record: every current version, disabled ones
+    too. A run that cannot write it does not start, as for the knowledge record."""
+    from defender.tenancy import run_knowledge
+
+    path = RunPaths(run_dir).record_versions
+    try:
+        run_knowledge.write_record_versions(path, records)
+    except OSError as e:
+        sys.exit(f"[run.py] could not write the run's record of versions {path}: {e}")
+
+
+def tenant_verdict(tenant: RunTenant, roster: RosterRead, *, warn: bool = True) -> TenantVerdict:
+    """R12 at run start (#1366): the tenant's systems over `roster` (the catalog this run reads),
+    its grants narrowed to them, or the `[run.py]` refusal. Read cold: no adapter code runs (a job's
+    host helper asks it too, #1170 O5, N7). Each ignored grant is warned of once, by the run half
+    (`warn`; a job's helper passes False, its container warns into the run's log)."""
+    from defender.systems import run_tenant as run_tenant_mod
+    from defender.systems.catalog import Catalog
+
+    try:
+        verdict = run_tenant_mod.tenant_systems(tenant, Catalog(roster))
+    except TenantRefused as refusal:
+        sys.exit(f"[run.py] this run's tenant {tenant.tenant_id!r} cannot be used: {refusal}")
+    if warn:
+        run_tenant_mod.warn_ignored(verdict)
+    return verdict
+
+
+def run_roster(defender_dir: Path) -> RosterRead:
+    """The adapters roster of the tree a run reads, read once at its start, or the `[run.py]`
+    refusal: an adapters tree that cannot be read stops the run before it exists. Read cold."""
+    from defender._paths import adapters_under
+    from defender.systems.verbs import RegistryError, read_roster
+
+    try:
+        return read_roster(adapters_under(defender_dir))
+    except RegistryError as unreadable:
+        sys.exit(f"[run.py] {unreadable}")
+
+
+def handed_records(launch: Any, *, label: str) -> TenantRecords:
+    """Inside a job container (#1170 A6): the tenant records its host helper read at setup and
+    handed over in the launch facts (`records`), or the `[run.py]` refusal naming why they are not
+    there. The container reads no database (O3)."""
+    from defender.tenancy.models import TenantRecords
+
+    try:
+        return TenantRecords.from_wire(launch.get("records"))
+    except ValueError as bad:
+        sys.exit(f"[run.py] {label}: the job's host helper handed no usable tenant records: {bad}")

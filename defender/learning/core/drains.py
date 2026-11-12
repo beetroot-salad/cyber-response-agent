@@ -710,6 +710,7 @@ def _open_delivery(
     paths: LoopPaths, *, directory: TenantDirectory, client: httpx.Client | None,
     identity: ForgeCredential | None, credential_config: Any,
     issuer_transport: httpx.BaseTransport | None, purpose: str = "drain",
+    relay: Callable[..., dict[str, Any]] | None = None,
 ) -> Iterator[TenantDelivery]:
     """Flow 4's front: the selected tenant's delivery, opened by `vc.opened_delivery` (its forge
     wiring from the tenant records, then its credential — the given one, else the tenant's forge
@@ -729,7 +730,7 @@ def _open_delivery(
             delivery = opened.enter_context(vc.opened_delivery(
                 tenant, defender_dir=process_defender_dir(), directory=directory, purpose=purpose,
                 client=client, identity=identity, credential_config=credential_config,
-                issuer_transport=issuer_transport))
+                issuer_transport=issuer_transport, relay=relay))
         except RecordsUnreachable as down:
             raise _Refused(f"the tenant {tenant.id}'s records could not be read: {down}", transient=True) from None
         except TenantRefused as unbound:
@@ -946,7 +947,7 @@ def _run_opened_batch(  # noqa: PLR0913 — one batch, kept whole
     disposition: BatchDisposition | None = None
     consumed = False
     try:
-        box = (start_box or delivery.start_box)(batch.box_request())
+        box = start_box(batch.box_request()) if start_box is not None else delivery.start_batch_box(batch)
         # The lanes' handle: the box is reachable only inside a run window (#1195).
         runs = box_mod.BoxRuns(box)
         work_ok = False
@@ -1007,8 +1008,12 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
     issuer_transport: httpx.BaseTransport | None = None,
     start_box: Callable[..., Any] | None = None,
     stop_box: Callable[..., None] = box_mod.stop_box,
+    container: Any = None,
 ) -> int:
-    """The lessons lane's tick into the selected tenant's repository (flow 4). `directory` is
+    """The lessons lane's tick into the selected tenant's repository (flow 4). `container`, the post-step's job
+    container (#1170, `learning.branch.container.JobContainer`): the tenant records, the forge credential, the batch's
+    publish, draft and box are then the per-job host helper's, asked over the job socket (no database or forge login
+    here, O3, O4, C23). `directory` is
     the tenant records (else the ones `DEFENDER_DATABASE_DSN` names); `client` the forge's HTTP
     client (one is built when absent); `identity` the tenant's delivery credential, else the
     tenant's forge credential minted through its live generation (`credential_config` the host's
@@ -1016,7 +1021,7 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
     `start_box`/`stop_box` the batch's box (default `TenantDelivery.start_box`, sandbox
     required, and `box.stop_box`)."""
     _validate_merge_mode()
-    records = _drain_directory(directory)
+    records, credential, relay = _drain_sources(container, directory=directory, identity=identity)
     # The lane's label reaches its work step bound into the DEFAULT seam, so an injected seam
     # keeps its call shape (#1134).
     if trigger_author is None:
@@ -1024,8 +1029,9 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
     seam = trigger_author
 
     def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
-        return _open_delivery(paths, directory=records, client=client, identity=identity,
-                              credential_config=credential_config, issuer_transport=issuer_transport)
+        return _open_delivery(paths, directory=records, client=client, identity=credential,
+                              credential_config=credential_config, issuer_transport=issuer_transport,
+                              relay=relay)
 
     # The root is opened once, here, and handed inward; a missing root stops the stage.
     with LearningState.open(paths) as state, state.lock(
@@ -1041,6 +1047,25 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
             ),
             open_delivery=open_delivery, start_box=start_box, stop_box=stop_box,
         ))
+
+
+def _drain_sources(container: Any, *, directory: TenantDirectory | None,
+                   identity: ForgeCredential | None) -> tuple[Any, ForgeCredential | None, Any]:
+    """The drain's tenant records, forge credential and relay: a job container's (#1170: the helper answers them over
+    the job socket; an `identity` given still wins; with no `container` and no `directory`, the one the environment's job
+    socket names), else `directory` (or the DSN's) with `identity` and no relay."""
+    found = container if container is not None or directory is not None else _job_container()
+    if found is None:
+        return _drain_directory(directory), identity, None
+    return found.records(), identity if identity is not None else found.forge_credential(), found.ask
+
+
+def _job_container() -> Any:
+    """The job container this drain runs in (#1170: the post-step's), by the job socket in the environment; None on a
+    host."""
+    from defender.learning.branch.container import JobContainer
+
+    return JobContainer.in_environ()
 
 
 def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two steps, the forge, the issuer, the box

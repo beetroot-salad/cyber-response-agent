@@ -22,7 +22,7 @@ from defender import box as box_mod
 from defender.box import _lifecycle
 from defender.tests.e2e._box665 import RecordingDocker
 from defender.tests.e2e._spec771 import requires_real_box
-from defender.tests.sandbox.test_run_box import _batch, _status, live_worktree_base  # noqa: F401 — a fixture
+from defender.tests.sandbox.test_run_box import _batch, _exec, _status, live_worktree_base  # noqa: F401 — a fixture
 from defender.tests.support.sandbox import _box1195 as X
 from defender.tests.support.sandbox._box1279 import request_lane
 from defender.tests.support.sandbox._box1343 import input_open
@@ -157,3 +157,45 @@ def test_a2_a_drain_box_stops_when_its_window_s_holder_is_killed(live_worktree_b
             if holder.poll() is None:
                 holder.kill()
                 holder.wait(timeout=10)
+
+
+@requires_real_box
+@pytest.mark.box
+def test_a2_a_drain_box_reached_over_the_relay_runs_only_inside_its_windows_on_a_real_daemon(
+        live_worktree_base: Path, monkeypatch):  # noqa: F811 — the imported fixture
+    """#1170 review of PR #1467: the drain's batch box as a job container reaches it. The helper's side (`relay_window`,
+    `relay_halt`, `relay_exec`, `relay_stop` over the real daemon) answers the job's side (`BoxRuns` over a
+    `RelayTransport`), in one process: the box is stopped before the work, runs inside each of two windows,
+    is `exited` between and after them, and is gone after its teardown."""
+    X.clear_opt_out(monkeypatch)
+    with contextlib.ExitStack() as stack:
+        batch, _tenant = stack.enter_context(_batch(live_worktree_base))
+        held = box_mod.start_box(batch.box_request())
+        stack.callback(lambda: _status(held.name) and box_mod.stop_box(held))
+        windows = box_mod.BoxRuns(held)
+
+        def helper(name: str, **fields):  # noqa: ANN202 — the helper's answers, as `job_host` gives them
+            if name == "box.exec":
+                return box_mod.relay_exec(held, box_mod.run_docker, fields["frame"], cwd=fields["cwd"],
+                                          timeout=fields["timeout"])
+            if name == "box.window":
+                return box_mod.relay_window(windows)
+            if name == "box.halt":
+                return box_mod.relay_halt(windows)
+            if name == "box.stop":
+                return box_mod.relay_stop(held, box_mod.run_docker, windows)
+            raise AssertionError(name)
+
+        relayed = box_mod.BoxExecutor(name=held.name, transport=box_mod.RelayTransport(helper, "h-live"))
+        runs = box_mod.BoxRuns(relayed)
+        runs.stop()
+        assert _status(held.name) == "exited", "the batch's box ran before its first window"
+        for n in (1, 2):
+            with runs.run() as box:
+                assert _status(held.name) == "running", f"window {n} did not start the box"
+                assert box is relayed
+                # This fixture's code tree carries no in-box command helper, so the box is proven usable by a plain exec.
+                assert _exec(held, "echo", f"window-{n}") == (0, f"window-{n}\n"), f"window {n}'s box ran nothing"
+            assert _status(held.name) == "exited", f"the box outlived window {n}"
+        box_mod.stop_box(relayed)
+        assert _status(held.name) == "", "the teardown over the relay left the box"

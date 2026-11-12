@@ -13,7 +13,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import Any
+from typing import Any, Protocol
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -44,7 +44,7 @@ from ._docker import BoxStartConflict, Create, claim_label, DockerFn, START_TOKE
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._host_env import provider_scrubbed_environ
 from ._spec import DEFAULT_SPEC, _HostTransport, _text
-from ._spec import _DockerTransport
+from ._spec import _DockerTransport, RelayRequest, RelayTransport
 
 _logger = logging.getLogger(__name__)
 
@@ -139,6 +139,14 @@ def _run_lane_mounts(
     mounts.append(_LaneMount("run clock directory", clock_dir(run_dir), data_root, PurePosixPath(CLOCK_TARGET),
                              readonly=True))
     return mounts
+
+
+def run_lane_sources(
+    run_dir: Path, defender_dir: Path, tenant_agent: Path | None = None, staged_token: Path | None = None,
+) -> tuple[Path, ...]:
+    """The host source of every bind the run lane makes for these arguments (`_run_lane_mounts`, the list its argv is
+    rendered from): what a starter that does not own those folders judges before the start (#1170 H10)."""
+    return tuple(Path(m.source) for m in _run_lane_mounts(run_dir, defender_dir, tenant_agent, staged_token))
 
 
 def _refuse_a_start_that_conflicts(
@@ -867,9 +875,12 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     write_verdict: Callable[[dict], None] | None = None,
     tenant_id: TenantId | None = None, staged_token: Path | None = None,
     require_sandbox: bool = False, start_token: str | None = None,
-    running_wait: float = 30.0,
+    running_wait: float = 30.0, relay: RelayRequest | None = None,
 ) -> BoxExecutor:
-    """Start the run's box. `require_sandbox` refuses the unsandboxed opt-out whatever the
+    """Start the run's box. `relay` is a job container's socket client (#1170 A4): the run box is then started by the
+    per-job host helper (`box.start` of the `shell` kind at the run's id), which derives every mount, name and label
+    from its claim, so every other argument is the helper's to decide and is not sent; the box comes back reached
+    through `RelayTransport`, and a refused or unanswered start is a `BoxFault`. `require_sandbox` refuses the unsandboxed opt-out whatever the
     environment says (#1342 R2: a job-lane run never degrades to host execution).
     `tenant_agent` is the run's agent half (its run copy's `stage/agent/`, #1108 P4), bound
     read-only at the model view's `/agent`; `staged_token` is the startup token beside it in the
@@ -883,6 +894,11 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     `BoxRuns.run`, attach, #1344 amendment 2).
     The tenant arguments are illegal with a `BoxRequest`, which carries its own mounts (and its
     own `tenant_id`)."""
+    if relay is not None:
+        if isinstance(run_dir_or_request, BoxRequest):
+            raise TypeError("start_box(request, relay=…) is not served: a relayed box is started by its helper, "
+                            "which decides its shape; ask relay_start for a box of another kind")
+        return relay_start(relay, "shell", Path(run_dir_or_request).name)
     if isinstance(run_dir_or_request, BoxRequest):
         request = run_dir_or_request
         # `is not None`, not a comparison with the env-resolved DEFAULT_SPEC. The env is not
@@ -960,23 +976,31 @@ def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged tok
 
 
 def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
-    """Remove the box's container. Through `docker` when one is given, else through the docker
-    the box was created with (#1195), so the whole lifecycle reaches one daemon. A run box
-    removes itself once stopped (#1343 B10), so one already being removed, or gone, is torn
-    down; its attached start is then ended, whether or not the removal was proven (ending it
-    ends the box's input, so the box stops on its own)."""
+    """Remove the box's container: its lifecycle's teardown (`lifecycle_of`). A docker-backed box is removed through
+    `docker` when one is given, else through the docker it was created with (#1195), so the whole lifecycle reaches one
+    daemon; a box reached over the job socket is removed by its helper, which proves it (#1170 A4)."""
     if not box.name:
         return
+    lifecycle_of(box, docker=docker).teardown()
+
+
+def relay_start(relay: RelayRequest, kind: str, ident: str) -> BoxExecutor:
+    """A box of `kind` (`shell`, `oracle`, `batch`) for the id `ident`, started by the per-job host helper over the
+    job socket (#1170 A4, O9: the request names only the kind and an id the helper minted). The executor reaches it
+    through `RelayTransport`; its run clock file, when the helper made one, is the job's to write (it lies in the
+    tenant's folder, mounted at its own path). A refusal, or a helper that cannot be reached, is a `BoxFault` naming
+    it; nothing runs elsewhere."""
     try:
-        reason = _remove_container(docker or _carried_docker(box), box.name)
-    finally:
-        starter = getattr(box, "starter", None)
-        if starter is not None:
-            _end_starter(starter)
-    if reason is not None:
-        raise BoxFault(f"could not tear down the box {box.name}: {reason}")
-    if box.clock_file is not None:
-        remove_clock(box.clock_file)
+        answer = relay("box.start", kind=kind, id=ident)
+    except Exception as refused:  # noqa: BLE001 — a refused or unanswered start is this one fault
+        raise BoxFault(f"the helper did not start the {kind} box for {ident}: {type(refused).__name__}: "
+                       f"{refused}") from refused
+    handle = answer.get("handle") if isinstance(answer, dict) else None
+    if not isinstance(handle, str) or not handle:
+        raise BoxFault(f"the helper's answer to the {kind} box start for {ident} names no handle")
+    clock = answer.get("clock_file")
+    return BoxExecutor(transport=RelayTransport(relay, handle), name=handle,
+                       clock_file=Path(clock) if isinstance(clock, str) and clock else None)
 
 
 def _carried_docker(box: object) -> DockerFn:
@@ -998,58 +1022,149 @@ def _carried_docker(box: object) -> DockerFn:
 _STOPPED_STATES = frozenset({"exited", "dead"})
 
 
-class BoxRuns:
-    """The lanes' handle on the batch's box (#1195): the box is reachable only inside `.run()`,
-    one agent run's window, so no spawn can run in it outside one and none can forget to."""
+class BoxLifecycle(Protocol):
+    """What a box's owner can do to it besides run a command (#1170 A4): each box's own, so every caller (the lanes'
+    windows, an ending's stop, a cancelled attempt, the teardown) asks the box rather than a daemon it may not reach.
+    A docker-backed box answers through its daemon (`DockerLifecycle`); a box reached over the job socket through the
+    helper that started it (`RelayTransport`).
 
-    def __init__(self, box: object) -> None:
-        sandboxed = getattr(box, "sandboxed", None)
-        if sandboxed is None:
-            raise BoxFault(f"cannot tell whether {box!r} is a sandboxed box; refusing to run beside it")
+    - `managed`: whether there is a box to stop and start at all (the unsandboxed fallback has none);
+    - `halt()`: stop the box, proven, keeping it for a later window; `BoxFault` when the stop is not proven;
+    - `open_window(hold)`: start the stopped box for one agent run's window, attached; a docker-backed window's
+      attached start is handed to `hold` as soon as it exists (the caller ends it), a relayed one is held by the helper;
+    - `teardown()`: remove the box for good (`stop_box`)."""
+
+    @property
+    def managed(self) -> bool: ...
+
+    def halt(self) -> None: ...
+
+    def open_window(self, hold: Callable[[subprocess.Popen[bytes]], None]) -> None: ...
+
+    def teardown(self) -> None: ...
+
+
+def lifecycle_of(box: object, *, docker: DockerFn | None = None) -> BoxLifecycle:
+    """The box's lifecycle: its relay's, when it is reached over the job socket, else its daemon's (through `docker`
+    when one is given, else the one the box was created with). The one place the two kinds of box are told apart for
+    anything but a command's exchange."""
+    transport = getattr(box, "transport", None)
+    if isinstance(transport, RelayTransport):
+        return transport
+    return DockerLifecycle(box, docker=docker)
+
+
+class DockerLifecycle:
+    """A docker-backed box's lifecycle (`BoxLifecycle`), through the docker it was created with (#1195)."""
+
+    def __init__(self, box: object, *, docker: DockerFn | None = None) -> None:
+        self._box = box
         self._name = str(getattr(box, "name", "") or "")
-        if sandboxed and not self._name:
-            raise BoxFault(f"the sandboxed box {box!r} names no container")
-        self._box: Any = box
-        self._docker: DockerFn | None = _carried_docker(box) if sandboxed else None
+        #: Resolved now: a sandboxed box that carries no docker is a `BoxFault` here, never a fall-back on a daemon it
+        #: was not created through.
+        self._daemon: DockerFn = docker or _carried_docker(box)
         #: The run box removes itself once stopped (#1343 B10): being removed, or gone, is
         #: stopped for it alone. A stop/start box is removed only by its owner, so for it
         #: either state is a box that did not stop as asked.
         self._auto_removed = getattr(box, "auto_removed", False) is True
-        #: The open window's attached start (#1344 amendment 2): this process holds its input,
-        #: so the box runs only while the window is open and its holder lives.
-        self._window: subprocess.Popen[bytes] | None = None
+
+    @property
+    def managed(self) -> bool:
+        return bool(getattr(self._box, "sandboxed", False))
+
+    def _docker(self) -> DockerFn:
+        return self._daemon
 
     def _status(self) -> str | None:
-        assert self._docker is not None
-        return _inspect_field(self._docker, self._name, "{{.State.Status}}")
+        return _inspect_field(self._docker(), self._name, "{{.State.Status}}")
 
     def _stopped(self, status: str | None) -> bool:
         if status in _STOPPED_STATES:
             return True
         if not self._auto_removed:
             return False
-        assert self._docker is not None
         # Gone is asked again of a daemon that must answer, so an unreachable one is no proof.
         return status == "removing" or (
-            status is None and _container_status(self._docker, self._name) is None)
+            status is None and _container_status(self._docker(), self._name) is None)
 
-    def stop(self) -> None:
-        """Stop the box, proven: `docker stop -t 0` kills every process in it, an agent's
-        leftovers included, and the box must then report `exited` or `dead` (or, for the run box,
-        which removes itself, be being removed or gone), else `BoxFault`."""
-        if self._docker is None:
+    def halt(self) -> None:
+        """`docker stop -t 0` kills every process in the box, an agent's leftovers included, and the box must then
+        report `exited` or `dead` (or, for the run box, which removes itself, be being removed or gone), else
+        `BoxFault`."""
+        if not self.managed:
             return
-        name = self._name
-        try:
-            proc = _call(self._docker, ["docker", "stop", "-t", "0", name])
-            status = self._status()
-        finally:
-            self._end_window()
+        proc = _call(self._docker(), ["docker", "stop", "-t", "0", self._name])
+        status = self._status()
         if not self._stopped(status):
             raise BoxFault(
-                f"could not stop the box {name} (stop rc={proc.returncode}: "
+                f"could not stop the box {self._name} (stop rc={proc.returncode}: "
                 f"{(proc.stderr or '').strip()}; status {status!r})"
             )
+
+    def open_window(self, hold: Callable[[subprocess.Popen[bytes]], None]) -> None:
+        """The stopped box started attached (#1344 amendment 2), its attached start handed to `hold` before the wait
+        for it to report running, so a start that never runs is still ended by its holder."""
+        if not self.managed:
+            return
+        docker, name = self._docker(), self._name
+        status = self._status()
+        if status != "exited":
+            raise BoxFault(
+                f"refusing to start the box {name} for an agent run: its status is "
+                f"{status!r}, not 'exited'"
+            )
+        window = _attach(docker, name)
+        hold(window)
+        try:
+            _await_running(docker, name, window, _WINDOW_RUNNING_WAIT)
+        except _StarterExited as exited:
+            # The private class must not reach a durable record other packages read; a lane
+            # box is never `--rm`, so the run box's name-reuse reasoning does not apply.
+            raise BoxFault(str(exited)) from exited
+
+    def teardown(self) -> None:
+        """Remove the container through the lifecycle's docker. A run box removes itself once
+        stopped (#1343 B10), so one already being removed, or gone, is torn down; its attached start is then ended,
+        whether or not the removal was proven (ending it ends the box's input, so the box stops on its own)."""
+        box = self._box
+        try:
+            reason = _remove_container(self._daemon, self._name)
+        finally:
+            starter = getattr(box, "starter", None)
+            if starter is not None:
+                _end_starter(starter)
+        if reason is not None:
+            raise BoxFault(f"could not tear down the box {self._name}: {reason}")
+        clock_file = getattr(box, "clock_file", None)
+        if clock_file is not None:
+            remove_clock(clock_file)
+
+
+class BoxRuns:
+    """The lanes' handle on the batch's box (#1195): the box is reachable only inside `.run()`,
+    one agent run's window, so no spawn can run in it outside one and none can forget to. The
+    box's own lifecycle (`lifecycle_of`) stops and starts it, whichever side holds its daemon."""
+
+    def __init__(self, box: object) -> None:
+        sandboxed = getattr(box, "sandboxed", None)
+        if sandboxed is None:
+            raise BoxFault(f"cannot tell whether {box!r} is a sandboxed box; refusing to run beside it")
+        name = str(getattr(box, "name", "") or "")
+        if sandboxed and not name:
+            raise BoxFault(f"the sandboxed box {box!r} names no container")
+        self._box: Any = box
+        self._lifecycle = lifecycle_of(box)
+        #: The open window's attached start (#1344 amendment 2), when this process holds it: its
+        #: input is held here, so the box runs only while the window is open and its holder lives.
+        self._window: subprocess.Popen[bytes] | None = None
+
+    def stop(self) -> None:
+        """Stop the box, proven (`BoxLifecycle.halt`), and end the open window's attached start
+        whatever the stop proved."""
+        try:
+            self._lifecycle.halt()
+        finally:
+            self._end_window()
 
     def _end_window(self) -> None:
         """End the open window's attached start, if any: its input closes, so a box the stop did
@@ -1058,31 +1173,15 @@ class BoxRuns:
         if window is not None:
             _end_starter(window)
 
-    @contextlib.contextmanager
-    def run(self) -> Iterator[BoxExecutor]:
-        """One agent run's window on the box: started attached (#1344 amendment 2), its input held
-        by this process for the window and closed at its end, so the box never outlives the
-        window's holder; then the proven stop."""
-        if self._docker is None:
-            yield self._box
-            return
-        name = self._name
+    def _hold(self, window: subprocess.Popen[bytes]) -> None:
+        self._window = window
+
+    def open_window(self) -> None:
+        """Start the stopped box for one window, proven running, and lift a loss an earlier window
+        found (#1421 decision 4; the fence's refusal is never lifted). A start that fails is
+        stopped, best-effort, before the fault propagates. The window is closed by `stop`."""
         try:
-            status = self._status()
-            if status != "exited":
-                raise BoxFault(
-                    f"refusing to start the box {name} for an agent run: its status is "
-                    f"{status!r}, not 'exited'"
-                )
-            self._window = _attach(self._docker, name)
-            try:
-                _await_running(self._docker, name, self._window, _WINDOW_RUNNING_WAIT)
-            except _StarterExited as exited:
-                # The private class must not reach a durable record other packages read; a lane
-                # box is never `--rm`, so the run box's name-reuse reasoning does not apply.
-                raise BoxFault(str(exited)) from exited
-            # A proven start: a loss found in an earlier window no longer refuses this one's
-            # commands (#1421 decision 4). The fence's refusal is never lifted.
+            self._lifecycle.open_window(self._hold)
             readmit = getattr(self._box, "readmit", None)
             if callable(readmit):
                 readmit()
@@ -1091,6 +1190,16 @@ class BoxRuns:
             with contextlib.suppress(BoxFault):
                 self.stop()
             raise
+
+    @contextlib.contextmanager
+    def run(self) -> Iterator[BoxExecutor]:
+        """One agent run's window on the box: started attached (#1344 amendment 2), its input held
+        for the window and closed at its end, so the box never outlives the window's holder; then
+        the proven stop."""
+        if not self._lifecycle.managed:
+            yield self._box
+            return
+        self.open_window()
         try:
             yield self._box
         except BaseException:

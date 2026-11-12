@@ -65,7 +65,7 @@ from ..close_tool import register_close_tool
 from defender.systems.circuit_breaker import RunAborted
 from ..permission.policies import _common
 from defender.providers import BuiltModel
-from ..run_clock import ClockSource
+from ..run_clock import ClockOrigin, ClockSource, origin_reading
 from ..run_state import RunState, run_state_of
 from defender.kit.access import RequestAccess
 from ..tools import (
@@ -314,8 +314,8 @@ async def _drive_agent(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the loop's 
         _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
-    except (run_end.CallRecordWriteFailed, providers.ProviderDown, providers.ProviderRejected,
-            ModelHTTPError, box_mod.BoxEnding, BaseExceptionGroup) as e:
+    except (run_end.CallRecordWriteFailed, run_end.ProxyAccessLost, providers.ProviderDown,
+            providers.ProviderRejected, ModelHTTPError, box_mod.BoxEnding, BaseExceptionGroup) as e:
         # These failures end the run by name. Concurrent leads may deliver any of them inside an
         # exception group; a group that carries none propagates as itself.
         # One owner picks which ending the failure carries (`run_endings`): the box first, then a
@@ -654,6 +654,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     orient_shim: orient.ShimRunner | None = None,
     run_state: RunState | None = None,
     clock: ClockSource | None = None,
+    clock_origin: ClockOrigin | None = None,
     #: The review gate's state container MAIN's deps use (`AgentDeps.review_state`), when the
     #: caller holds it (#1342 r5 C2: a job's facts holder, which reads the close however the
     #: run ends). `None`: a fresh one of the run's own.
@@ -674,8 +675,13 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # `clock` is the run clock's source (#1255 "Time"): a zero-argument callable returning an
     # aware UTC datetime, the single source every model-visible time of the run is read from
     # (`RunState.now`). Omitted, the host's own (wall time).
+    #
+    # `clock_origin` is the run clock's reading at the run's start when it is not the source's
+    # own (`run.py --as-of`, #1347 O5): the clock starts there and advances by the source.
     run_dir, run_id = run.run_dir, str(run.id)
     state = _run_state_at_boundary(run_state, run_dir, run_id, clock)
+    if clock_origin is not None:
+        state.resume_clock(origin_reading(clock_origin, state.clock.at(state.clock.ticks())), 0.0)
     state.access = access
     _box_follows_run_clock(box, state)
     model_name = resolve_main_model(model_name)

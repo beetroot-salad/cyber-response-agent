@@ -261,7 +261,10 @@ def _answer(ctx: VerbContext, name: str, params: dict):
     if entry is None:
         return {{"rows": []}}
     if "fault" in entry:
-        raise getattr(faults, entry["fault"])(entry.get("detail", "upstream said no"))
+        fault = getattr(faults, entry["fault"])(entry.get("detail", "upstream said no"))
+        if entry.get("origin") is not None:  # as the proxy client marks it (#1363 O4)
+            fault.origin = entry["origin"]
+        raise fault
     return entry["payload"]
 
 
@@ -374,11 +377,23 @@ class Estate:
         return payload
 
     def fail(self, system: str, verb: str, params: Mapping[str, Any] | None, *,
-             fault: str = "UpstreamFault", detail: str = "upstream said no") -> None:
-        """The real system errors on this call — a REAL `AdapterFault` subclass."""
+             fault: str = "UpstreamFault", detail: str = "upstream said no",
+             origin: str | None = None) -> None:
+        """The real system errors on this call — a REAL `AdapterFault` subclass. `origin` (#1363 O4)
+        marks it as the proxy client would: `setup` or `access` is our own failure, not the system's."""
         assert fault in ("UpstreamFault", "TransportFault", "ConfigFault", "AdapterFault"), fault
         key = f"{system}|{verb}|" + ("*" if params is None else canonical(params))
-        self._put(key, {"fault": fault, "detail": detail})
+        self._put(key, {"fault": fault, "detail": detail, "origin": origin})
+
+    def break_settings(self, system: str, detail: str = "HR_TIMEOUT_SEC is not set") -> None:
+        """The system's adapter settings check fails (a `ConfigFault`): judged down for a run, so
+        outside its read grant (#1363 O2, D5). Call before the tenant is placed."""
+        path = self.adapters / f"{system.replace('-', '_')}_adapter.py"
+        text = path.read_text(encoding="utf-8")
+        ok = '    return None\n\n\ndef _answer'
+        assert ok in text, "the stub adapter's settings check was not found"
+        path.write_text(text.replace(ok, f'    raise faults.ConfigFault({detail!r})\n\n\ndef _answer', 1),
+                        encoding="utf-8")
 
     # --- observing ---------------------------------------------------------------------
     def calls(self, system: str | None = None, verb: str | None = None) -> list[dict]:

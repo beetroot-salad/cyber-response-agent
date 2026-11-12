@@ -13,6 +13,7 @@ pitfalls add-on), adapters in a product checkout.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -34,7 +35,17 @@ from defender.tests.support.runtime.engine._declared869 import write_adapter
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 from defender.learning.leads.lead_extraction import collect_general_failures
 from defender.investigation import tools
-from defender.systems.circuit_breaker import error_class_for_exit
+from defender.learning import lead_repository
+from defender.learning.leads import lead_extraction
+from defender.records._layout import RunPaths
+from defender.systems.circuit_breaker import (
+    AGENT_FIXABLE_ERROR_CLASS,
+    DENIED_ERROR_CLASS,
+    INFRA_ERROR_CLASS,
+    error_class_for_exit,
+    is_infra_failure,
+)
+from defender.tests.support.shared import _request_cut1363 as RC
 from defender.investigation.query_tool import resolve_query_id
 from defender.investigation.sql_engine import sql as defender_sql
 from defender.knowledge._query_rules import ABOVE_GUARD_QUERY_ID, BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
@@ -566,3 +577,47 @@ def test_a_second_curation_extends_the_section_it_finds(tmp_path, monkeypatch):
     assert landed.count(PITFALLS_SECTION) == 1
     assert [ln for ln in landed.splitlines() if ln.startswith("## ")] == [
         *REDUCER_HEADINGS, PITFALLS_SECTION]
+
+
+# --- #1363 r8.4, D12: a request fault's row is its own class, never an agent lesson ---------------------
+
+def _run_dir_with_failed_calls(tmp_path: Path, exits: dict[str, int]) -> Path:
+    """A run folder whose queries table holds one failed `cmdb get-host` row per lead in `exits` (lead -> exit
+    code), with no `error_class` column (an old table, so readers derive it from the exit code) and its payload."""
+    run_dir = tmp_path / "run-1363"
+    paths = RunPaths(run_dir)
+    rows = []
+    for seq, (lead, code) in enumerate(exits.items()):
+        paths.gather_raw.mkdir(parents=True, exist_ok=True)
+        paths.lead_claim(lead).write_text(json.dumps({"goal": "look at web-1", "what_to_summarize": ["host"]}))
+        (paths.gather_raw / lead).mkdir(exist_ok=True)
+        (paths.gather_raw / lead / "0.json").write_text(json.dumps({"error": "x"}))
+        rows.append({"lead_id": lead, "seq": seq, "system": "cmdb", "verb": "get-host", "query_id": "cmdb.get-host",
+                     "params": {"host": "web-1"}, "raw_command": "cmdb get-host host=web-1",
+                     "payload_path": f"gather_raw/{lead}/0.json", "exit_code": code, "payload_status": "error",
+                     "payload_digest": f"exit={code}; cut", "payload_sha256": "", "system_key": ""})
+    paths.executed_queries.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return run_dir
+
+
+def test_1363_the_request_cut_exit_maps_to_an_error_class_of_its_own():
+    """The dedicated exit maps through `error_class_for_exit` to a class that is none of `agent-fixable`,
+    `infra`, `denied` or no error, and the breaker does not count it as an infra failure. The class's name is
+    the code stage's. #1363 D12."""
+    klass = error_class_for_exit(RC.REQUEST_CUT_EXIT)
+    assert isinstance(klass, str), klass
+    assert klass not in {AGENT_FIXABLE_ERROR_CLASS, INFRA_ERROR_CLASS, DENIED_ERROR_CLASS}, klass
+    assert is_infra_failure(RC.REQUEST_CUT_EXIT) is False
+
+
+def test_1363_a_request_cut_row_leaves_no_pitfall_while_an_agent_fixable_row_does(tmp_path):
+    """Read back from a queries table, a failed call with the dedicated exit is filed as no pitfall, where the
+    identical call failed with exit 1 (positive control, agent-fixable) is filed as one. Both go through the
+    table reader, the extraction and the pitfalls collector. #1363 D12."""
+    run_dir = _run_dir_with_failed_calls(tmp_path, {"l-001": RC.REQUEST_CUT_EXIT, "l-002": 1})
+    joined = lead_repository.joined(run_dir)
+    executed = lead_extraction.extract_from_joined(joined)
+    assert {e.lead_id: e.error_class for e in executed}["l-002"] == AGENT_FIXABLE_ERROR_CLASS, "control: not agent-fixable"
+    queued = lead_extraction.collect_general_failures(executed, run_dir, catalog=[])
+    assert [r["pitfall_id"].split(":")[1] for r in queued] == ["l-002"], (
+        f"expected the exit-1 row alone in the pitfalls queue, got {[(r['pitfall_id'], r['error_class']) for r in queued]}")

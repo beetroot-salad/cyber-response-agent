@@ -237,6 +237,21 @@ def test_o6_a_ticket_the_store_does_not_know_leaves_a_not_found_receipt(
     assert paths == [vendor.base_path + vendor.route(k) for k in (KEY, missing)]
 
 
+def test_1363_servicenow_not_found_re_raise_keeps_the_system_origin(tmp_path, data_root, checkout_roster):
+    """ServiceNow's 404 is re-raised as a fresh `UpstreamFault` naming sys_id; it carries the origin
+    `system` and is not the proxy's own, like the 404 it came from. #1363 B2, G26."""
+    from defender.kit.faults import UpstreamFault
+
+    missing = "0" * 32
+    with R.planted(tmp_path, data_root, SERVICENOW) as rig:
+        rig.reply(missing, 404, {"error": {"message": "No Record found"}})
+        with pytest.raises(UpstreamFault) as raised:
+            rig.comment(checkout_roster, missing)
+
+    assert "sys_id" in raised.value.detail, "positive control: this is the re-raised fault"
+    assert (raised.value.status, getattr(raised.value, "origin", None), raised.value.proxy_own) == (404, "system", False)
+
+
 # ======================================================================================
 # #1374: the ready-made adapters read a case's comments, for the host's read-back.
 # ======================================================================================

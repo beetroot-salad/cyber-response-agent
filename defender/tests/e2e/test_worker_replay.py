@@ -1,20 +1,23 @@
 """#1342 O16: one hermetic replay through the real worker lane, child process included.
 
 The real `Worker` (in-process) over a per-test database claims a queued investigation, writes the
-launch files and spawns `_job_entry1342.py`, which runs the real job entry with the replay harness's
+launch files and spawns `_helper_child1170.py`: the real per-job host helper (#1170 r4: admission, launch check, publish
+and the run's folders are its) whose job container is `_job_entry1342.py`, which runs the real in-container job entry with the replay harness's
 seams (an unboxed executor handed through the lifecycle's `start_box` seam, never the environment;
 a replay model closing with the golden's disposition). The row is read back from the database."""
 from __future__ import annotations
 
 import hashlib
 import json
-import sys
+import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from defender.tests.e2e._replay_harness import priced_billed, priced_cost
 from defender.tests.support.presentation import _cost_page_1377 as C
+from defender.tests.support.jobs._job_helper import helper_child, no_proxy_records
 from defender.tests.support.jobs._jobs1342 import (
     DEFENDER,
     StandInContainers,
@@ -31,18 +34,25 @@ from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, r
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.e2e]
 
-ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
+
+
+@pytest.fixture
+def short_root():
+    """The data root, short: the helper's job socket lives under it and a unix socket's path holds about 100 bytes, which
+    pytest's nested temporary folders overrun."""
+    root = Path(tempfile.mkdtemp(prefix="j", dir="/tmp"))
+    yield root
+    shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.mark.parametrize("line_ends", ["as stored", "CRLF", "padded", "decomposed", "zwnbsp", "feff_rich"])
 async def test_o16_a_replay_through_the_worker_lane_completes_with_its_disposition(
-        migrated_database, tmp_path, monkeypatch, line_ends):  # noqa: F811
+        migrated_database, tmp_path, monkeypatch, short_root, line_ends):  # noqa: F811
     """queued → completed with the golden's disposition, cost read from its sessions, knowledge current at the published commit; the run holds the alert's exact bytes, CRLF, padding whitespace, decomposed text and a U+FEFF inside a value included. (O16, r5 C1/C2: the real driver's review state is what the record's `report_committed` reads)"""
     from defender.records.formats import parse_report_text
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
-    root = tmp_path / "data"
-    root.mkdir()
+    root = short_root
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)  # the child reads tenant records here (r6 R6-2)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
@@ -74,12 +84,11 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         for shape in (b'"' + bom, bom + b'"', bom + bom, b"m" + bom + b"n", b'"k' + bom + b'ey":'):
             assert shape in golden_bytes, ("premise", shape)
     with B.run_tenant(tmp_path, root) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)  # R1: a set-up tenant has runs/
 
         def child(launch) -> list[str]:
-            return [sys.executable, str(ENTRY), "replay", t.commit, str(tmp_path / "marks"), "--job", launch.investigation_id,
-                    "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+            return helper_child("replay", t.commit, tmp_path / "marks", launch)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=golden_bytes)
@@ -115,24 +124,21 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
 
 
 async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_committed(
-        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+        migrated_database, tmp_path, monkeypatch, short_root):  # noqa: F811
     """The replay model commits the golden's report and the next model request raises (`KeyboardInterrupt`) inside the real driver: the job-end record still says `report_committed: true`, because the driver's own review state (the holder's dict) closed. (O8, M2, r5 C2)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
-    root = tmp_path / "data"
-    root.mkdir()
+    root = short_root
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)  # the child reads tenant records here (r6 R6-2)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     with B.run_tenant(tmp_path, root) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
-            return [sys.executable, str(ENTRY), "replay-fault-after-close", t.commit, str(tmp_path / "marks"),
-                    "--job", launch.investigation_id, "--tenant", launch.tenant_id,
-                    "--parent-pid", str(launch.parent_pid)]
+            return helper_child("replay-fault-after-close", t.commit, tmp_path / "marks", launch)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -150,28 +156,25 @@ async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_
 
 
 async def test_1345_o4_a_queued_job_whose_tenant_has_no_mapping_ends_failed_setup_refused_with_the_reason_on_stderr(
-        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+        migrated_database, tmp_path, monkeypatch, short_root):  # noqa: F811
     """The real worker and child over a tenant whose mapping row is gone (a job queued before the upgrade): the row ends
     `failed`/`setup_refused`/"run setup refused the job", no run folder, and the child's stderr carries
     `ALERT_MAPPING_MISSING`. The mapped replay above is the control. (#1345 O4, M2)"""
     from defender.records.formats import ALERT_MAPPING_MISSING
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
-    root = tmp_path / "data"
-    root.mkdir()
+    root = short_root
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     err_file = tmp_path / "child.stderr"
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     with B.run_tenant(tmp_path, root) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
-            return ["/bin/sh", "-c", 'exec "$@" 2>>"$0"', str(err_file), sys.executable, str(ENTRY), "replay", t.commit,
-                    str(tmp_path / "marks"), "--job", launch.investigation_id, "--tenant", launch.tenant_id,
-                    "--parent-pid", str(launch.parent_pid)]
+            return helper_child("replay", t.commit, tmp_path / "marks", launch, stderr_to=err_file)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -188,7 +191,7 @@ async def test_1345_o4_a_queued_job_whose_tenant_has_no_mapping_ends_failed_setu
 
 
 async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_alert_and_the_runs_stamped_label_as_launched(
-        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+        migrated_database, tmp_path, monkeypatch, short_root):  # noqa: F811
     """The real worker and child complete a run labelled with the alert's title at launch (the golden's `rule.description`
     under the default mapping); the tenant then replaces its mapping with one that would title it otherwise, and the
     alert, the run's provenance stamp and its launch record all keep the title it launched with. (#1345 Design "Alerts":
@@ -196,8 +199,7 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_alert_and_the_
     from defender.records.formats import DISPLAY_CAPS
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
-    root = tmp_path / "data"
-    root.mkdir()
+    root = short_root
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
@@ -207,12 +209,11 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_alert_and_the_
     launched_with, later = document["rule"]["description"][:DISPLAY_CAPS["title"]], document["rule"]["id"]
     assert launched_with != later, "premise: the two titles differ"
     with B.run_tenant(tmp_path, root) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
-            return [sys.executable, str(ENTRY), "replay", t.commit, str(tmp_path / "marks"), "--job", launch.investigation_id,
-                    "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+            return helper_child("replay", t.commit, tmp_path / "marks", launch)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -275,23 +276,23 @@ def _run_result(run: Path) -> dict:
     return [e for e in map(json.loads, lines) if e.get("type") == "result"][-1]
 
 
-async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated_database, tmp_path, monkeypatch):  # noqa: F811
+async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated_database, tmp_path, monkeypatch, short_root):  # noqa: F811
     """`cost_usd` is every priced response, all four billed counts priced: MAIN, the lead's final one included, and the
     review's; exact, and the run file agrees on the total at full precision and on every usage count. EXTENDED (r7 S5, S6): the
     run page's headline is that cost, and its bar is one segment per agent kind from the ledger. (S1, S2, S5)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
-    root = tmp_path / "data"
-    root.mkdir()
+    root = short_root
     _priced_env(monkeypatch, root, migrated_database)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
+    # Every system declared, as published: the priced run gathers from elastic, and a system with no access
+    # declaration is down by design (`no_proxy_records()` would leave nothing to gather). The helper signs with its seam.
     with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
-            return [sys.executable, str(ENTRY), "replay-priced", t.commit, str(tmp_path / "marks"), "--job",
-                    launch.investigation_id, "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+            return helper_child("replay-priced", t.commit, tmp_path / "marks", launch)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -337,22 +338,22 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
 
 
 async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_the_run_file_and_the_page_alike(
-        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+        migrated_database, tmp_path, monkeypatch, short_root):  # noqa: F811
     """The correlation lead's request raises an error that is no response: every other response is priced, and the job's cost,
     the run file's total and the page's headline are that sum, each "at least", with no correlation segment. (r7 S2a, S5, S6)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
-    root = tmp_path / "data"
-    root.mkdir()
+    root = short_root
     _priced_env(monkeypatch, root, migrated_database)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
+    # Every system declared, as published: the priced run gathers from elastic, and a system with no access
+    # declaration is down by design (`no_proxy_records()` would leave nothing to gather). The helper signs with its seam.
     with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
-            return [sys.executable, str(ENTRY), "replay-priced-unseen", t.commit, str(tmp_path / "marks"), "--job",
-                    launch.investigation_id, "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+            return helper_child("replay-priced-unseen", t.commit, tmp_path / "marks", launch)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -376,25 +377,25 @@ async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_th
 
 
 async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_report_and_marks_the_sum(
-        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+        migrated_database, tmp_path, monkeypatch, short_root):  # noqa: F811
     """Ledger inserts refused during the review (a real SQLite fault): same ending and report as the control; the sum lacks the review, is marked, and the child logs ERROR. (S3, S2, S5)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
-    root = tmp_path / "data"
-    root.mkdir()
+    root = short_root
     _priced_env(monkeypatch, root, migrated_database)
     err_file = tmp_path / "child.stderr"
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     modes: dict[str, str] = {}
+    # Every system declared, as published: the priced run gathers from elastic, and a system with no access
+    # declaration is down by design (`no_proxy_records()` would leave nothing to gather). The helper signs with its seam.
     with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
             mode = modes[launch.investigation_id]
-            return ["/bin/sh", "-c", 'exec "$@" 2>>"$0"', str(err_file if mode.endswith("fault") else tmp_path / "control.stderr"),
-                    sys.executable, str(ENTRY), mode, t.commit, str(tmp_path / mode), "--job", launch.investigation_id,
-                    "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+            return helper_child(mode, t.commit, tmp_path / mode, launch,
+                                stderr_to=err_file if mode.endswith("fault") else tmp_path / "control.stderr")
 
         async with job_store(migrated_database) as store:
             ids = []

@@ -268,12 +268,12 @@ def test_t12_a_store_the_proxy_saw_fail_keeps_the_store_wording(tmp_path, data_r
 
 
 def test_t13_a_relayed_status_is_the_systems_however_the_fault_is_raised():
-    """#1404 P1: a fault carrying the system's status is the system's even when the caller does
-    not say so; one with neither a status nor the system mark is the proxy's."""
+    """#1404 P1, #1363 B2: a fault raised with the origin `system` is the system's, one raised with
+    `access` the proxy's; `proxy_own` follows the origin."""
     with pytest.raises(AdapterFault) as relayed:
-        raise_proxy_fault("UpstreamFault", "HTTP 409 from ticket: duplicate", 409)
+        raise_proxy_fault("UpstreamFault", "HTTP 409 from ticket: duplicate", 409, origin="system")
     with pytest.raises(AdapterFault) as unmarked:
-        raise_proxy_fault("TransportFault", "the proxy's audit could not be written")
+        raise_proxy_fault("TransportFault", "the proxy's audit could not be written", origin="access")
     assert relayed.value.proxy_own is False, relayed.value
     assert unmarked.value.proxy_own is True, unmarked.value
 
@@ -379,7 +379,7 @@ def test_t17_the_final_record_says_whether_the_proxy_sent_and_only_a_false_prove
                                        url="http://store.invalid/c")
     assert got.sent is sent, got
     with pytest.raises(TransportFault) as raised:
-        raise_proxy_fault(got.fault, got.detail, from_system=got.from_system, sent=got.sent)
+        raise_proxy_fault(got.fault, got.detail, origin=got.origin, sent=got.sent)  # #1363 B2: `origin` replaces `from_system`
     assert getattr(raised.value, MAYBE_DELIVERED) is sent, (sent, raised.value)
 
 

@@ -65,6 +65,14 @@ jobs:
         timeout-minutes: 4
         run: python3 defender/box/image_cli.py build
 
+      # #1170 A7: the job image every per-job host helper starts its job container from, under the
+      # name the helper defaults to (`DEFENDER_JOB_IMAGE` unset: `job_host`'s `defender-job:latest`).
+      # The real-container job tests (tests/e2e/test_job_box_boundary_e2e.py) need it; the helper
+      # never pulls, so without it a job is a start failure.
+      - name: Build the job image
+        timeout-minutes: 6
+        run: docker build -f .devcontainer/Dockerfile.job -t defender-job:latest .
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
@@ -428,6 +436,18 @@ jobs:
       # their only collection — the gap #720 found when they sat uncollected in evaluations/.
       - name: Run eval tool tests
         run: defender/.venv/bin/python -m pytest evaluations/tests -q
+
+      # The lab's frozen-case scripts (capture, make-a-case, launcher, locks, ps shim), the
+      # frozen node's clock shim and the stubs' pinned clock (#1347). They drive the lab through
+      # fakes, never docker or the VPS. The shim tests compile clockshim.c with the runner's gcc
+      # (ubuntu-latest has it; without one they skip).
+      # playground-v2/chaos/tests is not here yet: nine of its tests are red on main from
+      # detection-rule drift (#1456).
+      - name: Run lab frozen-case tests
+        run: >-
+          defender/.venv/bin/python -m pytest playground-v2/scripts/tests playground-v2/clockshim/tests
+          playground-v2/change-mgmt/tests/test_1347_change_mgmt_pinned_clock.py
+          playground-v2/ticket-server/tests/test_1347_ticket_server_pinned_clock.py -q
 
   code-smells:
     runs-on: ubuntu-latest

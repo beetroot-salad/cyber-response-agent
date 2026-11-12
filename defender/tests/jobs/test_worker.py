@@ -588,7 +588,7 @@ _SPELLINGS = {"trailing space": lambda w: w + " ", "trailing newline": lambda w:
               "leading byte-order mark": lambda w: "\ufeff" + w,
               "zero-width space inside": lambda w: w[:2] + "\u200b" + w[2:]}
 for _key, _words in (("setup", ("refused", "crashed", "done")), ("box", ("not_started", "start_failed", "started")),
-                     ("cut_short", ("box-lost", "box-output-limit", "provider-down", "budget"))):
+                     ("cut_short", ("box-lost", "box-output-limit", "provider-down", "budget", "proxy-access"))):
     for _word in _words:
         for _how, _spell in _SPELLINGS.items():
             CASES[f"1-job-end-{_key}-word-{_word}-{_how.replace(' ', '-')}"] = _spec(
@@ -644,7 +644,7 @@ def test_p1_r7_3_a_job_end_record_is_exactly_its_five_facts_and_names_no_spend_f
         assert job_lane.JobEnd.parse(unreadable) is None, unreadable
 
 
-_CUT_SHORT_WORDS = sorted({*run_end.TRUNCATED_BY_VALUES, "box-lost", "box-output-limit"})
+_CUT_SHORT_WORDS = sorted({*run_end.TRUNCATED_BY_VALUES, "box-lost", "box-output-limit", "proxy-access"})  # #1363 B6: named, not only derived
 
 
 @pytest.mark.parametrize(("cut_short", "verified"), [(word, True) for word in _CUT_SHORT_WORDS] + [
@@ -1016,6 +1016,45 @@ async def test_o7_after_the_child_exits_its_own_box_is_swept_and_a_missing_box_i
     assert row(world["dsn"], clean)["stage"] == "completed"
     assert row(world["dsn"], left)["stage"] == "completed", "the cleanup must not decide the row"
     assert not _warned(caplog, clean), "an absent box is normal: nothing to warn about"
+
+
+class _HeldSweep(StandInContainers):
+    """The containers seam whose start sweep of the job containers a previous worker's helpers left
+    (`remove_job_containers`, #1170 A5) blocks until the test releases it, noting that it began."""
+
+    def __init__(self, where: Path) -> None:
+        super().__init__(where)
+        import threading
+
+        self.began, self.release = threading.Event(), threading.Event()
+
+    def remove_job_containers(self) -> None:
+        self.began.set()
+        assert self.release.wait(30), "the test never released the start sweep"
+
+
+async def test_a5_the_start_sweep_of_dead_helpers_containers_ends_before_any_row_is_claimed_or_child_spawned(world, tmp_path):
+    """At start the worker removes the job containers its previous run's helpers left, and claims nothing and spawns no
+    child until that sweep returns: held, the queued row stays queued and no child starts; released, the row runs.
+    (A5: a dead helper's container must not overlap a new claim)"""
+    containers = _HeldSweep(tmp_path / "containers")
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        serving = asyncio.create_task(_worker(world, store, child, containers=containers).serve())
+        began = await asyncio.to_thread(containers.began.wait, 15)
+        await asyncio.sleep(1.5)  # time enough for a claim that did not wait to land
+        held = (child.events(), row(world["dsn"], inv)["stage"], serving.done())
+        containers.release.set()
+        await _until(lambda: row(world["dsn"], inv)["stage"] == "completed", "the row to run once released")
+        assert not serving.done(), "premise: serve() is still running, so the SIGTERM below is its to handle"
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.wait_for(serving, timeout=60)
+
+    assert began, "the worker never swept the job containers at start"
+    assert held == ([], "queued", False), f"a row was claimed or a child spawned while the sweep ran: {held}"
+    assert child.events() == [("start", inv), ("end", inv)], "control: once released the row ran"
+    assert row(world["dsn"], inv)["stage"] == "completed"
 
 
 async def test_o7_the_sweep_runs_for_a_run_that_failed_and_never_writes_the_row(world, tmp_path):
@@ -4593,3 +4632,130 @@ async def test_b11_a_service_cancelled_as_its_store_call_finishes_still_ends_so_
             await asyncio.wait({task}, timeout=5)
     assert not leftover, f"the {service} service survived its cancel"
     assert task.cancelled()
+
+
+async def test_1170_the_worker_starts_each_investigation_as_its_tenants_host_helper(world):
+    """The worker's default child is the per-job host helper, not the job entry: one spawn per claim, naming the
+    helper module, the job's kind, the investigation, its tenant and the worker's pid; the row ends as the child's
+    end record says. (#1170 H7, Flow: claim)
+
+    The `spawn` door records the command the worker asked for and starts the scripted child in its place."""
+    from defender.worker import Launch, run_argv
+
+    child = _child(world, files=_committed())
+    real_spawn = asyncio.create_subprocess_exec
+    asked: list[list[str]] = []
+
+    async def as_scripted(*argv, **kw):
+        asked.append(list(argv))
+        inv = argv[argv.index("--job") + 1]
+        return await real_spawn(*child(Launch(inv, T1, os.getpid())), **kw)
+
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        await _worker(world, store, run_argv, spawn=as_scripted).drain()
+
+    assert asked == [[sys.executable, "-m", "defender.job_host", "--kind", "investigation", "--job", inv,
+                      "--tenant", T1, "--parent-pid", str(os.getpid())]]
+    assert row(world["dsn"], inv)["stage"] == "completed"
+
+
+async def test_1170_the_worker_starts_a_learning_job_and_its_post_step_as_their_kinds_host_helper(world):
+    """The worker's learning and post-step commands start the per-job host helper: `-m defender.job_host --kind learning`
+    with the job, tenant, source run and the worker's pid; `--kind post-step` with the job it follows (none when
+    family-less), the tenant and the pid. One spawn each; the rows end as the scripted children's records say. (#1170 H7)
+
+    The flag order is a pick (the exact argv); the `spawn` door records it and starts the scripted child instead."""
+    from defender.tests.jobs.test_1344_learning_jobs import (
+        END,
+        investigation_of,
+        job_child,
+        job_row,
+        learning_end,
+        learning_worker,
+        post_child,
+        queued_job,
+    )
+    from defender.worker import LearningLaunch, PostStepLaunch, job_entry_argv, post_step_argv
+
+    jobs = job_child(world, files={END: learning_end("completed")})
+    post = post_child(world)
+    real_spawn = asyncio.create_subprocess_exec
+    asked: list[list[str]] = []
+    pid = os.getpid()
+
+    async def as_scripted(*argv, **kw):
+        asked.append(list(argv))
+        rest = list(argv[3:])
+        flags = dict(zip(rest[::2], rest[1::2], strict=False))
+        kind, job = flags["--kind"], flags["--job"]
+        launch = (LearningLaunch(job, T1, pid, flags["--source"]) if kind == "learning"
+                  else PostStepLaunch(job, T1, pid, (job,)))
+        return await real_spawn(*(jobs if kind == "learning" else post)(launch), **kw)
+
+    async with job_store(world["dsn"]) as store:
+        job = await queued_job(world, store, ticket="T-1")
+        source = investigation_of(world["dsn"], job)
+        await learning_worker(world, store, job=job_entry_argv, post=post_step_argv, spawn=as_scripted).drain()
+
+    base = [sys.executable, "-m", "defender.job_host"]
+    assert asked == [
+        [*base, "--kind", "learning", "--job", job, "--tenant", T1, "--source", source, "--parent-pid", str(pid)],
+        [*base, "--kind", "post-step", "--job", job, "--tenant", T1, "--parent-pid", str(pid)]]
+    assert job_row(world["dsn"], job)["status"] == "completed"
+    assert post_step_argv(PostStepLaunch(None, T1, pid, ())) == [*base, "--kind", "post-step", "--tenant", T1,
+                                                                 "--parent-pid", str(pid)]
+    assert job_entry_argv(LearningLaunch(job, T1, pid, "src-1")) == [*base, "--kind", "learning", "--job", job, "--tenant", T1,
+                                                                       "--source", "src-1", "--parent-pid", str(pid)]
+
+
+@pytest.mark.parametrize("copied", [True, False], ids=["code-copy", "control-no-copy"])
+async def test_1170_the_worker_spawns_the_helper_in_its_code_copy_and_only_there(world, copied):
+    """The helper is started with `cwd` set to the worker's code copy (the `child_cwd` it was given), so it imports the copy and the container mounts it; a worker given no copy sets no `cwd` (control). (#1170 A7, G-D3)"""
+    from defender.worker import Launch, run_argv
+
+    copy = world["tmp"] / "code-copy"
+    copy.mkdir()
+    child = _child(world, files=_committed())
+    real_spawn = asyncio.create_subprocess_exec
+    cwds: list[str] = []
+
+    async def as_scripted(*argv, **kw):
+        cwds.append(kw.get("cwd", "<unset>"))
+        inv = argv[argv.index("--job") + 1]
+        kw.pop("cwd", None)
+        return await real_spawn(*child(Launch(inv, T1, os.getpid())), **kw)
+
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        await _worker(world, store, run_argv, spawn=as_scripted, **({"child_cwd": copy} if copied else {})).drain()
+
+    assert cwds == [str(copy) if copied else "<unset>"]
+    assert row(world["dsn"], inv)["stage"] == "completed", "control: the spawned child ran to its end record"
+
+
+async def test_1170_the_worker_start_sweeps_the_job_containers_a_dead_helper_left_by_their_label(world):
+    """At start the worker removes every container carrying the job-container label (their helper, and the claim tokens
+    that named them, died with the previous worker); a tenant's box without that label stays. (#1170 A5)"""
+    import signal
+
+    from defender import job_host
+    from defender.box import CLAIM_LABEL, TENANT_LABEL
+    from defender.tests.support.jobs._job_helper import ContainerStandIn, until
+    from defender.worker._containers import DockerContainers
+
+    docker = ContainerStandIn()
+    docker.live.update({"job-left-over": {job_host.JOB_LABEL: "1", TENANT_LABEL: T1, CLAIM_LABEL: "a" * 32},
+                        "tenant-box": {TENANT_LABEL: T1}})
+    async with job_store(world["dsn"]) as store:
+        worker = _worker(world, store, _child(world), containers=DockerContainers(docker=docker))
+        serving = asyncio.create_task(worker.serve())
+        try:
+            await asyncio.to_thread(until, lambda: "job-left-over" not in docker.live, "the start sweep", 15.0)
+        finally:
+            assert not serving.done(), "premise: serve() is still running, so the SIGTERM below is its to handle"
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+
+    assert "tenant-box" in docker.live, "the sweep took a container that is not a job container"
+    assert any(c[1] == "rm" and "job-left-over" in c for c in docker.calls)

@@ -16,9 +16,10 @@ audit device records each credential write (A4)."""
 from __future__ import annotations
 
 import base64
+import functools
 import re
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Any, TypeVar
 
 import httpx
 
@@ -26,10 +27,11 @@ from defender import tenancy
 from defender.kit.internal_http import internal_async_client, internal_client, tls_trust
 from defender.configuration.issuer import DEPLOYMENT_ISSUER, TRANSIT_MOUNT
 from defender.kit.access import CREDENTIAL_KINDS
-from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
+from defender.kit.faults import ORIGIN_ACCESS, ORIGIN_SETUP, AdapterFault, ConfigFault, TransportFault
 from defender.kit.verbs import is_system_name
 from defender.credential_proxy._credentials import CredentialSet
 from defender.credential_proxy._deadline import current as current_deadline
+from defender.credential_proxy._refusal import labelled
 
 #: How long one call to OpenBao may take, in seconds.
 OPENBAO_TIMEOUT_SEC = 10.0
@@ -86,6 +88,23 @@ def openbao_fault(status: int, detail: str) -> AdapterFault:
     fix, `ConfigFault`."""
     fault = TransportFault if status >= 500 else ConfigFault
     return fault(detail)
+
+
+_R = TypeVar("_R")
+
+
+def _our_access(call: Callable[..., _R]) -> Callable[..., _R]:
+    """A proxy-only OpenBao call: a fault it raises with no label of its own is OpenBao being
+    unreachable or refusing the proxy, our access as a whole (#1363 B3: labelled here, at the
+    proxy's step, since `openbao_fault` is shared with the launcher and the API's secret writer)."""
+    @functools.wraps(call)
+    def labelled_call(*args: Any, **kwargs: Any) -> _R:
+        try:
+            return call(*args, **kwargs)
+        except AdapterFault as fault:
+            fault.origin = fault.origin or ORIGIN_ACCESS
+            raise
+    return labelled_call
 
 
 class _OpenBao:
@@ -164,8 +183,11 @@ def _data_of(reply: httpx.Response) -> Mapping[str, Any]:
 class OpenBaoStore(_OpenBao):
     """The proxy's read of credential sets."""
 
+    @_our_access
     def read(self, tenant_id: str, system: str, generation: int) -> CredentialSet | None:
-        """`(tenant_id, system)`'s current set at `generation`, or None when there is none."""
+        """`(tenant_id, system)`'s current set at `generation`, or None when there is none. A set
+        missing its data or not in the store's shape is that system's setup (`setup`); the store
+        failing to answer, or refusing the proxy, is its access."""
         path = _secret_path(tenant_id, system, generation)
         what = f"the credential read of {system}"
         reply = self._call("GET", f"data/{path}", what)
@@ -173,15 +195,20 @@ class OpenBaoStore(_OpenBao):
             return None
         if reply.status_code != 200:
             raise self._refused(reply, what)
-        data = _data_of(reply)
+        try:
+            data = _data_of(reply)
+        except ConfigFault as fault:
+            # `_data_of` is shared with the API's secret writer, so the label is set here, at the
+            # proxy's step: a reply with no data object is this system's stored set unreadable.
+            raise labelled(fault, ORIGIN_SETUP) from None
         body, meta = data.get("data"), data.get("metadata")
         if body is None:  # the current version is deleted
             return None
         if not (isinstance(body, dict) and set(body) == {"kind", "fields"}
                 and body["kind"] in CREDENTIAL_KINDS and isinstance(body["fields"], dict)
                 and isinstance(meta, dict) and isinstance(meta.get("version"), int)):
-            raise ConfigFault(f"the stored credential set of {system} is not in the store's "
-                              "shape {kind, fields}")
+            raise labelled(ConfigFault(f"the stored credential set of {system} is not in the "
+                                       "store's shape {kind, fields}"), ORIGIN_SETUP)
         return CredentialSet(kind=body["kind"], fields=dict(body["fields"]),
                              version=meta["version"])
 
@@ -231,6 +258,7 @@ class TransitVerifier(_OpenBao):
                  transport: httpx.MockTransport | None = None) -> None:
         super().__init__(addr=addr, token=token, mount=TRANSIT_MOUNT, transport=transport)
 
+    @_our_access
     def verify(self, payload: bytes, signature: str, *, tenant_id: str) -> bool:
         key = transit_key_for(tenant_id)
         what = f"verifying with {key}"

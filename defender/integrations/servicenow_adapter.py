@@ -89,8 +89,10 @@ def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  #
     except UpstreamFault as fault:
         if fault.status != _NOT_FOUND:
             raise
-        raise UpstreamFault(f"{fault} ServiceNow addresses records by sys_id.",
-                            status=fault.status) from fault
+        relabelled = UpstreamFault(f"{fault} ServiceNow addresses records by sys_id.",
+                                   status=fault.status)
+        relabelled.origin = fault.origin
+        raise relabelled from fault
     return None
 
 

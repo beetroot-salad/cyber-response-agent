@@ -133,7 +133,7 @@ write an exit code yourself:
 
 | Fault | Exit | Meaning |
 |---|---|---|
-| `ConfigFault` | 2 | `config.env` missing/incomplete — the system is not configured. `check_settings` raises it at run start, so a verb raising it means the check missed a key: the system is marked down then, uncharged, and the miss is logged as an adapter defect. |
+| `ConfigFault` | 2 | `config.env` missing/incomplete — the system is not configured. `check_settings` raises it at run start, so a verb raising it means the check missed a key: the system is marked down then, uncharged, and the miss is logged as an adapter defect. Only for a fault of the system's own settings: a fault the credential proxy raises carries an origin (`request`, `setup`, `access`) that decides the reaction instead — a `request` fault is an uncharged exit-3 failed call and marks nothing down. |
 | `TransportFault` | 2 | the transport failed: unreachable, timed out, a 5xx (infra). |
 | `UpstreamFault` | 1 | the system was reached and rejected the query — a 4xx, a bad field. The agent's own to fix. |
 

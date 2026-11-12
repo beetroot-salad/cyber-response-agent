@@ -113,20 +113,15 @@ playground tenant; `$TENANT_ID` below is its UUID (one-time setup: the repo `REA
 scores are comparable (#1108 P4).
 
 ```bash
-# Investigate each held-out alert, appending its row to the index F yourself:
-for f in evaluations/fixtures/held_out/*/alert.json; do
-  slug=$(basename "$(dirname "$f")")
-  run_id=$(python3 defender/run.py "$f" --tenant "$TENANT_ID" --no-learn --knowledge-commit K \
-           | sed -n '1s/^run_id=//p')
-  [ -n "$run_id" ] && printf '{"slug": "%s", "run_id": "%s"}\n' "$slug" "$run_id" >> F
-done
+# The lab's launcher investigates each case and writes its bound row to the index F
+# (see the lab's README); a run that does not leaves its case unscored.
 
 # Score correctness against ground truth:
 python3 -m evaluations.held_out "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 ```
 
-A run that crashes before announcing its id leaves no row, and the slug's older row (if any) is
-scored instead. `held_out.py` reports aggregate accuracy plus per-class recall and counts runs
+A case counts only through a row whose `binding` is its current one; one without is listed and
+makes the report incomplete. `held_out.py` reports aggregate accuracy plus per-class recall and counts runs
 that crashed or produced no parseable `report.md` as **wrong** against the ground-truth class
 (see the failure-accounting rule in §Metrics of the design doc). A confident close whose review
 cannot run is recorded `inconclusive`, so a dip in malicious recall can be the review gate rather

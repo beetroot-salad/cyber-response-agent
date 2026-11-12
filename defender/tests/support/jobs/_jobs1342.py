@@ -67,12 +67,13 @@ TITLE = ALERT_BYTES_TITLE
 DESCRIPTION = ALERT_BYTES_DESCRIPTION
 
 
-def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: bool = True,
+def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: bool = True,  # noqa: PLR0913 — the row, its mapping, origin and records
                     data_root: Path | None = None, generations: Any = None,
                     alert_mapping: Mapping[str, str | None] | None = FIXTURE_ALERT_MAPPING,
-                    records: Any = DERIVED) -> None:
-    """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6), and #1345's
-    default alert mapping saved through the store (`alert_mapping=None`: a tenant with none, for a test of absence).
+                    origin: str | None = None, records: Any = DERIVED) -> None:
+    """A `tenancy.tenants` row (default: active, forge wiring recorded, at `origin` when given) by main's #1214 helper
+    (r6), and #1345's default alert mapping saved through the store (`alert_mapping=None`: a tenant with none, for a test
+    of absence).
     #1366 R8: also the tenant's current system and case records, imported through the store (`_systems1366`): by default
     those of the tenant's planted or published `settings/` under `data_root` (else the fixture's); `records=None`
     registers a tenant NOT imported (the operator's `import` then has work to do); a `RecordsSpec` seeds exactly that.
@@ -85,7 +86,7 @@ def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: 
     if generations is None:
         generations = [sign_generation(tenant_id)] if state == "active" else ()
     insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root, generations=generations,
-                         alert_mapping=alert_mapping, records=records)
+                         alert_mapping=alert_mapping, origin=origin, records=records)
 
 
 def drop_tenant(dsn: str, tenant_id: str) -> None:

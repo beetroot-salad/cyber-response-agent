@@ -140,6 +140,10 @@ class VerbContext:
     #: Or where to get it: the run's read token is asked of this inside the verb's own call, so
     #: a mint that fails is that call's fault (r7 A20). `request_token` wins when both are set.
     token_source: Callable[[], str] | None = dataclasses.field(default=None, repr=False)
+    #: Or the process's access holder (#1363 B1): any object with the holder's `token()` and
+    #: `report(fault)`. It gives the token and is told of the client's `setup` and `access`
+    #: faults. Out of every repr with the token it holds.
+    access: Any = dataclasses.field(default=None, repr=False)
 
     @field_validator("tenant")
     @classmethod

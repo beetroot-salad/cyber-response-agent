@@ -289,14 +289,15 @@ def _values_of(argv: list[str], flag: str) -> list[str]:
 
 
 def _child_of(children: list[dict], kind: str, job: str) -> dict | None:
-    """The child that runs the job entry (`cli.learning.job`) or the post-step (`post_step`) for `job`."""
-    return next((c for c in children if job in _values_of(c["argv"], "--job")
-                 and (form := _start_form(c)) is not None and kind in form[0]), None)
+    """The per-job host helper (`python -m defender.job_host --kind <kind> --job <job> ...`, #1170 H7) the worker started for `job`:
+    `kind` is `investigation`, `learning` or `post-step`. The job entry and the post-step themselves run inside the container."""
+    return next((c for c in children if job in _values_of(c["argv"], "--job") and _values_of(c["argv"], "--kind") == [kind]
+                 and (form := _start_form(c)) is not None and form[0] == "-m:defender.job_host"), None)
 
 
 @pytest.mark.postgres
 def test_o15_children_run_from_the_copy_and_load_modules_from_nowhere_else(source, data_root, db, tmp_path):
-    """The worker's investigation child and learning child (found by their job ids) start from the copy, and re-running each entry in the child's environment loads only copy modules. (O15, Code boxes)"""
+    """The worker's investigation helper and learning helper (`python -m defender.job_host`, found by their job ids) start from the copy, and re-running each entry in the child's environment loads only copy modules. (O15, Code boxes)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     with B.run_tenant(tmp_path, data_root) as t:
@@ -327,13 +328,17 @@ def test_o15_children_run_from_the_copy_and_load_modules_from_nowhere_else(sourc
                 assert child["env"].get("PYTHONDONTWRITEBYTECODE"), \
                     f"a {kind} child runs with bytecode writes on (O15: the worker sets it for its children): {child['argv']}"
 
-        entries = {form[0]: c for found in ours.values() for c in found if (form := _start_form(c)) is not None}
-        assert len(entries) >= 2, f"one entry for the investigation and one for the learning job: {sorted(entries)}"
-        for number, (target, entry) in enumerate(entries.items()):
+        entries = {kind: c for kind, found in ours.items() for c in found
+                   if (form := _start_form(c)) is not None and form[0] == "-m:defender.job_host"}
+        assert sorted(entries) == ["investigation", "learning"], \
+            f"one helper for the investigation and one for the learning job (#1170 H7): {sorted(entries)}"
+        assert {kind: _values_of(c["argv"], "--kind") for kind, c in entries.items()} == {"investigation": ["investigation"], "learning": ["learning"]}
+        for number, (kind, entry) in enumerate(entries.items()):
+            target = "-m:defender.job_host"
             ran, modules = W.modules_of(target, ["--help"], env=entry["env"], cwd=Path(entry["cwd"]), out=tmp_path / f"mods{number}.json")
             assert sum(1 for n in modules if n.startswith("defender.")) > 20, f"control: {target} loaded the package: {ran.stderr[-500:]}"
-            assert W.module_files_outside(modules, copy / "defender") == {}, target
-            assert [f for f in modules.values() if _under(f, source)] == [], target
+            assert W.module_files_outside(modules, copy / "defender") == {}, f"{kind}: {target}"
+            assert [f for f in modules.values() if _under(f, source)] == [], f"{kind}: {target}"
 
         env = ours["investigation"][0]["env"]
         stamped = subprocess.run([sys.executable, "-c", STAMP_PROBE], cwd=copy, env=env, capture_output=True, text=True,  # noqa: S603
@@ -355,7 +360,7 @@ def _job_status_by_id(dsn: str, job: str) -> str:
 @pytest.mark.postgres
 def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_source_unavailable_with_a_post_step(
         source, data_root, db, tmp_path):
-    """Default settings, no seams: a real `python -m defender.worker` runs the job's real entry (end record `source_unavailable`, not a crash) and then the real post-step (its record). (O15, O8, Worker start)"""
+    """Default settings, no seams: a real `python -m defender.worker` starts the learning job's host helper (carrying `--source`) and then the post-step's helper, and the job ends with a recorded failure (never a crash or a hang). The job entry's own `source_unavailable` verdict is made inside the container (#1170), which a default worker without the job image never starts: the row then ends with a helper-decided failure (`launch_refused` or `entry_error`, A3/O11), and the post-step still runs. (O15, O8, Worker start)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     with B.run_tenant(tmp_path, data_root) as t:
@@ -367,31 +372,38 @@ def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_sou
         assert not list(runs.glob("*.session-pointer.json")), "premise: the source investigation has no run folder or session store"
         watch = W.ChildWatch()
         with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: bool(W.code_copies(data_root)), watch=watch) as proc:
-            children = watch.wait_for(lambda seen: _child_of(seen, "cli.learning.job", job) and _child_of(seen, "post_step", job),
-                                      timeout=120, what="the job entry and the post-step children")
-            W.wait_until(lambda: (runs / f"{job}.post-step.json").is_file(), timeout=120, what="the post-step's record", proc=proc)
+            children = watch.wait_for(lambda seen: _child_of(seen, "learning", job) and _child_of(seen, "post-step", job),
+                                      timeout=120, what="the learning helper and the post-step helper")
+            W.wait_until(lambda: _job_status_by_id(db, job) == "failed" and (runs / f"{job}.learning-end.json").is_file(),
+                         timeout=120, what="the job's failed end", proc=proc)
 
-        entry = _child_of(children, "cli.learning.job", job)
-        assert entry is not None, f"no job-entry child was observed; saw {[c['argv'] for c in children]}"
+        entry = _child_of(children, "learning", job)
+        assert entry is not None, f"no learning helper was observed; saw {[c['argv'] for c in children]}"
         assert _values_of(entry["argv"], "--source") == [investigation], entry["argv"]
         assert _values_of(entry["argv"], "--job") == [job]
-        post = _child_of(children, "post_step", job)
-        assert post is not None, "no post-step child was observed"
+        assert _values_of(entry["argv"], "--tenant") == [t.tenant_id], entry["argv"]
+        post = _child_of(children, "post-step", job)
+        assert post is not None, "no post-step helper was observed"
         assert "--pending" not in post["argv"], "the pending jobs are handed in a record, never on the command line"
+        assert _values_of(post["argv"], "--tenant") == [t.tenant_id], post["argv"]
         handed = json.loads((runs / f"{job}.post-step-pending.json").read_text(encoding="utf-8"))
         assert handed == {"pending": []}, "control: nothing was pending before this job"
 
+        # No job image here, so the container never starts: the job ends failed with a recorded reason (never a crash), and
+        # the post-step is still started for it. `source_unavailable` is the entry's verdict inside the container
+        # (test_1344_job_end, test_job_container_entry).
         end = json.loads((runs / f"{job}.learning-end.json").read_text(encoding="utf-8"))
-        assert (end["status"], end["reason"]) == ("failed", "source_unavailable"), end
+        assert end["status"] == "failed", end
+        assert end["reason"] in ("entry_error", "launch_refused"), end  # helper-decided endings before the container (A3, O11)
+        assert end["message"], end
         (status, reason, message) = execute(db, "SELECT status, reason, message FROM jobs.learning_jobs WHERE id = %s", (job,))[0]
-        assert (status, reason) == ("failed", "source_unavailable"), "the child command crashed or was never wired"
+        assert (status, reason) == ("failed", end["reason"]), "the helper command crashed or was never wired"
         assert message
-        assert json.loads((runs / f"{job}.post-step.json").read_text(encoding="utf-8")) == {"published": [], "refused": []}
 
 
 @pytest.mark.postgres
 def test_o15_the_default_post_step_command_lists_the_tenants_earlier_pending_job(source, data_root, db, tmp_path):
-    """An earlier job `completed`/`pending` and a new one: the real post-step child is handed the earlier job's id in its pending record. (O15, O14, Worker start)"""
+    """An earlier job `completed`/`pending` and a new one: the real post-step helper is started for the new job and is handed the earlier job's id in its pending record. (O15, O14, Worker start)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     with B.run_tenant(tmp_path, data_root) as t:
@@ -405,10 +417,11 @@ def test_o15_the_default_post_step_command_lists_the_tenants_earlier_pending_job
         new = _job_of(db, _queue_investigation(db, "J-2", complete=True, tenant=t.tenant_id))
         watch = W.ChildWatch()
         with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: bool(W.code_copies(data_root)), watch=watch) as proc:
-            children = watch.wait_for(lambda seen: _child_of(seen, "post_step", new), timeout=120, what="the post-step child")
-            W.wait_until(lambda: (runs / f"{new}.post-step.json").is_file(), timeout=120, what="the post-step's record", proc=proc)
-        post = _child_of(children, "post_step", new)
-        assert post is not None, f"no post-step child was observed; saw {[c['argv'] for c in children]}"
+            children = watch.wait_for(lambda seen: _child_of(seen, "post-step", new), timeout=120, what="the post-step helper")
+            W.wait_until(lambda: (runs / f"{new}.post-step-pending.json").is_file(), timeout=120, what="the post-step's pending record", proc=proc)
+        post = _child_of(children, "post-step", new)
+        assert post is not None, f"no post-step helper was observed; saw {[c['argv'] for c in children]}"
+        assert _values_of(post["argv"], "--tenant") == [t.tenant_id], post["argv"]
         handed = json.loads((runs / f"{new}.post-step-pending.json").read_text(encoding="utf-8"))
         assert earlier in handed["pending"], handed
 

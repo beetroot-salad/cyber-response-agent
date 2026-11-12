@@ -74,8 +74,29 @@ ENTRY_POINT_MODULES = (
     "learning/frontend/serialize.py",
     "cli/learning/trace_lesson.py",
     "cli/retire_legacy_runs.py",
-    "learning/branch/post_step.py",   # #1344: the learning job's post-step, a host entry of its own
+    # #1170 (H7, P-C, A6): the per-job host helper admits each job's tenant; the post-step (#1344) runs in its job
+    # container under the helper's hold and opens no acceptance of its own.
+    "job_host/_investigation.py",
+    "job_host/_learning.py",
 )
+
+#: #1170 (H7, P-C): the per-job host helper's host half, which enters the acceptance on the hold its run owns until the
+#: job ends (its return closes nothing): the command scope of the helper's modules, beside `COMMAND_FUNCTIONS`.
+HELPER_HOST_HALVES: dict[str, frozenset[str]] = {
+    "job_host/_investigation.py": frozenset({"prepare"}),
+    "job_host/_learning.py": frozenset({"_admit_tenant"}),
+}
+
+#: #1170 (P-C, "In-box entries", C19): the entries that run inside a job container, covered by the helper's hold as the
+#: publish child (A3) is by its starter's: each takes its tenant by the folder rules only (no host lock, no admission).
+#: Unit by unit, `(module, function)`, since their modules also hold host-side commands; a unit here may reach the raw
+#: acceptance and does not pass the reach on to its callers.
+IN_BOX_ENTRIES = frozenset({
+    ("run.py", "_container_tenant"),             # the investigation job's entry (`run.py --job`)
+    ("run.py", "_sibling_set_up"),               # learning's `run.py --episode` sibling
+    ("learning/branch/cli.py", "_admitted"),     # the learning job's launch, its in-container branch
+    ("learning/branch/post_step.py", "main"),    # the post-step
+})
 
 
 # --- the read-only and one-shot commands that take `directory=` (design: "Callers that move to it") -------------------

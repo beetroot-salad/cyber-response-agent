@@ -15,6 +15,7 @@ from urllib.parse import unquote, urlsplit
 from defender.kit.access import AccessDeclaration, Route
 from defender.kit.paths import holds_separator, url_form_fault, url_path_fault
 from defender.credential_proxy._refusal import CONFIG, CONFINEMENT, Refused
+from defender.kit.faults import ORIGIN_REQUEST, ORIGIN_SETUP
 from defender.credential_proxy._tokens import READ_WRITE
 
 #: Methods that are reads under any base (O3).
@@ -40,7 +41,7 @@ def locate(declaration: AccessDeclaration, url: str) -> Target:
     declaration's parser judges a base by (#1366 R15)."""
     form = url_form_fault(url)
     if form is not None:
-        raise Refused(CONFIG, form.reason)
+        raise Refused(CONFIG, form.reason, origin=ORIGIN_REQUEST)
     asked = urlsplit(url)
     try:
         base = urlsplit(declaration.base)
@@ -48,22 +49,22 @@ def locate(declaration: AccessDeclaration, url: str) -> Target:
     except ValueError:
         # The parser refuses such a base; a declaration that reached here anyway is the
         # system's configuration fault, not a transport one.
-        raise Refused(CONFIG, "the system's declared base does not parse") from None
+        raise Refused(CONFIG, "the system's declared base does not parse", origin=ORIGIN_SETUP) from None
     scheme = asked.scheme.lower()
     if (scheme, asked.hostname, asked.port or _DEFAULT_PORT.get(scheme)) != (
             base.scheme.lower(), base.hostname, base_port or _DEFAULT_PORT.get(base.scheme.lower())):
-        raise Refused(CONFIG, "the URL's scheme, host or port is not the declared base's")
+        raise Refused(CONFIG, "the URL's scheme, host or port is not the declared base's", origin=ORIGIN_REQUEST)
     path = asked.path or "/"
     confined = url_path_fault(path)
     if confined is not None:
-        raise Refused(CONFINEMENT if confined.confinement else CONFIG, confined.reason)
+        raise Refused(CONFINEMENT if confined.confinement else CONFIG, confined.reason, origin=ORIGIN_REQUEST)
     base_path = base.path.rstrip("/")
     if not (path == base_path or path.startswith(base_path + "/")):
-        raise Refused(CONFIG, "the URL path is not under the declared base")
+        raise Refused(CONFIG, "the URL path is not under the declared base", origin=ORIGIN_REQUEST)
     if any(holds_separator(unquote(segment)) for segment in path[len(base_path):].split("/")):
         # A server that decodes the path before routing would split it there (#1391 r5 O-T5).
         # Only the part under the base: the tenant's own base may name an escaped `/`.
-        raise Refused(CONFINEMENT, "a URL path segment holds an encoded `/` or `\\`")
+        raise Refused(CONFINEMENT, "a URL path segment holds an encoded `/` or `\\`", origin=ORIGIN_REQUEST)
     sent = f"{base.scheme}://{base.netloc}{path}" + (f"?{asked.query}" if asked.query else "")
     return Target(url=sent, path=path[len(base_path):] or "/")
 
@@ -74,14 +75,14 @@ def check_route(declaration: AccessDeclaration, system: str, method: str, path: 
     and `mode` (the token's grant on `system`) is read-write. GET and HEAD are reads; another
     method is a read only if a read route lists it (O3, A14)."""
     if not _METHOD.fullmatch(method):
-        raise Refused(CONFIG, f"{method[:20]!r} is not an upper-case HTTP method")
+        raise Refused(CONFIG, f"{method[:20]!r} is not an upper-case HTTP method", origin=ORIGIN_REQUEST)
     if method in READ_METHODS or _route_listed(declaration.reads, method, path):
         return
     if not _route_listed(declaration.writes, method, path):
-        raise Refused(CONFINEMENT, f"{method} {path} is not a declared route of {system}")
+        raise Refused(CONFINEMENT, f"{method} {path} is not a declared route of {system}", origin=ORIGIN_REQUEST)
     if mode != READ_WRITE:
         raise Refused(CONFINEMENT, f"{method} {path} is a write and the token grants {system} "
-                                   "read only")
+                                   "read only", origin=ORIGIN_REQUEST)
 
 
 def _route_listed(routes: tuple[Route, ...], method: str, path: str) -> bool:

@@ -318,8 +318,11 @@ def test_a_tenant_that_may_not_be_worked_for_is_refused_for_its_state_whatever_i
 _TENANCY_RAW = frozenset({"tenancy/_tenant.py", "tenancy/__init__.py"})
 _HOST = frozenset({H.HOST_MODULE_PATH})
 _ENTRIES = frozenset(H.ENTRY_POINT_MODULES)
+#: #1170: the modules of the in-box entries, which take the folder rules by `accept_tenant` (the reachability census
+#: below pins which of their units may).
+_IN_BOX = frozenset(rel for rel, _ in H.IN_BOX_ENTRIES)
 _NAMES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
-    "accept_tenant": (_TENANCY_RAW, _HOST | H.A3_SET),
+    "accept_tenant": (_TENANCY_RAW, _HOST | H.A3_SET | _IN_BOX),
     "requested_tenant": (_TENANCY_RAW, _HOST | H.A3_SET),
     "accept_requested_tenant": (_TENANCY_RAW, _HOST | H.A3_SET),
     "admit_tenant": (frozenset({"tenancy/_admission.py", "tenancy/__init__.py"}), _HOST),

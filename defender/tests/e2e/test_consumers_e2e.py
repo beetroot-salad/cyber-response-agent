@@ -602,6 +602,52 @@ def test_visualize_runtime_distinguishes_exit_64_from_infra(tmp_path):
         "exit-64 (agent-fixable) and exit-2 (infra) render the same class — error_class is unread"
 
 
+def _lq_exit_styles() -> dict[str, dict[str, str]]:
+    """`{token: {property: value}}` for every `.lq-exit.<token>` selector in the visualiser's stylesheet (comments
+    dropped; a rule shared by several selectors counts for each; later declarations win, as in the cascade)."""
+    css = (Path(visualize_runtime.__file__).parent / "assets" / "styles.css").read_text(encoding="utf-8")
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    out: dict[str, dict[str, str]] = {}
+    for selectors, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+        declared = dict(d.split(":", 1) for d in (part.strip() for part in body.split(";")) if ":" in d)
+        declared = {k.strip(): v.strip() for k, v in declared.items()}
+        for selector in (sel.strip() for sel in selectors.split(",")):
+            if (found := re.fullmatch(r"\.lq-exit\.(lq-[\w-]+)", selector)):
+                out.setdefault(found.group(1), {}).update(declared)
+    return out
+
+
+def test_visualize_runtime_gives_every_exit_class_its_own_colour_not_the_bad_fallback(tmp_path):
+    """Every error class `error_class_for_exit` can return renders with an explicit colour; only an unknown
+    class reads as `lq-bad`, so a new class cannot silently look broken. The map is local to the renderer, so
+    it is pinned through the rendered rows, and each class token it emits has its own rule in the stylesheet.
+    #1363 D12."""
+    from defender.systems.circuit_breaker import DENIED_EXIT_CODE, error_class_for_exit
+    from defender.tests.support.shared import _request_cut1363 as RC
+    codes = [0, 1, 2, 124, DENIED_EXIT_CODE, RC.REQUEST_CUT_EXIT]
+    bad, colour_of = [], {}
+    for code in codes:
+        klass = error_class_for_exit(code)
+        html = _exit_class_html(_one_row_run(
+            tmp_path, f"c{code}", exit_code=code, error_class=klass, status="error"))
+        colour = re.search(r'class="lq-exit ([^"]*)"', html).group(1)
+        colour_of[klass] = colour
+        if "lq-bad" in colour:
+            bad.append((code, klass))
+    assert not bad, f"exit codes whose class renders as the 'bad' fallback: {bad}"
+    request_cut = error_class_for_exit(RC.REQUEST_CUT_EXIT)
+    assert request_cut != error_class_for_exit(1), \
+        f"the request-cut exit has no error class of its own (it is {request_cut!r}, as exit 1 is)"
+    assert len(set(colour_of.values())) == len(colour_of), f"two error classes share one colour: {colour_of}"
+    styles = _lq_exit_styles()
+    tokens = {token for colour in colour_of.values() for token in colour.split()}
+    assert tokens, "the rendered rows carry no class token"
+    unstyled = sorted(t for t in tokens if not styles.get(t))
+    assert not unstyled, f"class tokens the table emits with no `.lq-exit.<token>` rule in styles.css: {unstyled}"
+    twins = sorted(f"{a} = {b}" for a in tokens for b in tokens if a < b and styles[a] == styles[b])
+    assert not twins, f"two emitted class tokens are styled alike, so two classes look the same: {twins}"
+
+
 _SPELLING_SPLIT = ["change-mgmt", "host-state", "threat-intel"]
 
 
