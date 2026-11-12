@@ -25,7 +25,8 @@ import yaml
 CATALOG, IMPORT, SYSTEMS = "catalog", "import", "systems"
 SET_SYSTEM, DELETE_SYSTEM, SET_CASE, DELETE_CASE, SET_CREDENTIALS = (
     "set-system", "delete-system", "set-case", "delete-case", "set-credentials")
-DRY_RUN, REPLACES, FOR_VERSION, DISABLED, EXPORT = "--dry-run", "--replaces", "--for-version", "--disabled", "--export"
+DRY_RUN, REPLACES, FOR_VERSION, DISABLED, ENABLED, EXPORT = (
+    "--dry-run", "--replaces", "--for-version", "--disabled", "--enabled", "--export")
 #: A version's author is the writing command's name (R9).
 AUTHOR = {cmd: f"tenant.py {cmd}" for cmd in (IMPORT, SET_SYSTEM, DELETE_SYSTEM, SET_CASE, DELETE_CASE)}
 #: Rows the seeders write (not an operator command).
@@ -34,7 +35,7 @@ SEED_AUTHOR = "test seed"
 REAL = ("elastic", "jira", "servicenow")
 EXAMPLES = ("change-mgmt", "cmdb", "host-state", "identity", "threat-intel", "ticket")
 KV_MOUNT = "kv"
-PROXY_ROLE = "defender_proxy_reader"  # R14: NOLOGIN, SELECT on tenancy.system_versions only (migration 0012_system_records)
+PROXY_ROLE = "defender_proxy_reader"  # R14: NOLOGIN, SELECT on tenancy.system_versions and records_mark only (migration 0012)
 #: The records tables (schema `tenancy`); columns in shared-interface.md.
 SYSTEM_VERSIONS, CASE_VERSIONS, RECORDS_MARK = "system_versions", "case_versions", "records_mark"
 
@@ -534,7 +535,7 @@ class RecordsPort:
     """A hermetic `SystemRecordsPort` over RECORDS (not folders) for the proxy tests: `source` is a mapping
     `{tenant id: RecordsSpec | TenantRecords}` or a callable `tenant id -> RecordsSpec | TenantRecords | None`, read on
     each call (a test may swap what it holds). `current_system` answers the system's current record, `None` for none, and
-    raises an unlabelled `ConfigFault` for a tenant with no records, as `PostgresSystemRecords` does. Decides nothing (a disabled record is returned as it is: the proxy refuses it). New proxy tests seed
+    raises an unlabelled `ConfigFault` for a tenant not imported, as `PostgresSystemRecords` does. Decides nothing (a disabled record is returned as it is: the proxy refuses it). New proxy tests seed
     Postgres and use `PostgresSystemRecords` instead; run-side tests hand the same value to the run (`value_of`)."""
 
     def __init__(self, source: Mapping[str, Any] | Any) -> None:
@@ -548,8 +549,8 @@ class RecordsPort:
         from defender.kit.faults import ConfigFault
 
         records = self._records(tenant_id)
-        if records is None or not records.systems:
-            raise ConfigFault("the request token's tenant has no system records")  # as the real port: unlabelled
+        if records is None or not records.imported:
+            raise ConfigFault("the request token's tenant has no system records (it is not imported)")  # as the real port: unlabelled
         return records.systems.get(system_id)
 
 
@@ -659,10 +660,11 @@ class Operator:
         return system_folder(self.tmp / f"folder-{n}", system, config=config, access=access)
 
     def set_system(self, system: str, *, replaces: int, config: Mapping[str, str] | None,
-                   access: str | None, disabled: bool = False) -> tuple[int, str]:
+                   access: str | None, disabled: bool | None = None) -> tuple[int, str]:
+        """`disabled` True passes `--disabled`, False `--enabled`, None neither (the write keeps the current state)."""
         folder = self._folder(system, config, access)
         return self.run(SET_SYSTEM, self.tid, system, str(folder), REPLACES, str(replaces),
-                        *((DISABLED,) if disabled else ()))
+                        *({True: (DISABLED,), False: (ENABLED,), None: ()}[disabled]))
 
     def delete_system(self, system: str, *, replaces: int) -> tuple[int, str]:
         return self.run(DELETE_SYSTEM, self.tid, system, REPLACES, str(replaces))

@@ -61,14 +61,16 @@ def test_at_head_the_records_tables_have_the_designed_columns_a_tenant_key_and_a
 
 
 @pytest.mark.postgres
-def test_at_head_the_proxy_role_cannot_log_in_and_may_only_select_the_system_versions(migrated_database):
-    """`defender_proxy_reader` is NOLOGIN, may SELECT `system_versions` and nothing else there: no write to it, no read of
-    the case table, the mark or the tenants. (#1366 R14)"""
+def test_at_head_the_proxy_role_cannot_log_in_and_may_only_select_the_system_versions_and_the_mark(migrated_database):
+    """`defender_proxy_reader` is NOLOGIN, may SELECT `system_versions` and `records_mark` and nothing else there: no
+    write to either, no read of the case table or the tenants. (#1366 R14, amended: the proxy reads whether a token's
+    tenant is imported from the mark)"""
     assert execute(migrated_database, "SELECT rolcanlogin FROM pg_roles WHERE rolname = %s", (ROLE,)) == [(False,)]
     assert _can(migrated_database, "system_versions", "SELECT"), "control"
+    assert _can(migrated_database, "records_mark", "SELECT"), "control"
     wrong = [(t, p) for t, p in [("system_versions", "INSERT"), ("system_versions", "UPDATE"), ("system_versions", "DELETE"),
-                                 ("system_versions", "TRUNCATE"), ("case_versions", "SELECT"), ("records_mark", "SELECT"),
-                                 ("tenants", "SELECT")] if _can(migrated_database, t, p)]
+                                 ("system_versions", "TRUNCATE"), ("case_versions", "SELECT"), ("records_mark", "INSERT"),
+                                 ("records_mark", "DELETE"), ("tenants", "SELECT")] if _can(migrated_database, t, p)]
     assert wrong == []
 
 

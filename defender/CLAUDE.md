@@ -43,9 +43,9 @@ its records name (`tenant.py catalog` lists the adapters a record may name). Cre
 per-generation path `<tenant>/<system>/g<N>`. Once:
 
 1. Run migrations (revision `0012_system_records`). It also creates the NOLOGIN role
-   `defender_proxy_reader` (SELECT on `tenancy.system_versions` only): create a login that is a
-   member of it and set the proxy config's `records_dsn` to that login's DSN in place of
-   `data_root` (an old config refuses to start).
+   `defender_proxy_reader` (SELECT on `tenancy.system_versions` and `tenancy.records_mark` only):
+   create a login that is a member of it and set the proxy config's `records_dsn` to that login's
+   DSN in place of `data_root` (an old config refuses to start).
 2. Per tenant that existed before this change (one created after it needs none): publish its
    merged knowledge (`tenant.py update <tenant-id>`: the import reads the published export, not
    the clone), then `python3 defender/cli/tenant.py import <tenant-id> --dry-run`, fix every file
@@ -61,7 +61,8 @@ per-generation path `<tenant>/<system>/g<N>`. Once:
    `tenant check` reports them as retired until they are gone.
 
 From then on: change a system with `tenant.py systems <tenant-id> --export <dir>`, edit the
-folder, `tenant.py set-system <tenant-id> <system> <dir>/<system> --replaces <its version>`; a
+folder, `tenant.py set-system <tenant-id> <system> <dir>/<system> --replaces <its version>` (it
+keeps the system enabled or disabled as it is; `--disabled` or `--enabled` changes that); a
 change of its base, CA or auth block raises its credential generation, and its credentials are
 set again. Connect hands its result to the operator as such a folder: its validator takes
 `--handoff <folder>` and no longer `--tenant`.

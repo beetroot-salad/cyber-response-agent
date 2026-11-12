@@ -58,3 +58,6 @@ def upgrade() -> None:
                f"THEN CREATE ROLE {ROLE} NOLOGIN; END IF; END $$")
     op.execute(f"GRANT USAGE ON SCHEMA tenancy TO {ROLE}")
     op.execute(f"GRANT SELECT ON tenancy.system_versions TO {ROLE}")
+    # The mark: whether a token's tenant is one whose systems come from records at all (R8), read, never inferred from
+    # whether it has a version row (a tenant created since #1366 has the mark and may have none).
+    op.execute(f"GRANT SELECT ON tenancy.records_mark TO {ROLE}")

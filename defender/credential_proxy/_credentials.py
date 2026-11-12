@@ -106,6 +106,7 @@ def static_headers(auth: Auth, creds: CredentialSet, system: str) -> dict[str, s
 
 @dataclass
 class _Held:
+    generation: int
     version: int
     digest: str
     token: str = field(repr=False)
@@ -120,8 +121,9 @@ def _declaration_digest(declaration: AccessDeclaration) -> str:
 
 
 class AccessTokens:
-    """OAuth access tokens held in memory per (tenant, system, credential generation: a re-created system never reuses the old one's, K3), each under the set version and
-    the whole declaration it was issued for (A8, #1364 O2). A changed version or declaration, or a
+    """OAuth access tokens held in memory, one per (tenant, system), each under the credential generation (a re-created
+    system never reuses the old one's, K3), the set version and the whole declaration it was issued for (A8, #1364 O2).
+    A token of another generation is replaced, never kept beside the new one. A changed version or declaration, or a
     token within `REFRESH_MARGIN_SEC` of expiry, means a fresh exchange; one at a time per system,
     a request waiting its turn no longer than its own deadline (#1364 O1). Each exchange verifies
     the token endpoint with the `trust` its caller passes: the declaration's own (#1391 O4), built
@@ -129,13 +131,13 @@ class AccessTokens:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._gates: dict[tuple[str, str, int], threading.Lock] = {}
-        self._held: dict[tuple[str, str, int], _Held] = {}
+        self._gates: dict[tuple[str, str], threading.Lock] = {}
+        self._held: dict[tuple[str, str], _Held] = {}
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({len(self._held)} held)"
 
-    def _gate(self, key: tuple[str, str, int]) -> threading.Lock:
+    def _gate(self, key: tuple[str, str]) -> threading.Lock:
         with self._lock:
             return self._gates.setdefault(key, threading.Lock())
 
@@ -143,21 +145,21 @@ class AccessTokens:
               creds: CredentialSet, deadline: Deadline, trust: ssl.SSLContext) -> str:
         """An access token for `creds` under `declaration`'s auth: the held one if still good,
         else a new exchange (whose failure is `Refused`, never retried)."""
-        key, digest = (tenant_id, system, generation), _declaration_digest(declaration)
+        key, digest = (tenant_id, system), _declaration_digest(declaration)
         what = f"the token exchange of {system}"
         gate = self._gate(key)
         if not gate.acquire(timeout=deadline.left(what)):
             raise Refused(TRANSPORT, f"the request ran out of time waiting for {what}", origin=ORIGIN_SETUP)
         try:
             held = self._held.get(key)
-            if (held is not None and (held.version, held.digest) == (creds.version, digest)
+            if (held is not None and (held.generation, held.version, held.digest) == (generation, creds.version, digest)
                     and time.monotonic() < held.good_until):
                 return held.token
             self._held.pop(key, None)
             asked_at = time.monotonic()
             token, lifetime = _token_exchange(declaration.auth, creds, system, deadline, trust)
             if lifetime is not None and lifetime > REFRESH_MARGIN_SEC:
-                self._held[key] = _Held(creds.version, digest, token,
+                self._held[key] = _Held(generation, creds.version, digest, token,
                                         asked_at + lifetime - REFRESH_MARGIN_SEC)
             return token
         finally:
@@ -165,10 +167,10 @@ class AccessTokens:
 
     def evict(self, tenant_id: str, system: str, generation: int, token: str) -> None:
         """Drop the held token for (tenant, system, generation) if it is `token` (the upstream refused it)."""
-        key = (tenant_id, system, generation)
+        key = (tenant_id, system)
         with self._gate(key):
             held = self._held.get(key)
-            if held is not None and held.token == token:
+            if held is not None and (held.generation, held.token) == (generation, token):
                 del self._held[key]
 
 

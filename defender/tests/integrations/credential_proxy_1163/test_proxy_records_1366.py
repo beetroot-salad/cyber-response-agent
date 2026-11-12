@@ -220,6 +220,36 @@ def test_1366_k3_a_deleted_and_re_created_system_does_not_reuse_the_old_generati
         assert w.up.seen[-1].header("Authorization") == f"Bearer {issued[1]}"
 
 
+def test_1366_k3_the_proxy_holds_one_access_token_per_system_whatever_generations_it_served():
+    """A system served at generation 1, then 2, then 3: each new generation takes a fresh exchange (K3), and the proxy
+    holds only the newest generation's token, so neither memory nor superseded credentials' tokens build up. The
+    newest one is reused. (#1366 K3)"""
+    import ssl
+
+    import anyio
+
+    from defender.credential_proxy._credentials import AccessTokens, CredentialSet
+    from defender.credential_proxy._deadline import Deadline
+    from defender.tenancy import parse_access
+
+    issued: list[str] = []
+    tokens = AccessTokens()
+    creds = CredentialSet(kind=OAUTH, fields={"client_id": H.CLIENT_ID, "client_secret": H.CANARY_SECRET}, version=1)
+    with H.upstream() as auth:
+        auth.replies["/token"] = H.token_endpoint(issued)
+        declared = parse_access(H.declaration(auth.url, scheme=H.oauth_scheme(auth.url + "/token")), system="identity")
+
+        async def served() -> list[str]:  # as the proxy asks: from a worker thread anyio started
+            return [await anyio.to_thread.run_sync(tokens.token, TENANT, "identity", generation, declared, creds,
+                                                   Deadline.after(10), ssl.create_default_context())
+                    for generation in (1, 2, 3, 3)]
+
+        got = anyio.run(served)
+
+    assert got == [issued[0], issued[1], issued[2], issued[2]], (got, issued)
+    assert repr(tokens) == "AccessTokens(1 held)"
+
+
 def test_1366_o7_the_audit_trail_names_the_version_not_the_commit_and_has_it_before_route_and_credential_refusals():
     """A sent call, a route refusal and a no-credentials refusal each leave one record carrying the record's version
     (7, 7, 8: not a constant) and no `commit`. (#1366 O7)"""
@@ -359,6 +389,24 @@ def test_1366_o7_the_records_port_reuses_its_connection_and_still_reads_the_newe
 
 
 @pytest.mark.postgres
+def test_1366_r8_an_imported_tenant_with_no_system_rows_is_a_missing_record_not_an_unknown_tenant(migrated_database):  # noqa: F811
+    """A tenant with the records mark and no system version (created since #1366, or imported with none) has no record
+    for the system, which the proxy refuses as that system's setup; only a tenant without the mark is an unknown
+    tenant (an unlabelled `ConfigFault`, the proxy's access). (#1366 R8, #1363)"""
+    from defender.credential_proxy._records import PostgresSystemRecords
+    from defender.kit.faults import ConfigFault
+
+    marked, unmarked = str(uuid.uuid4()), str(uuid.uuid4())
+    register_tenant(migrated_database, marked, records=R.without(R.fixture_records(), *R.fixture_records().systems))
+    register_tenant(migrated_database, unmarked, records=None)
+    with R.proxy_login(migrated_database) as login, contextlib.closing(PostgresSystemRecords(login)) as port:
+        assert port.current_system(marked, "cmdb") is None
+        with pytest.raises(ConfigFault) as unknown:
+            port.current_system(unmarked, "cmdb")
+    assert getattr(unknown.value, "origin", None) is None, "the unknown tenant's fault is left for the proxy to label"
+
+
+@pytest.mark.postgres
 def test_1366_o7_a_kept_connection_whose_read_times_out_is_not_read_again_past_the_deadline(
         tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
     """The records table is held locked, so a read on the kept session runs into its own statement timeout: that is a
@@ -462,13 +510,13 @@ _INSERT = ("INSERT INTO tenancy.system_versions (tenant_id, system_id, version, 
     pytest.param("DELETE FROM tenancy.system_versions WHERE tenant_id = %s", id="delete"),
     pytest.param("TRUNCATE tenancy.system_versions", id="truncate"),
     pytest.param("SELECT count(*) FROM tenancy.case_versions WHERE tenant_id = %s", id="read-case-table"),
-    pytest.param("SELECT count(*) FROM tenancy.records_mark WHERE tenant_id = %s", id="read-mark"),
+    pytest.param("DELETE FROM tenancy.records_mark WHERE tenant_id = %s", id="delete-mark"),
     pytest.param("SELECT count(*) FROM tenancy.tenants WHERE id = %s", id="read-tenants"),
 ])
 def test_1366_r14_a_member_of_the_proxy_role_reads_current_records_and_is_refused_everything_else(
         statement, migrated_database):  # noqa: F811
     """A login that is a member of `defender_proxy_reader` reads the system versions (control); each write to them, and a
-    read of the case table, the mark or the tenants table, is refused for lack of privilege, and the rows are unchanged.
+    read of the case table or the tenants table, and a write to the mark, is refused for lack of privilege, and the rows are unchanged.
     (#1366 R14)"""
     import psycopg
 
