@@ -542,10 +542,14 @@ box = [
 ]
 credential-proxy = [
     { name = "alembic" },
+    { name = "anyio" },
+    { name = "certifi" },
     { name = "fastapi" },
+    { name = "h11" },
     { name = "httpx" },
     { name = "psycopg", extra = ["binary"] },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "starlette" },
     { name = "uvicorn" },
 ]
 database = [
@@ -576,18 +580,26 @@ runtime = [
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "toons" },
 ]
+web = [
+    { name = "fastapi" },
+    { name = "uvicorn" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "alembic", marker = "extra == 'database'", specifier = ">=1.13" },
+    { name = "anyio", marker = "extra == 'credential-proxy'" },
+    { name = "certifi", marker = "extra == 'credential-proxy'" },
     { name = "coverage", marker = "extra == 'dev'" },
     { name = "defender", extras = ["database"], marker = "extra == 'api'" },
     { name = "defender", extras = ["database"], marker = "extra == 'credential-proxy'" },
     { name = "defender", extras = ["database"], marker = "extra == 'runtime'" },
+    { name = "defender", extras = ["web"], marker = "extra == 'api'" },
+    { name = "defender", extras = ["web"], marker = "extra == 'credential-proxy'" },
     { name = "duckdb", marker = "extra == 'box'", specifier = ">=1.5,<2" },
     { name = "duckdb", marker = "extra == 'runtime'", specifier = ">=1.5,<2" },
-    { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115" },
-    { name = "fastapi", marker = "extra == 'credential-proxy'", specifier = ">=0.115" },
+    { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.115" },
+    { name = "h11", marker = "extra == 'credential-proxy'" },
     { name = "httpx", marker = "extra == 'api'" },
     { name = "httpx", marker = "extra == 'credential-proxy'" },
     { name = "httpx", marker = "extra == 'dev'" },
@@ -609,13 +621,13 @@ requires-dist = [
     { name = "radon", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'database'", specifier = ">=2.0" },
+    { name = "starlette", marker = "extra == 'credential-proxy'" },
     { name = "toons", marker = "extra == 'runtime'", specifier = ">=0.7,<0.8" },
     { name = "typing-extensions", specifier = ">=4.12" },
-    { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.30" },
-    { name = "uvicorn", marker = "extra == 'credential-proxy'", specifier = ">=0.30" },
+    { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.30" },
     { name = "vulture", marker = "extra == 'dev'" },
 ]
-provides-extras = ["runtime", "box", "api", "credential-proxy", "database", "dev"]
+provides-extras = ["runtime", "box", "api", "web", "credential-proxy", "database", "dev"]
 
 [[package]]
 name = "dnspython"
