@@ -21,6 +21,7 @@ from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._lead_author_1134 import drafts_under, skills_view
 from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of
+from defender.tests.support.learning.curation._lead_author_1134 import build_deps_handed  # noqa: E402
 
 DECLARED = frozenset({"elastic"})
 
@@ -100,7 +101,7 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
     spawn = LeadAuthorSpawn()
     # The deps' declared set: the product's adapters joined with the draft's committed markers.
     deps = dataclasses.replace(
-        lead_author.build_lead_author_deps(
+        build_deps_handed(
             paths, trees=C.draft_trees(lane), batch=lane.batch),
         invoke_agent=spawn, extract=lambda _rd: ([], []),
     )

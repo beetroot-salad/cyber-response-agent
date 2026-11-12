@@ -47,6 +47,7 @@ if TYPE_CHECKING:
 
     from defender.learning.author.version_control import Batch, TenantDelivery
     from defender.learning.author.version_control.auth import ForgeCredential
+    from defender.systems.catalog import Catalog, TenantSystems
     from defender.systems.run_tenant import Admitted
     from defender.tenancy import Tenant, TenantDirectory
 
@@ -62,6 +63,7 @@ def _invoke_lead_author(  # noqa: PLR0913 — the lead step's call shape, plus i
     batch: Batch | None = None, box: Any = None, on_done: Callable[[str | None], None],
     git_timeout: float = GIT_TIMEOUT_SECONDS, items: list[Any] | None = None, feedback: str | None = None,
     outcomes: dict[tuple[str, str], Any] | None = None, make_model: Callable[..., Any] | None = None,
+    systems: TenantSystems | Catalog,
 ) -> None:
     """The lead-author lane's default work step for one claimed curation request. `label` is the lane's
     (bound in by `lead_author_drain`): the held roots of its writable mounts — the lanes of `batch`'s
@@ -70,7 +72,8 @@ def _invoke_lead_author(  # noqa: PLR0913 — the lead step's call shape, plus i
     transient. Over the store (#1278) the claim's `items`, the framed `feedback` of a replacement and
     the `outcomes` the curator decides are handed through to the curator's entry. With no `batch` (a
     checkout-shaped scene), the label's trees over `paths` are held, and the curator refuses at its
-    commit (it commits only into a batch)."""
+    commit (it commits only into a batch). The lane's systems are handed (#1366 R16): the tenant's, read once
+    per claiming tick right before its claim (`_tick_systems`), or the whole `Catalog` from a caller with no tenant."""
     from defender.learning.leads.lead_extraction import LeadAuthorError
 
     _logger.info("step=lead-author")
@@ -79,7 +82,8 @@ def _invoke_lead_author(  # noqa: PLR0913 — the lead step's call shape, plus i
             "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             lambda mod: mod.run_under_held_queue_lock(
                 run, paths=paths, trees=trees, box=box, on_done=on_done,
-                git_timeout=git_timeout, batch=batch, **_store_kw(items, feedback, outcomes, make_model),
+                git_timeout=git_timeout, batch=batch, systems=systems,
+                **_store_kw(items, feedback, outcomes, make_model),
             ),
         )
     if rc not in (0, None):
@@ -234,8 +238,10 @@ def _invoke_pitfalls(  # noqa: PLR0913 — the pitfalls step's call shape, plus 
     git_timeout: float = GIT_TIMEOUT_SECONDS,
     items: list[Any] | None = None, feedback: str | None = None,
     outcomes: dict[tuple[str, str], Any] | None = None, make_model: Callable[..., Any] | None = None,
+    systems: TenantSystems | Catalog,
 ) -> int:
-    """The lead-author lane's default pitfalls work step: as `_invoke_lead_author`, the held roots
+    """The lead-author lane's default pitfalls work step: as `_invoke_lead_author` (its systems
+    handed the same way), the held roots
     of the `label` lane's writable mounts in `batch`'s draft are opened here and closed when the
     curation returns or raises (#1134 A3), and a store claim's `items`, `feedback` and `outcomes` are
     handed through (#1278). With no `batch` (a checkout-shaped scene), the label's trees over `paths`
@@ -247,7 +253,7 @@ def _invoke_pitfalls(  # noqa: PLR0913 — the pitfalls step's call shape, plus 
             lambda mod: mod.run_pitfalls(
                 paths=paths, trees=trees, batch=batch, box=box,
                 on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
-                git_timeout=git_timeout, **_store_kw(items, feedback, outcomes, make_model),
+                git_timeout=git_timeout, systems=systems, **_store_kw(items, feedback, outcomes, make_model),
             ),
         )
     return rc if rc is not None else 0
@@ -468,15 +474,40 @@ def _refusing(entry: Callable[[], int]) -> int:
 
 
 
+def _tick_systems(paths: LoopPaths, records: TenantDirectory) -> TenantSystems:
+    """The lead-author tick's systems (#1366 O1, R16): the selected tenant's, from its current
+    records over the catalog of the product checkout `paths` names. Read once, after the tick
+    delivers the batches earlier ticks retained and before any claim, so every claim and the
+    pitfalls curation of the tick are handed one set, and an outage skips the tick (`_Refused`, transient) with no claim taken and
+    no attempt counted. An unreadable adapters directory refuses the stage."""
+    from defender.learning.leads.declared_systems import AdaptersUnreadable, tenant_systems_of
+    from defender.records.formats import TenantRefused
+    from defender.tenancy import RecordsUnreachable
+
+    tenant = paths.tenant
+    if tenant is None:
+        raise _Refused("the drain delivers to a tenant's repository: no tenant is selected")
+    try:
+        return tenant_systems_of(paths.repo_root, records.current_records(tenant.id), tenant_id=tenant.id)
+    except RecordsUnreachable as down:
+        raise _Refused(f"the tenant {tenant.id}'s records could not be read: {down}", transient=True) from None
+    except TenantRefused as refused:  # not imported (R8): the tick is refused before any claim, and nothing is charged
+        raise _Refused(str(refused)) from None
+    except AdaptersUnreadable as unreadable:
+        raise _Refused(f"the product checkout's adapters could not be read: {unreadable}") from None
+
+
 def _store_tick(paths: LoopPaths, *, lane: str, label: DrainLabel, open_delivery: Callable[..., Any],
           author_work: Callable[..., None], start_box: Callable[..., Any] | None, stop_box: Callable[..., None],
-          reconcile_lanes: tuple[str, ...]) -> int:
+          **fields: Any) -> int:
+    """One lane's `store_tick.Tick` over the opened store; `fields` its further fields (`reconcile_lanes`,
+    `before_claim`)."""
     if paths.tenant is None:
         raise FatalConfigError("the drain delivers to a tenant's repository: no tenant is selected")
     with opened_store() as store:
         tick = Tick(paths=paths, lane=lane, label=label, store=store, open_delivery=open_delivery,
                     author_work=author_work, start_box=start_box, stop_box=stop_box,
-                    reconcile_lanes=reconcile_lanes)
+                    **fields)
         return _refusing(tick.run)
 
 
@@ -566,16 +597,25 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     # Read every configured value before a batch, box or agent exists, so a malformed setting
     # refuses the tick rather than a commit.
     lock_wait_seconds = repo_lock_wait_seconds()
-    if run_lead_author is None:
-        run_lead_author = functools.partial(
+    # The default steps are handed the tenant's systems, read once per claiming tick, after the reconcile and the
+    # recovery (which need none) and right before the claim (#1366 O1, R16); an injected step brings its own.
+    tick_systems: list[TenantSystems] = []
+    reads_systems = run_lead_author is None or run_pitfalls is None
+
+    def read_systems() -> None:
+        tick_systems[:] = [_tick_systems(paths, records)]
+
+    def lead_step(*args: Any, **kw: Any) -> None:
+        step = run_lead_author or functools.partial(
             _invoke_lead_author, label=LEAD_AUTHOR_DRAIN_LABEL, git_timeout=git_timeout, make_model=make_model,
-        )
-    if run_pitfalls is None:
-        run_pitfalls = functools.partial(
+            systems=tick_systems[0])
+        step(*args, **kw)
+
+    def pitfalls_step(*args: Any, **kw: Any) -> int:
+        step = run_pitfalls or functools.partial(
             _invoke_pitfalls, lock_wait_seconds=lock_wait_seconds, label=LEAD_AUTHOR_DRAIN_LABEL,
-            git_timeout=git_timeout, make_model=make_model,
-        )
-    lead_step, pitfalls_step = run_lead_author, run_pitfalls
+            git_timeout=git_timeout, make_model=make_model, systems=tick_systems[0])
+        return step(*args, **kw)
 
     def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
         return _open_delivery(paths, directory=records, client=client, identity=identity,
@@ -583,7 +623,8 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
 
     return _store_tick(paths, lane=LEAD_LANE, label=LEAD_AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
                  author_work=lambda work_paths, **kw: _store_lead_work(work_paths, lead_step, pitfalls_step, **kw),
-                 start_box=start_box, stop_box=stop_box, reconcile_lanes=(LEAD_LANE,))
+                 start_box=start_box, stop_box=stop_box, reconcile_lanes=(LEAD_LANE,),
+                 before_claim=read_systems if reads_systems else None)
 
 
 def feedback_drain(  # noqa: PLR0913 — the stage's seams: the model's decision, the forge, the records, the issuer

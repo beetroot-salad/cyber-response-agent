@@ -368,7 +368,10 @@ class Tick:
     """One lane's tick. `author_work(paths, *, batch, box, held, feedback, outcomes)` runs the lane's
     curators over the claim; `reconcile_lanes` the lanes whose batches in review this tick reconciles.
     `boxed` False authors with no box (the registry lane: no model runs, A4); `parent` is the holding a
-    claim's own holding sits inside (the feedback tick's lease)."""
+    claim's own holding sits inside (the feedback tick's lease).
+    `before_claim` runs once, after the reconcile and the recovery and right before the store claim, so what it
+    reads (the lead lane's systems, #1366 R16) is read only by a tick that claims; a `Refused` it raises skips the
+    claim with nothing taken and no attempt counted."""
 
     paths: LoopPaths
     lane: str
@@ -383,6 +386,7 @@ class Tick:
     thresholds: Mapping[str, int] = dataclasses.field(default_factory=dict)
     boxed: bool = True
     parent: Holding | None = None
+    before_claim: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
         assert self.paths.tenant is not None, "a tick is a tenant's"
@@ -756,8 +760,6 @@ class Tick:
         return framed_feedback(number, forge.reviews(number), forge.comments(number))
 
     def _claim(self, delivery: TenantDelivery) -> int:
-        from defender.learning.store import LaneBusy, TenantInactive
-
         work = self.store.lane_work(self.tenant_id, self.lane, thresholds=self.thresholds)
         if work.busy:
             _logger.info(f"{self.label}: a batch of the lane is not ended — no new batch")
@@ -771,17 +773,8 @@ class Tick:
                 _logger.warning(f"{self.label}: the feedback on PR #{work.replaces_pr} could not be read "
                                 f"({one_line(str(fault))}): the replacement waits, never authored blind")
                 return 0
-        try:
-            held = self.store.claim(self.tenant_id, self.lane, owner=self.owner, thresholds=self.thresholds)
-        except LaneBusy:
-            _logger.info(f"{self.label}: the lane is busy — no new batch")
-            return 0
-        except TenantInactive:
-            # Offboarding began: the claim inserted nothing, so its items stay queued and no attempt is counted.
-            _logger.info(f"{self.label}: the tenant is not active — no new batch")
-            return 0
+        held = self._take()
         if held is None:
-            _logger.info(f"{self.label}: nothing at threshold — no new batch")
             return 0
         if held.replaces is not None and str(held.replaces) != str(work.replaces):
             try:
@@ -792,6 +785,25 @@ class Tick:
         if held.replaces is None:
             feedback = None
         return self._author(delivery, held, feedback)
+
+    def _take(self) -> Any:
+        """The store claim, after `before_claim`; None (logged) when there is none to take."""
+        from defender.learning.store import LaneBusy, TenantInactive
+
+        if self.before_claim is not None:
+            self.before_claim()
+        try:
+            held = self.store.claim(self.tenant_id, self.lane, owner=self.owner, thresholds=self.thresholds)
+        except LaneBusy:
+            _logger.info(f"{self.label}: the lane is busy — no new batch")
+            return None
+        except TenantInactive:
+            # Offboarding began: the claim inserted nothing, so its items stay queued and no attempt is counted.
+            _logger.info(f"{self.label}: the tenant is not active — no new batch")
+            return None
+        if held is None:
+            _logger.info(f"{self.label}: nothing at threshold — no new batch")
+        return held
 
     # -- authoring and delivery ------------------------------------------------------------------------
 

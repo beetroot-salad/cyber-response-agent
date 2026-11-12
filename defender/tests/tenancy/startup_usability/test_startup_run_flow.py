@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import re
-import shutil
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -88,18 +87,18 @@ def _no_timeout(folder: Path) -> None:
     S.drop_key(folder, "identity", "IDENTITY_TIMEOUT_SEC")
 
 
-def _no_settings_folder(folder: Path) -> None:
-    # No `systems/change-mgmt/` at all: the record has no entry (`system_entry`'s "config file
-    # not found: ... — this tenant's settings do not configure this system").
-    shutil.rmtree(S.config_path(folder, "change-mgmt").parent)
+def _no_settings(folder: Path) -> None:
+    # The record holds no settings (what an upgrade that invalidated them leaves, #1366 R12). A system with NO record at
+    # all is a different relation (not in the roster, its grant ignored), so the folder stays and `config.env` goes.
+    S.config_path(folder, "change-mgmt").unlink()
 
 
 #: How each system is made unusable, and the distinctive token of the reason its adapter gives
 #: (three different `ConfigFault` sites). Each token is matched case-insensitively.
 UNCONFIGURE: dict[str, tuple[Callable[[Path], None], str]] = {
-    "cmdb": (_no_declaration, "access.yaml"),
+    "cmdb": (_no_declaration, "system cmdb access"),  # #1366 DC6: the record's locator, not the file
     "identity": (_no_timeout, "IDENTITY_TIMEOUT_SEC"),
-    "change-mgmt": (_no_settings_folder, "not found"),
+    "change-mgmt": (_no_settings, "system change-mgmt settings"),
 }
 
 #: The issue's headline: three granted systems the tenant does not configure, one it does.
@@ -438,11 +437,11 @@ def test_the_agent_is_told_at_start_which_systems_are_not_configured_and_why(tmp
         f"list_verbs shows a configured system as not configured: {listed_up!r}"
 
 
-def test_a_not_configured_reason_names_the_settings_pointer_never_the_host_path(
+def test_a_not_configured_reason_names_the_record_locator_never_the_host_path(
         tmp_path, data_root):
     folder = S.plant(data_root, marker="red", table=TABLE)
     S.config_path(folder, "change-mgmt").unlink()
-    pointer = "settings/systems/change-mgmt/config.env"
+    pointer = "system change-mgmt settings"  # #1366 DC6
     host_paths = {str(data_root), str(Path(data_root).resolve())}
     run = _drive(tmp_path, data_root, main=[
         dispatch("l-001", CONFIGURED),
@@ -466,7 +465,7 @@ def test_a_not_configured_reason_names_the_settings_pointer_never_the_host_path(
         assert _NOT_CONFIGURED.search(shown), \
             f"{what} does not show change-mgmt as not configured: {shown!r}"
         assert pointer in shown, \
-            f"{what} does not name the missing file by its settings pointer ({pointer}): {shown!r}"
+            f"{what} does not name the record by its locator ({pointer}): {shown!r}"
         for host_path in host_paths:
             assert host_path not in whole, \
                 f"{what} carries the host data root path: {host_path}"

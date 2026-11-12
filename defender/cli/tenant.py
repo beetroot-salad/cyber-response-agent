@@ -6,6 +6,14 @@ lifecycle's operator command once the lifecycle became a service).
     python3 defender/cli/tenant.py update <tenant-id>
     python3 defender/cli/tenant.py propose <tenant-id> <staged dir>
     python3 defender/cli/tenant.py set-alert-mapping <tenant-id> <mapping file>
+    python3 defender/cli/tenant.py catalog
+    python3 defender/cli/tenant.py import <tenant-id> [--dry-run]
+    python3 defender/cli/tenant.py set-system <tenant-id> <system> <folder> --replaces N [--disabled | --enabled]
+    python3 defender/cli/tenant.py delete-system <tenant-id> <system> --replaces N
+    python3 defender/cli/tenant.py set-case <tenant-id> <case-record file> --replaces N
+    python3 defender/cli/tenant.py delete-case <tenant-id> --replaces N
+    python3 defender/cli/tenant.py systems <tenant-id> [--export <dir>] [--token-file <path>]
+    python3 defender/cli/tenant.py set-credentials <tenant-id> <system> <file> --for-version N --token-file <path>
 
 Tenants are created, rotated and offboarded by platform administrators through the API; the
 tenant management service and the execution host's actor do the work (the repo from the template,
@@ -52,6 +60,17 @@ until the API is wired to the real store, and the upgrade path from `settings/al
 The first four are read once, when a run starts, and recorded beside its alert. Title and description are text or an
 integer's decimal text, and otherwise null.
 
+A tenant's systems and its case record (#1366) are records in the database, versioned, and written only by this command
+(`_tenant_records` describes each subcommand). `catalog` lists the adapters the product carries: what a system record
+may name, with the settings keys each reads. `import` turns a tenant's retired `settings/systems/<s>/` folders and
+`settings/case-record.yaml`, as its published export holds them, into first versions, once per tenant (a tenant created
+after #1366 is imported at creation); `--dry-run` lists every fault, each naming the file to fix. `set-system` takes a
+folder holding the system's `config.env` and `access.yaml` (what connect hands off and `systems --export` writes) and
+stores it as the system's next version; `--replaces` names the version it replaces (0: none ever), and a write naming
+a version that is no longer current is refused. `set-credentials` stores a system's credential set (a JSON file
+`{"kind": ..., "fields": {...}}`) for the version it names, at that version's credential generation, which rises when
+the system's address, CA or auth block changes: credentials are then set again. The import copies no credential.
+
 Exit status: 0 clean, 1 a finding or a refusal, 2 a usage error. A check that could not judge (the
 grant census not taken, `.tenant-id` unverifiable) is one more finding, not a separate code, and
 the checks that need no census still run. Every refusal is printed as `[tenant.py] <message>`.
@@ -59,8 +78,6 @@ the checks that need no census still run. Every refusal is printed as `[tenant.p
 from __future__ import annotations
 
 import argparse
-import dataclasses
-from collections.abc import Mapping
 import os
 import subprocess
 import sys
@@ -107,8 +124,9 @@ from defender.systems.verb_dispositions import (  # noqa: E402
     dispositions_path,
     run_grants,
 )
-from defender.systems import case_system  # noqa: E402
-from defender.records.formats import TenantRefused
+from defender.records.formats import TenantRefused  # noqa: E402
+from defender.cli import _tenant_records  # noqa: E402
+from defender.kit.faults import AdapterFault  # noqa: E402
 
 #: How long one git call of `check`'s committed read may take: each is a local lookup of one
 #: path, so a call still running is blocked (a FIFO where git expects a file), not slow.
@@ -118,53 +136,26 @@ _COMMITTED_READ_TIMEOUT = 15
 _CANNOT_VERIFY = "cannot verify .tenant-id is committed"
 
 
-def _say(message: object) -> None:
-    print(f"[tenant.py] {message}", file=sys.stderr)
-
-
-@dataclasses.dataclass(frozen=True)
-class _FolderRecord:
-    """A settings folder read the way run start reads a tenant's (`run_tenant.folder_settings`):
-    what the case system's own checks are asked over, with no accepted tenant to name."""
-
-    systems: Mapping[str, Any]
-    access: Mapping[str, Any]
-    case_record: Any
-    agent: Path
-
-
-def _case_findings(knowledge: Path) -> list[str]:
-    """What run start does not apply before a run: the case system the tenant names. A tenant with
-    no case-record file needs none. With one, the very judgement the record step makes at run end
-    (`case_system.judge_case_system`, D-17) must pass: the system on the roster, its adapter
-    accepted and exporting the comment action, its settings sound, and — through the credential
-    proxy — a declared write route. A folder still holding the retired case system folder is told
-    to move to the new file."""
-    settings = knowledge / SETTINGS_HALF
-    findings: list[str] = []
-    legacy = case_system.legacy_folder_finding(settings)
-    if legacy is not None:
-        findings.append(legacy)
-    record = _FolderRecord(agent=knowledge / "agent", **{
-        k: v for k, v in run_tenant.folder_settings(settings).items()})
-    if record.case_record is None:
-        return findings
-    try:
-        case_system.judge_case_system(record, defender_dir=_DEFENDER_DIR)
-    except case_system.CaseSettingsFault as fault:
-        findings.append(str(fault))
-    return findings
+_say = _tenant_records.say
 
 
 # ==========================================================================================
 # check
 # ==========================================================================================
 
-def check_tenant(admitted: run_tenant.Admitted) -> int:
+def check_tenant(admitted: run_tenant.Admitted, *, secrets: Any = None) -> int:
     """`check <id>`, for the tenant `main`'s host acceptance admitted: every finding about its
-    settings, its repo and its last publish, all reported."""
+    settings, its repo and its last publish, all reported. `secrets` is the operator's OpenBao
+    login, for the record findings that ask the secret store (#1366)."""
+    from defender.cli import _tenant_records_check as records_check
     tenant, records = admitted.tenant, admitted.directory
-    return _report([*_findings(tenant.knowledge), *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
+    mine = records_check.records_check(tenant.id, records, knowledge=tenant.knowledge, secrets=secrets,
+                                       defender_dir=_DEFENDER_DIR)
+    # Not imported (R8): the import finding in place of every finding about its systems (nothing is judged from the
+    # retired folders, which the import still reads); every other finding is reported all the same.
+    findings = (_findings(tenant.knowledge, systems=mine.systems) if mine.records is not None
+                else _tenant_findings(tenant.knowledge))
+    return _report([*mine.lines, *findings, *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
 
 
 def _mapping_findings(tenant: tenancy.Tenant, records: tenancy.TenantDirectory) -> list[str]:
@@ -393,7 +384,7 @@ def check_folder(folder: Path) -> int:
     return _report(_findings(folder))
 
 
-def _findings(knowledge: Path) -> list[str]:
+def _findings(knowledge: Path, *, systems: Any = None) -> list[str]:
     """Everything `check` reports about a folder acceptance (or the folder rules) passed: the
     settings files load, the grant table loads, the lead-zero agreement against the running
     catalog, the grant census both ways against the running checkout, and the committed
@@ -401,7 +392,8 @@ def _findings(knowledge: Path) -> list[str]:
     table went unchecked and why, and every other rule still runs."""
     settings = knowledge / SETTINGS_HALF
     findings: list[str] = []
-    findings += _case_findings(knowledge)
+    from defender.cli._tenant_records_check import census_findings, leftover_findings
+    findings += leftover_findings(knowledge)
     # Here, not at the top: the census reaches the lead-author's whole extraction stack, which
     # only `check` uses — `update` and `propose` start without paying for it.
     from defender.cli import _tenant_census
@@ -417,15 +409,20 @@ def _findings(knowledge: Path) -> list[str]:
     if census is not None:
         findings += [f"adapter `{name}` refused: {why}" for name, why in census.refused.items()
                      if is_platform_served(name)]
-    findings += _registry_findings(knowledge)
-    findings += _feedback_findings(knowledge)
-    findings += _registry_grant_findings(knowledge)
+    findings += _tenant_findings(knowledge)
     try:
-        findings += (_tenant_census.table_findings(settings, census).lines(table)
+        findings += (census_findings(_tenant_census.table_findings(settings, census), systems).lines(table)
                      if census is not None
                      else _tenant_census.folder_findings(settings).lines())
     except DispositionError as unloadable:
         findings.append(str(unloadable))
+    return findings
+
+
+def _tenant_findings(knowledge: Path) -> list[str]:
+    """The findings that need nothing of the tenant's systems: the registry, the feedback setting, the registry's
+    grants and the committed `.tenant-id`. A tenant not yet imported gets these too (R8)."""
+    findings = [*_registry_findings(knowledge), *_feedback_findings(knowledge), *_registry_grant_findings(knowledge)]
     committed = _tenant_id_committed(knowledge)
     if committed is not None:
         findings.append(committed)
@@ -541,12 +538,14 @@ def _no_commits_yet(folder: Path, env: dict[str, str], bound: float) -> bool:
 
 def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
     argv: list[str], *, directory: tenancy.TenantDirectory | None = None, client=None, identity=None,
-    credential_config=None,
+    credential_config=None, secrets=None,
 ) -> int:
     """The command line. `directory` is the tenant records a test or a launcher hands in; a
     production process passes none and reads them from `DEFENDER_DATABASE_DSN`. `client`,
     `identity` and `credential_config` are in-process stand-ins for the forge client, the
-    tenant's credential and the host's issuer configuration (`update`, `propose`).
+    tenant's credential and the host's issuer configuration (`update`, `propose`); `secrets` is
+    the operator's OpenBao login (`OpenBaoSecrets`) that `set-credentials`, `systems` and `check`
+    use, else built from `--token-file`.
 
     `check <id>`, `update` and `propose` work for the tenant through the one host acceptance
     (r10 A1), held for the whole command: this process recorded under the tenant's host lock,
@@ -558,6 +557,9 @@ def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
     check_p = sub.add_parser("check", help="report the census and repo findings of a tenant")
     check_p.add_argument("tenant_id", nargs="?")
     check_p.add_argument("--folder", type=Path, default=None)
+    check_p.add_argument("--token-file", type=Path, default=None,
+                         help="a file holding the operator's OpenBao token: also report systems with no credentials")
+    check_p.add_argument("--kv-mount", default="kv", help="the KV mount credential sets are stored on (default kv)")
     update_p = sub.add_parser("update", help="publish the tenant's merged main as `current`")
     update_p.add_argument("tenant_id")
     propose_p = sub.add_parser(
@@ -568,7 +570,10 @@ def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
         "set-alert-mapping", help="replace the tenant's alert mapping (stored in the database) from a YAML file")
     mapping_p.add_argument("tenant_id")
     mapping_p.add_argument("file", type=Path)
+    _record_parsers(sub)
     ns = p.parse_args(argv)
+    if ns.command == "catalog":
+        return _tenant_records.catalog(_DEFENDER_DIR)
     mapping = None
     if ns.command == "set-alert-mapping":
         mapping = _mapping_of_file(ns.file)
@@ -586,14 +591,106 @@ def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
         _say(f"propose refused: {refused}" if ns.command == "propose" else refused)
         return 1
     with admitted:
-        if ns.command == "update":
-            return update(admitted, client=client, identity=identity, credential_config=credential_config)
-        if ns.command == "set-alert-mapping":
-            return set_alert_mapping(admitted, mapping)
-        if ns.command == "propose":
-            return propose(admitted, ns.staged, client=client, identity=identity,
-                           credential_config=credential_config)
-        return check_tenant(admitted)
+        try:
+            return _admitted_dispatch(admitted, ns, mapping, client=client, identity=identity,
+                                      credential_config=credential_config, secrets=secrets)
+        except AdapterFault as fault:  # the secret store's every refusal (a bad mount, OpenBao down or refusing): one line
+            _say(f"{type(fault).__name__}: {fault}")
+            return 1
+
+
+def _admitted_dispatch(  # noqa: PLR0913 — main's seams, passed through
+        admitted: run_tenant.Admitted, ns: argparse.Namespace, mapping: Any, *, client: Any, identity: Any,
+        credential_config: Any, secrets: Any) -> int:
+    if ns.command in _RECORD_COMMANDS:
+        return _record_command(admitted, ns, secrets=secrets)
+    if ns.command == "set-alert-mapping":
+        return set_alert_mapping(admitted, mapping)
+    return _admitted_command(admitted, ns, client=client, identity=identity,
+                             credential_config=credential_config, secrets=secrets)
+
+
+def _admitted_command(admitted: run_tenant.Admitted, ns: argparse.Namespace, *, client: Any, identity: Any,
+                      credential_config: Any, secrets: Any) -> int:
+    """`update`, `propose` or `check <id>` for the admitted tenant."""
+    if ns.command == "update":
+        return update(admitted, client=client, identity=identity, credential_config=credential_config)
+    if ns.command == "propose":
+        return propose(admitted, ns.staged, client=client, identity=identity,
+                       credential_config=credential_config)
+    if secrets is None and ns.token_file is not None:
+        secrets = _tenant_records.operator_secrets(ns.token_file, mount=ns.kv_mount)
+        if secrets is None:
+            return 1
+    return check_tenant(admitted, secrets=secrets)
+
+
+#: The record subcommands (#1366 DC8) that work for an admitted tenant (`catalog` needs none).
+_RECORD_COMMANDS = frozenset({"import", "set-system", "delete-system", "set-case", "delete-case", "systems",
+                              "set-credentials"})
+
+
+def _record_parsers(sub: Any) -> None:
+    """The record subcommands' arguments (#1366 DC8)."""
+    sub.add_parser("catalog", help="list the adapters the product carries and the settings keys each reads")
+    import_p = sub.add_parser("import", help="turn the tenant's retired settings folders into its first records, once")
+    import_p.add_argument("tenant_id")
+    import_p.add_argument("--dry-run", action="store_true", help="list every fault and write nothing")
+    set_p = sub.add_parser("set-system", help="store a folder (config.env, access.yaml) as a system's next version")
+    set_p.add_argument("tenant_id")
+    set_p.add_argument("system")
+    set_p.add_argument("folder", type=Path)
+    set_p.add_argument("--replaces", type=int, required=True, help="the version it replaces (0: none ever)")
+    on_off = set_p.add_mutually_exclusive_group()
+    on_off.add_argument("--disabled", dest="enabled", action="store_false", default=None,
+                        help="store the system disabled (without either flag a write keeps its current state)")
+    on_off.add_argument("--enabled", dest="enabled", action="store_true", default=None,
+                        help="store the system enabled (a new system is enabled unless --disabled)")
+    del_p = sub.add_parser("delete-system", help="delete a system's record (a new version)")
+    del_p.add_argument("tenant_id")
+    del_p.add_argument("system")
+    del_p.add_argument("--replaces", type=int, required=True)
+    case_p = sub.add_parser("set-case", help="store a case-record file as the tenant's next case record")
+    case_p.add_argument("tenant_id")
+    case_p.add_argument("file", type=Path)
+    case_p.add_argument("--replaces", type=int, required=True)
+    del_case_p = sub.add_parser("delete-case", help="delete the tenant's case record (a new version)")
+    del_case_p.add_argument("tenant_id")
+    del_case_p.add_argument("--replaces", type=int, required=True)
+    systems_p = sub.add_parser("systems", help="list the tenant's current systems, or export each as a folder")
+    systems_p.add_argument("tenant_id")
+    systems_p.add_argument("--export", type=Path, default=None, metavar="DIR")
+    cred_p = sub.add_parser("set-credentials", help="store a system's credentials for its current version")
+    cred_p.add_argument("tenant_id")
+    cred_p.add_argument("system")
+    cred_p.add_argument("file", type=Path)
+    cred_p.add_argument("--for-version", type=int, required=True)
+    for parser in (systems_p, cred_p):
+        parser.add_argument("--token-file", type=Path, default=None, help="a file holding the operator's OpenBao token")
+        parser.add_argument("--kv-mount", default="kv", help="the KV mount credential sets are stored on (default kv)")
+
+
+def _record_command(admitted: run_tenant.Admitted, ns: argparse.Namespace, *, secrets: Any) -> int:
+    """One record subcommand for the admitted tenant."""
+    if ns.command == "import":
+        return _tenant_records.run_import(admitted, dry_run=ns.dry_run)
+    if ns.command == "set-system":
+        return _tenant_records.run_set_system(admitted, ns.system, ns.folder, replaces=ns.replaces,
+                                              enabled=ns.enabled)
+    if ns.command == "delete-system":
+        return _tenant_records.run_delete_system(admitted, ns.system, replaces=ns.replaces)
+    if ns.command == "set-case":
+        return _tenant_records.run_set_case(admitted, ns.file, replaces=ns.replaces)
+    if ns.command == "delete-case":
+        return _tenant_records.run_delete_case(admitted, replaces=ns.replaces)
+    if secrets is None and (ns.command == "set-credentials" or ns.token_file is not None):
+        secrets = _tenant_records.operator_secrets(ns.token_file, mount=ns.kv_mount)
+        if secrets is None:
+            return 1
+    if ns.command == "systems":
+        return _tenant_records.run_systems(admitted, export=ns.export, secrets=secrets)
+    return _tenant_records.run_set_credentials(admitted, ns.system, ns.file, for_version=ns.for_version,
+                                               secrets=secrets)
 
 
 if __name__ == "__main__":

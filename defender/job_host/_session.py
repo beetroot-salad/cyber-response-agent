@@ -34,6 +34,15 @@ class SetupRefused(Exception):
     """A setup step refused the job before its container (A3 `setup: refused`); the message names the cause."""
 
 
+def setup_step(step: Any, *args: Any, **kwargs: Any) -> Any:
+    """One step of run setup's shared host half (`run_common`, the operator command's too, A6): its `SystemExit`
+    refusal is this job's `setup: refused`, its message the cause."""
+    try:
+        return step(*args, **kwargs)
+    except SystemExit as refused:
+        raise SetupRefused(str(refused.code)) from None
+
+
 class StartFailed(Exception):
     """The job cannot be started confined (A3 `box: start_failed`): no socket, no image, a refusing runtime, or the
     helper signalled before the container started."""

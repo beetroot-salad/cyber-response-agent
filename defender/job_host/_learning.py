@@ -3,8 +3,10 @@ their boxes.
 
 **The learning job** (`--kind learning --job <id> --tenant T --source S`). Its host half, before the container: the
 tenant's lock, waited for at most 30 s (still busy: the learning entry's `stopped` word, which the worker hands back,
-A3, C24), the admission (`host_tenant`), the launch-time publish under the helper's cover (C19), the grant over the
-export it settled on (the granted systems declared `http-proxy`; down systems not subtracted, O5) and the first pass,
+A3, C24), the admission (`host_tenant`), the tenant's current records read once (#1366 O6: a tenant not imported is
+refused; the container, which reads no database, and every sibling's run are handed them in the launch facts), the
+launch-time publish under the helper's cover (C19), the grant over the export it settled on (the granted systems
+declared `http-proxy`, narrowed to those the tenant has enabled records of; down systems not subtracted, O5) and the first pass,
 signed for the learning job's own id (pre-flight's pass names the row the worker fences; O5, C12 replaced). `--source`
 is not checked here: the entry checks it in the container, over the tenant's own records (design correction).
 
@@ -50,7 +52,7 @@ from defender import job_socket
 from defender.job_socket import Refused
 
 from ._common import answer_pass, first_pass, grant, mirror_run_page, settle_knowledge, start_run_box
-from ._session import DOCKER_DID_NOT_RUN, HandBack, KindSpec, Prepared, Registry, Session, SetupRefused
+from ._session import DOCKER_DID_NOT_RUN, HandBack, KindSpec, Prepared, Registry, Session, SetupRefused, setup_step
 
 if TYPE_CHECKING:
     from defender.records.formats import Episode
@@ -83,6 +85,8 @@ class _Learning:
     tenant: Any
     commit: str
     scratch: Path
+    #: The tenant's current records, read once at the job's start (#1366 O6): every sibling's run reads these.
+    records: Any = None
     siblings: dict[str, _Sibling] = field(default_factory=dict)  # by run id
     by_world: dict[str, str] = field(default_factory=dict)  # world id -> run id
 
@@ -148,6 +152,7 @@ def _scratch(session: Session, cleanup: contextlib.ExitStack) -> Path:
 
 
 def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
+    from defender import run_common
     from defender.records.formats import TenantRefused
     from defender.systems.run_tenant import run_tenant_for
     from defender.tenancy import run_knowledge
@@ -156,13 +161,20 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     _hold_within_wait(session, hold)
     admitted = _admit_tenant(session, hold)
     accepted, records = admitted.tenant, admitted.directory
+    # The tenant's current records, read once for the whole job (#1366 O6; a tenant not imported refused, R8): the
+    # container, which reads no database, is handed them in the launch facts, and so is each sibling's run.
+    current = setup_step(run_common.read_records, records, accepted.id)
     source = settle_knowledge(session, accepted, records)
     try:
         export = session.inside_tenant(accepted.export_folder(source.commit))
-        ready = run_tenant_for(accepted, dispatches_lead_zero=False, agent_root=export / run_knowledge.AGENT_HALF,
+        ready = run_tenant_for(accepted, dispatches_lead_zero=False, records=current,
+                               agent_root=export / run_knowledge.AGENT_HALF,
                                settings_root=export / run_knowledge.SETTINGS_HALF)
     except (TenantRefused, Refused) as refused:
         raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
+    # Narrowed to the systems the tenant has enabled records of (#1366 R12), read cold (no adapter code, N7).
+    roster = setup_step(run_common.run_roster, session.defender_dir)
+    ready = setup_step(run_common.tenant_verdict, ready, roster, warn=False).tenant
     # The grant is the launch export's, not the family's pinned commit (which the container settles later): the proxy
     # serves a system only by its declaration in the tenant's `current` export, and this helper holds the tenant's
     # lock for the whole job, so no publish moves `current` under it. A grant from an older pin could only add systems
@@ -176,13 +188,14 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
         cleanup.close()
         raise
     session.minted.add(job)
-    state = _Learning(accepted, source.commit, scratch)
+    state = _Learning(accepted, source.commit, scratch, records=current)
     cleanup.callback(_remove_copies, state)
     command = session.command or ["python3", "-m", "defender.cli.learning.job", "--job", job,
                                   "--tenant", session.tenant_id, "--source", str(session.source)]
     facts = {"kind": LEARNING, "tenant": session.tenant_id, "job": job, "tenant_state": "active",
              "export_commit": source.commit, "proxy_url": passes.proxy_url if passes is not None else None,
-             "grant": [[s, "r"] for s in reads], "pass_lifetime": PASS_LIFETIME_SEC}
+             "grant": [[s, "r"] for s in reads], "pass_lifetime": PASS_LIFETIME_SEC,
+             "records": current.as_wire()}
     return Prepared(launch=facts, command=list(command), passes=passes, state=state, cleanup=cleanup,
                     exited=_learning_exited)
 
@@ -447,8 +460,9 @@ def _materialize_sibling(session: Session, state: _Learning, world: str, run: st
         raise Refused(f"the sibling's run could not be made: {refused.code}", "internal") from None
     try:
         run_common.write_knowledge_record(Path(made.run_dir), source)
-    except OSError as e:
-        raise Refused(f"could not write the sibling's knowledge record: {e}", "internal") from None
+        run_common.write_versions_record(Path(made.run_dir), state.records)
+    except SystemExit as e:
+        raise Refused(f"could not write the sibling's start records: {e.code}", "internal") from None
     return Path(made.run_dir)
 
 

@@ -395,6 +395,11 @@ class RosterRead:
     #: Systems whose `VERBS` is an empty dict literal: adapters with no agent actions (#1359 R1),
     #: valid, as against one whose `VERBS` cannot be read.
     no_verbs: frozenset[str] = frozenset()
+    #: Whether this is a whole read of its adapters directory (a catalog), or one tenant's systems
+    #: drawn from one (`catalog.TenantSystems`, #1366 DC7). The surfaces with no tenant (the
+    #: invlang ceiling gate among them) key on this, never on `root`, which a tenant's roster
+    #: shares with the catalog it was drawn from.
+    whole: bool = True
 
     def declared_verbs(self, system: str) -> frozenset[str]:
         """The verb names `system` declares; empty if not in the roster or unparsed."""

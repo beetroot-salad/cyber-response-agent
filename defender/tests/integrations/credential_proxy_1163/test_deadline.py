@@ -3,6 +3,7 @@ request inside one deadline built from it, and the caller's wait (deadline plus 
 horizon it was told: it bounds the gap between bytes of the reply, not the whole (#1412 O6)."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import socket
@@ -219,6 +220,51 @@ _KV_REPLY = json.dumps({"data": {"data": {"kind": "static", "fields": {"api_key"
 _VERIFY_REPLY = json.dumps({"data": {"valid": True}}).encode()
 
 
+@contextlib.contextmanager
+def _silent_database() -> Iterator[str]:
+    """A loopback TCP listener that accepts connections and never says a word: a database that hangs. Yields a DSN to it."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    stop = threading.Event()
+    held: list[socket.socket] = []
+
+    def serve() -> None:
+        while not stop.is_set():
+            try:
+                held.append(srv.accept()[0])
+            except OSError:
+                return
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        yield f"postgresql://nobody:pw@127.0.0.1:{srv.getsockname()[1]}/none"
+    finally:
+        stop.set()
+        srv.close()
+        for conn in held:
+            conn.close()
+
+
+def test_1366_o7_a_database_that_never_answers_is_cut_at_the_deadline_as_a_transport_fault():
+    """#1366 O7: the proxy's records read comes under the request's deadline like its OpenBao calls: a database that
+    accepts the connection and says nothing is answered by the deadline (plus slack) as `TransportFault`, unsent."""
+    from defender.credential_proxy._records import PostgresSystemRecords
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    signer = H.FakeSigner()
+    with _silent_database() as dsn, H.upstream() as up, contextlib.closing(PostgresSystemRecords(dsn)) as records:
+        client = T.client_of(proxy().ProxyDeps(
+            records=records, store=R.proxy_credentials(R.KvStandIn()), verifier=H.PairedVerifier(signer),
+            audit=H.AuditRecorder(), proxy_overhead_sec=OVERHEAD_SEC))
+        answer, took = _timed(lambda: T.ask(client, T.token(TENANT_1384, T.GRANT_R, signer=signer), "identity", "GET",
+                                            f"{up.url}{API}/users/x", None, None, 1))
+
+    assert answer["fault"] == "TransportFault", answer
+    assert took < 1 + OVERHEAD_SEC + SLACK_SEC, took
+    assert up.seen == []
+
+
 @pytest.mark.parametrize("slow_call", ["token verify", "credential read"])
 def test_o1_a_slow_openbao_is_cut_at_the_deadline(tmp_path, data_root, slow_call):
     """#1364 O1: the proxy's own OpenBao calls (checking the request token, reading the
@@ -293,7 +339,7 @@ def test_o1_openbao_gets_the_proxys_own_allowance_not_the_systems_timeout(tmp_pa
         return 200, {"Content-Type": "application/json"}, _KV_REPLY
 
     with H.upstream() as openbao, T.rig(tmp_path / "forge", data_root) as r:
-        openbao.replies[f"/v1/secret/data/{r.t.tenant_id}/identity"] = slow_kv
+        openbao.replies[f"/v1/secret/data/{r.t.tenant_id}/identity/g1"] = slow_kv
         store = proxy().OpenBaoStore(addr=openbao.url, token="t", mount="secret")
         client = T.client_of(T.deps(r.data_root, store, verifier=r.verifier, audit=r.audit))
         answer = T.ask(client, r.tok(), "identity", "GET", f"{r.up.url}{API}/users/x",
@@ -364,7 +410,7 @@ def test_1375_o1_a_request_builds_no_tls_context_on_any_leg(tmp_path, data_root)
         held = T.oauth_set()
         oauth = json.dumps({"data": {"data": {"kind": held.kind, "fields": held.fields},
                                      "metadata": {"version": held.version}}}).encode()
-        bao.replies[f"/v1/secret/data/{r.t.tenant_id}/identity"] = (
+        bao.replies[f"/v1/secret/data/{r.t.tenant_id}/identity/g1"] = (
             200, {"Content-Type": "application/json"}, oauth)
         bao.replies[f"/v1/transit/verify/{openbao.transit_key_for(r.t.tenant_id)}"] = (
             200, {"Content-Type": "application/json"}, _VERIFY_REPLY)
@@ -474,11 +520,36 @@ def test_1384_the_secret_writers_async_calls_go_through_its_injected_transport()
                                      transport=httpx.MockTransport(answer))
 
     async def both() -> bool:
-        await secrets.put_credentials(TENANT_1384, "identity", "static", {"api_key": "k"})
-        return await secrets.has_credentials(TENANT_1384, "identity")
+        await secrets.put_credentials(TENANT_1384, "identity", "static", {"api_key": "k"}, generation=1)
+        return await secrets.has_credentials(TENANT_1384, "identity", generation=1)
 
     assert asyncio.run(both()) is True
     assert [method for method, _ in seen] == ["POST", "GET"], seen
+
+
+@pytest.mark.parametrize("generation", [1, 2, 10, 123])
+def test_1366_p5_the_writer_and_the_proxys_read_use_the_generations_path_and_never_the_legacy_one(generation):
+    """A set written at generation N is stored at `<tenant>/<system>/gN` only, asked for and read at that generation
+    alone (the legacy set and another generation's are not it), through each adapter's injected transport. (#1366 P5, R13)"""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    legacy = f"{TENANT_1384}/identity"
+    kv = R.KvStandIn({legacy: R.credential_set({"api_key": "legacy"})})
+    writer, reader = R.operator_secrets(kv), R.proxy_credentials(kv)
+
+    async def write_and_ask() -> list[bool]:
+        before = await writer.has_credentials(TENANT_1384, "identity", generation=generation)
+        await writer.put_credentials(TENANT_1384, "identity", "static", {"api_key": "k"}, generation=generation)
+        return [before, await writer.has_credentials(TENANT_1384, "identity", generation=generation),
+                await writer.has_credentials(TENANT_1384, "identity", generation=generation + 1)]
+
+    assert asyncio.run(write_and_ask()) == [False, True, False]
+    assert kv.written() == [f"{legacy}/g{generation}"]
+    got = reader.read(TENANT_1384, "identity", generation)
+    assert got is not None
+    assert got.fields == {"api_key": "k"}
+    assert reader.read(TENANT_1384, "identity", generation + 1) is None
+    assert set(kv.read_paths()) == {f"{legacy}/g{generation}", f"{legacy}/g{generation + 1}"}, "the legacy path was read"
 
 
 @pytest.mark.parametrize("leg", ["system call", "token endpoint", "openbao token verify",

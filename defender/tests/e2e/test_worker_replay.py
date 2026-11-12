@@ -17,7 +17,7 @@ import pytest
 
 from defender.tests.e2e._replay_harness import priced_billed, priced_cost
 from defender.tests.support.presentation import _cost_page_1377 as C
-from defender.tests.support.jobs._job_helper import NO_PROXY_FILES, helper_child
+from defender.tests.support.jobs._job_helper import helper_child, no_proxy_records
 from defender.tests.support.jobs._jobs1342 import (
     DEFENDER,
     StandInContainers,
@@ -83,8 +83,8 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         bom = b"\xef\xbb\xbf"
         for shape in (b'"' + bom, bom + b'"', bom + bom, b"m" + bom + b"n", b'"k' + bom + b'ey":'):
             assert shape in golden_bytes, ("premise", shape)
-    with B.run_tenant(tmp_path, root, files=NO_PROXY_FILES) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=root)
+    with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)  # R1: a set-up tenant has runs/
 
         def child(launch) -> list[str]:
@@ -133,8 +133,8 @@ async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)  # the child reads tenant records here (r6 R6-2)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
-    with B.run_tenant(tmp_path, root, files=NO_PROXY_FILES) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=root)
+    with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
@@ -169,8 +169,8 @@ async def test_1345_o4_a_queued_job_whose_tenant_has_no_mapping_ends_failed_setu
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     err_file = tmp_path / "child.stderr"
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
-    with B.run_tenant(tmp_path, root, files=NO_PROXY_FILES) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=root)
+    with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
@@ -208,8 +208,8 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_alert_and_the_
     # The title as launched: the mapped text, cut (#1345 O2).
     launched_with, later = document["rule"]["description"][:DISPLAY_CAPS["title"]], document["rule"]["id"]
     assert launched_with != later, "premise: the two titles differ"
-    with B.run_tenant(tmp_path, root, files=NO_PROXY_FILES) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=root)
+    with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
@@ -286,7 +286,7 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
     _priced_env(monkeypatch, root, migrated_database)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     # Every system declared, as published: the priced run gathers from elastic, and a system with no access
-    # declaration is down by design (NO_PROXY_FILES would leave nothing to gather). The helper signs with its seam.
+    # declaration is down by design (`no_proxy_records()` would leave nothing to gather). The helper signs with its seam.
     with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
@@ -347,7 +347,7 @@ async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_th
     _priced_env(monkeypatch, root, migrated_database)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     # Every system declared, as published: the priced run gathers from elastic, and a system with no access
-    # declaration is down by design (NO_PROXY_FILES would leave nothing to gather). The helper signs with its seam.
+    # declaration is down by design (`no_proxy_records()` would leave nothing to gather). The helper signs with its seam.
     with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
@@ -387,7 +387,7 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     modes: dict[str, str] = {}
     # Every system declared, as published: the priced run gathers from elastic, and a system with no access
-    # declaration is down by design (NO_PROXY_FILES would leave nothing to gather). The helper signs with its seam.
+    # declaration is down by design (`no_proxy_records()` would leave nothing to gather). The helper signs with its seam.
     with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)

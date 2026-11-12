@@ -247,8 +247,9 @@ def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_o
     made = sorted(x["run"] for x in got["copies"])
     # Each sibling's folder, and beside it only the host-held knowledge-source record of that run (U12).
     assert [p.name for p in sorted((planted.dir / "runs").iterdir()) if p.is_dir()] == made
+    # Beside each sibling's run: its knowledge-source record and (#1366 O6) its record of the versions the job read.
     assert [p.name for p in sorted((planted.dir / "runs").iterdir()) if not p.is_dir()] == \
-        [f"{run}.knowledge-source.json" for run in made]
+        sorted(f"{run}{suffix}" for run in made for suffix in (".knowledge-source.json", ".record-versions.json"))
     assert (planted.dir / "runs" / got["copies"][0]["run"] / "report.md").read_text(encoding="utf-8") == "sibling output"
 
 

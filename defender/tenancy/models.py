@@ -14,13 +14,16 @@ import datetime as _dt
 from pathlib import Path
 from typing import Any, Literal, get_args
 
-from sqlalchemy import ARRAY, CheckConstraint, DateTime, ForeignKey, Index, Table, Text, select, text, update
+from sqlalchemy import ARRAY, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Table, Text, select, text, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from defender.database import Base, IdColumn
 from defender.records.formats import MAPPING_KEYS, AlertMapping, TenantId
+# The records' plain values live apart from the tables (no database library needed to hold them); re-exported here.
+from defender.tenancy.record_values import CaseRecord as CaseRecord, SystemRecord as SystemRecord, TenantRecords as TenantRecords
 
 SCHEMA = "tenancy"
 
@@ -226,6 +229,71 @@ class AlertMappingRow(Base, kw_only=True):
     def of(cls, tenant_id: TenantId, mapping: AlertMapping) -> AlertMappingRow:
         """The row for `mapping` (entries it does not map are null)."""
         return cls(tenant_id=tenant_id, **{k: mapping.path_of(k) for k in MAPPING_KEYS})
+
+
+# --- system and case records (#1366) -------------------------------------------------------------------------------------
+
+
+class SystemVersionRow(Base, kw_only=True):
+    """One version of one system: append-only, the highest version is current, a delete is a version with `deleted`."""
+
+    __tablename__ = "system_versions"
+    __table_args__ = {"schema": SCHEMA}
+
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
+    system_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    adapter_id: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean)
+    settings: Mapped[dict[str, str]] = mapped_column(JSONB)
+    access: Mapped[str] = mapped_column(Text)
+    credential_generation: Mapped[int] = mapped_column(Integer)
+    deleted: Mapped[bool] = mapped_column(Boolean)
+    author: Mapped[str] = mapped_column(Text)
+    written_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+
+    def as_record(self) -> SystemRecord:
+        ref = None
+        adapter = self.adapter_id
+        if adapter.startswith(CUSTOM_PREFIX):
+            path, _sep, revision = adapter[len(CUSTOM_PREFIX):].partition("@")
+            ref, adapter = (path, revision), ""
+        return SystemRecord(system_id=self.system_id, version=self.version, adapter_id=adapter, enabled=self.enabled,
+                            settings=dict(self.settings), access=self.access,
+                            credential_generation=self.credential_generation, custom_ref=ref)
+
+
+#: A custom adapter reference is stored in `adapter_id` as `custom:<path>@<revision>`.
+CUSTOM_PREFIX = "custom:"
+
+
+def adapter_column(record: SystemRecord) -> str:
+    """The `adapter_id` column's text for `record`."""
+    return record.adapter_id if record.custom_ref is None else f"{CUSTOM_PREFIX}{record.custom_ref[0]}@{record.custom_ref[1]}"
+
+
+class CaseVersionRow(Base, kw_only=True):
+    """One version of the tenant's case record: append-only, the highest is current, a delete is a version."""
+
+    __tablename__ = "case_versions"
+    __table_args__ = {"schema": SCHEMA}
+
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    system_id: Mapped[str] = mapped_column(Text)
+    comment_body: Mapped[str] = mapped_column(Text)
+    deleted: Mapped[bool] = mapped_column(Boolean)
+    author: Mapped[str] = mapped_column(Text)
+    written_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+
+
+class RecordsMark(Base, kw_only=True):
+    """Present for a tenant whose systems come from records (R8, R11). Also the row a writer locks to serialize a tenant."""
+
+    __tablename__ = "records_mark"
+    __table_args__ = {"schema": SCHEMA}
+
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
 
 
 @dataclasses.dataclass(frozen=True)

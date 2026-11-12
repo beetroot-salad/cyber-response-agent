@@ -21,7 +21,7 @@ BASE = T.BASE_PATH
 
 def test_a1_every_request_is_one_record_naming_who_what_and_how_it_ended(tmp_path, data_root):
     """Sent, upstream-refused and policy-refused requests each leave one record with tenant,
-    system, investigation, commit, method, relative path and outcome. O9, A4."""
+    system, investigation, record version (not the export commit: #1366 O7), method, relative path and outcome. O9, A4."""
     with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
             u + BASE, writes=(("POST", "/tickets"),))) as r:
         r.up.replies[f"{BASE}/missing"] = (404, {}, b"{}")
@@ -36,7 +36,8 @@ def test_a1_every_request_is_one_record_naming_who_what_and_how_it_ended(tmp_pat
         assert set(AUDIT_KEYS) <= set(record), record
         assert (record["tenant"], record["system"], record["investigation"]) == (
             r.t.tenant_id, "identity", T.RUN_ID)
-        assert record["commit"] == r.t.commit
+        assert record["version"] == 1, "the legacy export folders stand for version 1 (`R.ExportRecords`)"
+        assert "commit" not in record, record
     assert [(x["method"], x["outcome"]) for x in r.audit.records] == [
         ("GET", "sent 200"), ("GET", "sent 404"), ("POST", "ConfinementFault"),
         ("DELETE", "ConfinementFault"), ("GET", "ConfigFault")]

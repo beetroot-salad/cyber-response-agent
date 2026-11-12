@@ -15,6 +15,7 @@ from defender.learning.leads import lead_author
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
 from defender.tests.support.learning.core._state1135 import tenant_of
 from defender.tests.support.learning.curation._lead_author_1134 import (
+    handed_systems,
     GHOST,
     discover,
     draft_scene_over,
@@ -68,7 +69,8 @@ def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
 
     with pytest.raises(FatalConfigError, match=NO_MODEL):
         lead_author.run(run_of(run_dir), label=LEAD, batch=lane.batch,
-                        paths=tenant_of(run_dir).learning_paths(LoopPaths, repo_root=lane.paths.repo_root))
+                        paths=tenant_of(run_dir).learning_paths(LoopPaths, repo_root=lane.paths.repo_root),
+                        systems=handed_systems(lane.paths))
 
     for system in ("wazuh", "elastic"):
         qid = f"{system}.hunt-creds"

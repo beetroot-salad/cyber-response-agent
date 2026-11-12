@@ -169,12 +169,17 @@ def test_an_entry_point_refuses_a_tenant_that_may_not_be_worked_for_before_touch
     """Not active, no row or no wiring: a non-zero exit, the tenant and a reason on the error stream and not on stdout, no
     tenant accepted or built, nothing of the tenant's folder touched, nothing left recorded (r10 O-A1, O-A6, C3)."""
     entry = _entries(tmp_path)[name]
+    # Every directory is built BEFORE its watch: building one seeds its records (a planting helper reads the planted
+    # folder to say what they are, `R.derive`), which is the test's setup and not the entry point's read (R10: the seeder
+    # states the records, the entry reads them from the directory).
+    active = active_directory(data_root, TENANT)
+    directory = _directory(data_root, condition)
     with H.watch_folder(data_root, TENANT) as control_touches:
-        admitted = entry(active_directory(data_root, TENANT))
+        admitted = entry(active)
     assert _no_state_refusal(admitted.everything), f"control: an active tenant was refused: {admitted.everything}"
     assert control_touches, "control: an admitted entry reads the tenant's folder, so the watch can see a read"
     with H.watch_folder(data_root, TENANT) as touches, H.acceptance_calls() as calls:
-        refused = entry(_directory(data_root, condition))
+        refused = entry(directory)
     assert refused.raised is None, f"a refusal must exit or return, not raise: {refused.everything}"
     assert refused.exited_non_zero, f"a refusal must exit non-zero, exited {refused.code!r}: {refused.everything}"
     assert TENANT in refused.operator_text, f"the tenant is not on the error stream: {refused.everything}"
@@ -201,8 +206,9 @@ def test_an_admitted_entry_point_accepts_its_tenant_once_builds_one_and_reads_it
 def test_an_entry_point_stays_recorded_and_locked_for_every_read_of_the_tenants_folder(data_root, tmp_path, name):
     """Every read of the tenant's folder by an admitted entry happens while this process is recorded under the tenant's
     host lock and the lock is held, and nothing stays recorded after (r10 O-A2: held for as long as the command works)."""
+    directory = active_directory(data_root, TENANT)  # built before the watch: seeding its records is setup, not the entry's read
     with H.watch_folder(data_root, TENANT) as touches:
-        outcome = _entries(tmp_path)[name](active_directory(data_root, TENANT))
+        outcome = _entries(tmp_path)[name](directory)
     assert _no_state_refusal(outcome.everything), f"control: {outcome.everything}"
     assert touches, "control: the entry read the tenant's folder"
     unheld = [(event, path) for event, path, held in touches if held != (True, True)]
@@ -291,8 +297,9 @@ def test_a_tenant_that_may_not_be_worked_for_is_refused_for_its_state_whatever_i
     assert _no_state_refusal(entry(active_directory(data_root, TENANT)).everything), "control: the folder is sound"
     for condition in CONDITIONS:
         _faulted(data_root, fault)
+        directory = _directory(data_root, condition)  # built before the watch: seeding its records is setup
         with H.watch_folder(data_root, TENANT) as touches:
-            refused = entry(_directory(data_root, condition))
+            refused = entry(directory)
         where = f"{condition} with {fault}: {refused.everything}"
         assert refused.raised is None, where
         assert refused.exited_non_zero, where
@@ -385,20 +392,21 @@ def test_the_acceptance_names_are_spelled_only_where_the_design_puts_them():
 # --- X-H4: the scaffold validator never asks the tenant records (A3, O-A4) ---------------------------------------------
 
 @pytest.mark.parametrize("database", ["unset", "unreachable"])
-def test_the_scaffold_validator_checks_the_config_without_asking_the_tenant_records(tmp_path, database):
-    """The validator, run as the connect agent runs it, checks the tenant's config with the database address unset or
-    pointing at nothing, and its output names no records and no database (r10 A3, O-A4: advisory, no admission)."""
+def test_the_scaffold_validator_judges_a_handoff_without_asking_the_database(tmp_path, database):
+    """The validator, run as the connect agent runs it, judges connect's handoff folder with the database address unset or
+    pointing at nothing, and its output names no database (r10 A3, O-A4: advisory, no admission). #1366 O9/O11: the
+    validator's input is the handoff folder, not a tenant's retired `settings/systems/<s>/config.env`."""
     from defender.skills.connect import validate_scaffold
+    from defender.tests.support.tenancy import _systems1366 as R
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as S
 
-    root = tmp_path / "data"
-    S.adopted(root)
+    config, access = R.FIXTURE_FOLDERS["cmdb"]
+    folder = R.system_folder(tmp_path / "handoff", "cmdb", config=config, access=access)
     extra = {} if database == "unset" else {"DEFENDER_DATABASE_DSN": "postgresql://nobody:not-the-password@127.0.0.1:1/postgres"}
-    proc = S.run_script(S.script_of(validate_scaffold), "cmdb", "--tenant", S.TID, root=root,
+    proc = S.run_script(S.script_of(validate_scaffold), "cmdb", "--handoff", str(folder), root=None,
                         unset=("DEFENDER_DIR", "DEFENDER_DATABASE_DSN"), **extra)
     S.assert_ran(proc)
     text = S.output(proc)
-    assert "config.env" in text, f"the tenant's config was not checked: {text}"
+    assert "validate_scaffold: cmdb" in text, f"the handoff was not judged: {text}"  # printed once the arguments were accepted
     assert "could not be resolved" not in text, text
-    for word in ("database", "records"):
-        assert word not in text.lower(), f"the validator asked the tenant records: {text}"
+    assert "database" not in text.lower(), f"the validator asked the database: {text}"

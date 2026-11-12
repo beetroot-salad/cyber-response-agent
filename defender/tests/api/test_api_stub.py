@@ -398,6 +398,19 @@ def test_the_api_never_loads_the_runtime_or_the_learning_loop() -> None:
     assert api_forbidden(json.loads(out.stdout)) == []
 
 
+def test_1366_h3_the_api_loads_no_record_store_so_no_route_writes_system_records() -> None:
+    """Guard: the API, demo wiring and server load nothing of the record writer, so no route writes records. (#1366 H3/R1)"""
+    probe = (
+        "import json, sys; import defender.api.app, defender.api.demo, defender.api.serve; "
+        "print(json.dumps(sorted(m for m in sys.modules if m.startswith('defender.system_records'))))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", probe], cwd=REPO_ROOT, capture_output=True, text=True,
+        encoding="utf-8", check=True,
+    )
+    assert json.loads(out.stdout) == []
+
+
 def test_the_identity_package_loads_no_api_runtime_or_learning_module() -> None:
     """`defender.identity` imports nothing from `api`, nor anything the API must never load
     (the learning loop and what was `defender.runtime` before #1308 placed it by layer)."""

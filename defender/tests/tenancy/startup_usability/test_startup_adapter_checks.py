@@ -16,7 +16,9 @@ import pytest
 from defender._io import read_jsonl_rows
 from defender.kit.settings import NOT_CONFIGURED, SystemConfig
 from defender.kit.faults import ConfigFault
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T6
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.systems import system_status
 from defender.systems.verb_grant import GrantError
@@ -30,11 +32,11 @@ CHECK = "check_settings"
 @dataclass(frozen=True)
 class Family:
     """One way a system's settings can be unusable: what is done to its folder, and what the
-    resulting fault must name (any one of `names`, case-sensitive — they are key names or the
-    file's own name)."""
+    resulting fault must name (any one of `names`, case-sensitive; `{system}` is filled in). Under
+    #1366 DC6 a record's fault is located "system <s> settings", never by the file."""
 
     label: str
-    kind: str  # "no-folder" | "stored" | "drop" | "set"
+    kind: str  # "no-folder" | "drop-all" | "drop" | "set"
     names: tuple[str, ...]
     mutate: Callable[[Path, str], Any]
     key: str = ""
@@ -49,23 +51,14 @@ def _remove_file(folder: Path, system: str) -> None:
     S.config_path(folder, system).unlink()
 
 
-def _not_utf8(folder: Path, system: str) -> None:
-    S.write_config(folder, system, b"\xff\xfe not text \x80\n")
-
-
-def _directory_at_file(folder: Path, system: str) -> None:
-    # "Unreadable" through a real primitive that holds as root (a mode bit would not): a
-    # directory where the file is (`read_regular_bytes` refuses anything not a plain file).
-    path = S.config_path(folder, system)
-    path.unlink()
-    path.mkdir()
-
-
+# Retired (#1366 P2/O9): the `config-env-not-utf8` and `config-env-unreadable` families. A settings FILE that is
+# not text, or not a plain file, can no longer reach a run (the store refuses non-text settings at write, the files
+# are retired); what is left of them is an unusable record: no settings at all, the `config-env-absent` family here (a
+# system record is always its settings, a `SystemConfig`; "unusable" is the adapter's `check_settings`, down at start).
+# The store's refusal of bad bytes: tenant_1108_p4/test_system_records_1366.py.
 FILE_FAMILIES: tuple[Family, ...] = (
-    Family("no-folder", "no-folder", ("config.env", NOT_CONFIGURED), _remove_folder),
-    Family("config-env-absent", "stored", ("config.env",), _remove_file),
-    Family("config-env-not-utf8", "stored", ("UTF-8",), _not_utf8),
-    Family("config-env-unreadable", "stored", ("config.env",), _directory_at_file),
+    Family("no-folder", "no-folder", (NOT_CONFIGURED, "system {system} settings"), _remove_folder),
+    Family("config-env-absent", "drop-all", ("system {system} settings",), _remove_file),
 )
 
 
@@ -156,10 +149,10 @@ def _landed(record: Any, system: str, family: Family) -> bool:
     entry = record.systems.get(system)
     if family.kind == "no-folder":
         return system not in record.systems
-    if family.kind == "stored":
-        return isinstance(entry, ConfigFault)
     if not isinstance(entry, SystemConfig):
         return False
+    if family.kind == "drop-all":
+        return len(entry) == 0
     if family.kind == "drop":
         return family.key not in entry
     return entry.get(family.key) == family.value
@@ -199,24 +192,22 @@ def test_o5_settings_that_make_a_verb_raise_make_the_check_raise(
         f"{record.systems.get(system)!r}")
 
     complete = S.config_texts(marker)[system]
-    path = S.config_path(folder, system)
-    if path.is_dir():
-        path.rmdir()
     S.write_config(folder, system, complete)  # the disk is complete again; the record is not
 
     outcomes = _every_verb(module, _ctx(record, tmp_path))
     raising = {v: str(e) for v, e in outcomes.items() if isinstance(e, ConfigFault)}
     assert raising, (
         f"premise: some {system} verb raises ConfigFault under {family.label}: {outcomes}")
-    assert any(n in text for text in raising.values() for n in family.names), (
-        f"premise: the verbs' fault names one of {family.names}: {raising}")
+    names = tuple(n.format(system=system) for n in family.names)
+    assert any(n in text for text in raising.values() for n in names), (
+        f"premise: the verbs' fault names one of {names}: {raising}")
 
     fault = _check_outcome(_declared_check(module, system), record)
     assert isinstance(fault, ConfigFault), (
         f"{system}'s verbs raise ConfigFault under {family.label} ({sorted(raising)}) but its "
         f"settings check does not: got {fault!r}")
-    assert any(n in str(fault) for n in family.names), (
-        f"{system}'s check does not name what is wrong (one of {family.names}): {fault}")
+    assert any(n in str(fault) for n in names), (
+        f"{system}'s check does not name what is wrong (one of {names}): {fault}")
 
 
 #: Elastic is complete only with an access declaration, which this config.env-only fixture does
@@ -257,8 +248,12 @@ def _no_systems(folder: Path, _system: str) -> None:
                 path.unlink()
 
 
-def _own_folder_broken(folder: Path, system: str) -> None:
-    S.write_config(folder, system, b"\xff\xfe not text \x80\n")
+def _every_record_faulted(folder: Path, _system: str) -> None:
+    """Every configured system's record unusable (empty settings: what an upgrade leaves, R12), each judged down at start by
+    its adapter's settings check. (#1366 P2/O9 retired the arm that planted a `tacit-knowledge` `config.env` that was not UTF-8: no
+    record can exist for a platform-served name, R3, and a bad file cannot reach a run.)"""
+    for config in sorted((S.settings_of(folder) / "systems").glob("*/config.env")):
+        config.unlink()
 
 
 def _registry_malformed(folder: Path, _system: str) -> None:
@@ -270,7 +265,7 @@ def _registry_malformed(folder: Path, _system: str) -> None:
 @pytest.mark.parametrize(("label", "mutate"), [
     pytest.param("complete", None, id="complete"),
     pytest.param("no-system-configured", _no_systems, id="no-system-configured"),
-    pytest.param("own-folder-not-utf8", _own_folder_broken, id="own-folder-not-utf8"),
+    pytest.param("every-record-faulted", _every_record_faulted, id="every-record-faulted"),
     pytest.param("registry-malformed", _registry_malformed, id="registry-malformed"),
 ])
 def test_1390_judge_run_never_marks_the_platform_served_registry_down(
@@ -286,29 +281,31 @@ def test_1390_judge_run_never_marks_the_platform_served_registry_down(
     record = S.resolve(root)
     assert "tacit-knowledge" in record.grants.gather.systems, "premise: the tenant grants the registry"
     assert "tacit-knowledge" not in checkout_roster.adapter_files, "premise: no file serves it"
-    if label == "own-folder-not-utf8":
-        assert isinstance(record.systems.get("tacit-knowledge"), ConfigFault), (
-            f"premise: the record holds the stored fault: {record.systems.get('tacit-knowledge')!r}")
+    if label == "every-record-faulted":
+        assert record.systems, "premise: the tenant has system records"
+        assert all(len(v) == 0 for v in record.systems.values()), (
+            f"premise: every record holds no settings (so every adapter's check says unusable): {record.systems!r}")
 
     judged = system_status.judge_run(checkout_roster, record, defender_dir=S.DEFENDER)
 
     assert "tacit-knowledge" not in judged.down, (
         f"the registry is down at the start ({label}): {judged.down.get('tacit-knowledge')!r}")
-    if label == "no-system-configured":
+    if label in ("no-system-configured", "every-record-faulted"):
         assert judged.down, "positive control: settings that break adapters take them down"
 
 
-def test_1390_the_platform_verbs_answer_over_a_record_holding_a_stored_config_fault(tmp_path, checkout_roster):
-    """With the record holding a stored ConfigFault for `tacit-knowledge`, neither `lookup` nor `health-check` raises one, and `health-check` answers. A4."""
+def test_1390_the_platform_verbs_answer_over_records_whose_settings_are_all_unusable(tmp_path, checkout_roster):
+    """With the tenant's system records all unusable (no settings: every adapter's check raises), neither `lookup` nor `health-check` of `tacit-knowledge` raises one, and `health-check` answers. A4. (Was: a stored fault for tacit-knowledge itself; no record can exist for a platform-served name, R3, so the premise is retired, #1366 P2/O9.)"""
     from defender.systems.verbs import ModuleVerbRegistry
 
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="tkn", table=T6.TABLE_A + (
         "  tacit-knowledge:\n    health-check: {roles: [gather]}\n    lookup: {roles: [gather]}\n"))
-    _own_folder_broken(folder, "tacit-knowledge")
+    _every_record_faulted(folder, "tacit-knowledge")
     record = S.resolve(root)
-    assert isinstance(record.systems.get("tacit-knowledge"), ConfigFault), (
-        f"premise: the record holds the stored fault: {record.systems.get('tacit-knowledge')!r}")
+    assert record.systems, "premise: the tenant has system records"
+    assert all(len(v) == 0 for v in record.systems.values()), (
+        f"premise: every record holds no settings: {record.systems!r}")
     verbs = ModuleVerbRegistry(checkout_roster, record.grants.gather).verbs("tacit-knowledge")
     ctx = _ctx(record, tmp_path)
 
@@ -320,7 +317,7 @@ def test_1390_the_platform_verbs_answer_over_a_record_holding_a_stored_config_fa
             outcomes[name] = exc
 
     assert not [e for e in outcomes.values() if isinstance(e, ConfigFault)], (
-        f"a platform verb raised the stored ConfigFault: {outcomes}")
+        f"a platform verb raised the ConfigFault of an unusable record: {outcomes}")
     assert isinstance(outcomes["health-check"], dict), (
         f"health-check did not answer over the faulted record: {outcomes['health-check']!r}")
 
@@ -796,7 +793,13 @@ def test_a_missing_granted_system_refuses_before_checks_or_run_creation(tmp_path
 
     rec = S.RunRecorder(tmp_path / "run")
     alert = S.plant_alert(tmp_path / "alert.json")
-    rc, refused = S.drive_run(S.run_argv(alert, data_root), rec, roster=roster)
+    argv = S.run_argv(alert, data_root)
+    # The injected roster stands for the catalog (cmdb and identity alone), so the tenant's records are those two: stated, not
+    # the fixture's seven (a record naming an adapter the roster lacks is a removed-adapter refusal, R12, which would
+    # come before the grant refusal this test is about).
+    directory = directory_for_argv(argv, records=R.bare_records("cmdb", "identity"))
+    R.assert_records_within_roster(directory, S.PLAYGROUND_ID, roster)
+    rc, refused = S.drive_run(argv, rec, roster=roster, directory=directory)
     assert rc is None
     assert isinstance(refused, SystemExit)
     assert refused.code != 0

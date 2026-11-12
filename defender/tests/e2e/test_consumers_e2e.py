@@ -42,9 +42,8 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 )
 
 from defender.kit.verbs import body_param_of, engine_of, verb  # noqa: E402
-from defender.tests.support.learning.curation._lead_author_1134 import held_skills, skills_view  # noqa: E402
-from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT, place_tenant  # noqa: E402
-from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID  # noqa: E402
+from defender.tests.support.learning.curation._lead_author_1134 import held_skills, run_pitfalls_handed, skills_view  # noqa: E402
+from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -562,8 +561,8 @@ def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, m
         return 0
 
     with C.draft_trees(lane) as trees:
-        rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=synthesizing_curator,
-                                           trees=trees, batch=lane.batch, items=items)
+        rc = run_pitfalls_handed(paths=paths, invoke=synthesizing_curator,
+                                 trees=trees, batch=lane.batch, items=items)
     assert rc == 0
     text = lane.text_at_tip(rel)
     assert text is not None, "the curator's created execution.md was rejected — dead-end"
@@ -645,34 +644,22 @@ def test_visualize_runtime_gives_every_exit_class_its_own_colour_not_the_bad_fal
 _SPELLING_SPLIT = ["change-mgmt", "host-state", "threat-intel"]
 
 
-#: `validate_scaffold.py <system> --tenant <T> --staged <dir>` checks the tenant half connect
+#: `validate_scaffold.py <system> --staged <dir>` checks the tenant half connect
 #: stages, laid out like a tenant `agent/` (`skills/<system>/{SKILL.md,execution.md}`,
 #: `skills/gather/queries/<system>/*.md`); its adapter checks read the code tree `DEFENDER_DIR`
 #: names (only adapters stay in the product, #1172). A scaffold's staged half sits beside its
-#: code tree; `<T>` is set up under a data root of its own (the config check is advisory).
+#: code tree. It names no tenant (#1366 O1, O11).
 def _staged_agent(defender_dir: Path) -> Path:
     return defender_dir.with_name(defender_dir.name + "-agent")
 
 
-#: The tenant every scaffold validation names (`--tenant`), set up beside the staged half.
-SCAFFOLD_TENANT = D9_TENANT_ID
-
-
-def _scaffold_data_root(staged: Path) -> Path:
-    """A data root beside the staged half holding `SCAFFOLD_TENANT`, set up once."""
-    root = staged.with_name(staged.name + "-data-root")
-    if not (root / SCAFFOLD_TENANT).exists():
-        place_tenant(root, SCAFFOLD_TENANT)
-    return root
-
-
 def _run_validate_scaffold(system: str, *, defender_dir: Path = DEFENDER,
                            agent_dir: Path | None = None):
+    """connect's scaffold validator over a staged half. It names no tenant and reads no data root: it is a no-tenant
+    surface (#1366 O1, O11; `--tenant` retired)."""
     staged = agent_dir if agent_dir is not None else _staged_agent(defender_dir)
-    env = {"DEFENDER_DIR": str(defender_dir), "PATH": os.environ.get("PATH", ""),
-           "DEFENDER_DATA_ROOT": str(_scaffold_data_root(staged))}
-    return subprocess.run([sys.executable, str(VALIDATE_SCAFFOLD), system,
-                           "--tenant", SCAFFOLD_TENANT, "--staged", str(staged)],
+    env = {"DEFENDER_DIR": str(defender_dir), "PATH": os.environ.get("PATH", "")}
+    return subprocess.run([sys.executable, str(VALIDATE_SCAFFOLD), system, "--staged", str(staged)],
                           capture_output=True, text=True, env=env, timeout=60)
 
 

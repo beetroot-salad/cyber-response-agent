@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, seed_postgres, seed_twin
+from defender.tests.support.tenancy._systems1366 import DERIVED, seed_postgres_records, seed_twin_records
 
 if TYPE_CHECKING:
     from defender.tenancy import TenantDirectory
@@ -93,13 +94,18 @@ def active_directory(data_root: Path, tenant: str, **keywords: Any) -> TenantDir
     return TenantDirectory(lambda: twin)
 
 
-def active_repository(data_root: Path, tenant: str, *, state: str = "active", repo: str | None = None,
+def active_repository(  # noqa: PLR0913 — one twin's whole seeding, each part overridable
+        data_root: Path, tenant: str, *, state: str = "active", repo: str | None = None,
                       origin: str | None = None, wiring: bool = True,
                       generations: Sequence[Mapping[str, Any]] = (),
-                      alert_mapping: Mapping[str, str | None] | None = PLANTED_ALERT_MAPPING) -> Any:
+                      alert_mapping: Mapping[str, str | None] | None = PLANTED_ALERT_MAPPING,
+                      records: Any = DERIVED) -> Any:
     """The in-memory tenant repository behind `active_directory` (for a test that reads it back directly).
     #1345: it holds today's alert mapping (`_mapping1345.PLANTED_ALERT_MAPPING`) for the tenant; a test of absence
-    passes `alert_mapping=None`, another mapping passes its six entries."""
+    passes `alert_mapping=None`, another mapping passes its six entries.
+    #1366 R8: the twin is born NOT imported, so it is also seeded with the tenant's current system and case records
+    (`_systems1366.seed_twin_records`): by default what the tenant's own planted or published `settings/` stands for
+    (else the committed fixture's); `records=None` leaves the tenant not imported; a `RecordsSpec` seeds exactly that."""
     from defender.tenancy import InMemoryTenantRepository
 
     twin: Any = InMemoryTenantRepository()
@@ -112,6 +118,7 @@ def active_repository(data_root: Path, tenant: str, *, state: str = "active", re
     for fields in generations:
         _seed_generation(twin, str(tenant), fields)
     seed_twin(twin, str(tenant), alert_mapping)
+    seed_twin_records(twin, data_root, str(tenant), records)  # #1366 R8
     return twin
 
 
@@ -156,7 +163,7 @@ _JOB = {"creating": ("create", "names", "service"), "offboarding": ("offboard", 
 def insert_active_tenant(dsn: str, tenant: str, *, state: str = "active", repo: str | None = None,  # noqa: PLR0913
                          origin: str | None = None, wiring: bool = True,
                          data_root: Path | None = None, generations: Sequence[Mapping[str, Any]] = (),
-                         alert_mapping: Mapping[str, str | None] | None = None) -> None:
+                         alert_mapping: Mapping[str, str | None] | None = None, records: Any = None) -> None:
     """#1345: `alert_mapping` (six entries) is saved through the store after the rows; the default saves none
     (lifecycle and identity tests do not start runs). `_jobs1342.register_tenant` defaults it to `FIXTURE_ALERT_MAPPING`."""
     from defender.tests.support.shared._postgres1339 import execute
@@ -170,6 +177,7 @@ def insert_active_tenant(dsn: str, tenant: str, *, state: str = "active", repo: 
     for fields in generations:
         insert_generation(dsn, tenant, fields)
     seed_postgres(dsn, tenant, alert_mapping)
+    seed_postgres_records(dsn, tenant, records, data_root)  # #1366 R8: default none (not imported)
 
 
 def insert_generation(dsn: str, tenant: str, fields: Mapping[str, Any]) -> None:

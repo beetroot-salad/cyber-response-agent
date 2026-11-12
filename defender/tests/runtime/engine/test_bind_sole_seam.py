@@ -38,6 +38,7 @@ from defender.investigation.agent_definition import (  # noqa: E402
     read_allow_of,
     resolve_roots,
 )
+from defender.tests.support.learning.curation._lead_author_1134 import lead_scope
 
 _DEFENDER = PATHS.defender_dir
 
@@ -135,7 +136,7 @@ def test_d2_lead_author_write_shape_anchors_skills(tmp_path):
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
-    pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
+    pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd, scope=lead_scope(wtd)).policy
     assert permission.decide_write(                                                     # positive control (.md)
         skills / "elastic" / "SKILL.md", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
     assert not permission.decide_write(                                                 # wrong root
@@ -163,7 +164,7 @@ def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
     wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
     main_pol = bind(MAIN_DEF, run).policy
-    lead_pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
+    lead_pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd, scope=lead_scope(wtd)).policy
 
     assert permission.decide_write(                                                     # MAIN: sanctioned run-dir artifact
         run / "investigation.md", "", run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
@@ -183,7 +184,7 @@ def test_d2_lead_author_rm_scope(tmp_path):
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
-    pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
+    pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd, scope=lead_scope(wtd)).policy
 
     def _bash(cmd: str) -> bool:
         return permission.decide_bash(cmd, policy=pol, run_dir=run, defender_dir=wtd).allow
@@ -235,7 +236,7 @@ def test_d3_lead_author_worktree_anchor(tmp_path):
     """The lead author's deps and write scope anchor on its worktree tree, not the main checkout."""
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
-    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd)
+    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd, scope=lead_scope(wtd))
     assert deps.defender_dir == wtd
     assert permission.decide_write(
         wtd / "skills" / "elastic" / "SKILL.md", "c",
@@ -275,7 +276,7 @@ def test_d4_lead_author_no_tree_raises(tmp_path):
     wtd = _lead_wtd(tmp_path)
     with pytest.raises((ValueError, TypeError), match="explicit NON-PATHS defender_dir"):
         bind(LEAD_AUTHOR_DEF, run)                        # no tree
-    assert isinstance(bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd), LeadAuthorDeps)
+    assert isinstance(bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd, scope=lead_scope(wtd)), LeadAuthorDeps)
 
 
 # D5 — the reader lane through `compile_policy_for`
@@ -359,7 +360,7 @@ def test_d6_guard_needs_worktree_defender_dir(tmp_path):
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
     target = wtd / "skills" / "elastic" / "SKILL.md"
-    pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd).policy
+    pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd, scope=lead_scope(wtd)).policy
     # consistent tree → admitted.
     assert permission.decide_write(target, "c", run_dir=run, defender_dir=wtd, policy=pol).allow
     # the split (deps tree = PATHS while write_allow anchors on wt) → the legit write DENIES.
@@ -442,6 +443,6 @@ def test_d7_lead_author_main_tree_unbuildable(tmp_path):
     wtd = _lead_wtd(tmp_path)
     with pytest.raises((ValueError, TypeError), match="explicit NON-PATHS defender_dir"):
         bind(LEAD_AUTHOR_DEF, run, defender_dir=_DEFENDER)      # main-checkout tree — UNBUILDABLE
-    assert isinstance(bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd), LeadAuthorDeps)  # positive control
+    assert isinstance(bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd, scope=lead_scope(wtd)), LeadAuthorDeps)  # positive control
 
 

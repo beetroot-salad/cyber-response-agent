@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import re
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from defender.records import formats
 from defender._model import model
 from defender.records.formats import ReportUnreadable, require_report
 from defender.records import Run
-from defender.tenancy.tenant_settings import read_regular_bytes
+
+if TYPE_CHECKING:
+    from defender.tenancy.models import CaseRecord as StoredCaseRecord
 
 _logger = logging.getLogger(__name__)
 
@@ -83,14 +85,18 @@ class CaseRecordSettings:
     body: str
 
 
-def _fault(text: str) -> CaseTicketError:
-    return CaseTicketError(f"settings/{CASE_RECORD_REL} {text}")
+#: How a case-record fault names the record when its caller names it no other way: the retired file.
+CASE_RECORD_FILE = f"settings/{CASE_RECORD_REL}"
 
 
-def parse_case_record(text: str) -> CaseRecordSettings:
-    """The file's text as settings, or `CaseTicketError` naming the file: a YAML mapping with a
-    non-empty text `system` and a `comment` mapping whose `body` is non-empty text (no product
-    default: the body is the tenant's)."""
+def parse_case_record(text: str, *, named: str = CASE_RECORD_FILE) -> CaseRecordSettings:
+    """The case record's text as settings, or `CaseTicketError` naming it as `named` (the record, a file, a folder's
+    entry): a YAML mapping with a non-empty text `system` and a `comment` mapping whose `body` is non-empty text (no
+    product default: the body is the tenant's)."""
+
+    def _fault(text: str) -> CaseTicketError:
+        return CaseTicketError(f"{named} {text}")
+
     import yaml
 
     from defender._yaml import safe_load
@@ -117,23 +123,11 @@ def parse_case_record(text: str) -> CaseRecordSettings:
     return CaseRecordSettings(system=system.strip(), body=body)
 
 
-def load_case_record(settings: Path) -> CaseRecordSettings | None:
-    """The tenant's case-record file under `settings`, or `None` when it has none (a tenant with
-    no case system), or `CaseTicketError` naming the file when it cannot be read or stand.
-    Called once per run, by `run_tenant.resolved_settings`; every consumer is handed the result and
-    none reads the file."""
-    path = Path(settings) / CASE_RECORD_REL
-    try:
-        raw = read_regular_bytes(path)
-    except FileNotFoundError:
-        return None
-    except OSError as e:
-        raise _fault(f"cannot be read: {e.strerror or type(e).__name__}") from None
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        raise _fault("is not UTF-8 text") from None
-    return parse_case_record(text)
+def case_record_text(record: StoredCaseRecord) -> str:
+    """A stored case record (#1366) as the case-record text `parse_case_record` reads."""
+    from defender._yaml import safe_dump
+
+    return safe_dump({"system": record.system_id, "comment": {"body": record.comment_body}}, sort_keys=False)
 
 
 def _format(template: str, ctx: dict[str, str], where: str) -> str:
@@ -143,12 +137,12 @@ def _format(template: str, ctx: dict[str, str], where: str) -> str:
         return template.format_map(ctx)
     except KeyError as e:
         raise CaseTicketError(
-            f"the case-record file's `{where}` names a render key the context does not "
+            f"the case record's `{where}` names a render key the context does not "
             f"carry: {e}"
         ) from e
     except (ValueError, IndexError, AttributeError, TypeError) as e:
         raise CaseTicketError(
-            f"the case-record file's `{where}` is not a valid template: {e}"
+            f"the case record's `{where}` is not a valid template: {e}"
         ) from e
 
 

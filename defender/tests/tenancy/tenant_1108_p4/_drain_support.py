@@ -32,6 +32,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_delivery._identity import ISSUER, VaultHTTP
 from defender.tests.tenancy.tenant_1108_delivery._identity import token as issuer_token
 from defender.tests.tenancy.tenant_1108_p4._support import git
+from defender.tests.support.runtime.engine._declared869 import catalog_of
 
 #: The lesson the fake curator writes, below the corpus dir its config names (the draft's lane).
 LESSON_NAME = "p4-drain-lesson.md"
@@ -55,15 +56,17 @@ def run_stage(stage) -> int:
 def product_repo(tmp_path: Path, *, adapters: tuple[str, ...] = ()) -> Path:
     """A scratch product checkout (a real git repo with a `defender/` tree and one commit) used
     as the drain's `paths.repo_root`. `adapters` names systems whose shipped adapter module it
-    carries, for lanes that resolve declared systems and verbs from the product (#1172)."""
+    carries, for lanes that resolve declared systems and verbs from the product (#1172). Its adapters directory is
+    always there, empty without `adapters`, as every product checkout carries one: the lead-author tick reads it as its
+    delivery opens (#1366 R16)."""
     from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 
     repo = tmp_path / "product"
     (repo / "defender" / "lessons").mkdir(parents=True)
     (repo / "defender" / "lessons" / "product-era.md").write_text("product era\n", encoding="utf-8")
     (repo / "defender" / "README.md").write_text("scratch product checkout\n", encoding="utf-8")
+    (repo / "defender" / "integrations").mkdir()
     if adapters:
-        (repo / "defender" / "integrations").mkdir()
         for system in adapters:
             name = f"{system.replace('-', '_')}_adapter.py"
             shutil.copyfile(DEFENDER / "integrations" / name, repo / "defender" / "integrations" / name)
@@ -414,7 +417,11 @@ class LeadStep:
         self.paths_seen.append(paths)
         skills_dir = draft_root_of(batch) / LEAD_DRAFT_LANES[0]
         with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
-            deps = la.build_lead_author_deps(paths, trees=trees, batch=batch)
+            # (#1366 R16) The lanes are handed their systems. This stand-in for the drain's step is bound to no records (the real
+            # step is bound to the drain's directory), so it hands the whole catalog of the scratch product checkout: these
+            # suites assert delivery and the batch's lifecycle, not which systems a tenant's lane admits.
+            systems = kw.pop("systems", None) or catalog_of(paths.repo_root)
+            deps = la.build_lead_author_deps(paths, trees=trees, batch=batch, systems=systems)
 
             def spawn(_run_dir: Any, _handoffs: Any, _drafts: Any, *, box: Any = None) -> int:
                 for rel, text in self.edits.get(name, {}).items():
@@ -467,7 +474,7 @@ class PitfallsStep:
         with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
             return pitfalls_curator.run_pitfalls(paths=paths, trees=trees, batch=batch,
                                                  invoke=invoke, box=box, on_curated=on_curated,
-                                                 **kw)
+                                                 systems=kw.pop("systems", None) or catalog_of(paths.repo_root), **kw)
 
 
 def executed_lead(query_id: str, *, lead_id: str = "l-001") -> Any:

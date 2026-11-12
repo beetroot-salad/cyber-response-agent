@@ -14,6 +14,7 @@ import pytest
 
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.support.runtime.engine._spec767 import write_report
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
@@ -113,10 +114,16 @@ def _reader_policies(run_dir: Path):
     }
 
 
-def _settings_files() -> list[Path]:
+def _settings_files(leftover_tenant: Path) -> list[Path]:
+    """Every settings file the model's read surfaces must not reach: the committed fixture's and the
+    template's, plus a tenant repo that still holds the retired `systems/<s>/config.env` /
+    `access.yaml` and `case-record.yaml` (#1366 O9 / DC8: `import` and `check` still meet those files
+    in a tenant's repo and published export, though nothing reads them afterwards; the committed
+    fixture no longer carries them, so a planted tenant stands for them)."""
     files = [p for d in _committed_tenant_dirs() for p in (d / "settings").rglob("*")
              if p.is_file()]
     files += [p for p in T.TEMPLATE_SETTINGS.rglob("*") if p.is_file()]
+    files += [p for p in (leftover_tenant / "settings").rglob("*") if p.is_file()]
     return sorted(files)
 
 
@@ -126,10 +133,11 @@ def test_every_settings_file_is_denied_by_both_read_surfaces_and_a_corpus_file_i
 
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    files = _settings_files()
+    leftover = S.plant(tmp_path / "leftover-root", T.PLAYGROUND_ID, marker="leftover")
+    files = _settings_files(leftover)
     names = {p.name for p in files}
     # The census is non-vacuous: every kind is present to be denied.
-    assert {"verb-grants.yaml", "lead-zero.yaml", "case-record.yaml", "config.env"} <= names, names
+    assert {"verb-grants.yaml", "lead-zero.yaml", "case-record.yaml", "config.env", "access.yaml"} <= names, names
     control = T.DEFENDER / "skills" / "gather" / "SKILL.md"
     for role, policy in _reader_policies(run_dir).items():
         allowed = [
@@ -193,24 +201,33 @@ def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path
         "the fixture no longer discriminates"
 
 
-def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
+def test_a_system_with_no_settings_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
+    """A record with no settings is a fault naming the system and its required keys, with no folder path and no
+    fallback to the fixture's record (retires the folder-file wording). (#1366 O9, DC6)"""
     faults = T.mod("kit.faults")
     transport = T.mod("kit.transport")
+    cmdb = T.mod("integrations.cmdb_adapter")
     root = tmp_path / "injected-root"
     T.place_tenant(root, T.PLAYGROUND_ID, configs={})
     settings = T.accept(root, T.PLAYGROUND_ID).settings
-    # cmdb is declared, so its missing config.env is the one fault left (the declaration is
-    # judged first, #1391 r5 S1).
+    # cmdb is declared, so its missing settings are the one fault left (the declaration is judged first,
+    # #1391 r5 S1): an access file with no config.env plants a recorded cmdb with empty settings.
     (settings / "systems" / "cmdb").mkdir(parents=True, exist_ok=True)
     (settings / "systems" / "cmdb" / "access.yaml").write_text(
         T.access_text("noconf", "cmdb"), encoding="utf-8")
     with pytest.raises(faults.ConfigFault) as caught:
-        transport.load_config(_ctx(settings, tmp_path), "cmdb", "CMDB")
-    assert "the tenant's settings/systems/cmdb/config.env" in str(caught.value)
-    assert str(settings) not in str(caught.value)
-    # Control: the checkout's fixture does carry a cmdb config, so the refusal above is
-    # the absence of a fallback, not the absence of a file anywhere.
-    assert (T.FIXTURE_SETTINGS / "systems" / "cmdb" / "config.env").is_file()
+        transport.load_config(_ctx(settings, tmp_path), "cmdb", cmdb.PREFIX)
+    text = str(caught.value)
+    assert "cmdb" in text, text
+    for key in cmdb.REQUIRED_CONFIG_KEYS:
+        assert f"{cmdb.PREFIX}_{key}" in text, f"the fault does not name {cmdb.PREFIX}_{key}: {text}"
+    for retired in ("config.env", "settings/systems"):
+        assert retired not in text, f"a record's fault points at a retired folder file: {text}"
+    assert str(settings) not in text
+    # Control: the fixture tenant's cmdb record does carry settings, so the refusal above is the absence of
+    # a fallback, not the absence of a record anywhere.
+    assert R.fixture_records().systems["cmdb"].settings
+    assert transport.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path), "cmdb", cmdb.PREFIX)
 
 
 # ---- the case-record settings ----------------------------------------------------------------
@@ -220,7 +237,7 @@ def test_the_record_leg_comments_to_the_injected_tenants_store_with_its_case_rec
         injected, tmp_path):
     """The `--update-ticket` lane: the real record leg, handed the run's record, addresses the
     injected tenant's case store (`ticket/config.env`) and renders the injected tenant's
-    `case-record.yaml` body, not the checkout's. Replaces the retired `case-history` mapping
+    case record body (#1366: seeded from its planted `case-record.yaml`), not the fixture's. Replaces the retired `case-history` mapping
     reader tests (#1359 O2: the open leg and `load_case_mapping` are gone)."""
     from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 
@@ -237,8 +254,7 @@ def test_the_record_leg_comments_to_the_injected_tenants_store_with_its_case_rec
     (post,) = posts
     assert post["url"] == f"http://ticket-{MARK}:8080/tickets/{C.TICKET_KEY}/comments", post
     assert "injected-tenant-body" in post["body"]["body"], "the injected case-record body was not sent"
-    checkout_text = (T.FIXTURE_SETTINGS / "case-record.yaml").read_text(encoding="utf-8")
-    assert "injected-tenant-body" not in checkout_text, "the fixture no longer discriminates"
+    assert "injected-tenant-body" not in R.FIXTURE_CASE_BODY, "the fixture no longer discriminates"
 
 
 # ---- lead-zero ---------------------------------------------------------------------------------
@@ -334,6 +350,22 @@ def test_a_table_edited_between_two_runs_is_read_again(tmp_path):
 
 # ---- the operator's audit CLI is an entry point too -------------------------------------------------
 
+@pytest.mark.parametrize("agent", sorted(set(T.mod("cli.policy_cli").AGENT_NAMES) - {"gather"}))
+def test_the_policy_cli_shows_every_role_that_names_no_tenant(tmp_path, capsys, agent):
+    """Every role but gather is shown with no tenant, over a worktree-shaped tree (the authors bind only such a tree): a
+    role whose scope a run hands it (the lead author's systems, #1366 R16) is handed what a caller with no tenant hands,
+    never left to fail its own policy's build."""
+    from defender.tests.support.runtime.engine._declared869 import seed_tree
+
+    policy_cli = T.mod("cli.policy_cli")
+    tree = seed_tree(tmp_path, adapters=("cmdb",)) / "defender"
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    corpus = ["--corpus-name", "lessons"] if agent == "corpus_author" else []  # the role's own per-spawn input
+    assert policy_cli.main(["show", agent, "--run-dir", str(run_dir), "--defender-dir", str(tree), *corpus]) == 0
+    assert f"agent: {agent}" in capsys.readouterr().out
+
+
 def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_tenant(
         tmp_path, capsys, monkeypatch):
     policy_cli = T.mod("cli.policy_cli")
@@ -381,6 +413,32 @@ def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
     assert fixture_uuid("tenant:newco") in text, text
 
 
+def test_1366_p4_the_policy_cli_builds_the_tenant_from_its_records_not_its_folder(tmp_path, capsys, monkeypatch):
+    """The policy CLI's tenant comes from the tenant's records (design r7 orchestrator bullets: `policy_cli` passes the
+    current records to `run_tenant_for`). The planted folder grants gather cmdb and elastic: with the fixture's records
+    `show gather` answers; the SAME folder with a tenant imported with no records (so neither granted system is
+    recorded: unrecorded systems are not in the tenant, R12) leaves gather nothing to query and the CLI refuses naming
+    both grants, as a run does, not the import (the tenant is imported). A CLI reading the folder would answer in both.
+    (#1366 P4, R10, R12)"""
+    policy_cli = T.mod("cli.policy_cli")
+    root = tmp_path / "tenants"
+    T.place_tenant(root, fixture_uuid("tenant:acme"), table=T.TABLE_A)
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
+    run_dir = tmp_path / "run"
+    (run_dir / "gather_raw").mkdir(parents=True)
+    argv = ["show", "gather", "--run-dir", str(run_dir), "--tenant", fixture_uuid("tenant:acme")]
+
+    assert policy_cli.main(argv, directory=directory_for_argv(argv, records=R.fixture_records())) == 0
+    assert "agent: gather" in capsys.readouterr().out
+
+    with pytest.raises(SystemExit) as caught:
+        policy_cli.main(argv, directory=directory_for_argv(argv, records=R.RecordsSpec()))
+    text = str(caught.value.code)
+    assert text.startswith("defender-policy:"), text
+    assert all(system in text for system in ("cmdb", "elastic")), text
+    assert R.AUTHOR[R.IMPORT] not in text, text
+
+
 @pytest.mark.parametrize("inside", ["code tree", "runs base"])
 def test_a_tenant_folder_inside_a_tree_a_box_mounts_is_refused(tmp_path, inside):
     rt = T.mod("systems.run_tenant")
@@ -390,10 +448,10 @@ def test_a_tenant_folder_inside_a_tree_a_box_mounts_is_refused(tmp_path, inside)
     runs_base.mkdir()
     outside = tmp_path / "tenants"
     T.place_tenant(outside, fixture_uuid("tenant:acme"))
-    assert rt.resolve_tenant(fixture_data_root(outside), fixture_uuid("tenant:acme"), defender_dir=defender_dir,
+    assert R.resolve_tenant(fixture_data_root(outside), fixture_uuid("tenant:acme"), defender_dir=defender_dir,
                              dispatches_lead_zero=False, box_mounted=(runs_base,)).tenant_id == fixture_uuid("tenant:acme")
     root = (defender_dir if inside == "code tree" else runs_base) / "tenants"
     T.place_tenant(root, fixture_uuid("tenant:acme"))
     with pytest.raises(rt.TenantRefused, match="which a box mounts"):
-        rt.resolve_tenant(fixture_data_root(root), fixture_uuid("tenant:acme"), defender_dir=defender_dir, dispatches_lead_zero=False,
-                          box_mounted=(runs_base,))
+        R.resolve_tenant(fixture_data_root(root), fixture_uuid("tenant:acme"), defender_dir=defender_dir, dispatches_lead_zero=False,
+                         box_mounted=(runs_base,))

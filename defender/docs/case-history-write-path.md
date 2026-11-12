@@ -39,8 +39,9 @@ case; a person closes it.
   made only of dots. A refused or absent key records none and the receipt says the alert names no
   ticket. The key is sent as one percent-encoded path segment.
 
-- **Which system records cases is the tenant's setting.** `settings/case-record.yaml` names the
-  `system:` and the `comment.body:` template. A tenant without the file has no case system and
+- **Which system records cases is the tenant's setting.** Its case record (#1366: a database
+  record the operator writes with `tenant.py set-case` from a `case-record.yaml` file) names the
+  `system:` and the `comment.body:` template. A tenant without one has no case system and
   needs none. `tenant check` and the record step share one judgement (`systems/case_system.py`):
   the system on the roster, its adapter accepted and exporting the action, its `check_settings`
   and, through the credential proxy, a declared write route. The settings are read once when the
@@ -71,7 +72,7 @@ case; a person closes it.
 ## Shape
 
 - `tenancy/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, `CaseRecordSettings`
-  (`settings/case-record.yaml`), the comment renderer, the agent tag (`agent_comment_tag`,
+  (the case record's format), the comment renderer, the agent tag (`agent_comment_tag`,
   `posted_comment`).
 - `systems/case_system.py` — the shared judgement of the case system and its legacy-folder finding.
 - `investigation/ticket_writer.py` — I/O: `record_case_ticket` (at most one comment, a receipt on

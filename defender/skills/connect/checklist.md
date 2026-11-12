@@ -3,7 +3,7 @@
 The mechanical bar is automated. Run:
 
 ```bash
-python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant} --staged {staged}
+python3 defender/skills/connect/validate_scaffold.py {system} --handoff {handoff}/{system} --staged {staged}
 ```
 
 and fix every FAIL before going further. What it checks, and at which
@@ -20,7 +20,10 @@ severity — a WARN is a judgment call left to you, not a cleared bar:
   param that binds positionally is one the model can never supply, so the
   verb is dead on arrival (`adapter.md` §"The keyword-only params ARE the
   param contract");
-- `config.env` carries no inline secrets;
+- the handoff's `config.env` and `access.yaml` are a record the store accepts: the
+  store's own judgement (every key the adapter declares and no other, no blank or
+  `CHANGE-ME` value, the adapter's settings check, an access declaration that parses),
+  each failure the sentence the operator would be refused with, naming the file;
 - `skills/{system}/SKILL.md` frontmatter says `name: defender-{system}`;
 - every seed template with readable frontmatter names a declared verb; and
   for a **param-only** verb (one with no `@verb(engine=…)`), every
@@ -31,7 +34,7 @@ severity — a WARN is a judgment call left to you, not a cleared bar:
 
 **WARN** (exit 0 — surfaced, not enforced):
 
-- no `config.env`, or a value that merely looks high-entropy;
+- no `--handoff` given;
 - no `execution.md` (or one still inlined as a `## Execution` section in
   `SKILL.md` — split it, per `docs/system-skill-shape.md`);
 - no seed query templates at all. They grow post-merge, so this is not a
@@ -77,10 +80,11 @@ This file covers the rest — the calls a script can't make.
       you're sure of, not a speculative set mined from API docs.
 - [ ] **Credential boundary held by eye, too.** No tokens, passwords, or
       auth-bearing cURL anywhere in the adapter, docs, examples, or commit
-      — not just in `config.env` (which the script scans).
+      — not just in `config.env` (whose keys the store holds to the adapter's
+      declared ones; CI refuses a declared key named like a secret).
 - [ ] **Declared for the proxy.** `access.yaml` names the base, the auth
       scheme and field name (never a value), and every route the adapter
-      calls; `config.env` holds exactly the adapter's `REQUIRED_KEYS`. A
+      calls; `config.env` holds exactly the adapter's `REQUIRED_CONFIG_KEYS`. A
       credential is the operator's to store with the proxy (noted in the
       summary).
 - [ ] **One system.** If others came up in the interview, they were noted

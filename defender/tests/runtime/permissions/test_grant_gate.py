@@ -40,6 +40,7 @@ from defender.investigation.permission import (  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
+from defender.tests.support.learning.curation._lead_author_1134 import lead_scope
 
 
 
@@ -91,7 +92,7 @@ def _read(env, path, which="gather"):
 
 def _lead_author(env):
     """The lead author binds against a WORKTREE tree (requires_explicit_tree)."""
-    return bind(LEAD_AUTHOR_DEF, env.run, defender_dir=env.dfn).policy
+    return bind(LEAD_AUTHOR_DEF, env.run, defender_dir=env.dfn, scope=lead_scope(env.dfn)).policy
 
 
 def _curator(env):
@@ -553,7 +554,7 @@ def test_h4_grants_anchor_on_the_threaded_tree_not_module_paths(tmp_path):
     run = tmp_path / "learn-run"
     run.mkdir()
 
-    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=worktree)
+    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=worktree, scope=lead_scope(worktree))
     pol = deps.policy
 
     def verdict(cmd: str) -> bool:

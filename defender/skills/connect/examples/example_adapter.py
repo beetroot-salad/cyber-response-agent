@@ -23,7 +23,13 @@ PREFIX = "EXAMPLE"
 #: other key there is a settings fault naming it. The system's address is not one of them — it is
 #: the `base` of `systems/example/access.yaml`, the declaration the credential proxy reaches the
 #: system by.
-REQUIRED_KEYS = ("TIMEOUT_SEC",)
+REQUIRED_CONFIG_KEYS = ("TIMEOUT_SEC",)
+#: The keys whose values the adapter puts in a request path (each must be one segment): none here.
+PATH_KEYS: tuple[str, ...] = ()
+#: How the operator's catalog listing names the system (#1366 O2).
+DISPLAY_NAME = "Example system"
+#: True only for a lab stub; an adapter connect writes for a real system says False (#1366 O2).
+EXAMPLE = False
 #: The most events one `query` may ask for.
 MAX_LIMIT = 1000
 
@@ -36,7 +42,7 @@ def _config(ctx: VerbContext) -> dict[str, str]:
     `load_config` strips the prefix and raises `ConfigFault` for a system with no config or no
     declaration, a missing, blank or still-`CHANGE-ME` required key, or a key it does not read —
     which `check_settings` below raises first, at run start."""
-    return transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_KEYS)
+    return transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
 
 
 def check_settings(tenant: TenantRecord) -> None:
@@ -48,7 +54,7 @@ def check_settings(tenant: TenantRecord) -> None:
     anything else, is down as broken. A system needing no settings still declares one that never
     raises. This system's verbs fault only in `_config`, so the check is `_config`'s, over the
     record."""
-    transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_KEYS)
+    transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
 
 
 def _get(ctx: VerbContext, template: str, values: dict[str, str] | None = None, *,

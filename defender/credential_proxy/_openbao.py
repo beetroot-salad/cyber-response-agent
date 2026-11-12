@@ -1,8 +1,8 @@
 """OpenBao as the credential store and the token verifier (#1163 H11, O5, A4, A11, A25).
 
-- Store: KV v2, one secret per (tenant, system) at `<kv mount>/data/<tenant>/<system>`, holding
+- Store: KV v2, one secret per (tenant, system, credential generation) at `<kv mount>/data/<tenant>/<system>/g<N>`, holding
   `{"kind": ..., "fields": {...}}`; a write replaces the whole set and moves the version on.
-  The writer (`OpenBaoSecrets`, the API's port) may create, update and read metadata only; the
+  The writer (`OpenBaoSecrets`, the operator command's) may create, update and read metadata only; the
   proxy (`OpenBaoStore`) may read data only (`store_policies`).
 - Tokens: transit on the deployment's fixed mount (`configuration.issuer.TRANSIT_MOUNT`), one key
   per tenant (`transit_key_for`). The proxy may verify with any tenant's key and sign with none
@@ -60,11 +60,13 @@ def _check_name(value: object, what: str) -> str:
     return value
 
 
-def _secret_path(tenant_id: object, system: object) -> str:
+def _secret_path(tenant_id: object, system: object, generation: object) -> str:
     _check_tenant(tenant_id)
     if not isinstance(system, str) or not is_system_name(system):
         raise ConfigFault(f"{system!r} is not a system name")
-    return f"{tenant_id}/{system}"
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+        raise ConfigFault(f"{generation!r} is not a credential generation")
+    return f"{tenant_id}/{system}/g{generation}"
 
 
 def store_policies(*, kv_mount: str) -> dict[str, str]:
@@ -182,11 +184,11 @@ class OpenBaoStore(_OpenBao):
     """The proxy's read of credential sets."""
 
     @_our_access
-    def read(self, tenant_id: str, system: str) -> CredentialSet | None:
-        """`(tenant_id, system)`'s current set, or None when there is none. A set missing its
-        data or not in the store's shape is that system's setup (`setup`); the store failing to
-        answer, or refusing the proxy, is its access."""
-        path = _secret_path(tenant_id, system)
+    def read(self, tenant_id: str, system: str, generation: int) -> CredentialSet | None:
+        """`(tenant_id, system)`'s current set at `generation`, or None when there is none. A set
+        missing its data or not in the store's shape is that system's setup (`setup`); the store
+        failing to answer, or refusing the proxy, is its access."""
+        path = _secret_path(tenant_id, system, generation)
         what = f"the credential read of {system}"
         reply = self._call("GET", f"data/{path}", what)
         if reply.status_code == 404:
@@ -212,13 +214,14 @@ class OpenBaoStore(_OpenBao):
 
 
 class OpenBaoSecrets(_OpenBao):
-    """The API's write-only secret port: set a whole credential set with its kind, and ask
-    whether one exists. It cannot read a value back."""
+    """The operator command's write-only secret port (`tenant.py set-credentials`, `systems`, `check`): set a whole
+    credential set with its kind at a credential generation, and ask whether one exists there. It cannot read a value
+    back. Not the API's `SecretPort`, which names no generation yet (#1470)."""
 
     async def put_credentials(self, tenant_id: str, system_id: str, kind: str,
-                              credentials: Mapping[str, str]) -> None:
-        """Replace `(tenant_id, system_id)`'s whole set with `credentials` of `kind`."""
-        path = _secret_path(tenant_id, system_id)
+                              credentials: Mapping[str, str], *, generation: int) -> None:
+        """Replace `(tenant_id, system_id)`'s whole set at `generation` with `credentials` of `kind`."""
+        path = _secret_path(tenant_id, system_id, generation)
         if kind not in CREDENTIAL_KINDS:
             raise ConfigFault(f"a credential set's kind must be one of {list(CREDENTIAL_KINDS)}")
         if not credentials or not all(isinstance(k, str) and isinstance(v, str) and v
@@ -230,9 +233,9 @@ class OpenBaoSecrets(_OpenBao):
         if reply.status_code not in (200, 204):
             raise self._refused(reply, what)
 
-    async def has_credentials(self, tenant_id: str, system_id: str) -> bool:
-        """Does `(tenant_id, system_id)` have a current set? Asked of the metadata only."""
-        path = _secret_path(tenant_id, system_id)
+    async def has_credentials(self, tenant_id: str, system_id: str, *, generation: int) -> bool:
+        """Does `(tenant_id, system_id)` have a current set at `generation`? Asked of the metadata only."""
+        path = _secret_path(tenant_id, system_id, generation)
         what = f"the credential existence check of {system_id}"
         reply = await self._acall("GET", f"metadata/{path}", what)
         if reply.status_code == 404:

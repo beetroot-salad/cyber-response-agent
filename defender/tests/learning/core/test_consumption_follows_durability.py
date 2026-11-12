@@ -56,6 +56,7 @@ from defender.tests.support.learning.curation._lead_author_1134 import (
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, lead_author_drain
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed  # noqa: E402
 
 #: The commit a served lead-author run hands the drain in place of writing the sentinel itself.
 SHA = "abc123"
@@ -256,7 +257,7 @@ def test_952_m4_run_pitfalls_hands_its_partition_to_on_curated_and_decides_only_
     outcomes: dict = {}
 
     with C.draft_trees(lane) as trees:
-        assert pitfalls_curator.run_pitfalls(paths=lane.paths, invoke=spawn, on_curated=captured.append, trees=trees,
+        assert run_pitfalls_handed(paths=lane.paths, invoke=spawn, on_curated=captured.append, trees=trees,
                                              batch=lane.batch, items=_three_way_items(), outcomes=outcomes) == 0
 
     sha = lane.tip()

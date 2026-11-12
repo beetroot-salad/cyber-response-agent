@@ -3,10 +3,12 @@
 The host half, in order, before the container (the run half is the container's `run.py --job`): the tenant's lock and
 admission (`host_tenant`: an investigation waits for a busy lock, A3), the launch check (the worker's launch record),
 the alert mapping, the launch-time publish, the run copy (owned by this helper, C20) and its settings check, the tenant
-resolved over the copy, the grant (the granted systems declared `http-proxy` in the export just copied; systems the
-run later judges down are not subtracted, O5), the first pass (only for a non-empty grant: a pass that cannot be signed
+resolved over the copy and the tenant's current records (#1366: read once, before the alert mapping; a tenant not
+imported is refused), the grant (the granted systems declared `http-proxy` in the export just copied, narrowed to the
+systems the tenant has enabled records of; systems the run later judges down are not subtracted, O5), the first pass (only for a non-empty grant: a pass that cannot be signed
 refuses the job, O11), then the run folder made (`materialize_run`: the alert admitted against the launch record's
-digest, input and stamp) and the knowledge-source record beside it. Every refusal is `SetupRefused`, its cause on the
+digest, input and stamp) and the knowledge-source and record-versions records beside it. The records read are handed
+to the container in the launch facts. Every refusal is `SetupRefused`, its cause on the
 helper's stderr, and the job-end record says `setup: refused` (A3).
 
 This half is the operator command's too (A6): each step is `run_common`'s, the one `run.py <alert>` calls in its own
@@ -24,7 +26,7 @@ from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender.job_socket import Refused
 
 from ._common import answer_pass, first_pass, grant, mirror_run_page, settle_knowledge, start_run_box
-from ._session import DOCKER_DID_NOT_RUN, KindSpec, Prepared, Registry, Session, SetupRefused
+from ._session import DOCKER_DID_NOT_RUN, KindSpec, Prepared, Registry, Session, SetupRefused, setup_step
 
 _logger = logging.getLogger(__name__)
 
@@ -40,15 +42,6 @@ class _State:
     copy: Any
     tenant: Any
     box_token: str
-
-
-def _shared(step: Any, *args: Any, **kwargs: Any) -> Any:
-    """One step of run setup's shared host half (`run_common`, the operator command's too, A6): its `SystemExit`
-    refusal is this job's `setup: refused`, its message the cause."""
-    try:
-        return step(*args, **kwargs)
-    except SystemExit as refused:
-        raise SetupRefused(str(refused.code)) from None
 
 
 def _materialize(session: Session, accepted: Any, run: Any, launch: Any, mapping: Any, source: Any) -> Any:
@@ -91,7 +84,10 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
             launch = lane.check_launch(inv)
     except job_lane.JobLaneRefused as refused:
         raise SetupRefused(f"the launch check refused the job: {refused}") from None
-    mapping = _shared(run_common.read_alert_mapping, records, accepted.id)
+    # The tenant's current records, read once here (#1366 O6): a tenant not imported is refused before its alert
+    # mapping is read (R8). The container reads no database; it is handed these in the launch facts.
+    current = setup_step(run_common.read_records, records, accepted.id)
+    mapping = setup_step(run_common.read_alert_mapping, records, accepted.id)
     source = settle_knowledge(session, accepted, records)
     try:
         run = accepted.runs_repository().launched(launch)
@@ -99,15 +95,21 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         raise SetupRefused(str(refused)) from None
     cleanup = contextlib.ExitStack()
     try:
-        copy = _shared(run_common.copy_knowledge, accepted, source, inv)
+        copy = setup_step(run_common.copy_knowledge, accepted, source, inv)
         cleanup.callback(copy.remove)
         try:
-            run_tenant = _shared(run_common.run_tenant_or_exit, accepted, dispatches_lead_zero=True, copy=copy)
+            run_tenant = setup_step(run_common.run_tenant_or_exit, accepted, dispatches_lead_zero=True,
+                                 records=current, copy=copy)
         except TenantRefused as refused:
             raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
-        reads = grant(run_tenant)
+        # The tenant's systems over the catalog (read cold: no adapter code runs here, N7), its grants narrowed to the
+        # systems it has enabled records of (#1366 R12), so the pass names none it has not; the container warns.
+        roster = setup_step(run_common.run_roster, session.defender_dir)
+        verdict = setup_step(run_common.tenant_verdict, run_tenant, roster, warn=False)
+        reads = grant(verdict.tenant)
         passes = first_pass(session, accepted, records, reads)
         made = _materialize(session, accepted, run, launch, mapping, source)
+        setup_step(run_common.write_versions_record, Path(made.run_dir), current)
     except BaseException:
         cleanup.close()
         raise
@@ -119,6 +121,8 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         "export_commit": source.commit, "knowledge": source.host_record(), "run_dir": str(made.run_dir),
         "run_copy": str(copy.root), "proxy_url": passes.proxy_url if passes is not None else None,
         "grant": [[s, "r"] for s in reads], "pass_lifetime": PASS_LIFETIME_SEC,
+        # The records read above (#1366 O6), which the container builds its tenant from (it reads no database).
+        "records": current.as_wire(),
         # The start token the worker minted for the run box (#1342 r5 C1); the helper stamps it on the box itself.
         "box_token": launch.record.box_token,
     }

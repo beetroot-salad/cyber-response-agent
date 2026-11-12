@@ -91,7 +91,7 @@ class Launch:
             preflight=lambda model, **_kw: self.roles.append(model) or 0,
             live_tree=self.live_tree, roster=self.estate.roster(), oracle=self.oracle.model,
             verifier=self.verifier.model,
-            directory=T.launcher_directory(self.src.parent.parent.name))
+            directory=self.estate.launch_directory(self.src.parent.parent.name))
         return self.rc
 
     @property

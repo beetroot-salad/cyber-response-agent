@@ -32,6 +32,7 @@ from defender.tests.tenancy.alert_front_door_1222.test_down_at_start import (  #
     _drop,
     _import_state_restored,
     _names_system,
+    _over,
     _planted_calls,
     _planted_elastic,
     _planted_tree,
@@ -252,7 +253,7 @@ def test_a_dispatch_to_a_system_whose_adapter_is_broken_claims_no_lead_id(tmp_pa
     """The same gate for a broken adapter (a planted elastic that cannot be imported, judged through `roster=`): the refusal names elastic and the adapter's reason — neither 'not configured' nor 'tripped' — and no host path."""
     scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-claim-broken"))
     tree = _tree_with_broken_elastic(tmp_path / "planted")
-    d, main = _claim_scene(scene, "claim-broken", "elastic", defender_dir=tree,
+    d, main = _claim_scene(scene, "claim-broken", "elastic", defender_dir=tree, tenant=_over(scene.tenant, tree),
                            backend=_backend(), roster=read_roster(adapters_under(tree)))
     _assert_gate_before_claim(d, main, "elastic", "elastic's adapter broken at start",
                               said=(BROKEN_MARK,), unsaid=("not configured", "tripped"))
@@ -329,7 +330,7 @@ def _run_main_over(tree: Path, tmp_path: Path, tenant: S.Planted, *, main: S.Mai
 
     try:
         out["rc"] = run_py.main(
-            argv, directory=directory_for_argv(argv), lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
+            argv, directory=directory_for_argv(argv, records=_over(tenant, tree).records), lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
             visualize=lambda *_a, **_k: None, ticket_writer=S.NoTicket(),
             enqueue=lambda *_a, **_k: False, roster=read_roster(adapters_under(tree)),
             # The in-process launch-time publish.

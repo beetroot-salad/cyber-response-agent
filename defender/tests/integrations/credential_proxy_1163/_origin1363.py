@@ -182,6 +182,56 @@ def answering(status: int, doc: Any = None) -> httpx.MockTransport:
     return openbao(lambda _r: httpx.Response(status, json=doc if doc is not None else {}))
 
 
+#: A records DSN at a loopback port nothing listens on: the records database unreachable.
+CLOSED_DSN = "postgresql://census@127.0.0.1:1/census"
+
+
+class DisabledRecords:
+    """The rig's records (`ExportRecords` over its exports), each system's current record disabled."""
+
+    def __init__(self, root: Path) -> None:
+        from defender.tests.support.tenancy import _systems1366 as R
+
+        self._of = R.ExportRecords(root)
+
+    def current_system(self, tenant_id: str, system_id: str) -> Any:
+        import dataclasses
+
+        record = self._of.current_system(tenant_id, system_id)
+        return None if record is None else dataclasses.replace(record, enabled=False)
+
+
+def closed_records() -> Any:
+    """The real records port, closed (as at shutdown) before it is asked."""
+    port = proxy().PostgresSystemRecords(CLOSED_DSN)
+    port.close()
+    return port
+
+
+def failing_records(error: str) -> Any:
+    """The real records port over a connection whose every statement raises psycopg's `error` (by name): the database
+    answering the read with that error, with no server needed."""
+    import psycopg
+
+    raised = getattr(psycopg.errors, error)
+
+    class _Connection:
+        def transaction(self) -> Any:
+            return contextlib.nullcontext()
+
+        def execute(self, *_a: Any, **_k: Any) -> Any:
+            raise raised("census")
+
+        def close(self) -> None:
+            return None
+
+    class _Failing(proxy().PostgresSystemRecords):
+        def _connect(self, left: float) -> Any:
+            return _Connection()
+
+    return _Failing(CLOSED_DSN)
+
+
 def openbao_store(transport: httpx.MockTransport) -> Any:
     return proxy().OpenBaoStore(addr="http://openbao.invalid", token="t", mount="secret", transport=transport)
 
@@ -273,7 +323,8 @@ def bearer_rows() -> list[Row]:  # noqa: C901, PLR0915 — one row per cause
         Row("caller-left-before-its-request-arrived", "request", lambda r: Req(_Unread.PEER_LEFT, f"Bearer {r.tok()}")),
         # setup: ours, for one system
         Row("no-credential-set-stored", "setup", set_for(None)),
-        Row("no-declaration-for-a-granted-system", "setup", other_system("inventory")),  # no such folder in the export
+        Row("no-declaration-for-a-granted-system", "setup", other_system("inventory")),  # no record of it (#1366)
+        Row("system-record-disabled", "setup", lambda r: _with(req(r), deps_kw={"records": DisabledRecords(r.data_root)})),
         Row("declaration-not-valid", "setup", other_system(BROKEN_SYSTEM)),
         Row("credential-kind-does-not-fit", "setup", set_for(T.oauth_set())),
         Row("credential-field-missing", "setup", set_for(T.custom_set({"other": "x"}))),
@@ -336,6 +387,14 @@ def bearer_rows() -> list[Row]:  # noqa: C901, PLR0915 — one row per cause
         Row("store-openbao-unreachable", "access", lambda r: _with(req(r), store=openbao_store(openbao(unreachable=True)))),
         Row("store-openbao-failing", "access", lambda r: _with(req(r), store=openbao_store(answering(503)))),
         Row("store-openbao-refuses-the-proxy", "access", lambda r: _with(req(r), store=openbao_store(answering(403)))),
+        # the records database (#1366 O7): unreachable, closed, refusing the proxy's login, failing the read
+        Row("records-database-unreachable", "access",
+            lambda r: _with(req(r), deps_kw={"records": proxy().PostgresSystemRecords(CLOSED_DSN)})),
+        Row("records-port-closed", "access", lambda r: _with(req(r), deps_kw={"records": closed_records()})),
+        Row("records-database-refuses-the-read", "access",
+            lambda r: _with(req(r), deps_kw={"records": failing_records("InsufficientPrivilege")})),
+        Row("records-database-fails-the-read", "access",
+            lambda r: _with(req(r), deps_kw={"records": failing_records("QueryCanceled")})),
         # the system's own answer: no label
         Row("system-answers-200", None, answered(200)),
         Row("system-answers-404", None, answered(404)),
@@ -487,7 +546,7 @@ def _template(node: ast.AST) -> tuple[str, re.Pattern[str]] | None:
     return None
 
 
-def sites_in(source: str, file: str) -> list[Site]:
+def sites_in(source: str, file: str, *, callees: frozenset[str] = FAULT_CALLEES) -> list[Site]:
     """Every construction of a fault inside a function of `source`: the place a cause is named."""
     found: list[Site] = []
     stack: list[str] = []
@@ -502,7 +561,7 @@ def sites_in(source: str, file: str) -> list[Site]:
 
         def visit_Call(self, node: ast.Call) -> None:
             callee = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", None)
-            if callee in FAULT_CALLEES and stack:
+            if callee in callees and stack:
                 message = next((t for a in node.args if (t := _template(a)) is not None), None)
                 found.append(Site(file, ".".join(stack), node.lineno, message[0] if message else "",
                                   message[1] if message else None))
@@ -525,12 +584,14 @@ OFF_THE_PATH = {
     ("_app.py", "create_app_from_config"), ("_tokens.py", "mint_request_token"),
     ("_openbao.py", "_check_tenant"), ("_openbao.py", "_check_name"), ("_openbao.py", "_secret_path"),
     ("_openbao.py", "_OpenBao.__init__"), ("_openbao.py", "OpenBaoSecrets.put_credentials"),
+    ("_records.py", "PostgresSystemRecords.__init__"),
 }
 #: Reached only outside a proxied request, or not reachable at all because an earlier check
 #: refuses the same cause (each is judged by the unit cases beside the census where it can be).
 UNREACHED = (
-    ("_app.py", "_Proxy._current_export", "the request token names no tenant id"),
-    ("_app.py", "_Proxy._current_export", "tenant {}: {}"),
+    ("_app.py", "_Proxy._current_record", "the request token names no tenant id"),
+    # A record's access text is parsed (`_declared`) before the URL is located, and the parser refuses such a base.
+    ("_scope.py", "locate", "the system's declared base does not parse"),
     ("_credentials.py", "CredentialSet.__post_init__", "a credential set's kind"),
     ("_openbao.py", "_OpenBao._call", "OpenBao at {} is unreachable"),
 )
@@ -541,12 +602,33 @@ def off_the_path(site: Site) -> bool:
             or any((site.file, site.qualname) == (f, q) and site.text.startswith(t) for f, q, t in UNREACHED))
 
 
+#: Sites whose message is a shared rule's reason, not their own text (#1366 R15: the proxy judges a URL by the rules the
+#: access declaration's parser judges a base by): such a site is tied when every reason the rule's functions can give
+#: is some row's detail. Each is (file, qualname) -> (the rule's module under `defender/`, its functions, its fault).
+DELEGATED = {
+    ("_scope.py", "locate"): ("kit/paths.py", frozenset({"url_form_fault", "url_path_fault"}), "UrlFault"),
+}
+
+
+def delegate_sites(module: str, functions: frozenset[str], fault: str) -> list[Site]:
+    """The reasons `functions` of `module` can give: each construction of `fault` in them."""
+    path = Path(proxy().__file__).parents[1] / module
+    found = sites_in(path.read_text(encoding="utf-8"), path.name, callees=frozenset({fault}))
+    return [s for s in found if s.qualname in functions]
+
+
 def untied(sites: Sequence[Site], seen: Sequence[Observed]) -> list[str]:
-    """The sites on the path that no row's detail matches, and those with no message to match."""
+    """The sites on the path that no row's detail matches, and those with no message to match (a site that passes on a
+    shared rule's reason, `DELEGATED`, is matched by each of that rule's reasons)."""
     details = [d for o in seen for d in o.details]
     out = []
     for s in sites:
         if off_the_path(s):
+            continue
+        delegated = DELEGATED.get((s.file, s.qualname))
+        if s.pattern is None and delegated is not None:
+            out.extend(f"{s.file} {s.qualname}:{s.line}: no row's detail matches {d.text!r} ({d.file} {d.qualname})"
+                       for d in delegate_sites(*delegated) if not any(d.pattern and d.pattern.fullmatch(x) for x in details))
             continue
         if s.pattern is None:
             out.append(f"{s.file} {s.qualname}:{s.line}: no message to tie to a row")

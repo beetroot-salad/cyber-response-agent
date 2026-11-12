@@ -441,7 +441,7 @@ def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatc
     assert no_config.calls == [], "a run with no case-system config still reached the store"
     got = receipt(unconfigured)
     assert (got["ok"], got["url"], got["key"]) == (False, None, CASE_KEY), got
-    assert "systems/ticket/config.env" in got["reason"], got
+    assert "system ticket settings" in got["reason"], got  # #1366 DC6: the record, not the retired file
 
     reachable = _store(tmp_path)
     kept = make_run(tmp_path, name="run-reachable")
@@ -493,8 +493,8 @@ def test_767_any_2xx_is_success_whatever_its_body(tmp_path, monkeypatch, answer)
     ("a bad template, on the aborted arm", "{0}", {"truncated_by": "aborted"}),
 ])
 def test_767_a_template_fault_refuses_with_a_receipt(tmp_path, monkeypatch, capsys, why, body, kw):
-    """A comment template that cannot render sends nothing and says so, naming the case-record
-    file, on every arm that meant to call out. O5."""
+    """A comment template that cannot render sends nothing and says so, naming the case record (#1366 DC6: the record's
+    locator, not a file), on every arm that meant to call out. O5."""
     _setup(monkeypatch, tmp_path, case_record_doc(body=body))
     run_dir = make_run(tmp_path)
     store = _store(tmp_path)
@@ -502,7 +502,7 @@ def test_767_a_template_fault_refuses_with_a_receipt(tmp_path, monkeypatch, caps
     assert store.calls == [], f"{why}: something was sent off a broken template"
     got = receipt(run_dir)
     assert (got["ok"], got["status"]) == (False, "error"), got
-    assert CASE_RECORD_RELPATH in got["reason"], got
+    assert "the case record" in got["reason"], got
     err = capsys.readouterr().err
     assert "WARN" in err, err
     assert "raised, ignored" not in err, err

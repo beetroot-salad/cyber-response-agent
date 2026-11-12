@@ -12,6 +12,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S  # noqa: E402
+from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.kit.faults import ConfinementFault
 from defender.integrations.confinement import (  # noqa: E402
     READ_ENDPOINT_ALLOWLIST,
@@ -128,6 +129,12 @@ def check_settings(tenant):
     return None
 
 
+def comment_route(settings):
+    # The route the adapter DECLARES (#1366 C1, C10): the legitimate one, so the shared cover judgement offers the comment
+    # action. `add_case_comment` below writes elsewhere; the transport's write table, not this declaration, refuses that.
+    return ("POST", "/tickets/*/comments")
+
+
 def health_check(ctx):
     return {{}}
 
@@ -169,8 +176,9 @@ def _leg_over_planted_adapter(tmp_path: Path, monkeypatch: Any, *, method: str, 
         encoding="utf-8")
     store = M.FakeStore(tmp_path / "store")
     run_dir = M.make_run(tmp_path / "runs")
+    record = M.current_record()
     ticket_writer.record_case_ticket(
-        fixture_run(run_dir), tenant=M.current_record(), defender_dir=tree,
+        fixture_run(run_dir), tenant=record, defender_dir=tree, case=T1106.case_for(record, tree),
         env=box_mod.run_env(S.DEFENDER, run_dir), proxy_url=store.url, request_token=M.WRITE_TOKEN)
     return store, M.receipt(run_dir)
 
@@ -180,7 +188,7 @@ def test_a_case_adapter_the_cold_read_refused_serves_no_comment(
         tmp_path: Path, monkeypatch: Any, spelling: str):
     """Through the record leg, a case adapter whose `VERBS` holds the comment action is refused by
     the cold read and does not serve the host's comment either: no request reaches the store, an
-    `error` receipt (`url` null) names `settings/case-record.yaml` and says the adapter was
+    `error` receipt (`url` null) names the case record (#1366 O9, DC6: a record, not the retired file) and says the adapter was
     refused. Control: the same adapter without that `VERBS` entry comments. O4, D-7 amended."""
     control_store, control = _leg_over_planted_adapter(
         tmp_path / "control", monkeypatch, method="POST", suffix="/comments")
@@ -193,7 +201,7 @@ def test_a_case_adapter_the_cold_read_refused_serves_no_comment(
     assert store.calls == [], f"{spelling}: a refused adapter still served the comment"
     assert (got["status"], got["ok"], got["url"]) == ("error", False, None), got
     reason = got["reason"].lower()
-    assert "case-record.yaml" in reason, got
+    assert "case record" in reason, got
     assert str(tmp_path).lower() not in reason, f"the reason carries a host path: {got}"
     assert "adapter" in reason, got
     assert "refused" in reason, got

@@ -155,12 +155,15 @@ def current_record(*, config: dict[str, str] | None | object = _CONFIG_UNSET) ->
 
 
 def shipped_case_record_doc() -> dict[str, Any]:
-    """The repo's own checked-in case-record file (the committed fixture tenant's), read off the
-    real file."""
-    import yaml
+    """The case record the committed fixture tenant runs with, as the case-record file spells it
+    (`system:`, `comment.body:`). #1366 O9: the checked-in `settings/case-record.yaml` is gone;
+    the fixture tenant's case is the record its seeder holds (`R.fixture_records()`, read from
+    the retired copy of that file), so this reads the seeded record, not a path in the checkout."""
+    from defender.tests.support.tenancy import _systems1366 as R
 
-    return yaml.safe_load(
-        (T1106.FIXTURE_SETTINGS / CASE_RECORD_RELPATH).read_text(encoding="utf-8"))
+    case = R.fixture_records().case
+    assert case is not None, "the fixture tenant's records carry no case record"
+    return {"system": case.system_id, "comment": {"body": case.comment_body}}
 
 
 # --------------------------------------------------------------------------------------
@@ -304,9 +307,11 @@ def _handed(run_dir: Path, store: FakeStore, config: dict[str, str] | None | obj
     address and write-back token (the store's stand-in)."""
     from defender import box as box_mod
 
-    return {"tenant": current_record(config=config), "defender_dir": T1106.DEFENDER,
+    record = current_record(config=config)
+    return {"tenant": record, "defender_dir": T1106.DEFENDER,
             "env": store.env(box_mod.run_env(T1106.DEFENDER, Path(run_dir))),
-            "proxy_url": store.url, "request_token": WRITE_TOKEN}
+            "proxy_url": store.url, "request_token": WRITE_TOKEN,
+            "case": T1106.case_for(record)}  # (#1366 R16) run start's verdict over the tenant's roster, handed in
 
 
 def record(run_dir: Path, store: FakeStore, *,

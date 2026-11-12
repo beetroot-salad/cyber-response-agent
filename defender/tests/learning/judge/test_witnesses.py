@@ -8,7 +8,6 @@ from pydantic_ai.exceptions import ModelRetry
 
 from defender.agents import AGENTS, LEAD_AUTHOR_DEF
 from defender.investigation.agent_definition import (
-    RunScope,
     ToolSet,
     bind,
     compile_policy,
@@ -22,6 +21,7 @@ from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._by_path import load_lint_gate
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs
+from defender.tests.support.learning.curation._lead_author_1134 import lead_scope
 
 
 def _roots(run_dir: Path, defender_dir: Path):
@@ -135,7 +135,7 @@ def lead_author_deps(tmp_path: Path):
         d.mkdir(parents=True)
     seed_adapter_stubs(defender_dir, ("elastic",))
     deps = bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=defender_dir,
-                scope=RunScope(add_dirs=(declared,), model_roots=((PurePosixPath("/inputs/shared"), declared),)))
+                scope=lead_scope(defender_dir, add_dirs=(declared,), model_roots=((PurePosixPath("/inputs/shared"), declared),)))
     return deps, declared
 
 

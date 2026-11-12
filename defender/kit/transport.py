@@ -33,9 +33,8 @@ from defender.kit.settings import (
     PLACEHOLDER,
     ConfigAbsent,
     SystemConfig,
-    config_pointer,
     is_blank,
-    pointer_to,
+    locator_of,
 )
 from defender.kit.verbs import VerbContext
 
@@ -69,9 +68,11 @@ __all__ = [
     "VENDOR_DETAIL_CAP",
     "Answer",
     "CaseKey",
+    "CommentRoute",
     "ErrorDetail",
     "capped_detail",
     "check_settings_of",
+    "comment_write",
     "health_check",
     "link",
     "load_config",
@@ -82,6 +83,7 @@ __all__ = [
     "record_outbound",
     "request",
     "require_segment",
+    "route_literal",
     "system_entry",
     "timeout_of",
     "host_write",
@@ -99,16 +101,17 @@ def system_entry(ctx: VerbContext, system: str) -> SystemConfig:
 
 
 def record_entry(tenant: TenantRecord, system: str) -> SystemConfig:
-    """`system`'s `config.env` as the RUN's record holds it (parsed once at resolve), or the
-    `ConfigFault` for why there is none: a folder with no usable file keeps its own fault, and a
-    system with no folder gets "this tenant's settings do not configure this system". A fresh
-    instance each call, so a stored fault is never handed a second traceback.
+    """`system`'s settings as the RUN's record holds them (prefixed keys), or the `ConfigFault`
+    for why there are none: a stored fault is kept, and a system the record does not hold gets
+    "this tenant's settings do not configure this system", located by the record's locator
+    (#1366 DC6). A fresh instance each call, so a stored fault is never handed a second
+    traceback.
 
     A function of the record alone, so an adapter's settings check (#1256) asks what its verbs
     ask without a call to make."""
     entry = tenant.systems.get(system)
     if entry is None:
-        raise ConfigFault(f"config file not found: {config_pointer(system)} — {NOT_CONFIGURED}")
+        raise ConfigFault(f"{locator_of(tenant).part(system, 'settings')} not found — {NOT_CONFIGURED}")
     if isinstance(entry, ConfigFault):
         raise ConfigFault(str(entry))
     return entry
@@ -132,12 +135,13 @@ def record_config(
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE, *,
     path_keys: tuple[str, ...] = (),
 ) -> dict[str, str]:
-    """THE judgement of `system`'s settings folder (S1), over the run's record: its `required`
-    keys (prefix stripped), or the `ConfigFault` naming what is wrong. In order:
+    """THE judgement of `system`'s settings (S1), over the tenant record: its `required` keys
+    (prefix stripped), or the `ConfigFault` naming what is wrong, located by the record's locator
+    (#1366 DC6: a stored record names `system <s> settings`, a folder its file). In order:
 
-    0. its folder and `config.env`, when present, could be read;
+    0. a stored fault for its settings comes first;
     1. its access declaration is present and usable (P1);
-    2. its `config.env` is present, unless the adapter reads no key (O-S1);
+    2. its settings are present, unless the adapter reads no key (O-S1);
     3. it holds no key the adapter does not read (Q4);
     4. every key it reads is set and not blank;
     5. no value still carries the template's `CHANGE-ME` (S2);
@@ -160,14 +164,14 @@ def record_config(
         entry = {}
     else:
         entry = record_entry(tenant, system)
-    shown = config_pointer(system)
+    shown = locator_of(tenant).part(system, "settings")
     declared = {f"{prefix}_{key}" for key in required}
     undeclared = sorted(key for key in entry if key not in declared)
     if undeclared:
         reads = ", ".join(sorted(declared)) or "no keys"
         raise ConfigFault(
             f"{', '.join(undeclared)} in {shown} is not a setting of {system} "
-            f"(it reads {reads}; its base is its access.yaml's) — remove it; a key of the "
+            f"(it reads {reads}; its base is its access declaration's) — remove it; a key of the "
             f"retired docker access method is removed as {UPGRADE_POINTER} says")
     cfg = {key: entry[f"{prefix}_{key}"] for key in required
            if not is_blank(entry.get(f"{prefix}_{key}", ""))}
@@ -186,14 +190,14 @@ def record_config(
             raise ConfigFault(f"{prefix}_{key} in {shown} {why}: {system} puts it in a request "
                               "path, where a value is exactly one segment — "
                               f"{NOT_CONFIGURED}")
-    _check_timeout(prefix, cfg.get("TIMEOUT_SEC"))
+    _check_timeout(prefix, cfg.get("TIMEOUT_SEC"), shown)
     return cfg
 
 
-def _check_timeout(prefix: str, timeout: str | None) -> None:
+def _check_timeout(prefix: str, timeout: str | None, shown: str) -> None:
     if timeout is not None and not (timeout.isascii() and timeout.isdigit() and len(timeout) <= 9 and int(timeout) > 0):
         raise ConfigFault(
-            f"{prefix}_TIMEOUT_SEC must be a whole number of seconds above zero, got {timeout!r}")
+            f"{prefix}_TIMEOUT_SEC in {shown} must be a whole number of seconds above zero, got {timeout!r}")
 
 
 def timeout_of(config: Mapping[str, str]) -> int:
@@ -205,7 +209,7 @@ def record_access(tenant: TenantRecord, system: str) -> AccessDeclaration:
     """`system`'s parsed access declaration as the run's record holds it, or its `ConfigFault`."""
     found = tenant.access.get(system)
     if found is None:
-        raise ConfigFault(f"{pointer_to(f'systems/{system}/access.yaml')} not found — {system} "
+        raise ConfigFault(f"{locator_of(tenant).part(system, 'access')} not found — {system} "
                           f"is reached only through the credential proxy, at the base its access "
                           f"declaration names; {NOT_CONFIGURED}")
     if isinstance(found, ConfigFault):
@@ -222,6 +226,44 @@ def check_settings_of(
     call through the proxy (#1256 O-5): every `ConfigFault` such a verb can raise, over the run's
     record. None when the system is usable."""
     record_config(tenant, system, prefix, required, path_keys=path_keys)
+
+
+# --------------------------------------------------------------------------------------------
+# The comment route (#1366 C1, K5): what a case adapter's comment action sends, declared once.
+# --------------------------------------------------------------------------------------------
+
+#: A case adapter's comment route: (method, path pattern relative to the access base) in the
+#: credential proxy's route grammar, the case key the one `*`.
+CommentRoute = tuple[str, str]
+
+
+def route_literal(key: str, settings: Mapping[str, str]) -> str:
+    """The setting `key` (prefixed, as a record stores it) as a literal segment of a comment
+    route, or the `ConfigFault` naming it: it must be set, non-empty, and hold no `*`, `/` or
+    `\\` (C1: a literal is compared raw by the proxy, and the key is the route's only `*`)."""
+    value = settings.get(key)
+    if value is None:
+        raise ConfigFault(f"{key} is not set: the comment route is built from it")
+    if not value:
+        raise ConfigFault(f"{key} is empty: the comment route needs it as one path segment")
+    bad = sorted({ch for ch in value if ch in "*/\\"})
+    if bad:
+        raise ConfigFault(f"{key} holds {' '.join(f'`{ch}`' for ch in bad)}: the comment route "
+                          "needs it as one literal path segment")
+    return value
+
+
+def comment_write(ctx: VerbContext, system: str, route: CommentRoute, *, key: str, body: dict,
+                  timeout_sec: int) -> None:
+    """The host's comment on case `key`, sent as exactly the declared `route` (#1366 K5): the
+    route's one `*` filled with the key, every other segment as declared."""
+    method, pattern = route
+    segments = pattern.split("/")
+    if segments.count("*") != 1:
+        raise ValueError(f"a comment route has exactly one `*` (the case key), got {pattern!r}")
+    template = "/".join("{key}" if segment == "*" else segment for segment in segments)
+    host_write(ctx, system, method, template, {"key": CaseKey(key)}, body=body,
+               timeout_sec=timeout_sec)
 
 
 # --------------------------------------------------------------------------------------------

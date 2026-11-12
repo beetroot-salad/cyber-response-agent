@@ -179,10 +179,13 @@ class RunSystems:
     roster: RosterRead
     down: Mapping[str, StartCause]
     scope: ReasonScope
+    #: The whole catalog `roster` was drawn from (#1366 DC7), when the judge's caller had read it: the driver's
+    #: no-tenant surfaces reuse it rather than reading the checkout's adapters again.
+    catalog: RosterRead | None = None
 
 
 def judge_run(roster: RosterRead, tenant: RunTenant, *, defender_dir: Path,
-              known_ids: Collection[str] = ()) -> RunSystems:
+              known_ids: Collection[str] = (), catalog: RosterRead | None = None) -> RunSystems:
     """@owns system_down — each granted system the run cannot use, with why: the verdict of its
     adapter's own settings check over the run's frozen record (O-1, O-5), or the reason its
     adapter cannot be judged (O-5a), each from `judge_adapter`. Every other granted system is
@@ -204,7 +207,7 @@ def judge_run(roster: RosterRead, tenant: RunTenant, *, defender_dir: Path,
             functools.partial(fresh_adapter_module, roster, system), tenant=tenant, scope=scope)
         if cause is not None:
             down[system] = cause
-    return RunSystems(roster=roster, down=MappingProxyType(down), scope=scope)
+    return RunSystems(roster=roster, down=MappingProxyType(down), scope=scope, catalog=catalog)
 
 
 def hold_at_start(state: SystemsState, systems: RunSystems) -> None:

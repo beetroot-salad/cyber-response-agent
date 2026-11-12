@@ -12,7 +12,9 @@ pytest.importorskip("pydantic_ai")
 
 from defender.records import RunPaths  # noqa: E402
 from defender.records import Run  # noqa: E402
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T6
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.learning.branch import _triplet_947 as T947
 from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402
     GOLDEN_INVESTIGATION, LEGACY_BRANCH_CALL, planted_source, spec_at,
@@ -63,10 +65,10 @@ def _episode(where: Path, spec: Any, source_dir: Path) -> Path:
     return S.episode_v2(where, doc=doc, root=where / "episodes", base_rows=[capture])
 
 
-def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir: Path,
+def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir: Path, records: Any,
              ) -> dict[str, Any]:
     """Start one sibling of world `a` at the branch point: resolve its tenant NOW (its own
-    start), build its world registry as `run.main` does, and drive the real driver resumed. MAIN
+    start) over `records` (the tenant's records at that moment), build its world registry as `run.main` does, and drive the real driver resumed. MAIN
     dispatches one lead on elastic (configured in both siblings, so the lead runs and its first
     prompt carries the system index the resumed run rebuilds); the lead asks `list_verbs(cmdb)`,
     then `cmdb.get-host {host: web-1}`, then summarises."""
@@ -74,7 +76,7 @@ def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir
     ep = _episode(tmp_path / f"ep-{label}", spec, source_dir)
     world = S.load_world(ep, "a")
     tenant = run_py._resolve_run_tenant(accepted, defender_dir=S.DEFENDER,
-                                        dispatches_lead_zero=False)
+                                        dispatches_lead_zero=False, records=R.value_of(records))
     source = Run.under(fixture_runs_base(source_dir.parent), source_dir.name)
     sibling_dir = LZ.materialize_alert(tmp_path / f"sibling-{label}", LZ.alert_doc())
     main = H.ReplayFn([
@@ -106,7 +108,7 @@ def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir
             alert_path=RunPaths(sibling_dir).alert,
             run=Run.under(fixture_runs_base(sibling_dir.parent), sibling_dir.name),
             defender_dir=S.DEFENDER, model_name="fd1256-sibling", model_override=None,
-            box=None, tenant=tenant, world=world, episode=episode, investigate=investigate,
+            box=None, tenant=tenant, systems=T6.run_systems_for(tenant), world=world, episode=episode, investigate=investigate,
             **run_py._world_seams(world, oracle=None, verifier=None, source=source,
                                  tenant_id=str(tenant.tenant_id)))
     assert type(handed.get("verbs")).__name__ == "WorldRegistry", (
@@ -154,7 +156,7 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
 
     # Control: settings unchanged since the source run — the capture answers the call.
     configured = _sibling(tmp_path, "configured", accepted=accepted, spec=spec,
-                          source_dir=source_dir)
+                          source_dir=source_dir, records=R.derive(S7.settings_of(knowledge)))
     gather_saw = "\n".join(configured["gather"].seen)
     assert CAPTURE_MARK in gather_saw, (
         "premise: the configured sibling's call was not answered from the capture "
@@ -171,9 +173,11 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
         f"control: list_verbs(cmdb) in the configured sibling lists its verbs: "
         f"{_answer(seen, 1)!r}")
 
-    # The operator edits the tenant's settings after the source run, before the branch.
+    # The operator edits the tenant's settings after the source run, before the branch: the records at the sibling's own
+    # start are the edited ones (a records write, #1366 H9).
     S7.drop_key(knowledge, "cmdb", DROPPED)
-    down = _sibling(tmp_path, "down", accepted=accepted, spec=spec, source_dir=source_dir)
+    down = _sibling(tmp_path, "down", accepted=accepted, spec=spec, source_dir=source_dir,
+                    records=R.derive(S7.settings_of(knowledge)))
     assert DROPPED not in down["tenant"].systems.get("cmdb", {}), (
         "premise: the sibling's own start did not resolve the edited settings")
 
@@ -231,15 +235,18 @@ def _resume(tmp_path: Path, label: str, source: Path, monkeypatch: Any,
     """Plant the playground tenant afresh with `down`'s keys dropped, open a family over the
     source run, and start sibling `b` through `run.main`. Returns (rc, refusal, recorder,
     episode, the episode's census before the sibling started)."""
-    _root, folder, _tenant = _plant_at_data_root(fixture_uuid(f"tenant:o8o9{label}"))
+    root, folder, _tenant = _plant_at_data_root(fixture_uuid(f"tenant:o8o9{label}"))
     for system, key in down:
         S7.drop_key(folder, system, key)
     doc = T947.family_doc(source_run_dir=str(source), worlds=_identity_worlds())
     episode = _sibling_episode(tmp_path, doc, label=f"1256-{label}")
     before = _episode_census(episode)
     rec = S7.RunRecorder(tmp_path / f"sibling-{label}")
-    rc, refused = S7.drive_run(_resume_argv(episode / "family.yaml"), rec,
-                               visualize=rec.visualize)
+    resume = _resume_argv(episode / "family.yaml")
+    # The sibling's start reads the tenant's CURRENT records, which here are the dropped-key folder's (the launch's own
+    # directory is built before the publish, from the previous export).
+    rc, refused = S7.drive_run(resume, rec, visualize=rec.visualize,
+                               directory=directory_for_argv(resume, root, records=R.derive(S7.settings_of(folder))))
     return rc, refused, rec, episode, before
 
 

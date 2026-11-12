@@ -73,6 +73,7 @@ from defender.records import (
     RunRefused,
     RunsRepository,
 )
+from defender.systems.catalog import Catalog
 from defender.systems.run_tenant import RunTenant
 from defender.tenancy import Tenant
 from defender.learning.branch import outcome as outcome_mod
@@ -714,6 +715,17 @@ def _admitted(data_root: Any, tenant_id: TenantId, *, box_mounted: tuple[Any, ..
                                                     box_mounted=box_mounted))
 
 
+def _handed_records(container: JobContainer) -> Any:
+    """The tenant records the job's host helper read at the job's start and handed over in the
+    launch facts (#1366 O6, #1170 A6), or `TenantRefused` naming why they are not usable."""
+    from defender.tenancy.models import TenantRecords
+
+    try:
+        return TenantRecords.handed(container.launch)
+    except ValueError as bad:
+        raise TenantRefused(str(bad)) from bad
+
+
 def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, then the episode, in order
     ns: argparse.Namespace, *, lane: JobLaneHooks | None, spawn: Any = None, questioner: Any = None,
     preflight: Callable[..., int], render_page: PageRenderer | None = None, judge: Any = None,
@@ -756,13 +768,31 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
                      brief=f"the job's tenant was refused ({type(refusal).__name__})",
                      cause=refusal) from refusal
     with admitted:
-        # The tenant's readiness over its own folder; siblings dispatch no turn-0 lead.
+        # The tenant's readiness over its own folder; siblings dispatch no turn-0 lead. Its
+        # systems are its CURRENT records (#1366 H9, O6): the episode's served systems and every
+        # replay read the present, whatever the source run read; a tenant not imported is
+        # refused (R8). Narrowed over the catalog the launch reads (R12): a grant on a system
+        # the tenant has no enabled record of is ignored, once, here.
+        if roster is None:
+            from defender._paths import adapters_under
+            from defender.systems.verbs import read_roster
+
+            roster = read_roster(adapters_under(_DEFENDER_DIR))
         try:
-            tenant = run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False)
+            # Inside a job container there is no database: the records its host helper read at
+            # the job's start come in the launch facts (#1170 A6).
+            records = (admitted.directory.current_records(admitted.tenant.id) if container is None
+                       else _handed_records(container))
+            run_tenant_mod.require_imported(records, admitted.tenant.id)
+            verdict = run_tenant_mod.tenant_systems(
+                run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records),
+                Catalog(roster))
         except TenantRefused as refusal:
             raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
                          brief=f"the job's tenant was refused ({type(refusal).__name__})",
                          cause=refusal) from refusal
+        run_tenant_mod.warn_ignored(verdict)
+        tenant, roster = verdict.tenant, verdict.systems.roster
         runs = tenant.tenant.runs_repository()
         source = _open_launch_source(runs, ns.source_run_id)
         _source_stamp_agrees(source, tenant.tenant_id)
@@ -809,12 +839,6 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
             preflight=preflight, model=ns.model,
             allow_dirty=ns.allow_dirty,
             live_tree=live_capture, oracle=oracle, verifier=verifier)
-        if roster is None:
-            from defender._paths import adapters_under
-            from defender.systems.verbs import read_roster
-
-            roster = read_roster(adapters_under(_DEFENDER_DIR))
-
         view = prepare_episode(runs, source, knowledge_commit=pinned.commit,
                                episode_id=None if lane is None else lane.job_id)
         episode = view.episode

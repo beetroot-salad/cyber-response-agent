@@ -15,7 +15,7 @@ from __future__ import annotations
 from defender.records.formats import DataRoot, RunsBase, EpisodesRoot
 
 import contextlib
-import os
+import logging
 import dataclasses
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -28,19 +28,25 @@ from defender.tenancy import Tenant, accept_tenant, clone_halves
 from defender.records.formats import TenantId, TenantRefused
 from defender.tenancy import AGENT_HALF
 from defender.tenancy import RecordsUnreachable
-from defender.systems.verb_dispositions import RunGrants, require_gather_query, run_grants
+from defender.systems.verb_dispositions import DispositionError, RunGrants, require_gather_query, run_grants
 from defender.systems.verb_grant import GrantError, VerbGrant
 from defender import tenancy
-from defender.tenancy import tenant_settings
-from defender.tenancy.case_ticket import CaseRecordSettings, CaseTicketError, load_case_record
+from defender.tenancy.case_ticket import (
+    CaseRecordSettings, CaseTicketError, case_record_text, parse_case_record)
+from defender.tenancy.record_values import CaseRecord, TenantRecords
 from defender.kit.access import AccessDeclaration
 from defender.kit.settings import SystemConfig
 from defender.kit.faults import ConfigFault
 
 if TYPE_CHECKING:
+    from defender.systems.catalog import Catalog, TenantSystems
     from defender.systems.correlation import CorrelationDispatch
+    from defender.systems.verbs import RosterRead
     from defender.tenancy import TenantDirectory
     from defender.tenancy.models import ForgeWiring
+
+
+_logger = logging.getLogger(__name__)
 
 
 def table_pointer(tenant_id: str) -> str:
@@ -76,21 +82,21 @@ class RunTenant:
     tenant: Tenant
     grants: RunGrants
     correlation: CorrelationDispatch | None
-    #: One entry per folder under `settings/systems/`, each `config.env` parsed ONCE here,
-    #: verbatim (keys as written, prefix included): a `SystemConfig`, or the `ConfigFault` for why
-    #: there is none. A fault is kept, never raised at resolve: resolution is not refused for it
-    #: (O5). At run start each granted system's own settings check judges this record (#1256);
-    #: a system it faults is down for the run, and a start at which no granted system is usable
-    #: is refused by the run's start check (O-8), never here (D4). Asking for a system with no
-    #: folder gets the "not configured" fault.
+    #: One entry per enabled system record (#1366 O6), its stored settings held verbatim (keys
+    #: prefixed, as stored) as a `SystemConfig`, read ONCE when the run's tenant is built. At run
+    #: start each granted system's own settings check judges this record (#1256); a system it
+    #: faults is down for the run, and a start at which no granted system is usable is refused by
+    #: the run's start check (O-8), never here (D4). Asking for a system with no record gets the
+    #: "not configured" fault.
     systems: Mapping[str, SystemConfig | ConfigFault]
-    #: `settings/case-record.yaml` (#1359): the system that records cases and the comment body
-    #: template, loaded once and held for the run (D-18); `None` for a tenant with no such file;
-    #: a bad file is kept as its error.
+    #: The tenant's case record (#1359, #1366 H7): the system that records cases and the comment
+    #: body template, held for the run (D-18); `None` for a tenant with none; a record #1359's
+    #: rules now refuse is kept as its error.
     case_record: CaseRecordSettings | CaseTicketError | None
-    #: One entry per system whose folder holds an `access.yaml` (#1391 P1), each parsed
+    #: One entry per enabled system record (#1391 P1, #1366 K4), its stored declaration parsed
     #: ONCE here: the `AccessDeclaration`, or the `ConfigFault` for why there is none (#1163).
-    #: Adapters, the ticket writer and the run-start settings check read this, never the file.
+    #: Adapters, the ticket writer and the run-start settings check read this; the proxy reads
+    #: the current record per call.
     access: Mapping[str, AccessDeclaration | ConfigFault] = dataclasses.field(
         default_factory=lambda: MappingProxyType({}))
     #: The run's knowledge, one export commit (#1108 P4, O-B): the agent root the run reads (its
@@ -101,6 +107,10 @@ class RunTenant:
     #: The startup token run start staged beside `agent_root` (U9: the copy's `stage/<token>`),
     #: which the run's box reads back to prove its bind; `None` when nothing was staged.
     stage_token: Path | None = None
+    #: The tenant's current records the run was built from (#1366 R10, O6), read once at its
+    #: start: every O1 surface draws the tenant's systems from them (`catalog.TenantSystems`), and
+    #: the run records their versions. A tenant not imported has none (`imported` False).
+    records: TenantRecords = dataclasses.field(default_factory=TenantRecords)
 
     @property
     def tenant_id(self) -> TenantId:
@@ -159,32 +169,58 @@ def refusals() -> tuple[type[Exception], ...]:
     return (DispositionError, LeadZeroConfigError, CorrelationDispatchError, GrantError)
 
 
-def resolve_tenant(
+def resolve_tenant(  # noqa: PLR0913 — the request, the folder rules' inputs and the records seam
     data_root: DataRoot, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool,
     box_mounted: tuple[Path | RunsBase | EpisodesRoot, ...] = (),
+    directory: TenantDirectory | None = None,
 ) -> RunTenant:
-    """`tenant_id` under `data_root`, accepted and ready, or `TenantRefused` — resolved over the
-    tenant's own folder (`clone_halves`), for a caller that names no export.
+    """`tenant_id` under `data_root`, accepted and ready, or `TenantRefused` — its grants resolved
+    over the tenant's own folder (`clone_halves`), for a caller that names no export, and its
+    systems, access and case from its current records (#1366 R10), read through `directory`
+    (else the one `DEFENDER_DATABASE_DSN` names, `entry_directory`). No folder read for them.
 
     The acceptance is `_tenant.accept_tenant` (the one frame every entry point shares; the
     settings half outside `defender_dir` and every `box_mounted` tree, e.g. the runs base),
-    then run start's readiness function over the accepted tenant's settings."""
+    then run start's readiness function over the accepted tenant's settings. A tenant not
+    imported is refused (R8, `require_imported`)."""
     tenant = accept_tenant(
         data_root, tenant_id, defender_dir=defender_dir, box_mounted=box_mounted)
-    return run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero)
+    records = entry_directory(directory).current_records(tenant.id)
+    require_imported(records, tenant.id)
+    return run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero, records=records)
 
 
-def run_tenant_for(  # noqa: PLR0913 — the tenant, its two roots, the staged token, the flag
-    tenant: Tenant, *, dispatches_lead_zero: bool, agent_root: Path | None = None,
-    settings_root: Path | None = None, stage_token: Path | None = None,
-    defender_dir: Path | None = None,
+#: The operator command that makes a tenant's systems come from records (#1366 R8, O9).
+IMPORT_COMMAND = "tenant.py import"
+
+
+def not_imported_text(tenant_id: object) -> str:
+    """THE wording of R8: a tenant whose systems do not come from records yet, naming the import."""
+    return (f"tenant {str(tenant_id)!r} is not imported: its systems and case record are not in the database yet. "
+            f"Run `{IMPORT_COMMAND} {tenant_id}` once (a tenant created since #1366 needs none)")
+
+
+def require_imported(records: TenantRecords, tenant_id: object) -> None:
+    """R8: `TenantRefused` naming the import for a tenant whose import has not run."""
+    if not records.imported:
+        raise TenantRefused(not_imported_text(tenant_id))
+
+
+def run_tenant_for(  # noqa: PLR0913 — the tenant, its records, its two roots, the staged token, the flag
+    tenant: Tenant, *, dispatches_lead_zero: bool, records: TenantRecords,
+    agent_root: Path | None = None, settings_root: Path | None = None,
+    stage_token: Path | None = None, defender_dir: Path | None = None,
 ) -> RunTenant:
     """An accepted tenant, ready to run — or `TenantRefused` carrying run start's refusal.
 
-    `agent_root`/`settings_root` are the two halves of the one export the run reads (#1108 P4,
-    O-B: run start hands its run copy's); each defaults to the tenant's own folder
-    (`clone_halves`). `defender_dir` is accepted for callers that still pass it and is not read:
-    the code tree holds no catalog (O1)."""
+    Its systems, their access and the case record are built from `records`, the tenant's current
+    records (#1366 R10, O6; DC7: no folder read for them); its grants and lead-zero dispatch from
+    `settings_root`'s table. `agent_root`/`settings_root` are the two halves of the one export
+    the run reads (#1108 P4, O-B: run start hands its run copy's); each defaults to the tenant's
+    own folder (`clone_halves`). `defender_dir` is accepted for callers that still pass it and is
+    not read. Whether the tenant is imported (R8) is the caller's to refuse
+    (`require_imported`), and which of its records are its systems is the catalog's
+    (`tenant_systems`)."""
     del defender_dir
     clone_agent, clone_settings = clone_halves(tenant)
     settings = Path(settings_root) if settings_root is not None else clone_settings
@@ -194,7 +230,138 @@ def run_tenant_for(  # noqa: PLR0913 — the tenant, its two roots, the staged t
         dispatches_lead_zero=dispatches_lead_zero)
     return RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,
                      agent_root=agent, settings_root=settings, stage_token=stage_token,
-                     **resolved_settings(tenant, settings_root=settings))
+                     records=records, **record_settings(records))
+
+
+def record_settings(records: TenantRecords) -> dict[str, Any]:
+    """The parts of `RunTenant` built from the tenant's records (#1366 O6), as the keyword
+    arguments it takes: each enabled record's stored settings (`systems`) and its declaration
+    parsed (`access`, K4; a declaration that does not parse is kept as its fault, located at the
+    record, DC6), and the case record (`case_record`). Nothing raises for a record's content
+    (O5): a part that cannot stand is carried as the fault that says why."""
+    from defender.systems.record_judgement import located_access
+
+    enabled = {s: r for s, r in sorted(records.systems.items()) if r.enabled}
+    access: dict[str, AccessDeclaration | ConfigFault] = {}
+    for system, record in enabled.items():
+        try:
+            access[system] = located_access(record.access, system=system)
+        except ConfigFault as fault:
+            access[system] = ConfigFault(str(fault))  # the text only, as the other parts do
+    return {
+        "systems": MappingProxyType({s: SystemConfig(r.settings) for s, r in enabled.items()}),
+        "case_record": _case_settings(records.case),
+        "access": MappingProxyType(access),
+    }
+
+
+def _case_settings(case: CaseRecord | None) -> CaseRecordSettings | CaseTicketError | None:
+    """The case record as the run holds it: #1359's rules over it (`parse_case_record`), a
+    record they now refuse kept as its error, which names the case record (DC6), not a file."""
+    if case is None:
+        return None
+    try:
+        return parse_case_record(case_record_text(case), named=CASE_RECORD_NAME)
+    except CaseTicketError as bad:
+        return bad
+
+
+#: How the run's faults name the tenant's case record (#1366 DC6: the record, not a file).
+CASE_RECORD_NAME = "the case record"
+
+
+@dataclasses.dataclass(frozen=True)
+class TenantVerdict:
+    """R12 at run start (#1366): the run's tenant with its grants narrowed to its systems, the
+    tenant's systems (`catalog.TenantSystems`, DC7) and the granted systems whose grants were
+    ignored for want of an enabled record (each with why)."""
+
+    tenant: RunTenant
+    systems: TenantSystems
+    ignored: Mapping[str, str]
+
+
+def tenant_systems(tenant: RunTenant, catalog: Catalog) -> TenantVerdict:
+    """THE grants x records verdict of run start (#1366 R12), over `catalog` (the run's roster:
+    the checkout's, or the one a test or launcher injects), or `TenantRefused` naming why.
+
+    - An enabled record naming an adapter the catalog does not carry (an upgrade removed it) is
+      refused, naming each such system, whatever the grants say.
+    - A grant on a catalog system the tenant has no enabled record of (disabled, deleted, never
+      recorded) is ignored: the system is not in the roster, and the grants are narrowed so
+      nothing downstream asks for it. The caller logs one warning line per such system
+      (`warn_ignored`).
+    - A grant on a system the catalog does not have is kept, so the roster check refuses it
+      (`system_status.judge_run`'s `GrantError`, as before #1366).
+    - Narrowing happens before the empty-gather rule is asked again: a table left granting
+      gather no query verb is refused under that rule, naming the grants it ignored.
+
+    A lead-zero correlation grant on an ignored system is ignored too: the lead is withheld,
+    as a table that names no correlation holder withholds it."""
+    from defender.systems.catalog import TenantSystems
+
+    systems = TenantSystems.of(tenant.records, catalog, tenant_id=tenant.tenant_id)
+    if systems.adapter_missing:
+        named = ", ".join(sorted(systems.adapter_missing))
+        raise TenantRefused(
+            f"tenant {str(tenant.tenant_id)!r}: system(s) {named} name an adapter this product version no longer "
+            "carries (an upgrade removed it; `tenant.py catalog` lists the adapters): delete the record "
+            "(`tenant.py delete-system`) or move to an adapter the catalog has")
+    ours = set(systems.roster.verbs)
+    known = set(catalog.roster.verbs)
+    granted = set(tenant.grants.gather.systems) | set(tenant.grants.correlation.systems)
+    ignored = {s: ("its record is disabled" if s in systems.disabled else "it has no current record")
+               for s in sorted(granted) if s not in ours and s in known}
+    if not ignored:
+        return TenantVerdict(tenant=tenant, systems=systems, ignored=MappingProxyType({}))
+    grants = _narrowed(tenant.grants, frozenset(ignored))
+    try:
+        require_gather_query(grants)
+    except DispositionError as empty:
+        raise TenantRefused(
+            f"tenant {str(tenant.tenant_id)!r}: {empty} Its grants on {', '.join(ignored)} were ignored: "
+            "those systems have no enabled record (`tenant.py systems` lists the records)") from empty
+    correlation = tenant.correlation
+    if correlation is not None and correlation.system in ignored:
+        correlation = dataclasses.replace(correlation, system=None, grant=grants.correlation)
+    narrowed = dataclasses.replace(tenant, grants=grants, correlation=correlation)
+    return TenantVerdict(tenant=narrowed, systems=systems, ignored=MappingProxyType(ignored))
+
+
+def narrowed_to(tenant: RunTenant, roster: RosterRead, catalog: RosterRead) -> RunTenant:
+    """`tenant` with its grants on `catalog` systems outside `roster` (the tenant's systems)
+    left out (#1366 R12), for a frame handed a tenant's roster with a tenant run start did not
+    narrow (a direct caller of the driver). A grant on a system `catalog` lacks is kept, for the
+    roster check to refuse. Nothing is warned: run start warned when it narrowed."""
+    ignored = frozenset(s for s in tenant.grants.gather.systems | tenant.grants.correlation.systems
+                        if s not in roster.verbs and s in catalog.verbs)
+    if not ignored:
+        return tenant
+    grants = _narrowed(tenant.grants, ignored)
+    correlation = tenant.correlation
+    if correlation is not None and correlation.system in ignored:
+        correlation = dataclasses.replace(correlation, system=None, grant=grants.correlation)
+    return dataclasses.replace(tenant, grants=grants, correlation=correlation)
+
+
+def warn_ignored(verdict: TenantVerdict) -> None:
+    """One WARNING line per granted system `tenant_systems` ignored (#1366 R12): the run goes on
+    without it."""
+    for system, why in verdict.ignored.items():
+        _logger.warning(
+            f"{verdict.tenant.grants.path}: the grants on system {system} are ignored for this run: {why} "
+            "(`tenant check` reports it)")
+
+
+def _narrowed(grants: RunGrants, ignored: frozenset[str]) -> RunGrants:
+    """`grants` with every row on an `ignored` system left out (gather and the correlation lead)."""
+    from defender.systems.correlation import correlation_system
+
+    gather = VerbGrant(role=grants.gather.role,
+                       entries=tuple(e for e in grants.gather.entries if e[0] not in ignored))
+    lead = VerbGrant(role=grants.correlation.role,
+                     entries=tuple(e for e in grants.correlation.entries if e[0] not in ignored))
+    return dataclasses.replace(grants, gather=gather, correlation=lead, correlation_system=correlation_system(lead))
 
 
 def resolve_run_tenant_or_refuse(
@@ -288,7 +455,6 @@ def host_tenant(  # noqa: PLR0913 — the request (root, id), the records seam a
     `directory` is the tenant records a test or a launcher hands in; a production process passes
     none and reads them from `DEFENDER_DATABASE_DSN`. Refused in the lifecycle's own process
     (r10.1 C6, A4): prepare holds the lock exclusive there, so a shared hold would wait on itself."""
-    from defender import tenancy
     from defender._paths import process_defender_dir
     from defender.tenancy import host_lock
 
@@ -324,7 +490,6 @@ def entry_directory(given: TenantDirectory | None) -> TenantDirectory:
     run once at process start and never a migration). No directory and no address, or a database
     at another revision (named with this code's), is `TenantRefused`; a database that cannot be
     reached is its `RecordsUnreachable`, which a caller may treat as transient."""
-    from defender import tenancy
 
     return tenancy.host_directory(given, check_version=_check_version)
 
@@ -340,51 +505,6 @@ def _check_version(dsn: str) -> None:
         raise RecordsUnreachable(str(down)) from down
 
 
-def resolved_settings(tenant: Tenant, *, settings_root: Path | None = None) -> dict[str, Any]:
-    """The parts of the record built from a settings folder — `settings_root` (the run copy's,
-    #1108 P4), by default the accepted tenant's own (`clone_halves`): each system's `config.env`
-    (`systems`) and the case-record file (`case_record`) — as the keyword arguments
-    `RunTenant` takes. Read ONCE, here, when a run (or a launch) begins; nothing ever raises for a
-    part's content (O5): a part that cannot stand is carried as the fault that says why."""
-    settings = Path(settings_root) if settings_root is not None else clone_halves(tenant)[1]
-    return folder_settings(settings)
-
-
-def folder_settings(settings: Path) -> dict[str, Any]:
-    """`resolved_settings` over a bare `settings/` folder: the same parts, read the same way —
-    what `tenant check` judges a folder by, with no accepted tenant to name."""
-    systems = tenant_settings.read_systems(settings)
-    case_record: CaseRecordSettings | CaseTicketError | None
-    try:
-        case_record = load_case_record(settings)
-    except CaseTicketError as error:
-        # The text only: the caught error's traceback and cause (the OSError, with its host
-        # path) must not ride the record.
-        case_record = CaseTicketError(str(error))
-    return {
-        "systems": systems,
-        "case_record": case_record,
-        "access": _read_access(settings, systems),
-    }
-
-
-def _read_access(
-    settings: Path, systems: Mapping[str, SystemConfig | ConfigFault],
-) -> Mapping[str, AccessDeclaration | ConfigFault]:
-    """The declaration of every system whose folder holds an `access.yaml` (#1391 P1: holding
-    one is what being reached through the proxy is). A system with none gets no entry; whether
-    it needs one is its adapter's settings check to say."""
-    out: dict[str, AccessDeclaration | ConfigFault] = {}
-    for name in systems:
-        if not os.path.lexists(settings / "systems" / name / tenancy.ACCESS_FILE):
-            continue
-        try:
-            out[name] = tenancy.read_access(settings, name)
-        except ConfigFault as fault:
-            out[name] = ConfigFault(str(fault))  # the text only, as the other parts do
-    return MappingProxyType(out)
-
-
 __all__ = [
     "CaseRecordSettings",
     "RecordsUnreachable",
@@ -395,14 +515,20 @@ __all__ = [
     "resolve_tenant",
     "catalog_templates",
     "correlation_dispatch",
-    "folder_settings",
     "Admitted",
     "entry_directory",
     "host_tenant",
     "refusals",
     "resolve_run_tenant",
     "resolve_run_tenant_or_refuse",
-    "resolved_settings",
+    "record_settings",
+    "tenant_systems",
+    "warn_ignored",
+    "narrowed_to",
+    "TenantVerdict",
+    "require_imported",
+    "not_imported_text",
+    "IMPORT_COMMAND",
     "run_tenant_for",
     "table_pointer",
 ]

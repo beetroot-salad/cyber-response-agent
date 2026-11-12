@@ -36,6 +36,7 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender.tests.support.shared.contracts import _data_root_1078 as D
 from defender.tests.support.storage import _session_store_705 as SS
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
@@ -545,13 +546,17 @@ class Planted:
     root: Path
     tenant_id: str
     knowledge: Path
+    #: What `directory` seeds as the tenant's records (#1366): `R.DERIVED` = what the planted `settings/` stands for; a test
+    #: whose subject is not the records, and which puts files in `settings/` that would change that reading (a leftover
+    #: `systems/` folder), states them: `dataclasses.replace(planted, records=R.fixture_records())`.
+    records: Any = R.DERIVED
 
     @property
     def directory(self) -> Any:
         """A `TenantDirectory` holding this tenant active with its forge wiring (#1214 Flow 4)."""
         from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
 
-        return tenant_directory(self.root, self.tenant_id, alert_mapping=current_mapping(self))
+        return tenant_directory(self.root, self.tenant_id, alert_mapping=current_mapping(self), records=self.records)
 
     @property
     def settings(self) -> Path:
@@ -602,7 +607,9 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     `case_body` is the comment template of the tenant's `settings/case-record.yaml` (`SIGNED_COMMENT_BODY`
     also renders the signature). The tenant's ticket system accepts keys of `TICKET_KEY_PATTERN`. `lead_zero`
     defaults to the template the table's correlation holder needs. `omit_systems` drops those
-    systems' `config.env` (an unconfigured system). `lessons` plants files (name -> text) in the
+    systems' `config.env` and `access.yaml`: each is planted as configured-but-broken (#1366: a record with empty settings
+    and access, judged down at start, as the folder world judged an unconfigured system; NOT left unrecorded, which
+    would drop it from the roster and ignore its grant). `lessons` plants files (name -> text) in the
     tenant's own `agent/lessons/` (the checkout holds no corpus)."""
     root = Path(root) if root is not None else D.current_data_root()
     if lead_zero is None:
@@ -611,10 +618,11 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     if configs is None:  # the ticket system's key grammar: the suite's `TICKET_KEY` fits it
         texts["ticket"] = re.sub(r'(?m)^TICKET_KEY_PATTERN=.*$',
                                  f'TICKET_KEY_PATTERN="{TICKET_KEY_PATTERN}"', texts["ticket"])
-    for system in omit_systems:
+    omitted = tuple(omit_systems)
+    for system in omitted:
         texts.pop(system, None)
     knowledge = T6.place_tenant(root, tenant_id, table=table, lead_zero=lead_zero,
-                                configs=texts, case_body=case_body)
+                                configs=texts, case_body=case_body, unconfigured=omitted)
     planted = Planted(root=root, tenant_id=tenant_id, knowledge=knowledge)
     (root / tenant_id / "learning").mkdir(exist_ok=True)  # setup provisions mutable state
     _MAPPINGS[(str(root), tenant_id)] = None if isinstance(alert_mapping, str) else alert_mapping
@@ -1696,6 +1704,7 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     materialize: Callable[..., Any] | None = None,
     directory: Any = None,
     box_lifecycle: Mapping[str, Any] | None = None,
+    removed_adapters: Sequence[str] = (),
 ) -> Drive:
     """Drive one alert through the production front door (`run.main`) and return what happened.
 
@@ -1773,6 +1782,7 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
         seams["materialize"] = materialize  # run.main's setup seam (faults planted in setup)
     seams["publish"] = publish_double(d.published)
     seams["directory"] = directory if directory is not None else planted.directory  # #1345 slice B: a test-held directory
+    R.assert_records_within_roster(seams["directory"], planted.tenant_id, roster, removed=removed_adapters)  # the roster stands for the catalog
     if isinstance(writer, _WriterOverTheProxy):
         seams.update(writer.store.stand_in.seams())  # the proxy's address and a signer for its token
     try:

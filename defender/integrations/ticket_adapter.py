@@ -9,6 +9,7 @@ and a CLI had to find its own settings, which no code outside a process entry po
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 # Workspace root on sys.path so `defender.*` namespace imports resolve when the verb registry
@@ -28,11 +29,18 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 
 SYSTEM = "ticket"
 PREFIX = "TICKET"
+DISPLAY_NAME = "Ticket store (lab)"
+#: A lab stub (#1366 O2): an example adapter, not a real system's.
+EXAMPLE = True
 
 #: The transport template plus the store's key grammar (`TICKET_KEY_PATTERN`). The grammar is
 #: an environment fact, so it lives in the tenant config and is required: absent means the
 #: system is down (`ConfigFault`), never a built-in default.
 REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "KEY_PATTERN")
+#: No setting goes in a request path.
+PATH_KEYS: tuple[str, ...] = ()
+#: The route `add_case_comment` sends (#1366 C1): a comment on the ticket, whatever the settings.
+COMMENT_ROUTE = ("POST", "/tickets/*/comments")
 
 
 # A per-module zero-argument alias over `transport.load_config`.
@@ -42,6 +50,11 @@ def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module 
 
 def _timeout(ctx: VerbContext) -> int:  # lint-dup: ok — per-module alias over the shared transport.timeout_of
     return transport.timeout_of(_config(ctx))
+
+
+def comment_route(settings: Mapping[str, str]) -> tuple[str, str]:  # lint-dup: ok — every case-recording adapter declares its comment route under this one name (#1366 C1)
+    """The route `add_case_comment` sends (#1366 C1): the same for every record."""
+    return COMMENT_ROUTE
 
 
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
@@ -156,8 +169,8 @@ def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  #
     `key`, and return the ticket's web link. Not a verb (never in `VERBS`): no role or query tool
     can reach it. The key is one path segment, so it cannot reshape the request. Faults are the
     shared classes: a 4xx is an `UpstreamFault` carrying the status."""
-    transport.host_write(ctx, SYSTEM, "POST", "/tickets/{key}/comments", {"key": transport.CaseKey(key)},
-                    body={"author": COMMENT_AUTHOR, "body": body}, timeout_sec=_timeout(ctx))
+    transport.comment_write(ctx, SYSTEM, comment_route(transport.record_entry(ctx.tenant, SYSTEM)), key=key,
+                            body={"author": COMMENT_AUTHOR, "body": body}, timeout_sec=_timeout(ctx))
     return _ticket_link(ctx, key)
 
 

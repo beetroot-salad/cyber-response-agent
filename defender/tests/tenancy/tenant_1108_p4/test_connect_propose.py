@@ -19,7 +19,6 @@ from typing import Any
 import pytest
 
 from defender._git import REPO_ROOT
-from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_p4._support import (
     DEFENDER,
     FIXTURE_AGENT,
@@ -157,11 +156,11 @@ ADAPTER_SYSTEM = "cmdb"
 
 
 def _validate(t: Any, staged: Path) -> tuple[int, list[str]]:
-    env = {**os.environ, "PYTHONPATH": str(DEFENDER.parent),
-           "DEFENDER_DATA_ROOT": str(location_path(t.data_root))}
+    # No tenant and no data root: connect's validator is a no-tenant surface (#1366 O1, O11; `--tenant` retired).
+    env = {k: v for k, v in os.environ.items() if k != "DEFENDER_DATA_ROOT"}
+    env["PYTHONPATH"] = str(DEFENDER.parent)
     proc = subprocess.run(
-        [sys.executable, str(CONNECT / "validate_scaffold.py"), ADAPTER_SYSTEM,
-         "--tenant", t.tenant_id, "--staged", str(staged)],
+        [sys.executable, str(CONNECT / "validate_scaffold.py"), ADAPTER_SYSTEM, "--staged", str(staged)],
         env=env, capture_output=True, text=True, timeout=300, check=False)
     return proc.returncode, (proc.stdout + proc.stderr).splitlines()
 

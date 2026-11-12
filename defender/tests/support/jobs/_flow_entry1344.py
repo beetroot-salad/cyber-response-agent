@@ -131,6 +131,7 @@ def family() -> int:
     from defender.tests.e2e import _1255_twin as TWIN
     from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
     from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
+    from defender.tests.support.jobs._socket_standin1170 import handed_records
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
     from defender.tests.support.learning.branch import _triplet_947 as T
@@ -191,7 +192,8 @@ def family() -> int:
     try:
         # Pre-flight signs its pass up front (#1363): the helper signs it, over the tenant's one proxied system.
         signing = dict(reads=("elastic",), directory=seams["directory"], proxy_url=PROXY_URL, signer=seams["signer"])
-        with _socket(tenant, kind="learning", job=argv[argv.index("--job") + 1], signing=signing) as helper:
+        with _socket(tenant, kind="learning", job=argv[argv.index("--job") + 1], signing=signing,
+                     records=handed_records(seams["directory"], tenant)) as helper:
             job_entry.main(_in_container_argv(), environ=helper.environ(), **seams)
     except SystemExit as stop:
         return stop.code if isinstance(stop.code, int) else 1

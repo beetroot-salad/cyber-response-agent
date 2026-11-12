@@ -478,13 +478,15 @@ class ManagementService(Actor):
     async def _finish(self, held: HeldTenant) -> None:
         """The by-name sweep once more (late effects of a timed-out call), the signing key included,
         then `offboarded` with the repo deletion pending once the window ends; the publish status goes
-        (Flow 2.4, A25)."""
+        (Flow 2.4, A25), and the tenant's system and case records, every version, with its imported
+        mark (#1366 O10), in the same fenced commit."""
         bots = await self._revoke(await held.generations(), repo=await self._repo_of(held))
         await self._destroy_key(held.tenant_id)
         await self._delete_bots(bots)
         now = self._clock()
         await held.commit(step="delete_repo", actor=SERVICE, state="offboarded", pending_action="delete_repo",
-                          offboarded_at=now, repo_delete_after=now + REPO_WINDOW, drop_publish_status=True)
+                          offboarded_at=now, repo_delete_after=now + REPO_WINDOW, drop_publish_status=True,
+                          drop_records=True)
 
     async def _delete_repo(self, held: HeldTenant) -> None:
         """Due once `repo_delete_after` passed (the listing waits for it): the by-name sweep again

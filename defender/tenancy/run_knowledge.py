@@ -15,7 +15,7 @@ import secrets
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender import _io
 from defender._text import one_line
@@ -38,6 +38,9 @@ from defender.tenancy._publish_status import (
 from defender.tenancy._tenant import Tenant
 from defender.records.formats import TenantRefused
 from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF
+
+if TYPE_CHECKING:
+    from defender.tenancy.record_values import TenantRecords
 
 #: The report line's classes (OD2) are `tenancy._publish_status`'s, shared with the child that
 #: writes them. `stale:*` keeps a run with a snapshot going; `misconfigured` refuses it (O9);
@@ -280,9 +283,18 @@ def write_host_record(path: Path, source: KnowledgeSource) -> None:
     _io.write_guarded(path, json.dumps(source.host_record(), indent=2, sort_keys=True) + "\n")
 
 
+def write_record_versions(path: Path, records: TenantRecords) -> None:
+    """The host-held record of the system and case versions a run read at its start (#1366 O6,
+    P3; audit only), beside the knowledge-source record: every current version, disabled ones
+    too, and the case version (null when the tenant has none)."""
+    used = {"systems": {system: record.version for system, record in sorted(records.systems.items())},
+            "case": None if records.case is None else records.case.version}
+    _io.write_guarded(path, json.dumps(used, indent=2, sort_keys=True) + "\n")
+
+
 __all__ = [
     "FRESH", "MISCONFIGURED", "OPERATOR", "PINNED", "STALE", "STAGE", "STAGE_TOKEN",
     "TRANSIENT", "KnowledgeRefused", "KnowledgeSource", "PublishReport", "RunCopy",
     "child_failed", "copy_for_run", "failed_line", "pinned_commit", "read_publish_report", "resolve_source",
-    "write_host_record",
+    "write_host_record", "write_record_versions",
 ]

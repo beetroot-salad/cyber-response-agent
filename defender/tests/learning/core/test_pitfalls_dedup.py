@@ -17,6 +17,7 @@ from defender.tests.support.learning.core._store1278 import call, migrated_datab
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture `world` is built on
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
 from defender.tests.support.learning.curation import _curator1134 as C
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed  # noqa: E402
 
 #: l-003's real failure in `reviewer-measure-0807-b` — the same DuckDB diagnosis, turn after
 #: turn, while the SQL that provoked it changed every time.
@@ -203,7 +204,7 @@ def _run_pitfalls(queue: _Queue, invoke: object, tmp_path: Path, *, captured: li
     queue's rows as the claim's items; `queue.repo_root` is the product checkout holding the adapters."""
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=queue.repo_root)
     with C.draft_trees(lane) as trees:
-        return pitfalls_curator.run_pitfalls(paths=lane.paths, invoke=invoke, trees=trees, batch=lane.batch, items=queue.items(),
+        return run_pitfalls_handed(paths=lane.paths, invoke=invoke, trees=trees, batch=lane.batch, items=queue.items(),
                                              outcomes=outcomes if outcomes is not None else {},
                                              on_curated=(captured if captured is not None else []).append)
 

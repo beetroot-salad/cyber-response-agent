@@ -15,9 +15,8 @@ For each request (design "Proxy", in order, nothing sent or read before its chec
 1. verify the token with the key of the tenant it names, and its expiry (O1, O8, A11); a tenant
    id that is not a canonical tenant UUID is refused before any OpenBao or exports path is built;
 2. the system must be a system name and in the token's grant;
-3. read the system's declaration from the export the tenant's `current` names, under
-   `<data root>/<tenant id>/exports/` (A26), no link followed: never the clone's working tree,
-   never another export (O2, P-2, H10);
+3. read the system's current record from the tenant's system records (#1366 O7): none, deleted
+   or disabled is refused; its access text is the declaration (never a folder, never a cache);
 4. the URL must be under the one declared base, the route a read or a granted write (O2, O3);
 5. read the credential set; it must fit the declared scheme (A4); exchange an OAuth token if
    none is held (A8, A12);
@@ -70,7 +69,7 @@ from defender.kit.faults import (
 )
 from defender.kit.tls import trust_of_ca
 from defender.kit.verbs import is_system_name
-from defender.records.formats import TenantRefused
+from defender.tenancy.models import SystemRecord
 from defender.credential_proxy._audit import AUDIT_KEYS, AuditSink, FileAuditSink
 from defender.credential_proxy._credentials import (
     AccessTokens,
@@ -81,6 +80,7 @@ from defender.credential_proxy._credentials import (
 from defender.credential_proxy._deadline import Deadline, answering
 from defender.credential_proxy._openbao import OpenBaoStore, TransitVerifier
 from defender.credential_proxy._refusal import CONFIG, TRANSPORT, UPSTREAM, Refused
+from defender.credential_proxy._records import PostgresSystemRecords, SystemRecordsPort
 from defender.credential_proxy._reply import Sink, StreamedReply, public_trust, stream_reply
 from defender.credential_proxy._scope import Target, check_route, locate
 from defender.credential_proxy._tokens import Claims, TokenVerifier, split_token
@@ -121,20 +121,20 @@ _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}")
 
 
 class CredentialStore(Protocol):
-    """The proxy's read of a (tenant, system)'s credential set; None when there is none. A store
+    """The proxy's read of a (tenant, system)'s credential set at one generation; None when there is none. A store
     it cannot reach is `TransportFault`; one that refuses is `ConfigFault` (r7 A18)."""
 
-    def read(self, tenant_id: str, system: str) -> CredentialSet | None: ...
+    def read(self, tenant_id: str, system: str, generation: int) -> CredentialSet | None: ...
 
 
 @dataclass(frozen=True)
 class ProxyDeps:
-    """What the proxy runs over: the data root whose `<tenant id>/exports/` folders it reads (read
-    only; it keeps no tenant list, A26), the credential store, the token verifier, the audit
+    """What the proxy runs over: the port to the tenants' current system records (read only; the
+    proxy keeps no tenant list, A26), the credential store, the token verifier, the audit
     sink, the response cap (a test's seam, never configuration: the run is proven up to the
     shipped value, #1412) and upstream timeout, and the public trust's bundle."""
 
-    data_root: Path
+    records: SystemRecordsPort
     store: CredentialStore
     verifier: TokenVerifier
     audit: AuditSink
@@ -182,7 +182,7 @@ class _Trail:
     tenant: str | None = None
     system: str | None = None
     investigation: str | None = None
-    commit: str | None = None
+    version: int | None = None
     method: str | None = None
     path: str | None = None
     outcome: str | None = None
@@ -215,9 +215,6 @@ class _Proxy:
 
     def __init__(self, deps: ProxyDeps) -> None:
         self.deps = deps
-        # The one conversion of the data root this proxy is handed (A26); a tenant's exports are
-        # joined under it by tenancy, never spelled here.
-        self._root = tenancy.data_root_from_path(deps.data_root)
         ca_file = deps.public_ca_file
         self._trust = public_trust(None if ca_file is None else str(ca_file))
         self.access_tokens = AccessTokens()
@@ -273,28 +270,30 @@ class _Proxy:
         mode = claims.grant.get(asked.system)
         if mode is None:
             raise Refused(CONFIG, f"the request token does not grant {asked.system}", origin=ORIGIN_REQUEST)
-        export = self._current_export(claims.tenant)
-        trail.commit = export.commit
-        declaration = self._declared(export, asked.system)
+        record = self._current_record(claims.tenant, asked.system)
+        trail.version = record.version
+        declaration = self._declared(record, asked.system)
         target = locate(declaration, asked.url)
         trail.path = target.path[:_AUDIT_PATH_CAP]
         check_route(declaration, asked.system, asked.method, target.path, mode)
         headers = _forwarded(asked.headers, declaration.auth)
-        creds = self._stored(claims.tenant, asked.system)
+        creds = self._stored(claims.tenant, asked.system, record.credential_generation)
         if creds is None:
             raise Refused(CONFIG, f"no credential set is stored for {asked.system}", origin=ORIGIN_SETUP)
         check_fit(declaration.auth, creds, asked.system)
         trust = self._trust_of(declaration)
         access_token = None
         if declaration.auth.scheme == OAUTH_CLIENT_CREDENTIALS:
-            access_token = self.access_tokens.token(claims.tenant, asked.system, declaration,
+            access_token = self.access_tokens.token(claims.tenant, asked.system,
+                                                    record.credential_generation, declaration,
                                                     creds, deadline, trust)
             headers["Authorization"] = f"Bearer {access_token}"
         else:
             headers.update(static_headers(declaration.auth, creds, asked.system))
         answer = self._sent(asked, target, headers, send, trail, deadline, trust)
         if answer.status == 401 and access_token is not None:
-            self.access_tokens.evict(claims.tenant, asked.system, access_token)
+            self.access_tokens.evict(claims.tenant, asked.system, record.credential_generation,
+                                     access_token)
         return answer
 
     def _trust_of(self, declaration: AccessDeclaration) -> ssl.SSLContext:
@@ -322,43 +321,42 @@ class _Proxy:
             raise Refused(CONFIG, "the request token has expired", origin=ORIGIN_ACCESS)
         return claims
 
-    def _declared(self, export: tenancy.TenantExport, system: str) -> AccessDeclaration:
-        """The published declaration for `system`. A system with no usable declaration in the
-        export is our setup for that one system (#1363 B3: labelled here, since
-        `tenancy.read_export_access` is not the proxy's alone)."""
+    def _declared(self, record: SystemRecord, system: str) -> AccessDeclaration:
+        """The access declaration `system`'s current record holds. One that does not parse is our setup for that one
+        system (#1363 B3: labelled here, since `tenancy.parse_access` is not the proxy's alone)."""
         try:
-            return tenancy.read_export_access(export.path, system)
+            return tenancy.parse_access(record.access, system=system)
         except AdapterFault as fault:
             fault.origin = ORIGIN_SETUP
             raise
 
-    def _stored(self, tenant_id: str, system: str) -> CredentialSet | None:
-        """The credential set stored for `system`. The store labels its own per-system causes
-        (`setup`); a fault it raises with no label is the store as a whole being unusable
-        (OpenBao unreachable, or refusing the proxy): our access, whatever its class."""
+    def _stored(self, tenant_id: str, system: str, generation: int) -> CredentialSet | None:
+        """The credential set stored for `system` at `generation`. The store labels its own per-system causes
+        (`setup`); a fault it raises with no label is the store as a whole being unusable (OpenBao unreachable, or
+        refusing the proxy): our access, whatever its class."""
         try:
-            return self.deps.store.read(tenant_id, system)
+            return self.deps.store.read(tenant_id, system, generation)
         except AdapterFault as fault:
             fault.origin = fault.origin or ORIGIN_ACCESS
             raise
 
-    def _current_export(self, tenant_id: str) -> tenancy.TenantExport:
-        # The id is checked here too, not only by the verifier: no path is built from a claim
+    def _current_record(self, tenant_id: str, system: str) -> SystemRecord:
+        """`system`'s current record for the tenant (#1366 O7). No current record, or a disabled one, is that system's
+        setup; the records database failing to answer, or refusing the proxy's login, is our access."""
+        # The id is checked here too, not only by the verifier: no query is built from a claim
         # that is not a canonical tenant UUID (A26).
         if not tenancy.is_valid_tenant_id(tenant_id):
             raise Refused(CONFIG, "the request token names no tenant id", origin=ORIGIN_ACCESS)
         try:
-            exports = tenancy.tenant_exports(self._root, tenant_id)
-        except TenantRefused as refused:
-            raise Refused(CONFIG, f"tenant {tenant_id}: {refused}", origin=ORIGIN_ACCESS) from None
-        if not exports.is_dir() or exports.is_symlink():
-            raise Refused(CONFIG, f"tenant {tenant_id} has no exports folder under the proxy's data "
-                                  "root", origin=ORIGIN_ACCESS)
-        try:
-            return tenancy.current_export_at(exports, tenant_id)
-        except tenancy.DeliveryRefused as refused:
-            _logger.warning("tenant %s: %s", tenant_id, refused)
-            raise Refused(CONFIG, f"tenant {tenant_id} has no published export to apply", origin=ORIGIN_ACCESS) from None
+            record = self.deps.records.current_system(tenant_id, system)
+        except AdapterFault as fault:
+            fault.origin = fault.origin or ORIGIN_ACCESS
+            raise
+        if record is None:
+            raise Refused(CONFIG, f"{system} has no current record for the tenant", origin=ORIGIN_SETUP)
+        if not record.enabled:
+            raise Refused(CONFIG, f"{system} is disabled", origin=ORIGIN_SETUP)
+        return record
 
     def _sent(self, asked: _Asked, target: Target,  # noqa: PLR0913 — one call's state
               headers: dict[str, str], send: Sink,
@@ -607,7 +605,7 @@ def create_app(deps: ProxyDeps) -> FastAPI:  # lint-dup: ok — the proxy's own 
 
 #: The operator configuration `create_app_from_config` takes (A13, A26): exactly one of
 #: `openbao_token` and `openbao_token_file`, and every key of `CONFIG_KEYS`; the others optional.
-CONFIG_KEYS = ("kv_mount", "data_root", "audit_path")
+CONFIG_KEYS = ("kv_mount", "records_dsn", "audit_path")
 TOKEN_KEYS = ("openbao_token", "openbao_token_file")
 OPTIONAL_CONFIG_KEYS = ("upstream_timeout_sec",)
 
@@ -632,8 +630,8 @@ def _openbao_token(config: Mapping[str, Any]) -> str:
 def create_app_from_config(config: Mapping[str, Any], *, openbao_addr: str | None = None,
                            transport: httpx.MockTransport | None = None) -> FastAPI:
     """The shipped proxy from the operator's settings: the OpenBao store and transit verifier
-    (the proxy role's token, `kv_mount`), the data root whose tenants' `exports/` folders it reads
-    (`data_root`, read only) and the append-only audit file (`audit_path`). OpenBao is the
+    (the proxy role's token, `kv_mount`), the read-only login's DSN for the tenants' system records
+    (`records_dsn`; building the app does not connect) and the append-only audit file (`audit_path`). OpenBao is the
     deployment's (`DEPLOYMENT_ISSUER`, https) on the fixed transit mount; `openbao_addr` and
     `transport` are a test's seam, never configuration. A missing or unknown key (the retired
     `tenant_keys`, `tenant_exports`, `transit_mount`, `openbao_addr` and `max_response_bytes`
@@ -647,11 +645,11 @@ def create_app_from_config(config: Mapping[str, Any], *, openbao_addr: str | Non
     addr = DEPLOYMENT_ISSUER.openbao_url if openbao_addr is None else openbao_addr
     extra = {k: config[k] for k in OPTIONAL_CONFIG_KEYS if k in config}
     try:
-        data_root = config["data_root"]
-        if not isinstance(data_root, str) or "\0" in data_root:
-            raise TypeError("data_root")
+        records_dsn = config["records_dsn"]
+        if not isinstance(records_dsn, str) or not records_dsn or "\0" in records_dsn:
+            raise TypeError("records_dsn")
         deps = ProxyDeps(
-            data_root=Path(data_root),
+            records=PostgresSystemRecords(records_dsn),
             store=OpenBaoStore(addr=addr, token=token, mount=config["kv_mount"], transport=transport),
             verifier=TransitVerifier(addr=addr, token=token, transport=transport),
             audit=FileAuditSink(config["audit_path"]),

@@ -579,6 +579,13 @@ jobs:
       - name: Tenant-settings env-read gate (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_tenant_env_reads.py
 
+      # Every catalog adapter declares PREFIX, REQUIRED_CONFIG_KEYS, PATH_KEYS, DISPLAY_NAME and
+      # EXAMPLE as cold-readable module constants (the operator's catalog listing and the record
+      # judgement read them so), a comment-taking adapter its comment_route, and no declared
+      # settings key is named like a secret (#1366 K2, K8, C1). No baseline.
+      - name: Catalog declarations gate (no baseline)
+        run: defender/.venv/bin/python tooling/lint/lint_catalog_declarations.py
+
       # Adapters know only their target system: none (nor the kit's interface) reads the branch
       # point, the run state or the run clock, and host-state stamps no time of its own. The
       # oracle applies a replay's cut and the platform stamps each reply (#1385). No baseline.

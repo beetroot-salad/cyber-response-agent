@@ -6,17 +6,19 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from defender import _git
+from defender._paths import adapters_under
 from defender.tests.support.tenancy import _tenants1106
 from defender.learning.core import drains
 from defender.learning.core.config import LoopPaths
-from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.learning.leads import declared_systems, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.systems import verbs
+from defender.systems.catalog import Catalog
 from defender.systems.verb_grant import DENY_ALL
 from defender.systems.verb_roster import RosterError, audit_read_surfaces
 from defender.systems.verbs import ModuleVerbRegistry, RegistryError
@@ -24,6 +26,7 @@ from defender.skills.invlang.validate import _gating
 from defender.tests.support.runtime.engine._declared869 import (
     ADAPTER_BODY,
     ADAPTERS_REL,
+    catalog_of,
     pitfall_row,
     seed_tree,
     write,
@@ -170,6 +173,11 @@ def test_read_roster_refuses_an_unsearchable_directory_as_nobody(tmp_path):
     assert str(shape_only) in verdict.message, verdict.describe()
 
 
+def _adapter_names(adapters: Path) -> frozenset[str]:
+    """The systems with an adapter file under `adapters`, through the lanes' one adapter-directory read (`read_adapters`)."""
+    return frozenset(declared_systems.read_adapters(adapters).adapter_files)
+
+
 # The resolver
 
 
@@ -179,7 +187,7 @@ def test_the_resolver_reports_an_unreadable_directory_as_its_own_fault_as_nobody
     write(adapters / "cmdb_adapter.py", ADAPTER_BODY)
 
     def probe():
-        return declared_systems.adapter_systems_under(adapters)
+        return _adapter_names(adapters)
 
     with handed_to_nobody(root, adapters, 0o755):
         _expect_returned(run_as_nobody(probe, expected=LeadAuthorError), frozenset({"cmdb"}))
@@ -194,14 +202,14 @@ def test_the_resolver_reports_an_unreadable_directory_as_its_own_fault_as_nobody
 
     missing = tmp_path / "absent" / ADAPTERS_REL
     with pytest.raises(LeadAuthorError) as exc:
-        declared_systems.adapter_systems_under(missing)
+        _adapter_names(missing)
     assert f"{missing} is {CANNOT_READ}" in str(exc.value), str(exc.value)
 
     shape_only = root / "shape-only"
     write(shape_only / ".hidden_adapter.py", ADAPTER_BODY)
 
     def probe_shape_only():
-        return declared_systems.adapter_systems_under(shape_only)
+        return _adapter_names(shape_only)
 
     with handed_to_nobody(root, shape_only, 0o400):
         verdict = run_as_nobody(probe_shape_only, expected=LeadAuthorError)
@@ -218,7 +226,7 @@ def test_a_symlink_loop_named_like_an_adapter_never_escapes_the_resolver_untyped
     # Any other exception escapes the `try` and fails the test: only `LeadAuthorError` may escape.
     outcome: frozenset[str] | LeadAuthorError
     try:
-        outcome = declared_systems.adapter_systems_under(adapters)
+        outcome = _adapter_names(adapters)
     except LeadAuthorError as e:
         outcome = e
     if isinstance(outcome, LeadAuthorError):
@@ -231,7 +239,7 @@ def test_a_symlink_loop_named_like_an_adapter_never_escapes_the_resolver_untyped
         )
 
     (adapters / "loop_adapter.py").unlink()
-    assert declared_systems.adapter_systems_under(adapters) == frozenset({"cmdb"})
+    assert _adapter_names(adapters) == frozenset({"cmdb"})
 
 
 # The drain seam
@@ -252,9 +260,13 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
     monkeypatch.setenv("DEFENDER_DIR", str(repo / "defender"))  # the curator reads the adapters of the code tree the process runs
 
     def probe():
+        # (#1366 R16) The lane is handed its systems: a caller with no tenant hands the whole catalog, which it reads from the
+        # checkout, here as the lane's resolver reads it (`catalog_of`), as `nobody`. A tenant's lane reads the same tree
+        # through the tick (`test_the_lead_tick_reads_no_systems_from_an_unreadable_adapters_tree`).
         outcomes: dict = {}
         rc = drains._invoke_pitfalls(paths, None, on_curated=lambda _d: None,
-                                     label=LEAD_AUTHOR_DRAIN_LABEL, items=items, outcomes=outcomes)
+                                     label=LEAD_AUTHOR_DRAIN_LABEL, items=items, outcomes=outcomes,
+                                     systems=catalog_of(repo))
         return rc, sorted(outcomes)
 
     with handed_to_nobody(repo, adapters, 0o400):
@@ -273,7 +285,7 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
 
 
 def _redirect_repo_root(monkeypatch, root: Path) -> None:
-    """Point the checkout at `root`: `_adapters_at_run_start` reads `_git.REPO_ROOT` at call time."""
+    """Point the checkout at `root`: `_run_start_reads` reads `_git.REPO_ROOT` at call time."""
     monkeypatch.setattr(_git, "REPO_ROOT", root)  # lint-monkeypatch: ok — a module constant read at call time; the checkout root has no other seam
 
 
@@ -305,9 +317,13 @@ def test_the_nothing_to_try_gate_never_answers_without_a_held_roster(tmp_path):
 
 def _run_start():
     pytest.importorskip("pydantic_ai")
-    from defender.investigation.driver import _adapters_at_run_start
+    from defender.investigation.driver import _run_start_reads
 
-    return _adapters_at_run_start
+    def at_run_start(*args: Any, **kw: Any) -> tuple[Any, Any]:
+        roster, verbs, _tenant = _run_start_reads(*args, **kw)
+        return roster, verbs
+
+    return at_run_start
 
 
 def test_the_run_refuses_an_absent_checkout_adapters_directory_at_its_own_frame(
@@ -324,9 +340,12 @@ def test_the_run_refuses_an_absent_checkout_adapters_directory_at_its_own_frame(
     assert not adapters.exists()
     _redirect_repo_root(monkeypatch, root)
 
+    # (#1366 R16) The roster is handed: the run tree's whole catalog (what a caller with no tenant hands), not the checkout's, so
+    # the run's own read of the checkout is the one that finds the directory absent.
+    handed = Catalog.of_checkout(run_tree / "defender").roster
     _gating.release_capabilities()
     with pytest.raises(RegistryError) as exc:
-        at_run_start(run_tree / "defender", None, object(), _tenants1106.fixture_run_tenant())
+        at_run_start(run_tree / "defender", handed, object(), _tenants1106.fixture_run_tenant())
     assert str(adapters) in str(exc.value), f"does not name the directory: {exc.value}"
     with pytest.raises(_gating.CapabilitiesNotRead):
         _gating._capability_exists("cmdb")
@@ -402,7 +421,7 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
     )
 
     assert declared_systems.with_platform_systems(
-        declared_systems.adapter_systems_under(adapters)) == frozenset(expected)
+        _adapter_names(adapters)) == frozenset(expected)
     log = capsys.readouterr().err
     for name in ANOMALY_NAMES:
         assert sum(repr(name) in ln and str(adapters) in ln for ln in log.splitlines()) == 1, (
@@ -431,35 +450,40 @@ def _claimed_pitfalls() -> list[tuple[str, str, dict]]:
     return [("pitfall", r["pitfall_id"], r) for r in rows]
 
 
-def test_the_pitfalls_step_decides_no_fate_for_an_unreadable_adapters_tree(tmp_path, monkeypatch):
-    """An unreadable adapters tree is a host fault: the step raises the resolver's refusal and leaves the claim's items
-    undecided (the drain returns them to waiting), where a readable tree decides them."""
+def test_the_lead_tick_reads_no_systems_from_an_unreadable_adapters_tree(tmp_path, monkeypatch):
+    """The lead tick builds the tenant's systems from its records over the checkout's catalog once, right before its claim
+    (`store_tick.Tick.before_claim`); an adapters directory it cannot read is the host's fault, so the tick is refused there,
+    not as an outage, and no step runs and no item's fate is decided. Readable, the same read hands the pitfalls step
+    systems that decide the claim's items. (#1366 R16, #1035)"""
+    from defender.tests.support.learning.core import _state1135
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
+    from defender.tests.support.tenancy import _systems1366 as R
+
     repo = seed_tree(tmp_path, adapters=("cmdb",), markers=("elastic",), skills=("elastic",),
                      catalog=())
-    paths = LoopPaths(repo_root=repo)
+    tenant = _state1135.curation_tenant()
+    paths = tenant.learning_paths(LoopPaths, repo_root=repo)
+    directory = tenant_directory(current_data_root(), tenant.id, records=R.fixture_records())
     items = _claimed_pitfalls()
     adapters = _repo_adapters(repo)
     monkeypatch.setenv("DEFENDER_DIR", str(repo / "defender"))  # the curator reads the adapters of the code tree the process runs
     shutil.rmtree(adapters)
     outcomes: dict = {}
 
-    with pytest.raises(LeadAuthorError) as exc:
-        drains._invoke_pitfalls(paths, None, on_curated=lambda _d: None, label=LEAD_AUTHOR_DRAIN_LABEL,
-                                items=items, outcomes=outcomes)
+    with pytest.raises(drains._Refused) as exc:  # noqa: SLF001 — the tick's own refusal, before its claim
+        drains._tick_systems(paths, directory)  # noqa: SLF001
     assert f"{adapters} is {CANNOT_READ}" in str(exc.value), (
         f"the raise is not the resolver's own refusal: {exc.value}"
     )
-    assert isinstance(exc.value, SYSTEMIC_FAULTS), (
-        "the resolver's fault is not systemic, so the lane files it as the batch's own failure"
-    )
-    assert outcomes == {}, "an item's fate was decided for a host fault"
+    assert not exc.value.transient, "an unreadable adapters tree is the host's fault, not an outage to wait out"
 
     # The control restores the committed adapters directory itself (no per-claim reset does),
     # then reads the same tree.
     _git.git(["checkout", "--", str(adapters)], cwd=repo)
     assert (adapters / "cmdb_adapter.py").is_file()
     drains._invoke_pitfalls(paths, None, on_curated=lambda _d: None, label=LEAD_AUTHOR_DRAIN_LABEL,
-                            items=items, outcomes=outcomes)
+                            items=items, outcomes=outcomes,
+                            systems=drains._tick_systems(paths, directory))  # noqa: SLF001
     assert sorted(outcomes) == [("pitfall", "r:l-000:0"), ("pitfall", "r:l-001:0"), ("pitfall", "r:l-002:0")], (
         "the readable control did not get past the resolver to decide the unattributable rows"
     )
@@ -547,3 +571,53 @@ def test_an_adapter_that_does_not_parse_is_recorded_on_the_roster_not_raised_or_
     with pytest.raises(GrantError) as exc:
         ModuleVerbRegistry(roster, VerbGrant(role="gather", entries=(("latin", "query", "r"),)))
     assert "latin.query" in str(exc.value)
+
+
+# #1366 O1/DC7: a tenant's roster is its records'; the invlang ceiling gate stays the whole catalog
+
+
+def _tenants_run_start(tmp_path: Path, name: str, *, with_cmdb: bool):
+    """Production's own `RunTenant` for a twin tenant whose records lack cmdb (or not), and the roster `run.main` handed the
+    lifecycle for it (`systems.roster`), both taken off the lifecycle call."""
+    from defender.tests.tenancy.alert_front_door_1222.test_tenant_surfaces_1366 import _scene
+
+    drive, _directory = _scene(tmp_path, name, with_cmdb=with_cmdb)
+    call = drive.lifecycle_calls[0]
+    return call["tenant"], call["systems"].roster
+
+
+def test_1366_o1_run_start_hands_the_driver_the_systems_of_the_tenants_records_and_the_driver_reads_what_it_is_handed(tmp_path):
+    """The roster run start hands the driver is the tenant's records' (cmdb for B, not for A), never the checkout's, and the driver's
+    run-start reads serve exactly that value. (A driver handed none is refused: `test_no_defaulted_roster_1366`.) (#1366 O1, R16, DC7)"""
+    at_run_start = _run_start()
+    defender_dir = Path(_git.REPO_ROOT) / "defender"
+    tenant_a, handed_a = _tenants_run_start(tmp_path, "a", with_cmdb=False)
+    tenant_b, handed_b = _tenants_run_start(tmp_path, "b", with_cmdb=True)
+
+    roster_a, _ = at_run_start(defender_dir, handed_a, object(), tenant_a)
+    roster_b, _ = at_run_start(defender_dir, handed_b, object(), tenant_b)
+
+    assert roster_a is handed_a, "the driver served a roster other than the one it was handed"
+    assert roster_b is handed_b, "the driver served a roster other than the one it was handed"
+    assert "elastic" in roster_a.systems
+    assert "cmdb" not in roster_a.systems, sorted(roster_a.systems)
+    assert {"cmdb", "elastic"} <= set(roster_b.systems), sorted(roster_b.systems)
+
+
+@pytest.mark.parametrize("handed", ["tenant subset", "whole catalog"])
+def test_1366_o1_the_ceiling_gate_is_the_whole_catalog_even_when_the_runs_roster_is_the_tenants_subset(tmp_path, handed):
+    """The `nothing-to-try` gate is handed every checkout system whether the run's roster is the tenant's subset run start hands
+    or the whole catalog a caller with no tenant hands. (#1366 O1, R16, DC7)"""
+    at_run_start = _run_start()
+    defender_dir = Path(_git.REPO_ROOT) / "defender"
+    tenant_a, subset = _tenants_run_start(tmp_path, "a", with_cmdb=False)
+    assert "cmdb" not in subset.systems, "premise: the run's roster lacks cmdb"
+    whole = verbs.read_roster(adapters_under(Path(_git.REPO_ROOT) / "defender"))
+    assert "cmdb" in whole.verbs, "premise: the catalog has cmdb"
+
+    _gating.release_capabilities()
+    at_run_start(defender_dir, subset if handed == "tenant subset" else Catalog.of_checkout(defender_dir).roster,
+                 object(), tenant_a)
+
+    assert set(_gating.known_capabilities()) == set(whole.verbs)
+    assert _gating._capability_exists("cmdb") is True

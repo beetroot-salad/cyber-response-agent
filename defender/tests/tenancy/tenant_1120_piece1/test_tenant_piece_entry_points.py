@@ -26,7 +26,6 @@ from defender.learning.branch import cli as branch_cli
 from defender.cli.learning import branch as branch_entry
 from defender.cli import policy_cli
 from defender.cli import tenant as tenant_py
-from defender.skills.connect import validate_scaffold
 from defender.tests.support.invlang.validation import _dispositions995 as D995
 from defender.tests.support.shared.contracts import _spec1077 as S1077
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -78,11 +77,6 @@ def _owner_in_checkout(checkout: Path, root: Path) -> str:
         f"the checkout copy's accept_tenant did not refuse {root}:\n{proc.stdout}\n{proc.stderr}")
     assert proc.stdout, "the checkout copy's accept_tenant refused with no message"
     return proc.stdout
-
-
-def _copy_script(checkout: Path, module: Any) -> Path:
-    """The tmp checkout's own copy of an entry point's file."""
-    return checkout / H.script_of(module).resolve().relative_to(H.REPO_ROOT)
 
 
 def _knowledge_link(base: Path, root: Path) -> None:
@@ -166,9 +160,8 @@ CELLS_OF = {
     "branch.cli.main": ALL_CELLS,
     "tenant.check": ALL_CELLS,
     "policy_cli.main": ALL_CELLS,
-    "validate_scaffold.main": ALL_CELLS,
 }
-PROCESS_ENTRIES = {"tenant.check", "validate_scaffold.main"}
+PROCESS_ENTRIES = {"tenant.check"}  # #1366 O1/O11: validate_scaffold.main (--tenant) is retired
 
 
 @dataclass
@@ -257,7 +250,6 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
     # The process entries.
     module, args = {
         "tenant.check": (tenant_py, ["check", cell.tenant_id]),
-        "validate_scaffold.main": (validate_scaffold, ["cmdb", "--tenant", cell.tenant_id]),
     }[entry]
     if entry == "tenant.check":
         # The launcher's directory holds the asked-for tenant active, so the refusal is accept_tenant's own.
@@ -269,17 +261,7 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
                                **cell.env)
         text = H.output(proc)
         return proc.returncode != 0 and "Traceback" not in text, text, False
-    script = (_copy_script(cell.checkout, module) if cell.checkout is not None
-              else H.script_of(module))
-    proc = H.run_script(script, *args, root=cell.root, cwd=cell.checkout,
-                        unset=("DEFENDER_DIR",), **cell.env)
-    text = H.output(proc)
-    if entry == "validate_scaffold.main":
-        # Advisory: the refusal is its WARN and the tenant's config check is skipped; its exit
-        # status follows the other checks and is not the observable.
-        skipped = "config.env carries no inline secrets" not in text and "config.env:" not in text
-        return skipped and "Traceback" not in text, text, not skipped
-    return proc.returncode != 0 and "Traceback" not in text, text, False
+    raise AssertionError(entry)
 
 
 def _cell_problems(where: str, entry: str, cell_name: str, cell: _Cell, base: Path,  # noqa: PLR0913 — one cell's whole observation

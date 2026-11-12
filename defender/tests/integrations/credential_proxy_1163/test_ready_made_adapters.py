@@ -158,7 +158,9 @@ CHECKS = [
       for v in ("maybe", "true", "1", "", "YES", "No")],  # D-2: lowercase yes|no only
     *[pytest.param(SERVICENOW, _config("servicenow", _SN.format(v)), True, False,
                    id=f"servicenow-table-{n}")
-      for n, v in (("slash", "incident/x"), ("space", "a b"), ("query", "x?y=1"), ("blank", ""))],
+      # #1366 C1: the table is a segment of the declared comment route, so `*` and `\` are the settings fault too
+      for n, v in (("slash", "incident/x"), ("space", "a b"), ("query", "x?y=1"), ("blank", ""),
+                   ("star", "inc*"), ("lone-star", "*"), ("backslash", "a\\b"))],
     pytest.param(JIRA_NO, _config("jira", _JIRA.format("no"), docker=True), False, False,
                  id="jira-docker-exec"),
     pytest.param(SERVICENOW, _config("servicenow", _SN.format("incident"), docker=True), False,

@@ -39,7 +39,7 @@ from defender.investigation.tools._deps import run_of
 from defender._io import write_guarded
 from defender import _git
 from defender.knowledge import KnowledgePaths
-from defender._paths import DefenderPaths, adapters_under
+from defender._paths import DefenderPaths
 from defender._vocab import HOST_ONLY_DISPOSITION
 
 from defender import box as box_mod
@@ -84,7 +84,7 @@ from defender import _clock
 from defender.configuration import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender.records import Run, RunPaths
-from defender.systems.run_tenant import RunTenant
+from defender.systems.run_tenant import RunTenant, narrowed_to
 from ._prompts import (
     BUDGET_ENFORCE_FLAG,
     DEFAULT_GATHER_MODEL,
@@ -459,26 +459,36 @@ def _correlation_dispatch_at_run_start(
     return tenant.correlation
 
 
-def _adapters_at_run_start(
-    defender_dir: Path, roster: RosterRead | None, verbs: Any, tenant: RunTenant,
-) -> tuple[RosterRead, Any]:
+def _run_start_reads(
+    defender_dir: Path, roster: RosterRead, verbs: Any, tenant: RunTenant,
+    catalog: RosterRead | None = None,
+) -> tuple[RosterRead, Any, RunTenant]:
     """Everything a run resolves from an adapters tree, resolved first — before the budget,
     logger or any model — so an unreadable tree fails here as `RegistryError`, not mid-tool.
 
-    The roster is read here only if the caller injected none; consumers take the value.
+    The roster is the tenant's systems (#1366 O1, DC7: its enabled records the catalog carries,
+    plus the platform-served ones), handed by the caller (R16: the driver never builds one of its
+    own); a caller with no tenant hands the whole catalog's. Consumers take the value.
 
-    The invlang `nothing-to-try` gate is handed the checkout's roster (`hold_capabilities`)
-    rather than reading lazily, so a read fault is not misfiled as a document fault by the
-    gates that call it. When the run's tree is the checkout, the same read is reused."""
-    roster = roster if roster is not None else read_roster(adapters_under(defender_dir))  # lint-default: ok — DI seam owning its default (tree-derived; no signature default possible)
+    The invlang `nothing-to-try` gate is a no-tenant surface: it is handed the WHOLE catalog,
+    the checkout's (`hold_capabilities`), rather than reading lazily, so a read fault is not
+    misfiled as a document fault by the gates that call it. A whole read of the checkout is
+    reused (`catalog`, the one a tenant's roster was drawn from, or `roster` itself when whole);
+    a tenant's roster never is, though it shares the checkout's root.
+
+    The tenant comes back with its grants narrowed to its roster (#1366 R12,
+    `run_tenant.narrowed_to`): a grant on a catalog system the tenant has no record of is not
+    the run's, whoever resolved the tenant."""
+    checkout = DefenderPaths(_git.REPO_ROOT).adapters_dir
+    whole = next((read for read in (catalog, roster)
+                  if read is not None and read.whole and Path(read.root).resolve() == checkout.resolve()),
+                 None) or read_roster(checkout)
+    hold_capabilities(whole)
+    tenant = narrowed_to(tenant, roster, roster if roster.whole else whole)
     # Built over the run's gather grant; there is no process-level one.
     verbs = verbs if verbs is not None else ModuleVerbRegistry(  # lint-default: ok — DI seam owning its default (built over the run's own grant)
         roster, tenant.grants.gather, grant_home=tenant.table_pointer)
-    checkout = DefenderPaths(_git.REPO_ROOT).adapters_dir
-    hold_capabilities(
-        roster if Path(roster.root).resolve() == checkout.resolve() else read_roster(checkout)
-    )
-    return roster, verbs
+    return roster, verbs, tenant
 
 
 def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
@@ -625,7 +635,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     model_name: str | None = None,
     make_model: MakeModel | None = None,
     verbs: Any = None,
-    roster: RosterRead | None = None,
+    #: The tenant's systems the run reads (#1366 O1, DC7), handed: the driver never builds a
+    #: roster of its own (R16). A caller with no tenant hands the whole catalog's.
+    roster: RosterRead,
     #: The run's one judgement of its systems, made by `run.py` before the run existed (#1256):
     #: its roster is the run's, and the driver holds its verdict rather than judging again.
     #: `None`: the driver judges the roster itself.
@@ -680,8 +692,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # threaded inward.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
-    roster, verbs = _adapters_at_run_start(
-        defender_dir, systems.roster if systems is not None else roster, verbs, tenant)
+    roster, verbs, tenant = _run_start_reads(
+        defender_dir, systems.roster if systems is not None else roster, verbs, tenant,
+        catalog=systems.catalog if systems is not None else None)
     judged = _systems_at_run_start(
         state, systems, roster, tenant, defender_dir,
         known_ids=frozenset() if verbs is None else verbs.branch_identities())

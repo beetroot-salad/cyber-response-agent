@@ -10,6 +10,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from defender._paths import DefenderPaths
 from defender.learning.leads._errors import LeadAuthorError
@@ -20,6 +21,10 @@ from defender.kit.verbs import is_system_name
 #: From `DefenderPaths` rather than re-spelled, so the resolver and the gates agree on where
 #: adapters live.
 ADAPTERS_REL = DefenderPaths.adapters_rel
+
+if TYPE_CHECKING:
+    from defender.systems.catalog import Catalog, TenantSystems
+    from defender.tenancy.models import TenantRecords
 
 _logger = logging.getLogger(__name__)
 
@@ -50,12 +55,6 @@ def read_adapters(adapters_dir: Path) -> RosterRead:
             f"declared_systems: refused adapter name {name!r} from {adapters_dir} — {why}"
         )
     return roster
-
-
-def _adapter_names(adapters_dir: Path) -> frozenset[str]:
-    """The adapter half as a set of names: the systems with an adapter file, never the
-    platform-served ones. A caller that admits by name adds those with `with_platform_systems`."""
-    return frozenset(read_adapters(adapters_dir).adapter_files)
 
 
 def with_platform_systems(systems: frozenset[str]) -> frozenset[str]:
@@ -93,16 +92,6 @@ def _marker_names(agent: Mapping[str, object]) -> frozenset[str]:
     return frozenset(names)
 
 
-def declared_systems(
-    repo_root: Path, *, agent: Mapping[str, object] | None = None,
-) -> frozenset[str]:
-    """The union of the adapter glob (the product checkout at `repo_root`, working tree) and
-    the tenant's committed `execution.md` markers (`agent`, a committed tree's repo-relative
-    paths; none given, the adapter half alone: a product checkout carries no tenant marker
-    after #1108 P4 O1). An unreadable adapter source raises `LeadAuthorError`."""
-    return declared_systems_over(read_adapters(repo_root / ADAPTERS_REL), agent=agent)
-
-
 def declared_systems_over(
     roster: RosterRead, *, agent: Mapping[str, object] | None = None,
 ) -> frozenset[str]:
@@ -117,16 +106,17 @@ def declared_systems_over(
     return union
 
 
-def adapter_declared_systems(repo_root: Path) -> frozenset[str]:
-    """The adapter half alone, as the pitfalls lane resolves it. Never consults the marker
-    source, so an unresolvable marker doesn't raise here."""
-    return adapter_systems_under(repo_root / ADAPTERS_REL)
+def tenant_systems_of(repo_root: Path, records: TenantRecords, *, tenant_id: object) -> TenantSystems:
+    """A tenant's systems (`TenantSystems`) from its current `records` over the catalog of the
+    product checkout at `repo_root`. An unreadable adapter source raises `AdaptersUnreadable`; a tenant not
+    imported, `TenantRefused` naming the import (R8)."""
+    from defender.systems.catalog import Catalog, TenantSystems
+
+    return TenantSystems.of(records, Catalog(read_adapters(repo_root / ADAPTERS_REL)), tenant_id=tenant_id)
 
 
-def adapter_systems_under(adapters_dir: Path) -> frozenset[str]:
-    """The adapter half rooted at the adapters directory itself, for a caller that holds the
-    tree rather than the repo (the permission gate, handed a `defender_dir` by `bind`).
-    Reconstructing a repo root via `.parent` would read a sibling tree's adapters whenever the
-    bound tree isn't literally named `defender`.
-    """
-    return _adapter_names(adapters_dir)
+def lane_names(systems: TenantSystems | Catalog) -> frozenset[str]:
+    """The names a lane handed `systems` admits: every system of the tenant (its enabled
+    catalog-backed records and the platform-served ones), or, from a caller with no tenant, every
+    system of the whole catalog."""
+    return frozenset(systems.roster.systems)

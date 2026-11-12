@@ -2,7 +2,7 @@
 
 Other slices import: `helper_scene(tmp_path, monkeypatch, dsn, *, proxied, files, alert_mapping)`/`HelperScene`,
 `ContainerStandIn`/`Container`, `drive_helper`/`HelperRan`, `ForgeCredentialRecorder`, `SignalingSigner`, `ProcessHelper`,
-`helper_child`/`NO_PROXY_FILES` (a worker `child_argv` that runs the helper in front of the replay entry), the shared test pieces
+`helper_child`/`no_proxy_records` (a worker `child_argv` that runs the helper in front of the replay entry), the shared test pieces
 `make_signer` (the marked signer), `claims_of` (a pass token's claims), `after_the_signal`, `listing`, the fixtures
 `process_state` (autouse where imported) and `scene` (the default `helper_scene`), and the pure parsers `parse_mounts`,
 `parse_env`, `parse_labels`, `flag_values`, `host_path`, `until`. Picked names of the not-yet-built target (sketch choices, not settled
@@ -56,9 +56,23 @@ _UNDECLARED = ("ticket", "host-state", "threat-intel", "change-mgmt", "elastic",
 #: Every system the fixture tenant declares `http-proxy` as published (`helper_scene(proxied=ALL_SYSTEMS)`: none removed).
 ALL_SYSTEMS: tuple[str, ...] = (*_UNDECLARED, "identity")
 
-#: `helper_scene`'s `files=` for a tenant none of whose systems is `http-proxy`: an empty grant, so nothing is signed. A
-#: system with no declaration is down, so a run over it gathers from nothing.
-NO_PROXY_FILES: dict[str, Any] = {f"settings/systems/{s}/access.yaml": None for s in (*_UNDECLARED, "identity")}
+def proxied_records(proxied: tuple[str, ...]) -> Any:
+    """The fixture tenant's records (#1366: its systems and their access are database records, not files) with every
+    system outside `proxied` holding no access declaration, so it is not `http-proxy` and the grant is known. A system
+    with no declaration is down, so a run over it gathers from nothing."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    spec = R.fixture_records()
+    for system in ALL_SYSTEMS:
+        if system not in proxied:
+            spec = R.edited(spec, system, access="")
+    return spec
+
+
+def no_proxy_records() -> Any:
+    """`register_tenant`'s `records=` for a tenant none of whose systems is `http-proxy`: an empty grant, so nothing is
+    signed."""
+    return proxied_records(())
 
 
 def child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -562,14 +576,13 @@ def helper_scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[s
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)  # the helper holds the database login (N7)
     monkeypatch.setenv(CLAIM_ENV, claim)  # the worker hands each child its claim (`_worker._spawn`)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
-    over: dict[str, Any] = {f"settings/systems/{s}/access.yaml": None
-                            for s in (*_UNDECLARED, "identity") if s not in proxied}
-    over.update(files or {})
+    over: dict[str, Any] = dict(files or {})
     with contextlib.ExitStack() as cleanup:
         cleanup.callback(shutil.rmtree, outer, ignore_errors=True)
         t = cleanup.enter_context(B.run_tenant(tmp_path, root, files=over))
         # The forge wiring names the fixture's served origin, so the post-step's drain publish reaches it (C23).
-        register_tenant(dsn, t.tenant_id, data_root=root, generations=(), alert_mapping=alert_mapping, origin=t.origin)
+        register_tenant(dsn, t.tenant_id, data_root=root, generations=(), alert_mapping=alert_mapping, origin=t.origin,
+                        records=proxied_records(proxied))
         fields = A.generation(t.tenant_id, tmp_path / "secrets", sign_role_id="role-1170-sign",
                               sign_secret="secret-1170-sign")
         insert_generation(dsn, t.tenant_id, fields)

@@ -63,6 +63,17 @@ def _scope_for(
     if role is AgentRole.CORPUS_AUTHOR:
         from defender.learning.author.curator_engine import lesson_read_confine
         return RunScope(corpus_name=corpus_name, read_confine=lesson_read_confine(defender_dir))
+    if role is AgentRole.LEAD_AUTHOR:
+        # The lead author's lanes are drawn over the systems its spawn is handed (#1366 R16); this
+        # command names no tenant, so it is handed the whole catalog of the tree it shows, as a
+        # caller with no tenant is.
+        from defender.systems.catalog import Catalog
+        from defender.systems.verbs import RegistryError
+        try:
+            catalog = Catalog.of_checkout(defender_dir)
+        except RegistryError as unreadable:
+            sys.exit(f"defender-policy: {unreadable}")
+        return RunScope(systems=catalog.roster.systems)
     return RunScope()
 
 
@@ -89,11 +100,20 @@ def _definition(role: AgentRole, admitted: Admitted | None) -> AgentDefinition:
     from defender.investigation.driver import gather_def_for
 
     assert admitted is not None  # `main` admits gather's tenant before it asks
+    from defender.systems.catalog import Catalog
+    from defender.systems.verbs import RegistryError
+
+    # Its systems are the tenant's current records over the checkout's catalog (#1366 R10, R12):
+    # gather's grant narrowed to them, as run start narrows it; a tenant not imported is refused.
     try:
-        run = run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False)
-    except run_tenant_mod.TenantRefused as refusal:
+        records = admitted.directory.current_records(admitted.tenant.id)
+        run_tenant_mod.require_imported(records, admitted.tenant.id)
+        run = run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records)
+        verdict = run_tenant_mod.tenant_systems(run, Catalog.of_checkout(PATHS.defender_dir))
+    except (run_tenant_mod.TenantRefused, RegistryError) as refusal:
         sys.exit(f"defender-policy: {refusal}")
-    return gather_def_for(run.grants.gather)
+    run_tenant_mod.warn_ignored(verdict)
+    return gather_def_for(verdict.tenant.grants.gather)
 
 
 def _read_roots(policy: AgentPolicy, run_dir: Path, defender_dir: Path) -> list[str]:

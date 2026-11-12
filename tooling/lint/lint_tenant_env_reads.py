@@ -2,9 +2,11 @@
 """Tenant settings out of the environment — no read of the process environment, or of a verb
 context's `env`, in the code that addresses a tenant's systems (#1107 O7).
 
-A tenant's settings are its `settings/` folder, resolved ONCE when a run begins into the run's
-record (`RunTenant`). An adapter, the estate, the case-comment writer and lead-zero take what a
-system's address, container, docker context or secret is from that record — never from whatever
+A tenant's settings are its current system and case records (#1366: database rows the operator
+writes; a system's address is its access declaration, its secret is in the secret store), with
+its grant and lead-zero tables from its `settings/` folder, all read ONCE when a run begins into
+the run's record (`RunTenant`). An adapter, the estate, the case-comment writer and lead-zero take
+what a system's address or settings are from that record — never from whatever
 the process happens to have exported, which differs between the shell that launched the run, the
 box and the CI job, and which a model-writable tree can influence. This lint is the net under
 that rule: in the four swept trees an environment LOOKUP is a finding.

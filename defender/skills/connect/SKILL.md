@@ -124,10 +124,10 @@ greenfield tree there's nothing cached yet, so ask all four.
    read sources are auth-less. You never ask for a secret value, token, or
    auth-bearing cURL — if one is offered, refuse it: it never goes in a file you
    write or in this conversation. This is the credential boundary; it is
-   non-negotiable. A credential is stored by the operator with the
-   credential proxy (`PUT /systems/{system}/credentials` on the product
-   API, write-only); you need only its scheme and the field name the
-   access declaration names (`adapter.md` → "Credentials").
+   non-negotiable. A credential is stored by the operator in the secret
+   store (`tenant.py set-credentials`, write-only); you need only its
+   scheme and the field name the access declaration names (`adapter.md` →
+   "Credentials").
 
 ### 3. Route and build
 
@@ -179,15 +179,13 @@ Step 6 validates it and proposes it to the tenant's repo.
   connectivity detail live here, never in `SKILL.md` — the split exists so
   the orchestrator physically can't ingest it.
 
-`settings/systems/{system}/config.env` and `settings/systems/{system}/access.yaml` in the
-connected tenant's OWN repo (deployed as `$DEFENDER_DATA_ROOT/{tenant}/knowledge/`, never in
-this repo) — the tenant's non-secret config: `config.env` holds exactly the keys the adapter
-reads (its `REQUIRED_KEYS`, prefixed; any other key is refused by name), and `access.yaml`
-the system's base, auth scheme and routes (`adapter.md` → "Access declaration"). Also add
-`CHANGE-ME` placeholder copies of both at
-`knowledge/tenant-template/settings/systems/{system}/` in this repo, so a tenant scaffolded
-from the template knows the keys; a system whose files still carry `CHANGE-ME` is not
-configured. Track them in the tenant's repo. A secret is never in either file.
+`<handoff>/{system}/config.env` and `<handoff>/{system}/access.yaml` — the **handoff**: a
+folder outside both repos that you give the operator, never a file in the tenant's repo or in
+this one: the operator stores it as the system's record (`tenant.py set-system`).
+`config.env` holds exactly the keys the adapter reads (its
+`REQUIRED_CONFIG_KEYS`, prefixed; any other key is refused by name), and `access.yaml` the
+system's base, auth scheme and routes (`adapter.md` → "Access declaration"). A secret is never
+in either file.
 
 `<staged>/skills/gather/queries/{system}/` — write only the **couple of
 seed templates you're certain of** (an entry-point measurement, a by-key
@@ -252,10 +250,12 @@ For a **generated-adapter** integration, run the scaffold validator and fix
 every FAIL:
 
 ```bash
-python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant} --staged <staged>
+python3 defender/skills/connect/validate_scaffold.py {system} --handoff <handoff>/{system} --staged <staged>
 ```
 
-Skip it on the **MCP** path — it checks the adapter module an MCP system
+`--handoff` judges the folder exactly as the record store will when the operator writes it:
+each FAIL there is the sentence the operator would be refused with, naming the file to fix.
+Skip the validator on the **MCP** path — it checks the adapter module an MCP system
 doesn't have, so it would FAIL on things that aren't yours to fix.
 Either way, walk `${CLAUDE_SKILL_DIR}/checklist.md` for the judgment items
 the script can't check. Then, in a git repo (the normal
@@ -265,8 +265,6 @@ the branch and just leave the files in place for review:
 ```bash
 git checkout -b connect/{system}
 git add defender/integrations/{system}_adapter.py \
-        knowledge/tenant-template/settings/systems/{system}/config.env \
-        knowledge/tenant-template/settings/systems/{system}/access.yaml \
         knowledge/tenant-template/settings/verb-grants.yaml \
         knowledge/tenant-fixture/settings/verb-grants.yaml
 # add pyproject.toml / uv.lock only if a dependency was added
@@ -283,9 +281,20 @@ python3 defender/cli/tenant.py propose {tenant} <staged>
 request on the tenant's forge; a human merges it there. It refuses (`[tenant.py] ...`) a
 staged file outside a folder of `agent/`; fix what it names and propose again.
 
-The connected tenant's `config.env` and table live in ITS repo, not this one: branch and
-stage them there the same way, and run `python3 defender/cli/tenant.py check --folder
-<that repo>` to see the census over them.
+The connected tenant's grant table lives in ITS repo, not this one: branch and stage it there
+the same way, and run `python3 defender/cli/tenant.py check --folder <that repo>` to see the
+census over it.
+
+The handoff folder goes to the operator, with the order to apply it in: the adapter is merged
+and deployed first (the store refuses a record naming an adapter the running product does not
+carry), then the operator stores the record and its credential:
+
+```bash
+python3 defender/cli/tenant.py set-system {tenant} {system} <handoff>/{system} --replaces <current version, 0 if none>
+python3 defender/cli/tenant.py set-credentials {tenant} {system} <credential file> --for-version <the version stored> --token-file <operator token>
+```
+
+You run neither: they write the tenant's records and its secret, which are the operator's.
 
 **You do not merge or push.** Present a summary: files touched,
 health-check result, one line of sample output, open items, and what to expect next (the first runs will hit
@@ -300,9 +309,10 @@ Then stop. `/ship` can open the PR.
 - **Never handle credential values.** Tokens, passwords, API keys, pasted
   auth-bearing cURL — all forbidden. If offered one, stop and refuse it.
   `config.env` and `access.yaml` hold no secret and no reference to one: the operator
-  stores the value with the credential proxy, and the skill never sees it.
+  stores the value in the secret store (`tenant.py set-credentials`), and the skill never
+  sees it.
 - **Stay in your lane.** Write only the `{system}_adapter.py` adapter,
-  the staged `skills/{system}/`, that system's `config.env` and `access.yaml`, its staged
+  the staged `skills/{system}/`, the handoff's `config.env` and `access.yaml`, its staged
   seed templates, and
   its rows in every tenant's and the template's `settings/verb-grants.yaml`
   (plus `pyproject.toml` / `uv.lock` if a dep was added). Never `hooks/`,

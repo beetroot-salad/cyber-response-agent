@@ -27,10 +27,8 @@ START_SEC, EXIT_SEC, REFUSE_SEC = 30, 30, 15
 
 
 def _config(tmp_path: Path, **extra: object) -> Path:
-    """The operator config of A13/A26 (data root, no tenant list, no OpenBao address)."""
-    data = tmp_path / "data"
-    data.mkdir(exist_ok=True)
-    config = {"kv_mount": "kv", "data_root": str(data),
+    """The operator config of A13/A26 (the records DSN, no tenant list, no OpenBao address)."""
+    config = {"kv_mount": "kv", "records_dsn": "postgresql://proxy_reader:unused@127.0.0.1:1/defender",
               "audit_path": str(tmp_path / "audit.jsonl"), **extra}
     path = tmp_path / "config.json"
     path.write_text(json.dumps(config), encoding="utf-8")
@@ -120,7 +118,7 @@ def test_m1_openbao_calls_carry_the_token_file_content_not_the_environments(
         calls.append(request)
         return httpx.Response(200, json={"data": {"valid": True}})
 
-    config = {"kv_mount": "kv", "data_root": str(data_root),
+    config = {"kv_mount": "kv", "records_dsn": "postgresql://proxy_reader:unused@127.0.0.1:1/defender",
               "audit_path": str(tmp_path / "audit.jsonl"),
               P.PROXY_CONFIG_TOKEN_FILE_KEY: str(token_file)}
     with H.upstream() as up, T.identity_via_proxy(

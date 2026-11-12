@@ -22,7 +22,7 @@ from defender.learning.leads.path_validation import SKILLS_PREFIX
 _logger = logging.getLogger(__name__)
 
 
-def _spawn_author_agent(  # noqa: PLR0913 — one spawn's prompt, tree, folder, label, salt and seams
+def _spawn_author_agent(  # noqa: PLR0913 — one spawn's prompt, tree, folder, label, salt, seams and the tenant's systems
     *,
     system_prompt_file: Path,
     batch_id: str,
@@ -33,10 +33,12 @@ def _spawn_author_agent(  # noqa: PLR0913 — one spawn's prompt, tree, folder, 
     salt: str,
     box=None,
     make_model: Callable[..., Any] | None = None,
+    systems: tuple[str, ...],
 ) -> int:
     """Spawn one lead-lane curator over the lane's tree at `repo_root` (a batch draft's root):
-    the stage writes the `agent/` root it holds (#1108 P4 O7). `make_model` is the stage's model
-    seam (`None`: its own default)."""
+    the stage writes the `agent/` root it holds (#1108 P4 O7), its write lanes drawn over
+    `systems`, the lane's handed systems (#1366 R16: required, never the bound tree's). `make_model` is the stage's
+    model seam (`None`: its own default)."""
     from defender.learning.leads import lead_author_engine
 
     # Every knob is read at spawn: each is env-backed, and a default would freeze it at import.
@@ -55,6 +57,7 @@ def _spawn_author_agent(  # noqa: PLR0913 — one spawn's prompt, tree, folder, 
             repo_root=repo_root / AGENT_REL,
             box=box,
             salt=salt,
+            systems=systems,
         ),
         log_label=log_label,
         log=_logger,

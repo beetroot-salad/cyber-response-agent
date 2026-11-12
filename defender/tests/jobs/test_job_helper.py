@@ -455,17 +455,22 @@ def test_o5_a_pass_names_the_tenant_the_investigation_the_proxied_grant_and_a_60
 
 def _ticket_ungranted() -> str:
     """The fixture's verb table with every `ticket` row granted to gather withheld (so `ticket` is granted to nobody)."""
+    return _ungranted("ticket")
+
+
+def _ungranted(system: str) -> str:
+    """The fixture's verb table with every `system` row granted to gather withheld (so `system` is granted to nobody)."""
     import re
 
     from defender.tests.support.tenancy._tenants1106 import FIXTURE
 
     table = (FIXTURE / "settings" / "verb-grants.yaml").read_text(encoding="utf-8")
-    head, found, rest = table.partition("\n  ticket:\n")
-    assert found, "premise: the fixture's verb table has a ticket section"
+    head, found, rest = table.partition(f"\n  {system}:\n")
+    assert found, f"premise: the fixture's verb table has a {system} section"
     following = re.search(r"\n  [a-z][a-z-]*:\n", rest)
     block, tail = (rest[:following.start()], rest[following.start():]) if following else (rest, "")
     withheld = block.replace("{roles: [gather]}", "{roles: [], reason: \"withheld for #1170's grant case\"}")
-    assert withheld != block, "premise: the fixture grants some ticket verb to gather"
+    assert withheld != block, f"premise: the fixture grants some {system} verb to gather"
     return head + found + withheld + tail
 
 
@@ -586,7 +591,7 @@ def test_o5_a_publish_between_the_claim_and_a_later_pass_leaves_the_jobs_export_
 
     def job(c) -> int:
         got["first"] = A.grant_of(claims_of(signer, c.request("pass", id=inv)["token"]))
-        scene.t.merge({"settings/systems/identity/access.yaml": None})
+        scene.t.merge({"settings/verb-grants.yaml": _ungranted("identity")})
         got["published"] = scene.t.publish().commit
         got["launch"] = c.request("launch")
         got["later"] = A.grant_of(claims_of(signer, c.request("pass", id=inv)["token"]))

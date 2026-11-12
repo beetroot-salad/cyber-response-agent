@@ -133,3 +133,11 @@ def passes(tenant_id: str, reads: tuple[str, ...], *, directory: Any, proxy_url:
                                      "sign-fault") from None
 
     return address, answer
+
+
+def handed_records(directory: Any, tenant: str) -> dict[str, Any]:
+    """The `records` launch fact the real helper hands a container (#1366 O6, #1170 A6): the tenant's current records in
+    `directory` (the scene's), read as the helper reads them at the job's start."""
+    from defender.tenancy import requested_tenant_id
+
+    return directory.current_records(requested_tenant_id(tenant)).as_wire()

@@ -32,7 +32,7 @@ from defender.tests.support.runtime.engine._declared869 import (
     AGENT_SKILLS_REL,
     NESTED_MARKER_PARENT,
     agent_marker_file,
-    declared_systems,
+    declared_in,
     loop_log,
     pitfall_row,
     seed_tree,
@@ -48,7 +48,7 @@ from defender.learning.leads import lead_author
 from defender.tests.support.runtime.engine._declared869 import (
     LeadAuthorSpawn,
     Spawn,
-    adapter_declared_systems,
+    adapters_in,
     agent_skill_md,
     commit_paths,
     head_sha,
@@ -63,6 +63,7 @@ from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
 from defender.learning.leads.lead_extraction import ExecutedLead
 from defender.tests.support.learning.curation._lead_author_1134 import drafts_under, skills_view
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed, build_deps_handed
 
 
 #: The system the platform serves on every roster, with no adapter file (#1390).
@@ -111,7 +112,7 @@ def _recursive_marker_read_of(paths: object) -> set[str]:
 
 
 # The markers are the tenant's (`agent/skills/<name>/execution.md`), read from a committed tree
-# handed in as `declared_systems(repo_root, *, agent=<its repo-relative paths>)`; the adapter half
+# handed in as `declared_systems_over(<the checkout's catalog roster>, agent=<its repo-relative paths>)` (`declared_in`, a lane with no tenant); the adapter half
 # is the product checkout's working tree. The committed-vs-working-tree rule is pinned at the
 # resolver and at the lane (`test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`).
 
@@ -121,7 +122,7 @@ def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
                               markers=("elastic", "mcpsys"), skills=("elastic",))
     base = lane.batch.base()
     assert set(base) == set(_committed_agent_paths(lane)), "base() is not the committed tree"
-    got = declared_systems(product, agent=base)
+    got = declared_in(product, agent=base)
 
     assert got == frozenset({"elastic", "cmdb", "mcpsys", PLATFORM_SERVED})
     assert type(got) is frozenset
@@ -131,7 +132,7 @@ def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
 
     other, lane2 = lead_lane(tmp_path, adapters=("ticket",), markers=("ticket",),
                              name="other-product")
-    assert declared_systems(other, agent=lane2.batch.base()) == frozenset({"ticket", PLATFORM_SERVED})
+    assert declared_in(other, agent=lane2.batch.base()) == frozenset({"ticket", PLATFORM_SERVED})
 
 
 def test_the_marker_half_reads_the_committed_tree_and_the_adapter_half_does_not(tmp_path):
@@ -146,7 +147,7 @@ def test_the_marker_half_reads_the_committed_tree_and_the_adapter_half_does_not(
     base = lane.batch.base()
     assert f"{AGENT_SKILLS_REL}mcpsys/execution.md" not in base
 
-    on_disk_only = declared_systems(product, agent=base)
+    on_disk_only = declared_in(product, agent=base)
     assert agent_marker_file(lane.root, "mcpsys").is_file()
     assert "mcpsys" not in on_disk_only          # the marker half ignores every working tree
     assert "newsys" in on_disk_only              # the adapter half does not
@@ -155,7 +156,7 @@ def test_the_marker_half_reads_the_committed_tree_and_the_adapter_half_does_not(
     lane.batch.commit(lane.batch.change_set(), "land the marker")
     landed = lane.batch.base()
     assert f"{AGENT_SKILLS_REL}mcpsys/execution.md" in _committed_agent_paths(lane)
-    assert "mcpsys" in declared_systems(product, agent=landed)
+    assert "mcpsys" in declared_in(product, agent=landed)
 
 
 def test_the_marker_source_is_exactly_depth_one(tmp_path):
@@ -174,7 +175,7 @@ def test_the_marker_source_is_exactly_depth_one(tmp_path):
     assert NESTED_MARKER_PARENT in _recursive_marker_read_of(base)
     assert NESTED_MARKER_PARENT not in _marker_half_of(base)
 
-    got = declared_systems(product, agent=base)
+    got = declared_in(product, agent=base)
     assert NESTED_MARKER_PARENT not in got, (
         f"a nested execution.md declared {NESTED_MARKER_PARENT!r}: the marker read is "
         f"recursive, and every path in {list(AGENT_NESTED_MARKER_RELS)} is agent-committable"
@@ -189,14 +190,14 @@ def test_declared_systems_raises_when_the_adapter_half_is_unresolvable(tmp_path)
     `test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`."""
     product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic",))
     base = lane.batch.base()
-    assert declared_systems(product, agent=base) == frozenset({"elastic", PLATFORM_SERVED})   # the control
+    assert declared_in(product, agent=base) == frozenset({"elastic", PLATFORM_SERVED})   # the control
 
     no_adapters, lane2 = lead_lane(tmp_path, adapters=(), markers=("elastic",), skills=("elastic",),
                                    name="no-adapters")
     (no_adapters / ADAPTERS_REL).rmdir()
     base2 = lane2.batch.base()
     with pytest.raises(LeadAuthorError):
-        declared_systems(no_adapters, agent=base2)
+        declared_in(no_adapters, agent=base2)
     # Not the conjunctive reading, and not a silent empty set: the marker half alone WOULD
     # have been an answer here, and it must not be the one.
     assert _marker_half_of(base2) == {"elastic"}
@@ -215,7 +216,7 @@ def test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft(tmp_pat
     assert "draftsys" not in deps.systems, (
         "a marker the box wrote into the draft declared its system: the lane resolved over "
         "the draft, not the batch base")
-    assert deps.systems == declared_systems(product, agent=lane.batch.base())
+    assert deps.systems == declared_in(product, agent=lane.batch.base())
 
     # An unresolvable committed tree refuses the deps; it never degrades to the adapter half.
     _p2, broken = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic", "basesys"),
@@ -280,7 +281,7 @@ def test_run_pitfalls_resolves_systems_before_the_curator_is_spawned(tmp_path, m
     assert tick(lane, spawn, claim) == 0
 
     assert spawn.systems_seen == ["elastic"]
-    assert "late" in adapter_declared_systems(product)   # the tree DOES declare it, by the end
+    assert "late" in adapters_in(product)   # the tree DOES declare it, by the end
     # and the tenant's committed marker names mcpsys all along (the union's marker half)
     assert _in_base(lane, "agent/skills/mcpsys/execution.md")
     log = loop_log(capsys)
@@ -295,7 +296,7 @@ def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, capsy
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     _product, lane = lead_lane(tmp_path, adapters=("wtonly",), markers=("wtonly",), skills=(),
                                catalog=(), name="worktree")
-    assert "wtonly" not in declared_systems(_git.REPO_ROOT)
+    assert "wtonly" not in declared_in(_git.REPO_ROOT)
 
     claim = Claim()
     claim.add(pitfall_row("r:l-000:0", "wtonly"), pitfall_row("r:l-001:0", "wtonly"))
@@ -329,7 +330,7 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
     with pytest.raises(LeadAuthorError, match="mcpsys"):
         tick(lane, Spawn(land_an_adapter_then_plant, root=lane.root), claim)
     # By the end of the tick the tree declares mcpsys; the tick's resolved value still does not.
-    assert "mcpsys" in adapter_declared_systems(product)
+    assert "mcpsys" in adapters_in(product)
     assert claim.outcomes == {}, "a refused tick decided the claim's rows"
     assert claim.committed == set(), "a refused tick decided the claim's rows"
     assert before != head_sha(product), "the plant's own commit is the mid-tick change"
@@ -351,7 +352,7 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
     with pytest.raises(LeadAuthorError, match="mcpsys"):
         lead_author.run(run_of(_run_dir()), label=LEAD_AUTHOR_DRAIN_LABEL, paths=lane2.paths,
                         deps=deps)
-    assert "mcpsys" in adapter_declared_systems(other_product)
+    assert "mcpsys" in adapters_in(other_product)
     assert lane2.commits() == [], "the refused run committed into the batch"
 
 
@@ -501,7 +502,7 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
     paths = lane.paths
     spawn = LeadAuthorSpawn()
     deps = dataclasses.replace(
-        lead_author.build_lead_author_deps(
+        build_deps_handed(
             paths, trees=C.draft_trees(lane), batch=lane.batch),
         invoke_agent=spawn, extract=lambda _rd: ([], []),
     )
@@ -515,3 +516,141 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
     assert spawn.calls == [], "the agent must not be spawned against an empty declared set"
     assert lane.landed() == []
     assert len(lane.batch.change_set()) == 0
+
+
+def test_1366_o1_the_lead_lanes_declared_systems_are_the_tenants_records_not_the_product_checkouts(tmp_path):
+    """The product checkout carries cmdb and elastic adapters; the draft commits no marker: a tenant with no cmdb
+    record declares elastic and the platform-served system, one with it declares cmdb too. (#1366 O1 learning)"""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
+    from defender.tests.support.shared.contracts._repo import seed_adapter_stubs
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    product = tmp_path / "product"
+    (product / "defender" / "integrations").mkdir(parents=True)
+    seed_adapter_stubs(product / "defender", ("elastic", "cmdb"))
+    tenant = curation_tenant()
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, tenant=tenant, files={
+        "skills/gather/SKILL.md": "---\nname: gather\n---\n\nbody\n"})
+    whole = R.fixture_records()
+    assert {"cmdb", "elastic"} <= set(whole.systems), "fixture premise: the records can hold both systems"
+
+    declared = {}
+    for name, spec in (("a", R.without(whole, "cmdb")), ("b", whole)):
+        directory = tenant_directory(current_data_root(), tenant.id, records=spec)
+        deps = build_deps_handed(
+            lane.paths, trees=C.draft_trees(lane), batch=lane.batch, directory=directory)
+        declared[name] = deps.systems
+
+    assert {"elastic", PLATFORM_SERVED} <= declared["a"], declared["a"]
+    assert "cmdb" not in declared["a"], declared["a"]
+    assert {"cmdb", "elastic", PLATFORM_SERVED} <= declared["b"], declared["b"]
+
+
+# #1366 O1 (learning): the lanes' systems are the tenant's records', handed down from the drain's directory.
+
+
+def _record_tenants(tmp_path: Path, *, marker: bool):
+    """The product checkout (cmdb + elastic adapters), a lead lane over the curation tenant's draft, and the directory of
+    each of two tenants: A's records lack cmdb, B's hold it. `marker` commits `skills/cmdb/execution.md` in the draft's base."""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
+    from defender.tests.support.shared.contracts._repo import seed_adapter_stubs
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    product = tmp_path / "product"
+    (product / "defender" / "integrations").mkdir(parents=True)
+    seed_adapter_stubs(product / "defender", ("elastic", "cmdb"))
+    tenant = curation_tenant()
+    files = {"skills/gather/SKILL.md": _skill("gather"), "skills/cmdb/_draft/old.md": "---\nid: cmdb.old\nstatus: draft\n---\n\nx\n",
+             "skills/elastic/_draft/old.md": "---\nid: elastic.old\nstatus: draft\n---\n\nx\n"}
+    if marker:
+        files["skills/cmdb/execution.md"] = "# execution\n"
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, tenant=tenant, files=files)
+    whole = R.fixture_records()
+    assert {"cmdb", "elastic"} <= set(whole.systems), "fixture premise: the records can hold both systems"
+    directories = {name: tenant_directory(current_data_root(), tenant.id, records=spec)
+                   for name, spec in (("a", R.without(whole, "cmdb")), ("b", whole))}
+    return lane, directories
+
+
+@pytest.mark.parametrize(("name", "marker", "cmdb_lane"), [("a", True, False), ("b", False, True)])
+def test_1366_o1_the_lead_authors_write_and_rm_lanes_are_the_tenants_records_whatever_a_marker_says(
+        tmp_path, monkeypatch, name, marker, cmdb_lane):
+    """Through the deps the drain builds, the spawned lead author may write and rm a cmdb draft only for the tenant with a cmdb
+    record: A's committed cmdb marker declares nothing, B's record declares it with no marker; elastic is the control. (#1366 O1)"""
+    import functools
+
+    from pydantic_ai.messages import ModelResponse, RetryPromptPart, TextPart, ToolCallPart, ToolReturnPart
+    from pydantic_ai.models import override_allow_model_requests
+
+    from defender.learning.leads import lead_author_engine
+    from defender.tests.support.runtime.engine._engine_helpers import fake_model
+
+    lane, directories = _record_tenants(tmp_path, marker=marker)
+    deps = build_deps_handed(
+        lane.paths, trees=C.draft_trees(lane), batch=lane.batch, directory=directories[name])
+    assert ("cmdb" in deps.systems) is cmdb_lane, deps.systems
+    attempts = [("write_file", {"path": f"skills/{s}/_draft/new.md", "content": "---\nid: x.new\nstatus: draft\n---\n\nx\n"})
+                for s in ("cmdb", "elastic")] + [("bash", {"command": f"rm skills/{s}/_draft/old.md"}) for s in ("cmdb", "elastic")]
+    answers: dict[str, str] = {}
+
+    def model(messages, _info):
+        back = [p for m in messages for p in getattr(m, "parts", []) if isinstance(p, ToolReturnPart | RetryPromptPart)]
+        if back:
+            answers.update({p.tool_call_id: str(p.content) for p in back})
+            return ModelResponse(parts=[TextPart(content="done")])
+        return ModelResponse(parts=[ToolCallPart(tool_name=n, args=a, tool_call_id=f"c{i}") for i, (n, a) in enumerate(attempts)])
+
+    real = lead_author_engine.run_author_stage
+    monkeypatch.setattr(lead_author_engine, "run_author_stage", lambda **kw: real(**{  # lint-monkeypatch: ok — the real stage runs with the model substituted; the deps' `invoke_agent` offers no model seam
+        **kw, "source_key": lambda *_a, **_k: None,
+        "run_author": functools.partial(lead_author_engine._run_lead_author_pydantic, make_model=fake_model(model))}))
+    run_dir = tmp_path / "run-x"
+    run_dir.mkdir()
+    with override_allow_model_requests(False):
+        assert deps.invoke_agent(run_dir, [], [], box=None) == 0
+
+    drafts = lane.agent / "skills"
+    assert (drafts / "elastic" / "_draft" / "new.md").is_file(), "control: the elastic write lane is open"
+    assert (drafts / "cmdb" / "_draft" / "new.md").is_file() is cmdb_lane
+    assert "Blocked" not in answers["c3"], f"control: the elastic rm lane is open: {answers}"
+    assert ("Blocked" not in answers["c2"]) is cmdb_lane, answers
+
+
+@pytest.mark.parametrize(("name", "offered"), [("a", ["elastic"]), ("b", ["cmdb", "elastic"])])
+def test_1366_o1_the_pitfalls_curator_is_offered_the_systems_of_the_tenants_records_not_the_checkouts(
+        tmp_path, monkeypatch, name, offered):
+    """Queued pitfalls on cmdb and elastic: the curator is spawned for the systems the drain's tenant has records for (A: elastic
+    only, B: both), the checkout declaring both adapters either way. (#1366 O1 pitfalls curator)"""
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    lane, directories = _record_tenants(tmp_path, marker=False)
+    claim = Claim()
+    claim.add(*[pitfall_row(f"r:l-00{i}:0", s) for i, s in enumerate(("cmdb", "cmdb", "elastic", "elastic"))])
+    spawn = Spawn(root=lane.root)
+    with C.draft_trees(lane) as trees:
+        assert run_pitfalls_handed(
+            paths=lane.paths, trees=trees, batch=lane.batch, invoke=spawn, items=claim.items(), outcomes=claim.outcomes,
+            directory=directories[name]) == 0
+
+    assert sorted(spawn.systems_seen) == offered
+
+
+def test_1366_o1_a_tenant_whose_records_hold_no_system_has_no_pitfalls_lane(tmp_path, monkeypatch):
+    """BASE BEHAVIOUR for an empty declared set, kept (design r7 orchestrator bullet): the pitfalls curator over a tenant
+    with no recorded systems is refused as an empty declared set (`LeadAuthorError`, the guard at
+    `pitfalls_curator.py` for a broken checkout) and nothing is spawned, though the checkout declares adapters. The design
+    pins the empty set, not the new behaviour of a legitimate imported-empty tenant (R8, R11). (#1366 O1 pitfalls curator)"""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
+    lane, _ = _record_tenants(tmp_path, marker=True)
+    none = R.without(R.fixture_records(), *R.fixture_records().systems)
+    directory = tenant_directory(current_data_root(), curation_tenant().id, records=none)
+    claim = Claim()
+    claim.add(*[pitfall_row(f"r:l-00{i}:0", "elastic") for i in range(2)])
+    spawn = Spawn(root=lane.root)
+    with C.draft_trees(lane) as trees, pytest.raises(LeadAuthorError):
+        run_pitfalls_handed(paths=lane.paths, trees=trees, batch=lane.batch, invoke=spawn, items=claim.items(),
+                            outcomes=claim.outcomes, directory=directory)
+    assert spawn.calls == []
+    assert claim.outcomes == {}, "a refused curation decided the claim's rows"

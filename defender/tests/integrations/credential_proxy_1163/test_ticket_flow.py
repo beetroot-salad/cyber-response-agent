@@ -6,12 +6,16 @@ import json
 import logging
 from contextlib import contextmanager
 
+import pytest
+
 from defender.box import run_env
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
-from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
+from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, export_dir, published_tenant
+from defender.tests.support.tenancy import _tenants1106 as T1106
 
 STORE = "/store"
 WRITES = (("POST", "/tickets/*/comments"),)  # glob grammar: contract's pick
@@ -41,8 +45,8 @@ def _published(scratch, root, decl):
     """The fixture tenant (its case-record file names `ticket`) with `ticket` on `http-proxy`;
     `decl=None` leaves `ticket` with no `access.yaml` at all."""
     files = A.system_files(SYSTEM, decl or "", env_extra=KEY_PATTERN)
-    if decl is None:  # the committed fixture declares `ticket`: take its declaration away too
-        files[H.ACCESS_FILE.format(system=SYSTEM)] = None
+    if decl is None:  # no declaration file at all: the record's access text is then empty (#1366 O9; the fixture folders are retired)
+        del files[H.ACCESS_FILE.format(system=SYSTEM)]
     with published_tenant(scratch, root=root, files=files) as t:
         yield t
 
@@ -52,13 +56,15 @@ def _run(tmp_path):
     return rec, rec.materialize(S.plant_alert(tmp_path / "in", alert_id=KEY))
 
 
-def _leg(t, run, rec, url, tok, shim=None):
+def _leg(t, run, rec, url, tok, shim=None, record=None):
+    """The record leg over `record` (default: the run's record built from `t`'s records now)."""
     env = run_env(DEFENDER, rec.run_dir_at)
     if shim is not None:
         env = shim.env(env)
+    tenant = record if record is not None else T.run_record(t)
     S.ticket_writer().record_case_ticket(
-        run, tenant=T.run_record(t), defender_dir=DEFENDER, env=env, request_token=tok,
-        proxy_url=url)
+        run, tenant=tenant, defender_dir=DEFENDER, env=env, request_token=tok,
+        proxy_url=url, case=T1106.case_for(tenant))
     return S.receipt(rec.run_dir_at)
 
 
@@ -135,8 +141,8 @@ def test_t3_failures_are_text_in_the_receipt_and_carry_no_credential(tmp_path, d
 
 def test_t6_an_access_file_with_no_write_route_is_named_by_the_receipt_and_nothing_is_sent(
         tmp_path, data_root):
-    """A case system on `http-proxy` whose `access.yaml` declares no write route, is unparsable or
-    is absent: the leg's own judgement names `systems/ticket/access.yaml` in the receipt and makes
+    """A case system on `http-proxy` whose access declaration declares no write route, is unparsable or
+    is absent: the leg's own judgement names the record, `system ticket access` (#1366 DC6), in the receipt and makes
     no call, not even to the proxy. D-16, O5."""
     for label in ("no write route", "unparsable", "absent"):
         with H.upstream() as up:
@@ -150,29 +156,50 @@ def test_t6_an_access_file_with_no_write_route_is_named_by_the_receipt_and_nothi
                     receipt = _leg(t, run, rec, url, tok)
             assert receipt is not None, label
             assert (receipt["ok"], receipt["status"], receipt["url"]) == (False, "error", None), receipt
-            assert f"systems/{SYSTEM}/access.yaml" in receipt["reason"], (label, receipt)
+            # C5 words no part for a stored uncovered declaration: that arm names only the system (the discriminators are
+            # "no call, nothing sent"); the two judged by `parse_access` name its access (DC6).
+            named = SYSTEM if label == "no write route" else f"system {SYSTEM} access"
+            assert named in receipt["reason"], (label, receipt)
             assert tap.tokens == [], f"{label}: the proxy was called"
             assert up.seen == [], f"{label}: the store was reached"
 
 
+@pytest.mark.parametrize("base_moved", [False, True], ids=["control-base-unmoved", "base-moved"])
 def test_t6b_a_write_the_proxy_refuses_at_call_time_is_a_refusal_not_a_transport_error(
-        tmp_path, data_root):
-    """The declaration holds a write route, but not the comment's path: the leg's judgement
-    passes, the proxy refuses the call, and the receipt says so (not an access.yaml fault, not
-    "could not be reached"); nothing reaches the store. Control: t1 (matching route). O5, O4."""
-    other = (("POST", "/elsewhere/*"),)
-    with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up, writes=other)) as t:
+        tmp_path, data_root, base_moved):
+    """The run STARTED over a record whose access covers the comment's route (so the leg's own judgement passes), then the
+    system's record changed to a new version at the next credential generation whose routes still cover the comment but
+    whose BASE is elsewhere: the run's call falls outside the current base, and the proxy, which enforces the CURRENT
+    record at each call, refuses; the receipt says so (not an access declaration fault, not "could not be reached");
+    nothing reaches the store. Control: the same new version at generation 2 with the base UNMOVED comments (so the base is
+    what is refused, not the version or the generation). This is the design's flow, "in-flight runs' later calls fall
+    outside the new base and are refused", in a state the store accepts (the routes still cover, C4: a route-only change
+    that uncovered the comment would be refused at write); the test writes the record into the proxy's records port, it
+    does not drive the operator command (its write door is pinned in `test_system_records_1366.py`). (#1366 O7, Flows,
+    P5/R4; O5, O4)"""
+    with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
+        up.replies[COMMENT] = (201, {}, json.dumps({"id": 1}).encode())
         store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
         tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
         rec, run = _run(tmp_path)
-        with A.proxy_for(t, store) as (url, tap):
-            receipt = _leg(t, run, rec, url, tok)
+        started = R.derive(export_dir(t.tenant, t.commit) / "settings")  # covers the comment route at the published base
+        started_with = T.run_record(t, records=started)
+        held = {t.tenant_id: started}  # the records the proxy reads, one lookup per call
+        base = up.url + ("/moved-store" if base_moved else STORE)
+        held[t.tenant_id] = R.edited(started, SYSTEM, version=2, generation=2,
+                                     access=H.declaration(base, writes=WRITES))  # written after the run started
+        with A.proxy_for(t, store, records=R.RecordsPort(held)) as (url, tap):
+            receipt = _leg(t, run, rec, url, tok, record=started_with)
     assert receipt is not None
+    if not base_moved:
+        assert (receipt["status"], receipt["ok"]) == ("commented", True), receipt
+        assert [(s.method, s.path.split("?")[0]) for s in up.seen] == [("POST", COMMENT)]
+        return
     assert receipt["ok"] is False
     reason = (receipt.get("reason") or "").lower()
     assert "the credential proxy refused" in reason, reason
     assert "could not be reached" not in reason, reason
-    assert "access.yaml" not in reason, reason
+    assert f"system {SYSTEM} access" not in reason, reason  # #1366 DC6: no record fault
     assert tap.tokens == [tok]
     assert up.seen == []
 

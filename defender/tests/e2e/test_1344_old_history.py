@@ -191,7 +191,7 @@ def _launch_over_the_old_run(tmp_path: Path, **seams):
     captured = json.loads((old.run_dir / "gather_raw" / LEAD / "0.json").read_text(encoding="utf-8"))
     seams.setdefault("oracle", S.oracle(then=S.submit(captured, S.EMPTY_CLAIM)).model)
     seams.setdefault("verifier", S.passing_verifier().model)
-    seams.setdefault("directory", T.launcher_directory(tenant.id))
+    seams.setdefault("directory", est.launch_directory(tenant.id))
     from defender.cli.learning import branch as cli
 
     try:

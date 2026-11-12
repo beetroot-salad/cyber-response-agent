@@ -11,12 +11,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from defender.box import run_env
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
 from defender.tests.support.runtime.engine._spec767 import write_report
+from defender.tests.support.tenancy import _systems1366 as R
+from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
@@ -97,12 +101,15 @@ class Rig:
     url: str
     tap: RequestTap
     tmp: Path
+    #: The `R.RecordsSpec` this rig's tenant holds (#1366: the run's record and the proxy's port are built from it, not
+    #: from the published folders); `R.DERIVED` = what the published `settings/` stands for (`R.derive`); None = NOT imported.
+    records: Any = R.DERIVED
 
     def token(self, mode: str = "rw") -> str:
         return T.token(self.t.tenant_id, {(self.vendor.system, mode)})
 
     def record(self) -> Any:
-        return T.run_record(self.t)
+        return T.run_record(self.t, self.records)
 
     def reply(self, key: str, status: int, body: Any = None) -> None:
         self.up.replies[self.vendor.base_path + self.vendor.route(key)] = (
@@ -126,7 +133,8 @@ class Rig:
         rec = C.CaseRunRecorder(self.tmp / name)
         run = rec.materialize(C.plant_alert(self.tmp / f"in-{name}", key=key))
         write_report(rec.run_dir_at)  # a readable report: the template renders over it
-        C.record_leg()(run, tenant=self.record(), defender_dir=DEFENDER,
+        record = self.record()
+        C.record_leg()(run, tenant=record, defender_dir=DEFENDER, case=T1106.case_for(record),
                        env=run_env(DEFENDER, rec.run_dir_at), request_token=self.token(),
                        proxy_url=self.url)
         return S.receipt(rec.run_dir_at)
@@ -150,18 +158,38 @@ def files_for(v: Vendor, base: str, *, env: str | None = None,
     return files
 
 
+def records_of(v: Vendor, base: str, *, env: str | None = None, access: bool = True, leg: bool = False,
+               reads: tuple[tuple[str, str], ...] = (), writes: tuple[tuple[str, str], ...] | None = None) -> R.RecordsSpec:
+    """The records of `v` configured as `/connect` leaves it, as DATA (#1366: the run's record and the proxy's port are
+    built from these, no folder): its settings (`env`, else the suite's `env_text` plus the vendor's lines), its access
+    (`base`, the basic scheme, `reads`, and `writes` -- default the vendor's one write route; none with `access=False`),
+    and with `leg` the case record naming it."""
+    settings = R.parse_config_env(env if env is not None else A.env_text(v.system, extra=v.env))
+    text = (H.declaration(base, scheme=H.basic_scheme(), reads=reads, writes=(v.write,) if writes is None else writes)
+            if access else "")
+    case = None
+    if leg:
+        body = yaml.safe_load(C.case_record_text(v.system))["comment"]["body"]
+        case = R.CaseSpec(v.system, str(body))
+    return R.RecordsSpec({v.system: R.SysSpec(settings, text)}, case)
+
+
 @contextlib.contextmanager
 def planted(tmp: Path, data_root: Path, v: Vendor, *, env: str | None = None,
             access: bool = True, leg: bool = False) -> Iterator[Rig]:
     """`v` configured as `/connect` leaves it (with `leg`, also its case-record file,
     which only the record-leg tests need), the real proxy served in front of a fake upstream
-    holding the stored basic credential. Unless a test says otherwise the upstream answers 200."""
+    holding the stored basic credential. Unless a test says otherwise the upstream answers 200. The tenant's records
+    (`records_of`) are handed to the run's record and the proxy's port explicitly."""
     from defender.tests.integrations.credential_proxy_1163._target import proxy
 
     with H.upstream() as up:
-        files = files_for(v, v.declared_base(up), env=env, access=access, leg=leg)
+        base = v.declared_base(up)
+        files = files_for(v, base, env=env, access=access, leg=leg)
         with published_tenant(tmp / "forge", root=data_root, files=files) as t:
+            spec = records_of(v, base, env=env, access=access, leg=leg)
             store = H.FakeStore({(t.tenant_id, v.system): T.basic_set(USER, PASSWORD)})
-            tap = RequestTap(proxy().create_app(T.deps({t.tenant_id: T.exports_of(t)}, store)))
+            tap = RequestTap(proxy().create_app(T.deps({t.tenant_id: T.exports_of(t)}, store,
+                                                       records={t.tenant_id: spec})))
             with H.serve_asgi(tap) as url:
-                yield Rig(v, up, t, url, tap, tmp)
+                yield Rig(v, up, t, url, tap, tmp, spec)

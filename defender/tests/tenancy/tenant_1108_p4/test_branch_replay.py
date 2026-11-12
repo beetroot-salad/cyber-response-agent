@@ -22,6 +22,7 @@ import pytest
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as tenants
 
 from ._support import (
@@ -62,6 +63,9 @@ def _estate_settings(scratch: Path, est, tenant_id: str) -> dict:
     `published_tenant`: written by the same planter `Estate.place` uses, every committed fixture
     settings file it does not write deleted — so the published tenant grants exactly what the
     estate's stub adapters serve."""
+    # (#1366: the estate's systems are stub adapters that need no settings, so the tenant's records are the estate's own
+    # bare ones, handed to the launcher's directory in `_launch`; not the retired fixture's seven, which `configs={}`
+    # used to mean "replace".)
     knowledge = tenants.place_tenant(scratch, tenant_id, table=est.table(), configs={})
     wanted = {f"settings/{rel}": data
               for rel, data in files_under(knowledge / "settings").items()}
@@ -126,7 +130,7 @@ def _launch(scene: Scene, *, argv_extra=(), **seams) -> Launch:
     argv = ["--tenant", scene.t.tenant_id, scene.src.name, str(T.BRANCH_MESSAGE_ID), *argv_extra]
     try:
         rc = S.mod("cli.learning.branch").main(
-            argv, spawn=spawn, questioner=questioner, directory=directory_for_argv(argv), **seams)
+            argv, spawn=spawn, questioner=questioner, directory=directory_for_argv(argv, records=R.bare_records(*scene.est.systems)), **seams)
     except SystemExit as stop:
         rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
     S.log_refusal(rc, message)

@@ -192,25 +192,26 @@ gather redesign removed — never the recommended shape.
 
 ## Access declaration
 
-`settings/systems/{system}/access.yaml`, beside `config.env`, is how the credential
-proxy reaches the system — and its presence is what makes the system usable at all:
-without it the settings check refuses the system as not configured. It holds
+`access.yaml`, beside `config.env` in the handoff folder (stored with the system's record
+by `tenant.py set-system`), is how the credential proxy reaches the system — and every
+record carries one: without it the store refuses the record. It holds
 `access: http-proxy`, the system's `base` URL (the only place the address lives —
 never a `config.env` key), `auth` (its `scheme` — `bearer`, `header`, `basic` or
 `oauth-client-credentials` — and the credential *field name* the scheme reads, never
 a value), and the `reads` / `writes` routes the adapter calls (`{method, path}`).
-The proxy refuses any request outside them. Copy a sibling's (the template's
-ticket `access.yaml` is a worked one) and change the base, scheme and routes.
+The proxy refuses any request outside them. Ask the operator for a
+sibling's (`tenant.py systems <tenant> --export <dir>` writes each system's folder;
+ticket's is a worked one) and change the base, scheme and routes.
 
 ## Credentials
 
-The operator stores a system's credential with the credential proxy
-(`PUT /systems/{system}/credentials` on the product API, write-only: nothing returns
-it); the proxy applies it by the declaration's scheme. A tenant's `config.env` and
-`access.yaml` hold non-secret settings only. A key that holds a secret
-(`PASSWORD` / `TOKEN` / `SECRET` / `API_KEY`) or references one (`*_SECRET_REF`) is
-FAILed by `validate_scaffold`, on every line of the file, an `export` line or a
-repeated key included.
+The operator stores a system's credential in the secret store
+(`tenant.py set-credentials`, for the record version it was prepared for; nothing returns
+it); the proxy applies it by the declaration's scheme. A system's `config.env` and
+`access.yaml` hold non-secret settings only: the store keeps exactly the keys the adapter
+declares (`REQUIRED_CONFIG_KEYS`), refuses an `export` line or a repeated key, and CI
+(`lint_catalog_declarations.py`) refuses a declared key named like a secret
+(`PASSWORD` / `TOKEN` / `SECRET` / `API_KEY`) or a reference to one (`*_SECRET_REF`).
 
 An adapter reaches its store through `kit.transport.request`, naming its system on
 every call, which sends each request through the credential proxy (the proxy holds the credential and checks the route against the
@@ -314,7 +315,7 @@ prompt-injection vector. Say which URL and why, in one line.
 Run it on the system you just built (`<staged>` is the staging folder of `SKILL.md` step 4):
 
 ```bash
-python3 defender/skills/connect/validate_scaffold.py {system} --tenant {tenant} --staged <staged>
+python3 defender/skills/connect/validate_scaffold.py {system} --handoff <handoff>/{system} --staged <staged>
 ```
 
 Fix any FAIL before going further.

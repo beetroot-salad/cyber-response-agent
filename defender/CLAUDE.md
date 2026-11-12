@@ -34,6 +34,39 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1366
+
+A tenant's systems and its case record are versioned records in the database, written only by
+`defender/cli/tenant.py` (its top describes the subcommands); nothing reads a tenant's
+`settings/systems/` or `settings/case-record.yaml` any more, and a tenant's systems are only those
+its records name (`tenant.py catalog` lists the adapters a record may name). Credentials live at a
+per-generation path `<tenant>/<system>/g<N>`. Once:
+
+1. Run migrations (revision `0015_system_records`). It also creates the NOLOGIN role
+   `defender_proxy_reader` (SELECT on `tenancy.system_versions` and `tenancy.records_mark` only):
+   create a login that is a member of it and set the proxy config's `records_dsn` to that login's
+   DSN in place of `data_root` (an old config refuses to start).
+2. Per tenant that existed before this change (one created after it needs none): publish its
+   merged knowledge (`tenant.py update <tenant-id>`: the import reads the published export, not
+   the clone), then `python3 defender/cli/tenant.py import <tenant-id> --dry-run`, fix every file
+   it names in the tenant's repo, publish again, and `tenant.py import <tenant-id>`. It runs once
+   per tenant, writes every system and the case record at version 1, credential generation 1, and
+   copies no credential. Until then the tenant's runs are refused and `tenant check` reports it,
+   each naming the import.
+3. Per system, at generation 1: `tenant.py set-credentials <tenant-id> <system> <file> --for-version 1
+   --token-file <operator token file>` (the file is JSON `{"kind": ..., "fields": {...}}`). The set
+   at the old path `<tenant>/<system>` is never read again; until this is done the proxy refuses the
+   system and `tenant check` reports it.
+4. Delete `settings/systems/` and `settings/case-record.yaml` from the tenant's repository:
+   `tenant check` reports them as retired until they are gone.
+
+From then on: change a system with `tenant.py systems <tenant-id> --export <dir>`, edit the
+folder, `tenant.py set-system <tenant-id> <system> <dir>/<system> --replaces <its version>` (it
+keeps the system enabled or disabled as it is; `--disabled` or `--enabled` changes that); a
+change of its base, CA or auth block raises its credential generation, and its credentials are
+set again. Connect hands its result to the operator as such a folder: its validator takes
+`--handoff <folder>` and no longer `--tenant`.
+
 ## Upgrade from before #1278
 
 A tenant's learning work (queued findings, pitfalls and requests, the batches that author lessons, the commit-maker's

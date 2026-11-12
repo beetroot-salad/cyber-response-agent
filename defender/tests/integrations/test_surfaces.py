@@ -31,11 +31,14 @@ REPO_ROOT = PATHS.repo_root
 
 
 def _shipped_ticket_declaration():
-    """The committed playground tenant's `ticket` access declaration, parsed by the product."""
+    """The committed playground tenant's `ticket` access declaration, parsed by the product.
+    #1366 O9: the fixture's `settings/systems/ticket/access.yaml` is gone; the declaration is the
+    ticket record the fixture tenant is seeded with (the retired file's text, `R.fixture_records()`)."""
     from defender import tenancy
-    from defender.tests.support.tenancy import _tenants1106 as T1106
+    from defender.tests.support.tenancy import _systems1366 as R
 
-    return tenancy.read_access(T1106.FIXTURE_SETTINGS, "ticket")
+    return tenancy.parse_access(R.fixture_records().systems["ticket"].access, system="ticket")
+
 
 SHIPPED_PY = tuple(
     p for p in sorted(DEFENDER_DIR.rglob("*.py"))

@@ -351,6 +351,9 @@ class StageContext:
     repo_root: Path | None = None
     box: Any = None
     salt: str | None = None
+    #: The tenant's systems the lane writes for (#1366 O1), handed to the stage's scope; `None`
+    #: when the spawn names no tenant (the bound tree's adapters then decide).
+    systems: tuple[str, ...] | None = None
 
 
 def subagent_timeout() -> int:

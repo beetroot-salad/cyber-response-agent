@@ -360,9 +360,14 @@ def test_f5_a_request_the_proxy_cannot_process_is_a_transport_fault_and_audited(
     assert [rec["outcome"] for rec in r.audit.records] == ["TransportFault"]
 
 
+#: A DSN nothing listens on: building the app from config must not connect; a call that reaches the database is a TransportFault.
+RECORDS_DSN = "postgresql://proxy_reader:unused@127.0.0.1:1/defender"
+
+
 def _config(tmp_path, **over):
-    """The operator config of A13/A26: a token, the KV mount, the data root, the audit file."""
-    return {"openbao_token": "t", "kv_mount": "kv", "data_root": str(tmp_path),
+    """The operator config of A13/A26 (#1366: `records_dsn`, the read-only login's DSN, replaces `data_root`): a token, the
+    KV mount, the records DSN (never connected to when the app is built: nothing listens there), the audit file."""
+    return {"openbao_token": "t", "kv_mount": "kv", "records_dsn": RECORDS_DSN,
             "audit_path": str(tmp_path / "audit.jsonl")} | over
 
 
@@ -373,9 +378,9 @@ def test_f6_the_remaining_config_builds_the_proxy(tmp_path):
 
 @pytest.mark.parametrize("bad", [{"upstream_timeout_sec": "30"}, {"audit_path": 5},
                                  {"audit_path": "audit\0.jsonl"},
-                                 {"data_root": 5}, {"data_root": "root\0dir"}],
+                                 {"records_dsn": 5}, {"records_dsn": "dsn\0x"}],
                          ids=["quoted-number", "path-not-text", "nul-in-path",
-                              "root-not-text", "nul-in-root"])
+                              "dsn-not-text", "nul-in-dsn"])
 def test_f6_an_operator_config_value_of_the_wrong_type_is_a_config_fault(tmp_path, bad):
     """A configuration value of the wrong type or shape stops the proxy with `ConfigFault`
     naming the configuration, never a raw `TypeError` or `ValueError` (review of #1355)."""
@@ -400,10 +405,10 @@ def test_1412_an_operator_cannot_set_the_reply_limit_even_to_a_valid_value(tmp_p
         app_from_config(_config(tmp_path, max_response_bytes=64 * 1024 * 1024))
 
 
-def test_a26_a_config_without_a_data_root_is_a_config_fault(tmp_path):
-    """The one new key is required. A26."""
+def test_1366_a_config_without_a_records_dsn_is_a_config_fault(tmp_path):
+    """The key that replaces `data_root` is required. (#1366 orchestrator decision; was A26's `data_root`)"""
     config = _config(tmp_path)
-    del config["data_root"]
+    del config["records_dsn"]
     with pytest.raises(ConfigFault):
         app_from_config(config)
 
@@ -432,7 +437,7 @@ def test_a26_the_proxy_calls_the_deployments_openbao_over_https_on_the_fixed_tra
     with H.upstream() as up, T.identity_via_proxy(
             tmp_path / "forge", data_root, H.declaration(up.url + BASE), tenant_id=tid):
         client = TestClient(app_from_config(
-            _config(tmp_path, data_root=str(data_root)), transport=httpx.MockTransport(openbao)))
+            _config(tmp_path), transport=httpx.MockTransport(openbao)))
         url, grant = f"{up.url}{BASE}/users/x", {("identity", "r")}
         refused = T.ask(client, T.token(tid, grant, signer=signer), "identity", "GET", url)
         verify = calls[0]
@@ -445,10 +450,67 @@ def test_a26_the_proxy_calls_the_deployments_openbao_over_https_on_the_fixed_tra
         "POST", f"{DEPLOYMENT_OPENBAO}/v1/transit/verify/request-token-{tid}")
     assert DEPLOYMENT_OPENBAO.startswith("https://")
     assert {c.headers["X-Vault-Token"] for c in calls} == {"t"}
-    assert any(c.url.path == f"/v1/kv/data/{tid}/identity" for c in calls), (
-        "positive control: an accepted signature leads to the credential read")
-    assert accepted["fault"] == "ConfigFault", "no credential stored: nothing is sent"
+    # CONTRACT CONFLICT (#1366): the record is read (generation) before any credential; the config's DSN has no database
+    # behind it, so an accepted signature now ends at the records read, not at `kv/data/<tenant>/identity`.
+    assert not any("/kv/data/" in c.url.path for c in calls), "no credential is read before the record is"
+    assert accepted["fault"] == "TransportFault", "records unreachable: nothing is sent"
     assert up.seen == []
+
+
+def test_1366_a26_the_credential_read_follows_an_accepted_signature_and_a_found_record_and_no_sooner(tmp_path):
+    """Hermetic A26 control: the credential is read only after an accepted signature and a found record, at the record's
+    generation path. (#1366 O7, R13)"""
+    from defender.credential_proxy._openbao import OpenBaoStore, TransitVerifier
+    from defender.tests.integrations.credential_proxy_1163._target import proxy
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    tid, events, good, signer = str(uuid.uuid4()), [], {}, H.FakeSigner()
+    stored = R.credential_set({"api_key": H.CANARY_KEY})
+
+    def openbao(request: httpx.Request) -> httpx.Response:
+        if "/transit/verify/" in request.url.path:
+            events.append("verify")
+            return httpx.Response(200, json={"data": {"valid": json.loads(request.content)["signature"] in good}})
+        events.append(f"kv:{request.url.path}")
+        if request.url.path == f"/v1/kv/data/{tid}/identity/g2":
+            return httpx.Response(200, json={"data": {"data": stored, "metadata": {"version": 1}}})
+        return httpx.Response(404, json={"errors": []})
+
+    class Logged(R.RecordsPort):
+        def current_system(self, tenant_id: str, system_id: str) -> Any:
+            events.append("record")
+            return super().current_system(tenant_id, system_id)
+
+    transport = httpx.MockTransport(openbao)
+    with H.upstream() as up:
+        spec = R.RecordsSpec({"identity": R.SysSpec({"IDENTITY_TIMEOUT_SEC": "10"}, H.declaration(up.url + BASE),
+                                                    version=3, generation=2)})
+        records: dict[str, Any] = {tid: spec}
+        client = T.client_of(proxy().ProxyDeps(
+            records=Logged(records), audit=H.AuditRecorder(),
+            store=OpenBaoStore(addr=DEPLOYMENT_OPENBAO, token="t", mount="kv", transport=transport),
+            verifier=TransitVerifier(addr=DEPLOYMENT_OPENBAO, token="t", transport=transport)))
+        url, grant = f"{up.url}{BASE}/users/x", {("identity", "r")}
+
+        refused = T.ask(client, T.token(tid, grant, signer=signer), "identity", "GET", url)
+        assert (refused["fault"], events) == ("ConfigFault", ["verify"]), "a refused signature reads no record, no credential"
+
+        events.clear()
+        tok = T.token(tid, grant, signer=signer)
+        good[tok.rpartition(".")[2]] = True
+        accepted = T.ask(client, tok, "identity", "GET", url)
+        assert accepted["fault"] is None, accepted
+        assert events == ["verify", "record", f"kv:/v1/kv/data/{tid}/identity/g2"], events
+        assert [s.path for s in up.seen] == [f"{BASE}/users/x"]
+
+        events.clear()
+        records.clear()  # the record is gone: a (fresh) signature is still accepted
+        again = T.token(tid, grant, signer=signer)
+        good[again.rpartition(".")[2]] = True
+        gone = T.ask(client, again, "identity", "GET", url)
+        assert gone["fault"] == "ConfigFault", gone
+        assert events == ["verify", "record"], "no credential is read without a found record"
+        assert [s.path for s in up.seen] == [f"{BASE}/users/x"], "nothing more was sent"
 
 
 def test_a26_the_proxys_openbao_client_trusts_the_deployments_ca_and_no_web_proxy(tls_issuer, monkeypatch):  # noqa: F811
@@ -537,7 +599,7 @@ def test_a26_a_bad_tenant_id_is_refused_before_any_openbao_path_is_built(tmp_pat
     with H.upstream() as up, T.identity_via_proxy(
             tmp_path / "forge", data_root, H.declaration(up.url + BASE), tenant_id=tid):
         client = TestClient(app_from_config(
-            _config(tmp_path, data_root=str(data_root)), transport=httpx.MockTransport(openbao)))
+            _config(tmp_path), transport=httpx.MockTransport(openbao)))
         url, grant = f"{up.url}{BASE}/users/x", {("identity", "r")}
         good = T.token(tid, grant, signer=signer)
         T.ask(client, good, "identity", "GET", url)

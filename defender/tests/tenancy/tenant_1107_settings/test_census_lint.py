@@ -239,3 +239,19 @@ def test_whole_run_env_handed_to_an_in_tree_helper_that_looks_keys_up(tmp_path, 
     assert url.startswith(S.T1106.default_base(marker, "cmdb") + "/"), (
         f"the cmdb call did not use the base its declaration names: {url!r}")
     assert exported not in repr(sent[-1]), f"the exported CMDB_URL_BASE reached the request: {sent[-1]}"
+
+
+def test_1366_o9_the_lint_states_its_rule_over_a_tenants_records_not_its_settings_folder(tmp_path):
+    """WORDING GUARD, not a behaviour pin: a tenant's systems come from its records now (the `settings/systems/`
+    folders are retired), so the lint's own statement of the rule no longer calls the settings folder the tenant's
+    settings, and a finding still says the run's record. The rule's behaviour (an environment lookup in the four swept
+    trees is a finding) is unchanged by #1366 and is pinned by the flagged-lookup rows of this file; the restated
+    sentence has no behaviour of its own. (#1366 O9)"""
+    doc = " ".join((S.env_lint().__doc__ or "").split())
+    assert "A tenant's settings are its `settings/` folder" not in doc, doc
+    assert "records" in doc.lower(), doc
+    _skeleton(tmp_path)
+    S.plant_module(tmp_path, "defender/integrations/flagged_1366.py", "def verb(ctx):\n    return ctx.env.get('X_1366')\n")
+    rc, out = S.run_env_lint(tmp_path)
+    assert rc == 1, out
+    assert "run's record" in out, out

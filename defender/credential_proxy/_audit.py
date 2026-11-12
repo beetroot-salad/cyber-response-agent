@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any, Protocol
 
 #: The keys every proxy audit record carries (A4): `outcome` is `sent <status>` or the fault
-#: class; `path` is relative to the declared base; `commit` is the `current` commit applied.
+#: class; `path` is relative to the declared base; `version` is the system record's version applied.
 #: A field the request never reached (a token refused before its tenant is trusted) is null.
-AUDIT_KEYS = ("tenant", "system", "investigation", "commit", "method", "path", "outcome")
+AUDIT_KEYS = ("tenant", "system", "investigation", "version", "method", "path", "outcome")
 
 _APPEND = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_CLOEXEC
 

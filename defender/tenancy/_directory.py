@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from defender.records.formats import AlertMapping, TenantId, TenantRefused
 
 if TYPE_CHECKING:
-    from defender.tenancy.models import ForgeWiring, Generation, MergeEligibility
+    from defender.tenancy.models import ForgeWiring, Generation, MergeEligibility, TenantRecords
 
 _R = TypeVar("_R")
 
@@ -80,6 +80,13 @@ class TenantDirectory:
         """The tenant's alert mapping (#1345), None until one is saved: what run start derives the facts through."""
         async def read(repository: Any) -> AlertMapping | None:
             return await repository.alert_mapping(tenant_id)
+        return self._call(read)
+
+    def current_records(self, tenant_id: TenantId) -> TenantRecords:
+        """The tenant's system and case records as they stand (#1366): what run start, `check`, learning and the branch
+        launcher build the tenant's systems from."""
+        async def read(repository: Any) -> TenantRecords:
+            return await repository.current_records(tenant_id)
         return self._call(read)
 
     def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:

@@ -185,14 +185,22 @@ def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import
     folder = _folder(tmp_path, "tenant")
     script = _copy_script(checkout)
     H.assert_clean(H.run_script(script, "check", "--folder", str(folder), root=None))
+    # #1366 O9/DC8 (design: a leftover `settings/systems/` or `case-record.yaml` reported by `check`, either form, is a
+    # finding): it is said to be retired and ignored, not parsed, and `check` exits nonzero until it is removed.
+    leftover = _unparseable_mapping(folder)
+    proc = H.run_script(script, "check", "--folder", str(folder), root=None)
+    left = H.output(proc)
+    mentions = [ln for ln in left.splitlines() if "case-record.yaml" in ln]
+    assert mentions, f"`check --folder` did not report the leftover case-record.yaml:\n{left}"
+    assert all("retired" in ln and "ignored" in ln for ln in mentions), left
+    assert "is not valid YAML" not in left, f"a leftover case-record.yaml was still parsed:\n{left}"
+    assert proc.returncode != 0, f"a leftover case-record.yaml is a finding and `check` exits nonzero:\n{left}"
+    leftover.unlink()  # so the exit status below is the broken adapter's, not the leftover's
+    H.assert_clean(H.run_script(script, "check", "--folder", str(folder), root=None))
     H.add_adapter(checkout, BROKEN_SYSTEM, BROKEN_ADAPTER)
     blind = {"folder": folder, "cause": ADAPTER_CAUSE,
              "names": (BROKEN_SYSTEM, str(checkout.resolve()))}
     _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None), **blind)
-    _unparseable_mapping(folder)
-    # A case-record file that does not parse is a finding naming it (#1359 r4), census or not.
-    H.assert_refused(H.run_script(script, "check", "--folder", str(folder), root=None),
-                     "settings/case-record.yaml")
 
 
 def test_1120_s6_defender_dir_env_names_another_tree(

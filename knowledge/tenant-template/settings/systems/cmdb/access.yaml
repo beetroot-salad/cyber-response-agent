@@ -1,7 +1,0 @@
-# How the credential proxy reaches cmdb for this tenant — replace every CHANGE-ME.
-# `base` is the system's API URL (a path is allowed). The proxy adds the stored bearer key.
-access: http-proxy
-base: https://CHANGE-ME
-auth:
-  scheme: bearer
-  field: api_key

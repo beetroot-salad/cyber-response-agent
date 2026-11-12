@@ -119,7 +119,7 @@ def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_datab
 def test_the_revision_moves_tenants_and_adds_the_lifecycle_tables(migrated_database):
     """At head `tenancy` holds tenants and the new tables, `identity` no tenants, and memberships reference `tenancy.tenants` (O11)."""
     assert _tables(migrated_database, "tenancy") == {"tenants", "forge_wiring", "generations", "publish_status",
-                                                     "alert_mappings",  # #1345 r5: the mapping is a tenant record
+                                                     "alert_mappings", "system_versions", "case_versions", "records_mark",  # #1345 r5: the mapping is a tenant record; #1366: the records tables
                                                      "merge_eligibility"}  # #1414 D13: the service's eligibility record
     assert "tenants" not in _tables(migrated_database, "identity")
     assert [target for _, target in _fk_to_tenants(migrated_database)] == ["tenancy.tenants"]
@@ -255,7 +255,8 @@ def test_the_upgrade_keeps_every_row_of_every_tenancy_table_and_only_adds_the_si
                      bot_login=f"bot-{tenant}-{status}", role_id=f"role-{status}")
 
     def rows() -> dict[str, list[dict[str, object]]]:
-        tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version", "alert_mappings",  # #1345: a table the head adds
+        tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version", "alert_mappings", "system_versions",  # #1345, #1366: tables the head adds
+                                                              "case_versions", "records_mark",
                                                               "merge_eligibility"})  # #1414 D13: so is this
         return {t: sorted((r[0] for r in execute(empty_database, f"SELECT to_jsonb(x) FROM tenancy.{t} x")),  # noqa: S608
                           key=lambda row: json.dumps(row, sort_keys=True)) for t in tables}

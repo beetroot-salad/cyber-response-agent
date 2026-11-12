@@ -8,10 +8,10 @@ from typing import Any, ClassVar
 
 from defender.knowledge import CATALOG, CATALOG_SCHEMA_NAME, REDUCER_PITFALLS, SKILLS, KnowledgePaths
 from defender._model import model
-from defender._paths import adapters_under, process_defender_dir
+from defender._paths import process_defender_dir
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
-from defender.learning.leads.declared_systems import adapter_systems_under, with_platform_systems
+from defender.learning.leads.declared_systems import declares_no_system, with_platform_systems
 from defender.learning._pydantic_stage import run_stage as _run_stage_fn
 from defender.learning._pydantic_stage import with_make_model
 from defender import providers
@@ -32,28 +32,22 @@ _LEAD_AUTHOR_DENY_REASON = (
 )
 
 
-def _systems_or_raise(defender_dir: Path) -> tuple[str, ...]:
-    """The systems this tree declares, sorted — refusing to build a lane-less policy.
-
-    The adapter half alone, not the `declared_systems` union the commit gate uses: this runs
-    inside `bind` per spawn, and the marker half needs a `git ls-tree`. A marker-only system is
-    thus refused here but admitted at commit — stricter on write, the safe direction (a
-    recoverable tool denial rather than a batch discard).
-
-    No declared adapter means a writer whose `write_allow` admits nothing, which would burn its
-    request budget on denials; this is the runtime twin of `_require_write_co_constraint`.
-    """
-    # Rooted on the bound tree itself: `.parent / "defender"` would read a sibling tree's
-    # adapters whenever the directory isn't literally named `defender`.
-    adapters_dir = adapters_under(defender_dir)
-    systems = adapter_systems_under(adapters_dir)
-    if not systems:
+def _systems_or_raise(systems: tuple[str, ...] | None) -> tuple[str, ...]:
+    """The systems the lane writes for, sorted: the ones the spawn's scope names (#1366 O1, R16:
+    the lane's handed systems, the tenant's, or the whole catalog's for a caller with no tenant),
+    plus the platform-served ones. A scope that names none is refused, never filled from the
+    bound tree's adapters; so is one naming no system of record, a writer whose `write_allow`
+    admits nothing, which would burn its request budget on denials (the runtime twin of
+    `_require_write_co_constraint`)."""
+    if systems is None:
         raise ValueError(
-            f"lead-author write scope is empty: {adapters_dir} declares no system, so no "
-            "per-system write lane compiles and the spawned agent could not write the edits "
-            "its own handoff asks for"
-        )
-    return tuple(sorted(with_platform_systems(systems)))
+            "lead-author write scope names no systems: a lead lane is handed its tenant's systems "
+            "(or, with no tenant, the whole catalog), never the bound tree's adapters")
+    if declares_no_system(frozenset(systems)):
+        raise ValueError(
+            "lead-author write scope is empty: the tenant has no system of record, so no "
+            "per-system write lane compiles")
+    return tuple(sorted(with_platform_systems(frozenset(systems))))
 
 
 #: The catalog's tail under `<skills>/`, derived so the write and `rm` lanes name the same
@@ -153,12 +147,12 @@ def _lane_skills_dir(roots: ResolvedRoots) -> Path:
 
 def _lead_author_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
     return (
-        _rm_skills_grant(_lane_skills_dir(roots), _systems_or_raise(roots.defender_dir)),
+        _rm_skills_grant(_lane_skills_dir(roots), _systems_or_raise(roots.systems)),
     )
 
 
 def _lead_author_write_shape(roots: ResolvedRoots) -> tuple[re.Pattern[str], ...]:
-    return _skill_write_lanes(_lane_skills_dir(roots), _systems_or_raise(roots.defender_dir))
+    return _skill_write_lanes(_lane_skills_dir(roots), _systems_or_raise(roots.systems))
 
 
 @model(frozen=True)
@@ -203,7 +197,7 @@ def _run_lead_author_pydantic(
         LEAD_AUTHOR_DEF, ctx.learning_run_dir,
         # `ctx.salt` isn't bound: it scopes the prompt frames, while tool returns are framed
         # by `wrap_fresh` with their own salt.
-        defender_dir=process_defender_dir(), scope=RunScope(tenant_agent=agent_root),
+        defender_dir=process_defender_dir(), scope=RunScope(tenant_agent=agent_root, systems=ctx.systems),
         box=ctx.box,
     )
     return run_stage(

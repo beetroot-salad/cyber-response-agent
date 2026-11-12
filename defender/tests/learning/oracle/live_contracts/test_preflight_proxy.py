@@ -35,8 +35,6 @@ API = "/api"
 CLOCK_TOLERANCE = 60
 ROLE, SECRET = "role-1163-learning", "secret-1163-learning"
 DELIVERY_ROLE, DELIVERY_SECRET = "role-1163-delivery", "secret-1163-delivery"
-FIXTURE_SYSTEMS = ("identity", "ticket", "host-state", "threat-intel", "change-mgmt",
-                   "elastic", "cmdb")
 #: `idp` is a tenant-only name: no product allowlist knows it (A6). Its `query` goes through the
 #: shared transport; its other verbs answer locally.
 IDP_ADAPTER = '''\
@@ -205,9 +203,9 @@ def rig(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = False,  #
         merged.replies[f"{API}/events"] = (200, {"Content-Type": "application/json"},
                                            json.dumps(idp.payload).encode())
         files = {"settings/verb-grants.yaml": est.table(),
-                 # host-state reads no key, so it ships no config.env to remove (#1391 r5 O-S1).
-                 **{f"settings/systems/{s}/config.env": None for s in FIXTURE_SYSTEMS
-                    if s != "host-state"},
+                 # #1366 O9: the fixture ships no `settings/systems/` (its folders are retired), so there is none to remove;
+                 # the tenant's records are idp and crm alone, derived from the files planted below (crm is in the roster
+                 # above and in no grant).
                  **A.system_files("idp", H.declaration(merged.url + API)),
                  # Granted for gather and declared, never called by the source run: the run's read
                  # grant reaches it (D5), H12's "systems the replayed calls reach" did not.
@@ -226,7 +224,13 @@ def rig(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = False,  #
                                   delivery_secret=DELIVERY_SECRET, delivery_file=False)
             if not sign_login:  # a live generation that records no sign login (A24')
                 fields["sign_role_id"] = None
-            records = t.directory_with(generations=[fields])
+            # The tenant's records: the estate's stub systems (their calls replay), with idp, crm and hr as the files
+            # planted above stand for them (each with its access declaration, so on the proxy).
+            from defender.tests.support.tenancy import _systems1366 as R
+
+            planted = R.resolve(R.DERIVED, data_root, S.FIXTURE_TENANT)
+            records = t.directory_with(generations=[fields], records=R.RecordsSpec(
+                {**est.records().systems, **planted.systems}, planted.case))
             bao = bao_type({ROLE: SECRET, DELIVERY_ROLE: DELIVERY_SECRET})
             store = H.FakeStore({(S.FIXTURE_TENANT, "idp"): T.static_set()} if credential_set else {})
             # No second records read inside learning (A24): one through the environment's
@@ -327,17 +331,20 @@ def test_p1b_preflight_signs_with_the_sign_login_whatever_the_environment_holds(
     assert all(A.SIGNATURE_CANARY in tok for tok in tap.tokens)
 
 
-def test_p2_a_working_tree_base_that_differs_from_current_is_refused_and_sent_nowhere(
+def test_p2_a_working_tree_base_that_differs_from_current_is_never_read_by_preflight(
         tmp_path, monkeypatch, data_root):
-    """The proxy refuses the working tree's base (it applies `current`); the idp call's live read
-    fails without making a world unservable, and neither upstream is reached. A3, O2."""
+    """An unmerged edit of the idp declaration in the clone's working tree reaches nothing: pre-flight reads the tenant's
+    CURRENT records (H9, A5, O6: every replay uses the current records, never the working tree), so the idp call's live
+    read goes to the current base through the proxy, and the working tree's upstream is never reached. A3, O2.
+    (Was: the adapter's record was the working tree and the proxy refused its base. Under #1366 preflight has no working
+    tree record; what stays pinned is that the edit is not obeyed.)"""
     run, outcome, bao, tap, merged, wt = _preflight(
         tmp_path, monkeypatch, data_root, working_tree_edit=True)
     assert outcome is not None, run.message  # the outcome is written before any sibling
     assert outcome["unservable_worlds"] == [], "the failed live read made a world unservable"
     assert outcome["outcome"] == "accepted", ("a `request` fault is skipped and the pass goes on (#1363 N1)", outcome)
     assert tap.tokens, "positive control: the proxy was asked"
-    assert merged.seen == []
+    assert len(merged.seen) == 1, "the idp read went to the current base, once"
     assert wt.seen == []
 
 

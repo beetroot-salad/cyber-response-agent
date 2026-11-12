@@ -42,7 +42,11 @@ VULTURE_ARGS = [
     "--min-confidence", "60",
     "--exclude", "defender/.venv,defender/tests,defender/skills/invlang/schema.py",
     # event_time is the alert mapping's entry in its wire model and its table: read through pydantic and SQLAlchemy.
-    "--ignore-names", "key_field,key_value,event_time",
+    # #1366 K2/O2: `DISPLAY_NAME` and `EXAMPLE` are catalog declarations read cold (AST, `systems.catalog` and
+    # lint_catalog_declarations), never by attribute. `written_at` is a version row's audit column (P3, R9): written by
+    # the store's inserts, read by no code. `add_records` is the memory twin's public seeder beside `add_generation`
+    # (R10: planting helpers seed records with it).
+    "--ignore-names", "key_field,key_value,event_time,DISPLAY_NAME,EXAMPLE,written_at,add_records",
     # pydantic calls its validators, and SQLAlchemy a hybrid property's SQL side, by decorator registration, never by name.
     "--ignore-decorators", "@field_validator,@model_validator,@*.inplace.expression",
 ]

@@ -94,8 +94,8 @@ def test_a_query_verb_is_handed_the_runs_tenant_record(tmp_path):
 
 def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_host_path(
         tmp_path):
-    """The settings half is host-only: MAIN is told why cmdb is down by its `settings/` path, and no
-    model view or run-dir table holds the data root."""
+    """The settings half is host-only: MAIN is told why cmdb is down by its record's locator (`system cmdb settings`,
+    #1366 DC6: not a file), and no model view or run-dir table holds the data root."""
     tenant = _tenant(tmp_path, T.TABLE_A, "fault")
     (tenant.settings / "systems" / "cmdb" / "config.env").unlink()
     transport = T.mod("kit.transport")
@@ -115,10 +115,8 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
         ])
     told_main = "\n".join(main.seen)
     about_cmdb = [ln for ln in told_main.splitlines() if "cmdb" in ln][:20]
-    assert "config file not found" in told_main, (
-        f"MAIN was never told why cmdb is down; its cmdb lines: {about_cmdb}")
-    assert "settings/systems/cmdb/config.env" in told_main, (
-        f"the reason MAIN was given does not name the settings file: {about_cmdb}")
+    assert "system cmdb settings" in told_main, (
+        f"MAIN was never told why cmdb is down (system cmdb settings); its cmdb lines: {about_cmdb}")
     assert rec.calls == [], f"the down system's verb ran: {rec.calls}"
     queries = run_dir / "executed_queries.jsonl"
     rows = read_jsonl_rows(queries) if queries.is_file() else []
@@ -128,7 +126,7 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
     data_root = str(location_path(tenant.data_root))
     shown = "\n".join([*main.seen, *gather.seen])
     reason_lines = [ln for ln in shown.splitlines()
-                    if "config file not found" in ln or "systems/cmdb/config.env" in ln]
+                    if "system cmdb settings" in ln]
     assert reason_lines, "no model-visible line carries the reason"
     # At base neither model's view holds the data root at all, so the sweep is over every line.
     for label, text in (("the reason", "\n".join(reason_lines)), ("a model's view", shown),

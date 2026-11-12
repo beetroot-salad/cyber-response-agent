@@ -7,7 +7,7 @@ import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
 from uuid import uuid4
@@ -35,9 +35,10 @@ from defender.learning.leads._lead_spine import (
 )
 from defender.learning.leads.declared_systems import (
     ADAPTERS_REL,
-    adapter_declared_systems,
+    lane_names,
     with_platform_systems,
 )
+from defender.systems.verbs import PLATFORM_SERVED
 from defender import box as _box
 from defender.kit.verbs import is_system_name
 from defender.learning.leads.lead_extraction import LeadAuthorError
@@ -47,6 +48,9 @@ from defender.learning.leads.path_validation import (
     SKILLS_PREFIX,
     _is_system_execution_md,
 )
+
+if TYPE_CHECKING:
+    from defender.systems.catalog import Catalog, TenantSystems
 
 _logger = logging.getLogger(__name__)
 
@@ -136,10 +140,11 @@ def _invoke_pitfalls_agent(  # noqa: PLR0913 — the spawn's handoffs, its folde
     box=None,
     feedback: str | None = None,
     make_model: Callable[..., Any] | None = None,
+    systems: tuple[str, ...],
 ) -> int:
     """Spawn the pitfalls curator over the draft at `repo_root`, its run folder `run_dir` (the call's
-    own folder, #1278 A1). `feedback` is a replacement's framed review text (H13); `make_model` the
-    stage's model seam."""
+    own folder, #1278 A1), its write lanes drawn over `systems`: the lane's handed systems (#1366 O1, R16),
+    required. `feedback` is a replacement's framed review text (H13); `make_model` the stage's model seam."""
     stage_salt = salt if salt is not None else uuid4().hex
     view = draft_view(run_dir, repo_root)
     context = (f"draft_root: {view.to_model(repo_root)}\n"
@@ -157,7 +162,7 @@ def _invoke_pitfalls_agent(  # noqa: PLR0913 — the spawn's handoffs, its folde
         repo_root=repo_root,
         learning_run_dir=run_dir,
         log_label="pitfalls curator",
-        salt=stage_salt, box=box,
+        salt=stage_salt, box=box, systems=systems,
         **({"make_model": make_model} if make_model is not None else {}),
     )
 
@@ -428,19 +433,22 @@ def _pitfalls_commit_message(changed: list[str]) -> str:
     )
 
 
-def _require_adapter_declared_systems(repo_root: Path) -> frozenset[str]:
-    """The systems the pitfalls lane admits: the adapter half alone, resolved once at the lane's
-    own boundary — refusing loudly rather than spending an empty set as an ordinary per-row
-    membership "no" — plus the platform-served names."""
-    systems = adapter_declared_systems(repo_root)
-    if not systems:
+def _require_adapter_declared_systems(repo_root: Path, systems: TenantSystems | Catalog) -> frozenset[str]:
+    """The systems the pitfalls lane admits, resolved once at the lane's own boundary — refusing
+    loudly rather than spending an empty set as an ordinary per-row membership "no" — plus the
+    platform-served names. They are handed, never defaulted (#1366 O1, R16): the tenant's (its
+    current enabled records the checkout's catalog carries), or the whole catalog from a caller
+    with no tenant."""
+    declared = lane_names(systems) - PLATFORM_SERVED.keys()
+    if not declared:
         message = (
-            f"pitfalls curation refused: {repo_root / ADAPTERS_REL} declares no systems; "
-            "refusing to run the pitfalls lane against an empty declared set"
+            f"pitfalls curation refused: {repo_root / ADAPTERS_REL} declares no systems for the "
+            "lane (it carries none, or the tenant's records name none it carries); refusing to run "
+            "the pitfalls lane against an empty declared set"
         )
         _logger.error(message)
         raise LeadAuthorError(message)
-    return with_platform_systems(systems)
+    return with_platform_systems(declared)
 
 
 def _split_batch_by_membership(
@@ -533,6 +541,7 @@ def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface
     outcomes: dict[tuple[str, str], Any] | None = None,
     feedback: str | None = None,
     make_model: Callable[..., Any] | None = None,
+    systems: TenantSystems | Catalog,
 ) -> int:
     """One curation over a learning store claim's pitfalls (`items`, #1278 D1/D9), into `batch`'s
     draft (#1108 P4 O7): the claim is the draft against the batch's base, judged by the lane's gate
@@ -541,7 +550,8 @@ def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface
     surface can teach is skipped naming its system. The pitfalls the commit took are handed to
     `on_curated` (they stay in the batch); the rest are left unnamed (the drain returns them to
     waiting). `feedback` is a replacement's framed review text (H13). `state` is only handed on to
-    an injected `invoke` (the seam's call shape); nothing reads through it."""
+    an injected `invoke` (the seam's call shape); nothing reads through it. The lane's systems are
+    handed (#1366 R16): the tenant's, or the whole `Catalog` from a caller with no tenant."""
     outcomes = outcomes if outcomes is not None else {}
     root = Path(batch.draft_root) if batch is not None else paths.repo_root
     lane_skills(trees, paths, skills_dir=root / SKILLS_PREFIX if batch is not None else None)
@@ -564,8 +574,8 @@ def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface
     # The lane's own product checkout's adapters (`paths.repo_root`), resolved once, before the agent is
     # spawned: the tree the lane's gate and the handoffs are judged against.
     repo_root = paths.repo_root
-    systems = _require_adapter_declared_systems(repo_root)
-    handoffs = _build_pitfalls_handoffs(records, systems=systems)
+    admitted = _require_adapter_declared_systems(repo_root, systems)
+    handoffs = _build_pitfalls_handoffs(records, systems=admitted)
     # One derivation of "was the reducer surface offered this tick", read by the commit gate and
     # the partition.
     reducer_offered = any(h.get("surface") == "reducer" for h in handoffs)
@@ -616,7 +626,7 @@ def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface
     # and is stopped before the gate reads what it wrote (#1195).
     run_dir = call_folder(batch.tenant, str(batch.id), "pitfalls", 1, make=True)
     spawn_call = invoke or partial(_invoke_pitfalls_agent, run_dir=run_dir, feedback=feedback,
-                                   make_model=make_model)
+                                   make_model=make_model, systems=tuple(sorted(admitted)))
     with _box.box_for_run(box) as run_box:
         # The `invoke` seam keeps its call shape (`state` is whatever the caller handed, `None` over
         # the learning store).
@@ -632,7 +642,7 @@ def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface
     # entry refuses it whole, `DeliveryRefused`); the gate judges it, the commit-maker commits.
     change_set = batch.change_set()
     changed = _verify_pitfalls_state(
-        root, change_set=change_set, systems=systems, reducer_offered=reducer_offered,
+        root, change_set=change_set, systems=admitted, reducer_offered=reducer_offered,
         tree_for=trees.tree_for, base=batch.base(),
     )
     sha = None

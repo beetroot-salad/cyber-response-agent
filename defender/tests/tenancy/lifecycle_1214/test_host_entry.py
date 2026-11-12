@@ -690,7 +690,6 @@ def _units(rel: str, tree: ast.Module) -> list[tuple[str, bool, list[ast.AST]]]:
 A3_ENTRIES = frozenset({("learning/author/version_control/publish.py", "publish_for_run"),
                         ("learning/author/version_control/publish.py", "publish_child_main"),
                         ("investigation/publish_launch.py", "launch_publish"),
-                        ("skills/connect/validate_scaffold.py", "main"),
                         # The lifecycle job's cutover import needs the forge reads of a tenant it accepts by the folder
                         # rules inside the lifecycle process (#1278): its one opener, like the publish entries above.
                         ("learning/author/version_control/publish.py", "delivery_for_cutover")})
@@ -835,11 +834,11 @@ def test_the_reachability_census_sees_through_the_host_modules_and_the_starter_s
         "learning/branch/cli.py": ("from defender.systems.run_tenant import resolve_tenant\n"
                                    "def _launch(argv):\n    return resolve_tenant(1, argv[0])\n"),
         "cli/private.py": "from defender.systems.run_tenant import _load\ndef main(argv):\n    return _load(1, argv[0])\n",
-        "cli/a3.py": ("from defender.skills.connect.validate_scaffold import _accept\n"
+        "cli/a3.py": ("from defender.learning.author.version_control.publish import _accept\n"
                       "def main(argv):\n    return _accept(1, argv[0])\n"),
-        "skills/connect/validate_scaffold.py": ("from defender.tenancy._tenant import accept_tenant\n"
-                                                "def _accept(r, t):\n    return accept_tenant(r, t)\n"
-                                                "def main():\n    return _accept(1, 2)\n"),
+        "learning/author/version_control/publish.py": ("from defender.tenancy._tenant import accept_tenant\n"
+                                                       "def _accept(r, t):\n    return accept_tenant(r, t)\n"
+                                                       "def publish_for_run():\n    return _accept(1, 2)\n"),
         "cli/__init__.py": "",
         "cli/sub/deep.py": "from defender.tenancy._tenant import accept_tenant\ndef go():\n    return accept_tenant(1, 2)\n",
         "cli/other.py": "from defender.cli import go\ndef run():\n    return go()\n",

@@ -170,12 +170,13 @@ def test_1224_a_tenant_with_no_lab_systems_branches_and_serves_a_world_change(tm
 
 @pytest.mark.parametrize("elastic", ["none-configured", "fails-to-resolve"])
 def test_1224_launch_over_a_tenant_with_no_elastic_system(tmp_path, elastic):
-    est = S.estate(tmp_path)
     if elastic == "fails-to-resolve":
-        # The estate's tenant is published for real, with this config.
-        est.place(configs={"elastic": "ELASTIC_CARRIER=pigeon\n"})  # a key elastic does not read
+        # The tenant RECORDS elastic with a setting it does not read: an adapter in the roster whose settings check
+        # refuses it (the record is stated, #1366 R10), and the grant table gives it no row.
+        est = S.estate(tmp_path, unusable=("elastic",))
         assert "elastic" in est.run_tenant().systems
     else:
+        est = S.estate(tmp_path)
         assert "elastic" not in est.run_tenant().systems
     assert "elastic" not in est.run_tenant().grants.gather.systems
 

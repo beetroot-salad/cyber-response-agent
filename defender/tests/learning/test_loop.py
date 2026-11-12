@@ -85,6 +85,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (  # noqa: E402
     BoxSpy, author_drain, critical_text, lead_author_drain, remote_branches)
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: E402, F401 — fixture `world` is built on
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed  # noqa: E402
 
 
 def _items(w) -> dict:
@@ -237,6 +238,85 @@ def test_lead_author_drain_does_not_count_a_nonzero_step_as_served(world, monkey
     assert (item.status, item.attempts) == ("waiting", 1), "the failed step was recorded as done"
 
 
+class _RecordsDown:
+    """The tenant's directory, its current-records read down (an outage) while every other read answers; counts the reads."""
+
+    def __init__(self, directory) -> None:
+        self._directory = directory
+        self.reads = 0
+
+    def __getattr__(self, name):
+        return getattr(self._directory, name)
+
+    def current_records(self, tenant_id):
+        from defender.tenancy import RecordsUnreachable
+
+        self.reads += 1
+        raise RecordsUnreachable("the tenant records' database could not be reached")
+
+
+class _NotImported(_RecordsDown):
+    """The tenant's directory, its records read as a tenant whose import has not run (R8)."""
+
+    def current_records(self, tenant_id):
+        from defender.tenancy.record_values import TenantRecords
+
+        self.reads += 1
+        return TenantRecords(imported=False, systems={}, case=None)
+
+
+@pytest.mark.postgres
+def test_lead_author_drain_skips_the_tick_when_the_tenants_systems_cannot_be_read(world, caplog):  # noqa: F811 — the imported fixture
+    """The tick reads the tenant's systems once, right before its claim; an outage there skips the tick (rc 0) with no claim
+    taken, so the queued request stays waiting with no attempt counted and no batch is started. (#1366 R16)"""
+    w = world
+    run_dir = _request(w, "case-outage")
+    down = _RecordsDown(w.t.directory)
+
+    assert _lead_tick(w, directory=down) == 0, critical_text(caplog)
+
+    assert down.reads == 1, "the tick did not read the tenant's systems before its claim"
+    item = _items(w)[("curation_request", run_dir.name)]
+    assert (item.status, item.attempts) == ("waiting", 0), (item.status, item.attempts)
+    assert call(w.dsn, "batches", w.t.tenant_id) == [], "a batch was started though the systems could not be read"
+    assert "an outage; skipping this tick" in caplog.text
+
+
+@pytest.mark.postgres
+def test_lead_author_drain_refuses_a_tick_for_a_tenant_not_imported_and_charges_no_claim(world, caplog):  # noqa: F811 — the imported fixture
+    """Right after the upgrade every tenant is not imported: its tick is refused naming the import (exit 2), before any claim,
+    so its queued work waits for the import rather than being charged and held. (#1366 R8, R16)"""
+    w = world
+    run_dir = _request(w, "case-not-imported")
+
+    assert _lead_tick(w, directory=_NotImported(w.t.directory)) == 2
+    assert "not imported" in critical_text(caplog)
+
+    item = _items(w)[("curation_request", run_dir.name)]
+    assert (item.status, item.attempts) == ("waiting", 0), (item.status, item.attempts)
+    assert call(w.dsn, "batches", w.t.tenant_id) == [], "a batch was started for a tenant not imported"
+
+
+@pytest.mark.postgres
+def test_a_lead_tick_that_only_reconciles_reads_no_systems(world, caplog):  # noqa: F811 — the imported fixture
+    """Reconciling a batch in review needs no systems: with the lane's batch in review (so no claim this tick), the tick runs
+    while the tenant's records are down, never reads them and is not skipped as an outage. (#1366 R16)"""
+    from defender.tests.support.learning.core._declared870 import shim_row
+    from defender.tests.support.learning.core._store1278 import LEAD_LANE, ONE
+
+    w = world
+    call(w.dsn, "add_pitfall", w.t.tenant_id, shim_row("p4-run:1"))
+    claim = call(w.dsn, "claim", w.t.tenant_id, LEAD_LANE, owner="lead-drain", thresholds=ONE)
+    call(w.dsn, "in_review", claim, 41, {})
+    _request(w, "case-reconcile-only")
+    down = _RecordsDown(w.t.directory)
+
+    assert _lead_tick(w, directory=down) == 0, critical_text(caplog)
+
+    assert down.reads == 0, "a tick with no claim to take read the tenant's systems"
+    assert "an outage; skipping this tick" not in caplog.text
+
+
 @pytest.mark.postgres
 def test_lead_author_drain_bounds_the_retries_of_a_failing_request(world, monkeypatch):  # noqa: F811 — the imported fixture
     """A request whose step keeps failing is retried a bounded number of ticks, then taken out of the queue for a person
@@ -283,7 +363,6 @@ def test_lead_author_drain_stops_with_exit_two_on_a_misconfigured_step(world, mo
 def test_a_pitfall_the_curator_keeps_declining_is_taken_out_at_the_ceiling(world, monkeypatch):  # noqa: F811 — the imported fixture
     """A reducer pitfall the pitfalls curator is offered and declines every tick is not offered for ever: after the attempt
     ceiling it is held for a person (or dead), where it was once retired to the graveyard. (design r8 Schema: attempts, ceiling)"""
-    from defender.learning.leads import pitfalls_curator
     from defender.tests.support.learning.core._declared870 import shim_row
     from defender.tests.tenancy.tenant_1108_p4._drain_support import LEAD_DRAFT_LANES, draft_lane_trees
 
@@ -295,7 +374,7 @@ def test_a_pitfall_the_curator_keeps_declining_is_taken_out_at_the_ceiling(world
 
     def declining(paths, state, *, batch, box=None, on_curated, items, outcomes, **_kw):
         with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
-            return pitfalls_curator.run_pitfalls(paths=paths, trees=trees, batch=batch, items=items, outcomes=outcomes,
+            return run_pitfalls_handed(paths=paths, trees=trees, batch=batch, items=items, outcomes=outcomes,
                                                  on_curated=on_curated, invoke=lambda handoffs, **_k: offers.append(handoffs) or 0)
 
     statuses = []

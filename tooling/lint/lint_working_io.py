@@ -256,6 +256,9 @@ RESIDUE = {
     ("tenancy.run_knowledge", "copy_for_run", ".mkdir"): (1, "nonrecord", ('held',)),
     ("tenancy.run_knowledge", "copy_for_run", "os.rename"): (1, "nonrecord", ('copies / temporary',)),
     ("tenancy.run_knowledge", "write_host_record", "write_guarded"): (1, "nonrecord", ('path',)),
+    # #1366 O6: the host-held record of the system and case versions a run read at its start, in the same
+    # container as the knowledge-source record (beside the run dir, never in it): non-record I/O like it.
+    ("tenancy.run_knowledge", "write_record_versions", "write_guarded"): (1, "nonrecord", ('path',)),
     # #1255 extracted the existing empty tool-trace fallback; #1165 N-c still
     # retires this projection separately. Its record target and count are unchanged.
     ("investigation.driver", "_write_trace_or_empty", "write_guarded"): (
@@ -288,6 +291,7 @@ RESIDUE = {
     ("investigation.tools._files", "_write_operand", "hold"): (1, "model_tools", ('root',)),
     ("systems.verb_roster", "audit_read_surfaces", "read_text_utf8"): (1, "nonrecord", ('path',)),
     ("systems.verbs", "read_roster", "read_bytes_capped"): (1, "nonrecord", ('path',)),
+    ("systems.catalog", "_cold_declarations", "read_bytes_capped"): (1, "nonrecord", ('path',)),
 }
 
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import location_path
 
 import contextlib
+import dataclasses
 import json
+import shutil
 import os
 import re
 import threading
@@ -18,6 +20,7 @@ from typing import Any
 import pytest
 
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
 # Names
@@ -121,6 +124,12 @@ def world(tmp_path: Path, capsys: Any, *, launchable: bool = False, **plant: Any
     still valid, the branchable source run (`T.runs_base`) and a family manifest naming it
     (`T.episode`), so launch and sibling resume can be driven over the tenant afterwards."""
     w = World(tmp=Path(tmp_path), capsys=capsys, planted=S.plant_tenant(**plant))
+    # A tenant tree after #1366 holds neither `settings/systems/` nor `settings/case-record.yaml` (the records hold them;
+    # DC8: `check` reports a leftover of either as retired and ignored, a finding). The planter still writes both for the
+    # many tests that derive their records from them; this world is about the tenant CHECK, so it drops them and the
+    # directory's seeder falls back to the fixture's records.
+    shutil.rmtree(w.planted.settings / "systems")
+    (w.planted.settings / "case-record.yaml").unlink()
     if launchable:
         # A branch launch pins the knowledge commit its source's stamp names, so the tenant is
         # published for real first and the source stamped after, naming that commit (not the
@@ -354,25 +363,38 @@ def assert_no_run(v: Verdict) -> None:
     assert not d.router.leads(), "a lead's model was asked on a refused tenant"
 
 
-#: What a legacy tenant (#1359) still holds at the retired mapping, as the bytes written.
-LEGACY_RECORD = "settings/case-record.yaml"
+#: What a legacy tenant (#1359) still holds at the retired mapping, as the bytes written: a file under the retired
+#: `settings/systems/` folder, which since #1366 is itself retired (the tenant's systems are records).
+LEGACY_FOLDER = "settings/systems/"
 
 
 @pytest.mark.parametrize("shape", _shape_params(CASE_FAULTS))
-def test_a_legacy_case_history_folder_is_a_check_finding_naming_the_new_file(
+def test_a_legacy_case_history_folder_is_a_check_finding_naming_the_retired_folder(
         tmp_path: Path, capsys: Any, shape: str) -> None:
-    """Whatever the retired mapping holds, `check` names `settings/case-record.yaml`; acceptance and run start go on. #1359 r4."""
+    """Whatever the retired case-history mapping holds, it sits in the retired `settings/systems/` folder, which
+    `check --folder` reports as retired and ignored (nonzero exit, never parsed: every shape is the same finding, with no
+    crash); acceptance and run start go on. (#1359 r4, then #1366 DC8: the new home of the case record is a record, not
+    `settings/case-record.yaml`, so the finding names the retired folder, not a replacement file.)"""
     w = world(tmp_path, capsys)
-    sites = ("acceptance", "check-folder", "run-start")
-    for v in verdicts(w, sites).values():
+    # The tenant's records are stated: the leftover folder planted below puts a `systems/` directory in `settings/`, which
+    # the seeder's reading of the planted folder would take for "planted no systems" (R8: imported, empty).
+    w.planted = dataclasses.replace(w.planted, records=R.fixture_records())
+    sites = ("acceptance", "run-start")
+    for v in verdicts(w, ("acceptance", "check-folder", "run-start")).values():
         assert_passed(v)  # control: with no case folder every site passes
+    rc, err = tenant_py(capsys, "check", "--folder", str(w.planted.knowledge))
+    assert not [line for line in err.splitlines() if LEGACY_FOLDER in line], f"control: no folder, no finding: {err}"
     try:
         w.case_bytes(CASE_FAULTS[shape])
         # A run starts from a published tenant, and `git add` cannot read a file at mode 000: an
         # unreadable file never reaches a published tenant, so that shape has no run-start site.
         planted_sites = tuple(site for site in sites if not (shape == "unreadable" and site == "run-start"))
         vs = verdicts(w, planted_sites)
-        assert_refused(vs["check-folder"], LEGACY_RECORD)
+        rc, err = tenant_py(capsys, "check", "--folder", str(w.planted.knowledge))
+        assert rc != 0, err
+        retired = [line for line in err.splitlines() if LEGACY_FOLDER in line and "retired" in line]
+        assert retired, f"check --folder does not report the retired {LEGACY_FOLDER} folder: {err}"
+        assert "Traceback" not in err, err
         assert_passed(vs["acceptance"])
         if "run-start" in vs:
             assert_passed(vs["run-start"])

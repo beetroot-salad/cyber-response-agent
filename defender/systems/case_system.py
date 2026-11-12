@@ -1,14 +1,16 @@
 """The case system a tenant names (#1359): which adapter takes the host's comment, and whether
-the tenant's settings let it.
+the tenant's records let it.
 
-One judgement, two askers (D-17): the record leg at run end and `tenant check` on a folder both
-call `judge_case_system`, so the check cannot pass what the leg would refuse. It reads the
-tenant's `settings/case-record.yaml` as recorded when the run began, the case system's adapter
-(from the roster the run reads), its access declaration when the system is reached through the
-credential proxy, then its `check_settings` over the same record — judged by
+One judgement, every asker (D-17, #1366 C3): the record leg at run end (`case_verdict`, made at run
+start) and `tenant check` both call `judge_case_system`, so the check cannot pass what the leg
+would refuse. It reads the tenant's case record as the run read it at its start, the case
+system among the tenant's systems (#1366 O1: its enabled records the catalog carries, never the
+whole checkout), that system's settings judged by its adapter's own `check_settings` (through
 `system_status.judge_adapter`, the run start's own rules, so a missing or crashing check is the
-adapter's defect here as there. Every failure is a `CaseSettingsFault` naming the one file that is
-wrong, and nothing else escapes: both askers may call it unguarded.
+adapter's defect here as there), then the cover rule over its stored access declaration
+(`record_judgement.case_cover_fault`, C2, the store's own rule). Every failure is a
+`CaseSettingsFault` naming the record that is wrong (DC6: `the case record`, `system <s>
+settings`, `system <s> access`), and nothing else escapes: every asker may call it unguarded.
 """
 from __future__ import annotations
 
@@ -17,21 +19,20 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from defender._paths import adapters_under
-from defender.kit.access import AccessDeclaration
 from defender.kit.faults import ConfigFault
-from defender.kit.settings import config_pointer, pointer_to
+from defender.kit.settings import RECORDS, pointer_to
 from defender.kit.verbs import COMMENT_ACTION, HOST_ACTIONS, READBACK_ACTION, CaseComments
 from defender.systems.run_tenant import RunTenant
 from defender.systems.system_status import AdapterBroken, NotConfigured, ReasonScope, judge_adapter
-from defender.systems.verbs import RegistryError, RosterRead, fresh_adapter_module, read_roster
+from defender.systems.verbs import RosterRead, fresh_adapter_module
 from defender.tenancy.case_ticket import (
     CASE_RECORD_REL, CaseRecordSettings, CaseTicketError)
 
 #: The retired system folder a tenant may still hold; `tenant check` names the new file for it.
 LEGACY_SYSTEM = "case-history"  # lint-shippable: ok — the retired system's folder name, named only to tell the operator to migrate
 
-CASE_RECORD_POINTER = pointer_to(CASE_RECORD_REL)
+#: How a case-system fault names the tenant's case record (#1366 DC6: the record, not a file).
+CASE_RECORD_POINTER = RECORDS.case()
 
 
 class CaseSettingsFault(Exception):  # noqa: N818 — named for what it reports
@@ -76,19 +77,19 @@ def legacy_folder_finding(settings: Path) -> str | None:
     return None
 
 
-def _adapter_of(system: str, *, defender_dir: Path, roster: RosterRead | None) -> tuple[Any, RosterRead]:
-    """`system`'s adapter module, read fresh from the checkout, or the `CaseSettingsFault` naming
-    `settings/case-record.yaml` for why it cannot take a comment: no adapter, an adapter the
-    roster refused, one that will not load, or one without the comment action."""
-    if roster is None:
-        try:
-            roster = read_roster(adapters_under(Path(defender_dir)))
-        except RegistryError as e:
-            raise CaseSettingsFault(CASE_RECORD_POINTER,
-                                    f"cannot be judged: the adapters cannot be read ({e})") from None
+def _adapter_of(system: str, *, roster: RosterRead) -> Any:
+    """`system`'s adapter module among the tenant's systems (`roster`, #1366 O1: never the whole
+    checkout), read fresh, or the `CaseSettingsFault` naming the case record for why it cannot
+    take a comment: not among the tenant's systems, a platform-served system (no adapter), an
+    adapter the roster refused, one that will not load, or one without the comment action."""
     if system not in roster.adapter_files:
-        raise CaseSettingsFault(CASE_RECORD_POINTER,
-                                f"names the system `{system}`, which has no adapter")
+        if system in roster.verbs:  # a platform-served system: in every roster, with no adapter
+            raise CaseSettingsFault(CASE_RECORD_POINTER,
+                                    f"names the system `{system}`, which has no adapter")
+        raise CaseSettingsFault(
+            CASE_RECORD_POINTER,
+            f"names the case system `{system}`, which is not among the tenant's systems (it has no "
+            "enabled record whose adapter the catalog carries): a case system is one of them")
     if system in roster.unparsed:
         why = roster.unparsed[system]
         shown = why if any(a in why or a.replace("_", "-") in why for a in HOST_ACTIONS) \
@@ -108,48 +109,50 @@ def _adapter_of(system: str, *, defender_dir: Path, roster: RosterRead | None) -
             CASE_RECORD_POINTER,
             f"names the system `{system}`, whose adapter has no `{COMMENT_ACTION}`: it cannot "
             "record a comment")
-    return module, roster
+    return module
 
 
 def judge_case_system(
-    record: Any, *, defender_dir: Path, roster: RosterRead | None = None,
+    record: Any, *, defender_dir: Path, roster: RosterRead,
 ) -> CaseTarget:
     """The case system `record` names, ready to take a comment, or `CaseSettingsFault`.
 
-    `record` is the run's tenant record (or `tenant check`'s stand-in over a folder): it carries
-    `case_record`, `systems` and `access`, read once when the run began. A tenant with no
-    case-record file has no case system: that too is a fault, said so, for the callers that asked
-    (`--update-ticket` was given)."""
+    `record` is the run's tenant record (or `tenant check`'s, built from the same records): it
+    carries `case_record`, `systems` and `access`, read once when the run began. `roster` is the
+    tenant's systems (`TenantSystems.roster`, built once and handed, #1366 R16: never computed
+    here), or the whole catalog's from a caller with no tenant. A tenant with no case record has no
+    case system: that too is a fault, said so, for the callers that asked (`--update-ticket` was
+    given). Order (C3): the case record, its system among the tenant's, its settings (the
+    adapter's own check), then the cover of its comment route by its stored access."""
     case = record.case_record
     if case is None:
         raise CaseSettingsFault(CASE_RECORD_POINTER, "is absent: the tenant names no case system "
                                 "to record the findings in")
     if isinstance(case, CaseTicketError):
         raise CaseSettingsFault(CASE_RECORD_POINTER,
-                                str(case).removeprefix(f"settings/{CASE_RECORD_REL} "))
+                                str(case).removeprefix(f"{CASE_RECORD_POINTER} ")
+                                .removeprefix(f"settings/{CASE_RECORD_REL} "))
     system = case.system
-    module, roster = _adapter_of(system, defender_dir=defender_dir, roster=roster)
-    # Every case system is reached through the credential proxy (#1391 P1): its access
-    # declaration must be usable and declare the comment's route. Judged before the settings
-    # check, so a fault the check raises is about `config.env`, never this file (O-S3).
-    _judge_access(system, record.access)
+    module = _adapter_of(system, roster=roster)
     # The run's own reason scope, as run start's judgement uses: a crash text naming the
     # tenant's folder or the data root is shown by name, never located.
     scope = ReasonScope(tenant=record if isinstance(record, RunTenant) else None,
                         defender_dir=Path(defender_dir), adapters_root=Path(roster.root))
     cause = judge_adapter(lambda: module, tenant=record, scope=scope)
     if isinstance(cause, NotConfigured):
-        config = config_pointer(system)
-        raise CaseSettingsFault(config, cause.reason.removeprefix(f"{config}: "))
+        settings, access = RECORDS.part(system, "settings"), RECORDS.part(system, "access")
+        where = access if cause.reason.startswith(access) else settings
+        raise CaseSettingsFault(where, cause.reason.removeprefix(where).lstrip(": ") or cause.reason)
     if isinstance(cause, AdapterBroken):
         raise CaseSettingsFault(CASE_RECORD_POINTER,
                                 f"names the system `{system}`, whose adapter cannot be used: "
                                 f"{cause.reason}", adapter_refused=True)
+    _judge_cover(system, module, record)
     return CaseTarget(system=system, template=case, module=module)
 
 
 def case_verdict(
-    record: Any, *, defender_dir: Path, roster: RosterRead | None = None,
+    record: Any, *, defender_dir: Path, roster: RosterRead,
 ) -> CaseTarget | CaseSettingsFault:
     """`judge_case_system` as a value: run start judges once, over the roster the run reads, and
     hands the verdict to both the token mint and the record step, so they cannot disagree."""
@@ -159,19 +162,30 @@ def case_verdict(
         return fault
 
 
-def _judge_access(system: str, access: Mapping[str, AccessDeclaration | ConfigFault]) -> None:
-    """The case system's access declaration must be usable and declare its comment route: at
-    least one write route in its `access.yaml` (D-16)."""
-    pointer = pointer_to(f"systems/{system}/access.yaml")
-    found = access.get(system)
+def _judge_cover(system: str, module: Any, record: Any) -> None:
+    """The case system's stored access declaration must be usable and cover its adapter's
+    comment route (#1366 C2, C5): THE cover rule the store's write and `tenant check` ask
+    (`record_judgement.case_cover_fault`). An adapter that declares no comment route offers no
+    comment action there, catalog adapter or not. A route the settings cannot build is the
+    adapter's settings fault, named at the system's settings."""
+    from defender.systems.record_judgement import case_cover_fault
+
+    pointer = RECORDS.part(system, "access")
+    found = record.access.get(system)
     if isinstance(found, ConfigFault):
-        raise CaseSettingsFault(pointer, found.detail.removeprefix(f"{pointer} ").lstrip(": "))
+        raise CaseSettingsFault(pointer, found.detail.removeprefix(pointer).lstrip(": "))
     if found is None:
         raise CaseSettingsFault(pointer, "is absent: a case system is reached only through the "
                                 "credential proxy, at the base its access declaration names")
-    if not found.writes:
-        raise CaseSettingsFault(pointer, "declares no write route: the host's comment has no "
-                                "route to be sent on")
+    settings = record.systems.get(system)
+    try:
+        why = case_cover_fault(module, settings if isinstance(settings, Mapping) else {}, found)
+    except ConfigFault as fault:
+        where = RECORDS.part(system, "settings")
+        raise CaseSettingsFault(where, str(fault).removeprefix(where).lstrip(": ")) from None
+    if why is not None:
+        raise CaseSettingsFault(pointer, f"the case system `{system}` cannot take the comment "
+                                f"{CASE_RECORD_POINTER} sends through it: {why}")
 
 
 __all__ = [

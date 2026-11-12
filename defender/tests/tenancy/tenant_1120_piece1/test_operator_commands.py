@@ -19,14 +19,12 @@ from defender.tests.support.shared.contracts._frontend_outputs import frontend_o
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — shared pytest fixture
 from defender.tests.support.tenancy._active1214 import database_env, insert_active_tenant
 
-from defender.tenancy import _tenant
 from defender import run as run_py
 from defender.cli.learning import branch as branch_entry
 from defender import box as box_mod
 from defender.execution import box_codec
 from defender.cli import policy_cli
 from defender.cli import tenant as tenant_py
-from defender.skills.connect import validate_scaffold
 from defender.tests.support.storage._alert_plant import plant_alert as plant_alert_with_record
 from defender.tests.support.learning.branch import _triplet_947 as T947
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H78
@@ -40,50 +38,6 @@ HEALTH_CHECK_ONLY_TABLE = "dispositions:\n  cmdb:\n    health-check: {roles: [ga
 
 #: A `verb-grants.yaml` that is not YAML (an unclosed flow mapping) — the unloadable table.
 UNPARSEABLE_TABLE = "dispositions:\n  cmdb:\n    health-check: {roles: [gather]\n"
-
-
-#: The row `validate_scaffold` prints once it has checked a clean `config.env`.
-CONFIG_CHECKED = "config.env carries no inline secrets"
-
-#: The WARN / FAIL glyphs `validate_scaffold.Report` prints each row with.
-WARN_ROW, FAIL_ROW = "[!]", "[✗]"
-
-
-def _ticket_config(settings: Path) -> Path:
-    return settings / "systems" / "ticket" / "config.env"
-
-
-def _mark_ticket_config(settings: Path, marker_key: str, *, drop_timeout: bool) -> Path:
-    """Give a tenant's ticket `config.env` an inline-secret marker line (a key `validate_scaffold`
-    FAILs by name) and, with `drop_timeout`, lose the required `TICKET_TIMEOUT_SEC`."""
-    path = _ticket_config(settings)
-    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines(keepends=True)
-             if not (drop_timeout and ln.startswith("TICKET_TIMEOUT_SEC"))]
-    path.write_text("".join(lines) + f'{marker_key}="inline-marker-{marker_key.lower()}"\n',
-                    encoding="utf-8")
-    return path
-
-
-def _other_tree(tmp_path: Path, tenant_id: str, marker_key: str) -> Path:
-    """Another checkout's `defender/` whose `knowledge/tenants/<tenant_id>` holds a complete tenant
-    folder carrying `marker_key` in its ticket config — what a command would find if it derived its
-    tenants root from an exported `$DEFENDER_DIR`."""
-    other = tmp_path / "other-checkout"
-    (other / "defender").mkdir(parents=True)
-    folder = other / "knowledge" / "tenants" / tenant_id
-    shutil.copytree(H.FIXTURE, folder)
-    _mark_ticket_config(folder / "settings", marker_key, drop_timeout=True)
-    return other / "defender"
-
-
-def _validate_scaffold(root: Path | None, tenant_id: str, **kw: Any) -> Any:
-    """`validate_scaffold.py ticket --tenant <id>`, as the operator runs it."""
-    return H.run_script(H.script_of(validate_scaffold), "ticket", "--tenant", tenant_id,
-                        root=root, **kw)
-
-
-def _rows(text: str, glyph: str) -> list[str]:
-    return [ln.strip() for ln in text.splitlines() if ln.strip().startswith(glyph)]
 
 
 def _policy_gather(tmp_path: Path, tenant_id: str) -> tuple[int | None, str]:
@@ -102,14 +56,13 @@ def _census_lint(repo: Path) -> Any:
 
 def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_checkouts(
         data_root: Path, tmp_path: Path, capsys) -> None:
-    """policy_cli's grant and validate_scaffold's config check come from the data root's copy,
-    never the checkout's knowledge/ or an exported `DEFENDER_DIR`'s tree."""
+    """policy_cli's grants come from the data root's copy, never the checkout's knowledge/. (validate_scaffold's
+    `config.env` check over a data-root tenant is retired: #1366 O9/O11, its judgement moved onto connect's handoff,
+    `tenant_1107_settings/test_validator.py`.)"""
     tid = fixture_uuid("tenant:playground")
     H.adopted(data_root, tid)
     settings = H.settings_dir(data_root, tid)
     (settings / "verb-grants.yaml").write_text(HEALTH_CHECK_ONLY_TABLE, encoding="utf-8")
-    _mark_ticket_config(settings, "TICKET_SPEC1120_DATA_ROOT_TOKEN", drop_timeout=True)
-    other_defender = _other_tree(tmp_path, tid, "TICKET_SPEC1120_OTHER_TREE_TOKEN")
     table = settings / "verb-grants.yaml"
 
     # policy_cli: the data-root table decides gather's grant.
@@ -122,49 +75,11 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
     assert rc == 0, f"policy_cli refused the data-root tenant's granting table: {text}"
     assert "agent: gather" in capsys.readouterr().out
 
-    for defender_dir_env in ({}, {"DEFENDER_DIR": str(other_defender)}):
-        unset = ("DEFENDER_DIR",) if not defender_dir_env else ()
-        # validate_scaffold: the data-root config.env is the one checked.
-        out = H.output(_validate_scaffold(data_root, tid, unset=unset, **defender_dir_env))
-        assert "Traceback (most recent call last)" not in out, out
-        assert any("TICKET_SPEC1120_DATA_ROOT_TOKEN" in row for row in _rows(out, FAIL_ROW)), (
-            f"validate_scaffold did not check the data-root config.env ({defender_dir_env}):"
-            f"\n{out}")
-        assert "OTHER_TREE" not in out, out
-        assert str(H.KNOWLEDGE_ROOT) not in out, out
 
-
-def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_without_a_traceback(
-        data_root: Path, tmp_path: Path) -> None:
-    """validate_scaffold and the census lint catch TenantRefused and surface its message in their
-    own idiom, never a traceback."""
-    elsewhere = tmp_path / "elsewhere" / "knowledge"
-    shutil.copytree(H.FIXTURE, elsewhere)
-    H.write_tenant_id_file(elsewhere, H.TID, "id")
-    _mark_ticket_config(elsewhere / "settings", "TICKET_SPEC1120_CONTROL_TOKEN",
-                        drop_timeout=True)
-    link = H.knowledge_dir(data_root)
-    link.parent.mkdir(parents=True)
-    link.symlink_to(elsewhere, target_is_directory=True)
-    owner = H.accept_refusal(_tenant, data_root, H.TID)
-
-    scaffold = _validate_scaffold(data_root, H.TID)
-    H.assert_ran(scaffold)
-    warned = _rows(H.output(scaffold), WARN_ROW)
-    assert any(owner in row for row in warned), (
-        f"validate_scaffold did not print accept_tenant's refusal as a WARN:\n"
-        f"{H.output(scaffold)}")
-    assert not any(owner in row for row in _rows(H.output(scaffold), FAIL_ROW))
-    assert "TICKET_SPEC1120_CONTROL_TOKEN" not in H.output(scaffold), (
-        "validate_scaffold checked the config of a tenant acceptance refused")
-
-    # The positive control: the same folder, placed for real.
-    link.unlink()
-    shutil.move(str(elsewhere), str(link))
-    scaffold = _validate_scaffold(data_root, H.TID)
-    H.assert_ran(scaffold)
-    assert "TICKET_SPEC1120_CONTROL_TOKEN" in H.output(scaffold), H.output(scaffold)
-
+def test_1120_the_census_lint_refuses_a_fixture_with_a_link_without_a_traceback(tmp_path: Path) -> None:
+    """The census lint refuses a fixture holding a link, in its own idiom, never a traceback; the clean checkout passes.
+    (Its validate_scaffold half is retired: connect's validator is a no-tenant surface judging the handoff, #1366
+    O1/O11.)"""
     # The census lint over a tmp repo whose fixture folder acceptance's folder rules refuse.
     repo = H.tmp_checkout(tmp_path / "repo")
     lint = _census_lint(repo)
@@ -184,28 +99,17 @@ def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_witho
 
 def test_1120_s6_operator_tools_in_a_shell_without_the_data_root(
         data_root: Path, tmp_path: Path, monkeypatch) -> None:
-    """With DEFENDER_DATA_ROOT unset, validate_scaffold --tenant and policy_cli gather --tenant each
-    report resolve_data_root's refusal naming the variable."""
+    """With DEFENDER_DATA_ROOT unset, policy_cli gather --tenant reports resolve_data_root's refusal naming
+    the variable. (#1366 O1/O11: validate_scaffold --tenant is retired; connect's validator judges the handoff.)"""
     tid = fixture_uuid("tenant:playground")
     H.adopted(data_root, tid)
 
-    scaffold = _validate_scaffold(None, tid)
-    H.assert_ran(scaffold)
-    out = H.output(scaffold)
-    assert any(H.DATA_ROOT_ENV in row for row in _rows(out, WARN_ROW)), (
-        f"validate_scaffold did not WARN naming {H.DATA_ROOT_ENV}:\n{out}")
-    assert not any(H.DATA_ROOT_ENV in row for row in _rows(out, FAIL_ROW)), out
-    assert CONFIG_CHECKED not in out, (
-        f"validate_scaffold checked a config.env without a data root:\n{out}")
     monkeypatch.delenv(H.DATA_ROOT_ENV, raising=False)
     rc, text = _policy_gather(tmp_path, tid)
     assert rc is None, f"policy_cli gather built a policy without a data root: {rc}"
     assert H.DATA_ROOT_ENV in text, (
         f"policy_cli gather did not refuse naming {H.DATA_ROOT_ENV}: {text!r}")
 
-    scaffold = _validate_scaffold(data_root, tid)
-    H.assert_ran(scaffold)
-    assert CONFIG_CHECKED in H.output(scaffold), H.output(scaffold)
     monkeypatch.setenv(H.DATA_ROOT_ENV, str(data_root))
     rc, text = _policy_gather(tmp_path, tid)
     assert rc == 0, f"policy_cli refused a tenant under a set data root: {text}"
@@ -246,12 +150,10 @@ def _launch(source: Path) -> BaseException | int:
 def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_table(
         data_root: Path, tmp_path: Path, capsys) -> None:
     """An unparseable verb-grants.yaml is a named refusal from check, run.main, the launcher,
-    and policy_cli; validate_scaffold, which never loads the table, accepts the tenant."""
+    and policy_cli."""
     H.adopted(data_root)
     table = H.settings_dir(data_root) / "verb-grants.yaml"
     table.write_text(UNPARSEABLE_TABLE, encoding="utf-8")
-    _mark_ticket_config(H.settings_dir(data_root), "TICKET_SPEC1120_UNLOADABLE_TOKEN",
-                        drop_timeout=True)
 
     H.assert_refused(H.check(tenant_py, data_root, H.TID), "verb-grants.yaml")
 
@@ -277,13 +179,6 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     rc, text = _policy_gather(tmp_path, H.TID)
     assert rc is None, f"policy_cli built gather's policy over an unloadable table: {rc}"
     assert str(table) in text, f"policy_cli did not refuse naming the table: {text!r}"
-
-    # The consumer that never loads the table accepts the tenant.
-    capsys.readouterr()
-    out = H.output(_validate_scaffold(data_root, H.TID))
-    assert "TICKET_SPEC1120_UNLOADABLE_TOKEN" in out, (
-        f"validate_scaffold did not check the tenant's config:\n{out}")
-    assert "verb-grants.yaml" not in out, out
 
 
 def _mount_specs(argv: list[str]) -> list[dict[str, str]]:

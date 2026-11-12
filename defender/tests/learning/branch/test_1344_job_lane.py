@@ -112,7 +112,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     """The job entry in-process over `_spec1224`'s fixture tenant (or `estate`, made at `tmp_path`), the source run
     holding `calls` (default: `_calls()`); every paid seam a recording double. `extra` seams (the launcher's
     `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults."""
-    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn
+    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, handed_records
     from defender.tests.support.jobs._socket_standin1170 import materialise as materialise_export
     from defender.tests.support.jobs._socket_standin1170 import passes as helper_passes
 
@@ -134,7 +134,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         questioner=asking, preflight=preflight or S.no_preflight, live_tree=live_tree or T.source_capture(),
         roster=est.roster(), judge=grading,
         oracle=(oracle or S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM))).model,
-        verifier=S.passing_verifier().model, directory=T.launcher_directory(tenant), spawn=siblings,
+        verifier=S.passing_verifier().model, directory=est.launch_directory(tenant), spawn=siblings,
         candidates=candidates if candidates is not None else choose(T.BRANCH_MESSAGE_ID))
     if grade is not None:
         seams["grade"] = grade
@@ -146,6 +146,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
             tenant, extra.pop("helper_grant"), directory=extra.get("directory", seams["directory"]), proxy_url=extra.pop("proxy_url"),
             signer=extra.pop("signer", None), transport=extra.pop("issuer_transport", None))
     seams.update(extra)
+    launch["records"] = handed_records(seams["directory"], tenant)
     # In its job container (#1170 A6): no `--parent-pid`, and a job socket answering the helper's `launch` facts and the
     # export it materialises; the helper's own answers are `tests/jobs/test_job_helper_learning.py`'s.
     argv = ["--job", job, "--tenant", tenant, "--source", src.name]

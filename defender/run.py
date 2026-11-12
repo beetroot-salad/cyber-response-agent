@@ -56,7 +56,6 @@ from defender import _clock, _log  # noqa: E402
 from defender.records.formats import AlertMapping, DataRoot, RunsBase  # noqa: E402
 from defender.records import formats  # noqa: E402
 from defender import run_common as _run  # noqa: E402
-from defender._paths import adapters_under  # noqa: E402
 from defender import job_socket  # noqa: E402
 from defender.records import Run  # noqa: E402
 from defender.records import job_facts, job_lane  # noqa: E402
@@ -74,6 +73,7 @@ from defender.tenancy import run_knowledge  # noqa: E402
 from defender.systems import case_system, system_status  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa: E402
+from defender.tenancy.record_values import TenantRecords  # noqa: E402
 from defender.systems.system_status import RunSystems  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
@@ -83,10 +83,8 @@ from defender.kit.faults import AdapterFault, ConfigFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
 from defender.systems.verbs import (  # noqa: E402
     ModuleVerbRegistry,
-    RegistryError,
     RosterRead,
     ServingAbort,
-    read_roster,
 )
 from defender.investigation import ticket_writer as _default_ticket_writer  # noqa: E402
 
@@ -337,10 +335,9 @@ class _Investigate(Protocol):
     """The investigation seam's exact shape, so both the call site and `_drive_investigation`
     stay type-checked (tests inject the seam, so only a real run would catch a renamed keyword).
 
-    The run's judgement of its systems is not part of it: the lifecycle binds the one `main`
-    made at run start (`system_status.RunSystems`: the roster the run reads and each system down
-    at its start) into whichever seam it drives (`_judged`), which hands it to
-    `_drive_investigation(systems=…)`.
+    `systems` is the run's one judgement of its systems, `main`'s at run start
+    (`system_status.RunSystems`: the tenant's roster the run reads and each system down at its
+    start), handed to every seam (#1366 R16: required, never computed by the drive).
 
     `job_facts` is a job's facts holder (#1342 r5 C2), handed on the job lane only: the driver
     keeps its review state in the holder's dict.
@@ -349,6 +346,7 @@ class _Investigate(Protocol):
     def __call__(  # noqa: PLR0913 — the investigation's whole identity, one keyword each
         self, *, alert_path: Path, run: Run, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
+        systems: RunSystems,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
         source: Run | None = None, job_facts: _JobEndFacts | None = None,
         access: RequestAccess | None = None, clock_origin: ClockOrigin | None = None,
@@ -385,11 +383,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     registry_cls: Any = ModuleVerbRegistry,
     investigate: Callable[..., dict[str, Any]] = _run_the_driver,
     #: The run's one judgement of its systems (#1256), made by `main` before the run folder
-    #: existed: the roster the run reads and each granted system down at its start. The
-    #: registry is built over that roster and the driver holds that verdict, so the run is
-    #: judged once. `None` (a direct caller with no `main` before it): the roster is
-    #: `defender_dir`'s, read here, and the driver judges it.
-    systems: RunSystems | None = None,
+    #: existed: the tenant's roster the run reads and each granted system down at its start.
+    #: The registry is built over that roster and the driver holds that verdict, so the run is
+    #: judged once. Required (#1366 R16): the drive never reads a roster of its own.
+    systems: RunSystems,
     #: A job's facts holder (#1342 r5 C2): the driver keeps its review state in the holder's
     #: dict, so the job entry reads the close however the run ends. `None` off the job lane.
     job_facts: _JobEndFacts | None = None,
@@ -414,8 +411,8 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     The two registries are built in separate arms of one `if` so both can never exist.
     """
     # The roster `main` judged, handed down to the registry and `run_investigation` with its
-    # verdict; read here only for a direct caller, whose run the driver judges.
-    roster = systems.roster if systems is not None else read_roster(adapters_under(defender_dir))
+    # verdict.
+    roster = systems.roster
     held: dict[str, Any] = {} if job_facts is None else {"review_state": job_facts.review_state}
     if run_state is not None:
         held["run_state"] = run_state
@@ -478,18 +475,6 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     )
 
 
-def _judged(investigate: _Investigate, systems: RunSystems | None) -> _Investigate:
-    """`investigate` with the run's one judgement of its systems bound in (`systems=`), when
-    `main` made one (#1256): the seam's shape (`_Investigate`) stays the investigation's
-    identity, and the judgement rides beside it to the drive that holds it
-    (`_drive_investigation`, or a seam composed over it), so the run is not judged twice.
-    Without one, the seam as it is: its driver judges."""
-    if systems is None:
-        return investigate
-    seam: Callable[..., dict[str, Any]] = investigate
-    return functools.partial(seam, systems=systems)
-
-
 def _access_kwargs(access: RequestAccess | None) -> dict[str, RequestAccess]:
     """`access=` for a seam to take, only when the run has one: a seam that predates the
     credential proxy is not handed a keyword it has no use for."""
@@ -517,10 +502,9 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: The opened source run a world forks, threaded beside `world`.
     source: Run | None = None,
     #: The run's one judgement of its systems, made by `main` at run start (#1256), handed to
-    #: the investigation beside its seam's shape (`_judged`) so the run reads that roster and
-    #: holds that verdict (`None`: the drive reads `defender_dir`'s roster and the driver
-    #: judges it, as for a direct caller).
-    systems: RunSystems | None = None,
+    #: the investigation so the run reads that roster and holds that verdict. Required (#1366
+    #: R16): no drive reads a roster of its own.
+    systems: RunSystems,
     #: The run clock's start (`--as-of`, #1347), threaded to the drive; `None` on an ordinary run.
     clock_origin: ClockOrigin | None = None,
     #: The credential proxy's address and the run's read token (#1163), signed at run start.
@@ -576,7 +560,6 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             raise box_mod.BoxStartFault(f"the run's box did not start: {fault}") from fault
     if job_facts is not None:
         job_facts.box = _BOX_STARTED
-    drive = _judged(investigate, systems)
     # The job's facts holder (#1342) and the run's request access (#1163), each only when the run
     # has one: a seam that predates either is not handed a keyword it has no use for.
     keywords: dict[str, Any] = {} if job_facts is None else {"job_facts": job_facts}
@@ -588,7 +571,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     # teardown fault on it is logged, never raised over the ending.
     box_ending = False
     try:
-        summary = drive(
+        summary = investigate(
             alert_path=RunPaths(run_dir).alert,
             run=run,
             defender_dir=defender_dir,
@@ -600,6 +583,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             episode=episode,
             serving=serving,
             source=source,
+            systems=systems,
             **keywords,
         )
         investigation_ok = True
@@ -723,6 +707,10 @@ _knowledge_source = _run.resolve_knowledge
 _copy_knowledge = _run.copy_knowledge
 _write_knowledge_record = _run.write_knowledge_record
 _read_alert_mapping = _run.read_alert_mapping
+_read_records = _run.read_records
+_write_record_versions = _run.write_versions_record
+_tenant_verdict = _run.tenant_verdict
+_run_roster = _run.run_roster
 
 
 def _family_pin(ns: argparse.Namespace, pin: str | None, episode: Any) -> str | None:
@@ -775,17 +763,8 @@ def _early_run(ns: argparse.Namespace, accepted: tenancy.Tenant, world: Any, epi
         sys.exit(f"[run.py] {where}{refused}")
 
 
-def _run_roster(defender_dir: Path) -> RosterRead:
-    """The adapters roster of the tree this run reads, read ONCE by `main` — or its refusal: an
-    adapters tree that cannot be read stops the run before it exists."""
-    try:
-        return read_roster(adapters_under(defender_dir))
-    except RegistryError as unreadable:
-        sys.exit(f"[run.py] {unreadable}")
-
-
 def _judge_start(tenant: RunTenant, *, roster: RosterRead, defender_dir: Path,
-                 known_ids: Collection[str] = ()) -> RunSystems:
+                 known_ids: Collection[str] = (), catalog: RosterRead | None = None) -> RunSystems:
     """#1256 O-8, before the run exists: the run's ONE judgement of its systems
     (`system_status.judge_run`) — each granted system judged by its own adapter's settings check
     over `roster`, the roster this run reads — handed back whole, for `main` to hand on to the
@@ -795,10 +774,10 @@ def _judge_start(tenant: RunTenant, *, roster: RosterRead, defender_dir: Path,
     folder, the box and any model call; nothing is logged or held here — the driver does that
     once, when the run starts. Never in the tenant resolution the tenant check and
     `defender-policy` share: whether a system is usable is a run's question, not the tenant's
-    (D4)."""
+    (D4). `catalog`, the whole catalog `roster` was drawn from, is handed on with the judgement."""
     try:
         systems = system_status.judge_run(
-            roster, tenant, defender_dir=defender_dir, known_ids=known_ids)
+            roster, tenant, defender_dir=defender_dir, known_ids=known_ids, catalog=catalog)
         system_status.require_usable(tenant.grants, systems.down)
     except (GrantError, system_status.NoUsableSystem) as refusal:
         sys.exit(f"[run.py] this run's tenant {tenant.tenant_id!r} cannot be used: {refusal}")
@@ -1052,6 +1031,14 @@ class _Started:
     #: on an ordinary run.
     as_of: ClockOrigin | None = None
 
+    def record_case(self) -> case_system.CaseTarget | case_system.CaseSettingsFault:
+        """The verdict the record step comments on: set at setup whenever the run records its case,
+        so its absence there is a caller bug, never a reason to judge again (#1366 R16)."""
+        if self.case is None:
+            raise TypeError("the record step needs the case verdict judged at run start "
+                            "(`--update-ticket`), and setup made none")
+        return self.case
+
     def lifecycle_kwargs(self, ns: argparse.Namespace) -> dict[str, Any]:
         # The origin only when set, so a lifecycle seam that predates it is called as before.
         origin_kw: dict[str, Any] = {} if self.as_of is None else {"clock_origin": self.as_of}
@@ -1115,7 +1102,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
         # One readiness check, shared by the old-manifest judge (only for a manifest recording
         # no corpus patterns) and the run; resolved over the run's own copy of its knowledge.
         tenant_of = functools.cache(lambda: _resolve_run_tenant(
-            accepted, dispatches_lead_zero=ns.episode is None, copy=copy))
+            accepted, dispatches_lead_zero=ns.episode is None, records=current, copy=copy))
         world = _resume_target(ns, episode=episode, tenant=lambda: tenant_of(),
                                arm_ids=(lambda: None) if episode_runs is None
                                else episode_runs.arm_ids)
@@ -1124,6 +1111,9 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
         # A fresh run derives its facts through the tenant's alert mapping, read from the tenant records once,
         # here: before the knowledge copy and the run folder, so a tenant with none (or records that cannot be
         # reached) is refused with nothing made (#1345 O3, O4). A sibling carries its source's record.
+        # The tenant's current records (#1366 O6), read once here for every lane, siblings too
+        # (H9): a tenant not imported is refused (R8) before its alert mapping is looked at.
+        current = _read_records(records, accepted.id)
         mapping = None if world is not None else _read_alert_mapping(records, accepted.id)
 
         # The one refusal knowable without the run's knowledge, made before the launch-time
@@ -1144,7 +1134,12 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             # The tenant's settings (and with them the one tenant check), over the run's copy:
             # resolved before the input is read and before anything billable is spent; nothing
             # below reads them again.
-            tenant = tenant_of()
+            # The tenant's systems over the catalog this run reads (the injected roster, or the
+            # checkout's, read once here): R12's grants x records verdict (#1366), the grants
+            # narrowed to the systems the tenant has records for.
+            verdict = _tenant_verdict(
+                tenant_of(), roster if roster is not None else _run_roster(DEFENDER_DIR))
+            tenant = verdict.tenant
             # The run's one judgement of its systems (#1256), before the run is made: the roster
             # this run reads (the injected one, or the checkout's, read once here), judged by the
             # adapters' own settings checks over those settings — a start at which no granted
@@ -1154,9 +1149,8 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
 
             known_ids = (() if world is None else family_identities(world.family, world.arm_ids))
             systems = _judge_start(
-                tenant, defender_dir=DEFENDER_DIR,
-                roster=roster if roster is not None else _run_roster(DEFENDER_DIR),
-                known_ids=known_ids)
+                tenant, defender_dir=DEFENDER_DIR, roster=verdict.systems.roster,
+                known_ids=known_ids, catalog=verdict.systems.catalog.roster)
             # The request tokens' signer, over the systems just judged (#1342
             # R6-8): a configuration that cannot sign them refuses here, before the run is made;
             # nothing is signed until a call or a ticket leg asks (r7 A20).
@@ -1206,6 +1200,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             # or the box exists.
             print(f"run_id={run_dir.name}", flush=True)
             _write_knowledge_record(run_dir, knowledge)
+            _write_record_versions(run_dir, current)
             yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world,
                            episode=episode, systems=systems, seams=seams, alert=alert,
                            minting=minting, case=case, as_of=origin)
@@ -1403,7 +1398,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                             run, tenant=tenant, defender_dir=DEFENDER_DIR,
                             env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent),
                             truncated_by=truncated_by, closed_before_cut=closed_before_cut,
-                            case=started.case, **token)
+                            case=started.record_case(), **token)
 
                     skipped = _not_curated(started, no_learn=ns.no_learn)
                     if skipped is not None:
@@ -1561,6 +1556,23 @@ def _helper_made(ns: argparse.Namespace, accepted: tenancy.Tenant,
     return run, copy
 
 
+def _container_systems(  # noqa: PLR0913 — the tenant, its copy and records, the roster, the lead flag, the ids
+    accepted: tenancy.Tenant, *, copy: run_knowledge.RunCopy, records: TenantRecords, roster: Any,
+    dispatches_lead_zero: bool, known_ids: Any = (),
+) -> tuple[RunTenant, RunSystems]:
+    """A job container's tenant and its one judgement of its systems (#1170 A6, #1366): the tenant
+    over its copy and the records its host helper read (no database here), its systems over the
+    catalog this container reads, its grants narrowed to them, then judged by the adapters' own
+    settings checks. The judgement runs adapter code, so it is the container's, never the
+    helper's (#1170 O5, N7)."""
+    tenant = _resolve_run_tenant(accepted, dispatches_lead_zero=dispatches_lead_zero, records=records,
+                                 copy=copy)
+    verdict = _tenant_verdict(tenant, roster if roster is not None else _run_roster(DEFENDER_DIR))
+    systems = _judge_start(verdict.tenant, defender_dir=DEFENDER_DIR, roster=verdict.systems.roster,
+                           known_ids=known_ids, catalog=verdict.systems.catalog.roster)
+    return verdict.tenant, systems
+
+
 def _set_up_in_container(  # noqa: PLR0913 — the request, its launch facts, the socket and the run half's seams
     ns: argparse.Namespace, data_root: DataRoot, launch: Mapping[str, Any],
     request: Callable[..., dict[str, Any]], *, preflight: Callable[..., int], roster: Any,
@@ -1571,9 +1583,9 @@ def _set_up_in_container(  # noqa: PLR0913 — the request, its launch facts, th
     Its read pass comes from the helper, asked when a call needs it."""
     accepted = _container_tenant(ns, data_root)
     run, copy = _helper_made(ns, accepted, launch)
-    tenant = _resolve_run_tenant(accepted, dispatches_lead_zero=True, copy=copy)
-    systems = _judge_start(tenant, defender_dir=DEFENDER_DIR,
-                           roster=roster if roster is not None else _run_roster(DEFENDER_DIR))
+    current = _run.handed_records(launch, label=f"job {ns.job}")
+    tenant, systems = _container_systems(
+        accepted, copy=copy, records=current, roster=roster, dispatches_lead_zero=True)
     passes = _HelperPass(request, run_id=ns.job, proxy_url=str(launch.get("proxy_url") or ""),
                          granted=bool(launch.get("grant")))
     model = driver.resolve_main_model(ns.model)
@@ -1731,10 +1743,10 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
         source = _open_world_source(accepted.runs_repository(), world)
         run, copy = _sibling_made(request, ns, accepted, episode_runs, world)
         _family_pin(ns, _knowledge_pin(ns), episode)  # a `--knowledge-commit` naming another export refuses
-        tenant = _resolve_run_tenant(accepted, dispatches_lead_zero=False, copy=copy)
-        systems = _judge_start(tenant, defender_dir=DEFENDER_DIR,
-                               roster=roster if roster is not None else _run_roster(DEFENDER_DIR),
-                               known_ids=family_identities(world.family, world.arm_ids))
+        current = _run.handed_records(launch, label=f"--episode {ns.episode}")
+        tenant, systems = _container_systems(
+            accepted, copy=copy, records=current, roster=roster, dispatches_lead_zero=False,
+            known_ids=family_identities(world.family, world.arm_ids))
         passes = _HelperPass(request, run_id=run.run_dir.name, proxy_url=str(launch.get("proxy_url") or ""),
                              granted=bool(launch.get("grant")))
         model = driver.resolve_main_model(ns.model)

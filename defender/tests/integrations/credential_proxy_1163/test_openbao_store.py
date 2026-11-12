@@ -53,8 +53,9 @@ def _verifier(bao, tokens):
     return transit_verifier(bao.addr, tokens["proxy"])
 
 
-def _put(writer, tenant, system, kind, fields):
-    asyncio.run(writer.put_credentials(tenant, system, kind, fields))
+def _put(writer, tenant, system, kind, fields, generation=1):
+    """A set written at `generation` (a set is stored at `<tenant>/<system>/g<N>`; the first is g1). (#1366 P5)"""
+    asyncio.run(writer.put_credentials(tenant, system, kind, fields, generation=generation))
 
 
 def _b64(data: bytes) -> str:
@@ -78,17 +79,34 @@ def test_b1_the_writer_sets_and_asks_but_only_the_proxy_reads(openbao):
     writer = _writer(openbao, tokens["writer"])
     _put(writer, tenant, "identity", STATIC, {"api_key": H.CANARY_KEY})
 
-    assert asyncio.run(writer.has_credentials(tenant, "identity")) is True
-    assert asyncio.run(writer.has_credentials(tenant, "cmdb")) is False
+    assert asyncio.run(writer.has_credentials(tenant, "identity", generation=1)) is True
+    assert asyncio.run(writer.has_credentials(tenant, "cmdb", generation=1)) is False
     with pytest.raises(ConfigFault) as refused:
-        _store(openbao, tokens["writer"]).read(tenant, "identity")
+        _store(openbao, tokens["writer"]).read(tenant, "identity", 1)
     assert H.CANARY_KEY not in str(refused.value)
-    got = _store(openbao, tokens["proxy"]).read(tenant, "identity")
+    got = _store(openbao, tokens["proxy"]).read(tenant, "identity", 1)
     assert (got.fields, got.version) == ({"api_key": H.CANARY_KEY}, 1)
     with pytest.raises(ConfigFault):  # the proxy may not write
         _put(_writer(openbao, tokens["proxy"]), tenant, "identity", STATIC, {"api_key": "x" * 32})
-    assert _store(openbao, tokens["proxy"]).read(tenant, "identity").fields == {
+    assert _store(openbao, tokens["proxy"]).read(tenant, "identity", 1).fields == {
         "api_key": H.CANARY_KEY}
+
+
+def test_1366_p5_the_two_policies_cover_a_generations_path_and_a_set_is_stored_only_there(openbao):
+    """Against a real OpenBao (CI only): the writer sets and asks at `<tenant>/<system>/g<N>`, the proxy reads that
+    generation and not another, and the proxy still cannot write. (#1366 P5, A4)"""
+    tenant = openbao.tenant(key=False)
+    tokens = _tokens(openbao)
+    writer, reader = _writer(openbao, tokens["writer"]), _store(openbao, tokens["proxy"])
+    asyncio.run(writer.put_credentials(tenant, "identity", STATIC, {"api_key": H.CANARY_KEY}, generation=3))
+
+    assert asyncio.run(writer.has_credentials(tenant, "identity", generation=3)) is True
+    assert asyncio.run(writer.has_credentials(tenant, "identity", generation=2)) is False
+    assert reader.read(tenant, "identity", 3).fields == {"api_key": H.CANARY_KEY}
+    assert reader.read(tenant, "identity", 2) is None
+    assert reader.read(tenant, "identity", 1) is None
+    with pytest.raises(ConfigFault):  # the proxy may not write, at a generation path either
+        asyncio.run(_writer(openbao, tokens["proxy"]).put_credentials(tenant, "identity", STATIC, {"api_key": "x" * 32}, generation=3))
 
 
 def test_b1_at_the_wire_the_writer_gets_metadata_and_never_the_value(openbao):
@@ -98,7 +116,7 @@ def test_b1_at_the_wire_the_writer_gets_metadata_and_never_the_value(openbao):
     tokens = _tokens(openbao)
     _put(_writer(openbao, tokens["writer"]), tenant, "identity", STATIC,
          {"api_key": H.CANARY_KEY})
-    kv, path = openbao.kv_mount, f"{tenant}/identity"
+    kv, path = openbao.kv_mount, f"{tenant}/identity/g1"
 
     refused = openbao.call("GET", f"{kv}/data/{path}", token=tokens["writer"])
     asked = openbao.call("GET", f"{kv}/metadata/{path}", token=tokens["writer"])
@@ -124,15 +142,15 @@ def test_b6_the_kind_is_stored_with_the_set_and_a_write_replaces_the_whole_set(o
     tokens = _tokens(openbao)
     writer, store = _writer(openbao, tokens["writer"]), _store(openbao, tokens["proxy"])
     _put(writer, tenant, "crm", OAUTH, {"client_id": H.CLIENT_ID, "client_secret": H.CANARY_SECRET})
-    first = store.read(tenant, "crm")
+    first = store.read(tenant, "crm", 1)
     assert (first.kind, first.fields, first.version) == (
         OAUTH, {"client_id": H.CLIENT_ID, "client_secret": H.CANARY_SECRET}, 1)
 
     _put(writer, tenant, "crm", STATIC, {"api_key": H.CANARY_KEY})
-    second = store.read(tenant, "crm")
+    second = store.read(tenant, "crm", 1)
     assert (second.kind, second.fields, second.version) == (
         STATIC, {"api_key": H.CANARY_KEY}, 2)
-    assert store.read(tenant, "absent") is None
+    assert store.read(tenant, "absent", 1) is None
 
 
 def _secret_sent(seen: H.Seen) -> str:
@@ -295,16 +313,16 @@ def test_a25_the_proxy_policy_grants_exactly_kv_read_and_transit_verify(openbao)
     def refused(method, path, body=None):
         return openbao.call(method, path, token=proxy_token, json=body).status_code
 
-    assert _store(openbao, proxy_token).read(tenant, "identity") is not None, "control: the proxy reads the KV"
+    assert _store(openbao, proxy_token).read(tenant, "identity", 1) is not None, "control: the proxy reads the KV"
     assert _verifier(openbao, tokens).verify(b"claims-1163", signature, tenant_id=tenant) is True, "control: it verifies"
     assert [refused("LIST", f"{m}/keys"), refused("LIST", f"{m}/keys/"), refused("GET", f"{m}/keys?list=true"),
             refused("GET", f"{m}/keys/{key}"), refused("GET", f"{m}/keys/{key}/"),
             refused("POST", f"{m}/sign/{key}", {"input": _b64(b"x")}),
             refused("POST", f"{kv}/data/probe-{openbao.tag}", {"data": {"api_key": "x"}}),
-            refused("PUT", f"{kv}/data/{tenant}/identity", {"data": {"api_key": "x"}}),
-            refused("DELETE", f"{kv}/data/{tenant}/identity"),
+            refused("PUT", f"{kv}/data/{tenant}/identity/g1", {"data": {"api_key": "x"}}),
+            refused("DELETE", f"{kv}/data/{tenant}/identity/g1"),
             refused("LIST", f"{kv}/metadata"), refused("LIST", f"{kv}/metadata/"), refused("LIST", f"{kv}/metadata/{tenant}"),
-            refused("GET", f"{kv}/metadata/{tenant}/identity")] == [403] * 13
+            refused("GET", f"{kv}/metadata/{tenant}/identity/g1")] == [403] * 13
 
 
 _RULE = re.compile(r'path\s+"([^"]+)"\s*\{\s*capabilities\s*=\s*\[([^\]]*)\]\s*\}')
@@ -469,7 +487,7 @@ def test_b9_openbao_5xx_is_retryable_and_4xx_is_the_operators_to_fix(status, fau
         store = proxy().OpenBaoStore(addr=bao.url, token="t", mount="kv")
         verifier = transit_verifier(bao.url, "t")
         with pytest.raises(fault):
-            store.read(TENANT_FOR_STATUS, "identity")
+            store.read(TENANT_FOR_STATUS, "identity", 1)
         with pytest.raises(fault):
             verifier.verify(b"claims-1163", "vault:v1:x", tenant_id=TENANT_FOR_STATUS)
 
@@ -481,7 +499,7 @@ def test_b9_a_404_is_no_credential_for_the_store_and_a_destroyed_key_for_the_ver
         bao.replies = _always(404)
         store = proxy().OpenBaoStore(addr=bao.url, token="t", mount="kv")
         verifier = transit_verifier(bao.url, "t")
-        assert store.read(TENANT_FOR_STATUS, "identity") is None
+        assert store.read(TENANT_FOR_STATUS, "identity", 1) is None
         with pytest.raises(ConfigFault):
             verifier.verify(b"claims-1163", "vault:v1:x", tenant_id=TENANT_FOR_STATUS)
 
@@ -557,7 +575,7 @@ def test_b9_no_openbao_token_is_in_any_repr_of_the_store_or_verifier(openbao):
     verifier = _verifier(openbao, tokens)
     writer, store = _writer(openbao, tokens["writer"]), _store(openbao, tokens["proxy"])
     _put(writer, tenant, "identity", STATIC, {"api_key": H.CANARY_KEY})
-    assert store.read(tenant, "identity").fields == {"api_key": H.CANARY_KEY}
+    assert store.read(tenant, "identity", 1).fields == {"api_key": H.CANARY_KEY}
     assert verifier.verify(b"c", openbao.signer(tenant).sign(b"c"), tenant_id=tenant) is True
 
     for obj in (writer, store, verifier):
@@ -565,4 +583,4 @@ def test_b9_no_openbao_token_is_in_any_repr_of_the_store_or_verifier(openbao):
         for secret in (*tokens.values(), openbao.root_token):
             assert secret not in shown, type(obj).__name__
         assert type(obj).__name__ in shown
-    assert H.CANARY_KEY not in repr(store.read(tenant, "identity"))
+    assert H.CANARY_KEY not in repr(store.read(tenant, "identity", 1))

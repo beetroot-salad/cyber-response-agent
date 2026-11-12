@@ -205,17 +205,24 @@ def test_f5_the_run_page_refuses_a_foreign_record_and_a_linked_runs(tmp_path):
     assert not (moved / src.name / "runtime.html").exists()
 
 
+def _tenants_systems(d9_tenant, defender_dir) -> tuple[str, ...]:
+    """The systems the map is drawn over (#1366 O1, DC7: the tenant's current enabled records the checkout's catalog carries,
+    plus the platform-served ones; no longer every adapter of the checkout), taken from the tenant's own directory."""
+    from defender.systems.catalog import Catalog, TenantSystems
+
+    records = d9_tenant.directory.current_records(d9_tenant)
+    return TenantSystems.of(records, Catalog.of_checkout(defender_dir), tenant_id=d9_tenant).roster.systems
+
+
 def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d9_tenant):
     import uuid
 
-    from defender._paths import adapters_under
-    from defender.systems.verbs import read_roster
     from defender.cli import workspace_map as wm
 
     runs = location_path(P.data_root)() / d9_tenant / "runs"
     run = H.make_run(runs, str(uuid.uuid4()))
-    expected = wm.workspace_map(
-        run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).verbs))
+    systems = _tenants_systems(d9_tenant, wm.DEFENDER_DIR)
+    expected = wm.workspace_map(run, systems=systems, skills_of=systems)
     argv = ["workspace_map.py", "--tenant", d9_tenant, run.name]
     ok = P.drive_cli(wm.main, argv)
     assert ok.rc == 0, ok.said
@@ -295,14 +302,12 @@ def _refused_naming(child: subprocess.CompletedProcess, what: str) -> None:
 def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
     import uuid
 
-    from defender._paths import adapters_under
-    from defender.systems.verbs import read_roster
     from defender.cli import workspace_map as wm
 
     runs = location_path(P.data_root)() / d9_tenant / "runs"
     run = H.make_run(runs, str(uuid.uuid4()))
-    expected = wm.workspace_map(
-        run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).verbs))
+    systems = _tenants_systems(d9_tenant, wm.DEFENDER_DIR)
+    expected = wm.workspace_map(run, systems=systems, skills_of=systems)
     ok = _launched_process("workspace_map", d9_tenant, "--tenant", d9_tenant, run.name)
     assert ok.returncode == 0, ok.stderr[-600:]
     assert ok.stdout == expected

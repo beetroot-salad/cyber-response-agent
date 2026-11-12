@@ -13,6 +13,7 @@ from typing import Any
 
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163._target import proxy
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.tenant_1108_p4._support import (
     OTHER_TENANT_ID,
     PublishedTenant,
@@ -38,12 +39,13 @@ def exports_of(t: PublishedTenant) -> Path:
     return export_dir(t.tenant, t.commit).parent
 
 
-def run_record(t: PublishedTenant) -> Any:
-    """The run's record over the first export's settings, as run start resolves it."""
-    from defender.systems.run_tenant import run_tenant_for
-
-    return run_tenant_for(t.tenant, dispatches_lead_zero=False,
-                          settings_root=export_dir(t.tenant, t.commit) / "settings")
+def run_record(t: PublishedTenant, records: Any = R.DERIVED) -> Any:
+    """The run's record as run start resolves it, built from RECORDS (#1366 R10: `run_tenant_for(..., records=)`, no folder
+    read for systems, access or case). `records` is a `R.RecordsSpec` (exactly that), `None` (the tenant is NOT imported,
+    as everywhere in this contract) or `R.DERIVED` (the default: what the first export's planted `settings/` stands for).
+    Grants still come from the first export's settings."""
+    return R.run_tenant_for(t.tenant, dispatches_lead_zero=False, records=records,
+                            settings_root=export_dir(t.tenant, t.commit) / "settings")
 
 
 def static_set(key: str = H.CANARY_KEY, version: int = 1) -> Any:
@@ -76,12 +78,36 @@ def data_root_of(tenants: Mapping[str, Path]) -> Path:
     return root
 
 
+def _reads_a_generation(store: Any) -> bool:
+    """Does `store.read` take (tenant, system, generation)? A real `OpenBaoStore` does and is handed as it is; only the
+    legacy two-argument fakes need `R.GenerationBlind`."""
+    import inspect
+
+    positional = [p for p in inspect.signature(store.read).parameters.values()
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    return len(positional) >= 3
+
+
 def deps(tenants: Mapping[str, Path] | Path, store: Any, *, verifier: Any = None,
          audit: Any = None, **extra: Any) -> Any:
-    """`ProxyDeps` over a data root: `tenants` is the root itself or the `{id: exports}` mapping
-    of tenants under it; `extra` keywords (e.g. `max_response_bytes`) pass through."""
+    """`ProxyDeps` for tenants under a data root: `tenants` is the root itself or the `{id: exports}` mapping
+    of tenants under it; `extra` keywords (e.g. `max_response_bytes`) pass through. #1366: the proxy reads its systems
+    through the records port, so `records=` (a port, or a `{tenant id: RecordsSpec}` mapping handed to `R.RecordsPort`; `None` = no tenant
+    has records; default `R.DERIVED` = `R.ExportRecords(root)`: records computed, per call, from the planted export
+    folders by the run side's own `derive` rule, version 1 / generation 1) is the port, and a `store` whose `read` takes no generation (a legacy fake) is wrapped
+    (`R.GenerationBlind`; a real `OpenBaoStore` is not, so its sets are seeded at `<tenant>/<system>/g1`); pass `records=` and an already generation-aware `store=` (`generation_aware=True`) for a
+    test of the new behaviour."""
     root = tenants if isinstance(tenants, Path) else data_root_of(tenants)
-    return proxy().ProxyDeps(data_root=root, store=store,
+    records = extra.pop("records", R.DERIVED)
+    if records is R.DERIVED:
+        records = R.ExportRecords(root)
+    elif records is None:  # not imported anywhere
+        records = R.RecordsPort({})
+    elif not hasattr(records, "current_system"):  # {tenant id: RecordsSpec}: records, not folders
+        records = R.RecordsPort(records)
+    if not extra.pop("generation_aware", False) and not _reads_a_generation(store):
+        store = R.GenerationBlind(store)
+    return proxy().ProxyDeps(records=records, store=store,
                              verifier=verifier if verifier is not None else H.FakeVerifier(),
                              audit=audit if audit is not None else H.AuditRecorder(), **extra)
 

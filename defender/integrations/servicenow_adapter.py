@@ -10,6 +10,7 @@ the request against the system's declared write routes. The adapter grants the a
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 # Workspace root on sys.path so `defender.*` namespace imports resolve when the verb registry
@@ -23,15 +24,22 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
 from defender.kit.verbs import CaseComments, VerbContext
 from defender.kit import transport
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
+from defender.kit.settings import locator_of
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.kit.verbs import TenantRecord, Verb  # noqa: F401 — named by the VERBS type comment
 
 SYSTEM = "servicenow"
 PREFIX = "SERVICENOW"
+DISPLAY_NAME = "ServiceNow"
+#: A real system's adapter, not a lab stub (#1366 O2).
+EXAMPLE = False
 
 #: The transport template plus the one ServiceNow-specific key. Required, no default.
 REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "TABLE")
+#: TABLE goes in the comment's path, but as a literal of the declared route (`comment_route`
+#: judges it), not a value the transport fills.
+PATH_KEYS: tuple[str, ...] = ()
 
 #: A table name is one path segment: letters, digits and underscores.
 _TABLE_NAME = re.compile(r"[A-Za-z0-9_]+")
@@ -41,13 +49,24 @@ _NOT_FOUND = 404
 _READ_PAGE = 100
 
 
+def comment_route(settings: Mapping[str, str]) -> tuple[str, str]:  # lint-dup: ok — every case-recording adapter declares its comment route under this one name (#1366 C1)
+    """The route `add_case_comment` sends (#1366 C1), from the record's prefixed `settings`: a
+    PATCH of the record in the configured table. The table is a literal segment: set, one table
+    name (letters, digits, underscores), else the `ConfigFault` naming the key."""
+    table = transport.route_literal(f"{PREFIX}_TABLE", settings)
+    if not _TABLE_NAME.fullmatch(table):
+        raise ConfigFault(
+            f"{PREFIX}_TABLE must be one table name (letters, digits, underscores), got {table!r}")
+    return "PATCH", f"/api/now/table/{table}/*"
+
+
 def _servicenow_settings(tenant: TenantRecord) -> dict[str, str]:
     """The system's config over the run's record, or the `ConfigFault` for why it is unusable."""
     config = transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS)
-    if not _TABLE_NAME.fullmatch(config["TABLE"]):
-        raise ConfigFault(
-            f"{PREFIX}_TABLE must be one table name (letters, digits, underscores), "
-            f"got {config['TABLE']!r}")
+    try:
+        comment_route(transport.record_entry(tenant, SYSTEM))
+    except ConfigFault as fault:
+        raise ConfigFault(f"{locator_of(tenant).part(SYSTEM, 'settings')}: {fault}") from None
     return config
 
 
@@ -65,9 +84,8 @@ def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  #
     addressed by sys_id."""
     config = _servicenow_settings(ctx.tenant)
     try:
-        transport.host_write(ctx, SYSTEM, "PATCH", "/api/now/table/{table}/{key}",
-                        {"table": config["TABLE"], "key": transport.CaseKey(key)}, body={"work_notes": body},
-                        timeout_sec=transport.timeout_of(config))
+        transport.comment_write(ctx, SYSTEM, comment_route(transport.record_entry(ctx.tenant, SYSTEM)),
+                                key=key, body={"work_notes": body}, timeout_sec=transport.timeout_of(config))
     except UpstreamFault as fault:
         if fault.status != _NOT_FOUND:
             raise

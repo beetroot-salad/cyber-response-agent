@@ -53,7 +53,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from defender.records.formats import AlertMapping, TenantId
-    from defender.tenancy.models import ForgeWiring, Generation, MergeEligibility, TenantRecord
+    from defender.tenancy.models import ForgeWiring, Generation, MergeEligibility, TenantRecord, TenantRecords
 
 #: The first key of every tenant lock: a fixed int4 naming tenancy's advisory locks.
 LOCK_NAMESPACE = 1214
@@ -101,6 +101,7 @@ class HeldTenant(Protocol):
         update_generations: Mapping[str, Mapping[str, Any]] | None = None,
         go_live: str | None = None, destroy: Collection[str] | Literal["all"] = (),
         wiring: ForgeWiring | None = None, drop_wiring: bool = False, drop_publish_status: bool = False,
+        drop_records: bool = False,
     ) -> TenantRecord:
         """Record a step's outcome and the next step (`step`, `actor`; both None when nothing is
         left pending), in one fenced statement; the tenant's failure is left None. With it:
@@ -143,6 +144,12 @@ class TenantRepository(Protocol):
     async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
         """Who may merge into the tenant's `main`, as the management service last read it (#1414 D13); None when no read
         has succeeded yet (never an empty record standing for it)."""
+        ...
+
+    async def current_records(self, tenant_id: TenantId) -> TenantRecords:
+        """The tenant's system and case records as they stand (#1366 R10): whether its systems come from records (the mark),
+        its current non-deleted systems, its current case record. Not marked: `imported=False` and nothing else.
+        Written only by `system_records`' store."""
         ...
 
     # --- requests (the API)

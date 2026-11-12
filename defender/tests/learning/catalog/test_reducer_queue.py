@@ -25,6 +25,7 @@ from defender.tests.support.learning.core._declared870 import (
     Spawn,
     pitfall_row,
 )
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.runtime.engine._declared869 import write_adapter
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
@@ -412,7 +413,7 @@ def _curate(lane: C.DraftLane, text: str, monkeypatch) -> int | BaseException:
         return 0
 
     try:
-        return pitfalls_curator.run_pitfalls(paths=lane.paths, trees=C.draft_trees(lane), batch=lane.batch, invoke=agent,
+        return run_pitfalls_handed(paths=lane.paths, trees=C.draft_trees(lane), batch=lane.batch, invoke=agent,
                                              items=[("pitfall", r["pitfall_id"], r) for r in rows], outcomes={},
                                              on_curated=lambda _d: None)
     except LeadAuthorError as refused:

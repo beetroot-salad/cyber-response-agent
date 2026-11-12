@@ -35,7 +35,9 @@ if TYPE_CHECKING:
     from defender.records.formats import AlertMapping
     from defender.records.job_lane import Launched
     from defender.records.formats import ResumeWorld
-    from defender.systems.run_tenant import RunTenant
+    from defender.systems.run_tenant import RunTenant, TenantVerdict
+    from defender.systems.verbs import RosterRead
+    from defender.tenancy.record_values import TenantRecords
     from defender.tenancy.run_knowledge import KnowledgeSource, PublishReport, RunCopy
 
 _GENERIC_ALERT_STEMS = {"alert"}
@@ -615,7 +617,7 @@ def copy_knowledge(tenant: tenancy.Tenant, source: KnowledgeSource, run_id: str)
 
 def run_tenant_or_exit(
     tenant: tenancy.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
-    copy: RunCopy | None = None,
+    records: TenantRecords, copy: RunCopy | None = None,
 ) -> RunTenant:
     """The accepted tenant ready to run — its grants and lead-zero dispatch from run start's
     readiness function, over the run's own copy of its knowledge (#1108 P4, O-B: settings,
@@ -623,8 +625,10 @@ def run_tenant_or_exit(
     model call, so tenant misconfiguration fails early. Refusals name the file to edit.
 
     `dispatches_lead_zero` is False for an `--episode` sibling, which dispatches no turn-0
-    lead. Without `copy` (a direct caller), the record is resolved over the tenant's own
-    folder. `defender_dir` is not read: the code tree holds no tenant knowledge (O1)."""
+    lead. Without `copy` (a direct caller), the grants are resolved over the tenant's own
+    folder. Its systems, access and case record are the tenant's current `records` (#1366 O6),
+    read once at setup (`read_records`; inside a job container, the ones its host helper read and
+    handed over). `defender_dir` is not read: the code tree holds no tenant knowledge (O1)."""
     from defender.systems import run_tenant as run_tenant_mod
 
     del defender_dir
@@ -633,7 +637,7 @@ def run_tenant_or_exit(
               "stage_token": copy.token})
     try:
         return run_tenant_mod.run_tenant_for(
-            tenant, dispatches_lead_zero=dispatches_lead_zero, **roots)
+            tenant, dispatches_lead_zero=dispatches_lead_zero, records=records, **roots)
     except run_tenant_mod.TenantRefused as refusal:
         sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
 
@@ -662,3 +666,72 @@ def write_knowledge_record(run_dir: Path, source: KnowledgeSource) -> None:
         run_knowledge.write_host_record(path, source)
     except OSError as e:
         sys.exit(f"[run.py] could not write the run's knowledge record {path}: {e}")
+
+
+def read_records(records: Any, tenant_id: Any) -> TenantRecords:
+    """The tenant's current system and case records (#1366 O6, R10), read ONCE at setup on the
+    host (the operator command, or a job's host helper), or a `[run.py]` refusal: the records
+    could not be reached, or the tenant is not imported (R8, named before anything else of the
+    tenant's settings is looked at, the alert mapping included)."""
+    from defender.systems import run_tenant as run_tenant_mod
+
+    try:
+        current = records.current_records(tenant_id)
+        run_tenant_mod.require_imported(current, tenant_id)
+    except TenantRefused as refused:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+    return current
+
+
+def write_versions_record(run_dir: Path, records: TenantRecords) -> None:
+    """The host-held record of which system and case versions the run read at its start (#1366
+    O6, P3; audit only), beside the knowledge-source record: every current version, disabled ones
+    too. A run that cannot write it does not start, as for the knowledge record."""
+    from defender.tenancy import run_knowledge
+
+    path = RunPaths(run_dir).record_versions
+    try:
+        run_knowledge.write_record_versions(path, records)
+    except OSError as e:
+        sys.exit(f"[run.py] could not write the run's record of versions {path}: {e}")
+
+
+def tenant_verdict(tenant: RunTenant, roster: RosterRead, *, warn: bool = True) -> TenantVerdict:
+    """R12 at run start (#1366): the tenant's systems over `roster` (the catalog this run reads),
+    its grants narrowed to them, or the `[run.py]` refusal. Read cold: no adapter code runs (a job's
+    host helper asks it too, #1170 O5, N7). Each ignored grant is warned of once, by the run half
+    (`warn`; a job's helper passes False, its container warns into the run's log)."""
+    from defender.systems import run_tenant as run_tenant_mod
+    from defender.systems.catalog import Catalog
+
+    try:
+        verdict = run_tenant_mod.tenant_systems(tenant, Catalog(roster))
+    except TenantRefused as refusal:
+        sys.exit(f"[run.py] this run's tenant {tenant.tenant_id!r} cannot be used: {refusal}")
+    if warn:
+        run_tenant_mod.warn_ignored(verdict)
+    return verdict
+
+
+def run_roster(defender_dir: Path) -> RosterRead:
+    """The adapters roster of the tree a run reads, read once at its start, or the `[run.py]`
+    refusal: an adapters tree that cannot be read stops the run before it exists. Read cold."""
+    from defender._paths import adapters_under
+    from defender.systems.verbs import RegistryError, read_roster
+
+    try:
+        return read_roster(adapters_under(defender_dir))
+    except RegistryError as unreadable:
+        sys.exit(f"[run.py] {unreadable}")
+
+
+def handed_records(launch: Any, *, label: str) -> TenantRecords:
+    """Inside a job container (#1170 A6): the tenant records its host helper read at setup and
+    handed over in the launch facts (`records`), or the `[run.py]` refusal naming why they are not
+    there. The container reads no database (O3)."""
+    from defender.tenancy.record_values import TenantRecords
+
+    try:
+        return TenantRecords.handed(launch)
+    except ValueError as bad:
+        sys.exit(f"[run.py] {label}: {bad}")

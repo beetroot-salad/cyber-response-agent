@@ -54,6 +54,7 @@ from defender.tests.learning.curation.test_lead_author_handle import (
     _worktree,
     draft_of,
 )
+from defender.tests.support.learning.curation._lead_author_1134 import build_deps_handed, lead_scope, run_pitfalls_handed
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -527,7 +528,7 @@ def _drive_pitfalls(  # noqa: PLR0913 — one drive, every seam a row varies
 
     spawn = BoxSeenSpawn(curate)
     with C.draft_trees(s.lane) as trees:
-        got = _outcome(lambda: pitfalls_curator.run_pitfalls(
+        got = _outcome(lambda: run_pitfalls_handed(
             paths=s.paths, trees=LoggedTrees(trees, log), batch=s.lane.batch, invoke=spawn,
             box=box, items=s.items, outcomes=s.outcomes))
     return got, spawn
@@ -976,7 +977,7 @@ class Lanes:
             return 0
         with C.draft_trees(self.lane) as trees:
             held = trees if self.log is None else LoggedTrees(trees, self.log)
-            return pitfalls_curator.run_pitfalls(
+            return run_pitfalls_handed(
                 paths=paths, trees=held, batch=self.lane.batch, invoke=self.curator,
                 box=box, on_curated=on_curated, items=items, outcomes=outcomes)
 
@@ -1355,7 +1356,7 @@ class TenantLanes(Lanes):
         # its deps built with that batch, never `paths`' checkout.
         with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
             deps = dataclasses.replace(
-                lead_author.build_lead_author_deps(paths, trees=trees, batch=batch),
+                build_deps_handed(paths, trees=trees, batch=batch),
                 invoke_agent=self.agent, extract=lambda _run_dir: ([], [ELASTIC_LEAD]))
             # The draft's `agent/skills` lane, where the box's agent writes — not `deps.paths`,
             # which stays product-rooted.
@@ -1376,8 +1377,13 @@ def _held_lead_drain(s: TenantLeadScene, monkeypatch: Any
     daemon.tripwire = X.Tripwire(s.tmp).install(monkeypatch)
     daemon.refuse_start(at=[1])
     start = X.HeldStart(daemon)
+    # The tenant's records hold wazuh too (#1366 R16: a lane authors only the tenant's own systems), so the wazuh lead
+    # is served and its box is the one whose start is refused.
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    directory = s.t.directory_with(records=R.added(R.fixture_records(), "wazuh"))
     got = _p4_caught(lambda: drains.lead_author_drain(
-        s.paths, client=s.t.forge.client, identity=s.t.vault.identity(), directory=s.t.directory,
+        s.paths, client=s.t.forge.client, identity=s.t.vault.identity(), directory=directory,
         start_box=start))
     [request] = start.requests
     X.no_path_docker(daemon)
@@ -1613,6 +1619,7 @@ def test_the_lead_authors_deps_refuse_the_handle_as_its_box(tmp_path: Path, monk
     built: list[Any] = []
     got = X.caught(lambda: built.append(bind(
         LEAD_AUTHOR_DEF, s.run_dir, defender_dir=s.paths.repo_root / "defender",
+        scope=lead_scope(s.paths.repo_root / "defender"),  # (#1366 R16) named, so the only ValueError left is the box's
         box=runs if handed == "handle" else box)))
     assert daemon.docker_calls() == [], f"binding the spawn's deps asked docker: {daemon.steps()}"
     X.no_path_docker(daemon)

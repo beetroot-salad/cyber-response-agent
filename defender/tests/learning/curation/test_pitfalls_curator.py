@@ -23,6 +23,7 @@ from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-
 from defender.learning.leads.lead_extraction import LeadAuthorError  # type: ignore[import-not-found]
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
 from defender.tests.support.learning.curation import _curator1134 as C
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed  # noqa: E402
 
 
 DECLARED = frozenset({"elastic", "wazuh"})
@@ -74,7 +75,7 @@ class _Claim:
 
 
 def _run(lane: C.DraftLane, items, claim: _Claim, invoke) -> int:
-    return pitfalls_curator.run_pitfalls(
+    return run_pitfalls_handed(
         paths=lane.paths, trees=C.draft_trees(lane), batch=lane.batch, invoke=invoke,
         items=items, outcomes=claim.outcomes, on_curated=claim.curated.append)
 
@@ -300,4 +301,5 @@ def test_invoke_pitfalls_agent_config_fault_propagates(tmp_path: Path, monkeypat
     from defender.learning.core.config import FatalConfigError
     _capture_engine(monkeypatch, raise_exc=FatalConfigError("needs FIREWORKS_API_KEY"))
     with pytest.raises(FatalConfigError):
-        pitfalls_curator._invoke_pitfalls_agent([], run_dir=tmp_path / "call", repo_root=tmp_path)
+        pitfalls_curator._invoke_pitfalls_agent([], run_dir=tmp_path / "call", repo_root=tmp_path,
+                                                systems=("elastic",))

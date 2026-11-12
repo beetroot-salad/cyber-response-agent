@@ -189,7 +189,7 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
     _run()._drive_investigation(
         alert_path=RunPaths(src).alert, run=_fixture_run_1165(src),
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
-        tenant=T1106.fixture_run_tenant(),
+        tenant=T1106.fixture_run_tenant(), systems=T1106.fixture_run_systems(),
         world=_run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant),
         episode=Episode.open(ep), serving=S1224.serving(), source=T.open_source(src),
@@ -213,7 +213,7 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
     _run()._drive_investigation(
         alert_path=RunPaths(src).alert, run=_fixture_run_1165(src),
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
-        tenant=T1106.fixture_run_tenant(),
+        tenant=T1106.fixture_run_tenant(), systems=T1106.fixture_run_systems(),
         world=_run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant),
         episode=Episode.open(ep), serving=S1224.serving(), source=T.open_source(src),
@@ -285,7 +285,7 @@ def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
         run=_run_handle_lifecycle_1165(run_dir), model="m", model_override=None, defender_dir=T.DEFENDER,
         world=_run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant),
-        tenant=T1106.fixture_run_tenant(),
+        tenant=T1106.fixture_run_tenant(), systems=T1106.fixture_run_systems(),
         investigate=lambda **kw: events.append("investigate") or {},
         start_box=lambda *a, **kw: events.append("start") or object(),
         stop_box=lambda *a, **kw: events.append("stop"),

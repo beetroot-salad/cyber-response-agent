@@ -17,8 +17,8 @@ from typing import Any
 from defender import run_common
 from defender.records import RunPaths
 from defender.learning.branch.estate.registry import EstateError
-from defender.systems import run_tenant
 from defender.tests.support.runtime.engine import _spec767 as M
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.storage._alert_plant import plant_alert as plant_with_record
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -387,14 +387,18 @@ def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monke
 
 
 def test_d_case_record_error_consumers(tmp_path, caplog):
-    """A bad case-record file touches only the record step: the query tool serves tickets whole
-    (no read of the file), and the leg leaves an error receipt naming the file and sends no
-    comment. (D-7, D-12; the retired mapping's `open.status` lifecycle rule is gone with the open leg.)"""
+    """A case record that does not cover the comment route (what an upgrade leaves, C5; a bad case-record FILE can no
+    longer reach a run, O4/O9) touches only the record step: the query tool serves tickets whole, and the leg leaves an
+    error receipt naming the case system and sends no comment. (D-7, D-12; the retired mapping's `open.status`
+    lifecycle rule is gone with the open leg.)"""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="bad", table=TICKET_TABLE)
-    S.case_record_path(folder).write_text("- not\n- a mapping\n", encoding="utf-8")
-    record = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
-                                       dispatches_lead_zero=False)  # acceptance does not refuse
+    access = S.settings_of(folder) / "systems" / "ticket" / "access.yaml"
+    doc = json.loads(access.read_text(encoding="utf-8"))
+    doc["writes"] = []  # the stored declaration has no comment route
+    access.write_text(json.dumps(doc), encoding="utf-8")
+    record = R.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
+                              dispatches_lead_zero=False)  # acceptance does not refuse
 
     # (a) The query tool: no case-record file is read, so every ticket is served whole; no warning.
     caplog.set_level(logging.WARNING)
@@ -422,10 +426,11 @@ def test_d_case_record_error_consumers(tmp_path, caplog):
     assert got["status"] == "error", got
     assert got["ok"] is False, got
     assert got["url"] is None, got
-    assert "case-record.yaml" in got["reason"], got
+    assert "ticket" in got["reason"], got
+    assert "case-record.yaml" not in got["reason"], got
     for host in {str(folder), str(folder.resolve()), str(root), str(root.resolve())}:
         assert host not in got["reason"], f"the reason carries the host path {host}: {got['reason']!r}"
-    assert shim.calls() == [], "a docker child ran off a bad case-record file"
+    assert shim.calls() == [], "a docker child ran off a case record that does not cover the route"
 
 
 def test_o2_ticket_replies_ignore_the_case_record_file(tmp_path):
@@ -495,7 +500,7 @@ def test_c_estate_registry_takes_no_case_record_file(tmp_path, monkeypatch):
                 defender_dir=kw["defender_dir"], model_name=kw["model"],
                 model_override=kw["model_override"], box=None, tenant=kw["tenant"],
                 world=kw["world"], episode=kw["episode"], serving=kw["serving"],
-                source=kw["source"],
+                source=kw["source"], systems=kw["systems"],
                 investigate=lambda **ikw: investigated.append(ikw) or {
                     "output": "spec1107", "requests": 0, "truncated_by": None})
 

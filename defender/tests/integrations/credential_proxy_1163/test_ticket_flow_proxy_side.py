@@ -13,7 +13,6 @@ import pytest
 from defender.box import run_env
 from defender.kit.transport import raise_proxy_fault
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
-from defender.kit.settings import config_pointer
 from defender.systems import case_system
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
@@ -35,6 +34,7 @@ from defender.tests.integrations.credential_proxy_1163.test_ticket_flow import (
 from defender.tests.integrations.credential_proxy_1163.test_proxy_faults_proxy_side import _BrokenStore
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
+from defender.tests.support.tenancy import _tenants1106 as T1106
 
 REASON = "store says no: duplicate-or-invalid"
 
@@ -139,7 +139,7 @@ def _leg_with_adapter_raising(tmp_path, data_root, raises):
     with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
         rec, run = _run(tmp_path)
         tenant = T.run_record(t)
-        real = case_system.case_verdict(tenant, defender_dir=DEFENDER)
+        real = T1106.case_for(tenant, DEFENDER)
         assert isinstance(real, case_system.CaseTarget), real
         stub = dataclasses.replace(real, module=types.SimpleNamespace(add_case_comment=raises))
         S.ticket_writer().record_case_ticket(
@@ -148,30 +148,30 @@ def _leg_with_adapter_raising(tmp_path, data_root, raises):
         return S.receipt(rec.run_dir_at)
 
 
-def test_t8_a_settings_fault_the_adapter_raises_itself_points_at_config_not_the_proxy(
+def test_t8_a_settings_fault_the_adapter_raises_itself_points_at_the_settings_not_the_proxy(
         tmp_path, data_root):
     """The adapter's own settings fault, raised before any request, on a system reached through
-    the proxy: the receipt names that system's `config.env`, not a proxy refusal. #1398."""
+    the proxy: the receipt names that system's settings record (`system ticket settings`, #1366 DC6; not the retired file), not a proxy refusal. #1398."""
     def own_settings_fault(*_a, **_k):
         raise ConfigFault("TICKET_BASE_URL is blank")
 
     receipt = _leg_with_adapter_raising(tmp_path, data_root, own_settings_fault)
     assert receipt is not None
     assert receipt["ok"] is False
-    assert config_pointer(SYSTEM) in receipt["reason"], receipt
+    assert f"system {SYSTEM} settings" in receipt["reason"], receipt
     assert "the credential proxy refused" not in receipt["reason"].lower(), receipt
 
 
 def test_t9_a_settings_fault_the_proxy_raises_is_still_a_proxy_refusal(tmp_path, data_root):
     """Control for t8, from the other side: the same fault class arriving through the proxy's
-    answer (the way the transport raises it) is the proxy's refusal, not a `config.env` fault."""
+    answer (the way the transport raises it) is the proxy's refusal, not a settings fault."""
     def proxy_says_config(*_a, **_k):
         raise_proxy_fault("ConfigFault", "the declaration holds no route for this call")
 
     receipt = _leg_with_adapter_raising(tmp_path, data_root, proxy_says_config)
     assert receipt is not None
     assert "the credential proxy refused" in receipt["reason"].lower(), receipt
-    assert config_pointer(SYSTEM) not in receipt["reason"], receipt
+    assert f"system {SYSTEM} settings" not in receipt["reason"], receipt
 
 
 class _Slow(H.FakeStore):

@@ -531,7 +531,7 @@ def test_launch_binds_the_run_verdict_writer_before_startup_can_fail(tmp_path):
     with pytest.raises(box.BoxFault, match="startup refused"):
         launch._run_investigation_lifecycle(
             run=run, model="test", model_override=None, defender_dir=Path("defender"),
-            tenant=tenant,
+            tenant=tenant, systems=tenants.fixture_run_systems(),
             start_box=start, investigate=lambda **kw: reached.append(kw))
     assert reached == []
     record = run.facts.scrub_verdict
@@ -587,7 +587,7 @@ def test_launch_forwards_the_same_run_and_binds_both_teardown_callbacks(tmp_path
 
     result = launch._run_investigation_lifecycle(
         run=run, model="test", model_override=None, defender_dir=Path("defender"),
-        tenant=tenant, start_box=start,
+        tenant=tenant, systems=tenants.fixture_run_systems(), start_box=start,
         investigate=investigate, stop_box=lambda _: None)
     assert result == {"output": "done"}
     assert seen == [run]

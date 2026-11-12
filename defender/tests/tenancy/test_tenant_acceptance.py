@@ -8,7 +8,7 @@ One rule for the tenant a request names.
 
 The launcher refuses a bad tenant before its billable role preflight.
 
-`validate_scaffold` judges settings against an exported `DEFENDER_DIR` tree.
+(`validate_scaffold` judging settings against an exported `DEFENDER_DIR` tree is retired: #1366 O11.)
 
 Tenant refuses a construction without acceptance's token.
 """
@@ -31,7 +31,6 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.records._tenant_id import TenantRefused
 from defender.cli.learning import branch as branch_entry
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.skills.connect import validate_scaffold
 from defender.records._tenant_id import TenantId
 
 
@@ -85,10 +84,13 @@ def test_runs_linked_onto_knowledge_puts_settings_in_a_mounted_tree(tmp_path: Pa
 
 def test_a_linked_settings_systems_folder_is_named_as_a_link(tmp_path: Path) -> None:
     """#1359: no required setting sits under `systems/` any more, so a linked `systems/` is
-    refused by the link walk, not as the way to a missing required file."""
+    refused by the link walk, not as the way to a missing required file. (#1366 O9: the tenant repo no longer
+    carries `systems/`; a leftover one is still walked, so the test plants it.)"""
     root = tmp_path / "data"
     H.adopted(root)
     systems = H.settings_dir(root) / "systems"
+    systems.mkdir(exist_ok=True)
+    (systems / "leftover").mkdir(exist_ok=True)
     copy = tmp_path / "systems-copy"
     shutil.move(str(systems), copy)
     systems.symlink_to(copy, target_is_directory=True)
@@ -219,25 +221,10 @@ def test_the_launcher_refuses_before_its_role_preflight(tmp_path: Path, monkeypa
     assert calls == [], f"the role preflight ran before the refusal: {calls}"
 
 
-def _data_root_inside_another_code_tree(tmp_path: Path) -> tuple[Path, Path]:
-    """A tenant adopted under `<tmp>/code/data`, with `<tmp>/code` the code tree an exported
-    `DEFENDER_DIR` names. Returns `(the data root, the code tree)`."""
-    code = tmp_path / "code"
-    root = code / "data"
-    H.adopted(root)
-    return root, code
-
-
-def test_validate_scaffold_holds_settings_outside_the_tree_it_checks(tmp_path: Path) -> None:
-    """`validate_scaffold` (advisory) skips its config check with a WARN naming the settings
-    as inside the exported tree."""
-    root, code = _data_root_inside_another_code_tree(tmp_path)
-    proc = H.run_script(H.script_of(validate_scaffold), "cmdb", "--tenant", H.TID,
-                        root=root, DEFENDER_DIR=str(code))
-    H.assert_ran(proc)
-    text = H.output(proc)
-    assert "config.env not checked" in text, text
-    assert f"inside {code}" in text, text
+# Retired (#1366 O11, O9): `test_validate_scaffold_holds_settings_outside_the_tree_it_checks`. It asserted validate_scaffold's
+# "config.env not checked" WARN for a data-root tenant whose settings sit inside the exported tree; the validator no longer reads
+# a tenant's `config.env` (its input is connect's handoff folder, `tenant_1107_settings/test_validator.py`), so there is no
+# data-root settings check to skip and no such WARN.
 
 
 def test_a_forged_token_is_refused_by_the_guard(tmp_path: Path) -> None:

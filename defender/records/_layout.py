@@ -126,6 +126,10 @@ _TICKET_COMMENTS_SUFFIX = ".ticket-comments.jsonl"
 #: written by run start. Host-held like the ticket receipt: the raw publish reason it may carry
 #: never enters a file the box can read, and the run page, the ticket and the API read it here.
 KNOWLEDGE_SOURCE_SUFFIX = ".knowledge-source.json"
+#: Which system and case record versions the run read at its start (#1366 O6, P3; audit only):
+#: `{"systems": {id: version}, "case": version|null}`, written by run start beside the knowledge
+#: source record. Host-held: no record content (nor its versions) is the box's to read or forge.
+_RECORD_VERSIONS_SUFFIX = ".record-versions.json"
 #: The job lane's files (#1342), each `<run id><suffix>` beside the run folder. The worker writes
 #: the launch record (`{investigation_id, tenant_id, alert_id, digest, label}`) and the alert's
 #: exact bytes before it starts the child; the job entry writes the job-end record (the facts the
@@ -145,7 +149,8 @@ _POST_STEP_PENDING_SUFFIX = ".post-step-pending.json"
 #: them beside its folder (`sidecar_names`). The accounting-failures name reserved, see above.
 USED_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
                          TICKET_WRITE_SUFFIX, SESSION_POINTER_SUFFIX, _CALL_JOIN_SUFFIX,
-                         _TICKET_COMMENTS_SUFFIX, KNOWLEDGE_SOURCE_SUFFIX, _JOB_END_SUFFIX)
+                         _TICKET_COMMENTS_SUFFIX, KNOWLEDGE_SOURCE_SUFFIX, _JOB_END_SUFFIX,
+                         _RECORD_VERSIONS_SUFFIX)
 #: Every host-only sidecar name a runs folder may hold beside its run folders (`sidecar_owner`:
 #: the listing, the run-name check, the retire command). The launch record and alert file are
 #: written before the run folder exists and do not mean "used": the child's setup goes on over
@@ -488,6 +493,14 @@ class RunPaths:
         that was fresh, stale or pinned, and the publish's reason. Beside the run folder, so the
         box can neither read the reason nor forge the record."""
         return self._container(runs_base) / f"{self.run_dir.name}{KNOWLEDGE_SOURCE_SUFFIX}"
+
+    @property
+    def record_versions(self) -> Path:
+        """The run's record of the system and case versions it read at its start (#1366 O6):
+        beside the run folder, in the same container as `knowledge_source()`, so the box, which
+        mounts the run folder, can neither read nor forge it. The run's natural container (a
+        sibling's fork writes its own beside it)."""
+        return self._container(None) / f"{self.run_dir.name}{_RECORD_VERSIONS_SUFFIX}"
 
     def launch_record(self, runs_base: RunsBase | None = None) -> Path:
         """The job lane's launch record (#1342): which investigation, tenant and alert this id

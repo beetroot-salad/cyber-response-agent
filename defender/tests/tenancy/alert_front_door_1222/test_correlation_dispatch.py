@@ -492,16 +492,17 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path):
     assert _names_down_as_not_configured(opening, "elastic"), (
         "MAIN's opening message does not name elastic as not configured though its settings "
         "fail the start check")
-    assert "access.yaml" in opening, (
-        "MAIN's opening message names elastic down without the check's reason (no access.yaml)")
+    # #1366 DC6: run start inherits the record's wording, a locator per system and part, not a file in a folder.
+    assert "system elastic access" in opening, (
+        "MAIN's opening message names elastic down without the check's reason (no system elastic access)")
 
     lead_saw = (_lead_tool_returns(faulted, "l-001") if faulted.router.dispatched("l-001")
                 else "")
     refused = _main_tool_returns(faulted) + "\n" + lead_saw
     assert "not configured" in refused.lower(), (
         f"MAIN's elastic lead was not refused as not configured: {refused[:2000]}")
-    assert "access.yaml" in refused, (
-        f"the refusal does not name the check's reason (no access.yaml): {refused[:2000]}")
+    assert "system elastic access" in refused, (
+        f"the refusal does not name the check's reason (no system elastic access): {refused[:2000]}")
     assert "tripped" not in refused.lower(), (
         f"a not-configured system was refused as a tripped breaker: {refused[:2000]}")
     assert faulted.rows_for("l-001") == [], (
@@ -523,7 +524,7 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path):
     assert not _names_down_as_not_configured(healthy_opening, "elastic"), (
         f"a fully configured elastic is named not configured: "
         f"{_names_down_as_not_configured(healthy_opening, 'elastic')}")
-    assert "access.yaml" not in healthy_opening
+    assert "system elastic access" not in healthy_opening
     assert [r.get("exit_code") for r in healthy.rows_for("l-001")] == [0], (
         healthy.rows_for("l-001"))
     assert [(s.method, s.path.split("?")[0]) for s in up.seen] == [

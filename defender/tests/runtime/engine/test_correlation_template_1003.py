@@ -193,7 +193,8 @@ def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_hand
     from defender.investigation.driver import _correlation_dispatch_at_run_start
     from defender.investigation.lead_zero import CorrelationDispatch
     from defender.systems.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
-    from defender.systems.run_tenant import TenantRefused, run_tenant_for
+    from defender.systems.run_tenant import TenantRefused
+    from defender.tests.support.tenancy._systems1366 import run_tenant_for  # #1366: the run's tenant is built from records
 
     tree = tmp_path / "repo" / "defender"
     tree.mkdir(parents=True)

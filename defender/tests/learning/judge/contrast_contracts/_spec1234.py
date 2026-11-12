@@ -1819,11 +1819,15 @@ class InProcessSiblings:
 
         try:
             from defender.systems.verbs import read_roster
-            from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
+            from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 
-            return mod(RUN).main(tail, lifecycle=lifecycle, directory=directory_for_root(), visualize=_no_visualize,
+            # The sibling's tenant records are the estate's (stated, #1366 R10), within the roster it is handed.
+            directory = directory_for_argv(tail, records=self.est.records())
+            roster = read_roster(self.est.adapters)
+            S24.R.assert_records_within_roster(directory, tail[tail.index("--tenant") + 1], roster)
+            return mod(RUN).main(tail, lifecycle=lifecycle, directory=directory, visualize=_no_visualize,
                                  preflight=_no_preflight, oracle=oracle.model,
-                                 verifier=self.verifier.model, roster=read_roster(self.est.adapters))
+                                 verifier=self.verifier.model, roster=roster)
         except SystemExit as stop:
             return 0 if stop.code is None else (stop.code if isinstance(stop.code, int) else 2)
         except Exception as escaped:  # noqa: BLE001 — recorded for the scenario; rc 1 like a crashed child
@@ -1931,7 +1935,7 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
         try:
             rc = mod("cli.learning.branch").main(["--tenant", src.parent.parent.name, src.name,
                                 str(T.BRANCH_MESSAGE_ID)],
-                               spawn=spawn, directory=T.launcher_directory(src.parent.parent.name),
+                               spawn=spawn, directory=est.launch_directory(src.parent.parent.name),
                                **seams)
         except SystemExit as stop:
             rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))

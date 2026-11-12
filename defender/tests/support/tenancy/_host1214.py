@@ -52,10 +52,10 @@ COMMAND_FUNCTIONS = frozenset({"main", "_launch", "job_main"})  # #1342 r6 R6-3:
 RAW_LAYER = "tenancy/_tenant.py"
 
 #: A3: the processes covered by their starter, which load the folder with the folder rules only. Exactly these.
+#: (#1366 O11/O1: `skills/connect/validate_scaffold.py` left this set; it is a no-tenant surface judging a handoff.)
 A3_SET = frozenset({
     "learning/author/version_control/publish.py",
     "investigation/publish_launch.py",
-    "skills/connect/validate_scaffold.py",
 })
 
 #: The entry points that move to the host acceptance step (design: "Callers that move to it").

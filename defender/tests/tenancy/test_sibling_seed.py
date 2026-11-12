@@ -10,12 +10,14 @@ from defender.tests.storage.tenant_1105_run_repository._spec1105_pr2 import Coun
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from defender.records._episode_handle import Episode
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.support.learning.branch import _triplet_947 as P
 from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV, current_data_root
@@ -128,7 +130,7 @@ _AS_STAMPED = object()
 
 
 def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None,
-          questioner: Any = None) -> tuple[Any, SpawnRecorder]:
+          questioner: Any = None, records: Any = R.DERIVED) -> tuple[Any, SpawnRecorder]:
     """One episode from `src` through the real launcher (`cli.main`), every seam injected: the
     question-writer, the role preflight, the live tree, and pre-flight's roster and oracle and
     verifier doubles (#1224 — an oracle serving every call unchanged and a verifier passing it).
@@ -139,8 +141,10 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None,
         # The request names the tenant whose `<root>/<T>/runs/<run id>` the source sits at,
         # and the source by its id.
         argv = ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID)]
+        directory = directory_for_argv(argv, records=records)
+        R.assert_records_within_roster(directory, src.parent.parent.name, roster)  # the roster stands for the catalog
         outcome = T.mod("cli.learning.branch").main(
-            argv, directory=directory_for_argv(argv),
+            argv, directory=directory,
             spawn=spawn, questioner=O.questioner_for() if questioner is None else questioner,
             preflight=O.no_preflight,
             live_tree=P.source_capture(tenant_id=stamp_tenant), roster=roster,
@@ -175,7 +179,8 @@ def _episodes_made() -> list[str]:
 _BASE = {"rows": [{"user": "alice", "event_id": "e-100", "host": "web-1"}]}
 
 
-def _estate_launch(tmp_path: Path, *, failed: Any = None) -> tuple[Any, SpawnRecorder, Any]:
+def _estate_launch(tmp_path: Path, *, failed: Any = None,
+                   unrecorded: tuple[str, ...] = (), source_versions: bool = False) -> tuple[Any, SpawnRecorder, Any]:
     """One accepted episode over `_spec1224`'s estate tenant (`acme`, with systems the
     checkout's fixture lacks), stamped `acme`. Returns `(outcome, spawn, estate)`. `failed`, a
     call, is also in the source run as a captured failure, which pre-flight reads live (H6)."""
@@ -190,7 +195,13 @@ def _estate_launch(tmp_path: Path, *, failed: Any = None) -> tuple[Any, SpawnRec
         O.Call("idp", "query", O.query_params("user:alice"), _BASE),
         O.Call("edr", "query", O.query_params("host:web-1"), _BASE)],
         after_source=None if failed is None else plant_failure)
-    outcome, spawn = _main(src, stamp_tenant=fixture_uuid("tenant:acme"), roster=est.roster())
+    # The tenant's records are the estate's (stub adapters of its own roster: stated, not inferred from a folder).
+    records = R.without(est.records(), *unrecorded)
+    if source_versions:
+        # What the source run recorded it used (audit only): every system of the estate, at a version the twin no longer holds.
+        RunPaths(src).record_versions.write_text(json.dumps(
+            {"systems": {system: 1 for system in est.systems}, "case": None}), encoding="utf-8")
+    outcome, spawn = _main(src, stamp_tenant=fixture_uuid("tenant:acme"), roster=est.roster(), records=records)
     return outcome, spawn, est
 
 
@@ -276,6 +287,18 @@ def test_the_launcher_judges_and_records_the_episode_tenants_own_served_systems(
         ("edr", "query", dict(failed.params))], est.calls()
 
 
+@pytest.mark.parametrize("source_versions", [False, True], ids=["plain", "source-run-recorded-the-system"])
+def test_1366_h9_the_launcher_serves_the_systems_of_the_tenants_current_records(tmp_path, source_versions):
+    """The estate grants siem-x but the tenant's current records no longer name it (the source run's recorded versions
+    still do): the episode's served systems are the rest. Control: the same launch with all three records. (#1366 H9, O1)"""
+    outcome, spawn, est = _estate_launch(tmp_path, unrecorded=("siem-x",), source_versions=source_versions)
+    assert spawn.launches, f"no sibling was started: {outcome!r}"
+    assert "siem-x" in est.served_systems(), "fixture premise: the grant serves siem-x"
+    manifest = Path(_episodes_made()[0]) / "family.yaml"
+    doc = T.mod("_yaml").safe_load(manifest.read_text(encoding="utf-8"))
+    assert doc["served_systems"] == ["edr", "idp"], doc["served_systems"]
+
+
 def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any_sibling(
         tmp_path, capsys):
     root = current_data_root()
@@ -352,7 +375,7 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
         run._drive_investigation(
             alert_path=RunPaths(src).alert, run=_fixture_run_1165(src),
             defender_dir=P.DEFENDER, model_name="m", model_override=None, box=None,
-            tenant=record,
+            tenant=record, systems=T.run_systems_for(record),
             world=run.resume_world(Episode.open(ep), "b", tenant=lambda r=record: r),
             episode=Episode.open(ep), serving=O.serving(), source=P.open_source(src),
             investigate=lambda seen=seen, **kw: seen.update(kw) or {})

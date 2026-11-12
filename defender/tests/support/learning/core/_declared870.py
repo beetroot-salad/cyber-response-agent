@@ -219,12 +219,13 @@ class Claim:
 
 
 def tick(lane, spawn, claim: Claim) -> int:
-    """One real pitfalls tick over the batch draft `lane`, handed the claim's items; it reports into `claim`."""
-    from defender.learning.leads import pitfalls_curator
+    """One real pitfalls tick over the batch draft `lane`, handed the claim's items and its systems (the whole catalog of
+    the lane's product checkout, as a caller with no tenant hands it, #1366 R16); it reports into `claim`."""
     from defender.tests.support.learning.curation import _curator1134 as C
+    from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
 
     claim.curated.clear()
-    return pitfalls_curator.run_pitfalls(
+    return run_pitfalls_handed(
         paths=lane.paths, trees=C.draft_trees(lane), batch=lane.batch, invoke=spawn,
         items=claim.items(), outcomes=claim.outcomes, on_curated=claim.curated.append)
 

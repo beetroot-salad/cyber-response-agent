@@ -60,10 +60,13 @@ def test_q1_a_query_reaches_the_upstream_with_the_key_and_returns_the_echo_unalt
     assert result["authorization"] == f"Bearer {H.CANARY_KEY}"
     assert tok not in caplog.text
     (entry,) = audit.records  # the path is relative to the base (A2, A4), never the base's own
-    assert {k: entry.get(k) for k in ("tenant", "system", "investigation", "commit", "method",
+    # The trail names the system's record VERSION (the planted records are at version 1) in place of the export commit
+    # (#1366 O7).
+    assert {k: entry.get(k) for k in ("tenant", "system", "investigation", "version", "method",
                                       "path")} == {
         "tenant": t.tenant_id, "system": "identity", "investigation": T.RUN_ID,
-        "commit": t.commit, "method": "GET", "path": "/users/dev.dana"}
+        "version": 1, "method": "GET", "path": "/users/dev.dana"}
+    assert "commit" not in entry
     assert H.CANARY_KEY not in repr(audit.records)
     assert tok not in repr(audit.records)
     assert tok not in repr(ctx), "the request token shows in the context's repr (O10)"
@@ -463,13 +466,13 @@ def test_1391_o3_health_check_faults_by_the_reply_and_a_403_names_the_monitor_pr
 
 def test_1391_o3_elastic_on_the_http_proxy_method_with_no_access_yaml_is_a_settings_fault(
         tmp_path, data_root):
-    """Elastic's settings with no `access.yaml` beside them are a ConfigFault naming it at the
+    """Elastic's settings with no access declaration beside them are a ConfigFault naming it at the
     settings check and at a verb, nothing sent. #1391 O3, P1."""
     with H.upstream() as up, _elastic(tmp_path, data_root, up.url,
                                       declared=False) as (ctx, tap):
-        with pytest.raises(ConfigFault, match="access.yaml"):
+        with pytest.raises(ConfigFault, match="system elastic access"):  # #1366 DC6
             elastic_adapter.check_settings(ctx.tenant)
-        with pytest.raises(ConfigFault, match="access.yaml"):
+        with pytest.raises(ConfigFault, match="system elastic access"):
             elastic_adapter.VERBS["query"](ctx, native_query="*")
 
     assert (tap.tokens, up.seen) == ([], [])
@@ -637,7 +640,7 @@ def _proxied(tmp_path, data_root, up, system, *, env=None, declared=True):
     files = H.access_files(system, _decl_for(system, up.url),
                            env=_NETWORK_ENVS[system] if env is None else env)
     if not declared:
-        files[f"settings/systems/{system}/access.yaml"] = None
+        del files[f"settings/systems/{system}/access.yaml"]  # #1366 O9: nothing to delete from; none planted = empty access
     with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
         store = H.FakeStore({(t.tenant_id, system): _set_for(system)})
         with A.proxy_for(t, store) as (url, tap):
@@ -724,7 +727,7 @@ def test_1391_o1_a_network_system_with_no_declaration_is_a_settings_fault_naming
     """No `access.yaml` is a settings fault, never a fallback to another access method. P1."""
     with (H.upstream() as up,
           _proxied(tmp_path, data_root, up, system, declared=False) as (ctx, tap),
-          pytest.raises(ConfigFault, match=r"access\.yaml\S* not found")):
+          pytest.raises(ConfigFault, match=rf"system {system} access")):  # #1366 DC6
         _adapter_of(system).check_settings(ctx.tenant)
     assert (tap.tokens, up.seen) == ([], [])
 

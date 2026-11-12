@@ -17,6 +17,8 @@ from defender.tests.integrations.credential_proxy_1163.test_run_start_tokens imp
     TABLE, RunAtHandedRecorder, _records)
 from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
+from defender.tests.support.tenancy import _systems1366 as R
+from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
 
@@ -42,7 +44,8 @@ def _comment(tmp_path, t, url: str, tok: str, *, key: str = C.TICKET_KEY,
     env = run_env(DEFENDER, rec.run_dir_at)
     if shim is not None:
         env = shim.env(env)
-    C.record_leg()(run, tenant=T.run_record(t), defender_dir=DEFENDER, env=env,
+    record = T.run_record(t)
+    C.record_leg()(run, tenant=record, defender_dir=DEFENDER, env=env, case=T1106.case_for(record),
                    request_token=tok, proxy_url=url)
     return S.receipt(rec.run_dir_at)
 
@@ -163,10 +166,13 @@ def test_the_record_leg_gets_a_write_back_token_for_the_named_case_system(tmp_pa
     assert kw.get("request_token"), kw
 
 
-def test_no_write_back_token_is_minted_for_a_tenant_with_no_case_file(tmp_path, data_root):
-    """No case-record file: nothing is minted for any system, and the run goes on. D-9 corrected."""
-    _case_tenant(data_root, C.CASE_SYSTEM_TICKET)
-    (S.settings_of(data_root / S.PLAYGROUND_ID / "knowledge") / C.CASE_RECORD_REL).unlink()
+def test_no_write_back_token_is_minted_for_a_tenant_with_no_case_record(tmp_path, data_root):
+    """The tenant's records hold no case record: nothing is minted for any system, and the run goes on. D-9 corrected,
+    over records (#1366 O9: the tenant is built from its records, so the planted folder's `case-record.yaml` is
+    irrelevant; the absence is the `NO_CASE` marker, which seeds no case record)."""
+    folder = _case_tenant(data_root, C.CASE_SYSTEM_TICKET)
+    (S.settings_of(folder) / C.CASE_RECORD_REL).unlink()
+    (S.settings_of(folder) / R.NO_CASE).write_text("", encoding="utf-8")
     signer = A.MarkedSigner()
     writer = _RecordOnly()
     rec = RunAtHandedRecorder(tmp_path / "run")
@@ -204,17 +210,21 @@ def test_r4_no_signing_access_mints_nothing_the_run_goes_on_and_the_leg_says_so(
     assert up.seen == []
 
 
-@pytest.mark.parametrize("spoil", ["bad config.env", "bad case-record file"])
+@pytest.mark.parametrize("spoil", ["bad config.env", "case record not covered"])
 def test_run_start_judges_the_case_settings_before_the_mint(tmp_path, data_root, spoil):
-    """Bad case settings are reported as such (the file named), never as a missing token or a
-    proxy refusal, and nothing is signed. Run-start flow, O5."""
+    """Bad case settings are reported as such (the settings named, or the case system whose stored declaration no longer
+    covers the comment route: what an upgrade leaves, C5; a bad case-record FILE cannot reach a run, O4/O9), never as a
+    missing token or a proxy refusal, and nothing is signed. Run-start flow, O5."""
     folder = _case_tenant(data_root, C.CASE_SYSTEM_TICKET)
     if spoil == "bad config.env":
         S.set_key(folder, C.CASE_SYSTEM_TICKET, "TICKET_TIMEOUT_SEC", "ten")
-        named = "systems/ticket/config.env"
+        named = "system ticket settings"  # #1366 DC6: the record, not the retired file
     else:
-        S.case_record_path(folder).write_text("- not\n- a mapping\n", encoding="utf-8")
-        named = C.CASE_RECORD_REL
+        # The stored declaration keeps its reads and base but no longer has the comment route (a valid record).
+        for rel, text in H.access_files(
+                C.CASE_SYSTEM_TICKET, H.declaration("http://x.invalid/api", writes=())).items():
+            (folder / rel).write_text(text, encoding="utf-8")
+        named = "ticket"
     signer = A.MarkedSigner()
     rec, rc, refused = _drive_real_leg(
         tmp_path, data_root, signer=signer, directory=_records(data_root, tmp_path)[0].directory)

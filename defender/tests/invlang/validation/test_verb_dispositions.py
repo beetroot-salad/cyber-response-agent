@@ -100,9 +100,10 @@ def test_a_whole_system_absent_from_the_table_reports_every_one_of_its_verbs():
 
 def test_deleting_a_row_from_the_SHIPPED_table_is_caught():
     """A mutation test on the real file, not a synthetic one."""
-    from defender.learning.leads.declared_systems import declared_systems
+    from defender.learning.leads.declared_systems import lane_names
+    from defender.systems.catalog import Catalog
 
-    systems = tuple(sorted(declared_systems(REPO_ROOT)))
+    systems = tuple(sorted(lane_names(Catalog.of_checkout(REPO_ROOT / "defender"))))
     walked = _walk(DEFENDER, systems)
     victim = "host-state"
     deleted = {(victim, v) for v in walked[victim]}
@@ -167,9 +168,10 @@ def test_a_hostile_system_directory_name_does_not_blind_the_gate():
         repo, {("alpha", "lookup"): OK, ("alpha", "health-check"): OK},
     )
     seed_repo(repo, add="-A", message="hostile")
-    from defender.learning.leads.declared_systems import declared_systems
+    from defender.learning.leads.declared_systems import lane_names
+    from defender.systems.catalog import Catalog
 
-    resolved = declared_systems(repo)
+    resolved = lane_names(Catalog.of_checkout(repo / "defender"))
     assert "alpha" in resolved, "a well-formed system beside hostile names must survive"
     assert not (set(HOSTILE_NAMES) & resolved)
 

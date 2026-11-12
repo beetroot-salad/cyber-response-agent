@@ -125,10 +125,10 @@ def test_1363_b3_helpers_the_launcher_and_the_secret_writer_share_carry_no_label
             secrets = OpenBaoSecrets(addr="http://openbao.invalid", token="t", mount="secret", transport=transport)
             if writes:
                 with pytest.raises(AdapterFault) as put:
-                    await secrets.put_credentials(T.RUN_ID, "identity", "static", {"api_key": "k"})
+                    await secrets.put_credentials(T.RUN_ID, "identity", "static", {"api_key": "k"}, generation=1)
                 out.append(put.value)
             with pytest.raises(AdapterFault) as has:
-                await secrets.has_credentials(T.RUN_ID, "identity")
+                await secrets.has_credentials(T.RUN_ID, "identity", generation=1)
             out.append(has.value)
         return out
 
@@ -162,7 +162,7 @@ def test_1363_b3_the_store_splits_its_two_causes_where_it_raises(transport, labe
     """`OpenBaoStore.read` raises `access` when OpenBao cannot be used and `setup` when the set is
     unusable, with no deadline or request around it. #1363 B3."""
     with pytest.raises(AdapterFault) as raised:
-        O.openbao_store(transport).read(T.RUN_ID, "identity")
+        O.openbao_store(transport).read(T.RUN_ID, "identity", 1)
     assert getattr(raised.value, "origin", None) == label, raised.value
 
 
@@ -171,7 +171,7 @@ def test_1363_b3_the_same_helper_reads_access_at_verify_and_setup_at_the_store()
     the store: one helper, two call sites, two labels. #1363 B3."""
     transport = O.answering(200, {"data": None})
     with pytest.raises(AdapterFault) as at_store:
-        O.openbao_store(transport).read(T.RUN_ID, "identity")
+        O.openbao_store(transport).read(T.RUN_ID, "identity", 1)
     with pytest.raises(AdapterFault) as at_verify:
         O.openbao_verifier(transport).verify(b"p", "s", tenant_id=T.RUN_ID)
     assert (at_store.value.origin, at_verify.value.origin) == ("setup", "access")

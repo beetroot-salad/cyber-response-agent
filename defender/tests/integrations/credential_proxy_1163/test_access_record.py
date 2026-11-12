@@ -11,6 +11,7 @@ from defender.systems.verbs import read_roster
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.support.tenancy import _systems1366 as R1366
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
 
 BASE = "http://identity.invalid/api"
@@ -27,17 +28,21 @@ BAD = {
 
 
 #: What each defect's reason must name, so a system down for being unimplemented does not pass.
-WORDS = {"url-base": ("access.yaml", "URL_BASE"), "bastion": ("access.yaml", "BASTION_HOST"),
-         "malformed": ("access.yaml",), "duplicate-key": ("access.yaml", "duplicate"),
-         "no-declaration": ("access.yaml",)}
+#: A record's fault is located "system <s> settings" / "system <s> access", never by a file (#1366 DC6).
+WORDS = {"url-base": ("system identity settings", "URL_BASE"), "bastion": ("system identity settings", "BASTION_HOST"),
+         "malformed": ("system identity access",), "duplicate-key": ("system identity access", "duplicate"),
+         "no-declaration": ("system identity access",)}
 
 
 def _down(tmp_path, data_root, env, decl):
-    files = {"settings/systems/identity/config.env": env}
+    # #1366 O9: the retired fixture folders (`R1366.import_files`) stand for the tenant's records, so "the rest are up" is not
+    # vacuous; the row plants identity's record over them (no declaration = an empty access text).
+    overrides = {"settings/systems/identity/config.env": env}
     if decl is not None:
-        files.update(H.access_files("identity", decl))
-    else:  # the committed fixture declares identity; this row takes the declaration away
-        files["settings/systems/identity/access.yaml"] = None
+        overrides.update(H.access_files("identity", decl))
+    else:
+        overrides["settings/systems/identity/access.yaml"] = None
+    files = R1366.import_files(**overrides)
     with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
         record = T.run_record(t)  # resolving the record never raises on a bad declaration
         roster = read_roster(adapters_under(DEFENDER))
@@ -80,4 +85,4 @@ def test_a5_run_main_continues_with_the_bad_system_down(tmp_path, data_root):
     assert rc == 0, (rc, refused)
     (life,) = rec.lifecycle_calls
     assert set(life["systems"].down) == {"identity"}
-    assert "access.yaml" in life["systems"].down["identity"].reason
+    assert "system identity access" in life["systems"].down["identity"].reason  # #1366 DC6

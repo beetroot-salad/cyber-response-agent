@@ -17,7 +17,7 @@ from defender._model import model
 from defender.records import Run, RunPaths
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
@@ -36,6 +36,9 @@ from defender.learning.author.version_control import DeliveryRefused
 from defender.learning.leads import lead_render
 from defender import box as _box
 from defender.systems.verbs import engine_for
+
+if TYPE_CHECKING:
+    from defender.systems.catalog import Catalog, TenantSystems
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
     CATALOG_PREFIX,
@@ -186,18 +189,26 @@ class LeadAuthorDeps:
     file_pitfalls: Callable[[list[dict]], int] | None = None
 
 
-def build_lead_author_deps(  # noqa: PLR0913 — the lane's seams, plus where its pitfalls go
+def build_lead_author_deps(  # noqa: PLR0913 — the lane's seams, plus where its pitfalls go and the tenant's systems
     paths: _loop_config.LoopPaths, *, trees: DrainTrees,
     batch: Any = None, git_timeout: float = GIT_TIMEOUT_SECONDS,
     file_pitfalls: Callable[[list[dict]], int] | None = None,
     make_model: Callable[..., Any] | None = None,
+    systems: TenantSystems | Catalog,
 ) -> LeadAuthorDeps:
     """The lane's seams over `batch`'s draft (#1108 P4 O7, OD16), reading and writing `skills/`
     through `trees`, the lane's held mounts (`open_drain_trees`): `trees` must hold the draft's
     `agent/skills` itself (`paths.skills_dir` with no batch), else `LeadAuthorError`. `paths`
-    names the product checkout, whose adapters declare the systems with the markers the
-    batch's base commits. The deps must not outlive `trees`."""
-    from defender.learning.leads.declared_systems import declared_systems
+    names the product checkout. The deps must not outlive `trees`.
+
+    The lane's systems are handed, never defaulted (#1366 O1, DC7, R16): the tenant's
+    `TenantSystems` (its current enabled records the product checkout's catalog carries, plus the
+    platform-served ones), built once by the entry that admitted the tenant, or the whole
+    `Catalog` from a caller with no tenant. Only a caller with no tenant, handing the catalog, has
+    the batch's committed markers declare systems beside it. The spawned author's write and `rm`
+    lanes are drawn over the same set."""
+    from defender.learning.leads.declared_systems import declared_systems_over, lane_names
+    from defender.systems.catalog import Catalog
 
     if batch is not None:
         root = Path(batch.draft_root)
@@ -206,13 +217,14 @@ def build_lead_author_deps(  # noqa: PLR0913 — the lane's seams, plus where it
     else:
         root, skills_dir, base = paths.repo_root, paths.skills_dir, None
     skills = lane_skills(trees, paths, skills_dir=skills_dir)
-    systems = declared_systems(paths.repo_root, agent=base)
-    invoke_kw: dict[str, Any] = {"repo_root": root}
+    declared = (declared_systems_over(systems.roster, agent=base) if isinstance(systems, Catalog)
+                else lane_names(systems))
+    invoke_kw: dict[str, Any] = {"repo_root": root, "systems": tuple(sorted(lane_names(systems)))}
     if make_model is not None:
         invoke_kw["spawn"] = functools.partial(_spawn_author_agent, make_model=make_model)
     return LeadAuthorDeps(
         paths=paths,
-        systems=systems,
+        systems=declared,
         invoke_agent=functools.partial(invoke_agent, **invoke_kw),
         extract=extract,
         synthesize=synthesize_drafts,
@@ -220,7 +232,7 @@ def build_lead_author_deps(  # noqa: PLR0913 — the lane's seams, plus where it
             build_handoff, repo_root=root, skills=skills.view(), where=skills_dir,
         ),
         discover_system_drafts=functools.partial(
-            discover_system_drafts, skills=skills.view(), where=skills_dir, systems=systems,
+            discover_system_drafts, skills=skills.view(), where=skills_dir, systems=declared,
         ),
         skills=skills,
         tree_for=trees.tree_for,
@@ -242,12 +254,14 @@ def run(  # noqa: PLR0913 — the run, its lane, and each seam a caller may hand
     box: Any = None,
     on_done: DoneSink | None = None,
     file_pitfalls: Callable[[list[dict]], int] | None = None,
+    systems: TenantSystems | Catalog | None = None,
 ) -> int:
     """Serve one run over `batch`'s draft (`deps.batch` when deps are given), for a caller that
     already holds the lane (the drain, through its store claim). #1278 A3: there is no by-hand
     entry and no file queue lock. The lane's grant is read first: a label whose lane does not
     mount the skills tree is refused before anything is built. Without `file_pitfalls` the run's
-    pitfalls are filed in the learning store."""
+    pitfalls are filed in the learning store. Without deps, `systems` are the lane's systems
+    (`build_lead_author_deps`)."""
     if deps is None and paths is None:
         raise TypeError("run takes paths= (or deps=)")
     lane_batch = getattr(deps, "batch", None) if deps is not None else batch
@@ -266,8 +280,17 @@ def run(  # noqa: PLR0913 — the run, its lane, and each seam a caller may hand
     with open_drain_trees(paths, label, batch=batch) as trees:
         deps = build_lead_author_deps(
             paths, trees=trees, batch=batch,
-            file_pitfalls=file_pitfalls if file_pitfalls is not None else _store_pitfalls(paths))
+            file_pitfalls=file_pitfalls if file_pitfalls is not None else _store_pitfalls(paths),
+            systems=_handed(systems))
         return _run_locked(run_dir, deps, box=box, on_done=sink)
+
+
+def _handed(systems: TenantSystems | Catalog | None) -> TenantSystems | Catalog:
+    """The lane's handed systems; a lane building its deps with none is refused (#1366 R16: never defaulted)."""
+    if systems is None:
+        raise LeadAuthorError("the lead-author lane was handed no systems: its entry hands the tenant's (or, with no "
+                              "tenant, the whole catalog)")
+    return systems
 
 
 def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the run, its held lock and trees, and its seams
@@ -277,16 +300,17 @@ def run_under_held_queue_lock(  # noqa: PLR0913 — the drain's call shape: the 
     items: Any = None, feedback: str | None = None,  # noqa: ARG001 — the drain's store seam; the run names its own leads
     outcomes: dict[tuple[str, str], Any] | None = None,  # noqa: ARG001 — the drain decides a served request's fate
     make_model: Callable[..., Any] | None = None,
+    systems: TenantSystems | Catalog | None = None,
 ) -> int:
     """`run` for a caller that already holds the lane (the drain: its store claim, #1278) and the
     lane's held mounts, `trees` (the drain's work step opens them over `batch`'s draft). Never skips.
     `run` is the run the drain opened from the claim's address; `deps` given are used as built, else
-    they are built over `batch`, the run's pitfalls filed in the learning store, and `make_model` the
-    spawn's model seam."""
+    they are built over `batch`, the run's pitfalls filed in the learning store, `make_model` the
+    spawn's model seam, and over `systems`."""
     if deps is None:
         deps = build_lead_author_deps(
             paths, trees=trees, batch=batch, git_timeout=git_timeout,
-            file_pitfalls=_store_pitfalls(paths), make_model=make_model)
+            file_pitfalls=_store_pitfalls(paths), make_model=make_model, systems=_handed(systems))
     return _run_locked(Path(run.run_dir), deps, box=box, on_done=on_done)
 
 

@@ -24,6 +24,7 @@ from defender import _yaml
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
@@ -322,6 +323,12 @@ class Estate:
     root: Path
     systems: tuple[str, ...] = SYSTEMS
     withheld: tuple[tuple[str, str], ...] = ()
+    #: Systems the tenant RECORDS (each with a stub adapter in the roster) but whose grant table has no row: configured and
+    #: not granted. (#1366 R10: a record is stated, and a record needs an adapter.)
+    configured_only: tuple[str, ...] = ()
+    #: Like `configured_only`, and the stub's settings check raises `ConfigFault` over the record's settings: a system
+    #: whose settings cannot be used (down at start).
+    unusable: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self.root = Path(self.root)
@@ -330,9 +337,13 @@ class Estate:
         if not (self.state / "answers.json").exists():
             (self.state / "answers.json").write_text("{}", encoding="utf-8")
         (self.state / "calls.jsonl").touch()
-        for system in self.systems:
+        for system in (*self.systems, *self.configured_only):
             (self.adapters / f"{system.replace('-', '_')}_adapter.py").write_text(
                 _ADAPTER.format(system=system, state=str(self.state)), encoding="utf-8")
+        for system in self.unusable:
+            broken = _ADAPTER.replace("    return None\n", "    raise faults.ConfigFault('fixture: these settings cannot be used')\n", 1)
+            (self.adapters / f"{system.replace('-', '_')}_adapter.py").write_text(
+                broken.format(system=system, state=str(self.state)), encoding="utf-8")
 
     # --- where things are --------------------------------------------------------------
     @property
@@ -427,9 +438,33 @@ class Estate:
                             root / tenant_id, symlinks=True)
         return T6.accept(root, tenant_id)
 
+    def records(self) -> Any:
+        """The tenant's system records: one enabled stub record per estate system (R10: stated, not inferred. The estate's
+        systems are stub adapters of its own roster, so a default that fell back to the retired fixture's seven would
+        record systems the roster does not have and none it does)."""
+        spec = R.bare_records(*self.systems, *self.configured_only)
+        for system in self.unusable:
+            spec = R.added(spec, system, R.SysSpec({f"{system.upper()}_CARRIER": "pigeon"}, ""))
+        return spec
+
+    def directory(self, data_root: Path | None = None, tenant_id: str = FIXTURE_TENANT, **kw: Any) -> Any:
+        """The seeded ACTIVE tenant directory over the estate's tenant, holding `records()` (or the `records=` given)."""
+        from defender.tests.support.tenancy._active1214 import active_directory
+
+        root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
+        kw.setdefault("records", self.records())
+        return active_directory(root, tenant_id, **kw)
+
+    def launch_directory(self, tenant_id: str, roster: Any = None) -> Any:
+        """`directory()` for a launcher driven with this estate's roster (default: `self.roster()`): the records are the
+        estate's, and the roster the launcher is handed stands for the catalog they must lie within."""
+        directory = self.directory(tenant_id=tenant_id)
+        R.assert_records_within_roster(directory, tenant_id, roster if roster is not None else self.roster())
+        return directory
+
     def run_tenant(self, data_root: Path | None = None,
                    tenant_id: str = FIXTURE_TENANT) -> Any:
-        return T6.run_tenant(self.place(data_root, tenant_id))
+        return T6.run_tenant(self.place(data_root, tenant_id), records=self.records())
 
     def grant(self) -> Any:
         """The tenant's gather `VerbGrant` — the grant every branching query goes through."""
@@ -1611,7 +1646,8 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     # The episode lands under the launching tenant's own `<T>/episodes/`; the launcher mints
     # its id, so it is found as the ONE new folder there.
     tenant_id = src.parent.parent.name
-    seams.setdefault("directory", T.launcher_directory(tenant_id))  # C9: one seeded active directory
+    seams.setdefault("directory", est.directory(tenant_id=tenant_id))  # C9: one seeded active directory, the estate's records
+    R.assert_records_within_roster(seams["directory"], tenant_id, seams["roster"])  # the roster stands for the catalog
     root = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "episodes"
     before = {p.name for p in root.iterdir()} if root.is_dir() else set()
     try:
