@@ -55,7 +55,10 @@ upgrading a worker:
 2. Register gVisor with `--host-uds=open` on every execution host: `runsc install -- --oci-seccomp --host-uds=open`, then
    restart Docker. The job's socket is a host unix socket mounted into the job's gVisor guest, and gVisor refuses the
    guest's connection to it without this. The flag is daemon-wide, so every box gets the capability; a follow-up issue
-   weighs a job-only runtime.
+   weighs a job-only runtime. Run the worker natively on the execution host, with `ps` installed: the helper must share
+   the docker daemon's mount paths and pid namespace, and `docker top` needs `ps`
+   (`docs/decisions/vps-compose-deployment.md`, brain confinement). A worker in a container beside the daemon fails
+   every job.
 3. Job containers start under the box runtime (`DEFENDER_BOX_RUNTIME`). Set `DEFENDER_JOB_NETWORK` to the Docker network
    from which the job reaches the credential proxy and the model provider. Leave OpenBao and the database off that network.
 4. The job container runs as the uid that owns the data root, and its socket lives under

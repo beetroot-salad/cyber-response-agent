@@ -5,8 +5,8 @@ Two images, on purpose:
 | | Dev container (`Dockerfile.dev`) | Runtime container (`Dockerfile.runtime`) |
 |---|---|---|
 | Role | the "coding machine" — editing, this session, infra tooling | where an investigation actually executes (`defender/run.py`) |
-| Carries | terraform, hcloud, codex, docker CLI, ssh, uv, node | **only** python 3.11 + the defender `.[runtime]` and `.[api]` deps (`api` for the dev credential proxy, which runs from this image, #1482) + defender code — never tenant data (mounted at run time) |
-| Privilege | none special | gets the privilege runsc needs later (the dev container never does) |
+| Carries | terraform, hcloud, codex, docker CLI, ssh, uv, node | **only** python 3.11 + the defender `.[runtime]` deps + defender code — never tenant data (mounted at run time) |
+| Privilege | privileged, for its own jobs daemon (#1475); already root-equivalent through the host docker socket | gets the privilege runsc needs |
 | Maps to the sandbox design | the trusted orchestration/dev host | (superseded — see "The box image" below) |
 
 The dev container now mounts the host Docker socket (Docker-outside-of-Docker), so

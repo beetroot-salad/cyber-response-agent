@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y \
     # procps supplies `ps`. Without it VS Code's process-list code falls back to
     # a shell script that forks ~6 processes per PID in /proc, every poll — the
     # runs pile up faster than they finish and bury the box in forks. Keep it.
+    # The jobs daemon needs it too: `docker top` runs `ps`, and without that list a
+    # job's helper refuses gVisor's own processes as callers (#1475).
     procps \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
@@ -25,8 +27,28 @@ RUN apt-get update && apt-get install -y \
     && chmod a+r /etc/apt/keyrings/hashicorp.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/hashicorp.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list > /dev/null \
     && apt-get update \
-    && apt-get install -y docker-ce-cli docker-compose-plugin terraform \
+    # docker-ce + containerd.io + iptables: the dev container's own jobs daemon (below).
+    && apt-get install -y docker-ce-cli docker-compose-plugin terraform docker-ce containerd.io iptables \
     && rm -rf /var/lib/apt/lists/*
+
+# The jobs daemon (#1170, #1475): a docker daemon inside this container, for running jobs live. A job's helper must
+# share the docker daemon's mount paths and pid namespace (defender/docs/decisions/vps-compose-deployment.md, brain
+# confinement); the host daemon behind /var/run/docker.sock shares neither, this one shares both by construction.
+# Started on demand by `start-jobs-docker`, on its own socket; see defender/docs/development-operations.md.
+# gVisor comes from its own signed apt repository, as CI's .github/actions/install-gvisor installs it, registered
+# as CI registers it: --oci-seccomp (boxes are refused without it, #771) and --host-uds=open (the job's socket is a
+# unix socket of this container mounted into the job's gVisor guest, which refuses to connect to it without this).
+RUN curl -fsSL https://gvisor.dev/archive.key | gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+       > /etc/apt/sources.list.d/gvisor.list \
+    && apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/gvisor.list -o Dir::Etc::sourceparts=/dev/null \
+       -o APT::Get::List-Cleanup=0 \
+    && apt-get install -y --no-install-recommends runsc \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /etc/docker \
+    && printf '%s\n' '{"runtimes": {"runsc": {"path": "/usr/bin/runsc", "runtimeArgs": ["--oci-seccomp", "--host-uds=open"]}}}' \
+       > /etc/docker/daemon.json
+COPY .devcontainer/start-jobs-docker.sh /usr/local/bin/start-jobs-docker
 
 # hcloud CLI (Hetzner Cloud)
 ARG HCLOUD_VERSION=1.62.2
