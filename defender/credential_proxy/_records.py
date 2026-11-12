@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import math
 import threading
+import time
 from typing import Any, Protocol
 
 import psycopg
@@ -62,16 +63,23 @@ class PostgresSystemRecords:
 
     def current_system(self, tenant_id: str, system_id: str) -> SystemRecord | None:
         deadline = current_deadline()
-        left = READ_TIMEOUT_SEC if deadline is None else min(READ_TIMEOUT_SEC, deadline.left("the record read"))
+        # One budget for the whole read, each step given what is left of it: a second connection after a stale one
+        # never restarts the clock.
+        end = time.monotonic() + (READ_TIMEOUT_SEC if deadline is None
+                                  else min(READ_TIMEOUT_SEC, deadline.left("the record read")))
+
+        def left() -> float:
+            return max(0.001, end - time.monotonic())
+
         reused = self._take()
         row: Any = None
         if reused is not None:
             try:
-                row = self._read(reused, left, tenant_id, system_id, reused=True)
+                row = self._read(reused, left(), tenant_id, system_id, reused=True)
             except _Stale:
                 reused = None  # closed by `_read`; a fresh connection answers instead
         if reused is None:
-            row = self._read(self._connect(left), left, tenant_id, system_id, reused=False)
+            row = self._read(self._connect(left()), left(), tenant_id, system_id, reused=False)
         known, version, adapter_id, enabled, settings, access, generation, deleted = row
         if not known:
             raise ConfigFault("the request token's tenant has no system records")
@@ -113,7 +121,9 @@ class PostgresSystemRecords:
                               f"({type(e).__name__})") from None
         except psycopg.Error as e:
             conn.close()
-            if reused and isinstance(e, psycopg.OperationalError):
+            # A kept connection the server closed fails as a connection; a statement it cancelled (the read's own
+            # timeout) is a slow database, not a stale connection, and is not read again.
+            if reused and isinstance(e, psycopg.OperationalError) and not isinstance(e, psycopg.errors.QueryCanceled):
                 raise _Stale from None
             raise TransportFault(f"the records database failed the read ({type(e).__name__})") from None
         self._give_back(conn)

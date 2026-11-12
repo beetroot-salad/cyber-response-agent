@@ -359,6 +359,34 @@ def test_1366_o7_the_records_port_reuses_its_connection_and_still_reads_the_newe
 
 
 @pytest.mark.postgres
+def test_1366_o7_a_kept_connection_whose_read_times_out_is_not_read_again_past_the_deadline(
+        tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
+    """The records table is held locked, so a read on the kept session runs into its own statement timeout: that is a
+    slow database, not a stale session, so the read fails within the request's deadline rather than being tried again
+    on a fresh session with a fresh budget. (#1366 O7)"""
+    import psycopg
+
+    from defender.credential_proxy._deadline import Deadline, answering
+    from defender.credential_proxy._records import PostgresSystemRecords
+    from defender.kit.faults import TransportFault
+
+    budget = 1.5
+    with _pg(tmp_path, data_root, migrated_database, capsys, monkeypatch) as w:
+        login = w.stack.enter_context(R.proxy_login(w.dsn))
+        port = w.stack.enter_context(contextlib.closing(PostgresSystemRecords(login)))
+        assert port.current_system(w.t.tenant_id, "identity").version == 1  # premise: one kept session
+        with psycopg.connect(w.dsn) as holder:
+            holder.execute("LOCK TABLE tenancy.system_versions IN ACCESS EXCLUSIVE MODE")
+            started = time.monotonic()
+            with answering(Deadline.after(budget)), pytest.raises(TransportFault):
+                port.current_system(w.t.tenant_id, "identity")
+            took = time.monotonic() - started
+            holder.rollback()
+
+    assert took < budget + 0.5, f"the read took {took:.2f}s against a {budget}s deadline"
+
+
+@pytest.mark.postgres
 def test_1366_r13_an_imported_system_is_refused_until_credentials_are_set_at_its_generation(
         tmp_path, data_root, migrated_database, capsys, monkeypatch):  # noqa: F811
     """The tenant was imported (seeded) and identity then moved to generation 2; the only stored set is at the legacy path:
