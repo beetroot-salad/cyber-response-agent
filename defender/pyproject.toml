@@ -87,7 +87,8 @@ box = [
 ]
 # The platform HTTP API (`defender/api/`, #1131): the stub endpoints over in-memory fakes. Its
 # own extra because the API is its own program — it never loads the investigation or learning
-# modules, and neither the runtime nor the box image needs a web framework.
+# modules, and the box image never needs a web framework. The runtime image syncs it too
+# (#1482): the dev credential proxy runs from that image and serves with fastapi and uvicorn.
 api = [
     "fastapi>=0.115",
     # The ASGI server behind `api/serve.py`, the local dev entry point.
