@@ -428,6 +428,39 @@ def test_a_stop_anywhere_in_a_claim_runs_no_further_curator_commit_or_pr_and_lea
     assert s.branch_tip_on_remote(batch.branch) == cast.commits()[-1]
 
 
+def test_a_cancel_the_tick_itself_reads_before_its_pr_is_a_clean_stop_whose_push_the_renewer_does_not_interrupt(
+        world, capfd):  # noqa: F811 — the imported fixture
+    """The cancel lands during the claim's own push, so the tick's renewal after it usually reads the stop itself. Its
+    stop path expires the lease and pushes for longer than a renewal interval: the renewer, halted first, does not find
+    its lease gone and signal a lost lease into that push. (Should the renewer read the cancel first, the tick ends by
+    its signalled stop instead, which this also accepts.) (finding 3 of the #1476 review)"""
+    w = world
+    s = Scene(w, AUTHOR_LANE)
+    s.seed()
+    cast = Cast(s)
+    mp = pytest.MonkeyPatch()
+
+    def before(number: int) -> None:
+        if number == 1:
+            call(w.dsn, "request_cancel", w.t.tenant_id)
+        else:
+            time.sleep(1.0)  # the stop path's push outlasts several renewals (0.2 s in the child)
+
+    PushSpy(cast, mp, before=before)
+    try:
+        child = s.run_in_child(cast, "self-read-stop")
+        ended = child.wait(seconds=STOP_BOUND)
+    finally:
+        mp.undo()
+
+    err = capfd.readouterr().err
+    assert "stopping the tick (lease)" not in err, f"the renewer signalled a lost lease into the stop path: {err}"
+    assert ended in ({"rc": 0}, {"raised": "TickStopped"}), f"the tick crashed: {ended}"
+    [batch] = s.batches().values()
+    assert (batch.phase, s.open_prs()) == ("working", [])
+    assert s.branch_tip_on_remote(batch.branch) == cast.commits()[-1]
+
+
 def test_a_stopped_claims_push_that_hangs_is_cut_off_inside_the_stop_budget(world, caplog):  # noqa: F811 — the imported fixture
     """The origin never answers the stopped claim's push: the tick still ends within the stop budget, with the lease expired and the commits on the local branch for a takeover. (Stop budget, G-C7)"""
     from defender.learning.core import store_tick

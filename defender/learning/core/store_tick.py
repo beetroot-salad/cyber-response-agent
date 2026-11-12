@@ -873,7 +873,7 @@ class Tick:
                     _logger.warning(f"{self.label}: batch {held.batch_id}'s lease was lost before its delivery: "
                                     "nothing pushed past it; a takeover delivers it")
                 except Stop:
-                    self._stopped(delivery, held, "cancel")
+                    self._stopped(delivery, held, hold, "cancel")
                 except _forge_faults() as fault:
                     _logger.error(f"{self.label}: batch {held.batch_id} could not be delivered "
                                   f"({one_line(str(fault))}): its commits stay on its branch for a takeover")
@@ -881,8 +881,7 @@ class Tick:
                         self.store.expire_own(held)
                 return 0
             except TickStopped as stopped:
-                hold.halt()
-                self._stopped(delivery, held, stopped.why)
+                self._stopped(delivery, held, hold, stopped.why)
                 raise
             except LeaseLost:
                 _logger.warning(f"{self.label}: batch {held.batch_id}'s lease was lost: nothing more is done")
@@ -904,14 +903,16 @@ class Tick:
                 if batch is not None:
                     batch.discard()
 
-    def _stopped(self, delivery: TenantDelivery, held: Any, why: str) -> None:
+    def _stopped(self, delivery: TenantDelivery, held: Any, hold: Holding, why: str) -> None:
         """The stop path (D4): a lost lease does nothing more; otherwise no commits ends the batch at once
         (the attempt forgiven), and commits are pushed within the stop budget with the holder's own lease
-        expired, so a takeover delivers them at once."""
+        expired, so a takeover delivers them at once. The lease's renewer is halted first, whichever path
+        stopped: renewing a lease this path expires would signal a second stop into its push."""
         from dataclasses import replace
 
         from defender.learning.store import LeaseLost
 
+        hold.halt()
         if why == "lease":
             _logger.warning(f"{self.label}: batch {held.batch_id}'s lease was lost: stopped, nothing pushed")
             return
