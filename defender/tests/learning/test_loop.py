@@ -410,6 +410,27 @@ def test_lead_author_drain_skips_the_tick_when_the_tenants_systems_cannot_be_rea
     assert "an outage; skipping this tick" in caplog.text
 
 
+def test_lead_author_drain_delivers_a_retained_batch_while_the_tenants_systems_cannot_be_read(tenant, tmp_path: Path):
+    """Delivery needs no systems: a batch an earlier tick retained is delivered even while the tenant's records are
+    down, and only then does the outage skip the tick, its claim still queued. (#1366 R16)"""
+    t = tenant
+    paths = _tenant_paths(t, tmp_path)
+    state = state_for_paths(paths)
+    prefix = drains._branch_prefix(drains.LEAD_AUTHOR_DRAIN_LABEL)
+    state.record_delivery("lead-retained", {"branch": f"{prefix}retained", "batch_id": "retained",
+                                            "label": str(drains.LEAD_AUTHOR_DRAIN_LABEL), "reason": "push refused",
+                                            "at": "2026-11-07T00:00:00Z"})
+    run_dir = curation_run_dir("case-outage-retained")
+    enqueue_run(state, run_dir)
+    marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
+
+    assert drains.lead_author_drain(paths, **{**_seams(t), "directory": _RecordsDown(t.directory)}) == 0
+
+    assert state_for_paths(paths).deliveries(prefix) == []
+    assert marker.exists()
+    assert not json.loads(marker.read_text()).get("attempts"), marker.read_text()
+
+
 def test_lead_author_drain_bounded_retry_then_quarantine(tenant, tmp_path: Path, monkeypatch):
     import defender.learning.leads.lead_author as la
 

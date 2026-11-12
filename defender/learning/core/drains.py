@@ -744,9 +744,9 @@ def _open_delivery(
 
 def _tick_systems(paths: LoopPaths, records: TenantDirectory) -> TenantSystems:
     """The lead-author tick's systems (#1366 O1, R16): the selected tenant's, from its current
-    records over the catalog of the product checkout `paths` names. Read once, as the tick's
-    delivery opens and before any claim, so every claim and the pitfalls curation of the tick are
-    handed one set, and an outage skips the tick (`_Refused`, transient) with no claim taken and
+    records over the catalog of the product checkout `paths` names. Read once, after the tick
+    delivers the batches earlier ticks retained and before any claim, so every claim and the
+    pitfalls curation of the tick are handed one set, and an outage skips the tick (`_Refused`, transient) with no claim taken and
     no attempt counted. An unreadable adapters directory refuses the stage."""
     from defender.learning.leads.declared_systems import AdaptersUnreadable, tenant_systems_of
     from defender.tenancy import RecordsUnreachable
@@ -1093,8 +1093,9 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     lock_wait_seconds = repo_lock_wait_seconds()
     # The lane's label and git bound reach its work steps bound into the DEFAULT seams, so an
     # injected seam keeps its call shape (#1134).
-    # The default steps are handed the tenant's systems, read once per tick as the delivery opens
-    # (#1366 O1, R16); an injected step brings its own.
+    # The default steps are handed the tenant's systems, read once per tick that has work, after
+    # retained batches are delivered and before any claim (#1366 O1, R16); an injected step brings
+    # its own.
     tick_systems: list[TenantSystems] = []
     reads_systems = run_lead_author is None or run_pitfalls is None
 
@@ -1108,14 +1109,18 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
                 git_timeout=git_timeout, systems=tick_systems[0]),
         )
 
-    @contextlib.contextmanager
-    def open_delivery() -> Iterator[TenantDelivery]:
-        with _open_delivery(paths, directory=records, client=client, identity=identity,
-                            credential_config=credential_config,
-                            issuer_transport=issuer_transport) as delivery:
-            if reads_systems:
-                tick_systems[:] = [_tick_systems(paths, records)]
-            yield delivery
+    def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
+        return _open_delivery(paths, directory=records, client=client, identity=identity,
+                              credential_config=credential_config, issuer_transport=issuer_transport)
+
+    def has_work(state: LearningState) -> bool:
+        # Read here: after the batches earlier ticks retained are delivered (delivery needs no
+        # systems), before the tick starts a batch or claims anything.
+        if not _has_lead_author_work(state):
+            return False
+        if reads_systems:
+            tick_systems[:] = [_tick_systems(paths, records)]
+        return True
 
     with LearningState.open(paths) as state, state.lock(
             LEAD_AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as locked:
@@ -1136,7 +1141,7 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
             claims = state.has_requests()
             return _refusing(lambda: _run_tenant_batch(
                 paths, state, label=LEAD_AUTHOR_DRAIN_LABEL,
-                has_work=_has_lead_author_work,
+                has_work=has_work,
                 do_work=lambda work_paths, *, batch, box=None: _drain_lead_author(
                     work_paths, state, *steps(), box=box, batch=batch,
                     lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
