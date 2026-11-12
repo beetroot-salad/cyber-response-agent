@@ -402,8 +402,7 @@ class _Views:
             spawned["pitfalls"] = kw
             return 0
 
-        state = S.sym("tests.support.learning.core._state1135", "env_state")()
-        pitfalls._invoke_pitfalls_agent(rows, state=state, repo_root=self.lane.repo,
+        pitfalls._invoke_pitfalls_agent(rows, run_dir=self.run_dir, repo_root=self.lane.repo,
                                         systems=tuple(sorted(LANE_SYSTEMS)), spawn=spawn_pitfalls)
         return {"drafts": {Path(p): Path(p).read_text(encoding="utf-8") for p in created},
                 "author": spawned.get("author", {}).get("user_prompt"),

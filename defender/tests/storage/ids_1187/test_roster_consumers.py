@@ -200,14 +200,14 @@ def test_manifest_consumers_refuse_other_episode_ids_before_side_effects(
     from defender.learning.branch import cli
     from defender.learning.judge import JudgeRefused, grade_episode
     from defender.records import Run
-    from defender.tests.support.learning.core import _state1135
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
 
     ep, episode_id, roster = _episode(data_root)
     if consumer == "verify":
         _arm(ep, roster[T.world_id(ep, "a")])
     runs = R.tenant(data_root).runs_repository()
     judge = P.quiet_judge()
-    state = _state1135.state_over(tmp_path / "judge-state")
+    store = MemoryStore()
 
     def exercise(refused):
         if consumer == "page":
@@ -216,8 +216,9 @@ def test_manifest_consumers_refuse_other_episode_ids_before_side_effects(
             assert (ep / E.PAGE_NAME).is_file() is not refused
             return got.said
         if consumer == "judge":
-            err = R.raised(grade_episode, runs, episode_id, judge=judge, state=state)
+            err = R.raised(grade_episode, runs, episode_id, judge=judge, store=store)
             assert judge.prompts == [], "a mismatched or outcome-less episode asked the judge"
+            assert not refused or not store.items, "a refused grade queued findings"
             assert (ep / "judge.yaml").is_file() is not refused
             assert R.is_a(err, JudgeRefused) if refused else err is None, err
             return R.message(err)

@@ -63,9 +63,9 @@ What runs now branches a **real** investigation instead of inventing one.
    resolution on it and still concluded the same (`decision-discipline`).
 6. **Enqueue** — a gradable episode's surviving findings are appended to one
    of two queues, partitioned by what a finding is *about* (#1007): a finding
-   about the defender's conduct to `_pending/findings.jsonl`, a finding about
+   about the defender's conduct to the learning store's findings queue, a finding about
    the world — an invented field shape, a story the world's facts never backed, a
-   family that failed to discriminate — to `_pending/questioner_findings.jsonl`.
+   family that failed to discriminate — to its questioner-findings queue.
 
 The episode's own record artifacts — `judge.yaml` (written last, certifying
 the pass) and `timing.json` (the launcher's per-step clock) — sit at the
@@ -116,9 +116,9 @@ The old loop ran two directions and fed three corpora — defender findings
 into `agent/lessons/`, plus actor and environment observations into their own.
 Those two lost their producers at the cutover and are gone (see above).
 What is live since #1007 is partitioned by *subject*, not by direction:
-`agent/lessons/`, fed by `_pending/findings.jsonl` and read by the runtime
+`agent/lessons/`, fed by the learning store's findings queue and read by the runtime
 agent, and `lessons-questioner/`, fed by
-`_pending/questioner_findings.jsonl` and read by the questioner. One drain
+the store's questioner-findings queue and read by the questioner. One drain
 tick serves both.
 
 The canonical enumeration of the queues and their thresholds is

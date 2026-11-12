@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
-from defender.tests.support.shared._locations_1210 import location_path
 
 import contextlib
 import dataclasses
-import json
+from types import SimpleNamespace
 import os
 import subprocess
 from collections.abc import Callable, Iterator
@@ -18,7 +16,9 @@ import pytest
 from defender import _git
 from defender._io import READ_LIMIT
 from defender.records import RunPaths
-from defender.learning.core import drains, persist
+from defender.learning.core import drains
+from defender.tests.support.learning.core import _store1278 as ST
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.author.shared import AuthorError
@@ -232,6 +232,10 @@ class DraftScene:
 @dataclasses.dataclass
 class LeadScene(DraftScene):
     run_dir: Path
+    #: The claim's items as the store hands them to the lane (`(kind, key, payload)`) and the fates the lane decides
+    #: for them (#1278): requests and pitfalls are rows of the learning store, not queue folders.
+    held: list = dataclasses.field(default_factory=list)
+    outcomes: dict = dataclasses.field(default_factory=dict)
 
     def at(self, name: str) -> Path:
         return self.lane.skills_dir / name
@@ -254,7 +258,6 @@ def _lead_scene(tmp_path: Path, committed: dict[str, str] | None = None, *,
                    **(files or {})}
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, files=agent_files, product=product,
                         tenant=_state1135.curation_tenant())
-    location_path(lane.paths.state_root).mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return LeadScene(tmp=lane.tmp, lane=lane, run_dir=_run_dir(), head=lane.base)
 
 
@@ -471,6 +474,11 @@ EXECUTION_TEXT = "# execution\n\n## Common pitfalls\n\n- use the key, not the id
 
 @dataclasses.dataclass
 class PitfallsScene(DraftScene):
+    #: The claim's pitfalls, as the store hands them to the curator (`(kind, key, payload)`), and the fates the curator
+    #: decides for them (#1278 D1): the rows are no longer a queue file.
+    items: list = dataclasses.field(default_factory=list)
+    outcomes: dict = dataclasses.field(default_factory=dict)
+
     def at(self, rel: str) -> Path:
         return self.repo / rel
 
@@ -480,7 +488,7 @@ def _pitfalls_scene(tmp_path: Path, monkeypatch, rows: list[dict], *,
     """A started batch whose draft carries the reducer add-on and `elastic/execution.md` (the
     `elastic` marker and skill, the `gather` non-system skill) plus `files` (agent-relative), all
     in the batch base; the product checkout holds the `elastic` and `cmdb` adapters. `rows` are
-    queued and the threshold is 1, so the tick offers what the rows name."""
+    the claim's pitfalls, so the tick offers what the rows name."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     product = seed_product(tmp_path, adapters=("elastic", "cmdb"))
     agent_files = {**seed_agent_files(markers=("elastic",), skills=("elastic",), catalog=(),
@@ -488,8 +496,8 @@ def _pitfalls_scene(tmp_path: Path, monkeypatch, rows: list[dict], *,
                    REDUCER_REL.removeprefix("agent/"): reducer_surface_text(), **(files or {})}
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, files=agent_files, product=product,
                         tenant=_state1135.curation_tenant())
-    persist.append_pitfalls(rows, state=_state1135.state_for_paths(lane.paths))
-    return PitfallsScene(tmp=lane.tmp, lane=lane, head=lane.base)
+    return PitfallsScene(tmp=lane.tmp, lane=lane, head=lane.base,
+                         items=[("pitfall", str(r["pitfall_id"]), dict(r)) for r in rows])
 
 
 def _reducer_rows() -> list[dict]:
@@ -501,7 +509,8 @@ def _system_rows() -> list[dict]:
 
 
 def _queued(s: PitfallsScene) -> list[str]:
-    return sorted(r["pitfall_id"] for r in persist.read_pitfalls(_state1135.state_for_paths(s.paths)))
+    """The claim's pitfalls no fate was decided for: the ones the store returns to waiting."""
+    return sorted(key for kind, key, _ in s.items if (kind, key) not in s.outcomes)
 
 
 def _drive_pitfalls(  # noqa: PLR0913 — one drive, every seam a row varies
@@ -521,7 +530,7 @@ def _drive_pitfalls(  # noqa: PLR0913 — one drive, every seam a row varies
     with C.draft_trees(s.lane) as trees:
         got = _outcome(lambda: run_pitfalls_handed(
             paths=s.paths, trees=LoggedTrees(trees, log), batch=s.lane.batch, invoke=spawn,
-            box=box))
+            box=box, items=s.items, outcomes=s.outcomes))
     return got, spawn
 
 
@@ -880,16 +889,51 @@ def test_a_plain_execution_md_larger_than_any_read_is_refused(tmp_path: Path, mo
     assert s.nothing_landed(), "an oversized file was committed"
 
 
-def _queue_claims(s: LeadScene, *run_names: str) -> list[Path]:
-    """A lead-author request queued for each named run dir (`runs/<name>`, a `gather_raw/` of its
-    own), keyed `case-<name>`; returns the run dirs."""
+@pytest.fixture
+def learning_store(migrated_database, monkeypatch):  # noqa: F811 — fixture
+    """The learning store the tenant lead scenes' drain ticks read: the database, a lease of ten minutes with five of
+    grace and a renewer that never fires, the lead lane waking at one item (#1278)."""
+    monkeypatch.setenv(ST.DSN_ENV, migrated_database)
+    for name, value in ((ST.LEASE_ENV, "600"), (ST.GRACE_ENV, "300"), (ST.RENEW_ENV, "600"),
+                        ("LEARNING_PITFALLS_THRESHOLD", "1")):
+        monkeypatch.setenv(name, value)
+    return migrated_database
+
+
+def _tenant_of(s: Any) -> str:
+    return str(s.paths.tenant.id)
+
+
+def _dsn() -> str:
+    import os
+
+    return os.environ["DEFENDER_DATABASE_DSN"]
+
+
+def _queue_claims(s: Any, *run_names: str) -> list[Path]:
+    """A lead-author request for each named run dir (`runs/<name>`, a `gather_raw/` of its own), keyed
+    `case-<name>`; returns the run dirs. A scene over a batch draft holds them as its claim's items; a scene over a
+    tenant files them in the learning store (`enqueue_request`, #1278)."""
     run_dirs = []
     for name in run_names:
         run_dir = _state1135.curation_run_dir(name)
         (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
-        _state1135.enqueue_case(_state1135.state_for_paths(s.paths), f"case-{name}", run_dir)
+        row = _state1135.curation_row(f"case-{name}", run_dir)
+        if isinstance(s, TenantLeadScene):
+            ST.call(_dsn(), "enqueue_request", _tenant_of(s), str(row["run_id"]), row["case_id"], row)
+        else:
+            s.held.append(("curation_request", str(row["run_id"]), row))
         run_dirs.append(run_dir)
     return run_dirs
+
+
+def _add_pitfalls(s: Any, rows: list[dict]) -> None:
+    """The pitfalls rows `rows`, as the lane's claim holds them (a scene) or the store holds them (a tenant scene)."""
+    for row in rows:
+        if isinstance(s, TenantLeadScene):
+            ST.call(_dsn(), "add_pitfall", _tenant_of(s), row)
+        else:
+            s.held.append(("pitfall", str(row["pitfall_id"]), dict(row)))
 
 
 class Lanes:
@@ -913,7 +957,7 @@ class Lanes:
     def run_lead(self, paths: LoopPaths, state: Any, run: Any, *, box: Any = None,
                  on_done: Any, **_kw: Any) -> int:
         self.handed.append(box)
-        deps = draft_lead_deps(self.lane, state=state, invoke_agent=self.agent,
+        deps = draft_lead_deps(self.lane, invoke_agent=self.agent,
                                extract=lambda _run_dir: ([], [ELASTIC_LEAD]))
         if self.log is not None:
             deps = _journaled_deps(deps, self.log)
@@ -926,7 +970,7 @@ class Lanes:
             return 0
 
     def run_pitfalls(self, paths: LoopPaths, state: Any, *, box: Any = None, on_curated: Any,
-                     **_kw: Any) -> int:
+                     items: Any = (), outcomes: Any = None, **_kw: Any) -> int:
         self.handed.append(box)
         self.pitfalls_ticks += 1
         if self.curator is None:
@@ -934,27 +978,20 @@ class Lanes:
         with C.draft_trees(self.lane) as trees:
             held = trees if self.log is None else LoggedTrees(trees, self.log)
             return run_pitfalls_handed(
-                paths=paths, state=state, trees=held, batch=self.lane.batch, invoke=self.curator,
-                box=box, on_curated=on_curated)
-
-
-def _request_dir(s: LeadScene, *below: str) -> Path:
-    """The lead-author request queue's folder (or one below it), spelled literally: `state.py`
-    names it for no caller."""
-    return location_path(s.paths.state_root).joinpath("author-queue", *below)
+                paths=paths, trees=held, batch=self.lane.batch, invoke=self.curator,
+                box=box, on_curated=on_curated, items=items, outcomes=outcomes)
 
 
 def _drain(s: LeadScene, lanes: Lanes, **kw: Any) -> Any:
-    """`drains._drain_lead_author` over the scene's paths, on a learning-state handle over its
-    root (as the lane's entry opens one), its two work steps `lanes`', serving the scene's batch.
-    The scene's paths carry the accepted tenant the claims name (r10.1 C1: a drain serves only through its own
-    tenant), and the drain re-checks each claim's tenant: the directory holds every tenant the scene placed
-    active. As the lane's entry does, the tick claims when a request is queued as it begins."""
+    """The lead-author lane's work over the scene's claim: `drains._store_lead_work` with the lanes' two work steps,
+    serving the scene's batch, deciding fates into `s.outcomes` (what the store applies when the batch enters review or
+    ends). A fault the lane halts on propagates, as it does out of the tick."""
+    from types import SimpleNamespace
+
     lanes.lane = s.lane
-    state = _state1135.state_for_paths(s.paths)
-    return drains._drain_lead_author(
-        s.paths, state, lanes.run_lead, lanes.run_pitfalls,
-        claims=state.has_requests(), directory=directory_for_root(), **kw)
+    return drains._store_lead_work(
+        s.paths, lanes.run_lead, lanes.run_pitfalls, box=kw.pop("box", None), batch=s.lane.batch,
+        held=SimpleNamespace(items=list(s.held)), feedback=None, outcomes=s.outcomes, **kw)
 
 
 def _caught_drain(s: LeadScene, lanes: Lanes, **kw: Any) -> BaseException | None:
@@ -962,41 +999,50 @@ def _caught_drain(s: LeadScene, lanes: Lanes, **kw: Any) -> BaseException | None
     return X.caught(lambda: _drain(s, lanes, **kw))
 
 
-def _failed(s: LeadScene) -> list[str]:
-    """The names of the claims the lane dead-lettered."""
-    failed = _request_dir(s, "failed")
-    return sorted(p.name for p in failed.glob("*.json")) if failed.is_dir() else []
+def _fates(s: Any) -> dict[tuple[str, str], str]:
+    """Each lead-lane item (`(kind, case or pitfall id)`) -> its fate: `dead`, or the store's status for a tenant scene
+    (`waiting`, `in_batch`, ...), or `waiting`/`decided:<outcome>` for a scene over a batch draft (no fate yet decided means
+    the store keeps it waiting)."""
+    if isinstance(s, TenantLeadScene):
+        return {(i.kind, i.coalesce_key or i.key): i.status for i in ST.call(_dsn(), "work", _tenant_of(s))
+                if i.kind in ("curation_request", "pitfall")}
+    out = {}
+    for kind, key, payload in s.held:
+        name = (s.outcomes.get((kind, key)) or SimpleNamespace(name="waiting")).name
+        out[(kind, payload.get("case_id") or key)] = name
+    return out
 
 
-def _claim_files(s: LeadScene) -> tuple[list[str], list[str]]:
-    """The lead-author queue's markers: those still queued, and those claimed (`inflight/`)."""
-    qdir = _request_dir(s)
-    return (sorted(p.name for p in qdir.glob("*.json")),
-            sorted(p.name for p in (qdir / "inflight").glob("*.json")))
+def _failed(s: Any) -> list[str]:
+    """The case ids of the requests the lane retired as dead."""
+    return sorted(k for (kind, k), v in _fates(s).items() if kind == "curation_request" and v == "dead")
 
 
-def _attempts(paths: LoopPaths) -> list[Any]:
-    return [r.get("attempts") for r in persist.read_pitfalls(_state1135.state_for_paths(paths))]
+def _not_spent(s: Any) -> list[str]:
+    """The case ids of the requests still to be served: no fate decided (waiting, or held in a batch that has not ended)."""
+    return sorted(k for (kind, k), v in _fates(s).items() if kind == "curation_request" and v in ("waiting", "in_batch"))
 
 
-def _claim_attempts(s: LeadScene) -> dict[str, Any]:
-    """Each claimed marker's (`inflight/`) `attempts`: a serve is charged once, before its run,
-    and a box fault charges nothing more."""
-    inflight = _request_dir(s, "inflight")
-    return {p.name: json.loads(p.read_text(encoding="utf-8")).get("attempts")
-            for p in sorted(inflight.glob("*.json"))}
+def _pitfall_fates(s: Any) -> dict[str, str]:
+    return {k: v for (kind, k), v in _fates(s).items() if kind == "pitfall"}
+
+
+def _charged(s: TenantLeadScene) -> dict[str, int]:
+    """How many serves each request in the store has been charged (an attempt is stamped at claim, D8)."""
+    return {i.coalesce_key: i.attempts for i in ST.call(_dsn(), "work", _tenant_of(s))
+            if i.kind == "curation_request" and i.attempts}
 
 
 def _claim_then_pitfalls(tmp_path: Path, monkeypatch: Any
                          ) -> tuple[X.FakeDaemon, Any, Any, LeadScene, list[Any], str | None]:
     """One claim queued and three pitfalls rows at threshold, over a stopped box: the daemon,
-    the executor, the handle, the scene, the rows' attempts and `execution.md` at HEAD."""
+    the executor, the handle, the scene, the pitfalls' fates and `execution.md` at HEAD."""
     daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
+    _add_pitfalls(s, _system_rows())
     _queue_claims(s, "run-0")
-    return (daemon, box, runs, s, _attempts(s.paths),
+    return (daemon, box, runs, s, _pitfall_fates(s),
             s.committed(DRAFT_EXECUTION_REL))
 
 
@@ -1042,12 +1088,12 @@ def test_a_claims_run_start_fault_halts_the_lane_and_dead_letters_nothing(
 
     assert isinstance(got, BoxFault), got
     assert lanes.agent.calls == [], "an agent ran though its box never started"
-    assert _claim_files(s) == (["case-run-1.json"], ["case-run-0.json"]), (
-        "the lane went on to serve another claim")
+    assert _not_spent(s) == ["case-run-0", "case-run-1"], (
+        "the lane went on to serve another claim, or decided a fate for one")
     assert lanes.pitfalls_ticks == 0, "the pitfalls tick ran after a box fault"
     assert _failed(s) == [], "a claim was dead-lettered for a box that would not start"
-    assert _claim_attempts(s) == {"case-run-0.json": 1}, (
-        f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
+    # retired: the claim's attempt count (`_claim_attempts`, the `inflight/` marker's); an attempt is stamped at claim by
+    # the store (design D8) and a halt charges nothing beyond it: `ST::test_an_attempt_is_stamped*`.
     assert s.lane.tip() == s.head
     assert daemon.status(NAME) == "exited"
 
@@ -1071,7 +1117,10 @@ def test_control_a_claims_agent_fault_dead_letters_that_claim_and_the_next_is_se
 
     log.assert_runs_hold_exactly(["agent", "agent"], ("agent",))
     assert [b is box for b in lanes.agent.boxes] == [True, True], lanes.agent.boxes
-    assert _failed(s) == ["case-run-0.json"], _failed(s)
+    # An ordinary failure retires nothing at once (the old dead-letter on the first failure is retired, design D8): the
+    # claim is stamped an attempt and waits, holding at the ceiling; the next claim is still served.
+    assert _failed(s) == [], _failed(s)
+    assert _fates(s)[("curation_request", "case-run-0")] == "waiting"
     assert daemon.status(NAME) == "exited"
     assert s.committed(s.rel(AGENT_NAME)) == VETTED
 
@@ -1089,12 +1138,10 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_lane(
 
     assert isinstance(got, BoxFault), got
     assert len(lanes.agent.calls) == 1, lanes.agent.calls
-    assert _claim_files(s) == (["case-run-1.json"], ["case-run-0.json"]), (
-        "the lane went on to serve another claim")
+    assert _not_spent(s) == ["case-run-0", "case-run-1"], (
+        "the lane went on to serve another claim, or decided a fate for one")
     assert lanes.pitfalls_ticks == 0, "the pitfalls tick ran after a box fault"
     assert _failed(s) == [], "a claim was dead-lettered for a box that would not stop"
-    assert _claim_attempts(s) == {"case-run-0.json": 1}, (
-        f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
     assert s.lane.tip() == s.head, "a commit landed beside a box that would not stop"
 
 
@@ -1121,7 +1168,7 @@ def test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row(
 
     got = _caught_drain(s, lanes, box=runs)
 
-    attempts = _attempts(s.paths)
+    attempts = _pitfall_fates(s)
     assert s.committed(s.rel(AGENT_NAME)) == VETTED, (
         "the claim's own commit did not stand")
     assert s.committed(DRAFT_EXECUTION_REL) == execution_before, (
@@ -1129,11 +1176,11 @@ def test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row(
     assert lanes.pitfalls_ticks == 1
     if where == "curator-fails":
         assert got is None, got
-        assert attempts == [1] * len(attempts_before), attempts
+        assert attempts == attempts_before, attempts  # an ordinary failure leaves them waiting to be retried
         return
     assert isinstance(got, BoxFault), got
     assert len(lanes.curator.calls) == (0 if where == "start" else 1)
-    assert attempts == attempts_before, f"a pitfalls row was bumped for a box fault: {attempts}"
+    assert attempts == attempts_before, f"a pitfalls fate was decided for a box fault: {attempts}"
 
 
 def _run_calls(daemon: X.FakeDaemon) -> list[str]:
@@ -1183,10 +1230,10 @@ def test_a_stop_fault_under_a_failing_curator_halts_the_lane_and_bumps_no_pitfal
     X.no_path_docker(daemon)
     if stop == "holds":
         assert got is None, got
-        assert _attempts(s.paths) == [1] * len(attempts_before), _attempts(s.paths)
+        assert _pitfall_fates(s) == attempts_before, _pitfall_fates(s)  # retried, not retired
         return
     X.assert_the_stop_fault_won(got, raised, daemon, stop)
-    assert _attempts(s.paths) == attempts_before, "a pitfalls row was bumped for a box fault"
+    assert _pitfall_fates(s) == attempts_before, "a pitfalls fate was decided for a box fault"
 
 
 @pytest.mark.parametrize("stop", ["refused", "holds"])
@@ -1221,7 +1268,7 @@ def test_a_swallowed_stop_fault_in_the_last_claim_makes_the_pitfalls_run_refuse(
     assert lanes.curator.calls == [], "the pitfalls curator ran after a swallowed stop fault"
     assert s.committed(DRAFT_EXECUTION_REL) == execution_before, (
         "the pitfalls edit was committed after a swallowed stop fault")
-    assert _attempts(s.paths) == attempts_before
+    assert _pitfall_fates(s) == attempts_before
     assert calls == [*ONE_RUN, "status", "stop", "status"], (
         f"the pitfalls run did not refuse the running box with a best-effort stop: {calls}")
     assert daemon.status(NAME) == "exited"
@@ -1261,6 +1308,10 @@ def _tenant_lead_scene(tmp_path: Path, data_root: Path) -> Iterator[TenantLeadSc
              for p in skills.rglob("*") if p.is_file()}
     with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
         bind_forge(t)
+        if os.environ.get("DEFENDER_DATABASE_DSN"):
+            from defender.tests.support.jobs._jobs1342 import register_tenant
+
+            register_tenant(os.environ["DEFENDER_DATABASE_DSN"], t.tenant_id)
         yield TenantLeadScene(tmp=tmp_path, repo=repo, paths=drain_paths(t, repo),
                               run_dir=_run_dir(), head=_git.git_head_sha(repo), t=t)
 
@@ -1305,7 +1356,7 @@ class TenantLanes(Lanes):
         # its deps built with that batch, never `paths`' checkout.
         with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
             deps = dataclasses.replace(
-                build_deps_handed(paths, state=state, trees=trees, batch=batch),
+                build_deps_handed(paths, trees=trees, batch=batch),
                 invoke_agent=self.agent, extract=lambda _run_dir: ([], [ELASTIC_LEAD]))
             # The draft's `agent/skills` lane, where the box's agent writes — not `deps.paths`,
             # which stays product-rooted.
@@ -1340,15 +1391,16 @@ def _held_lead_drain(s: TenantLeadScene, monkeypatch: Any
 
 
 @pytest.mark.parametrize("first", ["box-faults", "nothing-to-author"])
+@pytest.mark.postgres
 def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
-        tmp_path: Path, monkeypatch, data_root: Path, first: str):
+        tmp_path: Path, monkeypatch, data_root: Path, first: str, learning_store):
     """Nothing is delivered or dead-lettered, and the claim is charged its one serve (#1195)."""
     with _tenant_lead_scene(tmp_path, data_root) as s:
         leads = {"claim-0": WAZUH_LEAD if first == "box-faults" else None, "claim-1": ELASTIC_LEAD}
         for name, lead in leads.items():
             rows = [(lead.query_id, lead.system, lead.verb)] if lead is not None else []
-            _state1135.enqueue_case(_state1135.state_for_paths(s.paths), f"case-{name}",
-                                    _run_dir(*rows, run_id=name))
+            row = _state1135.curation_row(f"case-{name}", _run_dir(*rows, run_id=name))
+            ST.call(learning_store, "enqueue_request", _tenant_of(s), str(row["run_id"]), row["case_id"], row)
 
         got, calls = _held_lead_drain(s, monkeypatch)
 
@@ -1357,31 +1409,29 @@ def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
         assert calls == X.REFUSED_FIRST_RUN, f"a default step called docker outside its run: {calls}"
         assert _failed(s) == [], "a claim was dead-lettered for a box that would not start"
         _nothing_delivered(s)
-        queued, claimed = _claim_files(s)
-        if first == "nothing-to-author":
-            assert queued == [], queued
-            assert "case-claim-1.json" in claimed, claimed
-            return
-        assert queued == ["case-claim-1.json"], (
-            f"the next claim was served, or the first handed back as a transient: {queued}")
-        assert claimed == ["case-claim-0.json"], claimed
-        assert _claim_attempts(s) == {"case-claim-0.json": 1}, (
-            f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
+        # The halted batch committed nothing, so its claim ends with the fates the lane decided, which are none: every
+        # request waits again, with the attempt the claim stamped on it (design D8, `ST::test_d8_*`); none is served
+        # past the fault and none is dead. (The old per-claim `inflight/` marker count is retired with the marker: the
+        # store stamps the attempt at claim.)
+        fates = _fates(s)
+        assert set(fates.values()) == {"waiting"}, fates
+        assert _charged(s) == {"case-claim-0": 1, "case-claim-1": 1}, _charged(s)
 
 
+@pytest.mark.postgres
 def test_a_run_start_fault_through_the_default_pitfalls_step_halts_the_lane(
-        tmp_path: Path, monkeypatch, data_root: Path):
-    """It bumps no pitfalls row and delivers nothing (#1195)."""
+        tmp_path: Path, monkeypatch, data_root: Path, learning_store):
+    """It decides no pitfalls fate and delivers nothing (#1195)."""
     with _tenant_lead_scene(tmp_path, data_root) as s:
         monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-        persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
-        attempts_before = _attempts(s.paths)
+        _add_pitfalls(s, _system_rows())
+        attempts_before = _pitfall_fates(s)
 
         got, calls = _held_lead_drain(s, monkeypatch)
 
         assert isinstance(got, BoxFault), got
         assert calls == X.REFUSED_FIRST_RUN, f"the default step called docker outside its run: {calls}"
-        assert _attempts(s.paths) == attempts_before, "a pitfalls row was bumped for a box fault"
+        assert _pitfall_fates(s) == attempts_before, "a pitfalls fate was decided for a box fault"
         _nothing_delivered(s)
 
 
@@ -1440,20 +1490,25 @@ LEAD_F1_FAILURES = [
 ]
 
 
+@pytest.mark.postgres
 @pytest.mark.parametrize("follows", ["next-claim", "nothing-follows"])
 @pytest.mark.parametrize("stop", STOP_FAULTS)
 @pytest.mark.parametrize("failure", LEAD_F1_FAILURES)
 def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failure_as_context(
-        tmp_path: Path, monkeypatch, data_root: Path, failure: Any, stop: str, follows: str):
+        tmp_path: Path, monkeypatch, data_root: Path, failure: Any, stop: str, follows: str, learning_store):
     """Nothing is delivered or dead-lettered (#1195). Control (the stop holds): the failing claim
-    is dead-lettered and the next claim's commit is delivered as a `lead-author/` PR."""
-    claims = ("run-0", "run-1") if follows == "next-claim" else ("run-0",)
+    waits to be retried (an attempt stamped, D8; no dead letter at the first failure) and the next claim's commit is
+    delivered as a `lead-author/` PR."""
+    # The store hands a claim its requests in key order (`kind, item_key`, the run id), not the order they were filed: the
+    # first served is the one whose run id sorts first.
+    first, second = sorted(("run-0", "run-1"), key=fixture_uuid)
+    claims = (first, second) if follows == "next-claim" else (first,)
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, *claims) as (s, daemon):
         raised = failure()
 
         def author(run_dir: Path) -> None:
             daemon.mark(f"agent:{run_dir.name}")
-            if run_dir.name != fixture_uuid("run-0"):
+            if run_dir.name != fixture_uuid(first):
                 write(lanes.skills_dir / AGENT_NAME, VETTED)
                 return
             if stop != "holds":  # 1: the post-create stop; 2: this run's; its proof: the next ask
@@ -1469,32 +1524,35 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
         kept = _kept(daemon)
         if stop == "holds":
             assert got is None, got
-            assert _failed(s) == ["case-run-0.json"], _failed(s)
+            assert _failed(s) == [], _failed(s)
+            assert _fates(s)[("curation_request", f"case-{first}")] == "waiting"
             if follows == "next-claim":
                 # #1344 amendment 2: one plain start for the probes, then each run's window attaches.
-                assert kept == ["create", "start", "stop", "attach", f"agent:{fixture_uuid('run-0')}",
-                                "stop", "attach", f"agent:{fixture_uuid('run-1')}", "stop", "rm"], kept
+                assert kept == ["create", "start", "stop", "attach", f"agent:{fixture_uuid(first)}",
+                                "stop", "attach", f"agent:{fixture_uuid(second)}", "stop", "rm"], kept
                 assert _delivered_text(s, AGENT_NAME) == VETTED.strip()
             return
         X.assert_the_stop_fault_won(got, raised, daemon, stop)
         assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
         assert _failed(s) == [], "a claim was dead-lettered under a box fault"
-        assert _claim_attempts(s) == {"case-run-0.json": 1}, (
-            f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
-        assert _claim_files(s) == (["case-run-1.json"] if follows == "next-claim" else [],
-                                   ["case-run-0.json"]), _claim_files(s)
-        assert kept[:5] == ["create", "start", "stop", "attach", f"agent:{fixture_uuid('run-0')}"], kept
+        fates = _fates(s)
+        assert fates[("curation_request", f"case-{second}")] != "dead" if follows == "next-claim" else True, fates
+        assert fates[("curation_request", f"case-{first}")] != "dead", fates
+        assert kept[:5] == ["create", "start", "stop", "attach", f"agent:{fixture_uuid(first)}"], kept
         assert not {"start", "attach"} & set(kept[5:]), (
             f"a later run was started beside the box: {kept}")
         assert kept[-1:] == ["rm"], kept
+        assert [x for x in kept if x.startswith("agent:")] == [f"agent:{fixture_uuid(first)}"], (
+            f"the next claim's agent ran after the halt: {kept}")
         assert lanes.pitfalls_ticks == 0
         _nothing_delivered(s)
 
 
+@pytest.mark.postgres
 @pytest.mark.parametrize("docker", ["carried", "path-default"])
 @pytest.mark.parametrize("stop", ["refused", "holds"])
 def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
-        tmp_path: Path, monkeypatch, data_root: Path, stop: str, docker: str):
+        tmp_path: Path, monkeypatch, data_root: Path, stop: str, docker: str, learning_store):
     """Nothing is delivered and the claim is charged once (#1195). Control (the stop holds): the
     agent's draft is delivered as a `lead-author/` PR."""
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, "run-0",
@@ -1519,12 +1577,11 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
         assert isinstance(got, BoxFault), got
         _nothing_delivered(s)
         assert _failed(s) == [], "the claim was dead-lettered for a box that would not stop"
-        assert _claim_attempts(s) == {"case-run-0.json": 1}, (
-            f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
 
 
+@pytest.mark.postgres
 def test_a_claim_a_box_fault_halted_is_served_on_the_next_tick(
-        tmp_path: Path, monkeypatch, data_root: Path):
+        tmp_path: Path, monkeypatch, data_root: Path, learning_store):
     """The re-served claim's commit is then delivered on the tenant forge (#1195)."""
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, "run-0") as (s, daemon):
         served: list[str] = []
@@ -1540,7 +1597,7 @@ def test_a_claim_a_box_fault_halted_is_served_on_the_next_tick(
         got1, _ = _production_lead_drain(s, daemon, lanes=lanes)
         assert isinstance(got1, BoxFault), f"tick 1 did not halt on its box fault: {got1!r}"
         _nothing_delivered(s)
-        assert _claim_attempts(s) == {"case-run-0.json": 1}, _claim_attempts(s)
+        assert _fates(s)[("curation_request", "case-run-0")] != "dead"
 
         got2, _ = _production_lead_drain(s, daemon, lanes=lanes)
 
@@ -1549,7 +1606,8 @@ def test_a_claim_a_box_fault_halted_is_served_on_the_next_tick(
             f"tick 2 did not serve the claim again: {served}")
         assert _failed(s) == [], f"the claim was quarantined or dead-lettered: {_failed(s)}"
         assert _delivered_text(s, AGENT_NAME) == VETTED.strip()
-        assert _claim_files(s) == ([], []), _claim_files(s)
+        assert _fates(s).get(("curation_request", "case-run-0")) != "waiting", (
+            "the re-served claim is still queued after its commit was delivered")
         X.no_path_docker(daemon)
 
 
@@ -1583,26 +1641,24 @@ BATCH_START_FAULTS = [
 
 
 @pytest.mark.parametrize(("knob", "kind"), BATCH_START_FAULTS)
+@pytest.mark.postgres
 def test_a_batch_start_fault_claims_nothing_and_dead_letters_nothing(
-        tmp_path: Path, monkeypatch, data_root: Path, knob: str, kind: type):
+        tmp_path: Path, monkeypatch, data_root: Path, knob: str, kind: type, learning_store):
     """It also charges nothing, runs no lane step and delivers nothing (#1195)."""
     with _production_tenant_lead_scene(tmp_path, monkeypatch, data_root, "run-0", "run-1") as (s, daemon):
         monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-        persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
-        attempts_before = _attempts(s.paths)
-        qdir = _request_dir(s)
-        markers_before = {p.name: p.read_bytes() for p in qdir.glob("*.json")}
+        _add_pitfalls(s, _system_rows())
+        attempts_before = _pitfall_fates(s)
+        fates_before = _fates(s)
         getattr(daemon, knob)()
 
         got, lanes = _production_lead_drain(s, daemon, lambda _rd: None)
 
         assert isinstance(got, kind), got
-        assert {p.name: p.read_bytes() for p in qdir.glob("*.json")} == markers_before, (
-            "a claim was claimed or charged for a box that never came up")
-        assert _claim_files(s)[1] == [], "a claim was claimed for a box that never came up"
+        assert _fates(s) == fates_before, "a claim was claimed or charged for a box that never came up"
         assert _failed(s) == []
         assert lanes.agent.calls == []
         assert lanes.pitfalls_ticks == 0
-        assert _attempts(s.paths) == attempts_before
+        assert _pitfall_fates(s) == attempts_before
         _nothing_delivered(s)
         X.no_path_docker(daemon)

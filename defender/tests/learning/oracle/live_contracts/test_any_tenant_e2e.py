@@ -10,8 +10,8 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.core._state1135 import state_over  # noqa: E402
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S  # noqa: E402
 
 SHARED = {"rows": [{"entity": "alice", "event_id": "e-1", "kind": "seen"}]}
@@ -84,7 +84,7 @@ def _branch_end_to_end(tmp_path: Path, est: S.Estate, *, doc: dict, calls: list,
                               root=S.T.tenant_episodes(tmp_path / "judged-data-root"),
                               ledgers={"b": S.ledger_rows(launch.ep, "b")})
     judge = S.FakeJudge(default=S.judge_reply(systems=(system,), bucket=bucket))
-    J.grade_at(judged, judge=judge, state=state_over(tmp_path / "judge-state"), draws=1)
+    J.grade_at(judged, judge=judge, store=MemoryStore(), draws=1)
     judge_world = _judge_world(J.judge_record(judged), "b")
 
     lesson_marker, foreign_marker = f"LESSON-ON-{system}", "LESSON-ON-elastic"

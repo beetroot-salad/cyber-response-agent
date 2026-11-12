@@ -1,15 +1,19 @@
-"""Post-flight: agent-state verification, queue rotation, no-commit surfacing.
+"""Post-flight: agent-state verification, the fates a claim writes, no-commit surfacing.
 
-The author works on a batch draft; what it committed is read off the batch branch."""
+The author works on a batch draft; what it committed is read off the batch branch, and the fate each claimed row got is
+the claim's `outcomes` (#1278 D1): none for a committed row (it stays in the batch) or one the curator mentioned
+nowhere, `skipped` with the curator's reason, and nothing at all for an aborted tick (the claim counted the attempt).
+
+Retired with the file queue (design r8 Items): the queue rotation itself, the `consumed_commit` sha stamped on a consumed
+row (the commit record is the store's), the per-row `attempts` count, and the stuck-row record of a duplicate
+classification (the reason is logged and is the claim's fault record)."""
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 
 import pytest
-from defender.learning.core.state import FINDINGS
 
-from defender.tests.support.learning.curation._author_draft import DraftRepo, attempts, rows_without_attempts
+from defender.tests.support.learning.curation._author_draft import DraftRepo
 
 
 @pytest.fixture
@@ -17,18 +21,15 @@ def draft_repo(tmp_path):
     return DraftRepo.over(tmp_path)
 
 
-
-def _assert_held_with_one_attempt(draft_repo, pre_pending: list[dict]) -> None:
-    """The tick left the queue as it was, each row charged one attempt, and consumed nothing."""
-    queued = draft_repo.queue.read_text()
-    assert rows_without_attempts(queued) == pre_pending
-    assert attempts(queued) == [1] * len(pre_pending)
-    assert not draft_repo.consumed.exists()
+def _aborted(draft_repo, rc: int) -> None:
+    """The tick aborted (`rc`): the rows stay as they were, given no fate, and nothing is left in the draft."""
+    assert rc in (0, 2)
+    assert draft_repo.outcomes == {}
+    assert draft_repo.lane.drift() == []
 
 
-def test_committed_finding_consumed(draft_repo, helpers):
-    a = draft_repo.author
-    helpers.write_finding(draft_repo.queue, finding_id="run-1/0", run_id="run-1")
+def test_committed_finding_is_committed_and_stays_in_the_batch(draft_repo):
+    draft_repo.add("run-1/0")
 
     def fake_invoke(findings, batch_id, cfg):
         draft_repo.write_lesson("lessonA", "run-1/0")
@@ -39,24 +40,16 @@ def test_committed_finding_consumed(draft_repo, helpers):
         }
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke)
-    assert a.run_batch(cfg=cfg) == 0
+    assert draft_repo.run(cfg) == 0
     # What landed on the batch branch, asked of git.
     assert draft_repo.lane.landed() == ["agent/lessons/lessonA.md"]
     assert len(draft_repo.lane.commits()) == 1
-    assert draft_repo.queue.read_text().strip() == ""
-    consumed = [
-        json.loads(line)
-        for line in draft_repo.consumed.read_text().splitlines() if line.strip()
-    ]
-    assert len(consumed) == 1
-    assert consumed[0]["consumed_category"] == "consumed_committed"
-    assert consumed[0]["consumed_commit"] == draft_repo.lane.tip()
+    assert draft_repo.fate("run-1/0") is None, "a committed finding is named nowhere: it stays in its batch"
+    assert draft_repo.outcomes == {}
 
 
-def test_committed_finding_without_commit_message_aborts(draft_repo, helpers):
-    a = draft_repo.author
-    helpers.write_finding(draft_repo.queue, finding_id="run-1b/0", run_id="run-1b")
-    pre_pending = rows_without_attempts(draft_repo.queue.read_text())
+def test_committed_finding_without_commit_message_aborts(draft_repo):
+    draft_repo.add("run-1b/0")
 
     def fake_invoke(findings, batch_id, cfg):
         draft_repo.write_lesson("lessonB", "run-1b/0")
@@ -66,15 +59,15 @@ def test_committed_finding_without_commit_message_aborts(draft_repo, helpers):
         }
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke)
-    assert a.run_batch(cfg=cfg) == 2
-    _assert_held_with_one_attempt(draft_repo, pre_pending)
+    assert draft_repo.run(cfg) == 2
+    _aborted(draft_repo, 2)
+    assert draft_repo.lane.landed() == []
 
 
-def test_a_stray_forward_bad_bucket_key_aborts(draft_repo, helpers):
+def test_a_stray_forward_bad_bucket_key_aborts(draft_repo):
     """`held_forward_bad` is no longer a curator bucket (#773): a result still carrying it aborts
-    the tick and charges the row an attempt."""
-    a = draft_repo.author
-    helpers.write_finding(draft_repo.queue, finding_id="run-2/0", run_id="run-2")
+    the tick and decides nothing for the row."""
+    draft_repo.add("run-2/0")
 
     def fake_invoke(findings, batch_id, cfg):
         return {
@@ -85,18 +78,12 @@ def test_a_stray_forward_bad_bucket_key_aborts(draft_repo, helpers):
         }
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke)
-    assert a.run_batch(cfg=cfg) == 2
-    pending = [
-        json.loads(line)
-        for line in draft_repo.queue.read_text().splitlines() if line.strip()
-    ]
-    assert [p["finding_id"] for p in pending] == ["run-2/0"]
-    assert pending[0].get("attempts") == 1
+    assert draft_repo.run(cfg) == 2
+    _aborted(draft_repo, 2)
 
 
-def test_consumed_skip_rotates_out(draft_repo, helpers):
-    a = draft_repo.author
-    helpers.write_finding(draft_repo.queue, finding_id="run-3/0", run_id="run-3")
+def test_consumed_skip_is_skipped_with_the_curators_reason(draft_repo):
+    draft_repo.add("run-3/0")
 
     def fake_invoke(findings, batch_id, cfg):
         return {
@@ -106,22 +93,14 @@ def test_consumed_skip_rotates_out(draft_repo, helpers):
         }
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke)
-    assert a.run_batch(cfg=cfg) == 0
-    assert draft_repo.queue.read_text().strip() == "", "skipped findings must rotate out — never re-trigger"
-    consumed = [
-        json.loads(line)
-        for line in draft_repo.consumed.read_text().splitlines() if line.strip()
-    ]
-    assert consumed[0]["consumed_category"] == "consumed_skip"
-    assert "skip_reason" in consumed[0]
+    assert draft_repo.run(cfg) == 0
+    assert draft_repo.fate("run-3/0") == ("skipped", "already covered"), "skipped findings must leave the work — never re-trigger"
 
 
-def test_committed_but_corpus_clean_aborts(draft_repo, helpers):
+def test_committed_but_corpus_clean_aborts(draft_repo):
     """``committed`` non-empty but the corpus clean (a claimed commit, no edits) is inconsistent:
-    the tick aborts, the row stays queued with one attempt, nothing rotates."""
-    a = draft_repo.author
-    helpers.write_finding(draft_repo.queue, finding_id="run-4/0", run_id="run-4")
-    pre_pending = rows_without_attempts(draft_repo.queue.read_text())
+    the tick aborts and decides nothing."""
+    draft_repo.add("run-4/0")
 
     def fake_invoke(findings, batch_id, cfg):
         return {
@@ -131,16 +110,14 @@ def test_committed_but_corpus_clean_aborts(draft_repo, helpers):
         }
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke)
-    assert a.run_batch(cfg=cfg) == 2
-    _assert_held_with_one_attempt(draft_repo, pre_pending)
+    assert draft_repo.run(cfg) == 2
+    _aborted(draft_repo, 2)
 
 
-def test_no_commit_but_left_corpus_edits_aborts(draft_repo, helpers):
-    """``committed`` empty but the corpus dirty is inconsistent: refuse to rotate, and reset the
+def test_no_commit_but_left_corpus_edits_aborts(draft_repo):
+    """``committed`` empty but the corpus dirty is inconsistent: refuse to decide, and reset the
     draft."""
-    a = draft_repo.author
-    helpers.write_finding(draft_repo.queue, finding_id="run-5/0", run_id="run-5")
-    pre_pending = rows_without_attempts(draft_repo.queue.read_text())
+    draft_repo.add("run-5/0")
 
     def fake_invoke(findings, batch_id, cfg):
         (draft_repo.lessons_dir / "orphan.md").write_text("uncommitted\n")
@@ -151,17 +128,16 @@ def test_no_commit_but_left_corpus_edits_aborts(draft_repo, helpers):
         }
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke)
-    assert a.run_batch(cfg=cfg) == 2
-    _assert_held_with_one_attempt(draft_repo, pre_pending)
-    assert draft_repo.lane.drift() == [], "the refused tick left its edit in the draft"
+    assert draft_repo.run(cfg) == 2
+    _aborted(draft_repo, 2)
+    assert draft_repo.lane.landed() == []
 
 
-def test_agent_result_missing_finding_stays_queued_untouched(draft_repo, helpers):
-    """A row the curator mentions in no bucket is neither a fault nor charged: it stays queued
-    as it was while the rest of the tick completes."""
-    a = draft_repo.author
-    helpers.write_finding(draft_repo.queue, finding_id="run-6/0", run_id="run-6")
-    helpers.write_finding(draft_repo.queue, finding_id="run-6/1", run_id="run-6")
+def test_agent_result_missing_finding_is_decided_nothing(draft_repo):
+    """A row the curator mentions in no bucket is neither a fault nor decided: it keeps no fate
+    while the rest of the tick completes."""
+    draft_repo.add("run-6/0")
+    draft_repo.add("run-6/1")
 
     def fake_invoke(findings, batch_id, cfg):
         return {
@@ -171,11 +147,9 @@ def test_agent_result_missing_finding_stays_queued_untouched(draft_repo, helpers
         }
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke)
-    rc = a.run_batch(cfg=cfg)
-    assert rc == 0
-    remaining = rows_without_attempts(draft_repo.queue.read_text())
-    assert [r["finding_id"] for r in remaining] == ["run-6/1"]
-    assert "attempts" not in remaining[0]
+    assert draft_repo.run(cfg) == 0
+    assert draft_repo.fate("run-6/0") == ("skipped", "x")
+    assert draft_repo.fate("run-6/1") is None
 
 
 @pytest.mark.parametrize(
@@ -197,10 +171,8 @@ def test_agent_result_missing_finding_stays_queued_untouched(draft_repo, helpers
         },
     ],
 )
-def test_agent_result_duplicate_classification_aborts(draft_repo, helpers, agent_result):
-    a = draft_repo.author
-    helpers.write_finding(draft_repo.queue, finding_id="run-6b/0", run_id="run-6b")
-    pre_pending = rows_without_attempts(draft_repo.queue.read_text())
+def test_agent_result_duplicate_classification_aborts(draft_repo, agent_result, caplog):
+    draft_repo.add("run-6b/0")
 
     def fake_invoke(findings, batch_id, cfg):
         if agent_result["committed"]:
@@ -208,19 +180,15 @@ def test_agent_result_duplicate_classification_aborts(draft_repo, helpers, agent
         return agent_result
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke)
-    rc = a.run_batch(cfg=cfg)
-    assert rc == 2
-    _assert_held_with_one_attempt(draft_repo, pre_pending)
-    [stuck] = draft_repo.state.stuck_rows(FINDINGS)
-    assert "more than once" in stuck["reason"], stuck
+    assert draft_repo.run(cfg) == 2
+    _aborted(draft_repo, 2)
+    assert "more than once" in caplog.text
 
 
-def test_agent_writes_outside_lessons_aborts(draft_repo, helpers):
+def test_agent_writes_outside_lessons_aborts(draft_repo):
     """A change outside every lane of the draft refuses the claim whole: a refused claim, not a
-    stage failure (rc 0), with the row held at one attempt, nothing landed, the draft reset."""
-    a = draft_repo.author
-    helpers.write_finding(draft_repo.queue, finding_id="run-7/0", run_id="run-7")
-    pre_pending = rows_without_attempts(draft_repo.queue.read_text())
+    stage failure (rc 0), nothing decided, nothing landed, the draft reset."""
+    draft_repo.add("run-7/0")
 
     def fake_invoke(findings, batch_id, cfg):
         # Outside every lane of the draft.
@@ -233,8 +201,6 @@ def test_agent_writes_outside_lessons_aborts(draft_repo, helpers):
         }
 
     cfg = replace(draft_repo.cfg, invoke_agent=fake_invoke)
-    rc = a.run_batch(cfg=cfg)
-    assert rc == 0
-    _assert_held_with_one_attempt(draft_repo, pre_pending)
+    assert draft_repo.run(cfg) == 0
+    _aborted(draft_repo, 0)
     assert draft_repo.lane.landed() == [], "an out-of-lane change refuses the claim whole"
-    assert draft_repo.lane.drift() == [], "the refused claim's draft was not reset"

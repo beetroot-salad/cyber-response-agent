@@ -231,34 +231,44 @@ def _is_owner_module(rel: str) -> bool:
 _LOCATION_MODULE = "defender.records._locations"
 _LOCATION_FILE = "records/_locations.py"
 _EXPORT_OWNER = "learning/author/version_control/exports.py"
-_RECORD_OWNER = "learning/author/version_control/record.py"
 #: The run-safe reader of published knowledge (#1108 P4: a run never imports the delivery package).
 _EXPORT_READER = "tenancy/_exports.py"
 RECORD_LOCATION_NAMES = frozenset({
     "tenant_root", "row_path", "runs", "sessions", "episodes", "learning", "worktrees",
     "data_root", "runs_base", "trust_root", "sessions_dir", "runs_legacy", "episodes_legacy",
-    "exports", "drafts", "knowledge_lock", "commit_record",
+    "exports", "drafts", "knowledge_lock", "commit_record", "scratch",
 })
 # Keys are (location role, module), values are exact qualified functions, not module exemptions.
 CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
-    ("learning_root", "learning/core/state.py"): frozenset({"LearningState.open", "LearningAdoption.__init__"}),
-    ("data_root", "learning/core/state.py"): frozenset({"LearningAdoption.__init__"}),
     ("session_trust_root", "records/session_store/_write.py"): frozenset({"open_store"}),
     ("exports_root", _EXPORT_OWNER): frozenset({"materialise_export", "publish_locked", "write_export"}),
     ("drafts_root", _EXPORT_OWNER): frozenset({"sweep_dead_owners", "build_draft", "draft_path"}),
     ("knowledge_lock", _EXPORT_OWNER): frozenset({"tenant_lock"}),
     ("exports_root", _EXPORT_READER): frozenset({"current_export"}),
     ("knowledge_lock", _EXPORT_READER): frozenset({"knowledge_lock_holder"}),
-    ("commit_record", _RECORD_OWNER): frozenset({"_record_made", "_Record.read"}),
+    # #1278 cutover: the batch worktrees leave the learning folder for the tenant's worktrees location (A2 D10).
+    ("worktrees_root", "learning/store/_import.py"): frozenset({"cut_over_learning_state"}),
+    # #1278 A1: the curators' call folders, made in the tenant's scratch location by their one owner.
+    ("scratch_root", "learning/call_folders.py"): frozenset({"call_folder"}),
+    # #1170: the per-job helper makes the oracle's folder in the tenant's scratch location.
+    ("scratch_root", "job_host/_learning.py"): frozenset({"_oracle_box"}),
+    # #1278: the learning store's `commit_record` verb (its commit-maker rows), read where a tick or a
+    # revert reads what the commit-maker made — the store's record, not the tenant's file record.
+    ("commit_record", "learning/author/version_control/store_delivery.py"): frozenset({"revert_lesson"}),
+    ("commit_record", "learning/core/store_tick.py"): frozenset({"Tick._opened", "Tick._author"}),
     # #1214: the lifecycle's own setting, read once each where it makes or removes a tenant's folder.
     ("data_root", "lifecycle/config.py"): frozenset({"LifecycleConfig.__post_init__"}),
     ("data_root", "lifecycle/_host.py"): frozenset({"HostActor.__init__"}),
+    # #1278 Migration: the cutover job accepts the tenant and reads its old learning folder, in one function each.
+    ("learning_root", "lifecycle/_host.py"): frozenset({"HostActor._read_learning", "HostActor._cut_over"}),
+    ("data_root", "lifecycle/_process.py"): frozenset({"learning_delivery.open_for"}),
     # #1163 A26: the credential proxy's one setting, converted once when its pipeline is built.
     ("data_root", "credential_proxy/_app.py"): frozenset({"_Proxy.__init__"}),
 }
 _ATTRIBUTE_ROLES = {
     "exports": "exports_root", "drafts": "drafts_root", "knowledge_lock": "knowledge_lock",
-    "commit_record": "commit_record", "data_root": "data_root",
+    "commit_record": "commit_record", "data_root": "data_root", "worktrees": "worktrees_root",
+    "scratch": "scratch_root", "learning": "learning_root",
 }
 _ROOT_OVERRIDE_METHODS = frozenset({
     "run_end_sidecar", "scrub_verdict", "ticket_write", "call_join", "ticket_comments",
@@ -267,7 +277,6 @@ _ROOT_OVERRIDE_METHODS = frozenset({
 _OWNER_CONSTRUCTORS = frozenset({
     "defender.tenancy._tenant._TenantPaths", "defender.tenancy._tenant._TenantLayout",
     "defender.records.SessionPaths", "defender.records._layout.SessionPaths",
-    "defender.learning.core.state.LearningAdoption",
 })
 
 

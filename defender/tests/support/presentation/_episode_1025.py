@@ -23,7 +23,7 @@ from defender.records._episode_paths import EpisodePaths
 from defender._io import bind, write_guarded
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
+from defender.tests.support.learning.judge._store_stand_in1278 import stand_in_store
 from defender.tests.support.tenancy._active1214 import active_directory
 
 mod = T.mod
@@ -782,11 +782,11 @@ def copy_episode(ep: Episode, dest: Path) -> Episode:
 
 @pytest.fixture(autouse=True)
 def tmp_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every configured root inside `tmp_path` (the sibling runs base, the learning state root the
-    judge's enqueue appends to), so an episode a test drives never lands in the checkout. A page
-    test module binds it as `_tmp_roots = E.tmp_roots`."""
+    """Every configured root inside `tmp_path` (the sibling runs base), so an episode a test drives never lands in the
+    checkout, and a stand-in for the learning store the launcher's judge frame inserts into (#1278). A page test module
+    binds it as `_tmp_roots = E.tmp_roots`."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+    stand_in_store(monkeypatch)
 
 
 def page_module():

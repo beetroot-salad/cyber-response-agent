@@ -28,14 +28,14 @@ from defender.tenancy.record_values import CaseRecord as CaseRecord, SystemRecor
 SCHEMA = "tenancy"
 
 TenantState = Literal["creating", "active", "offboarding", "offboarded"]
-PendingAction = Literal["create", "rotate", "offboard", "delete_repo"]
+PendingAction = Literal["create", "rotate", "offboard", "delete_repo", "learning_cutover"]
 StepActor = Literal["service", "host"]
 GenerationStatus = Literal["pending", "live", "retiring", "destroyed"]
 
 #: Each state with the pending actions it allows (`None`: nothing pending).
 ALLOWED_ACTIONS: dict[str, frozenset[str | None]] = {
     "creating": frozenset({"create"}),
-    "active": frozenset({None, "rotate"}),
+    "active": frozenset({None, "rotate", "learning_cutover"}),
     "offboarding": frozenset({"offboard"}),
     "offboarded": frozenset({None, "delete_repo"}),
 }

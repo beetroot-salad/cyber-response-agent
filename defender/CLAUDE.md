@@ -42,7 +42,7 @@ A tenant's systems and its case record are versioned records in the database, wr
 its records name (`tenant.py catalog` lists the adapters a record may name). Credentials live at a
 per-generation path `<tenant>/<system>/g<N>`. Once:
 
-1. Run migrations (revision `0013_system_records`). It also creates the NOLOGIN role
+1. Run migrations (revision `0015_system_records`). It also creates the NOLOGIN role
    `defender_proxy_reader` (SELECT on `tenancy.system_versions` and `tenancy.records_mark` only):
    create a login that is a member of it and set the proxy config's `records_dsn` to that login's
    DSN in place of `data_root` (an old config refuses to start).
@@ -67,6 +67,36 @@ change of its base, CA or auth block raises its credential generation, and its c
 set again. Connect hands its result to the operator as such a folder: its validator takes
 `--handoff <folder>` and no longer `--tenant`.
 
+## Upgrade from before #1278
+
+A tenant's learning work (queued findings, pitfalls and requests, the batches that author lessons, the commit-maker's
+record) lives in the `learning` schema of PostgreSQL; nothing reads the tenant's `<data root>/<T>/learning/` folder any
+more. Each existing tenant moves once, by a lifecycle job (like a credential rotation), in this order:
+
+1. Stop the workers and the learning drains of the host, then run migrations (revisions `0013_learning_store` and
+   `0014_learning_cutover_action`). Until a tenant is cut over its old queues are not read, so its learning looks
+   empty: nothing is lost, and nothing new is drawn from the old files.
+2. For each active tenant with nothing pending: `python -m defender.lifecycle request-learning-cutover --tenant <T>` (or
+   `--all`). With the lifecycle
+   (`python -m defender.lifecycle serve`) running, its host actor works the job under the tenant's exclusive host lock
+   (a worker still holding the lock fails the step, naming it, until it is free):
+   - `import`: reads the old queues, ledgers, dead-letter and stuck records, retained deliveries and the commit
+     record, and the tenant's open learning PRs from the forge, and writes them to the store in ONE transaction. A
+     record it will not guess (an unknown ledger category, two open authoring batches on one lane, a NUL character,
+     a feedback record) or an unreachable store writes nothing and touches no file.
+   - `cutover`: only after the import committed. It moves the batch worktrees to the tenant's scratch location and
+     removes the whole `learning/` folder (queues, ledgers, markers, locks, curator traces: those have no batch to
+     attach to and are discarded).
+3. Watch `GET /admin/tenants/<T>`: `pending_action` is `learning_cutover` at step `import`, then `cutover`, then the
+   tenant is `active` with nothing pending and no failure. A failure names the step and the record; fix it (remove or
+   repair the offending file) and `POST /admin/tenants/<T>/resume`: the job restarts at the failed step. A failed
+   `cutover` is not imported again.
+
+It is one-way: after the cutover the folder is gone and nothing recreates it, so keep a backup of
+`<data root>/<T>/learning/` first if the old state matters. Asking again for a tenant that is already cut over changes
+nothing. Findings held from a PR merged before the cutover import as waiting and are retired by the corpus check on the
+next tick. Other tenants' jobs are independent: one tenant's refused import does not stop another's.
+
 ## Upgrade from before #1454
 
 Programs (#1307) now have their own table, `identity.programs`; users and memberships are people only. Run migrations
@@ -88,7 +118,10 @@ upgrading a worker:
 2. Register gVisor with `--host-uds=open` on every execution host: `runsc install -- --oci-seccomp --host-uds=open`, then
    restart Docker. The job's socket is a host unix socket mounted into the job's gVisor guest, and gVisor refuses the
    guest's connection to it without this. The flag is daemon-wide, so every box gets the capability; a follow-up issue
-   weighs a job-only runtime.
+   weighs a job-only runtime. Run the worker natively on the execution host, with `ps` installed: the helper must share
+   the docker daemon's mount paths and pid namespace, and `docker top` needs `ps`
+   (`docs/decisions/vps-compose-deployment.md`, brain confinement). A worker in a container beside the daemon fails
+   every job.
 3. Job containers start under the box runtime (`DEFENDER_BOX_RUNTIME`). Set `DEFENDER_JOB_NETWORK` to the Docker network
    from which the job reaches the credential proxy and the model provider. Leave OpenBao and the database off that network.
 4. The job container runs as the uid that owns the data root, and its socket lives under

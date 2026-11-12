@@ -10,9 +10,7 @@ import time
 from pathlib import Path
 from typing import IO, Any
 
-#: Retry interval for a waiting acquirer. A repo lock is held for a whole authoring run (slow
-#: poll is fine); a channel append lock is held for one row (a slow poll would dominate).
-SLOW_POLL = 0.2
+#: Retry interval for a waiting acquirer.
 FAST_POLL = 0.05
 
 

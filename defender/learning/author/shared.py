@@ -13,11 +13,9 @@ from defender._io import Bound, Held
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender._text import is_content_less
 from defender._untrusted import wrap
-from defender._clock import now_iso
 from defender.knowledge import PROVENANCE_KEYS, iter_lessons
 from defender.knowledge import AGENT_REL, KnowledgePaths
 from defender.learning.core.lane_trees import DrainTrees
-from defender.learning.core.state import Channel, LearningState
 
 
 
@@ -57,10 +55,6 @@ def lane_corpus_dir(paths: Any, batch: Any, corpus: str) -> tuple[Path, Path, st
     return root, knowledge.corpus_dir(corpus), knowledge.rel(corpus)
 
 
-def without_consumed_category(rec: dict) -> dict:
-    return {k: v for k, v in rec.items() if k != "consumed_category"}
-
-
 def existing_finding_ids(cfg: Any) -> set[str]:
     """Every queue-row id this corpus already attributes a lesson to — the pre-author
     idempotency read, shared by every corpus-author channel.
@@ -86,16 +80,6 @@ def existing_finding_ids(cfg: Any) -> set[str]:
 
 def by_id(rows: list[dict], id_key: str) -> dict[str, dict]:
     return {r[id_key]: r for r in rows}
-
-
-def partition_committed(
-    committed: list[dict], *, hold_committed: bool
-) -> tuple[list[dict], list[dict]]:
-    if hold_committed:
-        return [without_consumed_category(c) for c in committed], []
-    return [], committed
-
-
 
 
 def result_list(result: dict, key: str) -> list[Any]:
@@ -235,14 +219,17 @@ def build_corpus_manifest(
     return "\n".join(sections)
 
 
-def build_curator_user_prompt(
+def build_curator_user_prompt(  # noqa: PLR0913 — the user turn's parts: its rows, corpus, labels, salt and feedback
     rows: list[dict], batch_id: str, *, corpus: Bound, corpus_dir: Path, corpus_dir_rel: str,
     label: str,
     manifest_seed: str | None = None,
     salt: str | None = None,
+    feedback: str | None = None,
 ) -> str:
     """The curator spawn's user turn. The manifest is read through `corpus`, the corpus mount's
-    view (#1134); `corpus_dir` is that folder's spelling only."""
+    view (#1134); `corpus_dir` is that folder's spelling only. `feedback` (a replacement batch's,
+    #1278 H13) is the reviewers' words on the PR it replaces, already framed as untrusted data by
+    the drain; it rides in a section of its own."""
     seed = manifest_seed if manifest_seed is not None else batch_id
     manifest = build_corpus_manifest(
         corpus, where=corpus_dir, seed=seed,
@@ -264,29 +251,5 @@ def build_curator_user_prompt(
         wrap(context, "curator_context", stage_salt),
         wrap(manifest_stems, "corpus_manifest", stage_salt),
         wrap(structured_json_body(rows) if rows else "", "lesson_rows", stage_salt),
+        *([wrap(feedback, "review_feedback", stage_salt)] if feedback else []),
     )
-
-
-def write_disposition_report(
-    state: LearningState, channel: Channel, *, batch_id: str, groups: dict[str, list[dict]],
-) -> None:
-    """One line per tick naming what the tick declined, under one label per reason.
-
-    Shared by both curators: a skip is terminal, so this line is the only trace that a
-    skipped finding was ever seen. Labels are the caller's and never merged, since each
-    implies a different recovery. Counts first, then ids, in the caller's order; then, for each
-    label whose rows carry a gate's `held_reason`, `<label>_reasons={id: reason}` — a held row
-    stays queued tick after tick, so the line is where an operator reads why.
-
-    Nothing is written when the tick declined nothing.
-    """
-    if not any(groups.values()):
-        return
-    counts = " ".join(f"{label}={len(rows)}" for label, rows in groups.items())
-    ids = " ".join(
-        f"{label}_ids={[r.get(channel.id_key) for r in rows]}" for label, rows in groups.items())
-    reasons = "".join(
-        f" {label}_reasons={why}" for label, rows in groups.items()
-        if (why := {r.get(channel.id_key): r["held_reason"] for r in rows if "held_reason" in r}))
-    state.disposition_report(
-        channel, f"{now_iso()} batch={batch_id} {counts} {ids}{reasons}\n")

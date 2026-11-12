@@ -1,14 +1,13 @@
 """Shared literals and builders for the #870 pitfalls-lane tests (no tests here)."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
-
 from pathlib import Path
 from typing import Any
 
-from defender.learning.core.state import PITFALLS
 from defender.learning.leads.lead_extraction import ExecutedLead
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID
+from defender.learning.core.state import PITFALLS
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.runtime.engine._declared869 import (  # noqa: F401 — re-exported substrate
     Spawn,
     seed_agent_files,
@@ -196,6 +195,63 @@ def by_surface(handoffs: list[dict]) -> dict[str, list[dict]]:
     for entry in handoffs:
         out.setdefault(str(entry.get("surface")), []).append(entry)
     return out
+
+
+class Claim:
+    """The pitfalls a tick's claim holds: rows are added as the claim's items, and each tick reports back what it decided
+    (`outcomes`, and the `PitfallsDisposition`s `on_curated` hands back)."""
+
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+        self.outcomes: dict = {}
+        self.curated: list = []
+
+    def add(self, *rows: dict) -> list[str]:
+        self.rows.extend(rows)
+        return [r["pitfall_id"] for r in rows]
+
+    def items(self) -> list[tuple[str, str, dict]]:
+        return [("pitfall", r["pitfall_id"], r) for r in self.rows]
+
+    @property
+    def committed(self) -> set[str]:
+        return {i for d in self.curated for i in d.committed_ids}
+
+
+def tick(lane, spawn, claim: Claim) -> int:
+    """One real pitfalls tick over the batch draft `lane`, handed the claim's items and its systems (the whole catalog of
+    the lane's product checkout, as a caller with no tenant hands it, #1366 R16); it reports into `claim`."""
+    from defender.tests.support.learning.curation import _curator1134 as C
+    from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
+
+    claim.curated.clear()
+    return run_pitfalls_handed(
+        paths=lane.paths, trees=C.draft_trees(lane), batch=lane.batch, invoke=spawn,
+        items=claim.items(), outcomes=claim.outcomes, on_curated=claim.curated.append)
+
+
+def queue_pitfalls(w, *rows: dict) -> None:
+    """File each row as a pitfall item of the world's tenant (`add_pitfall`: one row per occurrence)."""
+    from defender.tests.support.learning.core._store1278 import call
+
+    for row in rows:
+        call(w.dsn, "add_pitfall", w.t.tenant_id, row)
+
+
+def pitfall_items(w) -> dict[str, Any]:
+    """The tenant's pitfall items by key (status, reason, attempts on each)."""
+    from defender.tests.support.learning.core._store1278 import call
+
+    return {i.key: i for i in call(w.dsn, "work", w.t.tenant_id) if i.kind == "pitfall"}
+
+
+def lead_wakes(w) -> bool:
+    """Whether the lead lane's wake gate (the store's claim rule at the env thresholds) finds work for the world's tenant."""
+    from defender.learning.core.store_tick import LEAD_LANE, lane_waiting
+    from defender.learning.store import blocking
+
+    with blocking(w.dsn) as store:
+        return lane_waiting(store, w.t.tenant_id, LEAD_LANE)
 
 
 def queue_ids(paths) -> list[str]:

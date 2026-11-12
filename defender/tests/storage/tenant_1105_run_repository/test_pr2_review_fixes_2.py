@@ -15,33 +15,12 @@ from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 from defender.tests.storage.tenant_1105_run_repository import test_pr2_review_fixes as R1
 from defender.records._tenant_id import TenantId, TenantRefused
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
     P.roots(tmp_path, monkeypatch)
-
-
-def _queue_dir(paths: Any) -> Path:
-    return Path(location_path(paths.state_root)) / "author-queue"
-
-
-def _queued_top(paths: Any, case_id: str) -> bool:
-    return (_queue_dir(paths) / f"{case_id}.json").is_file()
-
-
-def _inflight(paths: Any, case_id: str) -> bool:
-    return (_queue_dir(paths) / "inflight" / f"{case_id}.json").is_file()
-
-
-def _pitfall_at_threshold(paths: Any, monkeypatch: Any) -> None:
-    """One pitfall row with the threshold at 1, so the tick wakes with no curation row."""
-    from defender.learning.core import persist
-    from defender.tests.support.learning.core._state1135 import state_for_paths
-
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls([{"pitfall_id": "r:0", "system": "elastic"}],
-                            state=state_for_paths(paths))
 
 
 @pytest.fixture
@@ -56,31 +35,35 @@ def published(tmp_path, data_root):
 
 
 class _EnqueueingBox(R1._Box):
-    """The box seam, which also enqueues a curation row as the box starts: a row landing
+    """The box seam, which also files a curation request in the store as the box starts: a row landing
     mid-tick, after the tick looked at its queue."""
 
-    def __init__(self, paths: Any, row: dict) -> None:
+    def __init__(self, dsn: str, tenant_id: str, row: dict) -> None:
         super().__init__()
-        self.paths, self.row = paths, row
+        self.dsn, self.tenant_id, self.row = dsn, tenant_id, row
 
     def start(self, request: Any, **kw: Any) -> Any:
-        P.queue_row(self.paths, self.row["case_id"], self.row)
+        P.file_request(self.dsn, self.tenant_id, self.row["case_id"], self.row)
         return super().start(request, **kw)
 
 
+@pytest.mark.postgres
 @pytest.mark.parametrize("root_set", [True, False], ids=["root-set", "root-unset"])
-def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(published, tmp_path, monkeypatch,
-                                                         root_set):
-    """Through the REAL tenant-selected tick over the published tenant's drain paths."""
+def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(published, tmp_path, monkeypatch, root_set, migrated_database):  # noqa: F811 — the imported fixture
+    """Through the REAL tenant-selected tick over the published tenant's drain paths. The late request is filed in the
+    store after the tick's claim (#1278: the claim is the store's, so it is not in the batch and stays `waiting`)."""
+    from defender.tests.support.runtime.engine._declared869 import pitfall_row
+
     t = published
     H.make_run(H.runs_folder(t.tenant), R1.RID_R1)
     root = os.environ[P.DATA_ROOT_ENV]
     paths = R1._tenant_paths(t, tmp_path)
-    _pitfall_at_threshold(paths, monkeypatch)
+    P.store_tick_scene(migrated_database, monkeypatch, t.tenant_id)
+    P.file_pitfall(migrated_database, t.tenant_id, pitfall_row("r:0", "elastic"))  # wakes the tick with no curation row
     if not root_set:
         monkeypatch.delenv(P.DATA_ROOT_ENV)
     row = {"case_id": "late", "tenant_id": t.tenant_id, "run_id": R1.RID_R1}
-    box = _EnqueueingBox(paths, row)
+    box = _EnqueueingBox(migrated_database, t.tenant_id, row)
     lane = P.Lane()
     pitfalls: list[str] = []
 
@@ -89,8 +72,8 @@ def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(published, tmp_path, m
     assert box.started, "the tick never started its box"
     assert pitfalls == ["pitfalls"], "the pitfalls step did not run"
     assert lane.handed == [], "a row that landed mid-tick was served"
-    assert _queued_top(paths, "late"), "the late row left the queue's top-level slot"
-    assert not _inflight(paths, "late"), "the late row was claimed"
+    late = P.store_items(migrated_database, t.tenant_id, "curation_request")["late"]
+    assert (late.status, late.attempts) == ("waiting", 0), f"the late row was claimed into the tick's batch: {late}"
 
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
     assert R1._tick(t, paths, lane=lane, pitfalls=[], box=R1._Box()) == 0
@@ -113,7 +96,8 @@ def test_2_requested_tenant_is_the_one_acceptance_of_a_raw_or_stored_tenant_id(d
                           TenantRefused), bad
 
 
-@pytest.mark.parametrize("cli", ["lead_author", "visualize_run", "workspace_map"])
+# retired: the `lead_author` row (the by-hand `lead_author.main` entry is deleted, design A3).
+@pytest.mark.parametrize("cli", ["visualize_run", "workspace_map"])
 def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant, monkeypatch,
                                                               cli):
     from defender.tenancy._command_line_run import open_command_line_run
@@ -133,7 +117,6 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
     assert Path(run.run_dir) == run_dir
 
     argv, main, status = {
-        "lead_author": (["--tenant", d9_tenant, run_id], R1._lead_author_main(), 2),
         "visualize_run": (P.new_run_page_argv(d9_tenant, run_id), P.run_page_main(), 1),
         "workspace_map": (["workspace_map.py", "--tenant", d9_tenant, run_id],
                           R1._workspace_map_main(), 2),
@@ -148,35 +131,39 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
     assert got.out == ""
 
 
-def test_4_a_quarantined_curation_row_shows_its_address(published, tmp_path):
-    """The row is quarantined by the REAL tenant-selected tick over the published tenant's
-    drain paths."""
+@pytest.mark.postgres
+def test_4_a_dead_curation_request_shows_its_address(published, tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
+    """The request is retired by the REAL tenant-selected tick over the published tenant's drain paths, and the queue
+    page lists it dead with the run id it names and the reason, with no run folder. #1278 update: the queue page's
+    dead-letter list (design O2) carries the item's id (the run id the request is keyed by) and reason; the old
+    quarantine row's separate `tenant_id`/`run_id` fields are gone, the page being per tenant."""
     from defender.learning.frontend import serialize_queues
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
-    from defender.tests.support.learning.core._state1135 import state_for_paths
 
     t = published
     H.runs_folder(t.tenant)
     paths = R1._tenant_paths(t, tmp_path)
+    P.store_tick_scene(migrated_database, monkeypatch, t.tenant_id)
     gone_run = fixture_uuid("nope")  # a well-formed run id naming no run
-    P.queue_row(paths, "gone", {"case_id": "gone", "tenant_id": t.tenant_id, "run_id": gone_run})
+    P.file_request(migrated_database, t.tenant_id, "gone", {"case_id": "gone", "tenant_id": t.tenant_id, "run_id": gone_run})
     assert R1._tick(t, paths, lane=P.Lane(), pitfalls=[], box=R1._Box()) == 0
-    assert P.dead_letter(paths, "gone") is not None, "control: the row was not quarantined"
 
-    view = serialize_queues.build_view(paths, state_for_paths(paths))
-    rows = [r for r in view["quarantine"]["markers"]["rows"] if r["identity"] == "gone"]
-    assert len(rows) == 1, view["quarantine"]["markers"]
-    row = rows[0]
-    assert row["failed"] == "artifact-missing"
-    assert (row.get("tenant_id"), row.get("run_id")) == (t.tenant_id, gone_run), row
-    assert "run_dir" not in row, row
+    from defender.learning.store import blocking
+
+    with blocking(migrated_database) as store:
+        view = serialize_queues.build_view(paths, store)
+    channel = next(c for c in view["channels"] if c["name"] == "curation_requests")
+    rows = [r for r in channel["deadletter"] if r["id"] == gone_run]
+    assert len(rows) == 1, channel
+    assert rows[0]["reason"] == "artifact-missing", rows[0]
+    assert "run_dir" not in str(channel), channel
 
 
 def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     from defender.learning.judge import JudgeRefused, grade_episode
     from defender.records import RunRefused
     from defender.tests.support.learning.judge import _judge_921 as J
-    from defender.tests.support.learning.core._state1135 import env_state
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     est, src = P.launch_source(tmp_path)
@@ -190,16 +177,15 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     ep = episodes / episode_id
     (ep / "judge.yaml").unlink(missing_ok=True)
     other = P.second_tenant(location_path(P.data_root)(), H.U_ID)
-    state_dir = tmp_path / "learning-state"
-    before = P.tree(state_dir)
+    refused_store = MemoryStore()
 
     judge = J.scripted_judge()
     err = H.raised(grade_episode, other.runs_repository(), episode_id, judge=judge,
-                   state=env_state())
+                   store=refused_store)
     assert isinstance(err, (JudgeRefused, RunRefused, TenantRefused,
                             FileNotFoundError)), f"another tenant graded the episode: {err!r}"
     assert not (ep / "judge.yaml").exists(), "a grade was written for another tenant"
-    assert P.tree(state_dir) == before, "the refused grade touched the learning state"
+    assert not refused_store.items, "the refused grade queued findings"
     assert not os.path.lexists(S.episodes_dir(location_path(P.data_root)(), H.U_ID) / episode_id)
 
     own = _tenant.accept_tenant(fixture_data_root(location_path(P.data_root)()), P.LAUNCH_TENANT,
@@ -211,12 +197,13 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     handle.close()
     moved.rename(ep / "runs")
 
-    graded = grade_episode(own, episode_id, judge=J.scripted_judge(), state=env_state())
+    graded = grade_episode(own, episode_id, judge=J.scripted_judge(), store=MemoryStore())
     assert graded is not None
     assert (ep / "judge.yaml").is_file(), "control: the own tenant did not grade"
 
 
-def test_7_the_judge_prompts_views_are_numbered_without_a_gap(tmp_path):
+@pytest.mark.postgres
+def test_7_the_judge_prompts_views_are_numbered_without_a_gap(tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
     from defender.learning.judge import layout as judge_layout
 
     numbers = [int(m.group(1)) for title in judge_layout.FOCUS_VIEW_TITLES.values()
@@ -225,6 +212,7 @@ def test_7_the_judge_prompts_views_are_numbered_without_a_gap(tmp_path):
     lessons = judge_layout.FOCUS_VIEW_TITLES["lessons"]
     assert lessons.startswith(f"VIEW {len(numbers)}:"), lessons
 
+    P.reach_launch_store(migrated_database, monkeypatch)  # the judge pass inserts into the learning store (#1278)
     est, src = P.launch_source(tmp_path)
     got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
     assert got.judge.prompts, "the judge was never asked"

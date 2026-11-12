@@ -134,8 +134,8 @@ is the read-only handle over this projection; it is not a `Run`.
 
 Marked here so a reader does not mistake these for a kind this page owns.
 
-- **Learning queues, locks and markers** under `LoopPaths` (`learning/core/config.py`):
-  `_pending*/`, `author-queue/`, `_pending_delivery/`, `.stuck.jsonl`, batch markers.
+- **Learning work tracking**: queued items, batches and commits are rows of the learning store
+  (`learning/store/`, #1278), not files.
 - **Quarantine** of a tainted worktree: tar + manifest (`learning/core/quarantine.py`).
 - **Checked-in corpora a run consumes**: lessons, knowledge, skills, the gather query catalog,
   `lead-zero.yaml`, `bash_policy.json`, prompts and templates. `lessons_loaded.jsonl` is the
@@ -143,7 +143,8 @@ Marked here so a reader does not mistake these for a kind this page owns.
 - **Eval case inputs and result trees** (`evals/`).
 - **Rendered pages outside a run or episode** (`queues.html`, `lessons.html`) and the untracked
   `<publish root>/<tenant>/` publish area, the folder `DEFENDER_RUN_VISUALIZATIONS_DIR` names on `dev` (#1084, #1279); no box may mount it.
-- The corpus curators' own wire traces under `_pending/wire_logs/`, learning state rather than a
+- The curators' own wire traces, each in its call folder under the tenant's scratch location
+  (`<T>/scratch/<drain batch>-<stage>-<n>/wire_logs/`, `learning/call_folders.py`, #1278 A1), not a
   run record; the review step's scratch `served/` tree, which is not the episode's.
 - Repo and worktree files, git plumbing, container identity files, stdio and subprocess pipes,
   scratch files.

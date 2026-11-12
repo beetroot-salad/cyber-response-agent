@@ -41,7 +41,6 @@ NESTED_MARKER_PARENT = "mcpsys"
 #: any change outside `defender/skills/**.md`, so a queue file in the fixture repo would read as
 #: a stray. Builders put the state root outside the repo; this covers paths that cannot move.
 GIT_IGNORE = (
-    "defender/learning/_pending/\n"
     "defender/learning/_pending_leads/\n"
     "defender/learning/_pending_pitfalls/\n"
     "defender/learning/runs/\n"

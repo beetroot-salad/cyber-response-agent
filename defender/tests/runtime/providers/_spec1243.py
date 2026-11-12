@@ -318,18 +318,18 @@ class MainFailing(S.MainScript):
 
     def __init__(self, turns: Sequence[S.Turn] | None = None, plan: Plan = UP) -> None:
         super().__init__(turns)
-        self._attempts = Attempts(plan, answer=lambda m, i: S.MainScript.__call__(self, m, i))
+        self._scripted = Attempts(plan, answer=lambda m, i: S.MainScript.__call__(self, m, i))
 
     def __call__(self, messages: Any, info: Any) -> Any:
-        return self._attempts(messages, info)
+        return self._scripted(messages, info)
 
     @property
     def attempts(self) -> int:
-        return self._attempts.attempts
+        return self._scripted.attempts
 
     @property
     def inbound(self) -> list[list[Any]]:
-        return self._attempts.inbound
+        return self._scripted.inbound
 
 
 class LeadsFailing(S.LeadRouter):

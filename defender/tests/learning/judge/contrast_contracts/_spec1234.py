@@ -1290,19 +1290,37 @@ def judge(replies: Mapping[Any, Any] | None = None, *,
 # --------------------------------------------------------------------------------------
 
 
+#: The default findings store of each test (#1278: an operator's pass inserts into the learning store; the in-memory
+#: stand-in keeps the store's one rule the pass depends on, a repeated finding id is a duplicate), keyed by the running
+#: test so a suite that does not reset it (a #1007 test borrowing `grade`) never shares rows between tests.
+_DEFAULT_STORES: dict[str, Any] = {}
+
+
+def reset_default_store() -> None:
+    _DEFAULT_STORES.clear()
+
+
 def env_state() -> Any:
-    """A handle over the learning state root the environment names (what the launcher opens)."""
-    from defender.tests.support.learning.core._state1135 import env_state as _env_state
+    """The running test's default findings store: the one `grade` inserts into and `defender_queue` reads back,
+    unless a test passes `store=` of its own."""
+    import os
 
-    return _env_state()
+    test = os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" ", 1)[0]
+    if test not in _DEFAULT_STORES:
+        _DEFAULT_STORES[test] = state_over(None)
+    return _DEFAULT_STORES[test]
 
 
-def state_over(root: Path) -> Any:
-    """A handle over a queue folder of the test's own (`_state1135.state_over`): a variant that
-    must not share the env-named queues (they dedup on `finding_id`)."""
-    from defender.tests.support.learning.core._state1135 import state_over as _state_over
+def state_over(root: Path | None = None) -> Any:  # noqa: ARG001 — kept for the call sites that name a queue folder
+    """A findings store of the test's own, apart from the default one (a variant that must not share
+    the default's rows: the store dedups on `finding_id`)."""
+    return J.faultable_store()
 
-    return _state_over(root)
+
+def sink(tenant: Any = "tenant") -> Any:
+    """The findings sink over the default store (`enqueue.StoreFindings`), for a test that calls the appenders itself
+    (`append_rows(ep, rows, state=sink())`)."""
+    return J.findings_sink(env_state(), tenant=str(tenant))
 
 
 def _ep(where: Any) -> Path:
@@ -1310,10 +1328,12 @@ def _ep(where: Any) -> Path:
 
 
 def grade(where: Any, judge_seam: Any = None, *, draws: int | None = 1, **kw: Any) -> Any:
-    """`grade_episode(runs, episode_id, judge=, state=, draws=, git_show=)` over the episode
-    (`_judge_921.grade_at`). `judge_seam=None` is `judge()`; `draws=None` reads `JUDGE_DRAWS`."""
+    """`grade_episode(runs, episode_id, judge=, store=, draws=, git_show=)` over the episode
+    (`_judge_921.grade_at`). `judge_seam=None` is `judge()`; `draws=None` reads `JUDGE_DRAWS`. The store
+    defaults to the test's own (`env_state()`); a job-lane pass (`job_lane=True`) reaches none."""
     kw.setdefault("git_show", FakeGitShow())
-    kw.setdefault("state", env_state())
+    if not kw.get("job_lane"):
+        kw.setdefault("store", env_state())
     if draws is not None:
         kw["draws"] = draws
     judge_seam = judge_seam if judge_seam is not None else judge()  # lint-default: ok — fresh per-call recording double; never a provider
@@ -1332,10 +1352,9 @@ def grade_refused(where: Any, judge_seam: Any = None, **kw: Any) -> BaseExceptio
 
 
 def stops() -> tuple[type[BaseException], ...]:
-    """What a stopped pass may raise: a refusal, or `StateRefused` (raised by the state handle
-    when a queue append is refused, e.g. a directory planted at the queue's name). Kept apart
-    from `refusals()`, so a "refused loudly" check never loosens."""
-    return (*refusals(), sym(STATE, "StateRefused"))
+    """What a stopped pass may raise: a refusal. (#1278 retired `StateRefused`, the file handle's own
+    refusal of a queue append.) Kept apart from `refusals()`, so a "refused loudly" check never loosens."""
+    return refusals()
 
 
 def page(where: Any) -> str:
@@ -1508,7 +1527,7 @@ def wire_log_records(where: Any) -> list[dict]:
 
 
 def defender_queue(state: Any = None) -> list[dict]:
-    """The defender findings channel's rows, through the state handle's own reader."""
+    """The defender findings the store holds, through its reader."""
     return (state if state is not None else env_state()).rows(sym(STATE, "FINDINGS"))
 
 
@@ -1523,13 +1542,13 @@ def from_world(queue_rows: Iterable[Mapping[str, Any]], label: str) -> list[dict
 
 
 def queue_bytes(state: Any = None) -> tuple[str, str]:
-    """Both queue files' raw text (defender, questioner) — for "byte-identical" demands."""
+    """Both kinds' queued rows as text, one JSON line per row in insertion order (defender, questioner) —
+    for "byte-identical" demands."""
+    import json
+
     st = state if state is not None else env_state()
-    out = []
-    for channel in ("FINDINGS", "QUESTIONER_FINDINGS"):
-        described = Path(st.describe(sym(STATE, channel)))
-        out.append(described.read_text(encoding="utf-8") if described.is_file() else "")
-    return out[0], out[1]
+    return tuple("".join(json.dumps(r, sort_keys=True) + "\n" for r in st.rows(sym(STATE, channel)))
+                 for channel in ("FINDINGS", "QUESTIONER_FINDINGS"))  # type: ignore[return-value]
 
 
 # --------------------------------------------------------------------------------------

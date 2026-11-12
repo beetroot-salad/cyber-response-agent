@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import os
@@ -24,8 +23,9 @@ from defender.learning.core.config import (
 from defender._tree_listing import entry_kind
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
-from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
-from defender.tests.support.learning.core._state1135 import state_for_paths
+from defender.tests.support.learning.core._store1278 import world as store_world  # noqa: F401
+from defender.tests.support.learning.core._store1278 import call, finding, migrated_database  # noqa: F401
+from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401
 from defender.tests.support.learning.curation._curator1134 import (
     is_link_to,
     leaf_refusal,
@@ -33,7 +33,7 @@ from defender.tests.support.learning.curation._curator1134 import (
     put,
     world,
 )
-from defender.tests.support.learning.curation._drain719 import finding_row, make_repo, pending, seed, stuck_records
+from defender.tests.support.learning.curation._drain719 import finding_row, make_repo
 from defender.tests.support.learning.curation._tree_listing_1134 import descriptors_under
 from defender.tests.learning.curation.test_mount_list import UNKNOWN_LABELS
 
@@ -50,9 +50,9 @@ def test_the_builders_require_the_trees_and_take_their_mounts(tmp_path, channel)
     build, attr = BUILDERS[channel]
 
     with pytest.raises(TypeError):
-        build(w.paths, state=w.state)
+        build(w.paths)
 
-    cfg = build(w.paths, state=w.state, trees=w.trees)
+    cfg = build(w.paths, trees=w.trees)
     assert cfg.corpus_dir == getattr(w.paths, attr)
     assert cfg.corpus is w.trees.mount(cfg.corpus_dir)
     assert cfg.tree_for == w.trees.tree_for
@@ -63,14 +63,14 @@ def test_run_batch_takes_exactly_one_of_trees_and_cfg(tmp_path, channel):
     w = world(tmp_path)
     build, _attr = BUILDERS[channel]
     run = RUNNERS[channel]
-    cfg = build(w.paths, state=w.state, trees=w.trees)
+    cfg = build(w.paths, trees=w.trees)
 
     with pytest.raises(TypeError):
-        run(paths=w.paths, state=w.state)
+        run(paths=w.paths)
     with pytest.raises(TypeError):
-        run(paths=w.paths, state=w.state, trees=w.trees, cfg=cfg)
+        run(paths=w.paths, trees=w.trees, cfg=cfg)
 
-    assert run(paths=w.paths, state=w.state, trees=w.trees) == 0
+    assert run(paths=w.paths, trees=w.trees) == 0
     assert run(cfg=cfg) == 0
 
 
@@ -115,21 +115,21 @@ def test_trees_that_do_not_hold_the_corpus_exactly_are_fatal_config(tmp_path, ch
         for mount in trees.mounts:
             assert str(mount) in said, (mount, said)
         with pytest.raises(FatalConfigError):
-            build(paths, state=w.state, trees=trees)
+            build(paths, trees=trees)
         with pytest.raises(FatalConfigError):
-            RUNNERS[channel](paths=paths, state=w.state, trees=trees)
+            RUNNERS[channel](paths=paths, trees=trees)
 
 
 @pytest.mark.parametrize("channel", sorted(BUILDERS))
 def test_lane_corpus_is_the_trees_own_mount_whatever_opened_them(tmp_path, channel):
     w = world(tmp_path)
     build, attr = BUILDERS[channel]
-    paths = LoopPaths(repo_root=w.repo, state_dir=tmp_path / "state")
+    paths = LoopPaths(repo_root=w.repo)
 
     with DrainTrees.open((paths.lessons_dir, paths.lessons_questioner_dir)) as trees:
         corpus_dir = getattr(paths, attr)
         assert author_shared.lane_corpus(trees, corpus_dir) is trees.mount(corpus_dir)
-        cfg = build(paths, state=w.state, trees=trees)
+        cfg = build(paths, trees=trees)
         assert cfg.corpus is trees.mount(corpus_dir)
         hit = cfg.tree_for(paths.lessons_questioner_dir / "y.md")
         assert hit is not None
@@ -141,7 +141,7 @@ def test_lane_corpus_is_the_trees_own_mount_whatever_opened_them(tmp_path, chann
 def test_cfg_corpus_is_the_held_mount_and_never_follows_a_link(tmp_path, channel):
     w = world(tmp_path)
     build, attr = BUILDERS[channel]
-    cfg = build(w.paths, state=w.state, trees=w.trees)
+    cfg = build(w.paths, trees=w.trees)
     root = getattr(w.paths, attr)
 
     target = w.target("secret.md")
@@ -186,146 +186,159 @@ def test_cfg_tree_for_maps_both_corpora_to_their_own_mounts_and_nothing_else(tmp
     assert entry_kind(held.view(), name).kind == "other"
 
 
-def _held_queue(paths: LoopPaths) -> None:
-    """One finding of a retired direction: the pre-author gate holds it (`retired_direction`), so
+def _held_items() -> list[tuple[str, str, dict]]:
+    """One claimed finding of a retired direction: the pre-author gate holds it (`retired_direction`), so
     a tick serves it without spawning any agent."""
-    seed(paths, FINDINGS, [finding_row("f1", run_id="old-run", direction="adversarial")])
+    return [("finding", "f1", finding_row("f1", run_id="old-run", direction="adversarial"))]
 
 
 def _trigger_args(paths: LoopPaths) -> tuple:
-    return (paths, state_for_paths(paths), FINDINGS, "LEARNING_AUTHOR_THRESHOLD", "author", "pending")
+    return (paths, None, "finding", "LEARNING_AUTHOR_THRESHOLD", "author", "pending")
+
+
+def _trigger(paths: LoopPaths, label, outcomes: dict) -> None:
+    """The author lane's default work step over a claim of `_held_items()`, its fates written to `outcomes`."""
+    drains._maybe_trigger_author(*_trigger_args(paths), label=label, items=_held_items(), outcomes=outcomes)
+
+
+def _is_held(outcomes: dict) -> bool:
+    """The claim held its one finding (the gate's `retired_direction`), and decided nothing else."""
+    held = outcomes.get(("finding", "f1"))
+    return len(outcomes) == 1 and held is not None and held.name == "held" and "retired_direction" in held.reason
 
 
 def test_the_trigger_requires_the_label_and_runs_the_batch_under_its_trees(tmp_path, monkeypatch):
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     w = world(tmp_path)
-    _held_queue(w.paths)
+    outcomes: dict = {}
 
     with pytest.raises(TypeError):
-        drains._maybe_trigger_author(*_trigger_args(w.paths))
-    assert "held_reason" not in pending(w.paths, FINDINGS)[0]
+        drains._maybe_trigger_author(*_trigger_args(w.paths), items=_held_items(), outcomes=outcomes)
+    assert outcomes == {}
 
-    drains._maybe_trigger_author(*_trigger_args(w.paths), label=AUTHOR_DRAIN_LABEL)
+    _trigger(w.paths, AUTHOR_DRAIN_LABEL, outcomes)
 
-    [row] = pending(w.paths, FINDINGS)
-    assert "held_reason" in row, row
-    assert stuck_records(w.paths, FINDINGS) == []
+    assert _is_held(outcomes), outcomes
 
 
 def test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other(tmp_path, monkeypatch):
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     w = world(tmp_path)
-    _held_queue(w.paths)
     w.trees.close()
+    outcomes: dict = {}
 
     with pytest.raises(FatalConfigError):
-        drains._maybe_trigger_author(*_trigger_args(w.paths), label=LEAD_AUTHOR_DRAIN_LABEL)
-    assert "held_reason" not in pending(w.paths, FINDINGS)[0]
+        _trigger(w.paths, LEAD_AUTHOR_DRAIN_LABEL, outcomes)
+    assert outcomes == {}
     for non_member in UNKNOWN_LABELS:
         with pytest.raises(AttributeError):
-            drains._maybe_trigger_author(*_trigger_args(w.paths), label=non_member)
-        assert "held_reason" not in pending(w.paths, FINDINGS)[0]
+            _trigger(w.paths, non_member, outcomes)
+        assert outcomes == {}
         assert descriptors_under(w.repo) == []
 
-    drains._maybe_trigger_author(*_trigger_args(w.paths), label=AUTHOR_DRAIN_LABEL)
+    _trigger(w.paths, AUTHOR_DRAIN_LABEL, outcomes)
 
-    [row] = pending(w.paths, FINDINGS)
-    assert "held_reason" in row, row
-    assert stuck_records(w.paths, FINDINGS) == []
-
-
-@contextlib.contextmanager
-def _tenant_drain(tmp_path: Path, data_root: Path, files: dict | None = None):
-    """The fixture tenant published for real with its forge bound, and the drain's learning
-    paths over a scratch product checkout: `(tenant, paths)`."""
-    from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo
-    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
-
-    with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
-        bind_forge(t)
-        yield t, drain_paths(t, product_repo(tmp_path))
+    assert _is_held(outcomes), outcomes
 
 
 def _drafts(t: Any) -> Path:
     return Path(location_path(t.tenant.tenant_root)) / "drafts"
 
 
-def test_author_drains_real_default_seam_carries_the_label_to_the_open(
-        tmp_path, data_root, monkeypatch):
+def _items(w: Any) -> dict[tuple[str, str], Any]:
+    return {(i.kind, i.key): i for i in call(w.dsn, "work", w.t.tenant_id)}
+
+
+#: A world finding no declared system is named by: the questioner curator serves it without a model.
+_NO_SYSTEM_WORLD_ROW = {"schema_version": 1, "finding_id": "w1", "subject": "world", "type": "lead-set",
+                        "finding": "a world finding"}
+
+
+def _publish_held(w: Any) -> None:
+    """A retired-direction finding the gate holds, in the store (it wakes the author lane at one item)."""
+    row = finding_row("f1", run_id="old-run", direction="adversarial")
+    call(w.dsn, "publish_findings", w.t.tenant_id, "old-run", [row], kind="finding")
+
+
+@pytest.fixture
+def no_questioner_corpus_world(tmp_path, data_root, migrated_database, monkeypatch):  # noqa: F811 — the imported fixture
+    """The `world` of the store tests over a tenant repo that never committed `agent/lessons-questioner/`."""
+    from types import SimpleNamespace
+
+    from defender.tests.support.jobs._jobs1342 import register_tenant
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo
+    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
+
+    with published_tenant(tmp_path / "forge", root=data_root, files={
+            "agent/lessons-questioner/fixture-questioner-seed.md": None}) as t:
+        bind_forge(t)
+        register_tenant(migrated_database, t.tenant_id)
+        monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
+        monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+        monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
+        yield SimpleNamespace(t=t, dsn=migrated_database, paths=drain_paths(t, product_repo(tmp_path)))
+
+
+@pytest.mark.postgres
+def test_author_drains_real_default_seam_carries_the_label_to_the_open(store_world):  # noqa: F811 — the imported fixture
     """The drain's production `trigger_author` opens the author label's trees over the batch's
-    draft: the gate holds the row, nothing is stuck, nothing stays held under the drafts, and
-    nothing is delivered."""
-    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
-        BoxSpy, author_drain, remote_branches)
+    draft: the gate holds the row (the store records it held, not failed), and nothing stays held
+    under the drafts or is delivered."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain, remote_branches
 
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    with _tenant_drain(tmp_path, data_root) as (t, paths):
-        _held_queue(paths)
+    w = store_world
+    _publish_held(w)
 
-        rc = author_drain(t, paths, trigger=None, box=BoxSpy())
+    rc = author_drain(w.t, w.paths, trigger=None, box=BoxSpy())
 
-        assert rc == 0
-        [row] = pending(paths, FINDINGS)
-        assert "held_reason" in row, row
-        assert stuck_records(paths, FINDINGS) == []
-        assert stuck_records(paths, QUESTIONER_FINDINGS) == []
-        assert descriptors_under(_drafts(t)) == []
-        assert remote_branches(t.remote) == {}
-        assert t.forge.creates == []
+    assert rc == 0
+    got = _items(w)
+    assert got[("finding", "f1")].status == "held", got
+    assert descriptors_under(_drafts(w.t)) == []
+    assert remote_branches(w.t.remote) == {}
+    assert w.t.forge.creates == []
 
 
-def test_a_lane_the_tenant_repo_never_committed_is_still_a_held_mount(
-        tmp_path, data_root, monkeypatch):
-    """The draft makes each lane's folder, so a tenant repo holding no
-    `agent/lessons-questioner/` still gives both curators their held corpus: neither channel
-    records a hold fault, the gate holds the findings row, and the questioner curator serves its
-    row."""
+@pytest.mark.postgres
+def test_a_lane_the_tenant_repo_never_committed_is_still_a_held_mount(no_questioner_corpus_world):
+    """The draft makes each lane's folder, so a tenant repo holding no `agent/lessons-questioner/` still
+    gives both curators their held corpus: the gate holds the findings row, and the questioner curator
+    serves its row (no system to teach: skipped), neither records a failure."""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain
 
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
-    with _tenant_drain(tmp_path, data_root, files={
-            "agent/lessons-questioner/fixture-questioner-seed.md": None}) as (t, paths):
-        _held_queue(paths)
-        seed(paths, QUESTIONER_FINDINGS, [{"schema_version": 1, "finding_id": "w1",
-                                          "subject": "world", "type": "lead-set",
-                                          "finding": "a world finding"}])
+    w = no_questioner_corpus_world
+    _publish_held(w)
+    call(w.dsn, "publish_findings", w.t.tenant_id, "run-w1", [_NO_SYSTEM_WORLD_ROW], kind="questioner_finding")
 
-        rc = author_drain(t, paths, trigger=None, box=BoxSpy())
+    rc = author_drain(w.t, w.paths, trigger=None, box=BoxSpy())
 
-        assert rc == 0
-        assert stuck_records(paths, FINDINGS) == []
-        assert stuck_records(paths, QUESTIONER_FINDINGS) == []
-        [row] = pending(paths, FINDINGS)
-        assert "held_reason" in row, row
-        assert pending(paths, QUESTIONER_FINDINGS) == [], "the questioner curator never served"
-        assert descriptors_under(_drafts(t)) == []
+    assert rc == 0
+    got = _items(w)
+    assert got[("finding", "f1")].status == "held", got
+    assert got[("questioner_finding", "w1")].status != "waiting", "the questioner curator never served"
+    assert got[("questioner_finding", "w1")].status != "dead", got
+    assert descriptors_under(_drafts(w.t)) == []
 
 
 def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     repo = make_repo(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    paths = LoopPaths(repo_root=repo)
     # make_repo carries both corpora; this case needs one absent
     subprocess.run(["git", "-C", str(repo), "rm", "-rq", str(paths.lessons_questioner_dir)], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-qm", "no questioner corpus"], check=True)
-    _held_queue(paths)
+    outcomes: dict = {}
 
     with pytest.raises(FileNotFoundError):
-        drains._maybe_trigger_author(*_trigger_args(paths), label=AUTHOR_DRAIN_LABEL)
+        _trigger(paths, AUTHOR_DRAIN_LABEL, outcomes)
 
-    assert "held_reason" not in pending(paths, FINDINGS)[0]
+    assert outcomes == {}, "a held finding was named though the open failed"
     assert not os.path.lexists(paths.lessons_questioner_dir)
     assert descriptors_under(repo) == []
 
 
-def _spy_paths(repo: Path, state: Path, seen: list[list[str]], *,
-               fault: BaseException | None = None, extra_mount: Path | None = None) -> LoopPaths:
-    """A `LoopPaths` (the seam's `paths`) that records what this process holds under the repo
-    each time `learning_dir` is asked for (the builders read it for their prompt path, after the
-    open); with `fault`, raises it after recording; with `extra_mount`, the paths carry a third
-    mount for the author label to hold (`extra_mount_dir`, which the caller adds to the label's
-    tree list). A class per call."""
+def _spy_paths(repo: Path, *, extra_mount: Path | None = None) -> LoopPaths:
+    """A `LoopPaths` (the seam's `paths`); with `extra_mount`, the paths carry a third mount for the
+    author label to hold (`extra_mount_dir`, which the caller adds to the label's tree list). A class
+    per call."""
 
     class Spy(LoopPaths):
         @property
@@ -333,14 +346,23 @@ def _spy_paths(repo: Path, state: Path, seen: list[list[str]], *,
             assert extra_mount is not None
             return extra_mount
 
-        @property
-        def learning_dir(self) -> Path:  # type: ignore[override]
-            seen.append(sorted(descriptors_under(self.repo_root)))
-            if fault is not None:
-                raise fault
-            return super().learning_dir
+    return Spy(repo_root=repo)
 
-    return Spy(repo_root=repo, state_dir=state)
+
+def _spy_build(monkeypatch, repo: Path, seen: list[list[str]], *,
+               fault: BaseException | None = None) -> None:
+    """Record what this process holds under the repo each time the curator's batch builds its config (after
+    the seam opened its trees); with `fault`, raise it after recording. (#1278: the builder no longer reads the
+    prompt path off the passed `paths`, so the config build itself is the observation point.)"""
+    real = lessons_run.build_author_config
+
+    def spy(*a: Any, **kw: Any) -> Any:
+        seen.append(sorted(descriptors_under(repo)))
+        if fault is not None:
+            raise fault
+        return real(*a, **kw)
+
+    monkeypatch.setattr(lessons_run, "build_author_config", spy)  # lint-monkeypatch: ok — a recording wrapper around the real builder; no seam reports the config the drain builds for the call
 
 
 def _held_roots(paths: LoopPaths) -> list[str]:
@@ -363,18 +385,19 @@ def test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs(
             config._WRITABLE_TREE_ATTRS, AUTHOR_DRAIN_LABEL,
             (*config._WRITABLE_TREE_ATTRS[AUTHOR_DRAIN_LABEL], "extra_mount_dir"))
     seen: list[list[str]] = []
-    paths = _spy_paths(w.repo, tmp_path / "state", seen, extra_mount=extra_mount)
-    _held_queue(paths)
+    paths = _spy_paths(w.repo, extra_mount=extra_mount)
+    _spy_build(monkeypatch, w.repo, seen)
+    outcomes: dict = {}
     w.trees.close()
     assert descriptors_under(w.repo) == []
 
-    drains._maybe_trigger_author(*_trigger_args(paths), label=AUTHOR_DRAIN_LABEL)
+    _trigger(paths, AUTHOR_DRAIN_LABEL, outcomes)
 
     assert seen, "the curator's batch never built its config"
     assert all(held == _held_roots(paths) for held in seen), (seen, _held_roots(paths))
     assert len(_held_roots(paths)) == (3 if extra else 2)
     assert descriptors_under(w.repo) == [], "a held root outlived the seam"
-    assert "held_reason" in pending(paths, FINDINGS)[0]
+    assert _is_held(outcomes), outcomes
     bad = [r.getMessage() for r in caplog.records if "Bad file descriptor" in r.getMessage()]
     assert bad == [], bad
 
@@ -385,46 +408,26 @@ def test_the_trigger_releases_the_trees_when_the_batch_raises(tmp_path, monkeypa
     w = world(tmp_path)
     seen: list[list[str]] = []
     exc = RuntimeError("the batch blew up") if fault == "RuntimeError" else OSError(5, "io fault")
-    paths = _spy_paths(w.repo, tmp_path / "state", seen, fault=exc)
-    _held_queue(paths)
+    paths = _spy_paths(w.repo)
+    _spy_build(monkeypatch, w.repo, seen, fault=exc)
+    outcomes: dict = {}
     w.trees.close()
 
     if fault == "RuntimeError":
         with pytest.raises(RuntimeError, match="the batch blew up"):
-            drains._maybe_trigger_author(*_trigger_args(paths), label=AUTHOR_DRAIN_LABEL)
+            _trigger(paths, AUTHOR_DRAIN_LABEL, outcomes)
     else:
-        assert drains._maybe_trigger_author(*_trigger_args(paths), label=AUTHOR_DRAIN_LABEL) is None
+        assert _trigger(paths, AUTHOR_DRAIN_LABEL, outcomes) is None
+    assert outcomes == {}
 
     assert seen == [_held_roots(paths)], seen
     assert descriptors_under(w.repo) == [], "a held root outlived the raising seam"
 
 
-def test_below_the_threshold_nothing_is_held(tmp_path, monkeypatch):
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
-    w = world(tmp_path)
-    asked: list[str] = []
-
-    class CountsTheAsk(LoopPaths):
-        @property
-        def lessons_dir(self) -> Path:  # type: ignore[override]
-            asked.append("lessons_dir")
-            return super().lessons_dir
-
-        @property
-        def lessons_questioner_dir(self) -> Path:  # type: ignore[override]
-            asked.append("lessons_questioner_dir")
-            return super().lessons_questioner_dir
-
-    paths = CountsTheAsk(repo_root=w.repo, state_dir=tmp_path / "state")
-    _held_queue(paths)
-    w.trees.close()
-    asked.clear()
-
-    drains._maybe_trigger_author(*_trigger_args(paths), label=AUTHOR_DRAIN_LABEL)
-
-    assert asked == []
-    assert "held_reason" not in pending(paths, FINDINGS)[0]
-    assert descriptors_under(w.repo) == []
+# Retired: test_below_the_threshold_nothing_is_held. The threshold gate moved from the seam to the
+# store's claim (design r8 Flows: the claim takes each kind at or over its own threshold and nothing
+# below); enforced by test_store_1278::test_d8_the_claim_takes_each_kind_at_or_over_its_own_threshold_and_nothing_below.
+# A seam handed a claim never sees a below-threshold item, so there is nothing left to hold or not.
 
 
 def _harness() -> Path:
@@ -448,7 +451,7 @@ print(json.dumps({"rc": run.returncode, "stdout": run.stdout, "stderr": run.stde
 
 def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_path):
     """The harness runs an empty-queue scenario cleanly in its own scratch dir and never reads
-    the retired `DEFENDER_LEARNING_STATE_DIR`."""
+    the retired learning-state variable."""
     evals = _harness().parent
     scenario = tmp_path / "scenario"
     scenario.mkdir()
@@ -458,7 +461,7 @@ def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_p
     decoy = tmp_path / "decoy-state"
     decoy.mkdir()
     env = {**os.environ, "PYTHONPATH": str(evals.parent),
-           "DEFENDER_LEARNING_STATE_DIR": str(decoy)}
+           "DEFENDER_LEARNING_STATE_DIR": str(decoy)}  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
 
     proc = subprocess.run(
         [sys.executable, "-c", _HARNESS_RUN, str(evals), str(scenario), str(scratch)],
@@ -471,20 +474,21 @@ def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_p
     assert not (scratch / "defender" / "lessons").exists(), "a product-shaped corpus was made"
 
 
-def test_the_trigger_holds_nothing_for_an_injected_seam(tmp_path, data_root, monkeypatch):
+@pytest.mark.postgres
+def test_the_trigger_holds_nothing_for_an_injected_seam(store_world):  # noqa: F811 — the imported fixture
     """An injected `trigger_author` keeps its call shape (no `label`) and the lane opens nothing
     around it: the default seam is the only place the author label is consumed."""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, author_drain
 
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+    w = store_world
+    _publish_held(w)
+    call(w.dsn, "publish_findings", w.t.tenant_id, "run-w1", [_NO_SYSTEM_WORLD_ROW], kind="questioner_finding")
     calls: list[tuple[tuple, dict, list[str]]] = []
-    with _tenant_drain(tmp_path, data_root) as (t, paths):
-        _held_queue(paths)
 
-        def injected(*a, **kw):
-            calls.append((a, kw, sorted(descriptors_under(_drafts(t)))))
+    def injected(*a, **kw):
+        calls.append((a, kw, sorted(descriptors_under(_drafts(w.t)))))
 
-        rc = author_drain(t, paths, trigger=injected, box=BoxSpy())
+    rc = author_drain(w.t, w.paths, trigger=injected, box=BoxSpy())
 
     assert rc == 0
     assert [c[0][4] for c in calls] == ["author", "questioner_curator"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
@@ -15,7 +16,6 @@ from defender import _yaml
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.runtime.state import _1255_world as W
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.core import _state1135
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 def _names(root: Path) -> set[str]:
@@ -606,7 +606,7 @@ def test_input_every_world_has_no_facts(tmp_path):
         assert S.ledger_rows(run.ep, w) == []
 
     judge = S.FakeJudge()
-    J.grade_at(run.ep, judge=judge, state=_state1135.state_over(tmp_path / "judge-state"))
+    J.grade_at(run.ep, judge=judge, store=MemoryStore())
     assert judge.prompts == [], "a refused episode is not graded (no model call)"
 
 
@@ -926,7 +926,7 @@ def test_outcome_record_is_cut_short_by_a_launcher_crash(tmp_path, state):
 
     judge = S.FakeJudge(default="unused")
     try:
-        J.grade_at(ep, judge=judge, state=_state1135.state_over(tmp_path / "judge-state"))
+        J.grade_at(ep, judge=judge, store=MemoryStore())
     except S.sym(S.JUDGE, "JudgeRefused"):
         pass
     assert judge.prompts == [], "no record is not an accepted record: nothing is graded"

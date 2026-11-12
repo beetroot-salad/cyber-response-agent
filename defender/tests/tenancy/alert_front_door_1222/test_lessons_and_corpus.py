@@ -21,7 +21,8 @@ import pytest
 from defender import _yaml
 from defender.tests.support.runtime.state import _1255_view as V
 from defender.tests.support.learning.curation import _curator1134 as C
-from defender.tests.support.learning.curation import _drain719 as D
+from defender.tests.support.learning.judge._memory_store import MemoryStore
+from defender.tests.tenancy.alert_front_door_1222 import _lane1222 as L
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
@@ -178,6 +179,16 @@ def _past_run(runs_base: Path, run_id: str, *, tag: str, rule_id: str = "R-PAST"
 
 FINDINGS = S.sym("learning.core.state", "FINDINGS")
 
+#: The findings the judge queued for the learning store (#1278: its in-memory stand-in), fresh per test.
+_QUEUED = MemoryStore()
+
+
+@pytest.fixture(autouse=True)
+def _queued_findings() -> Any:
+    _QUEUED.items.clear()
+    yield
+    _QUEUED.items.clear()
+
 
 @dataclass
 class _Curator:
@@ -206,8 +217,9 @@ class _Curator:
 def _judged(tmp_path: Path, *, signature: str | None,
             world_rule: str | None = None) -> list[dict]:
     """Grade an accepted episode whose record copy holds `signature` (None: no signature) and
-    return the finding rows the REAL enqueue appended. `world_rule` rewrites every world copy's
-    `alert.json` to that id first — what a box that rewrote its alert leaves."""
+    return the finding rows the REAL enqueue queued for the learning store (kept for `_drain`).
+    `world_rule` rewrites every world copy's `alert.json` to that id first — what a box that
+    rewrote its alert leaves."""
     ep = J.accepted_episode(tmp_path / "judged")
     if world_rule is not None:
         for alert in (ep / "worlds").glob("*/alert.json"):
@@ -216,24 +228,22 @@ def _judged(tmp_path: Path, *, signature: str | None,
     S.plant_episode_copy(ep, facts={"signature": signature} if signature else {})
     runs_base = tmp_path / "judged" / "runs-base"
     runs_base.mkdir(parents=True, exist_ok=True)
-    J.grade(ep, runs_base=runs_base)
-    return J.enqueued_rows(J.judge_record(ep))
+    J.grade(ep, runs_base=runs_base, store=_QUEUED)
+    return _QUEUED.rows(FINDINGS)
 
 
 def _drain(tmp_path: Path, curator: _Curator, *, extra_rows: Iterable[dict] = ()) -> Any:
-    """One REAL drain tick (`drain.run_batch`) over the learning state the judge appended to,
-    the curator at `invoke_agent=`, over a real batch of the fixture tenant (a curator commits
-    only into a tenant batch's draft). Returns the draft lane, whose batch branch holds what the
-    tick committed."""
-    lane = C.draft_lane(tmp_path, files={}, state_dir=tmp_path / "learning-state")
-    paths = lane.paths
-    extra = list(extra_rows)
-    if extra:
-        D.seed(paths, FINDINGS, D.pending(paths, FINDINGS) + extra)
-    cfg = C.draft_author_cfg(lane, invoke_agent=curator)
+    """One REAL drain claim (`drain.run_batch`) over the findings the judge queued for the store (`_judged`,
+    plus `extra_rows`), the curator at `invoke_agent=`, over a real batch of the fixture tenant (a curator commits
+    only into a tenant batch's draft). Returns the draft lane, whose batch branch holds what the claim committed."""
+    from defender.learning.store import Outcome  # noqa: F401 — the fates the claim fills in `outcomes`
+
+    lane = L.draft_lane(tmp_path, files={})
+    items = [("finding", str(row["finding_id"]), dict(row)) for row in (*_QUEUED.rows(FINDINGS), *extra_rows)]
+    cfg = L.author_cfg(lane, invoke_agent=curator)
     assert Path(cfg.corpus_dir) == lane.lessons_dir, "the curator would write outside the draft"
-    rc = S.sym("learning.author.drain", "run_batch")(cfg=cfg)
-    assert rc == 0, f"the drain tick failed (rc={rc})"
+    rc = S.sym("learning.author.drain", "run_batch")(cfg=cfg, items=items, outcomes={})
+    assert rc == 0, f"the drain claim failed (rc={rc})"
     return lane
 
 

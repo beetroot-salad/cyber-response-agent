@@ -4,17 +4,15 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 
 import pytest
 
-from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as D
+from defender.tests.support.learning.judge import _gate_1278 as G
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.core._state1135 import env_state
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _family_row(fid: str, **over) -> dict:
@@ -36,30 +34,25 @@ def test_1166_the_appender_refuses_a_defender_row_that_is_not_family(tmp_path, d
     ep.mkdir()
     row = _family_row("ep-1/b/0/0", direction=direction)
     with pytest.raises(J.refusals()) as raised:
-        J.mod("learning.judge.enqueue").append_rows(ep, [row], state=env_state())
+        J.mod("learning.judge.enqueue").append_rows(ep, [row], state=J.findings_sink(MemoryStore()))
     assert direction in str(raised.value)
 
 
 @pytest.mark.parametrize("direction", ["benign", "adversarial", None])
 def test_1166_a_queued_non_family_row_is_held_by_name_and_the_batch_still_authors(
         tmp_path, direction):
-    # The REAL lessons tick over a batch's git-free draft.
-    lane = C.draft_lane(tmp_path)
-    paths = lane.paths
-    channel = D.channel_of("findings")
+    # The REAL lessons claim over a batch's git-free draft; the fates are read off its outcomes (#1278 D1).
     legacy = _family_row("old/0", run_id="fresh-01")
     if direction is None:
         legacy.pop("direction")
     else:
         legacy["direction"] = direction
-    D.seed(paths, channel, [legacy, _family_row("ep-1/b/0/0")])
     agent = D.recording(D.committing("family-lesson"))
-    cfg = C.draft_author_cfg(lane, invoke_agent=agent)
+    lane = G.gate_lane(tmp_path)
 
-    assert J.mod("learning.author.drain").run_batch(cfg=cfg) == 0
+    rc, outcomes = G.claim(G.lessons_cfg(lane, invoke_agent=agent), [legacy, _family_row("ep-1/b/0/0")])
+
+    assert rc == 0
     assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/0"]
-    assert [r["finding_id"] for r in D.consumed(paths, channel)] == ["ep-1/b/0/0"]
-    pending = D.pending_by_id(paths, channel)
-    assert list(pending) == ["old/0"]
-    assert pending["old/0"]["held_reason"] == f"retired_direction({direction!r})"
-    assert D.stuck_records(paths, channel) == []
+    # Held by name; the authored row is cited, so it is named no fate and stays in its batch.
+    assert G.fates(outcomes) == {"old/0": ("held", f"retired_direction({direction!r})")}

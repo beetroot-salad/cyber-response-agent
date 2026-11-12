@@ -7,6 +7,7 @@ organisation's Owners team and no bot, other users and teams kept, read back as 
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import shutil
 import uuid
 
@@ -109,6 +110,28 @@ def test_offboard_ends_api_access_at_once_then_destroys_everything_but_the_archi
     assert world.forge.repos[f"{ORG}/{tenant}"]["archived"] is True
     assert not (world.data_root / tenant).exists()
     assert not gen.host_secret_file.exists() and not gen.sign_secret_file.exists() and _secret_files(world) == []
+
+
+def test_offboarding_with_no_database_address_fails_the_teardown_and_removes_nothing_until_one_is_set(world, monkeypatch):
+    """Without `DEFENDER_DATABASE_DSN` the teardown cannot purge the tenant's learning rows, so it fails naming the variable
+    and removes nothing; with the address set, resume finishes. (O6, Offboarding)"""
+    tenant = world.active_tenant()
+    secret_file = world.live(tenant).host_secret_file
+    dsn = os.environ["DEFENDER_DATABASE_DSN"]  # the folder's autouse fixture set one
+    monkeypatch.delenv("DEFENDER_DATABASE_DSN")
+    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+
+    world.drive()
+
+    item = world.item(tenant)
+    assert (item["state"], item["step"], item["step_actor"]) == ("offboarding", "teardown", "host")
+    assert item["failure"] and "DEFENDER_DATABASE_DSN" in item["failure"]
+    assert (world.data_root / tenant).is_dir() and secret_file.is_file(), "files removed though the rows were not purged"
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)
+    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    world.drive()
+    assert world.item(tenant)["state"] == "offboarded"
+    assert not (world.data_root / tenant).exists()
 
 
 def test_offboard_from_creating_destroys_what_the_unfinished_job_made(world):

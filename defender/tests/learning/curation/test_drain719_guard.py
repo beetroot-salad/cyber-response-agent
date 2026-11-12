@@ -1,237 +1,98 @@
-"""Drain retire set: only the enumerated failure classes bump attempts and retire; systemic faults propagate; stuck rows surface an operator signal."""
-from __future__ import annotations
+"""Drain retire set: only the enumerated failure classes fault a claim (rc 2); every other fault propagates; neither decides a fate.
 
-from defender.tests.support.shared._locations_1210 import location_path
+Over the learning store (#1278 D1) a faulted claim writes no fate for its items: the batch's commits say what becomes
+of them, and the store's claim counted the attempt.
+
+Retired with the file queue (design r8 Locks and Items, #1278 D1):
+- the per-row `attempts` count bumped and untouched across faults, the retirement at the ceiling (`max_attempts`), the
+  graveyard row, and the ceiling's timeout reason: the counter and the ceiling are the store's, covered by
+  `tests/learning/store_1278/test_items_1278.py::test_crashes_to_the_ceiling_hold_the_item_for_a_person` and
+  `test_store_1278.py::test_d8_a_recovery_abandon_keeps_the_attempt_and_the_ceiling_holds_the_item_for_a_person`;
+- the stuck-row operator signal (`stuck_records`, a rising `consecutive_ticks`, `held_report.log`): the file is gone, the
+  fault is the claim's recorded one (store `fault` column, `tests/learning/store_1278`);
+- a plain `OSError` from a queue-lock acquisition classified systemic (`StateRefused`): there is no queue lock;
+- `drains._drain_pitfalls` and the pitfalls ceiling bump (`[1, 1]`): the pitfalls leg is the store claim's
+  (`test_1278_curator_fates.py` drives the real curators).
+"""
+from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 from pydantic_ai.exceptions import ModelRetry
 
-from defender.tests.support.learning.curation import _curator1134 as C
-from defender.tests.support.learning.curation import _drain719 as h
+from defender.tests.support.learning.curation import _spec773 as S
 from defender.learning.author import drain
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core.config import FatalConfigError, StageAbort  # type: ignore[import-not-found]
-from defender.learning.core.state import FINDINGS, PITFALLS, StateRefused  # type: ignore[import-not-found]
 from defender.box import BoxFault  # type: ignore[import-not-found]
 from defender._git import GitError  # type: ignore[import-not-found]
-from defender.tests.support.learning.core import _state1135
 
 
-# Only the enumerated `RETIRE_SET` classes retire
+def _faulting_scene(tmp_path: Path, exc: BaseException):
+    return S.build_draft_scene(tmp_path, rows=[S.finding_row("a/0", run_id="a")],
+                               curator=S.FakeCurator(raises=exc))
 
 
-def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouched(
-    tmp_path: Path,
-):
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of("findings")
-    rows = [h.row_for("findings", "b/0", attempts=2)]
-    h.seed(paths, ch, rows)
-    before = (location_path(paths.state_root) / ch.queue).read_bytes()
-    cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=3,
-        invoke_agent=h.raising(FileNotFoundError("no such prompt file")),
-    )
-
-    for _ in range(3):
-        with pytest.raises(FileNotFoundError):
-            drain.run_batch(cfg=cfg)
-
-    assert (location_path(paths.state_root) / ch.queue).read_bytes() == before, "an unnamed class must not touch the queue at all"
-    assert h.attempts_of(paths, ch, "b/0") == 2, "the count is untouched — not bumped, not reset"
-    assert h.graveyard(paths, ch) == []
-    assert h.consumed(paths, ch) == []
+# Only the enumerated `RETIRE_SET` classes fault the claim
 
 
-def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_signal(
-    tmp_path: Path,
-):
-    """A row stuck on a non-retiring fault is loud: each tick writes a stuck record naming the
-    fault class, the rows and a rising tick count; a fault that retires writes none."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of("findings")
-    rows = [h.row_for("findings", "a/0"), h.row_for("findings", "a/1")]
-    h.seed(paths, ch, rows)
-    cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=3,
-        invoke_agent=h.raising(FileNotFoundError("no such prompt file")),
-    )
+@pytest.mark.parametrize("exc", [
+    author_shared.AuthorError("a member"),
+    ModelRetry("killed"),
+    GitError(["git", "commit"], 1, "boom"),
+], ids=["AuthorError", "ModelRetry", "GitError"])
+def test_a_retire_set_member_faults_the_claim_and_decides_no_fate(tmp_path: Path, exc: BaseException):
+    """A `RETIRE_SET` member returns rc 2 (a batch that did not author is not a success) and decides nothing, so a
+    channel naming fewer classes fails here."""
+    sc = _faulting_scene(tmp_path, exc)
 
-    for tick in (1, 2, 3):
-        with pytest.raises(FileNotFoundError):
-            drain.run_batch(cfg=cfg)
-        records = h.stuck_records(paths, ch)
-        assert len(records) == tick, f"tick {tick} produced no stuck-row record"
-
-        latest = records[-1]
-        assert latest["fault_class"] == "FileNotFoundError", (
-            "the stuck record does not name the fault class"
-        )
-        assert sorted(latest["row_ids"]) == ["a/0", "a/1"], "the stalled rows are not named"
-        assert latest["consecutive_ticks"] == tick, "the stuck record's tick count does not rise"
-
-    assert h.pending_by_id(paths, ch).keys() == {"a/0", "a/1"}, "the stuck rows left the queue"
-    assert h.graveyard(paths, ch) == []
-    assert not ((location_path(paths.state_root) / FINDINGS.queue).parent / "held_report.log").exists(), (
-        "the stuck rows were reported through a held_report.log"
-    )
-
-    member = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.raising(author_shared.AuthorError("a member — this one retires")),
-    )
-    before = len(h.stuck_records(paths, ch))
-    assert drain.run_batch(cfg=member) == 2
-    assert len(h.graveyard(paths, ch)) == 2, "the member fault retired the rows"
-    assert len(h.stuck_records(paths, ch)) == before, "a fault that retired its rows wrote a stuck record"
+    assert sc.run() == 2, "a member did not fault the batch"
+    assert sc.outcomes == {}
+    assert sc.head_files() == []
 
 
-def test_a_retire_set_member_retires_the_row_and_a_non_member_leaves_it_queued(tmp_path: Path):
-    """On every author channel a `RETIRE_SET` member retires the row and a non-member propagates
-    leaving it queued, so a channel naming fewer classes fails here."""
-    paths = h.make_paths(tmp_path)
-    member_seen, non_member_seen = {}, {}
+@pytest.mark.parametrize("exc", [
+    FileNotFoundError("no such prompt file"),
+    StageAbort("abort"),
+    FatalConfigError("bad config"),
+    BoxFault("box gone"),
+    TimeoutError("bare"),
+], ids=lambda e: type(e).__name__)
+def test_a_failure_in_no_named_class_propagates_and_decides_no_fate(tmp_path: Path, exc: BaseException):
+    """A non-member (systemic, config, box, a bare `TimeoutError`) propagates unchanged out of the claim: it is neither
+    absorbed as a success nor given a fate for its row."""
+    sc = _faulting_scene(tmp_path, exc)
 
-    for name in h.AUTHOR_CHANNELS:
-        ch = h.channel_of(name)
-        rid = "run-W/0"
-
-        h.seed(paths, ch, [h.row_for(name, rid)])
-        member = h.cfg_for(
-            paths, name, max_attempts=1, invoke_agent=h.raising(ModelRetry("killed"))
-        )
-        assert drain.run_batch(cfg=member) == 2, f"{name}: a member did not fault the batch"
-        member_seen[name] = (h.pending(paths, ch) == [], tuple(r["attempts"] for r in h.graveyard(paths, ch)))
-
-        rows = [h.row_for(name, rid)]
-        h.seed(paths, ch, rows)
-        non_member = h.cfg_for(
-            paths, name, max_attempts=1, invoke_agent=h.raising(StageAbort("abort"))
-        )
-        with pytest.raises(StageAbort):
-            drain.run_batch(cfg=non_member)
-        non_member_seen[name] = h.pending(paths, ch) == rows
-
-    assert set(member_seen.values()) == {(True, (1,))}, member_seen
-    assert set(non_member_seen.values()) == {True}, non_member_seen
-
-
-# A killed box command is a named member, so it retires
+    with pytest.raises(type(exc)):
+        sc.run()
+    assert sc.outcomes == {}
+    assert sc.head_files() == []
 
 
 def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp_path: Path):
-    """`ModelRetry` (a killed box command) is a `RETIRE_SET` member: an `except AuthorError`
-    alone would report the batch as a success."""
-    # The real lessons tick over a batch's git-free draft.
-    lane = C.draft_lane(tmp_path)
-    paths = lane.paths
-    ch = h.channel_of("findings")
-
-    h.seed(paths, ch, [h.row_for("findings", "a/0")])
-    ok = C.draft_author_cfg(lane, max_attempts=2, invoke_agent=h.committing("live"))
-    assert drain.run_batch(cfg=ok) == 0
-    assert h.pending(paths, ch) == []
-    assert h.graveyard(paths, ch) == []
-
+    """`ModelRetry` (a killed box command) is a `RETIRE_SET` member: an `except AuthorError` alone would report the
+    batch as a success. The control batch (a clean curator over the same scene) succeeds."""
     assert ModelRetry in tuple(drain.RETIRE_SET), "ModelRetry was dropped from the retire set"
-    h.seed(paths, ch, [h.row_for("findings", "a/1")])
-    # The control batch consumed a/0, so assert that the killed batch adds nothing to the ledger.
-    consumed_before = len(h.consumed(paths, ch))
-    killed = C.draft_author_cfg(lane, max_attempts=2,
-        invoke_agent=h.raising(ModelRetry("command timed out after 120s")),
-    )
-    assert drain.run_batch(cfg=killed) != 0, "an absorbed kill is not a successful batch"
-    assert h.attempts_of(paths, ch, "a/1") == 1
-    assert len(h.consumed(paths, ch)) == consumed_before, (
-        "nothing was consumed by a batch that did not author"
-    )
+    ok = S.build_draft_scene(tmp_path / "ok", rows=[S.finding_row("a/0", run_id="a")],
+                             curator=S.FakeCurator(writes={"l1.md": S.lesson("a/0")}))
+    assert ok.run() == 0
+    assert ok.head_files() == ["agent/lessons/l1.md"]
+
+    killed = _faulting_scene(tmp_path / "killed", ModelRetry("command timed out after 120s"))
+    assert killed.run() != 0, "an absorbed kill is not a successful batch"
+    assert killed.outcomes == {}
 
 
-# Non-members propagate without touching the row
-
-
-def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path: Path):
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of("findings")
-    rows = [h.row_for("findings", "a/0")]
-    h.seed(paths, ch, rows)
-
-    (location_path(paths.state_root) / ch.drain_role.file).mkdir(parents=True)
-    cfg = h.cfg_for(
-        paths,
-        "findings",
-        max_attempts=1,
-        invoke_agent=h.raising(AssertionError("never reached")),
-    )
-    with pytest.raises(StateRefused):
-        drain.run_batch(cfg=cfg)
-    assert h.pending(paths, ch) == rows
-    assert h.graveyard(paths, ch) == []
-    assert h.attempts_of(paths, ch, "a/0") is None
-
-
-def test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible(tmp_path: Path):
-    """The batch's wall-clock deadline reaches the drain as an `AuthorError` (`TimeoutError` ->
-    `RunUnprocessable` -> `AuthorError`), so it bumps and can retire; a bare `TimeoutError`
-    is not a member."""
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of("findings")
-    h.seed(paths, ch, [h.row_for("findings", "a/0")])
+def test_mid_batch_author_timeout_is_a_member_and_a_bare_timeout_is_not(tmp_path: Path):
+    """The batch's wall-clock deadline reaches the drain as an `AuthorError` (`TimeoutError` -> `RunUnprocessable` ->
+    `AuthorError`), so it faults the claim (rc 2); a bare `TimeoutError` is not a member and propagates."""
     late = author_shared.AuthorError(
         "curator (batch1) did not complete: curator (curator:batch1) did not complete: TimeoutError()"
     )
-    cfg = h.cfg_for(paths, "findings", max_attempts=2, invoke_agent=h.raising(late))
+    assert _faulting_scene(tmp_path / "late", late).run() == 2
 
-    assert drain.run_batch(cfg=cfg) == 2
-    assert h.attempts_of(paths, ch, "a/0") == 1
-    assert drain.run_batch(cfg=cfg) == 2
-    assert "TimeoutError" in h.graveyard(paths, ch)[0]["deadletter_reason"]
-
-    h.seed(paths, ch, [h.row_for("findings", "a/1")])
-    bare = h.cfg_for(
-        paths, "findings", max_attempts=2, invoke_agent=h.raising(TimeoutError("bare"))
-    )
+    bare = _faulting_scene(tmp_path / "bare", TimeoutError("bare"))
     with pytest.raises(TimeoutError):
-        drain.run_batch(cfg=bare)
-    assert h.attempts_of(paths, ch, "a/1") is None, "a bare TimeoutError is not a member"
-
-
-def test_systemic_faults_propagate_without_bumping_attempts(tmp_path: Path):
-    from defender.learning.core import drains  # type: ignore[import-not-found]
-
-    paths = h.make_paths(tmp_path)
-    rows = [h.row_for("pitfalls", f"r:l-{i:03d}:0") for i in range(2)]
-
-    for exc in (
-        StageAbort("abort"),
-        FatalConfigError("bad config"),
-        GitError(["git", "commit"], 1, "boom"),
-        BoxFault("box gone"),
-    ):
-        h.seed(paths, PITFALLS, rows)
-
-        def leg(_paths, _state, box=None, _exc=exc, **_kw):
-            raise _exc
-
-        with pytest.raises(type(exc)):
-            drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
-        assert h.pending(paths, PITFALLS) == rows, f"{type(exc).__name__}: no row was touched"
-        assert h.graveyard(paths, PITFALLS) == []
-
-    h.seed(paths, PITFALLS, rows)
-
-    def failing_author(_paths, _state, box=None, **_kw):
-        raise author_shared.AuthorError("converted pitfalls rc")
-
-    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), failing_author)
-    assert [r.get("attempts") for r in h.pending(paths, PITFALLS)] == [1, 1], (
-        "the non-exempt AuthorError did not bump both rows"
-    )
+        bare.run()
+    assert bare.outcomes == {}

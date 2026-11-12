@@ -33,11 +33,8 @@ RUNS_BASE_ENV = "DEFENDER_RUNS_BASE"
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
     """Configure tenant roots without the retired external episodes-root variable."""
-    from defender.tests.support.learning.core import _state1135
-
     monkeypatch.delenv(S.EPISODES_BASE_ENV, raising=False)
     monkeypatch.setenv(RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 # Builders and observation helpers.
 
 

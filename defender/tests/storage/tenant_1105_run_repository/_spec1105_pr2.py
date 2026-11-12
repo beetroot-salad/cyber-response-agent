@@ -5,15 +5,14 @@ from defender.tests.support.shared._locations_1210 import fixture_data_root, loc
 
 import logging
 import io
-import json
 import os
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
 
 from defender.tests.support.learning.judge import _judge_921 as J
-from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
@@ -87,7 +86,6 @@ def roots(tmp_path: Path, monkeypatch: Any) -> None:
     """Every configured root inside `tmp_path`: the operator runs base pre-flight exports and
     the learning state root. No episodes base: an episode lives under its tenant."""
     monkeypatch.setenv(RUNS_BASE_ENV, str(Path(tmp_path) / "defender-runs"))
-    _state1135.set_state_dir(monkeypatch, Path(tmp_path) / "learning-state")
 
 
 def data_root() -> Path:
@@ -218,7 +216,7 @@ def grade(episode_dir: Path, tenant_id: str) -> Any:
     episode_id)`, `runs` being the tenant's repository under the configured data root. A final
     `judge.yaml` short-circuits a second pass, so it is removed first."""
     from defender.tenancy import _tenant
-    from defender.tests.support.learning.core._state1135 import env_state
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1
 
     (Path(episode_dir) / "judge.yaml").unlink(missing_ok=True)
@@ -226,7 +224,7 @@ def grade(episode_dir: Path, tenant_id: str) -> Any:
     runs = _tenant.accept_tenant(
         fixture_data_root(data_root()), tenant_id, defender_dir=H1.DEFENDER).runs_repository()
     return T.mod("learning.judge").grade_episode(
-        runs, Path(episode_dir).name, judge=J.scripted_judge(), state=env_state())
+        runs, Path(episode_dir).name, judge=J.scripted_judge(), store=MemoryStore())
 
 
 def sibling_scene(tmp_path: Path, *, roster: bool = True) -> tuple[Path, Path]:
@@ -457,23 +455,53 @@ def git_repo(path: Path) -> Path:
     return path
 
 
-def queue_row(paths: Any, case_id: str, body: dict) -> Path:
-    """A curation request written by hand at `author-queue/<case_id>.json` — the queue a drain
-    claims from (the shape `enqueue_curation` writes: one JSON document per request)."""
-    row = Path(location_path(paths.state_root)) / "author-queue" / f"{case_id}.json"
-    row.parent.mkdir(parents=True, exist_ok=True)
-    row.write_text(json.dumps(body) + "\n", encoding="utf-8")
-    return row
+# #1278: a curation request is a row of the learning store, not a file under `author-queue/`. These helpers hold a
+# tenant's requests the way the store hands them to the lane (`(kind, key, payload)` items) and read back the fate the
+# lane decided for each (`drains._store_lead_work`: the drain's claim loop, with no database); what the store does with a
+# fate (the attempt ceiling, the retirement of a waiting request) is pinned by the store's own contract tests
+# (`tests/learning/store_1278/test_store_1278.py`, D8). The real tick over the store is `file_request` + `drains.lead_author_drain`.
+
+_QUEUES: dict[str, _Queue] = {}
+
+
+@dataclass
+class _Queue:
+    rows: dict[str, dict] = field(default_factory=dict)
+    outcomes: dict[tuple[str, str], Any] = field(default_factory=dict)
+
+
+def _queue_of(paths: Any) -> _Queue:
+    """The requests held for `paths`' tenant (for paths with no tenant: for their checkout)."""
+    tenant = paths.tenant
+    return _QUEUES.setdefault(str(location_path(tenant.runs)) if tenant is not None else str(paths.repo_root), _Queue())
+
+
+def queue_row(paths: Any, case_id: str, body: dict) -> None:
+    """A curation request `body` (`{case_id, tenant_id, run_id}`, or any malformed payload) held for `paths`' drain
+    under `case_id`."""
+    _queue_of(paths).rows[case_id] = dict(body)
+
+
+def _fate(paths: Any, case_id: str) -> Any:
+    return _queue_of(paths).outcomes.get(("curation_request", case_id))
 
 
 def dead_letter(paths: Any, case_id: str) -> dict | None:
-    failed = Path(location_path(paths.state_root)) / "author-queue" / "failed" / f"{case_id}.json"
-    return json.loads(failed.read_text(encoding="utf-8")) if failed.is_file() else None
+    """`{"failed": <reason>}` when the lane decided the request dead, else None."""
+    fate = _fate(paths, case_id)
+    return {"failed": fate.reason} if fate is not None and fate.name == "dead" else None
 
 
 def still_queued(paths: Any, case_id: str) -> bool:
-    q = Path(location_path(paths.state_root)) / "author-queue"
-    return (q / f"{case_id}.json").is_file() or (q / "inflight" / f"{case_id}.json").is_file()
+    """The request is still to be served: the lane has decided no fate for it, or decided it waits."""
+    fate = _fate(paths, case_id)
+    return fate is None or fate.name == "waiting"
+
+
+def fate_name(paths: Any, case_id: str) -> str | None:
+    """The name of the fate the lane decided for the request (`dead`, `skipped`, `waiting`), None before any."""
+    fate = _fate(paths, case_id)
+    return None if fate is None else fate.name
 
 
 @dataclass
@@ -484,8 +512,12 @@ class Lane:
     handed: list[Any] = field(default_factory=list)
 
     def __call__(self, _paths: Any, _state: Any, run: Any, *, box: Any = None,
-                 on_done: Any = None, **_kw: Any) -> None:
+                 on_done: Any = None, items: Any = (), outcomes: Any = None, **_kw: Any) -> None:
+        from defender.learning.store import Outcome
+
         self.handed.append(run)
+        for kind, key, _payload in items:  # served: the real step decides a fate for each item it was handed
+            outcomes[(kind, key)] = Outcome.skipped("served by the test's lane")
         if on_done is not None:
             on_done(None)
 
@@ -494,49 +526,73 @@ class Lane:
         return [Path(getattr(h, "run_dir", h)) for h in self.handed]
 
 
-def records_with(root: Path | str, states: dict[str, str]) -> Any:
-    """A `TenantDirectory` holding each tenant of `states` in the state given, with forge wiring (a tenant not named has no
-    row)."""
-    import inspect
-
-    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
-    from defender.tests.support.tenancy import _active1214
-
-    twin: Any = InMemoryTenantRepository()
-    for tenant, state in states.items():
-        added = twin.add_tenant(tenant, created_at=_active1214.CREATED, state=state, repo=f"tenants/{tenant}",
-                                origin=_active1214._origin_of(Path(root), tenant, None))
-        if inspect.isawaitable(added):
-            _active1214.run_sync(_active1214._await(added))
-        _active1214.seed_twin(twin, tenant, _active1214.PLANTED_ALERT_MAPPING)  # #1345: today's mapping
-        _active1214.seed_twin_records(twin, root, tenant)  # #1366 R8
-    return TenantDirectory(lambda: twin)
-
-
-def drain(paths: Any, lane: Lane, *, active: Any = (), directory: Any = None) -> list[Any]:
-    """One lead-author tick's claim loop over `paths`, with the directory holding
-    every tenant placed under the data root active, and every id in `active` whatever its folder (the drain
-    re-checks the state per claim, Flow 4). Scratch paths require a configured data root before any claim is made."""
+def drain(paths: Any, lane: Lane) -> dict:
+    """One lead-author tick's claim loop over `paths` (`drains._store_lead_work`, the drain's accepted tenant
+    `paths.tenant` its only door to a run): the requests held for `paths` that have no fate yet, handed to `lane`,
+    with the pitfalls step doing nothing. Returns the fates decided so far."""
     from defender.learning.core import drains
-    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 
-    state = _state1135.state_for_paths(paths)
-    return drains._drain_lead_author_markers(
-        paths, state, lane,
-        directory=(directory if directory is not None else directory_for_root(os.environ[DATA_ROOT_ENV], also=active)
-                   if os.environ.get(DATA_ROOT_ENV) else None))
+    queue = _queue_of(paths)
+    held = [("curation_request", case_id, dict(body)) for case_id, body in queue.rows.items()
+            if still_queued(paths, case_id)]
+    drains._store_lead_work(paths, lane, lambda *_a, **_kw: 0, box=None, batch=None, held=SimpleNamespace(items=held),
+                            feedback=None, outcomes=queue.outcomes)
+    return queue.outcomes
 
 
 def tenant_loop_paths(tenant: Any) -> Any:
-    """The drain's paths for the accepted `tenant`: its learning root (made if absent) and `paths.tenant` set. A drain
-    rehydrates a claim only through the tenant its start accepted (r10.1 C1), so a drain scene names its tenant."""
+    """The drain's paths for the accepted `tenant` (`paths.tenant` set). A drain rehydrates a claim only through the
+    tenant its start accepted (r10.1 C1), so a drain scene names its tenant."""
     from defender.learning.core.config import LoopPaths
 
-    location_path(tenant.learning).mkdir(parents=True, exist_ok=True)
     return LoopPaths.for_tenant(tenant)
 
 
 def loop_paths(tmp_path: Path) -> Any:
     from defender.learning.core.config import LoopPaths
 
-    return LoopPaths(repo_root=git_repo(Path(tmp_path) / "wt"), state_dir=Path(tmp_path) / "state")
+    return LoopPaths(repo_root=git_repo(Path(tmp_path) / "wt"))
+
+
+def store_tick_scene(dsn: str, monkeypatch: Any, tenant_id: str) -> None:
+    """The learning store the REAL tenant-selected tick reads (#1278): the database named, the tenant recorded active in
+    it, a lease of ten minutes with five of grace and a renewer that never fires, the pitfalls lane waking at one item."""
+    from defender.tests.support.jobs._jobs1342 import register_tenant
+    from defender.tests.support.learning.core import _store1278 as ST
+
+    monkeypatch.setenv(ST.DSN_ENV, dsn)
+    for name, value in ((ST.LEASE_ENV, "600"), (ST.GRACE_ENV, "300"), (ST.RENEW_ENV, "600"),
+                        ("LEARNING_PITFALLS_THRESHOLD", "1")):
+        monkeypatch.setenv(name, value)
+    register_tenant(dsn, tenant_id)
+
+
+def file_request(dsn: str, tenant_id: str, case_id: str, body: dict) -> None:
+    """The curation request `body` filed in the store for `tenant_id`, as run end files it."""
+    from defender.tests.support.learning.core import _store1278 as ST
+
+    ST.call(dsn, "enqueue_request", tenant_id, str(body["run_id"]), case_id, dict(body))
+
+
+def file_pitfall(dsn: str, tenant_id: str, row: dict) -> None:
+    from defender.tests.support.learning.core import _store1278 as ST
+
+    ST.call(dsn, "add_pitfall", tenant_id, row)
+
+
+def store_items(dsn: str, tenant_id: str, kind: str) -> dict[str, Any]:
+    """The store's work items of `kind` for `tenant_id`, by their coalesce key (a request's case id)."""
+    from defender.tests.support.learning.core import _store1278 as ST
+
+    return {i.coalesce_key or i.key: i for i in ST.call(dsn, "work", tenant_id) if i.kind == kind}
+
+
+def reach_launch_store(dsn: str, monkeypatch: Any) -> None:
+    """The learning store a launch's judge pass inserts its findings into (#1278: the judge is handed a store opened at
+    `DEFENDER_DATABASE_DSN`, and without one its pass is refused and logged): the database named, the launch fixture's
+    tenant recorded active in it."""
+    from defender.tests.support.jobs._jobs1342 import register_tenant
+    from defender.tests.support.learning.core import _store1278 as ST
+
+    monkeypatch.setenv(ST.DSN_ENV, dsn)
+    register_tenant(dsn, LAUNCH_TENANT)

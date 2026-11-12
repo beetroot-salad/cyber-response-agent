@@ -22,7 +22,7 @@ from defender import _yaml
 from defender.learning.core.state import FINDINGS
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core._state1135 import env_state
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy import _tenants1106 as T1106
@@ -47,6 +47,17 @@ HANG_BOUND_S = 60.0
 
 _FORGED_HEADING = re.compile(r"(?m)^\s{0,3}#{1,6}\s*Forged")
 _FENCE_OPENER = re.compile(r"(?m)^\s{0,3}```")
+
+
+#: The findings sink a pass writes to (#1278: the learning store, here its in-memory stand-in), fresh per test.
+_QUEUE: list[MemoryStore] = []
+
+
+@pytest.fixture(autouse=True)
+def _findings_store() -> Any:
+    _QUEUE[:] = [MemoryStore()]
+    yield _QUEUE[0]
+    _QUEUE.clear()
 
 
 # Builders
@@ -103,15 +114,14 @@ def _trial(base: Path, name: str, raw: bytes, *, disposition: str = "benign", **
 
 def _grade(ep: Path, base: Path, *, judge: J.FakeJudge | None = None) -> tuple[Any, J.FakeJudge]:
     fake = J.scripted_judge() if judge is None else judge
-    grade = J.grade_at(ep, runs_base=base, judge=fake, state=env_state(),
+    grade = J.grade_at(ep, runs_base=base, judge=fake, store=_QUEUE[0],
                                        draws=1, git_show=J.FakeGitShow())
     return grade, fake
 
 
 def _rows() -> list[dict[str, Any]]:
-    """The defender queue's rows, read through the learning state's own reader (what the drain
-    reads)."""
-    return env_state().rows(FINDINGS)
+    """The findings the passes queued for the learning store, in the order they arrived."""
+    return _QUEUE[0].rows(FINDINGS)
 
 
 def _keys(rows: list[dict[str, Any]]) -> list[Any]:

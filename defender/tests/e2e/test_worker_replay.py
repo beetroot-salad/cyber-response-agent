@@ -316,7 +316,7 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
         assert result["usage"] == priced_billed(10), "usage counts every response's four billed counts, as the total does"
         assert result["num_turns"] == 4, "num_turns stays MAIN's turns (run health reads it)"
         # r7 S5/S6: the run page, rendered through its real entry on this job's run, agrees with the worker and the run file.
-        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))  # lint-stale-ref: ok — the retired variable is set on purpose to prove the learning store ignores it
         html = _page(runs / inv.investigation_id)
         assert C.headline(html) == f"${stored['cost_usd']:.4f}", "the page's headline is not the worker's final cost, exact"
         segments = C.segments(html)
@@ -369,7 +369,7 @@ async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_th
         assert lower_limit(migrated_database, inv.investigation_id) is True
         result = _run_result(runs / inv.investigation_id)
         assert (result["total_cost_usd"], result["total_cost_is_lower_limit"]) == (pytest.approx(stored["cost_usd"], abs=1e-6), True)
-        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))  # lint-stale-ref: ok — the retired variable is set on purpose to prove the learning store ignores it
         html = _page(runs / inv.investigation_id)
         headline = C.headline(html)
         assert (C.at_least(headline), C.dollars(headline)) == (True, pytest.approx(stored["cost_usd"], abs=1e-4))
@@ -426,7 +426,7 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
         assert (result["total_cost_usd"], result["total_cost_is_lower_limit"]) == (pytest.approx(lacking_review, abs=1e-6), True)
         assert (result["usage"], result["num_turns"]) == (priced_billed(7), 4)
         assert _spend_errors(err_file), "the failed write was not logged at ERROR"
-        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))  # lint-stale-ref: ok — the retired variable is set on purpose to prove the learning store ignores it
         page = C.headline(_page(runs / faulted))
         assert (C.at_least(page), C.dollars(page)) == (True, pytest.approx(lacking_review, abs=1e-4)), (
             "the job reads at least, so the page, rendered from the run alone, must too (r7.3 T1; review finding 1)")

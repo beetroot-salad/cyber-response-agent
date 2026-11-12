@@ -1,16 +1,13 @@
 """#1007: the `subject` partition, the second queue channel, and who owns a row's identity."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
-
 import json
-import threading
 
 import pytest
 
-from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, LearningState
+from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender.tests.support.learning.branch import _world_1007 as W
-from defender.tests.support.learning.curation._curator1134 import author_trees
+from defender.tests.support.learning.judge import _gate_1278 as G
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
 
 #: The finding id every hand-fed row here carries unless a scenario says otherwise.
@@ -76,30 +73,21 @@ def test_each_channel_gates_a_row_type_against_its_own_vocabulary(tmp_path):
 def test_lessons_gate_refuses_direction_world_loudly(tmp_path):
     """The defender curator's own gate refuses a `direction: world` row it should never see."""
     author = W.mod("learning.author.lessons.run")
-    paths = W.loop_paths(tmp_path)
-    cfg = author.build_author_config(paths, trees=author_trees(paths), state=LearningState.open(paths))
+    cfg = G.lessons_cfg(G.gate_lane(tmp_path))
 
     with pytest.raises(W.refusals()):
         author._gate_findings([queue_row(direction=W.SUBJECT_WORLD, subject=W.SUBJECT_WORLD)],
                               cfg)
 
 
-def test_the_questioner_channel_declares_its_own_append_lock_and_shares_the_drain_lock(
-        tmp_path):
-    """The questioner channel gets its OWN append lock and consumed file, and SHARES the drain lock
-    with the findings channel."""
-    paths = W.loop_paths(tmp_path)
-    root, findings, questioner = location_path(paths.state_root), FINDINGS, QUESTIONER_FINDINGS
-
-    assert (root / questioner.queue).name == W.QUESTIONER_QUEUE_FILENAME
-    assert root / questioner.queue != root / findings.queue
-    assert root / questioner.consumed != root / findings.consumed
-    assert root / questioner.append_lock != root / findings.append_lock, (
-        "the two channels share an append lock, so an appender on one blocks the other")
-    assert root / questioner.drain_role.file == root / findings.drain_role.file, (
-        f"the questioner channel's drain lock is {root / questioner.drain_role.file} — a separate "
-        "lock gives up the mutual exclusion that keeps two curators out of one worktree")
-    assert questioner.id_key == "finding_id"
+def test_the_two_findings_channels_are_distinct_and_keyed_on_finding_id():
+    """The questioner channel is a channel of its own, keyed on `finding_id` like the defender's.
+    (Retired with the file queue: its own append lock and consumed file, and the drain lock it shared with the
+    findings channel. The channels are two item kinds in the store, `finding` and `questioner_finding`, one lane
+    under the store claim, design r8 "Locks"; the same key in two kinds being two items is
+    tests/learning/store_1278/test_store_1278.py::test_d5_the_same_key_in_two_kinds_is_two_items.)"""
+    assert QUESTIONER_FINDINGS.name != FINDINGS.name
+    assert QUESTIONER_FINDINGS.id_key == FINDINGS.id_key == "finding_id"
 
 
 def test_a_world_queue_row_is_a_full_finding_row_plus_four_fields(tmp_path):
@@ -280,64 +268,25 @@ def test_an_ungradable_world_enqueues_nothing_on_either_channel(tmp_path, monkey
         "the control failed — the gradable sibling enqueued no questioner row")
 
 
-def test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_own_curator(
-        tmp_path):
-    """`finding_id` feeds TWO channels from ONE id space; consumption on one channel must not
-    suppress the other."""
-    drains = W.mod("learning.core.drains")
-    enqueue = W.mod("learning.judge.enqueue")
-    paths = W.loop_paths(tmp_path)
-    shared_id = f"{W.EPISODE_ID}/b/0/0"
-    (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
-    (location_path(paths.state_root) / FINDINGS.consumed).write_text(
-        json.dumps(queue_row(finding_id=shared_id,
-                             consumed_category="consumed_idempotent")) + "\n",
-        encoding="utf-8")
-    enqueue.append_world_rows(tmp_path, [world_row(finding_id=shared_id)],
-                              state=W.learning_state(paths))
-
-    pending, held = drains._pending_queue_counts(W.learning_state(paths), QUESTIONER_FINDINGS)
-
-    assert held == 0, f"the row was held, not suppressed: {held}"
-    assert pending == 1, (
-        "the world row was suppressed by a defender-channel consumption of the same id — the "
-        "two channels are sharing one id space AND one consumption record")
-
-
-def test_two_episodes_appending_at_once_lose_no_questioner_row(tmp_path):
-    """Two episodes grading into one questioner channel at once lose no row and tear no line."""
-    enqueue = W.mod("learning.judge.enqueue")
-    paths = W.loop_paths(tmp_path)
-    batches = [[world_row(finding_id=f"ep-{n}/b/0/{i}", run_id=f"ep-{n}")
-                for i in range(12)] for n in (1, 2)]
-    errors: list[BaseException] = []
-    start = threading.Barrier(2)
-
-    def drive(rows):
-        try:
-            start.wait(timeout=5)
-            enqueue.append_world_rows(tmp_path, rows, state=W.learning_state(paths))
-        except BaseException as bad:                       # noqa: BLE001 — reported below
-            errors.append(bad)
-
-    threads = [threading.Thread(target=drive, args=(b,)) for b in batches]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=20)
-
-    assert errors == [], f"an appender raised under interleaving: {errors!r}"
-    landed = W.queue_rows(paths, QUESTIONER_FINDINGS)
-    assert len(landed) == 24, f"{24 - len(landed)} rows were lost under interleaving"
+# Retired: test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_own_curator (the defender
+# channel's `consumed` file must not suppress the same id on the questioner channel; `drains._pending_queue_counts`).
+# Consumption records and the pending count are file-queue mechanics replaced by the store (design r8: an item is
+# `(tenant, kind, key)`); that one id in two kinds is two independent items is
+# tests/learning/store_1278/test_store_1278.py::test_d5_the_same_key_in_two_kinds_is_two_items.
+#
+# Retired: test_two_episodes_appending_at_once_lose_no_questioner_row (two threads appending 12 rows each to one
+# queue file). The queue file and its append lock are replaced by the store's insert (design r8 "Locks");
+# no row lost or doubled under concurrent inserts is the store's contract
+# (tests/learning/store_1278/test_items_1278.py).
 
 
 def test_a_malformed_line_on_either_channel_is_skipped_and_counted_never_silently_absent(
         tmp_path):
     """A malformed line on EITHER channel is skipped and COUNTED — the same reading on both."""
+    # The reader is the one the served ledger and every other jsonl record is read with; the findings queue file it was
+    # first written for is gone (#1278), so the questioner-shaped lines are read from a plain file.
     io_mod = W.mod("_io")
-    paths = W.loop_paths(tmp_path)
-    (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
-    channel = location_path(paths.state_root) / QUESTIONER_FINDINGS.queue
+    channel = tmp_path / "questioner.jsonl"
     channel.write_text(
         json.dumps(world_row()) + "\n{not json\n" + json.dumps(world_row(finding_id="x/2")) + "\n",
         encoding="utf-8")

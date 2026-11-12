@@ -1060,23 +1060,28 @@ def _render_page(runs: RunsRepository[Tenant], render_page: PageRenderer, *, epi
 
 def _grade(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any) -> None:
     """The grade, the body of the `JUDGE` frame; any failure is logged, never raised. The
-    judge opens the episode by id through `runs`, the request's tenant's repository."""
+    judge opens the episode by id through `runs`, the request's tenant's repository, and inserts
+    its findings into the learning store at the host's database address (#1278)."""
     try:
         from defender.learning import judge as judge_mod
-        from defender.learning.core.config import LoopPaths
-        from defender.learning.core.state import LearningState, StateRefused
+        from defender.learning.store import blocking
+        from defender.tenancy import database_address_variable
 
-        # The root is resolved and opened here, once, and handed to the grade (RF5). A missing
-        # root or a refused entry is logged below like any judge failure: grading never fails a
+        # The store is opened here, once, and handed to the grade (RF5). No address, or a store
+        # that cannot be reached, is logged below like any judge failure: grading never fails a
         # launch.
-        with LearningState.open(LoopPaths.for_tenant(runs.tenant)) as state:
-            judge_mod.grade_episode(runs, episode_id, judge=judge, state=state)
+        variable = database_address_variable()
+        dsn = os.environ.get(variable, "")
+        if not dsn:
+            raise judge_mod.JudgeRefused(f"{variable} is not set: an operator's judge inserts its "
+                                         "findings into the learning store, and has no database to "
+                                         "reach it at")
+        with blocking(dsn) as store:
+            judge_mod.grade_episode(runs, episode_id, judge=judge, store=store)
     # Imports are inside the `try` too, so an import or config fault is a judge failure
     # rather than reaching `_launch`'s abort arm with a false "no sibling started" message.
-    # `StateRefused` is named: the judge is one of its declared exemptions, and it is not an
-    # `Exception`.
-    except (Exception, StateRefused) as judge_failed:  # noqa: BLE001 — a judge failure is non-fatal, see below
-        # Every class: the grade reads model-authored archives, a shared queue and an injected
+    except Exception as judge_failed:  # noqa: BLE001 — a judge failure is non-fatal, see below
+        # Every class: the grade reads model-authored archives, the store and an injected
         # model seam, any of which can raise anything. Logged in full so the launch's status
         # stays about the launch without hiding the failure.
         _logger.warning(f"episode {episode_id}: the judge pass failed ({judge_failed!r}); the "
@@ -1088,14 +1093,12 @@ def _grade_job(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any, lan
     in the episode and whose pass touches no queue. A pass that fails is the job's
     `judge_failed`, never swallowed; its message names only the failure's type. Its return is
     the job's ending, decided: `lane.judged` is told at once."""
-    from defender.learning.core.state import StateRefused
-
     from defender.learning.judge import grade_episode
 
     grade = grade_episode if lane.grade is None else lane.grade
     try:
         graded = grade(runs, episode_id, judge=judge, job_lane=True)
-    except (Exception, StateRefused) as judge_failed:  # noqa: BLE001 — every failure of the pass is the job's judge_failed
+    except Exception as judge_failed:  # noqa: BLE001 — every failure of the pass is the job's judge_failed
         raise ending(f"[branch] episode {episode_id}: the judge pass failed ({judge_failed!r})",
                      reason=JUDGE_FAILED,
                      brief=f"the judge's pass failed ({type(judge_failed).__name__})",

@@ -706,33 +706,22 @@ def test_enforce_flag_unrecognized_token(monkeypatch):
 def test_retired_learning_state_override_cannot_redirect_tenant_state(
     tmp_path, monkeypatch, d9_tenant, data_root,
 ):
-    """The retired `DEFENDER_LEARNING_STATE_DIR` cannot redirect a tenant's runs or learning state."""
+    """The retired learning-state variable cannot redirect a tenant's runs or its learning folder (#1278 O10: the
+    folder is only what the cutover import reads; learning's work lives in the store, which the variable never named)."""
     from defender.tenancy import _tenant
-    from defender.learning.core.config import LoopPaths
-    from defender.learning.core.state import FINDINGS, LearningState
 
     tenant = T1106.accept(data_root, d9_tenant)
-    location_path(tenant.learning).mkdir(exist_ok=True)
-    expected = {"finding_id": "tenant/0", "run_id": "tenant"}
-    with LearningState.open(LoopPaths.for_tenant(tenant)) as state:
-        assert state.append(FINDINGS, [expected]) == (1, 0)
     alias = tmp_path / "alias"
     alias.symlink_to(data_root)
     decoy = tmp_path / "ambient-learning"
-    queue = decoy / FINDINGS.queue
-    queue.parent.mkdir(parents=True)
-    decoy_bytes = b'{"finding_id":"ambient/0","run_id":"ambient"}\n'
-    queue.write_bytes(decoy_bytes)
+    decoy.mkdir()
     for ambient in (location_path(tenant.runs), alias, decoy):
-        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(ambient))
+        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(ambient))  # lint-stale-ref: ok — the retired variable is set on purpose to prove it is ignored
         accepted = T1106.accept(_tenant.resolve_data_root(), d9_tenant)
         assert location_path(accepted.runs) == data_root.resolve() / d9_tenant / "runs"
-        paths = LoopPaths.for_tenant(accepted)
-        assert location_path(paths.state_root) == location_path(tenant.learning)
-        with LearningState.open(paths) as state:
-            assert state.rows(FINDINGS) == [expected]
-    assert queue.read_bytes() == decoy_bytes
-    assert not (location_path(tenant.runs) / FINDINGS.queue).exists()
+        assert location_path(accepted.learning) == data_root.resolve() / d9_tenant / "learning"
+        assert location_path(accepted.learning) == location_path(tenant.learning)
+    assert list(decoy.iterdir()) == [], "the retired override reached a folder"
 
 
 def test_every_agent_construction_pins_retries_explicitly(tmp_path):

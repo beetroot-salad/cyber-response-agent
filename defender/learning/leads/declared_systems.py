@@ -33,9 +33,8 @@ class AdaptersUnreadable(LeadAuthorError, RegistryError):
     """The adapters directory cannot be read.
 
     Both bases matter: `LeadAuthorError` is what the lane's callers catch; `RegistryError`
-    puts it in `faults.SYSTEMIC_FAULTS`, so `run_or_dead_letter` re-raises it (CRITICAL, exit
-    2) instead of charging an unreadable checkout to every queued row's `attempts` until the
-    whole queue is graveyarded."""
+    puts it in `faults.SYSTEMIC_FAULTS`, so the tick stops on it (CRITICAL, exit 2) instead of
+    charging an unreadable checkout to every claimed item's attempts."""
 
 
 def read_adapters(adapters_dir: Path) -> RosterRead:

@@ -114,7 +114,15 @@ def _make_hooks(  # noqa: PLR0913 — the hook set's full wiring: logging, budge
     @hooks.on.model_request
     async def _log_request(ctx, *, request_context, handler):  # noqa: ANN001
         t0 = time.time()
-        resp = await handler(request_context)
+        try:
+            resp = await handler(request_context)
+        except BaseException:
+            # What was sent stays in the trace though nothing came back; the fault is re-raised.
+            try:
+                logger.log_unanswered(request_messages=request_context.messages, agent_id=agent_id)
+            except Exception as e:  # noqa: BLE001 — never replaces the request's own fault
+                _logger.warning(f"request logging skipped: {e!r}")
+            raise
         duration_ms = (time.time() - t0) * 1000.0
         try:
             _stamp_duration(store, session_id, duration_ms)

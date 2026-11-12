@@ -423,17 +423,17 @@ class Admitted:
     it after) and the tenant's forge `wiring`. The acceptance already holds the tenant's host lock;
     `with admitted:` releases it when the block ends. Only `host_tenant` makes one."""
 
-    __slots__ = ("_release", "directory", "tenant", "wiring")
+    __slots__ = ("_release", "directory", "tenant", "wiring")  # lint-stale-ref: ok — unrelated local slot named _release, not the retired mechanism
 
     def __init__(self, tenant: Tenant, directory: TenantDirectory, wiring: ForgeWiring,
                  release: contextlib.ExitStack) -> None:
-        self.tenant, self.directory, self.wiring, self._release = tenant, directory, wiring, release
+        self.tenant, self.directory, self.wiring, self._release = tenant, directory, wiring, release  # lint-stale-ref: ok — unrelated local slot named _release, not the retired mechanism
 
     def __enter__(self) -> Admitted:
         return self
 
     def __exit__(self, *_exc: object) -> None:
-        self._release.close()
+        self._release.close()  # lint-stale-ref: ok — unrelated local slot named _release, not the retired mechanism
 
 
 def host_tenant(  # noqa: PLR0913 — the request (root, id), the records seam and the folder rules' inputs

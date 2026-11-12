@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -16,7 +17,6 @@ import pytest
 from defender.kit import faults
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage._alert_plant import plant_alert
-from defender.tests.support.learning.core._state1135 import state_over
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 SUBMIT = S.COINED["tool.submit"]
@@ -972,7 +972,7 @@ def _grade(ep: Path, judge: Any, where: Path) -> BaseException | None:
     it is raised."""
     try:
         J.grade_at(ep, judge=judge, git_show=J.FakeGitShow(),
-                   state=state_over(where / "judge-state"), draws=1)
+                   store=MemoryStore(), draws=1)
     except Exception as exc:  # noqa: BLE001 — re-raised unless the prompts were captured
         if not judge.prompts:
             raise

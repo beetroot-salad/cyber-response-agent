@@ -164,6 +164,19 @@ def _test_owns_its_stores() -> Iterator[None]:
         yield
 
 
+@pytest.fixture(autouse=True)
+def _sigterm_restored() -> Iterator[None]:
+    """A tick stopped in-process leaves SIGTERM ignored, as its dying process would; a child the worker starts later
+    inherits an ignored SIGTERM and outlives a teardown's SIGTERM (#1476: the feedback stop tests then the host-lock
+    teardown, in one worker). Each test gets back the disposition it started with."""
+    import signal
+
+    before = signal.getsignal(signal.SIGTERM)
+    yield
+    if before is not None:
+        signal.signal(signal.SIGTERM, before)
+
+
 @pytest.fixture
 def d9_tenant(data_root) -> str:
     """D9's one tenant: its knowledge folder set up in this test's data root, returned as the id a test hands

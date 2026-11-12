@@ -227,15 +227,15 @@ def _store_from_a_newer_format(runs: Path, investigation: str) -> None:
 
 def post_step() -> int:
     from defender.learning.branch import post_step as step
-    from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
-    from defender.tests.support.learning.core._state1135 import state_over
+    from defender.tests.support.learning.core._store1278 import call
 
     tenant = argv[argv.index("--tenant") + 1]
 
     def gate(*_a, **_k) -> int:
-        state = state_over(Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "learning")
-        (marks / "gate").write_text(str(len(state.rows(FINDINGS)) + len(state.rows(QUESTIONER_FINDINGS))),
-                                    encoding="utf-8")
+        # #1278: the findings the learning store holds for the tenant (both channels), not a queue file's rows.
+        held = [i for i in call(os.environ["DEFENDER_DATABASE_DSN"], "work", tenant)
+                if i.kind in ("finding", "questioner_finding")]
+        (marks / "gate").write_text(str(len(held)), encoding="utf-8")
         return 0
 
     try:

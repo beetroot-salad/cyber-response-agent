@@ -595,7 +595,7 @@ def test_the_scrub_survives_a_crashed_investigation(tmp_path):
 
 # The drain scrubs no worktree: its claim refuses any link or special file whole
 # (tenant_1108_delivery/test_changes.py), and its stop-on-failure is pinned in
-# learning/retrieval/test_lessons_run_windows.py.
+# the learning-store tick tests.
 
 
 def _reap_probe(*, stop_fault=None, scrub_fault=None):

@@ -166,6 +166,9 @@ class TenantRepository(Protocol):
     async def request_rotate(self, tenant_id: TenantId) -> TenantRecord:
         """Only `active` with nothing pending: `rotate` pending at step `names` (service)."""
         ...
+    async def request_learning_cutover(self, tenant_id: TenantId) -> TenantRecord:
+        """Only `active` with nothing pending: `learning_cutover` pending at step `import` (host), #1278."""
+        ...
 
     # --- host processes
     async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:

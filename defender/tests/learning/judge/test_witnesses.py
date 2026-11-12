@@ -17,17 +17,11 @@ from defender._agent_role import AgentRole
 from defender.investigation.tools import _tool_read_file
 from defender.systems.verb_grant import GrantError
 from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._by_path import load_lint_gate
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs
-from defender.tests.support.learning.core import _state1135
-from defender.tests.support.learning.core._state1135 import env_state
 from defender.tests.support.learning.curation._lead_author_1134 import lead_scope
-
-
-@pytest.fixture(autouse=True)
-def _isolated_roots(tmp_path, monkeypatch):
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _roots(run_dir: Path, defender_dir: Path):
@@ -68,7 +62,7 @@ def test_922_the_family_judge_frames_the_archived_bodies_it_grades(tmp_path):
 
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.grade_at(
-        ep, judge=judge, draws=1, state=env_state())
+        ep, judge=judge, draws=1, store=MemoryStore())
 
     assert f"judge:{T.fixture_world_id('b')}:0" in judge.agent_ids, (
         f"the judge never called for world b: {judge.agent_ids}")

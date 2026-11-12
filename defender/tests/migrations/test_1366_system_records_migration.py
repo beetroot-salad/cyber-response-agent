@@ -1,4 +1,4 @@
-"""#1366 upgrade: `0013_system_records` creates the three records tables and the proxy's read-only role (R14, shared-interface).
+"""#1366 upgrade: `0015_system_records` creates the three records tables and the proxy's read-only role (R14, shared-interface).
 
 Database cases are marked `postgres`; each runs on a database of its own (`conftest.py`). Roles are cluster-wide and the
 tests share one server, so no case drops the role: an earlier upgrade (any database's) has usually created it already.
@@ -11,7 +11,7 @@ from defender.tests.migrations.test_1214_migrations import _upgrade_to
 from defender.tests.support.shared._postgres1339 import execute
 
 ROLE = "defender_proxy_reader"
-PREVIOUS = "0012_programs_table"  # the head before #1366 (main's programs-table revision, #1454)
+PREVIOUS = "0014_learning_cutover_action"  # the head before #1366 (main's learning-store cutover revision, #1278)
 TABLES = {
     "system_versions": {"tenant_id", "system_id", "version", "adapter_id", "enabled", "settings", "access",
                         "credential_generation", "deleted", "author", "written_at"},
@@ -37,7 +37,7 @@ def _ensure_role(dsn: str) -> None:
 def test_the_revision_sits_directly_on_the_previous_head():
     from defender.migrations import _scripts
 
-    assert _scripts().get_revision("0013_system_records").down_revision == PREVIOUS
+    assert _scripts().get_revision("0015_system_records").down_revision == PREVIOUS
 
 
 @pytest.mark.postgres

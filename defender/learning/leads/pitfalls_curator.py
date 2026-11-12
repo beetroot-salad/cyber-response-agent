@@ -5,7 +5,7 @@ import difflib
 import logging
 import re
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from functools import partial
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
@@ -17,15 +17,12 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender.knowledge import FENCE_LINE_RE
 from defender.knowledge import AGENT_REL, REDUCER_PITFALLS
 from defender._frontmatter import FrontmatterError, split_frontmatter
-from defender.learning.author import drain as _author_drain
-from defender.learning.author import shared as _author_shared
 from defender._io import ENTRY_FILE
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 from defender.learning.core import pitfalls_disposition as _disposition
 from defender.learning.core.lane_trees import DrainTrees, TreeFor, kind_at, read_at
-from defender.learning.core.state import PITFALLS, LearningState
 from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.author.version_control import ChangeSet
 from defender.learning.leads._lead_spine import (
@@ -92,6 +89,8 @@ def _failures_of(records: list[dict], *, keep_goal: bool = True) -> list[dict]:
     # by its `executed_query` and `stderr_digest` anyway.
     return [
         {
+            # The mistake's exemplar row, as the claim keys it: what the curator was handed.
+            "pitfall_id": f.get("pitfall_id", ""),
             "query_id": f.get("query_id", ""),
             "goal": f.get("goal", "") if keep_goal else "",
             "executed_query": f.get("executed_query", ""),
@@ -133,33 +132,38 @@ def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> li
     return out
 
 
-def _invoke_pitfalls_agent(
-    handoffs: list[dict], *, state: LearningState, repo_root: Path,
+def _invoke_pitfalls_agent(  # noqa: PLR0913 — the spawn's handoffs, its folder, its tree and its seams
+    handoffs: list[dict], *, run_dir: Path, repo_root: Path,
+    state: Any = None,  # noqa: ARG001 — the `invoke` seam's call shape; nothing is read through it (#1278)
     spawn: Callable[..., int] = _spawn_author_agent,
     salt: str | None = None,
     box=None,
+    feedback: str | None = None,
+    make_model: Callable[..., Any] | None = None,
     systems: tuple[str, ...],
 ) -> int:
-    """Spawn the pitfalls curator over the draft at `repo_root` for `handoffs`, its write lanes
-    drawn over `systems`: the lane's handed systems (#1366 O1, R16), required."""
+    """Spawn the pitfalls curator over the draft at `repo_root`, its run folder `run_dir` (the call's
+    own folder, #1278 A1), its write lanes drawn over `systems`: the lane's handed systems (#1366 O1, R16),
+    required. `feedback` is a replacement's framed review text (H13); `make_model` the stage's model seam."""
     stage_salt = salt if salt is not None else uuid4().hex
-    learning_run_dir = state.stage_dir(_loop_config.LEAD_AUTHOR_DRAIN_LABEL)
-    view = draft_view(learning_run_dir, repo_root)
+    view = draft_view(run_dir, repo_root)
     context = (f"draft_root: {view.to_model(repo_root)}\n"
                f"skills_dir: {view.to_model(repo_root / SKILLS_PREFIX)}")
     user_prompt = stage_user_message(
         stage_salt,
         wrap(context, "pitfalls_context", stage_salt),
         wrap(structured_json_body(handoffs), "pitfalls_handoffs", stage_salt),
+        *([wrap(feedback, "review_feedback", stage_salt)] if feedback else []),
     )
     return spawn(
         system_prompt_file=LEAD_PITFALLS_PROMPT,
         batch_id="pitfalls",
         user_prompt=user_prompt,
         repo_root=repo_root,
-        learning_run_dir=learning_run_dir,
+        learning_run_dir=run_dir,
         log_label="pitfalls curator",
         salt=stage_salt, box=box, systems=systems,
+        **({"make_model": make_model} if make_model is not None else {}),
     )
 
 
@@ -485,81 +489,95 @@ def _deadletter_reason(row: dict) -> str:
     return f"undeclared-system:{system}"
 
 
-def _graveyard_dropped_rows(
-    state: LearningState, rows: list[dict], dropped_ids: list[str],
-) -> None:
-    """Graveyard dropped rows for human review. Terminal: `drain.retire`'s ceiling doesn't apply,
-    since an undeclared name is refused on the first tick, never retried."""
-    if not dropped_ids:
-        return
-    ids = set(dropped_ids)
-    key = PITFALLS.id_key
-    entries = [
-        {key: r[key], "deadletter_reason": _deadletter_reason(r), "row": r,
-         **_author_drain.retirement_stamp()}
-        for r in rows if r.get(key) in ids
-    ]
-    if entries:
-        state.deadletter(PITFALLS, entries)
-
-
-#: Re-exported from `core/pitfalls_disposition`, which holds the success-path consumption and
-#: the held rows' offer ceiling beside the drain that carries them. The ceiling's helper is not
-#: re-exported: `apply` binds it in `core/`, so patching a name here would not reach it.
-HELD_CEILING_REASON = _disposition.HELD_CEILING_REASON
-OFFERS_DECLINED_KEY = _disposition.OFFERS_DECLINED_KEY
+#: Re-exported from `core/pitfalls_disposition`, which holds it beside the drain that reads it.
 PitfallsDisposition = _disposition.PitfallsDisposition
 
 
-def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
+def _claimed_rows(
+    items: Sequence[tuple[str, str, dict[str, Any]]], outcomes: dict[tuple[str, str], Any],
+) -> tuple[list[dict], dict[str, tuple[str, str]]]:
+    """The claim's pitfall rows that carry a `pitfall_id`, and each id's item; a row with none is dead
+    at once (unkeyable, D1), named by the key the store gave it."""
+    from defender.learning.store import Outcome
+
+    rows: list[dict] = []
+    item_of: dict[str, tuple[str, str]] = {}
+    for kind, key, payload in items:
+        pid = payload.get("pitfall_id")
+        if not isinstance(pid, str) or not pid or pid in item_of:
+            outcomes[(kind, key)] = Outcome.dead("row carries no value under 'pitfall_id'")
+            continue
+        rows.append(dict(payload))
+        item_of[pid] = (kind, key)
+    return rows, item_of
+
+
+def _skip_dropped(
+    rows: list[dict], dropped_ids: list[str], item_of: dict[str, tuple[str, str]],
+    outcomes: dict[tuple[str, str], Any],
+) -> None:
+    """The rows no surface can teach (no system, a malformed one, one the adapters do not declare):
+    skipped, the reason naming the system (D9). Terminal: no retry makes one teachable."""
+    from defender.learning.store import Outcome
+
+    dropped = set(dropped_ids)
+    for r in rows:
+        if r["pitfall_id"] in dropped:
+            outcomes[item_of[r["pitfall_id"]]] = Outcome.skipped(_deadletter_reason(r))
+
+
+def run_pitfalls(  # noqa: PLR0913 — one claim's whole injection surface
     *,
     paths: _loop_config.LoopPaths,
-    state: LearningState | None = None,
     trees: DrainTrees,
+    state: Any = None,
     batch: Any = None,
     invoke: Callable[..., int] | None = None,
     box=None,
     on_curated: Callable[[PitfallsDisposition], None] | None = None,
-    lock_wait_seconds: int | None = None,
-    git_timeout: float = GIT_TIMEOUT_SECONDS,
+    lock_wait_seconds: int | None = None,  # noqa: ARG001 — the drain's call shape; the store's claim is the lane's lock
+    git_timeout: float = GIT_TIMEOUT_SECONDS,  # noqa: ARG001 — the drain's call shape; the lane runs no git
+    items: Sequence[tuple[str, str, dict[str, Any]]] = (),
+    outcomes: dict[tuple[str, str], Any] | None = None,
+    feedback: str | None = None,
+    make_model: Callable[..., Any] | None = None,
     systems: TenantSystems | Catalog,
 ) -> int:
-    """One curation tick over the pitfalls queue, into `batch`'s draft (#1108 P4 O7): the claim
-    is the draft against the batch's base, judged by the lane's gate and committed by the
-    batch's commit-maker. `paths` names the product checkout (adapters) and the learning state;
-    `git_timeout` is kept for the drain's call shape (the lane runs no git). The lane's systems
-    are handed (#1366 R16): the tenant's, or the whole `Catalog` from a caller with no tenant."""
-    # An entry point on its own (by hand) opens the handle; the drain hands its own in.
-    if state is None:
-        with LearningState.open(paths) as own:
-            return run_pitfalls(
-                paths=paths, state=own, trees=trees, batch=batch, invoke=invoke, box=box,
-                on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
-                git_timeout=git_timeout, systems=systems)
+    """One curation over a learning store claim's pitfalls (`items`, #1278 D1/D9), into `batch`'s
+    draft (#1108 P4 O7): the claim is the draft against the batch's base, judged by the lane's gate
+    and committed by the batch's commit-maker. `paths` names the product checkout (adapters).
+    `outcomes` is filled with the fates decided here: a row with no id is dead, a row no declared
+    surface can teach is skipped naming its system. The pitfalls the commit took are handed to
+    `on_curated` (they stay in the batch); the rest are left unnamed (the drain returns them to
+    waiting). `feedback` is a replacement's framed review text (H13). `state` is only handed on to
+    an injected `invoke` (the seam's call shape); nothing reads through it. The lane's systems are
+    handed (#1366 R16): the tenant's, or the whole `Catalog` from a caller with no tenant."""
+    outcomes = outcomes if outcomes is not None else {}
     root = Path(batch.draft_root) if batch is not None else paths.repo_root
     lane_skills(trees, paths, skills_dir=root / SKILLS_PREFIX if batch is not None else None)
-    rows = _loop_persist.read_pitfalls(state)
-    # The gate counts distinct mistakes, not rows: the queue keeps one row per failure, so a
-    # looping lead would otherwise clear the threshold on a single lesson.
+    rows, item_of = _claimed_rows(items, outcomes)
+    if not rows:
+        _logger.info("pitfalls: no keyed pitfall in the claim — nothing to curate")
+        return 0
+    # The pitfalls arrival rule, strictly: the claim runs a curator only over the threshold's distinct mistakes. The
+    # store's claim counted them in SQL; a claim whose rows collapse into fewer mistakes (a looping lead's repeats)
+    # is one lesson wearing many hats and is not curated.
     records = _loop_persist.merge_pitfalls(rows)
     threshold = _loop_config.pitfalls_threshold()
     if not _loop_persist.pitfalls_lane_is_open(records, threshold):
-        if records:
-            _logger.info(
-                f"pitfalls queue below threshold (n={len(records)} distinct mistake(s) "
-                f"in {len(rows)} row(s), threshold={threshold}) — skipping curation"
-            )
+        _logger.info(
+            f"pitfalls claim below threshold (n={len(records)} distinct mistake(s) "
+            f"in {len(rows)} row(s), threshold={threshold}) — skipping curation"
+        )
         return 0
-    # From the raw rows: rotation must name every row that fed a record, not just the merge's
-    # exemplar.
-    batch_ids = [str(r["pitfall_id"]) for r in rows if r.get("pitfall_id")]
+    batch_ids = [str(r["pitfall_id"]) for r in rows]
+    # The lane's own product checkout's adapters (`paths.repo_root`), resolved once, before the agent is
+    # spawned: the tree the lane's gate and the handoffs are judged against.
     repo_root = paths.repo_root
-    # The worktree's sources, not the process's checkout: this run commits into `repo_root`.
-    # Resolved once, before the agent is spawned.
     admitted = _require_adapter_declared_systems(repo_root, systems)
     handoffs = _build_pitfalls_handoffs(records, systems=admitted)
-    # One derivation of "was the reducer surface offered this tick", read by the commit gate,
-    # the partition and the hold's ceiling.
+    # One derivation of "was the reducer surface offered this tick", read by the commit gate and
+    # the partition.
     reducer_offered = any(h.get("surface") == "reducer" for h in handoffs)
     # The `surface` filter makes the subscript safe: the reducer entry omits `system`.
     kept = {str(h["system"]) for h in handoffs if h.get("surface") == "system"}
@@ -574,50 +592,51 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
         # Named, never dropped quietly: a batch that silently loses a system reads like one
         # that had nothing to teach. Names the adapter source, the only one this lane reads.
         _logger.warning(
-            f"pitfalls: dropped {len(dropped)} queued system(s) not in the declared adapter "
+            f"pitfalls: dropped {len(dropped)} claimed system(s) not in the declared adapter "
             f"set ({repo_root / ADAPTERS_REL}): {dropped}"
         )
 
     if not handoffs:
-        # Nothing in this batch could ever be taught, so there is no offer to hold rows
-        # against and the whole batch retires.
+        # Nothing in this claim could ever be taught, so there is no offer to make.
         _, dropped_ids, _ = _split_batch_by_membership(
             rows, batch_ids, kept, reducer_offered=reducer_offered, changed=[],
         )
         _logger.warning(
-            f"{len(records)} queued pitfall(s) in {len(batch_ids)} row(s) but none named a "
-            f"system the adapter set at {repo_root / ADAPTERS_REL} declares — dropping"
+            f"{len(records)} claimed pitfall(s) in {len(batch_ids)} row(s) but none named a "
+            f"system the adapter set at {repo_root / ADAPTERS_REL} declares — skipping them"
         )
-        _graveyard_dropped_rows(state, rows, dropped_ids)
-        _loop_persist.rotate_pitfalls(
-            dropped_ids, None, state=state, category="consumed_unattributable",
-            timeout_seconds=lock_wait_seconds,
-        )
+        _skip_dropped(rows, dropped_ids, item_of, outcomes)
         return 0
     if batch is None:
         raise LeadAuthorError(
             "pitfalls curation refused: no batch was handed, and the lane commits only into a "
             "tenant batch's draft (#1108 P4) — nothing is curated"
         )
-    # A queue row is one occurrence, so `len(rows)` is the failure count. Surfaces are named
-    # rather than systems, since a reducer-only tick has no system names.
+    # A row is one occurrence, so `len(rows)` is the failure count. Surfaces are named rather
+    # than systems, since a reducer-only claim has no system names.
     _logger.info(
         f"pitfalls curation: {len(records)} distinct mistake(s) "
         f"({len(rows)} failure(s)) offered across {len(handoffs)} surface(s): "
         f"{[h['path'] for h in handoffs]}"
     )
 
-    # The box runs for the spawn only, and is stopped before the gate reads what it wrote
-    # (#1195).
+    from defender.learning.call_folders import call_folder
+
+    # The call's own folder (#1278 A1), made before the box runs; the box runs for the spawn only,
+    # and is stopped before the gate reads what it wrote (#1195).
+    run_dir = call_folder(batch.tenant, str(batch.id), "pitfalls", 1, make=True)
+    spawn_call = invoke or partial(_invoke_pitfalls_agent, run_dir=run_dir, feedback=feedback,
+                                   make_model=make_model, systems=tuple(sorted(admitted)))
     with _box.box_for_run(box) as run_box:
-        spawned = invoke or partial(_invoke_pitfalls_agent, systems=tuple(sorted(admitted)))
-        rc = spawned(handoffs, state=state, repo_root=root, box=run_box)
+        # The `invoke` seam keeps its call shape (`state` is whatever the caller handed, `None` over
+        # the learning store).
+        rc = spawn_call(handoffs, state=state, repo_root=root, box=run_box)
     if rc != 0:
-        # Raised, not returned: a returned rc goes uninspected. `AuthorError` is in the drain's
-        # retire set, so a repeatedly failing batch reaches the bounded retirement.
-        raise _author_shared.AuthorError(
-            f"pitfalls curator exited rc={rc}; leaving queue intact"
-        )
+        # Not raised: an `AuthorError` halts the drain's tick, and a stage fault is this curation's
+        # alone. The claim's items take what the batch's commits show (the draft is reset by the
+        # drain's claim).
+        _logger.error(f"pitfalls curator exited rc={rc}; nothing committed")
+        return 2
 
     # The claim, derived before anything reads what the box wrote (a link, FIFO or out-of-lane
     # entry refuses it whole, `DeliveryRefused`); the gate judges it, the commit-maker commits.
@@ -630,46 +649,23 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     if changed:
         sha = batch.commit(change_set, _pitfalls_commit_message(changed))
     else:
-        _logger.info("pitfalls curator made no corpus edits (valid no-edit tick)")
+        _logger.info("pitfalls curator made no corpus edits (valid no-edit claim)")
     # After the commit: a reducer row's criterion needs the confirmed edit, which only
     # `changed` carries.
     committed_ids, dropped_ids, held_ids = _split_batch_by_membership(
         rows, batch_ids, kept, reducer_offered=reducer_offered, changed=changed,
     )
-    # Unattributable rows leave now whatever `on_curated` is: no scrub can make an undeclared
-    # system teachable, and deferring would re-graveyard them on the retry.
-    if dropped_ids:
-        _graveyard_dropped_rows(state, rows, dropped_ids)
-        _loop_persist.rotate_pitfalls(
-            dropped_ids, None, state=state, category="consumed_unattributable",
-            timeout_seconds=lock_wait_seconds,
-        )
+    _skip_dropped(rows, dropped_ids, item_of, outcomes)
     disposition = PitfallsDisposition(
         committed_ids=tuple(committed_ids), sha=sha, held_ids=tuple(held_ids),
     )
     if on_curated is not None:
         on_curated(disposition)
-        # Reports what this tick did; the rotation and decline bump belong to whoever judges
-        # the commit sound.
-        _logger.info(
-            f"pitfalls curation done; commit={(sha or 'none')[:12]}, "
-            f"taught {len(changed)} surface(s): {changed}, "
-            f"{len(set(dropped_ids))} unattributable row(s) rotated out; "
-            f"{len(set(committed_ids))} committed and {len(held_ids)} held row(s) handed "
-            "to the drain to consume once the batch passes the scrub"
-        )
-        return 0
-    retired = disposition.apply(state, timeout_seconds=lock_wait_seconds)
-    # Distinct id sets throughout, since a `pitfall_id` may repeat in the queue file.
-    rotated = set(committed_ids) | set(dropped_ids)
-    # Retired rows left this tick, so they are excluded from the held count.
     _logger.info(
         f"pitfalls curation done; commit={(sha or 'none')[:12]}, "
         f"taught {len(changed)} surface(s): {changed}, "
-        f"rotated {len(rotated) + retired} row(s) out of the queue "
-        f"({len(set(dropped_ids))} unattributable, "
-        f"{len(held_ids) - retired} held for a later tick"
-        + (f", {retired} retired at the hold ceiling" if retired else "")
-        + ")"
+        f"{len(set(dropped_ids))} unattributable row(s) skipped; "
+        f"{len(set(committed_ids))} committed row(s) stay in the batch and {len(held_ids)} offered "
+        "and declined row(s) wait again"
     )
     return 0

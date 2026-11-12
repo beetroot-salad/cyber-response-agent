@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
 
 import dataclasses
 import errno
@@ -13,14 +12,14 @@ import pytest
 
 from defender import _git
 from defender.configuration._env import FatalConfigError
-from defender.learning.core import drains, persist
+from defender.learning.core import drains
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees
 from defender.learning.leads import lead_author, lead_neighbors
 from defender.learning.leads.draft_synthesis import synthesize_drafts
-from defender.tests.support.learning.core import _state1135
+from defender.tests.support.learning.core._state1135 import tenant_of
 from defender.tests.support.learning.curation._tree_listing_1134 import RealOs, fd_path
-from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn, catalog_of, pitfall_row
+from defender.tests.support.runtime.engine._declared869 import LeadAuthorSpawn
 from defender.tests.support.learning.core._declared870 import (
     REDUCER_REL,
     Spawn,
@@ -68,8 +67,9 @@ from defender.tests.learning.curation.test_lead_author_handle import (
     marked_template,
     said_for,
 )
-from defender.learning.core.state import PITFALLS
-from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed, build_deps_handed
+from defender.tests.support.learning.curation._lead_author_1134 import build_deps_handed
+from defender.tests.support.learning.curation._lead_author_1134 import handed_systems
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -101,24 +101,25 @@ EDITED_REDUCER = reducer_surface_text(bullets=(OUT_MARK,))
 def _pitfalls_lane(tmp_path: Path) -> C.DraftLane:
     """A started batch whose draft carries the reducer add-on (`REDUCER_REL`, in the batch base)
     and the `elastic` marker and skill, the product checkout
-    holding the `elastic` and `cmdb` adapters, and three queued reducer rows (a `defender-sql`
-    mistake each), so the tick offers the reducer surface to its curator."""
+    holding the `elastic` and `cmdb` adapters; with `_reducer_items()` as the claim the tick offers
+    the reducer surface to its curator."""
     product = seed_product(tmp_path, adapters=("elastic", "cmdb"))
     files = {**seed_agent_files(markers=("elastic",), skills=("elastic",), catalog=(),
                                 non_systems=("gather",)),
              REDUCER_REL.removeprefix("agent/"): reducer_surface_text()}
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, files=files, product=product)
-    location_path(lane.paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
-    persist.append_pitfalls([shim_row(f"r:l-003:{i}") for i in range(3)],
-                            state=_state1135.state_for_paths(lane.paths))
     return lane
+
+
+def _reducer_items() -> list[tuple[str, str, dict]]:
+    """The claim's three reducer rows (a distinct `defender-sql` mistake each, by digest), as the store hands them (#1278)."""
+    return [("pitfall", f"r:l-003:{i}", shim_row(f"r:l-003:{i}", digest=f"exit=1; mismatched input at token {i}")) for i in range(3)]
 
 
 @pytest.mark.parametrize("left", ["plain", "link", "hardlink"])
 def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
         tmp_path: Path, monkeypatch, left: str):
     """Over a batch draft; what landed is read from the batch branch."""
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     lane = _pitfalls_lane(tmp_path)
     target = write(tmp_path / "outside" / "reducer.md", EDITED_REDUCER)
 
@@ -137,7 +138,8 @@ def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
     with C.draft_trees(lane) as trees, kernel_watch(**watch) as events:
         got = _outcome(lambda: run_pitfalls_handed(
             paths=lane.paths, trees=trees, batch=lane.batch,
-            invoke=Spawn(curate, root=Path(lane.batch.draft_root))))
+            invoke=Spawn(curate, root=Path(lane.batch.draft_root)),
+            items=_reducer_items(), outcomes={}))
         seen = events()
 
     assert seen == [], f"the gate opened or read the outside file: {seen}"
@@ -163,7 +165,6 @@ def _lead_lane(tmp_path: Path) -> C.DraftLane:
                                 catalog=("elastic", "wazuh")),
              "skills/gather/queries/SCHEMA.md": "# template schema\n"}
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, files=files, product=product)
-    location_path(lane.paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     return lane
 
 
@@ -201,7 +202,6 @@ def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=seed_agent_files(
         markers=("elastic", "wazuh"), skills=("elastic",), catalog=("elastic", "wazuh")))
     paths = lane.paths
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     run_dir = _run_dir()
     target = write(tmp_path / "outside" / Path(what.name).name, what.text)
     at = lane.skills_dir / what.name
@@ -332,9 +332,11 @@ def test_two_claims_over_one_paths_each_mint_through_their_own_trees(
     for i, lead in enumerate((WAZUH_LEAD, ELASTIC_LEAD)):
         run_dir = _run_dir((lead.query_id, lead.system, lead.verb), run_id=f"claim-{i}")
         try:
-            drains._invoke_lead_author(paths, _state1135.state_for_paths(paths), run_of(run_dir),
+            # the serve files pitfalls for the run's accepted tenant (#1278): the paths carry it
+            drains._invoke_lead_author(tenant_of(run_dir).learning_paths(LoopPaths, repo_root=paths.repo_root),
+                                       None, run_of(run_dir),
                                        label=LEAD, batch=lane.batch, on_done=lambda _sha: None,
-                                       systems=catalog_of(paths.repo_root))
+                                       systems=handed_systems(paths))
         except FatalConfigError:
             reached.append(lead.query_id)
         minted[lead.query_id] = (lane.skills_dir / draft_of(lead)[0]).is_file()
@@ -394,8 +396,7 @@ def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, r
 
     with DrainTrees.open((lane.skills_dir,), **seam) as trees:
         deps = dataclasses.replace(
-            build_deps_handed(paths, state=_state1135.state_for_paths(paths),
-                                               trees=trees, batch=lane.batch),
+            build_deps_handed(paths, trees=trees, batch=lane.batch),
             invoke_agent=spawn, extract=lambda _run_dir: ([], [lead]))
         rc = lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps)
 
@@ -448,28 +449,28 @@ def test_where_only_spells_for_the_readers(scene: Scene, tmp_path: Path):
 
 
 @pytest.mark.parametrize("how", ["lane_trees", *REFUSALS])
-def test_run_pitfalls_checks_its_trees_before_it_reads_its_queue(
-        tmp_path: Path, monkeypatch, how: str):
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "99")
+def test_run_pitfalls_checks_its_trees_before_it_decides_any_of_its_claim(
+        tmp_path: Path, how: str):
+    """Trees that do not hold `skills/` exactly are refused before any item of the claim is read: a
+    claimed row with no `pitfall_id` is dead-lettered by the first pass, so an empty `outcomes` shows the
+    check came first. The control (the lane's own trees) reaches that pass."""
     if how == "lane_trees":
-        paths = LoopPaths(repo_root=_worktree(tmp_path), state_dir=tmp_path / "state")
-        location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+        paths = LoopPaths(repo_root=_worktree(tmp_path))
         trees = lead_trees(paths)
     else:
         paths, trees = _refusing_trees(tmp_path)[how]()
-    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=_state1135.state_for_paths(paths))
-    queue = location_path(paths.state_root) / PITFALLS.queue
     spawn = Spawn()
+    outcomes: dict = {}
+    items = [("pitfall", "unkeyed", {"system": "elastic"})]  # a row with no `pitfall_id`: dead at the claim's first pass
 
-    with trees, kernel_watch(reads=[queue], opens=[queue]) as events:
-        got = _outcome(lambda: run_pitfalls_handed(paths=paths, trees=trees,
-                                                            invoke=spawn))
-        seen = events()
+    with trees:
+        got = _outcome(lambda: run_pitfalls_handed(
+            paths=paths, trees=trees, invoke=spawn, items=items, outcomes=outcomes))
 
     assert spawn.calls == []
     if how == "lane_trees":
         assert got == ("returned", 0), got
-        assert seen, "the control never read its queue, so the watch proves nothing"
+        assert [o.name for o in outcomes.values()] == ["dead"], "the control never read its claim"
         return
     assert raised(got, "LeadAuthorError", ""), got
-    assert seen == [], f"the queue was read before the trees were checked: {seen}"
+    assert outcomes == {}, f"the claim was read before the trees were checked: {outcomes}"

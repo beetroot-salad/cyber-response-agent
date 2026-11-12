@@ -16,18 +16,12 @@ from pathlib import Path
 import pytest
 
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
-from defender.tests.support.tenancy._active1214 import active_directory
-from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS, TRY_ONCE
 from defender.tests.support.learning.curation import _curator1134 as C
-from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.learning.curation._lead_author_1134 import repo_skills, skills_view
 from defender.tests.support.learning.core._state1135 import curation_run_dir, curation_tenant, run_of
-from defender.tests.support.learning.core._state1135 import state_over, set_state_dir
-from defender.tests.support.shared._locations_1210 import location_path
-from defender.tests.support.learning.curation._lead_author_1134 import build_deps_handed
+from defender.tests.support.learning.curation._lead_author_1134 import build_deps_handed  # noqa: E402
 
 
 #: The seeded catalog, agent-relative (where it sits in the draft) and repo-relative.
@@ -62,8 +56,19 @@ def _lane(tmp_path: Path, files: dict[str, str] | None = None, *, tenant=None) -
 def _deps(lane: C.DraftLane, **overrides):
     """Real lead-author deps over the lane's draft, leaf collaborators overridden by keyword."""
     deps = build_deps_handed(
-        lane.paths, state=open_state(lane.paths), trees=C.draft_trees(lane), batch=lane.batch)
+        lane.paths, trees=C.draft_trees(lane), batch=lane.batch, file_pitfalls=_PitfallSink())
     return replace(deps, **overrides) if overrides else deps
+
+
+class _PitfallSink:
+    """The `file_pitfalls` seam (#1278: the run's pitfalls go to the learning store; here they are kept in `filed`)."""
+
+    def __init__(self) -> None:
+        self.filed: list[dict] = []
+
+    def __call__(self, rows: list[dict]) -> int:
+        self.filed.extend(rows)
+        return len(rows)
 
 
 def _executed_lead(**kw):
@@ -272,40 +277,14 @@ def _claude_should_not_be_called(*args, **kwargs):
     raise AssertionError("claude was spawned despite gating check")
 
 
-def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path, tmp_path: Path):
-    deps = _deps(_lane(tmp_path), invoke_agent=_claude_should_not_be_called)
-    with deps.state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held:
-        assert held, "the test could not take the queue lock it means to hold"
-        rc = lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
-    assert rc == lead_author.QUEUE_LOCK_SKIP_RC
-    assert rc != 0
+# Conflict (design r8 Locks, "lead-queue: by-hand run uses the same claim"): the lead-queue file lock is deleted, so the
+# test that held it and expected QUEUE_LOCK_SKIP_RC is retired. A by-hand run held off by a working lead batch of the
+# store is `tests/tenancy/tenant_1108_p4/test_1278_tick.py::test_locks_a_by_hand_lead_author_run_*`.
 
 
-@pytest.mark.parametrize("held_root", ["tenant", "legacy"])
-def test_1186_lead_author_cli_takes_the_runs_tenant_queue_lock(
-    run_dir, tmp_path, monkeypatch, held_root,
-):
-    """The CLI uses its Run's tenant for the queue lock and pitfall writes."""
-    set_state_dir(monkeypatch, tmp_path / "legacy-state")
-    learning = run_dir.parent.parent / "learning"
-    _write_lead_meta(run_dir, "l-001", "failed query")
-    _write_query(run_dir, "l-001", 0, "idp.query", payload_status="error")
-    learning.mkdir(exist_ok=True)
-    root = learning if held_root == "tenant" else tmp_path / "legacy-state"
-    with (state_over(root) as holder, holder.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held):
-        assert held
-        # r10.1 C1/C9: the command admits through the host acceptance; a test hands it one seeded active directory.
-        rc = lead_author.main(["--tenant", run_dir.parent.parent.name, run_dir.name],
-                              directory=active_directory(run_dir.parents[2], run_dir.parent.parent.name))
-    assert rc == (lead_author.QUEUE_LOCK_SKIP_RC if held_root == "tenant" else 0)
-    if held_root == "tenant":
-        assert not (run_dir / "lead_author" / "pitfalls_collected").exists()
-        assert not (learning / PITFALLS.queue).exists()
-        assert not (tmp_path / "legacy-state" / LEAD_QUEUE_LOCK.file).exists()
-    else:
-        rows = [json.loads(line) for line in (learning / PITFALLS.queue).read_text().splitlines()]
-        assert [(row["source_run"], row["query_id"]) for row in rows] == [(run_dir.name, "idp.query")]
-    assert not (tmp_path / "legacy-state" / PITFALLS.queue).exists()
+# Retired: test_1186_lead_author_cli_files_the_runs_pitfall_for_the_runs_tenant_in_the_store. The by-hand CLI
+# (`lead_author.main`, `store_tick.by_hand_claim`) is deleted (design amendment A3); a tenant's pitfalls are filed
+# through `build_lead_author_deps(file_pitfalls=)`, covered by the pitfall tests of test_1278_tick / test_items_1278.
 
 
 def test_run_done_sentinel_short_circuits(run_dir: Path, tmp_path: Path):
@@ -432,28 +411,24 @@ def test_verify_skills_state_rejects_stray_outside_skills(tmp_path: Path):
     assert lane.drift() == []
 
 
-def _queue_entry(paths, where: str, name: str) -> dict | None:
-    """The lead-author queue's request `name` in `where` (`""` queued, `"failed"`,
-    `"inflight"`), or `None`."""
-    at = location_path(paths.state_root) / "author-queue" / where / f"{name}.json"
-    return json.loads(at.read_text(encoding="utf-8")) if at.is_file() else None
-
-
 @pytest.mark.parametrize("fault", ["refused-claim", "gate-rejection", "unrelated"])
-def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
-        tmp_path: Path, fault: str, monkeypatch):
+def test_the_drain_serves_a_refused_claim_without_landing_anything_and_keeps_its_request(
+        tmp_path: Path, fault: str):
     """A claim the batch's ChangeSet refuses (a symlink the box left in `skills/`, at a path the
-    lane gate would admit as a plain file) stays queued with one attempt, neither dead-lettered
-    nor in flight; nothing lands and the draft is reset (#1175). Controls: a lane-gate content
-    rejection and an unrelated spawn fault are dead-lettered at once."""
-    from defender.learning.core import drains
-    from defender.tests.support.learning.core._state1135 import enqueue_run, state_for_paths
+    lane gate would admit as a plain file) lands nothing, leaves the draft reset and the outside file
+    untouched, and its request is not decided (it waits for the store's attempt ceiling, #1278 D8: no
+    dead letter here). Controls: a lane-gate content rejection and an unrelated spawn fault land
+    nothing either. (The old file queue's retry counter and dead letter are the store's: retired,
+    see test_items_1278's crash-to-the-ceiling cases.)"""
+    from types import SimpleNamespace
 
-    monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
-    lane = _lane(tmp_path, tenant=curation_tenant())
+    from defender.learning.core import drains
+
+    tenant = curation_tenant()
+    lane = _lane(tmp_path, tenant=tenant)
     run_dir = curation_run_dir("lead-u10")
-    state = state_for_paths(lane.paths)
-    enqueue_run(state, run_dir)
+    key = run_dir.name
+    payload = {"case_id": key, "tenant_id": run_dir.parent.parent.name, "run_id": key}
     outside = tmp_path / "outside" / "host.md"
     outside.parent.mkdir(parents=True, exist_ok=True)
     outside.write_text(query_template("wazuh.newthing", "established"))
@@ -474,23 +449,24 @@ def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
                      discover_system_drafts=lambda: [])
         lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps, box=box, on_done=on_done)
 
-    drains._drain_lead_author_markers(lane.paths, state, serve,
-                                      directory=directory_for_root())
+    outcomes: dict = {}
+    held = SimpleNamespace(items=[("curation_request", key, payload)])
+    halted: Exception | None = None
+    try:
+        drains._store_lead_work(lane.paths, serve, lambda *a, **kw: 0, box=None, batch=lane.batch,
+                                held=held, feedback=None, outcomes=outcomes)
+    except Exception as halting:  # noqa: BLE001 — a halting fault ends the tick (its batch faults): decided nothing
+        halted = halting
+    assert halted is None or fault != "refused-claim", f"a refused claim must be contained, not halt the tick: {halted!r}"
 
-    name = run_dir.name
     assert lane.landed() == []
-    assert _queue_entry(lane.paths, "inflight", name) is None
-    assert outside.read_text() == query_template("wazuh.newthing", "established")
-    if fault != "refused-claim":
-        assert _queue_entry(lane.paths, "", name) is None
-        failed = _queue_entry(lane.paths, "failed", name)
-        assert failed is not None, "the existing rule's dead letter is missing"
-        return
     assert lane.drift() == []
-    assert _queue_entry(lane.paths, "failed", name) is None, "a refused claim was dead-lettered"
-    queued = _queue_entry(lane.paths, "", name)
-    assert queued is not None, "the refused claim's request was lost"
-    assert queued.get("attempts") == 1
+    assert outside.read_text() == query_template("wazuh.newthing", "established")
+    named = outcomes.get(("curation_request", key))
+    assert named is None or named.name == "waiting", f"the request was decided: {named}"
+    if fault == "refused-claim":
+        assert named is not None, "the refused claim's request was not kept"
+        assert named.name == "waiting", "the refused claim's request was not kept"
 
 
 @pytest.mark.parametrize(("case", "mutate", "match"), [
@@ -871,7 +847,7 @@ def test_invoke_agent_pending_drafts_reach_engine_user_prompt(run_dir: Path, mon
     pending = [{"draft_path": "agent/skills/elastic/_draft/falco-na.md",
                 "system": "elastic",
                 "skill_path": "agent/skills/elastic/SKILL.md"}]
-    rc = lead_author.invoke_agent(run_dir, handoffs, pending, systems=("elastic", "wazuh"))  # (#1366 R16) the spawn scope's systems are handed
+    rc = lead_author.invoke_agent(run_dir, handoffs, pending)
     assert rc == 0
     prompt = cap["user_prompt"]
     assert re.search(r"<run-[0-9a-f]+-handoffs>", prompt)
@@ -945,16 +921,14 @@ def test_run_collects_general_failure_before_early_return(tmp_path: Path):
     _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")
 
     assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
-    queue = location_path(deps.paths.state_root) / PITFALLS.queue
-    rows = [json.loads(ln) for ln in queue.read_text().splitlines()]
+    rows = deps.file_pitfalls.filed
     assert [r["query_id"] for r in rows] == ["elastic.esql"]
     assert rows[0]["error_class"] == "agent-fixable"
     assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
 
     (run_dir / "lead_author" / "done").unlink()
     assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
-    rows2 = [json.loads(ln) for ln in queue.read_text().splitlines()]
-    assert len(rows2) == 1
+    assert len(deps.file_pitfalls.filed) == 1, "the sentinel keeps a rerun from filing the run's pitfalls twice"
 
 
 def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(tmp_path: Path):

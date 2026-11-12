@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
+
 pytestmark = pytest.mark.e2e
 
 DEFENDER = Path(__file__).resolve().parents[2]
@@ -199,10 +201,12 @@ def _launch_over_the_old_run(tmp_path: Path, **seams):
     return old, tenant, rc, spawn, est
 
 
-def test_the_launcher_reads_the_old_run_primes_the_oracle_from_its_capture_and_starts_siblings(tmp_path, caplog):
-    """Obligation: Old history, launcher. The old capture primes the base tier and the questioner's family starts."""
+def test_the_launcher_reads_the_old_run_primes_the_oracle_from_its_capture_and_starts_siblings(tmp_path, caplog, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
+    """Obligation: Old history, launcher. The old capture primes the base tier and the questioner's family starts. (#1278: the
+    judge pass files its findings in the learning store, so the launcher's process has a migrated database to reach.)"""
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     questioner = S.questioner_for()
     old, tenant, rc, spawn, _est = _launch_over_the_old_run(tmp_path, questioner=questioner)
     episodes = S.tenant_episodes(tenant.id)

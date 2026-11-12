@@ -1,26 +1,37 @@
+"""The learning loop's reply parsing, and its two drains' plumbing over the learning store.
+
+#1278 moved the drains' queues, markers, locks and quarantine into the store (design r8 Flows, Locks, Schema). The tests below
+drive the real `author_drain` / `lead_author_drain` tick over the real store and read items back from it.
+
+Retired from this file (design r8 Locks, Schema "Retired files"):
+- `test_rotate_preserves_concurrent_appends`: a file queue's rotation under concurrent appends; the append locks and the
+  rotation are gone ("transactions and the unique key"); concurrent inserts are pinned by `test_1241_queue_idempotency.py`.
+- `test_enqueue_for_authoring_writes_marker`: the marker file under `author-queue/`; a request is a store item
+  (`enqueue_request`, `test_items_1278.py`, and the run-end enqueue in `test_1135_exemptions.py::test_e1_*`).
+- `test_author_drain_triggers_all_curators`: a curator whose kind has no items is not run (A2 D1); each curator is handed
+  its own kind's items by `test_1278_curator_fates.py::test_d1_each_curator_is_handed_its_own_kinds_items_from_the_claim`.
+- `test_author_drain_singleton_lock_exits_without_work`, `test_lead_author_drain_singleton_lock_distinct_from_lessons`: the
+  drain flock files are deleted; one working batch per lane, a live batch of another holder and the lanes' independence are
+  `test_1278_tick.py::test_locks_a_tick_finding_a_live_batch_of_another_holder_authors_nothing_and_exits_quietly` and
+  `test_1278_curator_fates.py::test_d9_each_tick_claims_only_its_own_lanes_kinds`.
+
+Retired with deleted files (their plumbing is the file queue's, design r8 Schema "Retired files", Locks):
+- `core/test_1135_claims_fixes.py` (queue rotation with a keyless row, the rotate read window, a stuck record written for a
+  contained fault): the rotate, the read window and the stuck records are gone; that a fault contained to a curator leaves
+  its item waiting with the attempt counted is `state_contracts/test_1135_drain_halt.py` and
+  `test_lead_author_drain_contains_a_poison_request_and_counts_its_attempt` below.
+- `core/test_881_loop_plumbing.py` (the held report, stuck records, unreadable queue lines and the pending count of a file
+  queue): the report, the records and the lines are gone; a row the gate holds keeps its reason in the store
+  (`test_1278_curator_fates.py::test_d1_the_gate_holds_a_retired_row...`), and the wake gate's count is
+  `core/test_orchestrate_thresholds.py::test_881_the_wake_gate_counts_what_a_tick_could_take`.
+"""
 from __future__ import annotations
-
-from defender.tests.support.shared._locations_1210 import location_path
-
-
-import json
-from pathlib import Path
 
 import pytest
 import yaml
 
 from defender._yaml import safe_load
 from defender.learning import loop
-
-RunUnprocessable = loop.RunUnprocessable
-LoopPaths = loop.LoopPaths
-
-from defender.learning.core import drains as drains  # type: ignore[import-not-found]  # noqa: E402
-from defender.learning.core.state import AUTHOR_DRAIN_LOCK, FINDINGS  # noqa: E402
-from defender.tests.support.learning.core._state1135 import curation_run_dir, enqueue_run, state_for_paths  # noqa: E402
-from defender.tests.support.shared._fixture_uuid import fixture_uuid
-from defender.learning.core import persist as persist  # type: ignore[import-not-found]  # noqa: E402
-from defender import _io as _io  # type: ignore[import-not-found]  # noqa: E402
 
 
 def test_reply_document_text_passes_through_plain_yaml():
@@ -62,326 +73,177 @@ def test_reply_document_text_strips_thinking_prelude():
     assert loop.reply_document_text(text) == "outcome: survived\nconfidence: high"
 
 
-def _read_jsonl(path: Path) -> list[dict]:
-    return _io.read_jsonl_rows(path)
 
 
-def _noop_start_box(request, **_kw):
-    """A no-op box lifecycle: these tests exercise the drain's queue and batch mechanics, not the
-    box lifecycle, which is pinned separately."""
-    from types import SimpleNamespace
+# --- the drains over the store ---------------------------------------------------------------------------------------------
 
-    return SimpleNamespace(name=request.name, sandboxed=False)
+pytest.importorskip("pydantic_ai")
 
-
-def _noop_stop_box(_box, **_kw):
-    pass
-
-
-def _isolate(tmp_path: Path) -> tuple[object, Path]:
-    paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
-    learning_run_dir = location_path(paths.state_root) / "runs" / "case-x"
-    learning_run_dir.mkdir(parents=True)
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
-    return paths, learning_run_dir
+from defender.tests.support.learning.core import _state1135 as S  # noqa: E402
+from defender.tests.support.learning.core._store1278 import call, migrated_database, world  # noqa: E402, F401 — fixtures
+from defender.tests.tenancy.tenant_1108_p4._drain_support import (  # noqa: E402
+    BoxSpy, author_drain, critical_text, lead_author_drain, remote_branches)
+from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
+from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: E402, F401 — fixture `world` is built on
+from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls_handed  # noqa: E402
 
 
-def test_rotate_preserves_concurrent_appends(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
-    pending = location_path(paths.state_root) / FINDINGS.queue
-    pending.parent.mkdir(parents=True, exist_ok=True)
-    rows = [
-        {"finding_id": "r/0", "v": "f1"},
-        {"finding_id": "r/1", "v": "f2"},
-        {"finding_id": "r/2", "v": "f3-new-arrival"},
-    ]
-    pending.write_text("".join(json.dumps(r) + "\n" for r in rows))
-
-    held = [{"finding_id": "r/1", "v": "f2", "held_reason": "no_ground_truth"}]
-    consumed = [{"finding_id": "r/0", "v": "f1", "consumed_category": "consumed_committed"}]
-    state_for_paths(paths).rotate(FINDINGS, held, consumed, "abc123")
-
-    survivors = _read_jsonl(pending)
-    assert {s["finding_id"] for s in survivors} == {"r/1", "r/2"}
-    held_row = next(s for s in survivors if s["finding_id"] == "r/1")
-    assert held_row["held_reason"] == "no_ground_truth"
-    consumed_rows = _read_jsonl(location_path(paths.state_root) / FINDINGS.consumed)
-    assert consumed_rows[0]["consumed_commit"] == "abc123"
-    assert "consumed_at" in consumed_rows[0]
+def _items(w) -> dict:
+    return {(i.kind, i.key): i for i in call(w.dsn, "work", w.t.tenant_id)}
 
 
-def test_enqueue_for_authoring_writes_marker(tmp_path: Path):
-    paths, _ = _isolate(tmp_path)
-    run_dir = curation_run_dir("case-a")
-    enqueue_run(state_for_paths(paths), run_dir)
-    # The run's id is a uuid (`curation_run_dir` derives it from the label), and `enqueue_run`
-    # names the request for the run itself.
-    rid = run_dir.name
-    spec = json.loads((location_path(paths.state_root) / "author-queue" / f"{rid}.json").read_text())
-    # The row is the run's address.
-    assert spec == {"case_id": rid, "tenant_id": run_dir.parent.parent.name, "run_id": rid}
+def _request(w, label: str):
+    """A finished run of the tenant and its curation request filed in the store (the run end's `enqueue_curation` row)."""
+    run_dir = S.curation_run_dir(label)
+    call(w.dsn, "enqueue_request", w.t.tenant_id, run_dir.name, f"case-{label}", S.curation_row(f"case-{label}", run_dir))
+    return run_dir
 
 
-@pytest.fixture
-def tenant(tmp_path, data_root):
-    """The fixture tenant published for real, its forge bound: the drains batch into the tenant
-    repo, so every drain case below runs over it."""
-    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
-
-    with published_tenant(tmp_path / "forge", root=data_root) as t:
-        bind_forge(t)
-        yield t
+def _lead_tick(w, **seams):
+    return lead_author_drain(w.t, w.paths, box=BoxSpy(), **seams)
 
 
-def _tenant_paths(t, tmp_path: Path):
-    """The tenant's learning paths over a scratch product checkout, its state root made."""
-    from defender.tests.tenancy.tenant_1108_p4._drain_support import drain_paths, product_repo
-
-    paths = drain_paths(t, product_repo(tmp_path))
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
-    return paths
-
-
-def _seams(t) -> dict:
-    """The drain's delivery and box seams over the tenant: the tenant forge fake's client, an
-    identity over its issuer fake, a no-op box."""
-    return {"client": t.forge.client, "identity": t.vault.identity(), "directory": t.directory,
-            "start_box": _noop_start_box, "stop_box": _noop_stop_box}
-
-
-def _seed_curator_findings(paths) -> None:
-    (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
-    with (location_path(paths.state_root) / FINDINGS.queue).open("w") as fh:
-        for i in range(5):
-            fh.write(json.dumps({"finding_id": f"f{i}"}) + "\n")
-
-
-def test_author_drain_triggers_all_curators(tenant, tmp_path: Path):
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    _seed_curator_findings(paths)
-    triggered: list[str] = []
-    drains.author_drain(
-        paths,
-        trigger_author=lambda paths, state, channel, env, module, label, **_kw: triggered.append(module),
-        **_seams(t),
-    )
-    assert triggered == [
-        "author",
-        "questioner_curator",
-    ]
-
-
-def test_author_drain_skips_when_no_work(tenant, tmp_path: Path):
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
+@pytest.mark.postgres
+def test_author_drain_skips_when_no_work(world):  # noqa: F811 — the imported fixture
+    """With nothing queued the tick starts no batch, spawns no curator and opens no PR."""
+    w = world
     triggered: list = []
-    rc = drains.author_drain(
-        paths,
-        trigger_author=lambda *a, **_kw: triggered.append(a),
-        **_seams(t),
-    )
+
+    rc = author_drain(w.t, w.paths, trigger=lambda *a, **_kw: triggered.append(a), box=BoxSpy())
+
     assert rc == 0
     assert triggered == []
-    from defender.tests.tenancy.tenant_1108_p4._drain_support import draft_entries, remote_branches
-
-    assert draft_entries(t) == [], "a batch was started with nothing queued"
-    assert remote_branches(t.remote, "") == {"main": t.origin_main()}
-    assert t.forge.creates == []
+    assert call(w.dsn, "batches", w.t.tenant_id) == [], "a batch was started with nothing queued"
+    assert remote_branches(w.t.remote, "") == {"main": w.t.origin_main()}
+    assert w.t.forge.creates == []
 
 
-def test_author_drain_singleton_lock_exits_without_work(tenant, tmp_path: Path):
-    import fcntl
+@pytest.mark.postgres
+def test_lead_author_drain_serves_a_queued_request_with_its_run(world):  # noqa: F811 — the imported fixture
+    """A queued curation request is served once: the lead step is handed the run the request names, through the claim."""
+    w = world
+    run_dir = _request(w, "case-b")
+    seen: list = []
 
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    _seed_curator_findings(paths)
-    (location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file).parent.mkdir(parents=True, exist_ok=True)
-    holder = (location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file).open("a+")
-    fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
-    try:
-        worked: list[str] = []
-        rc = drains.author_drain(
-            paths,
-            trigger_author=lambda *a, **_kw: worked.append("trigger"),
-            **_seams(t),
-        )
-        assert rc == 0
-        assert worked == []
-    finally:
-        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
-        holder.close()
+    def lead(paths, state, run, *, on_done, items, **_kw):
+        seen.append((run.run_dir, [key for _kind, key, _payload in items]))
+        on_done(None)
+
+    assert _lead_tick(w, run_lead_author=lead) == 0
+    assert seen == [(run_dir.resolve(), [run_dir.name])]
 
 
-def test_lead_author_drain_runs_lead_author_then_clears_marker(tenant, tmp_path: Path):
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    run_dir = curation_run_dir("case-b")
-    enqueue_run(state_for_paths(paths), run_dir)
-    seen: list[tuple[Path, Path]] = []
-    drains.lead_author_drain(
-        paths,
-        run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(
-            (wt_paths.repo_root, run.run_dir)),
-        **_seams(t),
-    )
-    assert [rd for _, rd in seen] == [run_dir.resolve()]
-    assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
-
-
-def test_lead_author_drain_runs_pitfalls_after_markers(tenant, tmp_path: Path):
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    run_dir = curation_run_dir("case-p")
-    enqueue_run(state_for_paths(paths), run_dir)
+@pytest.mark.postgres
+def test_lead_author_drain_runs_pitfalls_after_the_requests(world, monkeypatch):  # noqa: F811 — the imported fixture
+    """In one tick the lead step serves the claim's requests first, then the pitfalls curation runs over the claim's pitfalls."""
+    w = world
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    _request(w, "case-p")
+    call(w.dsn, "add_pitfall", w.t.tenant_id, {"pitfall_id": "p1", "system": "elastic"})
     order: list[str] = []
-    drains.lead_author_drain(
-        paths,
-        run_lead_author=lambda wt_paths, state, rd, **_kw: order.append("marker"),
-        run_pitfalls=lambda wt_paths, state, **_kw: (order.append("pitfalls"), 0)[1],
-        **_seams(t),
-    )
-    assert order == ["marker", "pitfalls"]
+
+    rc = _lead_tick(w, run_lead_author=lambda *_a, on_done, **_k: (order.append("request"), on_done(None)),
+                    run_pitfalls=lambda _p, _s, *, items, **_k: (order.append("pitfalls:" + ",".join(k for _kind, k, _pl in items)), 0)[1])
+
+    assert rc == 0
+    assert order == ["request", "pitfalls:p1"]
 
 
-def test_has_lead_author_work_fires_on_pitfalls_threshold(tmp_path: Path, monkeypatch):
-    from defender.learning.core import persist
-    paths, _ = _isolate(tmp_path)
-    assert drains._has_lead_author_work(state_for_paths(paths)) is False
+@pytest.mark.postgres
+def test_the_lead_lane_wakes_at_the_pitfalls_threshold(world, monkeypatch):  # noqa: F811 — the imported fixture
+    """The lead lane has work for pitfalls only at `LEARNING_PITFALLS_THRESHOLD` (digest-less rows stay distinct mistakes)."""
+    from defender.learning.core.store_tick import LEAD_LANE, lane_waiting
+    from defender.learning.store import blocking
+
+    w = world
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    # Digest-less rows stay two distinct mistakes: an absent diagnosis is not a shared one, so
-    # `pitfall_key` keys each such row to itself rather than folding them.
-    persist.append_pitfalls(
-        [{"pitfall_id": f"r:{i}", "system": "elastic"} for i in range(2)], state=state_for_paths(paths)
-    )
-    assert drains._has_lead_author_work(state_for_paths(paths)) is True
+
+    def waiting() -> bool:
+        with blocking(w.dsn) as store:
+            return lane_waiting(store, w.t.tenant_id, LEAD_LANE)
+
+    assert waiting() is False
+    call(w.dsn, "add_pitfall", w.t.tenant_id, {"pitfall_id": "r:0", "system": "elastic"})
+    assert waiting() is False, "one pitfall woke a lane whose threshold is two"
+    call(w.dsn, "add_pitfall", w.t.tenant_id, {"pitfall_id": "r:1", "system": "elastic"})
+    assert waiting() is True
 
 
-def test_lead_author_drain_marks_artifact_missing(tenant, tmp_path: Path):
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    run_dir = curation_run_dir("case-real")
-    enqueue_run(state_for_paths(paths), run_dir)
-    # A row naming a run its tenant's repository cannot open: the address is well-formed, the
-    # run folder was never made.
+@pytest.mark.postgres
+def test_lead_author_drain_kills_a_request_whose_run_is_gone_and_serves_the_rest(world):  # noqa: F811 — the imported fixture
+    """A well-formed request naming a run its tenant cannot open is dead, `artifact-missing`; the healthy one beside it is served."""
+    w = world
+    run_dir = _request(w, "case-real")
     gone = run_dir.parent / fixture_uuid("case-gone")
-    enqueue_run(state_for_paths(paths), gone)
-    seen: list[Path] = []
-    drains.lead_author_drain(
-        paths,
-        run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(run.run_dir),
-        **_seams(t),
-    )
+    call(w.dsn, "enqueue_request", w.t.tenant_id, gone.name, "case-gone", S.curation_row("case-gone", gone))
+    seen: list = []
+
+    assert _lead_tick(w, run_lead_author=lambda _p, _s, run, *, on_done, **_k: (seen.append(run.run_dir), on_done(None))) == 0
+
     assert seen == [run_dir.resolve()]
-    assert not (location_path(paths.state_root) / "author-queue" / f"{gone.name}.json").exists()
-    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{gone.name}.json"
-    assert json.loads(failed.read_text())["failed"] == "artifact-missing"
+    dead = _items(w)[("curation_request", gone.name)]
+    assert (dead.status, dead.reason) == ("dead", "artifact-missing")
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        "{not valid json",
-        "null",
-        '["case-broken"]',
-        '{"run_id": "case-broken", "run_dir": null}',
-        '{"run_id": "case-broken", "run_dir": 7}',
-        '{"run_id": "case-broken"}',
-    ],
-    ids=["torn", "null", "list", "run_dir-null", "run_dir-number", "run_dir-absent"],
-)
-def test_lead_author_drain_dead_letters_an_unservable_marker(tenant, tmp_path: Path, body: str):
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    run_dir = curation_run_dir("case-real")
-    enqueue_run(state_for_paths(paths), run_dir)
-    (location_path(paths.state_root) / "author-queue").mkdir(parents=True, exist_ok=True)
-    (location_path(paths.state_root) / "author-queue" / "case-broken.json").write_text(body, encoding="utf-8")
+@pytest.mark.postgres
+@pytest.mark.parametrize("payload", [
+    {}, {"run_id": "case-broken"}, {"run_id": None, "tenant_id": None}, {"run_id": 7, "tenant_id": 7}, {"tenant_id": fixture_uuid("someone-else"), "run_id": fixture_uuid("run-x")},
+], ids=["empty", "no-tenant", "null-run", "number-run", "other-tenant"])
+def test_lead_author_drain_serves_nothing_for_an_unservable_request_and_leaves_it_unclaimed(world, payload):  # noqa: F811 — the imported fixture
+    """A request naming no openable run of the drain's tenant is never served and not left claimed by its batch; the healthy
+    request in the same pass is served."""
+    w = world
+    run_dir = _request(w, "case-real")
+    call(w.dsn, "enqueue_request", w.t.tenant_id, "broken", "case-broken", payload)
+    seen: list = []
 
-    seen: list[Path] = []
-    drains.lead_author_drain(
-        paths,
-        run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(run.run_dir),
-        **_seams(t),
-    )
+    assert _lead_tick(w, run_lead_author=lambda _p, _s, run, *, on_done, **_k: (seen.append(run.run_dir), on_done(None))) == 0
 
-    assert seen == [run_dir.resolve()], "the healthy request in the same pass was not served"
-    assert not (location_path(paths.state_root) / "author-queue" / "case-broken.json").exists()
-    assert not (location_path(paths.state_root) / "author-queue" / "inflight" / "case-broken.json").exists(), \
-        "the unservable marker was left claimed — the next tick reclaims and re-fails on it"
-    failed = location_path(paths.state_root) / "author-queue" / "failed" / "case-broken.json"
-    assert json.loads(failed.read_text())["failed"].startswith("unreadable")
-    assert drains._has_lead_author_work(state_for_paths(paths)) is False, \
-        "the queue still reports work on a request nothing can ever serve"
+    assert seen == [run_dir.resolve()], "the healthy request was not served, or the unservable one was"
+    assert _items(w)[("curation_request", "broken")].status != "in_batch", \
+        "the unservable request was left claimed: the next tick reclaims and re-fails on it"
 
 
-def test_lead_author_drain_singleton_lock_distinct_from_lessons(tenant, tmp_path: Path):
-    import fcntl
+@pytest.mark.postgres
+def test_lead_author_drain_contains_a_poison_request_and_counts_its_attempt(world):  # noqa: F811 — the imported fixture
+    """A request whose step raises does not stop the pass: the healthy request is served, the poison one has its attempt counted."""
+    w = world
+    poison, good = _request(w, "case-poison"), _request(w, "case-good")
+    seen: list = []
 
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    run_dir = curation_run_dir("case-d")
-    enqueue_run(state_for_paths(paths), run_dir)
-    (location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file).parent.mkdir(parents=True, exist_ok=True)
-    holder = (location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file).open("a+")
-    fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
-    try:
-        seen: list = []
-        rc = drains.lead_author_drain(
-            paths,
-            run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(run.run_dir),
-            **_seams(t),
-        )
-        assert rc == 0
-        assert seen == [run_dir.resolve()]
-    finally:
-        fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
-        holder.close()
-
-
-def test_lead_author_drain_quarantines_poison_run_dir(tenant, tmp_path: Path):
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    poison = curation_run_dir("case-poison")
-    good = curation_run_dir("case-good")
-    enqueue_run(state_for_paths(paths), poison)
-    enqueue_run(state_for_paths(paths), good)
-    seen: list[Path] = []
-
-    def maybe_boom(wt_paths, state, run, *, box=None, **_kw) -> None:
+    def lead(_p, _s, run, *, on_done, **_k):
         if run.run_dir.name == poison.name:
             raise RuntimeError("lead-author blew up")
         seen.append(run.run_dir)
+        on_done(None)
 
-    drains.lead_author_drain(
-        paths, run_lead_author=maybe_boom, **_seams(t),
-    )
+    assert _lead_tick(w, run_lead_author=lead) == 0
+
     assert seen == [good.resolve()]
-    assert not (location_path(paths.state_root) / "author-queue" / f"{poison.name}.json").exists()
-    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{poison.name}.json"
-    assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
+    bad = _items(w)[("curation_request", poison.name)]
+    assert (bad.status, bad.attempts) == ("waiting", 1)
 
 
-def test_lead_author_drain_quarantines_on_nonzero_rc(tenant, tmp_path: Path, monkeypatch):
+@pytest.mark.postgres
+def test_lead_author_drain_does_not_count_a_nonzero_step_as_served(world, monkeypatch):  # noqa: F811 — the imported fixture
+    """The default lead step returning a non-zero rc is a failure of that request, not a success: the request is not done."""
     import defender.learning.leads.lead_author as la
 
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    run_dir = curation_run_dir("case-rc")
-    enqueue_run(state_for_paths(paths), run_dir)
-    # lint-monkeypatch: ok — drives the real _invoke_lead_author; _run_curator_module
-    monkeypatch.setattr(la, "run_under_held_queue_lock", lambda rd, paths=None, box=None, **_kw: 2)  # lint-monkeypatch: ok
-    drains.lead_author_drain(paths, **_seams(t))
-    assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
-    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
-    assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
+    w = world
+    run_dir = _request(w, "case-rc")
+    monkeypatch.setattr(la, "run_under_held_queue_lock", lambda rd, paths=None, box=None, **_kw: 2)  # lint-monkeypatch: ok — drives the real _invoke_lead_author
+
+    assert _lead_tick(w) == 0
+    item = _items(w)[("curation_request", run_dir.name)]
+    assert (item.status, item.attempts) == ("waiting", 1), "the failed step was recorded as done"
 
 
 class _RecordsDown:
-    """The tenant's directory, its current-records read down (an outage) while every other read answers."""
+    """The tenant's directory, its current-records read down (an outage) while every other read answers; counts the reads."""
 
     def __init__(self, directory) -> None:
         self._directory = directory
+        self.reads = 0
 
     def __getattr__(self, name):
         return getattr(self._directory, name)
@@ -389,25 +251,8 @@ class _RecordsDown:
     def current_records(self, tenant_id):
         from defender.tenancy import RecordsUnreachable
 
+        self.reads += 1
         raise RecordsUnreachable("the tenant records' database could not be reached")
-
-
-def test_lead_author_drain_skips_the_tick_when_the_tenants_systems_cannot_be_read(tenant, tmp_path: Path, caplog):
-    """The tick reads the tenant's systems once, as its delivery opens; an outage there skips the tick (rc 0) before any
-    claim, so the queued claim stays queued with no attempt counted and nothing is dead-lettered. (#1366 R16)"""
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    run_dir = curation_run_dir("case-outage")
-    enqueue_run(state_for_paths(paths), run_dir)
-    marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
-    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
-
-    assert drains.lead_author_drain(paths, **{**_seams(t), "directory": _RecordsDown(t.directory)}) == 0
-
-    assert marker.exists()
-    assert not json.loads(marker.read_text()).get("attempts"), marker.read_text()
-    assert not failed.exists()
-    assert "an outage; skipping this tick" in caplog.text
 
 
 class _NotImported(_RecordsDown):
@@ -416,73 +261,128 @@ class _NotImported(_RecordsDown):
     def current_records(self, tenant_id):
         from defender.tenancy.record_values import TenantRecords
 
+        self.reads += 1
         return TenantRecords(imported=False, systems={}, case=None)
 
 
-def test_lead_author_drain_refuses_a_tick_for_a_tenant_not_imported_and_charges_no_claim(tenant, tmp_path: Path):
-    """Right after the upgrade every tenant is not imported: its tick is refused naming the import, before any claim,
-    so its queued work waits for the import rather than being charged and dead-lettered. (#1366 R8, R16)"""
-    from defender.configuration import FatalConfigError
+@pytest.mark.postgres
+def test_lead_author_drain_skips_the_tick_when_the_tenants_systems_cannot_be_read(world, caplog):  # noqa: F811 — the imported fixture
+    """The tick reads the tenant's systems once, right before its claim; an outage there skips the tick (rc 0) with no claim
+    taken, so the queued request stays waiting with no attempt counted and no batch is started. (#1366 R16)"""
+    w = world
+    run_dir = _request(w, "case-outage")
+    down = _RecordsDown(w.t.directory)
 
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    run_dir = curation_run_dir("case-not-imported")
-    enqueue_run(state_for_paths(paths), run_dir)
-    marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
-    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
+    assert _lead_tick(w, directory=down) == 0, critical_text(caplog)
 
-    with pytest.raises(FatalConfigError, match="not imported"):
-        drains.lead_author_drain(paths, **{**_seams(t), "directory": _NotImported(t.directory)})
-
-    assert marker.exists()
-    assert not json.loads(marker.read_text()).get("attempts"), marker.read_text()
-    assert not failed.exists()
+    assert down.reads == 1, "the tick did not read the tenant's systems before its claim"
+    item = _items(w)[("curation_request", run_dir.name)]
+    assert (item.status, item.attempts) == ("waiting", 0), (item.status, item.attempts)
+    assert call(w.dsn, "batches", w.t.tenant_id) == [], "a batch was started though the systems could not be read"
+    assert "an outage; skipping this tick" in caplog.text
 
 
-def test_lead_author_drain_delivers_a_retained_batch_while_the_tenants_systems_cannot_be_read(tenant, tmp_path: Path):
-    """Delivery needs no systems: a batch an earlier tick retained is delivered even while the tenant's records are
-    down, and only then does the outage skip the tick, its claim still queued. (#1366 R16)"""
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    state = state_for_paths(paths)
-    prefix = drains._branch_prefix(drains.LEAD_AUTHOR_DRAIN_LABEL)
-    state.record_delivery("lead-retained", {"branch": f"{prefix}retained", "batch_id": "retained",
-                                            "label": str(drains.LEAD_AUTHOR_DRAIN_LABEL), "reason": "push refused",
-                                            "at": "2026-11-07T00:00:00Z"})
-    run_dir = curation_run_dir("case-outage-retained")
-    enqueue_run(state, run_dir)
-    marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
+@pytest.mark.postgres
+def test_lead_author_drain_refuses_a_tick_for_a_tenant_not_imported_and_charges_no_claim(world, caplog):  # noqa: F811 — the imported fixture
+    """Right after the upgrade every tenant is not imported: its tick is refused naming the import (exit 2), before any claim,
+    so its queued work waits for the import rather than being charged and held. (#1366 R8, R16)"""
+    w = world
+    run_dir = _request(w, "case-not-imported")
 
-    assert drains.lead_author_drain(paths, **{**_seams(t), "directory": _RecordsDown(t.directory)}) == 0
+    assert _lead_tick(w, directory=_NotImported(w.t.directory)) == 2
+    assert "not imported" in critical_text(caplog)
 
-    assert state_for_paths(paths).deliveries(prefix) == []
-    assert marker.exists()
-    assert not json.loads(marker.read_text()).get("attempts"), marker.read_text()
+    item = _items(w)[("curation_request", run_dir.name)]
+    assert (item.status, item.attempts) == ("waiting", 0), (item.status, item.attempts)
+    assert call(w.dsn, "batches", w.t.tenant_id) == [], "a batch was started for a tenant not imported"
 
 
-def test_lead_author_drain_bounded_retry_then_quarantine(tenant, tmp_path: Path, monkeypatch):
+@pytest.mark.postgres
+def test_a_lead_tick_that_only_reconciles_reads_no_systems(world, caplog):  # noqa: F811 — the imported fixture
+    """Reconciling a batch in review needs no systems: with the lane's batch in review (so no claim this tick), the tick runs
+    while the tenant's records are down, never reads them and is not skipped as an outage. (#1366 R16)"""
+    from defender.tests.support.learning.core._declared870 import shim_row
+    from defender.tests.support.learning.core._store1278 import LEAD_LANE, ONE
+
+    w = world
+    call(w.dsn, "add_pitfall", w.t.tenant_id, shim_row("p4-run:1"))
+    claim = call(w.dsn, "claim", w.t.tenant_id, LEAD_LANE, owner="lead-drain", thresholds=ONE)
+    call(w.dsn, "in_review", claim, 41, {})
+    _request(w, "case-reconcile-only")
+    down = _RecordsDown(w.t.directory)
+
+    assert _lead_tick(w, directory=down) == 0, critical_text(caplog)
+
+    assert down.reads == 0, "a tick with no claim to take read the tenant's systems"
+    assert "an outage; skipping this tick" not in caplog.text
+
+
+@pytest.mark.postgres
+def test_lead_author_drain_bounds_the_retries_of_a_failing_request(world, monkeypatch):  # noqa: F811 — the imported fixture
+    """A request whose step keeps failing is retried a bounded number of ticks, then taken out of the queue for a person
+    (held or dead), never served for ever. (`LEARNING_AUTHOR_MAX_ATTEMPTS`, design r8 Schema: attempts)"""
     import defender.learning.leads.lead_author as la
 
-    t = tenant
-    paths = _tenant_paths(t, tmp_path)
-    run_dir = curation_run_dir("case-transient")
-    enqueue_run(state_for_paths(paths), run_dir)
-    monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
+    w = world
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
+    run_dir = _request(w, "case-transient")
 
     def boom(rd, paths=None, box=None, **_kw):
         raise OSError("disk hiccup")
 
-    # lint-monkeypatch: ok — same intentional seam as the rc=2 test above: drives the
-    monkeypatch.setattr(la, "run_under_held_queue_lock", boom)  # lint-monkeypatch: ok
-    marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
-    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
+    monkeypatch.setattr(la, "run_under_held_queue_lock", boom)  # lint-monkeypatch: ok — drives the real _invoke_lead_author
 
-    for expected in (1, 2):
-        drains.lead_author_drain(paths, **_seams(t))
-        assert marker.exists()
-        assert json.loads(marker.read_text())["attempts"] == expected
-        assert not failed.exists()
+    statuses = []
+    for _ in range(5):
+        _lead_tick(w)
+        statuses.append(_items(w)[("curation_request", run_dir.name)].status)
 
-    drains.lead_author_drain(paths, **_seams(t))
-    assert not marker.exists()
-    assert json.loads(failed.read_text())["failed"].startswith("transient-exhausted")
+    assert statuses[:2] == ["waiting", "waiting"], statuses
+    assert statuses[-1] in {"held", "dead"}, f"a request that failed five ticks running is still {statuses[-1]}: {statuses}"
+
+
+@pytest.mark.postgres
+def test_lead_author_drain_stops_with_exit_two_on_a_misconfigured_step(world, monkeypatch, caplog):  # noqa: F811 — the imported fixture
+    """A `FatalConfigError` out of the lead step (a malformed `LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD`) is systemic: it ends the
+    tick with exit 2 rather than being quarantined against the request, which is not charged an attempt it can never clear."""
+    from defender.learning.leads import lead_author
+
+    w = world
+    run_dir = _request(w, "case-lift")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
+
+    def lead(_p, _s, _run, **_k):
+        lead_author._lift_threshold()
+
+    assert _lead_tick(w, run_lead_author=lead) == 2, critical_text(caplog)
+    assert "LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD" in caplog.text
+    assert _items(w)[("curation_request", run_dir.name)].status != "dead"
+
+
+@pytest.mark.postgres
+def test_a_pitfall_the_curator_keeps_declining_is_taken_out_at_the_ceiling(world, monkeypatch):  # noqa: F811 — the imported fixture
+    """A reducer pitfall the pitfalls curator is offered and declines every tick is not offered for ever: after the attempt
+    ceiling it is held for a person (or dead), where it was once retired to the graveyard. (design r8 Schema: attempts, ceiling)"""
+    from defender.tests.support.learning.core._declared870 import shim_row
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import LEAD_DRAFT_LANES, draft_lane_trees
+
+    w = world
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
+    call(w.dsn, "add_pitfall", w.t.tenant_id, shim_row("r:l-003:0"))
+    offers: list = []
+
+    def declining(paths, state, *, batch, box=None, on_curated, items, outcomes, **_kw):
+        with draft_lane_trees(batch, LEAD_DRAFT_LANES) as trees:
+            return run_pitfalls_handed(paths=paths, trees=trees, batch=batch, items=items, outcomes=outcomes,
+                                                 on_curated=on_curated, invoke=lambda handoffs, **_k: offers.append(handoffs) or 0)
+
+    statuses = []
+    for _ in range(5):
+        _lead_tick(w, run_pitfalls=declining)
+        statuses.append(_items(w)[("pitfall", "r:l-003:0")].status)
+
+    assert len(offers) >= 1, "the reducer offer was never made, so the decline is vacuous"
+    assert statuses[0] == "waiting"
+    assert statuses[-1] in {"held", "dead"}, f"a pitfall declined five ticks running is still {statuses[-1]}: {statuses}"
+    assert len(offers) <= 3, f"the curator was offered the declined pitfall {len(offers)} times, past the ceiling of 3"

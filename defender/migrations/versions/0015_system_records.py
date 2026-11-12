@@ -1,8 +1,8 @@
 """A tenant's systems and case record live in the database (#1366): append-only version tables beside the tenant records,
 a per-tenant mark that its systems come from records, and the proxy's read-only role (R14).
 
-Revision ID: 0013_system_records
-Revises: 0012_programs_table
+Revision ID: 0015_system_records
+Revises: 0014_learning_cutover_action
 
 The role is cluster-wide and may already exist (another database on the same server created it), so it is created only
 when absent. It cannot log in: a deployment attaches a login that is a member of it. There is no downgrade.
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0013_system_records"
-down_revision = "0012_programs_table"
+revision = "0015_system_records"
+down_revision = "0014_learning_cutover_action"
 
 ROLE = "defender_proxy_reader"
 

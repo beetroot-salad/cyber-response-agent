@@ -1,9 +1,7 @@
 """#1035 — one roster read: `systems.verbs.read_roster`, and the four readers that consume it."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
 
-import functools
 import os
 import shutil
 import sys
@@ -15,7 +13,7 @@ import pytest
 from defender import _git
 from defender._paths import adapters_under
 from defender.tests.support.tenancy import _tenants1106
-from defender.learning.core import drains, persist
+from defender.learning.core import drains
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import declared_systems, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
@@ -33,8 +31,6 @@ from defender.tests.support.runtime.engine._declared869 import (
     seed_tree,
     write,
 )
-from defender.tests.support.learning.curation._curator1134 import open_state
-from defender.tests.support.learning.core._declared870 import graveyard_by_id, queue_ids
 from defender.tests.support.integrations._roster1035 import (
     EXIT_RAISED_EXPECTED,
     EXIT_RETURNED,
@@ -44,7 +40,6 @@ from defender.tests.support.integrations._roster1035 import (
     run_as_nobody,
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-from defender.learning.core.state import PITFALLS
 
 #: The resolver's message for every cannot-read arm (`test_hardening_772.py` matches it too).
 CANNOT_READ = "not a directory this process can read"
@@ -253,25 +248,26 @@ def test_a_symlink_loop_named_like_an_adapter_never_escapes_the_resolver_untyped
 def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
     tmp_path, monkeypatch,
 ):
+    """The pitfalls step over a claim (#1278: the claim's items, not a queue file) refuses an adapters directory this
+    process cannot search, and decides no fate for the claim's items; readable, it decides them."""
     assert not issubclass(LeadAuthorError, OSError)
     assert drains._CURATOR_MODULES["pitfalls_curator"] == pitfalls_curator.__name__
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     repo = seed_tree(tmp_path, adapters=("cmdb",), markers=("elastic",), skills=("elastic",),
                      catalog=())
     adapters = _repo_adapters(repo)
-    paths = LoopPaths(repo_root=repo, state_dir=repo / "state")
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")],
-        state=open_state(paths),
-    )
-    assert len(persist.read_pitfalls(open_state(paths))) == 2
+    paths = LoopPaths(repo_root=repo)
+    items = _claimed_pitfalls()
+    monkeypatch.setenv("DEFENDER_DIR", str(repo / "defender"))  # the curator reads the adapters of the code tree the process runs
 
     def probe():
         # (#1366 R16) The lane is handed its systems: a caller with no tenant hands the whole catalog, which it reads from the
         # checkout, here as the lane's resolver reads it (`catalog_of`), as `nobody`. A tenant's lane reads the same tree
-        # itself, through the drain seam (`test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_tree`).
-        return drains._invoke_pitfalls(paths, open_state(paths), on_curated=lambda _d: None,
-                                       label=LEAD_AUTHOR_DRAIN_LABEL, systems=catalog_of(repo))
+        # through the tick (`test_the_lead_tick_reads_no_systems_from_an_unreadable_adapters_tree`).
+        outcomes: dict = {}
+        rc = drains._invoke_pitfalls(paths, None, on_curated=lambda _d: None,
+                                     label=LEAD_AUTHOR_DRAIN_LABEL, items=items, outcomes=outcomes,
+                                     systems=catalog_of(repo))
+        return rc, sorted(outcomes)
 
     with handed_to_nobody(repo, adapters, 0o400):
         verdict = run_as_nobody(probe, expected=LeadAuthorError)
@@ -280,17 +276,12 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
         f"the raise is not the resolver's own refusal; {verdict.describe()}"
     )
     assert CONTINUING not in verdict.log, f"the drain seam swallowed the fault: {verdict.log!r}"
-    assert len(persist.read_pitfalls(open_state(paths))) == 2, "the queue was rotated on a failed tick"
-    assert not (location_path(paths.state_root) / PITFALLS.consumed).exists(), "rows were stamped consumed on a failed tick"
 
     with handed_to_nobody(repo, adapters, 0o755):
         control = run_as_nobody(probe, expected=LeadAuthorError)
-    _expect_returned(control, 0)
+    _expect_returned(control, (0, [("pitfall", "r:l-000:0"), ("pitfall", "r:l-001:0"), ("pitfall", "r:l-002:0")]))
     assert CONTINUING not in control.log, control.log
     assert CANNOT_READ not in control.log, control.log
-    assert persist.read_pitfalls(open_state(paths)) == [], (
-        "the readable control did not get past the resolver to rotate the unattributable rows"
-    )
 
 
 def _redirect_repo_root(monkeypatch, root: Path) -> None:
@@ -451,62 +442,50 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
     assert set(read_roster(adapters).adapter_files) == {"cmdb"}
 
 
-def _seed_pitfalls_queue(tmp_path: Path, monkeypatch) -> tuple[Path, LoopPaths, Any]:
-    """Two `mcpsys` rows queued, for the fixture tenant's lane (#1366 R16: a tenant's lane draws its systems from the tenant's
-    current records over the checkout's catalog, which it reads itself), over a tree declaring only `cmdb`: no record of the
-    tenant is served by an adapter that declares `mcpsys`, so the readable control rotates the rows out without spawning a
-    curator. Returns the repo, the tenant's paths over it and the directory holding the tenant's records."""
+def _claimed_pitfalls() -> list[tuple[str, str, dict]]:
+    """THRESHOLD (3) distinct `mcpsys` pitfalls as a store claim hands them to the curator (fewer distinct mistakes
+    would skip below the pitfalls threshold before the adapters tree is read): over a tree declaring only `cmdb`, no adapter
+    declares `mcpsys`, so the readable control skips them without spawning a curator."""
+    rows = [pitfall_row(f"r:l-00{n}:0", "mcpsys") for n in range(3)]
+    return [("pitfall", r["pitfall_id"], r) for r in rows]
+
+
+def test_the_lead_tick_reads_no_systems_from_an_unreadable_adapters_tree(tmp_path, monkeypatch):
+    """The lead tick builds the tenant's systems from its records over the checkout's catalog once, right before its claim
+    (`store_tick.Tick.before_claim`); an adapters directory it cannot read is the host's fault, so the tick is refused there,
+    not as an outage, and no step runs and no item's fate is decided. Readable, the same read hands the pitfalls step
+    systems that decide the claim's items. (#1366 R16, #1035)"""
     from defender.tests.support.learning.core import _state1135
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
     from defender.tests.support.tenancy import _systems1366 as R
 
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "1")
     repo = seed_tree(tmp_path, adapters=("cmdb",), markers=("elastic",), skills=("elastic",),
                      catalog=())
     tenant = _state1135.curation_tenant()
     paths = tenant.learning_paths(LoopPaths, repo_root=repo)
-    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
     directory = tenant_directory(current_data_root(), tenant.id, records=R.fixture_records())
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")],
-        state=open_state(paths),
-    )
-    assert queue_ids(paths) == ["r:l-000:0", "r:l-001:0"]
-    return repo, paths, directory
-
-
-def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_tree(
-    tmp_path, monkeypatch,
-):
-    """The tick builds the tenant's systems from its records over the checkout's catalog once, as its delivery opens; an adapters
-    directory it cannot read is the host's fault, so the tick is refused there, before any step, and spends no queue row.
-    (#1366 R16, #1035)"""
-    repo, paths, directory = _seed_pitfalls_queue(tmp_path, monkeypatch)
+    items = _claimed_pitfalls()
     adapters = _repo_adapters(repo)
+    monkeypatch.setenv("DEFENDER_DIR", str(repo / "defender"))  # the curator reads the adapters of the code tree the process runs
     shutil.rmtree(adapters)
+    outcomes: dict = {}
 
-    with pytest.raises(drains._Refused) as exc:  # noqa: SLF001 — the tick's own refusal, as its delivery opens
+    with pytest.raises(drains._Refused) as exc:  # noqa: SLF001 — the tick's own refusal, before its claim
         drains._tick_systems(paths, directory)  # noqa: SLF001
     assert f"{adapters} is {CANNOT_READ}" in str(exc.value), (
         f"the raise is not the resolver's own refusal: {exc.value}"
     )
     assert not exc.value.transient, "an unreadable adapters tree is the host's fault, not an outage to wait out"
-    assert queue_ids(paths) == ["r:l-000:0", "r:l-001:0"], "the queue was spent on a host fault"
-    assert all(int(r.get("attempts") or 0) == 0 for r in persist.read_pitfalls(open_state(paths))), (
-        "a queued row's lifetime `attempts` was bumped for a tree this process cannot read"
-    )
-    assert graveyard_by_id(paths) == {}, "rows were retired for a host fault"
 
     # The control restores the committed adapters directory itself (no per-claim reset does),
     # then reads the same tree.
     _git.git(["checkout", "--", str(adapters)], cwd=repo)
     assert (adapters / "cmdb_adapter.py").is_file()
-    step = functools.partial(drains._invoke_pitfalls, label=LEAD_AUTHOR_DRAIN_LABEL,
-                             systems=drains._tick_systems(paths, directory))  # noqa: SLF001
-    drains._drain_pitfalls(paths, open_state(paths), step)
-    assert queue_ids(paths) == [], (
-        "the readable control did not get past the resolver to rotate the unattributable rows"
+    drains._invoke_pitfalls(paths, None, on_curated=lambda _d: None, label=LEAD_AUTHOR_DRAIN_LABEL,
+                            items=items, outcomes=outcomes,
+                            systems=drains._tick_systems(paths, directory))  # noqa: SLF001
+    assert sorted(outcomes) == [("pitfall", "r:l-000:0"), ("pitfall", "r:l-001:0"), ("pitfall", "r:l-002:0")], (
+        "the readable control did not get past the resolver to decide the unattributable rows"
     )
 
 

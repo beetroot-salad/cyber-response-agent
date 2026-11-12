@@ -67,7 +67,7 @@ ENTRY_POINT_MODULES = (
     "learning/core/cli.py",
     "cli/learning/revert_lesson.py",
     "cli/learning/lessons_page.py",
-    "learning/leads/lead_author/__init__.py",
+    # retired: "learning/leads/lead_author/__init__.py" — the by-hand lead-author entry is deleted (#1278 A3)
     "presentation/visualize_run.py",
     "cli/workspace_map.py",
     "presentation/visualize_episode.py",
@@ -115,7 +115,7 @@ COMMANDS: dict[str, tuple[str, Callable[[str], list[str]]]] = {
     "posture_contract": ("defender.learning.frontend.serialize", lambda t: ["serialize.py", "--tenant", t]),
     "lesson_tracer": ("defender.cli.learning.trace_lesson", lambda t: ["--tenant", t, "--all"]),
     "retirement": ("defender.cli.retire_legacy_runs", lambda t: ["--tenant", t]),
-    "lead_author_opener": ("defender.learning.leads.lead_author", lambda t: ["--tenant", t, RUN_ID]),
+    # retired: "lead_author_opener" — the by-hand lead-author entry (`lead_author.main`) is deleted (#1278 A3)
     "lessons_page": ("defender.cli.learning.lessons_page", lambda t: ["--tenant", t]),
     "revert": ("defender.cli.learning.revert_lesson", lambda t: ["--tenant", t, "some-lesson"]),
     "policy_view": ("defender.cli.policy_cli",

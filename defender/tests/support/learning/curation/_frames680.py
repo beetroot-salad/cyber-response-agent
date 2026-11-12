@@ -12,13 +12,12 @@ from defender.agents import (
 )
 from defender.learning.author import shared as author_shared
 from defender.learning.author.curator_engine import CuratorDeps
-from defender.learning.core.config import LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.investigation.agent_definition import RunScope, bind
 from defender.box import BoxResult
 from defender.investigation.tools import _tool_bash, _tool_read_file
 from defender.tests.support.runtime.state._1255_view import model_path
-from defender.tests.support.learning.curation._curator1134 import corpus_view, open_state
+from defender.tests.support.learning.curation._curator1134 import corpus_view
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs
 from defender.tests.support.learning.curation._lead_author_1134 import lead_scope
 
@@ -180,7 +179,7 @@ def _pitfalls_prompt(
     def call(*, spawn, salt):
         return pitfalls_curator._invoke_pitfalls_agent(
             [{"system": "test", "stderr_digest": hostile}],
-            state=open_state(LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "state")),
+            run_dir=tmp_path / "call",
             repo_root=tmp_path,
             systems=("test",),
             spawn=spawn,

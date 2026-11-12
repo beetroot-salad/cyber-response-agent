@@ -2,7 +2,7 @@
 """Unsafe JSONL-I/O smell: flag hand-rolled per-line JSONL reads/appends under ``defender/``
 that bypass the shared ``defender._io`` helpers.
 
-JSONL queues (``_pending/findings.jsonl``, ``executed_queries.jsonl`` …) are appended to live
+JSONL files (``executed_queries.jsonl`` …) are appended to live
 and read back by off-process drains. Two hand-rolled shapes recur:
 
 READ — a torn last line crashes the drain ::
