@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Scrub-order fence (#540, re-sited by #1342): four rules over the entrypoint and the bash tool.
 
-* `run.py` has two compositions, the operator's `main` and the job entry's `job_main`. Each
+* `run.py` has two compositions, the operator's `main` (which is also a learning sibling's
+  inside its job container, #1170 A6) and the job entry's `job_main`. Each
   calls the box lifecycle (which scrubs the run folder) and then the shared `_post_steps`, in
   that order. The readers of the run folder — listing it, the table cross-check and the page
   render — live only in `_post_steps`: any reference to one anywhere else in `run.py` is a
   finding, whatever its form (a call, an alias, a `partial`, a lambda, a class body, a
   `getattr` string, `os.listdir` or `glob` for `iterdir`). The one allowance is the page-render
   seam: a parameter named `visualize` defaulting to the reader, and `visualize=visualize`
-  handed to `_post_steps`. The operator's own readers, the case ticket and the curation
+  handed to `_post_steps` or to a composition (the job container's process wiring,
+  `serve_job`, hands the seam to the composition it runs, which is held to this rule
+  itself). The operator's own readers, the case ticket and the curation
   enqueue, come after its lifecycle.
-* `main`, `job_main`, `_post_steps` and `_run_investigation_lifecycle` are each bound exactly once
+* The compositions, `_post_steps` and `_run_investigation_lifecycle` are each bound exactly once
   in `run.py` (a second `def`, assignment, import, class, match capture or `except ... as` of the
   name would shadow the one this rule reads), and none carries a decorator (which would wrap the
   function this rule reads).
@@ -178,10 +181,10 @@ def _readers_elsewhere(root: Path) -> list[str]:
         return []
     _text, tree = _astlib.read_and_parse(path, _RUN)
     found: list[str] = []
-    allowed: set[int] = set()  # `visualize=visualize` handed to the post-steps, and the seam's default
+    allowed: set[int] = set()  # `visualize=visualize` handed to the post-steps or a composition, and the seam's default
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == _POST_STEPS:
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) in (_POST_STEPS, *_COMPOSITIONS):
             allowed.update(id(kw.value) for kw in node.keywords
                            if kw.arg == _SEAM and isinstance(kw.value, ast.Name) and kw.value.id == _SEAM)
         elif isinstance(node, ast.arguments):

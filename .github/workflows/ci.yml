@@ -32,12 +32,14 @@ concurrency:
 # before it cancels green runs (it did again on 2026-11-02: main's heavier shard ran 11m06s and
 # a PR's two shards both passed every test past 12 minutes, so the suite went to three shards,
 # and again on 2026-11-09: all three shards ran ~11m45s, and main and PR runs lost a shard at 12
-# minutes with every test passed, so the suite went to four),
+# minutes with every test passed, so the suite went to four; and again on 2026-11-11: three of four
+# shards were cancelled at 12 minutes on main and on PR #1476 with the suite at ~8,000 tests a shard,
+# so it went to five),
 # and a stall that burns the gVisor step's full 5-minute bound still lands inside 12, so the
 # step's own timeout fires first and names the command. Raising the step bound without raising
 # this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
-  # Four shards of the unit suite, run in parallel: this job is the critical path (~6-8 min against
+  # Five shards of the unit suite, run in parallel: this job is the critical path (~6-8 min against
   # <2.5 min for every other job), and its CPU time is balanced across the runner's four cores, so
   # the only way down is more cores. `--shard I/N` (defender/tests/_shard.py) hands each shard whole
   # test files, balanced by each file's recorded cost, so together they run every test exactly once
@@ -47,13 +49,13 @@ jobs:
   # the extra runner minutes are free. `fail-fast: false` so one shard failing still reports the
   # other's results.
   test:
-    name: test (shard ${{ matrix.shard }}/4)
+    name: test (shard ${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
     timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
 
     steps:
       - uses: actions/checkout@v5
@@ -64,6 +66,14 @@ jobs:
       - name: Build the box image
         timeout-minutes: 4
         run: python3 defender/box/image_cli.py build
+
+      # #1170 A7: the job image every per-job host helper starts its job container from, under the
+      # name the helper defaults to (`DEFENDER_JOB_IMAGE` unset: `job_host`'s `defender-job:latest`).
+      # The real-container job tests (tests/e2e/test_job_box_boundary_e2e.py) need it; the helper
+      # never pulls, so without it a job is a start failure.
+      - name: Build the job image
+        timeout-minutes: 6
+        run: docker build -f .devcontainer/Dockerfile.job -t defender-job:latest .
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -161,7 +171,7 @@ jobs:
         run: >-
           uv run pytest tests/ -v -m "not live and not gate"
           -n auto --dist loadfile --durations=25
-          --shard ${{ matrix.shard }}/4
+          --shard ${{ matrix.shard }}/5
           --ignore tests/e2e/test_box_boundary_e2e.py
 
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
@@ -430,14 +440,16 @@ jobs:
         run: defender/.venv/bin/python -m pytest evaluations/tests -q
 
       # The lab's frozen-case scripts (capture, make-a-case, launcher, locks, ps shim), the
-      # frozen node's clock shim and the stubs' pinned clock (#1347). They drive the lab through
-      # fakes, never docker or the VPS. The shim tests compile clockshim.c with the runner's gcc
+      # frozen node's clock shim and the stubs' pinned clock (#1347), and the lab's edge and
+      # endpoint-query service (#1391). They drive the lab through fakes and loopback sockets,
+      # never docker or the VPS. The shim tests compile clockshim.c with the runner's gcc
       # (ubuntu-latest has it; without one they skip).
       # playground-v2/chaos/tests is not here yet: nine of its tests are red on main from
       # detection-rule drift (#1456).
       - name: Run lab frozen-case tests
         run: >-
           defender/.venv/bin/python -m pytest playground-v2/scripts/tests playground-v2/clockshim/tests
+          playground-v2/edge/tests playground-v2/endpoint-query/tests
           playground-v2/change-mgmt/tests/test_1347_change_mgmt_pinned_clock.py
           playground-v2/ticket-server/tests/test_1347_ticket_server_pinned_clock.py -q
 

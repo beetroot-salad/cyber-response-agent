@@ -1,0 +1,39 @@
+# The JOB image (#1170 A7): what each per-job host helper (`defender/job_host`) starts one job
+# container from. It holds Python, the defender runtime dependencies and git, and nothing else:
+#
+#   - NO CODE. The helper binds the worker's code copy read-only at its own path and puts it on
+#     `PYTHONPATH`, so the image never goes stale against the code a job runs, and a job runs
+#     exactly the code its worker runs. The code copy holds no `.venv`, so the dependencies
+#     live here, first on `PATH`: the container's command is a bare `python3`.
+#   - NO DOCKER CLI. A job reaches no daemon (#1170 O2): its boxes are started by its helper.
+#   - NO TENANT DATA and NO SECRETS. The tenant's own folder is bound at run time; the
+#     helper hands in the settings the job reads, minus secrets and cross-tenant addresses.
+#   - git: a learning post-step pushes its draft to the tenant's forge with a token the helper
+#     minted for it.
+#
+# Build it from the repository root; `defender-job:latest` is the helper's default image
+# (`DEFENDER_JOB_IMAGE` names another). The helper never pulls it:
+#   docker build -f .devcontainer/Dockerfile.job -t defender-job:latest .
+#
+# The helper runs it read-only, as the uid that owns the data root, with every capability
+# dropped and a tmpfs `/tmp` as `HOME`, so nothing here may need to be written at run time.
+
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv
+
+# The runtime extra, resolved from the committed lock into a venv outside any path the
+# helper binds. The project itself is not installed: its code is the bound code copy.
+WORKDIR /opt/defender-job
+COPY defender/pyproject.toml defender/uv.lock ./
+ENV UV_PROJECT_ENVIRONMENT=/opt/defender-job/.venv
+RUN uv sync --frozen --extra runtime --no-install-project \
+    && rm -f pyproject.toml uv.lock
+ENV PATH=/opt/defender-job/.venv/bin:$PATH \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /

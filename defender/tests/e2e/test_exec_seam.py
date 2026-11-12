@@ -467,3 +467,50 @@ def test_output_limit_fault_is_fatal_instead_of_a_model_retry(tmp_path):
     with pytest.raises(box.BoxOutputLimitExceeded):
         _bash(deps, _cat_alert(run_dir))
     transport.only()
+
+
+def _relay_deps(run_dir: Path, helper) -> runtime_tools.AgentDeps:
+    """MAIN deps whose box is reached over the job socket (#1170 A4): the relay transport, no docker."""
+    from defender.tests.support.jobs._box_relay import relay_executor
+
+    return bind(MAIN_DEF, run_dir, defender_dir=DEFENDER, box=relay_executor(helper))
+
+
+def test_tool_bash_executes_through_the_relay_transport_as_the_same_frame(tmp_path):
+    """The real `_tool_bash` over a relay box sends the gate-admitted command's frame to `box.exec` and shows the helper's result;
+    a denied command is never sent. Same contract as the injected seam above. (A4)"""
+    from defender.tests.support.jobs._box_relay import ScriptedHelper, ok
+
+    run_dir = _run_dir(tmp_path)
+    real_content = RunPaths(run_dir).alert.read_text()
+    helper = ScriptedHelper(ok(0, b"<<from-the-box>>\n", b""))
+    shown = _bash(_relay_deps(run_dir, helper), _cat_alert(run_dir))
+
+    (sent,) = helper.asked("box.exec")
+    assert [list(st.argv) for pl in box.decode_request(sent["frame"]) for st in pl.stages] == [["cat", _alert_model_path(run_dir)]]
+    assert "<<from-the-box>>" in shown
+    assert real_content.strip() not in shown, "the host executed the command in-process; the relay was bypassed"
+
+    denied = ScriptedHelper(ok())
+    with pytest.raises(ModelRetry):
+        _bash(_relay_deps(run_dir, denied), "cat /etc/shadow")
+    assert denied.calls == [], "a denied command was still handed to the relay"
+
+
+@pytest.mark.parametrize(("answer", "ending"), [("OUTPUT_LIMIT", box.BoxOutputLimitExceeded), ("LOST", box.BoxLost)])
+def test_a_relay_ending_is_fatal_instead_of_a_model_retry(tmp_path, answer, ending):
+    """`output-limit` and `lost` from the helper surface from the bash tool as their typed endings, as the docker transport's do. (A4)"""
+    from defender.tests.support.jobs import _box_relay as R
+
+    helper = R.ScriptedHelper(getattr(R, answer))
+    with pytest.raises(ending):
+        _bash(_relay_deps(_run_dir(tmp_path), helper), "echo hi")
+    assert len(helper.asked("box.exec")) == 1
+
+
+def test_a_relay_timeout_reaches_the_model_as_the_existing_timeout_retry(tmp_path):
+    """`timeout` from the helper is the tool's existing `ModelRetry` timeout message, no ending. (A4)"""
+    from defender.tests.support.jobs import _box_relay as R
+
+    with pytest.raises(ModelRetry, match="timed out"):
+        _bash(_relay_deps(_run_dir(tmp_path), R.ScriptedHelper(R.TIMEOUT)), "echo hi")

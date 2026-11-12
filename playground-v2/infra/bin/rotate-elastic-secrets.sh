@@ -2,6 +2,8 @@
 # Rotate the playground's Elastic secrets in one pass:
 #   - the `elastic` superuser password            (V2_ELASTIC_PASSWORD)
 #   - the `kibana_system` password, made distinct  (V2_KIBANA_PASSWORD)
+#   - the defender's read-only user `defender-readonly` (V2_DEFENDER_READONLY_PASSWORD; es-init
+#                                                   writes it on the `up` below, #1391)
 #   - Kibana's encryption key                      (V2_KIBANA_ENCRYPTION_KEY; the old one is kept
 #                                                   as V2_KIBANA_ENCRYPTION_KEY_PREVIOUS so saved
 #                                                   objects encrypted with it stay readable)
@@ -27,10 +29,17 @@ get() { sed -n "s/^$1=//p" "${ENV_FILE}" | tail -n1; }
 OLD_EP="$(get V2_ELASTIC_PASSWORD)"
 OLD_KEY="$(get V2_KIBANA_ENCRYPTION_KEY)"
 [ -n "${OLD_EP}" ] && [ -n "${OLD_KEY}" ] || { echo "V2_ELASTIC_PASSWORD / V2_KIBANA_ENCRYPTION_KEY missing from .env" >&2; exit 2; }
+# The `compose up` below must not fail after the passwords have changed: Kibana and Fleet would be
+# left holding the old ones. So prove first that compose loads this .env (a required variable it
+# lacks, a syntax error). The new password variable is set to a placeholder for the check only.
+V2_DEFENDER_READONLY_PASSWORD="${V2_DEFENDER_READONLY_PASSWORD:-placeholder}" \
+    docker --context "${CTX}" compose config -q \
+    || { echo "compose cannot load this checkout's .env (above): nothing was rotated" >&2; exit 2; }
 
 # Hex only: these land in .env, curl config and shell, where $ " \ # * all need care.
 NEW_EP="$(openssl rand -hex 24)"
 NEW_KP="$(openssl rand -hex 24)"
+NEW_DP="$(openssl rand -hex 24)"
 NEW_KEY="$(openssl rand -hex 32)"
 
 es_set_password() {  # user, new password — authenticated with the OLD elastic password
@@ -60,13 +69,16 @@ set_var() {  # name, value — rewrite in place (through a symlink, too) or appe
 }
 set_var V2_ELASTIC_PASSWORD "${NEW_EP}"
 set_var V2_KIBANA_PASSWORD "${NEW_KP}"
+set_var V2_DEFENDER_READONLY_PASSWORD "${NEW_DP}"
 set_var V2_KIBANA_ENCRYPTION_KEY_PREVIOUS "${OLD_KEY}"
 set_var V2_KIBANA_ENCRYPTION_KEY "${NEW_KEY}"
 
 echo "-> recreating the services that hold these secrets in their container env"
 # Only these: a whole-stack `up` from another checkout also recreates services with relative
 # bind mounts (ticket-server's seed), which resolve against this checkout's path on the VPS.
-docker --context "${CTX}" compose up -d --build --no-deps \
+# The new read-only password is handed to compose explicitly: a copy exported in this shell
+# would otherwise win over .env and es-init would set the old one again.
+V2_DEFENDER_READONLY_PASSWORD="${NEW_DP}" docker --context "${CTX}" compose up -d --build --no-deps \
     elasticsearch es-init kibana fleet-server fleet-init fleet-host-policies fleet-outputs-reconciler
 
 echo "-> waiting for Kibana"
@@ -94,3 +106,7 @@ printf 'user = "elastic:%s"\n' "${NEW_EP}" \
 echo
 
 echo "-> done. Delete ${backup} once you have checked the stack."
+echo "   defender-readonly has a new password (es-init set it): re-store the lab tenant's elastic"
+echo "   credential (basic, username defender-readonly, password = V2_DEFENDER_READONLY_PASSWORD in"
+echo "   .env) through the API, or every run starts with elastic down (401). Frozen launches ask"
+echo "   compose for it from .env themselves: do not export it (an exported copy beats .env in compose)."

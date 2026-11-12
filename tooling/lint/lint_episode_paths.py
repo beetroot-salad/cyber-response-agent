@@ -111,7 +111,7 @@ RESIDUE = frozenset({
     ("learning.branch.archive", "archive_episode", "shutil.copy2"),
     ("learning.branch.archive", "archive_episode", "shutil.copytree"),
     ("learning.branch.cli", "_open_launch_source", ".open"),
-    ("run", "_open_world_source", ".open"),
+    ("run", "_open_run", ".open"),
 })
 
 #: `_io` functions that do no I/O; any OTHER public `_io` function called from the handle is a

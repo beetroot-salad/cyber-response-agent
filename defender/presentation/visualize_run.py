@@ -121,15 +121,14 @@ def _ledger_cost(run: Run) -> LedgerCost:
     return LedgerCost(read)
 
 
-def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False) -> CopyOutcome:
-    """The post-run step: render the run's page, save it as the run's `runtime_html` record
-    through `run` — so whatever backend the handle sits on receives it like every other record —
-    then hand it to the dev-only copy, and answer what the copy did (#1110).
+def save_page(run: Run, *, update_ticket: bool = False) -> str:
+    """Render the run's page and save it as the run's `runtime_html` record through `run`, so
+    whatever backend the handle sits on receives it like every other record; the page, saved.
 
-    `tenant` is the one its caller accepted; the copy lands in that tenant's area (#1279 O2).
-    A failed render and a refused record save are each `VisualizeFailed`, saying which, with
-    the cause chained: the caller's single "no record" signal. The copy never raises.
-    """
+    A failed render and a refused record save are each `VisualizeFailed`, saying which, with the
+    cause chained: the caller's single "no record" signal. A job container saves its page here
+    and no further: its host helper makes the dev-only copy (`mirror_page`) after it exits
+    (#1170 A10)."""
     try:
         page = render_page(run, update_ticket=update_ticket)
     except Exception as e:
@@ -140,6 +139,14 @@ def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False) -> Co
     except Exception as e:
         raise VisualizeFailed(f"the page record {record.path} could not be saved") from e
     _logger.info("saved the run page as %s", record.path)
+    return page
+
+
+def publish_page(run: Run, *, tenant: Tenant, update_ticket: bool = False) -> CopyOutcome:
+    """The operator's post-run step: the page saved (`save_page`), then handed to the dev-only
+    copy (`mirror_page`); what the copy did (#1110). `tenant` is the one its caller accepted; the
+    copy lands in that tenant's area (#1279 O2). The copy never raises."""
+    page = save_page(run, update_ticket=update_ticket)
     return mirror_page(page, run.run_dir.name, tenant)
 
 

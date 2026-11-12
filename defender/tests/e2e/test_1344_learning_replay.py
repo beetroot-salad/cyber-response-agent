@@ -7,7 +7,9 @@ Not real here: the Docker boxes (unboxed executor), the models (scripts), the te
 from __future__ import annotations
 
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -80,12 +82,14 @@ def _admitted_gathers(tenant: str, run_id: str) -> tuple[list[int], list[int]]:
     return gathers, admitted
 
 
-async def _run_flow(migrated_database, tmp_path, monkeypatch, *, investigate_mode, damage=None):  # noqa: F811
+async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, investigate_mode, damage=None):  # noqa: F811
     """The worker over one queued investigation, learning slot on: returns what the cases read back."""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
-    root = tmp_path / "data"
-    root.mkdir()
+    # A short data root (#1170): the investigation's job socket lives under it, and pytest's folders overrun a unix
+    # socket's ~108 bytes.
+    root = Path(tempfile.mkdtemp(prefix="j", dir="/tmp"))
+    request.addfinalizer(lambda: shutil.rmtree(root, ignore_errors=True))
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
@@ -130,12 +134,12 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, *, investigate_mod
 
 
 async def test_o1_o8_o14_a_completed_investigation_is_learned_from_end_to_end_and_its_findings_reach_the_queue(
-        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+        migrated_database, tmp_path, monkeypatch, request):  # noqa: F811
     """Completed run → auto job → family → judge → row `completed` → published → drain gate saw the findings. (O1, O3, O4, O8, O14, D-C)"""
     from defender.learning.core.state import FINDINGS
     from defender.tests.support.learning.core._state1135 import state_over
 
-    flow = await _run_flow(migrated_database, tmp_path, monkeypatch, investigate_mode="investigate")
+    flow = await _run_flow(migrated_database, tmp_path, monkeypatch, request, investigate_mode="investigate")
 
     stored = row(migrated_database, flow["investigation"])
     assert stored["stage"] == "completed", stored
@@ -158,12 +162,12 @@ async def test_o1_o8_o14_a_completed_investigation_is_learned_from_end_to_end_an
 
 
 async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_and_nothing_is_published(
-        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+        migrated_database, tmp_path, monkeypatch, request):  # noqa: F811
     """Same flow, MAIN never gathered: `skipped`/`no_fork_point`, no sibling, no queue row; the child started, so the post-step and its gate still run. (O3, O8, L3)"""
     from defender.learning.core.state import FINDINGS
     from defender.tests.support.learning.core._state1135 import state_over
 
-    flow = await _run_flow(migrated_database, tmp_path, monkeypatch, investigate_mode="investigate-no-gather")
+    flow = await _run_flow(migrated_database, tmp_path, monkeypatch, request, investigate_mode="investigate-no-gather")
 
     assert row(migrated_database, flow["investigation"])["stage"] == "completed"
     assert flow["gathers"] == ([], []), "premise: MAIN made no gather call"
@@ -180,12 +184,12 @@ async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_
 
 
 async def test_l5_a_source_whose_session_store_is_of_another_version_ends_skipped_history_unreadable_not_in_a_crash(
-        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+        migrated_database, tmp_path, monkeypatch, request):  # noqa: F811
     """The source's database carries a format version current code refuses: typed `skipped`/`history_unreadable` with the type in the message, before any sibling; the intact flow above is the control. (O3, L5, Old history)"""
     from defender.learning.core.state import FINDINGS
     from defender.tests.support.learning.core._state1135 import state_over
 
-    flow = await _run_flow(migrated_database, tmp_path, monkeypatch, investigate_mode="investigate", damage="store-version")
+    flow = await _run_flow(migrated_database, tmp_path, monkeypatch, request, investigate_mode="investigate", damage="store-version")
 
     assert row(migrated_database, flow["investigation"])["stage"] == "completed"
     assert (flow["marks"] / "family" / "runs").is_file(), "premise: the family step started and damaged the store"

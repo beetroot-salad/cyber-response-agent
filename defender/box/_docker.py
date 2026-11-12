@@ -292,11 +292,14 @@ def _remove_container(docker: DockerFn, name: str) -> str | None:
     return f"{(first.stderr or '').strip()}; after waiting: {(second.stderr or '').strip()}"
 
 
-def _remove_labelled(docker: DockerFn, label: str, value: str, whose: str) -> str | None:
-    """Remove every container carrying `label=value`, each through `_remove_container`: `None`
-    once none is left, else why not. A host with no docker binary has no box to remove."""
+def remove_labelled_containers(label: str, value: str | None = None, *, docker: DockerFn = run_docker,
+                               whose: str = "the labelled") -> str | None:
+    """Remove every container carrying the label `label` (with the value `value`, or any value when `value` is
+    None), each through `_remove_container`, paused or not: `None` once none is left, else why not, naming
+    `whose` containers. A host with no docker binary has no box to remove."""
+    selector = label if value is None else f"{label}={value}"
     try:
-        listed = docker(["docker", "ps", "-aq", "--filter", f"label={label}={value}"])
+        listed = docker(["docker", "ps", "-aq", "--filter", f"label={selector}"])
     except FileNotFoundError:
         return None
     except (OSError, subprocess.SubprocessError) as e:
@@ -311,7 +314,7 @@ def remove_tenant_containers(tenant_id: str, *, docker: DockerFn = run_docker) -
     """Remove every container labelled with the tenant (`TENANT_LABEL`): `None` once none is
     left, else why not. A host with no docker binary has no box to remove (the offboarding of a
     tenant on a host that never ran one)."""
-    return _remove_labelled(docker, TENANT_LABEL, tenant_id, "the tenant's")
+    return remove_labelled_containers(TENANT_LABEL, tenant_id, docker=docker, whose="the tenant's")
 
 
 def remove_claimed_containers(token: str, *, docker: DockerFn = run_docker) -> str | None:
@@ -320,7 +323,7 @@ def remove_claimed_containers(token: str, *, docker: DockerFn = run_docker) -> s
     child that held it is gone."""
     if not _CLAIM_TOKEN.fullmatch(token):
         raise ValueError(f"not a claim token: {token!r}")
-    return _remove_labelled(docker, CLAIM_LABEL, token, "the child's")
+    return remove_labelled_containers(CLAIM_LABEL, token, docker=docker, whose="the child's")
 
 
 class BoxStartConflict(BoxFault):

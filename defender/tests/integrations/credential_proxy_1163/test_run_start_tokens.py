@@ -695,3 +695,20 @@ def test_1449_a_world_reads_on_a_runs_terms_and_is_never_minted_a_write_back_tok
         ("identity", "r"), ("ticket", "r")], "a world's read grant is not a regular run's"
     assert run.write_back(), "control: the regular run's mint signs no write-back token"
     assert world.write_back() == {}, "a world's mint signed a write-back token"
+
+
+def test_a6_the_job_entry_never_builds_a_request_signer():
+    """The job entry reaches no sign-login code in run.py: not `_TokenMint`, not `signing_access`/`approle_login`
+    (the helper's, not the container's). The operator command reaches `_TokenMint` and keeps the signing seams (control).
+    Replaces a signature-only check that passed on today's `job_main` (no signing parameter, signing reached by name); the
+    run-time side is `test_job_container_entry.py::test_a6_the_entry_opens_no_database_...`. (O4, P-B)"""
+    import inspect
+
+    from defender import run as run_py
+    from defender.tests.jobs.test_read_only import _reached_names
+
+    seams = {"signer", "directory", "proxy_url", "issuer_transport"}
+    assert seams <= set(inspect.signature(run_py.main).parameters), "control: the operator command still signs"
+    assert not seams & set(inspect.signature(run_py.job_main).parameters), "the in-container entry has a signing seam"
+    assert "_TokenMint" in _reached_names("main"), "control: the operator command mints through _TokenMint"
+    assert not {"_TokenMint", "signing_access", "approle_login", "TenantRequestSigner"} & _reached_names("job_main")
