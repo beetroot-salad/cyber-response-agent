@@ -42,7 +42,7 @@ from ._store import (
     _str_or_none,
     lanes_of_branch,
 )
-from defender.jobs.learning_models import AUTHOR_LANE, LEAD_LANE, BatchRow, CommitChangeRow, CommitRow
+from defender.jobs.learning_models import AUTHOR_LANE, FEEDBACK_LANE, LEAD_LANE, BatchRow, CommitChangeRow, CommitRow
 
 
 class _Repository(Protocol):
@@ -101,7 +101,7 @@ _FEEDBACK_CHANNEL = "feedback_lessons"
 #: A retained feedback delivery's record name (`<prefix slug>-<batch>.json`) and drain label, and its branch prefix.
 _FEEDBACK_DELIVERY = "feedback-"
 _FEEDBACK_LABEL = "feedback_drain"
-_FEEDBACK_BRANCH = "feedback/"
+_FEEDBACK_BRANCH = BRANCH_PREFIX[FEEDBACK_LANE]
 _DELIVERY = "_pending_delivery"
 _COMMIT_RECORD = "commit-maker.jsonl"
 _WORKTREES = "worktrees"

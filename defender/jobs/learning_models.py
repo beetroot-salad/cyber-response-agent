@@ -39,6 +39,10 @@ FEEDBACK_LANE = "feedback"
 LANE_OF = {"finding": AUTHOR_LANE, "questioner_finding": AUTHOR_LANE, "pitfall": LEAD_LANE, "curation_request": LEAD_LANE,
            "feedback_instruction": AUTHOR_LANE}
 LANES = (AUTHOR_LANE, LEAD_LANE, FEEDBACK_LANE)
+#: Each lane's branch prefix on the tenant repository: the store mints every batch's branch under it, the tick scans it
+#: for PRs no batch made, and the import places an open PR's lane by it. A revert batch's branch is under its own.
+BRANCH_PREFIX = {AUTHOR_LANE: "lessons/", LEAD_LANE: "lead-author/", FEEDBACK_LANE: "feedback/"}
+REVERT_PREFIX = "lessons/revert-"
 STATUSES = ("waiting", "in_batch", "held", "published", "skipped", "dead")
 BATCH_KINDS = ("author", "revert", "registry")
 #: The batch kinds that hold their lane while not ended (O3, H4; A4: a registry batch is the feedback lane's writer

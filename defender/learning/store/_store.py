@@ -31,10 +31,12 @@ from defender.tenancy.models import TenantRecord
 from defender.jobs.learning_models import (
     AUTHOR_LANE,
     AUTHORING_KINDS,
+    BRANCH_PREFIX,
     FEEDBACK_LANE,
     LANE_OF,
     LANES,
     LEAD_LANE,
+    REVERT_PREFIX,
     BatchRow,
     CommitChangeRow,
     CommitRow,
@@ -52,8 +54,6 @@ DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_GENERATION_CEILING = 3
 DEFAULT_REFUSAL_CEILING = 3
 
-BRANCH_PREFIX = {AUTHOR_LANE: "lessons/", LEAD_LANE: "lead-author/", FEEDBACK_LANE: "feedback/"}
-REVERT_PREFIX = "lessons/revert-"
 
 _I = cast(Table, WorkItemRow.__table__)
 _B = cast(Table, BatchRow.__table__)
@@ -183,6 +183,19 @@ class BatchView:
     #: The database's own reading: working, and its lease and grace have run out. The one lapse test (O1, P6);
     #: no host reads a clock of its own for it.
     lapsed: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class LaneWork:
+    """What a claim on a lane would meet now, by the claim's own rules (`LearningStore.lane_work`): `busy` (the claim
+    would be refused), `claimable` (it would take something: a replacement due, or a kind at its threshold), and the
+    batch a replacement would replace (`replaces`, with its PR and generation), or `None`."""
+
+    busy: bool
+    claimable: bool
+    replaces: BatchId | None = None
+    replaces_pr: int | None = None
+    replaces_generation: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -416,6 +429,13 @@ class LearningStore(FeedbackVerbs):
                          payload=r.payload, source_run=r.source_run, enqueued_at=r.enqueued_at,
                          updated_at=r.updated_at) for r in rows]
 
+    async def item_keys(self, tenant: str, kind: str) -> list[str]:
+        """Every key of `kind` the tenant holds, whatever its status (a key is the store's for good): keys only, for a
+        reader that needs to know which ids are taken, not the items."""
+        async with self._sessions() as s:
+            return list((await s.execute(select(_I.c.item_key).where(
+                _I.c.tenant_id == TenantId(tenant), _I.c.kind == kind))).scalars())
+
     async def batches(self, tenant: str) -> list[BatchView]:
         async with self._sessions() as s:
             rows = (await s.execute(select(_B, self._lapsed().label("lapsed")).where(_B.c.tenant_id == TenantId(tenant))
@@ -459,16 +479,35 @@ class LearningStore(FeedbackVerbs):
                 raise LaneBusy(lane) from None
             raise
 
-    async def _refuse_if_busy(self, s: AsyncSession, tenant: str, lane: str) -> None:
-        busy = (await s.execute(select(_B.c.id).where(
+    async def lane_work(self, tenant: str, lane: str, *, thresholds: Mapping[str, int]) -> LaneWork:
+        """What `claim` would meet on `lane` now, by its own rules and nothing claimed: the one answer to "is the lane
+        busy, is anything due" that every gate asks (a tick before it opens a delivery, a post-step's wake)."""
+        if lane not in LANES:
+            raise ValueError(f"not a lane: {lane}")
+        kinds = [k for k, ln in LANE_OF.items() if ln == lane]
+        async with self._sessions() as s:
+            busy = await self._busy(s, tenant, lane)
+            replaced = await self._replacement_due(s, tenant, kinds)
+            due = bool(await self._due_kinds(s, tenant, kinds, thresholds)) if replaced is None else True
+        if replaced is None:
+            return LaneWork(busy=busy, claimable=due)
+        return LaneWork(busy=busy, claimable=True, replaces=BatchId.stored(str(replaced.id)),
+                        replaces_pr=replaced.pr_number, replaces_generation=int(replaced.generation))
+
+    async def _busy(self, s: AsyncSession, tenant: str, lane: str) -> bool:
+        """The lane holds a batch a claim must wait for: one working, an authoring batch not ended, or (the author
+        lane) a revert in review."""
+        return (await s.execute(select(_B.c.id).where(
             _B.c.tenant_id == TenantId(tenant), _B.c.lane == lane,
             or_(_B.c.phase == "working", and_(_B.c.kind.in_(AUTHORING_KINDS), _B.c.phase != "ended"),
-                and_(true() if lane == AUTHOR_LANE else false(), _B.c.kind == "revert", _B.c.phase == "in_review"))).limit(1))).first()
-        if busy is not None:
+                and_(true() if lane == AUTHOR_LANE else false(), _B.c.kind == "revert", _B.c.phase == "in_review"))).limit(1))).first() is not None
+
+    async def _refuse_if_busy(self, s: AsyncSession, tenant: str, lane: str) -> None:
+        if await self._busy(s, tenant, lane):
             raise LaneBusy(lane)
 
-    async def _claim_replacement(self, s: AsyncSession, tenant: str, lane: str, kinds: list[str],
-                                 owner: str) -> Held | None:
+    async def _replacement_due(self, s: AsyncSession, tenant: str, kinds: list[str]) -> Any:
+        """The closed batch whose items a replacement takes first (the latest ended), or `None`."""
         due = (await s.execute(
             select(_I.c.batch_id).select_from(_I.join(_B, _I.c.batch_id == _B.c.id))
             .where(_I.c.tenant_id == TenantId(tenant), _I.c.kind.in_(kinds), _I.c.status == "in_batch",
@@ -476,7 +515,14 @@ class LearningStore(FeedbackVerbs):
             .group_by(_I.c.batch_id, _B.c.ended_at).order_by(_B.c.ended_at.desc(), _I.c.batch_id).limit(1))).first()
         if due is None:
             return None
-        old = (await s.execute(select(_B).where(_B.c.id == due.batch_id).with_for_update())).one()
+        return (await s.execute(select(_B).where(_B.c.id == due.batch_id))).one()
+
+    async def _claim_replacement(self, s: AsyncSession, tenant: str, lane: str, kinds: list[str],
+                                 owner: str) -> Held | None:
+        due = await self._replacement_due(s, tenant, kinds)
+        if due is None:
+            return None
+        old = (await s.execute(select(_B).where(_B.c.id == due.id).with_for_update())).one()
         if old.generation >= self.generation_ceiling:
             await s.execute(update(_I).where(_I.c.tenant_id == TenantId(tenant), _I.c.batch_id == old.id,
                                              _I.c.status == "in_batch").values(
@@ -488,16 +534,21 @@ class LearningStore(FeedbackVerbs):
 
     async def _claim_due(self, s: AsyncSession, tenant: str, lane: str, kinds: list[str], owner: str,
                          thresholds: Mapping[str, int]) -> Held | None:
-        # One arrival rule (A2 D8): rows, but a pitfall counts its distinct mistakes (`mistake_key`), in SQL.
-        tid = TenantId(tenant)
-        counts: dict[str, int] = dict((await s.execute(
-            select(_I.c.kind, func.count(func.distinct(case((_I.c.kind == "pitfall", _I.c.mistake_key), else_=_I.c.item_key))))  # lint-half-table: ok — the pitfall's own distinct-mistake count, not its lane
-            .where(_I.c.tenant_id == tid, _I.c.kind.in_(kinds), _I.c.status == "waiting").group_by(_I.c.kind))).all())
-        due = [k for k in kinds if counts.get(k, 0) > 0 and counts[k] >= max(1, thresholds.get(k, 1))]
+        due = await self._due_kinds(s, tenant, kinds, thresholds)
         if not due:
             return None
         return await self._new_batch(s, tenant, lane, "author", owner, due, generation=0, replaces=None,
                                      feedback_pr=None, only_batch=None)
+
+    async def _due_kinds(self, s: AsyncSession, tenant: str, kinds: list[str],
+                         thresholds: Mapping[str, int]) -> list[str]:
+        """The kinds whose waiting items are at their threshold. One arrival rule (A2 D8): rows, but a pitfall counts
+        its distinct mistakes (`mistake_key`), in SQL."""
+        counts: dict[str, int] = dict((await s.execute(
+            select(_I.c.kind, func.count(func.distinct(case((_I.c.kind == "pitfall", _I.c.mistake_key), else_=_I.c.item_key))))  # lint-half-table: ok — the pitfall's own distinct-mistake count, not its lane
+            .where(_I.c.tenant_id == TenantId(tenant), _I.c.kind.in_(kinds), _I.c.status == "waiting")
+            .group_by(_I.c.kind))).all())
+        return [k for k in kinds if counts.get(k, 0) > 0 and counts[k] >= max(1, thresholds.get(k, 1))]
 
     async def _new_batch(  # noqa: PLR0913
             self, s: AsyncSession, tenant: str, lane: str, kind: str, owner: str, kinds: list[str], *,

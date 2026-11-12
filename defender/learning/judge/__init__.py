@@ -747,13 +747,11 @@ class _Pass:
         own, so only a row an earlier pass queued can hold one."""
         if channel.name not in self.queued_ids:
             try:
-                rows = self.state.rows(channel)
+                self.queued_ids[channel.name] = self.state.queued_ids(channel)
             except Exception:  # noqa: BLE001 — an unreadable sink (episode record or store) is met again by the append
                 # The append meets the same read refusal and stops the pass loudly with
                 # this world's row left `queueing` (A6); no row is silently deduplicated.
                 return frozenset()
-            self.queued_ids[channel.name] = frozenset(
-                r["finding_id"] for r in rows if isinstance(r.get("finding_id"), str))
         return self.queued_ids[channel.name]
 
     def _commit(self, row: dict[str, Any], defender_rows: list[dict[str, Any]],

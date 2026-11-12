@@ -56,8 +56,6 @@ CORPUS_OF = {"finding": "agent/lessons", "questioner_finding": "agent/lessons-qu
              "feedback_instruction": "agent/lessons"}
 #: The provenance field both corpora cite their findings under.
 CITE_FIELD = provenance_field("finding_id")
-#: Each lane's branch prefix on the tenant repository (the store mints the branch under it).
-PREFIX_OF = {AUTHOR_LANE: "lessons/", LEAD_LANE: "lead-author/", FEEDBACK_LANE: "feedback/"}
 
 
 _T = TypeVar("_T")
@@ -175,16 +173,6 @@ def _forge_faults() -> tuple[type[BaseException], ...]:
 
 #: The item statuses a tick reads: what can be claimed and what is in a batch (the rest is history or a person's).
 OPEN_WORK = ("waiting", "in_batch")
-
-
-def arrived(kind: str, waiting: Sequence[Any], threshold: int) -> bool:
-    """Whether a kind's waiting items clear its threshold: rows, but a pitfall counts its distinct mistakes (the
-    store's claim applies the same rule)."""
-    if kind != "pitfall":  # lint-half-table: ok — the pitfall's own distinct-mistake count, not its lane
-        return len(waiting) >= max(1, threshold)
-    from defender.learning.core.persist import merge_pitfalls, pitfalls_lane_is_open
-
-    return pitfalls_lane_is_open(merge_pitfalls([dict(i.payload) for i in waiting]), max(1, threshold))
 
 
 # --- the renewer and the one stop (D4) ------------------------------------------------------------------
@@ -406,42 +394,18 @@ class Tick:
 
     # -- what there is to do -----------------------------------------------------------------------
 
-    def _open_pr_of_ended(self, b: Any) -> bool:
-        # The bot never closes a registry PR (A4): a person's abandon leaves it open for a person.
-        return (b.kind != "registry" and b.phase == "ended" and b.outcome == "abandoned" and b.pr_number is not None
-                and (b.last_checked is None or (b.ended_at is not None and b.last_checked < b.ended_at)))
-
-    def _claimable(self, views: Sequence[Any], items: Sequence[Any]) -> bool:
-        from defender.jobs.learning_models import LANE_OF
-
-        kinds = {k for k, ln in LANE_OF.items() if ln == self.lane}
-        ended_closed = {b.id for b in views if b.phase == "ended" and b.outcome == "closed"}
-        waiting: dict[str, list[Any]] = {}
-        for i in items:
-            if i.kind not in kinds:
-                continue
-            if i.status == "in_batch" and i.batch_id in ended_closed:
-                return True
-            if i.status == "waiting":
-                waiting.setdefault(i.kind, []).append(i)
-        return any(arrived(k, rows, int(self.thresholds.get(k, 1))) for k, rows in waiting.items())
-
     def _to_tend(self, views: Sequence[Any]) -> tuple[list[Any], list[Any], list[Any]]:
         """`(in review, lapsed, ended with a PR to close)`: what this tick reconciles and recovers."""
         review = [b for b in views if b.phase == "in_review" and b.lane in self.reconcile_lanes]
         lapsed = [b for b in views if b.lane == self.lane and b.lapsed]
-        closing = [b for b in views if b.lane in self.reconcile_lanes and self._open_pr_of_ended(b)]
+        closing = [b for b in views if b.lane in self.reconcile_lanes and open_pr_of_ended(b)]
         return review, lapsed, closing
 
     def run(self) -> int:
-        from defender.jobs.learning_models import AUTHORING_KINDS
-
         views = self.store.batches(self.tenant_id)
-        items = self.store.work(self.tenant_id, statuses=OPEN_WORK)
         review, lapsed, closing = self._to_tend(views)
-        busy = any(b.lane == self.lane and b.phase in ("working", "needs_person") for b in views) or any(
-            b.lane == self.lane and b.kind in AUTHORING_KINDS and b.phase != "ended" for b in views)
-        claim = not busy and self._claimable(views, items)
+        work = self.store.lane_work(self.tenant_id, self.lane, thresholds=self.thresholds)
+        claim = work.claimable and not work.busy
         if not (review or lapsed or closing or claim):
             _logger.info(f"{self.label}: nothing in review, nothing lapsed and nothing at threshold — skipping")
             return 0
@@ -454,7 +418,9 @@ class Tick:
                     for b in [*review, *lapsed]:
                         self._refusal(b, refused)
                 raise
-            delivery = dataclasses.replace(delivery, branch_prefix=PREFIX_OF[self.lane])
+            from defender.jobs.learning_models import BRANCH_PREFIX
+
+            delivery = dataclasses.replace(delivery, branch_prefix=BRANCH_PREFIX[self.lane])
             return self._opened(delivery, review, lapsed, closing)
 
     def tend(self, delivery: TenantDelivery) -> None:
@@ -497,7 +463,7 @@ class Tick:
                         "unknown, so the batch waits")
         with contextlib.suppress(Exception):
             # An ended batch is selected again while its PR is open and unchecked since it ended
-            # (`_open_pr_of_ended`): a fault is not a check, so it must not stamp one.
+            # (`open_pr_of_ended`): a fault is not a check, so it must not stamp one.
             if b.phase not in ("working", "ended"):
                 self.store.note_check(self.tenant_id, str(b.id), reset_refusals=False)
 
@@ -593,13 +559,21 @@ class Tick:
                 if tip is None:
                     tip = next((r.commit for r in reversed(record.rows) if r.commit in commits), None)
                 changed = record.changed_paths(str(b.id))
+                # Each corpus folder is read once per merge, whatever the number of members citing into it.
+                in_merge: dict[str, set[str]] = {}
+                at_tip: dict[str, set[str]] = {}
                 for i in members:
                     folder = CORPUS_OF.get(i.kind)
                     if folder is None:
                         continue
-                    if i.key in cited_in_tree(repository, merge, folder, CITE_FIELD):
+                    if folder not in in_merge:
+                        in_merge[folder] = cited_in_tree(repository, merge, folder, CITE_FIELD)
+                    if i.key in in_merge[folder]:
                         published.append((i.kind, i.key))
-                    elif tip is not None and i.key in cited_in_paths(repository, tip, changed, folder, CITE_FIELD):
+                        continue
+                    if tip is not None and folder not in at_tip:
+                        at_tip[folder] = cited_in_paths(repository, tip, changed, folder, CITE_FIELD)
+                    if tip is not None and i.key in at_tip[folder]:
                         held.append((i.kind, i.key))
             except _forge_faults() + (RuntimeError,) as fault:
                 self._fault(b, fault, "reading the merge commit")
@@ -701,11 +675,14 @@ class Tick:
             tip = remote_tip(delivery.repository, held.branch)
         changed = record.changed_paths(str(held.batch_id))
         out: dict[tuple[str, str], Any] = {}
+        cited: dict[str, set[str]] = {}  # each corpus folder read once, whatever the number of items
         for kind, key, _payload in held.items:
             folder = CORPUS_OF.get(kind)
             if folder is None:
                 continue
-            if tip is None or key not in cited_in_paths(delivery.repository, tip, changed, folder, CITE_FIELD):
+            if tip is not None and folder not in cited:
+                cited[folder] = cited_in_paths(delivery.repository, tip, changed, folder, CITE_FIELD)
+            if tip is None or key not in cited[folder]:
                 out[(kind, key)] = Outcome.waiting()
         return out
 
@@ -756,7 +733,9 @@ class Tick:
                 raise RuntimeError(f"registry batch {held.batch_id} has no tip to describe its PR by")
             tip_message = repository.commit_message(tip)
         if held.kind == "author":
-            prefix = PREFIX_OF[held.lane]
+            from defender.jobs.learning_models import BRANCH_PREFIX
+
+            prefix = BRANCH_PREFIX[held.lane]
             known = {b.branch for b in self.store.batches(self.tenant_id)}
             foreign = [r for r in repository.forge.list_open_prs(prefix) if r["headRefName"] not in known]
             if foreign:
@@ -772,37 +751,24 @@ class Tick:
 
     # -- the claim ---------------------------------------------------------------------------------------
 
-    def _due(self, views: Sequence[Any], items: Sequence[Any]) -> Any | None:
-        """The batch a replacement claim would replace (the store's order: latest ended first), or `None`."""
-        from defender.jobs.learning_models import LANE_OF
-
-        closed = {b.id: b for b in views if b.phase == "ended" and b.outcome == "closed"}
-        due = {i.batch_id for i in items if i.status == "in_batch" and i.batch_id in closed
-               and LANE_OF.get(i.kind) == self.lane}
-        if not due:
-            return None
-        return sorted((closed[d] for d in due), key=lambda b: (b.ended_at, str(b.id)), reverse=True)[0]
-
     def _feedback(self, delivery: TenantDelivery, number: int) -> str:
         forge = delivery.repository.forge
         return framed_feedback(number, forge.reviews(number), forge.comments(number))
 
     def _claim(self, delivery: TenantDelivery) -> int:
-        from defender.jobs.learning_models import AUTHORING_KINDS
         from defender.learning.store import LaneBusy, TenantInactive
 
-        views = self.store.batches(self.tenant_id)
-        if any(b.lane == self.lane and (b.phase == "working" or (b.kind in AUTHORING_KINDS and b.phase != "ended")
-                                        or (b.kind == "revert" and b.phase == "in_review")) for b in views):
+        work = self.store.lane_work(self.tenant_id, self.lane, thresholds=self.thresholds)
+        if work.busy:
             _logger.info(f"{self.label}: a batch of the lane is not ended — no new batch")
             return 0
-        due = self._due(views, self.store.work(self.tenant_id, statuses=OPEN_WORK))
         feedback: str | None = None
-        if due is not None and due.pr_number is not None and due.generation < int(self.store.generation_ceiling):
+        if (work.replaces is not None and work.replaces_pr is not None
+                and work.replaces_generation < int(self.store.generation_ceiling)):
             try:
-                feedback = self._feedback(delivery, int(due.pr_number))
+                feedback = self._feedback(delivery, int(work.replaces_pr))
             except _forge_faults() as fault:
-                _logger.warning(f"{self.label}: the feedback on PR #{due.pr_number} could not be read "
+                _logger.warning(f"{self.label}: the feedback on PR #{work.replaces_pr} could not be read "
                                 f"({one_line(str(fault))}): the replacement waits, never authored blind")
                 return 0
         try:
@@ -817,7 +783,7 @@ class Tick:
         if held is None:
             _logger.info(f"{self.label}: nothing at threshold — no new batch")
             return 0
-        if held.replaces is not None and (due is None or str(held.replaces) != str(due.id)):
+        if held.replaces is not None and str(held.replaces) != str(work.replaces):
             try:
                 feedback = self._feedback(delivery, int(held.feedback_pr)) if held.feedback_pr is not None else None
             except _forge_faults():
@@ -968,28 +934,29 @@ def _stop_after_work(stop_box: Callable[..., None], box: Any, *, work_ok: bool, 
         _logger.error(f"{label}: the batch's box could not be torn down after a failed batch: {e!r}")
 
 
-def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapping[str, int] | None = None) -> bool:
-    """Whether a tick of `lane` could find work: a batch not ended (in review to check, working to recover,
-    or a person's) or something it could claim (G-T1)."""
-    views = store.batches(tenant_id)
-    if any(b.phase != "ended" for b in views):
-        return True
-    from defender.jobs.learning_models import LANE_OF
+def open_pr_of_ended(b: Any) -> bool:
+    """An abandoned batch whose PR is still to be closed (not checked since it ended). The bot never closes a registry
+    PR (A4): a person's abandon leaves it open for a person."""
+    return (b.kind != "registry" and b.phase == "ended" and b.outcome == "abandoned" and b.pr_number is not None
+            and (b.last_checked is None or (b.ended_at is not None and b.last_checked < b.ended_at)))
 
-    limits = dict(tick_thresholds or thresholds())
-    closed = {b.id for b in views if b.phase == "ended" and b.outcome == "closed"}
-    waiting: dict[str, list[Any]] = {}
-    for i in store.work(tenant_id, statuses=OPEN_WORK):
-        if LANE_OF.get(i.kind) != lane:
-            continue
-        if i.status == "in_batch" and i.batch_id in closed:
+
+def lane_waiting(store: Any, tenant_id: str, lane: str, *, tick_thresholds: Mapping[str, int] | None = None,
+                 reconcile_lanes: Sequence[str] | None = None) -> bool:
+    """Whether a tick of `lane` (reconciling `reconcile_lanes`, by default its own) could act now or later without a
+    person (G-T1): a batch of its lane working (to recover should its lease lapse), one of a reconciled lane in review
+    (its PR may change) or ended with its PR still to close, or a claim the store would make (`lane_work`, the claim's
+    own rules). A batch waiting for a person is none of these: no tick moves it, so it keeps no check clock running."""
+    reconciled = set(reconcile_lanes or (lane,))
+    for b in store.batches(tenant_id):
+        if (b.lane == lane and b.phase == "working") or (
+                b.lane in reconciled and (b.phase == "in_review" or open_pr_of_ended(b))):
             return True
-        if i.status == "waiting":
-            waiting.setdefault(i.kind, []).append(i)
-    return any(arrived(k, rows, int(limits.get(k, 1))) for k, rows in waiting.items())
+    work = store.lane_work(tenant_id, lane, thresholds=dict(tick_thresholds or thresholds()))
+    return bool(work.claimable and not work.busy)
 
 
 __all__ = ["AUTHOR_LANE", "CORPUS_OF", "DSN_ENV", "FEEDBACK_LANE", "GRACE_ENV", "Holding", "LEAD_LANE", "LEASE_ENV", "RENEW_ENV",
            "Refused", "STOP_PUSH_SECONDS", "Tick", "TickStopped", "classified_refusal", "closed_with_feedback",
-           "framed_feedback", "forge_refuses", "http_status", "lane_waiting", "live_changes_requested", "opened_store",
+           "framed_feedback", "forge_refuses", "http_status", "lane_waiting", "live_changes_requested", "open_pr_of_ended", "opened_store",
            "owner_name", "store_knobs", "thresholds"]

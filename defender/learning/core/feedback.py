@@ -234,6 +234,7 @@ def _release(store: Any, held: Any) -> None:
 
 def _steps(paths: LoopPaths, store: Any, held: Any, hold: Any, open_delivery: Callable[[], Any], records: Any, *,
            decide: Callable[..., dict], eligibility_max_age: dt.timedelta | None) -> None:
+    from defender.jobs.learning_models import BRANCH_PREFIX
     from defender.learning.core import drains, store_tick
     from defender.tenancy import RecordsUnreachable
 
@@ -245,7 +246,7 @@ def _steps(paths: LoopPaths, store: Any, held: Any, hold: Any, open_delivery: Ca
             eligible = _eligible_logins(records, tenant.id, eligibility_bound(eligibility_max_age), bots)
         except RecordsUnreachable as down:
             raise drains._Refused(f"the tenant {tenant.id}'s records could not be read: {down}", transient=True) from None
-        delivery = dataclasses.replace(opened, branch_prefix=store_tick.PREFIX_OF[store_tick.FEEDBACK_LANE])
+        delivery = dataclasses.replace(opened, branch_prefix=BRANCH_PREFIX[store_tick.FEEDBACK_LANE])
         ctx = Tick(store, held, hold, delivery.repository.forge, bots, str(tenant.id), eligible)
         lane = store_tick.Tick(paths=paths, lane=store_tick.FEEDBACK_LANE, label=FEEDBACK_DRAIN_LABEL, store=store,
                                open_delivery=open_delivery, author_work=_no_work, start_box=None,

@@ -28,6 +28,9 @@ class MemoryStore:
         return [i for i in self.items.get(str(tenant), [])
                 if (statuses is None or getattr(i, "status", "waiting") in statuses) and (kind is None or i.kind == kind)]
 
+    def item_keys(self, tenant: str, kind: str) -> list[str]:
+        return [i.key for i in self.items.get(str(tenant), []) if i.kind == kind]
+
     def publish_findings(self, tenant: str, run_id: str, rows: Any, *, kind: str) -> tuple[int, int]:  # noqa: ARG002 — the real verb's shape
         held = self.items.setdefault(str(tenant), [])
         added = 0

@@ -13,6 +13,7 @@ from ._store import (
     ImportRefused,
     ItemRefused,
     LaneBusy,
+    LaneWork,
     LearningStore,
     LeaseLost,
     NotLapsed,
@@ -23,7 +24,7 @@ from ._store import (
 )
 
 __all__ = [
-    "BatchView", "BlockingStore", "CommitRecord", "FeedbackComment", "FeedbackHeld", "FeedbackIssue", "Held", "ImportRefused", "ItemRefused", "LaneBusy", "LearningStore",
+    "BatchView", "BlockingStore", "CommitRecord", "FeedbackComment", "FeedbackHeld", "FeedbackIssue", "Held", "ImportRefused", "ItemRefused", "LaneBusy", "LaneWork", "LearningStore",
     "LeaseLost", "NotLapsed", "Outcome", "Stop", "TenantInactive", "WorkItem", "blocking", "cut_over_learning_state",
     "import_learning_state", "LearningImport", "read_learning_state", "write_learning_state",
 ]

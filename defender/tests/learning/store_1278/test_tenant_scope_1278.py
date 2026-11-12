@@ -181,6 +181,18 @@ async def _work(c):
     assert keys == {("finding", "h1"), ("finding", "a1"), ("pitfall", "a-pit"), ("curation_request", "run-a1")}
 
 
+async def _item_keys(c):
+    c.freeze()
+    assert set(c.seen(await c.store.item_keys(BLUE, "finding"))) == {"h1", "a1"}
+
+
+async def _lane_work(c):
+    """BLUE's lanes answered from BLUE's rows: GREEN's lead batch closed with items due names no replacement of BLUE's."""
+    c.freeze()
+    for lane in (AUTHOR_LANE, LEAD_LANE):
+        c.seen(await c.store.lane_work(BLUE, lane, thresholds=ONE))
+
+
 async def _batches(c):
     c.freeze()
     assert [str(b.id) for b in c.seen(await c.store.batches(BLUE))] == [str(c.spent.batch_id)]
@@ -325,7 +337,8 @@ async def _purge(c):
 #: Every public verb of the store and how BLUE calls it. `close` takes no tenant.
 ENTRIES = {
     "publish_findings": _publish_findings, "add_pitfall": _add_pitfall, "enqueue_request": _enqueue_request,
-    "work": _work, "batches": _batches, "commit_record": _commit_record,
+    "work": _work, "item_keys": _item_keys, "lane_work": _lane_work, "batches": _batches,
+    "commit_record": _commit_record,
     "claim": _claim, "claim_revert": _claim_revert, "take_over": _take_over,
     **{name: _holder(name) for name in ("renew", "record_commit", "in_review", "end_no_commits", "abandon_clean",
                                          "abandon_crashed", "expire_own")},

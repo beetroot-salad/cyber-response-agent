@@ -75,6 +75,10 @@ class FindingsSink(Protocol):
 
     def rows(self, channel: Any) -> list[dict[str, Any]]: ...
 
+    def queued_ids(self, channel: Any) -> frozenset[str]:
+        """The finding ids `channel` already holds (a row an earlier pass queued)."""
+        ...
+
     def append(self, channel: Any, rows: list[dict[str, Any]], *,
                dedup_key: str | None = None) -> tuple[int, int]: ...
 
@@ -440,6 +444,10 @@ class StoreFindings:
         kind = _store_kind(channel)
         return [item.payload for item in self._store.work(self._tenant, kind=kind)]
 
+    def queued_ids(self, channel: Any) -> frozenset[str]:
+        """The keys only (a finding's key is its id), never the tenant's whole history of payloads."""
+        return frozenset(self._store.item_keys(self._tenant, _store_kind(channel)))
+
     def append(self, channel: Any, rows: list[dict[str, Any]], *,
                dedup_key: str | None = None) -> tuple[int, int]:
         """Insert `rows` as `channel`'s kind: `(inserted, 0)`. Dedup is the store's, by finding id
@@ -504,6 +512,9 @@ class EpisodeFindings:
 
     def rows(self, channel: Any) -> list[dict[str, Any]]:
         return self.rows_report(channel)[0]
+
+    def queued_ids(self, channel: Any) -> frozenset[str]:
+        return frozenset(r["finding_id"] for r in self.rows(channel) if isinstance(r.get("finding_id"), str))
 
     def append(self, channel: Any, rows: list[dict[str, Any]], *,
                dedup_key: str | None = None) -> tuple[int, int]:

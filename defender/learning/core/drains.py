@@ -438,14 +438,18 @@ def _run_of(payload: dict, tenant: Tenant | None) -> Run | Exception:
         return refused
 
 
+#: The lanes the author drain's tick reconciles (in review, PRs to close): its own, the lead lane's and the feedback
+#: lane's. Its wake test (`author_work_waiting`) asks of the same lanes.
+AUTHOR_DRAIN_RECONCILES = (AUTHOR_LANE, LEAD_LANE, FEEDBACK_LANE)
+
+
 def author_work_waiting(paths: LoopPaths) -> bool:
-    """Whether `author_drain` could find work now (#1344 amendment 3, G-T1): a batch not ended (in review
-    to check, working to recover, or a person's), a replacement due or an author-lane kind at its
-    threshold. What a post-step reports as still waiting."""
+    """Whether `author_drain` could act now or later without a person (#1344 amendment 3, G-T1; `lane_waiting` over the
+    lanes it reconciles). What a post-step reports as still waiting."""
     if paths.tenant is None:
         return False
     with opened_store() as store:
-        return lane_waiting(store, str(paths.tenant.id), AUTHOR_LANE)
+        return lane_waiting(store, str(paths.tenant.id), AUTHOR_LANE, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
 
 
 def _refusing(entry: Callable[[], int]) -> int:
@@ -516,7 +520,7 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
 
     return _store_tick(paths, lane=AUTHOR_LANE, label=AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
                  author_work=lambda work_paths, **kw: _store_curators(work_paths, seam, **kw),
-                 start_box=start_box, stop_box=stop_box, reconcile_lanes=(AUTHOR_LANE, LEAD_LANE, FEEDBACK_LANE))
+                 start_box=start_box, stop_box=stop_box, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
 
 
 def _drain_sources(container: Any, *, directory: TenantDirectory | None,

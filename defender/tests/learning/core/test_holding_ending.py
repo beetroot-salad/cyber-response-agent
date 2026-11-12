@@ -56,10 +56,15 @@ def test_control_a_verb_made_around_the_renewer_is_followed_by_a_lost_lease_stop
     holder as a lost lease."""
     store = _Lease()
     previous = signal.getsignal(signal.SIGTERM)
-    try:
-        with pytest.raises(TickStopped) as stopped, Holding(store, HELD):
+
+    def end_around_the_renewer() -> None:
+        with Holding(store, HELD):
             store.end(HELD)
             time.sleep(RENEW_EVERY * 6)
+
+    try:
+        with pytest.raises(TickStopped) as stopped:
+            end_around_the_renewer()
     finally:
         signal.signal(signal.SIGTERM, previous)  # a fired stop leaves SIGTERM ignored, as a tick's process would
     assert stopped.value.why == "lease"
