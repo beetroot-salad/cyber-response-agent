@@ -387,12 +387,15 @@ class LearningStore(FeedbackVerbs):
     # -- views -------------------------------------------------------------------------------------------------
 
     async def work(self, tenant: str) -> list[WorkItem]:
+        """The tenant's items. A waiting item is in no batch: the batch it last left (kept on its row) and that batch's
+        PR are not reported as its own."""
         async with self._sessions() as s:
             rows = (await s.execute(
                 select(_I, _B.c.pr_number).select_from(_I.outerjoin(_B, _I.c.batch_id == _B.c.id))
                 .where(_I.c.tenant_id == TenantId(tenant)).order_by(_I.c.kind, _I.c.item_key))).all()
         return [WorkItem(kind=r.kind, key=r.item_key, status=r.status, reason=r.reason, fault=r.fault,
-                         batch_id=r.batch_id, pr_number=r.pr_number, attempts=r.attempts, deferrals=r.deferrals,
+                         batch_id=None if r.status == "waiting" else r.batch_id,
+                         pr_number=None if r.status == "waiting" else r.pr_number, attempts=r.attempts, deferrals=r.deferrals,
                          offers_declined=r.offers_declined, coalesce_key=r.coalesce_key, mistake_key=r.mistake_key,
                          payload=r.payload, source_run=r.source_run, enqueued_at=r.enqueued_at,
                          updated_at=r.updated_at) for r in rows]

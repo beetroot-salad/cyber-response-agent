@@ -90,7 +90,7 @@ def test_o2_the_view_names_each_items_status_batch_and_pr(seen):
     assert got[("findings", "f4")] == ("in_batch", batch_id, 7)
     assert got[("findings", "f2")] == ("held", batch_id, 7)
     assert got[("findings", "f3")] == ("dead", batch_id, 7)
-    assert got[("findings", "f1")][0] == "waiting"
+    assert got[("findings", "f1")] == ("waiting", None, None), "a waiting item shows the batch it left (#1476 review 10)"
     assert got[("questioner_findings", "q1")][0] == "in_batch"
     assert got[("pitfalls", "p1")] == ("waiting", None, None)
     assert got[("curation_requests", "run-9")] == ("waiting", None, None)
