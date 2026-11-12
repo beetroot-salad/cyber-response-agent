@@ -45,8 +45,11 @@ class Docker:
             out = "\n".join(sorted(self.labelled.get(label, ())))
         elif "image" in argv and "ls" in argv:
             out = "\n".join(sorted(self.cached))
+        elif "image" in argv and "inspect" in argv and "{{.Id}}" in argv:
+            out = "sha256:" + "ab" * 32     # an image's id on the lab server (#1391: the copy's marker names it)
         elif "image" in argv and "inspect" in argv and "-f" not in argv:
-            rc = 0 if argv[-1] in self.cached else 1
+            # the engine's copies of the lab's own images are current here (their marker tests are on the rig)
+            rc = 0 if argv[-1] in self.cached or "-lab-" in argv[-1] else 1
         return subprocess.CompletedProcess(argv, rc, stdout=out, stderr="")
 
     def inner(self, verb):
@@ -239,6 +242,17 @@ def test_the_service_answers_the_freezes_hosts_with_nothing_inspectable(parts):
     assert "--init" in service[0], "PID 1 must answer a stop"
 
 
+def test_the_service_is_handed_todays_ps_argv_not_the_one_baked_into_its_image(parts):
+    """#1391: the replica shim answers only the surface's argv, so the launcher passes that argv to
+    the service rather than trust a possibly older image's own copy."""
+    import json
+    docker = Docker()
+    lab_ops.LabOps(run=docker).serve_hosts(parts, freeze())
+    service = [r for r, _ in docker.inner("run") if lab_ops.QUERY_IMAGE in r][0]
+    i = service.index("--ps-argv")
+    assert json.loads(service[i + 1]) == lab_ops.PS_ARGV
+
+
 def test_the_frontend_is_the_edge_on_every_surface_port_without_the_key():
     docker = Docker()
     lab_ops.LabOps(run=docker)._frontends()
@@ -316,3 +330,54 @@ def test_serving_cached_hosts_takes_the_same_round_trips_whatever_the_host_count
         started = {w[w.index("--name") + 1] for w in Docker.script_commands(batch[0][-1]) if w[:2] == ["docker", "run"]}
         assert started == {*hosts, lab_ops.HOST_STATE_SERVICE}
     assert counts[1] == counts[len(HOSTS)], counts
+
+
+def _compose_runs() -> bool:
+    try:
+        return subprocess.run(["docker", "compose", "version"], capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(not _compose_runs(), reason="needs the docker compose CLI (no daemon)")
+@pytest.mark.parametrize("written", ['"pw-1"', "pw-1 # rotated today", "'pw-1'", "pw-1   "])
+def test_the_launcher_reads_the_password_as_compose_gives_it_to_es_init_not_as_the_line_is_written(
+        tmp_path, monkeypatch, written):
+    """#1391: real compose renders the lab's own compose.yml, so a quoted, commented or padded
+    value is the password es-init sets, and an operator's stale export is not consulted."""
+    playground = Path(lab_ops.PLAYGROUND)
+    (tmp_path / "soar").mkdir()
+    (tmp_path / "compose.yml").write_text((playground / "compose.yml").read_text())
+    (tmp_path / "soar" / "compose.yml").write_text((playground / "soar" / "compose.yml").read_text())
+    lines = [line for line in (playground / ".env.example").read_text().splitlines()
+             if not line.startswith(f"{lab_ops.READONLY_PASSWORD_ENV}=")]
+    (tmp_path / ".env").write_text("\n".join([*lines, f"{lab_ops.READONLY_PASSWORD_ENV}={written}", ""]))
+    monkeypatch.setenv(lab_ops.READONLY_PASSWORD_ENV, "stale-exported-password")
+    monkeypatch.setenv("DOCKER_HOST", "unix:///nonexistent.sock")   # config needs no daemon; never reach one
+    ops = lab_ops.LabOps(run=subprocess.run, lab_env_file=tmp_path / ".env")
+    assert ops.current_password() == "pw-1"
+
+
+def _saved(rig) -> list[str]:
+    """The lab-server images copied into the engine, in order (`docker save <image>` on the lab server)."""
+    return [argv[-1] for argv, _ in rig.docker.calls if "save" in argv and "exec" not in argv]
+
+
+def test_an_engine_copy_of_a_lab_image_is_current_by_its_marker_and_recopied_when_the_lab_rebuilds_it(tmp_path):
+    """#1391: every image the engine runs is the lab server's current one. A copy is marked with the
+    lab server's image id (the two daemons' own ids differ for one image), so an unchanged image is
+    copied once, a rebuild under the same tag is copied again, and the older marker is dropped."""
+    from _lab_fakes import LabRig
+    rig = LabRig(tmp_path)
+    rig.write_expected_case("none")
+    rig.launch()
+    first = _saved(rig)
+    assert {lab_ops.EDGE_IMAGE, lab_ops.QUERY_IMAGE, "soc-playground/cmdb:local"} <= set(first), first
+    rig.launch()
+    assert _saved(rig) == first, "an unchanged image is not copied again"
+    rig.docker.image_rev[lab_ops.QUERY_IMAGE] = 1
+    rig.launch()
+    assert _saved(rig)[len(first):] == [lab_ops.QUERY_IMAGE]
+    repo = lab_ops.QUERY_IMAGE.rpartition(":")[0]
+    markers = sorted(t for _, t in rig.docker.markers if t.startswith(f"{repo}:"))
+    assert len(markers) == 1 and markers[0].startswith(f"{repo}:local-lab-"), markers

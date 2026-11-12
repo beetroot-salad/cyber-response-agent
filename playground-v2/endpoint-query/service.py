@@ -36,7 +36,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import http.client
-import io
 import json
 import os
 import posixpath
@@ -75,9 +74,10 @@ class Docker(Protocol):
     def exec(self, name: str, argv: list[str]) -> tuple[int, bytes, bytes]:
         """Run `argv` in the container: (exit code, stdout, stderr)."""
 
-    def read(self, name: str, path: str) -> tuple[str, bytes | str] | None:
+    def read(self, name: str, path: str, *, digest: bool = False) -> tuple[str, bytes | str] | None:
         """What is at `path` in the container's filesystem, without running anything in it:
-        ("file", content), ("link", target), ("other", ""), or None when nothing is there."""
+        ("file", content) (at most MAX_OUTPUT bytes), ("link", target), ("other", ""), or None when
+        nothing is there. `digest`: a file's sha256 instead, ("sha256", hex), of any size."""
 
 
 # -- the Docker Engine API over its unix socket (no CLI in the image) ------------------------------
@@ -139,24 +139,39 @@ class SocketDocker:
             raise Unavailable(f"docker inspect {ref}: HTTP {status}")
         return json.loads(payload)
 
-    def read(self, name: str, path: str) -> tuple[str, bytes | str] | None:
-        status, payload = self._call("GET", f"/containers/{quote(name, safe='')}/archive?path={quote(path, safe='')}")
-        if status == 404:
-            return None
-        if status != 200:
-            raise Unavailable(f"docker archive {name}:{path}: HTTP {status}")
+    def read(self, name: str, path: str, *, digest: bool = False) -> tuple[str, bytes | str] | None:
+        """Streamed from the daemon: a hashed file is never held whole, whatever its size."""
+        conn = _UnixConnection(self.path)
         try:
-            with tarfile.open(fileobj=io.BytesIO(payload)) as tar:
+            conn.request("GET", f"/containers/{quote(name, safe='')}/archive?path={quote(path, safe='')}",
+                         headers={"Connection": "close"})
+            reply = conn.getresponse()
+            if reply.status == 404:
+                return None
+            if reply.status != 200:
+                raise Unavailable(f"docker archive {name}:{path}: HTTP {reply.status}")
+            with tarfile.open(fileobj=reply, mode="r|") as tar:
                 member = tar.next()
                 if member is None:
                     return None
                 if member.issym():
                     return "link", member.linkname
-                if member.isfile():
-                    return "file", tar.extractfile(member).read()
-                return "other", ""
-        except tarfile.TarError as exc:
-            raise Unavailable(f"docker archive {name}:{path}: {exc}") from exc
+                if not member.isfile():
+                    return "other", ""
+                content = tar.extractfile(member)
+                if digest:
+                    h = hashlib.sha256()
+                    while chunk := content.read(1 << 20):
+                        h.update(chunk)
+                    return "sha256", h.hexdigest()
+                data = content.read(MAX_OUTPUT + 1)
+                if len(data) > MAX_OUTPUT:
+                    raise Unavailable(f"{path} on {name} is over {MAX_OUTPUT} bytes")
+                return "file", data
+        except (OSError, http.client.HTTPException, tarfile.TarError) as exc:
+            raise Unavailable(f"docker archive {name}:{path}: {type(exc).__name__}: {exc}") from exc
+        finally:
+            conn.close()
 
     def exec(self, name: str, argv: list[str]) -> tuple[int, bytes, bytes]:
         status, payload = self._call("POST", f"/containers/{quote(name, safe='')}/exec",
@@ -199,7 +214,7 @@ class Service:
     def __init__(self, docker: Docker, *, hosts: list[str], inspectable: list[str], argv: list[str]) -> None:
         self.docker, self.hosts, self.inspectable, self.ps = docker, list(hosts), set(inspectable), list(argv)
 
-    def _resolve(self, ref: str, allowed: set[str] | list[str], what: str) -> dict | None:
+    def _resolve(self, ref: str, allowed: set[str] | list[str]) -> dict | None:
         """The daemon names the container; the list then decides. None: not one we serve."""
         doc = self.docker.container(ref)
         if doc is None or str(doc.get("Name", "")).lstrip("/") not in allowed:
@@ -207,7 +222,7 @@ class Service:
         return doc
 
     def _host(self, host: str) -> str:
-        doc = self._resolve(host, self.hosts, "host")
+        doc = self._resolve(host, self.hosts)
         if doc is None:
             raise _fail(404, f"host {host!r} is not enrolled")
         name = str(doc["Name"]).lstrip("/")
@@ -215,14 +230,15 @@ class Service:
             raise _fail(503, f"host {name!r} is enrolled but not running")
         return name
 
-    def _file(self, host: str, path: str) -> bytes | None:
-        """`path`'s content in the host, symlinks followed inside its filesystem; None if absent."""
+    def _file(self, host: str, path: str, *, digest: bool = False) -> bytes | str | None:
+        """`path`'s content in the host (`digest`: its sha256, any size), symlinks followed inside
+        its filesystem; None if absent."""
         for _ in range(MAX_LINKS + 1):
-            found = self.docker.read(host, path)
+            found = self.docker.read(host, path, digest=digest)
             if found is None:
                 return None
             kind, data = found
-            if kind == "file":
+            if kind in ("file", "sha256"):
                 return data
             if kind != "link":
                 raise _fail(503, f"{path!r} on {host} is not a regular file")
@@ -246,6 +262,8 @@ class Service:
             return a.status, a.body
         except Unavailable as exc:
             return 503, {"detail": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - whatever breaks, the caller gets the documented 503
+            return 503, {"detail": f"endpoint-query could not answer: {type(exc).__name__}: {str(exc)[:300]}"}
 
     def _route(self, method: str, target: str) -> dict:  # noqa: C901 - one flat route table
         parts = urlsplit(target)
@@ -276,7 +294,7 @@ class Service:
             case ["hosts", host, "packages"]:
                 return {"packages": dpkg_packages(self._required(self._host(host), DPKG_STATUS))}
             case ["containers", ref]:
-                doc = self._resolve(ref, self.inspectable, "container")
+                doc = self._resolve(ref, self.inspectable)
                 if doc is None:
                     raise _fail(404, f"no such container: {ref}")
                 return {"name": str(doc.get("Name", "")).lstrip("/"),
@@ -284,7 +302,7 @@ class Service:
         raise _fail(404, "no such route")
 
     def _authorized_keys(self, host: str, user: str) -> dict:
-        if not SAFE_USERNAME_RE.match(user):
+        if not SAFE_USERNAME_RE.fullmatch(user):
             raise _fail(400, f"refusing unsafe user value: {user!r}")
         host = self._host(host)
         record = next((line.split(":") for line in self._passwd(host) if line.split(":", 1)[0] == user), None)
@@ -303,13 +321,13 @@ class Service:
         if len(paths) != 1:
             raise _fail(400, "exactly one path is required")
         path = paths[0]
-        if not SAFE_PATH_RE.match(path) or any(s in (".", "..") for s in path.split("/")):
+        if not SAFE_PATH_RE.fullmatch(path) or any(s in (".", "..") for s in path.split("/")):
             raise _fail(400, f"refusing unsafe path value: {path!r}")
         host = self._host(host)
-        data = self._file(host, path)
-        if data is None:
+        digest = self._file(host, path, digest=True)
+        if digest is None:
             raise _fail(404, f"{path!r} does not exist on {host}")
-        return {"sha256": hashlib.sha256(data).hexdigest()}
+        return {"sha256": digest}
 
 
 def dpkg_packages(status: str) -> list[str]:
@@ -330,7 +348,9 @@ def dpkg_packages(status: str) -> list[str]:
 
 def make_handler(service: Service) -> type:
     class Handler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
+        # HTTP/1.0: one reply per connection, then close. No body is ever read (every route is a
+        # GET), so a body a client sent cannot be left on the connection as a next request.
+        protocol_version = "HTTP/1.0"
         server_version = "endpoint-query"
         sys_version = ""
 
@@ -360,13 +380,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--inspectable", type=Path, required=True, help="the containers inspect may name")
     parser.add_argument("--socket", default="/var/run/docker.sock")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--ps-argv", type=json.loads, default=None,
+                        help="the process-list argv as a JSON list (frozen: the launcher's, the one its "
+                             "replicas' shim answers); default: this image's lab-surface.json")
     args = parser.parse_args(argv)
     hosts = read_names(args.hosts)
     if not hosts:
         print(f"{args.hosts} names no host: nothing to serve", file=sys.stderr)
         return 2
+    argv_ps = args.ps_argv if args.ps_argv is not None else ps_argv()
+    if not (isinstance(argv_ps, list) and argv_ps and all(isinstance(a, str) for a in argv_ps)):
+        print(f"--ps-argv must be a non-empty JSON list of strings: {argv_ps!r}", file=sys.stderr)
+        return 2
     service = Service(SocketDocker(args.socket), hosts=hosts, inspectable=read_names(args.inspectable),
-                      argv=ps_argv())
+                      argv=argv_ps)
     ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(service)).serve_forever()
     return 0
 

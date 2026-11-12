@@ -269,19 +269,36 @@ class LabOps:
                     f"/out/{SHIM_FILE}")
         self._shim_ready = True
 
-    def _ensure_image(self, image: str, *, current: bool = False) -> None:
-        """`image` in the engine, copied from the lab server when absent. `current`: also when the
-        ids differ (a lab-built `:local` image changes under the same tag; an old copy would keep
-        serving the old surface or argv)."""
-        have = self._inner("image", "inspect", "-f", "{{.Id}}", image, check=False)
-        if have.returncode == 0:
-            if not current:
-                return
-            want = _text(self._outer("image", "inspect", "-f", "{{.Id}}", image).stdout).strip()
-            if _text(have.stdout).strip() == want:
-                return
-        saved = self._outer("save", image).stdout
-        self._inner("load", input=saved)
+    @staticmethod
+    def _repo_tag(image: str) -> tuple[str, str]:
+        repo, sep, tag = image.rpartition(":")
+        if not sep or "/" in tag:
+            return image, "latest"
+        return repo, tag
+
+    def _ensure_image(self, image: str) -> None:
+        """`image` in the engine as the lab server holds it now, for every image (a lab-built
+        `:local` one changes under the same tag; an old copy would keep serving the old surface,
+        argv or stub). The two daemons' image ids are not comparable (a containerd image store and
+        the engine's overlay2 give one image different ids), so the copy is marked with a tag
+        naming the lab server's id: the marker present means current. Otherwise the image is
+        copied and marked, and older markers of the tag are untagged (one an engine container
+        still uses stays, and goes on a later launch)."""
+        repo, tag = self._repo_tag(image)
+        outer_id = _text(self._outer("image", "inspect", "-f", "{{.Id}}", image).stdout).strip()
+        stamp = outer_id.removeprefix("sha256:")[:12]
+        if not stamp:
+            raise LabOpsError(f"the lab server has no id for {image}")
+        marker = f"{repo}:{tag}-lab-{stamp}"
+        if self._inner("image", "inspect", marker, check=False).returncode == 0:
+            return
+        self._inner("load", input=self._outer("save", image).stdout)
+        self._inner("tag", image, marker)
+        listed = self._inner("image", "ls", "--format", "{{.Tag}}", repo, check=False)
+        old = [f"{repo}:{t}" for t in _text(listed.stdout).split()
+               if t.startswith(f"{tag}-lab-") and f"{repo}:{t}" != marker]
+        if old:
+            self._inner("image", "rm", *old, check=False)
 
     def ensure_engine(self) -> None:
         """The engine container, running, with the lab's certs, the repository, the shim and its
@@ -492,20 +509,28 @@ class LabOps:
     # -- credentials ------------------------------------------------------------------------------
 
     def current_password(self) -> str:
-        """The read-only user's password as the lab stores it now (read at every launch): the lab
-        `.env`'s, the one es-init gives the live `defender-readonly`. Read from the file, never the
-        shell: an exported copy would override `.env` for compose too, and a rotation would then
-        put the old password back."""
+        """The read-only user's password as the lab stores it now (read at every launch): the value
+        compose gives es-init, which sets it on the live `defender-readonly`. Asked of compose
+        itself, so quotes, comments and spaces in `.env` read as compose reads them. The `.env`
+        must sit beside its compose.yml (compose.yml requires it there). An exported copy in the
+        shell would beat `.env` in compose, and a rotation would then put the old password back,
+        so it is removed from the environment compose sees. The rendered config holds every lab
+        secret: it is never logged."""
+        env = {k: v for k, v in os.environ.items() if k != READONLY_PASSWORD_ENV}
+        argv = ["docker", "compose", "-f", str(self.lab_env_file.parent / "compose.yml"),
+                "--env-file", str(self.lab_env_file), "config", "--format", "json"]
+        proc = self._exec(argv, check=False, env=env, text=True)
+        if proc.returncode != 0:
+            raise LabOpsError(f"compose could not render the lab config from {self.lab_env_file}: "
+                              f"{_text(proc.stderr).strip()[:500]}")
         try:
-            lines = self.lab_env_file.read_text().splitlines()
-        except OSError as exc:
-            raise LabOpsError(f"cannot read the lab .env ({self.lab_env_file}): {exc}") from exc
-        prefix = f"{READONLY_PASSWORD_ENV}="
-        values = [line[len(prefix):] for line in lines if line.startswith(prefix)]
-        if not values or not values[-1]:
+            value = json.loads(proc.stdout)["services"]["es-init"]["environment"]["DEFENDER_PASSWORD"]
+        except (ValueError, KeyError, TypeError):
+            value = None
+        if not isinstance(value, str) or not value:
             raise LabOpsError(f"{READONLY_PASSWORD_ENV} is not set in {self.lab_env_file}: the current password "
                               "of the lab's read-only Elasticsearch user")
-        return values[-1]
+        return value
 
     def create_readonly_user(self, password: str) -> None:
         """The proxy's read-only user in the frozen cluster: `read` on the lab's fixed read-only
@@ -558,7 +583,7 @@ class LabOps:
         """The lab's edge program as the frozen copy's one frontend, every port of SURFACE, key
         check off (#1391 r6 L1): the same declared-surface rule as live. The per-port forwarders
         an older launcher started are removed first (they hold the same ports)."""
-        self._ensure_image(EDGE_IMAGE, current=True)
+        self._ensure_image(EDGE_IMAGE)
         self._inner("rm", "-f", FRONTEND, *(f"frontend-{p}" for p in FRONTEND_PORTS), check=False)
         ports = [a for p in FRONTEND_PORTS for a in ("-p", f"{p}:{p}")]
         self._inner("run", "-d", "--name", FRONTEND, "--network", ENGINE_NETWORK, *ports,
@@ -608,7 +633,7 @@ class LabOps:
         listed = self._inner("image", "ls", "--format", "{{.Repository}}:{{.Tag}}", "frozen-host/*", check=False)
         present = set(_text(listed.stdout).split()) if listed.returncode == 0 else set()
         images = {h: self._replica_image(parts, freeze["parts"], h, present) for h in hosts}
-        self._ensure_image(QUERY_IMAGE, current=True)
+        self._ensure_image(QUERY_IMAGE)
         # One exec for every start, whatever the host count: each `_inner` is a round trip over the
         # lab's SSH context. `;` after the removal (a missing container is not an error), `&&`
         # after, so the first failed start fails the whole exec.
@@ -686,7 +711,8 @@ class LabOps:
         return ["docker", "run", "-d", "--init", "--name", HOST_STATE_SERVICE, "--hostname", HOST_STATE_SERVICE,
                 "--network", ENGINE_NETWORK, "-v", "/var/run/docker.sock:/var/run/docker.sock",
                 "-v", f"{QUERY_DIR}:/etc/endpoint-query:ro", QUERY_IMAGE,
-                "--hosts", "/etc/endpoint-query/hosts.txt", "--inspectable", "/etc/endpoint-query/inspectable.txt"]
+                "--hosts", "/etc/endpoint-query/hosts.txt", "--inspectable", "/etc/endpoint-query/inspectable.txt",
+                "--ps-argv", json.dumps(PS_ARGV)]
 
     def purge_host_cache(self, freeze: dict) -> list[str]:
         """Remove a freeze's host images and every replica image built from them, whatever shim or

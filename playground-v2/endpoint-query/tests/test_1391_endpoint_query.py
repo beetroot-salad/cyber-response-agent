@@ -81,13 +81,13 @@ class FakeDocker:
             return None
         return {"Id": c["id"], "Name": f"/{name}", "State": {"Running": c["running"]}, "Config": {"Image": c["image"]}}
 
-    def read(self, name, path):
+    def read(self, name, path, *, digest=False):
         self.reads.append((name, path))
         found = self.containers[name]["files"].get(path)
         if found is None:
             return None
         if isinstance(found, bytes):
-            return "file", found
+            return ("sha256", __import__("hashlib").sha256(found).hexdigest()) if digest else ("file", found)
         return ("link", found[1]) if found[0] == "link" else ("other", "")
 
     def exec(self, name, argv):
@@ -129,6 +129,8 @@ def test_each_route_answers(target, status, body):
     ("/hosts/web-1/accounts/nobody/authorized-keys", 404),   # no such user
     ("/hosts/web-1/accounts/bad%20user/authorized-keys", 400),
     ("/hosts/web-1/accounts/-x/authorized-keys", 400),
+    ("/hosts/web-1/accounts/root%0A/authorized-keys", 400),  # a trailing newline is not a user
+    ("/hosts/web-1/files/sha256?path=%2Fetc%2Fhosts%0A", 400),
     ("/hosts/web-1/files/sha256?path=etc%2Fhosts", 400),     # not absolute
     ("/hosts/web-1/files/sha256?path=%2Fetc%2F..%2Fshadow", 400),
     ("/hosts/web-1/files/sha256?path=%2Fetc%2Fhosts%3Bid", 400),
@@ -206,6 +208,48 @@ def test_a_daemon_that_cannot_answer_is_unavailable():
     assert service.answer("GET", "/hosts/web-1/processes")[0] == 503
 
 
+def _raw(service, payload):
+    """Send raw bytes to the real handler; every reply that comes back on that one connection."""
+    import socket
+    server = ThreadingHTTPServer(("127.0.0.1", 0), eq.make_handler(service))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with socket.create_connection(("127.0.0.1", server.server_address[1]), timeout=5) as s:
+            s.sendall(payload)
+            data = b""
+            while chunk := s.recv(65536):
+                data += chunk
+    finally:
+        server.shutdown()
+    return [line for line in data.split(b"\r\n") if line.startswith(b"HTTP/")], data
+
+
+def test_an_unexpected_failure_is_answered_503_not_a_dropped_connection():
+    class Garbled(FakeDocker):
+        def container(self, ref):
+            raise ValueError("a daemon reply that is not JSON")
+
+    service, _ = make(Garbled())
+    assert service.answer("GET", "/hosts/web-1/accounts")[0] == 503
+    statuses, data = _raw(service, b"GET /hosts/web-1/accounts HTTP/1.1\r\nHost: x\r\n\r\n")
+    assert statuses == [b"HTTP/1.0 503 Service Unavailable"] and b"ValueError" in data
+
+
+def test_one_reply_per_connection_so_a_body_is_never_read_as_the_next_request():
+    smuggled = b"GET /hosts HTTP/1.1\r\nHost: x\r\n\r\n"
+    service, docker = make()
+    statuses, _ = _raw(service, b"POST /hosts HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n" % len(smuggled)
+                       + smuggled)
+    assert statuses == [b"HTTP/1.0 405 Method Not Allowed"]
+
+
+def test_the_frozen_launcher_can_hand_the_service_its_ps_argv(tmp_path):
+    hosts = tmp_path / "hosts.txt"
+    hosts.write_text("web-1\n")
+    assert eq.main(["--hosts", str(hosts), "--inspectable", str(hosts), "--ps-argv", '"not a list"']) == 2
+    assert eq.main(["--hosts", str(hosts), "--inspectable", str(hosts), "--ps-argv", "[]"]) == 2
+
+
 def _frame(kind, data):
     return bytes([kind, 0, 0, 0]) + len(data).to_bytes(4, "big") + data
 
@@ -260,6 +304,8 @@ def daemon(tmp_path):
                 self._send(200, _tar_of("passwd", b"root:x:0:0::/root:/bin/bash\n"))
             elif self.path == "/containers/web-1/archive?path=%2Fetc%2Fmtab":
                 self._send(200, _tar_of("mtab", link="../proc/self/mounts"))
+            elif self.path == "/containers/web-1/archive?path=%2Fbig.bin":
+                self._send(200, _tar_of("big.bin", BIG), chunked=True)
             else:
                 self._send(404, b'{"message": "no such container"}')
 
@@ -295,6 +341,17 @@ def _tar_of(name, data=b"", *, link=None):
             info.size = len(data)
             t.addfile(info, io.BytesIO(data))
     return buf.getvalue()
+
+
+BIG = bytes(range(256)) * (3 * eq.MAX_OUTPUT // 256)   # three times the text cap
+
+
+def test_a_file_of_any_size_is_hashed_as_it_streams_but_text_reads_stay_capped(daemon):
+    path, _ = daemon
+    docker = eq.SocketDocker(path)
+    assert docker.read("web-1", "/big.bin", digest=True) == ("sha256", __import__("hashlib").sha256(BIG).hexdigest())
+    with pytest.raises(eq.Unavailable, match="over"):
+        docker.read("web-1", "/big.bin")
 
 
 def test_the_socket_client_speaks_the_daemons_shapes(daemon):

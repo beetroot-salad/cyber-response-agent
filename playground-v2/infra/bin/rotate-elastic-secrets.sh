@@ -108,5 +108,5 @@ echo
 echo "-> done. Delete ${backup} once you have checked the stack."
 echo "   defender-readonly has a new password (es-init set it): re-store the lab tenant's elastic"
 echo "   credential (basic, username defender-readonly, password = V2_DEFENDER_READONLY_PASSWORD in"
-echo "   .env) through the API, or every run starts with elastic down (401). Frozen launches read"
-echo "   the same variable: export the new value in the operator's shell."
+echo "   .env) through the API, or every run starts with elastic down (401). Frozen launches ask"
+echo "   compose for it from .env themselves: do not export it (an exported copy beats .env in compose)."

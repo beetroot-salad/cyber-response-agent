@@ -2,12 +2,19 @@
 # Answers the process-tree listing from a captured tree (#1347 D6). Installed as `ps` only on
 # replica hosts, with V2_PS_SHIM_TREE naming the captured file. The verb's fixed argv never falls
 # through to the live ps: without a readable tree it fails, so an empty or live list is never
-# taken for the process list as of T. Any other argv runs the real ps.
+# taken for the process list as of T. On a replica (a tree is set) every other argv is refused
+# too (#1391): a caller asking with another argv (a stale endpoint-query image, another tool)
+# would otherwise get the replica's own live processes as if they were the host's. With no tree
+# set (a live host, where this file is dormant) any other argv runs the real ps.
 if [ "$*" = "-eo pid,ppid,user,stat,etime,cmd --forest" ]; then
     if [ -z "$V2_PS_SHIM_TREE" ] || [ ! -r "$V2_PS_SHIM_TREE" ]; then
         echo "ps-shim: no captured process tree (V2_PS_SHIM_TREE unset or unreadable)" >&2
         exit 1
     fi
     exec cat "$V2_PS_SHIM_TREE"
+fi
+if [ -n "$V2_PS_SHIM_TREE" ]; then
+    echo "ps-shim: this replica answers only 'ps -eo pid,ppid,user,stat,etime,cmd --forest' (asked: ps $*)" >&2
+    exit 1
 fi
 exec /bin/ps "$@"
