@@ -8,15 +8,15 @@ import dataclasses
 import datetime as _dt
 import hashlib
 from collections.abc import Collection
-from typing import Any, TypeVar, overload
+from typing import Any, TypeVar, get_args, overload
 
 from defender.tenancy import InMemoryTenantRepository
 
-from defender.records.formats import CredentialId, MembershipId, TenantId, UserId
+from defender.records.formats import CredentialId, MembershipId, ProgramId, TenantId, UserId
 
-from .errors import CredentialCapReached, DataRuleViolation
+from .errors import CredentialCapReached, DataRuleViolation, TenantNotActive
 from .models import (
-    CredentialKind, Membership, MembershipStatus, ProgramCredential, Role, Session, User, UserStatus,
+    CredentialKind, Membership, MembershipStatus, PersonRole, Program, ProgramCredential, Session, User, UserStatus,
     normalize_email,
 )
 from .ports import ExpiryWarning
@@ -42,7 +42,7 @@ def secret_hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-_Row = TypeVar("_Row", User, Membership, Session, ProgramCredential)
+_Row = TypeVar("_Row", User, Membership, Session, ProgramCredential, Program)
 
 
 @overload
@@ -71,18 +71,10 @@ def holds_slot(row: ProgramCredential, now: _dt.datetime) -> bool:
 
 def check_credential_fields(*, kind: str, key_hash: str | None) -> None:
     """A key has its hash and an OAuth client has none (the SQL schema carries it as a CHECK)."""
-    if kind not in ("key", "oauth_client"):
+    if kind not in get_args(CredentialKind):
         raise DataRuleViolation(f"{kind!r} is not a credential kind")
     if (kind == "key") != (key_hash is not None):
         raise DataRuleViolation("a key has its hash, an OAuth client has none")
-
-
-def check_role(kind: str, role: str) -> None:
-    """A person is `admin`, a program `automation`."""
-    if role not in ("admin", "automation"):
-        raise DataRuleViolation(f"{role!r} is not a membership role")
-    if (kind == "program") != (role == "automation"):
-        raise DataRuleViolation(f"a {kind} cannot hold the {role!r} role")
 
 
 def first_warning(created_at: _dt.datetime, expires_at: _dt.datetime) -> tuple[int | None, _dt.datetime | None]:
@@ -136,6 +128,7 @@ class InMemoryIdentityRepository:
         self._by_account: dict[str, str] = {}
         self._memberships: dict[str, Membership] = {}
         self._sessions: dict[str, Session] = {}
+        self._programs: dict[str, Program] = {}
         self._credentials: dict[str, ProgramCredential] = {}
         self._warning_deliveries: dict[tuple[CredentialId, int, UserId], _dt.datetime] = {}
 
@@ -153,16 +146,13 @@ class InMemoryIdentityRepository:
         return {t for t in tenant_ids if self._active(t)}
 
     async def tenant_has_active_members(self, tenant_id: TenantId) -> bool:
-        return any(m.tenant_id == tenant_id and m.status == "active" and self._users[m.user_id].kind == "person"
-                   for m in self._memberships.values())
+        return any(m.tenant_id == tenant_id and m.status == "active" for m in self._memberships.values())
 
     # --- users -------------------------------------------------------------------------------
     def _new_user(
-        self, email: str | None, *, created_at: _dt.datetime, status: UserStatus = "invited",
+        self, email: str, *, created_at: _dt.datetime, status: UserStatus = "invited",
         display_name: str = "", signin_account_id: str | None = None, is_platform_admin: bool = False,
     ) -> User:
-        if email is None:
-            raise DataRuleViolation("a person needs an email address")
         email = normalize_email(email)
         if email in self._by_email:
             raise DataRuleViolation(f"the email {email!r} already belongs to a user")
@@ -182,6 +172,8 @@ class InMemoryIdentityRepository:
         display_name: str = "", signin_account_id: str | None = None, is_platform_admin: bool = False,
     ) -> User:
         """Seeder."""
+        if email is None:
+            raise DataRuleViolation("a person needs an email address")
         return _copy(self._new_user(
             email, created_at=created_at, status=status, display_name=display_name,
             signin_account_id=signin_account_id, is_platform_admin=is_platform_admin))
@@ -228,8 +220,6 @@ class InMemoryIdentityRepository:
             self._update_user(user_id, display_name=display_name, updated_at=now)
 
     async def set_platform_admin(self, user_id: UserId, flag: bool) -> None:
-        if flag and user_id in self._users and self._users[user_id].kind == "program":
-            raise DataRuleViolation("a program cannot be a platform administrator")
         if user_id in self._users:
             self._update_user(user_id, is_platform_admin=flag)
 
@@ -259,11 +249,10 @@ class InMemoryIdentityRepository:
         self, user_id: UserId, tenant_id: TenantId, *, status: MembershipStatus, invited_by: UserId | None,
         created_at: _dt.datetime, expires_at: _dt.datetime | None = None,
         accepted_at: _dt.datetime | None = None, ended_at: _dt.datetime | None = None,
-        ended_by: UserId | None = None, role: Role = "admin",
+        ended_by: UserId | None = None, role: PersonRole = "admin",
     ) -> Membership:
         """Seeder."""
         self._refuse_dangling(user_id, tenant_id)
-        check_role(self._users[user_id].kind, role)
         self._refuse_unknown_actor(invited_by, ended_by)
         check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at)
         if status in _LIVE and self._live_row(user_id, tenant_id) is not None:
@@ -277,9 +266,9 @@ class InMemoryIdentityRepository:
         self, user_id: UserId, tenant_id: TenantId, *, invited_by: UserId | None, now: _dt.datetime,
         expires_at: _dt.datetime | None = None,
     ) -> Membership | None:
+        if not self._active(tenant_id):  # P-L: the write holds the tenant `active` (memory: one step, no lock)
+            raise TenantNotActive(f"tenant {tenant_id!r} is not active")
         self._refuse_dangling(user_id, tenant_id)
-        if self._users[user_id].kind == "program":
-            raise DataRuleViolation("a program is never invited")
         live = self._live_row(user_id, tenant_id)
         if live is not None:
             return None if live.status == "active" else _copy(live)
@@ -328,57 +317,80 @@ class InMemoryIdentityRepository:
     ) -> list[tuple[Membership, User]]:
         return [(m, _copy(self._users[m.user_id]))
                 for m in await self.memberships_of_tenant(tenant_id)
-                if m.status == status and self._users[m.user_id].kind == "person"]
+                if m.status == status]
 
     async def active_membership(self, user_id: UserId, tenant_id: TenantId) -> Membership | None:
         row = self._live_row(user_id, tenant_id)
         return _copy(row) if row is not None and row.status == "active" else None
 
-    def _standing_membership(self, program_id: UserId) -> Membership | None:
-        """The program's active `automation` membership in an `active` tenant (the store's one reading of it)."""
-        return next((m for m in self._memberships.values() if m.user_id == program_id and m.status == "active"
-                     and m.role == "automation" and self._active(m.tenant_id)), None)
-
-    async def program_standing(self, program_id: UserId) -> tuple[User, Membership] | None:
-        program = self._users.get(program_id)
-        if program is None or program.kind != "program" or program.status != "active":
-            return None
-        row = self._standing_membership(program_id)
-        return None if row is None else (_copy(program), _copy(row))
-
     # --- programs and their credentials ---------------------------------------------------------
+    def _in_standing(self, program_id: ProgramId) -> bool:
+        """The one standing rule (O-D): the program is `active` and its tenant `active`."""
+        program = self._programs.get(program_id)
+        return program is not None and program.active and self._active(program.tenant_id)
+
+    def _admit(self, row: ProgramCredential | None, now: _dt.datetime) -> tuple[ProgramCredential, Program] | None:
+        """The credential and its program when the credential is usable and the program in standing."""
+        if row is None or not usable(row, now) or not self._in_standing(row.program_id):
+            return None
+        return _copy(row), _copy(self._programs[row.program_id])
+
+    async def admit_by_key(self, key_hash: str, *, now: _dt.datetime) -> tuple[ProgramCredential, Program] | None:
+        return next((a for r in self._credentials.values() if r.kind == "key" and r.key_hash == key_hash
+                     and (a := self._admit(r, now)) is not None), None)
+
+    async def admit_by_client(
+        self, client_id: CredentialId, *, service_account_id: str, now: _dt.datetime,
+    ) -> tuple[ProgramCredential, Program] | None:
+        row = self._credentials.get(client_id)
+        if row is None or row.kind != "oauth_client" or row.service_account_id != service_account_id:
+            return None
+        return self._admit(row, now)
+
+    async def admit_by_credential(
+        self, credential_id: CredentialId, *, now: _dt.datetime,
+    ) -> tuple[ProgramCredential, Program] | None:
+        return self._admit(self._credentials.get(credential_id), now)
+
+    async def program(self, program_id: ProgramId) -> Program | None:
+        return _copy(self._programs.get(program_id))
+
     async def add_program(
         self, tenant_id: TenantId, *, display_name: str, created_by: UserId, now: _dt.datetime,
-    ) -> User:
-        creator = self._users.get(created_by)
-        if creator is None or creator.kind != "person":
+    ) -> Program:
+        # The order PostgreSQL refuses in: the tenant (P-L), then the name (`Program.new`), then the creator (its key).
+        if not self._active(tenant_id):
+            raise TenantNotActive(f"tenant {tenant_id!r} is not active")
+        program = Program.new(tenant_id, display_name=display_name, created_by=created_by, created_at=now)
+        if created_by not in self._users:
             raise DataRuleViolation(f"no person {created_by!r} to create a program")
-        if self._tenants.state_of(tenant_id) is None:
-            raise DataRuleViolation(f"no tenant {tenant_id!r}")
-        program = User.new_program(display_name=display_name, created_by=created_by, created_at=now)
-        self._users[program.id] = program
-        self._insert_membership(
-            user_id=program.id, tenant_id=tenant_id, status="active", invited_by=created_by, created_at=now,
-            accepted_at=now, role="automation")
+        self._programs[program.id] = program
         return _copy(program)
 
-    async def programs_of_tenant(self, tenant_id: TenantId) -> list[User]:
-        rows = [m for m in self._memberships.values()
-                if m.tenant_id == tenant_id and m.status == "active" and self._users[m.user_id].kind == "program"]
-        return [_copy(self._users[m.user_id]) for m in sorted(rows, key=lambda m: (m.created_at, m.id))]
+    async def programs_of_tenant(self, tenant_id: TenantId) -> list[Program]:
+        rows = [p for p in self._programs.values() if p.tenant_id == tenant_id and p.active]
+        return [_copy(p) for p in sorted(rows, key=lambda p: (p.created_at, p.id))]
+
+    async def tenants_of_credentials(self, credential_ids: Collection[CredentialId]) -> dict[CredentialId, TenantId]:
+        """Each credential's program's tenant, whatever the program or tenant has become; an id that is none is left out."""
+        found = {}
+        for c in credential_ids:
+            row = self._credentials.get(c)
+            if row is not None:
+                found[CredentialId(c)] = self._programs[row.program_id].tenant_id
+        return found
 
     def _revoke(self, row: ProgramCredential, *, by: UserId | None, now: _dt.datetime) -> None:
         self._credentials[row.id] = dataclasses.replace(row, state="revoked", revoked_at=now, revoked_by=by)
 
     async def remove_program(
-        self, program_id: UserId, *, removed_by: UserId | None, now: _dt.datetime,
+        self, program_id: ProgramId, *, removed_by: UserId | None, now: _dt.datetime,
     ) -> list[CredentialId] | None:
-        program = self._users.get(program_id)
-        membership = next((m for m in self._memberships.values() if m.user_id == program_id and m.status == "active"), None)
-        if program is None or program.kind != "program" or membership is None:
+        program = self._programs.get(program_id)
+        if program is None or not program.active:
             return None
         self._refuse_unknown_actor(removed_by)
-        self._update_membership(membership.id, status="ended", ended_at=now, ended_by=removed_by)
+        self._programs[program_id] = dataclasses.replace(program, removed_at=now, removed_by=removed_by)
         revoked = sorted((r for r in self._credentials.values()
                           if r.program_id == program_id and r.state in ("pending", "live")),
                          key=lambda r: (r.created_at, r.id))
@@ -387,15 +399,15 @@ class InMemoryIdentityRepository:
         return [r.id for r in revoked]
 
     async def add_credential(
-        self, program_id: UserId, *, kind: CredentialKind, name: str, created_by: UserId,
+        self, program_id: ProgramId, *, kind: CredentialKind, name: str, created_by: UserId,
         expires_at: _dt.datetime, now: _dt.datetime, key_hash: str | None = None,
         credential_id: CredentialId | None = None,
     ) -> ProgramCredential | None:
-        program = self._users.get(program_id)
-        if program is None or program.kind != "program":
+        program = self._programs.get(program_id)
+        if program is None:
             raise DataRuleViolation(f"{program_id!r} is no program")
         check_credential_fields(kind=kind, key_hash=key_hash)
-        if not any(m.user_id == program_id and m.status == "active" for m in self._memberships.values()):
+        if not program.active:
             return None
         self._refuse_unknown_actor(created_by)
         if sum(holds_slot(r, now) for r in self._credentials.values() if r.program_id == program_id) >= CREDENTIAL_CAP:
@@ -414,7 +426,7 @@ class InMemoryIdentityRepository:
     async def go_live(self, credential_id: CredentialId, *, service_account_id: str, now: _dt.datetime) -> bool:
         row = self._credentials.get(credential_id)
         if (row is None or row.state != "pending" or row.pending_deadline is None or row.pending_deadline <= now
-                or not any(m.user_id == row.program_id and m.status == "active" for m in self._memberships.values())):
+                or not self._programs[row.program_id].active):
             return False
         self._credentials[row.id] = dataclasses.replace(row, state="live", service_account_id=service_account_id)
         return True
@@ -430,10 +442,7 @@ class InMemoryIdentityRepository:
     async def credential_by_id(self, credential_id: CredentialId) -> ProgramCredential | None:
         return _copy(self._credentials.get(credential_id))
 
-    async def credential_by_hash(self, key_hash: str) -> ProgramCredential | None:
-        return _copy(next((r for r in self._credentials.values() if r.key_hash == key_hash), None))
-
-    async def credentials_of_program(self, program_id: UserId) -> list[ProgramCredential]:
+    async def credentials_of_program(self, program_id: ProgramId) -> list[ProgramCredential]:
         rows = [r for r in self._credentials.values() if r.program_id == program_id]
         return [_copy(r) for r in sorted(rows, key=lambda r: (r.created_at, r.id))]
 
@@ -444,21 +453,21 @@ class InMemoryIdentityRepository:
         self._credentials[row.id] = dataclasses.replace(row, last_used_at=now)
         return True
 
-    async def revoke_stale_pending(self, *, now: _dt.datetime) -> list[CredentialId]:
+    async def revoke_stale_pending(self, *, now: _dt.datetime) -> list[tuple[CredentialId, TenantId]]:
         stale = [r for r in self._credentials.values()
                  if r.state == "pending" and r.pending_deadline is not None and r.pending_deadline <= now]
         for row in stale:
             self._revoke(row, by=None, now=now)
-        return [r.id for r in stale]
+        return [(r.id, self._programs[r.program_id].tenant_id) for r in stale]
 
     async def oauth_credentials_to_keep(self, *, now: _dt.datetime) -> set[CredentialId]:
         return {r.id for r in self._credentials.values()
-                if r.kind == "oauth_client" and holds_slot(r, now) and self._standing_membership(r.program_id)}
+                if r.kind == "oauth_client" and holds_slot(r, now) and self._in_standing(r.program_id)}
 
     async def claim_expiry_warning(self, *, now: _dt.datetime, hold_until: _dt.datetime) -> ExpiryWarning | None:
         due = sorted((r for r in self._credentials.values()
                       if usable(r, now) and r.warn_next_at is not None and r.warn_next_at <= now
-                      and self._standing_membership(r.program_id)),
+                      and self._in_standing(r.program_id)),
                      key=lambda r: (r.warn_next_at, r.id))
         if not due:
             return None

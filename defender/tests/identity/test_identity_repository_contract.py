@@ -849,6 +849,8 @@ def _mutate(model: object) -> None:
             changed = value + dt.timedelta(days=1)
         elif name == "status":  # another status the model accepts; the models refuse any other value
             changed = "invited" if value == "active" else "active"
+        elif name == "role":  # `admin` is the one role the model accepts: there is no other value to change it to
+            continue
         elif isinstance(value, str):
             changed = value + "-mutated"
         else:

@@ -65,6 +65,13 @@ class UserId(UuidId):
     domain = "user"
 
 
+class ProgramId(UuidId):
+    """A program's id (#1454): a `programs` row, never a user."""
+
+    __slots__ = ()
+    domain = "program"
+
+
 class MembershipId(UuidId):
     __slots__ = ()
     domain = "membership"

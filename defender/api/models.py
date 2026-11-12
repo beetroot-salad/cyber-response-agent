@@ -15,7 +15,7 @@ from defender.kit.access import secret_fields
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
 from defender.records.formats import (
-    AlertId, AlertMappingFault, CredentialId, InvestigationId, LearningJobId, MembershipId, TenantId, UserId,
+    AlertId, AlertMappingFault, CredentialId, InvestigationId, LearningJobId, MembershipId, ProgramId, TenantId, UserId,
     check_mapping,
 )
 
@@ -368,7 +368,7 @@ class Me(BaseModel):
 
 
 class ProgramRef(BaseModel):
-    id: UserId
+    id: ProgramId
     display_name: str
 
 
@@ -397,9 +397,9 @@ class ProgramCreate(BaseModel):
 
 
 class Program(BaseModel):
-    id: UserId
+    id: ProgramId
     display_name: str
-    created_by: UserId | None = Field(description="The administrator who made it.")
+    created_by: UserId = Field(description="The administrator who made it.")
     created_at: Instant
 
 

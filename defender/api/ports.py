@@ -13,7 +13,7 @@ from defender.identity import IdentityService
 # The store's refusals are the API's: one class each, so the store's raise is the API's answer
 # with no mapping between them (#1342).
 from defender.jobs.errors import Conflict, NotFound, UnknownReference  # noqa: F401 — re-exported: the API's refusals
-from defender.records.formats import AlertId, CredentialId, InvestigationId, LearningJobId, TenantId, UserId
+from defender.records.formats import AlertId, CredentialId, InvestigationId, LearningJobId, ProgramId, TenantId, UserId
 
 from .models import (
     Alert,
@@ -42,7 +42,8 @@ class Principal:
     `Principal` exists (`app._principal`)."""
 
     tenant_id: TenantId
-    user_id: UserId
+    #: A person's user id or a program's id (both UUID text); audit actors are free text in the log.
+    actor_id: UserId | ProgramId
     #: The credential a program's request came in on; None for a person (#1307 D6).
     credential_id: CredentialId | None = None
 

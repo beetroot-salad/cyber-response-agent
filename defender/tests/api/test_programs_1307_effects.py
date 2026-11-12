@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import collections
 import itertools
 from collections.abc import Callable
 from typing import Any
@@ -40,6 +41,7 @@ from defender.tests.support.api._programs1307 import (  # noqa: E402
 import datetime as _dt  # noqa: E402
 
 PENDING_DEADLINE = _dt.timedelta(minutes=10)
+ORPHAN_PREFIX = "6d3c1f0e-0000-4000-8000-"
 ORPHANS = ("6d3c1f0e-0000-4000-8000-0000000000a1", "6d3c1f0e-0000-4000-8000-0000000000a2")
 
 
@@ -68,9 +70,9 @@ def _orphan(s: Soar, client_id: str) -> None:
     s.world.realm.clients[client_id] = Client(client_id, f"00000000-5a00-4000-8000-{client_id[-12:]}", "kc-secret")
 
 
-def _reconcilable(s: Soar) -> list[str]:
+def _reconcilable(s: Soar, more: int = 0) -> list[str]:
     """A realm with a kept client, one whose credential was revoked, two no row names, and one whose creation crashed midway and whose
-    `pending` row is past its deadline: the clients reconciliation deletes are returned (sorted)."""
+    `pending` row is past its deadline, plus `more` of each of those three: the clients reconciliation deletes are returned (sorted)."""
     kept = issue_oauth(s.ann, T1, str(create_program(s.ann, T1, "Kept")["id"]))
     revoked = issue_oauth(s.ann, T1, s.program_id)
     assert revoke(s.ann, T1, s.program_id, revoked).status_code == 204
@@ -80,7 +82,15 @@ def _reconcilable(s: Soar) -> list[str]:
     stale = s.world.crashed_oauth_create(s.ann, other)
     s.world.clock.advance(PENDING_DEADLINE + _dt.timedelta(seconds=1))
     assert kept in s.world.realm.clients
-    return sorted([revoked, stale, *ORPHANS])
+    extra = []
+    for n in range(more):
+        extra.append(issue_oauth(s.ann, T1, s.program_id))
+        assert revoke(s.ann, T1, s.program_id, extra[-1]).status_code == 204
+        extra.append(f"{ORPHAN_PREFIX}{0x100 + n:012x}")
+        _orphan(s, extra[-1])
+        extra.append(s.world.crashed_oauth_create(s.ann, str(create_program(s.ann, T1, f"Other {n}")["id"])))
+    s.world.clock.advance(PENDING_DEADLINE + _dt.timedelta(seconds=1))  # the extra crashed rows were made after the last advance: age them past their own deadline
+    return sorted([revoked, stale, *ORPHANS, *extra])
 
 
 def _issue(kind: str) -> Callable[[Soar], Callable[[], Any]]:
@@ -132,8 +142,10 @@ OPERATIONS: dict[str, Callable[[Soar], Callable[[], Any]]] = {
 
 
 def _rows(s: Soar) -> list[Any]:
-    programs = {p for r in s.world.call(s.world.raw_repo.memberships_of_tenant, T1) for p in [str(r.user_id)]}
-    return [row for program in sorted(programs) for row in s.world.credentials(program)]
+    # the seeded program (which an operation may remove, so it is named) and the tenant's other active programs (#1454: programs
+    # are their own rows, not memberships)
+    active = {str(p.id) for p in s.world.call(s.world.raw_repo.programs_of_tenant, T1)}
+    return [row for program in sorted({s.program_id, *active}) for row in s.world.credentials(program)]
 
 
 def _facts(s: Soar, audit: AuditLog, clients_before: set[str]) -> list[str]:
@@ -220,3 +232,52 @@ def _reconcile_once(s: Soar) -> Any:
     except Exception as e:  # noqa: BLE001 — the pass raises its first failure; the test inspects it
         return e
     return None
+
+
+def _repo_calls_before_the_first_delete(plan: FaultPlan) -> list[tuple[int, str]]:
+    """(call number, method) of every repository call the pass made before its first client deletion."""
+    first_delete = next(i for i, (who, name, _) in enumerate(plan.calls) if (who, name) == ("realm", "delete_client"))
+    return [(i, name) for i, (who, name, _) in enumerate(plan.calls[:first_delete]) if who == "repo"]
+
+
+def test_1454_a_cleanup_pass_reads_the_tenants_it_needs_once_before_it_deletes_and_audits_them(caplog: pytest.LogCaptureFixture) -> None:
+    """The keep-set and the tenants are read once before the first deletion, and the repository calls the pass makes do not grow
+    with the clients to delete; each deletion is audited with its tenant, none for a client with no row (O-F)."""
+    calls = {}
+    for more in (0, 3):  # 4 clients to delete, then 13
+        caplog.clear()
+        s, audit, plan = _world(caplog)
+        doomed = _reconcilable(s, more)
+        plan.arm(None)
+        assert _reconcile_once(s) is None
+        assert sorted(s.world.realm.deleted) == doomed
+        assert len(doomed) == 4 + 3 * more
+        assert sorted((e.target, e.tenant_id) for e in audit.events() if e.action == CLIENT_DELETE) == sorted(
+            (c, None if c.startswith(ORPHAN_PREFIX) else T1) for c in doomed)
+        before = [name for _, name in _repo_calls_before_the_first_delete(plan)]
+        assert before.count("oauth_credentials_to_keep") == before.count("tenants_of_credentials") == 1, before
+        calls[more] = collections.Counter(name for who, name, _ in plan.calls if who == "repo")
+    assert calls[0] == calls[3], calls  # no per-client or per-row lookup of any kind
+
+
+def test_1454_a_failed_read_in_a_cleanup_pass_deletes_nothing_and_fails_the_pass(caplog: pytest.LogCaptureFixture) -> None:
+    """A fault at the keep-set read or at the tenant read, both of which come before the first deletion, leaves every client in
+    the realm, audits no deletion and fails the pass with the fault; the unfaulted pass deletes them all (O-F)."""
+    s, audit, plan = _world(caplog)
+    doomed = _reconcilable(s)
+    plan.arm(None)
+    assert _reconcile_once(s) is None
+    assert sorted(s.world.realm.deleted) == doomed  # control: unfaulted, all deleted
+    reads = [(i, name) for i, name in _repo_calls_before_the_first_delete(plan)
+             if name in ("oauth_credentials_to_keep", "tenants_of_credentials")]
+    assert sorted(name for _, name in reads) == ["oauth_credentials_to_keep", "tenants_of_credentials"], reads
+    for at, name in reads:
+        caplog.clear()
+        s, audit, plan = _world(caplog)
+        doomed_here = _reconcilable(s)  # ids are minted per world
+        plan.arm(at)
+        outcome = _reconcile_once(s)
+        assert isinstance(outcome, InjectedProgramsFault), (name, outcome)
+        assert s.world.realm.deleted == [], name
+        assert [c for c in doomed_here if c not in s.world.realm.clients] == [], name
+        assert CLIENT_DELETE not in [e.action for e in audit.events()], name

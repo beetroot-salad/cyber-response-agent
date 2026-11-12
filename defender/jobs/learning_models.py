@@ -1,6 +1,6 @@
 """The learning store's tables (#1278): work items, batches and the commit-maker's record, and #1414's feedback
 records (A4: the feedback issues, the comments taken in, the feedback tick's lease and cursor), in the
-`learning` schema. Every value is set in Python (no server defaults); migration `0012_learning_store`
+`learning` schema. Every value is set in Python (no server defaults); migration `0013_learning_store`
 creates them. The rules the data holds on its own are constraints here, so #1339's catalog comparison
 covers them: one item per (tenant, kind, key), one waiting request per case, at most one not-ended authoring
 batch per lane and one working batch per lane, one run per feedback issue."""

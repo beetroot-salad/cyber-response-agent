@@ -3,13 +3,13 @@
 
 The two CHECK constraints on `tenancy.tenants` that name the actions are replaced; no row changes.
 
-Revision ID: 0013_learning_cutover_action
-Revises: 0012_learning_store
+Revision ID: 0014_learning_cutover_action
+Revises: 0013_learning_store
 """
 from alembic import op
 
-revision = "0013_learning_cutover_action"
-down_revision = "0012_learning_store"
+revision = "0014_learning_cutover_action"
+down_revision = "0013_learning_store"
 
 SCHEMA = "tenancy"
 ACTIONS = "'create', 'rotate', 'offboard', 'delete_repo', 'learning_cutover'"

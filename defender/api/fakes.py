@@ -295,7 +295,7 @@ class _InMemoryTransaction:
         self._store = store
         self._clock = clock
         self._tenant_id = tenant_id
-        self._actor = principal.user_id
+        self._actor = principal.actor_id
         self._credential_id = principal.credential_id
         self._pending: list[AuditEvent] = []  # lint-stale-ref: ok — unrelated local attribute named _pending, not the retired learning queue
 

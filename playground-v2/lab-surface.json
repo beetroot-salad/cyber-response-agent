@@ -1,0 +1,15 @@
+{
+  "_doc": "The lab's public surface (#1391 r6 L1, L3), the one source for every copy of these facts. Keyed by the tenant's system name. `port` is what the tenant declares and what the edge (live) and the frozen engine's frontend publish; `service` is the container the edge forwards to, on `service_port` (or on `port` for a passthrough). `writes` are the non-GET calls the lab tenant may declare (method, path; `*` is one segment); the edge refuses every other non-GET call and every `/admin/...` path. A `passthrough` system is forwarded as bytes (Elasticsearch authenticates itself). `ps_argv` is the process-list command capture records, the endpoint-query service runs and the replica `ps` shim answers. `readonly_indices` is what `defender-readonly` may read, live (es-init in compose.yml, checked against this list by a test) and frozen (the launcher): fixed and broad, never a copy of the tenant's patterns.",
+  "service_port": 8080,
+  "systems": {
+    "cmdb": {"port": 8001, "service": "cmdb", "writes": []},
+    "threat-intel": {"port": 8002, "service": "threat-intel", "writes": [["POST", "/lookup"]]},
+    "change-mgmt": {"port": 8003, "service": "change-mgmt", "writes": []},
+    "ticket": {"port": 8004, "service": "ticket-server", "writes": [["POST", "/tickets/*/comments"]]},
+    "identity": {"port": 8005, "service": "identity", "writes": []},
+    "host-state": {"port": 8007, "service": "endpoint-query", "writes": []},
+    "elastic": {"port": 9200, "service": "elasticsearch", "passthrough": true}
+  },
+  "ps_argv": ["ps", "-eo", "pid,ppid,user,stat,etime,cmd", "--forest"],
+  "readonly_indices": ["logs-*", ".alerts-security.alerts-*", ".internal.alerts-security.alerts-*"]
+}

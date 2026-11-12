@@ -4,13 +4,13 @@ mail. Structural, so the in-memory and PostgreSQL repositories and the test fake
 from __future__ import annotations
 
 import datetime as _dt
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from typing import Protocol
 
 from defender._model import model
-from defender.records.formats import CredentialId, MembershipId, TenantId, UserId
+from defender.records.formats import CredentialId, MembershipId, ProgramId, TenantId, UserId
 
-from .models import CredentialKind, Membership, MembershipStatus, ProgramCredential, Session, User
+from .models import CredentialKind, Membership, MembershipStatus, Program, ProgramCredential, Session, User
 
 
 @model(frozen=True)
@@ -50,15 +50,19 @@ class IdentityRepository(Protocol):
     - every status change is conditional on the expected status and reports whether it applied;
     - `active` carries `accepted_at`, `ended` carries `ended_at` and `ended_by`;
     - a session is found by the hash of its value, and the value itself is never kept;
-    - a person has an email and the `admin` role; a program has neither an email, an account nor the
-      administrator flag, is always `active`, holds only the `automation` role, is never invited, and
-      owns credentials (at most two usable or still-pending at once, only while its membership is active),
-      and only a program owns one: that is a rule of the data itself (a foreign key to the user's kind), not
-      something to check again when a credential is used;
+    - a person has an email and the `admin` role; a program is a row of its own (`Program`: its tenant, creator and
+      status `active` | `removed`), never a user, a member or invited, and owns credentials (at most two usable or
+      still-pending at once, only while it is `active`), and only a program owns one: that is a rule of the data
+      itself (a foreign key to `programs`), not something to check again when a credential is used;
     - a program's display name and a credential's name hold only what PostgreSQL text can (no NUL, no lone
       surrogate);
-    - every write that decides from what it reads (the cap, removal, going live) is serialised on the program's
-      user row. The one write that does not take it, `revoke_stale_pending`, decides nothing: it revokes only a
+    - a write that makes something live in a tenant (`add_program`, `ensure_invitation`, `accept_invitation`) holds the
+      tenant `active` while it writes (P-L): in PostgreSQL it takes the tenant row `FOR SHARE` first
+      (`tenancy.models.share_tenant`); the creates raise `TenantNotActive`, accepting returns `False`;
+    - a program is *in standing* when it is `active` and its tenant is `active` (O-D): the one rule behind every
+      admission, the expiry-warning claim and the keep-set;
+    - every write that decides from what it reads (the cap, removal, going live) is serialised on the program's own
+      row. The one write that does not take it, `revoke_stale_pending`, decides nothing: it revokes only a
       `pending` row past its deadline, and going live refuses that same row, so the two cannot both apply.
 
     Time is an explicit aware-UTC argument; the repository holds no clock. Every method is a
@@ -101,11 +105,11 @@ class IdentityRepository(Protocol):
         expires_at: _dt.datetime | None = None,
     ) -> Membership | None:
         """The user's `invited` row for the tenant, or a new one; `None` when the user is
-        already an active member. Finished rows are never reopened."""
+        already an active member. Finished rows are never reopened. `TenantNotActive` unless the tenant is `active`."""
         ...
     async def accept_invitation(self, membership_id: MembershipId, *, now: _dt.datetime) -> bool:
         """`invited` -> `active` while unexpired (`expires_at` unset or after `now`) and while its
-        tenant is `active`, checked in the same statement."""
+        tenant is `active`, checked in the same transaction under the tenant's share lock (P-L)."""
         ...
     async def end_membership(self, membership_id: MembershipId, *, ended_by: UserId | None, now: _dt.datetime) -> bool: ...
     async def revoke_invitation(self, membership_id: MembershipId) -> bool: ...
@@ -118,61 +122,78 @@ class IdentityRepository(Protocol):
         """The tenant's rows in `status`, each with its user, in one read."""
         ...
     async def active_membership(self, user_id: UserId, tenant_id: TenantId) -> Membership | None: ...
-    async def program_standing(self, program_id: UserId) -> tuple[User, Membership] | None:
-        """The program and its active `automation` membership, while the tenant it belongs to is `active`; else
-        None. One read: whether a verified credential lets its program in at all."""
-        ...
 
-    # --- programs and their credentials (#1307)
+    # --- programs and their credentials (#1307, #1454)
+    async def program(self, program_id: ProgramId) -> Program | None:
+        """The program at any status."""
+        ...
     async def add_program(
         self, tenant_id: TenantId, *, display_name: str, created_by: UserId, now: _dt.datetime,
-    ) -> User:
-        """A program of the tenant: an active user of kind program with one active `automation` membership."""
+    ) -> Program:
+        """An `active` program of the tenant, made by a person. `TenantNotActive` unless the tenant is `active` (P-L)."""
         ...
-    async def programs_of_tenant(self, tenant_id: TenantId) -> list[User]:
-        """The tenant's programs with an active membership."""
+    async def programs_of_tenant(self, tenant_id: TenantId) -> list[Program]:
+        """The tenant's `active` programs."""
         ...
     async def remove_program(
-        self, program_id: UserId, *, removed_by: UserId | None, now: _dt.datetime,
+        self, program_id: ProgramId, *, removed_by: UserId | None, now: _dt.datetime,
     ) -> list[CredentialId] | None:
-        """One write: end the program's active membership and revoke every credential still `pending` or
+        """One write: mark the program `removed` (who, when) and revoke every credential still `pending` or
         `live`; the ids it revoked, read inside that write, so a credential added just before is among them.
-        None when it has no active membership."""
+        None when it is not `active`."""
         ...
     async def add_credential(
-        self, program_id: UserId, *, kind: CredentialKind, name: str, created_by: UserId,
+        self, program_id: ProgramId, *, kind: CredentialKind, name: str, created_by: UserId,
         expires_at: _dt.datetime, now: _dt.datetime, key_hash: str | None = None,
         credential_id: CredentialId | None = None,
     ) -> ProgramCredential | None:
         """A key (`live`, with its hash) or an OAuth client (`pending`, deadline `now` + 10 minutes, no hash).
-        None, writing nothing, for a program without an active membership (removed: an answer, as for
-        `remove_program`). Refused for a user that is no program or a key without its hash; and, as
+        None, writing nothing, for a removed program (an answer, as for
+        `remove_program`). Refused for an id that is no program or a key without its hash; and, as
         `CredentialCapReached`, when the program already has two credentials that are usable or pending within
         their deadline.
         The id is minted unless given (a key's value holds its id, so the caller mints it first)."""
         ...
     async def go_live(self, credential_id: CredentialId, *, service_account_id: str, now: _dt.datetime) -> bool:
-        """`pending` -> `live`, only before the deadline and while the program's membership is active."""
+        """`pending` -> `live`, only before the deadline and while the program is `active`."""
         ...
     async def revoke_credential(self, credential_id: CredentialId, *, revoked_by: UserId | None, now: _dt.datetime) -> bool:
         """`pending` or `live` -> `revoked`, once."""
         ...
     async def credential_by_id(self, credential_id: CredentialId) -> ProgramCredential | None: ...
-    async def credential_by_hash(self, key_hash: str) -> ProgramCredential | None: ...
-    async def credentials_of_program(self, program_id: UserId) -> list[ProgramCredential]: ...
+    async def admit_by_key(self, key_hash: str, *, now: _dt.datetime) -> tuple[ProgramCredential, Program] | None:
+        """The key with this hash and its program, when the key is `usable` and the program in standing; else None.
+        One read (O-C)."""
+        ...
+    async def admit_by_client(
+        self, client_id: CredentialId, *, service_account_id: str, now: _dt.datetime,
+    ) -> tuple[ProgramCredential, Program] | None:
+        """As `admit_by_key`, for the OAuth credential whose id is the realm client and whose service account matches."""
+        ...
+    async def admit_by_credential(
+        self, credential_id: CredentialId, *, now: _dt.datetime,
+    ) -> tuple[ProgramCredential, Program] | None:
+        """As `admit_by_key`, by credential id (the expiry warning's send-time recheck); it touches nothing."""
+        ...
+    async def tenants_of_credentials(self, credential_ids: Collection[CredentialId]) -> Mapping[CredentialId, TenantId]:
+        """The tenant of each credential's program, in one read, whatever the program or the tenant has become; an id
+        that is no credential is left out."""
+        ...
+    async def credentials_of_program(self, program_id: ProgramId) -> list[ProgramCredential]: ...
     async def touch_credential(self, credential_id: CredentialId, *, now: _dt.datetime) -> bool:
         """Move `last_used_at` to `now` only when unset or more than five minutes old."""
         ...
-    async def revoke_stale_pending(self, *, now: _dt.datetime) -> list[CredentialId]:
-        """Revoke (by the system) every `pending` credential at or past its deadline; their ids."""
+    async def revoke_stale_pending(self, *, now: _dt.datetime) -> list[tuple[CredentialId, TenantId]]:
+        """Revoke (by the system) every `pending` credential at or past its deadline; each with its program's tenant,
+        from the same write."""
         ...
     async def oauth_credentials_to_keep(self, *, now: _dt.datetime) -> set[CredentialId]:
         """The OAuth credentials whose realm client must exist: `live` and unexpired, or `pending`
-        within the deadline, of a program in standing (as `program_standing`). A credential whose program
+        within the deadline, of a program in standing (O-D). A credential whose program
         or tenant has gone keeps nothing, whether or not its own row was revoked in time."""
         ...
     async def claim_expiry_warning(self, *, now: _dt.datetime, hold_until: _dt.datetime) -> ExpiryWarning | None:
-        """A usable credential's due warning, while its program is in standing (as `program_standing`: nobody is
+        """A usable credential's due warning, while its program is in standing (O-D: nobody is
         warned about a credential that no longer lets anything in) (14 or 3 days before expiry; a threshold already passed when the
         credential was created never is), the earliest due first. Of several due, the tightest is returned and the
         looser ones are passed over unsent. Moves the send's next try to `hold_until`. Reads one row (Postgres:
@@ -286,6 +307,6 @@ class ProgramsPort(Protocol):
 class MailPort(Protocol):
     async def notify_invitation(self, to: str, tenant_id: TenantId, invitation_id: MembershipId) -> None: ...
     async def notify_credential_expiry(
-        self, to: str, tenant_id: TenantId, program_id: UserId, credential_id: CredentialId,
+        self, to: str, tenant_id: TenantId, program_id: ProgramId, credential_id: CredentialId,
         expires_at: _dt.datetime,
     ) -> None: ...

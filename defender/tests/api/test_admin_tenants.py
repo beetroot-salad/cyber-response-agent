@@ -47,6 +47,8 @@ ITEM_KEYS = {"tenant_id", "state", "pending_action", "step", "step_actor", "fail
 MALFORMED = "not-a-tenant-id"
 WAIT = 10.0
 STATES = ["creating", "offboarding", "offboarded"]  # every state that is not `active`
+#: The states an invitation can be found in: it was written while the tenant was `active` (P-L), then the tenant moved.
+SEEDED_STATES = ["offboarding", "offboarded"]
 
 
 @pytest.fixture
@@ -601,31 +603,33 @@ def test_me_lists_only_memberships_of_active_tenants() -> None:
     assert tenants_of(member) == {T2}
 
 
-@pytest.mark.parametrize("state", STATES)
+@pytest.mark.parametrize("state", SEEDED_STATES)
 def test_an_invitation_to_a_tenant_that_is_not_active_cannot_be_accepted(state: str) -> None:
-    """Explicit accept: 404 and no membership for a `creating`, `offboarding` or `offboarded` tenant; the active tenant's invitation accepts (r9 Identity seam)."""
+    """Explicit accept: 404 and no membership once the tenant is offboarding or offboarded; the active tenant's invitation accepts (r9 Identity seam, P-L)."""
     world = World(administrators=[OPS], tenants={LAB: [ME]})
     member = world.sign_in(ME)
-    world.register(T1, state=state)
+    world.register(T1)
     world.register(T2)
     world.seed_first_members(T1, [ME])
     world.seed_first_members(T2, [ME])
     [stale] = world.call(world.raw_repo.memberships_of_tenant, T1)
     [live] = world.call(world.raw_repo.memberships_of_tenant, T2)
+    world.move_tenant(T1, state)
     assert member.post(f"/invitations/{stale.id}/accept").status_code == 404
     assert tenants_of(member) == {LAB}
     assert member.post(f"/invitations/{live.id}/accept").status_code == 200  # control
     assert tenants_of(member) == {LAB, T2}
 
 
-@pytest.mark.parametrize("state", STATES)
+@pytest.mark.parametrize("state", SEEDED_STATES)
 def test_the_first_sign_in_joins_only_active_tenants(state: str) -> None:
-    """Accept at sign-in skips an invitation to a tenant that is not active and takes the active one (r9 Identity seam)."""
+    """Accept at sign-in skips an invitation to a tenant that is offboarding or offboarded and takes the active one (r9 Identity seam, P-L)."""
     world = World(administrators=[OPS])
-    world.register(T1, state=state)
+    world.register(T1)
     world.register(T2)
     world.seed_first_members(T1, [ME])
     world.seed_first_members(T2, [ME])
+    world.move_tenant(T1, state)
     world.send_pending()
     assert tenants_of(world.sign_in(ME)) == {T2}
 

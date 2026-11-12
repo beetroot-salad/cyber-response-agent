@@ -40,8 +40,8 @@ A tenant's learning work (queued findings, pitfalls and requests, the batches th
 record) lives in the `learning` schema of PostgreSQL; nothing reads the tenant's `<data root>/<T>/learning/` folder any
 more. Each existing tenant moves once, by a lifecycle job (like a credential rotation), in this order:
 
-1. Stop the workers and the learning drains of the host, then run migrations (revisions `0012_learning_store` and
-   `0013_learning_cutover_action`). Until a tenant is cut over its old queues are not read, so its learning looks
+1. Stop the workers and the learning drains of the host, then run migrations (revisions `0013_learning_store` and
+   `0014_learning_cutover_action`). Until a tenant is cut over its old queues are not read, so its learning looks
    empty: nothing is lost, and nothing new is drawn from the old files.
 2. For each active tenant with nothing pending: `python -m defender.lifecycle request-learning-cutover --tenant <T>` (or
    `--all`). With the lifecycle
@@ -63,6 +63,14 @@ It is one-way: after the cutover the folder is gone and nothing recreates it, so
 `<data root>/<T>/learning/` first if the old state matters. Asking again for a tenant that is already cut over changes
 nothing. Findings held from a PR merged before the cutover import as waiting and are retired by the corpus check on the
 next tick. Other tenants' jobs are independent: one tenant's refused import does not stop another's.
+
+## Upgrade from before #1454
+
+Programs (#1307) now have their own table, `identity.programs`; users and memberships are people only. Run migrations
+(revision `0012_programs_table`). It stops, changing nothing, while any program row exists (a `users` row of kind
+`program`) or any membership's role is not `admin`: no deployment created a program through the #1307 API, so
+remove any left in a development database first. Stop the API and the
+lifecycle service before migrating; an older process fails on every program read once the columns are gone.
 
 ## Upgrade from before #1170
 
