@@ -174,6 +174,8 @@ class FakeDocker:
             return self._lifecycle(verb, rest, names, scope)
         if verb in ("compose", "swarm", "service", "stack"):
             self.unmodelled.append(" ".join(argv))
+        if verb == "image" and rest[:1] == ["inspect"] and "{{.Id}}" in rest:
+            return 0, "sha256:" + "ab" * 32, ""     # an image's id (#1391: the engine copy's marker names it)
         return None
 
     def _run(self, verb: str, rest: list[str], scope: str):

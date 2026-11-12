@@ -4,7 +4,8 @@
 # ./unbound, ./zeek, ./threat-intel, ./change-mgmt) have their own context roots
 # and are unaffected.
 #
-# Root-context builds only need hosts/, cmdb/, identity/, and keycloak/realm.yaml.
+# Root-context builds only need hosts/, cmdb/, identity/, keycloak/realm.yaml, and (#1391)
+# lab-surface.json with edge/ and endpoint-query/.
 # Everything else is noise.
 *
 !hosts/
@@ -14,3 +15,9 @@
 !identity/
 !identity/**
 !keycloak/realm.yaml
+# The lab's ingress and endpoint-query service (#1391 r6) copy the one surface table.
+!lab-surface.json
+!edge/
+!edge/**
+!endpoint-query/
+!endpoint-query/**

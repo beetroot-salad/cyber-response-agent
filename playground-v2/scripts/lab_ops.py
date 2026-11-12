@@ -11,11 +11,24 @@ Topology. The *frozen engine* is a Docker-in-Docker container (`lab-engine`) on 
 reached with `docker --context <context> exec lab-engine docker ...`; its daemon listens on a unix
 socket only. Inside it (network `lab`): the frozen Elasticsearch (`elasticsearch`, the live image,
 the live node's certificate mounted from the lab's certs volume, `LD_PRELOAD` of the D15 wall-clock
-shim reading its offset from a file on the engine's state volume), the five stubs loaded from the freeze's dump and pinned at T, and per-port frontends the
-engine publishes on loopback. The *frozen proxy* is a second container on the deployment network
-(next to the live credential proxy), the product's proxy program unmodified, with its own audit
-file and a resolver (`--add-host`) mapping the tenant's declared host names to the ssh-forwarded
-endpoint of those frontends. Host state is staged out (D20): hosts are captured, not served.
+shim reading its offset from a file on the engine's state volume), the five stubs loaded from the freeze's dump and pinned at T, and the
+frontend: the lab's edge (nginx, rules rendered by `edge/render.py`, the same image live runs, key check off: the engine
+is reached only through the operator's SSH forward), publishing every port of `lab-surface.json`
+on the engine's loopback and admitting only the declared surface, so a frozen run cannot read the
+case's chaos overlay through `GET /admin/overlay`. The *frozen proxy* is a second container on the
+deployment network (next to the live credential proxy), the product's proxy program unmodified,
+with its own audit file and a resolver (`--add-host`) mapping the tenant's declared host names to
+the ssh-forwarded endpoint of that frontend.
+
+Host state (#1391 r6 O9): `serve_hosts` runs one inert replica per host the freeze committed
+(`image-<host>.tar`), named as the host, with no network, a read-only root and no healthcheck.
+Each runs one image built from the committed host image with its `/var/log` and
+`/var/lib/elastic-agent` copies in place, its captured process tree, today's `ps` shim
+(`hosts/base/ps-shim`) as `ps` on its PATH (so the process list is the tree captured at T) and an
+idle entrypoint. The image is tagged by a digest of all of those inputs and committed only once
+complete, so its tag is the whole cache. The lab's endpoint-query service then answers host-state
+for those hosts, with nothing inspectable (`container-inspect` is #1347's named gap).
+`purge_host_cache` removes a freeze's images.
 
 Every restore goes into a fresh node (D25): the node container and its data volume
 (`frozen-es-data`) are discarded and a new node starts empty; the copy-state marker lives on the
@@ -56,16 +69,23 @@ DOCKER_CONTEXT = "soc-playground"
 ES_CONTAINER = "elasticsearch"
 RULES_PART = "detection-rules.tar"
 STUBS_PART = "stubs.tar"
-STUBS = {"cmdb": 8001, "threat-intel": 8002, "change-mgmt": 8003, "ticket-server": 8004, "identity": 8005}
-HOST_STATE_PORT = 8007   # staged out (D20): nothing answers, as live
-ES_PORT = 9200
+#: The lab's public surface, one table (#1391 r6 L3): ports, the services behind them, the
+#: process-list argv. The edge, the endpoint-query service and the firewall agree with it.
+SURFACE = json.loads((PLAYGROUND / "lab-surface.json").read_text())
+_SYSTEMS = SURFACE["systems"]
+STUBS = {spec["service"]: int(spec["port"]) for name, spec in _SYSTEMS.items()
+         if name not in ("host-state", "elastic")}
+HOST_STATE_SERVICE = _SYSTEMS["host-state"]["service"]
+HOST_STATE_PORT = int(_SYSTEMS["host-state"]["port"])
+ES_PORT = int(_SYSTEMS["elastic"]["port"])
 # What `content_digest` reads of each stub: its whole store, through a read the stub already serves.
 STUB_STATE = {"cmdb": "/hosts", "threat-intel": "/indicators", "change-mgmt": "/changes",
               "ticket-server": "/tickets", "identity": "/users"}
 FRONTEND_PORTS = (*STUBS.values(), HOST_STATE_PORT, ES_PORT)
 FRONTEND_BASE = 10000    # the engine publishes frontend port p on the lab server's loopback at BASE+p
 HOST_VOLUMES = ("/var/log", "/var/lib/elastic-agent")   # certs and tokens are never copied
-PS_ARGV = ["ps", "-eo", "pid,ppid,user,stat,etime,cmd", "--forest"]
+PS_ARGV = list(SURFACE["ps_argv"])
+READONLY_INDICES = tuple(SURFACE["readonly_indices"])   # what defender-readonly reads, live and frozen
 WATCHER = "alert-ticket-watcher"
 
 ENGINE = "lab-engine"
@@ -86,6 +106,16 @@ SHIM_IMAGE = "local/clockshim:latest"
 SHIM_CONTEXT = PLAYGROUND / "clockshim"
 DEFAULT_ES_IMAGE = "docker.elastic.co/elasticsearch/elasticsearch:9.3.3"
 FROZEN_PROXY = "frozen-credential-proxy"
+FRONTEND = "frontend"                     # the engine's one edge container, every port of SURFACE
+EDGE_IMAGE = "soc-playground/edge:local"
+QUERY_IMAGE = "soc-playground/endpoint-query:local"
+PS_SHIM = PLAYGROUND / "hosts" / "base" / "ps-shim"
+QUERY_DIR = "/lab/endpoint-query"         # in the engine: the service's host lists
+#: Bumped when `_replica_image` builds differently: every replica image is then rebuilt.
+REPLICA_RECIPE = "replica-v2"
+BASE_LABEL = "soc-playground.frozen-base"   # on a replica image: the host image it was built from
+REPLICA_TREE_DIR = "/lab/tree"            # in a replica: its captured process tree
+READONLY_PASSWORD_ENV = "V2_DEFENDER_READONLY_PASSWORD"
 PROXY_PORT = 8411
 RO_ROLE = "frozen_readonly"
 
@@ -164,7 +194,8 @@ class LabOps:
                  proxy_network: str = "cyber-response-agent_devcontainer_default",
                  es_image: str = DEFAULT_ES_IMAGE, cluster_name: str = "soc-playground",
                  certs_volume: str = "soc-playground_certs", repo_dir: str = "/srv/lab/frozen-cases",
-                 readonly_user: str = "defender-readonly", poll_s: float = 5.0, ready_timeout_s: float = 300.0) -> None:
+                 readonly_user: str = "defender-readonly", poll_s: float = 5.0, ready_timeout_s: float = 300.0,
+                 lab_env_file: str | Path | None = None) -> None:
         self._run, self.context, self.proxy_context = run, context, proxy_context
         self.tenant_dir = Path(tenant_dir) if tenant_dir else None
         self.tenant_hosts, self.frozen_endpoint = list(tenant_hosts or ()), frozen_endpoint
@@ -175,10 +206,12 @@ class LabOps:
         self.es_image, self.cluster_name = es_image, cluster_name
         self.certs_volume, self.repo_dir = certs_volume, repo_dir
         self.readonly_user = readonly_user
+        self.lab_env_file = Path(lab_env_file) if lab_env_file else PLAYGROUND / ".env"
         self.poll_s, self.ready_timeout_s = poll_s, ready_timeout_s
         self._scratch: list[str] = []
         self._shim_ready = False
         self._stubs_loaded: str | None = None   # digest of what load_stubs was given, until teardown
+        self._replicas: list[str] = []
 
     @classmethod
     def from_environment(cls) -> LabOps:
@@ -192,7 +225,8 @@ class LabOps:
             es_image=env.get("V2_FROZEN_ES_IMAGE", DEFAULT_ES_IMAGE),
             cluster_name=env.get("V2_FROZEN_CLUSTER_NAME", "soc-playground"),
             certs_volume=env.get("V2_FROZEN_CERTS_VOLUME", "soc-playground_certs"),
-            repo_dir=env.get("V2_FROZEN_REPO_DIR", "/srv/lab/frozen-cases"))
+            repo_dir=env.get("V2_FROZEN_REPO_DIR", "/srv/lab/frozen-cases"),
+            lab_env_file=env.get("V2_LAB_ENV_FILE"))
 
     # -- transport ---------------------------------------------------------------------------------
 
@@ -235,11 +269,36 @@ class LabOps:
                     f"/out/{SHIM_FILE}")
         self._shim_ready = True
 
+    @staticmethod
+    def _repo_tag(image: str) -> tuple[str, str]:
+        repo, sep, tag = image.rpartition(":")
+        if not sep or "/" in tag:
+            return image, "latest"
+        return repo, tag
+
     def _ensure_image(self, image: str) -> None:
-        if self._inner("image", "inspect", image, check=False).returncode == 0:
+        """`image` in the engine as the lab server holds it now, for every image (a lab-built
+        `:local` one changes under the same tag; an old copy would keep serving the old surface,
+        argv or stub). The two daemons' image ids are not comparable (a containerd image store and
+        the engine's overlay2 give one image different ids), so the copy is marked with a tag
+        naming the lab server's id: the marker present means current. Otherwise the image is
+        copied and marked, and older markers of the tag are untagged (one an engine container
+        still uses stays, and goes on a later launch)."""
+        repo, tag = self._repo_tag(image)
+        outer_id = _text(self._outer("image", "inspect", "-f", "{{.Id}}", image).stdout).strip()
+        stamp = outer_id.removeprefix("sha256:")[:12]
+        if not stamp:
+            raise LabOpsError(f"the lab server has no id for {image}")
+        marker = f"{repo}:{tag}-lab-{stamp}"
+        if self._inner("image", "inspect", marker, check=False).returncode == 0:
             return
-        saved = self._outer("save", image).stdout
-        self._inner("load", input=saved)
+        self._inner("load", input=self._outer("save", image).stdout)
+        self._inner("tag", image, marker)
+        listed = self._inner("image", "ls", "--format", "{{.Tag}}", repo, check=False)
+        old = [f"{repo}:{t}" for t in _text(listed.stdout).split()
+               if t.startswith(f"{tag}-lab-") and f"{repo}:{t}" != marker]
+        if old:
+            self._inner("image", "rm", *old, check=False)
 
     def ensure_engine(self) -> None:
         """The engine container, running, with the lab's certs, the repository, the shim and its
@@ -450,25 +509,37 @@ class LabOps:
     # -- credentials ------------------------------------------------------------------------------
 
     def current_password(self) -> str:
-        """The read-only user's password as the lab stores it now (read at every launch)."""
-        value = os.environ.get("V2_FROZEN_READONLY_PASSWORD", "")
-        if not value:
-            raise LabOpsError("V2_FROZEN_READONLY_PASSWORD is not set: the current password of the "
-                              "lab's read-only Elasticsearch user")
-        return value
-
-    def _tenant_patterns(self) -> list[str]:
-        if self.tenant_dir is None:
-            raise NotConfigured("V2_FROZEN_TENANT_DIR is not set: the lab tenant's directory")
-        return frozen_copy.tenant_patterns(self.tenant_dir / "settings")
+        """The read-only user's password as the lab stores it now (read at every launch): the value
+        compose gives es-init, which sets it on the live `defender-readonly`. Asked of compose
+        itself, so quotes, comments and spaces in `.env` read as compose reads them. The `.env`
+        must sit beside its compose.yml (compose.yml requires it there). An exported copy in the
+        shell would beat `.env` in compose, and a rotation would then put the old password back,
+        so it is removed from the environment compose sees. The rendered config holds every lab
+        secret: it is never logged."""
+        env = {k: v for k, v in os.environ.items() if k != READONLY_PASSWORD_ENV}
+        argv = ["docker", "compose", "-f", str(self.lab_env_file.parent / "compose.yml"),
+                "--env-file", str(self.lab_env_file), "config", "--format", "json"]
+        proc = self._exec(argv, check=False, env=env, text=True)
+        if proc.returncode != 0:
+            raise LabOpsError(f"compose could not render the lab config from {self.lab_env_file}: "
+                              f"{_text(proc.stderr).strip()[:500]}")
+        try:
+            value = json.loads(proc.stdout)["services"]["es-init"]["environment"]["DEFENDER_PASSWORD"]
+        except (ValueError, KeyError, TypeError):
+            value = None
+        if not isinstance(value, str) or not value:
+            raise LabOpsError(f"{READONLY_PASSWORD_ENV} is not set in {self.lab_env_file}: the current password "
+                              "of the lab's read-only Elasticsearch user")
+        return value.replace("$$", "$")     # the rendered config escapes `$` as `$$`; es-init gets one
 
     def create_readonly_user(self, password: str) -> None:
-        """The proxy's read-only user in the frozen cluster: `read` on the configured patterns and
+        """The proxy's read-only user in the frozen cluster: `read` on the lab's fixed read-only
+        indices (`readonly_indices` in lab-surface.json, the same list live es-init grants) and
         `monitor`, with the current password. Created in the cluster, never in a freeze part."""
         es = self.frozen_es()
         es.es_request("PUT", f"/_security/role/{RO_ROLE}", {
             "cluster": ["monitor"],
-            "indices": [{"names": self._tenant_patterns(), "privileges": ["read"]}]})
+            "indices": [{"names": list(READONLY_INDICES), "privileges": ["read"]}]})
         es.es_request("PUT", f"/_security/user/{self.readonly_user}",
                       {"password": password, "roles": [RO_ROLE]})
 
@@ -509,16 +580,161 @@ class LabOps:
         return f"http://{FROZEN_PROXY}:{PROXY_PORT}"
 
     def _frontends(self) -> None:
-        """One forwarder per declared port: it fans a port out to the copy that answers it. The
-        host-state port has none in the staged scope, as live (C33)."""
-        self._ensure_image("alpine/socat:latest")
-        targets = {**{p: stub for stub, p in STUBS.items()}, ES_PORT: ES_CONTAINER}
-        for port, target in targets.items():
-            name = f"frontend-{port}"
-            self._inner("rm", "-f", name, check=False)
-            self._inner("run", "-d", "--name", name, "--network", ENGINE_NETWORK, "-p", f"{port}:{port}",
-                        "alpine/socat:latest", f"TCP-LISTEN:{port},fork,reuseaddr",
-                        f"TCP:{target}:{ES_PORT if target == ES_CONTAINER else 8080}")
+        """The lab's edge program as the frozen copy's one frontend, every port of SURFACE, key
+        check off (#1391 r6 L1): the same declared-surface rule as live. The per-port forwarders
+        an older launcher started are removed first (they hold the same ports)."""
+        self._ensure_image(EDGE_IMAGE)
+        self._inner("rm", "-f", FRONTEND, *(f"frontend-{p}" for p in FRONTEND_PORTS), check=False)
+        ports = [a for p in FRONTEND_PORTS for a in ("-p", f"{p}:{p}")]
+        self._inner("run", "-d", "--name", FRONTEND, "--network", ENGINE_NETWORK, *ports,
+                    EDGE_IMAGE, "--no-key-check")
+
+    # -- host state (#1391 r6 O9) ------------------------------------------------------------------
+
+    @staticmethod
+    def frozen_hosts(freeze: dict) -> list[str]:
+        """The hosts a freeze captured: any host one of its host parts names (`image-<host>.tar`,
+        `proc-tree-<host>.txt`), never today's inventory. A host named by one part and missing
+        another is then refused by `serve_hosts`, not silently left out."""
+        hosts = set()
+        for name in freeze["parts"]:
+            if name.startswith("image-") and name.endswith(".tar"):
+                hosts.add(name[len("image-"):-len(".tar")])
+            elif name.startswith("proc-tree-") and name.endswith(".txt"):
+                hosts.add(name[len("proc-tree-"):-len(".txt")])
+        return sorted(hosts)
+
+    @staticmethod
+    def host_parts(host: str) -> dict[str, str]:
+        """A host's parts: its image, its process tree and its volume copies (mount -> part)."""
+        return {"image": f"image-{host}.tar", "tree": f"proc-tree-{host}.txt",
+                **{mount: f"volume-{host}{mount.replace('/', '-')}.tar" for mount in HOST_VOLUMES}}
+
+    @classmethod
+    def check_host_parts(cls, freeze: dict) -> list[str]:
+        """The freeze's hosts, or LabOpsError: a freeze with no host, or a host missing any of its
+        parts, cannot serve host-state (an empty host list would answer every call with a quiet
+        404). Needs no engine: the launcher asks before it takes the lock."""
+        hosts = cls.frozen_hosts(freeze)
+        if not hosts:
+            raise LabOpsError("the freeze captured no host (no host image): host-state cannot be served")
+        missing = [n for h in hosts for n in cls.host_parts(h).values() if n not in freeze["parts"]]
+        if missing:
+            raise LabOpsError(f"the freeze lacks host parts {missing}: host-state cannot be served")
+        return hosts
+
+    def serve_hosts(self, parts: Any, freeze: dict) -> list[str]:
+        """Inert replicas of the freeze's hosts and the endpoint-query service over them, in the
+        engine. Each replica runs one image holding everything it serves (`_replica_image`), so the
+        image's tag is the whole cache: it exists complete or not at all."""
+        parts = Path(parts)
+        hosts = self.check_host_parts(freeze)
+        self.ensure_engine()
+        listed = self._inner("image", "ls", "--format", "{{.Repository}}:{{.Tag}}", "frozen-host/*", check=False)
+        present = set(_text(listed.stdout).split()) if listed.returncode == 0 else set()
+        images = {h: self._replica_image(parts, freeze["parts"], h, present) for h in hosts}
+        self._ensure_image(QUERY_IMAGE)
+        # One exec for every start, whatever the host count: each `_inner` is a round trip over the
+        # lab's SSH context. `;` after the removal (a missing container is not an error), `&&`
+        # after, so the first failed start fails the whole exec.
+        starts = [["docker", "run", "-d", "--name", h, "--hostname", h, "--network", "none", "--no-healthcheck",
+                   "--read-only", "--tmpfs", "/tmp", images[h]] for h in hosts]
+        steps = [f"mkdir -p {QUERY_DIR}", f"cat > {QUERY_DIR}/hosts.txt", f"printf '' > {QUERY_DIR}/inspectable.txt",
+                 *(shlex.join(a) for a in [*starts, self._query_start()])]
+        script = shlex.join(["docker", "rm", "-f", *hosts, HOST_STATE_SERVICE]) + "; " + " && ".join(steps)
+        self._replicas.extend(hosts)
+        self._engine("sh", "-c", script, input="\n".join(hosts) + "\n")
+        return hosts
+
+    @staticmethod
+    def _key(sha: str) -> str:
+        return str(sha)[:16]
+
+    @classmethod
+    def replica_tag(cls, digests: dict, host: str) -> str:
+        """The replica image's tag: a digest of every input it is built from (the host's parts,
+        today's `ps` shim, the recipe), so a changed shim or part builds a new image."""
+        named = cls.host_parts(host)
+        h = hashlib.sha256(f"{REPLICA_RECIPE}\n".encode())
+        for kind in ("image", "tree", *HOST_VOLUMES):
+            h.update(f"{kind}={digests[named[kind]]}\n".encode())
+        h.update(hashlib.sha256(PS_SHIM.read_bytes()).hexdigest().encode())
+        return f"frozen-host/{host}:{h.hexdigest()[:16]}"
+
+    def _replica_image(self, parts: Path, digests: dict, host: str, present: set[str]) -> str:
+        """The host's replica image, built once per input digest: the committed host image, its
+        volume copies in place of what the image holds at those paths, its captured tree, today's
+        shim as `ps`, and an idle entrypoint. Committed under its tag only once complete, so an
+        interrupted build leaves no tag and is redone."""
+        tag = self.replica_tag(digests, host)
+        if tag in present:
+            return tag
+        named = self.host_parts(host)
+        base = f"frozen-host-base/{host}:{self._key(digests[named['image']])}"
+        if self._inner("image", "inspect", base, check=False).returncode != 0:
+            with open(parts / named["image"], "rb") as fh:
+                self._inner("load", stdin=fh)
+            self._inner("tag", f"local/{host}:latest", base)
+            self._inner("image", "rm", f"local/{host}:latest", check=False)
+        build = f"frozen-build-{host}"
+        self._inner("rm", "-f", build, check=False)
+        clear = " ".join(HOST_VOLUMES)
+        self._inner("run", "--name", build, "--network", "none", "--entrypoint", "sh", base, "-c",
+                    f"rm -rf {clear} && mkdir -p {clear} {REPLICA_TREE_DIR}")
+        for mount in HOST_VOLUMES:      # each copy as captured, unpacked by the daemon into its mount
+            with open(parts / named[mount], "rb") as fh:
+                self._inner("cp", "-a", "-", f"{build}:{mount}", stdin=fh)
+        self._inner("cp", "-a", "-", f"{build}:/", input=self._tree_and_shim(parts / named["tree"]))
+        self._inner("commit", '--change=ENTRYPOINT ["sleep"]', '--change=CMD ["infinity"]',
+                    f"--change=ENV V2_PS_SHIM_TREE={REPLICA_TREE_DIR}/tree.txt", "--change=HEALTHCHECK NONE",
+                    f"--change=LABEL {BASE_LABEL}={base}", build, tag)
+        self._inner("rm", "-f", build, check=False)
+        return tag
+
+    @staticmethod
+    def _tree_and_shim(tree: Path) -> bytes:
+        """A small tar rooted at `/`: the captured tree and today's shim as `ps`."""
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for arcname, source, mode in ((f"{REPLICA_TREE_DIR.lstrip('/')}/tree.txt", tree, 0o644),
+                                          ("usr/local/bin/ps", PS_SHIM, 0o755)):
+                data = Path(source).read_bytes()
+                info = tarfile.TarInfo(arcname)
+                info.size, info.mode = len(data), mode
+                tar.addfile(info, io.BytesIO(data))
+        return buf.getvalue()
+
+    @staticmethod
+    def _query_start() -> list[str]:
+        """The lab's endpoint-query service on the engine's daemon: the freeze's hosts (`hosts.txt`),
+        nothing inspectable (#1347's container-inspect gap; a replica's image name would tell the copy)."""
+        return ["docker", "run", "-d", "--init", "--name", HOST_STATE_SERVICE, "--hostname", HOST_STATE_SERVICE,
+                "--network", ENGINE_NETWORK, "-v", "/var/run/docker.sock:/var/run/docker.sock",
+                "-v", f"{QUERY_DIR}:/etc/endpoint-query:ro", QUERY_IMAGE,
+                "--hosts", "/etc/endpoint-query/hosts.txt", "--inspectable", "/etc/endpoint-query/inspectable.txt",
+                "--ps-argv", json.dumps(PS_ARGV)]
+
+    def purge_host_cache(self, freeze: dict) -> list[str]:
+        """Remove a freeze's host images and every replica image built from them, whatever shim or
+        recipe built it (found by the label naming the host image it came from). A host image
+        another freeze shares goes too; it is reloaded on demand. No engine: nothing to remove
+        (never creates one). Returns what was removed."""
+        state = self._outer("inspect", "-f", "{{.State.Running}}", ENGINE, check=False)
+        if state.returncode != 0:
+            return []
+        self.ensure_engine()
+        removed = []
+        for host in self.frozen_hosts(freeze):
+            image = self.host_parts(host)["image"]
+            if image not in freeze["parts"]:
+                continue
+            base = f"frozen-host-base/{host}:{self._key(freeze['parts'][image])}"
+            listed = self._inner("image", "ls", "--filter", f"label={BASE_LABEL}={base}",
+                                 "--format", "{{.Repository}}:{{.Tag}}", check=False)
+            for tag in [*_text(listed.stdout).split(), base]:
+                if self._inner("image", "rm", tag, check=False).returncode == 0:
+                    removed.append(tag)
+        return removed
 
     def content_digest(self, indices: list[str]) -> str:
         """sha256 over every document of the named `indices` (the ones the overlays touched) in the
@@ -550,10 +766,13 @@ class LabOps:
                 for h in frozen_copy.walk(es, name, {"match_all": {}}, source=True, version=True)]
 
     def teardown(self) -> None:
-        """Stop the proxy, the frontends and the stubs; the frozen cluster and its data stay."""
+        """Stop the proxy, the frontend, the stubs, the replicas and the endpoint-query service; the
+        frozen cluster and its data stay, and so do the cached host images."""
         self._exec(["docker", *(["--context", self.proxy_context] if self.proxy_context else []),
                     "rm", "-f", FROZEN_PROXY], check=False)
-        names = [f"frontend-{p}" for p in FRONTEND_PORTS] + list(STUBS)
+        names = [FRONTEND, *(f"frontend-{p}" for p in FRONTEND_PORTS), *STUBS, HOST_STATE_SERVICE,
+                 *self._replicas]
+        self._replicas = []
         self._inner("rm", "-f", *names, check=False)
         self._inner("stop", ES_CONTAINER, check=False)
         self._stubs_loaded = None
