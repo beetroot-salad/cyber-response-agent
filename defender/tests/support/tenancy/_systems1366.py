@@ -292,8 +292,11 @@ def derive(settings: Path | str | None) -> RecordsSpec:
       carries no empty directory): the retired fixture's records, as every test that names no systems has always run."""
     if settings is None or not _readable(Path(settings) / "systems", folder=True):
         return fixture_records()
-    planted = records_from_settings(Path(settings))
-    if (Path(settings) / NO_CASE).is_file():
+    try:
+        planted = records_from_settings(Path(settings))
+    except OSError:  # a settings tree a refusal case made unreadable: the seeder must not crash before the code runs
+        return fixture_records()
+    if _readable(Path(settings) / NO_CASE, folder=False):
         return replace(planted, case=None)
     if planted.systems and planted.case is None and FIXTURE_CASE_SYSTEM in planted.systems:
         return replace(planted, case=fixture_records().case)
